@@ -1,0 +1,232 @@
+# Kargu — Architecture, Operating Logic & Specification
+
+Kargu is an advanced autonomous agentic coding assistant for GNU Emacs. It interfaces with OpenAI-compatible LLM endpoints (via `plz` asynchronous HTTP/SSE), integrates workspace intelligence from `lsp-mode` and `dape`, applies file changes through `ediff` shadow buffers, provides interactive workflow controls via `transient`, and maintains rigorous formal protocol safety verified with TLA+.
+
+---
+
+## 1. Core Architecture & Design Philosophy
+
+- **Non-Blocking Asynchrony**: All network requests (HTTP POST, SSE streaming) run via `plz` child processes or timers. The Emacs UI thread is never blocked, keeping editor interaction smooth.
+- **Magit-Style Modular Layout**: Entry point is `(require 'kargu)` / `M-x kargu-menu`. Submodules follow predictable path conventions (`kargu/loop/machine` → `kargu/loop/machine.el`).
+- **Strict Protocol Safety**: A bidirectional protocol firewall ensures message payloads strictly conform to LLM provider requirements (OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter), preventing protocol rejections.
+- **Self-Healing Edit Cycle**: Tool modifications automatically trigger LSP and Flycheck diagnostics, providing automated error-correction loops within configurable round budgets.
+- **Formal Verification**: The core state machine and protocol invariants are modeled in TLA+ under `proof/` and exhaustively verified via the TLC model checker.
+
+---
+
+## 2. Operating Modes & Tool Gating
+
+Kargu defines five distinct operational modes (`kargu-active-mode`):
+
+| Mode | Mutating Tools Allowed | Description |
+|---|---|---|
+| `ask` | ❌ No | Pure conversational query mode. Answers questions without modifying files or running commands. |
+| `plan` | ❌ No | Implementation planning mode. Inspects workspace architecture and drafts plans without applying changes. |
+| `debug` | ❌ No | Interactive debugging mode. Inspects stack traces, breakpoints, and runtime variables via `dape`. |
+| `build` | ✅ Yes | Build and test mode. Executes compilers, runs test suites, and fixes compilation/lint errors. |
+| `agent` | ✅ Yes | Full autonomous mode. Searches, reads, edits files, runs shell commands, and conducts self-healing edits. |
+
+### Tool Visibility & Execution Gating
+- Mutating tools (`edit_file`, `write_file`, `edit`, `write`, `bash`, `debug_toggle_breakpoint`) are only advertised in the LLM tool schema and executable when `kargu-active-mode` is `agent` or `build`.
+- If an unauthorized mutating tool call is attempted in a read-only mode, `kargu-loop--gate-tool` intercepts it and returns a descriptive error message without executing the tool.
+- **Mode Switching Isolation**: Mode changes via `kargu-set-mode` are blocked while an agent loop is in flight (`kargu-loop-running-p`), preventing mid-turn mode corruption.
+
+---
+
+## 3. LLM Protocol & Message Firewall
+
+The protocol firewall (`kargu--validate-history` in `kargu/history.el`) sanitizes `kargu--message-history` prior to every outgoing request and immediately after run completion:
+
+### Firewall Invariants
+1. **System Prompt Head**: The first message is always `role: "system"`, refreshed with the active mode's instructions (`kargu--get-system-prompt`).
+2. **No Trailing Assistant Turn**: Payloads must never end on a model turn (rejected by OpenRouter / OpenAI with 400 Bad Request). Controlled by `kargu-trailing-assistant-fix`:
+   - `'strip` (protocol default): Discards trailing assistant messages.
+   - `'nudge`: Appends a synthetic user `"Continue."` turn.
+3. **Strict Tool Call Pairing**: Every assistant message containing `tool_calls` must be immediately followed by matching `role: "tool"` results for *all* calls. If a run is interrupted or cancelled, `kargu--flush-pending` injects synthetic tool error results.
+4. **No Orphan Tool Results**: Any `role: "tool"` message lacking a matching preceding assistant call ID is dropped.
+5. **Consecutive User Merging**: Consecutive `user` turns are automatically merged into a single turn separated by `\n\n`.
+6. **Consecutive Assistant Merging**: Consecutive assistant text turns without tool calls are merged.
+7. **Content Normalization & Reasoning Support**:
+   - Models returning reasoning tokens (`reasoning_content`) without text content maintain `content: ""` to satisfy provider schemas requiring string content.
+   - Null, `:json-null`, or empty string `content` is stripped when tool calls are present (satisfying providers that reject empty text blocks alongside tool calls).
+8. **Empty Object Schema Serialization**: Parameterless tools (e.g. `lsp_project_skeleton`, `debug_get_context`) serialize `"parameters": {"type": "object", "properties": {}}` using `:json-empty-object` in `kargu/json.el` and `kargu--sanitize-tool-parameters` in `kargu/api/tools.el`.
+
+---
+
+## 4. Autonomous Agent Loop (`kargu/loop/`)
+
+The agent loop executes an asynchronous state machine:
+
+```
+[IDLE]
+  │
+  ▼  (kargu-loop-send)
+[REQUEST] ◄─────────────────────────────────────────────┐
+  │                                                     │
+  ├───────────────┬─────────────────┐                   │
+  │ (compact req) │ (max iter)      │ (send)            │
+  ▼               ▼                 ▼                   │
+[COMPACT_WAIT]  [DONE: limit]     [WAIT_MODEL]          │
+  │                                 │                   │
+  │ (summary)                       ├─► [DONE: answer]  │
+  └───────────────────────────────► ├─► [ERROR: api]    │
+                                    ├─► [REQUEST: retry/length/empty]
+                                    │                   │
+                                    ▼ (tool_calls)      │
+                                  [EXEC_TOOLS]          │
+                                    │                   │
+                                    ├─► [VERIFY_FILES] ─┤
+                                    │      (LSP heal)   │
+                                    └───────────────────┘
+```
+
+### Event Classification & Dispatch (`kargu/loop/machine.el`)
+
+#### Request Classification
+- `stale`: Run cancelled or replaced; request ignored.
+- `busy`: Compaction in progress; request paused.
+- `compact`: History length exceeds threshold and compaction budget available; triggers compaction turn.
+- `send`: Normal model turn dispatch. Iterations counter incremented; on `kargu-max-iterations`, tools are hidden (`:no-tools t`) and a conclusion nudge is sent.
+
+#### Response Classification
+- `stale`: Inactive generation; ignored.
+- `overflow`: Context window exceeded; triggers compaction if allowed, else `:error`.
+- `error`: Upstream failure. If retryable (502, 503, 429, overload), retried with exponential backoff up to `kargu-loop-upstream-retries` without polluting history; otherwise ends in `:error`.
+- `tools`: Queues tool calls for sequential execution.
+- `length`: Truncated by `max_tokens`; injects a `"Continue."` nudge (max 1 continue per run).
+- `answer`: Final assistant response; ends run in `:done`.
+- `empty`: Empty response with no tools; re-prompts with system notice up to `kargu-loop-empty-retries`, then finishes `:done`.
+
+---
+
+## 5. Tool Execution & Safety Architecture
+
+### Sequential Queue & Doom-Loop Detection (`kargu/loop/tools.el`)
+- Tool calls returned in a single assistant turn are queued and executed sequentially.
+- **Doom-Loop Detection**: Every tool call generates a signature `name \0 args`. If three consecutive identical signatures occur, the run is immediately aborted with `:error`, and synthetic error results are written for the current and all remaining queued tools.
+
+### Diff Staging & Ediff Review (`kargu/tools/diff.el`)
+- Mutating file tools (`edit_file`, `write_file`) never overwrite disk directly without staging.
+- Changes are staged in shadow buffers:
+  - **Buffer A**: Original file content from disk.
+  - **Buffer B**: Proposed new content from the model.
+  - **Ediff Interaction**: Pressing `b` accepts the model's proposal; pressing `a` restores/keeps original code.
+- Review modes (`kargu-diff-review-mode`):
+  - `'auto`: Changes applied immediately and auto-saved.
+  - `'blocking`: Starts interactive Ediff in a recursive edit.
+  - `'async`: Opens Ediff non-blockingly.
+
+### Diagnostic Self-Healing (`kargu/loop/heal.el`)
+- After file edits, the loop enters `VERIFY_FILES` and waits for LSP/Flycheck diagnostics to settle (`kargu-lsp-wait-diagnostics`).
+- Error count evaluation:
+  - If diagnostics contain errors, the `:healing` round counter increments up to `kargu-max-healing-steps` (default: 3). A `SELF-HEALING (round N of M)` block with diagnostic details is appended directly to the tool result.
+  - If errors are 0, a clean verification confirmation is appended.
+  - When the healing budget is spent, files are consumed without auto-verification and the model is instructed to verify manually.
+
+---
+
+## 6. Context Compaction & Tail Retention (`kargu/history/compact.el`)
+
+When history character cost exceeds `kargu-history-compact-chars` (or upon context overflow):
+1. A tools-off compaction turn is initiated (`:no-tools t`, max 1 per run).
+2. `kargu-history-compact-tail` extracts the suffix of the last `kargu-history-compact-keep` messages:
+   - System prompts and previous compaction notices are discarded.
+   - The tail walks forward to begin on a `user` turn (or skips leading orphan tool calls if no user turn exists).
+3. The model summarizes prior work using `kargu-prompt-compaction-system` and `kargu-prompt-compaction-user`.
+4. `kargu-history-apply-compaction` reconstructs history:
+   - Refreshed system prompt.
+   - `user`: `COMPACTION_ACK: Prior work summary:\n<summary>`.
+   - `assistant`: `"Acknowledged. Continuing from the summary."`.
+   - Bridging `user` turn (`"Please proceed with the task."`) if the preserved tail begins with an assistant message.
+   - Preserved tail messages.
+5. The protocol firewall validates the resulting history before resuming work.
+
+---
+
+## 7. Chat Interface & Context Attachments (`kargu/chat/`)
+
+- **Sidebar Interface (`*kargu-chat*`)**: Header with model indicator, provider status, and interactive mode buttons (`[ask]`, `[plan]`, `[debug]`, `[build]`, `[agent]`).
+- **Real-Time Streaming (`kargu/chat/render.el`)**: Streams assistant text deltas and collapsible thought blocks (`<thought>...</thought>`). Multi-turn tool runs dynamically reset stream preamble markers to prevent rendering lockouts.
+- **Mention Cleaning (`kargu-chat--clean-at-token`)**: Robust mention extractor cleans `@` tokens:
+  - Strips outer brackets (`@[...]`, `@{...}`, `(<...>)`),
+  - Strips quotes (`"..."`, `'...'`, `` `...` ``),
+  - Strips sentence-ending punctuation (`,`, `:`, `;`, `)`, `]`, `.`),
+  - Preserves internal file paths and extension dots (e.g. `@[tanim.md]` → `tanim.md`).
+- **Context Attachments (`kargu/chat/attach.el`)**: Resolves mentions to files or LSP symbols and synthetically prepends file contents (bounded by `kargu-chat-attach-max-lines`) to the user prompt.
+
+---
+
+## 8. Formal Verification with TLA+ (`proof/`)
+
+Kargu's protocol invariants and agent loop state machine are formally specified in TLA+ and verified using the TLC model checker:
+
+- `proof/KarguProtocol.tla`: Models message records, role invariants, tool pairing, and the exact `kargu--validate-history` repair algorithm.
+- `proof/KarguLoop.tla`: Models loop states (`IDLE`, `REQUEST`, `WAIT_MODEL`, `EXEC_TOOLS`, `VERIFY_FILES`, `COMPACT_WAIT`, `DONE`, `ERROR`, `STOPPED`), parallel tool execution, doom loops, self-healing, compaction, and cancellations.
+- `proof/MC.tla` & `proof/MC.cfg`: TLC model-checking harness.
+- `proof/run_tlc.sh`: Execution script verifying all safety invariants across 26,000+ states with zero errors.
+
+---
+
+## 9. File & Module Structure
+
+```
+kargu/
+├── kargu.el               # Package header, load-path setup, require ordering
+├── kargu/
+│   ├── core.el            # Customization groups, session plist, modes, logging
+│   ├── config.el          # TOML configuration parser, provider resolution
+│   ├── constants.el       # Mode enums, message roles, buffer constants
+│   ├── json.el            # JSON encoder/decoder, empty object support (:json-empty-object)
+│   ├── fs.el              # Bounded project tree traversal, directory ignore filters
+│   ├── prompt.el          # System prompt builder, model-specific prompt templates
+│   ├── prompt/            # Model-specific system prompt text files (anthropic, gpt, gemini, etc.)
+│   ├── result.el          # Result object formatting helpers
+│   ├── ui.el              # Transient control menus (`kargu-menu`)
+│   │
+│   ├── api.el             # High-level API dispatch (`kargu-api-send`, cancellation)
+│   ├── api/
+│   │   ├── circuit.el     # Circuit breaker for provider failure protection
+│   │   ├── http.el        # Asynchronous plz HTTP client with exponential backoff
+│   │   ├── response.el    # Response accessors, reasoning extraction, assistant recording
+│   │   ├── stream.el      # Server-Sent Events (SSE) chunk parser and stream dispatcher
+│   │   └── tools.el       # Tool registry, schema builder, parameter sanitizer
+│   │
+│   ├── history.el         # Message history storage, protocol firewall (`kargu--validate-history`)
+│   ├── history-compact.el # History compaction entry points and thresholds
+│   ├── history/
+│   │   └── compact.el     # Tail extraction, compaction application, ACK generation
+│   │
+│   ├── loop.el            # Agent run lifecycle (`kargu-loop-send`, `kargu-loop-stop`)
+│   ├── loop/
+│   │   ├── machine.el     # Request/response event classification and table dispatch
+│   │   ├── tools.el       # Sequential tool execution queue, doom-loop detection
+│   │   ├── heal.el        # Post-edit LSP diagnostics and self-healing rounds
+│   │   └── compact.el     # Compaction turn handling and single-compaction cap
+│   │
+│   ├── chat.el            # Chat sidebar buffer management and major mode
+│   ├── chat/
+│   │   ├── attach.el      # Mention parsing (`@[file]`), synthetic read attachments
+│   │   ├── complete.el    # Company completion backend for files and LSP symbols
+│   │   ├── header.el      # Chat buffer header line with mode buttons
+│   │   ├── prompt.el      # Interactive prompt input area and keybindings
+│   │   └── render.el      # Markdown fontification, streaming deltas, thought blocks
+│   │
+│   └── tools/
+│       ├── bash.el        # Terminal shell execution tool
+│       ├── dape.el        # Live debugging context, breakpoint management, evaluation
+│       ├── diff.el        # Shadow buffers, Ediff review workflows, patch rollback
+│       ├── lsp.el         # LSP project skeleton, diagnostic queries, symbol lookup
+│       ├── search.el      # Ripgrep workspace search and glob file matching
+│       ├── skill.el       # Agent skill loader and custom instructions
+│       ├── toolchain.el   # Project toolchain and build system detector
+│       └── webfetch.el    # Web page fetcher via curl with flag injection guards
+│
+└── proof/
+    ├── KarguProtocol.tla  # Formal TLA+ specification of message protocols & firewall
+    ├── KarguLoop.tla      # Formal TLA+ specification of the agent loop & tool cycle
+    ├── KarguLoop.cfg      # Default TLC configuration
+    ├── MC.tla             # Model checking wrapper module
+    ├── MC.cfg             # Model checking bounded parameters & invariants
+    ├── README.md          # Formal proof documentation and fault-injection guide
+    └── run_tlc.sh         # Shell script to run TLC model checker
+```

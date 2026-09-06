@@ -1,0 +1,3 @@
+*.elc
+proof/states/
+.test-tmp/

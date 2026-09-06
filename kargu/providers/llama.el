@@ -1,0 +1,36 @@
+;;; kargu/providers/llama.el --- Llama provider definition -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 kargu developers.
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Part of kargu.
+
+;;; Commentary:
+
+;; Provider definition for Llama (llama).
+
+;;; Code:
+
+(eval-and-compile
+  (let ((root (locate-dominating-file
+               (or (bound-and-true-p byte-compile-current-file)
+                   load-file-name
+                   buffer-file-name
+                   default-directory)
+               "kargu.el")))
+    (when root
+      (add-to-list 'load-path (file-name-as-directory
+                               (expand-file-name root))))))
+
+(require 'kargu/providers/registry)
+
+(kargu-register-provider
+ :id "llama"
+ :name "Llama"
+ :api "https://api.llama.com/compat/v1"
+ :env '("LLAMA_API_KEY")
+ :models '("llama-4-scout-17b-16e-instruct-fp8" "cerebras-llama-4-maverick-17b-128e-instruct" "llama-3.3-70b-instruct" "groq-llama-4-maverick-17b-128e-instruct" "cerebras-llama-4-scout-17b-16e-instruct" "llama-3.3-8b-instruct" "llama-4-maverick-17b-128e-instruct-fp8")
+ :npm "@ai-sdk/openai-compatible")
+
+(provide 'kargu/providers/llama)
+
+;;; llama.el ends here

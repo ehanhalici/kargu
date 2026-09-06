@@ -1,0 +1,74 @@
+;;; tests/test-history.el --- Tests for kargu/history -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 kargu developers.
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+(require 'ert)
+(require 'kargu/history)
+
+(ert-deftest kargu-history-vector-tool-calls-test ()
+  "Ensure kargu--validate-history handles vector tool_calls without crashing (Bug 1 regression)."
+  (let ((kargu--message-history
+         `((("role" . "system") ("content" . "sys"))
+           (("role" . "user") ("content" . "hi"))
+           (("role" . "assistant")
+            ("content" . "calling tool")
+            ("tool_calls" . [(("id" . "call_vec1")
+                              ("type" . "function")
+                              ("function" . (("name" . "bash") ("arguments" . "ls"))))]))
+           (("role" . "tool")
+            ("tool_call_id" . "call_vec1")
+            ("name" . "bash")
+            ("content" . "file1.txt\nfile2.txt")))))
+    ;; Must not signal wrong-type-argument listp
+    (should (listp (kargu--validate-history)))
+    (should (= (length kargu--message-history) 4))))
+
+(ert-deftest kargu-history-empty-vector-tool-calls-test ()
+  "Ensure empty vector tool_calls [] does not trigger false tool branch or crash."
+  (let ((kargu--message-history
+         `((("role" . "system") ("content" . "sys"))
+           (("role" . "user") ("content" . "hello"))
+           (("role" . "assistant")
+            ("content" . "done")
+            ("tool_calls" . [])))))
+    ;; If trailing assistant is stripped (default)
+    (let ((kargu-trailing-assistant-fix 'strip))
+      (kargu--validate-history)
+      (should (= (length kargu--message-history) 2)))))
+
+(ert-deftest kargu-history-completed-tail-alias-test ()
+  "Ensure kargu--history-completed-assistant-tail-p alias is defined and functional."
+  (should (fboundp 'kargu--history-completed-assistant-tail-p))
+  (let ((kargu--message-history
+         `((("role" . "system") ("content" . "sys"))
+           (("role" . "user") ("content" . "hello"))
+           (("role" . "assistant") ("content" . "finished")))))
+    (should (kargu--history-completed-assistant-tail-p))))
+
+(ert-deftest kargu-history-orphan-tool-dropping-test ()
+  "Ensure orphan tool results with no prior tool call are dropped."
+  (let ((kargu--message-history
+         `((("role" . "system") ("content" . "sys"))
+           (("role" . "user") ("content" . "hello"))
+           (("role" . "tool")
+            ("tool_call_id" . "orphan_call")
+            ("name" . "bash")
+            ("content" . "orphan output")))))
+    (kargu--validate-history)
+    ;; Orphan tool message should be dropped
+    (should (= (length kargu--message-history) 2))))
+
+(ert-deftest kargu-history-consecutive-user-merge-test ()
+  "Ensure consecutive user messages are merged."
+  (let ((kargu--message-history
+         `((("role" . "system") ("content" . "sys"))
+           (("role" . "user") ("content" . "part 1"))
+           (("role" . "user") ("content" . "part 2")))))
+    (kargu--validate-history)
+    (should (= (length kargu--message-history) 2))
+    (should (string-search "part 1\n\npart 2"
+                           (alist-get "content" (nth 1 kargu--message-history) nil nil #'equal)))))
+
+(provide 'tests/test-history)
+;;; test-history.el ends here
