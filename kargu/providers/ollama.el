@@ -27,8 +27,9 @@
  :id "ollama"
  :name "Ollama"
  :api "http://localhost:11434/v1"
+ :models-api "http://localhost:11434/api/tags"
+ :model-detail-api "http://localhost:11434/api/show"
  :env nil
- :models '("qwen2.5-coder:latest" "deepseek-r1:latest" "llama3.2:latest")
  :npm "ollama")
 
 (provide 'kargu/providers/ollama)

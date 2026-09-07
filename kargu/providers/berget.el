@@ -27,8 +27,8 @@
  :id "berget"
  :name "Berget.AI"
  :api "https://api.berget.ai/v1"
+ :models-api "https://api.berget.ai/v1/models"
  :env '("BERGET_API_KEY")
- :models '("meta-llama/Llama-3.3-70B-Instruct" "moonshotai/Kimi-K2.6" "google/gemma-4-31B-it" "openai/gpt-oss-120b" "mistralai/Mistral-Medium-3.5-128B" "mistralai/Mistral-Small-3.2-24B-Instruct-2506" "zai-org/GLM-4.7" "zai-org/GLM-5.2")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/berget)

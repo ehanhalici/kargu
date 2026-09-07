@@ -27,8 +27,8 @@
  :id "regolo-ai"
  :name "Regolo AI"
  :api "https://api.regolo.ai/v1"
+ :models-api "https://api.regolo.ai/v1/models"
  :env '("REGOLO_API_KEY")
- :models '("llama-3.1-8b-instruct" "minimax-m2.5" "mistral-small3.2" "qwen3-reranker-4b" "qwen3-embedding-8b" "llama-3.3-70b-instruct" "qwen-image" "qwen3.5-122b" "gpt-oss-120b" "qwen3-coder-next" "qwen3.5-9b" "mistral-small-4-119b" "gpt-oss-20b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/regolo-ai)

@@ -27,8 +27,8 @@
  :id "gmicloud"
  :name "GMI Cloud"
  :api "https://api.gmi-serving.com/v1"
+ :models-api "https://api.gmi-serving.com/v1/models"
  :env '("GMICLOUD_API_KEY")
- :models '("moonshotai/Kimi-K2.6" "moonshotai/kimi-k2.7-code-highspeed" "Qwen/Qwen3.7-Max" "openai/gpt-5.5" "anthropic/claude-opus-4.7" "anthropic/claude-opus-4.8" "anthropic/claude-sonnet-4.6" "anthropic/claude-opus-4.6" "zai-org/GLM-5.1-FP8" "zai-org/GLM-5-FP8" "zai-org/GLM-5.2-FP8" "deepseek-ai/DeepSeek-V4-Flash" "deepseek-ai/DeepSeek-V4-Pro")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/gmicloud)

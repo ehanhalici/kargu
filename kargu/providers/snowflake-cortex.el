@@ -27,8 +27,8 @@
  :id "snowflake-cortex"
  :name "Snowflake Cortex"
  :api "https://${SNOWFLAKE_ACCOUNT}.snowflakecomputing.com/api/v2/cortex/v1"
+ :models-api "https://${SNOWFLAKE_ACCOUNT}.snowflakecomputing.com/api/v2/cortex/v1/models"
  :env '("SNOWFLAKE_ACCOUNT" "SNOWFLAKE_CORTEX_PAT")
- :models '("openai-gpt-5.1" "snowflake-llama3.3-70b" "openai-gpt-5.2" "claude-sonnet-4-5" "claude-opus-4-7" "deepseek-r1" "claude-opus-4-8" "openai-gpt-5" "openai-gpt-5.5" "claude-fable-5" "openai-gpt-5-nano" "claude-haiku-4-5" "mistral-large2" "openai-gpt-4.1" "claude-sonnet-4-6")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/snowflake-cortex)

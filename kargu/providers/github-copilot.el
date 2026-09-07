@@ -27,8 +27,8 @@
  :id "github-copilot"
  :name "GitHub Copilot"
  :api "https://api.githubcopilot.com"
+ :models-api "https://api.githubcopilot.com/models"
  :env '("GITHUB_TOKEN")
- :models '("claude-sonnet-4.5" "claude-sonnet-4" "gemini-2.5-pro" "claude-haiku-4.5" "gemini-3.5-flash" "kimi-k2.7-code" "claude-sonnet-5" "gpt-5.4-nano" "claude-opus-4.7" "mai-code-1-flash-picker" "gpt-5.2" "gpt-5.3-codex" "gpt-5.6-luna" "gpt-5.6-terra" "claude-opus-4.8")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/github-copilot)

@@ -27,8 +27,8 @@
  :id "poe"
  :name "Poe"
  :api "https://api.poe.com/v1"
+ :models-api "https://api.poe.com/v1/models"
  :env '("POE_API_KEY")
- :models '("trytako/tako" "xai/grok-code-fast-1" "xai/grok-4.1-fast-reasoning" "xai/grok-3-mini" "xai/grok-4.1-fast-non-reasoning" "xai/grok-3" "xai/grok-4-fast-reasoning" "xai/grok-4" "xai/grok-4-fast-non-reasoning" "xai/grok-4.20-multi-agent" "topazlabs-co/topazlabs" "fireworks-ai/kimi-k2.5-fw" "google/veo-3.1-fast" "google/imagen-3" "google/nano-banana-pro")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/poe)

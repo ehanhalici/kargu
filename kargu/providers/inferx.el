@@ -27,8 +27,8 @@
  :id "inferx"
  :name "InferX"
  :api "https://model.inferx.net/v1"
+ :models-api "https://model.inferx.net/v1/models"
  :env '("INFERX_API_KEY")
- :models '("google/gemma-4-31b-it-fp8" "qwen/qwen3-coder-next-fp8-1m" "qwen/qwen3.5-122b-a10b-nvfp4" "qwen/qwen3.6-35b-a3b-fp8" "qwen/qwen3-coder-next-fp8" "qwen/qwen3.6-27b-fp8")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/inferx)

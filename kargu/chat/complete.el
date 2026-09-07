@@ -62,7 +62,9 @@ Format: (:roots ROOTS :time TIME :files FILES).")
   "Start company after an `@' mention in the prompt."
   (when (and (fboundp 'company-manual-begin)
              (kargu-chat--at-prefix))
-    (company-manual-begin)))
+    (when (boundp 'company-backend)
+      (setq company-backend nil))
+    (ignore-errors (company-manual-begin))))
 
 (defun kargu-chat--completion-root ()
   "Project root used for `@' file completion."
@@ -170,17 +172,19 @@ root directory name so `@rust/src/lib.rs' is findable."
 
 (defun kargu-chat--listed-files ()
   "Cached relative file paths for `@' completion."
-  (let* ((roots (kargu-chat--completion-roots))
-         (now (float-time))
-         (cache kargu-chat--files-cache))
-    (if (and cache
-             (equal (plist-get cache :roots) roots)
-             (< (- now (plist-get cache :time)) 8.0))
-        (plist-get cache :files)
-      (let ((files (kargu-chat--collect-files roots)))
-        (setq kargu-chat--files-cache
-              (list :roots roots :time now :files files))
-        files))))
+  (condition-case nil
+      (let* ((roots (kargu-chat--completion-roots))
+             (now (float-time))
+             (cache kargu-chat--files-cache))
+        (if (and cache
+                 (equal (plist-get cache :roots) roots)
+                 (< (- now (plist-get cache :time)) 8.0))
+            (plist-get cache :files)
+          (let ((files (kargu-chat--collect-files roots)))
+            (setq kargu-chat--files-cache
+                  (list :roots roots :time now :files files))
+            files)))
+    (error nil)))
 
 (defun kargu-chat--flex-indices (query string)
   "Return match indices of QUERY chars in STRING, or nil.
@@ -253,24 +257,26 @@ QUERY and STRING should already be downcased."
 
 (defun kargu-chat--file-candidates (query)
   "File mention candidates fuzzy-matching QUERY (without the leading `@')."
-  (let* ((q (or query ""))
-         (scored
-          (let (acc)
-            (dolist (rel (kargu-chat--listed-files))
-              (let ((score (kargu-chat--flex-score q rel)))
-                (when score
-                  (push (cons score rel) acc))))
-            acc)))
-    (setq scored (cl-sort scored #'< :key #'car))
-    (cl-loop for (_score . rel) in scored
-             for n from 0
-             until (>= n 50)
-             collect
-             (let ((cand (concat "@" rel)))
-               (propertize cand
-                           'kargu-kind 'file
-                           'kargu-ann "file"
-                           'kargu-match (kargu-chat--match-property q rel))))))
+  (condition-case nil
+      (let* ((q (or query ""))
+             (scored
+              (let (acc)
+                (dolist (rel (or (kargu-chat--listed-files) nil))
+                  (let ((score (kargu-chat--flex-score q rel)))
+                    (when score
+                      (push (cons score rel) acc))))
+                acc)))
+        (setq scored (cl-sort scored #'< :key #'car))
+        (cl-loop for (_score . rel) in scored
+                 for n from 0
+                 until (>= n 50)
+                 collect
+                 (let ((cand (concat "@" rel)))
+                   (propertize cand
+                               'kargu-kind 'file
+                               'kargu-ann "file"
+                               'kargu-match (kargu-chat--match-property q rel)))))
+    (error nil)))
 
 (defun kargu-chat--symbol-candidates (query)
   "Symbol mention candidates matching QUERY (without the leading `@').

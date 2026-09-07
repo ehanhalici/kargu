@@ -24,14 +24,16 @@
 (require 'kargu/chat/prompt)
 
 (ert-deftest kargu-metadata-context-window-heuristics-test ()
-  "Test that `kargu-model-context-window' resolves known and custom models."
+  "Test that `kargu-model-context-window' dynamically resolves metadata."
+  ;; Custom registered metadata
+  (kargu-model-set-metadata "anthropic/claude-3.5-sonnet" '(:id "anthropic/claude-3.5-sonnet" :context-window 200000))
+  (kargu-model-set-metadata "google/gemini-1.5-pro" '(:id "google/gemini-1.5-pro" :context-window 1000000))
+  (kargu-model-set-metadata "my-custom-model" '(:id "my-custom-model" :context-window 32768))
   (should (= (kargu-model-context-window "anthropic/claude-3.5-sonnet") 200000))
   (should (= (kargu-model-context-window "google/gemini-1.5-pro") 1000000))
-  (should (= (kargu-model-context-window "openai/gpt-4o") 128000))
-  (should (= (kargu-model-context-window "deepseek/deepseek-chat") 64000))
-  ;; Custom registered metadata
-  (kargu-model-set-metadata "my-custom-model" '(:id "my-custom-model" :context-window 32768))
-  (should (= (kargu-model-context-window "my-custom-model") 32768)))
+  (should (= (kargu-model-context-window "my-custom-model") 32768))
+  ;; Fallback when metadata not yet fetched
+  (should (= (kargu-model-context-window "unknown-model") 128000)))
 
 (ert-deftest kargu-dynamic-compaction-threshold-test ()
   "Test that `kargu-history-compact-threshold' dynamically adapts to active model."
@@ -128,15 +130,16 @@
   "Test that `kargu-chat--footer-string' renders provider, model, effort buttons and refreshes."
   (let* ((kargu--session-provider "opencode")
          (kargu--session-model "gemini-3.7-flash")
-         (kargu-reasoning-effort 'low)
-         (footer (kargu-chat--footer-string)))
-    ;; Check structure
-    (should (string-match-p "provider: " footer))
-    (should (string-match-p "\\[opencode\\]" footer))
-    (should (string-match-p "model: " footer))
-    (should (string-match-p "\\[gemini-3\\.7-flash (1m ctx)\\]" footer))
-    (should (string-match-p "effort: " footer))
-    (should (string-match-p "\\[low\\]" footer))
+         (kargu-reasoning-effort 'low))
+    (kargu-model-set-metadata "gemini-3.7-flash" '(:id "gemini-3.7-flash" :context-window 1000000))
+    (let ((footer (kargu-chat--footer-string)))
+      ;; Check structure
+      (should (string-match-p "provider: " footer))
+      (should (string-match-p "\\[opencode\\]" footer))
+      (should (string-match-p "model: " footer))
+      (should (string-match-p "\\[gemini-3\\.7-flash (1m ctx)\\]" footer))
+      (should (string-match-p "effort: " footer))
+      (should (string-match-p "\\[low\\]" footer)))
     ;; Verify interactive chat buffer integration
     (with-temp-buffer
       (rename-buffer kargu-chat-buffer-name t)
@@ -170,7 +173,10 @@
                   ((string-match-p "model" prompt) "llama3.1-70b")
                   ((string-match-p "effort" prompt) "medium"))))
               ((symbol-function 'kargu-api-list-models)
-               (lambda (cb) (funcall cb '((("id" . "llama3.1-70b") ("context_length" . 128000)))))))
+               (lambda (cb &optional _p)
+                 (funcall cb '((("id" . "llama3.1-70b")
+                                ("context_length" . 128000)
+                                ("supports_reasoning" . t)))))))
       (kargu-chat-select-provider-company)
       (should (string= (kargu--provider-name) "cerebras"))
       (should (string= (kargu--model) "llama3.1-70b"))
@@ -248,7 +254,9 @@
           (kargu-chat-mode)
           (kargu-chat--ensure-idle-prompt)
           (cl-letf (((symbol-function 'kargu-connected-providers)
-                     (lambda () '("opencode" "cerebras" "groq"))))
+                     (lambda () '("opencode" "cerebras" "groq")))
+                    ((symbol-function 'kargu--config-providers)
+                     (lambda () '(("opencode") ("cerebras") ("groq")))))
             (let ((noninteractive nil))
               (kargu-chat-select-provider-company)
               (should (null inhibit-read-only))
@@ -306,15 +314,9 @@
     (should (equal (kargu-model-reasoning-efforts "custom-model" "custom-prov")
                    '("low" "high"))))
 
-  ;; 4. Well-known heuristics
-  ;; Claude 3.7 supports max
-  (should (equal (kargu-model-reasoning-efforts "claude-3-7-sonnet")
-                 '("low" "medium" "high" "max")))
-  ;; Gemini 2.5 supports max
-  (should (equal (kargu-model-reasoning-efforts "gemini-2.5-pro")
-                 '("low" "medium" "high" "max")))
-  ;; OpenAI o3 supports low, medium, high
-  (should (equal (kargu-model-reasoning-efforts "o3-mini")
+  ;; 4. Model metadata with supports-reasoning flag
+  (kargu-model-set-metadata "my-reasoner" '(:id "my-reasoner" :supports-reasoning t))
+  (should (equal (kargu-model-reasoning-efforts "my-reasoner")
                  '("low" "medium" "high"))))
 
 (ert-deftest kargu-company-dynamic-effort-selection-test ()

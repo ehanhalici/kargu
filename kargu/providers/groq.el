@@ -27,8 +27,8 @@
  :id "groq"
  :name "Groq"
  :api "https://api.groq.com/openai/v1"
+ :models-api "https://api.groq.com/openai/v1/models"
  :env '("GROQ_API_KEY")
- :models '("llama-3.3-70b-versatile" "llama-3.1-8b-instant" "mixtral-8x7b-32768" "whisper-large-v3-turbo" "whisper-large-v3" "meta-llama/llama-prompt-guard-2-86m" "meta-llama/llama-prompt-guard-2-22m" "meta-llama/llama-4-scout-17b-16e-instruct" "openai/gpt-oss-safeguard-20b" "openai/gpt-oss-120b" "openai/gpt-oss-20b" "canopylabs/orpheus-v1-english" "canopylabs/orpheus-arabic-saudi" "groq/compound" "groq/compound-mini")
  :npm "@ai-sdk/groq")
 
 (provide 'kargu/providers/groq)

@@ -28,6 +28,8 @@
 (require 'tests/test-plan)
 (require 'tests/test-patch)
 (require 'tests/test-metadata)
+(require 'tests/test-todo-fixes)
+(require 'tests/test-dynamic-models)
 
 (defun kargu-run-all-tests ()
   "Run all Kargu ERT test suites."

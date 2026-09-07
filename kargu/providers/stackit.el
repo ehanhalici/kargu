@@ -27,8 +27,8 @@
  :id "stackit"
  :name "STACKIT"
  :api "https://api.openai-compat.model-serving.eu01.onstackit.cloud/v1"
+ :models-api "https://api.openai-compat.model-serving.eu01.onstackit.cloud/v1/models"
  :env '("STACKIT_API_KEY")
- :models '("cortecs/Llama-3.3-70B-Instruct-FP8-Dynamic" "google/gemma-3-27b-it" "Qwen/Qwen3.6-27B" "Qwen/Qwen3-VL-Embedding-8B" "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8" "openai/gpt-oss-120b" "openai/gpt-oss-20b" "intfloat/e5-mistral-7b-instruct")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/stackit)

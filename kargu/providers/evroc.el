@@ -27,8 +27,8 @@
  :id "evroc"
  :name "evroc"
  :api "https://models.think.evroc.com/v1"
+ :models-api "https://models.think.evroc.com/v1/models"
  :env '("EVROC_API_KEY")
- :models '("moonshotai/Kimi-K2.6" "google/gemma-4-26B-A4B-it" "Qwen/Qwen3-Embedding-8B" "Qwen/Qwen3-Reranker-4B" "Qwen/Qwen3.6-35B-A3B-FP8" "Qwen/Qwen3-VL-30B-A3B-Instruct" "openai/gpt-oss-120b" "openai/whisper-large-v3-turbo" "openai/whisper-large-v3" "mistralai/Mistral-Medium-3.5-128B" "mistralai/Voxtral-Small-24B-2507" "nvidia/Llama-3.3-70B-Instruct-FP8" "evroc/roc" "KBLab/kb-whisper-large" "intfloat/multilingual-e5-large-instruct")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/evroc)

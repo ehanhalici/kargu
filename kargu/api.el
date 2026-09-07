@@ -176,27 +176,14 @@ that fetching the catalog never cancels a running chat request.")
             found)))))
 
 (defun kargu-model-context-window (&optional model-id)
-  "Return the context window size in tokens for MODEL-ID (default active model)."
+  "Return the context window size in tokens for MODEL-ID (default active model).
+Purely derived from live model metadata or session defaults."
   (let* ((mid (or model-id (kargu--model) ""))
          (meta (kargu-model-get-metadata mid))
          (ctx (and meta (plist-get meta :context-window))))
-    (cond
-     ((and (integerp ctx) (> ctx 0)) ctx)
-     ;; Heuristics for well-known models
-     ((string-match-p "gemini-3" mid) 1000000)
-     ((string-match-p "gemini-2" mid) 1000000)
-     ((string-match-p "gemini-1\\.5" mid) 1000000)
-     ((string-match-p "gemini" mid) 1000000)
-     ((string-match-p "claude-3" mid) 200000)
-     ((string-match-p "claude" mid) 200000)
-     ((string-match-p "deepseek" mid) 64000)
-     ((string-match-p "o1\\|o3" mid) 200000)
-     ((string-match-p "gpt-4o" mid) 128000)
-     ((string-match-p "gpt-4" mid) 128000)
-     ((string-match-p "llama-3" mid) 128000)
-     ((string-match-p "qwen" mid) 128000)
-     ((string-match-p "mistral" mid) 32000)
-     (t 128000))))
+    (if (and (integerp ctx) (> ctx 0))
+        ctx
+      128000)))
 
 (defun kargu--extract-models-from-json (data)
   "Extract a list of model alists or IDs from decoded JSON DATA."
@@ -206,38 +193,114 @@ that fetching the catalog never cancels a running chat request.")
    ((listp data)
     (or (kargu--aget data "data")
         (kargu--aget data "models")
-        (and (consp (car data)) (kargu--aget (car data) "id") data)))))
+        (kargu--aget data "items")
+        (and (consp (car data))
+             (or (kargu--aget (car data) "id")
+                 (kargu--aget (car data) "name"))
+             data)))))
 
-(defun kargu-api-list-models (callback)
-  "Fetch the model catalog from the active provider asynchronously.
+(defun kargu-api-list-models (&optional callback provider-name)
+  "Fetch catalog from active or specified PROVIDER-NAME asynchronously.
 CALLBACK receives either the list of model alists or an error
 alist with an \"error\" key."
-  (let ((key (kargu--resolve-api-key))
-        (gen (cl-incf kargu--models-generation)))
-    (if (null key)
-        (funcall callback
-                 `(("error" . (("message" . "no API key")))))
-      (plz 'get (concat (kargu--api-base) "/models")
-           :headers (if (kargu--nonempty key)
-                        `(("Authorization" . ,(concat "Bearer " key)))
-                      nil)
+  (interactive)
+  (let* ((cb (or callback #'ignore))
+         (pname (or provider-name (kargu--provider-name)))
+         (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname "default"))))
+         (pname-lower (downcase (string-trim pname-str)))
+         (key (kargu--resolve-api-key pname-lower))
+         (gen (cl-incf kargu--models-generation))
+         (is-keyless (member pname-lower '("ollama" "lmstudio" "llamacpp")))
+         (custom-models-url (and (fboundp 'kargu-provider-models-api)
+                                 (kargu-provider-models-api pname-lower)))
+         (api-base (kargu--api-base pname-lower))
+         (url (or custom-models-url
+                  (cond
+                   ((and (string-match-p "ollama" pname-lower)
+                         (not (string-suffix-p "/v1" api-base)))
+                    (concat api-base "/api/tags"))
+                   ((string-suffix-p "/models" api-base)
+                    api-base)
+                   (t (concat api-base "/models")))))
+         (headers (kargu--api-headers key pname-lower)))
+    (if (and (null key) (not is-keyless))
+        (funcall cb
+                 `(("error" . (("message" . ,(format "no API key for provider %s" pname-str))))))
+      (plz 'get url
+           :headers headers
            :as 'string
            :then (lambda (body)
                    (when (= gen kargu--models-generation)
                      (let* ((data (kargu--json-decode-safe body))
                             (extracted (kargu--extract-models-from-json data)))
-                       (funcall callback
-                                (or extracted
-                                    `(("error" .
-                                       (("message" . ,(format "unexpected /models body: %s"
-                                                              (truncate-string-to-width
-                                                               (or body "") 200)))))))))))
+                       (if extracted
+                           (progn
+                             (kargu--record-models-metadata extracted pname-lower)
+                             (let ((clean-ids
+                                    (delq nil
+                                          (mapcar (lambda (m)
+                                                    (let ((id (if (consp m)
+                                                                  (or (kargu--aget m "id") (kargu--aget m "name"))
+                                                                m)))
+                                                      (if (and (stringp id) (string-prefix-p "models/" id))
+                                                          (substring id 7)
+                                                        id)))
+                                                  extracted))))
+                               (when clean-ids
+                                 (puthash pname-lower clean-ids kargu--live-models-cache)))
+                             (funcall cb extracted))
+                         (funcall cb
+                                  `(("error" .
+                                     (("message" . ,(format "unexpected /models body from %s: %s"
+                                                           pname-str
+                                                           (truncate-string-to-width
+                                                            (or body "") 200)))))))))))
            :else (lambda (err)
                    (when (= gen kargu--models-generation)
-                     (funcall callback
+                     (funcall cb
                               `(("error" .
                                  (("message" .
                                    ,(kargu--plz-error-message err))))))))))))
+
+(defun kargu-api-prefetch-models (&optional provider-name)
+  "Prefetch live models asynchronously for PROVIDER-NAME into cache."
+  (interactive)
+  (let ((pname (or provider-name (kargu--provider-name))))
+    (kargu-api-list-models #'ignore pname)))
+
+(defun kargu-api-fetch-models-sync (&optional provider-name)
+  "Fetch and cache the model catalog synchronously from PROVIDER-NAME.
+Returns a list of clean model ID strings, or nil on failure."
+  (let* ((pname (or provider-name (kargu--provider-name)))
+         (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname "default"))))
+         (pname-lower (downcase (string-trim pname-str)))
+         (result nil)
+         (done nil))
+    (kargu-api-list-models
+     (lambda (models)
+       (let ((err (kargu--aget models "error")))
+         (unless err
+           (kargu--record-models-metadata models pname-lower)
+           (let* ((raw-ids (kargu--extract-models-from-json models))
+                  (clean-ids
+                   (delq nil
+                         (mapcar (lambda (m)
+                                   (let ((id (if (consp m)
+                                                 (or (kargu--aget m "id") (kargu--aget m "name"))
+                                               m)))
+                                     (if (and (stringp id) (string-prefix-p "models/" id))
+                                         (substring id 7)
+                                       id)))
+                                 raw-ids))))
+             (setq result clean-ids)))
+         (setq done t)))
+     pname-lower)
+    (let ((start (float-time)))
+      (while (and (not done) (< (- (float-time) start) 5.0))
+        (accept-process-output nil 0.05)))
+    (when result
+      (puthash pname-lower result kargu--live-models-cache))
+    result))
 
 (defun kargu--extract-reasoning-efforts (model-data)
   "Extract supported reasoning effort strings from MODEL-DATA alist or plist.
@@ -292,7 +355,13 @@ Returns a list of clean effort strings (e.g. \\='(\"low\" \"medium\")), or nil."
                             (kargu--aget reasoning "effort")
                             (kargu--aget reasoning "values")
                             (kargu--aget reasoning "options")
-                            (kargu--aget reasoning "supported_efforts"))))
+                            (kargu--aget reasoning "supported_efforts")
+                            (and (consp (car-safe reasoning))
+                                 (or (kargu--aget (car reasoning) "efforts")
+                                     (kargu--aget (car reasoning) "effort")
+                                     (kargu--aget (car reasoning) "values")
+                                     (kargu--aget (car reasoning) "options")
+                                     (kargu--aget (car reasoning) "supported_efforts"))))))
               (when vals
                 (if (vectorp vals) (setq vals (append vals nil)))
                 (when (listp vals)
@@ -324,61 +393,170 @@ Returns a list of clean effort strings (e.g. \\='(\"low\" \"medium\")), or nil."
                 (push s cleaned))))
           (nreverse cleaned))))))
 
-(defun kargu--record-models-metadata (models)
-  "Extract and record metadata from raw MODELS list into hash table."
-  (dolist (m models)
-    (when (listp m)
-      (let* ((id (or (kargu--aget m "id") (kargu--aget m "name")))
-             (clean-id (if (and (stringp id) (string-prefix-p "models/" id))
-                           (substring id 7)
-                         id))
-             (ctx (or (kargu--aget m "context_length")
-                      (kargu--aget m "context_window")
-                      (kargu--aget m "max_input_tokens")
-                      (kargu--aget m "max_context_tokens")))
-             (max-out (or (kargu--aget m "max_completion_tokens")
-                          (kargu--aget m "max_output")
-                          (kargu--aget m "max_output_tokens")))
-             (desc (kargu--aget m "description"))
-             (pricing (or (kargu--aget m "pricing") (kargu--aget m "cost")))
-             (in-cost (or (and (listp pricing) (kargu--aget pricing "prompt"))
-                          (kargu--aget m "input_cost")))
-             (out-cost (or (and (listp pricing) (kargu--aget pricing "completion"))
-                           (kargu--aget m "output_cost")))
-             (efforts (kargu--extract-reasoning-efforts m))
-             (sr (kargu--aget m "supports_reasoning"))
-             (sr-p (and sr (not (eq sr :json-false))))
-             (r (kargu--aget m "reasoning"))
-             (r-p (and r (not (eq r :json-false))))
-             (explicit-false (or (eq sr :json-false) (eq r :json-false)))
-             (reasoning (cond
-                         (explicit-false :json-false)
-                         (efforts t)
-                         (sr-p t)
-                         (r-p t)
-                         ((and (stringp clean-id)
-                               (string-match-p "thinking\\|reasoning\\|r1\\|o1\\|o3" (downcase clean-id)))
-                          t)
-                         (t nil))))
-        (when (and (stringp clean-id) (not (string-empty-p clean-id)))
-          (let ((plist (list :id clean-id
-                             :provider (kargu--provider-name)
-                             :context-window (and (numberp ctx) (round ctx))
-                             :max-output (and (numberp max-out) (round max-out))
-                             :input-cost in-cost
-                             :output-cost out-cost
-                             :supports-reasoning reasoning
-                             :reasoning-efforts efforts
-                             :description (and (stringp desc) desc))))
-            (kargu-model-set-metadata clean-id plist)
-            (when (string-match-p "/" clean-id)
-              (let ((short-id (car (last (split-string clean-id "/")))))
-                (unless (gethash (downcase short-id) kargu--model-metadata-table)
-                  (kargu-model-set-metadata short-id plist))))))))))
+(defun kargu--record-models-metadata (models &optional provider-name)
+  "Extract and record metadata from raw MODELS list into hash table.
+PROVIDER-NAME is the associated provider ID string."
+  (let ((pname (or provider-name (kargu--provider-name))))
+    (dolist (m models)
+      (when (listp m)
+        (let* ((id (or (kargu--aget m "id") (kargu--aget m "name")))
+               (clean-id (if (and (stringp id) (string-prefix-p "models/" id))
+                             (substring id 7)
+                           id))
+               (top-p (or (kargu--aget m "top_provider") (kargu--aget m "topProvider")))
+               (top-p-alist (if (and (consp top-p) (consp (car-safe top-p)) (consp (car-safe (car-safe top-p))))
+                                (car top-p)
+                              top-p))
+               (arch (or (kargu--aget m "architecture") (kargu--aget m "details")))
+               (arch-alist (if (and (consp arch) (consp (car-safe arch)) (consp (car-safe (car-safe arch))))
+                                (car arch)
+                              arch))
+               (top-ctx (and (consp top-p-alist) (kargu--aget top-p-alist "context_length")))
+               (top-max (and (consp top-p-alist) (kargu--aget top-p-alist "max_completion_tokens")))
+               (ctx (or (kargu--aget m "context_length")
+                        (kargu--aget m "context_window")
+                        (kargu--aget m "max_input_tokens")
+                        (kargu--aget m "inputTokenLimit")
+                        (kargu--aget m "max_context_tokens")
+                        top-ctx))
+               (max-out (or (kargu--aget m "max_completion_tokens")
+                            (kargu--aget m "max_output")
+                            (kargu--aget m "max_output_tokens")
+                            (kargu--aget m "outputTokenLimit")
+                            (kargu--aget m "max_tokens")
+                            top-max))
+               (desc (kargu--aget m "description"))
+               (pricing (or (kargu--aget m "pricing") (kargu--aget m "cost")))
+               (pricing-alist (if (and (consp pricing) (consp (car-safe pricing)) (consp (car-safe (car-safe pricing))))
+                                  (car pricing)
+                                pricing))
+               (in-cost (or (and (consp pricing-alist) (kargu--aget pricing-alist "prompt"))
+                            (kargu--aget m "input_cost")))
+               (out-cost (or (and (consp pricing-alist) (kargu--aget pricing-alist "completion"))
+                             (kargu--aget m "output_cost")))
+               (supp-params (or (kargu--aget m "supported_parameters")
+                                (kargu--aget m "supportedParameters")))
+               (supp-params-list (cond ((vectorp supp-params) (append supp-params nil))
+                                       ((listp supp-params) supp-params)
+                                       (t nil)))
+               (has-reasoning-param (and supp-params-list
+                                         (cl-some (lambda (p)
+                                                    (and (stringp p)
+                                                         (string-match-p "reasoning" (downcase p))))
+                                                  supp-params-list)))
+               (efforts (or (kargu--extract-reasoning-efforts m)
+                            (and has-reasoning-param '("low" "medium" "high"))))
+               (sr (kargu--aget m "supports_reasoning"))
+               (sr-p (and sr (not (eq sr :json-false))))
+               (r (kargu--aget m "reasoning"))
+               (r-p (and r (not (eq r :json-false))))
+               (explicit-false (or (eq sr :json-false) (eq r :json-false)))
+               (clean-lower (downcase (or clean-id "")))
+               (reasoning (cond
+                           (explicit-false :json-false)
+                           (efforts t)
+                           (has-reasoning-param t)
+                           (sr-p t)
+                           (r-p t)
+                           ((string-match-p "thinking\\|reasoning\\|r1\\|o1\\|o3\\|o4" clean-lower)
+                            t)
+                           (t nil)))
+               (modality (or (and (consp arch-alist) (kargu--aget arch-alist "modality"))
+                             (kargu--aget m "modality")))
+               (param-size (or (and (consp arch-alist) (kargu--aget arch-alist "parameter_size"))
+                               (kargu--aget m "parameter_size")))
+               (quant (or (and (consp arch-alist) (kargu--aget arch-alist "quantization_level"))
+                          (kargu--aget m "quantization_level")))
+               (params (cond
+                        ((and param-size quant) (format "%s %s" param-size quant))
+                        (param-size (format "%s" param-size))
+                        (t nil)))
+               (vision (or (string-match-p "image\\|multimodal\\|vision" (format "%s" (or modality "")))
+                           (string-match-p "vision\\|vl\\|multimodal\\|image" clean-lower)))
+               (free (or (string-match-p "free" clean-lower)
+                         (and (numberp in-cost) (= in-cost 0)
+                              (numberp out-cost) (= out-cost 0)))))
+          (when (and (stringp clean-id) (not (string-empty-p clean-id)))
+            (let ((plist (list :id clean-id
+                               :provider pname
+                               :context-window (and (numberp ctx) (round ctx))
+                               :max-output (and (numberp max-out) (round max-out))
+                               :input-cost in-cost
+                               :output-cost out-cost
+                               :supports-reasoning reasoning
+                               :reasoning-efforts efforts
+                               :vision vision
+                               :params params
+                               :free free
+                               :description (and (stringp desc) desc))))
+              (kargu-model-set-metadata clean-id plist)
+              (when (string-match-p "/" clean-id)
+                (let ((short-id (car (last (split-string clean-id "/")))))
+                  (unless (gethash (downcase short-id) kargu--model-metadata-table)
+                    (kargu-model-set-metadata short-id plist)))))))))))
+
+(defun kargu-model-annotation-string (model-id &optional provider-name)
+  "Build a rich, compact annotation badge string for MODEL-ID.
+Includes context window, max output tokens, reasoning/thinking support,
+multimodal/vision capability, parameter size, and pricing/free badges."
+  (let* ((mid (or model-id ""))
+         (mid-clean (downcase (string-trim mid)))
+         (pname (or provider-name (kargu--provider-name)))
+         (meta (kargu-model-get-metadata mid))
+         (ctx (or (and meta (plist-get meta :context-window))
+                  (kargu-model-context-window mid)))
+         (max-out (and meta (plist-get meta :max-output)))
+         (efforts (or (and meta (plist-get meta :reasoning-efforts))
+                      (kargu-model-reasoning-efforts mid pname)))
+         (supp-r (kargu-model-supports-reasoning-p mid pname))
+         (vision (or (and meta (plist-get meta :vision))
+                     (string-match-p "vision\\|vl\\|multimodal\\|image" mid-clean)))
+         (params (and meta (plist-get meta :params)))
+         (free (or (and meta (plist-get meta :free))
+                   (string-match-p "free" mid-clean)))
+         (pricing (and meta (plist-get meta :input-cost)))
+         (parts nil))
+    ;; 1. Context window
+    (when (and (numberp ctx) (> ctx 0))
+      (let ((ctx-str (if (>= ctx 1000000)
+                         (format "%dm ctx" (/ ctx 1000000))
+                       (format "%dk ctx" (/ ctx 1000)))))
+        (push ctx-str parts)))
+    ;; 2. Max completion / output tokens
+    (when (and (numberp max-out) (> max-out 0))
+      (push (format "max %dk" (max 1 (/ max-out 1024))) parts))
+    ;; 3. Parameter size / details (Ollama)
+    (when (and (stringp params) (not (string-empty-p params)))
+      (push params parts))
+    ;; 4. Reasoning / thinking capability
+    (cond
+     ((and (listp efforts) efforts)
+      (if (and (member "low" efforts) (member "high" efforts))
+          (push "🧠 think: low..high" parts)
+        (push (format "🧠 think: %s" (mapconcat #'identity efforts ",")) parts)))
+     (supp-r
+      (push "🧠 think" parts)))
+    ;; 5. Vision / multimodal
+    (when vision
+      (push "👁 vision" parts))
+    ;; 6. Free or Pricing
+    (let ((p-num (cond ((numberp pricing) pricing)
+                       ((and (stringp pricing) (not (string-empty-p pricing)))
+                        (string-to-number pricing))
+                       (t nil))))
+      (cond
+       (free
+        (push "⚡ free" parts))
+       ((and (numberp p-num) (> p-num 0))
+        (let ((per-m (* p-num 1000000.0)))
+          (push (format "$%.2f/1M" per-m) parts)))))
+    (if parts
+        (format "  [%s]" (mapconcat #'identity (nreverse parts) " · "))
+      "")))
 
 (defun kargu-model-supports-reasoning-p (&optional model-id provider-name)
   "Return non-nil if MODEL-ID supports thinking / reasoning.
-Checks model metadata, provider defaults, and well-known model heuristics."
+Checks model metadata and provider API responses dynamically."
   (let* ((mid (or model-id (kargu--model) ""))
          (pname (or provider-name (kargu--provider-name)))
          (meta (kargu-model-get-metadata mid))
@@ -387,14 +565,16 @@ Checks model metadata, provider defaults, and well-known model heuristics."
          (prov-efforts (and pname (fboundp 'kargu-provider-reasoning-efforts)
                             (kargu-provider-reasoning-efforts pname))))
     (cond
-     ((or efforts prov-efforts (and supp (not (eq supp :json-false)))) t)
      ((eq supp :json-false) nil)
-     (t t))))
+     ((or efforts prov-efforts (and supp (not (eq supp :json-false)))) t)
+     (t nil))))
 
 (defun kargu-model-reasoning-efforts (&optional model-id provider-name)
   "Return supported reasoning effort strings for MODEL-ID and PROVIDER-NAME.
-Returns nil if the model does not support reasoning."
+Returns nil if the model does not support reasoning.
+Derived strictly from live model metadata and provider API capabilities."
   (let* ((mid (or model-id (kargu--model) ""))
+         (mid-lower (downcase (string-trim mid)))
          (pname (or provider-name (kargu--provider-name)))
          (meta (kargu-model-get-metadata mid))
          (supp (and meta (plist-get meta :supports-reasoning)))
@@ -409,26 +589,11 @@ Returns nil if the model does not support reasoning."
      ;; 3. Provider-registered default efforts
      ((and (listp prov-efforts) prov-efforts)
       prov-efforts)
-     ;; 4. Well-known model family heuristics
-     ((and (stringp mid) (not (string-empty-p mid)))
-      (let ((clean (downcase mid)))
-        (cond
-         ;; Claude 3.7 supports low, medium, high, max
-         ((string-match-p "claude-3-7\\|claude-3\\.7" clean)
-          '("low" "medium" "high" "max"))
-         ;; Gemini 2.5/2.0 thinking supports low, medium, high, max
-         ((string-match-p "gemini-2\\.5\\|gemini-3\\|gemini.*thinking" clean)
-          '("low" "medium" "high" "max"))
-         ;; OpenAI o1, o3, o-series
-         ((string-match-p "o1\\|o3\\|o4\\|gpt-5" clean)
-          '("low" "medium" "high"))
-         ;; DeepSeek R1 and general reasoning models
-         ((string-match-p "thinking\\|reasoning\\|r1" clean)
-          '("low" "medium" "high"))
-         ;; Default fallback when not explicitly disabled
-         (t '("low" "medium" "high")))))
-     ;; Fallback default
-     (t '("low" "medium" "high")))))
+     ;; 4. Model supports reasoning or model name indicates reasoning
+     ((or (and supp (not (eq supp :json-false)))
+          (string-match-p "r1\\|o1\\|o3\\|o4\\|thinking\\|reasoning\\|3-7\\|3\\.7" mid-lower))
+      '("low" "medium" "high"))
+     (t nil))))
 
 (defun kargu--reasoning-effort-annotation (effort-str)
   "Return human-readable annotation string for EFFORT-STR."
@@ -498,6 +663,8 @@ Returns nil if the model does not support reasoning."
                              (ignore-errors (company-manual-begin)))))))
       (completing-read prompt cand-strings nil t nil nil default))))
 
+(defvar kargu-chat--output-marker)
+(defvar kargu-chat-buffer-name)
 (declare-function kargu-chat--goto-footer-field "kargu/chat/prompt")
 
 (defun kargu--company-select-at-point (field candidates annotations callback &optional on-cancel)
@@ -540,13 +707,17 @@ When `noninteractive' or Company is unavailable, falls back to
               (put-text-property btn-start (1+ btn-start)
                                  'front-sticky nil)))
           (let* ((start-marker (copy-marker (point) nil))
-                 (saved-backends (and (boundp 'company-backends) company-backends))
                  (done nil)
+                 (finish-hook nil)
+                 (cancel-hook nil)
+                 (orig-backends (and (boundp 'company-backends) company-backends))
                  (cleanup
                   (lambda ()
                     (when (markerp start-marker)
                       (set-marker start-marker nil))
-                    (setq-local company-backends saved-backends)))
+                    (setq-local company-backends (or orig-backends '(kargu-chat-company)))
+                    (setq-local company-minimum-prefix-length 1)
+                    (setq-local company-idle-delay 0.15)))
                  (backend
                   (lambda (cmd &optional arg &rest _ignored)
                     (cl-case cmd
@@ -565,19 +736,11 @@ When `noninteractive' or Company is unavailable, falls back to
                       (annotation
                        (when (and arg annotations)
                          (or (cdr (assoc arg annotations)) "")))
-                      (require-match t)
+                      (require-match nil)
                       (sorted t)
                       (duplicates nil)
-                      (post-completion
-                       (unless done
-                         (setq done t)
-                         (unwind-protect
-                             (let ((inhibit-read-only t))
-                               (when (functionp callback)
-                                 (funcall callback arg)))
-                           (funcall cleanup)))))))
-                 (finish-hook nil)
-                 (cancel-hook nil))
+                      (post-completion nil)
+                      (otherwise nil)))))
             (setq-local company-backends (list backend))
             (setq-local company-minimum-prefix-length 0)
             (setq-local company-idle-delay 0.01)
@@ -588,33 +751,55 @@ When `noninteractive' or Company is unavailable, falls back to
                     (remove-hook 'company-completion-cancelled-hook cancel-hook t)
                     (unless done
                       (setq done t)
-                      (unwind-protect
-                          (let ((inhibit-read-only t))
-                            (when (functionp callback)
-                              (funcall callback result)))
-                        (funcall cleanup)))))
+                      (funcall cleanup)
+                      (when (functionp callback)
+                        (let ((chosen result))
+                          (if noninteractive
+                              (funcall callback chosen)
+                            (run-at-time 0 nil
+                                         (lambda ()
+                                           (with-current-buffer (or (get-buffer kargu-chat-buffer-name)
+                                                                    (current-buffer))
+                                             (funcall callback chosen))))))))))
             (setq cancel-hook
                   (lambda (&optional _aborted)
                     (remove-hook 'company-completion-finished-hook finish-hook t)
                     (remove-hook 'company-completion-cancelled-hook cancel-hook t)
                     (unless done
                       (setq done t)
-                      (unwind-protect
-                          (let ((inhibit-read-only t))
-                            (if (functionp on-cancel)
-                                (funcall on-cancel)
-                              (when (fboundp 'kargu-chat-refresh-footer)
-                                (kargu-chat-refresh-footer))))
-                        (funcall cleanup)))))
+                      (funcall cleanup)
+                      (if (functionp on-cancel)
+                          (funcall on-cancel)
+                        (when (fboundp 'kargu-chat-refresh-footer)
+                          (kargu-chat-refresh-footer))))))
             (add-hook 'company-completion-finished-hook finish-hook nil t)
             (add-hook 'company-completion-cancelled-hook cancel-hook nil t)
-            (setq company-backend backend)
             (unless (ignore-errors (company-manual-begin))
-              (funcall cancel-hook)
-              (let* ((prompt (format "kargu %s: " field))
-                     (res (kargu--completing-read-with-company
-                           prompt cand-strings (car cand-strings) annotations)))
-                (funcall callback res)))))))))
+              (funcall cancel-hook))))))))
+
+(defun kargu-chat-select-mode-company (&optional _event)
+  "Interactively select an execution mode using Company at point.
+Falls back to `completing-read' via `kargu-set-mode' when Company
+is unavailable or in batch mode."
+  (interactive (list last-input-event))
+  (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+            (and (fboundp 'kargu-busy-p) (kargu-busy-p)))
+    (user-error "kargu: cannot change mode while agent is running or thinking (stop with C-c C-k first)"))
+  (let* ((modes '("ask" "plan" "debug" "agent"))
+         (annotations '(("ask" . "  [Read-only answers; no file edits]")
+                        ("plan" . "  [Read-only architecture & implementation planning]")
+                        ("debug" . "  [Debugging mode; uses dape and diagnostic tools]")
+                        ("agent" . "  [Full agentic mode; can edit files and run commands]"))))
+    (kargu--company-select-at-point
+     'mode
+     modes
+     annotations
+     (lambda (chosen)
+       (unless (and (stringp chosen) (member chosen modes))
+         (when (fboundp 'kargu-chat-refresh-footer)
+           (kargu-chat-refresh-footer))
+         (user-error "kargu: invalid mode selection: %s" chosen))
+       (kargu-set-mode (intern chosen))))))
 
 (defun kargu-chat-select-effort-company (&optional _event)
   "Interactively select reasoning effort using Company completion at point.
@@ -652,65 +837,88 @@ Effort levels are resolved dynamically from the active model and provider."
                (kargu-chat-refresh-footer))
              (user-error "kargu: invalid reasoning effort: %s" chosen))
            (setq kargu-reasoning-effort
-                 (if (member chosen '("off" "none")) nil (intern chosen)))
+                 (if (member (downcase chosen) '("off" "none")) nil (intern chosen)))
            (when (fboundp 'kargu-chat-refresh-footer)
              (kargu-chat-refresh-footer))
            (force-mode-line-update t)
            (message "kargu: reasoning effort set to '%s'." chosen)))))))
 
 (defun kargu-chat-select-model-company (&optional live-ids catalog-ids provider-name _event)
-  "Interactively select a model for PROVIDER-NAME using Company at point."
+  "Interactively select a model for PROVIDER-NAME using Company at point.
+Automatically fetches live model list from provider API if not cached."
   (interactive (list nil nil nil last-input-event))
+  (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+            (and (fboundp 'kargu-busy-p) (kargu-busy-p)))
+    (user-error "kargu: cannot change model while agent is running or thinking (stop with C-c C-k first)"))
   (let* ((pname (or provider-name (kargu--provider-name)))
-         (live (or live-ids (gethash pname kargu--live-models-cache)))
-         (catalog (or catalog-ids (kargu--provider-models)))
-         (all-models (delete-dups (delq nil (append live catalog (list (kargu--model)))))))
-    (unless all-models
-      (user-error "kargu: model list is empty for '%s'" pname))
-    (let ((annotations
-           (mapcar (lambda (m)
-                     (let* ((ctx (kargu-model-context-window m))
-                            (meta (kargu-model-get-metadata m))
-                            (max-out (and meta (plist-get meta :max-output)))
-                            (ctx-label (if (>= ctx 1000000)
-                                           (format "%dm ctx" (/ ctx 1000000))
-                                         (format "%dk ctx" (/ ctx 1000))))
-                            (ann (if max-out
-                                     (format "  [%s, max %dk]" ctx-label (/ max-out 1024))
-                                   (format "  [%s]" ctx-label))))
-                        (cons m ann)))
-                   all-models)))
-      (kargu--company-select-at-point
-       'model
-       all-models
-       annotations
-       (lambda (chosen)
-         (unless (and (stringp chosen) (member chosen all-models))
-           (when (fboundp 'kargu-chat-refresh-footer)
-             (kargu-chat-refresh-footer))
-           (user-error "kargu: invalid model selection: %s" chosen))
-         (setq kargu--session-model chosen)
-         (let* ((ctx (kargu-model-context-window chosen))
-                (thresh (and (fboundp 'kargu-history-compact-threshold)
-                             (kargu-history-compact-threshold)))
-                (meta (kargu-model-get-metadata chosen))
-                (desc (and meta (plist-get meta :description))))
-           (when (fboundp 'kargu-chat-refresh-footer)
-             (kargu-chat-refresh-footer))
-           (force-mode-line-update t)
-           (message "kargu: model '%s' selected (Context: %d tokens, Compaction Threshold: %d chars)%s"
-                    chosen ctx (or thresh 0) (if desc (format " · %s" desc) "")))
-         (if (kargu-model-reasoning-efforts chosen pname)
-             (kargu-chat-select-effort-company)
-           (setq kargu-reasoning-effort nil)
-           (when (fboundp 'kargu-chat-refresh-footer)
-             (kargu-chat-refresh-footer))
-           (force-mode-line-update t)))))))
+         (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname "default"))))
+         (cached (and (null live-ids) (gethash pname-str kargu--live-models-cache)))
+         (sync-models (and (null live-ids) (null cached)
+                           (progn
+                             (message "kargu: querying live model catalog from %s (%s)..."
+                                      pname-str (kargu--api-base pname-str))
+                             (kargu-api-fetch-models-sync pname-str))))
+         (live (or live-ids cached sync-models))
+         (catalog catalog-ids)
+         (curr (kargu--model))
+         (all-models (delete-dups (delq nil (append (and live (copy-sequence live))
+                                                    (and catalog (copy-sequence catalog))
+                                                    (and (kargu--nonempty curr) (list curr)))))))
+    (if (null all-models)
+        ;; Prompt manually if no models could be discovered
+        (let ((chosen (read-string (format "kargu model for %s: " pname-str) (or curr ""))))
+          (when (and (stringp chosen) (not (string-empty-p chosen)))
+            (setq kargu--session-model chosen)
+            (when (fboundp 'kargu-chat-refresh-footer)
+              (kargu-chat-refresh-footer))
+            (force-mode-line-update t)
+            (message "kargu: model set to '%s'" chosen)
+            chosen))
+      (let ((annotations
+             (mapcar (lambda (m)
+                       (cons m (kargu-model-annotation-string m pname-str)))
+                     all-models)))
+        (kargu--company-select-at-point
+         'model
+         all-models
+         annotations
+         (lambda (chosen)
+           (unless (and (stringp chosen) (not (string-empty-p chosen)))
+             (when (fboundp 'kargu-chat-refresh-footer)
+               (kargu-chat-refresh-footer))
+             (user-error "kargu: invalid model selection: %s" chosen))
+           (setq kargu--session-model chosen)
+           (let* ((ctx (kargu-model-context-window chosen))
+                  (thresh (and (fboundp 'kargu-history-compact-threshold)
+                               (kargu-history-compact-threshold)))
+                  (meta (kargu-model-get-metadata chosen))
+                  (desc (and meta (plist-get meta :description))))
+             (when (fboundp 'kargu-chat-refresh-footer)
+               (kargu-chat-refresh-footer))
+             (force-mode-line-update t)
+             (message "kargu: model '%s' selected (Context: %d tokens, Compaction Threshold: %d chars)%s"
+                      chosen ctx (or thresh 0) (if desc (format " · %s" desc) "")))
+           (if (kargu-model-reasoning-efforts chosen pname-str)
+               (if noninteractive
+                   (kargu-chat-select-effort-company)
+                 (run-at-time 0.05 nil #'kargu-chat-select-effort-company))
+             (setq kargu-reasoning-effort nil)
+             (when (fboundp 'kargu-chat-refresh-footer)
+               (kargu-chat-refresh-footer))
+             (force-mode-line-update t))))))))
 
 (defun kargu-chat-select-provider-company (&optional _event)
   "Interactively select an authenticated provider using Company at point."
   (interactive (list last-input-event))
-  (let ((connected (kargu-connected-providers)))
+  (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+            (and (fboundp 'kargu-busy-p) (kargu-busy-p)))
+    (user-error "kargu: cannot change provider while agent is running or thinking (stop with C-c C-k first)"))
+  (let* ((all-connected (kargu-connected-providers))
+         (cfg-list (and (fboundp 'kargu--config-providers)
+                        (mapcar #'car (kargu--config-providers))))
+         (cfg-connected (and cfg-list (cl-remove-if-not (lambda (p) (member p cfg-list)) all-connected)))
+         (connected (or (and (not noninteractive) cfg-connected)
+                        all-connected)))
     (unless connected
       (user-error "kargu: no providers with API keys found. Add keys with M-x kargu-edit-config"))
     (let ((annotations
@@ -734,26 +942,11 @@ Effort levels are resolved dynamically from the active model and provider."
          (kargu-set-provider chosen)
          (when (fboundp 'kargu-chat-refresh-footer)
            (kargu-chat-refresh-footer))
-         (message "kargu: fetching models for provider %s..." chosen)
-         (kargu-api-list-models
-          (lambda (models)
-            (let ((catalog-models (kargu--provider-models)))
-              (unless (kargu--aget models "error")
-                (kargu--record-models-metadata models))
-              (let* ((raw-ids (kargu--extract-models-from-json models))
-                     (clean-ids
-                      (delq nil
-                            (mapcar (lambda (m)
-                                      (let ((id (if (consp m)
-                                                    (or (kargu--aget m "id") (kargu--aget m "name"))
-                                                  m)))
-                                        (if (and (stringp id) (string-prefix-p "models/" id))
-                                            (substring id 7)
-                                          id)))
-                                    raw-ids))))
-                (when clean-ids
-                  (puthash chosen clean-ids kargu--live-models-cache))
-                (kargu-chat-select-model-company clean-ids catalog-models chosen))))))))))
+         (if noninteractive
+             (kargu-chat-select-model-company nil nil chosen)
+           (run-at-time 0.05 nil
+                        (lambda ()
+                          (kargu-chat-select-model-company nil nil chosen)))))))))
 
 (defun kargu--prompt-and-set-model (live-ids catalog-ids provider-name)
   "Prompt user to pick model from LIVE-IDS or CATALOG-IDS for PROVIDER-NAME."
@@ -772,38 +965,8 @@ If called interactively or with prefix, queries provider and prompts."
         (force-mode-line-update t)
         (message "kargu: model set to %s" refresh-or-model)
         refresh-or-model)
-    (let* ((pname (kargu--provider-name))
-           (cached (and (null refresh-or-model) (gethash pname kargu--live-models-cache)))
-           (catalog-models (or (kargu--provider-models) nil)))
-      (if cached
-          (kargu-chat-select-model-company cached catalog-models pname)
-        (message "kargu: querying live model catalog from %s (%s)..."
-                 pname (kargu--api-base))
-        (kargu-api-list-models
-         (lambda (models)
-           (let ((err (kargu--aget models "error")))
-             (if err
-                 (progn
-                   (kargu-log 'warn "could not fetch live models from %s: %s"
-                              pname (kargu--aget err "message"))
-                   (message "kargu: live query failed (%s); using catalog defaults"
-                            (kargu--aget err "message"))
-                   (kargu-chat-select-model-company nil catalog-models pname))
-               (kargu--record-models-metadata models)
-               (let* ((raw-ids (kargu--extract-models-from-json models))
-                      (clean-ids
-                       (delq nil
-                             (mapcar (lambda (m)
-                                       (let ((id (if (consp m)
-                                                     (or (kargu--aget m "id") (kargu--aget m "name"))
-                                                   m)))
-                                         (if (and (stringp id) (string-prefix-p "models/" id))
-                                             (substring id 7)
-                                           id)))
-                                     raw-ids))))
-                 (when clean-ids
-                   (puthash pname clean-ids kargu--live-models-cache))
-                 (kargu-chat-select-model-company clean-ids catalog-models pname))))))))))
+    (let ((pname (kargu--provider-name)))
+      (kargu-chat-select-model-company nil nil pname))))
 
 (defun kargu-switch-provider-and-model ()
   "Interactively switch provider, model, and reasoning effort.

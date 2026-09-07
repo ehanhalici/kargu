@@ -27,8 +27,8 @@
  :id "abliteration-ai"
  :name "abliteration.ai"
  :api "https://api.abliteration.ai/v1"
+ :models-api "https://api.abliteration.ai/v1/models"
  :env '("ABLIT_KEY")
- :models '("abliterated-model")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/abliteration-ai)

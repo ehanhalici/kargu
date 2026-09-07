@@ -27,8 +27,8 @@
  :id "kimi-for-coding"
  :name "Kimi For Coding"
  :api "https://api.kimi.com/coding/v1"
+ :models-api "https://api.kimi.com/coding/v1/models"
  :env '("KIMI_API_KEY")
- :models '("k2p7" "kimi-k2-thinking" "k2p5" "k2p6")
  :npm "@ai-sdk/anthropic")
 
 (provide 'kargu/providers/kimi-for-coding)

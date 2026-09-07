@@ -27,8 +27,9 @@
  :id "deepseek"
  :name "DeepSeek"
  :api "https://api.deepseek.com/v1"
+ :models-api "https://api.deepseek.com/models"
+ :usage-api "https://api.deepseek.com/user/balance"
  :env '("DEEPSEEK_API_KEY")
- :models '("deepseek-chat" "deepseek-reasoner" "deepseek-v4-flash" "deepseek-v4-pro")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/deepseek)

@@ -27,8 +27,8 @@
  :id "kuae-cloud-coding-plan"
  :name "KUAE Cloud Coding Plan"
  :api "https://coding-plan-endpoint.kuaecloud.net/v1"
+ :models-api "https://coding-plan-endpoint.kuaecloud.net/v1/models"
  :env '("KUAE_API_KEY")
- :models '("GLM-4.7")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/kuae-cloud-coding-plan)

@@ -27,8 +27,8 @@
  :id "modelscope"
  :name "ModelScope"
  :api "https://api-inference.modelscope.cn/v1"
+ :models-api "https://api-inference.modelscope.cn/v1/models"
  :env '("MODELSCOPE_API_KEY")
- :models '("Qwen/Qwen3-30B-A3B-Thinking-2507" "Qwen/Qwen3-235B-A22B-Thinking-2507" "Qwen/Qwen3-Coder-30B-A3B-Instruct" "Qwen/Qwen3-30B-A3B-Instruct-2507" "Qwen/Qwen3-235B-A22B-Instruct-2507" "ZhipuAI/GLM-4.6" "ZhipuAI/GLM-4.5")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/modelscope)

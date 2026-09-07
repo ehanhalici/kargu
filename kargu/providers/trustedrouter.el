@@ -27,8 +27,8 @@
  :id "trustedrouter"
  :name "TrustedRouter"
  :api "https://api.trustedrouter.com/v1"
+ :models-api "https://api.trustedrouter.com/v1/models"
  :env '("TRUSTEDROUTER_API_KEY")
- :models '("zdr" "e2e" "synth-code" "fast" "synth" "auto" "cheap")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/trustedrouter)

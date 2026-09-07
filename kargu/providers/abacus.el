@@ -27,8 +27,8 @@
  :id "abacus"
  :name "Abacus"
  :api "https://routellm.abacus.ai/v1"
+ :models-api "https://routellm.abacus.ai/v1/models"
  :env '("ABACUS_API_KEY")
- :models '("o3" "gemini-3.1-flash-lite" "route-llm" "grok-code-fast-1" "gpt-5.3-codex-xhigh" "llama-3.3-70b-versatile" "gemini-2.5-pro" "gpt-5" "claude-haiku-4-5-20251001" "grok-4.3" "gemini-2.5-flash" "gpt-4o" "o4-mini" "qwen3-max" "gemini-3.5-flash")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/abacus)

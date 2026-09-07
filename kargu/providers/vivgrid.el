@@ -27,8 +27,8 @@
  :id "vivgrid"
  :name "Vivgrid"
  :api "https://api.vivgrid.com/v1"
+ :models-api "https://api.vivgrid.com/v1/models"
  :env '("VIVGRID_API_KEY")
- :models '("deepseek-v4-pro" "gpt-5.4-nano" "glm-5.2" "gpt-5.1-codex" "gpt-5.1-codex-max" "gpt-5.3-codex" "gpt-5.6-luna" "gpt-5.6-terra" "gpt-5.4" "gpt-5.4-mini" "gemini-3.1-pro-preview" "gpt-5-mini" "gpt-5.6-sol" "deepseek-v3.2" "gemini-3.1-flash-lite-preview")
  :npm "@ai-sdk/openai")
 
 (provide 'kargu/providers/vivgrid)

@@ -27,8 +27,8 @@
  :id "neuralwatt"
  :name "Neuralwatt"
  :api "https://api.neuralwatt.com/v1"
+ :models-api "https://api.neuralwatt.com/v1/models"
  :env '("NEURALWATT_API_KEY")
- :models '("kimi-k2.5-fast" "kimi-k2.6-flex" "glm-5.2-short-fast-flex" "glm-5.2-flex" "glm-5.2" "glm-5.2-short-fast" "qwen3.5-397b-fast" "kimi-k2.6-fast" "qwen3.6-35b-fast" "glm-5.2-short-flex" "glm-5.2-fast" "glm-5.2-short" "kimi-k2.7-code-flex" "moonshotai/Kimi-K2.6" "moonshotai/Kimi-K2.5")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/neuralwatt)

@@ -27,8 +27,8 @@
  :id "inference"
  :name "Inference"
  :api "https://inference.net/v1"
+ :models-api "https://inference.net/v1/models"
  :env '("INFERENCE_API_KEY")
- :models '("mistral/mistral-nemo-12b-instruct" "google/gemma-3" "osmosis/osmosis-structure-0.6b" "qwen/qwen3-embedding-4b" "qwen/qwen-2.5-7b-vision-instruct" "meta/llama-3.1-8b-instruct" "meta/llama-3.2-1b-instruct" "meta/llama-3.2-11b-vision-instruct" "meta/llama-3.2-3b-instruct")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/inference)

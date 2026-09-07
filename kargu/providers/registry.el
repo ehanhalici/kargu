@@ -61,7 +61,8 @@
 (defun kargu-register-provider (&rest plist)
   "Register a provider in the global registry.
 PLIST must contain at least `:id'.  Other supported keys:
-`:name', `:api', `:env', `:models', `:npm', `:reasoning-efforts'."
+`:name', `:api', `:env', `:models', `:models-api', `:model-detail-api',
+`:usage-api', `:extra-headers', `:npm', `:reasoning-efforts'."
   (let* ((id (plist-get plist :id))
          (id-str (cond ((stringp id) (downcase (string-trim id)))
                        ((symbolp id) (downcase (symbol-name id)))
@@ -81,6 +82,28 @@ PLIST must contain at least `:id'.  Other supported keys:
   "Return default base URL for provider ID, or nil if unknown."
   (let ((info (kargu-provider-get id)))
     (and info (kargu--nonempty (plist-get info :api)))))
+
+(defun kargu-provider-models-api (id)
+  "Return dedicated models list URL for provider ID, or nil to use default."
+  (let ((info (kargu-provider-get id)))
+    (and info (kargu--nonempty (or (plist-get info :models-api)
+                                   (plist-get info :models-endpoint))))))
+
+(defun kargu-provider-model-detail-api (id)
+  "Return model detail endpoint URL template for provider ID, or nil."
+  (let ((info (kargu-provider-get id)))
+    (and info (kargu--nonempty (plist-get info :model-detail-api)))))
+
+(defun kargu-provider-usage-api (id)
+  "Return usage / quota endpoint URL for provider ID, or nil."
+  (let ((info (kargu-provider-get id)))
+    (and info (kargu--nonempty (or (plist-get info :usage-api)
+                                   (plist-get info :account-api))))))
+
+(defun kargu-provider-extra-headers (id)
+  "Return extra HTTP headers alist for provider ID, or nil."
+  (let ((info (kargu-provider-get id)))
+    (and info (plist-get info :extra-headers))))
 
 (defun kargu-provider-env (id)
   "Return list of environment variable names for provider ID."

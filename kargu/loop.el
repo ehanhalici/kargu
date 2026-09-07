@@ -157,6 +157,8 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
                          "kargu: on-finish must be callable or nil: %S" on-finish)
   (let ((run (list :prompt prompt
                    :state 'request
+                   :chat-buffer (current-buffer)
+                   :max-iterations (if (boundp 'kargu-max-iterations) kargu-max-iterations 12)
                    :on-delta on-delta
                    :on-finish (or on-finish
                                   #'kargu-loop--message-report)

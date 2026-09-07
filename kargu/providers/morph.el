@@ -27,8 +27,8 @@
  :id "morph"
  :name "Morph"
  :api "https://api.morphllm.com/v1"
+ :models-api "https://api.morphllm.com/v1/models"
  :env '("MORPH_API_KEY")
- :models '("morph-v3-fast" "morph-v3-large" "auto")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/morph)

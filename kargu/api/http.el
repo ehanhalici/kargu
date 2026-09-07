@@ -262,16 +262,38 @@ until the retry finishes or is cancelled."
         (kargu-log 'error "request failed: %s" msg)
         (funcall callback (kargu--api-error-alist msg))))))
 
-(defun kargu--api-headers (key)
-  "HTTP headers for the active provider.
+(defun kargu--api-headers (key &optional provider-name)
+  "HTTP headers for the active or specified PROVIDER-NAME.
 KEY is the resolved secret.  An empty KEY omits Authorization so
-local or keyless proxies still work."
-  (append
-   `(("Content-Type" . "application/json")
-     ("HTTP-Referer" . ,kargu-app-url)
-     ("X-Title" . "kargu"))
-   (when (kargu--nonempty key)
-     `(("Authorization" . ,(concat "Bearer " key))))))
+local or keyless proxies still work.  Includes `x-opencode-session'
+for OpenCode routing/caching affinity and any provider extra-headers."
+  (let* ((sid (if (fboundp 'kargu-session-id) (kargu-session-id) "default"))
+         (pname (if provider-name
+                    (format "%s" provider-name)
+                  (if (fboundp 'kargu--provider-name) (kargu--provider-name) "")))
+         (pname-lower (downcase (string-trim pname)))
+         (base (if (fboundp 'kargu--api-base) (kargu--api-base pname-lower) ""))
+         (is-opencode (or (string-match-p "opencode" base)
+                          (string-match-p "opencode" pname-lower)))
+         (is-anthropic (or (string-match-p "anthropic" base)
+                           (string-match-p "anthropic" pname-lower)))
+         (extra (and (fboundp 'kargu-provider-extra-headers)
+                     (kargu-provider-extra-headers pname-lower)))
+         (headers
+          (append
+           `(("Content-Type" . "application/json")
+             ("HTTP-Referer" . ,kargu-app-url)
+             ("X-Title" . "kargu"))
+           (when (kargu--nonempty key)
+             (if is-anthropic
+                 `(("x-api-key" . ,key)
+                   ("anthropic-version" . "2023-06-01"))
+               `(("Authorization" . ,(concat "Bearer " key))))))))
+    (when (or is-opencode (string-prefix-p "opencode" pname-lower))
+      (setq headers (append headers (list (cons "x-opencode-session" sid)))))
+    (when (listp extra)
+      (setq headers (append headers extra)))
+    headers))
 
 (defun kargu--api-post (url headers payload gen callback &optional on-delta attempt)
   "POST PAYLOAD to URL via plz, dispatching to CALLBACK.
@@ -518,11 +540,15 @@ same payload instead of finishing as an empty assistant turn.
       (plist-put kargu--session :requests
                  (1+ (or (plist-get kargu--session :requests) 0)))
       (when (numberp in)
+        (plist-put kargu--session :last-prompt-tokens in)
         (plist-put kargu--session :tokens-in
                    (+ (or (plist-get kargu--session :tokens-in) 0) in)))
       (when (numberp out)
         (plist-put kargu--session :tokens-out
                    (+ (or (plist-get kargu--session :tokens-out) 0) out)))
+      (when (fboundp 'kargu-chat-refresh-footer)
+        (ignore-errors (kargu-chat-refresh-footer)))
+      (force-mode-line-update t)
       (kargu-log 'info "usage: %s in / %s out (session: %s)"
                        in out (kargu-session-usage))))
   kargu--session)

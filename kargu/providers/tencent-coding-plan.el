@@ -27,8 +27,8 @@
  :id "tencent-coding-plan"
  :name "Tencent Coding Plan (China)"
  :api "https://api.lkeap.cloud.tencent.com/coding/v3"
+ :models-api "https://api.lkeap.cloud.tencent.com/coding/v3/models"
  :env '("TENCENT_CODING_PLAN_API_KEY")
- :models '("minimax-m2.5" "kimi-k2.5" "hunyuan-turbos" "hunyuan-t1" "tc-code-latest" "glm-5" "hunyuan-2.0-instruct" "hunyuan-2.0-thinking")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/tencent-coding-plan)

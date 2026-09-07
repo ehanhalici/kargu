@@ -27,8 +27,8 @@
  :id "jiekou"
  :name "Jiekou.AI"
  :api "https://api.jiekou.ai/openai"
+ :models-api "https://api.jiekou.ai/openai/models"
  :env '("JIEKOU_API_KEY")
- :models '("o3" "grok-code-fast-1" "gpt-5.2-pro" "gemini-2.5-pro" "claude-haiku-4-5-20251001" "gpt-5-pro" "gemini-2.5-flash" "o4-mini" "gemini-2.5-flash-lite-preview-09-2025" "claude-opus-4-1-20250805" "grok-4-1-fast-non-reasoning" "gpt-5-chat-latest" "claude-opus-4-5-20251101" "gpt-5.1-codex" "gpt-5.1-codex-max")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/jiekou)

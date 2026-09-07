@@ -27,8 +27,8 @@
  :id "xiaomi"
  :name "Xiaomi"
  :api "https://api.xiaomimimo.com/v1"
+ :models-api "https://api.xiaomimimo.com/v1/models"
  :env '("XIAOMI_API_KEY")
- :models '("mimo-v2.5-pro-ultraspeed" "mimo-v2.5" "mimo-v2-omni" "mimo-v2-flash" "mimo-v2-pro" "mimo-v2.5-pro")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/xiaomi)

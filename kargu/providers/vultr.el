@@ -27,8 +27,8 @@
  :id "vultr"
  :name "Vultr"
  :api "https://api.vultrinference.com/v1"
+ :models-api "https://api.vultrinference.com/v1/models"
  :env '("VULTR_API_KEY")
- :models '("moonshotai/Kimi-K2.6" "Qwen/Qwen3.6-27B" "Qwen/Qwen3.5-397B-A17B" "XiaomiMiMo/MiMo-V2.5-Pro" "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16" "nvidia/DeepSeek-V3.2-NVFP4" "nvidia/Nemotron-Cascade-2-30B-A3B" "zai-org/GLM-5.2-FP8" "deepseek-ai/DeepSeek-V4-Flash" "MiniMaxAI/MiniMax-M2.7")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/vultr)

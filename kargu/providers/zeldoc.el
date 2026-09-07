@@ -27,8 +27,8 @@
  :id "zeldoc"
  :name "Zeldoc"
  :api "https://api.zeldoc.ai/v1"
+ :models-api "https://api.zeldoc.ai/v1/models"
  :env '("ZELDOC_API_KEY")
- :models '("z-code")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/zeldoc)

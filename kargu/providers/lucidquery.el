@@ -27,8 +27,8 @@
  :id "lucidquery"
  :name "LucidQuery"
  :api "https://api.lucidquery.com/v1"
+ :models-api "https://api.lucidquery.com/v1/models"
  :env '("LUCIDQUERY_API_KEY")
- :models '("lucidnova-rf1-100b" "lucidquery-nexus-coder" "lucidquery-agi-01-swift" "lucidquery-agi-01-frontier")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/lucidquery)

@@ -27,8 +27,8 @@
  :id "privatemode-ai"
  :name "Privatemode AI"
  :api "http://localhost:8080/v1"
+ :models-api "http://localhost:8080/v1/models"
  :env '("PRIVATEMODE_API_KEY" "PRIVATEMODE_ENDPOINT")
- :models '("qwen3-embedding-4b" "gemma-3-27b" "gpt-oss-120b" "whisper-large-v3" "qwen3-coder-30b-a3b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/privatemode-ai)

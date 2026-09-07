@@ -27,8 +27,8 @@
  :id "dinference"
  :name "DInference"
  :api "https://api.dinference.com/v1"
+ :models-api "https://api.dinference.com/v1/models"
  :env '("DINFERENCE_API_KEY")
- :models '("minimax-m2.5" "glm-4.7" "glm-5.1" "gpt-oss-120b" "glm-5")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/dinference)

@@ -27,8 +27,8 @@
  :id "lilac"
  :name "Lilac"
  :api "https://api.getlilac.com/v1"
+ :models-api "https://api.getlilac.com/v1/models"
  :env '("LILAC_API_KEY")
- :models '("moonshotai/kimi-k2.6" "minimaxai/minimax-m3" "google/gemma-4-31b-it" "zai-org/glm-5.2")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/lilac)

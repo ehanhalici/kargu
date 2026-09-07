@@ -27,8 +27,8 @@
  :id "ambient"
  :name "Ambient"
  :api "https://api.ambient.xyz/v1"
+ :models-api "https://api.ambient.xyz/v1/models"
  :env '("AMBIENT_API_KEY")
- :models '("moonshotai/kimi-k2.7-code" "moonshotai/kimi-k2.6" "zai-org/GLM-5.1-FP8" "zai-org/GLM-5.2-FP8")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/ambient)

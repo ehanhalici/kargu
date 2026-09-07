@@ -27,8 +27,8 @@
  :id "iflowcn"
  :name "iFlow"
  :api "https://apis.iflow.cn/v1"
+ :models-api "https://apis.iflow.cn/v1/models"
  :env '("IFLOW_API_KEY")
- :models '("qwen3-coder-plus" "deepseek-v3" "kimi-k2" "qwen3-32b" "qwen3-max-preview" "qwen3-max" "qwen3-235b" "glm-4.6" "qwen3-235b-a22b-thinking-2507" "deepseek-r1" "qwen3-vl-plus" "qwen3-235b-a22b-instruct" "kimi-k2-0905" "deepseek-v3.2")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/iflowcn)

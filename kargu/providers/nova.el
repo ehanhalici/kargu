@@ -27,8 +27,8 @@
  :id "nova"
  :name "Nova"
  :api "https://api.nova.amazon.com/v1"
+ :models-api "https://api.nova.amazon.com/v1/models"
  :env '("NOVA_API_KEY")
- :models '("nova-2-pro-v1" "nova-2-lite-v1")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/nova)

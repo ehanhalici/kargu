@@ -27,8 +27,8 @@
  :id "requesty"
  :name "Requesty"
  :api "https://router.requesty.ai/v1"
+ :models-api "https://router.requesty.ai/v1/models"
  :env '("REQUESTY_API_KEY")
- :models '("xai/grok-4" "xai/grok-4-fast" "google/gemini-2.5-pro" "google/gemini-2.5-flash" "google/gemini-3-pro-preview" "google/gemini-3-flash-preview" "openai/gpt-5.2-chat" "openai/gpt-5.2-pro" "openai/gpt-5" "openai/gpt-5-chat" "openai/gpt-5-pro" "openai/o4-mini" "openai/gpt-5.1-chat" "openai/gpt-5.1-codex" "openai/gpt-5.1-codex-max")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/requesty)

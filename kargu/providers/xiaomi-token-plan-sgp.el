@@ -27,8 +27,8 @@
  :id "xiaomi-token-plan-sgp"
  :name "Xiaomi Token Plan (Singapore)"
  :api "https://token-plan-sgp.xiaomimimo.com/v1"
+ :models-api "https://token-plan-sgp.xiaomimimo.com/v1/models"
  :env '("XIAOMI_API_KEY")
- :models '("mimo-v2.5-tts" "mimo-v2.5-pro" "mimo-v2-pro" "mimo-v2-tts" "mimo-v2.5" "mimo-v2.5-tts-voicedesign" "mimo-v2.5-tts-voiceclone")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/xiaomi-token-plan-sgp)

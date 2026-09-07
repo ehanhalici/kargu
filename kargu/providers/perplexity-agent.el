@@ -27,8 +27,8 @@
  :id "perplexity-agent"
  :name "Perplexity Agent"
  :api "https://api.perplexity.ai/v1"
+ :models-api "https://api.perplexity.ai/v1/models"
  :env '("PERPLEXITY_API_KEY")
- :models '("xai/grok-4-1-fast-non-reasoning" "google/gemini-2.5-pro" "google/gemini-2.5-flash" "google/gemini-3.1-pro-preview" "google/gemini-3-flash-preview" "openai/gpt-5.2" "openai/gpt-5.4" "openai/gpt-5-mini" "openai/gpt-5.1" "openai/gpt-5.5" "nvidia/nemotron-3-super-120b-a12b" "anthropic/claude-opus-4-5" "anthropic/claude-sonnet-4-5" "anthropic/claude-opus-4-7" "anthropic/claude-haiku-4-5")
  :npm "@ai-sdk/openai")
 
 (provide 'kargu/providers/perplexity-agent)

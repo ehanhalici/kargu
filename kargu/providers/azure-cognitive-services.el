@@ -27,8 +27,8 @@
  :id "azure-cognitive-services"
  :name "Azure Cognitive Services"
  :api "https://${AZURE_COGNITIVE_SERVICES_RESOURCE_NAME}.cognitiveservices.azure.com"
+ :models-api "https://${AZURE_COGNITIVE_SERVICES_RESOURCE_NAME}.cognitiveservices.azure.com/models"
  :env '("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME" "AZURE_COGNITIVE_SERVICES_API_KEY")
- :models '("claude-opus-4-5" "claude-sonnet-4-5" "gpt-5.4-nano" "claude-opus-4-8" "claude-opus-4-1" "kimi-k2.5" "claude-haiku-4-5" "gpt-5.4" "gpt-5.4-mini" "kimi-k2.6" "claude-opus-4-6" "gpt-5.4-pro" "gpt-5.5" "gpt-5.1" "meta-llama-3-70b-instruct")
  :npm "@ai-sdk/azure")
 
 (provide 'kargu/providers/azure-cognitive-services)

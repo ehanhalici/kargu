@@ -27,8 +27,8 @@
  :id "zai-coding-plan"
  :name "Z.AI Coding Plan"
  :api "https://api.z.ai/api/coding/paas/v4"
+ :models-api "https://api.z.ai/api/coding/paas/v4/models"
  :env '("ZHIPU_API_KEY")
- :models '("glm-4.7" "glm-5.1" "glm-5.2" "glm-5v-turbo" "glm-4.5-air" "glm-5-turbo")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/zai-coding-plan)

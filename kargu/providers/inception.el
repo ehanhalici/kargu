@@ -27,8 +27,8 @@
  :id "inception"
  :name "Inception"
  :api "https://api.inceptionlabs.ai/v1"
+ :models-api "https://api.inceptionlabs.ai/v1/models"
  :env '("INCEPTION_API_KEY")
- :models '("mercury-edit-2" "mercury-2")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/inception)

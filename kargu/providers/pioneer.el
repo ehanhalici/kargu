@@ -27,8 +27,8 @@
  :id "pioneer"
  :name "Pioneer"
  :api "https://api.pioneer.ai/v1"
+ :models-api "https://api.pioneer.ai/v1/models"
  :env '("PIONEER_API_KEY")
- :models '("gemini-3-flash" "qwen3.7-plus" "claude-opus-4-5" "qwen3.7-max" "gpt-4o" "gemini-3.5-flash" "claude-sonnet-4-5" "claude-opus-4-7" "gpt-5.4-nano" "qwen3.6-flash" "claude-opus-4-8" "mistral-medium-3.5" "gpt-5.3-codex" "claude-opus-4-1" "gpt-4.1-nano")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/pioneer)

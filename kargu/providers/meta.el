@@ -27,8 +27,8 @@
  :id "meta"
  :name "Meta"
  :api "https://api.meta.ai/v1"
+ :models-api "https://api.meta.ai/v1/models"
  :env '("META_MODEL_API_KEY")
- :models '("muse-spark-1.1")
  :npm "@ai-sdk/openai")
 
 (provide 'kargu/providers/meta)

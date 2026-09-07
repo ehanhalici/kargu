@@ -27,8 +27,8 @@
  :id "cortecs"
  :name "Cortecs"
  :api "https://api.cortecs.ai/v1"
+ :models-api "https://api.cortecs.ai/v1/models"
  :env '("CORTECS_API_KEY")
- :models '("deepseek-r1-0528" "deepseek-v4-flash" "minimax-m2.5" "deepseek-v3-0324" "claude-opus4-7" "glm-4.7" "qwen3-235b-a22b-instruct-2507" "qwen3-coder-30b-a3b-instruct" "minimax-m2.1" "qwen3-32b" "claude-4-6-sonnet" "claude-sonnet-4" "llama-4-maverick" "gemini-2.5-pro" "claude-4-5-sonnet")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/cortecs)

@@ -27,8 +27,8 @@
  :id "mistral"
  :name "Mistral"
  :api "https://api.mistral.ai/v1"
+ :models-api "https://api.mistral.ai/v1/models"
  :env '("MISTRAL_API_KEY")
- :models '("mistral-large-latest" "mistral-small-latest" "codestral-latest" "open-mistral-7b" "devstral-small-2507" "ministral-3b-latest" "pixtral-large-latest" "mistral-nemo" "mistral-embed" "mistral-small-2506" "ministral-8b-latest" "open-mixtral-8x22b" "mistral-medium-latest" "devstral-small-2505" "magistral-small")
  :npm "@ai-sdk/mistral")
 
 (provide 'kargu/providers/mistral)

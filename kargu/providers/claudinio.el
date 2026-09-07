@@ -27,8 +27,8 @@
  :id "claudinio"
  :name "Claudinio"
  :api "https://api.claudin.io/v1"
+ :models-api "https://api.claudin.io/v1/models"
  :env '("CLAUDINIO_API_KEY")
- :models '("claudinio" "claudius")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/claudinio)

@@ -249,7 +249,11 @@ Returns non-nil if approved, or nil if rejected."
     t)
    ;; Interactive with live chat buffer
    (t
-    (let* ((chat-buf (get-buffer (or (bound-and-true-p kargu-chat-buffer-name) "*kargu*")))
+    (when (fboundp 'kargu-notify)
+      (kargu-notify 'permission))
+    (let* ((chat-buf (or (and (bound-and-true-p kargu--loop-run)
+                              (plist-get kargu--loop-run :chat-buffer))
+                         (get-buffer (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*"))))
            (decision nil))
       (if (not (and chat-buf (buffer-live-p chat-buf)))
           ;; Fallback when chat buffer is not available
@@ -261,28 +265,28 @@ Returns non-nil if approved, or nil if rejected."
                        (kargu-chat--prompt-live-p))
               (delete-region kargu-chat--output-marker (point-max))
               (setq kargu-chat--prompt-marker nil))
-            (save-excursion
-              (goto-char (point-max))
-              (insert "\n")
-              (insert (propertize "  ⚡ [Bash Permission Approval]" 'face '(:inherit warning :weight bold)) "\n")
-              (insert (format "     Command: $ %s\n" (propertize command 'face 'font-lock-keyword-face)))
-              (insert (format "     Directory: %s\n     " dir))
-              (insert-button
-               "[✓ Approve]"
-               'action (lambda (_)
-                         (setq decision :approved)
-                         (exit-recursive-edit))
-               'face '(:inherit success :weight bold)
-               'help-echo "Click to approve and execute command")
-              (insert "  ")
-              (insert-button
-               "[✗ Reject]"
-               'action (lambda (_)
-                         (setq decision :rejected)
-                         (exit-recursive-edit))
-               'face '(:inherit error :weight bold)
-               'help-echo "Click to reject command")
-              (insert "\n\n"))))
+            (goto-char (point-max))
+            (insert "\n")
+            (insert (propertize "  ⚡ [Bash Permission Approval]" 'face '(:inherit warning :weight bold)) "\n")
+            (insert (format "     Command: $ %s\n" (propertize command 'face 'font-lock-keyword-face)))
+            (insert (format "     Directory: %s\n     " dir))
+            (insert-button
+             "[✓ Approve]"
+             'action (lambda (_)
+                       (setq decision :approved)
+                       (exit-recursive-edit))
+             'face '(:inherit success :weight bold)
+             'help-echo "Click to approve and execute command")
+            (insert "  ")
+            (insert-button
+             "[✗ Reject]"
+             'action (lambda (_)
+                       (setq decision :rejected)
+                       (exit-recursive-edit))
+             'face '(:inherit error :weight bold)
+             'help-echo "Click to reject command")
+            (insert "\n\n")
+            (setq kargu-chat--output-marker (copy-marker (point-max) t))))
         ;; Scroll chat window to show the prompt
         (dolist (win (get-buffer-window-list chat-buf nil t))
           (set-window-point win (point-max)))
@@ -296,11 +300,13 @@ Returns non-nil if approved, or nil if rejected."
         ;; Update UI to show final choice
         (with-current-buffer chat-buf
           (let ((inhibit-read-only t))
-            (save-excursion
-              (goto-char (point-max))
-              (if (eq decision :approved)
-                  (insert (propertize "     -> [✓ Approved, executing...]\n" 'face 'font-lock-string-face))
-                (insert (propertize "     -> [✗ Rejected]\n" 'face 'font-lock-warning-face))))))
+            (goto-char (point-max))
+            (if (eq decision :approved)
+                (insert (propertize "     -> [✓ Approved, executing...]\n" 'face 'font-lock-string-face))
+              (insert (propertize "     -> [✗ Rejected]\n" 'face 'font-lock-warning-face)))
+            (setq kargu-chat--output-marker (copy-marker (point-max) t))))
+        (dolist (win (get-buffer-window-list chat-buf nil t))
+          (set-window-point win (point-max)))
         (when (and chat-buf (buffer-live-p chat-buf)
                    (not (kargu-loop-running-p))
                    (fboundp 'kargu-chat--ensure-idle-prompt))

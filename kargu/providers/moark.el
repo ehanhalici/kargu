@@ -27,8 +27,8 @@
  :id "moark"
  :name "Moark"
  :api "https://moark.com/v1"
+ :models-api "https://moark.com/v1/models"
  :env '("MOARK_API_KEY")
- :models '("MiniMax-M2.1" "GLM-4.7")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/moark)

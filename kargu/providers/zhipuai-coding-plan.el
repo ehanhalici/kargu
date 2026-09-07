@@ -27,8 +27,8 @@
  :id "zhipuai-coding-plan"
  :name "Zhipu AI Coding Plan"
  :api "https://open.bigmodel.cn/api/coding/paas/v4"
+ :models-api "https://open.bigmodel.cn/api/coding/paas/v4/models"
  :env '("ZHIPU_API_KEY")
- :models '("glm-5.1" "glm-5v-turbo" "glm-5-turbo" "glm-4.5-air" "glm-4.6v" "glm-5.2" "glm-4.7")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/zhipuai-coding-plan)

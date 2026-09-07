@@ -27,8 +27,8 @@
  :id "llmtr"
  :name "LLMTR"
  :api "https://llmtr.com/v1"
+ :models-api "https://llmtr.com/v1/models"
  :env '("LLMTR_API_KEY")
- :models '("sincap" "magibu-11b-v8" "gemma-4" "medgemma-4b" "qwen3-6-35b" "trendyol-7b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/llmtr)

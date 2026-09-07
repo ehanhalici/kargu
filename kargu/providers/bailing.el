@@ -27,8 +27,8 @@
  :id "bailing"
  :name "Bailing"
  :api "https://api.tbox.cn/api/llm/v1/chat/completions"
+ :models-api "https://api.tbox.cn/api/llm/v1/chat/completions/models"
  :env '("BAILING_API_TOKEN")
- :models '("Ring-1T" "Ling-1T")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/bailing)

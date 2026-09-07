@@ -27,8 +27,8 @@
  :id "drun"
  :name "D.Run (China)"
  :api "https://chat.d.run/v1"
+ :models-api "https://chat.d.run/v1/models"
  :env '("DRUN_API_KEY")
- :models '("public/deepseek-v3" "public/deepseek-r1" "public/minimax-m25")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/drun)

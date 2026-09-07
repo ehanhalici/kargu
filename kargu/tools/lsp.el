@@ -104,7 +104,7 @@ Protects the token budget on huge workspaces."
   :type 'natnum
   :group 'kargu-lsp)
 
-(defcustom kargu-lsp-diag-settle-timeout 6.0
+(defcustom kargu-lsp-diag-settle-timeout 3.0
   "Seconds `kargu-lsp-wait-diagnostics' waits for the language
 server to republish diagnostics after an edit."
   :type 'number
@@ -447,20 +447,22 @@ Combines LSP symbols (if active) with Emacs `imenu' across ROOTS."
         acc)
     ;; 1. Try LSP
     (condition-case nil
-        (when (kargu-lsp--managed-buffer)
-          (let ((lsp-items (or (kargu-lsp--ws-symbols (or query ""))
-                               (kargu-lsp--doc-symbols))))
-            (dolist (item lsp-items)
-              (let* ((path (nth 0 item))
-                     (line (nth 1 item))
-                     (name (nth 2 item))
-                     (kind (if (fboundp 'kargu-lsp--kind-name)
-                               (kargu-lsp--kind-name (nth 3 item))
-                             (format "%s" (or (nth 3 item) "Symbol"))))
-                     (key (cons path name)))
-                (unless (gethash key seen)
-                  (puthash key t seen)
-                  (push (list path line name kind) acc))))))
+        (let ((buf (kargu-lsp--managed-buffer)))
+          (when (buffer-live-p buf)
+            (with-current-buffer buf
+              (let ((lsp-items (or (kargu-lsp--ws-symbols (or query ""))
+                                   (kargu-lsp--doc-symbols))))
+                (dolist (item lsp-items)
+                  (let* ((path (nth 0 item))
+                         (line (nth 1 item))
+                         (name (nth 2 item))
+                         (kind (if (fboundp 'kargu-lsp--kind-name)
+                                   (kargu-lsp--kind-name (nth 3 item))
+                                 (format "%s" (or (nth 3 item) "Symbol"))))
+                         (key (cons path name)))
+                    (unless (gethash key seen)
+                      (puthash key t seen)
+                      (push (list path line name kind) acc))))))))
       (error nil))
     ;; 2. Add imenu symbols
     (dolist (item (kargu-lsp--imenu-symbols roots))
@@ -786,6 +788,9 @@ judging a change."
                  (setq polls (1+ polls))
                  (if (or timed-out
                          (and (not flycheck-busy)
+                              (>= polls 1)
+                              (null snapshot))
+                         (and (not flycheck-busy)
                               (>= polls 2)
                               (equal snapshot last-snapshot)))
                      (funcall callback
@@ -793,8 +798,8 @@ judging a change."
                               (kargu-lsp-get-diagnostics path)
                               timed-out)
                    (setq last-snapshot snapshot)
-                   (run-at-time 0.4 nil #'tick)))))
-          (run-at-time 0.4 nil #'tick))))))
+                   (run-at-time 0.25 nil #'tick)))))
+          (run-at-time 0.25 nil #'tick))))))
 
 ;;;; Find definition -------------------------------------------------------
 

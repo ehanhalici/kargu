@@ -27,8 +27,8 @@
  :id "gitlab"
  :name "GitLab Duo"
  :api "https://gitlab.com/api/v4/ai"
+ :models-api "https://gitlab.com/api/v4/ai/models"
  :env '("GITLAB_TOKEN")
- :models '("duo-chat-opus-4-5" "duo-chat-opus-4-8" "duo-chat-opus-4-7" "duo-chat-gpt-5-2-codex" "duo-chat-fable-5" "duo-chat-gpt-5-5" "duo-chat-opus-4-6" "duo-chat-gpt-5-4" "duo-chat-gpt-5-codex" "duo-chat-gpt-5-4-nano" "duo-chat-sonnet-4-6" "duo-chat-gpt-5-mini" "duo-chat-sonnet-5" "duo-chat-gpt-5-4-mini" "duo-chat-gpt-5-3-codex")
  :npm "gitlab-ai-provider")
 
 (provide 'kargu/providers/gitlab)

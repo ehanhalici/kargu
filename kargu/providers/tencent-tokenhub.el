@@ -27,8 +27,8 @@
  :id "tencent-tokenhub"
  :name "Tencent TokenHub"
  :api "https://tokenhub.tencentmaas.com/v1"
+ :models-api "https://tokenhub.tencentmaas.com/v1/models"
  :env '("TENCENT_TOKENHUB_API_KEY")
- :models '("hy3" "hy3-preview")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/tencent-tokenhub)

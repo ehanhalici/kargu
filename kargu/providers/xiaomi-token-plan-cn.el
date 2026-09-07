@@ -27,8 +27,8 @@
  :id "xiaomi-token-plan-cn"
  :name "Xiaomi Token Plan (China)"
  :api "https://token-plan-cn.xiaomimimo.com/v1"
+ :models-api "https://token-plan-cn.xiaomimimo.com/v1/models"
  :env '("XIAOMI_API_KEY")
- :models '("mimo-v2.5-tts-voiceclone" "mimo-v2.5-tts-voicedesign" "mimo-v2.5" "mimo-v2-tts" "mimo-v2-pro" "mimo-v2.5-pro" "mimo-v2.5-tts")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/xiaomi-token-plan-cn)

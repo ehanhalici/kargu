@@ -27,8 +27,8 @@
  :id "github-models"
  :name "GitHub Models"
  :api "https://models.github.ai/inference"
+ :models-api "https://models.github.ai/inference/models"
  :env '("GITHUB_TOKEN")
- :models '("ai21-labs/ai21-jamba-1.5-mini" "ai21-labs/ai21-jamba-1.5-large" "core42/jais-30b-chat" "xai/grok-3-mini" "xai/grok-3" "microsoft/phi-3.5-moe-instruct" "microsoft/phi-3-small-128k-instruct" "microsoft/phi-3.5-mini-instruct" "microsoft/phi-3-medium-128k-instruct" "microsoft/phi-3-small-8k-instruct" "microsoft/phi-4-reasoning" "microsoft/mai-ds-r1" "microsoft/phi-4-mini-instruct" "microsoft/phi-4" "microsoft/phi-3.5-vision-instruct")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/github-models)

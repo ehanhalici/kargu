@@ -27,8 +27,8 @@
  :id "perplexity"
  :name "Perplexity"
  :api "https://api.perplexity.ai"
+ :models-api "https://api.perplexity.ai/models"
  :env '("PERPLEXITY_API_KEY")
- :models '("sonar" "sonar-pro" "sonar-reasoning" "sonar-reasoning-pro" "sonar-deep-research")
  :npm "@ai-sdk/perplexity")
 
 (provide 'kargu/providers/perplexity)

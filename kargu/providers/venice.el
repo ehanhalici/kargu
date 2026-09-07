@@ -27,8 +27,8 @@
  :id "venice"
  :name "Venice AI"
  :api "https://api.venice.ai/api/v1"
+ :models-api "https://api.venice.ai/api/v1/models"
  :env '("VENICE_API_KEY")
- :models '("llama-3.3-70b" "deepseek-r1-llama-70b" "z-ai-glm-5-turbo" "grok-4-20-multi-agent" "deepseek-v4-flash" "google-gemma-4-31b-it" "kimi-k2-6" "openai-gpt-56-terra-pro" "qwen3-235b-a22b-instruct-2507" "openai-gpt-56-sol-pro" "nvidia-nemotron-cascade-2-30b-a3b" "claude-opus-4-7-fast" "openai-gpt-55-pro" "qwen3-5-397b-a17b" "claude-opus-4-5")
  :npm "venice-ai-sdk-provider")
 
 (provide 'kargu/providers/venice)

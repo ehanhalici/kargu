@@ -27,8 +27,8 @@
  :id "kilo"
  :name "Kilo Gateway"
  :api "https://api.kilo.ai/api/gateway"
+ :models-api "https://api.kilo.ai/api/gateway/models"
  :env '("KILO_API_KEY")
- :models '("inclusionai/ling-2.6-1t" "inclusionai/ring-2.6-1t" "inclusionai/ling-2.6-flash" "ibm-granite/granite-4.0-h-micro" "ibm-granite/granite-4.1-8b" "meta-llama/llama-3.1-8b-instruct" "meta-llama/llama-3-70b-instruct" "meta-llama/llama-3.1-70b-instruct" "meta-llama/llama-3.2-1b-instruct" "meta-llama/llama-4-maverick" "meta-llama/llama-3.2-11b-vision-instruct" "meta-llama/llama-3.3-70b-instruct" "meta-llama/llama-guard-3-8b" "meta-llama/llama-guard-4-12b" "meta-llama/llama-3-8b-instruct")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/kilo)

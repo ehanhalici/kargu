@@ -27,8 +27,8 @@
  :id "sarvam"
  :name "Sarvam AI"
  :api "https://api.sarvam.ai/v1"
+ :models-api "https://api.sarvam.ai/v1/models"
  :env '("SARVAM_API_KEY")
- :models '("sarvam-105b" "sarvam-30b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/sarvam)

@@ -27,8 +27,8 @@
  :id "ollama-cloud"
  :name "Ollama Cloud"
  :api "https://ollama.com/v1"
+ :models-api "https://ollama.com/v1/models"
  :env '("OLLAMA_API_KEY")
- :models '("deepseek-v4-flash" "minimax-m2.5" "devstral-small-2:24b" "glm-4.7" "cogito-2.1:671b" "minimax-m2.1" "gpt-oss:120b" "nemotron-3-nano:30b" "ministral-3:8b" "rnj-1:8b" "kimi-k2.7-code" "glm-5.1" "deepseek-v4-pro" "glm-4.6" "kimi-k2-thinking")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/ollama-cloud)

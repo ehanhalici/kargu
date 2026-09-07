@@ -27,8 +27,8 @@
  :id "huggingface"
  :name "Hugging Face"
  :api "https://router.huggingface.co/v1"
+ :models-api "https://router.huggingface.co/v1/models"
  :env '("HF_TOKEN")
- :models '("meta-llama/Llama-3.3-70B-Instruct" "moonshotai/Kimi-K2-Thinking" "moonshotai/Kimi-K2-Instruct-0905" "moonshotai/Kimi-K2-Instruct" "moonshotai/Kimi-K2.6" "moonshotai/Kimi-K2.5" "moonshotai/Kimi-K2.7-Code" "stepfun-ai/Step-3.5-Flash" "stepfun-ai/Step-3.7-Flash" "google/gemma-4-31B-it" "google/gemma-4-26B-A4B-it" "Qwen/Qwen3.6-35B-A3B" "Qwen/Qwen3-Coder-Next" "Qwen/Qwen3-Embedding-8B" "Qwen/Qwen3.6-27B")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/huggingface)

@@ -27,8 +27,9 @@
  :id "openai"
  :name "OpenAI"
  :api "https://api.openai.com/v1"
+ :models-api "https://api.openai.com/v1/models"
+ :usage-api "https://api.openai.com/v1/usage"
  :env '("OPENAI_API_KEY")
- :models '("gpt-4o" "gpt-4o-mini" "o1" "o3-mini" "gpt-4.5-preview" "o3" "text-embedding-3-large" "gpt-5.2-pro" "gpt-5.6" "gpt-5" "gpt-3.5-turbo" "gpt-5-pro" "gpt-4" "o4-mini" "o3-pro")
  :npm "@ai-sdk/openai")
 
 (provide 'kargu/providers/openai)

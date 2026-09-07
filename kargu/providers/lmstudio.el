@@ -27,8 +27,8 @@
  :id "lmstudio"
  :name "LMStudio"
  :api "http://127.0.0.1:1234/v1"
+ :models-api "http://localhost:1234/v1/models"
  :env '("LMSTUDIO_API_KEY")
- :models '("openai/gpt-oss-20b" "qwen/qwen3-30b-a3b-2507" "qwen/qwen3-coder-30b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/lmstudio)

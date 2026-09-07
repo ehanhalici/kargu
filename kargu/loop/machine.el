@@ -83,20 +83,112 @@
       (concat prompt "\n\n" kargu-prompt-max-steps-nudge)
     kargu-prompt-max-steps-nudge))
 
-(defun kargu-loop--request-send (run prompt)
-  "Send one model turn for RUN."
-  (let ((iterations (1+ (or (plist-get run :iterations) 0))))
-    (plist-put run :iterations iterations)
+(defvar kargu-loop--mock-continue-decision nil
+  "Mock decision for `kargu-loop--prompt-continue' in unit tests.
+When non-nil, may be `:continue' or `:stop'.")
+
+(defun kargu-loop--prompt-continue (run prompt)
+  "Prompt the user interactively when RUN reaches its iteration limit.
+Offers to add another batch of turns (`kargu-max-iterations') or stop."
+  (kargu-loop--set-state run 'pause)
+  (when (fboundp 'kargu-notify)
+    (kargu-notify 'limit))
+  (let* ((chat-buf (plist-get run :chat-buffer))
+         (max-iter (or (plist-get run :iterations) 12))
+         (batch (if (boundp 'kargu-max-iterations) kargu-max-iterations 12))
+         (decision nil))
     (cond
-     ((> iterations kargu-max-iterations)
+     (kargu-loop--mock-continue-decision
+      (setq decision kargu-loop--mock-continue-decision)
+      (when (and chat-buf (buffer-live-p chat-buf))
+        (with-current-buffer chat-buf
+          (let ((inhibit-read-only t))
+            (goto-char (point-max))
+            (insert "\n")
+            (insert (propertize (format "  ⏸  [Turn limit reached (%d turns)]\n" max-iter)
+                                'face '(:inherit warning :weight bold)))
+            (insert (format "     Continue for another %d turns?\n     " batch))
+            (insert (format "[✓ Continue (+%d turns)]  [✗ Stop]\n\n" batch))))))
+     ((not (and chat-buf (buffer-live-p chat-buf) (not noninteractive)))
+      (if (or noninteractive
+              (y-or-n-p (format "Kargu reached %d turns limit. Continue for another %d turns? "
+                                max-iter batch)))
+          (setq decision (if noninteractive :stop :continue))
+        (setq decision :stop)))
+     (t
+      (with-current-buffer chat-buf
+        (let ((inhibit-read-only t))
+          (when (and (fboundp 'kargu-chat--prompt-live-p)
+                     (kargu-chat--prompt-live-p))
+            (delete-region kargu-chat--output-marker (point-max))
+            (setq kargu-chat--prompt-marker nil))
+          (goto-char (point-max))
+          (insert "\n")
+          (insert (propertize (format "  ⏸  [Turn limit reached (%d turns)]\n" max-iter)
+                              'face '(:inherit warning :weight bold)))
+          (insert (format "     Continue for another %d turns?\n     " batch))
+          (insert-button
+           (format "[✓ Continue (+%d turns)]" batch)
+           'action (lambda (_)
+                     (setq decision :continue)
+                     (exit-recursive-edit))
+           'face '(:inherit success :weight bold)
+           'help-echo "Click to allow another turn batch")
+          (insert "  ")
+          (insert-button
+           "[✗ Stop]"
+           'action (lambda (_)
+                     (setq decision :stop)
+                     (exit-recursive-edit))
+           'face '(:inherit error :weight bold)
+           'help-echo "Click to stop the run")
+          (insert "\n\n")
+          (setq kargu-chat--output-marker (copy-marker (point) t))))
+      (dolist (win (get-buffer-window-list chat-buf nil t))
+        (set-window-point win (point-max)))
+      (message "Turn limit reached (%d turns): click [✓ Continue] or [✗ Stop]" max-iter)
+      (condition-case _sig
+          (recursive-edit)
+        (quit
+         (setq decision :stop)
+         (message "kargu: run stopped at turn limit")))
+      (with-current-buffer chat-buf
+        (let ((inhibit-read-only t))
+          (goto-char (point-max))
+          (if (eq decision :continue)
+              (insert (propertize (format "     -> [✓ Continuing for +%d turns...]\n" batch)
+                                  'face 'font-lock-string-face))
+            (insert (propertize "     -> [✗ Stopped]\n" 'face 'font-lock-warning-face)))
+          (setq kargu-chat--output-marker (copy-marker (point) t))))))
+    (if (eq decision :continue)
+        (progn
+          (plist-put run :max-iterations (+ max-iter batch))
+          (plist-put run :no-tools nil)
+          (kargu-log 'info "loop: extended turn limit by %d (new cap: %d)"
+                     batch (+ max-iter batch))
+          (kargu-loop--set-state run 'wait)
+          (let ((on-delta (and (plist-get run :on-delta)
+                               (lambda (event)
+                                 (kargu--loop-forward-delta run event)))))
+            (kargu-api-send
+             prompt
+             (lambda (response)
+               (kargu--loop-handle-response run response))
+             on-delta)))
       (kargu--loop-finish
        run :limit
-       (format "iteration limit reached (%d model round-trips, `kargu-max-iterations'); stopping.  Send a follow-up prompt to continue."
-               kargu-max-iterations)))
+       (format "iteration limit reached (%d model round-trips); stopped by user."
+               max-iter)))))
+
+(defun kargu-loop--request-send (run prompt)
+  "Send one model turn for RUN."
+  (let* ((max-iter (or (plist-get run :max-iterations) kargu-max-iterations))
+         (iterations (1+ (or (plist-get run :iterations) 0))))
+    (plist-put run :iterations iterations)
+    (cond
+     ((> iterations max-iter)
+      (kargu-loop--prompt-continue run prompt))
      (t
-      (when (>= iterations kargu-max-iterations)
-        (plist-put run :no-tools t)
-        (setq prompt (kargu-loop--max-steps-prompt prompt)))
       (kargu-loop--set-state run 'wait)
       (let ((on-delta (and (plist-get run :on-delta)
                            (lambda (event)

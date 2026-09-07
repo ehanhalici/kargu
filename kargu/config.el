@@ -269,20 +269,22 @@ Merges user TOML configuration with built-in provider defaults."
       (replace-regexp-in-string "/+\\'" "" url)
     url))
 
-(defun kargu--api-base ()
-  "Endpoint base URL: active provider `api' if set, else `kargu-api-base'."
+(defun kargu--api-base (&optional provider-name)
+  "Return endpoint base URL.
+Use active or specified PROVIDER-NAME `api', else `kargu-api-base'."
   (kargu--strip-trailing-slashes
-   (or (kargu--nonempty (plist-get (kargu--provider-plist) :api))
+   (or (and provider-name
+            (fboundp 'kargu-provider-api)
+            (kargu-provider-api provider-name))
+       (kargu--nonempty (plist-get (kargu--provider-plist) :api))
        kargu-api-base)))
 
 (defun kargu--model ()
-  "Model id: session, TOML `model'/`name', provider list, else `kargu-model'."
+  "Model id: session model, explicit TOML model, or nil if not selected yet."
   (or (kargu--nonempty kargu--session-model)
       (and (null kargu--session-provider)
            (kargu--nonempty (plist-get (kargu--config-plist) :model)))
-      (kargu--nonempty (plist-get (kargu--provider-plist) :model))
-      (car (kargu--provider-models))
-      kargu-model))
+      (kargu--nonempty (plist-get (kargu--provider-plist) :model))))
 
 (defun kargu-set-provider (name)
   "Use provider NAME for this Emacs session.
@@ -299,13 +301,16 @@ from `kargu-provider-list'."
   (setq kargu--session-provider name)
   (let* ((prov-plist (kargu--provider-plist))
          (explicit-model (plist-get prov-plist :model))
-         (models (plist-get prov-plist :models)))
+         (cached-model (and (boundp 'kargu--live-models-cache)
+                            (car-safe (gethash name kargu--live-models-cache)))))
     (setq kargu--session-model (or (kargu--nonempty explicit-model)
-                                  (car models))))
+                                  (and noninteractive cached-model))))
+  (when (fboundp 'kargu-api-prefetch-models)
+    (kargu-api-prefetch-models name))
   (kargu-log 'info "provider set to %s (model %s, api %s)"
-             name (kargu--model) (kargu--api-base))
+             name (or (kargu--model) "none") (kargu--api-base))
   (message "kargu provider: %s (model %s, api %s)"
-           name (kargu--model) (kargu--api-base))
+           name (or (kargu--model) "none") (kargu--api-base))
   name)
 
 (defun kargu--example-config-path ()
@@ -375,24 +380,37 @@ from `kargu-provider-list'."
                  (and (kargu--nonempty val) val)))
              envs)))
 
-(defun kargu--resolve-api-key ()
-  "Resolve the API key for the active provider."
-  (cond
-   ((kargu--nonempty kargu-api-key))
-   ((kargu--nonempty (plist-get (kargu--provider-plist) :apikey)))
-   ((kargu--nonempty (kargu--provider-env-api-key)))
-   ((kargu--nonempty (kargu--env-api-key (kargu--url-host (kargu--api-base)))))
-   ((let* ((host (or (kargu--url-host (kargu--api-base)) "openrouter.ai"))
-           (found (progn (require 'auth-source)
-                         (auth-source-search :host host :max 1))))
-      (when found
-        (let ((secret (plist-get (car found) :secret)))
-          (kargu--nonempty
-           (cond
-            ((functionp secret) (funcall secret))
-            ((stringp secret) secret)))))))
-   ((plist-member (kargu--provider-plist) :apikey) "")
-   (t nil)))
+(defun kargu--resolve-api-key (&optional provider-name)
+  "Resolve the API key for the active or specified PROVIDER-NAME."
+  (if (and provider-name
+           (not (equal provider-name (kargu--provider-name))))
+      (let* ((pname-str (if (symbolp provider-name) (symbol-name provider-name) (format "%s" provider-name)))
+             (pname-lower (downcase (string-trim pname-str)))
+             (entry (assoc pname-lower (kargu--config-providers)))
+             (toml-plist (and entry (cdr entry)))
+             (envs (and (fboundp 'kargu-provider-env) (kargu-provider-env pname-lower)))
+             (env-val (cl-some (lambda (v) (let ((val (getenv v))) (and (kargu--nonempty val) val))) envs)))
+        (or (and toml-plist (kargu--nonempty (plist-get toml-plist :apikey)))
+            (kargu--nonempty env-val)
+            (and (equal pname-lower (kargu--provider-name)) (kargu--nonempty kargu-api-key))
+            (and toml-plist (plist-member toml-plist :apikey) "")
+            nil))
+    (cond
+     ((kargu--nonempty kargu-api-key))
+     ((kargu--nonempty (plist-get (kargu--provider-plist) :apikey)))
+     ((kargu--nonempty (kargu--provider-env-api-key)))
+     ((kargu--nonempty (kargu--env-api-key (kargu--url-host (kargu--api-base)))))
+     ((let* ((host (or (kargu--url-host (kargu--api-base)) "openrouter.ai"))
+             (found (progn (require 'auth-source)
+                           (auth-source-search :host host :max 1))))
+        (when found
+          (let ((secret (plist-get (car found) :secret)))
+            (kargu--nonempty
+             (cond
+              ((functionp secret) (funcall secret))
+              ((stringp secret) secret)))))))
+     ((plist-member (kargu--provider-plist) :apikey) "")
+     (t nil))))
 
 (defconst kargu--dependencies
   '((plz . "asynchronous HTTP + SSE streaming (mandatory)")

@@ -97,6 +97,7 @@ the model must call `read_file' instead of drowning the prompt."
 
 ;;;; Chat major mode ------------------------------------------------------
 
+(declare-function kargu-chat-select-mode-company "kargu/api" (&optional _event))
 (declare-function kargu-chat-select-provider-company "kargu/api")
 (declare-function kargu-chat-select-model-company "kargu/api")
 (declare-function kargu-chat-select-effort-company "kargu/api")
@@ -109,6 +110,9 @@ the model must call `read_file' instead of drowning the prompt."
   "C-c C-r"  #'kargu-chat-reset
   "C-c C-l"  #'kargu-chat-clear
   "C-c C-q"  #'kargu-chat-quit
+  "C-c C-n"  #'kargu-chat-new
+  "C-c C-b"  #'kargu-chat-switch
+  "C-c C-x"  #'kargu-chat-select-mode-company
   "C-c C-p"  #'kargu-chat-select-provider-company
   "C-c C-m"  #'kargu-chat-select-model-company
   "C-c C-o"  #'kargu-chat-select-effort-company
@@ -136,6 +140,19 @@ or insert newline if editing."
      (t
       (newline)))))
 
+(defvar kargu-chat-buffers nil
+  "List of live kargu chat buffers.")
+
+(defun kargu-chat-list-buffers ()
+  "Return a list of live buffers running `kargu-chat-mode'."
+  (setq kargu-chat-buffers
+        (cl-remove-if-not (lambda (b)
+                            (and (bufferp b)
+                                 (buffer-live-p b)
+                                 (with-current-buffer b (derived-mode-p 'kargu-chat-mode))))
+                          (buffer-list)))
+  kargu-chat-buffers)
+
 (define-derived-mode kargu-chat-mode text-mode "kargu"
   "Major mode for the kargu chat transcript.
 
@@ -143,8 +160,9 @@ Past turns are read-only.  Type at the `kargu> ' prompt at the
 end of the buffer; move the cursor up to select and copy.  C-c
 C-c sends the prompt, RET inserts a newline, C-c C-k stops a
 run, C-c C-q hides the sidebar.  `@' completes project files and
-LSP symbols when company-mode is available.  The header line
-shows the active mode, the model and the run state.
+LSP symbols when company-mode is available.  C-c C-n starts a new
+chat session, C-c C-b switches between open chat sessions.
+The header line shows the active mode, model, and context usage.
 
 \\{kargu-chat-mode-map}"
   (setq-local buffer-read-only nil)
@@ -152,44 +170,90 @@ shows the active mode, the model and the run state.
   (setq-local word-wrap t)
   (setq-local require-final-newline nil)
   (setq-local header-line-format '(:eval (kargu-chat--header-string)))
-  (setq-local company-minimum-prefix-length 1)
-  (setq-local company-idle-delay 0.15)
-  (when (featurep 'company)
+  (add-to-list 'kargu-chat-buffers (current-buffer))
+  (add-hook 'kill-buffer-hook
+            (lambda ()
+              (setq kargu-chat-buffers (delq (current-buffer) kargu-chat-buffers)))
+            nil t)
+  (when (or (featurep 'company) (require 'company nil t))
     (setq-local company-backends '(kargu-chat-company))
-    (company-mode 1))
-  (add-hook 'post-self-insert-hook #'kargu-chat--maybe-company nil t))
+    (setq-local company-minimum-prefix-length 1)
+    (setq-local company-idle-delay 0.15)
+    (unless (bound-and-true-p company-mode)
+      (company-mode 1)))
+  (add-hook 'post-self-insert-hook #'kargu-chat--maybe-company nil t)
+  (when (fboundp 'kargu-api-prefetch-models)
+    (kargu-api-prefetch-models)))
 
 ;;;; Buffer lifecycle & display -------------------------------------------
 
-(defun kargu-chat--buffer ()
-  "Return the chat buffer, creating and initializing it if needed."
-  (if-let ((buffer (get-buffer kargu-chat-buffer-name)))
-      (with-current-buffer buffer
-        (unless (eq major-mode 'kargu-chat-mode)
-          (kargu-chat-mode)
-          (let ((inhibit-read-only t)
-                (end (point-max)))
-            (when (> end (point-min))
-              (add-text-properties
-               (point-min) end
-               '(read-only t front-sticky t
-                 rear-nonsticky (read-only face front-sticky))))))
-        (kargu-chat--ensure-prompt)
-        (current-buffer))
-    (with-current-buffer (get-buffer-create kargu-chat-buffer-name)
+(defun kargu-chat-new (&optional name)
+  "Create and display a new independent kargu chat session buffer.
+If NAME is provided, creates `*kargu-chat: NAME*'.
+Otherwise generates `*kargu-chat*<N>'."
+  (interactive
+   (list (when current-prefix-arg
+           (read-string "Session name (optional): "))))
+  (let* ((base-name (if (and (stringp name) (not (string-empty-p (string-trim name))))
+                        (format "*kargu-chat: %s*" (string-trim name))
+                      kargu-chat-buffer-name))
+         (buf (generate-new-buffer base-name)))
+    (with-current-buffer buf
       (kargu-chat-mode)
       (kargu-chat--insert
        (concat "kargu chat — type at the prompt; "
-               "C-c C-c sends, C-c C-k stops, C-c C-q hides.\n"))
-       (kargu-chat--insert "Mode: ")
-       (dolist (m '(ask plan debug agent))
-        (let ((btn (buttonize (format "[%s]" m)
-                              (lambda (_) (kargu-set-mode m)))))
-          (kargu-chat--insert btn)
-          (kargu-chat--insert " ")))
-      (kargu-chat--insert "\n\n")
-      (kargu-chat--ensure-prompt)
-      (current-buffer))))
+               "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-b switch chat.\n\n"))
+      (kargu-chat--ensure-prompt))
+    (pop-to-buffer-same-window buf)
+    (with-current-buffer buf
+      (goto-char (point-max)))
+    (kargu-chat-list-buffers)
+    buf))
+
+(defun kargu-chat-switch ()
+  "Interactively switch between open kargu chat buffers."
+  (interactive)
+  (let* ((live (kargu-chat-list-buffers)))
+    (cond
+     ((null live)
+      (kargu-chat-show))
+     ((= (length live) 1)
+      (pop-to-buffer-same-window (car live)))
+     (t
+      (let* ((names (mapcar #'buffer-name live))
+             (default-name (buffer-name (if (derived-mode-p 'kargu-chat-mode)
+                                            (or (cadr live) (car live))
+                                          (car live))))
+             (chosen (completing-read "Switch to kargu chat: " names nil t nil nil default-name))
+             (target (get-buffer chosen)))
+        (when (and target (buffer-live-p target))
+          (pop-to-buffer-same-window target)))))))
+
+(defun kargu-chat--buffer ()
+  "Return the chat buffer, creating and initializing it if needed.
+Reuses the current buffer if it is already in `kargu-chat-mode'."
+  (if (derived-mode-p 'kargu-chat-mode)
+      (current-buffer)
+    (if-let ((buffer (get-buffer kargu-chat-buffer-name)))
+        (with-current-buffer buffer
+          (unless (eq major-mode 'kargu-chat-mode)
+            (kargu-chat-mode)
+            (let ((inhibit-read-only t)
+                  (end (point-max)))
+              (when (> end (point-min))
+                (add-text-properties
+                 (point-min) end
+                 '(read-only t front-sticky t
+                   rear-nonsticky (read-only face front-sticky))))))
+          (kargu-chat--ensure-prompt)
+          (current-buffer))
+      (with-current-buffer (get-buffer-create kargu-chat-buffer-name)
+        (kargu-chat-mode)
+        (kargu-chat--insert
+         (concat "kargu chat — type at the prompt; "
+                 "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-b switch chat.\n\n"))
+        (kargu-chat--ensure-prompt)
+        (current-buffer)))))
 
 (defun kargu-chat-show ()
   "Display the chat buffer directly in the current window without splitting.
@@ -212,7 +276,7 @@ opens in whichever window is currently selected (left or right)."
 (defun kargu-chat-toggle ()
   "Toggle the kargu chat buffer in the current window."
   (interactive)
-  (let* ((buffer (get-buffer kargu-chat-buffer-name))
+  (let* ((buffer (kargu-chat--buffer))
          (window (and buffer (get-buffer-window buffer t))))
     (if (and window (eq window (selected-window)))
         (kargu-chat--hide window)
@@ -239,8 +303,8 @@ opens in whichever window is currently selected (left or right)."
   (kargu-chat--render-user-turn prompt)
   (kargu-chat--render-agent-heading)
   (kargu-chat--ensure-running-prompt)
-  (let ((buf (get-buffer kargu-chat-buffer-name)))
-    (when buf
+  (let ((buf (current-buffer)))
+    (when (buffer-live-p buf)
       (with-current-buffer buf
         (setq kargu-chat--answer-start
               (copy-marker
@@ -252,8 +316,8 @@ opens in whichever window is currently selected (left or right)."
                    #'kargu-chat--on-delta
                    #'kargu-chat--on-finish)
   (force-mode-line-update t)
-  (let ((buffer (get-buffer kargu-chat-buffer-name)))
-    (when buffer
+  (let ((buffer (current-buffer)))
+    (when (buffer-live-p buffer)
       (with-current-buffer buffer
         (goto-char (point-max))))))
 

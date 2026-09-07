@@ -27,8 +27,8 @@
  :id "stepfun"
  :name "StepFun"
  :api "https://api.stepfun.com/v1"
+ :models-api "https://api.stepfun.com/v1/models"
  :env '("STEPFUN_API_KEY")
- :models '("step-1-32k" "step-3.7-flash" "step-3.5-flash-2603" "stepaudio-2.5-tts" "stepaudio-2.5-asr" "step-3.5-flash" "step-tts-2" "step-2-16k")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/stepfun)

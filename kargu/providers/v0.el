@@ -27,8 +27,8 @@
  :id "v0"
  :name "v0"
  :api "https://api.v0.dev/v1"
+ :models-api "https://api.v0.dev/v1/models"
  :env '("V0_API_KEY")
- :models '("v0-1.0-md" "v0-1.5-lg" "v0-1.5-md")
  :npm "@ai-sdk/vercel")
 
 (provide 'kargu/providers/v0)

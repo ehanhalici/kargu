@@ -27,8 +27,8 @@
  :id "umans-ai-coding-plan"
  :name "Umans AI Coding Plan"
  :api "https://api.code.umans.ai/v1"
+ :models-api "https://api.code.umans.ai/v1/models"
  :env '("UMANS_AI_CODING_PLAN_API_KEY")
- :models '("umans-kimi-k2.7" "umans-glm-5.1" "umans-coder" "umans-flash" "umans-glm-5.2" "umans-qwen3.6-35b-a3b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/umans-ai-coding-plan)

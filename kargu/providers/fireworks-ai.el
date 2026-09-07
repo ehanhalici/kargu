@@ -27,8 +27,8 @@
  :id "fireworks-ai"
  :name "Fireworks AI"
  :api "https://api.fireworks.ai/inference/v1"
+ :models-api "https://api.fireworks.ai/inference/v1/models"
  :env '("FIREWORKS_API_KEY")
- :models '("accounts/fireworks/routers/kimi-k2p6-turbo" "accounts/fireworks/routers/glm-5p2-fast" "accounts/fireworks/routers/kimi-k2p7-code-fast" "accounts/fireworks/routers/glm-5p1-fast" "accounts/fireworks/routers/kimi-k2p6-fast" "accounts/fireworks/models/deepseek-v4-flash" "accounts/fireworks/models/deepseek-v4-pro" "accounts/fireworks/models/minimax-m2p7" "accounts/fireworks/models/minimax-m3" "accounts/fireworks/models/kimi-k2p6" "accounts/fireworks/models/qwen3p7-plus" "accounts/fireworks/models/glm-5p1" "accounts/fireworks/models/glm-5p2" "accounts/fireworks/models/gpt-oss-120b" "accounts/fireworks/models/gpt-oss-20b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/fireworks-ai)

@@ -27,8 +27,8 @@
  :id "cerebras"
  :name "Cerebras"
  :api "https://api.cerebras.ai/v1"
+ :models-api "https://api.cerebras.ai/v1/models"
  :env '("CEREBRAS_API_KEY")
- :models '("llama3.1-70b" "llama3.1-8b" "gemma-4-31b" "gpt-oss-120b" "zai-glm-4.7")
  :npm "@ai-sdk/cerebras")
 
 (provide 'kargu/providers/cerebras)

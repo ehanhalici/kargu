@@ -27,8 +27,8 @@
  :id "llama"
  :name "Llama"
  :api "https://api.llama.com/compat/v1"
+ :models-api "https://api.llama.com/compat/v1/models"
  :env '("LLAMA_API_KEY")
- :models '("llama-4-scout-17b-16e-instruct-fp8" "cerebras-llama-4-maverick-17b-128e-instruct" "llama-3.3-70b-instruct" "groq-llama-4-maverick-17b-128e-instruct" "cerebras-llama-4-scout-17b-16e-instruct" "llama-3.3-8b-instruct" "llama-4-maverick-17b-128e-instruct-fp8")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/llama)

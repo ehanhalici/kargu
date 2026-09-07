@@ -27,8 +27,8 @@
  :id "ovhcloud"
  :name "OVHcloud AI Endpoints"
  :api "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
+ :models-api "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/models"
  :env '("OVHCLOUD_API_KEY")
- :models '("qwen3-coder-30b-a3b-instruct" "qwen3-32b" "qwen3guard-gen-8b" "qwen3guard-gen-0.6b" "meta-llama-3_3-70b-instruct" "mistral-small-3.2-24b-instruct-2506" "qwen2.5-vl-72b-instruct" "gpt-oss-120b" "mistral-7b-instruct-v0.3" "mistral-nemo-instruct-2407" "qwen3.6-27b" "qwen3.5-9b" "qwen3.5-397b-a17b" "gpt-oss-20b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/ovhcloud)

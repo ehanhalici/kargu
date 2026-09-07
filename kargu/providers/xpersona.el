@@ -27,8 +27,8 @@
  :id "xpersona"
  :name "Xpersona"
  :api "https://www.xpersona.co/v1"
+ :models-api "https://www.xpersona.co/v1/models"
  :env '("XPERSONA_API_KEY")
- :models '("xpersona-gpt-5.5" "xpersona-frieren-coder" "claude-fable-5")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/xpersona)

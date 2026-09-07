@@ -27,8 +27,8 @@
  :id "siliconflow-cn"
  :name "SiliconFlow (China)"
  :api "https://api.siliconflow.cn/v1"
+ :models-api "https://api.siliconflow.cn/v1/models"
  :env '("SILICONFLOW_CN_API_KEY")
- :models '("baidu/ERNIE-4.5-300B-A47B" "ByteDance-Seed/Seed-OSS-36B-Instruct" "stepfun-ai/Step-3.5-Flash" "inclusionAI/Ling-flash-2.0" "Pro/moonshotai/Kimi-K2.6" "Pro/moonshotai/Kimi-K2.5" "Pro/zai-org/GLM-5" "Pro/zai-org/GLM-5.1" "Pro/deepseek-ai/DeepSeek-R1" "Pro/deepseek-ai/DeepSeek-V3.1-Terminus" "Pro/deepseek-ai/DeepSeek-V3.2" "Pro/deepseek-ai/DeepSeek-V3" "Pro/MiniMaxAI/MiniMax-M2.5" "Qwen/Qwen3.6-35B-A3B" "Qwen/Qwen3.5-397B-A17B")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/siliconflow-cn)

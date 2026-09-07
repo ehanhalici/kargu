@@ -111,6 +111,7 @@
 (require 'kargu/tools/skill)
 (require 'kargu/tools/webfetch)
 (require 'kargu/loop)
+(require 'company nil t)
 (require 'kargu/chat)
 (require 'kargu/plan)
 (require 'kargu/ui)

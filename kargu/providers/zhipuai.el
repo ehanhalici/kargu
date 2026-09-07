@@ -27,8 +27,8 @@
  :id "zhipuai"
  :name "Zhipu AI"
  :api "https://open.bigmodel.cn/api/paas/v4"
+ :models-api "https://open.bigmodel.cn/api/paas/v4/models"
  :env '("ZHIPU_API_KEY")
- :models '("glm-5.1" "glm-5.2" "glm-5v-turbo" "glm-5" "glm-4.5-flash" "glm-4.7-flash" "glm-4.5-air" "glm-4.6v" "glm-4.6" "glm-4.7-flashx" "glm-4.5" "glm-4.5v" "glm-4.7")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/zhipuai)

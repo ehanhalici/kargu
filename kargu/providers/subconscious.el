@@ -27,8 +27,8 @@
  :id "subconscious"
  :name "Subconscious"
  :api "https://api.subconscious.dev/v1"
+ :models-api "https://api.subconscious.dev/v1/models"
  :env '("SUBCONSCIOUS_API_KEY")
- :models '("subconscious/glm-5.2" "subconscious/tim-qwen3.6-27b")
  :npm "@ai-sdk/anthropic")
 
 (provide 'kargu/providers/subconscious)

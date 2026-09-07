@@ -27,8 +27,8 @@
  :id "qihang-ai"
  :name "QiHang"
  :api "https://api.qhaigc.net/v1"
+ :models-api "https://api.qhaigc.net/v1/models"
  :env '("QIHANG_API_KEY")
- :models '("claude-haiku-4-5-20251001" "gemini-2.5-flash" "claude-opus-4-5-20251101" "gpt-5.2" "claude-sonnet-4-5-20250929" "gemini-3-pro-preview" "gpt-5-mini" "gemini-3-flash-preview" "gpt-5.2-codex")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/qihang-ai)

@@ -27,8 +27,8 @@
  :id "google-vertex-anthropic"
  :name "Vertex (Anthropic)"
  :api "https://aiplatform.${GOOGLE_VERTEX_LOCATION}.rep.googleapis.com/v1/projects/${GOOGLE_VERTEX_PROJECT}/locations/${GOOGLE_VERTEX_LOCATION}/publishers/anthropic/models"
+ :models-api "https://aiplatform.${GOOGLE_VERTEX_LOCATION}.rep.googleapis.com/v1/projects/${GOOGLE_VERTEX_PROJECT}/locations/${GOOGLE_VERTEX_LOCATION}/publishers/anthropic/models"
  :env '("GOOGLE_VERTEX_PROJECT" "GOOGLE_VERTEX_LOCATION" "GOOGLE_APPLICATION_CREDENTIALS")
- :models '("claude-haiku-4-5@20251001" "claude-opus-4@20250514" "claude-opus-4-1@20250805" "claude-opus-4-5@20251101" "claude-3-5-haiku@20241022" "claude-sonnet-4@20250514" "claude-opus-4-7@default" "claude-sonnet-4-5@20250929" "claude-sonnet-5@default" "claude-opus-4-6@default" "claude-opus-4-8@default" "claude-sonnet-4-6@default")
  :npm "@ai-sdk/google-vertex/anthropic")
 
 (provide 'kargu/providers/google-vertex-anthropic)

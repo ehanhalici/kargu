@@ -435,43 +435,56 @@ selectively revert individual hunks back to the original version."
     (unless stack
       (user-error "No rollback snapshot recorded for %s" path))
     (let* ((orig-snap (car (last stack)))
-           (original (plist-get orig-snap :content))
-           (buf-file (or (find-buffer-visiting path)
-                         (find-file-noselect path)))
-           (buf-orig (get-buffer-create (format "*kargu-orig:%s*" (file-name-nondirectory path))))
-           (wconfig (current-window-configuration)))
-      (with-current-buffer buf-orig
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert (or original ""))
-          (set-buffer-modified-p nil))
-        (setq buffer-read-only t))
-      (let* ((ediff-window-setup-function (or kargu-diff-ediff-window-setup-function #'ediff-setup-windows-plain))
-             (ediff-split-window-function (or kargu-diff-ediff-split-window-function #'split-window-horizontally))
-             (ctl (ediff-buffers buf-orig buf-file)))
-        (when (bufferp ctl)
-          (with-current-buffer ctl
-            (add-hook 'ediff-after-quit-hook-internal
-                      (lambda ()
-                        (when (window-configuration-p wconfig)
-                          (set-window-configuration wconfig))
-                        (run-at-time 0 nil
-                                     (lambda (buf)
-                                       (when (buffer-live-p buf)
-                                         (kill-buffer buf)))
-                                     buf-orig))
-                      nil t)
-            (add-hook 'kill-buffer-hook
-                      (lambda ()
-                        (when (window-configuration-p wconfig)
-                          (set-window-configuration wconfig))
-                        (run-at-time 0 nil
-                                     (lambda (buf)
-                                       (when (buffer-live-p buf)
-                                         (kill-buffer buf)))
-                                     buf-orig))
-                      nil t)))
-        ctl))))
+           (original (plist-get orig-snap :content)))
+      (kargu-diff--rollback-review path original))))
+
+(defun kargu-diff--restore-wconfig (wconfig)
+  "Restore WCONFIG and ensure chat buffer windows stay at latest content."
+  (when (window-configuration-p wconfig)
+    (set-window-configuration wconfig)
+    (dolist (win (window-list))
+      (let ((buf (window-buffer win)))
+        (when (and (buffer-live-p buf)
+                   (with-current-buffer buf (derived-mode-p 'kargu-chat-mode)))
+          (with-current-buffer buf
+            (set-window-point win (point-max))))))))
+
+(defun kargu-diff--rollback-review (path original)
+  "Open ediff comparing pre-edit ORIGINAL with the current state of PATH."
+  (let* ((buf-file (or (find-buffer-visiting path)
+                       (find-file-noselect path)))
+         (buf-orig (get-buffer-create (format "*kargu-orig:%s*" (file-name-nondirectory path))))
+         (wconfig (current-window-configuration)))
+    (with-current-buffer buf-orig
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (or original ""))
+        (set-buffer-modified-p nil))
+      (setq buffer-read-only t))
+    (let* ((ediff-window-setup-function (or kargu-diff-ediff-window-setup-function #'ediff-setup-windows-plain))
+           (ediff-split-window-function (or kargu-diff-ediff-split-window-function #'split-window-horizontally))
+           (ctl (ediff-buffers buf-orig buf-file)))
+      (when (bufferp ctl)
+        (with-current-buffer ctl
+          (add-hook 'ediff-after-quit-hook-internal
+                    (lambda ()
+                      (kargu-diff--restore-wconfig wconfig)
+                      (run-at-time 0 nil
+                                   (lambda (buf)
+                                     (when (buffer-live-p buf)
+                                       (kill-buffer buf)))
+                                   buf-orig))
+                    nil t)
+          (add-hook 'kill-buffer-hook
+                    (lambda ()
+                      (kargu-diff--restore-wconfig wconfig)
+                      (run-at-time 0 nil
+                                   (lambda (buf)
+                                     (when (buffer-live-p buf)
+                                       (kill-buffer buf)))
+                                   buf-orig))
+                    nil t)))
+      ctl)))
 
 (defun kargu-diff-stat-added (stat)
   "Return added lines from diff STAT."
@@ -571,13 +584,7 @@ our quit hook, e.g. it was killed directly."
       (kargu-log 'warn "diff: dropped abandoned review for %s" path))))
 
 (defun kargu-diff--abort-session (session &optional silent)
-  "Cancel SESSION without applying the proposal.
-Restore the file buffer to its pre-review content and quit ediff
-when SILENT is nil (C-g during a blocking review).  Always drop
-the session so a later `edit_file' is not blocked, and return an
-`:interrupted' outcome plist.  SILENT non-nil skips restore,
-ediff teardown and the session callback (used when reaping a
-stale control buffer)."
+  "Cancel the active review for SESSION."
   (let ((path (plist-get session :path))
         (buf-a (plist-get session :buffer-a))
         (shadow (plist-get session :shadow-buffer))
@@ -586,32 +593,31 @@ stale control buffer)."
         (callback (plist-get session :callback)))
     (when (and path (eq session (gethash path kargu-diff--sessions)))
       (remhash path kargu-diff--sessions))
-    (kargu-diff--maybe-drop-hook)
-    (unless silent
-      (when (and (buffer-live-p buf-a) (stringp original))
-        (with-current-buffer buf-a
-          (unless (string= (buffer-string) original)
-            (let ((inhibit-read-only t)
-                  (inhibit-modification-hooks t))
-              (erase-buffer)
-              (insert original)))))
-      (when (and control (buffer-live-p control))
-        (let ((ediff-quit-hook
-               (remq #'kargu-diff--ediff-quit ediff-quit-hook)))
-          (condition-case-unless-debug _err
-              (with-current-buffer control
-                (if (fboundp 'ediff-really-quit)
-                    (ediff-really-quit nil)
-                  (kill-buffer control)))
-            (error
-             (when (buffer-live-p control)
-               (kill-buffer control)))))))
+    (when (buffer-live-p buf-a)
+      (with-current-buffer buf-a
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert original)
+          (set-buffer-modified-p nil))))
+    (when (buffer-live-p control)
+      (with-current-buffer control
+        (remove-hook 'ediff-quit-hook #'kargu-diff--ediff-quit t)
+        (when (boundp 'ediff-quit-hook)
+          (setq ediff-quit-hook
+                (remq #'kargu-diff--ediff-quit ediff-quit-hook)))
+        (condition-case-unless-debug _err
+            (with-current-buffer control
+              (if (fboundp 'ediff-really-quit)
+                  (ediff-really-quit nil)
+                (kill-buffer control)))
+          (error
+           (when (buffer-live-p control)
+             (kill-buffer control))))))
     (when (buffer-live-p shadow)
       (with-current-buffer shadow (set-buffer-modified-p nil))
       (kill-buffer shadow))
     (when-let* ((wconfig (plist-get session :window-config)))
-      (when (window-configuration-p wconfig)
-        (set-window-configuration wconfig)))
+      (kargu-diff--restore-wconfig wconfig))
     (let ((outcome (list :status :interrupted :file path :saved nil)))
       (plist-put outcome :message (kargu-diff--describe outcome))
       (plist-put session :outcome outcome)
@@ -757,6 +763,8 @@ blocking review), plus :file, :saved and a model-facing :message."
           (kargu-log 'info "diff: proposal staged for %s (%d -> %d bytes)"
                             path (length original) (length new-content))
           (add-hook 'ediff-quit-hook #'kargu-diff--ediff-quit)
+          (when (fboundp 'kargu-notify)
+            (kargu-notify 'permission))
           (let ((control (condition-case-unless-debug err
                             (let ((ediff-window-setup-function (or kargu-diff-ediff-window-setup-function #'ediff-setup-windows-plain))
                                   (ediff-split-window-function (or kargu-diff-ediff-split-window-function #'split-window-horizontally)))
@@ -775,15 +783,13 @@ blocking review), plus :file, :saved and a model-facing :message."
               (with-current-buffer control
                 (add-hook 'ediff-after-quit-hook-internal
                           (lambda ()
-                            (when (window-configuration-p wconfig)
-                              (set-window-configuration wconfig)))
+                            (kargu-diff--restore-wconfig wconfig))
                           nil t)
                 (add-hook 'kill-buffer-hook
                           (lambda ()
                             (when (gethash path kargu-diff--sessions)
                               (kargu-diff--ediff-quit))
-                            (when (window-configuration-p wconfig)
-                              (set-window-configuration wconfig)))
+                            (kargu-diff--restore-wconfig wconfig))
                           nil t))))
           (if (eq kargu-diff-review-mode 'blocking)
               (progn
@@ -792,8 +798,7 @@ blocking review), plus :file, :saved and a model-facing :message."
                   (quit
                    (kargu-diff--abort-session session)
                    (message "kargu: review interrupted; the file is restored")))
-                (when (window-configuration-p wconfig)
-                  (set-window-configuration wconfig))
+                (kargu-diff--restore-wconfig wconfig)
                 (or (plist-get session :outcome)
                     (let ((outcome (list :status :staged :file path :saved nil)))
                       (plist-put outcome :message (kargu-diff--describe outcome))

@@ -27,8 +27,8 @@
  :id "the-grid-ai"
  :name "The Grid AI"
  :api "https://api.thegrid.ai/v1"
+ :models-api "https://api.thegrid.ai/v1/models"
  :env '("THEGRIDAI_API_KEY")
- :models '("agent-prime" "agent-max" "text-standard" "code-prime" "text-prime" "code-max" "agent-standard" "text-max" "code-standard")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/the-grid-ai)

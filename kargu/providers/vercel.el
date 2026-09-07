@@ -27,8 +27,8 @@
  :id "vercel"
  :name "Vercel AI Gateway"
  :api "https://api.vercel.com/v1/ai"
+ :models-api "https://api.vercel.com/v1/ai/models"
  :env '("AI_GATEWAY_API_KEY")
- :models '("xai/grok-imagine-video-1.5" "xai/grok-4.1-fast-reasoning" "xai/grok-4.20-non-reasoning-beta" "xai/grok-4.3" "xai/grok-tts" "xai/grok-4.1-fast-non-reasoning" "xai/grok-voice-think-fast-1.0" "xai/grok-imagine-video" "xai/grok-4.20-multi-agent-beta" "xai/grok-stt" "xai/grok-4.5" "xai/grok-4.20-reasoning" "xai/grok-4.20-reasoning-beta" "xai/grok-imagine-video-1.5-preview" "xai/grok-4.20-non-reasoning")
  :npm "@ai-sdk/gateway")
 
 (provide 'kargu/providers/vercel)

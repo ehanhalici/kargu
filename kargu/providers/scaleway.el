@@ -27,8 +27,8 @@
  :id "scaleway"
  :name "Scaleway"
  :api "https://api.scaleway.ai/v1"
+ :models-api "https://api.scaleway.ai/v1/models"
  :env '("SCALEWAY_API_KEY")
- :models '("qwen3-235b-a22b-instruct-2507" "qwen3-coder-30b-a3b-instruct" "qwen3-embedding-8b" "bge-multilingual-gemma2" "qwen3.6-35b-a3b" "llama-3.3-70b-instruct" "glm-5.2" "pixtral-12b-2409" "mistral-small-3.2-24b-instruct-2506" "gpt-oss-120b" "gemma-4-26b-a4b-it" "mistral-medium-3.5-128b" "qwen3.5-397b-a17b" "whisper-large-v3" "gemma-3-27b-it")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/scaleway)

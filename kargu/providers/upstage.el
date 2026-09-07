@@ -27,8 +27,8 @@
  :id "upstage"
  :name "Upstage"
  :api "https://api.upstage.ai/v1/solar"
+ :models-api "https://api.upstage.ai/v1/solar/models"
  :env '("UPSTAGE_API_KEY")
- :models '("solar-pro2" "solar-pro3" "solar-mini")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/upstage)

@@ -27,8 +27,8 @@
  :id "wafer.ai"
  :name "Wafer"
  :api "https://pass.wafer.ai/v1"
+ :models-api "https://pass.wafer.ai/v1/models"
  :env '("WAFER_API_KEY")
- :models '("glm5.2-fast" "Kimi-K2.6" "MiniMax-M3" "GLM-5.2" "GLM-5.1")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/wafer.ai)

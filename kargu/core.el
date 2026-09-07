@@ -35,8 +35,13 @@
 ;;;; Alist helpers --------------------------------------------------------
 
 (defun kargu--aget (alist key &optional default)
-  "Return the value for string KEY in ALIST, or DEFAULT."
-  (alist-get key alist default nil #'equal))
+  "Return the value for string KEY in ALIST, or DEFAULT.
+Safely handles malformed alists, dotted pairs, and non-list data."
+  (if (and (consp alist) (listp (cdr alist)))
+      (condition-case nil
+          (alist-get key alist default nil #'equal)
+        (error default))
+    default))
 
 (defun kargu--nonempty (value)
   "VALUE if it is a non-empty string, else nil."
@@ -201,7 +206,15 @@ changing modes mid-conversation takes effect immediately."
   (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
     (user-error "kargu: cannot change mode while an agent run is in progress (M-x kargu-loop-stop)"))
   (setq kargu-active-mode mode)
+  (setq-default kargu-active-mode mode)
   (kargu-log 'info "mode set to `%s'" mode)
+  (dolist (buf (buffer-list))
+    (when (and (buffer-live-p buf)
+               (with-current-buffer buf (derived-mode-p 'kargu-chat-mode)))
+      (with-current-buffer buf
+        (setq kargu-active-mode mode)
+        (when (fboundp 'kargu-chat-refresh-footer)
+          (kargu-chat-refresh-footer)))))
   (force-mode-line-update t)
   (message "kargu mode: %s" mode)
   mode)
@@ -258,15 +271,67 @@ changing modes mid-conversation takes effect immediately."
       (and (boundp 'shell-file-name) shell-file-name)
       "unknown"))
 
+(defcustom kargu-sound-notifications t
+  "When non-nil, play audio alerts on approvals, pauses, and run completions."
+  :type 'boolean
+  :group 'kargu)
+
+(defun kargu-notify (&optional _event)
+  "Play an audio alert for _EVENT (`permission', `pause', `finish', `error')."
+  (when kargu-sound-notifications
+    (ignore-errors
+      (ding t))))
+
 ;;;; Session state --------------------------------------------------------
+
+(defun kargu--generate-session-id ()
+  "Generate a unique session identifier string."
+  (format "kargu-%s-%06x"
+          (format-time-string "%Y%m%d%H%M%S")
+          (random #xffffff)))
+
+(defvar-local kargu--session-id nil
+  "Buffer-local session identifier.")
 
 (defvar kargu--session
   (list :active nil
+        :id (kargu--generate-session-id)
         :requests 0
         :tokens-in 0
         :tokens-out 0
+        :last-prompt-tokens 0
         :started (format-time-string "%Y-%m-%d %H:%M"))
   "Session counters, updated by the API module.")
+
+(defun kargu-session-id ()
+  "Return the active session identifier, generating one if absent."
+  (or (and (bound-and-true-p kargu--session-id) kargu--session-id)
+      (let ((sid (plist-get kargu--session :id)))
+        (or sid
+            (let ((new-id (kargu--generate-session-id)))
+              (plist-put kargu--session :id new-id)
+              (setq kargu--session-id new-id)
+              new-id)))))
+
+(defun kargu-session-context-info ()
+  "Return a plist (:used TOKENS :capacity CAP :percent PCT :formatted STR)."
+  (let* ((in (or (plist-get kargu--session :last-prompt-tokens)
+                 (plist-get kargu--session :tokens-in)
+                 0))
+         (cap (if (fboundp 'kargu-model-context-window)
+                  (kargu-model-context-window)
+                128000))
+         (pct (if (> cap 0) (/ (* 100 in) cap) 0))
+         (in-str (if (>= in 1000)
+                     (format "%.1fk" (/ (float in) 1000))
+                   (format "%d" in)))
+         (cap-str (if (>= cap 1000000)
+                      (format "%dm" (/ cap 1000000))
+                    (format "%dk" (/ cap 1000)))))
+    (list :used in
+          :capacity cap
+          :percent pct
+          :formatted (format "%s/%s (%d%%)" in-str cap-str pct))))
 
 (defvar kargu--session-provider nil
   "Session override for the active TOML provider name, or nil.")
@@ -277,10 +342,12 @@ changing modes mid-conversation takes effect immediately."
 (defun kargu-session-usage ()
   "Return a short usage report string for the current session."
   (interactive)
-  (let ((report (format "requests: %d  tokens-in: %d  tokens-out: %d"
-                       (or (plist-get kargu--session :requests) 0)
-                       (or (plist-get kargu--session :tokens-in) 0)
-                       (or (plist-get kargu--session :tokens-out) 0))))
+  (let* ((ctx-info (kargu-session-context-info))
+         (report (format "requests: %d  tokens-in: %d  tokens-out: %d  ctx: %s"
+                         (or (plist-get kargu--session :requests) 0)
+                         (or (plist-get kargu--session :tokens-in) 0)
+                         (or (plist-get kargu--session :tokens-out) 0)
+                         (plist-get ctx-info :formatted))))
     (when (called-interactively-p 'any)
       (message "kargu %s" report))
     report))
@@ -288,11 +355,14 @@ changing modes mid-conversation takes effect immediately."
 (defun kargu-session-reset ()
   "Reset session counters, conversation history and agent state."
   (interactive)
+  (setq kargu--session-id (kargu--generate-session-id))
   (setq kargu--session
         (list :active nil
+              :id kargu--session-id
               :requests 0
               :tokens-in 0
               :tokens-out 0
+              :last-prompt-tokens 0
               :started (format-time-string "%Y-%m-%d %H:%M")))
   (when (fboundp 'kargu-history-reset)
     (kargu-history-reset))

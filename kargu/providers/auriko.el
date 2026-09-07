@@ -27,8 +27,8 @@
  :id "auriko"
  :name "Auriko"
  :api "https://api.auriko.ai/v1"
+ :models-api "https://api.auriko.ai/v1/models"
  :env '("AURIKO_API_KEY")
- :models '("deepseek-v4-flash" "gemini-2.5-pro" "grok-4.3" "gemini-2.5-flash" "glm-5.1" "deepseek-v4-pro" "claude-opus-4-7" "minimax-m2-7-highspeed" "minimax-m2-7" "qwen-3.6-plus" "kimi-k2.5" "kimi-k2.6" "gemini-3.1-pro-preview" "claude-opus-4-6" "claude-sonnet-4-6")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/auriko)

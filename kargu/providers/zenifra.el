@@ -27,8 +27,8 @@
  :id "zenifra"
  :name "Zenifra"
  :api "https://ai.zenifra.com/v1"
+ :models-api "https://ai.zenifra.com/v1/models"
  :env '("ZENIFRA_AI_KEY")
- :models '("alibaba/qwen3.6-35b-a3b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/zenifra)

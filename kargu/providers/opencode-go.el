@@ -27,8 +27,8 @@
  :id "opencode-go"
  :name "OpenCode Go"
  :api "https://opencode.ai/zen/go/v1"
+ :models-api "https://opencode.ai/zen/go/v1/models"
  :env '("OPENCODE_API_KEY")
- :models '("deepseek-v4-flash" "minimax-m2.5" "qwen3.7-plus" "qwen3.7-max" "kimi-k2.7-code" "glm-5.1" "deepseek-v4-pro" "glm-5.2" "minimax-m3" "qwen3.5-plus" "minimax-m2.7" "kimi-k2.5" "mimo-v2.5" "mimo-v2-omni" "kimi-k2.6")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/opencode-go)

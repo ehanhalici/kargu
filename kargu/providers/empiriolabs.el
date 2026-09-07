@@ -27,8 +27,8 @@
  :id "empiriolabs"
  :name "EmpirioLabs AI"
  :api "https://api.empiriolabs.ai/v1"
+ :models-api "https://api.empiriolabs.ai/v1/models"
  :env '("EMPIRIOLABS_API_KEY")
- :models '("qwen3-5-plus" "deepseek-v4-flash" "kimi-k2-6" "qwen3-5-27b" "step-3-7-flash" "qwen3-5-397b-a17b" "qwen3-5-35b-a3b" "qwen3-max" "glm-5-1" "qwen3-7-plus" "kimi-k2-7-code" "deepseek-v4-pro" "glm-4-5-flash" "qwen3-6-flash" "minimax-m2-7-highspeed")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/empiriolabs)

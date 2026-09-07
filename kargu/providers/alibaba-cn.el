@@ -27,8 +27,8 @@
  :id "alibaba-cn"
  :name "Alibaba (China)"
  :api "https://dashscope.aliyuncs.com/compatible-mode/v1"
+ :models-api "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
  :env '("DASHSCOPE_API_KEY")
- :models '("qwen2-5-math-72b-instruct" "deepseek-r1-0528" "qwen3-omni-flash" "deepseek-v4-flash" "qwen-plus" "qwen3-coder-30b-a3b-instruct" "qwen2-5-coder-7b-instruct" "deepseek-v3" "qwen3-omni-flash-realtime" "deepseek-r1-distill-llama-70b" "qwen3-32b" "qwen-omni-turbo-realtime" "qwen2-5-math-7b-instruct" "qwen3-next-80b-a3b-instruct" "qwen3.7-plus")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/alibaba-cn)

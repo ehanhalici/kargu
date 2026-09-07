@@ -34,6 +34,7 @@
 (require 'kargu/loop)
 
 (declare-function kargu-chat-stop "kargu/chat")
+(declare-function kargu-chat-select-mode-company "kargu/api" (&optional _event))
 (declare-function kargu-chat-select-provider-company "kargu/api")
 (declare-function kargu-chat-select-model-company "kargu/api")
 (declare-function kargu-chat-select-effort-company "kargu/api")
@@ -42,8 +43,10 @@
 (declare-function kargu-model-context-window "kargu/api" (&optional model-id))
 (defvar kargu-reasoning-effort)
 
-(defconst kargu-chat-buffer-name "*kargu-chat*"
-  "Name of the kargu chat log buffer.")
+(defcustom kargu-chat-buffer-name "*kargu-chat*"
+  "Name of the default kargu chat log buffer."
+  :type 'string
+  :group 'kargu-ui)
 
 (defconst kargu-chat--prompt-string "kargu> "
   "Editable prompt prefix at the end of the chat buffer.")
@@ -65,17 +68,34 @@ Insertion type is t so streamed output stays above the prompt.")
 
 (defun kargu-chat--footer-string ()
   "Build the interactive footer line shown at the bottom of the chat buffer.
-Contains clickable provider, model, context, and effort buttons."
-  (let* ((pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "default"))
-         (mname (if (fboundp 'kargu--model) (kargu--model) "model"))
-         (ctx (if (fboundp 'kargu-model-context-window) (kargu-model-context-window mname) 128000))
-         (ctx-str (if (>= ctx 1000000)
-                      (format "%dm" (/ ctx 1000000))
-                    (format "%dk" (/ ctx 1000))))
+Contains clickable mode, provider, model, context usage, and effort buttons."
+  (let* ((mode-name (upcase (symbol-name (or (bound-and-true-p kargu-active-mode) 'ask))))
+         (pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "default"))
+         (raw-m (if (fboundp 'kargu--model) (kargu--model) nil))
+         (has-model (and (stringp raw-m) (not (string-empty-p raw-m))))
+         (cap (if (and has-model (fboundp 'kargu-model-context-window))
+                  (kargu-model-context-window raw-m)
+                128000))
+         (cap-str (if (>= cap 1000000)
+                      (format "%dm" (/ cap 1000000))
+                    (format "%dk" (/ cap 1000))))
+         (m-label (if has-model
+                      (format "[%s (%s ctx)]" raw-m cap-str)
+                    "[select model]"))
+         (m-face (if has-model 'font-lock-string-face 'font-lock-warning-face))
+         (ctx-info (if (fboundp 'kargu-session-context-info)
+                       (kargu-session-context-info)
+                     (list :formatted "128k")))
+         (ctx-str (plist-get ctx-info :formatted))
          (effort (if (boundp 'kargu-reasoning-effort) (or kargu-reasoning-effort "off") "off"))
+         (mode-map (make-sparse-keymap))
          (p-map (make-sparse-keymap))
          (m-map (make-sparse-keymap))
          (e-map (make-sparse-keymap)))
+    (define-key mode-map [mouse-1] (lambda (e) (interactive "e") (kargu-chat-select-mode-company e)))
+    (define-key mode-map [mouse-2] (lambda (e) (interactive "e") (kargu-chat-select-mode-company e)))
+    (define-key mode-map (kbd "RET") (lambda () (interactive) (kargu-chat-select-mode-company)))
+
     (define-key p-map [mouse-1] (lambda (e) (interactive "e") (kargu-chat-select-provider-company e)))
     (define-key p-map [mouse-2] (lambda (e) (interactive "e") (kargu-chat-select-provider-company e)))
     (define-key p-map (kbd "RET") (lambda () (interactive) (kargu-chat-select-provider-company)))
@@ -88,7 +108,15 @@ Contains clickable provider, model, context, and effort buttons."
     (define-key e-map [mouse-2] (lambda (e) (interactive "e") (kargu-chat-select-effort-company e)))
     (define-key e-map (kbd "RET") (lambda () (interactive) (kargu-chat-select-effort-company)))
 
-    (let ((p-btn (propertize (format "[%s]" pname)
+    (let ((mode-btn (propertize (format "[%s]" mode-name)
+                                'face 'bold
+                                'mouse-face 'highlight
+                                'help-echo "mouse-1 or RET: switch mode with company list (C-c C-x)"
+                                'keymap mode-map
+                                'local-map mode-map
+                                'button t
+                                'action (lambda (_) (kargu-chat-select-mode-company))))
+          (p-btn (propertize (format "[%s]" pname)
                              'face 'font-lock-type-face
                              'mouse-face 'highlight
                              'help-echo "mouse-1 or RET: switch provider (company list)"
@@ -96,14 +124,17 @@ Contains clickable provider, model, context, and effort buttons."
                              'local-map p-map
                              'button t
                              'action (lambda (_) (kargu-chat-select-provider-company))))
-          (m-btn (propertize (format "[%s (%s ctx)]" mname ctx-str)
-                             'face 'font-lock-string-face
+          (m-btn (propertize m-label
+                             'face m-face
                              'mouse-face 'highlight
                              'help-echo "mouse-1 or RET: select model (company list)"
                              'keymap m-map
                              'local-map m-map
                              'button t
                              'action (lambda (_) (kargu-chat-select-model-company))))
+          (ctx-btn (propertize (format "[ctx: %s]" ctx-str)
+                               'face 'font-lock-doc-face
+                               'help-echo "Model context usage (used / capacity)"))
           (e-btn (propertize (format "[%s]" effort)
                              'face 'font-lock-keyword-face
                              'mouse-face 'highlight
@@ -113,11 +144,16 @@ Contains clickable provider, model, context, and effort buttons."
                              'button t
                              'action (lambda (_) (kargu-chat-select-effort-company)))))
       (propertize
-       (concat (propertize "provider: " 'face 'font-lock-comment-face)
+       (concat (propertize "mode: " 'face 'font-lock-comment-face)
+               mode-btn
+               "  "
+               (propertize "provider: " 'face 'font-lock-comment-face)
                p-btn
                "  "
                (propertize "model: " 'face 'font-lock-comment-face)
                m-btn
+               " "
+               ctx-btn
                "  "
                (propertize "effort: " 'face 'font-lock-comment-face)
                e-btn
@@ -161,7 +197,8 @@ Contains clickable provider, model, context, and effort buttons."
         (force-mode-line-update t)))))
 
 (defun kargu-chat--goto-footer-field (field)
-  "Move point to FIELD (\\='provider, \\='model, or \\='effort) in footer.
+  "Move point to the start of FIELD button inside footer.
+FIELD is \\='mode, \\='provider, \\='model, or \\='effort.
 Return point if found, or nil."
   (let ((buf (or (and (markerp kargu-chat--output-marker)
                       (marker-position kargu-chat--output-marker)
@@ -175,10 +212,11 @@ Return point if found, or nil."
                    (marker-position kargu-chat--output-marker))
           (goto-char (marker-position kargu-chat--output-marker))
           (let ((pat (cl-case field
+                       (mode "mode: [")
                        (provider "provider: [")
                        (model "model: [")
                        (effort "effort: [")
-                       (t "provider: ["))))
+                       (t "mode: ["))))
             (when (search-forward pat (and (markerp kargu-chat--prompt-marker)
                                            (marker-position kargu-chat--prompt-marker))
                                   t)

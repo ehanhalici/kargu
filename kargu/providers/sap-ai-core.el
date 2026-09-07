@@ -27,8 +27,8 @@
  :id "sap-ai-core"
  :name "SAP AI Core"
  :api "https://api.ai.prod.eu-central-1.aws.ml.hana.ondemand.com/v2"
+ :models-api "https://api.ai.prod.eu-central-1.aws.ml.hana.ondemand.com/v2/models"
  :env '("AICORE_SERVICE_KEY")
- :models '("anthropic--claude-4.8-opus" "gemini-3.1-flash-lite" "anthropic--claude-4.6-sonnet" "anthropic--claude-3-sonnet" "anthropic--claude-4-sonnet" "gemini-2.5-pro" "gpt-5" "gemini-2.5-flash" "gemini-3.5-flash" "anthropic--claude-4.5-haiku" "anthropic--claude-3-haiku" "anthropic--claude-4-opus" "anthropic--claude-4.5-sonnet" "anthropic--claude-3.5-sonnet" "anthropic--claude-4.6-opus")
  :npm "@jerome-benoit/sap-ai-provider-v2")
 
 (provide 'kargu/providers/sap-ai-core)

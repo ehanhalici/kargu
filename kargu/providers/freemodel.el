@@ -27,8 +27,8 @@
  :id "freemodel"
  :name "FreeModel"
  :api "https://cc.freemodel.dev/v1"
+ :models-api "https://cc.freemodel.dev/v1/models"
  :env '("FREEMODEL_API_KEY")
- :models '("claude-haiku-4-5-20251001" "claude-opus-4-7" "claude-opus-4-8" "gpt-5.3-codex" "claude-fable-5" "gpt-5.4" "gpt-5.4-mini" "claude-opus-4-6" "claude-sonnet-4-6" "gpt-5.5")
  :npm "@ai-sdk/anthropic")
 
 (provide 'kargu/providers/freemodel)

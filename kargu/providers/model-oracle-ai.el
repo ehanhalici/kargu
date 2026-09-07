@@ -27,8 +27,8 @@
  :id "model-oracle-ai"
  :name "Model Oracle AI"
  :api "https://api.modeloracle.com/api/v1"
+ :models-api "https://api.modeloracle.com/api/v1/models"
  :env '("MODEL_ORACLE_API_KEY")
- :models '("gpt-5" "claude-haiku-4.5" "o4-mini" "deepseek-v4-pro" "claude-sonnet-5" "gpt-5.4-nano" "glm-5.2" "claude-opus-4.8" "claude-fable-5" "gpt-5.4" "gpt-5.4-mini" "gpt-4.1" "gpt-4.1-mini" "auto" "gpt-5.5")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/model-oracle-ai)

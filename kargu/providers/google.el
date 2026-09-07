@@ -27,8 +27,8 @@
  :id "google"
  :name "Google"
  :api "https://generativelanguage.googleapis.com/v1beta/openai"
+ :models-api "https://generativelanguage.googleapis.com/v1beta/openai/models"
  :env '("GOOGLE_API_KEY" "GOOGLE_GENERATIVE_AI_API_KEY" "GEMINI_API_KEY")
- :models '("gemini-2.0-flash" "gemini-1.5-pro" "gemini-1.5-flash" "gemini-3.1-flash-lite" "gemini-2.5-flash-preview-tts" "gemini-2.5-pro" "gemini-2.5-flash" "gemini-3.5-flash" "gemma-4-31b-it" "gemini-embedding-001" "gemini-3.1-pro-preview-customtools" "gemini-flash-lite-latest" "gemini-3-pro-image-preview" "gemini-2.5-flash-image" "gemini-2.5-flash-lite")
  :npm "@ai-sdk/google")
 
 (provide 'kargu/providers/google)

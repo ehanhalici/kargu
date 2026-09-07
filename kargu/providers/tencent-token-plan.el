@@ -27,8 +27,8 @@
  :id "tencent-token-plan"
  :name "Tencent Token Plan"
  :api "https://api.lkeap.cloud.tencent.com/plan/v3"
+ :models-api "https://api.lkeap.cloud.tencent.com/plan/v3/models"
  :env '("TENCENT_TOKEN_PLAN_API_KEY")
- :models '("hy3")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/tencent-token-plan)

@@ -27,8 +27,8 @@
  :id "poolside"
  :name "Poolside"
  :api "https://inference.poolside.ai/v1"
+ :models-api "https://inference.poolside.ai/v1/models"
  :env '("POOLSIDE_API_KEY")
- :models '("poolside/laguna-xs.2" "poolside/laguna-m.1" "poolside/laguna-xs-2.1")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/poolside)

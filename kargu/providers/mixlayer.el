@@ -27,8 +27,8 @@
  :id "mixlayer"
  :name "Mixlayer"
  :api "https://models.mixlayer.ai/v1"
+ :models-api "https://models.mixlayer.ai/v1/models"
  :env '("MIXLAYER_API_KEY")
- :models '("qwen/qwen3.5-27b" "qwen/qwen3.5-35b-a3b" "qwen/qwen3.5-9b" "qwen/qwen3.5-397b-a17b" "qwen/qwen3.5-122b-a10b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/mixlayer)

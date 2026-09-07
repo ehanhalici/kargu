@@ -27,8 +27,8 @@
  :id "inceptron"
  :name "Inceptron"
  :api "https://api.inceptron.io/v1"
+ :models-api "https://api.inceptron.io/v1/models"
  :env '("INCEPTRON_API_KEY")
- :models '("moonshotai/Kimi-K2.6" "moonshotai/Kimi-K2.7-Code" "moonshotai/Kimi-K2.6-Fast" "zai-org/GLM-5.1-FP8" "zai-org/GLM-5.2" "MiniMaxAI/MiniMax-M2.5")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/inceptron)

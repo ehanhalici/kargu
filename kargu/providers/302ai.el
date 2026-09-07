@@ -27,8 +27,8 @@
  :id "302ai"
  :name "302.AI"
  :api "https://api.302.ai/v1"
+ :models-api "https://api.302.ai/v1/models"
  :env '("302AI_API_KEY")
- :models '("gpt-5.4-mini-2026-03-17" "chatgpt-4o-latest" "gpt-5.4-nano-2026-03-17" "kimi-k2-0905-preview" "grok-4.20-beta-0309-non-reasoning" "gemini-2.5-flash-nothink" "qwen-plus" "glm-4.7" "qwen3-235b-a22b-instruct-2507" "glm-4.5v" "claude-opus-4-5" "gemini-2.5-pro" "gpt-5" "claude-haiku-4-5-20251001" "kimi-k2-thinking-turbo")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/302ai)

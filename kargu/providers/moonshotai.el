@@ -27,8 +27,8 @@
  :id "moonshotai"
  :name "Moonshot AI"
  :api "https://api.moonshot.ai/v1"
+ :models-api "https://api.moonshot.ai/v1/models"
  :env '("MOONSHOT_API_KEY")
- :models '("kimi-k2-0905-preview" "kimi-k2-thinking-turbo" "kimi-k2.7-code" "kimi-k2-thinking" "kimi-k2-0711-preview" "kimi-k2-turbo-preview" "kimi-k2.5" "kimi-k2.6" "kimi-k2.7-code-highspeed")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/moonshotai)

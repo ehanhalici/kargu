@@ -27,8 +27,8 @@
  :id "minimax-coding-plan"
  :name "MiniMax Token Plan (minimax.io)"
  :api "https://api.minimax.io/anthropic/v1"
+ :models-api "https://api.minimax.io/anthropic/v1/models"
  :env '("MINIMAX_API_KEY")
- :models '("MiniMax-M2.1" "MiniMax-M2.5-highspeed" "MiniMax-M2.7-highspeed" "MiniMax-M2" "MiniMax-M2.5" "MiniMax-M3" "MiniMax-M2.7")
  :npm "@ai-sdk/anthropic")
 
 (provide 'kargu/providers/minimax-coding-plan)

@@ -27,8 +27,8 @@
  :id "longcat"
  :name "LongCat"
  :api "https://api.longcat.chat/openai"
+ :models-api "https://api.longcat.chat/openai/models"
  :env '("LONGCAT_API_KEY")
- :models '("LongCat-2.0")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/longcat)

@@ -27,8 +27,8 @@
  :id "llamacpp"
  :name "llama.cpp"
  :api "http://127.0.0.1:8080/v1"
+ :models-api "http://127.0.0.1:8080/v1/models"
  :env nil
- :models nil
  :npm "llamacpp")
 
 (provide 'kargu/providers/llamacpp)

@@ -27,8 +27,8 @@
  :id "llmgateway"
  :name "LLM Gateway"
  :api "https://api.llmgateway.io/v1"
+ :models-api "https://api.llmgateway.io/v1/models"
  :env '("LLMGATEWAY_API_KEY")
- :models '("qwen-coder-plus" "mistral-large-latest" "qwen3-vl-235b-a22b-thinking" "devstral-small-2507" "qwen3-vl-30b-a3b-thinking" "deepseek-v4-flash" "qwen3-coder-plus" "minimax-m2.7-highspeed" "qwen-plus" "o3" "nemotron-3-ultra-550b" "minimax-m2.5" "grok-4-20-beta-0309-non-reasoning" "glm-4.7" "gemini-3.1-flash-lite")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/llmgateway)

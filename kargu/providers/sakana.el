@@ -27,8 +27,8 @@
  :id "sakana"
  :name "Sakana AI"
  :api "https://api.sakana.ai/v1"
+ :models-api "https://api.sakana.ai/v1/models"
  :env '("SAKANA_API_KEY")
- :models '("fugu-ultra-20260615" "fugu" "fugu-ultra")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/sakana)

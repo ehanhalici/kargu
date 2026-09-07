@@ -27,8 +27,8 @@
  :id "tinfoil"
  :name "Tinfoil"
  :api "https://inference.tinfoil.sh/v1"
+ :models-api "https://inference.tinfoil.sh/v1/models"
  :env '("TINFOIL_API_KEY")
- :models '("kimi-k2-6" "llama3-3-70b" "gpt-oss-safeguard-120b" "nomic-embed-text" "gpt-oss-120b" "glm-5-2" "gemma4-31b")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/tinfoil)

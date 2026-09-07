@@ -27,8 +27,8 @@
  :id "synthetic"
  :name "Synthetic"
  :api "https://api.synthetic.new/openai/v1"
+ :models-api "https://api.synthetic.new/openai/v1/models"
  :env '("SYNTHETIC_API_KEY")
- :models '("hf:moonshotai/Kimi-K2.7-Code" "hf:zai-org/GLM-4.7-Flash" "hf:zai-org/GLM-5.2" "hf:MiniMaxAI/MiniMax-M3" "hf:openai/gpt-oss-120b" "hf:Qwen/Qwen3.6-27B" "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/synthetic)

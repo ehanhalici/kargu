@@ -47,12 +47,13 @@
   (should (equal (kargu-provider-api "openrouter") "https://openrouter.ai/api/v1")))
 
 (ert-deftest kargu-providers-builtins-models-test ()
-  "Built-in providers must supply known model defaults."
-  (should (member "deepseek-chat" (kargu-provider-models "deepseek")))
-  (should (member "llama-3.3-70b-versatile" (kargu-provider-models "groq")))
-  (should (member "gpt-4o" (kargu-provider-models "openai")))
-  (should (member "claude-3-5-sonnet-latest" (kargu-provider-models "anthropic")))
-  (should (member "qwen2.5-coder:latest" (kargu-provider-models "ollama"))))
+  "Built-in providers must supply dynamic models API routes without static hardcoding."
+  (should (equal (kargu-provider-models-api "deepseek") "https://api.deepseek.com/models"))
+  (should (equal (kargu-provider-models-api "groq") "https://api.groq.com/openai/v1/models"))
+  (should (equal (kargu-provider-models-api "openai") "https://api.openai.com/v1/models"))
+  (should (equal (kargu-provider-models-api "anthropic") "https://api.anthropic.com/v1/models"))
+  (should (equal (kargu-provider-models-api "ollama") "http://localhost:11434/api/tags"))
+  (should (equal (kargu-provider-models-api "openrouter") "https://openrouter.ai/api/v1/models")))
 
 (ert-deftest kargu-providers-zero-url-toml-config-test ()
   "When TOML specifies only `apikey', URL is automatically resolved."
@@ -67,12 +68,13 @@
           (with-temp-file temp-config
             (insert "provider = \"deepseek\"\n\n"
                     "[providers.deepseek]\n"
-                    "apikey = \"sk-test-deepseek-12345\"\n"))
+                    "apikey = \"sk-test-deepseek-12345\"\n"
+                    "model = \"deepseek-chat\"\n"))
           (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
             (should (equal (kargu--provider-name) "deepseek"))
             ;; API base should resolve to DeepSeek's default URL automatically:
             (should (equal (kargu--api-base) "https://api.deepseek.com/v1"))
-            ;; Model should resolve from DeepSeek's known models:
+            ;; Model should resolve from TOML configured model:
             (should (equal (kargu--model) "deepseek-chat"))
             ;; API key should resolve to the configured key:
             (should (equal (kargu--resolve-api-key) "sk-test-deepseek-12345"))))
@@ -128,17 +130,18 @@
    :id "test-dynamic-ai"
    :name "Test Dynamic AI"
    :api "https://api.test-dynamic.ai/v1"
-   :env '("TEST_DYNAMIC_API_KEY")
-   :models '("dynamic-model-1" "dynamic-model-2"))
+   :models-api "https://api.test-dynamic.ai/v1/models"
+   :env '("TEST_DYNAMIC_API_KEY"))
   (should (equal (kargu-provider-api "test-dynamic-ai") "https://api.test-dynamic.ai/v1"))
+  (should (equal (kargu-provider-models-api "test-dynamic-ai") "https://api.test-dynamic.ai/v1/models"))
   (should (equal (kargu-provider-name "test-dynamic-ai") "Test Dynamic AI"))
-  (should (equal (kargu-provider-models "test-dynamic-ai") '("dynamic-model-1" "dynamic-model-2")))
   (should (member "test-dynamic-ai" (kargu-provider-list))))
 
 (ert-deftest kargu-providers-session-switch-test ()
-  "`kargu-set-provider' sets session provider, model, and resolves correct API base."
+  "`kargu-set-provider' sets session provider, model from live cache, and resolves correct API base."
   (let ((kargu--session-provider nil)
         (kargu--session-model nil))
+    (puthash "cerebras" '("llama3.1-70b") kargu--live-models-cache)
     (kargu-set-provider "cerebras")
     (should (equal kargu--session-provider "cerebras"))
     (should (equal (kargu--api-base) "https://api.cerebras.ai/v1"))

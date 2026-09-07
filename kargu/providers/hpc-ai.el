@@ -27,8 +27,8 @@
  :id "hpc-ai"
  :name "HPC-AI"
  :api "https://api.hpc-ai.com/inference/v1"
+ :models-api "https://api.hpc-ai.com/inference/v1/models"
  :env '("HPC_AI_API_KEY")
- :models '("moonshotai/kimi-k2.7-code" "moonshotai/kimi-k2.5" "openai/gpt-5.5" "anthropic/claude-opus-4.7" "zai-org/glm-5.1" "zai-org/glm-5.2" "deepseek/deepseek-v4-flash" "deepseek/deepseek-v4-pro" "minimax/minimax-m2.5")
  :npm "@ai-sdk/openai-compatible")
 
 (provide 'kargu/providers/hpc-ai)
