@@ -123,5 +123,25 @@
   (let ((kargu-permission--mock-decision :reject))
     (should-error (kargu-bash-run "git status") :type 'error)))
 
+(ert-deftest kargu-permission-interactive-prompt-and-decision-flow-test ()
+  "Ensure approval prompt correctly renders buttons and wait-for-decision captures approved."
+  (with-temp-buffer
+    (let ((chat-buf (current-buffer))
+          (decision nil))
+      (kargu-permission--render-approval-prompt
+       chat-buf "make test" "/tmp/proj" (lambda (d) (setq decision d)))
+      ;; Verify prompt was rendered with buttons
+      (let ((content (buffer-string)))
+        (should (string-match-p "Bash Permission Approval" content))
+        (should (string-match-p "make test" content))
+        (should (string-match-p "\\[✓ Approve\\]" content))
+        (should (string-match-p "\\[✗ Reject\\]" content)))
+      ;; Simulate clicking [✓ Approve]
+      (setq decision :approved)
+      (cl-letf (((symbol-function 'recursive-edit) #'ignore))
+        (let ((result (kargu-permission--wait-for-decision chat-buf (lambda () decision))))
+          (should (eq result :approved))
+          (should (string-match-p "Approved, executing" (buffer-string))))))))
+
 (provide 'tests/test-permission)
 ;;; test-permission.el ends here

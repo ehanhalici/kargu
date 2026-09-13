@@ -134,6 +134,10 @@ process filters and callbacks."
                                (cond
                                 ((and in-start (>= wp in-start)) 'input)
                                 ((or (>= wp at) (>= wp (1- at))) 'output)
+                                ((and (fboundp 'kargu-loop-running-p)
+                                      (kargu-loop-running-p)
+                                      (>= wp (- at 300)))
+                                 'output)
                                 (t nil)))))
                      windows)))
               (save-excursion
@@ -245,6 +249,81 @@ Only used when `kargu-chat-drop-preamble' is non-nil."
     (truncate-string-to-width result 100))
    (t (format "%d chars" (length result)))))
 
+(defun kargu-chat--clear-running-prompt-banner (buffer)
+  "Clear any in-flight prompt banner from BUFFER before printing final report."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (and (markerp kargu-chat--output-marker)
+                 (eq (marker-buffer kargu-chat--output-marker) buffer)
+                 (null kargu-chat--prompt-marker))
+        (let ((inhibit-read-only t))
+          (delete-region kargu-chat--output-marker (point-max)))))))
+
+(defun kargu-chat--render-finish-status (status report text error)
+  "Render the summary status banner for STATUS in REPORT."
+  ;; Plain transport: print answer here if no deltas arrived
+  (when (and (eq status :done) (not kargu-chat--streamed-text))
+    (if (kargu--nonempty text)
+        (progn
+          (kargu-chat--insert text)
+          (kargu-chat--insert "\n"))
+      (kargu-chat--insert "— empty model response\n" 'kargu-chat-meta)))
+  ;; Interrupted runs carry reason as report text
+  (when (and (memq status '(:stopped :limit))
+             (stringp text) (not (string-empty-p text)))
+    (kargu-chat--insert (concat text "\n") 'kargu-chat-meta))
+  (pcase status
+    (:done
+     (kargu-chat--insert
+      (format "— done · %d model turn(s) · %d healing round(s) · %d verification(s)\n"
+              (or (plist-get report :iterations) 0)
+              (or (plist-get report :healing) 0)
+              (or (plist-get report :verifications) 0))
+      'kargu-chat-meta))
+    (:error
+     (kargu-chat--insert
+      (format "— ERROR: %s\n" (or error "unknown error"))
+      'kargu-chat-error))
+    (:stopped
+     (kargu-chat--insert "— run stopped\n" 'kargu-chat-meta))
+    (:limit
+     (kargu-chat--insert "— stopped: iteration limit\n" 'kargu-chat-meta))
+    (_
+     (kargu-chat--insert "— run ended\n" 'kargu-chat-meta))))
+
+(defun kargu-chat--render-modified-file (file)
+  "Render stats and ediff/rollback action buttons for modified FILE."
+  (let* ((stats (if (fboundp 'kargu-diff-file-stats)
+                    (kargu-diff-file-stats file)
+                  (cons 0 0)))
+         (added (car stats))
+         (deleted (cdr stats))
+         (stat-str (concat (propertize (format "+%d" added) 'face 'font-lock-string-face)
+                           " "
+                           (propertize (format "-%d" deleted) 'face 'font-lock-warning-face)))
+         (diff-btn (buttonize "[ediff]"
+                              (lambda (_)
+                                (if (fboundp 'kargu-diff-review)
+                                    (kargu-diff-review file)
+                                  (message "kargu-diff-review unavailable")))))
+         (rb-btn (buttonize "[rollback]"
+                            (lambda (_)
+                              (if (fboundp 'kargu-diff-rollback)
+                                  (kargu-diff-rollback file)
+                                (message "kargu-diff-rollback unavailable"))))))
+    (kargu-chat--insert (format "  • %s (%s)  " file stat-str))
+    (kargu-chat--insert diff-btn)
+    (kargu-chat--insert "  ")
+    (kargu-chat--insert rb-btn)
+    (kargu-chat--insert "\n")))
+
+(defun kargu-chat--render-modified-files (modified)
+  "Render summary list of MODIFIED files."
+  (when (and (listp modified) modified)
+    (kargu-chat--insert "\nModified file(s):\n" 'kargu-chat-meta)
+    (dolist (file modified)
+      (kargu-chat--render-modified-file file))))
+
 (defun kargu-chat--on-finish (report)
   "Render the final REPORT plist of an agent run.
 See `kargu-loop-send' for the shape of the report."
@@ -255,71 +334,10 @@ See `kargu-loop-send' for the shape of the report."
         (pending (plist-get report :pending-files))
         (modified (plist-get report :modified-files))
         (buffer (kargu-chat--target-buffer)))
-    ;; Clear any running prompt banner before printing final report
-    (when (buffer-live-p buffer)
-      (with-current-buffer buffer
-        (when (and (markerp kargu-chat--output-marker)
-                   (eq (marker-buffer kargu-chat--output-marker) buffer)
-                   (null kargu-chat--prompt-marker))
-          (let ((inhibit-read-only t))
-            (delete-region kargu-chat--output-marker (point-max))))))
+    (kargu-chat--clear-running-prompt-banner buffer)
     (kargu-chat--insert "\n")
-    ;; Plain transport: no deltas arrived, print the answer here.
-    (when (and (eq status :done) (not kargu-chat--streamed-text))
-      (if (kargu--nonempty text)
-          (progn
-            (kargu-chat--insert text)
-            (kargu-chat--insert "\n"))
-        (kargu-chat--insert "— empty model response\n" 'kargu-chat-meta)))
-    ;; Interrupted runs carry their reason as the report text.
-    (when (and (memq status '(:stopped :limit))
-               (stringp text) (not (string-empty-p text)))
-      (kargu-chat--insert (concat text "\n") 'kargu-chat-meta))
-    (pcase status
-      (:done
-       (kargu-chat--insert
-        (format "— done · %d model turn(s) · %d healing round(s) · %d verification(s)\n"
-                (or (plist-get report :iterations) 0)
-                (or (plist-get report :healing) 0)
-                (or (plist-get report :verifications) 0))
-        'kargu-chat-meta))
-      (:error
-       (kargu-chat--insert
-        (format "— ERROR: %s\n" (or error "unknown error"))
-        'kargu-chat-error))
-      (:stopped
-       (kargu-chat--insert "— run stopped\n" 'kargu-chat-meta))
-      (:limit
-       (kargu-chat--insert "— stopped: iteration limit\n"
-                               'kargu-chat-meta))
-      (_
-       (kargu-chat--insert "— run ended\n" 'kargu-chat-meta)))
-    (when (and (listp modified) modified)
-      (kargu-chat--insert "\nModified file(s):\n" 'kargu-chat-meta)
-      (dolist (file modified)
-        (let* ((stats (if (fboundp 'kargu-diff-file-stats)
-                          (kargu-diff-file-stats file)
-                        (cons 0 0)))
-               (added (car stats))
-               (deleted (cdr stats))
-               (stat-str (concat (propertize (format "+%d" added) 'face 'font-lock-string-face)
-                                 " "
-                                 (propertize (format "-%d" deleted) 'face 'font-lock-warning-face)))
-               (diff-btn (buttonize "[ediff]"
-                                    (lambda (_)
-                                      (if (fboundp 'kargu-diff-review)
-                                          (kargu-diff-review file)
-                                        (message "kargu-diff-review unavailable")))))
-               (rb-btn (buttonize "[rollback]"
-                                  (lambda (_)
-                                    (if (fboundp 'kargu-diff-rollback)
-                                        (kargu-diff-rollback file)
-                                      (message "kargu-diff-rollback unavailable"))))))
-          (kargu-chat--insert (format "  • %s (%s)  " file stat-str))
-          (kargu-chat--insert diff-btn)
-          (kargu-chat--insert "  ")
-          (kargu-chat--insert rb-btn)
-          (kargu-chat--insert "\n"))))
+    (kargu-chat--render-finish-status status report text error)
+    (kargu-chat--render-modified-files modified)
     (when (and (listp pending) pending)
       (kargu-chat--insert
        (format "unverified changed file(s): %s\nroll back with M-x kargu-diff-rollback or the menu's r\n"
@@ -349,6 +367,14 @@ afterwards.  FN is the original function."
   (kargu-chat--drop-streamed-preamble)
   (let ((live (kargu-chat--target-buffer)))
     (when live
+      (with-current-buffer live
+        (let ((pos (if (and (markerp kargu-chat--output-marker)
+                            (eq (marker-buffer kargu-chat--output-marker) live))
+                       (marker-position kargu-chat--output-marker)
+                     (point-max))))
+          (unless (or (<= pos (point-min))
+                      (eq (char-before pos) ?\n))
+            (kargu-chat--insert "\n"))))
       (kargu-chat--insert (format "  → %s " name)
                           'kargu-chat-tool))
     (let ((result (funcall fn name arguments)))

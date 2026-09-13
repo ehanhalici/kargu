@@ -17,6 +17,7 @@
 (require 'ert)
 (require 'kargu)
 (require 'tests/test-contract)
+(require 'test-state)
 (require 'tests/test-permission)
 (require 'tests/test-git)
 (require 'tests/test-history)

@@ -450,40 +450,40 @@ ignored.  PROCESS is only used for logging context."
                (kargu-log 'warn "on-delta callback failed: %s"
                                 (error-message-string err))))))))))
 
+(defun kargu--api-decode-body-response (body trimmed parsed-events)
+  "Decode raw HTTP BODY or PARSED-EVENTS into a response alist."
+  (cond
+   (parsed-events
+    (kargu--accumulate-stream-deltas parsed-events))
+   ((or (null trimmed) (string-empty-p trimmed)) nil)
+   ((string-prefix-p "{" trimmed)
+    (kargu--json-decode-safe body))
+   ((string-match-p "\\`\\(?:[^\n]*\n\\)*data:" trimmed)
+    (let ((events (kargu--sse-parse body)))
+      (if events
+          (kargu--accumulate-stream-deltas events)
+        `(("error" . (("message" . "SSE body contained no data events")))))))
+   (t
+    `(("error" . (("message" . ,(truncate-string-to-width trimmed 300))))))))
+
+(defun kargu--api-handle-success (response callback)
+  "Record success metrics and dispatch CALLBACK with valid RESPONSE."
+  (setq kargu--busy nil)
+  (kargu-circuit-record-success)
+  (kargu--record-usage response)
+  (kargu--history-append-assistant response)
+  (funcall callback response))
+
 (defun kargu--api-handle-body (body callback &optional url headers payload gen
                                    on-delta attempt parsed-events)
   "Process a successful HTTP BODY string and dispatch CALLBACK.
 Accepts both ordinary JSON bodies and SSE stream bodies; SSE
-bodies are reduced to an ordinary response alist first.
-When PARSED-EVENTS is non-nil, use them directly without re-parsing
-the entire BODY string.
-Non-JSON, non-SSE bodies (HTML error pages, plain-text HTTP
-failures) are surfaced as errors instead of being treated as an
-empty successful completion.
-When URL is supplied, HTTP 200 bodies that carry a retryable
-provider error (SSE `error' events, 502/overloaded) resend the
-same payload instead of finishing as an empty assistant turn.
-`kargu--busy' stays set across those retries."
-  (let ((trimmed (and (stringp body) (string-trim body)))
-        (attempt (or attempt 0)))
+bodies are reduced to an ordinary response alist first."
+  (let* ((trimmed (and (stringp body) (string-trim body)))
+         (attempt (or attempt 0)))
     (kargu--log-block "IN HTTP body" (or body "")
                       (kargu--log-looks-json-p trimmed))
-    (let* ((response
-            (cond
-             (parsed-events
-              (kargu--accumulate-stream-deltas parsed-events))
-             ((or (null trimmed) (string-empty-p trimmed)) nil)
-             ((string-prefix-p "{" trimmed)
-              (kargu--json-decode-safe body))
-             ((string-match-p "\\`\\(?:[^\n]*\n\\)*data:" trimmed)
-              (let ((events (kargu--sse-parse body)))
-                (if events
-                    (kargu--accumulate-stream-deltas events)
-                  `(("error" .
-                     (("message" . "SSE body contained no data events")))))))
-             (t
-              `(("error" .
-                 (("message" . ,(truncate-string-to-width trimmed 300))))))))
+    (let* ((response (kargu--api-decode-body-response body trimmed parsed-events))
            (err (and response (kargu-response-error-message response))))
       (when (and kargu-log-wire response)
         (kargu--log-block "IN reconstructed JSON"
@@ -501,8 +501,7 @@ same payload instead of finishing as an empty assistant turn.
         (funcall callback
                  (kargu--api-error-alist
                   (format "HTTP 200: empty or invalid response body: %s"
-                          (truncate-string-to-width
-                           (or body "") 200)))))
+                          (truncate-string-to-width (or body "") 200)))))
        (err
         (setq kargu--busy nil)
         (funcall callback
@@ -522,15 +521,10 @@ same payload instead of finishing as an empty assistant turn.
                           (format "HTTP 200: %s" parsed)
                         (format "HTTP 200: response contained no choices%s"
                                 (if (and trimmed (not (string-empty-p trimmed)))
-                                    (concat ": " (truncate-string-to-width
-                                                  trimmed 200))
+                                    (concat ": " (truncate-string-to-width trimmed 200))
                                   ""))))))))
        (t
-        (setq kargu--busy nil)
-        (kargu-circuit-record-success)
-        (kargu--record-usage response)
-        (kargu--history-append-assistant response)
-        (funcall callback response))))))
+        (kargu--api-handle-success response callback))))))
 
 (defun kargu--record-usage (response)
   "Accumulate the token usage of RESPONSE in `kargu--session'."

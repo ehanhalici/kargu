@@ -90,6 +90,7 @@
 (require 'kargu/constants)
 (require 'kargu/result)
 (require 'kargu/contract)
+(require 'kargu/state)
 (require 'kargu/permission)
 (require 'kargu/providers)
 (require 'kargu/config)

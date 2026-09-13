@@ -122,6 +122,80 @@ Return a result string if COMMAND matches a management command, or nil."
                     (if (string-empty-p (string-trim out)) "(no output yet)" out))))))
      (t nil))))
 
+(defun kargu-bash--resolve-shell ()
+  "Find an executable shell binary."
+  (let ((s (or (getenv "SHELL")
+               (and (boundp 'shell-file-name) shell-file-name)
+               "/bin/sh")))
+    (if (and (stringp s) (executable-find s))
+        s
+      (or (executable-find "bash") (executable-find "sh") "/bin/sh"))))
+
+(defun kargu-bash--run-background (command dir shell)
+  "Execute COMMAND in DIR asynchronously under SHELL and return status string."
+  (let* ((id (format "p%d" (cl-incf kargu-bash--counter)))
+         (buf (get-buffer-create (format "*kargu-proc-%s*" id)))
+         proc)
+    (with-current-buffer buf
+      (erase-buffer)
+      (setq-local buffer-offer-save nil))
+    (let ((default-directory (file-name-as-directory dir)))
+      (setq proc (make-process
+                  :name (format "kargu-bg-%s" id)
+                  :buffer buf
+                  :command (list shell "-c" command)
+                  :connection-type 'pipe
+                  :stderr buf))
+      (dolist (p (process-list))
+        (when (eq (process-buffer p) buf)
+          (set-process-query-on-exit-flag p nil))))
+    (puthash id
+             (list :id id
+                   :pid (process-id proc)
+                   :command command
+                   :proc proc
+                   :buf buf
+                   :start (float-time))
+             kargu-bash--processes)
+    (format "Process started in background: ID=[%s], PID=%d. Output directed to buffer '*kargu-proc-%s*'.\nManage with bash command='status %s' or command='kill %s'."
+            id (process-id proc) id id id)))
+
+(defun kargu-bash--run-sync (command dir shell)
+  "Execute COMMAND synchronously in DIR under SHELL within timeout bounds."
+  (let* ((buf (generate-new-buffer " *kargu-bash*"))
+         (start (float-time))
+         proc)
+    (unwind-protect
+        (progn
+          (let ((default-directory (file-name-as-directory dir)))
+            (setq proc (make-process
+                        :name "kargu-bash"
+                        :buffer buf
+                        :command (list shell "-c" command)
+                        :connection-type 'pipe
+                        :stderr buf))
+            (set-process-query-on-exit-flag proc nil))
+          (with-local-quit
+            (while (process-live-p proc)
+              (when (> (- (float-time) start) kargu-bash-timeout)
+                (ignore-errors (kill-process proc))
+                (error "bash timed out after %ds: %s"
+                       kargu-bash-timeout
+                       (truncate-string-to-width command 80)))
+              (accept-process-output proc 0.05)))
+          (if (process-live-p proc)
+              (progn
+                (ignore-errors (kill-process proc))
+                (error "bash command interrupted by user (C-g): %s"
+                       (truncate-string-to-width command 80)))
+            (let* ((code (process-exit-status proc))
+                   (out (with-current-buffer buf (buffer-string))))
+              (format "exit %s\ncwd: %s\n%s" code dir
+                      (if (string-empty-p out) "(no output)" out)))))
+      (kargu-bash--clean-buffer-processes buf)
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
 (defun kargu-bash-run (command &optional cwd background)
   "Run COMMAND in CWD, capturing stdout and stderr.
 When BACKGROUND is non-nil, start the process asynchronously without
@@ -137,74 +211,10 @@ Strictly validates that CWD and all path arguments stay within project root."
         ;; User approval check: 1-click button prompt in chat
         (unless (kargu-permission-request-approval command dir)
           (error "Command execution was rejected by the user"))
-        (let* ((shell (let ((s (or (getenv "SHELL")
-                                    (and (boundp 'shell-file-name) shell-file-name)
-                                    "/bin/sh")))
-                        (if (and (stringp s) (executable-find s))
-                            s
-                          (or (executable-find "bash") (executable-find "sh") "/bin/sh")))))
+        (let ((shell (kargu-bash--resolve-shell)))
           (if background
-              ;; Asynchronous background process execution
-              (let* ((id (format "p%d" (cl-incf kargu-bash--counter)))
-                     (buf (get-buffer-create (format "*kargu-proc-%s*" id)))
-                     proc)
-                (with-current-buffer buf
-                  (erase-buffer)
-                  (setq-local buffer-offer-save nil))
-                (let ((default-directory (file-name-as-directory dir)))
-                  (setq proc (make-process
-                              :name (format "kargu-bg-%s" id)
-                              :buffer buf
-                              :command (list shell "-c" command)
-                              :connection-type 'pipe
-                              :stderr buf))
-                  (dolist (p (process-list))
-                    (when (eq (process-buffer p) buf)
-                      (set-process-query-on-exit-flag p nil))))
-                (puthash id
-                         (list :id id
-                               :pid (process-id proc)
-                               :command command
-                               :proc proc
-                               :buf buf
-                               :start (float-time))
-                         kargu-bash--processes)
-                (format "Process started in background: ID=[%s], PID=%d. Output directed to buffer '*kargu-proc-%s*'.\nManage with bash command='status %s' or command='kill %s'."
-                        id (process-id proc) id id id))
-            ;; Synchronous bounded execution
-            (let* ((buf (generate-new-buffer " *kargu-bash*"))
-                   (start (float-time))
-                   proc)
-              (unwind-protect
-                  (progn
-                    (let ((default-directory (file-name-as-directory dir)))
-                      (setq proc (make-process
-                                  :name "kargu-bash"
-                                  :buffer buf
-                                  :command (list shell "-c" command)
-                                  :connection-type 'pipe
-                                  :stderr buf))
-                      (set-process-query-on-exit-flag proc nil))
-                    (with-local-quit
-                      (while (process-live-p proc)
-                        (when (> (- (float-time) start) kargu-bash-timeout)
-                          (ignore-errors (kill-process proc))
-                          (error "bash timed out after %ds: %s"
-                                 kargu-bash-timeout
-                                 (truncate-string-to-width command 80)))
-                        (accept-process-output proc 0.05)))
-                    (if (process-live-p proc)
-                        (progn
-                          (ignore-errors (kill-process proc))
-                          (error "bash command interrupted by user (C-g): %s"
-                                 (truncate-string-to-width command 80)))
-                      (let* ((code (process-exit-status proc))
-                             (out (with-current-buffer buf (buffer-string))))
-                        (format "exit %s\ncwd: %s\n%s" code dir
-                                (if (string-empty-p out) "(no output)" out)))))
-                (kargu-bash--clean-buffer-processes buf)
-                (when (buffer-live-p buf)
-                  (kill-buffer buf)))))))))
+              (kargu-bash--run-background command dir shell)
+            (kargu-bash--run-sync command dir shell))))))
 
 (defun kargu-bash-register-tools ()
   "Register the bash tool."

@@ -16,18 +16,17 @@ Kargu is an advanced autonomous agentic coding assistant for GNU Emacs. It inter
 
 ## 2. Operating Modes & Tool Gating
 
-Kargu defines five distinct operational modes (`kargu-active-mode`):
+Kargu defines four distinct operational modes (`kargu-active-mode`):
 
 | Mode | Mutating Tools Allowed | Description |
 |---|---|---|
 | `ask` | ❌ No | Pure conversational query mode. Answers questions without modifying files or running commands. |
 | `plan` | ❌ No | Implementation planning mode. Inspects workspace architecture and drafts plans without applying changes. |
 | `debug` | ❌ No | Interactive debugging mode. Inspects stack traces, breakpoints, and runtime variables via `dape`. |
-| `build` | ✅ Yes | Build and test mode. Executes compilers, runs test suites, and fixes compilation/lint errors. |
 | `agent` | ✅ Yes | Full autonomous mode. Searches, reads, edits files, runs shell commands, and conducts self-healing edits. |
 
 ### Tool Visibility & Execution Gating
-- Mutating tools (`edit_file`, `write_file`, `edit`, `write`, `bash`, `debug_toggle_breakpoint`) are only advertised in the LLM tool schema and executable when `kargu-active-mode` is `agent` or `build`.
+- Mutating tools (`edit_file`, `write_file`, `edit`, `write`, `bash`, `debug_toggle_breakpoint`) are only advertised in the LLM tool schema and executable when `kargu-active-mode` is `agent`.
 - If an unauthorized mutating tool call is attempted in a read-only mode, `kargu-loop--gate-tool` intercepts it and returns a descriptive error message without executing the tool.
 - **Mode Switching Isolation**: Mode changes via `kargu-set-mode` are blocked while an agent loop is in flight (`kargu-loop-running-p`), preventing mid-turn mode corruption.
 
@@ -145,7 +144,7 @@ When history character cost exceeds `kargu-history-compact-chars` (or upon conte
 
 ## 7. Chat Interface & Context Attachments (`kargu/chat/`)
 
-- **Sidebar Interface (`*kargu-chat*`)**: Header with model indicator, provider status, and interactive mode buttons (`[ask]`, `[plan]`, `[debug]`, `[build]`, `[agent]`).
+- **Sidebar Interface (`*kargu-chat*`)**: Header with model indicator, provider status, and interactive mode buttons (`[ask]`, `[plan]`, `[debug]`, `[agent]`).
 - **Real-Time Streaming (`kargu/chat/render.el`)**: Streams assistant text deltas and collapsible thought blocks (`<thought>...</thought>`). Multi-turn tool runs dynamically reset stream preamble markers to prevent rendering lockouts.
 - **Mention Cleaning (`kargu-chat--clean-at-token`)**: Robust mention extractor cleans `@` tokens:
   - Strips outer brackets (`@[...]`, `@{...}`, `(<...>)`),
@@ -161,7 +160,7 @@ When history character cost exceeds `kargu-history-compact-chars` (or upon conte
 Kargu's protocol invariants and agent loop state machine are formally specified in TLA+ and verified using the TLC model checker:
 
 - `proof/KarguProtocol.tla`: Models message records, role invariants, tool pairing, and the exact `kargu--validate-history` repair algorithm.
-- `proof/KarguLoop.tla`: Models loop states (`IDLE`, `REQUEST`, `WAIT_MODEL`, `EXEC_TOOLS`, `VERIFY_FILES`, `COMPACT_WAIT`, `DONE`, `ERROR`, `STOPPED`), parallel tool execution, doom loops, self-healing, compaction, and cancellations.
+- `proof/KarguLoop.tla`: Models loop states (`IDLE`, `REQUEST`, `WAIT_MODEL`, `EXEC_TOOLS`, `VERIFY_FILES`, `COMPACT_WAIT`, `PAUSE`, `DONE`, `ERROR`, `STOPPED`), parallel tool execution, doom loops, self-healing, compaction, interactive continuation, and cancellations.
 - `proof/MC.tla` & `proof/MC.cfg`: TLC model-checking harness.
 - `proof/run_tlc.sh`: Execution script verifying all safety invariants across 26,000+ states with zero errors.
 
@@ -172,61 +171,110 @@ Kargu's protocol invariants and agent loop state machine are formally specified 
 ```
 kargu/
 ├── kargu.el               # Package header, load-path setup, require ordering
+├── config.toml.example    # Example TOML configuration (provider keys, models)
 ├── kargu/
-│   ├── core.el            # Customization groups, session plist, modes, logging
-│   ├── config.el          # TOML configuration parser, provider resolution
-│   ├── constants.el       # Mode enums, message roles, buffer constants
-│   ├── json.el            # JSON encoder/decoder, empty object support (:json-empty-object)
+│   ├── core.el            # Slim core: alist helpers, mode state, notify, OS/shell
+│   ├── core/
+│   │   ├── custom.el      # All defcustom declarations (API key, model, temperature…)
+│   │   ├── log.el         # Logging engine: kargu-log, wire-log, kargu-show-log
+│   │   └── session.el     # Session state plist, usage counters, session-reset
+│   ├── constants.el       # Bridge → kargu/contract/constants (backward compat)
+│   ├── contract.el        # Ingress/egress contract validation facade
+│   ├── contract/
+│   │   ├── assert.el      # kargu-contract-assert, kargu-contract-validate
+│   │   ├── constants.el   # Mode enums, message roles, buffer names, HTTP codes
+│   │   ├── result.el      # Railway-Oriented Programming: kargu-ok, kargu-err
+│   │   └── types.el       # Type predicates: kargu-contract-message-p, -history-p…
+│   ├── state.el           # Centralized state store facade
+│   ├── state/
+│   │   ├── store.el       # kargu--state-store plist, kargu-state-get/set/update
+│   │   ├── selectors.el   # Pure read selectors: kargu-state-mode, -status, -busy-p
+│   │   ├── transitions.el # Validated lifecycle mutations: kargu-state-set-mode…
+│   │   └── hooks.el       # Event bus: kargu-state-change-hook, subscribe/unsubscribe
+│   ├── permission.el      # Project sandboxing facade
+│   ├── permission/
+│   │   ├── guards.el      # Project root resolution, within-project assertion
+│   │   ├── bash.el        # Command tokenization and escape validation
+│   │   └── policy.el      # Approval buttons UI (Approve / Reject)
+│   ├── config.el          # TOML config, provider & API key resolution facade
+│   ├── config/
+│   │   ├── toml.el        # Pure Elisp TOML parser
+│   │   ├── key.el         # Multi-tier API key & endpoint resolution
+│   │   └── schema.el      # Config caching, setup check, kargu-edit-config
+│   ├── providers.el       # Provider registry facade
+│   ├── providers/         # One .el per provider (openrouter.el, anthropic.el, …)
+│   ├── json.el            # JSON encoder/decoder, empty object support
 │   ├── fs.el              # Bounded project tree traversal, directory ignore filters
+│   ├── result.el          # Bridge → kargu/contract/result (backward compat)
 │   ├── prompt.el          # System prompt builder, model-specific prompt templates
-│   ├── prompt/            # Model-specific system prompt text files (anthropic, gpt, gemini, etc.)
-│   ├── result.el          # Result object formatting helpers
-│   ├── ui.el              # Transient control menus (`kargu-menu`)
+│   ├── prompt/            # Model-specific system prompt text files
+│   ├── plan.el            # Plan mode facade
+│   ├── plan/              # Plan sub-modules (checklist, review, apply)
+│   ├── ui.el              # Transient control menus facade
+│   ├── ui/
+│   │   ├── transient.el   # kargu-menu transient dispatch
+│   │   └── notify.el      # kargu-notify UI notification
 │   │
-│   ├── api.el             # High-level API dispatch (`kargu-api-send`, cancellation)
+│   ├── api.el             # High-level API dispatch facade
 │   ├── api/
-│   │   ├── circuit.el     # Circuit breaker for provider failure protection
-│   │   ├── http.el        # Asynchronous plz HTTP client with exponential backoff
-│   │   ├── response.el    # Response accessors, reasoning extraction, assistant recording
-│   │   ├── stream.el      # Server-Sent Events (SSE) chunk parser and stream dispatcher
+│   │   ├── catalog.el     # Live /models catalog fetcher & metadata cache
+│   │   ├── circuit.el     # Circuit breaker (3-state: closed/open/half-open)
+│   │   ├── client.el      # Payload builder, provider-specific request shaping
+│   │   ├── http.el        # Async plz HTTP client with exponential backoff
+│   │   ├── response.el    # Response accessors, reasoning extraction
+│   │   ├── select.el      # Model selection UI (company / transient)
+│   │   ├── stream.el      # SSE chunk parser and stream dispatcher
 │   │   └── tools.el       # Tool registry, schema builder, parameter sanitizer
 │   │
-│   ├── history.el         # Message history storage, protocol firewall (`kargu--validate-history`)
-│   ├── history-compact.el # History compaction entry points and thresholds
+│   ├── history.el         # Message history storage, protocol firewall facade
+│   ├── history-compact.el # Bridge → kargu/history/compact (backward compat)
 │   ├── history/
-│   │   └── compact.el     # Tail extraction, compaction application, ACK generation
+│   │   ├── protocol.el    # History storage: kargu--message-history, -add, -reset
+│   │   ├── repair.el      # Protocol firewall: kargu--validate-history
+│   │   └── compact.el     # Compaction: tail extraction, ACK generation
 │   │
-│   ├── loop.el            # Agent run lifecycle (`kargu-loop-send`, `kargu-loop-stop`)
+│   ├── loop.el            # Agent run lifecycle facade
 │   ├── loop/
-│   │   ├── machine.el     # Request/response event classification and table dispatch
-│   │   ├── tools.el       # Sequential tool execution queue, doom-loop detection
+│   │   ├── machine.el     # Request/response event classification and dispatch
+│   │   ├── ui.el          # Interactive UI: turn-limit prompt, continue/stop buttons
+│   │   ├── tools.el       # Sequential tool queue, doom-loop detection, batch dedup
 │   │   ├── heal.el        # Post-edit LSP diagnostics and self-healing rounds
 │   │   └── compact.el     # Compaction turn handling and single-compaction cap
 │   │
 │   ├── chat.el            # Chat sidebar buffer management and major mode
 │   ├── chat/
-│   │   ├── attach.el      # Mention parsing (`@[file]`), synthetic read attachments
+│   │   ├── attach.el      # Mention parsing (@[file]), synthetic read attachments
 │   │   ├── complete.el    # Company completion backend for files and LSP symbols
 │   │   ├── header.el      # Chat buffer header line with mode buttons
 │   │   ├── prompt.el      # Interactive prompt input area and keybindings
-│   │   └── render.el      # Markdown fontification, streaming deltas, thought blocks
+│   │   ├── render.el      # Markdown fontification, streaming deltas, thought blocks
+│   │   └── tune.el        # Model parameter tuning UI (temperature, reasoning effort)
 │   │
 │   └── tools/
-│       ├── bash.el        # Terminal shell execution tool
-│       ├── dape.el        # Live debugging context, breakpoint management, evaluation
-│       ├── diff.el        # Shadow buffers, Ediff review workflows, patch rollback
-│       ├── lsp.el         # LSP project skeleton, diagnostic queries, symbol lookup
+│       ├── bash.el        # Shell execution tool with approval gate
+│       ├── dape.el        # Live debugging context, breakpoints, eval
+│       ├── diff.el        # Shadow buffers, ediff review, rollback facade
+│       ├── diff/
+│       │   ├── stage.el   # Shadow buffer creation and staging logic
+│       │   ├── review.el  # Ediff interaction (blocking/async/auto modes)
+│       │   └── track.el   # Changed-file tracking: kargu-diff-changed-files
+│       ├── git.el         # Git operations: stage, commit, branch, stash
+│       ├── lsp.el         # LSP skeleton, diagnostics, xref, symbol lookup
 │       ├── search.el      # Ripgrep workspace search and glob file matching
 │       ├── skill.el       # Agent skill loader and custom instructions
 │       ├── toolchain.el   # Project toolchain and build system detector
-│       └── webfetch.el    # Web page fetcher via curl with flag injection guards
+│       └── webfetch.el    # Web page fetcher via curl
 │
 └── proof/
-    ├── KarguProtocol.tla  # Formal TLA+ specification of message protocols & firewall
-    ├── KarguLoop.tla      # Formal TLA+ specification of the agent loop & tool cycle
+    ├── KarguContract.tla  # Roles, modes, message schema, contract predicates
+    ├── KarguProtocol.tla  # Message firewall, history validation, compaction
+    ├── KarguCircuit.tla   # Circuit breaker state machine
+    ├── KarguTools.tla     # Tool gating, doom-loop detection, batch dedup
+    ├── KarguState.tla     # Centralized state store & lifecycle transitions
+    ├── KarguLoop.tla      # Full agent loop state machine (all states & safety)
     ├── KarguLoop.cfg      # Default TLC configuration
-    ├── MC.tla             # Model checking wrapper module
-    ├── MC.cfg             # Model checking bounded parameters & invariants
-    ├── README.md          # Formal proof documentation and fault-injection guide
+    ├── MC.tla             # Model checking wrapper
+    ├── MC.cfg             # Bounded parameters & invariants for TLC
+    ├── README.md          # Formal proof documentation
     └── run_tlc.sh         # Shell script to run TLC model checker
 ```

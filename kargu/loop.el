@@ -40,6 +40,8 @@
 (require 'kargu/tools/diff)
 (require 'kargu/tools/lsp)
 
+(declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id))
+
 (defgroup kargu-loop nil
   "The autonomous agent loop."
   :group 'kargu
@@ -97,6 +99,10 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
      "ERROR: tool `%s' is disabled in %s mode (read-only); switch to agent mode (M-x kargu-set-mode) before modifying files or debugger state"
      name kargu-active-mode)))
 
+;; kargu--tools-visible-p is declared in `kargu/api/tools.el' (defvar kargu--tools-visible-p nil).
+;; This forward declaration prevents byte-compiler warnings when loop.el is compiled
+;; before api/tools.el has been loaded.
+(defvar kargu--tools-visible-p)
 (setq kargu--tools-visible-p #'kargu-loop--tool-visible-p)
 
 (defun kargu-loop-running-p ()
@@ -172,6 +178,12 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
                    :doom-sigs nil)))
     (when (fboundp 'kargu-diff-reset-run-files)
       (kargu-diff-reset-run-files))
+    (when (and (fboundp 'kargu-model-supports-tools-p)
+               (not (kargu-model-supports-tools-p)))
+      (if (eq kargu-active-mode 'agent)
+          (user-error "Model '%s' does not support tool calling; switch to a tool-capable model or ask mode" (kargu--model))
+        (plist-put run :no-tools t)
+        (kargu-log 'info "model '%s' does not support tools; running in tool-free mode" (kargu--model))))
     (setq kargu--loop-run run)
     (plist-put kargu--session :active t)
     (kargu-log 'info "run start (mode=%s, model=%s)"

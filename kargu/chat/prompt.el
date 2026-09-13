@@ -66,102 +66,91 @@ Insertion type is t so streamed output stays above the prompt.")
 (defvar-local kargu-chat--prompt-marker nil
   "Marker at the start of the editable prompt input.")
 
+(defun kargu-chat--footer-button (label face help action-fn &optional mouse-fn)
+  "Create an interactive button text string for footer.
+LABEL is the displayed text. FACE is the font face. HELP is tooltip text.
+ACTION-FN is called on RET or click. MOUSE-FN is called with event if supplied."
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] (or mouse-fn (lambda (_) (interactive) (funcall action-fn))))
+    (define-key map [mouse-2] (or mouse-fn (lambda (_) (interactive) (funcall action-fn))))
+    (define-key map (kbd "RET") (lambda () (interactive) (funcall action-fn)))
+    (propertize label
+                'face face
+                'mouse-face 'highlight
+                'help-echo help
+                'keymap map
+                'local-map map
+                'button t
+                'action (lambda (_) (funcall action-fn)))))
+
+(defun kargu-chat--footer-model-label (raw-m)
+  "Return cons (LABEL . FACE) for RAW-M model in footer."
+  (let ((has-model (and (stringp raw-m) (not (string-empty-p raw-m)))))
+    (if has-model
+        (let* ((cap (if (fboundp 'kargu-model-context-window)
+                        (kargu-model-context-window raw-m)
+                      128000))
+               (cap-str (if (>= cap 1000000)
+                            (format "%dm" (/ cap 1000000))
+                          (format "%dk" (/ cap 1000)))))
+          (cons (format "[%s (%s ctx)]" raw-m cap-str) 'font-lock-string-face))
+      (cons "[select model]" 'font-lock-warning-face))))
+
 (defun kargu-chat--footer-string ()
   "Build the interactive footer line shown at the bottom of the chat buffer.
 Contains clickable mode, provider, model, context usage, and effort buttons."
   (let* ((mode-name (upcase (symbol-name (or (bound-and-true-p kargu-active-mode) 'ask))))
          (pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "default"))
          (raw-m (if (fboundp 'kargu--model) (kargu--model) nil))
-         (has-model (and (stringp raw-m) (not (string-empty-p raw-m))))
-         (cap (if (and has-model (fboundp 'kargu-model-context-window))
-                  (kargu-model-context-window raw-m)
-                128000))
-         (cap-str (if (>= cap 1000000)
-                      (format "%dm" (/ cap 1000000))
-                    (format "%dk" (/ cap 1000))))
-         (m-label (if has-model
-                      (format "[%s (%s ctx)]" raw-m cap-str)
-                    "[select model]"))
-         (m-face (if has-model 'font-lock-string-face 'font-lock-warning-face))
+         (m-info (kargu-chat--footer-model-label raw-m))
          (ctx-info (if (fboundp 'kargu-session-context-info)
                        (kargu-session-context-info)
                      (list :formatted "128k")))
          (ctx-str (plist-get ctx-info :formatted))
          (effort (if (boundp 'kargu-reasoning-effort) (or kargu-reasoning-effort "off") "off"))
-         (mode-map (make-sparse-keymap))
-         (p-map (make-sparse-keymap))
-         (m-map (make-sparse-keymap))
-         (e-map (make-sparse-keymap)))
-    (define-key mode-map [mouse-1] (lambda (e) (interactive "e") (kargu-chat-select-mode-company e)))
-    (define-key mode-map [mouse-2] (lambda (e) (interactive "e") (kargu-chat-select-mode-company e)))
-    (define-key mode-map (kbd "RET") (lambda () (interactive) (kargu-chat-select-mode-company)))
-
-    (define-key p-map [mouse-1] (lambda (e) (interactive "e") (kargu-chat-select-provider-company e)))
-    (define-key p-map [mouse-2] (lambda (e) (interactive "e") (kargu-chat-select-provider-company e)))
-    (define-key p-map (kbd "RET") (lambda () (interactive) (kargu-chat-select-provider-company)))
-
-    (define-key m-map [mouse-1] (lambda (e) (interactive "e") (kargu-chat-select-model-company nil nil nil e)))
-    (define-key m-map [mouse-2] (lambda (e) (interactive "e") (kargu-chat-select-model-company nil nil nil e)))
-    (define-key m-map (kbd "RET") (lambda () (interactive) (kargu-chat-select-model-company)))
-
-    (define-key e-map [mouse-1] (lambda (e) (interactive "e") (kargu-chat-select-effort-company e)))
-    (define-key e-map [mouse-2] (lambda (e) (interactive "e") (kargu-chat-select-effort-company e)))
-    (define-key e-map (kbd "RET") (lambda () (interactive) (kargu-chat-select-effort-company)))
-
-    (let ((mode-btn (propertize (format "[%s]" mode-name)
-                                'face 'bold
-                                'mouse-face 'highlight
-                                'help-echo "mouse-1 or RET: switch mode with company list (C-c C-x)"
-                                'keymap mode-map
-                                'local-map mode-map
-                                'button t
-                                'action (lambda (_) (kargu-chat-select-mode-company))))
-          (p-btn (propertize (format "[%s]" pname)
-                             'face 'font-lock-type-face
-                             'mouse-face 'highlight
-                             'help-echo "mouse-1 or RET: switch provider (company list)"
-                             'keymap p-map
-                             'local-map p-map
-                             'button t
-                             'action (lambda (_) (kargu-chat-select-provider-company))))
-          (m-btn (propertize m-label
-                             'face m-face
-                             'mouse-face 'highlight
-                             'help-echo "mouse-1 or RET: select model (company list)"
-                             'keymap m-map
-                             'local-map m-map
-                             'button t
-                             'action (lambda (_) (kargu-chat-select-model-company))))
-          (ctx-btn (propertize (format "[ctx: %s]" ctx-str)
-                               'face 'font-lock-doc-face
-                               'help-echo "Model context usage (used / capacity)"))
-          (e-btn (propertize (format "[%s]" effort)
-                             'face 'font-lock-keyword-face
-                             'mouse-face 'highlight
-                             'help-echo "mouse-1 or RET: select reasoning effort (company list)"
-                             'keymap e-map
-                             'local-map e-map
-                             'button t
-                             'action (lambda (_) (kargu-chat-select-effort-company)))))
-      (propertize
-       (concat (propertize "mode: " 'face 'font-lock-comment-face)
-               mode-btn
-               "  "
-               (propertize "provider: " 'face 'font-lock-comment-face)
-               p-btn
-               "  "
-               (propertize "model: " 'face 'font-lock-comment-face)
-               m-btn
-               " "
-               ctx-btn
-               "  "
-               (propertize "effort: " 'face 'font-lock-comment-face)
-               e-btn
-               "\n")
-       'field 'prompt
-       'read-only t
-       'front-sticky t
-       'rear-nonsticky '(read-only face field front-sticky)))))
+         (mode-btn (kargu-chat--footer-button
+                    (format "[%s]" mode-name) 'bold
+                    "mouse-1 or RET: switch mode with company list (C-c C-x)"
+                    #'kargu-chat-select-mode-company
+                    (lambda (e) (interactive "e") (kargu-chat-select-mode-company e))))
+         (p-btn (kargu-chat--footer-button
+                 (format "[%s]" pname) 'font-lock-type-face
+                 "mouse-1 or RET: switch provider (company list)"
+                 #'kargu-chat-select-provider-company
+                 (lambda (e) (interactive "e") (kargu-chat-select-provider-company e))))
+         (m-btn (kargu-chat--footer-button
+                 (car m-info) (cdr m-info)
+                 "mouse-1 or RET: select model (company list)"
+                 #'kargu-chat-select-model-company
+                 (lambda (e) (interactive "e") (kargu-chat-select-model-company nil nil nil e))))
+         (ctx-btn (propertize (format "[ctx: %s]" ctx-str)
+                              'face 'font-lock-doc-face
+                              'help-echo "Model context usage (used / capacity)"))
+         (e-btn (kargu-chat--footer-button
+                 (format "[%s]" effort) 'font-lock-keyword-face
+                 "mouse-1 or RET: select reasoning effort (company list)"
+                 #'kargu-chat-select-effort-company
+                 (lambda (e) (interactive "e") (kargu-chat-select-effort-company e)))))
+    (propertize
+     (concat "\n\n"
+             (propertize "mode: " 'face 'font-lock-comment-face)
+             mode-btn
+             "  "
+             (propertize "provider: " 'face 'font-lock-comment-face)
+             p-btn
+             "  "
+             (propertize "model: " 'face 'font-lock-comment-face)
+             m-btn
+             " "
+             ctx-btn
+             "  "
+             (propertize "effort: " 'face 'font-lock-comment-face)
+             e-btn
+             "\n")
+     'field 'prompt
+     'read-only t
+     'front-sticky t
+     'rear-nonsticky '(read-only face field front-sticky))))
 
 (defun kargu-chat-refresh-footer ()
   "Refresh the footer line at the bottom of the chat buffer in-place."

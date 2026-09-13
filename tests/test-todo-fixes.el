@@ -62,11 +62,16 @@
         (progn
           (with-current-buffer chat-buf
             (kargu-chat-mode)
-            ;; Prompt continue function
-            (kargu-loop--prompt-continue run "test prompt")
-            (should (string-match-p "Turn limit reached" (buffer-string)))
-            (should (string-match-p "Continue" (buffer-string)))
-            (should (string-match-p "Stop" (buffer-string)))))
+            ;; Mock kargu-api-send so we don't start a real un-mocked request in batch test
+            (cl-letf (((symbol-function 'kargu-api-send)
+                       (lambda (_prompt _cb &optional _delta) nil)))
+              ;; Prompt continue function
+              (kargu-loop--prompt-continue run "test prompt")
+              (should (string-match-p "Turn limit reached" (buffer-string)))
+              (should (string-match-p "Continue" (buffer-string)))
+              (should (string-match-p "Stop" (buffer-string))))))
+      (setq kargu--busy nil)
+      (when (fboundp 'kargu-state-reset) (kargu-state-reset))
       (kill-buffer chat-buf))))
 
 (ert-deftest kargu-todo-4-sound-notifications-test ()
@@ -217,6 +222,49 @@
                                       (setq err-msg (kargu-response-error-message resp)))))
               (should-not err-msg))))
       (setq kargu--busy nil))))
+
+(ert-deftest kargu-todo-11-unsupported-tools-fallback-test ()
+  "Test detection and handling of provider endpoints that do not support tools."
+  (let ((err-text "HTTP 404: (404) No endpoints found that support tool use. Try disabling \"lsp_project_skeleton\". To learn more about provider routing, visit: https://openrouter.ai/docs/guides/routing/provider-selection"))
+    ;; 1. Error string pattern detection
+    (should (kargu--error-no-tools-support-p err-text))
+    (should (kargu--error-no-tools-support-p "Model does not support tools"))
+
+    ;; 2. In ask mode: falls back to :no-tools t and retries
+    (let* ((kargu-active-mode 'ask)
+           (kargu--model-metadata-table (make-hash-table :test 'equal))
+           (kargu--session-model "openrouter/free-model")
+           (kargu--session-provider "openrouter")
+           (retry-called nil)
+           (finish-called nil)
+           (run (list :state 'wait :no-tools nil)))
+      (cl-letf (((symbol-function 'kargu--loop-request)
+                 (lambda (_run _prompt)
+                   (setq retry-called t)))
+                ((symbol-function 'kargu--loop-finish)
+                 (lambda (&rest _) (setq finish-called t))))
+        (kargu-loop--handle-tools-unsupported run err-text)
+        (should retry-called)
+        (should-not finish-called)
+        (should (plist-get run :no-tools))
+        (should-not (kargu-model-supports-tools-p "openrouter/free-model"))
+        (should (string-match-p "🚫 no-tools" (kargu-model-annotation-string "openrouter/free-model" "openrouter")))))
+
+    ;; 3. In agent mode: finishes with descriptive error
+    (let* ((kargu-active-mode 'agent)
+           (kargu--model-metadata-table (make-hash-table :test 'equal))
+           (kargu--session-model "openrouter/free-model")
+           (kargu--session-provider "openrouter")
+           (finish-err nil)
+           (run (list :state 'wait :no-tools nil)))
+      (cl-letf (((symbol-function 'kargu--loop-finish)
+                 (lambda (_run status text)
+                   (setq finish-err (cons status text))))
+                ((symbol-function 'kargu--loop-request)
+                 (lambda (&rest _) nil)))
+        (kargu-loop--handle-tools-unsupported run err-text)
+        (should (equal (car finish-err) :error))
+        (should (string-match-p "does not support tool use" (cdr finish-err)))))))
 
 (provide 'tests/test-todo-fixes)
 ;;; test-todo-fixes.el ends here

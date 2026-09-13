@@ -49,6 +49,9 @@ MCNext ==
     \/ CompactionFinish(FALSE)
     \/ UserStop
     \/ CircuitCooldownCanaryAction
+    \/ LoopPause
+    \/ PauseDecisionContinue(MaxIterations)
+    \/ PauseDecisionStop
 
 MCSpec == Init /\ [][MCNext]_vars
 

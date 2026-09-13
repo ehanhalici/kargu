@@ -30,8 +30,9 @@
 
 (require 'kargu/core)
 (require 'kargu/prompt)
-(require 'kargu/history)
+(require 'kargu/history/protocol)
 
+(declare-function kargu--validate-history "kargu/history/repair")
 (declare-function kargu-model-context-window "kargu/api" (&optional model-id))
 
 (defcustom kargu-history-compact-chars 45000

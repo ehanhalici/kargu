@@ -36,7 +36,10 @@
 (defvar kargu-loop-empty-retries)
 (defvar kargu-loop-upstream-retries)
 (defvar kargu-max-iterations)
+(defvar kargu-chat--output-marker)
+(defvar kargu-chat--prompt-marker)
 
+(declare-function kargu-chat--prompt-live-p "kargu/chat/prompt")
 (declare-function kargu--api-error-looks-retryable-p "kargu/api/http" (message))
 (declare-function kargu--api-retry-delay "kargu/api/http" (attempt err))
 
@@ -46,6 +49,9 @@
 (declare-function kargu--loop-compact-allowed-p "kargu/loop/compact" (run))
 (declare-function kargu--loop-start-compact "kargu/loop/compact" (run prompt))
 (declare-function kargu--loop-next-call "kargu/loop/tools" (run queue))
+(declare-function kargu-model-get-metadata "kargu/api/catalog" (id))
+(declare-function kargu-model-set-metadata "kargu/api/catalog" (id plist))
+(declare-function kargu--model "kargu/config/key" ())
 
 (defconst kargu-loop--length-reasons '("length" "max_tokens")
   "finish_reason values that mean the completion was truncated.")
@@ -83,102 +89,7 @@
       (concat prompt "\n\n" kargu-prompt-max-steps-nudge)
     kargu-prompt-max-steps-nudge))
 
-(defvar kargu-loop--mock-continue-decision nil
-  "Mock decision for `kargu-loop--prompt-continue' in unit tests.
-When non-nil, may be `:continue' or `:stop'.")
-
-(defun kargu-loop--prompt-continue (run prompt)
-  "Prompt the user interactively when RUN reaches its iteration limit.
-Offers to add another batch of turns (`kargu-max-iterations') or stop."
-  (kargu-loop--set-state run 'pause)
-  (when (fboundp 'kargu-notify)
-    (kargu-notify 'limit))
-  (let* ((chat-buf (plist-get run :chat-buffer))
-         (max-iter (or (plist-get run :iterations) 12))
-         (batch (if (boundp 'kargu-max-iterations) kargu-max-iterations 12))
-         (decision nil))
-    (cond
-     (kargu-loop--mock-continue-decision
-      (setq decision kargu-loop--mock-continue-decision)
-      (when (and chat-buf (buffer-live-p chat-buf))
-        (with-current-buffer chat-buf
-          (let ((inhibit-read-only t))
-            (goto-char (point-max))
-            (insert "\n")
-            (insert (propertize (format "  ⏸  [Turn limit reached (%d turns)]\n" max-iter)
-                                'face '(:inherit warning :weight bold)))
-            (insert (format "     Continue for another %d turns?\n     " batch))
-            (insert (format "[✓ Continue (+%d turns)]  [✗ Stop]\n\n" batch))))))
-     ((not (and chat-buf (buffer-live-p chat-buf) (not noninteractive)))
-      (if (or noninteractive
-              (y-or-n-p (format "Kargu reached %d turns limit. Continue for another %d turns? "
-                                max-iter batch)))
-          (setq decision (if noninteractive :stop :continue))
-        (setq decision :stop)))
-     (t
-      (with-current-buffer chat-buf
-        (let ((inhibit-read-only t))
-          (when (and (fboundp 'kargu-chat--prompt-live-p)
-                     (kargu-chat--prompt-live-p))
-            (delete-region kargu-chat--output-marker (point-max))
-            (setq kargu-chat--prompt-marker nil))
-          (goto-char (point-max))
-          (insert "\n")
-          (insert (propertize (format "  ⏸  [Turn limit reached (%d turns)]\n" max-iter)
-                              'face '(:inherit warning :weight bold)))
-          (insert (format "     Continue for another %d turns?\n     " batch))
-          (insert-button
-           (format "[✓ Continue (+%d turns)]" batch)
-           'action (lambda (_)
-                     (setq decision :continue)
-                     (exit-recursive-edit))
-           'face '(:inherit success :weight bold)
-           'help-echo "Click to allow another turn batch")
-          (insert "  ")
-          (insert-button
-           "[✗ Stop]"
-           'action (lambda (_)
-                     (setq decision :stop)
-                     (exit-recursive-edit))
-           'face '(:inherit error :weight bold)
-           'help-echo "Click to stop the run")
-          (insert "\n\n")
-          (setq kargu-chat--output-marker (copy-marker (point) t))))
-      (dolist (win (get-buffer-window-list chat-buf nil t))
-        (set-window-point win (point-max)))
-      (message "Turn limit reached (%d turns): click [✓ Continue] or [✗ Stop]" max-iter)
-      (condition-case _sig
-          (recursive-edit)
-        (quit
-         (setq decision :stop)
-         (message "kargu: run stopped at turn limit")))
-      (with-current-buffer chat-buf
-        (let ((inhibit-read-only t))
-          (goto-char (point-max))
-          (if (eq decision :continue)
-              (insert (propertize (format "     -> [✓ Continuing for +%d turns...]\n" batch)
-                                  'face 'font-lock-string-face))
-            (insert (propertize "     -> [✗ Stopped]\n" 'face 'font-lock-warning-face)))
-          (setq kargu-chat--output-marker (copy-marker (point) t))))))
-    (if (eq decision :continue)
-        (progn
-          (plist-put run :max-iterations (+ max-iter batch))
-          (plist-put run :no-tools nil)
-          (kargu-log 'info "loop: extended turn limit by %d (new cap: %d)"
-                     batch (+ max-iter batch))
-          (kargu-loop--set-state run 'wait)
-          (let ((on-delta (and (plist-get run :on-delta)
-                               (lambda (event)
-                                 (kargu--loop-forward-delta run event)))))
-            (kargu-api-send
-             prompt
-             (lambda (response)
-               (kargu--loop-handle-response run response))
-             on-delta)))
-      (kargu--loop-finish
-       run :limit
-       (format "iteration limit reached (%d model round-trips); stopped by user."
-               max-iter)))))
+(require 'kargu/loop/ui)
 
 (defun kargu-loop--request-send (run prompt)
   "Send one model turn for RUN."
@@ -318,6 +229,34 @@ Reasoning-only replies are empty, not answers."
                      (when (kargu-loop--live-p run)
                        (kargu--loop-request run nil)))))))
 
+(defun kargu--error-no-tools-support-p (err)
+  "Return non-nil if ERR indicates the provider rejected tool use."
+  (and (stringp err)
+       (string-match-p
+        "no endpoints found that support tool use\\|does not support tools\\|tools are not supported\\|function calling is not supported\\|try disabling"
+        (downcase err))))
+
+(defun kargu-loop--handle-tools-unsupported (run err)
+  "Handle provider tool rejection ERR on RUN.
+In `agent' mode, aborts with a descriptive error.  In `ask' or `plan' mode,
+records :supports-tools nil and retries without tools."
+  (let ((mid (kargu--model)))
+    (when (fboundp 'kargu-model-set-metadata)
+      (let ((meta (copy-sequence (kargu-model-get-metadata mid))))
+        (setq meta (plist-put meta :supports-tools nil))
+        (kargu-model-set-metadata mid meta)))
+    (if (eq kargu-active-mode 'agent)
+        (progn
+          (kargu-log 'error "loop: model '%s' does not support tools in agent mode: %s" mid err)
+          (kargu--loop-finish
+           run :error
+           (format "Model '%s' does not support tool use. Switch to a tool-capable model (e.g. Claude 3.5 Sonnet, GPT-4o, DeepSeek V3) or switch to Ask mode."
+                   mid)))
+      (kargu-log 'warn "loop: model does not support tool use; retrying without tools in %s mode"
+                 kargu-active-mode)
+      (plist-put run :no-tools t)
+      (kargu--loop-request run nil))))
+
 (defun kargu-loop--on-error (run response)
   "Retry RUN on 502/overload, otherwise finish with the error in RESPONSE."
   (let ((err (or (kargu-response-error-message response)
@@ -325,12 +264,17 @@ Reasoning-only replies are empty, not answers."
                               '("content-filter" "content_filter"))
                       "The response was blocked by the provider's content filter")
                  "unknown error")))
-    (if (and (kargu--api-error-looks-retryable-p err)
-             (< (or (plist-get run :upstream-retries) 0)
-                (or kargu-loop-upstream-retries 0)))
-        (kargu-loop--retry-upstream run err)
+    (cond
+     ((and (kargu--error-no-tools-support-p err)
+           (not (plist-get run :no-tools)))
+      (kargu-loop--handle-tools-unsupported run err))
+     ((and (kargu--api-error-looks-retryable-p err)
+           (< (or (plist-get run :upstream-retries) 0)
+              (or kargu-loop-upstream-retries 0)))
+      (kargu-loop--retry-upstream run err))
+     (t
       (kargu-log 'error "loop: request failed: %s" err)
-      (kargu--loop-finish run :error err))))
+      (kargu--loop-finish run :error err)))))
 
 (defun kargu-loop--on-tools (run response)
   "Queue tool calls from RESPONSE.

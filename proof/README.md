@@ -14,6 +14,7 @@ proof/
 ├── KarguProtocol.tla   # LLM protocol firewall, history validation, and turn transformations
 ├── KarguCircuit.tla    # Circuit breaker state machine (:closed, :open, :half-open), error classification
 ├── KarguTools.tla      # Tool queue, mode safety gating, and doom-loop detection (3-signature lock)
+├── KarguState.tla      # Centralized state store, pure selectors, lifecycle transitions, and busy invariants
 ├── KarguLoop.tla       # Top-level orchestrator composing submodules with strict ingress/egress contracts
 ├── KarguLoop.cfg       # Base model checker configuration
 ├── MC.tla              # Model checking wrapper with realistic parameters and state bounds
@@ -32,6 +33,7 @@ proof/
 | `KarguProtocol.tla` | [kargu/history.el](file:///home/emrehan/.emacs.local/kargu/kargu/history.el)<br>[kargu/history/compact.el](file:///home/emrehan/.emacs.local/kargu/kargu/history/compact.el) | Protocol firewall invariants (`ProtocolFirewallValid`), history repair (`ValidateHistory`), orphan tool dropping, user turn merging, and compaction transformations (`ApplyCompaction`). |
 | `KarguCircuit.tla` | [kargu/api/circuit.el](file:///home/emrehan/.emacs.local/kargu/kargu/api/circuit.el)<br>[kargu/api/response.el](file:///home/emrehan/.emacs.local/kargu/kargu/api/response.el) | Circuit breaker 3-state machine (`CLOSED`, `OPEN`, `HALF_OPEN`), consecutive failure thresholding (`CircuitRecordFailure`), canary recovery (`CircuitCooldownCanary`), and API response event classification. |
 | `KarguTools.tla` | [kargu/loop/tools.el](file:///home/emrehan/.emacs.local/kargu/kargu/loop/tools.el)<br>[kargu/loop/heal.el](file:///home/emrehan/.emacs.local/kargu/kargu/loop/heal.el) | Tool execution queue, mode safety gate (`GateToolAllowed`: mutating tools forbidden in non-mutating modes), doom-loop detection (3 consecutive identical calls), and LSP diagnostics post-edit healing. |
+| `KarguState.tla` | [kargu/state/store.el](file:///home/emrehan/.emacs.local/kargu/kargu/state/store.el)<br>[kargu/state/selectors.el](file:///home/emrehan/.emacs.local/kargu/kargu/state/selectors.el)<br>[kargu/state/transitions.el](file:///home/emrehan/.emacs.local/kargu/kargu/state/transitions.el)<br>[kargu/state/hooks.el](file:///home/emrehan/.emacs.local/kargu/kargu/state/hooks.el) | Centralized state store, pure selectors (`GetStatus`, `GetMode`, `GetBusy`, etc.), lifecycle transitions (`TransitionStatus`, `TransitionMode`, `TransitionProvider`, `TransitionModel`, `TransitionEffort`), cumulative token counters, and busy coherence invariant (`StateInvariant`). |
 | `KarguLoop.tla` | [kargu/loop.el](file:///home/emrehan/.emacs.local/kargu/kargu/loop.el)<br>[kargu/loop/machine.el](file:///home/emrehan/.emacs.local/kargu/kargu/loop/machine.el) | Composed state machine (`IDLE`, `REQUEST`, `WAIT_MODEL`, `EXEC_TOOLS`, `VERIFY_FILES`, `COMPACT_WAIT`, `DONE`, `ERROR`, `STOPPED`) enforcing strict Ingress Assertions and Egress post-conditions on all actions. |
 
 ---

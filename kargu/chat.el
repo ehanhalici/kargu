@@ -319,7 +319,11 @@ opens in whichever window is currently selected (left or right)."
   (let ((buffer (current-buffer)))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
-        (goto-char (point-max))))))
+        (goto-char (point-max)))
+      (dolist (win (get-buffer-window-list buffer nil t))
+        (set-window-point win (point-max))
+        (with-selected-window win
+          (goto-char (point-max)))))))
 
 (defun kargu-chat-send ()
   "Send the chat prompt input, or focus the prompt if it is empty.

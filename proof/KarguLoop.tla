@@ -13,7 +13,7 @@
 (***************************************************************************)
 
 EXTENDS Naturals, Sequences, FiniteSets, TLC,
-        KarguContract, KarguProtocol, KarguCircuit, KarguTools
+        KarguContract, KarguProtocol, KarguCircuit, KarguTools, KarguState
 
 CONSTANTS
     MaxIterations,          \* Cap on model roundtrips per run (e.g. 2..4)
@@ -38,6 +38,7 @@ States == {
     "EXEC_TOOLS",   \* Processing assistant tool call queue
     "VERIFY_FILES", \* Collecting LSP diagnostics for post-edit healing
     "COMPACT_WAIT", \* Compacting history via summary turn
+    "PAUSE",        \* Awaiting user decision at turn limit (interactive continuation)
     "DONE",         \* Run finished successfully (final answer delivered)
     "ERROR",        \* Run aborted due to error (doom loop, API fail, etc.)
     "STOPPED"       \* Run cancelled by user (`kargu-loop-stop`)
@@ -462,6 +463,42 @@ CircuitCooldownCanaryAction ==
                    doomSigs, pendingToolQueue, pendingToolCall, pendingVerifyFiles,
                    noTools, compacting, runStatus, generation, circuitFailures>>
 
+(* 17. LoopPause: Turn limit reached; awaiting user's continue/stop decision *)
+(* Mirrors `kargu-loop--prompt-continue' in `kargu/loop/machine.el' and     *)
+(* the interactive `kargu-loop/ui.el' continue/stop button UI.              *)
+LoopPause ==
+    /\ state = "REQUEST"
+    /\ iterations >= MaxIterations
+    /\ state ' = "PAUSE"
+    /\ UNCHANGED <<history, activeMode, iterations, healing, verifications,
+                   emptyRetries, upstreamRetries, compactions, lengthContinues,
+                   doomSigs, pendingToolQueue, pendingToolCall, pendingVerifyFiles,
+                   noTools, compacting, runStatus, generation,
+                   circuitState, circuitFailures>>
+
+(* 18a. PauseDecisionContinue: User grants more turns, run resumes from REQUEST *)
+PauseDecisionContinue(extraIterations) ==
+    /\ state = "PAUSE"
+    /\ extraIterations > 0
+    /\ state      ' = "REQUEST"
+    /\ iterations ' = iterations - extraIterations  \* resets relative counter
+    /\ noTools    ' = FALSE
+    /\ runStatus  ' = "none"
+    /\ UNCHANGED <<history, activeMode, healing, verifications,
+                   emptyRetries, upstreamRetries, compactions, lengthContinues,
+                   doomSigs, pendingToolQueue, pendingToolCall, pendingVerifyFiles,
+                   compacting, generation, circuitState, circuitFailures>>
+
+(* 18b. PauseDecisionStop: User stops; run finishes at limit *)
+PauseDecisionStop ==
+    /\ state = "PAUSE"
+    /\ state     ' = "DONE"
+    /\ runStatus ' = "limit"
+    /\ UNCHANGED <<history, activeMode, iterations, healing, verifications,
+                   emptyRetries, upstreamRetries, compactions, lengthContinues,
+                   doomSigs, pendingToolQueue, pendingToolCall, pendingVerifyFiles,
+                   noTools, compacting, generation, circuitState, circuitFailures>>
+
 (***************************************************************************)
 (* Safety Invariants Verified by TLC                                       *)
 (***************************************************************************)
@@ -506,7 +543,7 @@ Safety_AllTerminalStatesAnswered ==
 
 Safety_NoToolQueueOutsideExec ==
     state \notin {"EXEC_TOOLS", "VERIFY_FILES"} =>
-        (/\ pendingToolQueue = << >>
+        (/\ pendingToolQueue = <<>>
          /\ pendingToolCall.id = "none")
 
 Safety_NoPendingVerifyOutsideVerify ==
@@ -517,5 +554,12 @@ Safety_CircuitBreakerSoundness ==
 
 Safety_ContractIntegrity ==
     ContractHistory(history)
+
+(* PAUSE state: no request in flight and no pending tool queue *)
+Safety_PauseIsIdle ==
+    state = "PAUSE" =>
+        (/\ pendingToolQueue = <<>>
+         /\ pendingToolCall.id = "none"
+         /\ pendingVerifyFiles = {})
 
 =============================================================================

@@ -46,4 +46,19 @@ DoomLoopDetected(sigs, sig) ==
 MakeToolResult(id, name, output) ==
     MakeMsg("tool", output, << >>, id, name)
 
+(****************************************************************************)
+(* Batch Dedup (Mirrors `kargu--loop-tools-batch-cache' in tools.el)        *)
+(* Within a single assistant turn, if the same (name, arguments) pair       *)
+(* appears more than once, subsequent calls reuse the first result.         *)
+(****************************************************************************)
+
+BatchDedup(calls, sig) ==
+    \E k \in 1..Len(calls) :
+        /\ calls[k].name \o ":" \o calls[k].arguments = sig
+        /\ k < Len(calls)   \* not the first occurrence (first is executed)
+
+IsDuplicateInBatch(calls, idx) ==
+    LET sig == calls[idx].name \o ":" \o calls[idx].arguments
+    IN \E k \in 1..(idx-1) : calls[k].name \o ":" \o calls[k].arguments = sig
+
 =============================================================================

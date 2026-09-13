@@ -45,6 +45,8 @@
   (when (kargu-loop--live-p run)
     (if queue
         (kargu--loop-run-call run (car queue) (cdr queue))
+      ;; Clear turn batch cache when all tool calls of this turn are answered
+      (plist-put run :batch-cache nil)
       (kargu-log 'debug "loop: all tool calls answered; continuing")
       (kargu--loop-request run nil))))
 
@@ -90,17 +92,33 @@
                      (kargu--aget fn "name")
                    "unknown"))
            (args (and fn (kargu--aget fn "arguments")))
-           (id (kargu--loop-call-id call)))
+           (id (kargu--loop-call-id call))
+           (sig (kargu--loop-tool-sig name args))
+           (batch-cache (plist-get run :batch-cache))
+           (cached (and batch-cache (gethash sig batch-cache))))
       (kargu-log 'info "loop: tool call %s (id=%s)" name id)
-      (if (kargu--loop-doom-p run (kargu--loop-tool-sig name args))
-          (kargu--loop-doom-stop run id name queue)
+      (cond
+       ;; In-turn duplicate tool call deduplication: reuse result from earlier in this batch
+       (cached
+        (kargu-log 'info "loop: tool call %s (id=%s) is duplicate in current turn; reusing cached result" name id)
+        (kargu--loop-after-tool run id name cached queue))
+       ;; Doom-loop detection across consecutive turns
+       ((kargu--loop-doom-p run sig)
+        (kargu--loop-doom-stop run id name queue))
+       ;; Normal execution
+       (t
         (let ((result (condition-case-unless-debug err
-                         (or (kargu-loop--gate-tool name)
-                             (kargu-execute-tool name args))
-                       (error
-                        (format "ERROR: executing tool `%s' raised: %s"
-                                name (error-message-string err))))))
-          (kargu--loop-after-tool run id name result queue))))))
+                          (or (kargu-loop--gate-tool name)
+                              (kargu-execute-tool name args))
+                        (error
+                         (format "ERROR: executing tool `%s' raised: %s"
+                                 name (error-message-string err))))))
+          ;; Record into batch cache for subsequent calls within this turn
+          (unless batch-cache
+            (setq batch-cache (make-hash-table :test 'equal))
+            (plist-put run :batch-cache batch-cache))
+          (puthash sig result batch-cache)
+          (kargu--loop-after-tool run id name result queue)))))))
 
 (defun kargu-loop--classify-after-tool (run files)
   "Event after a tool result: `verify', `budget', or `plain'."
