@@ -20,6 +20,9 @@ StateStatuses == {
     ":executing-tools",
     ":verifying",
     ":compacting",
+    ":pause",
+    ":done",
+    ":limit",
     ":stopped",
     ":error"
 }
@@ -74,7 +77,7 @@ GetTotalTokens(st) == st.totalTokens
 
 \* Transition status updates both status and busy flag coherently
 TransitionStatus(st, nextStatus) ==
-    LET nextBusy == nextStatus \notin {":idle", ":stopped", ":error"}
+    LET nextBusy == nextStatus \notin {":idle", ":stopped", ":error", ":done", ":limit", ":pause"}
     IN [st EXCEPT !.status = nextStatus, !.busy = nextBusy]
 
 \* Transition mode with safety validation

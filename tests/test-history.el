@@ -70,5 +70,27 @@
     (should (string-search "part 1\n\npart 2"
                            (alist-get "content" (nth 1 kargu--message-history) nil nil #'equal)))))
 
+(ert-deftest kargu-history-flush-pending-deterministic-test ()
+  "Ensure kargu--flush-pending produces synthetic tool results in deterministic call order."
+  (let* ((pending (make-hash-table :test #'equal))
+         (out-rev nil))
+    (puthash "call_b" (cons "tool_b" 2) pending)
+    (puthash "call_a" (cons "tool_a" 1) pending)
+    (puthash "call_c" (cons "tool_c" 3) pending)
+    (setq out-rev (kargu--flush-pending pending out-rev))
+    (let ((final-list (nreverse out-rev)))
+      (should (= (length final-list) 3))
+      (should (equal (alist-get "tool_call_id" (nth 0 final-list) nil nil #'equal) "call_a"))
+      (should (equal (alist-get "tool_call_id" (nth 1 final-list) nil nil #'equal) "call_b"))
+      (should (equal (alist-get "tool_call_id" (nth 2 final-list) nil nil #'equal) "call_c")))))
+
+(ert-deftest kargu-history-refresh-system-head-non-destructive-test ()
+  "Ensure kargu--history-refresh-system-head does not mutate original message in place."
+  (let* ((orig-msg '(("role" . "system") ("content" . "original system prompt")))
+         (history (list orig-msg))
+         (res (kargu--history-refresh-system-head history)))
+    (should (equal (alist-get "content" orig-msg nil nil #'equal) "original system prompt"))
+    (should-not (eq (car res) orig-msg))))
+
 (provide 'tests/test-history)
 ;;; test-history.el ends here

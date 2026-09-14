@@ -93,6 +93,45 @@
     (should (string-match-p "ERROR: apply_patch is disabled in debug mode"
                             (kargu-diff--apply-patch-tool '((patch . "*** Begin Patch\n*** End Patch")))))))
 
+(ert-deftest kargu-patch-multi-hunk-update-test ()
+  "Test that `apply_patch' correctly applies multiple hunks separated by @@."
+  (let* ((tmp-dir (make-temp-file "kargu-patch-multihunk" t))
+         (kargu-permission--override-root tmp-dir)
+         (kargu-diff-review-mode 'auto)
+         (kargu-active-mode 'agent)
+         (file-rel "multi.txt")
+         (abs-file (expand-file-name file-rel tmp-dir))
+         (initial-content "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n")
+         (patch-text
+          (concat "*** Begin Patch\n"
+                  "*** Update File: " file-rel "\n"
+                  "@@\n"
+                  " line 1\n"
+                  "-line 2\n"
+                  "+line two\n"
+                  " line 3\n"
+                  "@@\n"
+                  " line 8\n"
+                  "-line 9\n"
+                  "+line nine\n"
+                  " line 10\n"
+                  "*** End Patch\n")))
+    (unwind-protect
+        (progn
+          (with-temp-file abs-file
+            (insert initial-content))
+          (let ((result (kargu-diff-apply-patch patch-text)))
+            (should (stringp result))
+            (with-temp-buffer
+              (insert-file-contents abs-file)
+              (let ((text (buffer-string)))
+                (should (string-match-p "line two" text))
+                (should-not (string-match-p "line 2" text))
+                (should (string-match-p "line 5" text))
+                (should (string-match-p "line nine" text))
+                (should-not (string-match-p "line 9" text))))))
+      (delete-directory tmp-dir t))))
+
 (provide 'tests/test-patch)
 
 ;;; test-patch.el ends here

@@ -57,6 +57,20 @@
               (setq kargu--session-id new-id)
               new-id)))))
 
+(defun kargu-session-record-usage (tokens-in tokens-out)
+  "Record TOKENS-IN and TOKENS-OUT in `kargu--session', incrementing request count.
+Return the updated `kargu--session' plist."
+  (plist-put kargu--session :requests
+             (1+ (or (plist-get kargu--session :requests) 0)))
+  (when (numberp tokens-in)
+    (plist-put kargu--session :last-prompt-tokens tokens-in)
+    (plist-put kargu--session :tokens-in
+               (+ (or (plist-get kargu--session :tokens-in) 0) tokens-in)))
+  (when (numberp tokens-out)
+    (plist-put kargu--session :tokens-out
+               (+ (or (plist-get kargu--session :tokens-out) 0) tokens-out)))
+  kargu--session)
+
 (defun kargu-session-context-info ()
   "Return a plist (:used TOKENS :capacity CAP :percent PCT :formatted STR)."
   (let* ((in (or (plist-get kargu--session :last-prompt-tokens)

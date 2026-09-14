@@ -32,6 +32,7 @@
 
 (require 'kargu/core)
 (require 'kargu/config)
+(require 'kargu/state/selectors)
 (require 'kargu/tools/toolchain)
 
 (defvar kargu--compaction-system nil
@@ -215,7 +216,7 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
      (format "  Git Branch: %s\n" (or (plist-get env :branch) "(none)"))
      (format "  Context file: %s\n"
              (or (kargu--context-file-name) "(none)"))
-     (format "  Mode: %s\n" kargu-active-mode)
+     (format "  Mode: %s\n" (kargu-state-mode))
      "</env>\n\n"
      (kargu-prompt--toolchain-block root))))
 
@@ -251,8 +252,9 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
 
 (defun kargu-prompt--mode-block ()
   "Mode-specific system paragraph."
-  (or (cdr (assq kargu-active-mode kargu-mode-system-prompts))
-      (cdr (assq 'ask kargu-mode-system-prompts))))
+  (let ((mode (kargu-state-mode)))
+    (or (cdr (assq mode kargu-mode-system-prompts))
+        (cdr (assq 'ask kargu-mode-system-prompts)))))
 
 (defconst kargu-prompt--parts
   '(kargu-prompt--provider-base
@@ -276,7 +278,8 @@ During compaction, `kargu--compaction-system' replaces this."
 
 (defun kargu-prompt-mode-reminder ()
   "Per-turn `<system-reminder>' for `kargu-active-mode', or nil."
-  (cdr (assq kargu-active-mode kargu-prompt-mode-reminders)))
+  (let ((mode (kargu-state-mode)))
+    (cdr (assq mode kargu-prompt-mode-reminders))))
 
 (defconst kargu-prompt--synthetic-prefixes
   '("System Notice:" "<system-reminder>" "COMPACTION_REQUEST:" "COMPACTION_ACK:")

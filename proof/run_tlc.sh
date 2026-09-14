@@ -7,7 +7,14 @@ cd "${SCRIPT_DIR}"
 
 TLC_BIN="$(which tlc 2>/dev/null || true)"
 if [[ -z "${TLC_BIN}" ]]; then
-    echo "ERROR: tlc (TLA+ model checker) not found in PATH."
+    if command -v nix-shell >/dev/null 2>&1; then
+        if [[ $# -gt 0 ]]; then
+            exec nix-shell "${SCRIPT_DIR}/../shell.nix" --run "bash \"${SCRIPT_DIR}/run_tlc.sh\" $*"
+        else
+            exec nix-shell "${SCRIPT_DIR}/../shell.nix" --run "bash \"${SCRIPT_DIR}/run_tlc.sh\""
+        fi
+    fi
+    echo "ERROR: tlc (TLA+ model checker) not found in PATH and nix-shell unavailable."
     exit 1
 fi
 
@@ -16,7 +23,12 @@ echo "Specification: MC.tla (extends KarguLoop.tla, KarguProtocol.tla)"
 echo "TLC Binary: ${TLC_BIN}"
 echo "---------------------------------------------------------------"
 
-"${TLC_BIN}" -workers auto -nowarning MC.tla
+if [[ $# -gt 0 ]]; then
+    "${TLC_BIN}" "$@"
+else
+    "${TLC_BIN}" -workers auto -nowarning -simulate num=100000 MC.tla
+fi
 
 echo "---------------------------------------------------------------"
 echo "TLC Model Checking Succeeded: All Protocol & Safety Invariants Verified!"
+

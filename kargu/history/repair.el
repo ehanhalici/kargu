@@ -42,26 +42,36 @@
 
 (defun kargu--flush-pending (pending out-rev)
   "Extend OUT-REV with synthetic tool results for unanswered calls.
-PENDING is a hash table mapping tool-call ids to tool names; it is cleared."
+PENDING is a hash table mapping tool-call ids to (name . seq) or name.
+The table is cleared upon completion."
   (when (> (hash-table-count pending) 0)
     (kargu-log 'warn
                "validate: %d unanswered tool call(s); injecting synthetic error results"
-               (hash-table-count pending)))
-  (maphash (lambda (id name)
-             (push `(("role" . "tool")
-                     ("tool_call_id" . ,id)
-                     ("name" . ,name)
-                     ("content" . "ERROR: interrupted before response"))
-                   out-rev))
-           pending)
+               (hash-table-count pending))
+    (let (entries)
+      (maphash (lambda (id val)
+                 (let ((name (if (consp val) (car val) val))
+                       (seq (if (consp val) (cdr val) 0)))
+                   (push (list seq id name) entries)))
+               pending)
+      (setq entries (sort entries (lambda (a b)
+                                    (if (= (nth 0 a) (nth 0 b))
+                                        (string< (nth 1 a) (nth 1 b))
+                                      (< (nth 0 a) (nth 0 b))))))
+      (dolist (entry entries)
+        (push `(("role" . "tool")
+                ("tool_call_id" . ,(nth 1 entry))
+                ("name" . ,(nth 2 entry))
+                ("content" . "ERROR: interrupted before response"))
+              out-rev))))
   (clrhash pending)
   out-rev)
 
 (defun kargu--history-refresh-system-head (history)
   "Return cons of (HEAD-MSG . REMAINING-MSGS) ensuring fresh system prompt."
-  (let ((rest history))
+  (let ((rest (copy-tree history)))
     (if (and rest (equal (kargu--aget (car rest) "role") "system"))
-        (let ((sys (pop rest)))
+        (let ((sys (copy-tree (pop rest))))
           (if (assoc "content" sys)
               (setcdr (assoc "content" sys) (kargu--get-system-prompt))
             (push `("content" . ,(kargu--get-system-prompt)) sys))
@@ -111,7 +121,7 @@ PENDING is a hash table mapping tool-call ids to tool names; it is cleared."
       (setcar out (cons `("content" . ,(string-trim extra)) prev)))
     out))
 
-(defun kargu--history-process-assistant-with-calls (msg pending out)
+(defun kargu--history-process-assistant-with-calls (msg pending out &optional next-seq-fn)
   "Process assistant MSG containing tool calls into OUT and register in PENDING."
   (let* ((clean (kargu--clean-assistant-message
                  (kargu--normalize-assistant-role msg)))
@@ -130,9 +140,11 @@ PENDING is a hash table mapping tool-call ids to tool names; it is cleared."
       (push clean out))
     (dolist (call calls)
       (when-let* ((id (kargu--aget call "id")))
-        (puthash id
-                 (or (kargu--aget (kargu--aget call "function") "name") "unknown")
-                 pending)))
+        (let ((seq (if next-seq-fn (funcall next-seq-fn) 0)))
+          (puthash id
+                   (cons (or (kargu--aget (kargu--aget call "function") "name") "unknown")
+                         seq)
+                   pending))))
     out))
 
 (defun kargu--history-fix-trailing-turn (out)
@@ -153,6 +165,8 @@ PENDING is a hash table mapping tool-call ids to tool names; it is cleared."
   "Enforce the protocol invariants required by chat providers.
 Mutates `kargu--message-history' in place and returns it."
   (let* ((pending (make-hash-table :test #'equal))
+         (seq 0)
+         (next-seq (lambda () (cl-incf seq)))
          (head-and-rest (kargu--history-refresh-system-head kargu--message-history))
          (out (list (car head-and-rest)))
          (rest (cdr head-and-rest)))
@@ -170,7 +184,7 @@ Mutates `kargu--message-history' in place and returns it."
           (cond
            ((and (kargu--assistant-role-p role)
                  (kargu--calls-to-list (kargu--aget msg "tool_calls")))
-            (setq out (kargu--history-process-assistant-with-calls msg pending out)))
+            (setq out (kargu--history-process-assistant-with-calls msg pending out next-seq)))
            ((and (equal role "user")
                  (equal (kargu--aget (car out) "role") "user"))
             (setq out (kargu--history-merge-consecutive-user msg out)))

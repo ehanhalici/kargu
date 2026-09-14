@@ -49,9 +49,11 @@ process filters and sentinels."
           (goto-char (point-max))
           (insert (format-time-string "%H:%M:%S ")
                   (propertize (format "[%s/%s] " level
-                                      (if (boundp 'kargu-active-mode)
-                                          kargu-active-mode
-                                        'ask))
+                                      (if (fboundp 'kargu-state-mode)
+                                          (kargu-state-mode)
+                                        (if (boundp 'kargu-active-mode)
+                                            kargu-active-mode
+                                          'ask)))
                               'face (pcase level
                                       ((or 'error 'warn) 'font-lock-warning-face)
                                       ('request 'font-lock-keyword-face)
@@ -112,9 +114,11 @@ Never signals.  Does not log API keys."
               (goto-char (point-max))
               (insert (format-time-string "%H:%M:%S ")
                       (propertize (format "[wire/%s] "
-                                          (if (boundp 'kargu-active-mode)
-                                              kargu-active-mode
-                                            'ask))
+                                          (if (fboundp 'kargu-state-mode)
+                                              (kargu-state-mode)
+                                            (if (boundp 'kargu-active-mode)
+                                                kargu-active-mode
+                                              'ask)))
                                   'face 'font-lock-type-face)
                       (format "---- %s ----\n" title)
                       body

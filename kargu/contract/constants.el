@@ -106,6 +106,7 @@
         kargu-http-internal-error
         kargu-http-bad-gateway
         kargu-http-unavailable
+        kargu-http-gateway-timeout
         kargu-http-overloaded)
   "HTTP status codes that qualify for retry and backoff.")
 

@@ -32,6 +32,7 @@
 
 (require 'kargu/core)
 (require 'kargu/contract)
+(require 'kargu/state)
 (require 'kargu/config)
 (require 'kargu/prompt)
 (require 'kargu/history)
@@ -81,29 +82,46 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
   (eq run kargu--loop-run))
 
 (defun kargu-loop--set-state (run state)
-  "Set RUN `:state' to STATE."
+  "Set RUN `:state' to STATE and synchronize with central state store."
   (plist-put run :state state)
+  (when (fboundp 'kargu-state-transition-status)
+    (let ((st (pcase state
+                ((or 'request :requesting) :requesting)
+                ((or 'wait :waiting-model) :waiting-model)
+                ((or 'tools :executing-tools) :executing-tools)
+                ((or 'verify :verifying) :verifying)
+                ((or 'compact :compacting) :compacting)
+                ((or 'pause :pause) :pause)
+                ((or 'done :done) :done)
+                ((or 'limit :limit) :limit)
+                ((or 'stopped :stopped) :stopped)
+                ((or 'error :error) :error)
+                (_ nil))))
+      (when st
+        (kargu-state-transition-status st))))
   state)
+
+(defun kargu-loop--active-mode ()
+  "Return the active mode symbol."
+  (if (fboundp 'kargu-state-mode)
+      (kargu-state-mode)
+    kargu-active-mode))
 
 (defun kargu-loop--tool-visible-p (name)
   "Return non-nil when tool NAME may be advertised to the model."
-  (and (not (plist-get kargu--loop-run :no-tools))
-       (or (not (member name kargu-loop-mutating-tools))
-           (eq kargu-active-mode 'agent))))
+  (let ((mode (kargu-loop--active-mode)))
+    (and (not (plist-get kargu--loop-run :no-tools))
+         (or (not (member name kargu-loop-mutating-tools))
+             (eq mode 'agent)))))
 
 (defun kargu-loop--gate-tool (name)
   "Return an error string when NAME may not run in the active mode."
-  (when (and (member name kargu-loop-mutating-tools)
-             (not (eq kargu-active-mode 'agent)))
-    (format
-     "ERROR: tool `%s' is disabled in %s mode (read-only); switch to agent mode (M-x kargu-set-mode) before modifying files or debugger state"
-     name kargu-active-mode)))
-
-;; kargu--tools-visible-p is declared in `kargu/api/tools.el' (defvar kargu--tools-visible-p nil).
-;; This forward declaration prevents byte-compiler warnings when loop.el is compiled
-;; before api/tools.el has been loaded.
-(defvar kargu--tools-visible-p)
-(setq kargu--tools-visible-p #'kargu-loop--tool-visible-p)
+  (let ((mode (kargu-loop--active-mode)))
+    (when (and (member name kargu-loop-mutating-tools)
+               (not (eq mode 'agent)))
+      (format
+       "ERROR: tool `%s' is disabled in %s mode (read-only); switch to agent mode (M-x kargu-set-mode) before modifying files or debugger state"
+       name mode))))
 
 (defun kargu-loop-running-p ()
   "Return non-nil while an agent run is in progress."
@@ -176,18 +194,23 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
                    :compactions 0
                    :length-continues 0
                    :doom-sigs nil)))
+    (setq kargu--compaction-system nil)
     (when (fboundp 'kargu-diff-reset-run-files)
       (kargu-diff-reset-run-files))
     (when (and (fboundp 'kargu-model-supports-tools-p)
                (not (kargu-model-supports-tools-p)))
-      (if (eq kargu-active-mode 'agent)
+      (if (eq (kargu-loop--active-mode) 'agent)
           (user-error "Model '%s' does not support tool calling; switch to a tool-capable model or ask mode" (kargu--model))
         (plist-put run :no-tools t)
         (kargu-log 'info "model '%s' does not support tools; running in tool-free mode" (kargu--model))))
     (setq kargu--loop-run run)
+    (when (fboundp 'kargu-state-set-loop-run)
+      (kargu-state-set-loop-run run))
+    (when (fboundp 'kargu-state-transition-status)
+      (kargu-state-transition-status :requesting))
     (plist-put kargu--session :active t)
     (kargu-log 'info "run start (mode=%s, model=%s)"
-               kargu-active-mode (kargu--model))
+               (kargu-loop--active-mode) (kargu--model))
     (kargu--loop-request run (kargu-prompt-wrap-user prompt))
     run))
 
@@ -212,8 +235,15 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
                      "run end with %d unconsumed changed file(s)"
                      (length pending))))
       (setq kargu--loop-run nil)
+      (when (fboundp 'kargu-state-set-loop-run)
+        (kargu-state-set-loop-run nil))
       (setq kargu--compaction-system nil)
       (plist-put kargu--session :active nil)
+      (when (fboundp 'kargu-state-transition-status)
+        (let ((final-st (if (memq status '(:done :limit :stopped :error))
+                            status
+                          :idle)))
+          (kargu-state-transition-status final-st (or text (symbol-name status)))))
       (kargu--validate-history)
       (kargu-log 'info "run end: %s (iterations=%d, healing=%d)"
                  status

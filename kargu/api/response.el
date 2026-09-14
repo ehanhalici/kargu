@@ -122,7 +122,7 @@ synthetic error alists produced by this module.  Nested
   "Build a callback error alist from MSG, marking overflow when detected."
   (let ((err `(("error" . (("message" . ,msg))))))
     (when (kargu--overflow-message-p msg)
-      (setq err (nconc err `(("overflow" . t)))))
+      (setq err (append err '(("overflow" . t)))))
     err))
 
 (defun kargu--log-assistant-wire (response)

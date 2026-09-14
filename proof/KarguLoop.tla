@@ -40,6 +40,7 @@ States == {
     "COMPACT_WAIT", \* Compacting history via summary turn
     "PAUSE",        \* Awaiting user decision at turn limit (interactive continuation)
     "DONE",         \* Run finished successfully (final answer delivered)
+    "LIMIT",        \* Run stopped at turn limit (`:limit`)
     "ERROR",        \* Run aborted due to error (doom loop, API fail, etc.)
     "STOPPED"       \* Run cancelled by user (`kargu-loop-stop`)
 }
@@ -315,8 +316,8 @@ ModelReceiveEmpty ==
            /\ state        ' = "REQUEST"
            /\ runStatus    ' = "none"
        ELSE
-           /\ state        ' = "ERROR"
-           /\ runStatus    ' = "error"
+           /\ state        ' = "DONE"
+           /\ runStatus    ' = "done"
            /\ UNCHANGED emptyRetries
     /\ UNCHANGED <<history, activeMode, iterations, healing, verifications,
                    upstreamRetries, compactions, lengthContinues, doomSigs,
@@ -492,7 +493,7 @@ PauseDecisionContinue(extraIterations) ==
 (* 18b. PauseDecisionStop: User stops; run finishes at limit *)
 PauseDecisionStop ==
     /\ state = "PAUSE"
-    /\ state     ' = "DONE"
+    /\ state     ' = "LIMIT"
     /\ runStatus ' = "limit"
     /\ UNCHANGED <<history, activeMode, iterations, healing, verifications,
                    emptyRetries, upstreamRetries, compactions, lengthContinues,
@@ -539,7 +540,7 @@ Safety_InterruptedToolCallsAnswered ==
     state = "STOPPED" => AllToolCallsAnswered(history)
 
 Safety_AllTerminalStatesAnswered ==
-    state \in {"DONE", "ERROR", "STOPPED"} => AllToolCallsAnswered(history)
+    state \in {"DONE", "LIMIT", "ERROR", "STOPPED"} => AllToolCallsAnswered(history)
 
 Safety_NoToolQueueOutsideExec ==
     state \notin {"EXEC_TOOLS", "VERIFY_FILES"} =>

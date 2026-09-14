@@ -35,26 +35,14 @@
 (require 'kargu/api/circuit)
 (require 'kargu/api/http)
 
-(defvar kargu--busy nil
-  "Non-nil while a chat request is in flight to the active provider.")
-
-(defun kargu-busy-p ()
-  "Return non-nil if an API request is currently in flight."
-  (not (null kargu--busy)))
+(defvar kargu--busy)
+(declare-function kargu-busy-p "kargu/api/http" ())
+(declare-function kargu-api-cancel "kargu/api/http" ())
 
 (defun kargu--api-cancel-busy ()
   "Clear the busy flag when a request completes or fails."
   (setq kargu--busy nil)
   (kargu-state-transition-status :idle))
-
-(defun kargu-api-cancel ()
-  "Cancel any in-flight chat or model-catalog request."
-  (interactive)
-  (cl-incf kargu--generation)
-  (setq kargu--busy nil)
-  (kargu-state-transition-status :idle "user cancelled")
-  (kargu-log 'info "api: in-flight request cancelled by user")
-  (message "kargu: cancelled in-flight request"))
 
 (defun kargu-api-send (prompt callback &optional on-delta)
   "Send the next conversation turn to OpenRouter, asynchronously.
@@ -139,23 +127,14 @@ history which is restored afterwards."
   (unless (kargu-circuit-allow-request-p)
     (user-error "Circuit breaker is %s; cannot ping until cooldown"
                 (kargu-circuit-status-string)))
-  (let ((old-history kargu--message-history)
-        (old-temp kargu-temperature)
-        (old-max kargu-max-tokens)
-        (old-session kargu--session))
-    (setq kargu--message-history nil
-          kargu-temperature nil
-          kargu-max-tokens 32)
+  (let ((kargu--message-history nil)
+        (kargu-temperature nil)
+        (kargu-max-tokens 32))
     (kargu--history-add "user" "Reply with the single word: pong")
     (message "kargu: pinging %s (%s)..." (kargu--provider-name) (kargu--model))
     (kargu-api-send
      nil
      (lambda (response)
-       ;; restore scratch state regardless of outcome
-       (setq kargu--message-history old-history
-             kargu-temperature old-temp
-             kargu-max-tokens old-max
-             kargu--session old-session)
        (let ((err (kargu-response-error-message response)))
          (if err
              (progn

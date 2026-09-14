@@ -58,10 +58,10 @@ touching plz internals.")
   kargu--busy)
 
 (defun kargu-api-cancel ()
-  "Cancel the current request.
+  "Cancel the current request or in-flight agent call.
 Stale response callbacks are turned into no-ops via the
 generation counter; the active curl process is terminated and
-the UI is left in a consistent state."
+the UI and central state are left in a consistent state."
   (interactive)
   (cl-incf kargu--generation)
   (when (and (processp kargu--current-process)
@@ -69,7 +69,10 @@ the UI is left in a consistent state."
     (ignore-errors (delete-process kargu--current-process)))
   (setq kargu--current-process nil)
   (setq kargu--busy nil)
-  (kargu-log 'warn "request cancelled"))
+  (when (fboundp 'kargu-state-transition-status)
+    (kargu-state-transition-status :idle "user cancelled"))
+  (kargu-log 'warn "request cancelled")
+  (message "kargu: cancelled in-flight request"))
 
 (defun kargu--build-payload (&rest extra)
   "Assemble the chat-completions request payload.
@@ -81,10 +84,10 @@ included when at least one tool is VISIBLE after
          (payload `(("model" . ,(kargu--model))
                     ("messages" . ,(vconcat kargu--message-history)))))
     (when kargu-temperature
-      (nconc payload `(("temperature" . ,kargu-temperature))))
+      (setq payload (append payload `(("temperature" . ,kargu-temperature)))))
     (when kargu-max-tokens
-      (nconc payload `(("max_tokens" . ,kargu-max-tokens)
-                       ("max_completion_tokens" . ,kargu-max-tokens))))
+      (setq payload (append payload `(("max_tokens" . ,kargu-max-tokens)
+                                      ("max_completion_tokens" . ,kargu-max-tokens)))))
     (let ((reasoning-alist nil))
       (when (and (boundp 'kargu-reasoning-effort)
                  kargu-reasoning-effort)
@@ -93,21 +96,21 @@ included when at least one tool is VISIBLE after
                             ((stringp kargu-reasoning-effort)
                              kargu-reasoning-effort))))
           (unless (member effort '("none" "nil" "off"))
-            (nconc payload `(("reasoning_effort" . ,effort)))
+            (setq payload (append payload `(("reasoning_effort" . ,effort))))
             (push (cons "effort" effort) reasoning-alist))))
       (when (and (boundp 'kargu-thinking-budget)
                  (integerp kargu-thinking-budget)
                  (> kargu-thinking-budget 0))
-        (nconc payload `(("thinking" . (("type" . "enabled")
-                                        ("budget_tokens" . ,kargu-thinking-budget)))))
+        (setq payload (append payload `(("thinking" . (("type" . "enabled")
+                                                        ("budget_tokens" . ,kargu-thinking-budget))))))
         (push (cons "max_tokens" kargu-thinking-budget) reasoning-alist))
       (when reasoning-alist
-        (nconc payload `(("reasoning" . ,(nreverse reasoning-alist))))))
+        (setq payload (append payload `(("reasoning" . ,(reverse reasoning-alist)))))))
     (when (> (length tools) 0)
-      (nconc payload `(("tools" . ,tools)
-                       ("tool_choice" . "auto"))))
-    (while extra
-      (nconc payload (list (pop extra))))
+      (setq payload (append payload `(("tools" . ,tools)
+                                      ("tool_choice" . "auto")))))
+    (when extra
+      (setq payload (append payload (copy-sequence extra))))
     payload))
 
 (defun kargu--summarize-http-body (body &optional status)
@@ -152,7 +155,7 @@ available, instead of dumping raw JSON."
     (error (format "%S" err))))
 
 (defconst kargu--api-retry-statuses
-  (or (bound-and-true-p kargu-http-retry-statuses) '(429 500 502 503 529))
+  (or (bound-and-true-p kargu-http-retry-statuses) '(429 500 502 503 504 529))
   "HTTP statuses that trigger exponential backoff retry.")
 
 (defun kargu--plz-http-status (err)
@@ -531,15 +534,10 @@ bodies are reduced to an ordinary response alist first."
   (when-let* ((usage (kargu--aget response "usage")))
     (let ((in (kargu--aget usage "prompt_tokens"))
           (out (kargu--aget usage "completion_tokens")))
-      (plist-put kargu--session :requests
-                 (1+ (or (plist-get kargu--session :requests) 0)))
-      (when (numberp in)
-        (plist-put kargu--session :last-prompt-tokens in)
-        (plist-put kargu--session :tokens-in
-                   (+ (or (plist-get kargu--session :tokens-in) 0) in)))
-      (when (numberp out)
-        (plist-put kargu--session :tokens-out
-                   (+ (or (plist-get kargu--session :tokens-out) 0) out)))
+      (kargu-session-record-usage in out)
+      (when (fboundp 'kargu-state-record-tokens)
+        (kargu-state-record-tokens (and (numberp in) in)
+                                   (and (numberp out) out)))
       (when (fboundp 'kargu-chat-refresh-footer)
         (ignore-errors (kargu-chat-refresh-footer)))
       (force-mode-line-update t)

@@ -36,8 +36,7 @@
 Each element is an alist with string keys in the OpenAI
 chat-completions shape: (\"role\" . \"system\"|\"user\"|\"assistant\"|\"tool\").")
 
-(defvar kargu--compaction-system nil
-  "Cached compaction summary message if one was applied.")
+(defvar kargu--compaction-system)
 
 (defun kargu--history-add (role content &rest fields)
   "Append a message ((ROLE . CONTENT) . FIELDS) to the history.

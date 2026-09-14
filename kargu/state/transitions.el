@@ -33,8 +33,10 @@
 (require 'kargu/state/hooks)
 
 (defconst kargu-state--valid-statuses
-  '(:idle :requesting :waiting-model :executing-tools :verifying :compacting :stopped :error)
+  '(:idle :requesting :waiting-model :executing-tools :verifying :compacting :pause :done :limit :stopped :error)
   "List of valid lifecycle statuses for the Kargu state machine.")
+
+(defvar kargu-active-mode)
 
 (defun kargu-state-set-mode (mode)
   "Set the active operating mode to MODE (`ask', `plan', `debug', or `agent').
@@ -45,6 +47,7 @@ Validates MODE and ensures an agent run is not currently active."
   (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
     (user-error "kargu: cannot change mode while an agent run is in progress (M-x kargu-loop-stop)"))
   (kargu-state-set :mode mode)
+  (setq kargu-active-mode mode)
   (kargu-state-notify :mode mode)
   mode)
 
@@ -85,7 +88,7 @@ Validates that NEW-STATUS is a known status and updates `:busy'."
     (error "Invalid lifecycle status: %S (expected one of %s)"
            new-status kargu-state--valid-statuses))
   (kargu-state-set :status new-status)
-  (let ((busy (if (memq new-status '(:idle :stopped :error)) nil t)))
+  (let ((busy (if (memq new-status '(:idle :stopped :error :done :limit :pause)) nil t)))
     (kargu-state-set :busy busy))
   (kargu-state-notify :status new-status detail)
   new-status)
@@ -97,6 +100,10 @@ Validates that NEW-STATUS is a known status and updates `:busy'."
 
 (defun kargu-state-record-tokens (prompt-tokens completion-tokens)
   "Accumulate PROMPT-TOKENS and COMPLETION-TOKENS into cumulative usage."
+  (kargu-contract-assert (lambda (p) (or (null p) (natnump p))) prompt-tokens
+                         "PROMPT-TOKENS must be a non-negative integer or nil: %S" prompt-tokens)
+  (kargu-contract-assert (lambda (c) (or (null c) (natnump c))) completion-tokens
+                         "COMPLETION-TOKENS must be a non-negative integer or nil: %S" completion-tokens)
   (let* ((p (or prompt-tokens 0))
          (c (or completion-tokens 0))
          (tot (+ p c))
@@ -110,12 +117,16 @@ Validates that NEW-STATUS is a known status and updates `:busy'."
 
 (defun kargu-state-set-context-buffer (buf)
   "Set the active context buffer to BUF."
+  (kargu-contract-assert (lambda (b) (or (null b) (bufferp b) (stringp b))) buf
+                         "BUF must be a buffer, buffer name or nil: %S" buf)
   (kargu-state-set :context-buffer buf)
   buf)
 
 (defun kargu-state-reset ()
   "Reset state store back to clean initial state."
   (let ((fresh (kargu-state-init)))
+    (when (boundp 'kargu-active-mode)
+      (setq kargu-active-mode 'ask))
     (kargu-state-notify :status :idle "reset")
     fresh))
 

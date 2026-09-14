@@ -44,6 +44,7 @@
 (declare-function kargu--api-retry-delay "kargu/api/http" (attempt err))
 
 (declare-function kargu-loop--live-p "kargu/loop" (run))
+(declare-function kargu-loop--active-mode "kargu/loop" ())
 (declare-function kargu-loop--set-state "kargu/loop" (run state))
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
 (declare-function kargu--loop-compact-allowed-p "kargu/loop/compact" (run))
@@ -193,7 +194,6 @@ Reasoning-only replies are empty, not answers."
     (tools    . kargu-loop--on-tools)
     (length   . kargu-loop--on-length)
     (answer   . kargu-loop--on-answer)
-    (visible  . kargu-loop--on-visible)
     (empty    . kargu-loop--on-empty))
   "Model-response event -> handler (RUN RESPONSE).")
 
@@ -245,17 +245,18 @@ records :supports-tools nil and retries without tools."
       (let ((meta (copy-sequence (kargu-model-get-metadata mid))))
         (setq meta (plist-put meta :supports-tools nil))
         (kargu-model-set-metadata mid meta)))
-    (if (eq kargu-active-mode 'agent)
-        (progn
-          (kargu-log 'error "loop: model '%s' does not support tools in agent mode: %s" mid err)
-          (kargu--loop-finish
-           run :error
-           (format "Model '%s' does not support tool use. Switch to a tool-capable model (e.g. Claude 3.5 Sonnet, GPT-4o, DeepSeek V3) or switch to Ask mode."
-                   mid)))
-      (kargu-log 'warn "loop: model does not support tool use; retrying without tools in %s mode"
-                 kargu-active-mode)
-      (plist-put run :no-tools t)
-      (kargu--loop-request run nil))))
+    (let ((mode (kargu-loop--active-mode)))
+      (if (eq mode 'agent)
+          (progn
+            (kargu-log 'error "loop: model '%s' does not support tools in agent mode: %s" mid err)
+            (kargu--loop-finish
+             run :error
+             (format "Model '%s' does not support tool use. Switch to a tool-capable model (e.g. Claude 3.5 Sonnet, GPT-4o, DeepSeek V3) or switch to Ask mode."
+                     mid)))
+        (kargu-log 'warn "loop: model does not support tool use; retrying without tools in %s mode"
+                   mode)
+        (plist-put run :no-tools t)
+        (kargu--loop-request run nil)))))
 
 (defun kargu-loop--on-error (run response)
   "Retry RUN on 502/overload, otherwise finish with the error in RESPONSE."
@@ -301,19 +302,13 @@ records :supports-tools nil and retries without tools."
    run :done
    (kargu--nonempty (kargu-response-answer-text response))))
 
-(defun kargu-loop--on-visible (run response)
-  "Finish RUN with visible text of RESPONSE (including reasoning)."
-  (kargu--loop-finish
-   run :done
-   (kargu--nonempty (kargu-response-text response))))
-
 (defun kargu-loop--on-empty (run _response)
   "Retry RUN after an empty tool-less reply, or finish it."
   (let ((n (or (plist-get run :empty-retries) 0))
         (cap (or kargu-loop-empty-retries 0)))
     (if (>= n cap)
         (kargu--loop-finish
-         run :error "(the model returned an empty response)")
+         run :done "(the model returned an empty response)")
       (plist-put run :empty-retries (1+ n))
       (kargu-log 'warn "loop: empty response, retry %d/%d"
                  (1+ n) cap)

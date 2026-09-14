@@ -115,6 +115,24 @@
        (or (alist-get "choices" resp nil nil #'equal)
            (alist-get "error" resp nil nil #'equal))))
 
+(defun kargu-contract-tool-schema-p (schema)
+  "Return non-nil if SCHEMA is nil or a valid JSON schema alist.
+A valid schema alist must have (\"type\" . \"object\") and a \"properties\" entry."
+  (or (null schema)
+      (and (consp schema)
+           (cl-every #'consp schema)
+           (let ((type (or (cdr (assoc "type" schema))
+                           (cdr (assoc :type schema))))
+                 (props-entry (or (assoc "properties" schema)
+                                  (assoc :properties schema))))
+             (and (stringp type)
+                  (equal type "object")
+                  props-entry
+                  (let ((props (cdr props-entry)))
+                    (or (null props)
+                        (eq props :json-empty-object)
+                        (and (consp props) (cl-every #'consp props)))))))))
+
 (provide 'kargu/contract/types)
 
 ;;; kargu/contract/types.el ends here

@@ -35,7 +35,7 @@
 (declare-function kargu-chat--ensure-running-prompt "kargu/chat/prompt" ())
 (declare-function kargu-loop--set-state "kargu/loop" (run state))
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
-(declare-function kargu--loop-forward-delta "kargu/loop/tools" (run event))
+(declare-function kargu--loop-forward-delta "kargu/loop/machine" (run event))
 (declare-function kargu--loop-handle-response "kargu/loop/machine" (run response))
 
 (defvar kargu-loop--mock-continue-decision nil

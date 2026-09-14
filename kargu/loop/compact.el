@@ -116,8 +116,8 @@ Return non-nil if started."
 
 (defun kargu--loop-handle-compaction (run response)
   "Apply the compaction RESPONSE of RUN and continue the original work."
+  (setq kargu--compaction-system nil)
   (when (kargu-loop--live-p run)
-    (setq kargu--compaction-system nil)
     (plist-put run :compacting nil)
     (plist-put run :no-tools nil)
     (funcall (alist-get (kargu-loop--classify-compaction response)

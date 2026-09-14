@@ -26,7 +26,7 @@ Kargu defines four distinct operational modes (`kargu-active-mode`):
 | `agent` | ✅ Yes | Full autonomous mode. Searches, reads, edits files, runs shell commands, and conducts self-healing edits. |
 
 ### Tool Visibility & Execution Gating
-- Mutating tools (`edit_file`, `write_file`, `edit`, `write`, `bash`, `debug_toggle_breakpoint`) are only advertised in the LLM tool schema and executable when `kargu-active-mode` is `agent`.
+- Mutating tools (`edit_file`, `write_file`, `edit`, `write`, `bash`, `debug_toggle_breakpoint`, `apply_patch`, `patch`, `git_commit`, `git_stage`, `git_unstage`, `git_branch`, `git_stash`) are only advertised in the LLM tool schema and executable when `kargu-active-mode` (or `kargu-state-mode`) is `agent`.
 - If an unauthorized mutating tool call is attempted in a read-only mode, `kargu-loop--gate-tool` intercepts it and returns a descriptive error message without executing the tool.
 - **Mode Switching Isolation**: Mode changes via `kargu-set-mode` are blocked while an agent loop is in flight (`kargu-loop-running-p`), preventing mid-turn mode corruption.
 
@@ -65,9 +65,9 @@ The agent loop executes an asynchronous state machine:
   ├───────────────┬─────────────────┐                   │
   │ (compact req) │ (max iter)      │ (send)            │
   ▼               ▼                 ▼                   │
-[COMPACT_WAIT]  [DONE: limit]     [WAIT_MODEL]          │
-  │                                 │                   │
-  │ (summary)                       ├─► [DONE: answer]  │
+[COMPACT_WAIT]  [PAUSE]           [WAIT_MODEL]          │
+  │               │ (ui continue)   │                   │
+  │ (summary)     └───────────────► ├─► [DONE: answer]  │
   └───────────────────────────────► ├─► [ERROR: api]    │
                                     ├─► [REQUEST: retry/length/empty]
                                     │                   │
@@ -126,7 +126,7 @@ The agent loop executes an asynchronous state machine:
 
 ## 6. Context Compaction & Tail Retention (`kargu/history/compact.el`)
 
-When history character cost exceeds `kargu-history-compact-chars` (or upon context overflow):
+When history character cost exceeds the compaction threshold (calculated dynamically by `kargu-history-compact-threshold` as 70% of the active model's context window, or falling back to `kargu-history-compact-chars`), or upon upstream context overflow:
 1. A tools-off compaction turn is initiated (`:no-tools t`, max 1 per run).
 2. `kargu-history-compact-tail` extracts the suffix of the last `kargu-history-compact-keep` messages:
    - System prompts and previous compaction notices are discarded.
@@ -150,6 +150,7 @@ When history character cost exceeds `kargu-history-compact-chars` (or upon conte
   - Strips outer brackets (`@[...]`, `@{...}`, `(<...>)`),
   - Strips quotes (`"..."`, `'...'`, `` `...` ``),
   - Strips sentence-ending punctuation (`,`, `:`, `;`, `)`, `]`, `.`),
+  - Supports symbol-level anchors via `@file::symbol` or `@[file::symbol]`,
   - Preserves internal file paths and extension dots (e.g. `@[tanim.md]` → `tanim.md`).
 - **Context Attachments (`kargu/chat/attach.el`)**: Resolves mentions to files or LSP symbols and synthetically prepends file contents (bounded by `kargu-chat-attach-max-lines`) to the user prompt.
 
@@ -202,14 +203,17 @@ kargu/
 │   │   ├── key.el         # Multi-tier API key & endpoint resolution
 │   │   └── schema.el      # Config caching, setup check, kargu-edit-config
 │   ├── providers.el       # Provider registry facade
-│   ├── providers/         # One .el per provider (openrouter.el, anthropic.el, …)
+│   ├── providers/         # Individual provider implementations & catalog
+│   │   ├── catalog.el     # Dynamic provider/model definitions & metadata
+│   │   ├── registry.el    # Dynamic runtime registration
+│   │   └── *.el           # One .el per provider (openrouter.el, anthropic.el, …)
 │   ├── json.el            # JSON encoder/decoder, empty object support
 │   ├── fs.el              # Bounded project tree traversal, directory ignore filters
 │   ├── result.el          # Bridge → kargu/contract/result (backward compat)
 │   ├── prompt.el          # System prompt builder, model-specific prompt templates
 │   ├── prompt/            # Model-specific system prompt text files
 │   ├── plan.el            # Plan mode facade
-│   ├── plan/              # Plan sub-modules (checklist, review, apply)
+│   ├── plan/              # Plan sub-modules (buffer.el, dispatch.el)
 │   ├── ui.el              # Transient control menus facade
 │   ├── ui/
 │   │   ├── transient.el   # kargu-menu transient dispatch

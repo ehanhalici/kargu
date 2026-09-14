@@ -99,7 +99,9 @@ ACTION-FN is called on RET or click. MOUSE-FN is called with event if supplied."
 (defun kargu-chat--footer-string ()
   "Build the interactive footer line shown at the bottom of the chat buffer.
 Contains clickable mode, provider, model, context usage, and effort buttons."
-  (let* ((mode-name (upcase (symbol-name (or (bound-and-true-p kargu-active-mode) 'ask))))
+  (let* ((mode-name (upcase (symbol-name (if (fboundp 'kargu-state-mode)
+                                           (kargu-state-mode)
+                                         (or (bound-and-true-p kargu-active-mode) 'ask)))))
          (pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "default"))
          (raw-m (if (fboundp 'kargu--model) (kargu--model) nil))
          (m-info (kargu-chat--footer-model-label raw-m))

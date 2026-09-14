@@ -58,6 +58,8 @@ are truncated to `kargu-tool-output-limit'."
                          "NAME must be a non-empty string: %S" name)
   (kargu-contract-assert #'stringp description
                          "DESCRIPTION must be a string: %S" description)
+  (kargu-contract-assert #'kargu-contract-tool-schema-p parameters
+                         "PARAMETERS must be a JSON schema data structure or nil: %S" parameters)
   (kargu-contract-assert #'kargu-contract-tool-executor-p executor
                          "EXECUTOR must be callable: %S" executor)
   (puthash name
@@ -90,13 +92,22 @@ are truncated to `kargu-tool-output-limit'."
           (append filtered '(("properties" . :json-empty-object))))
       params)))
 
+(defun kargu--tool-visible-p (name)
+  "Return non-nil if tool NAME is visible to the model.
+Delegates to `kargu--tools-visible-p' if set, otherwise to
+`kargu-loop--tool-visible-p' if defined, defaulting to t."
+  (if kargu--tools-visible-p
+      (funcall kargu--tools-visible-p name)
+    (if (fboundp 'kargu-loop--tool-visible-p)
+        (kargu-loop--tool-visible-p name)
+      t)))
+
 (defun kargu--build-tools-vector ()
   "Build the OpenAI \"tools\" array (as a vector) from the registry.
-Tools hidden by `kargu--tools-visible-p' are skipped."
+Tools hidden by `kargu--tool-visible-p' are skipped."
   (let (tools)
     (maphash (lambda (name spec)
-               (when (or (null kargu--tools-visible-p)
-                         (funcall kargu--tools-visible-p name))
+               (when (kargu--tool-visible-p name)
                  (push `(("type" . "function")
                          ("function" . (("name" . ,name)
                                         ("description" .

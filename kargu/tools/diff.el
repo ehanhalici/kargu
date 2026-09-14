@@ -38,6 +38,8 @@
                                (expand-file-name root))))))
 
 (require 'kargu/core)
+(require 'kargu/contract)
+(require 'kargu/state/selectors)
 (require 'kargu/api)
 (require 'kargu/permission)
 (require 'kargu/tools/lsp)         ; only for kargu--resolve-path
@@ -103,10 +105,6 @@ the left and Buffer B (new code) is on the right."
   :type 'function
   :group 'kargu-diff)
 
-;; Default ediff to single-frame side-by-side mode in Emacs
-(setq ediff-window-setup-function #'ediff-setup-windows-plain)
-(setq ediff-split-window-function #'split-window-horizontally)
-
 (defcustom kargu-diff-after-apply-hook nil
   "Hook run after an approved proposal is saved to its file.
 Runs with the file's buffer current;
@@ -129,6 +127,8 @@ without them the whole file is served, capped at
 `kargu-diff-read-max-chars'.  Each served line is prefixed with
 its 1-based file line number (`12 | ...') so the model can copy
 an exact `old_string' without the prefix."
+  (kargu-contract-assert #'kargu-contract-filepath-p file-path
+                         "FILE-PATH must be a valid file path string: %S" file-path)
   (let* ((live-buf (and (stringp file-path) (get-buffer file-path)))
          (is-buf (and live-buf (buffer-live-p live-buf)))
          (path (if is-buf file-path (kargu-diff--resolve file-path))))
@@ -176,10 +176,11 @@ an exact `old_string' without the prefix."
 
 (defun kargu-diff--mutating-disabled (name)
   "Return an error string when mutating tool NAME is blocked."
-  (unless (eq kargu-active-mode 'agent)
-    (format
-     "ERROR: %s is disabled in %s mode; switch to agent mode (M-x kargu-set-mode) before modifying files"
-     name kargu-active-mode)))
+  (let ((mode (kargu-state-mode)))
+    (unless (eq mode 'agent)
+      (format
+       "ERROR: %s is disabled in %s mode; switch to agent mode (M-x kargu-set-mode) before modifying files"
+       name mode))))
 
 (defun kargu-diff--edit-file-tool (args)
   "Executor for the `edit_file' tool: unique replace, stage, review."
@@ -235,14 +236,13 @@ an exact `old_string' without the prefix."
                                (error-message-string err))))))))))))
 
 (defun kargu-diff-apply-patch (patch-text)
-  "Parse and apply multi-file changes from PATCH-TEXT.
-Supports '*** Add File: <path>', '*** Update File: <path>',
-and '*** Delete File: <path>' within optional '*** Begin Patch'
-and '*** End Patch' envelopes.
+  "Parse and apply PATCH-TEXT supporting '*** Add File: <path>',
+'*** Update File: <path>', and '*** Delete File: <path>' within optional
+'*** Begin Patch' and '*** End Patch' envelopes.
 Applies edits through the proposal and rollback pipeline.
 Returns a formatted summary of applied changes."
-  (unless (and (stringp patch-text) (not (string-empty-p (string-trim patch-text))))
-    (error "patch text must be a non-empty string"))
+  (kargu-contract-assert #'kargu-contract-non-empty-string-p patch-text
+                         "PATCH-TEXT must be a non-empty string: %S" patch-text)
   (let* ((lines (split-string (string-trim patch-text) "\n"))
          (ops nil)
          (curr-type nil)
@@ -300,38 +300,55 @@ Returns a formatted summary of applied changes."
              (push (format "Deleted %s" rel) results))
             ('update
              (let* ((orig (or (kargu-diff--file-text file) ""))
-                    (hunk-lines
-                     (cl-remove-if (lambda (l)
-                                     (or (string-prefix-p "@@" l)
-                                         (string-prefix-p "*** Move to:" l)))
-                                   op-lines))
-                    (old-block
-                     (string-join
-                      (delq nil
-                            (mapcar (lambda (l)
-                                      (cond
-                                       ((string-prefix-p "-" l) (substring l 1))
-                                       ((string-prefix-p "+" l) nil)
-                                       ((string-prefix-p " " l) (substring l 1))
-                                       (t l)))
-                                    hunk-lines))
-                      "\n"))
-                    (new-block
-                     (string-join
-                      (delq nil
-                            (mapcar (lambda (l)
-                                      (cond
-                                       ((string-prefix-p "+" l) (substring l 1))
-                                       ((string-prefix-p "-" l) nil)
-                                       ((string-prefix-p " " l) (substring l 1))
-                                       (t l)))
-                                    hunk-lines))
-                      "\n")))
-               (let ((replaced (if (and (not (string-empty-p old-block))
-                                        (kargu-diff--count-literal orig old-block))
-                                   (kargu-diff--replace-first orig old-block new-block)
-                                 orig)))
-                 (kargu-diff-apply-proposal file replaced)
+                    (hunks nil)
+                    (curr-hunk nil))
+               (dolist (l op-lines)
+                 (cond
+                  ((string-prefix-p "*** Move to:" l)
+                   nil)
+                  ((string-prefix-p "@@" l)
+                   (when curr-hunk
+                     (push (nreverse curr-hunk) hunks)
+                     (setq curr-hunk nil)))
+                  (t
+                   (push l curr-hunk))))
+               (when curr-hunk
+                 (push (nreverse curr-hunk) hunks))
+               (setq hunks (nreverse hunks))
+               (unless hunks
+                 (setq hunks (list nil)))
+               (let ((current-text orig))
+                 (dolist (hunk-lines hunks)
+                   (when hunk-lines
+                     (let* ((old-block
+                             (string-join
+                              (delq nil
+                                    (mapcar (lambda (l)
+                                              (cond
+                                               ((string-prefix-p "-" l) (substring l 1))
+                                               ((string-prefix-p "+" l) nil)
+                                               ((string-prefix-p " " l) (substring l 1))
+                                               (t l)))
+                                            hunk-lines))
+                              "\n"))
+                            (new-block
+                             (string-join
+                              (delq nil
+                                    (mapcar (lambda (l)
+                                              (cond
+                                               ((string-prefix-p "+" l) (substring l 1))
+                                               ((string-prefix-p "-" l) nil)
+                                               ((string-prefix-p " " l) (substring l 1))
+                                               (t l)))
+                                            hunk-lines))
+                              "\n")))
+                       (if (string-empty-p old-block)
+                           (setq current-text (concat current-text (if (string-suffix-p "\n" current-text) "" "\n") new-block))
+                         (if (kargu-diff--count-literal current-text old-block)
+                             (setq current-text (kargu-diff--replace-first current-text old-block new-block))
+                           (error "Hunk failed to match in %s: %s"
+                                  rel (truncate-string-to-width old-block 60)))))))
+                 (kargu-diff-apply-proposal file current-text)
                  (push (format "Updated %s" rel) results)))))))
       (format "Patch successfully applied to %d file(s):\n  • %s"
               (length results) (string-join (nreverse results) "\n  • ")))))
@@ -350,7 +367,7 @@ Returns a formatted summary of applied changes."
   "Register the diff, edit, write, read and apply_patch tools."
   (kargu-register-tool
    "read_file"
-   "Read a source file with numbered lines (\"12 | code\"). ALWAYS call this before edit_file so old_string is copied from the real file. Use from_line/to_line to page through large files."
+   "Read a source file with numbered lines (\"12 | code\"). ALWAYS call this before edit_file so old_string is copied from the real file. Use from_line/to_line (or limit) to page through large files."
    '(("type" . "object")
      ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "Absolute or project-relative path of the file (or output buffer) to read.")))

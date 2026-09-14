@@ -30,6 +30,7 @@
                                (expand-file-name root))))))
 
 (require 'kargu/core)
+(require 'kargu/contract/assert)
 
 ;;;; Configuration & state ------------------------------------------------
 
@@ -82,6 +83,8 @@ If :open and the cooldown period has elapsed, transitions to :half-open."
 (defun kargu-circuit-record-failure (&optional reason)
   "Record a failed request with optional REASON string.
 If failures reach `kargu-circuit-failure-threshold', trips circuit to :open."
+  (kargu-contract-assert (lambda (r) (or (null r) (stringp r))) reason
+                         "REASON must be a string or nil: %S" reason)
   (setq kargu-circuit--last-failure-time (float-time))
   (setq kargu-circuit--failure-count (1+ kargu-circuit--failure-count))
   (cond

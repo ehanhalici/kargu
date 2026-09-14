@@ -75,5 +75,15 @@
   (should-not (kargu-contract-tool-executor-p "not-a-func"))
   (should-not (kargu-contract-tool-executor-p nil)))
 
+(ert-deftest kargu-contract-tool-schema-test ()
+  "Test JSON tool schema contract validation."
+  (should (kargu-contract-tool-schema-p nil))
+  (should (kargu-contract-tool-schema-p '(("type" . "object") ("properties" . :json-empty-object))))
+  (should (kargu-contract-tool-schema-p '(("type" . "object") ("properties" . (("file" . (("type" . "string"))))))))
+  (should-not (kargu-contract-tool-schema-p '(("type" . "object"))))
+  (should-not (kargu-contract-tool-schema-p '(("type" . "string"))))
+  (should-not (kargu-contract-tool-schema-p '(("type" . "object") ("properties" . "not-alist"))))
+  (should-not (kargu-contract-tool-schema-p "not-a-schema")))
+
 (provide 'tests/test-contract)
 ;;; test-contract.el ends here

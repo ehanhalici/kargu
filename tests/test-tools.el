@@ -57,11 +57,9 @@
     (should (or (string-search "rg" rec) (string-search "grep" rec)))))
 
 (ert-deftest kargu-diff-ediff-plain-horizontal-test ()
-  "Ensure ediff defaults to single-frame (plain) and horizontal (side-by-side) split."
+  "Ensure ediff configuration defaults to single-frame (plain) and horizontal (side-by-side) split."
   (should (eq kargu-diff-ediff-window-setup-function #'ediff-setup-windows-plain))
-  (should (eq kargu-diff-ediff-split-window-function #'split-window-horizontally))
-  (should (eq ediff-window-setup-function #'ediff-setup-windows-plain))
-  (should (eq ediff-split-window-function #'split-window-horizontally)))
+  (should (eq kargu-diff-ediff-split-window-function #'split-window-horizontally)))
 
 (ert-deftest kargu-chat-show-same-window-test ()
   "Ensure kargu-chat-show opens in the current window without creating splits."

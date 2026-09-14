@@ -29,6 +29,7 @@
 
 (require 'kargu/core)
 (require 'kargu/config)
+(require 'kargu/state/selectors)
 
 (declare-function kargu-loop-running-p "kargu/loop")
 (declare-function kargu-chat-stop "kargu/chat")
@@ -37,7 +38,7 @@
 (defun kargu-chat--header-string ()
   "Build the chat buffer's dynamic header line.
 Displays the kargu title and the active mode."
-  (let* ((mode-name (upcase (symbol-name (or (bound-and-true-p kargu-active-mode) 'ask))))
+  (let* ((mode-name (upcase (symbol-name (kargu-state-mode))))
          (running (and (fboundp 'kargu-loop-running-p)
                        (kargu-loop-running-p)))
          (mode-map (make-sparse-keymap))

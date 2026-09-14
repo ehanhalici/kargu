@@ -25,9 +25,17 @@
 
 (require 'kargu/state/store)
 
+(defvar kargu-active-mode)
+
 (defun kargu-state-mode ()
-  "Return the currently active operating mode symbol (`ask', `plan', etc.)."
-  (kargu-state-get :mode 'ask))
+  "Return the currently active operating mode symbol (`ask', `plan', etc.).
+Respects dynamic let-bindings of `kargu-active-mode' when present."
+  (let ((store-mode (kargu-state-get :mode 'ask)))
+    (if (and (boundp 'kargu-active-mode)
+             kargu-active-mode
+             (not (eq kargu-active-mode store-mode)))
+        kargu-active-mode
+      store-mode)))
 
 (defun kargu-state-status ()
   "Return the current lifecycle status symbol (`:idle', `:requesting', etc.)."
@@ -52,7 +60,7 @@
 (defun kargu-state-busy-p ()
   "Return non-nil if an API request or agent loop is currently active."
   (or (kargu-state-get :busy nil)
-      (not (memq (kargu-state-status) '(:idle :stopped :error)))))
+      (not (memq (kargu-state-status) '(:idle :stopped :error :done :limit :pause)))))
 
 (defun kargu-state-loop-run ()
   "Return the currently active loop run plist, or nil."
