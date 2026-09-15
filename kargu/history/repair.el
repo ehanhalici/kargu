@@ -69,9 +69,9 @@ The table is cleared upon completion."
 
 (defun kargu--history-refresh-system-head (history)
   "Return cons of (HEAD-MSG . REMAINING-MSGS) ensuring fresh system prompt."
-  (let ((rest (copy-tree history)))
+  (let ((rest (copy-tree history t)))
     (if (and rest (equal (kargu--aget (car rest) "role") "system"))
-        (let ((sys (copy-tree (pop rest))))
+        (let ((sys (copy-tree (pop rest) t)))
           (if (assoc "content" sys)
               (setcdr (assoc "content" sys) (kargu--get-system-prompt))
             (push `("content" . ,(kargu--get-system-prompt)) sys))
@@ -172,7 +172,7 @@ Mutates `kargu--message-history' in place and returns it."
          (rest (cdr head-and-rest)))
     ;; Walk each turn in the rest of history
     (dolist (raw rest)
-      (let* ((msg (copy-tree raw))
+      (let* ((msg (copy-tree raw t))
              (role (kargu--aget msg "role")))
         (cond
          ((equal role "tool")

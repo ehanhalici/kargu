@@ -41,6 +41,8 @@
 (declare-function kargu--provider-name "kargu/api")
 (declare-function kargu--model "kargu/api")
 (declare-function kargu-model-context-window "kargu/api" (&optional model-id))
+(declare-function kargu-provider-params-get-all "kargu/providers/params" (&optional provider))
+(declare-function kargu-tune-provider-params-menu "kargu/chat/tune-params")
 (defvar kargu-reasoning-effort)
 
 (defcustom kargu-chat-buffer-name "*kargu-chat*"
@@ -132,7 +134,24 @@ Contains clickable mode, provider, model, context usage, and effort buttons."
                  (format "[%s]" effort) 'font-lock-keyword-face
                  "mouse-1 or RET: select reasoning effort (company list)"
                  #'kargu-chat-select-effort-company
-                 (lambda (e) (interactive "e") (kargu-chat-select-effort-company e)))))
+                 (lambda (e) (interactive "e") (kargu-chat-select-effort-company e))))
+         (active-params (if (fboundp 'kargu-provider-params-get-all)
+                            (kargu-provider-params-get-all pname)
+                          nil))
+         (params-count (length active-params))
+         (params-label (if (> params-count 0) (format "[params: %d]" params-count) "[params]"))
+         (params-face (if (> params-count 0) 'font-lock-keyword-face 'font-lock-comment-face))
+         (params-btn (kargu-chat--footer-button
+                      params-label params-face
+                      "mouse-1 or RET: configure provider routing & parameters"
+                      (lambda () (interactive)
+                        (if (fboundp 'kargu-tune-provider-params-menu)
+                            (call-interactively #'kargu-tune-provider-params-menu)
+                          (message "kargu: provider parameters menu not available")))
+                      (lambda (_e) (interactive "e")
+                        (if (fboundp 'kargu-tune-provider-params-menu)
+                            (call-interactively #'kargu-tune-provider-params-menu)
+                          (message "kargu: provider parameters menu not available"))))))
     (propertize
      (concat "\n\n"
              (propertize "mode: " 'face 'font-lock-comment-face)
@@ -148,6 +167,8 @@ Contains clickable mode, provider, model, context usage, and effort buttons."
              "  "
              (propertize "effort: " 'face 'font-lock-comment-face)
              e-btn
+             "  "
+             params-btn
              "\n")
      'field 'prompt
      'read-only t

@@ -32,7 +32,18 @@
         (err-resp '(("error" . (("message" . "rate limit exceeded"))))))
     (should (eq (kargu-loop--classify-response run tool-resp) 'tools))
     (should (eq (kargu-loop--classify-response run ans-resp) 'answer))
-    (should (eq (kargu-loop--classify-response run err-resp) 'error))))
+    (should (eq (kargu-loop--classify-response run err-resp) 'error))
+    ;; Test length classification respecting run-specific :max-iterations
+    (let ((len-resp '(("choices" . ((("index" . 0)
+                                     ("message" . (("role" . "assistant")
+                                                   ("content" . "partial")))
+                                     ("finish_reason" . "length"))))))
+          (continued-run (list :state 'wait
+                               :iterations kargu-max-iterations
+                               :max-iterations (+ kargu-max-iterations 5)
+                               :length-continues 0)))
+      (let ((kargu--loop-run continued-run))
+        (should (eq (kargu-loop--classify-response continued-run len-resp) 'length))))))
 
 (provide 'tests/test-loop)
 ;;; test-loop.el ends here

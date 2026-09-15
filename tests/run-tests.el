@@ -14,6 +14,8 @@
       (add-to-list 'load-path (file-name-as-directory (expand-file-name root)))
       (add-to-list 'load-path (expand-file-name "tests" root)))))
 
+(setq load-prefer-newer t)
+
 (require 'ert)
 (require 'kargu)
 (require 'tests/test-contract)
@@ -31,6 +33,7 @@
 (require 'tests/test-metadata)
 (require 'tests/test-todo-fixes)
 (require 'tests/test-dynamic-models)
+(require 'tests/test-provider-params)
 
 (defun kargu-run-all-tests ()
   "Run all Kargu ERT test suites."

@@ -137,7 +137,7 @@ StartRun(prompt) ==
 (* 2. FollowUpPrompt: User sends follow-up in multi-turn conversation *)
 FollowUpPrompt(prompt) ==
     /\ AssertIngress(ContractPrompt(prompt), "FollowUpPrompt: Prompt must be non-empty")
-    /\ state \in {"DONE", "STOPPED"}
+    /\ state \in {"DONE", "STOPPED", "ERROR", "LIMIT"}
     /\ state              ' = "REQUEST"
     /\ runStatus          ' = "none"
     /\ history            ' = Append(history, MakeMsg("user", prompt, << >>, "none", "none"))

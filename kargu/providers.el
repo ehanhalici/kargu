@@ -24,6 +24,7 @@
 
 (require 'kargu/providers/registry)
 (require 'kargu/providers/catalog)
+(require 'kargu/providers/params)
 
 (provide 'kargu/providers)
 

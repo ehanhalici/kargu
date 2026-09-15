@@ -37,6 +37,7 @@
 (require 'kargu/api/response)
 (require 'kargu/api/stream)
 (require 'kargu/api/circuit)
+(require 'kargu/providers/params)
 
 ;;;; Asynchronous request plumbing ----------------------------------------
 
@@ -53,9 +54,18 @@ cancelled the counter is bumped and the stale process callbacks
 become no-ops.  This gives clean cancellation semantics without
 touching plz internals.")
 
+(declare-function kargu-loop-running-p "kargu/loop" ())
+
 (defun kargu-busy-p ()
   "Return non-nil while a chat request is in flight."
   kargu--busy)
+
+(defun kargu-api-clear-busy ()
+  "Clear the in-flight busy flag and update status when no loop is active."
+  (setq kargu--busy nil)
+  (unless (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+    (when (fboundp 'kargu-state-transition-status)
+      (kargu-state-transition-status :idle))))
 
 (defun kargu-api-cancel ()
   "Cancel the current request or in-flight agent call.
@@ -69,8 +79,9 @@ the UI and central state are left in a consistent state."
     (ignore-errors (delete-process kargu--current-process)))
   (setq kargu--current-process nil)
   (setq kargu--busy nil)
-  (when (fboundp 'kargu-state-transition-status)
-    (kargu-state-transition-status :idle "user cancelled"))
+  (unless (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+    (when (fboundp 'kargu-state-transition-status)
+      (kargu-state-transition-status :idle "user cancelled")))
   (kargu-log 'warn "request cancelled")
   (message "kargu: cancelled in-flight request"))
 
@@ -109,6 +120,10 @@ included when at least one tool is VISIBLE after
     (when (> (length tools) 0)
       (setq payload (append payload `(("tools" . ,tools)
                                       ("tool_choice" . "auto")))))
+    (when (fboundp 'kargu-provider-params-build-payload)
+      (let ((provider-params (kargu-provider-params-build-payload)))
+        (when provider-params
+          (setq payload (append payload provider-params)))))
     (when extra
       (setq payload (append payload (copy-sequence extra))))
     payload))

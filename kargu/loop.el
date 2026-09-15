@@ -105,7 +105,7 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
   "Return the active mode symbol."
   (if (fboundp 'kargu-state-mode)
       (kargu-state-mode)
-    kargu-active-mode))
+    (or (bound-and-true-p kargu-active-mode) 'ask)))
 
 (defun kargu-loop--tool-visible-p (name)
   "Return non-nil when tool NAME may be advertised to the model."

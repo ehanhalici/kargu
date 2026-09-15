@@ -83,6 +83,15 @@ Set to an integer (e.g. 2048, 4096) or nil for model default."
                  (integer :tag "Thinking token budget"))
   :group 'kargu)
 
+(defcustom kargu-provider-parameters nil
+  "Alist mapping provider ID strings to custom parameter alists.
+For example, for openrouter:
+  \\='((\"openrouter\" . ((\"sort\" . \"price\")
+                      (\"allow_fallbacks\" . :json-false)
+                      (\"zdr\" . t))))"
+  :type '(alist :key-type string :value-type (alist :key-type string :value-type sexp))
+  :group 'kargu)
+
 (defcustom kargu-stream t
   "When non-nil, stream responses incrementally (SSE) over a plz
 process filter."

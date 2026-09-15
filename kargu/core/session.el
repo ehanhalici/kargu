@@ -26,6 +26,10 @@
 
 (require 'kargu/core/log)
 
+(declare-function kargu-history-reset "kargu/history/protocol" ())
+(declare-function kargu-circuit-reset "kargu/api/circuit" ())
+(declare-function kargu-state-reset "kargu/state/transitions" ())
+
 ;;;; Session state --------------------------------------------------------
 
 (defun kargu--generate-session-id ()
@@ -126,6 +130,8 @@ Return the updated `kargu--session' plist."
     (kargu-history-reset))
   (when (fboundp 'kargu-circuit-reset)
     (kargu-circuit-reset))
+  (when (fboundp 'kargu-state-reset)
+    (kargu-state-reset))
   (setq kargu--session-provider nil
         kargu--session-model nil)
   (message "kargu session reset"))

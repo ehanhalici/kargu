@@ -13,7 +13,6 @@
 (require 'kargu/chat/header)
 (require 'kargu/loop)
 (require 'kargu/loop/machine)
-(require 'kargu/providers/opencode)
 (require 'kargu/providers/catalog)
 
 (require 'kargu/tools/lsp)

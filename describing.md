@@ -203,10 +203,10 @@ kargu/
 │   │   ├── key.el         # Multi-tier API key & endpoint resolution
 │   │   └── schema.el      # Config caching, setup check, kargu-edit-config
 │   ├── providers.el       # Provider registry facade
-│   ├── providers/         # Individual provider implementations & catalog
-│   │   ├── catalog.el     # Dynamic provider/model definitions & metadata
+│   ├── providers/         # Provider catalog, registry & parameters
+│   │   ├── catalog.el     # Consolidated built-in catalog of 160+ LLM providers
 │   │   ├── registry.el    # Dynamic runtime registration
-│   │   └── *.el           # One .el per provider (openrouter.el, anthropic.el, …)
+│   │   └── params.el      # Provider JSON parameter tuning schemas
 │   ├── json.el            # JSON encoder/decoder, empty object support
 │   ├── fs.el              # Bounded project tree traversal, directory ignore filters
 │   ├── result.el          # Bridge → kargu/contract/result (backward compat)

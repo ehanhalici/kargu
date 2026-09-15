@@ -35,14 +35,19 @@
 (require 'kargu/api/circuit)
 (require 'kargu/api/http)
 
-(defvar kargu--busy)
 (declare-function kargu-busy-p "kargu/api/http" ())
 (declare-function kargu-api-cancel "kargu/api/http" ())
+(declare-function kargu-api-clear-busy "kargu/api/http" ())
+(declare-function kargu-loop-running-p "kargu/loop" ())
 
 (defun kargu--api-cancel-busy ()
   "Clear the busy flag when a request completes or fails."
-  (setq kargu--busy nil)
-  (kargu-state-transition-status :idle))
+  (if (fboundp 'kargu-api-clear-busy)
+      (kargu-api-clear-busy)
+    (setq kargu--busy nil)
+    (unless (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+      (when (fboundp 'kargu-state-transition-status)
+        (kargu-state-transition-status :idle)))))
 
 (defun kargu-api-send (prompt callback &optional on-delta)
   "Send the next conversation turn to OpenRouter, asynchronously.

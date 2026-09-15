@@ -5,6 +5,8 @@
 
 (require 'ert)
 (require 'kargu/permission)
+(require 'kargu/chat)
+(require 'kargu/chat/prompt)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/search)
 (require 'kargu/tools/webfetch)
