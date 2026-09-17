@@ -133,7 +133,12 @@ an exact `old_string' without the prefix."
          (is-buf (and live-buf (buffer-live-p live-buf)))
          (path (if is-buf file-path (kargu-diff--resolve file-path))))
     (if (and (not is-buf) (not (file-exists-p path)))
-        (error "No such file: %s" path)
+        (error (concat "No such file: '%s'\n"
+                       "  - Attempted file: '%s'\n"
+                       "  - Allowed project root: '%s'\n"
+                       "  - Reason: The file does not exist within the permitted workspace boundary.\n"
+                       "  - Guidance: Use `find_files' or `list_files' to locate existing files inside '%s', or use `write_file' if you intend to create a new file.")
+               path file-path (kargu-permission-project-root) (kargu-permission-project-root))
       (let* ((text (if is-buf
                        (with-current-buffer live-buf (buffer-string))
                      (with-temp-buffer

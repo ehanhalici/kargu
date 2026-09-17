@@ -113,9 +113,19 @@ missing or not unique so the model can re-read and retry."
     (error "new_string must be a string"))
   (let ((path (kargu-diff--resolve file-path)))
     (unless (or (file-exists-p path) (find-buffer-visiting path))
-      (error "No such file: %s; use write_file to create it" path))
+      (error (concat "No such file: '%s'\n"
+                     "  - Attempted file: '%s'\n"
+                     "  - Allowed project root: '%s'\n"
+                     "  - Reason: The target file does not exist within the permitted workspace boundary.\n"
+                     "  - Guidance: Use `write_file' to create a new file, or use `find_files' to check existing files inside '%s'.")
+             path file-path (kargu-permission-project-root) (kargu-permission-project-root)))
     (when (file-directory-p path)
-      (error "%s is a directory; edit_file only changes files" path))
+      (error (concat "Invalid target: '%s' is a directory.\n"
+                     "  - Tool: edit_file\n"
+                     "  - Allowed project root: '%s'\n"
+                     "  - Reason: `edit_file' can only modify individual files, not directories.\n"
+                     "  - Guidance: Specify an individual file path inside '%s' to edit.")
+             path (kargu-permission-project-root) (kargu-permission-project-root)))
     (let* ((original (or (kargu-diff--file-text path) ""))
            (matches (kargu-diff--count-literal original old-string)))
       (unless (= matches 1)

@@ -54,10 +54,6 @@
   '("fp16" "bf16" "fp8" "int8" "mxfp8" "fp4" "mxfp4" "nvfp4" "int4" "fp32" "fp6" "unknown")
   "OpenRouter model quantization filter options.")
 
-(defconst kargu-openrouter-reasoning-efforts
-  '("none" "minimal" "low" "medium" "high")
-  "Reasoning depth levels for reasoning models.")
-
 (defconst kargu-openapi-service-tier-options
   '("auto" "default" "flex" "scale" "priority")
   "Service tier options for OpenAPI-compliant providers.")
@@ -360,9 +356,6 @@ from top-level request parameters."
   (list :key "quantizations" :label "Quantizations" :type 'multi-enum
         :choices kargu-openrouter-quantization-options
         :doc "Filter out low-precision quantizations to prevent quality loss.")
-  (list :key "reasoning_effort" :label "Reasoning Effort" :type 'enum
-        :choices kargu-openrouter-reasoning-efforts
-        :doc "Reasoning depth for OpenRouter reasoning models.")
   ;; Static Booleans (Tri-state: true, false, omit/default)
   (list :key "allow_fallbacks" :label "Allow Fallbacks" :type 'boolean
         :doc "Whether to allow routing fallbacks to subsequent providers on error.")

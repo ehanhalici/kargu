@@ -120,8 +120,12 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
     (when (and (member name kargu-loop-mutating-tools)
                (not (eq mode 'agent)))
       (format
-       "ERROR: tool `%s' is disabled in %s mode (read-only); switch to agent mode (M-x kargu-set-mode) before modifying files or debugger state"
-       name mode))))
+       (concat "Permission denied: Tool `%s' is blocked in %s mode.\n"
+               "  - Active mode: %s (read-only)\n"
+               "  - Blocked tool: `%s' (modifying files or execution state is prohibited in this mode)\n"
+               "  - Allowed tools in this mode: `read_file', `workspace_grep', `find_files', `list_files', and LSP inspection tools.\n"
+               "  - Guidance: You do not have permission to execute mutating tools while in %s mode. To modify code or run commands, switch to agent mode (M-x kargu-set-mode) or provide a read-only plan/response to the user.")
+       name mode mode name mode))))
 
 (defun kargu-loop-running-p ()
   "Return non-nil while an agent run is in progress."

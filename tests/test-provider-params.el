@@ -250,6 +250,26 @@
       (should (= (cdr (assoc "seed" payload)) 42))
       (should (equal (cdr (assoc "extra_feature" payload)) "enabled")))))
 
+(ert-deftest kargu-openrouter-menu-keys-and-no-reasoning-effort-test ()
+  "Verify OpenRouter parameters schema has no reasoning_effort and menu has no key collision on 'q'."
+  ;; 1. OpenRouter schema must not contain reasoning_effort
+  (let* ((specs (kargu-provider-params-specs "openrouter"))
+         (keys (mapcar (lambda (s) (plist-get s :key)) specs)))
+    (should-not (member "reasoning_effort" keys)))
+  ;; 2. Transient menu bindings
+  (when (fboundp 'transient-get-suffix)
+    (let ((quit-suffix (ignore-errors (transient-get-suffix 'kargu-tune-openrouter-menu "q")))
+          (quant-suffix (ignore-errors (transient-get-suffix 'kargu-tune-openrouter-menu "Q")))
+          (effort-suffix (ignore-errors (transient-get-suffix 'kargu-tune-openrouter-menu "e"))))
+      ;; 'q' is bound to quit
+      (should quit-suffix)
+      (should (eq (plist-get (cdr quit-suffix) :command) 'transient-quit-one))
+      ;; 'Q' is bound to quantizations
+      (should quant-suffix)
+      (should (eq (plist-get (cdr quant-suffix) :command) 'kargu-tune-param-select-quantizations))
+      ;; 'e' is not present
+      (should-not effort-suffix))))
+
 (provide 'tests/test-provider-params)
 
 ;;; test-provider-params.el ends here

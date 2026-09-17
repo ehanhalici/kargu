@@ -85,7 +85,12 @@
                 (expand-file-name path effective-root)))))
     (kargu-permission-assert-within-project abs effective-root "search path")
     (unless (file-exists-p abs)
-      (error "No such path: %s" abs))
+      (error (concat "No such search path: '%s'\n"
+                     "  - Attempted search path: '%s'\n"
+                     "  - Allowed project root: '%s'\n"
+                     "  - Reason: The specified path does not exist inside the project boundary.\n"
+                     "  - Guidance: Please ensure the directory exists within '%s', or omit the path parameter to search the entire project root.")
+             abs (or path "") effective-root effective-root))
     abs))
 
 (defun kargu-search--rg-exclude-args ()

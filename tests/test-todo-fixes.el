@@ -190,6 +190,45 @@
           (should (= company-minimum-prefix-length 1)))
       (kill-buffer chat-buf))))
 
+(ert-deftest kargu-company-at-symbol-typing-cycle-test ()
+  "Test that continuous typing after `@' preserves company-backend and handles kind/require-match."
+  (let ((chat-buf (get-buffer-create "*kargu-chat-typing-test*")))
+    (unwind-protect
+        (with-current-buffer chat-buf
+          (kargu-chat-mode)
+          (kargu-chat--ensure-idle-prompt)
+          (goto-char (point-max))
+          ;; 1. Verify kargu-chat-company protocol commands
+          (let ((file-cands (kargu-chat-company 'candidates "@tests/test-git.el")))
+            (should (consp file-cands))
+            (let ((cand (car file-cands)))
+              (should (equal (get-text-property 0 'company-backend cand) 'kargu-chat-company))
+              (should (equal (kargu-chat-company 'kind cand) 'file))
+              (should (stringp (kargu-chat-company 'meta cand)))))
+          (should (eq (kargu-chat-company 'require-match) 'never))
+
+          ;; 2. Simulate typing `@' followed by incremental characters
+          (insert "@")
+          (kargu-chat--maybe-company)
+          (should (equal company-backend 'kargu-chat-company))
+          (should (consp company-candidates))
+
+          ;; 3. Insert character while completion is active
+          (insert "s")
+          (kargu-chat--maybe-company)
+          ;; company-backend must NOT be reset to nil
+          (should (equal company-backend 'kargu-chat-company))
+
+          ;; 4. Verify kind call on candidate works cleanly (no void: nil error)
+          (let ((kind (company-call-backend 'kind (car company-candidates))))
+            (should (memq kind '(file function variable struct method))))
+
+          ;; 5. Even if company-backend were forced to nil, candidate property prevents crash
+          (setq company-backend nil)
+          (let ((cand (car (kargu-chat-company 'candidates "@tests"))))
+            (should (equal (company-call-backend 'kind cand) 'file))))
+      (kill-buffer chat-buf))))
+
 (ert-deftest kargu-todo-10-tool-continuation-history-test ()
   "Test that tool continuation after assistant tool call preserves user message."
   (let ((kargu--message-history nil)

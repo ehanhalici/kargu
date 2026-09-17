@@ -210,7 +210,13 @@ Strictly validates that CWD and all path arguments stay within project root."
         (kargu-permission-validate-command command root dir)
         ;; User approval check: 1-click button prompt in chat
         (unless (kargu-permission-request-approval command dir)
-          (error "Command execution was rejected by the user"))
+          (error (concat "Permission denied: Command execution was rejected by the user.\n"
+                         "  - Rejected command: '%s'\n"
+                         "  - Working directory: '%s'\n"
+                         "  - Allowed project root: '%s'\n"
+                         "  - Reason: The user chose not to grant execution permission for this shell command.\n"
+                         "  - Guidance: Do not repeatedly execute the identical command without user clarification. Consider an alternative approach that works strictly within '%s' or ask the user for guidance.")
+                 command dir root root))
         (let ((shell (kargu-bash--resolve-shell)))
           (if background
               (kargu-bash--run-background command dir shell)

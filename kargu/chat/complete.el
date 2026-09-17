@@ -62,8 +62,9 @@ Format: (:roots ROOTS :time TIME :files FILES).")
   "Start company after an `@' mention in the prompt."
   (when (and (fboundp 'company-manual-begin)
              (kargu-chat--at-prefix))
-    (when (boundp 'company-backend)
-      (setq company-backend nil))
+    (when (and (boundp 'company-backend)
+               (not (eq company-backend 'kargu-chat-company)))
+      (setq-local company-backend nil))
     (ignore-errors (company-manual-begin))))
 
 (defun kargu-chat--completion-root ()
@@ -273,10 +274,26 @@ QUERY and STRING should already be downcased."
                  collect
                  (let ((cand (concat "@" rel)))
                    (propertize cand
+                               'company-backend 'kargu-chat-company
                                'kargu-kind 'file
                                'kargu-ann "file"
                                'kargu-match (kargu-chat--match-property q rel)))))
     (error nil)))
+
+(defun kargu-chat--normalize-kind (kind)
+  "Convert KIND string or symbol into a standard Company icon kind symbol."
+  (let* ((str (downcase (format "%s" (or kind "variable"))))
+         (sym (intern str)))
+    (cond
+     ((memq sym '(function method variable struct class interface module
+                  constant field property enum enum-member file folder snippet text))
+      sym)
+     ((string-prefix-p "func" str) 'function)
+     ((string-prefix-p "var" str) 'variable)
+     ((string-prefix-p "struct" str) 'struct)
+     ((string-prefix-p "class" str) 'class)
+     ((string-prefix-p "interface" str) 'interface)
+     (t 'variable))))
 
 (defun kargu-chat--symbol-candidates (query)
   "Symbol mention candidates matching QUERY (without the leading `@').
@@ -325,7 +342,8 @@ QUERY can match the symbol name, the file path, or both if QUERY contains `::'."
                  (let ((cand (concat "@" cand-str)))
                    (propertize
                     cand
-                    'kargu-kind 'symbol
+                    'company-backend 'kargu-chat-company
+                    'kargu-kind (kargu-chat--normalize-kind kind)
                     'kargu-ann (format "%s :%s" kind (or line "?"))
                     'kargu-match (kargu-chat--match-property (if has-delim sym-q q) cand-str)))))
     (error nil)))
@@ -347,12 +365,20 @@ Matching is fuzzy (flex): `@lib.rs' completes `rust/src/lib.rs'."
     (prefix (kargu-chat--at-prefix))
     (candidates (kargu-chat--at-candidates arg))
     (annotation (or (get-text-property 0 'kargu-ann arg) ""))
+    (kind (or (get-text-property 0 'kargu-kind arg) 'file))
+    (meta
+     (let ((kind (get-text-property 0 'kargu-kind arg)))
+       (if (eq kind 'file)
+           (format "File mention: %s" (substring-no-properties (or arg "")))
+         (format "Symbol mention: %s (%s)"
+                 (substring-no-properties (or arg ""))
+                 (or (get-text-property 0 'kargu-ann arg) "symbol")))))
     (match (or (get-text-property 0 'kargu-match arg) 0))
+    (require-match 'never)
     (ignore-case t)
     (no-cache t)
     (duplicates t)
     (sorted t)))
-
 
 (provide 'kargu/chat/complete)
 

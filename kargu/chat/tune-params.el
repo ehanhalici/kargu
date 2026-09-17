@@ -83,14 +83,6 @@
                             'face 'font-lock-string-face)
               (propertize "all (no filter)" 'face 'font-lock-comment-face)))))
 
-(defun kargu-tune--param-reasoning-effort-desc ()
-  "Formatted description for provider reasoning effort parameter."
-  (let ((val (kargu-provider-param-get "reasoning_effort")))
-    (format "Reasoning Effort:  %s"
-            (if val
-                (propertize (upcase (format "%s" val)) 'face 'font-lock-keyword-face)
-              (propertize "default" 'face 'font-lock-comment-face)))))
-
 (defun kargu-tune--param-allow-fallbacks-desc ()
   "Formatted description for allow_fallbacks parameter."
   (format "Allow Fallbacks:   %s"
@@ -307,12 +299,6 @@
   (interactive)
   (let ((next (kargu-provider-param-toggle "data_collection")))
     (message "kargu: data collection: %s" (or next "allow (default)"))))
-
-(defun kargu-tune-param-cycle-reasoning-effort ()
-  "Cycle reasoning effort for active provider."
-  (interactive)
-  (let ((next (kargu-provider-param-toggle "reasoning_effort")))
-    (message "kargu: provider reasoning effort: %s" (or next "default"))))
 
 (defun kargu-tune-param-toggle-allow-fallbacks ()
   "Toggle allow_fallbacks for active provider."
@@ -651,8 +637,7 @@
      ["Static Routing & Policies"
       ("s" kargu-tune-param-cycle-sort :description kargu-tune--param-sort-desc :transient t)
       ("d" kargu-tune-param-cycle-data-collection :description kargu-tune--param-data-collection-desc :transient t)
-      ("q" "Quantizations Filter" kargu-tune-param-select-quantizations :description kargu-tune--param-quantizations-desc :transient t)
-      ("e" kargu-tune-param-cycle-reasoning-effort :description kargu-tune--param-reasoning-effort-desc :transient t)]
+      ("Q" "Quantizations Filter" kargu-tune-param-select-quantizations :description kargu-tune--param-quantizations-desc :transient t)]
      ["Guarantees & Flags"
       ("f" kargu-tune-param-toggle-allow-fallbacks :description kargu-tune--param-allow-fallbacks-desc :transient t)
       ("p" kargu-tune-param-toggle-require-parameters :description kargu-tune--param-require-parameters-desc :transient t)

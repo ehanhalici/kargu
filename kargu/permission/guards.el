@@ -107,8 +107,12 @@ Return the expanded absolute file name."
     (if (not kargu-permission-strict-mode)
         abs
       (unless (kargu-permission-within-project-p abs effective-root)
-        (error "Permission denied: %s '%s' is outside project root '%s'"
-               (or label "path") (or path "") effective-root))
+        (error (concat "Permission denied: %s '%s' is outside the permitted workspace boundary.\n"
+                       "  - Attempted target: '%s' (resolved to '%s')\n"
+                       "  - Allowed project root: '%s'\n"
+                       "  - Reason: For security and workspace isolation, you do not have permission to access paths outside the project root.\n"
+                       "  - Guidance: You are strictly restricted to working within '%s'. Please adjust your path to be relative to the project root or stay inside this directory.")
+               (or label "path") (or path "") (or path "") abs effective-root effective-root))
       abs)))
 
 (provide 'kargu/permission/guards)

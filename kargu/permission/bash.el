@@ -85,8 +85,12 @@ escapes ROOT."
                            (file-truename (or cwd effective-root)))))
       ;; 1. Check working directory
       (unless (kargu-permission-within-project-p effective-cwd effective-root)
-        (error "Permission denied: working directory '%s' is outside project root '%s'"
-               (or cwd "") effective-root))
+        (error (concat "Permission denied: working directory '%s' is outside the permitted workspace boundary.\n"
+                       "  - Attempted working directory: '%s' (resolved to '%s')\n"
+                       "  - Allowed project root: '%s'\n"
+                       "  - Reason: Shell commands are strictly confined to the project root to prevent unauthorized system access.\n"
+                       "  - Guidance: You do not have permission to run commands outside '%s'. Please set 'cwd' to a subdirectory within the project root or omit 'cwd' to run directly in the project root.")
+               (or cwd "") (or cwd "") effective-cwd effective-root effective-root))
       ;; 2. Substitute common environment variables (e.g. $HOME)
       (let* ((expanded-cmd (condition-case _
                                (substitute-in-file-name command)
@@ -101,13 +105,21 @@ escapes ROOT."
                   (string= tok ".."))
               (let ((expanded (expand-file-name tok effective-cwd)))
                 (unless (kargu-permission-within-project-p expanded effective-root)
-                  (error "Permission denied: path '%s' escapes project root '%s'"
-                         tok effective-root))))
+                  (error (concat "Permission denied: path traversal '%s' escapes the permitted workspace boundary.\n"
+                                 "  - Attempted path: '%s' (resolved to '%s')\n"
+                                 "  - Allowed project root: '%s'\n"
+                                 "  - Reason: Directory traversal (..) attempting to escape the project boundary is prohibited.\n"
+                                 "  - Guidance: You only have permission to execute commands and access files within '%s'. Please modify your command to operate strictly inside the project root.")
+                         tok tok expanded effective-root effective-root))))
              ((string-prefix-p "~" tok)
               (let ((expanded (expand-file-name tok)))
                 (unless (kargu-permission-within-project-p expanded effective-root)
-                  (error "Permission denied: home path '%s' is outside project root '%s'"
-                         tok effective-root))))
+                  (error (concat "Permission denied: home directory path '%s' escapes the permitted workspace boundary.\n"
+                                 "  - Attempted path: '%s' (resolved to '%s')\n"
+                                 "  - Allowed project root: '%s'\n"
+                                 "  - Reason: Accessing files in the user's home directory outside the project root is prohibited.\n"
+                                 "  - Guidance: You do not have permission to access external home directories. Please only work inside '%s'.")
+                         tok tok expanded effective-root effective-root))))
              ((string-prefix-p "/" tok)
               (cond
                ((kargu-permission-within-project-p tok effective-root)
@@ -119,8 +131,12 @@ escapes ROOT."
                ((and (eq type :word) (kargu-permission-allowed-binary-p tok))
                 nil)
                (t
-                (error "Permission denied: path '%s' is outside project root '%s'"
-                       tok effective-root)))))))))))
+                (error (concat "Permission denied: external system path '%s' is outside the permitted workspace boundary.\n"
+                               "  - Attempted path: '%s'\n"
+                               "  - Allowed project root: '%s'\n"
+                               "  - Reason: Absolute system paths outside the project root are prohibited (only standard system binaries and device sinks are permitted).\n"
+                               "  - Guidance: You do not have permission to access '%s'. You must restrict all script executions, file creations, and inspections to within '%s'.")
+                       tok tok effective-root tok effective-root)))))))))))
 
 (provide 'kargu/permission/bash)
 

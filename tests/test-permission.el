@@ -8,6 +8,7 @@
 (require 'kargu/tools/diff)
 (require 'kargu/tools/bash)
 (require 'kargu/tools/search)
+(require 'kargu/loop)
 
 (ert-deftest kargu-permission-within-project-test ()
   "Ensure kargu-permission-within-project-p correctly classifies in-tree and out-of-tree paths."
@@ -142,6 +143,69 @@
         (let ((result (kargu-permission--wait-for-decision chat-buf (lambda () decision))))
           (should (eq result :approved))
           (should (string-match-p "Approved, executing" (buffer-string))))))))
+
+(ert-deftest kargu-permission-detailed-error-message-test ()
+  "Ensure kargu-permission-assert-within-project provides structured, detailed error messages."
+  (let ((root (kargu-permission-project-root)))
+    (condition-case err
+        (kargu-permission-assert-within-project "/etc/shadow" root "file")
+      (error
+       (let ((msg (error-message-string err)))
+         (should (string-match-p "Permission denied" msg))
+         (should (string-match-p "Attempted target:" msg))
+         (should (string-match-p "Allowed project root:" msg))
+         (should (string-match-p "Reason:" msg))
+         (should (string-match-p "Guidance:" msg))
+         (should (string-search root msg)))))))
+
+(ert-deftest kargu-permission-detailed-bash-validation-error-test ()
+  "Ensure kargu-permission-validate-command returns detailed error messages for all violations."
+  (let ((root (kargu-permission-project-root)))
+    ;; 1. Working directory
+    (condition-case err
+        (kargu-permission-validate-command "ls" root "/tmp")
+      (error
+       (let ((msg (error-message-string err)))
+         (should (string-match-p "working directory" msg))
+         (should (string-match-p "Allowed project root:" msg))
+         (should (string-match-p "Guidance:" msg)))))
+    ;; 2. Traversal
+    (condition-case err
+        (kargu-permission-validate-command "cat ../outside.txt" root)
+      (error
+       (let ((msg (error-message-string err)))
+         (should (string-match-p "path traversal" msg))
+         (should (string-match-p "Allowed project root:" msg))
+         (should (string-match-p "Guidance:" msg)))))
+    ;; 3. External path
+    (condition-case err
+        (kargu-permission-validate-command "cat /etc/passwd" root)
+      (error
+       (let ((msg (error-message-string err)))
+         (should (string-match-p "external system path" msg))
+         (should (string-match-p "Allowed project root:" msg))
+         (should (string-match-p "Guidance:" msg)))))))
+
+(ert-deftest kargu-permission-detailed-bash-rejection-test ()
+  "Ensure kargu-bash-run user rejection returns detailed context and guidance."
+  (let ((kargu-permission--mock-decision :reject))
+    (condition-case err
+        (kargu-bash-run "python3 script.py")
+      (error
+       (let ((msg (error-message-string err)))
+         (should (string-match-p "Command execution was rejected by the user" msg))
+         (should (string-match-p "Rejected command:.*python3 script.py" msg))
+         (should (string-match-p "Allowed project root:" msg))
+         (should (string-match-p "Guidance:" msg)))))))
+
+(ert-deftest kargu-permission-detailed-mode-gating-test ()
+  "Ensure kargu-loop--gate-tool returns detailed error messages for blocked mutating tools."
+  (let ((kargu-active-mode 'plan))
+    (let ((msg (kargu-loop--gate-tool "bash")))
+      (should (stringp msg))
+      (should (string-match-p "Tool `bash' is blocked in plan mode" msg))
+      (should (string-match-p "Allowed tools in this mode:" msg))
+      (should (string-match-p "Guidance:" msg)))))
 
 (provide 'tests/test-permission)
 ;;; test-permission.el ends here
