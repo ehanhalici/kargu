@@ -92,5 +92,23 @@
     (should (equal (alist-get "content" orig-msg nil nil #'equal) "original system prompt"))
     (should-not (eq (car res) orig-msg))))
 
+(ert-deftest kargu-history-refresh-system-head-preserves-stable-system-prompt-test ()
+  "Ensure existing system prompt is preserved to maintain exact KV cache prefix."
+  (let* ((orig-msg '(("role" . "system") ("content" . "custom session system prompt from yesterday")))
+         (history (list orig-msg '(("role" . "user") ("content" . "hello"))))
+         (res (kargu--history-refresh-system-head history)))
+    ;; The head system prompt should retain its exact saved content
+    (should (equal (alist-get "content" (car res) nil nil #'equal)
+                   "custom session system prompt from yesterday"))))
+
+(ert-deftest kargu-history-refresh-system-head-force-refresh-test ()
+  "Ensure force-refresh flag regenerates system prompt when requested."
+  (let* ((orig-msg '(("role" . "system") ("content" . "old system prompt")))
+         (history (list orig-msg))
+         (res (kargu--history-refresh-system-head history t)))
+    (should-not (equal (alist-get "content" (car res) nil nil #'equal)
+                       "old system prompt"))))
+
 (provide 'tests/test-history)
+
 ;;; test-history.el ends here

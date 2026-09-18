@@ -32,6 +32,7 @@
 (require 'kargu/history-compact)
 (require 'kargu/api)
 (require 'kargu/api/circuit)
+(require 'kargu/ui/confirm)
 
 (defvar kargu-loop-empty-retries)
 (defvar kargu-loop-upstream-retries)
@@ -200,18 +201,19 @@ Reasoning-only replies are empty, not answers."
 
 (defun kargu-loop--on-overflow (run response)
   "Compact RUN after a context-window overflow.
- Records a circuit breaker success (API responded, just context overflow)."
+Records a circuit breaker success (API responded, just context overflow)."
   (kargu-circuit-record-success)
   (if (kargu--loop-start-compact run nil)
       (kargu-log 'warn "loop: context overflow; compacting")
-    (kargu--loop-finish run :error
-                       (or (kargu-response-error-message response)
-                           "context overflow"))))
+    (kargu-loop--recover-or-finish
+     run
+     (or (kargu-response-error-message response)
+         "context overflow"))))
 
 (defun kargu-loop--retry-upstream (run err)
   "Resend RUN from current history after retryable upstream error ERR.
- Records the failure in the circuit breaker; if the circuit trips
- to :open, the run is finished with an error instead of retrying."
+Records the failure in the circuit breaker; if the circuit trips
+to :open, prompt user to retry or abort instead of terminating."
   (kargu-circuit-record-failure err)
   (let* ((n (1+ (or (plist-get run :upstream-retries) 0)))
          (cap (or kargu-loop-upstream-retries 0))
@@ -219,10 +221,11 @@ Reasoning-only replies are empty, not answers."
     (plist-put run :upstream-retries n)
     (if (not (kargu-circuit-allow-request-p))
         (progn
-          (kargu-log 'error "loop: circuit breaker OPEN after %d upstream failures; aborting: %s"
+          (kargu-log 'error "loop: circuit breaker OPEN after %d upstream failures; prompting recovery: %s"
                      n err)
-          (kargu--loop-finish run :error
-                             (format "circuit breaker tripped (upstream: %s)" err)))
+          (kargu-loop--recover-or-finish
+           run
+           (format "circuit breaker tripped (upstream: %s)" err)))
       (kargu-log 'warn "loop: upstream error; retry %d/%d in %.1fs: %s"
                  n cap delay err)
       (run-at-time delay nil
@@ -259,8 +262,44 @@ records :supports-tools nil and retries without tools."
         (plist-put run :no-tools t)
         (kargu--loop-request run nil)))))
 
+(defun kargu-loop--recover-or-finish (run err)
+  "Prompt user to retry or abort after ERR during RUN.
+If user selects `:retry', reset circuit breaker, reset upstream retry count,
+and re-issue `kargu--loop-request'.  If `:stop' or anything else, abort RUN."
+  (let* ((chat-buf (plist-get run :chat-buffer))
+         (decision
+          (kargu-ui-confirm
+           :title "⚠️  [Request Interrupted / Network Error]"
+           :details (format "The model request failed or timed out:\n%s" err)
+           :notice "Choose whether to retry the request or stop the current agent run."
+           :actions '((:key :retry
+                       :label "[↻ Retry Request]"
+                       :face (:inherit success :weight bold)
+                       :help "Reset circuit breaker and retry the model request"
+                       :message "     -> [↻ Retrying model request...]\n\n")
+                      (:key :stop
+                       :label "[✗ Stop Run]"
+                       :face (:inherit error :weight bold)
+                       :help "Abort the current agent run with this error"
+                       :message "     -> [✗ Stopped by user]\n\n"))
+           :chat-buffer chat-buf
+           :fallback-prompt (format "Request failed: %s. Retry request? " err)
+           :default-action :stop
+           :notify 'permission)))
+    (if (eq decision :retry)
+        (progn
+          (kargu-log 'info "loop: user requested retry after error: %s" err)
+          (when (fboundp 'kargu-circuit-reset)
+            (kargu-circuit-reset))
+          (plist-put run :upstream-retries 0)
+          (kargu-loop--set-state run 'request)
+          (kargu--loop-request run nil))
+      (kargu-log 'info "loop: user stopped run after error: %s" err)
+      (kargu--loop-finish run :error err))))
+
 (defun kargu-loop--on-error (run response)
-  "Retry RUN on 502/overload, otherwise finish with the error in RESPONSE."
+  "Retry RUN on 502/overload.
+Otherwise prompt user or finish with the error in RESPONSE."
   (let ((err (or (kargu-response-error-message response)
                  (and (member (kargu--loop-finish-reason response)
                               '("content-filter" "content_filter"))
@@ -276,7 +315,7 @@ records :supports-tools nil and retries without tools."
       (kargu-loop--retry-upstream run err))
      (t
       (kargu-log 'error "loop: request failed: %s" err)
-      (kargu--loop-finish run :error err)))))
+      (kargu-loop--recover-or-finish run err)))))
 
 (defun kargu-loop--on-tools (run response)
   "Queue tool calls from RESPONSE.

@@ -26,6 +26,7 @@
 
 (require 'kargu/core)
 (require 'kargu/api)
+(require 'kargu/ui/confirm)
 
 (defvar kargu-chat--output-marker)
 (defvar kargu-chat--prompt-marker)
@@ -45,96 +46,36 @@ When non-nil, may be `:continue' or `:stop'.")
 (defun kargu-loop--render-continue-prompt (chat-buf max-iter batch set-decision-fn)
   "Render turn limit banner and buttons into CHAT-BUF.
 Calls SET-DECISION-FN with chosen action when clicked."
-  (with-current-buffer chat-buf
-    (let ((inhibit-read-only t))
-      (when (and (markerp kargu-chat--output-marker)
-                 (eq (marker-buffer kargu-chat--output-marker) chat-buf))
-        (delete-region kargu-chat--output-marker (point-max))
-        (setq kargu-chat--prompt-marker nil))
-      (goto-char (point-max))
-      (unless (or (bobp) (eq (char-before) ?\n))
-        (insert "\n"))
-      (insert "\n")
-      (insert (propertize (format "  ⏸  [Turn limit reached (%d turns)]\n" max-iter)
-                          'face '(:inherit warning :weight bold)))
-      (insert (format "     Continue for another %d turns?\n     " batch))
-      (insert-button
-       (format "[✓ Continue (+%d turns)]" batch)
-       'action (lambda (_)
-                 (funcall set-decision-fn :continue)
-                 (exit-recursive-edit))
-       'face '(:inherit success :weight bold)
-       'help-echo "Click to allow another turn batch")
-      (insert "  ")
-      (insert-button
-       "[✗ Stop]"
-       'action (lambda (_)
-                 (funcall set-decision-fn :stop)
-                 (exit-recursive-edit))
-       'face '(:inherit error :weight bold)
-       'help-echo "Click to stop the run")
-      (insert "\n\n")
-      (setq kargu-chat--output-marker (copy-marker (point) t)))))
+  (kargu-confirm--render-prompt
+   chat-buf (format "⏸  [Turn limit reached (%d turns)]" max-iter) nil
+   (format "Continue for another %d turns?" batch)
+   `((:key :continue :label ,(format "[✓ Continue (+%d turns)]" batch) :face (:inherit success :weight bold))
+     (:key :stop :label "[✗ Stop]" :face (:inherit error :weight bold)))
+   set-decision-fn))
 
 (defun kargu-loop--decide-continue (chat-buf max-iter batch)
   "Gather user decision (:continue or :stop) for extending turn limit."
-  (cond
-   (kargu-loop--mock-continue-decision
-    (when (and chat-buf (buffer-live-p chat-buf))
-      (with-current-buffer chat-buf
-        (let ((inhibit-read-only t))
-          (goto-char (point-max))
-          (insert "\n")
-          (insert (propertize (format "  ⏸  [Turn limit reached (%d turns)]\n" max-iter)
-                              'face '(:inherit warning :weight bold)))
-          (insert (format "     Continue for another %d turns?\n     " batch))
-          (insert (format "[✓ Continue (+%d turns)]  [✗ Stop]\n\n" batch)))))
-    kargu-loop--mock-continue-decision)
-   ((not (and chat-buf (buffer-live-p chat-buf) (not noninteractive)))
-    (if (or noninteractive
-            (y-or-n-p (format "Kargu reached %d turns limit. Continue for another %d turns? "
-                              max-iter batch)))
-        (if noninteractive :stop :continue)
-      :stop))
-   (t
-    (let ((decision :stop))
-      (kargu-loop--render-continue-prompt
-       chat-buf max-iter batch (lambda (d) (setq decision d)))
-      (let ((win (or (get-buffer-window chat-buf)
-                     (and (fboundp 'kargu-chat-show)
-                          (get-buffer-window (kargu-chat-show))))))
-        (when win
-          (select-window win)))
-      (with-current-buffer chat-buf
-        (goto-char (point-max)))
-      (dolist (win (get-buffer-window-list chat-buf nil t))
-        (set-window-point win (point-max))
-        (with-selected-window win
-          (goto-char (point-max))
-          (recenter -1)))
-      (message "Turn limit reached (%d turns): click [✓ Continue] or [✗ Stop]" max-iter)
-      (condition-case _sig
-          (recursive-edit)
-        (quit
-         (setq decision :stop)
-         (message "kargu: run stopped at turn limit")))
-      (with-current-buffer chat-buf
-        (let ((inhibit-read-only t))
-          (goto-char (point-max))
-          (if (eq decision :continue)
-              (insert (propertize (format "     -> [✓ Continuing for +%d turns...]\n\n" batch)
-                                  'face 'font-lock-string-face))
-            (insert (propertize "     -> [✗ Stopped]\n\n" 'face 'font-lock-warning-face)))
-          (setq kargu-chat--output-marker (copy-marker (point) t))))
-      (when (and (eq decision :continue)
-                 (fboundp 'kargu-chat--ensure-running-prompt))
-        (with-current-buffer chat-buf
-          (kargu-chat--ensure-running-prompt)))
-      (dolist (w (get-buffer-window-list chat-buf nil t))
-        (set-window-point w (point-max))
-        (with-selected-window w
-          (goto-char (point-max))))
-      decision))))
+  (let ((kargu-confirm--mock-decision
+         (or kargu-loop--mock-continue-decision
+             kargu-confirm--mock-decision)))
+    (kargu-ui-confirm
+     :title (format "⏸  [Turn limit reached (%d turns)]" max-iter)
+     :notice (format "Continue for another %d turns?" batch)
+     :actions `((:key :continue
+                 :label ,(format "[✓ Continue (+%d turns)]" batch)
+                 :face (:inherit success :weight bold)
+                 :help "Click to allow another turn batch"
+                 :message ,(format "     -> [✓ Continuing for +%d turns...]\n\n" batch))
+                (:key :stop
+                 :label "[✗ Stop]"
+                 :face (:inherit error :weight bold)
+                 :help "Click to stop the run"
+                 :message "     -> [✗ Stopped by user]\n\n"))
+     :chat-buffer chat-buf
+     :fallback-prompt (format "Kargu reached %d turns limit. Continue for another %d turns? "
+                              max-iter batch)
+     :default-action :stop
+     :notify 'permission)))
 
 (defun kargu-loop--apply-continue-decision (run prompt decision max-iter batch)
   "Apply DECISION (:continue or :stop) to RUN."

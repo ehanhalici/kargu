@@ -62,7 +62,8 @@
   "Register a provider in the global registry.
 PLIST must contain at least `:id'.  Other supported keys:
 `:name', `:api', `:env', `:models', `:models-api', `:model-detail-api',
-`:usage-api', `:extra-headers', `:npm', `:reasoning-efforts', `:format'."
+`:usage-api', `:extra-headers', `:npm', `:reasoning-efforts', `:format',
+`:prompt-caching'."
   (let* ((id (plist-get plist :id))
          (id-str (cond ((stringp id) (downcase (string-trim id)))
                        ((symbolp id) (downcase (symbol-name id)))
@@ -77,6 +78,11 @@ PLIST must contain at least `:id'.  Other supported keys:
   (when id
     (let ((id-str (if (symbolp id) (symbol-name id) (format "%s" id))))
       (gethash (downcase (string-trim id-str)) kargu-providers--table))))
+
+(defun kargu-provider-prompt-caching (id)
+  "Return non-nil if provider ID supports prompt caching."
+  (let ((info (kargu-provider-get id)))
+    (and info (plist-get info :prompt-caching))))
 
 (defun kargu-provider-format (id)
   "Return API access format symbol for provider ID, or nil if unsupported."

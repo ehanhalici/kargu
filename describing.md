@@ -1,6 +1,6 @@
 # Kargu — Architecture, Operating Logic & Specification
 
-Kargu is an advanced autonomous agentic coding assistant for GNU Emacs. It interfaces with OpenAI-compatible LLM endpoints (via `plz` asynchronous HTTP/SSE), integrates workspace intelligence from `lsp-mode` and `dape`, applies file changes through `ediff` shadow buffers, provides interactive workflow controls via `transient`, and maintains rigorous formal protocol safety verified with TLA+.
+Kargu is an advanced autonomous agentic coding assistant for GNU Emacs. It interfaces with OpenAI-compatible LLM endpoints (via `plz` asynchronous HTTP/SSE), integrates workspace intelligence from `eglot` and `dape`, applies file changes through `ediff` shadow buffers, provides interactive workflow controls via `transient`, and maintains rigorous formal protocol safety verified with TLA+.
 
 ---
 

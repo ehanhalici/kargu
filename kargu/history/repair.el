@@ -67,15 +67,25 @@ The table is cleared upon completion."
   (clrhash pending)
   out-rev)
 
-(defun kargu--history-refresh-system-head (history)
-  "Return cons of (HEAD-MSG . REMAINING-MSGS) ensuring fresh system prompt."
+(defun kargu--history-refresh-system-head (history &optional force-refresh)
+  "Return cons of (HEAD-MSG . REMAINING-MSGS).
+Preserves existing non-empty system prompt content to guarantee KV cache prefix
+alignment across turns and reloaded sessions.  If absent, empty, or if
+FORCE-REFRESH is non-nil, generates a fresh system prompt via
+`kargu--get-system-prompt'."
   (let ((rest (copy-tree history t)))
     (if (and rest (equal (kargu--aget (car rest) "role") "system"))
-        (let ((sys (copy-tree (pop rest) t)))
-          (if (assoc "content" sys)
-              (setcdr (assoc "content" sys) (kargu--get-system-prompt))
-            (push `("content" . ,(kargu--get-system-prompt)) sys))
-          (cons sys rest))
+        (let* ((sys (copy-tree (pop rest) t))
+               (content (kargu--aget sys "content")))
+          (if (and (not force-refresh)
+                   (stringp content)
+                   (not (string-empty-p (string-trim content))))
+              ;; Stable system prompt preserved for prompt cache hit
+              (cons sys rest)
+            (if (assoc "content" sys)
+                (setcdr (assoc "content" sys) (kargu--get-system-prompt))
+              (push `("content" . ,(kargu--get-system-prompt)) sys))
+            (cons sys rest)))
       (cons `(("role" . "system")
               ("content" . ,(kargu--get-system-prompt)))
             rest))))

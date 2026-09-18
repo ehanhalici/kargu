@@ -356,7 +356,7 @@ All tools are read-only and available in all modes."
   ;; 1. workspace_grep (grep, rg)
   (kargu-register-tool
    "workspace_grep"
-   "Search file contents for regex/literal pattern. Uses `rg' (ripgrep) if available, otherwise GNU grep. Read-only, available in all modes."
+   "Search file contents for regex or literal text pattern. ALWAYS use this (or rg/grep) instead of reading entire files when searching for definitions, usages, or text. Uses `rg' (ripgrep) if available, otherwise GNU grep. Read-only, available in all modes."
    '(("type" . "object")
      ("properties" . (("pattern" . (("type" . "string")
                                     ("description" . "Search pattern (regex or literal).")))
@@ -379,7 +379,7 @@ All tools are read-only and available in all modes."
   ;; 2. find_files (find, fd, glob, find_files_by_glob)
   (kargu-register-tool
    "find_files"
-   "Find project files matching a glob pattern (e.g. **/*.rs, *.el). Uses `fd' if available (preferred over `find'), otherwise `rg --files' or directory walk. Read-only, available in all modes."
+   "Find project files matching a glob pattern (e.g. **/*.rs, *.el, *test*). Uses `fd' if available (preferred over `find'), otherwise `rg --files' or directory walk. Read-only, available in all modes."
    '(("type" . "object")
      ("properties" . (("pattern" . (("type" . "string")
                                     ("description" . "Glob pattern such as **/*.rs or *.el.")))

@@ -10,6 +10,8 @@
 (require 'kargu/tools/diff)
 (require 'kargu/tools/search)
 (require 'kargu/tools/webfetch)
+(require 'kargu/tools/bash)
+(declare-function rust-mode "rust-mode" ())
 
 (defun kargu-test-temp-file (prefix)
   "Create a temporary file inside the project root for testing."
@@ -309,6 +311,236 @@
           (should-not (file-exists-p path))
           (should-not (gethash path kargu-diff--snapshots)))
       (when (file-exists-p path) (delete-file path)))))
+
+(ert-deftest kargu-bash-run-async-callback-test ()
+  "Ensure kargu-bash-run executes asynchronously when callback is provided."
+  (let* ((kargu-permission-confirm-bash nil)
+         (done nil)
+         (result nil))
+    (kargu-bash-run "echo async_hello_world" (kargu-permission-project-root) nil
+                    (lambda (res)
+                      (setq result res)
+                      (setq done t)))
+    (let ((start (float-time)))
+      (while (and (not done) (< (- (float-time) start) 5.0))
+        (accept-process-output nil 0.05)))
+    (should done)
+    (should (stringp result))
+    (should (string-match-p "exit 0" result))
+    (should (string-match-p "async_hello_world" result))))
+
+(ert-deftest kargu-execute-tool-async-bash-test ()
+  "Ensure kargu-execute-tool delegates to callback asynchronously for bash."
+  (let* ((kargu-permission-confirm-bash nil)
+         (done nil)
+         (result nil))
+    (kargu-execute-tool "bash" '(("command" . "echo tool_exec_async_test"))
+                        (lambda (res)
+                          (setq result res)
+                          (setq done t)))
+    (let ((start (float-time)))
+      (while (and (not done) (< (- (float-time) start) 5.0))
+        (accept-process-output nil 0.05)))
+    (should done)
+    (should (stringp result))
+    (should (string-match-p "tool_exec_async_test" result))))
+
+(ert-deftest kargu-bash-kill-active-async-test ()
+  "Ensure kargu-bash-kill-active-async terminates running async bash process."
+  (let ((kargu-permission-confirm-bash nil))
+    (kargu-bash-run "sleep 30" (kargu-permission-project-root) nil #'ignore)
+    (should (processp kargu-bash--active-async-proc))
+    (should (process-live-p kargu-bash--active-async-proc))
+    (kargu-bash-kill-active-async)
+    (should-not kargu-bash--active-async-proc)))
+
+(ert-deftest kargu-tool-missing-file-path-pattern-guidance-test ()
+  "Ensure kargu--tool-missing-file-path gives helpful guidance when pattern is passed."
+  (let ((res (kargu-execute-tool "read_file" '(("pattern" . "my_search_term")))))
+    (should (stringp res))
+    (should (string-prefix-p "ERROR: missing file_path" res))
+    (should (string-search "workspace_grep" res))
+    (should (string-search "find_files" res))))
+
+(ert-deftest kargu-dape-breakpoint-set-clear-test ()
+  "Ensure kargu-dape-set-breakpoint and clear-breakpoint function deterministically with rich output."
+  (let ((temp (kargu-test-temp-file "kargu-bp-test")))
+    (unwind-protect
+        (progn
+          (with-temp-file temp
+            (insert "fn main() {\n    let x = 42;\n    println!(\"{}\", x);\n}\n"))
+          ;; Mock dape internals
+          (let* ((full-temp (expand-file-name temp))
+                 (dape--breakpoints nil)
+                 (toggled-calls nil))
+            (cl-letf (((symbol-function 'dape-breakpoint-toggle)
+                       (lambda ()
+                         (let ((cur-line (line-number-at-pos)))
+                           (push (list full-temp cur-line) toggled-calls)
+                           (if (cl-some (lambda (bp) (and (equal (nth 0 bp) full-temp) (= (nth 1 bp) cur-line)))
+                                        dape--breakpoints)
+                               (setq dape--breakpoints
+                                     (cl-remove-if (lambda (bp) (and (equal (nth 0 bp) full-temp) (= (nth 1 bp) cur-line)))
+                                                   dape--breakpoints))
+                             (push (list full-temp cur-line) dape--breakpoints)))))
+                      ((symbol-function 'dape--breakpoint-file-name)
+                       (lambda (bp) (nth 0 bp)))
+                      ((symbol-function 'dape--breakpoint-line)
+                       (lambda (bp) (nth 1 bp))))
+              ;; 1. Set breakpoint on line 2
+              (let ((res (kargu-dape-set-breakpoint temp 2)))
+                (should (stringp res))
+                (should (string-search "[BREAKPOINT SET]" res))
+                (should (string-search "let x = 42;" res))
+                (should (cl-some (lambda (bp) (and (equal (nth 0 bp) full-temp) (= (nth 1 bp) 2))) dape--breakpoints)))
+              ;; 2. Set breakpoint on line 2 again (already set)
+              (let ((res2 (kargu-dape-set-breakpoint temp 2)))
+                (should (string-search "[BREAKPOINT ALREADY SET]" res2)))
+              ;; 3. Clear breakpoint on line 2
+              (let ((res3 (kargu-dape-clear-breakpoint temp 2)))
+                (should (string-search "[BREAKPOINT REMOVED]" res3))
+                (should-not (cl-some (lambda (bp) (and (equal (nth 0 bp) full-temp) (= (nth 1 bp) 2))) dape--breakpoints)))
+              ;; 4. Clear breakpoint on line 2 again (none exists)
+              (let ((res4 (kargu-dape-clear-breakpoint temp 2)))
+                (should (string-search "[BREAKPOINT NOT FOUND]" res4))))))
+      (when (file-exists-p temp) (delete-file temp)))))
+
+(ert-deftest kargu-dape-source-snippet-and-line-test ()
+  "Ensure kargu-dape--source-line and kargu-dape--source-snippet return expected formats."
+  (let ((temp (kargu-test-temp-file "kargu-snippet-test")))
+    (unwind-protect
+        (progn
+          (with-temp-file temp
+            (insert "line 1\nline 2 target\nline 3\nline 4\n"))
+          (should (string= (kargu-dape--source-line temp 2) "line 2 target"))
+          (let ((snippet (kargu-dape--source-snippet temp 2 1)))
+            (should (stringp snippet))
+            (should (string-search "=>    2: line 2 target" snippet))
+            (should (string-search "      1: line 1" snippet))
+            (should (string-search "      3: line 3" snippet))))
+      (when (file-exists-p temp) (delete-file temp)))))
+
+(ert-deftest kargu-dape-target-buffer-and-stop-on-entry-test ()
+  "Ensure kargu-dape--target-buffer skips chat buffer and ensure-stop-on-entry works."
+  (let ((src-buf (generate-new-buffer "my-code.rs"))
+        (chat-buf (generate-new-buffer "*kargu-chat*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer src-buf
+            (if (fboundp 'rust-mode)
+                (rust-mode)
+              (prog-mode))
+            (setq-local buffer-file-name "/tmp/my-code.rs"))
+          (with-current-buffer chat-buf
+            (kargu-chat-mode))
+          ;; When kargu-context-buffer is set to src-buf
+          (let ((kargu-context-buffer src-buf))
+            (should (eq (kargu-dape--target-buffer) src-buf)))
+          ;; Test ensure-stop-on-entry
+          (let ((cfg1 '(:program "test"))
+                (cfg2 '(:program "test" :stopOnEntry nil)))
+            (should (equal (plist-get (kargu-dape--ensure-stop-on-entry cfg1) :stopOnEntry) t))
+            (should (equal (plist-get (kargu-dape--ensure-stop-on-entry cfg2) :stopOnEntry) t))))
+      (when (buffer-live-p src-buf) (kill-buffer src-buf))
+      (when (buffer-live-p chat-buf) (kill-buffer chat-buf)))))
+
+(ert-deftest kargu-dape-tools-registration-and-execution-test ()
+  "Ensure all new dape debug tools are registered and return clean errors when disconnected."
+  ;; Tools should be registered
+  (should (member "debug_step_over" (kargu-registered-tools)))
+  (should (member "debug_step_in" (kargu-registered-tools)))
+  (should (member "debug_step_out" (kargu-registered-tools)))
+  (should (member "debug_continue" (kargu-registered-tools)))
+  (should (member "debug_pause" (kargu-registered-tools)))
+  (should (member "debug_restart" (kargu-registered-tools)))
+  (should (member "debug_set_breakpoint" (kargu-registered-tools)))
+  (should (member "debug_clear_breakpoint" (kargu-registered-tools)))
+  ;; Without a live session, tools return descriptive error strings
+  (let ((res-step (kargu-execute-tool "debug_step_over" nil))
+        (res-cont (kargu-execute-tool "debug_continue" nil))
+        (res-pause (kargu-execute-tool "debug_pause" nil)))
+    (should (string-prefix-p "ERROR:" res-step))
+    (should (string-prefix-p "ERROR:" res-cont))
+    (should (string-prefix-p "ERROR:" res-pause))))
+
+(ert-deftest kargu-loop-debug-mode-tool-visibility-test ()
+  "Ensure debug tools are visible in debug mode, while mutating tools are hidden."
+  (let ((kargu-active-mode 'debug))
+    (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'debug)))
+      ;; Debug tools should be visible in debug mode
+      (should (kargu-loop--tool-visible-p "debug_get_context"))
+      (should (kargu-loop--tool-visible-p "debug_step_in"))
+      (should (kargu-loop--tool-visible-p "debug_step_over"))
+      (should (kargu-loop--tool-visible-p "debug_set_breakpoint"))
+      (should (kargu-loop--tool-visible-p "read_file"))
+      (should (kargu-loop--tool-visible-p "workspace_grep"))
+      ;; File mutating tools must be hidden in debug mode
+      (should-not (kargu-loop--tool-visible-p "edit_file"))
+      (should-not (kargu-loop--tool-visible-p "write_file"))
+      (should-not (kargu-loop--tool-visible-p "bash"))
+      ;; Debug tools should not be blocked by gate in debug mode
+      (should-not (kargu-loop--gate-tool "debug_step_over"))
+      (should-not (kargu-loop--gate-tool "debug_set_breakpoint"))
+      ;; Mutating tools should be gated
+      (should (stringp (kargu-loop--gate-tool "edit_file"))))))
+
+(ert-deftest kargu-prompt-debug-message-content-test ()
+  "Ensure kargu-prompt-debug-message contains LSP schema, pause notice, and multi-tool calling rule."
+  (let ((kargu-active-mode 'debug))
+    (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'debug))
+              ((symbol-function 'kargu-lsp-build-skeleton) (lambda () "fn main() { ... }"))
+              ((symbol-function 'kargu-dape-get-context) (lambda () "Paused at src/main.rs:10\nStack: main()")))
+      (let ((msg (kargu-prompt-debug-message)))
+        (should (stringp msg))
+        ;; Check Turkish instructions
+        (should (string-search "DEBUG modundasın" msg))
+        (should (string-search "Kodun LSP şeması (semboller tablosu)" msg))
+        (should (string-search "fn main() { ... }" msg))
+        (should (string-search "Debug başladı ve şu an çalışmıyor" msg))
+        (should (string-search "breakpoint koyup run edebilirsin" msg))
+        (should (string-search "Aynı anda birden fazla komut" msg))
+        (should (string-search "debug_set_breakpoint" msg))
+        (should (string-search "debug_continue" msg))
+        (should (string-search "list_files" msg))
+        ;; Check English instructions for multi-model reliability
+        (should (string-search "DEBUG mode" msg))
+        (should (string-search "paused at entry" msg))
+        (should (string-search "MULTIPLE tools in a single turn" msg))
+        (should (string-search "Current debugger state:" msg))
+        (should (string-search "Paused at src/main.rs:10" msg))))))
+
+(ert-deftest kargu-prompt-tools-guidance-multi-tool-test ()
+  "Ensure kargu-prompt--tools-guidance-block explains multi-tool sequential execution."
+  (let ((block (kargu-prompt--tools-guidance-block)))
+    (should (stringp block))
+    (should (string-search "Execution & Multiple Tool Calling Rule:" block))
+    (should (string-search "MULTIPLE tools in a single turn" block))
+    (should (string-search "debug_set_breakpoint" block))
+    (should (string-search "debug_continue" block))))
+
+(ert-deftest kargu-chat-send-empty-prompt-debug-mode-test ()
+  "Ensure kargu-chat-send with empty prompt in debug mode initiates debug session."
+  (let ((kargu-active-mode 'debug)
+        (ensure-called nil)
+        (submitted-text nil)
+        (b (get-buffer-create kargu-chat-buffer-name)))
+    (unwind-protect
+        (with-current-buffer b
+          (kargu-chat-mode)
+          (kargu-chat--ensure-prompt)
+          (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'debug))
+                    ((symbol-function 'kargu-dape-ready-p) (lambda () nil))
+                    ((symbol-function 'kargu-dape-ensure-session)
+                     (lambda (on-ready _on-cancel)
+                       (setq ensure-called t)
+                       (funcall on-ready)))
+                    ((symbol-function 'kargu-chat--submit)
+                     (lambda (text)
+                       (setq submitted-text text))))
+            (kargu-chat-send)
+            (should ensure-called)
+            (should (string-search "Debug oturumu başlatıldı" submitted-text))))
+      (when (buffer-live-p b) (kill-buffer b)))))
 
 (provide 'tests/test-tools)
 ;;; test-tools.el ends here

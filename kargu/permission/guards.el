@@ -58,7 +58,8 @@
     "/run/current-system/sw/bin" "/run/wrappers/bin" "/sbin" "/usr/sbin")
   "Standard system executable directories allowed in shell commands.")
 
-(declare-function lsp-workspace-root "lsp-mode")
+(declare-function eglot-current-server "eglot")
+(declare-function eglot-project "eglot" (server))
 
 (defun kargu-permission-project-root (&optional buffer)
   "Return the canonical project root directory for BUFFER (or current).
@@ -66,16 +67,20 @@ The returned directory always ends with a slash and has symlinks resolved."
   (let ((raw-root
          (or kargu-permission--override-root
              (and (fboundp 'kargu--project-root)
-                  (ignore-errors (kargu--project-root)))
+                  (if (and buffer (buffer-live-p buffer))
+                      (with-current-buffer buffer (kargu--project-root))
+                    (kargu--project-root)))
              (when (and buffer (buffer-live-p buffer))
                (with-current-buffer buffer
-                 (or (when (fboundp 'lsp-workspace-root)
-                       (let ((ws (lsp-workspace-root)))
-                         (and ws (file-name-as-directory ws))))
-                     (when (fboundp 'project-root)
-                       (let ((project (project-current)))
-                         (and project (project-root project))))
-                     default-directory)))
+                 (let* ((proj (or (and (fboundp 'eglot-current-server)
+                                       (eglot-current-server)
+                                       (fboundp 'eglot-project)
+                                       (eglot-project (eglot-current-server)))
+                                  (and (fboundp 'project-current)
+                                       (project-current))))
+                        (root (and proj (fboundp 'project-root) (project-root proj))))
+                   (or (and root (file-name-as-directory (expand-file-name root)))
+                       default-directory))))
              default-directory)))
     (file-name-as-directory (file-truename (expand-file-name raw-root)))))
 

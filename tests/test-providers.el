@@ -215,6 +215,103 @@
     (kargu-tune-cycle-reasoning-effort)
     (should (null kargu-reasoning-effort))))
 
+(ert-deftest kargu-providers-catalog-prompt-caching-completeness-test ()
+  "Ensure every provider in `kargu-providers-builtin-catalog' defines `:prompt-caching'."
+  (require 'kargu/providers/catalog)
+  (should (> (length kargu-providers-builtin-catalog) 150))
+  (dolist (item kargu-providers-builtin-catalog)
+    (should (plist-member item :prompt-caching))
+    (let ((val (plist-get item :prompt-caching)))
+      (should (memq val '(t nil))))))
+
+(ert-deftest kargu-providers-prompt-caching-resolution-test ()
+  "Verify `kargu-provider-prompt-caching' correctly identifies caching providers."
+  (require 'kargu/providers/catalog)
+  (require 'kargu/providers/registry)
+  ;; Supported providers
+  (should (eq t (kargu-provider-prompt-caching "openrouter")))
+  (should (eq t (kargu-provider-prompt-caching "anthropic")))
+  (should (eq t (kargu-provider-prompt-caching "openai")))
+  (should (eq t (kargu-provider-prompt-caching "deepseek")))
+  (should (eq t (kargu-provider-prompt-caching "google")))
+  (should (eq t (kargu-provider-prompt-caching "mistral")))
+  (should (eq t (kargu-provider-prompt-caching "cerebras")))
+  (should (eq t (kargu-provider-prompt-caching "togetherai")))
+  ;; Unsupported providers
+  (should (null (kargu-provider-prompt-caching "ollama")))
+  (should (null (kargu-provider-prompt-caching "cohere")))
+  (should (null (kargu-provider-prompt-caching "perplexity"))))
+
+(ert-deftest kargu-providers-prompt-caching-payload-tools-test ()
+  "Ensure `kargu--build-payload' attaches `cache_control' to last tool for caching providers."
+  (require 'kargu/api/http)
+  (require 'kargu/api/tools)
+  (let ((kargu--session-provider "openrouter")
+        (kargu--session-model "anthropic/claude-3.5-sonnet")
+        (kargu--message-history '((("role" . "user") ("content" . "hello")))))
+    (let* ((payload (kargu--build-payload))
+           (tools (kargu--aget payload "tools")))
+      (should (vectorp tools))
+      (should (> (length tools) 0))
+      (let ((last-tool (aref tools (1- (length tools)))))
+        (should (equal (kargu--aget last-tool "cache_control")
+                       '(("type" . "ephemeral"))))))))
+
+(ert-deftest kargu-providers-prompt-caching-payload-disabled-test ()
+  "Ensure `kargu--build-payload' does not attach `cache_control' when provider does not support it."
+  (require 'kargu/api/http)
+  (require 'kargu/api/tools)
+  (let ((kargu--session-provider "ollama")
+        (kargu--session-model "llama3")
+        (kargu--message-history '((("role" . "user") ("content" . "hello")))))
+    (let* ((payload (kargu--build-payload))
+           (tools (kargu--aget payload "tools")))
+      (should (vectorp tools))
+      (should (> (length tools) 0))
+      (let ((last-tool (aref tools (1- (length tools)))))
+        (should-not (assoc "cache_control" last-tool))))))
+
+(ert-deftest kargu-providers-prompt-caching-payload-messages-multi-turn-test ()
+  "Ensure `kargu--build-payload' attaches `cache_control' to last completed turn for caching providers."
+  (require 'kargu/api/http)
+  (require 'kargu/api/tools)
+  (let ((kargu--session-provider "openrouter")
+        (kargu--session-model "anthropic/claude-3.5-sonnet")
+        (kargu--message-history '((("role" . "system") ("content" . "You are a coding assistant."))
+                                  (("role" . "user") ("content" . "Hello 1"))
+                                  (("role" . "assistant") ("content" . "Hi there 1"))
+                                  (("role" . "user") ("content" . "Hello 2")))))
+    (let* ((payload (kargu--build-payload))
+           (msgs (kargu--aget payload "messages")))
+      (should (vectorp msgs))
+      (should (= (length msgs) 4))
+      ;; Turn 2 (assistant) should have cache_control breakpoint
+      (let ((prev-turn (aref msgs 2)))
+        (should (equal (kargu--aget prev-turn "role") "assistant"))
+        (should (equal (kargu--aget prev-turn "cache_control")
+                       '(("type" . "ephemeral")))))
+      ;; Latest turn (user 2) should NOT have cache_control
+      (let ((curr-turn (aref msgs 3)))
+        (should (equal (kargu--aget curr-turn "role") "user"))
+        (should-not (assoc "cache_control" curr-turn))))))
+
+(ert-deftest kargu-providers-prompt-caching-payload-empty-tools-system-test ()
+  "Ensure `kargu--build-payload' attaches `cache_control' to system message when tools are empty."
+  (require 'kargu/api/http)
+  (require 'kargu/api/tools)
+  (cl-letf (((symbol-function 'kargu--build-tools-vector) (lambda () [])))
+    (let ((kargu--session-provider "anthropic")
+          (kargu--session-model "claude-3-5-sonnet-20241022")
+          (kargu--message-history '((("role" . "system") ("content" . "System instructions"))
+                                    (("role" . "user") ("content" . "Hello")))))
+      (let* ((payload (kargu--build-payload))
+             (msgs (kargu--aget payload "messages")))
+        (should (vectorp msgs))
+        (let ((sys-msg (aref msgs 0)))
+          (should (equal (kargu--aget sys-msg "role") "system"))
+          (should (equal (kargu--aget sys-msg "cache_control")
+                         '(("type" . "ephemeral")))))))))
+
 (provide 'tests/test-providers)
 
 ;;; test-providers.el ends here

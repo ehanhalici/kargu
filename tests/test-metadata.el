@@ -126,6 +126,64 @@
                 "Pick: " '("openai" "anthropic" "google") "anthropic")))
       (should (string= res "anthropic")))))
 
+(ert-deftest kargu-api-fuzzy-filter-and-scoring-test ()
+  "Test fuzzy filtering, scoring, and highlight chunks for model selection."
+  (let ((models '("openai/gpt-4o"
+                  "openai/gpt-4o-mini"
+                  "google/gemini-2.5-flash"
+                  "google/gemini-2.5-pro"
+                  "anthropic/claude-3-7-sonnet")))
+    ;; Substring match in base model name
+    (should (equal (mapcar #'substring-no-properties (kargu-api--fuzzy-filter "flash" models))
+                   '("google/gemini-2.5-flash")))
+    ;; Prefix match
+    (should (equal (mapcar #'substring-no-properties (kargu-api--fuzzy-filter "gpt-4o" models))
+                   '("openai/gpt-4o" "openai/gpt-4o-mini")))
+    ;; Subsequence / flex match
+    (should (equal (mapcar #'substring-no-properties (kargu-api--fuzzy-filter "c37s" models))
+                   '("anthropic/claude-3-7-sonnet")))
+    ;; Non-matching query returns nil
+    (should (null (kargu-api--fuzzy-filter "nonexistent-model" models)))
+    ;; Highlight chunks via Company
+    (let* ((cand (car (kargu-api--fuzzy-filter "flash" models)))
+           (chunks (and (fboundp 'company--match-from-capf-face)
+                        (company--match-from-capf-face cand))))
+      (should (equal chunks '((18 . 23)))))))
+
+(ert-deftest kargu-company-ephemeral-backend-fuzzy-and-strict-test ()
+  "Test that ephemeral Company backend enforces strict require-match and fuzzy candidates."
+  (let* ((cands '("gemini-2.5-flash" "gpt-4o"))
+         (backend (kargu--company-make-ephemeral-backend cands nil (point-marker))))
+    (should (eq (funcall backend 'require-match) t))
+    (let ((matched (funcall backend 'candidates "flash")))
+      (should (equal (mapcar #'substring-no-properties matched)
+                     '("gemini-2.5-flash")))
+      (when (fboundp 'company--match-from-capf-face)
+        (should (equal (funcall backend 'match (car matched)) '((11 . 16))))))
+    (should (null (funcall backend 'candidates "unknown")))))
+
+(ert-deftest kargu-api-model-selection-strict-template-rejection-test ()
+  "Test that model selection rejects non-template entries and resolves fuzzy queries."
+  ;; 1. Rejection of invalid / out-of-template model name
+  (let ((kargu--session-model "gpt-4o")
+        (footer-refreshed nil))
+    (cl-letf (((symbol-function 'kargu-chat-refresh-footer)
+               (lambda () (setq footer-refreshed t)))
+              ((symbol-function 'kargu--company-select-at-point)
+               (lambda (_field _cands _ann cb &rest _ignored)
+                 (funcall cb "out-of-template-model-xyz"))))
+      (should-error (kargu-chat-select-model-company '("gpt-4o" "gemini-2.5-flash") nil "mock")
+                    :type 'user-error)
+      (should (string= kargu--session-model "gpt-4o"))
+      (should footer-refreshed)))
+  ;; 2. Fuzzy query resolution to existing template model
+  (let ((kargu--session-model "gpt-4o"))
+    (cl-letf (((symbol-function 'kargu--company-select-at-point)
+               (lambda (_field _cands _ann cb &rest _ignored)
+                 (funcall cb "flash"))))
+      (kargu-chat-select-model-company '("gpt-4o" "gemini-2.5-flash") nil "mock")
+      (should (string= kargu--session-model "gemini-2.5-flash")))))
+
 (ert-deftest kargu-chat-footer-rendering-and-buttons-test ()
   "Test that `kargu-chat--footer-string' renders provider, model, effort buttons and refreshes."
   (let* ((kargu--session-provider "opencode")

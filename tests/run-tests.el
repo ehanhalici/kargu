@@ -34,6 +34,11 @@
 (require 'tests/test-todo-fixes)
 (require 'tests/test-dynamic-models)
 (require 'tests/test-provider-params)
+(require 'tests/test-lsp)
+(require 'tests/test-session)
+(require 'tests/test-confirm)
+(require 'tests/test-languages)
+(require 'tests/test-dape-commands)
 
 (defun kargu-run-all-tests ()
   "Run all Kargu ERT test suites."

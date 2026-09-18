@@ -42,12 +42,29 @@
 (declare-function kargu-chat--goto-footer-field "kargu/chat/prompt")
 (declare-function kargu-history-compact-threshold "kargu/history-compact")
 
+(declare-function company--match-from-capf-face "company")
+
 (defvar company-backends)
 (defvar company-minimum-prefix-length)
 (defvar company-idle-delay)
 (defvar company-candidates)
 (defvar kargu-chat-buffer-name)
 (defvar kargu-chat--output-marker)
+
+(defun kargu-api--fuzzy-filter (query candidates)
+  "Filter and sort CANDIDATES matching QUERY using Emacs' built-in flex completion."
+  (if (or (null query) (string-empty-p query))
+      candidates
+    (let* ((completion-styles '(flex basic partial-completion))
+           (all (completion-all-completions query candidates nil (length query))))
+      (when (consp all)
+        (let (res)
+          (while (consp (cdr all))
+            (push (car all) res)
+            (setq all (cdr all)))
+          (when (stringp (car all))
+            (push (car all) res))
+          (nreverse res))))))
 
 (defun kargu--completing-read-with-company (prompt candidates &optional default annotations)
   "Prompt for one of CANDIDATES using Company-mode with strict matching."
@@ -59,19 +76,22 @@
                (let ((text (minibuffer-contents-no-properties)))
                  (if (string-empty-p text) "" text)))
               (candidates
-               (let* ((prefix (or arg ""))
-                      (matched (cl-remove-if-not
-                                (lambda (c) (string-prefix-p prefix c t))
-                                cand-strings)))
-                 (or matched cand-strings)))
+               (let ((prefix (or arg "")))
+                 (kargu-api--fuzzy-filter prefix cand-strings)))
               (annotation
                (when (and arg annotations)
-                 (or (cdr (assoc arg annotations)) "")))
+                 (or (cdr (assoc (substring-no-properties arg) annotations)) "")))
+              (match
+               (if (fboundp 'company--match-from-capf-face)
+                   (company--match-from-capf-face arg)
+                 0))
+              (require-match t)
               (no-cache t)
               (sorted t)
               (duplicates nil)))))
     (minibuffer-with-setup-hook
         (lambda ()
+          (setq-local completion-styles '(flex basic partial-completion))
           (when (featurep 'company)
             (setq-local company-backends (list backend))
             (setq-local company-minimum-prefix-length 0)
@@ -113,15 +133,16 @@
          (buffer-substring-no-properties
           (marker-position start-marker) (point))))
       (candidates
-       (let* ((prefix (or arg ""))
-              (matched (cl-remove-if-not
-                        (lambda (c) (string-prefix-p prefix c t))
-                        cand-strings)))
-         (or matched cand-strings)))
+       (let ((prefix (or arg "")))
+         (kargu-api--fuzzy-filter prefix cand-strings)))
       (annotation
        (when (and arg annotations)
-         (or (cdr (assoc arg annotations)) "")))
-      (require-match nil)
+         (or (cdr (assoc (substring-no-properties arg) annotations)) "")))
+      (match
+       (if (fboundp 'company--match-from-capf-face)
+           (company--match-from-capf-face arg)
+         0))
+      (require-match t)
       (sorted t)
       (duplicates nil)
       (post-completion nil)
@@ -307,10 +328,17 @@ FIELD is \\='provider, \\='model, or \\='effort."
          all-models
          annotations
          (lambda (chosen)
-           (unless (and (stringp chosen) (not (string-empty-p chosen)))
-             (when (fboundp 'kargu-chat-refresh-footer)
-               (kargu-chat-refresh-footer))
-             (user-error "kargu: invalid model selection: %s" chosen))
+           (let* ((raw (and (stringp chosen) (string-trim (substring-no-properties chosen))))
+                  (resolved (cond
+                             ((or (null raw) (string-empty-p raw)) nil)
+                             ((member raw all-models) raw)
+                             (t (let ((matches (kargu-api--fuzzy-filter raw all-models)))
+                                  (and matches (substring-no-properties (car matches))))))))
+             (unless (and (stringp resolved) (member resolved all-models))
+               (when (fboundp 'kargu-chat-refresh-footer)
+                 (kargu-chat-refresh-footer))
+               (user-error "kargu: model '%s' is not in available template models" (or raw "")))
+             (setq chosen resolved))
            (setq kargu--session-model chosen)
            (kargu-state-set-model chosen)
            (let* ((ctx (kargu-model-context-window chosen))

@@ -32,239 +32,273 @@
      :models-api "https://api.302.ai/v1/models"
      :env ("302AI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "abacus"
      :name "Abacus"
      :api "https://routellm.abacus.ai/v1"
      :models-api "https://routellm.abacus.ai/v1/models"
      :env ("ABACUS_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "abliteration-ai"
      :name "abliteration.ai"
      :api "https://api.abliteration.ai/v1"
      :models-api "https://api.abliteration.ai/v1/models"
      :env ("ABLIT_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "aihubmix"
      :name "AIHubMix"
      :api "https://aihubmix.com/v1"
      :models-api "https://aihubmix.com/v1/models"
      :env ("AIHUBMIX_API_KEY")
      :npm "@aihubmix/ai-sdk-provider"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "alibaba"
      :name "Alibaba"
      :api "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
      :models-api "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models"
      :env ("DASHSCOPE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "alibaba-cn"
      :name "Alibaba (China)"
      :api "https://dashscope.aliyuncs.com/compatible-mode/v1"
      :models-api "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
      :env ("DASHSCOPE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "alibaba-coding-plan"
      :name "Alibaba Coding Plan"
      :api "https://coding-intl.dashscope.aliyuncs.com/v1"
      :models-api "https://coding-intl.dashscope.aliyuncs.com/v1/models"
      :env ("ALIBABA_CODING_PLAN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "alibaba-coding-plan-cn"
      :name "Alibaba Coding Plan (China)"
      :api "https://coding.dashscope.aliyuncs.com/v1"
      :models-api "https://coding.dashscope.aliyuncs.com/v1/models"
      :env ("ALIBABA_CODING_PLAN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "alibaba-token-plan"
      :name "Alibaba Token Plan"
      :api "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
      :models-api "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/models"
      :env ("ALIBABA_TOKEN_PLAN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "alibaba-token-plan-cn"
      :name "Alibaba Token Plan (China)"
      :api "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
      :models-api "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models"
      :env ("ALIBABA_TOKEN_PLAN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "amazon-bedrock"
      :name "Amazon Bedrock"
      :api "https://bedrock-runtime.us-east-1.amazonaws.com"
      :models-api "https://bedrock-runtime.us-east-1.amazonaws.com/models"
      :env ("AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_REGION" "AWS_BEARER_TOKEN_BEDROCK")
      :npm "@ai-sdk/amazon-bedrock"
-     :format nil)
+     :format nil
+     :prompt-caching t)
     (:id "ambient"
      :name "Ambient"
      :api "https://api.ambient.xyz/v1"
      :models-api "https://api.ambient.xyz/v1/models"
      :env ("AMBIENT_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "anthropic"
      :name "Anthropic"
      :api "https://api.anthropic.com/v1"
      :models-api "https://api.anthropic.com/v1/models"
-     :extra-headers '(("anthropic-version" . "2023-06-01"))
+     :extra-headers '(("anthropic-version" . "2023-06-01") ("anthropic-beta" . "prompt-caching-2024-07-31"))
      :env ("ANTHROPIC_API_KEY")
      :npm "@ai-sdk/anthropic"
-     :format anthropic)
+     :format anthropic
+     :prompt-caching t)
     (:id "anyapi"
      :name "AnyAPI"
      :api "https://api.anyapi.ai/v1"
      :models-api "https://api.anyapi.ai/v1/models"
      :env ("ANYAPI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "atomic-chat"
      :name "Atomic Chat"
      :api "http://127.0.0.1:1337/v1"
      :models-api "http://127.0.0.1:1337/v1/models"
      :env ("ATOMIC_CHAT_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "auriko"
      :name "Auriko"
      :api "https://api.auriko.ai/v1"
      :models-api "https://api.auriko.ai/v1/models"
      :env ("AURIKO_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "azure"
      :name "Azure"
      :api "https://${AZURE_RESOURCE_NAME}.openai.azure.com/openai/deployments"
      :models-api "https://${AZURE_RESOURCE_NAME}.openai.azure.com/openai/deployments/models"
      :env ("AZURE_RESOURCE_NAME" "AZURE_API_KEY")
      :npm "@ai-sdk/azure"
-     :format nil)
+     :format nil
+     :prompt-caching t)
     (:id "azure-cognitive-services"
      :name "Azure Cognitive Services"
      :api "https://${AZURE_COGNITIVE_SERVICES_RESOURCE_NAME}.cognitiveservices.azure.com"
      :models-api "https://${AZURE_COGNITIVE_SERVICES_RESOURCE_NAME}.cognitiveservices.azure.com/models"
      :env ("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME" "AZURE_COGNITIVE_SERVICES_API_KEY")
      :npm "@ai-sdk/azure"
-     :format nil)
+     :format nil
+     :prompt-caching t)
     (:id "bailing"
      :name "Bailing"
      :api "https://api.tbox.cn/api/llm/v1/chat/completions"
      :models-api "https://api.tbox.cn/api/llm/v1/chat/completions/models"
      :env ("BAILING_API_TOKEN")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "baseten"
      :name "Baseten"
      :api "https://inference.baseten.co/v1"
      :models-api "https://inference.baseten.co/v1/models"
      :env ("BASETEN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "berget"
      :name "Berget.AI"
      :api "https://api.berget.ai/v1"
      :models-api "https://api.berget.ai/v1/models"
      :env ("BERGET_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "cerebras"
      :name "Cerebras"
      :api "https://api.cerebras.ai/v1"
      :models-api "https://api.cerebras.ai/v1/models"
      :env ("CEREBRAS_API_KEY")
      :npm "@ai-sdk/cerebras"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "chutes"
      :name "Chutes"
      :api "https://llm.chutes.ai/v1"
      :models-api "https://llm.chutes.ai/v1/models"
      :env ("CHUTES_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "clarifai"
      :name "Clarifai"
      :api "https://api.clarifai.com/v2/ext/openai/v1"
      :models-api "https://api.clarifai.com/v2/ext/openai/v1/models"
      :env ("CLARIFAI_PAT")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "claudinio"
      :name "Claudinio"
      :api "https://api.claudin.io/v1"
      :models-api "https://api.claudin.io/v1/models"
      :env ("CLAUDINIO_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "cloudferro-sherlock"
      :name "CloudFerro Sherlock"
      :api "https://api-sherlock.cloudferro.com/openai/v1"
      :models-api "https://api-sherlock.cloudferro.com/openai/v1/models"
      :env ("CLOUDFERRO_SHERLOCK_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "cloudflare-ai-gateway"
      :name "Cloudflare AI Gateway"
      :api "https://gateway.ai.cloudflare.com/v1/${CLOUDFLARE_ACCOUNT_ID}/${CLOUDFLARE_GATEWAY_ID}"
      :models-api "https://gateway.ai.cloudflare.com/v1/${CLOUDFLARE_ACCOUNT_ID}/${CLOUDFLARE_GATEWAY_ID}/models"
      :env ("CLOUDFLARE_API_TOKEN" "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_GATEWAY_ID")
      :npm "ai-gateway-provider"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "cloudflare-workers-ai"
      :name "Cloudflare Workers AI"
      :api "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1"
      :models-api "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1/models"
      :env ("CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "cohere"
      :name "Cohere"
      :api "https://api.cohere.com/v2"
      :models-api "https://api.cohere.com/v2/models"
      :env ("COHERE_API_KEY")
      :npm "@ai-sdk/cohere"
-     :format nil)
+     :format nil
+     :prompt-caching nil)
     (:id "cortecs"
      :name "Cortecs"
      :api "https://api.cortecs.ai/v1"
      :models-api "https://api.cortecs.ai/v1/models"
      :env ("CORTECS_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "crof"
      :name "CrofAI"
      :api "https://crof.ai/v1"
      :models-api "https://crof.ai/v1/models"
      :env ("CROF_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "crossmodel"
      :name "CrossModel"
      :api "https://api.crossmodel.ai/v1"
      :models-api "https://api.crossmodel.ai/v1/models"
      :env ("CROSSMODEL_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "databricks"
      :name "Databricks"
      :api "https://${DATABRICKS_HOST}/ai-gateway/mlflow/v1"
      :models-api "https://${DATABRICKS_HOST}/ai-gateway/mlflow/v1/models"
      :env ("DATABRICKS_HOST" "DATABRICKS_TOKEN")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "deepinfra"
      :name "Deep Infra"
      :api "https://api.deepinfra.com/v1/openai"
      :models-api "https://api.deepinfra.com/v1/openai/models"
      :env ("DEEPINFRA_API_KEY")
      :npm "@ai-sdk/deepinfra"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "deepseek"
      :name "DeepSeek"
      :api "https://api.deepseek.com/v1"
@@ -272,448 +306,512 @@
      :usage-api "https://api.deepseek.com/user/balance"
      :env ("DEEPSEEK_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "digitalocean"
      :name "DigitalOcean"
      :api "https://inference.do-ai.run/v1"
      :models-api "https://inference.do-ai.run/v1/models"
      :env ("DIGITALOCEAN_ACCESS_TOKEN")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "dinference"
      :name "DInference"
      :api "https://api.dinference.com/v1"
      :models-api "https://api.dinference.com/v1/models"
      :env ("DINFERENCE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "drun"
      :name "D.Run (China)"
      :api "https://chat.d.run/v1"
      :models-api "https://chat.d.run/v1/models"
      :env ("DRUN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "empiriolabs"
      :name "EmpirioLabs AI"
      :api "https://api.empiriolabs.ai/v1"
      :models-api "https://api.empiriolabs.ai/v1/models"
      :env ("EMPIRIOLABS_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "evroc"
      :name "evroc"
      :api "https://models.think.evroc.com/v1"
      :models-api "https://models.think.evroc.com/v1/models"
      :env ("EVROC_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "fastrouter"
      :name "FastRouter"
      :api "https://go.fastrouter.ai/api/v1"
      :models-api "https://go.fastrouter.ai/api/v1/models"
      :env ("FASTROUTER_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "fireworks-ai"
      :name "Fireworks AI"
      :api "https://api.fireworks.ai/inference/v1"
      :models-api "https://api.fireworks.ai/inference/v1/models"
      :env ("FIREWORKS_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "freemodel"
      :name "FreeModel"
      :api "https://cc.freemodel.dev/v1"
      :models-api "https://cc.freemodel.dev/v1/models"
      :env ("FREEMODEL_API_KEY")
      :npm "@ai-sdk/anthropic"
-     :format anthropic)
+     :format anthropic
+     :prompt-caching nil)
     (:id "friendli"
      :name "Friendli"
      :api "https://api.friendli.ai/serverless/v1"
      :models-api "https://api.friendli.ai/serverless/v1/models"
      :env ("FRIENDLI_TOKEN")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "frogbot"
      :name "FrogBot"
      :api "https://app.frogbot.ai/api/v1"
      :models-api "https://app.frogbot.ai/api/v1/models"
      :env ("FROGBOT_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "github-copilot"
      :name "GitHub Copilot"
      :api "https://api.githubcopilot.com"
      :models-api "https://api.githubcopilot.com/models"
      :env ("GITHUB_TOKEN")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "github-models"
      :name "GitHub Models"
      :api "https://models.github.ai/inference"
      :models-api "https://models.github.ai/inference/models"
      :env ("GITHUB_TOKEN")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "gitlab"
      :name "GitLab Duo"
      :api "https://gitlab.com/api/v4/ai"
      :models-api "https://gitlab.com/api/v4/ai/models"
      :env ("GITLAB_TOKEN")
      :npm "gitlab-ai-provider"
-     :format nil)
+     :format nil
+     :prompt-caching nil)
     (:id "gmicloud"
      :name "GMI Cloud"
      :api "https://api.gmi-serving.com/v1"
      :models-api "https://api.gmi-serving.com/v1/models"
      :env ("GMICLOUD_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "google"
      :name "Google"
      :api "https://generativelanguage.googleapis.com/v1beta/openai"
      :models-api "https://generativelanguage.googleapis.com/v1beta/openai/models"
      :env ("GOOGLE_API_KEY" "GOOGLE_GENERATIVE_AI_API_KEY" "GEMINI_API_KEY")
      :npm "@ai-sdk/google"
-     :format gemini)
+     :format gemini
+     :prompt-caching t)
     (:id "google-vertex"
      :name "Vertex"
      :api "https://${GOOGLE_VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_VERTEX_PROJECT}/locations/${GOOGLE_VERTEX_LOCATION}/publishers/google/models"
      :models-api "https://${GOOGLE_VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${GOOGLE_VERTEX_PROJECT}/locations/${GOOGLE_VERTEX_LOCATION}/publishers/google/models"
      :env ("GOOGLE_VERTEX_PROJECT" "GOOGLE_VERTEX_LOCATION" "GOOGLE_APPLICATION_CREDENTIALS")
      :npm "@ai-sdk/google-vertex"
-     :format gemini)
+     :format gemini
+     :prompt-caching t)
     (:id "google-vertex-anthropic"
      :name "Vertex (Anthropic)"
      :api "https://aiplatform.${GOOGLE_VERTEX_LOCATION}.rep.googleapis.com/v1/projects/${GOOGLE_VERTEX_PROJECT}/locations/${GOOGLE_VERTEX_LOCATION}/publishers/anthropic/models"
      :models-api "https://aiplatform.${GOOGLE_VERTEX_LOCATION}.rep.googleapis.com/v1/projects/${GOOGLE_VERTEX_PROJECT}/locations/${GOOGLE_VERTEX_LOCATION}/publishers/anthropic/models"
      :env ("GOOGLE_VERTEX_PROJECT" "GOOGLE_VERTEX_LOCATION" "GOOGLE_APPLICATION_CREDENTIALS")
      :npm "@ai-sdk/google-vertex/anthropic"
-     :format anthropic)
+     :format anthropic
+     :prompt-caching t)
     (:id "groq"
      :name "Groq"
      :api "https://api.groq.com/openai/v1"
      :models-api "https://api.groq.com/openai/v1/models"
      :env ("GROQ_API_KEY")
      :npm "@ai-sdk/groq"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "helicone"
      :name "Helicone"
      :api "https://ai-gateway.helicone.ai/v1"
      :models-api "https://ai-gateway.helicone.ai/v1/models"
      :env ("HELICONE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "hpc-ai"
      :name "HPC-AI"
      :api "https://api.hpc-ai.com/inference/v1"
      :models-api "https://api.hpc-ai.com/inference/v1/models"
      :env ("HPC_AI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "huggingface"
      :name "Hugging Face"
      :api "https://router.huggingface.co/v1"
      :models-api "https://router.huggingface.co/v1/models"
      :env ("HF_TOKEN")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "iflowcn"
      :name "iFlow"
      :api "https://apis.iflow.cn/v1"
      :models-api "https://apis.iflow.cn/v1/models"
      :env ("IFLOW_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "inception"
      :name "Inception"
      :api "https://api.inceptionlabs.ai/v1"
      :models-api "https://api.inceptionlabs.ai/v1/models"
      :env ("INCEPTION_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "inceptron"
      :name "Inceptron"
      :api "https://api.inceptron.io/v1"
      :models-api "https://api.inceptron.io/v1/models"
      :env ("INCEPTRON_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "inference"
      :name "Inference"
      :api "https://inference.net/v1"
      :models-api "https://inference.net/v1/models"
      :env ("INFERENCE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "inferx"
      :name "InferX"
      :api "https://model.inferx.net/v1"
      :models-api "https://model.inferx.net/v1/models"
      :env ("INFERX_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "io-net"
      :name "IO.NET"
      :api "https://api.intelligence.io.solutions/api/v1"
      :models-api "https://api.intelligence.io.solutions/api/v1/models"
      :env ("IOINTELLIGENCE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "jiekou"
      :name "Jiekou.AI"
      :api "https://api.jiekou.ai/openai"
      :models-api "https://api.jiekou.ai/openai/models"
      :env ("JIEKOU_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "kenari"
      :name "Kenari"
      :api "https://kenari.id/v1"
      :models-api "https://kenari.id/v1/models"
      :env ("KENARI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "kilo"
      :name "Kilo Gateway"
      :api "https://api.kilo.ai/api/gateway"
      :models-api "https://api.kilo.ai/api/gateway/models"
      :env ("KILO_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "kimi-for-coding"
      :name "Kimi For Coding"
      :api "https://api.kimi.com/coding/v1"
      :models-api "https://api.kimi.com/coding/v1/models"
      :env ("KIMI_API_KEY")
      :npm "@ai-sdk/anthropic"
-     :format anthropic)
+     :format anthropic
+     :prompt-caching t)
     (:id "kuae-cloud-coding-plan"
      :name "KUAE Cloud Coding Plan"
      :api "https://coding-plan-endpoint.kuaecloud.net/v1"
      :models-api "https://coding-plan-endpoint.kuaecloud.net/v1/models"
      :env ("KUAE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "lilac"
      :name "Lilac"
      :api "https://api.getlilac.com/v1"
      :models-api "https://api.getlilac.com/v1/models"
      :env ("LILAC_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "llama"
      :name "Llama"
      :api "https://api.llama.com/compat/v1"
      :models-api "https://api.llama.com/compat/v1/models"
      :env ("LLAMA_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "llamacpp"
      :name "llama.cpp"
      :api "http://127.0.0.1:8080/v1"
      :models-api "http://127.0.0.1:8080/v1/models"
      :env nil
      :npm "llamacpp"
-     :format ollama)
+     :format ollama
+     :prompt-caching nil)
     (:id "llmgateway"
      :name "LLM Gateway"
      :api "https://api.llmgateway.io/v1"
      :models-api "https://api.llmgateway.io/v1/models"
      :env ("LLMGATEWAY_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "llmtr"
      :name "LLMTR"
      :api "https://llmtr.com/v1"
      :models-api "https://llmtr.com/v1/models"
      :env ("LLMTR_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "lmstudio"
      :name "LMStudio"
      :api "http://127.0.0.1:1234/v1"
      :models-api "http://localhost:1234/v1/models"
      :env ("LMSTUDIO_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "longcat"
      :name "LongCat"
      :api "https://api.longcat.chat/openai"
      :models-api "https://api.longcat.chat/openai/models"
      :env ("LONGCAT_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "lucidquery"
      :name "LucidQuery"
      :api "https://api.lucidquery.com/v1"
      :models-api "https://api.lucidquery.com/v1/models"
      :env ("LUCIDQUERY_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "meganova"
      :name "Meganova"
      :api "https://api.meganova.ai/v1"
      :models-api "https://api.meganova.ai/v1/models"
      :env ("MEGANOVA_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "merge-gateway"
      :name "Merge Gateway"
      :api "https://ai.mergegateway.com/v1"
      :models-api "https://ai.mergegateway.com/v1/models"
      :env ("MERGE_GATEWAY_API_KEY")
      :npm "merge-gateway-ai-sdk-provider"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "meta"
      :name "Meta"
      :api "https://api.meta.ai/v1"
      :models-api "https://api.meta.ai/v1/models"
      :env ("META_MODEL_API_KEY")
      :npm "@ai-sdk/openai"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "minimax"
      :name "MiniMax (minimax.io)"
      :api "https://api.minimax.io/anthropic/v1"
      :models-api "https://api.minimax.io/anthropic/v1/models"
      :env ("MINIMAX_API_KEY")
      :npm "@ai-sdk/anthropic"
-     :format anthropic)
+     :format anthropic
+     :prompt-caching t)
     (:id "minimax-cn"
      :name "MiniMax (minimaxi.com)"
      :api "https://api.minimaxi.com/anthropic/v1"
      :models-api "https://api.minimaxi.com/anthropic/v1/models"
      :env ("MINIMAX_API_KEY")
      :npm "@ai-sdk/anthropic"
-     :format anthropic)
+     :format anthropic
+     :prompt-caching t)
     (:id "minimax-cn-coding-plan"
      :name "MiniMax Token Plan (minimaxi.com)"
      :api "https://api.minimaxi.com/anthropic/v1"
      :models-api "https://api.minimaxi.com/anthropic/v1/models"
      :env ("MINIMAX_API_KEY")
      :npm "@ai-sdk/anthropic"
-     :format anthropic)
+     :format anthropic
+     :prompt-caching t)
     (:id "minimax-coding-plan"
      :name "MiniMax Token Plan (minimax.io)"
      :api "https://api.minimax.io/anthropic/v1"
      :models-api "https://api.minimax.io/anthropic/v1/models"
      :env ("MINIMAX_API_KEY")
      :npm "@ai-sdk/anthropic"
-     :format anthropic)
+     :format anthropic
+     :prompt-caching t)
     (:id "mistral"
      :name "Mistral"
      :api "https://api.mistral.ai/v1"
      :models-api "https://api.mistral.ai/v1/models"
      :env ("MISTRAL_API_KEY")
      :npm "@ai-sdk/mistral"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "mixlayer"
      :name "Mixlayer"
      :api "https://models.mixlayer.ai/v1"
      :models-api "https://models.mixlayer.ai/v1/models"
      :env ("MIXLAYER_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "moark"
      :name "Moark"
      :api "https://moark.com/v1"
      :models-api "https://moark.com/v1/models"
      :env ("MOARK_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "model-oracle-ai"
      :name "Model Oracle AI"
      :api "https://api.modeloracle.com/api/v1"
      :models-api "https://api.modeloracle.com/api/v1/models"
      :env ("MODEL_ORACLE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "modelscope"
      :name "ModelScope"
      :api "https://api-inference.modelscope.cn/v1"
      :models-api "https://api-inference.modelscope.cn/v1/models"
      :env ("MODELSCOPE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "moonshotai"
      :name "Moonshot AI"
      :api "https://api.moonshot.ai/v1"
      :models-api "https://api.moonshot.ai/v1/models"
      :env ("MOONSHOT_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "moonshotai-cn"
      :name "Moonshot AI (China)"
      :api "https://api.moonshot.cn/v1"
      :models-api "https://api.moonshot.cn/v1/models"
      :env ("MOONSHOT_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "morph"
      :name "Morph"
      :api "https://api.morphllm.com/v1"
      :models-api "https://api.morphllm.com/v1/models"
      :env ("MORPH_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "nano-gpt"
      :name "NanoGPT"
      :api "https://nano-gpt.com/api/v1"
      :models-api "https://nano-gpt.com/api/v1/models"
      :env ("NANO_GPT_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "nearai"
      :name "NEAR AI Cloud"
      :api "https://cloud-api.near.ai/v1"
      :models-api "https://cloud-api.near.ai/v1/models"
      :env ("NEARAI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "nebius"
      :name "Nebius Token Factory"
      :api "https://api.tokenfactory.nebius.com/v1"
      :models-api "https://api.tokenfactory.nebius.com/v1/models"
      :env ("NEBIUS_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "neon"
      :name "Neon"
      :api "${NEON_AI_GATEWAY_BASE_URL}/ai-gateway/mlflow/v1"
      :models-api "${NEON_AI_GATEWAY_BASE_URL}/ai-gateway/mlflow/v1/models"
      :env ("NEON_AI_GATEWAY_BASE_URL" "NEON_AI_GATEWAY_TOKEN")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "neuralwatt"
      :name "Neuralwatt"
      :api "https://api.neuralwatt.com/v1"
      :models-api "https://api.neuralwatt.com/v1/models"
      :env ("NEURALWATT_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "nova"
      :name "Nova"
      :api "https://api.nova.amazon.com/v1"
      :models-api "https://api.nova.amazon.com/v1/models"
      :env ("NOVA_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "novita-ai"
      :name "NovitaAI"
      :api "https://api.novita.ai/openai"
      :models-api "https://api.novita.ai/openai/models"
      :env ("NOVITA_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "nvidia"
      :name "Nvidia"
      :api "https://integrate.api.nvidia.com/v1"
      :models-api "https://integrate.api.nvidia.com/v1/models"
      :env ("NVIDIA_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "ollama"
      :name "Ollama"
      :api "http://localhost:11434/v1"
@@ -721,14 +819,16 @@
      :model-detail-api "http://localhost:11434/api/show"
      :env nil
      :npm "ollama"
-     :format ollama)
+     :format ollama
+     :prompt-caching nil)
     (:id "ollama-cloud"
      :name "Ollama Cloud"
      :api "https://ollama.com/v1"
      :models-api "https://ollama.com/v1/models"
      :env ("OLLAMA_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "openai"
      :name "OpenAI"
      :api "https://api.openai.com/v1"
@@ -736,7 +836,8 @@
      :usage-api "https://api.openai.com/v1/usage"
      :env ("OPENAI_API_KEY")
      :npm "@ai-sdk/openai"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "opencode"
      :name "OpenCode Zen"
      :api "https://opencode.ai/zen/v1"
@@ -744,14 +845,16 @@
      :usage-api "https://opencode.ai/zen/v1/user"
      :env ("OPENCODE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "opencode-go"
      :name "OpenCode Go"
      :api "https://opencode.ai/zen/go/v1"
      :models-api "https://opencode.ai/zen/go/v1/models"
      :env ("OPENCODE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "openrouter"
      :name "OpenRouter"
      :api "https://openrouter.ai/api/v1"
@@ -759,406 +862,464 @@
      :usage-api "https://openrouter.ai/api/v1/auth/key"
      :env ("OPENROUTER_API_KEY")
      :npm "@openrouter/ai-sdk-provider"
-     :format openrouter)
+     :format openrouter
+     :prompt-caching t)
     (:id "orcarouter"
      :name "OrcaRouter"
      :api "https://api.orcarouter.ai/v1"
      :models-api "https://api.orcarouter.ai/v1/models"
      :env ("ORCAROUTER_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "ovhcloud"
      :name "OVHcloud AI Endpoints"
      :api "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
      :models-api "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/models"
      :env ("OVHCLOUD_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "perplexity"
      :name "Perplexity"
      :api "https://api.perplexity.ai"
      :models-api "https://api.perplexity.ai/models"
      :env ("PERPLEXITY_API_KEY")
      :npm "@ai-sdk/perplexity"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "perplexity-agent"
      :name "Perplexity Agent"
      :api "https://api.perplexity.ai/v1"
      :models-api "https://api.perplexity.ai/v1/models"
      :env ("PERPLEXITY_API_KEY")
      :npm "@ai-sdk/openai"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "pioneer"
      :name "Pioneer"
      :api "https://api.pioneer.ai/v1"
      :models-api "https://api.pioneer.ai/v1/models"
      :env ("PIONEER_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "poe"
      :name "Poe"
      :api "https://api.poe.com/v1"
      :models-api "https://api.poe.com/v1/models"
      :env ("POE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "poolside"
      :name "Poolside"
      :api "https://inference.poolside.ai/v1"
      :models-api "https://inference.poolside.ai/v1/models"
      :env ("POOLSIDE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "privatemode-ai"
      :name "Privatemode AI"
      :api "http://localhost:8080/v1"
      :models-api "http://localhost:8080/v1/models"
      :env ("PRIVATEMODE_API_KEY" "PRIVATEMODE_ENDPOINT")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "qihang-ai"
      :name "QiHang"
      :api "https://api.qhaigc.net/v1"
      :models-api "https://api.qhaigc.net/v1/models"
      :env ("QIHANG_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "qiniu-ai"
      :name "Qiniu"
      :api "https://api.qnaigc.com/v1"
      :models-api "https://api.qnaigc.com/v1/models"
      :env ("QINIU_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "regolo-ai"
      :name "Regolo AI"
      :api "https://api.regolo.ai/v1"
      :models-api "https://api.regolo.ai/v1/models"
      :env ("REGOLO_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "requesty"
      :name "Requesty"
      :api "https://router.requesty.ai/v1"
      :models-api "https://router.requesty.ai/v1/models"
      :env ("REQUESTY_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "routing-run"
      :name "routing.run"
      :api "https://api.routing.run/v1"
      :models-api "https://api.routing.run/v1/models"
      :env ("ROUTING_RUN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "sakana"
      :name "Sakana AI"
      :api "https://api.sakana.ai/v1"
      :models-api "https://api.sakana.ai/v1/models"
      :env ("SAKANA_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "sap-ai-core"
      :name "SAP AI Core"
      :api "https://api.ai.prod.eu-central-1.aws.ml.hana.ondemand.com/v2"
      :models-api "https://api.ai.prod.eu-central-1.aws.ml.hana.ondemand.com/v2/models"
      :env ("AICORE_SERVICE_KEY")
      :npm "@jerome-benoit/sap-ai-provider-v2"
-     :format nil)
+     :format nil
+     :prompt-caching nil)
     (:id "sarvam"
      :name "Sarvam AI"
      :api "https://api.sarvam.ai/v1"
      :models-api "https://api.sarvam.ai/v1/models"
      :env ("SARVAM_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "scaleway"
      :name "Scaleway"
      :api "https://api.scaleway.ai/v1"
      :models-api "https://api.scaleway.ai/v1/models"
      :env ("SCALEWAY_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "siliconflow"
      :name "SiliconFlow"
      :api "https://api.siliconflow.com/v1"
      :models-api "https://api.siliconflow.com/v1/models"
      :env ("SILICONFLOW_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "siliconflow-cn"
      :name "SiliconFlow (China)"
      :api "https://api.siliconflow.cn/v1"
      :models-api "https://api.siliconflow.cn/v1/models"
      :env ("SILICONFLOW_CN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "snowflake-cortex"
      :name "Snowflake Cortex"
      :api "https://${SNOWFLAKE_ACCOUNT}.snowflakecomputing.com/api/v2/cortex/v1"
      :models-api "https://${SNOWFLAKE_ACCOUNT}.snowflakecomputing.com/api/v2/cortex/v1/models"
      :env ("SNOWFLAKE_ACCOUNT" "SNOWFLAKE_CORTEX_PAT")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "stackit"
      :name "STACKIT"
      :api "https://api.openai-compat.model-serving.eu01.onstackit.cloud/v1"
      :models-api "https://api.openai-compat.model-serving.eu01.onstackit.cloud/v1/models"
      :env ("STACKIT_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "stepfun"
      :name "StepFun"
      :api "https://api.stepfun.com/v1"
      :models-api "https://api.stepfun.com/v1/models"
      :env ("STEPFUN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "stepfun-ai"
      :name "StepFun AI"
      :api "https://api.stepfun.ai/step_plan/v1"
      :models-api "https://api.stepfun.ai/step_plan/v1/models"
      :env ("STEPFUN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "subconscious"
      :name "Subconscious"
      :api "https://api.subconscious.dev/v1"
      :models-api "https://api.subconscious.dev/v1/models"
      :env ("SUBCONSCIOUS_API_KEY")
      :npm "@ai-sdk/anthropic"
-     :format anthropic)
+     :format anthropic
+     :prompt-caching nil)
     (:id "submodel"
      :name "submodel"
      :api "https://llm.submodel.ai/v1"
      :models-api "https://llm.submodel.ai/v1/models"
      :env ("SUBMODEL_INSTAGEN_ACCESS_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "synthetic"
      :name "Synthetic"
      :api "https://api.synthetic.new/openai/v1"
      :models-api "https://api.synthetic.new/openai/v1/models"
      :env ("SYNTHETIC_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "tencent-coding-plan"
      :name "Tencent Coding Plan (China)"
      :api "https://api.lkeap.cloud.tencent.com/coding/v3"
      :models-api "https://api.lkeap.cloud.tencent.com/coding/v3/models"
      :env ("TENCENT_CODING_PLAN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "tencent-token-plan"
      :name "Tencent Token Plan"
      :api "https://api.lkeap.cloud.tencent.com/plan/v3"
      :models-api "https://api.lkeap.cloud.tencent.com/plan/v3/models"
      :env ("TENCENT_TOKEN_PLAN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "tencent-tokenhub"
      :name "Tencent TokenHub"
      :api "https://tokenhub.tencentmaas.com/v1"
      :models-api "https://tokenhub.tencentmaas.com/v1/models"
      :env ("TENCENT_TOKENHUB_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "the-grid-ai"
      :name "The Grid AI"
      :api "https://api.thegrid.ai/v1"
      :models-api "https://api.thegrid.ai/v1/models"
      :env ("THEGRIDAI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "tinfoil"
      :name "Tinfoil"
      :api "https://inference.tinfoil.sh/v1"
      :models-api "https://inference.tinfoil.sh/v1/models"
      :env ("TINFOIL_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "togetherai"
      :name "Together AI"
      :api "https://api.together.xyz/v1"
      :models-api "https://api.together.xyz/v1/models"
      :env ("TOGETHER_API_KEY")
      :npm "@ai-sdk/togetherai"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "trustedrouter"
      :name "TrustedRouter"
      :api "https://api.trustedrouter.com/v1"
      :models-api "https://api.trustedrouter.com/v1/models"
      :env ("TRUSTEDROUTER_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "umans-ai"
      :name "Umans AI"
      :api "https://api.code.umans.ai/v1"
      :models-api "https://api.code.umans.ai/v1/models"
      :env ("UMANS_AI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "umans-ai-coding-plan"
      :name "Umans AI Coding Plan"
      :api "https://api.code.umans.ai/v1"
      :models-api "https://api.code.umans.ai/v1/models"
      :env ("UMANS_AI_CODING_PLAN_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "unorouter"
      :name "UnoRouter"
      :api "https://api.unorouter.com/v1"
      :models-api "https://api.unorouter.com/v1/models"
      :env ("UNOROUTER_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "upstage"
      :name "Upstage"
      :api "https://api.upstage.ai/v1/solar"
      :models-api "https://api.upstage.ai/v1/solar/models"
      :env ("UPSTAGE_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "v0"
      :name "v0"
      :api "https://api.v0.dev/v1"
      :models-api "https://api.v0.dev/v1/models"
      :env ("V0_API_KEY")
      :npm "@ai-sdk/vercel"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "venice"
      :name "Venice AI"
      :api "https://api.venice.ai/api/v1"
      :models-api "https://api.venice.ai/api/v1/models"
      :env ("VENICE_API_KEY")
      :npm "venice-ai-sdk-provider"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "vercel"
      :name "Vercel AI Gateway"
      :api "https://api.vercel.com/v1/ai"
      :models-api "https://api.vercel.com/v1/ai/models"
      :env ("AI_GATEWAY_API_KEY")
      :npm "@ai-sdk/gateway"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "vivgrid"
      :name "Vivgrid"
      :api "https://api.vivgrid.com/v1"
      :models-api "https://api.vivgrid.com/v1/models"
      :env ("VIVGRID_API_KEY")
      :npm "@ai-sdk/openai"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "vultr"
      :name "Vultr"
      :api "https://api.vultrinference.com/v1"
      :models-api "https://api.vultrinference.com/v1/models"
      :env ("VULTR_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "wafer.ai"
      :name "Wafer"
      :api "https://pass.wafer.ai/v1"
      :models-api "https://pass.wafer.ai/v1/models"
      :env ("WAFER_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "wandb"
      :name "Weights & Biases"
      :api "https://api.inference.wandb.ai/v1"
      :models-api "https://api.inference.wandb.ai/v1/models"
      :env ("WANDB_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "xai"
      :name "xAI"
      :api "https://api.x.ai/v1"
      :models-api "https://api.x.ai/v1/models"
      :env ("XAI_API_KEY")
      :npm "@ai-sdk/xai"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "xiaomi"
      :name "Xiaomi"
      :api "https://api.xiaomimimo.com/v1"
      :models-api "https://api.xiaomimimo.com/v1/models"
      :env ("XIAOMI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "xiaomi-token-plan-ams"
      :name "Xiaomi Token Plan (Europe)"
      :api "https://token-plan-ams.xiaomimimo.com/v1"
      :models-api "https://token-plan-ams.xiaomimimo.com/v1/models"
      :env ("XIAOMI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "xiaomi-token-plan-cn"
      :name "Xiaomi Token Plan (China)"
      :api "https://token-plan-cn.xiaomimimo.com/v1"
      :models-api "https://token-plan-cn.xiaomimimo.com/v1/models"
      :env ("XIAOMI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "xiaomi-token-plan-sgp"
      :name "Xiaomi Token Plan (Singapore)"
      :api "https://token-plan-sgp.xiaomimimo.com/v1"
      :models-api "https://token-plan-sgp.xiaomimimo.com/v1/models"
      :env ("XIAOMI_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "xpersona"
      :name "Xpersona"
      :api "https://www.xpersona.co/v1"
      :models-api "https://www.xpersona.co/v1/models"
      :env ("XPERSONA_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "zai"
      :name "Z.AI"
      :api "https://api.z.ai/api/paas/v4"
      :models-api "https://api.z.ai/api/paas/v4/models"
      :env ("ZHIPU_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "zai-coding-plan"
      :name "Z.AI Coding Plan"
      :api "https://api.z.ai/api/coding/paas/v4"
      :models-api "https://api.z.ai/api/coding/paas/v4/models"
      :env ("ZHIPU_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "zeldoc"
      :name "Zeldoc"
      :api "https://api.zeldoc.ai/v1"
      :models-api "https://api.zeldoc.ai/v1/models"
      :env ("ZELDOC_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "zenifra"
      :name "Zenifra"
      :api "https://ai.zenifra.com/v1"
      :models-api "https://ai.zenifra.com/v1/models"
      :env ("ZENIFRA_AI_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching nil)
     (:id "zenmux"
      :name "ZenMux"
      :api "https://zenmux.ai/api/v1"
      :models-api "https://zenmux.ai/api/v1/models"
      :env ("ZENMUX_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "zhipuai"
      :name "Zhipu AI"
      :api "https://open.bigmodel.cn/api/paas/v4"
      :models-api "https://open.bigmodel.cn/api/paas/v4/models"
      :env ("ZHIPU_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
     (:id "zhipuai-coding-plan"
      :name "Zhipu AI Coding Plan"
      :api "https://open.bigmodel.cn/api/coding/paas/v4"
      :models-api "https://open.bigmodel.cn/api/coding/paas/v4/models"
      :env ("ZHIPU_API_KEY")
      :npm "@ai-sdk/openai-compatible"
-     :format openapi)
+     :format openapi
+     :prompt-caching t)
    )
   "Built-in metadata for all supported LLM providers.")
 

@@ -85,6 +85,9 @@ the UI and central state are left in a consistent state."
   (kargu-log 'warn "request cancelled")
   (message "kargu: cancelled in-flight request"))
 
+(declare-function kargu-provider-prompt-caching "kargu/providers/registry" (id))
+(declare-function kargu-provider-format "kargu/providers/registry" (id))
+
 (defun kargu--build-payload (&rest extra)
   "Assemble the chat-completions request payload.
 EXTRA is a list of additional (KEY . VALUE) conses appended to
@@ -92,8 +95,39 @@ the payload (e.g. (\"stream\" . t)).  The \"tools\" array is only
 included when at least one tool is VISIBLE after
 `kargu--tools-visible-p' filtering."
   (let* ((tools (kargu--build-tools-vector))
-         (payload `(("model" . ,(kargu--model))
-                    ("messages" . ,(vconcat kargu--message-history)))))
+         (pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "default"))
+         (pname-lower (downcase (string-trim (if (symbolp pname) (symbol-name pname) (format "%s" pname)))))
+         (caching-p (and (fboundp 'kargu-provider-prompt-caching)
+                         (kargu-provider-prompt-caching pname-lower)))
+         (is-anthropic-or-openrouter
+          (and caching-p
+               (or (member pname-lower
+                           '("openrouter" "anthropic" "google-vertex-anthropic"
+                             "amazon-bedrock" "claudinio"))
+                   (and (fboundp 'kargu-provider-format)
+                        (eq (kargu-provider-format pname-lower) 'anthropic)))))
+         (raw-msgs (copy-tree kargu--message-history t))
+         (payload nil))
+    ;; Multi-turn prompt caching for Anthropic / OpenRouter:
+    (when is-anthropic-or-openrouter
+      ;; 1. When tools is empty (e.g. ask mode), attach cache_control to system prompt
+      (when (and (= (length tools) 0) (> (length raw-msgs) 0))
+        (let ((sys-msg (car raw-msgs)))
+          (when (equal (kargu--aget sys-msg "role") "system")
+            (unless (assoc "cache_control" sys-msg)
+              (setcar raw-msgs
+                      (append sys-msg '(("cache_control" . (("type" . "ephemeral"))))))))))
+      ;; 2. Attach cache_control to the last completed turn before current prompt
+      ;; (turn length - 2) so past conversation history is 100% cached on multi-turn
+      ;; sessions and restored history chats.
+      (when (>= (length raw-msgs) 2)
+        (let* ((target-idx (- (length raw-msgs) 2))
+               (target-msg (nth target-idx raw-msgs)))
+          (unless (assoc "cache_control" target-msg)
+            (setcar (nthcdr target-idx raw-msgs)
+                    (append target-msg '(("cache_control" . (("type" . "ephemeral"))))))))))
+    (setq payload `(("model" . ,(kargu--model))
+                    ("messages" . ,(vconcat raw-msgs))))
     (when kargu-temperature
       (setq payload (append payload `(("temperature" . ,kargu-temperature)))))
     (when kargu-max-tokens
@@ -118,6 +152,17 @@ included when at least one tool is VISIBLE after
       (when reasoning-alist
         (setq payload (append payload `(("reasoning" . ,(reverse reasoning-alist)))))))
     (when (> (length tools) 0)
+      ;; When the active provider supports prompt caching and accepts cache_control blocks
+      ;; (Anthropic or OpenRouter), attach cache_control to the last tool definition to cache
+      ;; all tool schemas and the preceding system prompt in a single breakpoint.
+      (when is-anthropic-or-openrouter
+        (let* ((tools-list (append tools nil))
+               (last-idx (1- (length tools-list)))
+               (last-tool (nth last-idx tools-list)))
+          (unless (assoc "cache_control" last-tool)
+            (setcar (nthcdr last-idx tools-list)
+                    (append last-tool '(("cache_control" . (("type" . "ephemeral"))))))
+            (setq tools (vconcat tools-list)))))
       (setq payload (append payload `(("tools" . ,tools)
                                       ("tool_choice" . "auto")))))
     (when (fboundp 'kargu-provider-params-build-payload)

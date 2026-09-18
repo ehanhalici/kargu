@@ -197,8 +197,15 @@ concatenated or empty snapshots."
 
 (defun kargu--tool-missing-file-path (args)
   "Error string when a file path argument was missing."
-  (format "ERROR: missing file_path (also accepted: filePath, path). Got keys: %s"
-          (kargu--tool-arg-keys args)))
+  (let ((keys (kargu--tool-arg-keys args)))
+    (if (and (kargu--object-p args)
+             (or (assoc "pattern" args)
+                 (assoc "query" args)
+                 (assoc "regex" args)))
+        (format "ERROR: missing file_path (also accepted: filePath, path). Got keys: %s. Note: file reading/editing tools require an exact file_path, not a search pattern. To search file contents for a pattern, use 'workspace_grep'. To find files by pattern/glob, use 'find_files'."
+                keys)
+      (format "ERROR: missing file_path (also accepted: filePath, path). Got keys: %s"
+              keys))))
 
 (defvar kargu--truncated-counter 0
   "Monotonic counter for truncated output buffer names.")
@@ -222,8 +229,9 @@ so the model can inspect remaining lines using `read_file'."
                         omitted (length string) buf-name buf-name)))
     string))
 
-(defun kargu-execute-tool (name arguments)
-  "Run tool NAME with ARGUMENTS; ALWAYS return a result string.
+(defun kargu-execute-tool (name arguments &optional callback)
+  "Run tool NAME with ARGUMENTS; ALWAYS return a result string or invoke CALLBACK.
+When CALLBACK is provided, run asynchronously if the tool supports it.
 Errors are captured and returned as \"ERROR: ...\" results so the
 agent loop can feed them back to the model for self-correction."
   (let* ((spec (gethash name kargu--tool-registry))
@@ -241,11 +249,37 @@ agent loop can feed them back to the model for self-correction."
                       (format "%S" args))
     (kargu-log 'debug "execute-tool %s args=%s" name
                      (truncate-string-to-width (format "%s" args) 200))
-    (let ((out
-           (cond
-            ((null spec)
-             (format "ERROR: no such tool: %s" name))
-            (t
+    (cond
+     ((null spec)
+      (let ((out (format "ERROR: no such tool: %s" name)))
+        (if callback (funcall callback out) out)))
+     (callback
+      (condition-case-unless-debug err
+          (let* ((executor (kargu--aget spec "executor"))
+                 (on-done (lambda (res)
+                            (let* ((formatted (cond
+                                                ((null res) "OK (no output)")
+                                                ((stringp res)
+                                                 (if (string-empty-p res) "OK (no output)" res))
+                                                (t (kargu--json-encode res))))
+                                   (final (kargu--truncate-for-model formatted)))
+                              (kargu--log-block (format "tool %s result" name) formatted)
+                              (funcall callback final))))
+                 (called-async nil))
+            (condition-case _arity-err
+                (progn
+                  (funcall executor args on-done)
+                  (setq called-async t))
+              (wrong-number-of-arguments nil))
+            (unless called-async
+              (let ((sync-res (funcall executor args)))
+                (funcall on-done sync-res))))
+        (error
+         (let ((out (format "ERROR: tool %s failed: %s"
+                            name (error-message-string err))))
+           (funcall callback out)))))
+     (t
+      (let ((out
              (condition-case-unless-debug err
                  (let ((result (funcall (kargu--aget spec "executor") args)))
                    (cond
@@ -255,9 +289,9 @@ agent loop can feed them back to the model for self-correction."
                     (t (kargu--json-encode result))))
                (error
                 (format "ERROR: tool %s failed: %s"
-                        name (error-message-string err))))))))
-      (kargu--log-block (format "tool %s result" name) out)
-      (kargu--truncate-for-model out))))
+                        name (error-message-string err))))))
+        (kargu--log-block (format "tool %s result" name) out)
+        (kargu--truncate-for-model out))))))
 
 (provide 'kargu/api/tools)
 

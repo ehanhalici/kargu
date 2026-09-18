@@ -144,7 +144,7 @@ from `kargu-provider-list'."
 (defconst kargu--dependencies
   '((plz . "asynchronous HTTP + SSE streaming (mandatory)")
     (transient . "menu interface (mandatory)")
-    (lsp-mode . "LSP client (tools: skeleton, diagnostics, xref)")
+    (eglot . "LSP client (tools: skeleton, diagnostics, xref)")
     (dape . "debugger client (tools: stack, variables, eval)")
     (ediff . "diff approval engine (built into Emacs)"))
   "Feature -> purpose map checked by `kargu-check-setup'.")
@@ -152,8 +152,14 @@ from `kargu-provider-list'."
 (defun kargu--missing-dependencies ()
   "Return a list of (FEATURE . PURPOSE) for missing packages."
   (cl-remove-if (lambda (dep)
-                  (or (featurep (car dep))
-                      (locate-library (symbol-name (car dep)))))
+                  (let ((feat (car dep)))
+                    (cond
+                     ((eq feat 'eglot)
+                      (or (featurep 'eglot)
+                          (locate-library "eglot")))
+                     (t
+                      (or (featurep feat)
+                          (locate-library (symbol-name feat)))))))
                 kargu--dependencies))
 
 (defun kargu-check-setup ()

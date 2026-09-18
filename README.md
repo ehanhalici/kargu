@@ -14,7 +14,7 @@ Rather than running heavy external daemons or separate browser windows, Kargu tu
 
 - **Agentic AI & Autonomous Workflows**: Models can autonomously explore workspaces, inspect symbols, search across codebases, propose edits, and execute terminal commands through a secure loop.
 - **Deep Emacs Native Integration**:
-  - **LSP (`lsp-mode`)**: Structural project outlines, diagnostics, definitions, and symbol resolution without dumping raw files into context.
+  - **LSP (`eglot`)**: Structural project outlines, diagnostics, definitions, and symbol resolution without dumping raw files into context.
   - **Interactive Diffs (`ediff`)**: Review proposed AI file edits with hunk-level inspection, approval, rejection, and full rollback capabilities.
   - **Live Debugging (`dape`)**: Inspect paused debug sessions, read call stacks, inspect variables, and evaluate expressions during active debugging.
   - **Version Control (`magit` / Git)**: Inspect branches, diffs, commits, and status directly.
@@ -34,7 +34,7 @@ Rather than running heavy external daemons or separate browser windows, Kargu tu
 
 ### Prerequisites
 - GNU Emacs 29.1 or newer
-- Required packages: `plz`, `transient`,`lsp-mode`, `dape`, `company`, `magit`
+- Required packages: `plz`, `transient`, `eglot`, `dape`, `company`, `magit`
 - Command-line utilities: `rg` (ripgrep) or `grep`, `curl`, `git`
 
 ### Setup

@@ -29,6 +29,7 @@
 (require 'kargu/history)
 (require 'kargu/api)
 (require 'kargu/tools/diff)
+(require 'kargu/ui/confirm)
 
 (defvar kargu--loop-call-seq)
 (defvar kargu-max-healing-steps)
@@ -68,6 +69,81 @@
       (kargu--aget call "id")
     (format "call_%d" (cl-incf kargu--loop-call-seq))))
 
+(defvar kargu-chat--output-marker)
+(defvar kargu-chat--prompt-marker)
+(defvar kargu-chat-buffer-name)
+(declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-chat-show "kargu/chat" ())
+(declare-function kargu-chat--ensure-running-prompt "kargu/chat/prompt" ())
+(declare-function kargu-chat--ensure-idle-prompt "kargu/chat/prompt" ())
+(declare-function kargu-notify "kargu/ui/notify" (type &optional msg))
+
+(defun kargu-loop--tool-cacheable-p (name)
+  "Return non-nil if tool NAME results may be cached within a single turn batch.
+Stepping, execution, and mutating tools are never cached."
+  (not (or (string-prefix-p "debug_" name)
+           (string-prefix-p "bash" name)
+           (member name '("debug" "next" "step" "step_in" "step_over" "step_out" "out" "finish"
+                          "continue" "pause" "up" "down" "threads" "stack" "modules" "sources"
+                          "breakpoints" "scope" "watch" "eval" "restart" "kill" "disconnect" "quit"
+                          "set_breakpoint" "clear_breakpoint" "toggle_breakpoint")))))
+
+(defvar kargu-loop--mock-doom-decision nil
+  "Dynamically bound decision (:approve | :reject) used for unit testing.")
+
+(defun kargu-loop--render-doom-approval-prompt (chat-buf name args set-decision-fn)
+  "Render tool repetition approval prompt with action buttons in CHAT-BUF."
+  (let* ((args-str (when (and args (or (stringp args) (consp args)))
+                     (let ((s (if (stringp args) args (format "%S" args))))
+                       (unless (string-empty-p (string-trim s))
+                         (replace-regexp-in-string "[\r\n]+" " " s)))))
+         (details (concat (format "Tool: %s" name)
+                          (when args-str (format "\nArguments: %s" args-str)))))
+    (kargu-confirm--render-prompt
+     chat-buf "⚡ [Tool Repetition Approval]" details
+     "Notice: Identical tool call repeated 3 times consecutively."
+     '((:key :approved :label "[✓ Approve (Grant 3 More)]" :face (:inherit success :weight bold))
+       (:key :rejected :label "[✗ Stop Run]" :face (:inherit error :weight bold)))
+     set-decision-fn)))
+
+(defun kargu-loop--request-doom-approval (run name args)
+  "Request user approval when identical tool NAME with ARGS repeats 3 times.
+Presents approval and stop buttons in the chat buffer.  If approved,
+resets `:doom-sigs' on RUN (granting 3 more calls) and returns non-nil."
+  (let* ((args-str (when (and args (or (stringp args) (consp args)))
+                     (let ((s (if (stringp args) args (format "%S" args))))
+                       (unless (string-empty-p (string-trim s))
+                         (replace-regexp-in-string "[\r\n]+" " " s)))))
+         (details (concat (format "Tool: %s" name)
+                          (when args-str (format "\nArguments: %s" args-str))))
+         (kargu-confirm--mock-decision
+          (or (and (eq kargu-loop--mock-doom-decision :approve) :approve)
+              (and (eq kargu-loop--mock-doom-decision :reject) :stop)
+              kargu-confirm--mock-decision))
+         (decision
+          (kargu-ui-confirm
+           :title "⚡ [Tool Repetition Approval]"
+           :details details
+           :notice "Notice: Identical tool call repeated 3 times consecutively."
+           :actions '((:key :approve
+                       :label "[✓ Approve (Grant 3 More)]"
+                       :face (:inherit success :weight bold)
+                       :help "Click to approve and grant 3 additional calls"
+                       :message "     -> [✓ Approved: granted 3 additional calls]\n\n")
+                      (:key :stop
+                       :label "[✗ Stop Run]"
+                       :face (:inherit error :weight bold)
+                       :help "Click to stop the agent run"
+                       :message "     -> [✗ Stopped by user]\n\n"))
+           :chat-buffer (plist-get run :chat-buffer)
+           :fallback-prompt (format "Tool `%s` called 3 times consecutively. Allow 3 more calls? " name)
+           :default-action :stop
+           :notify 'permission)))
+    (let ((approved (eq decision :approve)))
+      (when approved
+        (plist-put run :doom-sigs nil))
+      approved)))
+
 (defun kargu--loop-doom-stop (run id name queue)
   "Record a doom-loop error for the current call and stop RUN."
   (kargu--history-add-tool-result
@@ -99,26 +175,34 @@
       (kargu-log 'info "loop: tool call %s (id=%s)" name id)
       (cond
        ;; In-turn duplicate tool call deduplication: reuse result from earlier in this batch
-       (cached
+       ((and cached (kargu-loop--tool-cacheable-p name))
         (kargu-log 'info "loop: tool call %s (id=%s) is duplicate in current turn; reusing cached result" name id)
         (kargu--loop-after-tool run id name cached queue))
-       ;; Doom-loop detection across consecutive turns
-       ((kargu--loop-doom-p run sig)
+       ;; Doom-loop detection across consecutive turns: ask user for approval
+       ((and (kargu--loop-doom-p run sig)
+             (not (kargu-loop--request-doom-approval run name args)))
         (kargu--loop-doom-stop run id name queue))
        ;; Normal execution
        (t
-        (let ((result (condition-case-unless-debug err
-                          (or (kargu-loop--gate-tool name)
-                              (kargu-execute-tool name args))
-                        (error
-                         (format "ERROR: executing tool `%s' raised: %s"
-                                 name (error-message-string err))))))
-          ;; Record into batch cache for subsequent calls within this turn
-          (unless batch-cache
-            (setq batch-cache (make-hash-table :test 'equal))
-            (plist-put run :batch-cache batch-cache))
-          (puthash sig result batch-cache)
-          (kargu--loop-after-tool run id name result queue)))))))
+        (let ((on-result
+               (lambda (result)
+                 (when (kargu-loop--live-p run)
+                   ;; Record into batch cache for subsequent calls within this turn
+                   (when (kargu-loop--tool-cacheable-p name)
+                     (unless batch-cache
+                       (setq batch-cache (make-hash-table :test 'equal))
+                       (plist-put run :batch-cache batch-cache))
+                     (puthash sig result batch-cache))
+                   (kargu--loop-after-tool run id name result queue)))))
+          (condition-case-unless-debug err
+              (let ((gate (kargu-loop--gate-tool name)))
+                (if gate
+                    (funcall on-result gate)
+                  (kargu-execute-tool name args on-result)))
+            (error
+             (funcall on-result
+                      (format "ERROR: executing tool `%s' raised: %s"
+                              name (error-message-string err)))))))))))
 
 (defun kargu-loop--classify-after-tool (run files)
   "Event after a tool result: `verify', `budget', or `plain'."

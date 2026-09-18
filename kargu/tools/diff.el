@@ -83,7 +83,7 @@ otherwise killed shortly after the review finishes."
   :type 'boolean
   :group 'kargu-diff)
 
-(defcustom kargu-diff-read-max-chars 60000
+(defcustom kargu-diff-read-max-chars 15000
   "Character cap for the `read_file' tool result.
 The text fed back to the model is additionally capped by
 `kargu-tool-output-limit'."
@@ -372,10 +372,10 @@ Returns a formatted summary of applied changes."
   "Register the diff, edit, write, read and apply_patch tools."
   (kargu-register-tool
    "read_file"
-   "Read a source file with numbered lines (\"12 | code\"). ALWAYS call this before edit_file so old_string is copied from the real file. Use from_line/to_line (or limit) to page through large files."
+   "Read a source file with numbered lines (\"12 | code\"). Before reading a large code file, prefer 'read_file_symbols' (outline) to see its structure or 'read_symbol' to inspect a specific function/struct. Requires 'file_path'. NEVER pass search patterns or regex here. Use from_line/to_line (or limit) to page through specific sections, or for non-code files (config, markdown, yaml)."
    '(("type" . "object")
      ("properties" . (("file_path" . (("type" . "string")
-                                       ("description" . "Absolute or project-relative path of the file (or output buffer) to read.")))
+                                       ("description" . "Absolute or project-relative path of the file (or output buffer) to read. Must be a valid file path, NOT a search pattern or regex.")))
                       ("from_line" . (("type" . "integer")
                                        ("description" . "First 1-based line to return (inclusive).")))
                       ("to_line" . (("type" . "integer")
@@ -400,7 +400,7 @@ Returns a formatted summary of applied changes."
            (error (format "ERROR: %s" (error-message-string err))))))))
   (kargu-register-tool
    "edit_file"
-   "Replace an exact unique block of text in an existing file. Best for surgical, localized modifications to minimize tokens and conflicts. Read the file first with read_file, then pass the exact old_string (include enough surrounding lines to make it unique) and the new_string replacement. Use write_file instead if you intend to rewrite the entire file. The human reviews the change in ediff (b accepts a hunk, a keeps the original). After an accepted edit, immediately call lsp_diagnostics on the file."
+   "Replace an exact unique block of text in an existing file. NOTE: For modifying existing code definitions (functions, classes, structs, methods, types), ALWAYS PREFER 'edit_by_lsp' instead. Use edit_file only as a fallback for non-code files (markdown, configs) or text outside defined symbols. Read the file first with read_file, then pass the exact old_string (include enough surrounding lines to make it unique) and the new_string replacement. The human reviews the change in ediff (b accepts a hunk, a keeps the original). After an accepted edit, immediately call lsp_diagnostics on the file."
    '(("type" . "object")
      ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "Absolute or project-relative path of the file to edit.")))

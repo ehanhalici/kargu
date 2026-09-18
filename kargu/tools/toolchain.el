@@ -29,6 +29,8 @@
       (add-to-list 'load-path (file-name-as-directory
                                (expand-file-name root))))))
 
+(require 'kargu/languages)
+
 ;;;; Strategy definition --------------------------------------------------
 
 (cl-defstruct (kargu-toolchain-strategy (:constructor kargu-make-toolchain-strategy))
@@ -58,12 +60,20 @@
 
 (defun kargu-toolchain-detect (root)
   "Detect the primary toolchain for ROOT by evaluating registered strategies."
-  (let ((matched nil))
-    (dolist (strat kargu-toolchain-strategies)
-      (unless matched
-        (when (funcall (kargu-toolchain-strategy-detector strat) root)
-          (setq matched (funcall (kargu-toolchain-strategy-resolver strat) root)))))
-    matched))
+  (or (when-let* ((lang (and (fboundp 'kargu-language-detect)
+                             (kargu-language-detect root)))
+                  (tc (kargu-language-spec-toolchain lang)))
+        (list :language (kargu-language-spec-name lang)
+              :build-cmd (plist-get tc :build-cmd)
+              :test-cmd (plist-get tc :test-cmd)
+              :lint-cmd (plist-get tc :lint-cmd)
+              :notes (plist-get tc :notes)))
+      (let ((matched nil))
+        (dolist (strat kargu-toolchain-strategies)
+          (unless matched
+            (when (funcall (kargu-toolchain-strategy-detector strat) root)
+              (setq matched (funcall (kargu-toolchain-strategy-resolver strat) root)))))
+        matched)))
 
 ;;;; Built-in Strategies --------------------------------------------------
 

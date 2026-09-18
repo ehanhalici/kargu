@@ -160,10 +160,95 @@ Return a result string if COMMAND matches a management command, or nil."
     (format "Process started in background: ID=[%s], PID=%d. Output directed to buffer '*kargu-proc-%s*'.\nManage with bash command='status %s' or command='kill %s'."
             id (process-id proc) id id id)))
 
-(defun kargu-bash--run-sync (command dir shell)
-  "Execute COMMAND synchronously in DIR under SHELL within timeout bounds."
+(defvar kargu-bash--active-async-proc nil
+  "Process object of the currently running async bash tool command, or nil.")
+
+(defun kargu-bash-kill-active-async ()
+  "Kill active asynchronous bash process if one is currently running."
+  (when (and kargu-bash--active-async-proc
+             (process-live-p kargu-bash--active-async-proc))
+    (ignore-errors (kill-process kargu-bash--active-async-proc))
+    (setq kargu-bash--active-async-proc nil)))
+
+(defun kargu-bash--run-async (command dir shell callback)
+  "Execute COMMAND asynchronously in DIR under SHELL.
+Calls CALLBACK with the formatted output string upon exit or timeout.
+Emacs UI remains completely responsive and interactive for the user."
   (let* ((buf (generate-new-buffer " *kargu-bash*"))
          (start (float-time))
+         (completed nil)
+         (timer nil)
+         (timeout-timer nil)
+         proc)
+    (let ((default-directory (file-name-as-directory dir)))
+      (setq proc (make-process
+                  :name "kargu-bash"
+                  :buffer buf
+                  :command (list shell "-c" command)
+                  :connection-type 'pipe
+                  :stderr buf
+                  :sentinel
+                  (lambda (p _event)
+                    (unless completed
+                      (setq completed t)
+                      (setq kargu-bash--active-async-proc nil)
+                      (when timer (cancel-timer timer))
+                      (when timeout-timer (cancel-timer timeout-timer))
+                      (let* ((code (process-exit-status p))
+                             (out (if (buffer-live-p buf)
+                                      (with-current-buffer buf (buffer-string))
+                                    ""))
+                             (res (format "exit %s\ncwd: %s\n%s"
+                                          code dir
+                                          (if (string-empty-p out) "(no output)" out))))
+                        (message "kargu: [bash] '%s' finished (exit %s, %.1fs)"
+                                 (truncate-string-to-width command 30)
+                                 code (- (float-time) start))
+                        (kargu-bash--clean-buffer-processes buf)
+                        (when (buffer-live-p buf) (kill-buffer buf))
+                        (funcall callback res))))))
+      (set-process-query-on-exit-flag proc nil)
+      (setq kargu-bash--active-async-proc proc))
+    ;; Timeout timer: kill process and return error when kargu-bash-timeout expires
+    (setq timeout-timer
+          (run-at-time
+           kargu-bash-timeout nil
+           (lambda ()
+             (unless completed
+               (setq completed t)
+               (setq kargu-bash--active-async-proc nil)
+               (when timer (cancel-timer timer))
+               (when (process-live-p proc)
+                 (ignore-errors (kill-process proc)))
+               (let ((err-msg (format "ERROR: bash timed out after %ds: %s"
+                                      kargu-bash-timeout
+                                      (truncate-string-to-width command 80))))
+                 (message "kargu: [bash] '%s' timed out (%ds)"
+                          (truncate-string-to-width command 30)
+                          kargu-bash-timeout)
+                 (kargu-bash--clean-buffer-processes buf)
+                 (when (buffer-live-p buf) (kill-buffer buf))
+                 (funcall callback err-msg))))))
+    ;; Periodic status ticker in minibuffer so user sees elapsed time
+    (setq timer
+          (run-at-time
+           1.0 1.0
+           (lambda ()
+             (unless completed
+               (when (process-live-p proc)
+                 (let ((elapsed (- (float-time) start)))
+                   (message "kargu: running '%s' (%.1fs / %ds) [waiting in background]..."
+                            (truncate-string-to-width command 40)
+                            elapsed kargu-bash-timeout)))))))
+    (message "kargu: started '%s' asynchronously in background (timeout %ds)..."
+             (truncate-string-to-width command 40) kargu-bash-timeout)))
+
+(defun kargu-bash--run-sync (command dir shell)
+  "Execute COMMAND synchronously in DIR under SHELL within timeout bounds.
+Emits live progress updates and redisplays to avoid freezing the window."
+  (let* ((buf (generate-new-buffer " *kargu-bash*"))
+         (start (float-time))
+         (last-msg 0.0)
          proc)
     (unwind-protect
         (progn
@@ -177,11 +262,18 @@ Return a result string if COMMAND matches a management command, or nil."
             (set-process-query-on-exit-flag proc nil))
           (with-local-quit
             (while (process-live-p proc)
-              (when (> (- (float-time) start) kargu-bash-timeout)
-                (ignore-errors (kill-process proc))
-                (error "bash timed out after %ds: %s"
-                       kargu-bash-timeout
-                       (truncate-string-to-width command 80)))
+              (let ((elapsed (- (float-time) start)))
+                (when (> elapsed kargu-bash-timeout)
+                  (ignore-errors (kill-process proc))
+                  (error "bash timed out after %ds: %s"
+                         kargu-bash-timeout
+                         (truncate-string-to-width command 80)))
+                (when (>= (- elapsed last-msg) 0.5)
+                  (setq last-msg elapsed)
+                  (message "kargu: running '%s' (%.1fs / %ds) [C-g to cancel]..."
+                           (truncate-string-to-width command 40)
+                           elapsed kargu-bash-timeout)
+                  (redisplay)))
               (accept-process-output proc 0.05)))
           (if (process-live-p proc)
               (progn
@@ -190,37 +282,51 @@ Return a result string if COMMAND matches a management command, or nil."
                        (truncate-string-to-width command 80)))
             (let* ((code (process-exit-status proc))
                    (out (with-current-buffer buf (buffer-string))))
+              (message "kargu: [bash] '%s' finished (exit %s, %.1fs)"
+                       (truncate-string-to-width command 30)
+                       code (- (float-time) start))
               (format "exit %s\ncwd: %s\n%s" code dir
                       (if (string-empty-p out) "(no output)" out)))))
       (kargu-bash--clean-buffer-processes buf)
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
 
-(defun kargu-bash-run (command &optional cwd background)
+(defun kargu-bash-run (command &optional cwd background callback)
   "Run COMMAND in CWD, capturing stdout and stderr.
-When BACKGROUND is non-nil, start the process asynchronously without
-blocking the turn and return a handle for process management.
+When CALLBACK is non-nil, execute asynchronously without blocking
+the Emacs UI and call CALLBACK with the result string upon completion.
+When BACKGROUND is non-nil, start a persistent background process.
 Strictly validates that CWD and all path arguments stay within project root."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p command
                          "command must be a non-empty string: %S" command)
-  (or (kargu-bash--manage-process command)
+  (let ((mgmt (kargu-bash--manage-process command)))
+    (if mgmt
+        (if callback (funcall callback mgmt) mgmt)
       (let* ((root (kargu-permission-project-root))
              (dir (kargu-bash--cwd cwd)))
         ;; Sandboxing check: command cannot escape project root
         (kargu-permission-validate-command command root dir)
         ;; User approval check: 1-click button prompt in chat
         (unless (kargu-permission-request-approval command dir)
-          (error (concat "Permission denied: Command execution was rejected by the user.\n"
-                         "  - Rejected command: '%s'\n"
-                         "  - Working directory: '%s'\n"
-                         "  - Allowed project root: '%s'\n"
+          (let ((err-text
+                 (concat "Permission denied: Command execution was rejected by the user.\n"
+                         "  - Rejected command: '" command "'\n"
+                         "  - Working directory: '" dir "'\n"
+                         "  - Allowed project root: '" root "'\n"
                          "  - Reason: The user chose not to grant execution permission for this shell command.\n"
-                         "  - Guidance: Do not repeatedly execute the identical command without user clarification. Consider an alternative approach that works strictly within '%s' or ask the user for guidance.")
-                 command dir root root))
+                         "  - Guidance: Do not repeatedly execute the identical command without user clarification. Consider an alternative approach that works strictly within '" root "' or ask the user for guidance.")))
+            (if callback
+                (funcall callback (format "ERROR: %s" err-text))
+              (error "%s" err-text))))
         (let ((shell (kargu-bash--resolve-shell)))
-          (if background
-              (kargu-bash--run-background command dir shell)
-            (kargu-bash--run-sync command dir shell))))))
+          (cond
+           (background
+            (let ((res (kargu-bash--run-background command dir shell)))
+              (if callback (funcall callback res) res)))
+           (callback
+            (kargu-bash--run-async command dir shell callback))
+           (t
+            (kargu-bash--run-sync command dir shell))))))))
 
 (defun kargu-bash-register-tools ()
   "Register the bash tool."
@@ -235,13 +341,16 @@ Strictly validates that CWD and all path arguments stay within project root."
                       ("background" . (("type" . "boolean")
                                        ("description" . "Set true to start a persistent background server/watcher.")))))
      ("required" . ["command"]))
-   (lambda (args)
+   (lambda (args &optional callback)
      (condition-case-unless-debug err
          (kargu-bash-run
           (kargu--tool-arg args "command")
           (kargu--tool-arg args "cwd" "path" "directory")
-          (kargu--tool-arg args "background"))
-       (error (format "ERROR: %s" (error-message-string err)))))))
+          (kargu--tool-arg args "background")
+          callback)
+       (error
+        (let ((err-msg (format "ERROR: %s" (error-message-string err))))
+          (if callback (funcall callback err-msg) err-msg)))))))
 
 (kargu-bash-register-tools)
 

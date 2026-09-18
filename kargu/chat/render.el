@@ -354,6 +354,10 @@ See `kargu-loop-send' for the shape of the report."
       (kargu-plan-handle-response report))
     (when (fboundp 'kargu-notify)
       (kargu-notify (if (eq status :error) 'error 'finish)))
+    (when (and (bound-and-true-p kargu-session-auto-save)
+               (fboundp 'kargu-session-save)
+               buffer)
+      (ignore-errors (kargu-session-save buffer)))
     (kargu-chat--ensure-idle-prompt)
     (force-mode-line-update t)
     (let ((buf (kargu-chat--target-buffer)))
@@ -363,7 +367,7 @@ See `kargu-loop-send' for the shape of the report."
         (dolist (win (get-buffer-window-list buf nil t))
           (set-window-point win (point-max)))))))
 
-(defun kargu-chat--tool-activity (fn name arguments)
+(defun kargu-chat--tool-activity (fn name arguments &optional callback)
   "Around advice on `kargu-execute-tool' for the chat timeline.
 Prints the tool NAME before it runs — visible while long tools or
 the human ediff gate block — and a one-line summary of the result
@@ -381,16 +385,28 @@ afterwards.  FN is the original function."
             (kargu-chat--insert "\n"))))
       (kargu-chat--insert (format "  → %s " name)
                           'kargu-chat-tool))
-    (let ((result (funcall fn name arguments)))
-      (when live
-        (kargu-chat--insert
-         (format "[%s]\n" (kargu-chat--result-summary result))
-         'kargu-chat-tool)
-        (setq kargu-chat--preamble-dropped nil)
-        (with-current-buffer live
-          (when (markerp kargu-chat--output-marker)
-            (setq kargu-chat--answer-start (copy-marker kargu-chat--output-marker nil)))))
-      result)))
+    (if callback
+        (funcall fn name arguments
+                 (lambda (result)
+                   (when live
+                     (kargu-chat--insert
+                      (format "[%s]\n" (kargu-chat--result-summary result))
+                      'kargu-chat-tool)
+                     (setq kargu-chat--preamble-dropped nil)
+                     (with-current-buffer live
+                       (when (markerp kargu-chat--output-marker)
+                         (setq kargu-chat--answer-start (copy-marker kargu-chat--output-marker nil)))))
+                   (funcall callback result)))
+      (let ((result (funcall fn name arguments)))
+        (when live
+          (kargu-chat--insert
+           (format "[%s]\n" (kargu-chat--result-summary result))
+           'kargu-chat-tool)
+          (setq kargu-chat--preamble-dropped nil)
+          (with-current-buffer live
+            (when (markerp kargu-chat--output-marker)
+              (setq kargu-chat--answer-start (copy-marker kargu-chat--output-marker nil)))))
+        result))))
 
 (when (fboundp 'kargu-execute-tool)
   (advice-add 'kargu-execute-tool :around

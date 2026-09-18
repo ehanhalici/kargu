@@ -49,10 +49,23 @@
   :prefix "kargu-loop-")
 
 (defcustom kargu-loop-mutating-tools
-  '("edit_file" "write_file" "edit" "write" "apply_patch" "patch" "bash" "debug_toggle_breakpoint"
+  '("edit_file" "write_file" "edit" "write" "apply_patch" "patch" "bash"
+    "edit_symbol" "edit_with_lsp" "edit_by_symbol"
     "git_commit" "git_stage" "git_unstage" "git_branch" "git_stash")
-  "Tools that modify files, git history, or program state.
+  "Tools that modify files or git history.
 They are advertised and executable only in agent mode."
+  :type '(repeat (string :tag "Tool name"))
+  :group 'kargu-loop)
+
+(defcustom kargu-loop-debug-tools
+  '("debug_get_context" "debug_eval" "debug_list_breakpoints"
+    "debug_set_breakpoint" "debug_clear_breakpoint" "debug_toggle_breakpoint"
+    "debug_step_over" "debug_step_in" "debug_step_out" "debug_continue"
+    "debug_pause" "debug_restart"
+    "step_over" "next" "step_in" "step" "step_out" "finish" "continue"
+    "pause" "restart" "set_breakpoint" "clear_breakpoint")
+  "Tools that inspect and control the live debug session in dape.
+They are advertised and executable in debug and agent modes."
   :type '(repeat (string :tag "Tool name"))
   :group 'kargu-loop)
 
@@ -111,21 +124,35 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
   "Return non-nil when tool NAME may be advertised to the model."
   (let ((mode (kargu-loop--active-mode)))
     (and (not (plist-get kargu--loop-run :no-tools))
-         (or (not (member name kargu-loop-mutating-tools))
-             (eq mode 'agent)))))
+         (cond
+          ((member name kargu-loop-debug-tools)
+           (memq mode '(debug agent)))
+          ((member name kargu-loop-mutating-tools)
+           (eq mode 'agent))
+          (t t)))))
 
 (defun kargu-loop--gate-tool (name)
   "Return an error string when NAME may not run in the active mode."
   (let ((mode (kargu-loop--active-mode)))
-    (when (and (member name kargu-loop-mutating-tools)
-               (not (eq mode 'agent)))
+    (cond
+     ((and (member name kargu-loop-debug-tools)
+           (not (memq mode '(debug agent))))
+      (format
+       (concat "Permission denied: Debug tool `%s' is blocked in %s mode.\n"
+               "  - Active mode: %s\n"
+               "  - Allowed modes for debugging: debug, agent\n"
+               "  - Guidance: Switch to debug mode to interact with the live debugger.")
+       name mode mode))
+     ((and (member name kargu-loop-mutating-tools)
+           (not (eq mode 'agent)))
       (format
        (concat "Permission denied: Tool `%s' is blocked in %s mode.\n"
                "  - Active mode: %s (read-only)\n"
                "  - Blocked tool: `%s' (modifying files or execution state is prohibited in this mode)\n"
                "  - Allowed tools in this mode: `read_file', `workspace_grep', `find_files', `list_files', and LSP inspection tools.\n"
                "  - Guidance: You do not have permission to execute mutating tools while in %s mode. To modify code or run commands, switch to agent mode (M-x kargu-set-mode) or provide a read-only plan/response to the user.")
-       name mode mode name mode))))
+       name mode mode name mode))
+     (t nil))))
 
 (defun kargu-loop-running-p ()
   "Return non-nil while an agent run is in progress."
@@ -136,6 +163,8 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
   (interactive)
   (if (null kargu--loop-run)
       (message "kargu: no run in progress")
+    (when (fboundp 'kargu-bash-kill-active-async)
+      (kargu-bash-kill-active-async))
     (kargu-api-cancel)
     (kargu--loop-finish kargu--loop-run
                         :stopped

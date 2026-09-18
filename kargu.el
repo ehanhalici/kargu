@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (plz "0.9") (transient "0.7") (lsp-mode "8.0") (dape "0.10"))
+;; Package-Requires: ((emacs "29.1") (plz "0.9") (transient "0.7") (eglot "1.14") (dape "0.10"))
 ;; Keywords: tools, convenience, ai, lsp, debug
 ;; URL: https://github.com/kargu/kargu
 
@@ -16,7 +16,7 @@
 ;; indexing daemon like the commercial AI editors, it reuses the
 ;; packages you already run every day:
 ;;
-;;   * lsp-mode  -> zero-token workspace skeleton, diagnostics and
+;;   * eglot     -> zero-token workspace skeleton, diagnostics and
 ;;                  symbol lookup tools (the model "sees" your
 ;;                  project without reading every file)
 ;;   * dape      -> live call-stack, in-scope variables and
