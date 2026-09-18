@@ -60,6 +60,7 @@
                                (expand-file-name root))))))
 
 (require 'kargu/core)
+(require 'kargu/json)
 (require 'kargu/api)
 (require 'kargu/languages)
 (require 'kargu/tools/lsp)         ; for kargu--resolve-path
@@ -77,6 +78,7 @@
 (declare-function dape-kill "dape" (conn &optional cb with-disconnect))
 (declare-function dape-disconnect-quit "dape" (conn))
 (declare-function dape-quit "dape" ())
+(declare-function kargu-seq-to-list "kargu/json" (seq))
 
 ;;;; Customization --------------------------------------------------------
 
@@ -107,13 +109,7 @@
 
 ;;;; Session access --------------------------------------------------------
 
-(defun kargu-dape--seq->list (seq)
-  "Normalize a JSON array (vector, list or single value) to a list."
-  (cond
-   ((vectorp seq) (append seq nil))
-   ((listp seq) seq)
-   (seq (list seq))
-   (t nil)))
+(defalias 'kargu-dape--seq->list #'kargu-seq-to-list)
 
 (defun kargu-dape--target-buffer ()
   "Return the best source/code buffer for launching dape.
@@ -179,6 +175,77 @@ Returns t when a thread is stopped or when the session is live and active."
                   (ignore-errors (dape--stopped-threads conn)))
              (bound-and-true-p dape-active-mode)))))
 
+(defun kargu-dape--interactive-launch-dape (target-buf)
+  "Interactively launch Dape in TARGET-BUF with :stopOnEntry preserved."
+  (let ((orig-config-fns (and (boundp 'dape-default-config-functions)
+                              dape-default-config-functions)))
+    (when (and target-buf (buffer-live-p target-buf))
+      (setq kargu-context-buffer target-buf))
+    (message "kargu: launching dape in %s; please enter configuration in the minibuffer..."
+             (buffer-name target-buf))
+    (when (boundp 'dape-default-config-functions)
+      (add-to-list 'dape-default-config-functions #'kargu-dape--ensure-stop-on-entry))
+    (unwind-protect
+        (with-current-buffer target-buf
+          (call-interactively #'dape))
+      (when (boundp 'dape-default-config-functions)
+        (setq dape-default-config-functions orig-config-fns)))))
+
+(defun kargu-dape--wait-for-session-ready (on-ready &optional on-cancel)
+  "Wait asynchronously for Dape session to become ready, then call ON-READY."
+  (let* ((start-time (float-time))
+         (timer nil)
+         (hook-stop nil)
+         (hook-start nil)
+         (cleanup-fn nil)
+         (triggered nil))
+    (setq cleanup-fn
+          (lambda ()
+            (when timer (cancel-timer timer))
+            (when (boundp 'dape-stopped-hook)
+              (remove-hook 'dape-stopped-hook hook-stop))
+            (when (boundp 'dape-start-hook)
+              (remove-hook 'dape-start-hook hook-start))))
+    (setq hook-stop
+          (lambda (&rest _)
+            (unless triggered
+              (setq triggered t)
+              (funcall cleanup-fn)
+              (message "kargu: debug session ready (paused)!")
+              (funcall on-ready))))
+    (setq hook-start
+          (lambda (&rest _)
+            (run-at-time
+             0.5 nil
+             (lambda ()
+               (unless triggered
+                 (when (or (kargu-dape-ready-p) (kargu-dape-live-p))
+                   (setq triggered t)
+                   (funcall cleanup-fn)
+                   (message "kargu: debug session ready!")
+                   (funcall on-ready)))))))
+    (when (boundp 'dape-stopped-hook)
+      (add-hook 'dape-stopped-hook hook-stop))
+    (when (boundp 'dape-start-hook)
+      (add-hook 'dape-start-hook hook-start))
+    (setq timer
+          (run-with-timer
+           0.5 0.5
+           (lambda ()
+             (cond
+              ((kargu-dape-ready-p)
+               (unless triggered
+                 (setq triggered t)
+                 (funcall cleanup-fn)
+                 (message "kargu: debug session ready!")
+                 (funcall on-ready)))
+              ((> (- (float-time) start-time) 60.0)
+               (unless triggered
+                 (setq triggered t)
+                 (funcall cleanup-fn)
+                 (message "kargu: debug session timed out waiting for adapter.")
+                 (when on-cancel (funcall on-cancel "dape launch timed out"))))))))))
+
 (defun kargu-dape-ensure-session (on-ready &optional on-cancel)
   "Ensure a dape debug session is running and ready.
 If already ready, calls ON-READY immediately.
@@ -194,77 +261,9 @@ If cancelled or start fails within timeout, calls ON-CANCEL."
     (when on-cancel (funcall on-cancel "dape is not installed")))
    (t
     (condition-case err
-        (let* ((target-buf (kargu-dape--target-buffer))
-               (orig-config-fns (and (boundp 'dape-default-config-functions)
-                                     dape-default-config-functions)))
-          (when (and target-buf (buffer-live-p target-buf))
-            (setq kargu-context-buffer target-buf))
-          (message "kargu: launching dape in %s; please enter configuration in the minibuffer..."
-                   (buffer-name target-buf))
-          ;; Temporarily ensure :stopOnEntry so the program does not run away before AI can inspect
-          (when (boundp 'dape-default-config-functions)
-            (add-to-list 'dape-default-config-functions #'kargu-dape--ensure-stop-on-entry))
-          (unwind-protect
-              (with-current-buffer target-buf
-                (call-interactively #'dape))
-            (when (boundp 'dape-default-config-functions)
-              (setq dape-default-config-functions orig-config-fns)))
-          ;; Wait asynchronously for readiness
-          (let* ((start-time (float-time))
-                 (timer nil)
-                 (hook-stop nil)
-                 (hook-start nil)
-                 (cleanup-fn nil)
-                 (triggered nil))
-            (setq cleanup-fn
-                  (lambda ()
-                    (when timer (cancel-timer timer))
-                    (when (boundp 'dape-stopped-hook)
-                      (remove-hook 'dape-stopped-hook hook-stop))
-                    (when (boundp 'dape-start-hook)
-                      (remove-hook 'dape-start-hook hook-start))))
-            (setq hook-stop
-                  (lambda (&rest _)
-                    (unless triggered
-                      (setq triggered t)
-                      (funcall cleanup-fn)
-                      (message "kargu: debug session ready (paused)!")
-                      (funcall on-ready))))
-            (setq hook-start
-                  (lambda (&rest _)
-                    ;; When session starts, wait briefly for initial stop (stopOnEntry)
-                    ;; or trigger if ready
-                    (run-at-time
-                     0.5 nil
-                     (lambda ()
-                       (unless triggered
-                         (when (or (kargu-dape-ready-p) (kargu-dape-live-p))
-                           (setq triggered t)
-                           (funcall cleanup-fn)
-                           (message "kargu: debug session ready!")
-                           (funcall on-ready)))))))
-            ;; NOTE: hooks must be GLOBAL (nil for local arg), because dape fires hooks globally!
-            (when (boundp 'dape-stopped-hook)
-              (add-hook 'dape-stopped-hook hook-stop))
-            (when (boundp 'dape-start-hook)
-              (add-hook 'dape-start-hook hook-start))
-            (setq timer
-                  (run-with-timer
-                   0.5 0.5
-                   (lambda ()
-                     (cond
-                      ((kargu-dape-ready-p)
-                       (unless triggered
-                         (setq triggered t)
-                         (funcall cleanup-fn)
-                         (message "kargu: debug session ready!")
-                         (funcall on-ready)))
-                      ((> (- (float-time) start-time) 60.0)
-                       (unless triggered
-                         (setq triggered t)
-                         (funcall cleanup-fn)
-                         (message "kargu: debug session timed out waiting for adapter.")
-                         (when on-cancel (funcall on-cancel "dape launch timed out"))))))))))
+        (let ((target-buf (kargu-dape--target-buffer)))
+          (kargu-dape--interactive-launch-dape target-buf)
+          (kargu-dape--wait-for-session-ready on-ready on-cancel))
       (quit
        (message "kargu: debug session launch cancelled.")
        (when on-cancel (funcall on-cancel "cancelled by user")))
@@ -369,15 +368,9 @@ synchronous (blocking, timeout-bounded) DAP requests."
            (kargu-log 'warn "%s" msg)
            msg))))))
 
-(defun kargu-dape--render-context (conn thread frames frame)
-  "Render the session snapshot for THREAD/FRAMES/FRAME as text."
-  (let ((lines
-         (list
-          (format "# dape session — thread #%s (%s), %d frame(s)"
-                  (or (and thread (plist-get thread :id)) "?")
-                  (or (and thread (plist-get thread :status)) "?")
-                  (length (or frames nil))))))
-    (push "## Stack" lines)
+(defun kargu-dape--render-stack-frames (conn frames frame)
+  "Render stack frame lines for FRAMES with FRAME highlighted."
+  (let ((lines (list "## Stack")))
     (if (null frames)
         (push "  (no stack frames available)" lines)
       (let ((selected-id (and frame (plist-get frame :id))))
@@ -395,54 +388,58 @@ synchronous (blocking, timeout-bounded) DAP requests."
       (let ((hidden (- (length frames) kargu-dape-max-frames)))
         (when (> hidden 0)
           (push (format "  ... %d more frames" hidden) lines))))
-    (when frame
-      (push (format "## Variables in frame \"%s\" (%s:%s)"
-                    (or (plist-get frame :name) "?")
-                    (kargu-dape--frame-path conn frame)
-                    (or (plist-get frame :line) "?"))
-            lines)
-      (let ((scopes (seq-take
-                     (kargu-dape--seq->list
-                      (plist-get frame :scopes))
-                     kargu-dape-max-scopes)))
-        (if (null scopes)
-            (push "  (no scopes reported by the adapter)" lines)
-          (dolist (scope scopes)
-            (let ((variables
-                   (kargu-dape--seq->list
-                    (plist-get scope :variables))))
-              (push (format "  Scope %s:" (or (plist-get scope :name) "?"))
-                    lines)
-              (if (null variables)
-                  (push "    (empty)" lines)
-                (dolist (variable
-                         (seq-take variables kargu-dape-max-variables))
-                  (push (format "    %s = %s%s"
-                                (or (plist-get variable :name) "?")
-                                (kargu-dape--trunc
-                                 (or (plist-get variable :value) "?"))
-                                (if (and (numberp
-                                          (plist-get variable
-                                                     :variablesReference))
-                                         (not (zerop
-                                               (plist-get variable
-                                                          :variablesReference))))
-                                    " {...}"
-                                  ""))
-                        lines)))
-              (let ((hidden (- (length variables)
-                               kargu-dape-max-variables)))
-                (when (> hidden 0)
-                  (push (format "    ... %d more variables" hidden)
-                        lines)))))
-          (let ((hidden (- (length (kargu-dape--seq->list
-                                    (plist-get frame :scopes)))
-                           kargu-dape-max-scopes)))
-            (when (> hidden 0)
-              (push (format "  ... %d more scopes" hidden) lines))))))
-    (string-join (nreverse lines) "\n")))
+    (nreverse lines)))
+
+(defun kargu-dape--render-frame-variables (conn frame)
+  "Render variable lines for FRAME using CONN."
+  (when frame
+    (let* ((lines (list (format "## Variables in frame \"%s\" (%s:%s)"
+                                (or (plist-get frame :name) "?")
+                                (kargu-dape--frame-path conn frame)
+                                (or (plist-get frame :line) "?"))))
+           (scopes (seq-take
+                    (kargu-dape--seq->list (plist-get frame :scopes))
+                    kargu-dape-max-scopes)))
+      (if (null scopes)
+          (push "  (no scopes reported by the adapter)" lines)
+        (dolist (scope scopes)
+          (let ((variables (kargu-dape--seq->list (plist-get scope :variables))))
+            (push (format "  Scope %s:" (or (plist-get scope :name) "?")) lines)
+            (if (null variables)
+                (push "    (empty)" lines)
+              (dolist (variable (seq-take variables kargu-dape-max-variables))
+                (push (kargu-dape--format-var-line variable "    ") lines)))
+            (let ((hidden (- (length variables) kargu-dape-max-variables)))
+              (when (> hidden 0)
+                (push (format "    ... %d more variables" hidden) lines)))))
+        (let ((hidden (- (length (kargu-dape--seq->list (plist-get frame :scopes)))
+                         kargu-dape-max-scopes)))
+          (when (> hidden 0)
+            (push (format "  ... %d more scopes" hidden) lines))))
+      (nreverse lines))))
+
+(defun kargu-dape--render-context (conn thread frames frame)
+  "Render the session snapshot for THREAD/FRAMES/FRAME as text."
+  (let* ((header (format "# dape session — thread #%s (%s), %d frame(s)"
+                         (or (and thread (plist-get thread :id)) "?")
+                         (or (and thread (plist-get thread :status)) "?")
+                         (length (or frames nil))))
+         (stack-lines (kargu-dape--render-stack-frames conn frames frame))
+         (var-lines (kargu-dape--render-frame-variables conn frame))
+         (all-lines (cons header (append stack-lines var-lines))))
+    (string-join all-lines "\n")))
 
 ;;;; Expression evaluation -------------------------------------------------
+
+(defun kargu-dape--format-language-hint (expr context-or-err)
+  "Format a language hint string for EXPR and CONTEXT-OR-ERR if available."
+  (let* ((active-lang (and (fboundp 'kargu-language-active)
+                           (kargu-language-active)))
+         (hint (and active-lang (kargu-language-eval-hint active-lang expr context-or-err))))
+    (if hint
+        (format "\n💡 Language Hint (%s): %s"
+                (kargu-language-spec-name active-lang) hint)
+      "")))
 
 (defun kargu-dape-eval-expression (expr &optional context)
   "Evaluate EXPR in the paused debug session; return result text.
@@ -450,12 +447,8 @@ CONTEXT is the DAP evaluate context (\"repl\" default, \"hover\"
 or \"watch\")."
   (let ((conn (kargu-dape--connection)))
     (if (stringp conn)
-        (let* ((active-lang (and (fboundp 'kargu-language-active)
-                                 (kargu-language-active)))
-               (hint (and active-lang (kargu-language-eval-hint active-lang expr conn))))
-          (if hint
-              (format "%s\n💡 Language Hint (%s): %s" conn (kargu-language-spec-name active-lang) hint)
-            conn))
+        (let ((hint (kargu-dape--format-language-hint expr conn)))
+          (if (string-empty-p hint) conn (concat conn hint)))
       (condition-case-unless-debug err
           (let (body err-msg)
             (let ((dape--request-blocking t))
@@ -469,28 +462,17 @@ or \"watch\")."
                        err-msg error))))
             (cond
              (err-msg
-              (let* ((active-lang (and (fboundp 'kargu-language-active)
-                                       (kargu-language-active)))
-                     (hint (and active-lang (kargu-language-eval-hint active-lang expr err-msg))))
-                (format "ERROR: evaluate '%s' failed: %s%s"
-                        expr err-msg
-                        (if hint
-                            (format "\n💡 Language Hint (%s): %s"
-                                    (kargu-language-spec-name active-lang) hint)
-                          ""))))
+              (format "ERROR: evaluate '%s' failed: %s%s"
+                      expr err-msg
+                      (kargu-dape--format-language-hint expr err-msg)))
              ((and body (plist-get body :result))
               (format "%s => %s" expr (kargu-dape--trunc (plist-get body :result))))
              (t (format "%s => (evaluated, no result value)" expr))))
         (error
-         (let* ((active-lang (and (fboundp 'kargu-language-active)
-                                  (kargu-language-active)))
-                (hint (and active-lang (kargu-language-eval-hint active-lang expr (error-message-string err)))))
+         (let ((err-str (error-message-string err)))
            (format "ERROR: dape eval '%s': %s%s"
-                   expr (error-message-string err)
-                   (if hint
-                       (format "\n💡 Language Hint (%s): %s"
-                               (kargu-language-spec-name active-lang) hint)
-                     ""))))))))
+                   expr err-str
+                   (kargu-dape--format-language-hint expr err-str))))))))
 
 ;;;; Breakpoints -----------------------------------------------------------
 
@@ -660,6 +642,45 @@ Returns structured confirmation with file, line, and remaining count."
 
 ;;;; Stepping & execution control ------------------------------------------
 
+(defun kargu-dape--format-stopped-report (action-name)
+  "Format debugging report after ACTION-NAME completes and execution pauses."
+  (let* ((ctx (kargu-dape-get-context))
+         (live-conn (kargu-dape--raw-connection))
+         (thread (and live-conn (or (dape--current-thread live-conn)
+                                    (car (dape--stopped-threads live-conn)))))
+         (top-frame (and live-conn (or (dape--current-stack-frame live-conn)
+                                       (car (plist-get thread :stackFrames)))))
+         (file (and live-conn top-frame (kargu-dape--frame-path live-conn top-frame)))
+         (line (and top-frame (plist-get top-frame :line)))
+         (fn-name (and top-frame (plist-get top-frame :name)))
+         (src-snippet (when (and file (not (equal file "?")) (numberp line))
+                        (kargu-dape--source-snippet file line 4))))
+    (concat
+     (format "[DEBUGGER PAUSED: Action '%s' completed]\n" action-name)
+     (format "Location: %s:%s%s\n"
+             (or file "?") (or line "?")
+             (if fn-name (format " in `%s`" fn-name) ""))
+     (if src-snippet
+         (format "\n### Source Context (%s:%s):\n```\n%s\n```\n\n"
+                 file line src-snippet)
+       "\n")
+     ctx
+     "\n\nAvailable Next Actions:\n"
+     "  - Inspect Variables: Review in-scope variables above. For struct/vector fields, use `debug_scope` (or `debug_inspect_variable`).\n"
+     "  - Custom Evaluation: Use `debug_eval` (Note: for Rust/C++, do not invoke runtime methods like .len(); inspect fields directly).\n"
+     "  - Stack Navigation: `debug_up` (caller), `debug_down` (callee), `debug_stack` (all frames), `debug_threads`.\n"
+     "  - Step & Continue: `debug_step_over` (next), `debug_step_in` (step), `debug_step_out` (out), or `debug_continue`.\n"
+     "  - Breakpoints: `debug_set_breakpoint`, `debug_clear_breakpoint`, `debug_list_breakpoints`.\n"
+     "  - Lifecycle: `debug_watch`, `debug_restart`, `debug_kill`, `debug_disconnect`, `debug_quit`.")))
+
+(defun kargu-dape--cleanup-wait (timer hook-stop hook-exit)
+  "Clean up TIMER and HOOK-STOP / HOOK-EXIT listeners."
+  (when timer (cancel-timer timer))
+  (when (boundp 'dape-stopped-hook)
+    (remove-hook 'dape-stopped-hook hook-stop))
+  (when (boundp 'dape-active-mode-off-hook)
+    (remove-hook 'dape-active-mode-off-hook hook-exit)))
+
 (defun kargu-dape--action-and-wait (action-fn action-name &optional callback timeout)
   "Execute ACTION-FN on connection and wait for stopped state.
 If CALLBACK is provided, operates asynchronously.
@@ -679,50 +700,13 @@ Returns a rich structured debugging report containing:
              (timer nil)
              (hook-stop nil)
              (hook-exit nil)
-             (cleanup nil)
-             (format-stopped-report
-              (lambda ()
-                (let* ((ctx (kargu-dape-get-context))
-                       (live-conn (kargu-dape--raw-connection))
-                       (thread (and live-conn (or (dape--current-thread live-conn)
-                                                  (car (dape--stopped-threads live-conn)))))
-                       (top-frame (and live-conn (or (dape--current-stack-frame live-conn)
-                                                     (car (plist-get thread :stackFrames)))))
-                       (file (and live-conn top-frame (kargu-dape--frame-path live-conn top-frame)))
-                       (line (and top-frame (plist-get top-frame :line)))
-                       (fn-name (and top-frame (plist-get top-frame :name)))
-                       (src-snippet (when (and file (not (equal file "?")) (numberp line))
-                                      (kargu-dape--source-snippet file line 4))))
-                  (concat
-                   (format "[DEBUGGER PAUSED: Action '%s' completed]\n" action-name)
-                   (format "Location: %s:%s%s\n"
-                           (or file "?") (or line "?")
-                           (if fn-name (format " in `%s`" fn-name) ""))
-                   (if src-snippet
-                       (format "\n### Source Context (%s:%s):\n```\n%s\n```\n\n"
-                               file line src-snippet)
-                     "\n")
-                   ctx
-                   "\n\nAvailable Next Actions:\n"
-                   "  - Inspect Variables: Review in-scope variables above. For struct/vector fields, use `debug_scope` (or `debug_inspect_variable`).\n"
-                   "  - Custom Evaluation: Use `debug_eval` (Note: for Rust/C++, do not invoke runtime methods like .len(); inspect fields directly).\n"
-                   "  - Stack Navigation: `debug_up` (caller), `debug_down` (callee), `debug_stack` (all frames), `debug_threads`.\n"
-                   "  - Step & Continue: `debug_step_over` (next), `debug_step_in` (step), `debug_step_out` (out), or `debug_continue`.\n"
-                   "  - Breakpoints: `debug_set_breakpoint`, `debug_clear_breakpoint`, `debug_list_breakpoints`.\n"
-                   "  - Lifecycle: `debug_watch`, `debug_restart`, `debug_kill`, `debug_disconnect`, `debug_quit`.")))))
-        (setq cleanup
-              (lambda ()
-                (when timer (cancel-timer timer))
-                (when (boundp 'dape-stopped-hook)
-                  (remove-hook 'dape-stopped-hook hook-stop))
-                (when (boundp 'dape-active-mode-off-hook)
-                  (remove-hook 'dape-active-mode-off-hook hook-exit))))
+             (cleanup (lambda () (kargu-dape--cleanup-wait timer hook-stop hook-exit))))
         (setq hook-stop
               (lambda (&rest _)
                 (unless done
                   (setq done t)
                   (funcall cleanup)
-                  (let ((msg (funcall format-stopped-report)))
+                  (let ((msg (kargu-dape--format-stopped-report action-name)))
                     (setq result msg)
                     (when callback (funcall callback msg))))))
         (setq hook-exit
@@ -978,6 +962,71 @@ Returns the newly selected frame info and location."
                 (string-join (nreverse lines) "\n"))))
         (error (format "ERROR: sources: %s" (error-message-string err)))))))
 
+(defun kargu-dape--format-var-line (v &optional indent)
+  "Format variable V as an indented text line."
+  (let ((pad (or indent "  "))
+        (vref (plist-get v :variablesReference)))
+    (format "%s%s = %s%s"
+            pad
+            (or (plist-get v :name) "?")
+            (kargu-dape--trunc (or (plist-get v :value) "?"))
+            (if (and (numberp vref) (not (zerop vref))) " {...}" ""))))
+
+(defun kargu-dape--scope-expand-var (conn scopes target-name)
+  "Inspect child fields of TARGET-NAME in SCOPES using CONN."
+  (let ((target-var nil))
+    (cl-dolist (sc scopes)
+      (cl-dolist (v (kargu-dape--seq->list (plist-get sc :variables)))
+        (when (equal (plist-get v :name) target-name)
+          (setq target-var v)
+          (cl-return))))
+    (if (null target-var)
+        (format "ERROR: variable '%s' not found in current frame scopes. Available: %s"
+                target-name
+                (mapconcat (lambda (sc)
+                             (mapconcat (lambda (v) (or (plist-get v :name) "?"))
+                                        (kargu-dape--seq->list (plist-get sc :variables))
+                                        ", "))
+                           scopes "; "))
+      (let ((vref (plist-get target-var :variablesReference)))
+        (if (or (null vref) (zerop vref))
+            (format "Variable '%s' = %s (primitive value, no child properties)"
+                    target-name
+                    (kargu-dape--trunc (or (plist-get target-var :value) "?")))
+          (let ((dape--request-blocking t))
+            (dape--variables conn target-var (lambda (&rest _))))
+          (let ((children (kargu-dape--seq->list (plist-get target-var :variables)))
+                (lines (list (format "Variable '%s' = %s (expanded child fields):"
+                                     target-name
+                                     (kargu-dape--trunc (or (plist-get target-var :value) "?"))))))
+            (if (null children)
+                (push "  (no child fields reported)" lines)
+              (dolist (ch (seq-take children 60))
+                (push (kargu-dape--format-var-line ch "  ") lines)))
+            (string-join (nreverse lines) "\n")))))))
+
+(defun kargu-dape--scope-inspect-index (scopes idx)
+  "Inspect scope at IDX in SCOPES."
+  (let ((sc (nth idx scopes)))
+    (if (null sc)
+        (format "ERROR: scope index %d out of range (available: 0 to %d)"
+                idx (1- (length scopes)))
+      (let ((lines (list (format "Scope #%d (%s):" idx (or (plist-get sc :name) "?")))))
+        (dolist (v (seq-take (kargu-dape--seq->list (plist-get sc :variables)) 60))
+          (push (kargu-dape--format-var-line v "  ") lines))
+        (string-join (nreverse lines) "\n")))))
+
+(defun kargu-dape--scope-overview (scopes frame)
+  "Overview of all SCOPES in FRAME."
+  (let ((lines (list (format "[SCOPES: %d in frame '%s']"
+                             (length scopes) (or (plist-get frame :name) "?")))))
+    (cl-loop for sc in scopes
+             for i from 0
+             do (push (format "Scope #%d: %s" i (or (plist-get sc :name) "?")) lines)
+                (dolist (v (seq-take (kargu-dape--seq->list (plist-get sc :variables)) 30))
+                  (push (kargu-dape--format-var-line v "    ") lines)))
+    (string-join (nreverse lines) "\n")))
+
 (defun kargu-dape-scope (&optional var-name-or-scope-idx)
   "Inspect scopes or expand child variables of VAR-NAME-OR-SCOPE-IDX."
   (let ((conn (kargu-dape--connection)))
@@ -1001,84 +1050,19 @@ Returns the newly selected frame info and location."
                  ((and (stringp var-name-or-scope-idx)
                        (not (string-empty-p var-name-or-scope-idx))
                        (not (string-match-p "\\`[0-9]+\\'" var-name-or-scope-idx)))
-                  (let* ((target-name var-name-or-scope-idx)
-                         (target-var nil))
-                    (cl-dolist (sc scopes)
-                      (cl-dolist (v (kargu-dape--seq->list (plist-get sc :variables)))
-                        (when (equal (plist-get v :name) target-name)
-                          (setq target-var v)
-                          (cl-return))))
-                    (if (null target-var)
-                        (format "ERROR: variable '%s' not found in current frame scopes. Available: %s"
-                                target-name
-                                (mapconcat (lambda (sc)
-                                             (mapconcat (lambda (v) (or (plist-get v :name) "?"))
-                                                        (kargu-dape--seq->list (plist-get sc :variables))
-                                                        ", "))
-                                           scopes "; "))
-                      (let ((vref (plist-get target-var :variablesReference)))
-                        (if (or (null vref) (zerop vref))
-                            (format "Variable '%s' = %s (primitive value, no child properties)"
-                                    target-name
-                                    (kargu-dape--trunc (or (plist-get target-var :value) "?")))
-                          (let ((dape--request-blocking t))
-                            (dape--variables conn target-var (lambda (&rest _))))
-                          (let ((children (kargu-dape--seq->list (plist-get target-var :variables)))
-                                (lines (list (format "Variable '%s' = %s (expanded child fields):"
-                                                     target-name
-                                                     (kargu-dape--trunc (or (plist-get target-var :value) "?"))))))
-                            (if (null children)
-                                (push "  (no child fields reported)" lines)
-                              (dolist (ch (seq-take children 60))
-                                (push (format "  %s = %s%s"
-                                              (or (plist-get ch :name) "?")
-                                              (kargu-dape--trunc (or (plist-get ch :value) "?"))
-                                              (if (and (numberp (plist-get ch :variablesReference))
-                                                       (not (zerop (plist-get ch :variablesReference))))
-                                                  " {...}"
-                                                ""))
-                                      lines)))
-                            (string-join (nreverse lines) "\n")))))))
+                  (kargu-dape--scope-expand-var conn scopes var-name-or-scope-idx))
                  ;; Numeric scope index branch
                  ((and var-name-or-scope-idx
                        (or (numberp var-name-or-scope-idx)
                            (and (stringp var-name-or-scope-idx)
                                 (string-match-p "\\`[0-9]+\\'" var-name-or-scope-idx))))
-                  (let* ((idx (if (numberp var-name-or-scope-idx)
-                                  var-name-or-scope-idx
-                                (string-to-number var-name-or-scope-idx)))
-                         (sc (nth idx scopes)))
-                    (if (null sc)
-                        (format "ERROR: scope index %d out of range (available: 0 to %d)"
-                                idx (1- (length scopes)))
-                      (let ((lines (list (format "Scope #%d (%s):" idx (or (plist-get sc :name) "?")))))
-                        (dolist (v (seq-take (kargu-dape--seq->list (plist-get sc :variables)) 60))
-                          (push (format "  %s = %s%s"
-                                        (or (plist-get v :name) "?")
-                                        (kargu-dape--trunc (or (plist-get v :value) "?"))
-                                        (if (and (numberp (plist-get v :variablesReference))
-                                                 (not (zerop (plist-get v :variablesReference))))
-                                            " {...}"
-                                          ""))
-                                lines))
-                        (string-join (nreverse lines) "\n")))))
+                  (let ((idx (if (numberp var-name-or-scope-idx)
+                                 var-name-or-scope-idx
+                               (string-to-number var-name-or-scope-idx))))
+                    (kargu-dape--scope-inspect-index scopes idx)))
                  ;; All scopes overview branch
                  (t
-                  (let ((lines (list (format "[SCOPES: %d in frame '%s']"
-                                             (length scopes) (or (plist-get frame :name) "?")))))
-                    (cl-loop for sc in scopes
-                             for i from 0
-                             do (push (format "Scope #%d: %s" i (or (plist-get sc :name) "?")) lines)
-                                (dolist (v (seq-take (kargu-dape--seq->list (plist-get sc :variables)) 30))
-                                  (push (format "    %s = %s%s"
-                                                (or (plist-get v :name) "?")
-                                                (kargu-dape--trunc (or (plist-get v :value) "?"))
-                                                (if (and (numberp (plist-get v :variablesReference))
-                                                         (not (zerop (plist-get v :variablesReference))))
-                                                    " {...}"
-                                                  ""))
-                                        lines)))
-                    (string-join (nreverse lines) "\n")))))))
+                  (kargu-dape--scope-overview scopes frame))))))
         (error (format "ERROR: scope: %s" (error-message-string err)))))))
 
 (defun kargu-dape-watch (&optional expr remove-p)

@@ -98,60 +98,84 @@ ACTION-FN is called on RET or click. MOUSE-FN is called with event if supplied."
           (cons (format "[%s (%s ctx)]" raw-m cap-str) 'font-lock-string-face))
       (cons "[select model]" 'font-lock-warning-face))))
 
-(defun kargu-chat--footer-string ()
-  "Build the interactive footer line shown at the bottom of the chat buffer.
-Contains clickable mode, provider, model, context usage, and effort buttons."
-  (let* ((mode-name (upcase (symbol-name (if (fboundp 'kargu-state-mode)
+(defun kargu-chat--footer-mode-button ()
+  "Build the mode button for the footer."
+  (let ((mode-name (upcase (symbol-name (if (fboundp 'kargu-state-mode)
                                            (kargu-state-mode)
-                                         (or (bound-and-true-p kargu-active-mode) 'ask)))))
-         (pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "default"))
-         (raw-m (if (fboundp 'kargu--model) (kargu--model) nil))
-         (m-info (kargu-chat--footer-model-label raw-m))
-         (ctx-info (if (fboundp 'kargu-session-context-info)
+                                         (or (bound-and-true-p kargu-active-mode) 'ask))))))
+    (kargu-chat--footer-button
+     (format "[%s]" mode-name) 'bold
+     "mouse-1 or RET: switch mode with company list (C-c C-x)"
+     #'kargu-chat-select-mode-company
+     (lambda (e) (interactive "e") (kargu-chat-select-mode-company e)))))
+
+(defun kargu-chat--footer-provider-button (pname)
+  "Build the provider button for PNAME for the footer."
+  (kargu-chat--footer-button
+   (format "[%s]" pname) 'font-lock-type-face
+   "mouse-1 or RET: switch provider (company list)"
+   #'kargu-chat-select-provider-company
+   (lambda (e) (interactive "e") (kargu-chat-select-provider-company e))))
+
+(defun kargu-chat--footer-model-button ()
+  "Build the model button for the footer."
+  (let* ((raw-m (if (fboundp 'kargu--model) (kargu--model) nil))
+         (m-info (kargu-chat--footer-model-label raw-m)))
+    (kargu-chat--footer-button
+     (car m-info) (cdr m-info)
+     "mouse-1 or RET: select model (company list)"
+     #'kargu-chat-select-model-company
+     (lambda (e) (interactive "e") (kargu-chat-select-model-company nil nil nil e)))))
+
+(defun kargu-chat--footer-context-button ()
+  "Build the context usage indicator for the footer."
+  (let* ((ctx-info (if (fboundp 'kargu-session-context-info)
                        (kargu-session-context-info)
                      (list :formatted "128k")))
-         (ctx-str (plist-get ctx-info :formatted))
-         (effort (if (boundp 'kargu-reasoning-effort) (or kargu-reasoning-effort "off") "off"))
-         (mode-btn (kargu-chat--footer-button
-                    (format "[%s]" mode-name) 'bold
-                    "mouse-1 or RET: switch mode with company list (C-c C-x)"
-                    #'kargu-chat-select-mode-company
-                    (lambda (e) (interactive "e") (kargu-chat-select-mode-company e))))
-         (p-btn (kargu-chat--footer-button
-                 (format "[%s]" pname) 'font-lock-type-face
-                 "mouse-1 or RET: switch provider (company list)"
-                 #'kargu-chat-select-provider-company
-                 (lambda (e) (interactive "e") (kargu-chat-select-provider-company e))))
-         (m-btn (kargu-chat--footer-button
-                 (car m-info) (cdr m-info)
-                 "mouse-1 or RET: select model (company list)"
-                 #'kargu-chat-select-model-company
-                 (lambda (e) (interactive "e") (kargu-chat-select-model-company nil nil nil e))))
-         (ctx-btn (propertize (format "[ctx: %s]" ctx-str)
-                              'face 'font-lock-doc-face
-                              'help-echo "Model context usage (used / capacity)"))
-         (e-btn (kargu-chat--footer-button
-                 (format "[%s]" effort) 'font-lock-keyword-face
-                 "mouse-1 or RET: select reasoning effort (company list)"
-                 #'kargu-chat-select-effort-company
-                 (lambda (e) (interactive "e") (kargu-chat-select-effort-company e))))
-         (active-params (if (fboundp 'kargu-provider-params-get-all)
+         (ctx-str (plist-get ctx-info :formatted)))
+    (propertize (format "[ctx: %s]" ctx-str)
+                'face 'font-lock-doc-face
+                'help-echo "Model context usage (used / capacity)")))
+
+(defun kargu-chat--footer-effort-button ()
+  "Build the reasoning effort button for the footer."
+  (let ((effort (if (boundp 'kargu-reasoning-effort) (or kargu-reasoning-effort "off") "off")))
+    (kargu-chat--footer-button
+     (format "[%s]" effort) 'font-lock-keyword-face
+     "mouse-1 or RET: select reasoning effort (company list)"
+     #'kargu-chat-select-effort-company
+     (lambda (e) (interactive "e") (kargu-chat-select-effort-company e)))))
+
+(defun kargu-chat--footer-params-button (pname)
+  "Build the provider parameters button for PNAME for the footer."
+  (let* ((active-params (if (fboundp 'kargu-provider-params-get-all)
                             (kargu-provider-params-get-all pname)
                           nil))
          (params-count (length active-params))
          (params-label (if (> params-count 0) (format "[params: %d]" params-count) "[params]"))
-         (params-face (if (> params-count 0) 'font-lock-keyword-face 'font-lock-comment-face))
-         (params-btn (kargu-chat--footer-button
-                      params-label params-face
-                      "mouse-1 or RET: configure provider routing & parameters"
-                      (lambda () (interactive)
-                        (if (fboundp 'kargu-tune-provider-params-menu)
-                            (call-interactively #'kargu-tune-provider-params-menu)
-                          (message "kargu: provider parameters menu not available")))
-                      (lambda (_e) (interactive "e")
-                        (if (fboundp 'kargu-tune-provider-params-menu)
-                            (call-interactively #'kargu-tune-provider-params-menu)
-                          (message "kargu: provider parameters menu not available"))))))
+         (params-face (if (> params-count 0) 'font-lock-keyword-face 'font-lock-comment-face)))
+    (kargu-chat--footer-button
+     params-label params-face
+     "mouse-1 or RET: configure provider routing & parameters"
+     (lambda () (interactive)
+       (if (fboundp 'kargu-tune-provider-params-menu)
+           (call-interactively #'kargu-tune-provider-params-menu)
+         (message "kargu: provider parameters menu not available")))
+     (lambda (_e) (interactive "e")
+       (if (fboundp 'kargu-tune-provider-params-menu)
+           (call-interactively #'kargu-tune-provider-params-menu)
+         (message "kargu: provider parameters menu not available"))))))
+
+(defun kargu-chat--footer-string ()
+  "Build the interactive footer line shown at the bottom of the chat buffer.
+Contains clickable mode, provider, model, context usage, and effort buttons."
+  (let* ((pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "default"))
+         (mode-btn (kargu-chat--footer-mode-button))
+         (p-btn (kargu-chat--footer-provider-button pname))
+         (m-btn (kargu-chat--footer-model-button))
+         (ctx-btn (kargu-chat--footer-context-button))
+         (e-btn (kargu-chat--footer-effort-button))
+         (params-btn (kargu-chat--footer-params-button pname)))
     (propertize
      (concat "\n\n"
              (propertize "mode: " 'face 'font-lock-comment-face)

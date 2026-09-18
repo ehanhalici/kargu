@@ -41,6 +41,7 @@ Dynamically bound while the hook runs.")
 (declare-function kargu-diff--sessions "kargu/tools/diff/review" ())
 (declare-function kargu-diff--session-live-p "kargu/tools/diff/review" (session))
 (declare-function kargu-diff--reap-stale "kargu/tools/diff/review" (path))
+(declare-function kargu-to-int "kargu/core" (value &optional default))
 (defvar kargu-diff--sessions)
 
 ;;;; Helpers --------------------------------------------------------------
@@ -56,15 +57,7 @@ and assert that it is strictly within the project root."
                  (expand-file-name path root))))
     (kargu-permission-assert-within-project abs root "file")))
 
-(defun kargu-diff--to-int (value)
-  "Coerce VALUE (integer, float or numeric string) to an integer.
-Return nil when VALUE is nil or not numeric."
-  (cond
-   ((integerp value) value)
-   ((numberp value) (round value))
-   ((stringp value)
-    (ignore-errors (cl-parse-integer value :junk-allowed t)))
-   (t nil)))
+(defalias 'kargu-diff--to-int #'kargu-to-int)
 
 (defun kargu-diff--count-literal (haystack needle)
   "Count non-overlapping occurrences of NEEDLE in HAYSTACK."

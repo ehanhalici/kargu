@@ -354,35 +354,29 @@
         (kargu-provider-param-set "order" parsed)
         (message "kargu: provider order set to: %S" parsed)))))
 
-(defun kargu-tune-param-set-only ()
-  "Set whitelist of allowed providers (comma-separated slugs)."
-  (interactive)
-  (let* ((curr (kargu-provider-param-get "only"))
+(defun kargu-tune-param--prompt-string-list (param label prompt-label)
+  "Prompt user for comma-separated string list PARAM with LABEL and PROMPT-LABEL."
+  (let* ((curr (kargu-provider-param-get param))
          (curr-str (if curr (mapconcat #'identity (if (vectorp curr) (append curr nil) curr) ",") ""))
-         (input (read-string "Only Providers (whitelist, empty to clear): " curr-str))
+         (input (read-string prompt-label curr-str))
          (trimmed (string-trim input)))
     (if (string-empty-p trimmed)
         (progn
-          (kargu-provider-param-set "only" nil)
-          (message "kargu: only providers whitelist cleared"))
+          (kargu-provider-param-set param nil)
+          (message "kargu: %s cleared" label))
       (let ((parsed (kargu--parse-string-list-input trimmed)))
-        (kargu-provider-param-set "only" parsed)
-        (message "kargu: only providers set to: %S" parsed)))))
+        (kargu-provider-param-set param parsed)
+        (message "kargu: %s set to: %S" label parsed)))))
+
+(defun kargu-tune-param-set-only ()
+  "Set whitelist of allowed providers (comma-separated slugs)."
+  (interactive)
+  (kargu-tune-param--prompt-string-list "only" "only providers" "Only Providers (whitelist, empty to clear): "))
 
 (defun kargu-tune-param-set-ignore ()
   "Set blacklist of ignored providers (comma-separated slugs)."
   (interactive)
-  (let* ((curr (kargu-provider-param-get "ignore"))
-         (curr-str (if curr (mapconcat #'identity (if (vectorp curr) (append curr nil) curr) ",") ""))
-         (input (read-string "Ignore Providers (blacklist, empty to clear): " curr-str))
-         (trimmed (string-trim input)))
-    (if (string-empty-p trimmed)
-        (progn
-          (kargu-provider-param-set "ignore" nil)
-          (message "kargu: ignore providers blacklist cleared"))
-      (let ((parsed (kargu--parse-string-list-input trimmed)))
-        (kargu-provider-param-set "ignore" parsed)
-        (message "kargu: ignore providers set to: %S" parsed)))))
+  (kargu-tune-param--prompt-string-list "ignore" "ignore providers" "Ignore Providers (blacklist, empty to clear): "))
 
 (defun kargu-tune-param-set-min-throughput ()
   "Set minimum throughput threshold in tokens per second."
@@ -451,35 +445,32 @@
         (kargu-provider-param-set "top_p" num)
         (message "kargu: top_p set to: %.2f" num)))))
 
-(defun kargu-tune-param-set-frequency-penalty ()
-  "Set frequency penalty (-2.0 to 2.0)."
-  (interactive)
-  (let* ((curr (kargu-provider-param-get "frequency_penalty"))
-         (input (read-string "Frequency Penalty (-2.0 to 2.0, empty to clear): "
-                             (if curr (number-to-string curr) "")))
+(defun kargu-tune-param--prompt-float-penalty (param label prompt-label)
+  "Prompt user for float penalty PARAM (-2.0 to 2.0) with LABEL and PROMPT-LABEL."
+  (let* ((curr (kargu-provider-param-get param))
+         (input (read-string prompt-label (if curr (number-to-string curr) "")))
          (trimmed (string-trim input)))
     (if (string-empty-p trimmed)
         (progn
-          (kargu-provider-param-set "frequency_penalty" nil)
-          (message "kargu: frequency penalty cleared"))
+          (kargu-provider-param-set param nil)
+          (message "kargu: %s cleared" label))
       (let ((num (string-to-number trimmed)))
-        (kargu-provider-param-set "frequency_penalty" num)
-        (message "kargu: frequency penalty set to: %.2f" num)))))
+        (kargu-provider-param-set param num)
+        (message "kargu: %s set to: %.2f" label num)))))
+
+(defun kargu-tune-param-set-frequency-penalty ()
+  "Set frequency penalty (-2.0 to 2.0)."
+  (interactive)
+  (kargu-tune-param--prompt-float-penalty
+   "frequency_penalty" "frequency penalty"
+   "Frequency Penalty (-2.0 to 2.0, empty to clear): "))
 
 (defun kargu-tune-param-set-presence-penalty ()
   "Set presence penalty (-2.0 to 2.0)."
   (interactive)
-  (let* ((curr (kargu-provider-param-get "presence_penalty"))
-         (input (read-string "Presence Penalty (-2.0 to 2.0, empty to clear): "
-                             (if curr (number-to-string curr) "")))
-         (trimmed (string-trim input)))
-    (if (string-empty-p trimmed)
-        (progn
-          (kargu-provider-param-set "presence_penalty" nil)
-          (message "kargu: presence penalty cleared"))
-      (let ((num (string-to-number trimmed)))
-        (kargu-provider-param-set "presence_penalty" num)
-        (message "kargu: presence penalty set to: %.2f" num)))))
+  (kargu-tune-param--prompt-float-penalty
+   "presence_penalty" "presence penalty"
+   "Presence Penalty (-2.0 to 2.0, empty to clear): "))
 
 (defun kargu-tune-param-toggle-parallel-tool-calls ()
   "Toggle parallel tool calls flag."

@@ -29,7 +29,10 @@
       (add-to-list 'load-path (file-name-as-directory
                                (expand-file-name root))))))
 
+(require 'kargu/fs)
 (require 'kargu/languages)
+
+(declare-function kargu-fs-has-file-p "kargu/fs" (root filename))
 
 ;;;; Strategy definition --------------------------------------------------
 
@@ -77,9 +80,7 @@
 
 ;;;; Built-in Strategies --------------------------------------------------
 
-(defun kargu-toolchain--has-file-p (root filename)
-  "Return non-nil if FILENAME exists under directory ROOT."
-  (file-exists-p (expand-file-name filename root)))
+(defalias 'kargu-toolchain--has-file-p #'kargu-fs-has-file-p)
 
 ;; 1. Rust Strategy
 (kargu-toolchain-register

@@ -229,69 +229,84 @@ so the model can inspect remaining lines using `read_file'."
                         omitted (length string) buf-name buf-name)))
     string))
 
+(defmacro kargu-safe-tool-call (&rest body)
+  "Execute BODY, catching errors and formatting as an ERROR string."
+  `(condition-case-unless-debug err
+       (progn ,@body)
+     (error (format "ERROR: %s" (error-message-string err)))))
+
+(defun kargu--format-tool-result (res)
+  "Format tool execution result RES as a string for consumption."
+  (cond
+   ((null res) "OK (no output)")
+   ((stringp res)
+    (if (string-empty-p res) "OK (no output)" res))
+   (t (kargu--json-encode res))))
+
+(defun kargu--tool-raw-args (arguments)
+  "Return raw string representation of ARGUMENTS for logging."
+  (cond
+   ((stringp arguments) arguments)
+   ((or (null arguments) (eq arguments :json-null)) "")
+   (t (condition-case nil
+          (kargu--json-encode arguments)
+        (error (format "%S" arguments))))))
+
+(defun kargu--execute-tool-async (executor args name callback)
+  "Execute EXECUTOR with ARGS asynchronously, invoking CALLBACK with result."
+  (condition-case-unless-debug err
+      (let* ((on-done (lambda (res)
+                        (let* ((formatted (kargu--format-tool-result res))
+                               (final (kargu--truncate-for-model formatted)))
+                          (kargu--log-block (format "tool %s result" name) formatted)
+                          (funcall callback final))))
+             (called-async nil))
+        (condition-case _arity-err
+            (progn
+              (funcall executor args on-done)
+              (setq called-async t))
+          (wrong-number-of-arguments nil))
+        (unless called-async
+          (let ((sync-res (funcall executor args)))
+            (funcall on-done sync-res))))
+    (error
+     (let ((out (format "ERROR: tool %s failed: %s"
+                        name (error-message-string err))))
+       (funcall callback out)))))
+
+(defun kargu--execute-tool-sync (executor args name)
+  "Execute EXECUTOR with ARGS synchronously and return truncated result."
+  (let ((out
+         (condition-case-unless-debug err
+             (kargu--format-tool-result (funcall executor args))
+           (error
+            (format "ERROR: tool %s failed: %s"
+                    name (error-message-string err))))))
+    (kargu--log-block (format "tool %s result" name) out)
+    (kargu--truncate-for-model out)))
+
 (defun kargu-execute-tool (name arguments &optional callback)
   "Run tool NAME with ARGUMENTS; ALWAYS return a result string or invoke CALLBACK.
 When CALLBACK is provided, run asynchronously if the tool supports it.
 Errors are captured and returned as \"ERROR: ...\" results so the
 agent loop can feed them back to the model for self-correction."
   (let* ((spec (gethash name kargu--tool-registry))
-         (raw (cond
-               ((stringp arguments) arguments)
-               ((null arguments) "")
-               ((eq arguments :json-null) "")
-               (t (condition-case nil
-                      (kargu--json-encode arguments)
-                    (error (format "%S" arguments))))))
+         (raw (kargu--tool-raw-args arguments))
          (args (kargu--decode-tool-arguments arguments)))
     (kargu--log-block (format "tool %s arguments (raw)" name) raw
                       (kargu--log-looks-json-p raw))
     (kargu--log-block (format "tool %s arguments (parsed)" name)
                       (format "%S" args))
     (kargu-log 'debug "execute-tool %s args=%s" name
-                     (truncate-string-to-width (format "%s" args) 200))
+               (truncate-string-to-width (format "%s" args) 200))
     (cond
      ((null spec)
       (let ((out (format "ERROR: no such tool: %s" name)))
         (if callback (funcall callback out) out)))
      (callback
-      (condition-case-unless-debug err
-          (let* ((executor (kargu--aget spec "executor"))
-                 (on-done (lambda (res)
-                            (let* ((formatted (cond
-                                                ((null res) "OK (no output)")
-                                                ((stringp res)
-                                                 (if (string-empty-p res) "OK (no output)" res))
-                                                (t (kargu--json-encode res))))
-                                   (final (kargu--truncate-for-model formatted)))
-                              (kargu--log-block (format "tool %s result" name) formatted)
-                              (funcall callback final))))
-                 (called-async nil))
-            (condition-case _arity-err
-                (progn
-                  (funcall executor args on-done)
-                  (setq called-async t))
-              (wrong-number-of-arguments nil))
-            (unless called-async
-              (let ((sync-res (funcall executor args)))
-                (funcall on-done sync-res))))
-        (error
-         (let ((out (format "ERROR: tool %s failed: %s"
-                            name (error-message-string err))))
-           (funcall callback out)))))
+      (kargu--execute-tool-async (kargu--aget spec "executor") args name callback))
      (t
-      (let ((out
-             (condition-case-unless-debug err
-                 (let ((result (funcall (kargu--aget spec "executor") args)))
-                   (cond
-                    ((null result) "OK (no output)")
-                    ((stringp result)
-                     (if (string-empty-p result) "OK (no output)" result))
-                    (t (kargu--json-encode result))))
-               (error
-                (format "ERROR: tool %s failed: %s"
-                        name (error-message-string err))))))
-        (kargu--log-block (format "tool %s result" name) out)
-        (kargu--truncate-for-model out))))))
+      (kargu--execute-tool-sync (kargu--aget spec "executor") args name)))))
 
 (provide 'kargu/api/tools)
 

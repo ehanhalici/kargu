@@ -330,13 +330,9 @@ PROVIDER-NAME is the associated provider ID string."
                   (unless (gethash (downcase short-id) kargu--model-metadata-table)
                     (kargu-model-set-metadata short-id plist)))))))))))
 
-(defun kargu-model-annotation-string (model-id &optional provider-name)
-  "Build a rich, compact annotation badge string for MODEL-ID."
-  (let* ((mid (or model-id ""))
-         (mid-clean (downcase (string-trim mid)))
-         (pname (or provider-name (kargu--provider-name)))
-         (meta (kargu-model-get-metadata mid))
-         (ctx (or (and meta (plist-get meta :context-window))
+(defun kargu-model--annotation-badges (meta mid-clean mid pname)
+  "Collect list of annotation badge strings from META, MID-CLEAN, MID, and PNAME."
+  (let* ((ctx (or (and meta (plist-get meta :context-window))
                   (kargu-model-context-window mid)))
          (max-out (and meta (plist-get meta :max-output)))
          (efforts (or (and meta (plist-get meta :reasoning-efforts))
@@ -344,17 +340,17 @@ PROVIDER-NAME is the associated provider ID string."
          (supp-r (kargu-model-supports-reasoning-p mid pname))
          (supp-tools (if meta (plist-get meta :supports-tools) t))
          (vision (or (and meta (plist-get meta :vision))
-                      (string-match-p "vision\\|vl\\|multimodal\\|image" mid-clean)))
+                     (string-match-p "vision\\|vl\\|multimodal\\|image" mid-clean)))
          (params (and meta (plist-get meta :params)))
          (free (or (and meta (plist-get meta :free))
                    (string-match-p "free" mid-clean)))
          (pricing (and meta (plist-get meta :input-cost)))
          (parts nil))
     (when (and (numberp ctx) (> ctx 0))
-      (let ((ctx-str (if (>= ctx 1000000)
-                         (format "%dm ctx" (/ ctx 1000000))
-                       (format "%dk ctx" (/ ctx 1000)))))
-        (push ctx-str parts)))
+      (push (if (>= ctx 1000000)
+                (format "%dm ctx" (/ ctx 1000000))
+              (format "%dk ctx" (/ ctx 1000)))
+            parts))
     (when (and (numberp max-out) (> max-out 0))
       (push (format "max %dk" (max 1 (/ max-out 1024))) parts))
     (when (and (stringp params) (not (string-empty-p params)))
@@ -382,8 +378,17 @@ PROVIDER-NAME is the associated provider ID string."
        ((and (numberp p-num) (> p-num 0))
         (let ((per-m (* p-num 1000000.0)))
           (push (format "$%.2f/1M" per-m) parts)))))
+    (nreverse parts)))
+
+(defun kargu-model-annotation-string (model-id &optional provider-name)
+  "Build a rich, compact annotation badge string for MODEL-ID."
+  (let* ((mid (or model-id ""))
+         (mid-clean (downcase (string-trim mid)))
+         (pname (or provider-name (kargu--provider-name)))
+         (meta (kargu-model-get-metadata mid))
+         (parts (kargu-model--annotation-badges meta mid-clean mid pname)))
     (if parts
-        (format "  [%s]" (mapconcat #'identity (nreverse parts) " · "))
+        (format "  [%s]" (mapconcat #'identity parts " · "))
       "")))
 
 (defun kargu-model-supports-tools-p (&optional model-id)
@@ -442,6 +447,35 @@ Defaults to t when unknown or not explicitly set to nil."
      ((string= clean "max") " [maximum reasoning effort]")
      (t (format " [%s effort]" clean)))))
 
+(defun kargu--catalog-models-url (pname-lower api-base)
+  "Determine the models endpoint URL for PNAME-LOWER and API-BASE."
+  (let ((custom-models-url (and (fboundp 'kargu-provider-models-api)
+                               (kargu-provider-models-api pname-lower))))
+    (or custom-models-url
+        (cond
+         ((and (string-match-p "ollama" pname-lower)
+               (not (string-suffix-p "/v1" api-base)))
+          (concat api-base "/api/tags"))
+         ((string-suffix-p "/models" api-base)
+          api-base)
+         (t (concat api-base "/models"))))))
+
+(defun kargu--catalog-cache-live-models (pname-lower extracted)
+  "Record metadata and cache clean model IDs for PNAME-LOWER from EXTRACTED list."
+  (kargu--record-models-metadata extracted pname-lower)
+  (let ((clean-ids
+         (delq nil
+               (mapcar (lambda (m)
+                         (let ((id (if (consp m)
+                                       (or (kargu--aget m "id") (kargu--aget m "name"))
+                                     m)))
+                           (if (and (stringp id) (string-prefix-p "models/" id))
+                               (substring id 7)
+                             id)))
+                       extracted))))
+    (when clean-ids
+      (puthash pname-lower clean-ids kargu--live-models-cache))))
+
 (defun kargu-api-list-models (&optional callback provider-name)
   "Fetch catalog from active or specified PROVIDER-NAME asynchronously.
 CALLBACK receives either the list of model alists or an error alist."
@@ -453,17 +487,8 @@ CALLBACK receives either the list of model alists or an error alist."
          (key (kargu--resolve-api-key pname-lower))
          (gen (cl-incf kargu--models-generation))
          (is-keyless (member pname-lower '("ollama" "lmstudio" "llamacpp")))
-         (custom-models-url (and (fboundp 'kargu-provider-models-api)
-                                 (kargu-provider-models-api pname-lower)))
          (api-base (kargu--api-base pname-lower))
-         (url (or custom-models-url
-                  (cond
-                   ((and (string-match-p "ollama" pname-lower)
-                         (not (string-suffix-p "/v1" api-base)))
-                    (concat api-base "/api/tags"))
-                   ((string-suffix-p "/models" api-base)
-                    api-base)
-                   (t (concat api-base "/models")))))
+         (url (kargu--catalog-models-url pname-lower api-base))
          (headers (kargu--api-headers key pname-lower)))
     (if (and (null key) (not is-keyless))
         (funcall cb
@@ -473,30 +498,18 @@ CALLBACK receives either the list of model alists or an error alist."
            :as 'string
            :then (lambda (body)
                    (when (= gen kargu--models-generation)
-                      (let* ((data (kargu--json-decode-safe body))
-                             (extracted (kargu--extract-models-from-json data)))
-                        (if extracted
-                            (progn
-                              (kargu--record-models-metadata extracted pname-lower)
-                              (let ((clean-ids
-                                     (delq nil
-                                           (mapcar (lambda (m)
-                                                     (let ((id (if (consp m)
-                                                                   (or (kargu--aget m "id") (kargu--aget m "name"))
-                                                                 m)))
-                                                       (if (and (stringp id) (string-prefix-p "models/" id))
-                                                           (substring id 7)
-                                                         id)))
-                                                   extracted))))
-                                (when clean-ids
-                                  (puthash pname-lower clean-ids kargu--live-models-cache)))
-                              (funcall cb extracted))
-                          (funcall cb
-                                   `(("error" .
-                                      (("message" . ,(format "unexpected /models body from %s: %s"
-                                                            pname-str
-                                                            (truncate-string-to-width
-                                                             (or body "") 200)))))))))))
+                     (let* ((data (kargu--json-decode-safe body))
+                            (extracted (kargu--extract-models-from-json data)))
+                       (if extracted
+                           (progn
+                             (kargu--catalog-cache-live-models pname-lower extracted)
+                             (funcall cb extracted))
+                         (funcall cb
+                                  `(("error" .
+                                     (("message" . ,(format "unexpected /models body from %s: %s"
+                                                           pname-str
+                                                           (truncate-string-to-width
+                                                            (or body "") 200)))))))))))
            :else (lambda (err)
                    (when (= gen kargu--models-generation)
                      (funcall cb

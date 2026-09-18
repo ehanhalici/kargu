@@ -40,6 +40,7 @@
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/api)
+(require 'kargu/api/tools)
 (require 'kargu/permission)
 (require 'kargu/tools/lsp)
 (require 'kargu/fs)
@@ -60,18 +61,9 @@
 
 (defun kargu-search--to-int (value default)
   "Coerce VALUE to an integer, or DEFAULT."
-  (or (and (integerp value) value)
-      (and (numberp value) (round value))
-      (and (stringp value)
-           (ignore-errors (cl-parse-integer value :junk-allowed t)))
-      default))
+  (or (kargu-to-int value default) default))
 
-(defun kargu-search--rel (path root)
-  "Return PATH relative to ROOT when it is inside ROOT."
-  (let ((rel (file-relative-name (expand-file-name path) root)))
-    (if (string-prefix-p ".." rel)
-        (expand-file-name path)
-      rel)))
+(defalias 'kargu-search--rel #'kargu-rel-path)
 
 (defun kargu-search--resolve (path root)
   "Resolve optional PATH against ROOT; assert it is strictly inside ROOT."
@@ -368,13 +360,12 @@ All tools are read-only and available in all modes."
                                         ("description" . "Maximum hits to return (default 50).")))))
      ("required" . ["pattern"]))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-search-grep
-          (kargu--tool-arg args "pattern")
-          (kargu--tool-arg args "path" "file_path" "filePath")
-          (kargu--tool-arg args "glob")
-          (kargu--tool-arg args "max_matches" "maxMatches" "limit"))
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call
+      (kargu-search-grep
+       (kargu--tool-arg args "pattern")
+       (kargu--tool-arg args "path" "file_path" "filePath")
+       (kargu--tool-arg args "glob")
+       (kargu--tool-arg args "max_matches" "maxMatches" "limit")))))
 
   ;; 2. find_files (find, fd, glob, find_files_by_glob)
   (kargu-register-tool
@@ -387,11 +378,10 @@ All tools are read-only and available in all modes."
                                  ("description" . "Directory to search (default: project root).")))))
      ("required" . ["pattern"]))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-search-glob
-          (kargu--tool-arg args "pattern")
-          (kargu--tool-arg args "path" "file_path" "filePath"))
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call
+      (kargu-search-glob
+       (kargu--tool-arg args "pattern")
+       (kargu--tool-arg args "path" "file_path" "filePath")))))
 
   ;; 3. list_files (ls, dir)
   (kargu-register-tool
@@ -402,10 +392,9 @@ All tools are read-only and available in all modes."
                                  ("description" . "Directory path to list (default: project root).")))))
      ("required" . []))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-search-list-files
-          (kargu--tool-arg args "path" "directory" "dir"))
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call
+      (kargu-search-list-files
+       (kargu--tool-arg args "path" "directory" "dir")))))
 
   ;; Aliases
   (kargu-register-tool-alias "grep" "workspace_grep")

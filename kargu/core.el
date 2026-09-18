@@ -57,6 +57,17 @@ Safely handles malformed alists, dotted pairs, and non-list data."
   "VALUE if it is a non-empty string, else nil."
   (and (stringp value) (not (string-empty-p value)) value))
 
+(defun kargu-to-int (value &optional default)
+  "Coerce VALUE to an integer, or return DEFAULT (defaults to nil).
+Handles integers, floats (rounded), and integer strings."
+  (cond
+   ((integerp value) value)
+   ((numberp value) (round value))
+   ((stringp value)
+    (or (ignore-errors (cl-parse-integer (string-trim value) :junk-allowed t))
+        default))
+   (t default)))
+
 ;;;; Mode state -----------------------------------------------------------
 
 (defvar kargu-active-mode 'ask

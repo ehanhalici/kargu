@@ -97,6 +97,41 @@ RAW may be a quoted string, single-quoted string, array, or bare token."
       ("models" (when (listp val)
                   (funcall provider-fn section :models val))))))
 
+(defun kargu--toml-read-multiline-array (raw)
+  "If RAW starts an unclosed array, read subsequent lines until closed."
+  (if (and (string-prefix-p "[" (string-trim raw))
+           (not (kargu--toml-array-closed-p raw)))
+      (catch 'kargu--toml-array-end
+        (while (not (kargu--toml-array-closed-p raw))
+          (let ((here (point)))
+            (forward-line 1)
+            (when (or (eobp) (= (point) here))
+              (throw 'kargu--toml-array-end raw))
+            (setq raw
+                  (concat raw " "
+                          (string-trim
+                           (buffer-substring
+                            (line-beginning-position)
+                            (line-end-position)))))))
+        raw)
+    raw))
+
+(defun kargu--toml-apply-review-mode (top-review-mode)
+  "Apply TOP-REVIEW-MODE to `kargu-diff-review-mode' if valid."
+  (when (and (stringp top-review-mode) (boundp 'kargu-diff-review-mode))
+    (let ((m (intern (downcase (string-trim top-review-mode)))))
+      (when (memq m '(auto blocking async))
+        (setq kargu-diff-review-mode m)))))
+
+(defun kargu--toml-fallback-default-provider (top-api top-key top-name top-model)
+  "Build default provider alist from top-level config fields if present."
+  (when (or top-api top-key top-name top-model)
+    (list (cons "default"
+                (append (and top-api (list :api top-api))
+                        (and top-key (list :apikey top-key))
+                        (let ((id (or top-model top-name)))
+                          (and id (list :models (list id)))))))))
+
 (defun kargu--read-toml-config (path)
   "Read PATH as kargu TOML; return (:provider :model :providers)."
   (let (top-provider top-model top-name top-api top-key top-review-mode
@@ -122,22 +157,8 @@ RAW may be a quoted string, single-quoted string, array, or bare token."
            ((string-match
              "\\`\\([A-Za-z][A-Za-z0-9_]*\\)[ \t]*=[ \t]*\\(.*\\)\\'"
              line)
-            (let ((key (match-string 1 line))
-                  (raw (match-string 2 line)))
-              (when (and (string-prefix-p "[" (string-trim raw))
-                         (not (kargu--toml-array-closed-p raw)))
-                (catch 'kargu--toml-array-end
-                  (while (not (kargu--toml-array-closed-p raw))
-                    (let ((here (point)))
-                      (forward-line 1)
-                      (when (or (eobp) (= (point) here))
-                        (throw 'kargu--toml-array-end nil))
-                      (setq raw
-                            (concat raw " "
-                                    (string-trim
-                                     (buffer-substring
-                                      (line-beginning-position)
-                                      (line-end-position)))))))))
+            (let* ((key (match-string 1 line))
+                   (raw (kargu--toml-read-multiline-array (match-string 2 line))))
               (kargu--read-toml-assign
                section key
                (kargu--toml-parse-value raw)
@@ -154,17 +175,10 @@ RAW may be a quoted string, single-quoted string, array, or bare token."
                        (kargu--provider-plist-put providers s k v))))))))
         (forward-line 1)))
     (setq providers (nreverse providers))
-    (when (and (null providers) (or top-api top-key top-name top-model))
-      (setq providers
-            (list (cons "default"
-                        (append (and top-api (list :api top-api))
-                                (and top-key (list :apikey top-key))
-                                (let ((id (or top-model top-name)))
-                                   (and id (list :models (list id)))))))))
-    (when (and (stringp top-review-mode) (boundp 'kargu-diff-review-mode))
-      (let ((m (intern (downcase (string-trim top-review-mode)))))
-        (when (memq m '(auto blocking async))
-          (setq kargu-diff-review-mode m))))
+    (unless providers
+      (setq providers (kargu--toml-fallback-default-provider
+                       top-api top-key top-name top-model)))
+    (kargu--toml-apply-review-mode top-review-mode)
     (list :provider (and (stringp top-provider) (not (string-empty-p top-provider)) top-provider)
           :model (or (and (stringp top-model) (not (string-empty-p top-model)) top-model)
                      (and (stringp top-name) (not (string-empty-p top-name)) top-name))

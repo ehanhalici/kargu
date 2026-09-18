@@ -47,6 +47,30 @@
        (or (string-match-p "/" token)
            (string-match-p "\\.[A-Za-z0-9]+\\'" token))))
 
+(defun kargu-chat--strip-enclosing-pairs (s)
+  "Strip matched enclosing delimiters like brackets and quotes from S."
+  (while (or (and (> (length s) 1) (string-prefix-p "[" s) (string-suffix-p "]" s))
+             (and (> (length s) 1) (string-prefix-p "(" s) (string-suffix-p ")" s))
+             (and (> (length s) 1) (string-prefix-p "<" s) (string-suffix-p ">" s))
+             (and (> (length s) 1) (string-prefix-p "{" s) (string-suffix-p "}" s))
+             (and (> (length s) 1) (string-prefix-p "\"" s) (string-suffix-p "\"" s))
+             (and (> (length s) 1) (string-prefix-p "'" s) (string-suffix-p "'" s))
+             (and (> (length s) 1) (string-prefix-p "`" s) (string-suffix-p "`" s)))
+    (setq s (substring s 1 -1)))
+  s)
+
+(defun kargu-chat--strip-edge-punctuation (s)
+  "Strip leading and trailing punctuation from token S."
+  (while (and (> (length s) 0)
+              (memq (aref s (1- (length s)))
+                    '(?, ?: ?\; ?\) ?\] ?\} ?> ?. ?\" ?\' ?\`)))
+    (setq s (substring s 0 (1- (length s)))))
+  (while (and (> (length s) 0)
+              (memq (aref s 0)
+                    '(?\" ?\' ?\` ?\[ ?\( ?\< ?\{)))
+    (setq s (substring s 1)))
+  s)
+
 (defun kargu-chat--clean-at-token (raw)
   "Strip enclosing brackets, quotes, and trailing punctuation from RAW mention."
   (let ((s (string-trim (or raw "")))
@@ -56,25 +80,8 @@
     (while changed
       (setq changed nil)
       (let ((len (length s)))
-        ;; 1. Pair stripping
-        (while (or (and (> (length s) 1) (string-prefix-p "[" s) (string-suffix-p "]" s))
-                   (and (> (length s) 1) (string-prefix-p "(" s) (string-suffix-p ")" s))
-                   (and (> (length s) 1) (string-prefix-p "<" s) (string-suffix-p ">" s))
-                   (and (> (length s) 1) (string-prefix-p "{" s) (string-suffix-p "}" s))
-                   (and (> (length s) 1) (string-prefix-p "\"" s) (string-suffix-p "\"" s))
-                   (and (> (length s) 1) (string-prefix-p "'" s) (string-suffix-p "'" s))
-                   (and (> (length s) 1) (string-prefix-p "`" s) (string-suffix-p "`" s)))
-          (setq s (substring s 1 -1)))
-        ;; 2. Trailing punctuation stripping
-        (while (and (> (length s) 0)
-                    (memq (aref s (1- (length s)))
-                          '(?, ?: ?\; ?\) ?\] ?\} ?> ?. ?\" ?\' ?\`)))
-          (setq s (substring s 0 (1- (length s)))))
-        ;; 3. Leading unmatched quotes or brackets stripping
-        (while (and (> (length s) 0)
-                    (memq (aref s 0)
-                          '(?\" ?\' ?\` ?\[ ?\( ?\< ?\{)))
-          (setq s (substring s 1)))
+        (setq s (kargu-chat--strip-enclosing-pairs s))
+        (setq s (kargu-chat--strip-edge-punctuation s))
         (unless (= len (length s))
           (setq changed t))))
     (string-trim s)))
@@ -147,42 +154,104 @@
    (kargu-chat--called-read abs)
    abs))
 
-(defun kargu-chat--dump-buffer-numbered ()
-  "Numbered dump of the current buffer; `forward-line' always progresses."
+(defun kargu-chat--dump-buffer-lines (&optional from to)
+  "Return lines of current buffer from 1-based FROM to TO with line numbers.
+If FROM or TO is nil, processes entire buffer."
   (let ((n 0)
         lines)
     (goto-char (point-min))
     (while (not (eobp))
       (setq n (1+ n))
-      (push (format "%d | %s" n
-                    (buffer-substring (line-beginning-position)
-                                      (line-end-position)))
-            lines)
+      (when (or (and (null from) (null to))
+                (and (or (null from) (>= n from))
+                     (or (null to) (<= n to))))
+        (push (format "%d | %s" n
+                      (buffer-substring (line-beginning-position)
+                                        (line-end-position)))
+              lines))
       (let ((pos (point)))
         (when (or (/= (forward-line 1) 0)
                   (<= (point) pos))
           (goto-char (point-max)))))
     (string-join (nreverse lines) "\n")))
 
+(defun kargu-chat--dump-buffer-numbered ()
+  "Numbered dump of the current buffer; `forward-line' always progresses."
+  (kargu-chat--dump-buffer-lines))
+
 (defun kargu-chat--dump-lines (abs from to)
   "Return lines FROM to TO of file ABS formatted with line numbers."
   (with-temp-buffer
     (insert-file-contents abs)
-    (let ((n 0)
-          lines)
-      (goto-char (point-min))
-      (while (not (eobp))
-        (setq n (1+ n))
-        (when (and (>= n from) (<= n to))
-          (push (format "%d | %s" n
-                        (buffer-substring (line-beginning-position)
-                                          (line-end-position)))
-                lines))
-        (let ((pos (point)))
-          (when (or (/= (forward-line 1) 0)
-                    (<= (point) pos))
-            (goto-char (point-max)))))
-      (string-join (nreverse lines) "\n"))))
+    (kargu-chat--dump-buffer-lines from to)))
+
+(defun kargu-chat--find-symbol-pos (sym-name)
+  "Locate definition or occurrence position of SYM-NAME in current buffer."
+  (goto-char (point-min))
+  (let ((case-fold-search nil))
+    (when (or (re-search-forward
+               (format "\\(?:defun\\|defmacro\\|defvar\\|defcustom\\|defconst\\|defclass\\|cl-defun\\|cl-defmethod\\)[ \t\n]+\\(?:'\\)?%s\\b"
+                       (regexp-quote sym-name))
+               nil t)
+              (re-search-forward
+               (format "\\(?:func\\|function\\|fn\\|def\\|class\\|struct\\|interface\\|type\\|var\\|const\\|let\\|val\\)[ \t\n]+\\(?:[A-Za-z0-9_.*&]+[ \t\n]+\\)?%s\\b"
+                       (regexp-quote sym-name))
+               nil t)
+              (re-search-forward
+               (format "\\b%s\\b[ \t]*[:=(]" (regexp-quote sym-name))
+               nil t)
+              (re-search-forward
+               (format "\\b%s\\b" (regexp-quote sym-name))
+               nil t))
+      (match-beginning 0))))
+
+(defun kargu-chat--compute-symbol-bounds (found-pos)
+  "Compute `(START-LINE . END-LINE)' starting at FOUND-POS based on major mode."
+  (goto-char found-pos)
+  (beginning-of-line)
+  (let ((def-line (line-number-at-pos (point)))
+        (start-line (line-number-at-pos (point)))
+        end-line)
+    (cond
+     ;; Lisp-like: try forward-sexp
+     ((derived-mode-p 'emacs-lisp-mode 'lisp-mode 'scheme-mode 'clojure-mode)
+      (condition-case nil
+          (save-excursion
+            (goto-char found-pos)
+            (beginning-of-defun)
+            (setq start-line (line-number-at-pos))
+            (forward-sexp 1)
+            (setq end-line (line-number-at-pos)))
+        (error nil)))
+     ;; Brace languages (C, C++, Go, Rust, Java, JS, TS, etc.)
+     ((save-excursion
+        (goto-char found-pos)
+        (search-forward "{" (line-end-position 3) t))
+      (condition-case nil
+          (save-excursion
+            (goto-char found-pos)
+            (search-forward "{" nil t)
+            (backward-char 1)
+            (forward-list 1)
+            (setq end-line (line-number-at-pos)))
+        (error nil)))
+     ;; Python / indentation-based
+     ((derived-mode-p 'python-mode 'python-ts-mode)
+      (save-excursion
+        (goto-char found-pos)
+        (forward-line 1)
+        (let ((last-line def-line))
+          (while (and (not (eobp))
+                      (or (looking-at "^[ \t]*$")
+                          (> (current-indentation) 0)))
+            (unless (looking-at "^[ \t]*$")
+              (setq last-line (line-number-at-pos)))
+            (forward-line 1))
+          (setq end-line last-line)))))
+    (unless (and end-line (>= end-line start-line))
+      (setq end-line (min (count-lines (point-min) (point-max))
+                          (+ start-line 35))))
+    (cons start-line end-line)))
 
 (defun kargu-chat--extract-symbol-range (abs sym-name)
   "Return (START-LINE . END-LINE) for SYM-NAME in file ABS."
@@ -193,70 +262,9 @@
           (delay-mode-hooks
             (set-auto-mode t))
         (error nil)))
-    (goto-char (point-min))
-    (let (found-pos)
-      (let ((case-fold-search nil))
-        (when (or (re-search-forward
-                   (format "\\(?:defun\\|defmacro\\|defvar\\|defcustom\\|defconst\\|defclass\\|cl-defun\\|cl-defmethod\\)[ \t\n]+\\(?:'\\)?%s\\b"
-                           (regexp-quote sym-name))
-                   nil t)
-                  (re-search-forward
-                   (format "\\(?:func\\|function\\|fn\\|def\\|class\\|struct\\|interface\\|type\\|var\\|const\\|let\\|val\\)[ \t\n]+\\(?:[A-Za-z0-9_.*&]+[ \t\n]+\\)?%s\\b"
-                           (regexp-quote sym-name))
-                   nil t)
-                  (re-search-forward
-                   (format "\\b%s\\b[ \t]*[:=(]" (regexp-quote sym-name))
-                   nil t)
-                  (re-search-forward
-                   (format "\\b%s\\b" (regexp-quote sym-name))
-                   nil t))
-          (setq found-pos (match-beginning 0))))
+    (let ((found-pos (kargu-chat--find-symbol-pos sym-name)))
       (when found-pos
-        (goto-char found-pos)
-        (beginning-of-line)
-        (let ((def-line (line-number-at-pos (point)))
-              (start-line (line-number-at-pos (point)))
-              end-line)
-          (cond
-           ;; Lisp-like: try forward-sexp
-           ((derived-mode-p 'emacs-lisp-mode 'lisp-mode 'scheme-mode 'clojure-mode)
-            (condition-case nil
-                (save-excursion
-                  (goto-char found-pos)
-                  (beginning-of-defun)
-                  (setq start-line (line-number-at-pos))
-                  (forward-sexp 1)
-                  (setq end-line (line-number-at-pos)))
-              (error nil)))
-           ;; Brace languages (C, C++, Go, Rust, Java, JS, TS, etc.)
-           ((save-excursion
-              (goto-char found-pos)
-              (search-forward "{" (line-end-position 3) t))
-            (condition-case nil
-                (save-excursion
-                  (goto-char found-pos)
-                  (search-forward "{" nil t)
-                  (backward-char 1)
-                  (forward-list 1)
-                  (setq end-line (line-number-at-pos)))
-              (error nil)))
-           ;; Python / indentation-based
-           ((derived-mode-p 'python-mode 'python-ts-mode)
-            (save-excursion
-              (goto-char found-pos)
-              (forward-line 1)
-              (let ((last-line def-line))
-                (while (and (not (eobp))
-                            (or (looking-at "^[ \t]*$")
-                                (> (current-indentation) 0)))
-                  (unless (looking-at "^[ \t]*$")
-                    (setq last-line (line-number-at-pos)))
-                  (forward-line 1))
-                (setq end-line last-line)))))
-          (unless (and end-line (>= end-line start-line))
-            (setq end-line (min (count-lines (point-min) (point-max))
-                                (+ start-line 35))))
-          (cons start-line end-line))))))
+        (kargu-chat--compute-symbol-bounds found-pos)))))
 
 (defun kargu-chat--attach-symbol-block (mention)
   "Attachment for symbol MENTION ('file::symbol') with line-numbered snippet."

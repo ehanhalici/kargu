@@ -104,6 +104,35 @@ instead of relying on deltas.")
       (and (derived-mode-p 'kargu-chat-mode) (current-buffer))
       (get-buffer kargu-chat-buffer-name)))
 
+(defun kargu-chat--compute-window-follow-states (windows in-start at)
+  "Calculate follow target (`input', `output', or nil) for each window in WINDOWS."
+  (mapcar
+   (lambda (window)
+     (let ((wp (window-point window)))
+       (cons window
+             (cond
+              ((and in-start (>= wp in-start)) 'input)
+              ((or (>= wp at) (>= wp (1- at))) 'output)
+              ((and (fboundp 'kargu-loop-running-p)
+                    (kargu-loop-running-p)
+                    (>= wp (- at 300)))
+               'output)
+              (t nil)))))
+   windows))
+
+(defun kargu-chat--apply-window-follow-states (follow-pairs)
+  "Update window points according to computed FOLLOW-PAIRS."
+  (let ((out-pos (if (markerp kargu-chat--output-marker)
+                     (marker-position kargu-chat--output-marker)
+                   (point-max))))
+    (dolist (pair follow-pairs)
+      (pcase (cdr pair)
+        ('output
+         (set-window-point (car pair) out-pos))
+        ('input
+         (set-window-point (car pair) (point-max)))
+        (_ nil)))))
+
 (defun kargu-chat--insert (text &optional face)
   "Insert TEXT into the transcript above the prompt.
 Windows whose point is at the output marker follow the insert;
@@ -127,20 +156,7 @@ process filters and callbacks."
                                   (marker-position kargu-chat--prompt-marker)))
                    (at-end (>= (point) at))
                    (windows (get-buffer-window-list buffer nil t))
-                   (follow
-                    (mapcar
-                     (lambda (window)
-                       (let ((wp (window-point window)))
-                         (cons window
-                               (cond
-                                ((and in-start (>= wp in-start)) 'input)
-                                ((or (>= wp at) (>= wp (1- at))) 'output)
-                                ((and (fboundp 'kargu-loop-running-p)
-                                      (kargu-loop-running-p)
-                                      (>= wp (- at 300)))
-                                 'output)
-                                (t nil)))))
-                     windows)))
+                   (follow (kargu-chat--compute-window-follow-states windows in-start at)))
               (save-excursion
                 (goto-char at)
                 (insert (kargu-chat--propertize-log text face)))
@@ -148,19 +164,7 @@ process filters and callbacks."
                 (goto-char (if (markerp kargu-chat--output-marker)
                                (marker-position kargu-chat--output-marker)
                              (point-max))))
-              (dolist (pair follow)
-                (pcase (cdr pair)
-                  ('output
-                   (set-window-point
-                    (car pair)
-                    (if (markerp kargu-chat--output-marker)
-                        (marker-position kargu-chat--output-marker)
-                      (point-max))))
-                  ('input
-                   (set-window-point
-                    (car pair)
-                    (point-max)))
-                  (_ nil)))))
+              (kargu-chat--apply-window-follow-states follow)))
         (error
          (kargu-log 'warn "chat insert failed: %s"
                           (error-message-string err)))))))
@@ -367,6 +371,17 @@ See `kargu-loop-send' for the shape of the report."
         (dolist (win (get-buffer-window-list buf nil t))
           (set-window-point win (point-max)))))))
 
+(defun kargu-chat--finish-tool-activity (live result)
+  "Render tool activity completion with RESULT into LIVE chat buffer."
+  (when live
+    (kargu-chat--insert
+     (format "[%s]\n" (kargu-chat--result-summary result))
+     'kargu-chat-tool)
+    (setq kargu-chat--preamble-dropped nil)
+    (with-current-buffer live
+      (when (markerp kargu-chat--output-marker)
+        (setq kargu-chat--answer-start (copy-marker kargu-chat--output-marker nil))))))
+
 (defun kargu-chat--tool-activity (fn name arguments &optional callback)
   "Around advice on `kargu-execute-tool' for the chat timeline.
 Prints the tool NAME before it runs — visible while long tools or
@@ -388,24 +403,10 @@ afterwards.  FN is the original function."
     (if callback
         (funcall fn name arguments
                  (lambda (result)
-                   (when live
-                     (kargu-chat--insert
-                      (format "[%s]\n" (kargu-chat--result-summary result))
-                      'kargu-chat-tool)
-                     (setq kargu-chat--preamble-dropped nil)
-                     (with-current-buffer live
-                       (when (markerp kargu-chat--output-marker)
-                         (setq kargu-chat--answer-start (copy-marker kargu-chat--output-marker nil)))))
+                   (kargu-chat--finish-tool-activity live result)
                    (funcall callback result)))
       (let ((result (funcall fn name arguments)))
-        (when live
-          (kargu-chat--insert
-           (format "[%s]\n" (kargu-chat--result-summary result))
-           'kargu-chat-tool)
-          (setq kargu-chat--preamble-dropped nil)
-          (with-current-buffer live
-            (when (markerp kargu-chat--output-marker)
-              (setq kargu-chat--answer-start (copy-marker kargu-chat--output-marker nil)))))
+        (kargu-chat--finish-tool-activity live result)
         result))))
 
 (when (fboundp 'kargu-execute-tool)

@@ -110,6 +110,34 @@ rather than concatenate."
                   (kargu--merge-tool-args
                    (kargu--aget cfn "arguments") args)))))))
 
+(defun kargu--extract-stream-tool-frags (delta)
+  "Extract normalized list of tool call fragments from DELTA."
+  (let* ((raw-frags (or (kargu--aget delta "tool_calls")
+                        (let ((legacy (kargu--aget delta "function_call")))
+                          (and legacy (kargu--object-p legacy)
+                               (list `(("index" . 0)
+                                       ("id" . "call_legacy")
+                                       ("function" . ,legacy))))))))
+    (cond
+     ((vectorp raw-frags) (append raw-frags nil))
+     ((listp raw-frags) raw-frags)
+     (t nil))))
+
+(defun kargu--assemble-stream-message (text reasoning calls)
+  "Assemble assistant message alist from TEXT, REASONING, and CALLS."
+  (let ((message `(("role" . "assistant")))
+        (has-text (not (string-empty-p text)))
+        (has-reason (not (string-empty-p reasoning))))
+    (when has-text
+      (push `("content" . ,text) message))
+    (when has-reason
+      (push `("reasoning_content" . ,reasoning) message))
+    (when calls
+      (push `("tool_calls" . ,calls) message))
+    (unless (or has-text calls)
+      (push `("content" . "") message))
+    message))
+
 (defun kargu--accumulate-stream-deltas (events)
   "Reduce parsed SSE EVENTS into a response shaped like an
 ordinary chat-completions reply, so every consumer (loop, UI,
@@ -140,19 +168,8 @@ error alist; it does not invent an empty assistant turn."
                   (push chunk text-chunks))
                 (when-let* ((rchunk (kargu--reasoning-text delta)))
                   (push rchunk reasoning-chunks))
-                (let* ((raw-frags (or (kargu--aget delta "tool_calls")
-                                      (let ((legacy (kargu--aget delta "function_call")))
-                                        (and legacy (kargu--object-p legacy)
-                                             (list `(("index" . 0)
-                                                     ("id" . "call_legacy")
-                                                     ("function" . ,legacy)))))))
-                       (frags (cond
-                               ((vectorp raw-frags) (append raw-frags nil))
-                               ((listp raw-frags) raw-frags)
-                               (t nil))))
-                  (when frags
-                    (dolist (frag frags)
-                      (kargu--merge-tool-call-fragment calls-map frag)))))
+                (dolist (frag (kargu--extract-stream-tool-frags delta))
+                  (kargu--merge-tool-call-fragment calls-map frag)))
               (unless (memq fr '(nil :json-null))
                 (setq finish fr)))))
         (when-let* ((u (kargu--aget event "usage")))
@@ -162,17 +179,7 @@ error alist; it does not invent an empty assistant turn."
              (reasoning (if reasoning-chunks (apply #'concat (nreverse reasoning-chunks)) ""))
              (calls (mapcar (lambda (idx) (gethash idx calls-map))
                             (sort (hash-table-keys calls-map) #'<)))
-             (message `(("role" . "assistant")))
-             (has-text (not (string-empty-p text)))
-             (has-reason (not (string-empty-p reasoning))))
-        (when has-text
-          (push `("content" . ,text) message))
-        (when has-reason
-          (push `("reasoning_content" . ,reasoning) message))
-        (when calls
-          (push `("tool_calls" . ,calls) message))
-        (unless (or has-text calls)
-          (push `("content" . "") message))
+             (message (kargu--assemble-stream-message text reasoning calls)))
         `(("choices" . ((("index" . 0)
                          ("message" . ,message)
                          ("finish_reason" . ,(or finish "stop")))))

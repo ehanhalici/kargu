@@ -173,6 +173,38 @@ synthetic error alists produced by this module.  Nested
                   (cell (and fn (assoc "arguments" fn))))
         (setcdr cell (kargu--encode-tool-arguments (cdr cell)))))))
 
+(defun kargu--normalize-history-content (msg content calls-p)
+  "Normalize CONTENT in MSG alist based on whether CALLS-P is true.
+Returns the updated message alist."
+  (let ((cell (assoc "content" msg)))
+    (cond
+     ((kargu--nonempty content)
+      (if cell
+          (progn (setcdr cell content) msg)
+        (cons `("content" . ,content) msg)))
+     (calls-p
+      (cl-remove-if (lambda (c) (equal (car c) "content")) msg))
+     (t
+      (if cell
+          (progn (setcdr cell "") msg)
+        (cons '("content" . "") msg))))))
+
+(defun kargu--normalize-history-reasoning (msg reason)
+  "Strip transient reasoning keys and update reasoning_content with REASON in MSG.
+Returns the updated message alist."
+  (let ((cleaned msg))
+    (dolist (key '("reasoning" "reasoning_details" "thinking" "thought"))
+      (setq cleaned (cl-remove-if (lambda (c) (equal (car c) key)) cleaned)))
+    (let ((rc (assoc "reasoning_content" cleaned)))
+      (cond
+       ((kargu--nonempty reason)
+        (if rc
+            (progn (setcdr rc reason) cleaned)
+          (cons `("reasoning_content" . ,reason) cleaned)))
+       (rc
+        (cl-remove-if (lambda (c) (equal (car c) "reasoning_content")) cleaned))
+       (t cleaned)))))
+
 (defun kargu--history-append-assistant (response)
   "Append RESPONSE's assistant message to the history; return it.
 The message is deep-copied so later history repairs can never
@@ -186,31 +218,9 @@ so a fake empty assistant cannot poison the next POST."
     (let* ((msg (kargu--normalize-assistant-role (copy-tree message)))
            (calls-p (kargu--assistant-has-tool-calls-p msg))
            (content (kargu--content-text message))
-           (reason (kargu--reasoning-text message))
-           (cell (assoc "content" msg)))
-      (cond
-       ((kargu--nonempty content)
-        (if cell
-            (setcdr cell content)
-          (push `("content" . ,content) msg)))
-       (calls-p
-        (setq msg (cl-remove-if (lambda (c) (equal (car c) "content"))
-                                msg)))
-       (t
-        (if cell
-            (setcdr cell "")
-          (push '("content" . "") msg))))
-      (dolist (key '("reasoning" "reasoning_details" "thinking" "thought"))
-        (setq msg (cl-remove-if (lambda (c) (equal (car c) key)) msg)))
-      (let ((rc (assoc "reasoning_content" msg)))
-        (cond
-         ((kargu--nonempty reason)
-          (if rc
-              (setcdr rc reason)
-            (push `("reasoning_content" . ,reason) msg)))
-         (rc
-          (setq msg (cl-remove-if (lambda (c) (equal (car c) "reasoning_content"))
-                                  msg)))))
+           (reason (kargu--reasoning-text message)))
+      (setq msg (kargu--normalize-history-content msg content calls-p))
+      (setq msg (kargu--normalize-history-reasoning msg reason))
       (kargu--history-sanitize-tool-calls msg)
       (setq calls-p (kargu--assistant-has-tool-calls-p msg))
       (cond

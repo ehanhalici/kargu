@@ -295,6 +295,43 @@ QUERY and STRING should already be downcased."
      ((string-prefix-p "interface" str) 'interface)
      (t 'variable))))
 
+(defun kargu-chat--score-symbol-item (item root has-delim file-q sym-q q)
+  "Calculate scoring record for symbol ITEM, or nil if unmatched."
+  (let* ((path (nth 0 item))
+         (line (nth 1 item))
+         (name (nth 2 item))
+         (kind (nth 3 item))
+         (rel (or (and path root (ignore-errors (file-relative-name path root)))
+                  (and path (file-name-nondirectory path))
+                  ""))
+         (cand-str (concat rel "::" name))
+         score)
+    (if has-delim
+        (let ((f-score (if (string-empty-p file-q) 0 (kargu-chat--flex-score file-q rel)))
+              (s-score (if (string-empty-p sym-q) 0 (kargu-chat--flex-score sym-q name))))
+          (when (and f-score s-score)
+            (setq score (+ (* f-score 2) s-score))))
+      (let ((name-score (and name (kargu-chat--flex-score q name)))
+            (full-score (and cand-str (kargu-chat--flex-score q cand-str))))
+        (cond
+         (name-score (setq score name-score))
+         (full-score (setq score (+ full-score 30))))))
+    (when (and score name (not (string-empty-p rel)))
+      (list score name kind rel line path cand-str))))
+
+(defun kargu-chat--format-symbol-candidate (item-record match-q)
+  "Format ITEM-RECORD into a propertized company candidate string using MATCH-Q."
+  (let* ((kind (nth 2 item-record))
+         (line (nth 4 item-record))
+         (cand-str (nth 6 item-record))
+         (cand (concat "@" cand-str)))
+    (propertize
+     cand
+     'company-backend 'kargu-chat-company
+     'kargu-kind (kargu-chat--normalize-kind kind)
+     'kargu-ann (format "%s :%s" kind (or line "?"))
+     'kargu-match (kargu-chat--match-property match-q cand-str))))
+
 (defun kargu-chat--symbol-candidates (query)
   "Symbol mention candidates matching QUERY (without the leading `@').
 Formatted as `@file::symbol' (e.g., `@main.go::CalcTotal').
@@ -306,46 +343,19 @@ QUERY can match the symbol name, the file path, or both if QUERY contains `::'."
              (has-delim (string-match-p "::" q))
              (file-q (and has-delim (car (split-string q "::"))))
              (sym-q (and has-delim (or (cadr (split-string q "::")) "")))
+             (match-q (if has-delim sym-q q))
              (all-symbols (if (fboundp 'kargu-lsp-all-symbols)
-                              (kargu-lsp-all-symbols (if has-delim sym-q q) roots)
+                              (kargu-lsp-all-symbols match-q roots)
                             nil))
              scored)
         (dolist (item all-symbols)
-          (let* ((path (nth 0 item))
-                 (line (nth 1 item))
-                 (name (nth 2 item))
-                 (kind (nth 3 item))
-                 (rel (or (and path root (ignore-errors (file-relative-name path root)))
-                          (and path (file-name-nondirectory path))
-                          ""))
-                 (cand-str (concat rel "::" name))
-                 score)
-            (if has-delim
-                (let ((f-score (if (string-empty-p file-q) 0 (kargu-chat--flex-score file-q rel)))
-                      (s-score (if (string-empty-p sym-q) 0 (kargu-chat--flex-score sym-q name))))
-                  (when (and f-score s-score)
-                    (setq score (+ (* f-score 2) s-score))))
-              (let ((name-score (and name (kargu-chat--flex-score q name)))
-                    (full-score (and cand-str (kargu-chat--flex-score q cand-str))))
-                (cond
-                 (name-score
-                  (setq score name-score))
-                 (full-score
-                  (setq score (+ full-score 30))))))
-            (when (and score name (not (string-empty-p rel)))
-              (push (list score name kind rel line path cand-str) scored))))
+          (when-let* ((rec (kargu-chat--score-symbol-item item root has-delim file-q sym-q q)))
+            (push rec scored)))
         (setq scored (cl-sort scored #'< :key #'car))
-        (cl-loop for (_score _name kind _rel line _path cand-str) in scored
+        (cl-loop for rec in scored
                  for n from 0
                  until (>= n 40)
-                 collect
-                 (let ((cand (concat "@" cand-str)))
-                   (propertize
-                    cand
-                    'company-backend 'kargu-chat-company
-                    'kargu-kind (kargu-chat--normalize-kind kind)
-                    'kargu-ann (format "%s :%s" kind (or line "?"))
-                    'kargu-match (kargu-chat--match-property (if has-delim sym-q q) cand-str)))))
+                 collect (kargu-chat--format-symbol-candidate rec match-q)))
     (error nil)))
 
 (defun kargu-chat--at-candidates (prefix)

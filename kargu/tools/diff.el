@@ -120,15 +120,30 @@ diagnostics verification."
 
 ;;;; File reading (companion tool) ----------------------------------------
 
-(defun kargu-diff-read-file (file-path &optional from-line to-line)
-  "Return a model-oriented dump of FILE-PATH.
-FROM-LINE and TO-LINE (1-based, inclusive) select a line window;
-without them the whole file is served, capped at
-`kargu-diff-read-max-chars'.  Each served line is prefixed with
-its 1-based file line number (`12 | ...') so the model can copy
-an exact `old_string' without the prefix."
-  (kargu-contract-assert #'kargu-contract-filepath-p file-path
-                         "FILE-PATH must be a valid file path string: %S" file-path)
+(defun kargu-diff--format-numbered-lines (lines from to has-window)
+  "Format LINES from 1-based indices FROM to TO.
+Prefix each line with line number.  If HAS-WINDOW is nil and output
+exceeds `kargu-diff-read-max-chars', truncate the output.
+Returns a cons cell `(BODY . TRUNCATED-P)'."
+  (let* ((picked (cl-subseq lines (1- from) to))
+         (n from)
+         (numbered
+          (mapcar (lambda (line)
+                    (prog1 (format "%d | %s" n line)
+                      (setq n (1+ n))))
+                  picked))
+         (body (string-join numbered "\n"))
+         (truncated (and (not has-window)
+                         (> (length body) kargu-diff-read-max-chars)))
+         (final-body (if truncated
+                         (concat (substring body 0 kargu-diff-read-max-chars)
+                                 "\n... [truncated; use from_line/to_line to read specific sections]")
+                       body)))
+    (cons final-body truncated)))
+
+(defun kargu-diff--resolve-read-target (file-path)
+  "Resolve FILE-PATH to (PATH . TEXT).
+Signals an error if file does not exist or looks binary."
   (let* ((live-buf (and (stringp file-path) (get-buffer file-path)))
          (is-buf (and live-buf (buffer-live-p live-buf)))
          (path (if is-buf file-path (kargu-diff--resolve file-path))))
@@ -139,43 +154,50 @@ an exact `old_string' without the prefix."
                        "  - Reason: The file does not exist within the permitted workspace boundary.\n"
                        "  - Guidance: Use `find_files' or `list_files' to locate existing files inside '%s', or use `write_file' if you intend to create a new file.")
                path file-path (kargu-permission-project-root) (kargu-permission-project-root))
-      (let* ((text (if is-buf
-                       (with-current-buffer live-buf (buffer-string))
-                     (with-temp-buffer
-                       (insert-file-contents path)
-                       (buffer-string))))
-             (lines (split-string text "\n"))
-             (total (max 1 (length lines)))
-             (has-window (or from-line to-line))
-             (from (max 1 (or (kargu-diff--to-int from-line) 1)))
-             (to (min (or (kargu-diff--to-int to-line) total) total)))
-        (when (> from total)
-          (error "from_line (%d) exceeds file line count (%d)" from total))
-        (when (< to from)
-          (error "to_line (%d) is before from_line (%d)" to from))
+      (let ((text (if is-buf
+                      (with-current-buffer live-buf (buffer-string))
+                    (with-temp-buffer
+                      (insert-file-contents path)
+                      (buffer-string)))))
         (when (cl-position 0 (substring text 0 (min 1000 (length text))))
           (error "%s looks like a binary file; read_file only serves text" path))
-        (let* ((picked (cl-subseq lines (1- from) to))
-               (n from)
-               (numbered
-                (mapcar (lambda (line)
-                          (prog1 (format "%d | %s" n line)
-                            (setq n (1+ n))))
-                        picked))
-               (body (string-join numbered "\n"))
-               (truncated (and (not has-window)
-                               (> (length body) kargu-diff-read-max-chars)))
-               (body (if truncated
-                         (concat (substring body 0 kargu-diff-read-max-chars)
-                                 "\n... [truncated; use from_line/to_line to read specific sections]")
-                       body)))
-          (format "(file %s, lines %d-%d of %d%s)\n%s"
-                  path from to total
-                  (if truncated
-                      (format ", capped at %d chars"
-                              kargu-diff-read-max-chars)
-                    "")
-                  body))))))
+        (cons path text)))))
+
+(defun kargu-diff--validate-read-bounds (from to total)
+  "Validate that FROM and TO are within bounds of TOTAL lines."
+  (when (> from total)
+    (error "from_line (%d) exceeds file line count (%d)" from total))
+  (when (< to from)
+    (error "to_line (%d) is before from_line (%d)" to from)))
+
+(defun kargu-diff-read-file (file-path &optional from-line to-line)
+  "Return a model-oriented dump of FILE-PATH.
+FROM-LINE and TO-LINE (1-based, inclusive) select a line window;
+without them the whole file is served, capped at
+`kargu-diff-read-max-chars'.  Each served line is prefixed with
+its 1-based file line number (`12 | ...') so the model can copy
+an exact `old_string' without the prefix."
+  (kargu-contract-assert #'kargu-contract-filepath-p file-path
+                         "FILE-PATH must be a valid file path string: %S" file-path)
+  (let* ((target (kargu-diff--resolve-read-target file-path))
+         (path (car target))
+         (text (cdr target))
+         (lines (split-string text "\n"))
+         (total (max 1 (length lines)))
+         (has-window (or from-line to-line))
+         (from (max 1 (or (kargu-diff--to-int from-line) 1)))
+         (to (min (or (kargu-diff--to-int to-line) total) total)))
+    (kargu-diff--validate-read-bounds from to total)
+    (let* ((formatted (kargu-diff--format-numbered-lines lines from to has-window))
+           (body (car formatted))
+           (truncated (cdr formatted)))
+      (format "(file %s, lines %d-%d of %d%s)\n%s"
+              path from to total
+              (if truncated
+                  (format ", capped at %d chars"
+                          kargu-diff-read-max-chars)
+                "")
+              body))))
 
 ;;;; Tool registration -----------------------------------------------------
 
@@ -240,26 +262,20 @@ an exact `old_string' without the prefix."
                 (error (format "ERROR: %s"
                                (error-message-string err))))))))))))
 
-(defun kargu-diff-apply-patch (patch-text)
-  "Parse and apply PATCH-TEXT supporting '*** Add File: <path>',
-'*** Update File: <path>', and '*** Delete File: <path>' within optional
-'*** Begin Patch' and '*** End Patch' envelopes.
-Applies edits through the proposal and rollback pipeline.
-Returns a formatted summary of applied changes."
-  (kargu-contract-assert #'kargu-contract-non-empty-string-p patch-text
-                         "PATCH-TEXT must be a non-empty string: %S" patch-text)
-  (let* ((lines (split-string (string-trim patch-text) "\n"))
-         (ops nil)
-         (curr-type nil)
-         (curr-file nil)
-         (curr-lines nil)
-         (flush-op
-          (lambda ()
-            (when (and curr-type curr-file)
-              (push (list :type curr-type :file curr-file :lines (nreverse curr-lines)) ops)
-              (setq curr-type nil
-                    curr-file nil
-                    curr-lines nil)))))
+(defun kargu-diff--parse-patch-lines (lines)
+  "Parse patch LINES into structured operations.
+Returns a list of plists with keys :type, :file, :lines."
+  (let* ((ops nil)
+        (curr-type nil)
+        (curr-file nil)
+        (curr-lines nil)
+        (flush-op
+         (lambda ()
+           (when (and curr-type curr-file)
+             (push (list :type curr-type :file curr-file :lines (nreverse curr-lines)) ops)
+             (setq curr-type nil
+                   curr-file nil
+                   curr-lines nil)))))
     (dolist (raw lines)
       (let ((line (string-trim-right raw)))
         (cond
@@ -281,82 +297,109 @@ Returns a formatted summary of applied changes."
          (curr-type
           (push raw curr-lines)))))
     (funcall flush-op)
-    (setq ops (nreverse ops))
+    (nreverse ops)))
+
+(defun kargu-diff--split-update-hunks (op-lines)
+  "Group OP-LINES into separate hunks demarcated by @@ markers."
+  (let ((hunks nil)
+        (curr-hunk nil))
+    (dolist (l op-lines)
+      (cond
+       ((string-prefix-p "*** Move to:" l)
+        nil)
+       ((string-prefix-p "@@" l)
+        (when curr-hunk
+          (push (nreverse curr-hunk) hunks)
+          (setq curr-hunk nil)))
+       (t
+        (push l curr-hunk))))
+    (when curr-hunk
+      (push (nreverse curr-hunk) hunks))
+    (setq hunks (nreverse hunks))
+    (or hunks (list nil))))
+
+(defun kargu-diff--extract-hunk-blocks (hunk-lines)
+  "Extract (OLD-BLOCK . NEW-BLOCK) from HUNK-LINES."
+  (let* ((old-block
+          (string-join
+           (delq nil
+                 (mapcar (lambda (l)
+                           (cond
+                            ((string-prefix-p "-" l) (substring l 1))
+                            ((string-prefix-p "+" l) nil)
+                            ((string-prefix-p " " l) (substring l 1))
+                            (t l)))
+                         hunk-lines))
+           "\n"))
+         (new-block
+          (string-join
+           (delq nil
+                 (mapcar (lambda (l)
+                           (cond
+                            ((string-prefix-p "+" l) (substring l 1))
+                            ((string-prefix-p "-" l) nil)
+                            ((string-prefix-p " " l) (substring l 1))
+                            (t l)))
+                         hunk-lines))
+           "\n")))
+    (cons old-block new-block)))
+
+(defun kargu-diff--apply-update-op (file rel op-lines)
+  "Apply an update patch operation for REL (at absolute FILE) using OP-LINES."
+  (let* ((orig (or (kargu-diff--file-text file) ""))
+         (hunks (kargu-diff--split-update-hunks op-lines))
+         (current-text orig))
+    (dolist (hunk-lines hunks)
+      (when hunk-lines
+        (let* ((blocks (kargu-diff--extract-hunk-blocks hunk-lines))
+               (old-block (car blocks))
+               (new-block (cdr blocks)))
+          (if (string-empty-p old-block)
+              (setq current-text (concat current-text (if (string-suffix-p "\n" current-text) "" "\n") new-block))
+            (if (kargu-diff--count-literal current-text old-block)
+                (setq current-text (kargu-diff--replace-first current-text old-block new-block))
+              (error "Hunk failed to match in %s: %s"
+                     rel (truncate-string-to-width old-block 60)))))))
+    (kargu-diff-apply-proposal file current-text)
+    (format "Updated %s" rel)))
+
+(defun kargu-diff--apply-patch-op (op)
+  "Apply a single patch operation OP and return a result summary string."
+  (let* ((type (plist-get op :type))
+         (rel (plist-get op :file))
+         (file (kargu-diff--resolve rel))
+         (op-lines (plist-get op :lines)))
+    (pcase type
+      ('add
+       (let* ((content-lines
+               (mapcar (lambda (l)
+                         (if (string-prefix-p "+" l) (substring l 1) l))
+                       op-lines))
+              (content (string-join content-lines "\n")))
+         (kargu-diff-apply-proposal file content)
+         (format "Added %s (%d lines)" rel (length content-lines))))
+      ('delete
+       (when (file-exists-p file)
+         (kargu-diff-apply-proposal file ""))
+       (format "Deleted %s" rel))
+      ('update
+       (kargu-diff--apply-update-op file rel op-lines)))))
+
+(defun kargu-diff-apply-patch (patch-text)
+  "Parse and apply PATCH-TEXT supporting '*** Add File: <path>',
+'*** Update File: <path>', and '*** Delete File: <path>' within optional
+'*** Begin Patch' and '*** End Patch' envelopes.
+Applies edits through the proposal and rollback pipeline.
+Returns a formatted summary of applied changes."
+  (kargu-contract-assert #'kargu-contract-non-empty-string-p patch-text
+                         "PATCH-TEXT must be a non-empty string: %S" patch-text)
+  (let* ((lines (split-string (string-trim patch-text) "\n"))
+         (ops (kargu-diff--parse-patch-lines lines)))
     (unless ops
       (error "No valid patch operations found (expected '*** Add File:', '*** Update File:', or '*** Delete File:')"))
-    (let (results)
-      (dolist (op ops)
-        (let* ((type (plist-get op :type))
-               (rel (plist-get op :file))
-               (file (kargu-diff--resolve rel))
-               (op-lines (plist-get op :lines)))
-          (pcase type
-            ('add
-             (let* ((content-lines
-                     (mapcar (lambda (l)
-                               (if (string-prefix-p "+" l) (substring l 1) l))
-                             op-lines))
-                    (content (string-join content-lines "\n")))
-               (kargu-diff-apply-proposal file content)
-               (push (format "Added %s (%d lines)" rel (length content-lines)) results)))
-            ('delete
-             (when (file-exists-p file)
-               (kargu-diff-apply-proposal file ""))
-             (push (format "Deleted %s" rel) results))
-            ('update
-             (let* ((orig (or (kargu-diff--file-text file) ""))
-                    (hunks nil)
-                    (curr-hunk nil))
-               (dolist (l op-lines)
-                 (cond
-                  ((string-prefix-p "*** Move to:" l)
-                   nil)
-                  ((string-prefix-p "@@" l)
-                   (when curr-hunk
-                     (push (nreverse curr-hunk) hunks)
-                     (setq curr-hunk nil)))
-                  (t
-                   (push l curr-hunk))))
-               (when curr-hunk
-                 (push (nreverse curr-hunk) hunks))
-               (setq hunks (nreverse hunks))
-               (unless hunks
-                 (setq hunks (list nil)))
-               (let ((current-text orig))
-                 (dolist (hunk-lines hunks)
-                   (when hunk-lines
-                     (let* ((old-block
-                             (string-join
-                              (delq nil
-                                    (mapcar (lambda (l)
-                                              (cond
-                                               ((string-prefix-p "-" l) (substring l 1))
-                                               ((string-prefix-p "+" l) nil)
-                                               ((string-prefix-p " " l) (substring l 1))
-                                               (t l)))
-                                            hunk-lines))
-                              "\n"))
-                            (new-block
-                             (string-join
-                              (delq nil
-                                    (mapcar (lambda (l)
-                                              (cond
-                                               ((string-prefix-p "+" l) (substring l 1))
-                                               ((string-prefix-p "-" l) nil)
-                                               ((string-prefix-p " " l) (substring l 1))
-                                               (t l)))
-                                            hunk-lines))
-                              "\n")))
-                       (if (string-empty-p old-block)
-                           (setq current-text (concat current-text (if (string-suffix-p "\n" current-text) "" "\n") new-block))
-                         (if (kargu-diff--count-literal current-text old-block)
-                             (setq current-text (kargu-diff--replace-first current-text old-block new-block))
-                           (error "Hunk failed to match in %s: %s"
-                                  rel (truncate-string-to-width old-block 60)))))))
-                 (kargu-diff-apply-proposal file current-text)
-                 (push (format "Updated %s" rel) results)))))))
+    (let ((results (mapcar #'kargu-diff--apply-patch-op ops)))
       (format "Patch successfully applied to %d file(s):\n  • %s"
-              (length results) (string-join (nreverse results) "\n  • ")))))
+              (length results) (string-join results "\n  • ")))))
 
 (defun kargu-diff--apply-patch-tool (args)
   "Executor for the `apply_patch' tool."

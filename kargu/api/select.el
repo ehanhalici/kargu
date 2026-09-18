@@ -289,6 +289,56 @@ FIELD is \\='provider, \\='model, or \\='effort."
            (force-mode-line-update t)
            (message "kargu: reasoning effort set to '%s'." chosen)))))))
 
+(defun kargu-chat--collect-model-candidates (pname-str live-ids catalog-ids)
+  "Collect available model IDs for PNAME-STR from LIVE-IDS, cache, and CATALOG-IDS."
+  (let* ((cached (and (null live-ids) (gethash pname-str kargu--live-models-cache)))
+         (sync-models (and (null live-ids) (null cached)
+                           (progn
+                             (message "kargu: querying live model catalog from %s (%s)..."
+                                      pname-str (kargu--api-base pname-str))
+                             (kargu-api-fetch-models-sync pname-str))))
+         (live (or live-ids cached sync-models))
+         (catalog catalog-ids)
+         (curr (kargu--model)))
+    (delete-dups (delq nil (append (and live (copy-sequence live))
+                                   (and catalog (copy-sequence catalog))
+                                   (and (kargu--nonempty curr) (list curr)))))))
+
+(defun kargu-chat--apply-chosen-model (chosen pname-str all-models)
+  "Resolve and activate CHOSEN model for PNAME-STR among ALL-MODELS."
+  (let* ((raw (and (stringp chosen) (string-trim (substring-no-properties chosen))))
+         (resolved (cond
+                    ((or (null raw) (string-empty-p raw)) nil)
+                    ((member raw all-models) raw)
+                    (t (let ((matches (kargu-api--fuzzy-filter raw all-models)))
+                         (and matches (substring-no-properties (car matches))))))))
+    (unless (and (stringp resolved) (member resolved all-models))
+      (when (fboundp 'kargu-chat-refresh-footer)
+        (kargu-chat-refresh-footer))
+      (user-error "kargu: model '%s' is not in available template models" (or raw "")))
+    (setq chosen resolved))
+  (setq kargu--session-model chosen)
+  (kargu-state-set-model chosen)
+  (let* ((ctx (kargu-model-context-window chosen))
+         (thresh (and (fboundp 'kargu-history-compact-threshold)
+                      (kargu-history-compact-threshold)))
+         (meta (kargu-model-get-metadata chosen))
+         (desc (and meta (plist-get meta :description))))
+    (when (fboundp 'kargu-chat-refresh-footer)
+      (kargu-chat-refresh-footer))
+    (force-mode-line-update t)
+    (message "kargu: model '%s' selected (Context: %d tokens, Compaction Threshold: %d chars)%s"
+             chosen ctx (or thresh 0) (if desc (format " · %s" desc) "")))
+  (if (kargu-model-reasoning-efforts chosen pname-str)
+      (if noninteractive
+          (kargu-chat-select-effort-company)
+        (run-at-time 0.05 nil #'kargu-chat-select-effort-company))
+    (setq kargu-reasoning-effort nil)
+    (kargu-state-set-reasoning-effort nil)
+    (when (fboundp 'kargu-chat-refresh-footer)
+      (kargu-chat-refresh-footer))
+    (force-mode-line-update t)))
+
 (defun kargu-chat-select-model-company (&optional live-ids catalog-ids provider-name _event)
   "Interactively select a model for PROVIDER-NAME using Company at point."
   (interactive (list nil nil nil last-input-event))
@@ -297,18 +347,8 @@ FIELD is \\='provider, \\='model, or \\='effort."
     (user-error "kargu: cannot change model while agent is running or thinking (stop with C-c C-k first)"))
   (let* ((pname (or provider-name (kargu--provider-name)))
          (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname "default"))))
-         (cached (and (null live-ids) (gethash pname-str kargu--live-models-cache)))
-         (sync-models (and (null live-ids) (null cached)
-                           (progn
-                             (message "kargu: querying live model catalog from %s (%s)..."
-                                      pname-str (kargu--api-base pname-str))
-                             (kargu-api-fetch-models-sync pname-str))))
-         (live (or live-ids cached sync-models))
-         (catalog catalog-ids)
          (curr (kargu--model))
-         (all-models (delete-dups (delq nil (append (and live (copy-sequence live))
-                                                    (and catalog (copy-sequence catalog))
-                                                    (and (kargu--nonempty curr) (list curr)))))))
+         (all-models (kargu-chat--collect-model-candidates pname-str live-ids catalog-ids)))
     (if (null all-models)
         (let ((chosen (read-string (format "kargu model for %s: " pname-str) (or curr ""))))
           (when (and (stringp chosen) (not (string-empty-p chosen)))
@@ -328,38 +368,7 @@ FIELD is \\='provider, \\='model, or \\='effort."
          all-models
          annotations
          (lambda (chosen)
-           (let* ((raw (and (stringp chosen) (string-trim (substring-no-properties chosen))))
-                  (resolved (cond
-                             ((or (null raw) (string-empty-p raw)) nil)
-                             ((member raw all-models) raw)
-                             (t (let ((matches (kargu-api--fuzzy-filter raw all-models)))
-                                  (and matches (substring-no-properties (car matches))))))))
-             (unless (and (stringp resolved) (member resolved all-models))
-               (when (fboundp 'kargu-chat-refresh-footer)
-                 (kargu-chat-refresh-footer))
-               (user-error "kargu: model '%s' is not in available template models" (or raw "")))
-             (setq chosen resolved))
-           (setq kargu--session-model chosen)
-           (kargu-state-set-model chosen)
-           (let* ((ctx (kargu-model-context-window chosen))
-                  (thresh (and (fboundp 'kargu-history-compact-threshold)
-                               (kargu-history-compact-threshold)))
-                  (meta (kargu-model-get-metadata chosen))
-                  (desc (and meta (plist-get meta :description))))
-             (when (fboundp 'kargu-chat-refresh-footer)
-               (kargu-chat-refresh-footer))
-             (force-mode-line-update t)
-             (message "kargu: model '%s' selected (Context: %d tokens, Compaction Threshold: %d chars)%s"
-                      chosen ctx (or thresh 0) (if desc (format " · %s" desc) "")))
-           (if (kargu-model-reasoning-efforts chosen pname-str)
-               (if noninteractive
-                   (kargu-chat-select-effort-company)
-                 (run-at-time 0.05 nil #'kargu-chat-select-effort-company))
-             (setq kargu-reasoning-effort nil)
-             (kargu-state-set-reasoning-effort nil)
-             (when (fboundp 'kargu-chat-refresh-footer)
-               (kargu-chat-refresh-footer))
-             (force-mode-line-update t))))))))
+           (kargu-chat--apply-chosen-model chosen pname-str all-models)))))))
 
 (defun kargu-chat-select-provider-company (&optional _event)
   "Interactively select an authenticated provider using Company at point."

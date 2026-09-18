@@ -44,11 +44,13 @@
 
 (defun kargu-skill--root ()
   "Project root used for skill discovery."
-  (file-name-as-directory
-   (expand-file-name
-    (or (and (fboundp 'kargu--project-root)
-             (ignore-errors (kargu--project-root)))
-        default-directory))))
+  (if (fboundp 'kargu-fs-project-root)
+      (kargu-fs-project-root)
+    (file-name-as-directory
+     (expand-file-name
+      (or (and (fboundp 'kargu--project-root)
+               (ignore-errors (kargu--project-root)))
+          default-directory)))))
 
 (defun kargu-skill--user-dir ()
   "User-level skills directory, or nil."

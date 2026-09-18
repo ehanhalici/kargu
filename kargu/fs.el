@@ -41,6 +41,14 @@
   :type 'natnum
   :group 'kargu)
 
+(defun kargu-fs-project-root ()
+  "Resolved project directory as a directory name."
+  (file-name-as-directory
+   (expand-file-name
+    (or (and (fboundp 'kargu--project-root)
+             (ignore-errors (kargu--project-root)))
+        default-directory))))
+
 (defun kargu-fs-skipped-path-p (path)
   "Non-nil if PATH has a skipped directory component."
   (cl-some (lambda (part) (member part kargu-fs-skip-dirs))
@@ -81,6 +89,23 @@ Return the list of kept paths."
                        (push (expand-file-name f) acc))))))))))
       (walk dir))
     acc))
+
+(defun kargu-fs-has-file-p (root filename)
+  "Return non-nil if FILENAME exists under directory ROOT."
+  (and (stringp root)
+       (file-exists-p (expand-file-name filename root))))
+
+(defun kargu-rel-path (path &optional root)
+  "Return PATH relative to ROOT when it is inside ROOT.
+ROOT defaults to project root or `default-directory'."
+  (let* ((effective-root (or root
+                             (and (fboundp 'kargu-permission-project-root)
+                                  (kargu-permission-project-root))
+                             default-directory))
+         (rel (file-relative-name (expand-file-name path) effective-root)))
+    (if (string-prefix-p ".." rel)
+        (expand-file-name path)
+      rel)))
 
 (provide 'kargu/fs)
 

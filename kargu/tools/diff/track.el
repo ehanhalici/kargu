@@ -63,6 +63,48 @@ agent loop reads this after tool calls and removes entries via
 
 (declare-function kargu-diff--resolve "kargu/tools/diff/stage" (path))
 
+(defun kargu-diff--rollback-created-file (path buffer)
+  "Roll back an agent-created file at PATH, killing BUFFER and deleting the file."
+  (when buffer
+    (with-current-buffer buffer (set-buffer-modified-p nil))
+    (condition-case-unless-debug _err
+        (kill-buffer buffer)
+      (error (message "kargu: could not kill buffer for %s" path))))
+  (when (file-exists-p path)
+    (delete-file path))
+  (message "kargu: rolled back agent-created file %s (deleted)" path))
+
+(defun kargu-diff--rollback-existing-file (path buffer content)
+  "Restore an existing file at PATH with BUFFER to CONTENT."
+  (let ((current (if buffer
+                     (with-current-buffer buffer (buffer-string))
+                   (and (file-exists-p path)
+                        (with-temp-buffer
+                          (insert-file-contents path)
+                          (buffer-string))))))
+    (if (and current (string= current (or content "")))
+        (message "kargu: %s is already at its initial state" path)
+      (if buffer
+          (with-current-buffer buffer
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (insert (or content "")))
+            (save-buffer))
+        (write-region (or content "") nil path))
+      (message "kargu: rolled back %s to initial state" path))))
+
+(defun kargu-diff--pop-snapshot-and-clear (path stack single-step)
+  "Pop snapshot STACK for PATH and clear change tracking."
+  (if (or (not single-step) (null (cdr stack)))
+      (remhash path kargu-diff--snapshots)
+    (puthash path (cdr stack) kargu-diff--snapshots))
+  (remhash path kargu-diff--changed)
+  (when (boundp 'kargu-diff--run-modified-files)
+    (unless (gethash path kargu-diff--snapshots)
+      (setq kargu-diff--run-modified-files
+            (delete path kargu-diff--run-modified-files))))
+  (kargu-log 'info "diff: rollback of %s (initial=%s)" path (not single-step)))
+
 (defun kargu-diff-rollback (file-path &optional single-step)
   "Restore FILE-PATH to its initial state before agent edits in this series.
 By default, restores to the earliest pre-agent snapshot (as if the prompt
@@ -88,41 +130,9 @@ The file is also removed from the changed-file set consumed by the agent loop."
              (created-new (plist-get snap :created-new))
              (buffer (find-buffer-visiting path)))
         (if created-new
-            (progn
-              (when buffer
-                (with-current-buffer buffer (set-buffer-modified-p nil))
-                (condition-case-unless-debug _err
-                    (kill-buffer buffer)
-                  (error (message "kargu: could not kill buffer for %s" path))))
-              (when (file-exists-p path)
-                (delete-file path))
-              (message "kargu: rolled back agent-created file %s (deleted)" path))
-          (let ((current (if buffer
-                             (with-current-buffer buffer (buffer-string))
-                           (and (file-exists-p path)
-                                (with-temp-buffer
-                                  (insert-file-contents path)
-                                  (buffer-string))))))
-            (if (and current (string= current (or content "")))
-                (message "kargu: %s is already at its initial state" path)
-              (if buffer
-                  (with-current-buffer buffer
-                    (let ((inhibit-read-only t))
-                      (erase-buffer)
-                      (insert (or content "")))
-                    (save-buffer))
-                (write-region (or content "") nil path))
-              (message "kargu: rolled back %s to initial state" path))))
-        ;; pop the snapshot and clear the change signal
-        (if (or (not single-step) (null (cdr stack)))
-            (remhash path kargu-diff--snapshots)
-          (puthash path (cdr stack) kargu-diff--snapshots))
-        (remhash path kargu-diff--changed)
-        (when (boundp 'kargu-diff--run-modified-files)
-          (unless (gethash path kargu-diff--snapshots)
-            (setq kargu-diff--run-modified-files
-                  (delete path kargu-diff--run-modified-files))))
-        (kargu-log 'info "diff: rollback of %s (initial=%s)" path (not single-step))
+            (kargu-diff--rollback-created-file path buffer)
+          (kargu-diff--rollback-existing-file path buffer content))
+        (kargu-diff--pop-snapshot-and-clear path stack single-step)
         path))))
 
 (defun kargu-diff-rollback-all ()
@@ -170,18 +180,44 @@ The file is also removed from the changed-file set consumed by the agent loop."
   "Return total modified lines from diff STAT."
   (+ (kargu-diff-stat-added stat) (kargu-diff-stat-deleted stat)))
 
+(defun kargu-diff--count-unified-changes (orig-content curr-content)
+  "Compute (ADDED . DELETED) line counts between ORIG-CONTENT and CURR-CONTENT.
+Uses unified diff output to tally insertions and deletions."
+  (let ((file-orig (make-temp-file "kargu-stat-orig"))
+        (file-curr (make-temp-file "kargu-stat-curr"))
+        (added 0)
+        (deleted 0))
+    (unwind-protect
+        (condition-case nil
+            (progn
+              (with-temp-file file-orig (insert orig-content))
+              (with-temp-file file-curr (insert curr-content))
+              (with-temp-buffer
+                (call-process "diff" nil t nil "-u" file-orig file-curr)
+                (goto-char (point-min))
+                (while (not (eobp))
+                  (let ((line (buffer-substring (line-beginning-position) (line-end-position))))
+                    (cond
+                     ((string-prefix-p "+++" line) nil)
+                     ((string-prefix-p "---" line) nil)
+                     ((string-prefix-p "+" line) (setq added (1+ added)))
+                     ((string-prefix-p "-" line) (setq deleted (1+ deleted)))))
+                  (forward-line 1)))
+              (cons added deleted))
+          (error (cons 0 0)))
+      (when (file-exists-p file-orig) (delete-file file-orig))
+      (when (file-exists-p file-curr) (delete-file file-curr)))))
+
 (defun kargu-diff-file-stats (file-path)
   "Return (ADDED . DELETED) line counts for FILE-PATH.
 Compares FILE-PATH against its pre-agent snapshot.  If no snapshot
 exists or diff fails, return (0 . 0)."
-  (cl-block kargu-diff-file-stats
-    (let ((path (ignore-errors
-                  (if (fboundp 'kargu-diff--resolve)
-                      (kargu-diff--resolve file-path)
-                    (expand-file-name file-path)))))
-      ;; Guard Clause 1: Invalid or unresolvable path
-      (unless path
-        (cl-return-from kargu-diff-file-stats (cons 0 0)))
+  (let ((path (ignore-errors
+                (if (fboundp 'kargu-diff--resolve)
+                    (kargu-diff--resolve file-path)
+                  (expand-file-name file-path)))))
+    (if (null path)
+        (cons 0 0)
       (let* ((stack (gethash path kargu-diff--snapshots))
              (base-snap (and stack (car (last stack))))
              (orig-content (and base-snap (plist-get base-snap :content)))
@@ -190,42 +226,18 @@ exists or diff fails, return (0 . 0)."
                                 (with-temp-buffer
                                   (insert-file-contents path)
                                   (buffer-string)))))
-        ;; Guard Clause 2: Newly created file
-        (when created-new
+        (cond
+         (created-new
           (let ((lines (if curr-content
                            (with-temp-buffer
                              (insert curr-content)
                              (count-lines (point-min) (point-max)))
                          0)))
-            (cl-return-from kargu-diff-file-stats (cons lines 0))))
-        ;; Guard Clause 3: Content missing or unchanged
-        (unless (and orig-content curr-content)
-          (cl-return-from kargu-diff-file-stats (cons 0 0)))
-        ;; Compute diff using system diff
-        (let ((file-orig (make-temp-file "kargu-stat-orig"))
-              (file-curr (make-temp-file "kargu-stat-curr"))
-              (added 0)
-              (deleted 0))
-          (unwind-protect
-              (condition-case nil
-                  (progn
-                    (with-temp-file file-orig (insert orig-content))
-                    (with-temp-file file-curr (insert curr-content))
-                    (with-temp-buffer
-                      (call-process "diff" nil t nil "-u" file-orig file-curr)
-                      (goto-char (point-min))
-                      (while (not (eobp))
-                        (let ((line (buffer-substring (line-beginning-position) (line-end-position))))
-                          (cond
-                           ((string-prefix-p "+++" line) nil)
-                           ((string-prefix-p "---" line) nil)
-                           ((string-prefix-p "+" line) (setq added (1+ added)))
-                           ((string-prefix-p "-" line) (setq deleted (1+ deleted)))))
-                        (forward-line 1)))
-                    (cons added deleted))
-                (error (cons 0 0)))
-            (when (file-exists-p file-orig) (delete-file file-orig))
-            (when (file-exists-p file-curr) (delete-file file-curr))))))))
+            (cons lines 0)))
+         ((and orig-content curr-content)
+          (kargu-diff--count-unified-changes orig-content curr-content))
+         (t
+          (cons 0 0)))))))
 
 (provide 'kargu/tools/diff/track)
 

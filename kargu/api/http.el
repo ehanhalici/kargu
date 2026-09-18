@@ -88,6 +88,62 @@ the UI and central state are left in a consistent state."
 (declare-function kargu-provider-prompt-caching "kargu/providers/registry" (id))
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 
+(defun kargu--apply-prompt-caching-messages (raw-msgs tools-len)
+  "Attach cache_control markers to RAW-MSGS when appropriate.
+TOOLS-LEN is the number of tools available."
+  ;; 1. When tools is empty (e.g. ask mode), attach cache_control to system prompt
+  (when (and (= tools-len 0) (> (length raw-msgs) 0))
+    (let ((sys-msg (car raw-msgs)))
+      (when (equal (kargu--aget sys-msg "role") "system")
+        (unless (assoc "cache_control" sys-msg)
+          (setcar raw-msgs
+                  (append sys-msg '(("cache_control" . (("type" . "ephemeral"))))))))))
+  ;; 2. Attach cache_control to the last completed turn before current prompt
+  ;; (turn length - 2) so past conversation history is 100% cached on multi-turn
+  ;; sessions and restored history chats.
+  (when (>= (length raw-msgs) 2)
+    (let* ((target-idx (- (length raw-msgs) 2))
+           (target-msg (nth target-idx raw-msgs)))
+      (unless (assoc "cache_control" target-msg)
+        (setcar (nthcdr target-idx raw-msgs)
+                (append target-msg '(("cache_control" . (("type" . "ephemeral")))))))))
+  raw-msgs)
+
+(defun kargu--apply-prompt-caching-tools (tools)
+  "Attach cache_control marker to the last tool definition in TOOLS vector."
+  (let* ((tools-list (append tools nil))
+         (last-idx (1- (length tools-list)))
+         (last-tool (nth last-idx tools-list)))
+    (unless (assoc "cache_control" last-tool)
+      (setcar (nthcdr last-idx tools-list)
+              (append last-tool '(("cache_control" . (("type" . "ephemeral"))))))
+      (setq tools (vconcat tools-list))))
+  tools)
+
+(defun kargu--build-reasoning-params ()
+  "Construct reasoning effort and thinking budget request entries."
+  (let ((payload-entries nil)
+        (reasoning-alist nil))
+    (when (and (boundp 'kargu-reasoning-effort)
+               kargu-reasoning-effort)
+      (let ((effort (cond ((symbolp kargu-reasoning-effort)
+                           (symbol-name kargu-reasoning-effort))
+                          ((stringp kargu-reasoning-effort)
+                           kargu-reasoning-effort))))
+        (unless (member effort '("none" "nil" "off"))
+          (push (cons "reasoning_effort" effort) payload-entries)
+          (push (cons "effort" effort) reasoning-alist))))
+    (when (and (boundp 'kargu-thinking-budget)
+               (integerp kargu-thinking-budget)
+               (> kargu-thinking-budget 0))
+      (push (cons "thinking" `(("type" . "enabled")
+                               ("budget_tokens" . ,kargu-thinking-budget)))
+            payload-entries)
+      (push (cons "max_tokens" kargu-thinking-budget) reasoning-alist))
+    (when reasoning-alist
+      (push (cons "reasoning" (reverse reasoning-alist)) payload-entries))
+    (nreverse payload-entries)))
+
 (defun kargu--build-payload (&rest extra)
   "Assemble the chat-completions request payload.
 EXTRA is a list of additional (KEY . VALUE) conses appended to
@@ -110,22 +166,8 @@ included when at least one tool is VISIBLE after
          (payload nil))
     ;; Multi-turn prompt caching for Anthropic / OpenRouter:
     (when is-anthropic-or-openrouter
-      ;; 1. When tools is empty (e.g. ask mode), attach cache_control to system prompt
-      (when (and (= (length tools) 0) (> (length raw-msgs) 0))
-        (let ((sys-msg (car raw-msgs)))
-          (when (equal (kargu--aget sys-msg "role") "system")
-            (unless (assoc "cache_control" sys-msg)
-              (setcar raw-msgs
-                      (append sys-msg '(("cache_control" . (("type" . "ephemeral"))))))))))
-      ;; 2. Attach cache_control to the last completed turn before current prompt
-      ;; (turn length - 2) so past conversation history is 100% cached on multi-turn
-      ;; sessions and restored history chats.
-      (when (>= (length raw-msgs) 2)
-        (let* ((target-idx (- (length raw-msgs) 2))
-               (target-msg (nth target-idx raw-msgs)))
-          (unless (assoc "cache_control" target-msg)
-            (setcar (nthcdr target-idx raw-msgs)
-                    (append target-msg '(("cache_control" . (("type" . "ephemeral"))))))))))
+      (setq raw-msgs (kargu--apply-prompt-caching-messages raw-msgs (length tools))))
+
     (setq payload `(("model" . ,(kargu--model))
                     ("messages" . ,(vconcat raw-msgs))))
     (when kargu-temperature
@@ -133,36 +175,14 @@ included when at least one tool is VISIBLE after
     (when kargu-max-tokens
       (setq payload (append payload `(("max_tokens" . ,kargu-max-tokens)
                                       ("max_completion_tokens" . ,kargu-max-tokens)))))
-    (let ((reasoning-alist nil))
-      (when (and (boundp 'kargu-reasoning-effort)
-                 kargu-reasoning-effort)
-        (let ((effort (cond ((symbolp kargu-reasoning-effort)
-                             (symbol-name kargu-reasoning-effort))
-                            ((stringp kargu-reasoning-effort)
-                             kargu-reasoning-effort))))
-          (unless (member effort '("none" "nil" "off"))
-            (setq payload (append payload `(("reasoning_effort" . ,effort))))
-            (push (cons "effort" effort) reasoning-alist))))
-      (when (and (boundp 'kargu-thinking-budget)
-                 (integerp kargu-thinking-budget)
-                 (> kargu-thinking-budget 0))
-        (setq payload (append payload `(("thinking" . (("type" . "enabled")
-                                                        ("budget_tokens" . ,kargu-thinking-budget))))))
-        (push (cons "max_tokens" kargu-thinking-budget) reasoning-alist))
-      (when reasoning-alist
-        (setq payload (append payload `(("reasoning" . ,(reverse reasoning-alist)))))))
+
+    (let ((reasoning-params (kargu--build-reasoning-params)))
+      (when reasoning-params
+        (setq payload (append payload reasoning-params))))
+
     (when (> (length tools) 0)
-      ;; When the active provider supports prompt caching and accepts cache_control blocks
-      ;; (Anthropic or OpenRouter), attach cache_control to the last tool definition to cache
-      ;; all tool schemas and the preceding system prompt in a single breakpoint.
       (when is-anthropic-or-openrouter
-        (let* ((tools-list (append tools nil))
-               (last-idx (1- (length tools-list)))
-               (last-tool (nth last-idx tools-list)))
-          (unless (assoc "cache_control" last-tool)
-            (setcar (nthcdr last-idx tools-list)
-                    (append last-tool '(("cache_control" . (("type" . "ephemeral"))))))
-            (setq tools (vconcat tools-list)))))
+        (setq tools (kargu--apply-prompt-caching-tools tools)))
       (setq payload (append payload `(("tools" . ,tools)
                                       ("tool_choice" . "auto")))))
     (when (fboundp 'kargu-provider-params-build-payload)
@@ -537,6 +557,30 @@ ignored.  PROCESS is only used for logging context."
   (kargu--history-append-assistant response)
   (funcall callback response))
 
+(defun kargu--api-dispatch-error (callback msg)
+  "Mark kargu as not busy and invoke CALLBACK with an error alist for MSG."
+  (setq kargu--busy nil)
+  (funcall callback (kargu--api-error-alist msg)))
+
+(defun kargu--api-handle-no-choices (response trimmed url headers payload gen
+                                             callback on-delta attempt)
+  "Handle a response with no choices, retrying if parsed error is retryable."
+  (let ((parsed (kargu--provider-error-text response)))
+    (if (and parsed
+             (kargu--api-error-looks-retryable-p parsed)
+             (kargu--api-schedule-retry
+              url headers payload gen callback on-delta attempt
+              (format "HTTP 200: %s" parsed)))
+        nil
+      (kargu--api-dispatch-error
+       callback
+       (if parsed
+           (format "HTTP 200: %s" parsed)
+         (format "HTTP 200: response contained no choices%s"
+                 (if (and trimmed (not (string-empty-p trimmed)))
+                     (concat ": " (truncate-string-to-width trimmed 200))
+                   "")))))))
+
 (defun kargu--api-handle-body (body callback &optional url headers payload gen
                                    on-delta attempt parsed-events)
   "Process a successful HTTP BODY string and dispatch CALLBACK.
@@ -560,32 +604,17 @@ bodies are reduced to an ordinary response alist first."
               (format "HTTP 200: %s" err)))
         nil)
        ((null response)
-        (setq kargu--busy nil)
-        (funcall callback
-                 (kargu--api-error-alist
-                  (format "HTTP 200: empty or invalid response body: %s"
-                          (truncate-string-to-width (or body "") 200)))))
+        (kargu--api-dispatch-error
+         callback
+         (format "HTTP 200: empty or invalid response body: %s"
+                 (truncate-string-to-width (or body "") 200))))
        (err
-        (setq kargu--busy nil)
-        (funcall callback
-                 (kargu--api-error-alist (format "HTTP 200: %s" err))))
+        (kargu--api-dispatch-error
+         callback
+         (format "HTTP 200: %s" err)))
        ((null (kargu--aget response "choices"))
-        (let ((parsed (kargu--provider-error-text response)))
-          (if (and parsed
-                   (kargu--api-error-looks-retryable-p parsed)
-                   (kargu--api-schedule-retry
-                    url headers payload gen callback on-delta attempt
-                    (format "HTTP 200: %s" parsed)))
-              nil
-            (setq kargu--busy nil)
-            (funcall callback
-                     (kargu--api-error-alist
-                      (if parsed
-                          (format "HTTP 200: %s" parsed)
-                        (format "HTTP 200: response contained no choices%s"
-                                (if (and trimmed (not (string-empty-p trimmed)))
-                                    (concat ": " (truncate-string-to-width trimmed 200))
-                                  ""))))))))
+        (kargu--api-handle-no-choices
+         response trimmed url headers payload gen callback on-delta attempt))
        (t
         (kargu--api-handle-success response callback))))))
 

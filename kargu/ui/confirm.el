@@ -43,6 +43,33 @@
 (defvar kargu-confirm--mock-decision nil
   "Dynamically bound decision key for unit tests (e.g. `:retry', `:stop').")
 
+(defun kargu-confirm--resolve-chat-buffer (&optional target-buf)
+  "Resolve and return a live chat buffer, or nil."
+  (or (and (bufferp target-buf) (buffer-live-p target-buf) target-buf)
+      (and (bound-and-true-p kargu-chat-buffer-name)
+           (get-buffer kargu-chat-buffer-name))
+      (get-buffer "*kargu-chat*")))
+
+(defun kargu-confirm--render-action-buttons (actions set-decision-fn)
+  "Render clickable button widgets for ACTIONS calling SET-DECISION-FN on click."
+  (let ((first t))
+    (dolist (act actions)
+      (let* ((act-key (plist-get act :key))
+             (label (or (plist-get act :label) (format "[%s]" act-key)))
+             (face (or (plist-get act :face) 'bold))
+             (help (or (plist-get act :help) (format "Click to %s" act-key)))
+             (captured act-key))
+        (unless first
+          (insert "  "))
+        (setq first nil)
+        (insert-button
+         label
+         'action (lambda (_)
+                   (funcall set-decision-fn captured)
+                   (exit-recursive-edit))
+         'face face
+         'help-echo help)))))
+
 (defun kargu-confirm--render-prompt (chat-buf title details notice actions set-decision-fn)
   "Render confirmation banner, DETAILS, NOTICE, and button ACTIONS in CHAT-BUF.
 SET-DECISION-FN is called with the chosen action key when clicked."
@@ -73,24 +100,7 @@ SET-DECISION-FN is called with the chosen action key when clicked."
       (when (and notice (stringp notice) (not (string-empty-p (string-trim notice))))
         (insert (format "     %s\n" (string-trim notice))))
       (insert "     ")
-      ;; Action buttons
-      (let ((first t))
-        (dolist (act actions)
-          (let* ((act-key (plist-get act :key))
-                 (label (or (plist-get act :label) (format "[%s]" act-key)))
-                 (face (or (plist-get act :face) 'bold))
-                 (help (or (plist-get act :help) (format "Click to %s" act-key)))
-                 (captured act-key))
-            (unless first
-              (insert "  "))
-            (setq first nil)
-            (insert-button
-             label
-             'action (lambda (_)
-                       (funcall set-decision-fn captured)
-                       (exit-recursive-edit))
-             'face face
-             'help-echo help))))
+      (kargu-confirm--render-action-buttons actions set-decision-fn)
       (insert "\n\n")
       (when (boundp 'kargu-chat--output-marker)
         (setq kargu-chat--output-marker (copy-marker (point-max) t))))))
@@ -159,18 +169,15 @@ Returns the chosen action key symbol."
          (target-buf (plist-get plist :chat-buffer))
          (fallback (or (plist-get plist :fallback-prompt) (format "%s Proceed? " (or title "Notice:"))))
          (default-action (or (plist-get plist :default-action) :stop))
-         (notify-type (plist-get plist :notify)))
+         (notify-type (plist-get plist :notify))
+         (chat-buf (kargu-confirm--resolve-chat-buffer target-buf)))
     (cond
      ;; Test mock override
      (kargu-confirm--mock-decision
-      (let ((chat-buf (or (and (bufferp target-buf) (buffer-live-p target-buf) target-buf)
-                          (and (bound-and-true-p kargu-chat-buffer-name)
-                               (get-buffer kargu-chat-buffer-name))
-                          (get-buffer "*kargu-chat*"))))
-        (when (and chat-buf (buffer-live-p chat-buf))
-          (kargu-confirm--render-prompt
-           chat-buf title details notice actions (lambda (_d) nil)))
-        kargu-confirm--mock-decision))
+      (when (and chat-buf (buffer-live-p chat-buf))
+        (kargu-confirm--render-prompt
+         chat-buf title details notice actions (lambda (_d) nil)))
+      kargu-confirm--mock-decision)
      ;; Headless / non-interactive (CI, batch)
      (noninteractive
       default-action)
@@ -178,22 +185,18 @@ Returns the chosen action key symbol."
      (t
       (when (and notify-type (fboundp 'kargu-notify))
         (kargu-notify notify-type))
-      (let ((chat-buf (or (and (bufferp target-buf) (buffer-live-p target-buf) target-buf)
-                          (and (bound-and-true-p kargu-chat-buffer-name)
-                               (get-buffer kargu-chat-buffer-name))
-                          (get-buffer "*kargu-chat*"))))
-        (if (not (and chat-buf (buffer-live-p chat-buf)))
-            (let ((first-act (and actions (plist-get (car actions) :key))))
-              (if (y-or-n-p fallback)
-                  (or first-act :ok)
-                default-action))
-          (let ((decision default-action))
-            (kargu-confirm--render-prompt
-             chat-buf title details notice actions (lambda (d) (setq decision d)))
-            (setq decision
-                  (kargu-confirm--wait-decision
-                   chat-buf actions default-action (lambda () decision)))
-            decision)))))))
+      (if (not (and chat-buf (buffer-live-p chat-buf)))
+          (let ((first-act (and actions (plist-get (car actions) :key))))
+            (if (y-or-n-p fallback)
+                (or first-act :ok)
+              default-action))
+        (let ((decision default-action))
+          (kargu-confirm--render-prompt
+           chat-buf title details notice actions
+           (lambda (d) (setq decision d)))
+          (kargu-confirm--wait-decision
+           chat-buf actions default-action
+           (lambda () decision))))))))
 
 (provide 'kargu/ui/confirm)
 

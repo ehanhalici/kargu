@@ -40,14 +40,31 @@
 (declare-function kargu-api-clear-busy "kargu/api/http" ())
 (declare-function kargu-loop-running-p "kargu/loop" ())
 
-(defun kargu--api-cancel-busy ()
-  "Clear the busy flag when a request completes or fails."
-  (if (fboundp 'kargu-api-clear-busy)
-      (kargu-api-clear-busy)
-    (setq kargu--busy nil)
-    (unless (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
-      (when (fboundp 'kargu-state-transition-status)
-        (kargu-state-transition-status :idle)))))
+(defalias 'kargu--api-cancel-busy #'kargu-api-clear-busy)
+
+(defun kargu--api-validate-preflight (prompt)
+  "Validate preflight conditions before sending conversation turn with PROMPT."
+  ;; Guard Clause 3: Completed assistant turn cannot continue without prompt
+  (when (and (or (null prompt) (string-empty-p prompt))
+             (kargu--history-completed-assistant-tail-p))
+    (user-error "nothing to continue; send a user message"))
+  (kargu--validate-history)
+  ;; Guard Clause 4: History must contain at least one user message
+  (unless (cl-some (lambda (m)
+                     (equal (kargu--aget m "role") "user"))
+                   kargu--message-history)
+    (user-error "nothing to send: history has no user message"))
+  ;; Guard Clause 5: History must not end on model turn
+  (when (kargu--assistant-role-p (kargu--history-last-role))
+    (user-error "refusing to send: history still ends on a model turn")))
+
+(defun kargu--api-rollback-prompt (prompt added-prompt-p)
+  "Roll back PROMPT from history if ADDED-PROMPT-P is non-nil."
+  (when (and added-prompt-p
+             kargu--message-history
+             (equal (kargu--aget (car (last kargu--message-history)) "role") "user")
+             (equal (kargu--aget (car (last kargu--message-history)) "content") prompt))
+    (setq kargu--message-history (butlast kargu--message-history))))
 
 (defun kargu-api-send (prompt callback &optional on-delta)
   "Send the next conversation turn to OpenRouter, asynchronously.
@@ -83,19 +100,7 @@ ON-DELTA is called with each streaming SSE delta event."
           (setq added-prompt-p t))
         (condition-case-unless-debug err
             (progn
-              ;; Guard Clause 3: Completed assistant turn cannot continue without prompt
-              (when (and (or (null prompt) (string-empty-p prompt))
-                         (kargu--history-completed-assistant-tail-p))
-                (user-error "nothing to continue; send a user message"))
-              (kargu--validate-history)
-              ;; Guard Clause 4: History must contain at least one user message
-              (unless (cl-some (lambda (m)
-                                 (equal (kargu--aget m "role") "user"))
-                               kargu--message-history)
-                (user-error "nothing to send: history has no user message"))
-              ;; Guard Clause 5: History must not end on model turn
-              (when (kargu--assistant-role-p (kargu--history-last-role))
-                (user-error "refusing to send: history still ends on a model turn"))
+              (kargu--api-validate-preflight prompt)
               (let ((gen (cl-incf kargu--generation)))
                 (setq kargu--busy t)
                 (kargu-state-transition-status :requesting)
@@ -110,11 +115,7 @@ ON-DELTA is called with each streaming SSE delta event."
                  on-delta)))
           (error
            (kargu--api-cancel-busy)
-           (when (and added-prompt-p
-                      kargu--message-history
-                      (equal (kargu--aget (car (last kargu--message-history)) "role") "user")
-                      (equal (kargu--aget (car (last kargu--message-history)) "content") prompt))
-             (setq kargu--message-history (butlast kargu--message-history)))
+           (kargu--api-rollback-prompt prompt added-prompt-p)
            (funcall callback
                     (kargu--api-error-alist (error-message-string err)))))))))
 

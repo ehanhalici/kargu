@@ -81,6 +81,15 @@ keys) works even when the parser interned keys as symbols."
     (mapcar #'kargu--json-stringify-keys object))
    (t object)))
 
+(defun kargu-seq-to-list (seq)
+  "Normalize a JSON array (vector, list, or single value) to a list.
+If SEQ is nil, return nil."
+  (cond
+   ((vectorp seq) (append seq nil))
+   ((listp seq) seq)
+   (seq (list seq))
+   (t nil)))
+
 (defun kargu--json-parse-raw (string)
   "Parse JSON STRING to alists/lists with the working parser flags."
   (if kargu--json-supports-key-type

@@ -229,6 +229,79 @@ If INPUT is already a list or vector, returns a vector of strings."
       (if trimmed (vconcat trimmed) nil)))
    (t nil)))
 
+(defun kargu-provider-params--format-value (val type key)
+  "Format raw parameter VAL according to TYPE and KEY for JSON serialization."
+  (cond
+   ((eq val :json-false) :json-false)
+   ((eq val t) t)
+   ((eq type 'string-list) (kargu--parse-string-list-input val))
+   ((eq type 'multi-enum)
+    (cond ((vectorp val) val)
+          ((listp val) (vconcat val))
+          ((stringp val) (kargu--parse-string-list-input val))
+          (t val)))
+   ((and (eq type 'json) (stringp val))
+    (condition-case _
+        (kargu--json-decode-object val)
+      (error val)))
+   ((and (equal key "custom_body") (stringp val))
+    (condition-case _
+        (kargu--json-decode-object val)
+      (error nil)))
+   (t val)))
+
+(defun kargu-provider-params--postprocess-anthropic (pid top-level)
+  "Apply Anthropic-specific extensions (thinking, metadata) to TOP-LEVEL for PID."
+  (let ((ext-thinking (kargu-provider-param-get "extended_thinking" pid))
+        (budget (kargu-provider-param-get "thinking_budget" pid))
+        (user-id (kargu-provider-param-get "user_id" pid))
+        (res top-level))
+    (when (or (eq ext-thinking t) (and (numberp budget) (> budget 0)))
+      (push (cons "thinking" `(("type" . "enabled")
+                               ("budget_tokens" . ,(or budget 2048))))
+            res))
+    (when (eq ext-thinking :json-false)
+      (push (cons "thinking" '(("type" . "disabled"))) res))
+    (when (and user-id (not (string-empty-p (format "%s" user-id))))
+      (push (cons "metadata" `(("user_id" . ,user-id))) res))
+    res))
+
+(defun kargu-provider-params--postprocess-gemini (pid sub-blocks top-level)
+  "Apply Gemini transformations (generationConfig, safetySettings) for PID.
+Returns updated TOP-LEVEL."
+  (let ((budget (kargu-provider-param-get "thinking_budget" pid))
+        (safety (kargu-provider-param-get "safety_threshold" pid))
+        (raw-gen (gethash "generationConfig" sub-blocks))
+        (gen-cfg nil)
+        (res top-level))
+    (dolist (cell raw-gen)
+      (let ((k (car cell))
+            (v (cdr cell)))
+        (push (cons (cond ((equal k "top_p") "topP")
+                          ((equal k "top_k") "topK")
+                          ((equal k "candidate_count") "candidateCount")
+                          ((equal k "response_mime_type") "responseMimeType")
+                          (t k))
+                    v)
+              gen-cfg)))
+    (setq gen-cfg (reverse gen-cfg))
+    (when (and (numberp budget) (> budget 0))
+      (setq gen-cfg (append gen-cfg `(("thinkingConfig" . (("thinkingBudget" . ,budget)))))))
+    (when gen-cfg
+      (puthash "generationConfig" gen-cfg sub-blocks))
+    (when safety
+      (push (cons "safetySettings"
+                  (vconcat
+                   (mapcar (lambda (cat)
+                             `(("category" . ,cat)
+                               ("threshold" . ,safety)))
+                           '("HARM_CATEGORY_HARASSMENT"
+                             "HARM_CATEGORY_HATE_SPEECH"
+                             "HARM_CATEGORY_SEXUALLY_EXPLICIT"
+                             "HARM_CATEGORY_DANGEROUS_CONTENT"))))
+            res))
+    res))
+
 (defun kargu-provider-params-build-payload (&optional provider)
   "Build payload alist for PROVIDER to merge into chat-completions request.
 Separates parameters targeting sub-objects (such as OpenRouter's
@@ -252,29 +325,9 @@ from top-level request parameters."
                  (target (or (and spec (plist-get spec :target))
                              default-target
                              :top-level))
-                 ;; Format value for JSON serialization
-                 (json-val
-                  (cond
-                   ((eq val :json-false) :json-false)
-                   ((eq val t) t)
-                   ((eq type 'string-list) (kargu--parse-string-list-input val))
-                   ((eq type 'multi-enum)
-                    (cond ((vectorp val) val)
-                          ((listp val) (vconcat val))
-                          ((stringp val) (kargu--parse-string-list-input val))
-                          (t val)))
-                   ((and (eq type 'json) (stringp val))
-                    (condition-case _
-                        (kargu--json-decode-object val)
-                      (error val)))
-                   ((and (equal key "custom_body") (stringp val))
-                    (condition-case _
-                        (kargu--json-decode-object val)
-                      (error nil)))
-                   (t val))))
+                 (json-val (kargu-provider-params--format-value val type key)))
             (when json-val
               (if (and (equal key "custom_body") (consp json-val))
-                  ;; Merge custom body entries into top-level
                   (setq top-level (append top-level json-val))
                 (if (and target (not (eq target :top-level)))
                     (let* ((t-str (if (symbolp target) (symbol-name target) (format "%s" target)))
@@ -284,52 +337,10 @@ from top-level request parameters."
 
     ;; Format-specific post-processing
     (cond
-     ;; Anthropic format special handling
      ((eq fmt 'anthropic)
-      (let ((ext-thinking (kargu-provider-param-get "extended_thinking" pid))
-            (budget (kargu-provider-param-get "thinking_budget" pid))
-            (user-id (kargu-provider-param-get "user_id" pid)))
-        (when (or (eq ext-thinking t) (and (numberp budget) (> budget 0)))
-          (push (cons "thinking" `(("type" . "enabled")
-                                   ("budget_tokens" . ,(or budget 2048))))
-                top-level))
-        (when (eq ext-thinking :json-false)
-          (push (cons "thinking" '(("type" . "disabled"))) top-level))
-        (when (and user-id (not (string-empty-p (format "%s" user-id))))
-          (push (cons "metadata" `(("user_id" . ,user-id))) top-level))))
-
-     ;; Gemini format special handling
+      (setq top-level (kargu-provider-params--postprocess-anthropic pid top-level)))
      ((eq fmt 'gemini)
-      (let ((budget (kargu-provider-param-get "thinking_budget" pid))
-            (safety (kargu-provider-param-get "safety_threshold" pid))
-            (raw-gen (gethash "generationConfig" sub-blocks))
-            (gen-cfg nil))
-        (dolist (cell raw-gen)
-          (let ((k (car cell))
-                (v (cdr cell)))
-            (push (cons (cond ((equal k "top_p") "topP")
-                              ((equal k "top_k") "topK")
-                              ((equal k "candidate_count") "candidateCount")
-                              ((equal k "response_mime_type") "responseMimeType")
-                              (t k))
-                        v)
-                  gen-cfg)))
-        (setq gen-cfg (reverse gen-cfg))
-        (when (and (numberp budget) (> budget 0))
-          (setq gen-cfg (append gen-cfg `(("thinkingConfig" . (("thinkingBudget" . ,budget)))))))
-        (when gen-cfg
-          (puthash "generationConfig" gen-cfg sub-blocks))
-        (when safety
-          (push (cons "safetySettings"
-                      (vconcat
-                       (mapcar (lambda (cat)
-                                 `(("category" . ,cat)
-                                   ("threshold" . ,safety)))
-                               '("HARM_CATEGORY_HARASSMENT"
-                                 "HARM_CATEGORY_HATE_SPEECH"
-                                 "HARM_CATEGORY_SEXUALLY_EXPLICIT"
-                                 "HARM_CATEGORY_DANGEROUS_CONTENT"))))
-                top-level)))))
+      (setq top-level (kargu-provider-params--postprocess-gemini pid sub-blocks top-level))))
 
     ;; Convert sub-blocks hash table into payload alists
     (maphash (lambda (block-name entries)

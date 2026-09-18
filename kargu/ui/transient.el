@@ -126,12 +126,8 @@
   (interactive)
   (kargu-ui--dispatch 'kargu-diff-review))
 
-(defun kargu-ui-toggle-review-mode ()
-  "Toggle `kargu-diff-review-mode' between auto and blocking."
-  (interactive)
-  (setq kargu-diff-review-mode
-        (if (eq kargu-diff-review-mode 'auto) 'blocking 'auto))
-  (message "kargu review mode: %s" kargu-diff-review-mode))
+(declare-function kargu-tune-toggle-review-mode "kargu/chat/tune" ())
+(defalias 'kargu-ui-toggle-review-mode #'kargu-tune-toggle-review-mode)
 
 (defun kargu-ui-snapshots ()
   "List files that currently have rollback snapshots."

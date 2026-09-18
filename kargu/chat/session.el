@@ -161,6 +161,34 @@ uses `<kargu-sessions-directory>/<project-key>/'."
       fallback
       "New Session"))
 
+(defun kargu-session--build-data (sid root title usage mode-val prov mod transcript messages)
+  "Construct session serializable alist for session SID under ROOT."
+  `(("id" . ,sid)
+    ("project_root" . ,root)
+    ("project_name" . ,(file-name-nondirectory (directory-file-name root)))
+    ("title" . ,title)
+    ("created_at" . ,(or (plist-get usage :started)
+                         (format-time-string "%Y-%m-%d %H:%M:%S")))
+    ("updated_at" . ,(format-time-string "%Y-%m-%d %H:%M:%S"))
+    ("mode" . ,(symbol-name mode-val))
+    ("provider" . ,(or prov ""))
+    ("model" . ,(or mod ""))
+    ("requests" . ,(or (plist-get usage :requests) 0))
+    ("tokens_in" . ,(or (plist-get usage :tokens-in) 0))
+    ("tokens_out" . ,(or (plist-get usage :tokens-out) 0))
+    ("transcript" . ,transcript)
+    ("messages" . ,(vconcat (or messages '())))))
+
+(defun kargu-session--write-data (file dir data sid)
+  "Encode and write DATA alist to FILE in DIR, logging for SID."
+  (let ((json-str (kargu--json-encode data)))
+    (unless (file-directory-p dir)
+      (make-directory dir t))
+    (with-temp-file file
+      (insert json-str))
+    (kargu-log 'info "session saved: %s (%s)" sid file)
+    file))
+
 (defun kargu-session-save (&optional buffer)
   "Save chat session from BUFFER (defaults to current buffer) to JSON.
 Returns the file path written, or nil if no content to save."
@@ -172,8 +200,8 @@ Returns the file path written, or nil if no content to save."
                         (and (fboundp 'kargu-session-id) (kargu-session-id))
                         (format "kargu-%s" (format-time-string "%Y%m%d%H%M%S"))))
                (messages (or kargu-chat--messages
-                             (and (boundp 'kargu--message-history) kargu--message-history)
-                             nil))
+                              (and (boundp 'kargu--message-history) kargu--message-history)
+                              nil))
                (transcript (kargu-session--extract-transcript buf))
                (title (or kargu-chat--session-title
                           (kargu-session--derive-title messages (buffer-name buf))))
@@ -198,29 +226,9 @@ Returns the file path written, or nil if no content to save."
                   kargu-chat--session-provider prov
                   kargu-chat--session-model mod
                   kargu-chat--messages messages)
-            (let* ((data
-                    `(("id" . ,sid)
-                      ("project_root" . ,root)
-                      ("project_name" . ,(file-name-nondirectory (directory-file-name root)))
-                      ("title" . ,title)
-                      ("created_at" . ,(or (plist-get usage :started)
-                                           (format-time-string "%Y-%m-%d %H:%M:%S")))
-                      ("updated_at" . ,(format-time-string "%Y-%m-%d %H:%M:%S"))
-                      ("mode" . ,(symbol-name mode-val))
-                      ("provider" . ,(or prov ""))
-                      ("model" . ,(or mod ""))
-                      ("requests" . ,(or (plist-get usage :requests) 0))
-                      ("tokens_in" . ,(or (plist-get usage :tokens-in) 0))
-                      ("tokens_out" . ,(or (plist-get usage :tokens-out) 0))
-                      ("transcript" . ,transcript)
-                      ("messages" . ,(vconcat (or messages '())))))
-                   (json-str (kargu--json-encode data)))
-              (unless (file-directory-p dir)
-                (make-directory dir t))
-              (with-temp-file file
-                (insert json-str))
-              (kargu-log 'info "session saved: %s (%s)" sid file)
-              file)))))))
+            (let ((data (kargu-session--build-data
+                         sid root title usage mode-val prov mod transcript messages)))
+              (kargu-session--write-data file dir data sid))))))))
 
 (defun kargu-session-list (&optional root)
   "Return list of saved session metadata alists for project ROOT, newest first."
@@ -250,6 +258,62 @@ Returns the file path written, or nil if no content to save."
 (defvar kargu-chat-buffer-name)
 (declare-function kargu-chat-mode "kargu/chat" ())
 
+(defun kargu-session--restore-variables (data root)
+  "Restore buffer-local chat session variables from DATA for project ROOT."
+  (let* ((sid (kargu--aget data "id"))
+         (title (kargu--aget data "title"))
+         (saved-root (kargu--aget data "project_root"))
+         (raw-msgs (kargu--aget data "messages"))
+         (msg-list (if (vectorp raw-msgs) (append raw-msgs nil) raw-msgs))
+         (saved-prov (kargu--aget data "provider"))
+         (saved-model (kargu--aget data "model")))
+    (setq kargu-chat--session-id sid
+          kargu-chat--session-title title
+          kargu-chat--project-root (or saved-root (kargu-session--project-root root))
+          kargu-chat--messages msg-list)
+    (setq-local kargu--session-id sid)
+    (when (and (stringp saved-prov) (not (string-empty-p (string-trim saved-prov))))
+      (setq kargu-chat--session-provider saved-prov)
+      (when (boundp 'kargu--session-provider)
+        (setq kargu--session-provider saved-prov)))
+    (when (and (stringp saved-model) (not (string-empty-p (string-trim saved-model))))
+      (setq kargu-chat--session-model saved-model)
+      (when (boundp 'kargu--session-model)
+        (setq kargu--session-model saved-model)))
+    (when (boundp 'kargu--message-history)
+      (setq kargu--message-history (copy-sequence msg-list)))))
+
+(defun kargu-session--restore-counters (data updated-at)
+  "Restore global session counters from DATA, fallback to UPDATED-AT."
+  (when (boundp 'kargu--session)
+    (setq kargu--session
+          (list :active nil
+                :id (kargu--aget data "id")
+                :requests (or (kargu--aget data "requests") 0)
+                :tokens-in (or (kargu--aget data "tokens_in") 0)
+                :tokens-out (or (kargu--aget data "tokens_out") 0)
+                :last-prompt-tokens 0
+                :started (or (kargu--aget data "created_at") updated-at)))))
+
+(defun kargu-session--render-restored-transcript (transcript updated-at message-count)
+  "Render TRANSCRIPT or banner into current buffer.
+Uses UPDATED-AT and MESSAGE-COUNT for status banner."
+  (if (and transcript (not (string-empty-p transcript)))
+      (progn
+        (insert (propertize transcript
+                            'read-only t
+                            'front-sticky t
+                            'rear-nonsticky '(read-only face front-sticky)))
+        (unless (eq (char-before) ?\n)
+          (insert "\n"))
+        (insert (propertize (format "— restored session from %s (%d messages) —\n\n"
+                                    updated-at
+                                    message-count)
+                            'face 'font-lock-comment-face
+                            'read-only t)))
+    (insert (concat "kargu chat — type at the prompt; "
+                    "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-b switch chat.\n\n"))))
+
 (defun kargu-session-load (session-or-id &optional target-buffer root)
   "Restore SESSION-OR-ID into TARGET-BUFFER for project ROOT.
 SESSION-OR-ID may be a session alist or a session id string.
@@ -268,9 +332,7 @@ Returns TARGET-BUFFER on success."
       (with-current-buffer buf
         (let ((inhibit-read-only t)
               (sid (kargu--aget data "id"))
-              (title (kargu--aget data "title"))
               (saved-root (kargu--aget data "project_root"))
-              (raw-msgs (kargu--aget data "messages"))
               (transcript (or (kargu--aget data "transcript") ""))
               (mode-str (kargu--aget data "mode"))
               (updated-at (or (kargu--aget data "updated_at") "earlier")))
@@ -280,56 +342,18 @@ Returns TARGET-BUFFER on success."
               (text-mode)))
           ;; Erase buffer cleanly
           (delete-region (point-min) (point-max))
-          ;; Restore message history
-          (let ((msg-list (if (vectorp raw-msgs) (append raw-msgs nil) raw-msgs))
-                (saved-prov (kargu--aget data "provider"))
-                (saved-model (kargu--aget data "model")))
-            (setq kargu-chat--session-id sid
-                  kargu-chat--session-title title
-                  kargu-chat--project-root (or saved-root (kargu-session--project-root root))
-                  kargu-chat--messages msg-list)
-            (setq-local kargu--session-id sid)
-            (when (and (stringp saved-prov) (not (string-empty-p (string-trim saved-prov))))
-              (setq kargu-chat--session-provider saved-prov)
-              (when (boundp 'kargu--session-provider)
-                (setq kargu--session-provider saved-prov)))
-            (when (and (stringp saved-model) (not (string-empty-p (string-trim saved-model))))
-              (setq kargu-chat--session-model saved-model)
-              (when (boundp 'kargu--session-model)
-                (setq kargu--session-model saved-model)))
-            (when (boundp 'kargu--message-history)
-              (setq kargu--message-history (copy-sequence msg-list))))
+          ;; Restore message history and local variables
+          (kargu-session--restore-variables data root)
           ;; Restore session counters
-          (when (boundp 'kargu--session)
-            (setq kargu--session
-                  (list :active nil
-                        :id sid
-                        :requests (or (kargu--aget data "requests") 0)
-                        :tokens-in (or (kargu--aget data "tokens_in") 0)
-                        :tokens-out (or (kargu--aget data "tokens_out") 0)
-                        :last-prompt-tokens 0
-                        :started (or (kargu--aget data "created_at") updated-at))))
+          (kargu-session--restore-counters data updated-at)
           ;; Switch mode if saved
           (when (and mode-str (fboundp 'kargu-set-mode))
             (condition-case nil
                 (kargu-set-mode (intern mode-str))
               (error nil)))
           ;; Insert transcript
-          (if (and transcript (not (string-empty-p transcript)))
-              (progn
-                (insert (propertize transcript
-                                    'read-only t
-                                    'front-sticky t
-                                    'rear-nonsticky '(read-only face front-sticky)))
-                (unless (eq (char-before) ?\n)
-                  (insert "\n"))
-                (insert (propertize (format "— restored session from %s (%d messages) —\n\n"
-                                            updated-at
-                                            (length (or kargu-chat--messages '())))
-                                    'face 'font-lock-comment-face
-                                    'read-only t)))
-            (insert (concat "kargu chat — type at the prompt; "
-                            "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-b switch chat.\n\n")))
+          (kargu-session--render-restored-transcript
+           transcript updated-at (length (or kargu-chat--messages '())))
           ;; Ensure idle prompt
           (when (fboundp 'kargu-chat--ensure-idle-prompt)
             (kargu-chat--ensure-idle-prompt))

@@ -120,11 +120,13 @@
 
 (defun kargu-prompt--workspace ()
   "Absolute workspace / project root directory."
-  (file-name-as-directory
-   (expand-file-name
-    (or (and (fboundp 'kargu--project-root)
-             (ignore-errors (kargu--project-root)))
-        default-directory))))
+  (if (fboundp 'kargu-fs-project-root)
+      (kargu-fs-project-root)
+    (file-name-as-directory
+     (expand-file-name
+      (or (and (fboundp 'kargu--project-root)
+               (ignore-errors (kargu--project-root)))
+          default-directory)))))
 
 (defun kargu-prompt--git-info (root)
   "Return (REPO-P . BRANCH) for ROOT with a single git invocation."

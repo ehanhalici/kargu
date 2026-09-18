@@ -44,6 +44,7 @@
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/api)
+(require 'kargu/api/tools)
 (require 'kargu/permission)
 (require 'magit nil t)
 
@@ -72,19 +73,9 @@
 
 ;;;; Status ---------------------------------------------------------------
 
-(defun kargu-git-status (&optional root)
-  "Return a structured, Magit-style Git status report for ROOT."
-  (let* ((proj-root (or root (kargu-permission-project-root)))
-         ;; 1. Branch info
-         (branch-res (kargu-git--run '("branch" "--show-current") proj-root))
-         (branch (if (string-empty-p (cdr branch-res)) "HEAD (detached)" (cdr branch-res)))
-         ;; 2. Tracking upstream info
-         (up-res (kargu-git--run '("status" "-sb") proj-root))
-         (up-line (car (split-string (cdr up-res) "\n" t)))
-         ;; 3. Porcelain status
-         (porc-res (kargu-git--run '("status" "--porcelain=v1") proj-root))
-         (lines (split-string (cdr porc-res) "\n" t))
-         staged unstaged untracked)
+(defun kargu-git--parse-porcelain-status (lines)
+  "Parse porcelain status LINES into a plist (:staged :unstaged :untracked)."
+  (let (staged unstaged untracked)
     (dolist (line lines)
       (when (>= (length line) 3)
         (let ((x (aref line 0))
@@ -98,29 +89,42 @@
               (push (format "%c %s" x path) staged))
             (unless (= y ?\s)
               (push (format "%c %s" y path) unstaged)))))))
+    (list :staged staged :unstaged unstaged :untracked untracked)))
+
+(defun kargu-git--insert-status-section (title items)
+  "Insert formatted status section for TITLE with ITEMS into current buffer."
+  (insert (format "%s (%d):\n" title (length items)))
+  (if (null items)
+      (insert "  (none)\n")
+    (dolist (item (nreverse items))
+      (insert (format "  %s\n" item)))))
+
+(defun kargu-git-status (&optional root)
+  "Return a structured, Magit-style Git status report for ROOT."
+  (let* ((proj-root (or root (kargu-permission-project-root)))
+         ;; 1. Branch info
+         (branch-res (kargu-git--run '("branch" "--show-current") proj-root))
+         (branch (if (string-empty-p (cdr branch-res)) "HEAD (detached)" (cdr branch-res)))
+         ;; 2. Tracking upstream info
+         (up-res (kargu-git--run '("status" "-sb") proj-root))
+         (up-line (car (split-string (cdr up-res) "\n" t)))
+         ;; 3. Porcelain status
+         (porc-res (kargu-git--run '("status" "--porcelain=v1") proj-root))
+         (lines (split-string (cdr porc-res) "\n" t))
+         (parsed (kargu-git--parse-porcelain-status lines))
+         (staged (plist-get parsed :staged))
+         (unstaged (plist-get parsed :unstaged))
+         (untracked (plist-get parsed :untracked)))
     (with-temp-buffer
       (insert (format "Head:     %s\n" branch))
       (when (and up-line (string-match-p "\\[" up-line))
         (insert (format "Tracking: %s\n" (string-trim up-line))))
       (insert (format "Root:     %s\n\n" proj-root))
-      ;; Staged
-      (insert (format "Staged changes (%d):\n" (length staged)))
-      (if (null staged)
-          (insert "  (none)\n")
-        (dolist (item (nreverse staged))
-          (insert (format "  %s\n" item))))
-      ;; Unstaged
-      (insert (format "\nUnstaged changes (%d):\n" (length unstaged)))
-      (if (null unstaged)
-          (insert "  (none)\n")
-        (dolist (item (nreverse unstaged))
-          (insert (format "  %s\n" item))))
-      ;; Untracked
-      (insert (format "\nUntracked files (%d):\n" (length untracked)))
-      (if (null untracked)
-          (insert "  (none)\n")
-        (dolist (item (nreverse untracked))
-          (insert (format "  %s\n" item))))
+      (kargu-git--insert-status-section "Staged changes" staged)
+      (insert "\n")
+      (kargu-git--insert-status-section "Unstaged changes" unstaged)
+      (insert "\n")
+      (kargu-git--insert-status-section "Untracked files" untracked)
       (buffer-string))))
 
 ;;;; Diff -----------------------------------------------------------------
@@ -331,9 +335,7 @@ PATH optionally filters by file path."
    '(("type" . "object")
      ("properties" . ()))
    (lambda (_args)
-     (condition-case-unless-debug err
-         (kargu-git-status)
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call (kargu-git-status))))
 
   ;; 2. git_diff
   (kargu-register-tool
@@ -348,12 +350,11 @@ PATH optionally filters by file path."
                                    ("description" . "Optional commit hash or reference.")))))
      ("required" . []))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-git-diff
-          (kargu--tool-arg args "staged")
-          (kargu--tool-arg args "path" "file")
-          (kargu--tool-arg args "commit" "rev"))
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call
+      (kargu-git-diff
+       (kargu--tool-arg args "staged")
+       (kargu--tool-arg args "path" "file")
+       (kargu--tool-arg args "commit" "rev")))))
 
   ;; 3. git_log
   (kargu-register-tool
@@ -366,12 +367,10 @@ PATH optionally filters by file path."
                                  ("description" . "Optional file path to limit history to.")))))
      ("required" . []))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-git-log
-          (let ((n (kargu--tool-arg args "max_count" "limit" "n")))
-            (and n (if (stringp n) (string-to-number n) n)))
-          (kargu--tool-arg args "path" "file"))
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call
+      (kargu-git-log
+       (kargu-to-int (kargu--tool-arg args "max_count" "limit" "n"))
+       (kargu--tool-arg args "path" "file")))))
 
   ;; 4. git_commit
   (kargu-register-tool
@@ -384,11 +383,10 @@ PATH optionally filters by file path."
                                 ("description" . "If true, automatically stage all modified tracked files.")))))
      ("required" . ["message"]))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-git-commit
-          (kargu--tool-arg args "message" "msg")
-          (kargu--tool-arg args "all"))
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call
+      (kargu-git-commit
+       (kargu--tool-arg args "message" "msg")
+       (kargu--tool-arg args "all")))))
 
   ;; 5. git_stage
   (kargu-register-tool
@@ -399,10 +397,9 @@ PATH optionally filters by file path."
                                   ("description" . "File path or pattern to stage (e.g. '.' for all).")))))
      ("required" . ["paths"]))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-git-stage
-          (kargu--tool-arg args "paths" "path" "file" "files"))
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call
+      (kargu-git-stage
+       (kargu--tool-arg args "paths" "path" "file" "files")))))
 
   ;; 6. git_unstage
   (kargu-register-tool
@@ -413,10 +410,9 @@ PATH optionally filters by file path."
                                   ("description" . "File path to unstage.")))))
      ("required" . ["paths"]))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-git-unstage
-          (kargu--tool-arg args "paths" "path" "file" "files"))
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call
+      (kargu-git-unstage
+       (kargu--tool-arg args "paths" "path" "file" "files")))))
 
   ;; 7. git_branch
   (kargu-register-tool
@@ -429,11 +425,10 @@ PATH optionally filters by file path."
                                  ("description" . "Branch name.")))))
      ("required" . ["action"]))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-git-branch
-          (kargu--tool-arg args "action")
-          (kargu--tool-arg args "name" "branch"))
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call
+      (kargu-git-branch
+       (kargu--tool-arg args "action")
+       (kargu--tool-arg args "name" "branch")))))
 
   ;; 8. git_stash
   (kargu-register-tool
@@ -446,11 +441,10 @@ PATH optionally filters by file path."
                                     ("description" . "Optional stash message for push.")))))
      ("required" . ["action"]))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-git-stash
-          (kargu--tool-arg args "action")
-          (kargu--tool-arg args "message" "msg"))
-       (error (format "ERROR: %s" (error-message-string err))))))
+     (kargu-safe-tool-call
+      (kargu-git-stash
+       (kargu--tool-arg args "action")
+       (kargu--tool-arg args "message" "msg")))))
 
   ;; 9. git_blame
   (kargu-register-tool
@@ -465,14 +459,11 @@ PATH optionally filters by file path."
                                      ("description" . "Optional end line.")))))
      ("required" . ["file_path"]))
    (lambda (args)
-     (condition-case-unless-debug err
-         (kargu-git-blame
-          (kargu--tool-arg args "file_path" "path" "file")
-          (let ((s (kargu--tool-arg args "start_line")))
-            (and s (if (stringp s) (string-to-number s) s)))
-          (let ((e (kargu--tool-arg args "end_line")))
-            (and e (if (stringp e) (string-to-number e) e))))
-       (error (format "ERROR: %s" (error-message-string err)))))))
+     (kargu-safe-tool-call
+      (kargu-git-blame
+       (kargu--tool-arg args "file_path" "path" "file")
+       (kargu-to-int (kargu--tool-arg args "start_line"))
+       (kargu-to-int (kargu--tool-arg args "end_line")))))))
 
 (kargu-git-register-tools)
 

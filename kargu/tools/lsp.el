@@ -39,6 +39,7 @@
                                (expand-file-name root))))))
 
 (require 'kargu/core)
+(require 'kargu/json)
 (require 'kargu/api)
 (require 'kargu/permission)
 (require 'eglot nil t)
@@ -78,6 +79,7 @@
 (declare-function kargu-diff--describe "kargu/tools/diff" (proposal))
 (declare-function kargu-diff--file-text "kargu/tools/diff/stage" (path))
 (declare-function kargu-diff-read-file "kargu/tools/diff" (file-path &optional from-line to-line))
+(declare-function kargu-seq-to-list "kargu/json" (seq))
 
 ;;;; Customization --------------------------------------------------------
 
@@ -149,13 +151,7 @@ Handles plists, hash tables, and alists.  Return DEFAULT if absent."
                (and acc (kargu-lsp--field acc field)))
              fields :initial-value object))
 
-(defun kargu-lsp--seq->list (seq)
-  "Normalize a JSON array (list, vector, or single value) to a list."
-  (cond
-   ((vectorp seq) (append seq nil))
-   ((listp seq) seq)
-   (seq (list seq))
-   (t nil)))
+(defalias 'kargu-lsp--seq->list #'kargu-seq-to-list)
 
 ;;;; Session & context routing --------------------------------------------
 
@@ -712,14 +708,9 @@ the skeleton is also displayed in a buffer."
             :source source
             :message text))))
 
-(defun kargu-lsp-get-project-diagnostics ()
-  "Scan and return a text report of diagnostics across the entire project.
-Aggregates diagnostics from Flymake project diagnostics and all open
-project buffers."
-  (interactive)
-  (let* ((root (kargu--project-root))
-         (all-diags nil)
-         ;; 1. Flymake project diagnostics (Eglot / Emacs 28+)
+(defun kargu-lsp--collect-project-diagnostics (root)
+  "Collect raw diagnostics across the project ROOT from Flymake and open buffers."
+  (let* ((all-diags nil)
          (flymake-proj (when (fboundp 'flymake--project-diagnostics)
                          (condition-case _err
                              (let ((default-directory root))
@@ -727,7 +718,6 @@ project buffers."
                                 (and (fboundp 'project-current)
                                      (project-current nil root))))
                            (error nil))))
-         ;; 2. Open project buffers
          (open-proj-diags
           (cl-loop for buf in (buffer-list)
                    for fn = (buffer-file-name buf)
@@ -740,85 +730,139 @@ project buffers."
           (push extracted all-diags))))
     (dolist (d open-proj-diags)
       (push d all-diags))
-    (let ((by-file (make-hash-table :test 'equal))
-          (seen (make-hash-table :test 'equal))
-          (total-count 0))
-      (dolist (d all-diags)
-        (let* ((file (plist-get d :file))
-               (key (format "%s:%s:%s:%s"
-                            file
-                            (plist-get d :line)
-                            (plist-get d :severity)
-                            (plist-get d :message))))
-          (unless (gethash key seen)
-            (puthash key t seen)
-            (cl-incf total-count)
-            (puthash file (cons d (gethash file by-file)) by-file))))
-      (let ((text
-             (if (zerop total-count)
-                 (format "[Project Clean] No compile or linter diagnostics found across the project (root: %s)." root)
-               (let* ((files (hash-table-keys by-file))
-                      (sorted-files
-                       (sort files
-                             (lambda (a b)
-                               (let ((a-has-err (cl-some (lambda (d) (= (plist-get d :severity) 1)) (gethash a by-file)))
-                                     (b-has-err (cl-some (lambda (d) (= (plist-get d :severity) 1)) (gethash b by-file))))
-                                 (cond
-                                  ((and a-has-err (not b-has-err)) t)
-                                  ((and (not a-has-err) b-has-err) nil)
-                                  (t (string< a b)))))))
-                      (sections
-                       (mapcar
-                        (lambda (f)
-                          (let* ((items (gethash f by-file))
-                                 (sorted-items
-                                  (sort (copy-sequence items)
-                                        (lambda (a b)
-                                          (if (= (plist-get a :severity) (plist-get b :severity))
-                                              (< (plist-get a :line) (plist-get b :line))
-                                            (< (plist-get a :severity) (plist-get b :severity))))))
-                                 (err-count (cl-count-if (lambda (d) (= (plist-get d :severity) 1)) sorted-items))
-                                 (warn-count (cl-count-if (lambda (d) (= (plist-get d :severity) 2)) sorted-items))
-                                 (rel-file (if (string-prefix-p root f)
-                                               (substring f (length root))
-                                             f)))
-                            (concat
-                             (format "== %s (%d diagnostic%s%s) ==\n"
-                                     rel-file
-                                     (length sorted-items)
-                                     (if (= (length sorted-items) 1) "" "s")
-                                     (cond
-                                      ((and (> err-count 0) (> warn-count 0))
-                                       (format ": %d error%s, %d warning%s"
-                                               err-count (if (= err-count 1) "" "s")
-                                               warn-count (if (= warn-count 1) "" "s")))
-                                      ((> err-count 0)
-                                       (format ": %d error%s" err-count (if (= err-count 1) "" "s")))
-                                      ((> warn-count 0)
-                                       (format ": %d warning%s" warn-count (if (= warn-count 1) "" "s")))
-                                      (t "")))
-                             (mapconcat
-                              (lambda (d)
-                                (format "  [%s] L%d:C%d: %s%s"
-                                        (kargu-lsp--severity-label (plist-get d :severity))
-                                        (plist-get d :line)
-                                        (plist-get d :character)
-                                        (plist-get d :message)
-                                        (if (plist-get d :source)
-                                            (format " (source: %s)" (plist-get d :source))
-                                          "")))
-                              sorted-items "\n"))))
-                        sorted-files)))
-                 (concat
-                  (format "Project diagnostics (root: %s) — %d diagnostic%s across %d file%s:\n\n"
-                          root total-count (if (= total-count 1) "" "s")
-                          (length sorted-files) (if (= (length sorted-files) 1) "" "s"))
-                  (string-join sections "\n\n"))))))
-        (when (called-interactively-p 'any)
-          (message "%s" text))
-        text))))
+    all-diags))
+
+(defun kargu-lsp--group-diagnostics-by-file (all-diags)
+  "Deduplicate and group ALL-DIAGS by file.
+Return a list `(TOTAL-COUNT BY-FILE-HASH)'."
+  (let ((by-file (make-hash-table :test 'equal))
+        (seen (make-hash-table :test 'equal))
+        (total-count 0))
+    (dolist (d all-diags)
+      (let* ((file (plist-get d :file))
+             (key (format "%s:%s:%s:%s"
+                          file
+                          (plist-get d :line)
+                          (plist-get d :severity)
+                          (plist-get d :message))))
+        (unless (gethash key seen)
+          (puthash key t seen)
+          (cl-incf total-count)
+          (puthash file (cons d (gethash file by-file)) by-file))))
+    (list total-count by-file)))
+
+(defun kargu-lsp--format-file-diagnostic-section (root file items)
+  "Format diagnostic ITEMS for FILE relative to ROOT."
+  (let* ((sorted-items
+          (sort (copy-sequence items)
+                (lambda (a b)
+                  (if (= (plist-get a :severity) (plist-get b :severity))
+                      (< (plist-get a :line) (plist-get b :line))
+                    (< (plist-get a :severity) (plist-get b :severity))))))
+         (err-count (cl-count-if (lambda (d) (= (plist-get d :severity) 1)) sorted-items))
+         (warn-count (cl-count-if (lambda (d) (= (plist-get d :severity) 2)) sorted-items))
+         (rel-file (if (string-prefix-p root file)
+                       (substring file (length root))
+                     file)))
+    (concat
+     (format "== %s (%d diagnostic%s%s) ==\n"
+             rel-file
+             (length sorted-items)
+             (if (= (length sorted-items) 1) "" "s")
+             (cond
+              ((and (> err-count 0) (> warn-count 0))
+               (format ": %d error%s, %d warning%s"
+                       err-count (if (= err-count 1) "" "s")
+                       warn-count (if (= warn-count 1) "" "s")))
+              ((> err-count 0)
+               (format ": %d error%s" err-count (if (= err-count 1) "" "s")))
+              ((> warn-count 0)
+               (format ": %d warning%s" warn-count (if (= warn-count 1) "" "s")))
+              (t "")))
+     (mapconcat
+      (lambda (d)
+        (format "  [%s] L%d:C%d: %s%s"
+                (kargu-lsp--severity-label (plist-get d :severity))
+                (plist-get d :line)
+                (plist-get d :character)
+                (plist-get d :message)
+                (if (plist-get d :source)
+                    (format " (source: %s)" (plist-get d :source))
+                  "")))
+      sorted-items "\n"))))
+
+(defun kargu-lsp--format-project-diagnostics (root total-count by-file)
+  "Format aggregated diagnostics for ROOT given TOTAL-COUNT and BY-FILE table."
+  (if (zerop total-count)
+      (format "[Project Clean] No compile or linter diagnostics found across the project (root: %s)." root)
+    (let* ((files (hash-table-keys by-file))
+           (sorted-files
+            (sort files
+                  (lambda (a b)
+                    (let ((a-has-err (cl-some (lambda (d) (= (plist-get d :severity) 1)) (gethash a by-file)))
+                          (b-has-err (cl-some (lambda (d) (= (plist-get d :severity) 1)) (gethash b by-file))))
+                      (cond
+                       ((and a-has-err (not b-has-err)) t)
+                       ((and (not a-has-err) b-has-err) nil)
+                       (t (string< a b)))))))
+           (sections
+            (mapcar (lambda (f)
+                      (kargu-lsp--format-file-diagnostic-section root f (gethash f by-file)))
+                    sorted-files)))
+      (concat
+       (format "Project diagnostics (root: %s) — %d diagnostic%s across %d file%s:\n\n"
+               root total-count (if (= total-count 1) "" "s")
+               (length sorted-files) (if (= (length sorted-files) 1) "" "s"))
+       (string-join sections "\n\n")))))
+
+(defun kargu-lsp-get-project-diagnostics ()
+  "Scan and return a text report of diagnostics across the entire project.
+Aggregates diagnostics from Flymake project diagnostics and all open
+project buffers."
+  (interactive)
+  (let* ((root (kargu--project-root))
+         (all-diags (kargu-lsp--collect-project-diagnostics root))
+         (grouped (kargu-lsp--group-diagnostics-by-file all-diags))
+         (total-count (nth 0 grouped))
+         (by-file (nth 1 grouped))
+         (text (kargu-lsp--format-project-diagnostics root total-count by-file)))
+    (when (called-interactively-p 'any)
+      (message "%s" text))
+    text))
 
 (defalias 'kargu-lsp-project-diagnostics #'kargu-lsp-get-project-diagnostics)
+
+(defun kargu-lsp--buffer-has-checker-p (buf)
+  "Return non-nil if BUF has an active or available syntax checker."
+  (and buf (buffer-live-p buf)
+       (or (kargu-lsp--buffer-managed-p buf)
+           (with-current-buffer buf
+             (or (bound-and-true-p flymake-mode)
+                 (bound-and-true-p flycheck-mode)
+                 (and (fboundp 'flycheck-get-checker-for-buffer)
+                      (flycheck-get-checker-for-buffer)))))))
+
+(defun kargu-lsp--ensure-flycheck-triggered (buf)
+  "Ensure Flycheck is started and checks BUF if available."
+  (when (and buf (buffer-live-p buf) (fboundp 'flycheck-mode))
+    (with-current-buffer buf
+      (when (and (fboundp 'flycheck-get-checker-for-buffer)
+                 (flycheck-get-checker-for-buffer))
+        (unless (bound-and-true-p flycheck-mode)
+          (ignore-errors (flycheck-mode 1)))
+        (when (and (bound-and-true-p flycheck-mode) (fboundp 'flycheck-buffer))
+          (ignore-errors (flycheck-buffer)))))))
+
+(defun kargu-lsp--checker-busy-p (buf)
+  "Return non-nil if Flymake or Flycheck is currently actively running on BUF."
+  (and buf (buffer-live-p buf)
+       (with-current-buffer buf
+         (or (and (bound-and-true-p flycheck-mode)
+                  (fboundp 'flycheck-running-p)
+                  (flycheck-running-p))
+             (and (bound-and-true-p flymake-mode)
+                  (fboundp 'flymake-is-running)
+                  (flymake-is-running))))))
 
 (defun kargu-lsp-wait-diagnostics (file-path callback &optional timeout)
   "Asynchronously wait for diagnostics of FILE-PATH to settle.
@@ -826,22 +870,8 @@ CALLBACK is called with (PATH TEXT TIMEOUT-P) once Flymake or Flycheck
 has stabilized."
   (let* ((path (kargu--resolve-path file-path))
          (buf (find-buffer-visiting path))
-         (has-checker-p
-          (and buf (buffer-live-p buf)
-               (or (kargu-lsp--buffer-managed-p buf)
-                   (with-current-buffer buf
-                     (or (bound-and-true-p flymake-mode)
-                         (bound-and-true-p flycheck-mode)
-                         (and (fboundp 'flycheck-get-checker-for-buffer)
-                              (flycheck-get-checker-for-buffer))))))))
-    (when (and buf (buffer-live-p buf) (fboundp 'flycheck-mode))
-      (with-current-buffer buf
-        (when (and (fboundp 'flycheck-get-checker-for-buffer)
-                   (flycheck-get-checker-for-buffer))
-          (unless (bound-and-true-p flycheck-mode)
-            (ignore-errors (flycheck-mode 1)))
-          (when (and (bound-and-true-p flycheck-mode) (fboundp 'flycheck-buffer))
-            (ignore-errors (flycheck-buffer))))))
+         (has-checker-p (kargu-lsp--buffer-has-checker-p buf)))
+    (kargu-lsp--ensure-flycheck-triggered buf)
     (let* ((timeout (or timeout kargu-lsp-diag-settle-timeout))
            (start (float-time))
            (last-snapshot nil)
@@ -850,20 +880,13 @@ has stabilized."
           (funcall callback path (kargu-lsp-get-diagnostics path) nil)
         (cl-labels
             ((tick ()
-               (let* ((busy (and buf (buffer-live-p buf)
-                                 (with-current-buffer buf
-                                   (or (and (bound-and-true-p flycheck-mode)
-                                            (fboundp 'flycheck-running-p)
-                                            (flycheck-running-p))
-                                       (and (bound-and-true-p flymake-mode)
-                                            (fboundp 'flymake-is-running)
-                                            (flymake-is-running))))))
+               (let* ((busy (kargu-lsp--checker-busy-p buf))
                       (timed-out (>= (- (float-time) start) timeout))
                       (snapshot (kargu-lsp--diagnostics-data path)))
                  (setq polls (1+ polls))
                  (if (or timed-out
-                          (and (not busy) (>= polls 1) (null snapshot))
-                          (and (not busy) (>= polls 2) (equal snapshot last-snapshot)))
+                         (and (not busy) (>= polls 1) (null snapshot))
+                         (and (not busy) (>= polls 2) (equal snapshot last-snapshot)))
                      (funcall callback path (kargu-lsp-get-diagnostics path) timed-out)
                    (setq last-snapshot snapshot)
                    (run-at-time 0.25 nil #'tick)))))
@@ -1213,6 +1236,62 @@ and :end-line."
             (kargu-diff-read-file path s-line e-line)
           (format "(symbol %s lines %d-%d)" symbol-name s-line e-line)))))))
 
+(defun kargu-lsp--format-missing-symbol-error (symbol-name path flat kind)
+  "Format error message when SYMBOL-NAME is not found in PATH."
+  (let ((avail (if flat
+                   (mapconcat
+                    (lambda (s)
+                      (format "  • %s %s [%s]"
+                              (plist-get s :kind)
+                              (plist-get s :name)
+                              (if (> (plist-get s :end-line) (plist-get s :start-line))
+                                  (format "lines %d-%d" (plist-get s :start-line) (plist-get s :end-line))
+                                (format "line %d" (plist-get s :start-line)))))
+                    (seq-take flat 30)
+                    "\n")
+                 "  (no symbols found in file)")))
+    (format "ERROR: Symbol '%s'%s not found in %s.\nAvailable symbols:\n%s"
+            symbol-name (if kind (format " (kind: %s)" kind) "") path avail)))
+
+(defun kargu-lsp--splice-symbol-content (raw-text s-line e-line new-content)
+  "Replace lines S-LINE to E-LINE in RAW-TEXT with NEW-CONTENT."
+  (let* ((file-lines (split-string raw-text "\n"))
+         (total (length file-lines))
+         (s-idx (1- s-line))
+         (e-idx (1- e-line)))
+    (when (or (< s-idx 0) (> s-idx total))
+      (error "Symbol start line %d out of range (total lines %d)" s-line total))
+    (let* ((before-lines (seq-take file-lines s-idx))
+           (after-lines (nthcdr (min total (1+ e-idx)) file-lines))
+           (clean-content (and new-content (string-trim-right new-content "[\r\n]+")))
+           (new-lines (if (or (null clean-content) (string-empty-p clean-content))
+                          nil
+                        (split-string clean-content "\n")))
+           (combined (append before-lines new-lines after-lines))
+           (new-full-text (string-join combined "\n")))
+      (when (and (string-suffix-p "\n" raw-text)
+                 (not (string-suffix-p "\n" new-full-text)))
+        (setq new-full-text (concat new-full-text "\n")))
+      new-full-text)))
+
+(defun kargu-lsp--apply-symbol-replacement (path sym new-full-text s-line e-line reason)
+  "Apply NEW-FULL-TEXT to PATH replacing SYM (lines S-LINE to E-LINE)."
+  (when (and (stringp reason) (not (string-empty-p reason)))
+    (message "kargu edit_by_lsp proposal for %s (%s): %s" path (plist-get sym :name) reason)
+    (kargu-log 'info "lsp: edit_by_lsp reason: %s" reason))
+  (require 'kargu/tools/diff nil t)
+  (if (and (fboundp 'kargu-diff-apply-proposal)
+           (fboundp 'kargu-diff--describe))
+      (let ((prop (kargu-diff-apply-proposal path new-full-text)))
+        (format "Successfully replaced %s `%s` (lines %d-%d) in %s.\n%s"
+                (plist-get sym :kind) (plist-get sym :name)
+                s-line e-line path
+                (kargu-diff--describe prop)))
+    (with-temp-file path (insert new-full-text))
+    (format "Replaced %s `%s` (lines %d-%d) in %s"
+            (plist-get sym :kind) (plist-get sym :name)
+            s-line e-line path)))
+
 (defun kargu-lsp-edit-symbol (file-path symbol-name new-content &optional kind reason)
   "Replace the body of SYMBOL-NAME in FILE-PATH with NEW-CONTENT.
 NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
@@ -1227,20 +1306,7 @@ NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
          ((not (file-exists-p path))
           (format "ERROR: file does not exist: %s" path))
          ((null matches)
-          (let ((avail (if flat
-                           (mapconcat
-                            (lambda (s)
-                              (format "  • %s %s [%s]"
-                                      (plist-get s :kind)
-                                      (plist-get s :name)
-                                      (if (> (plist-get s :end-line) (plist-get s :start-line))
-                                          (format "lines %d-%d" (plist-get s :start-line) (plist-get s :end-line))
-                                        (format "line %d" (plist-get s :start-line)))))
-                            (seq-take flat 30)
-                            "\n")
-                         "  (no symbols found in file)")))
-            (format "ERROR: Symbol '%s'%s not found in %s.\nAvailable symbols:\n%s"
-                    symbol-name (if kind (format " (kind: %s)" kind) "") path avail)))
+          (kargu-lsp--format-missing-symbol-error symbol-name path flat kind))
          (t
           (let* ((sym (car matches))
                  (s-line (plist-get sym :start-line))
@@ -1250,38 +1316,8 @@ NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
                                (with-temp-buffer
                                  (insert-file-contents path)
                                  (buffer-string))))
-                 (file-lines (split-string raw-text "\n"))
-                 (total (length file-lines))
-                 (s-idx (1- s-line))
-                 (e-idx (1- e-line)))
-            (when (or (< s-idx 0) (> s-idx total))
-              (error "Symbol start line %d out of range (total lines %d)" s-line total))
-            (let* ((before-lines (seq-take file-lines s-idx))
-                   (after-lines (nthcdr (min total (1+ e-idx)) file-lines))
-                   (clean-content (and new-content (string-trim-right new-content "[\r\n]+")))
-                   (new-lines (if (or (null clean-content) (string-empty-p clean-content))
-                                  nil
-                                (split-string clean-content "\n")))
-                   (combined (append before-lines new-lines after-lines))
-                   (new-full-text (string-join combined "\n")))
-              (when (and (string-suffix-p "\n" raw-text)
-                         (not (string-suffix-p "\n" new-full-text)))
-                (setq new-full-text (concat new-full-text "\n")))
-              (when (and (stringp reason) (not (string-empty-p reason)))
-                (message "kargu edit_by_lsp proposal for %s (%s): %s" path symbol-name reason)
-                (kargu-log 'info "lsp: edit_by_lsp reason: %s" reason))
-              (require 'kargu/tools/diff nil t)
-              (if (and (fboundp 'kargu-diff-apply-proposal)
-                       (fboundp 'kargu-diff--describe))
-                  (let ((prop (kargu-diff-apply-proposal path new-full-text)))
-                    (format "Successfully replaced %s `%s` (lines %d-%d) in %s.\n%s"
-                            (plist-get sym :kind) (plist-get sym :name)
-                            s-line e-line path
-                            (kargu-diff--describe prop)))
-                (with-temp-file path (insert new-full-text))
-                (format "Replaced %s `%s` (lines %d-%d) in %s"
-                        (plist-get sym :kind) (plist-get sym :name)
-                        s-line e-line path)))))))))
+                 (new-full-text (kargu-lsp--splice-symbol-content raw-text s-line e-line new-content)))
+            (kargu-lsp--apply-symbol-replacement path sym new-full-text s-line e-line reason)))))))
 
 (defalias 'kargu-lsp-edit-by-lsp #'kargu-lsp-edit-symbol)
 

@@ -33,6 +33,9 @@
                                (expand-file-name root))))))
 
 (require 'kargu/core)
+(require 'kargu/fs)
+
+(declare-function kargu-fs-has-file-p "kargu/fs" (root filename))
 
 ;;;; Language Specification Structure ---------------------------------------
 
@@ -74,10 +77,7 @@
 
 ;;;; Detection -------------------------------------------------------------
 
-(defun kargu-languages--has-file-p (root filename)
-  "Return non-nil if FILENAME exists under directory ROOT."
-  (and (stringp root)
-       (file-exists-p (expand-file-name filename root))))
+(defalias 'kargu-languages--has-file-p #'kargu-fs-has-file-p)
 
 (defun kargu-language-detect (root)
   "Detect the primary language spec for ROOT by evaluating registered specs.

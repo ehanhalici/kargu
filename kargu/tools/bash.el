@@ -68,58 +68,80 @@
         (set-process-buffer p nil)
         (ignore-errors (delete-process p))))))
 
+(defun kargu-bash--format-result (code dir out)
+  "Format process execution result string from CODE, DIR, and OUT."
+  (format "exit %s\ncwd: %s\n%s"
+          code dir
+          (if (string-empty-p out) "(no output)" out)))
+
+(defun kargu-bash--log-finished (command code start-time)
+  "Log finish message for COMMAND with exit CODE and elapsed START-TIME."
+  (message "kargu: [bash] '%s' finished (exit %s, %.1fs)"
+           (truncate-string-to-width command 30)
+           code (- (float-time) start-time)))
+
+(defun kargu-bash--manage-list ()
+  "List active background processes."
+  (let (lines)
+    (maphash
+     (lambda (id plist)
+       (let* ((proc (plist-get plist :proc))
+              (alive (and proc (process-live-p proc)))
+              (pid (plist-get plist :pid))
+              (orig-cmd (plist-get plist :command)))
+         (push (format "  [%s] PID %s (%s) - %s"
+                       id (or pid "?") (if alive "RUNNING" "EXITED")
+                       (truncate-string-to-width orig-cmd 60))
+               lines)))
+     kargu-bash--processes)
+    (if lines
+        (concat "Background processes:\n" (string-join (nreverse lines) "\n"))
+      "No active background processes.")))
+
+(defun kargu-bash--manage-kill (target-id)
+  "Terminate background process matching TARGET-ID."
+  (let ((plist (gethash target-id kargu-bash--processes)))
+    (if (null plist)
+        (format "ERROR: no background process found with ID '%s'" target-id)
+      (let ((buf (plist-get plist :buf)))
+        (kargu-bash--clean-buffer-processes buf)
+        (when (and buf (buffer-live-p buf))
+          (ignore-errors (kill-buffer buf)))
+        (remhash target-id kargu-bash--processes)
+        (format "Background process [%s] (PID %s) terminated."
+                target-id (plist-get plist :pid))))))
+
+(defun kargu-bash--manage-status (target-id)
+  "Report status and recent output for background process matching TARGET-ID."
+  (let ((plist (gethash target-id kargu-bash--processes)))
+    (if (null plist)
+        (format "ERROR: no background process found with ID '%s'" target-id)
+      (let* ((proc (plist-get plist :proc))
+             (alive (and proc (process-live-p proc)))
+             (buf (plist-get plist :buf))
+             (out (if (and buf (buffer-live-p buf))
+                      (with-current-buffer buf
+                        (let* ((lines (split-string (buffer-string) "\n"))
+                               (tail (last lines 25)))
+                          (string-join tail "\n")))
+                    "(buffer closed)")))
+        (format "Background process [%s] (PID %s, %s):\nCommand: %s\nRecent output:\n%s"
+                target-id (plist-get plist :pid)
+                (if alive "RUNNING" (format "EXITED code %s" (process-exit-status proc)))
+                (plist-get plist :command)
+                (if (string-empty-p (string-trim out)) "(no output yet)" out))))))
+
 (defun kargu-bash--manage-process (command)
   "Handle background process management commands (list, status, kill).
 Return a result string if COMMAND matches a management command, or nil."
   (let ((cmd (string-trim command)))
     (cond
      ((equal cmd "list")
-      (let (lines)
-        (maphash
-         (lambda (id plist)
-           (let* ((proc (plist-get plist :proc))
-                  (alive (and proc (process-live-p proc)))
-                  (pid (plist-get plist :pid))
-                  (orig-cmd (plist-get plist :command)))
-             (push (format "  [%s] PID %s (%s) - %s"
-                           id (or pid "?") (if alive "RUNNING" "EXITED")
-                           (truncate-string-to-width orig-cmd 60))
-                   lines)))
-         kargu-bash--processes)
-        (if lines
-            (concat "Background processes:\n" (string-join (nreverse lines) "\n"))
-          "No active background processes.")))
+      (kargu-bash--manage-list))
      ((string-prefix-p "kill " cmd)
-      (let* ((target-id (string-trim (substring cmd 5)))
-             (plist (gethash target-id kargu-bash--processes)))
-        (if (null plist)
-            (format "ERROR: no background process found with ID '%s'" target-id)
-          (let ((buf (plist-get plist :buf)))
-            (kargu-bash--clean-buffer-processes buf)
-            (when (and buf (buffer-live-p buf))
-              (ignore-errors (kill-buffer buf)))
-            (remhash target-id kargu-bash--processes)
-            (format "Background process [%s] (PID %s) terminated."
-                    target-id (plist-get plist :pid))))))
+      (kargu-bash--manage-kill (string-trim (substring cmd 5))))
      ((string-prefix-p "status " cmd)
-      (let* ((target-id (string-trim (substring cmd 7)))
-             (plist (gethash target-id kargu-bash--processes)))
-        (if (null plist)
-            (format "ERROR: no background process found with ID '%s'" target-id)
-          (let* ((proc (plist-get plist :proc))
-                 (alive (and proc (process-live-p proc)))
-                 (buf (plist-get plist :buf))
-                 (out (if (and buf (buffer-live-p buf))
-                          (with-current-buffer buf
-                            (let* ((lines (split-string (buffer-string) "\n"))
-                                   (tail (last lines 25)))
-                              (string-join tail "\n")))
-                        "(buffer closed)")))
-            (format "Background process [%s] (PID %s, %s):\nCommand: %s\nRecent output:\n%s"
-                    target-id (plist-get plist :pid)
-                    (if alive "RUNNING" (format "EXITED code %s" (process-exit-status proc)))
-                    (plist-get plist :command)
-                    (if (string-empty-p (string-trim out)) "(no output yet)" out))))))
+      (kargu-bash--manage-status (string-trim (substring cmd 7))))
      (t nil))))
 
 (defun kargu-bash--resolve-shell ()
@@ -170,6 +192,14 @@ Return a result string if COMMAND matches a management command, or nil."
     (ignore-errors (kill-process kargu-bash--active-async-proc))
     (setq kargu-bash--active-async-proc nil)))
 
+(defun kargu-bash--cleanup-async (buf timer timeout-timer)
+  "Cancel TIMERS and clean up BUF after async bash run."
+  (setq kargu-bash--active-async-proc nil)
+  (when timer (cancel-timer timer))
+  (when timeout-timer (cancel-timer timeout-timer))
+  (kargu-bash--clean-buffer-processes buf)
+  (when (buffer-live-p buf) (kill-buffer buf)))
+
 (defun kargu-bash--run-async (command dir shell callback)
   "Execute COMMAND asynchronously in DIR under SHELL.
 Calls CALLBACK with the formatted output string upon exit or timeout.
@@ -191,21 +221,13 @@ Emacs UI remains completely responsive and interactive for the user."
                   (lambda (p _event)
                     (unless completed
                       (setq completed t)
-                      (setq kargu-bash--active-async-proc nil)
-                      (when timer (cancel-timer timer))
-                      (when timeout-timer (cancel-timer timeout-timer))
                       (let* ((code (process-exit-status p))
                              (out (if (buffer-live-p buf)
                                       (with-current-buffer buf (buffer-string))
                                     ""))
-                             (res (format "exit %s\ncwd: %s\n%s"
-                                          code dir
-                                          (if (string-empty-p out) "(no output)" out))))
-                        (message "kargu: [bash] '%s' finished (exit %s, %.1fs)"
-                                 (truncate-string-to-width command 30)
-                                 code (- (float-time) start))
-                        (kargu-bash--clean-buffer-processes buf)
-                        (when (buffer-live-p buf) (kill-buffer buf))
+                             (res (kargu-bash--format-result code dir out)))
+                        (kargu-bash--log-finished command code start)
+                        (kargu-bash--cleanup-async buf timer timeout-timer)
                         (funcall callback res))))))
       (set-process-query-on-exit-flag proc nil)
       (setq kargu-bash--active-async-proc proc))
@@ -216,8 +238,6 @@ Emacs UI remains completely responsive and interactive for the user."
            (lambda ()
              (unless completed
                (setq completed t)
-               (setq kargu-bash--active-async-proc nil)
-               (when timer (cancel-timer timer))
                (when (process-live-p proc)
                  (ignore-errors (kill-process proc)))
                (let ((err-msg (format "ERROR: bash timed out after %ds: %s"
@@ -226,8 +246,7 @@ Emacs UI remains completely responsive and interactive for the user."
                  (message "kargu: [bash] '%s' timed out (%ds)"
                           (truncate-string-to-width command 30)
                           kargu-bash-timeout)
-                 (kargu-bash--clean-buffer-processes buf)
-                 (when (buffer-live-p buf) (kill-buffer buf))
+                 (kargu-bash--cleanup-async buf timer timeout-timer)
                  (funcall callback err-msg))))))
     ;; Periodic status ticker in minibuffer so user sees elapsed time
     (setq timer
@@ -282,11 +301,8 @@ Emits live progress updates and redisplays to avoid freezing the window."
                        (truncate-string-to-width command 80)))
             (let* ((code (process-exit-status proc))
                    (out (with-current-buffer buf (buffer-string))))
-              (message "kargu: [bash] '%s' finished (exit %s, %.1fs)"
-                       (truncate-string-to-width command 30)
-                       code (- (float-time) start))
-              (format "exit %s\ncwd: %s\n%s" code dir
-                      (if (string-empty-p out) "(no output)" out)))))
+              (kargu-bash--log-finished command code start)
+              (kargu-bash--format-result code dir out))))
       (kargu-bash--clean-buffer-processes buf)
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
