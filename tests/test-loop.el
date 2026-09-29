@@ -223,16 +223,16 @@
               ((symbol-function 'kargu--get-system-prompt)
                (lambda () (format "SYS %s %s" mode (and kargu--compaction-system t)))))
       (kargu--validate-history)
-      (should (equal (kargu--aget (car kargu--message-history) "content") "SYS ask nil"))
+      (should (equal (kargu-aget (car kargu--message-history) "content") "SYS ask nil"))
       (setq mode 'agent)
       (kargu--validate-history)
-      (should (equal (kargu--aget (car kargu--message-history) "content") "SYS agent nil"))
+      (should (equal (kargu-aget (car kargu--message-history) "content") "SYS agent nil"))
       (setq kargu--compaction-system "compact")
       (kargu--validate-history)
-      (should (equal (kargu--aget (car kargu--message-history) "content") "SYS agent t"))
+      (should (equal (kargu-aget (car kargu--message-history) "content") "SYS agent t"))
       (setq kargu--compaction-system nil)
       (kargu--validate-history)
-      (should (equal (kargu--aget (car kargu--message-history) "content") "SYS agent nil")))))
+      (should (equal (kargu-aget (car kargu--message-history) "content") "SYS agent nil")))))
 
 (ert-deftest kargu-system-message-is-kept-while-nothing-changes-test ()
   "An unchanged prompt input keeps the stored system message untouched."
@@ -245,7 +245,7 @@
       (kargu--validate-history)
       (kargu--validate-history)
       (kargu--validate-history)
-      (should (equal (kargu--aget (car kargu--message-history) "content") "SYS 1")))))
+      (should (equal (kargu-aget (car kargu--message-history) "content") "SYS 1")))))
 
 (ert-deftest kargu-loop-continue-prompt-test ()
   "Test loop limit prompt structure and continuation mechanism."

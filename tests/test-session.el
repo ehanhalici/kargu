@@ -64,8 +64,8 @@
           ;; List sessions
           (let ((sessions (kargu-session-list proj-dir)))
             (should (= (length sessions) 1))
-            (should (equal (kargu--aget (car sessions) "id") "session-test-001"))
-            (should (equal (kargu--aget (car sessions) "title") "Test Chat Session")))
+            (should (equal (kargu-aget (car sessions) "id") "session-test-001"))
+            (should (equal (kargu-aget (car sessions) "title") "Test Chat Session")))
 
           ;; Restore into buf2
           (with-current-buffer buf2
@@ -109,8 +109,8 @@
               (insert "## you · 12:00\nRemember the provider\n"))
             (kargu-session-save buf1))
           (let ((sessions (kargu-session-list proj-dir)))
-            (should (equal (kargu--aget (car sessions) "provider") "openrouter"))
-            (should (equal (kargu--aget (car sessions) "model") "kept-model")))
+            (should (equal (kargu-aget (car sessions) "provider") "openrouter"))
+            (should (equal (kargu-aget (car sessions) "model") "kept-model")))
           (setq kargu--session-provider nil
                 kargu--session-model nil)
           (with-current-buffer buf2
@@ -159,12 +159,12 @@
           ;; Verify Proj A sessions
           (let ((sessionsA (kargu-session-list projA)))
             (should (= (length sessionsA) 1))
-            (should (equal (kargu--aget (car sessionsA) "id") "session-A")))
+            (should (equal (kargu-aget (car sessionsA) "id") "session-A")))
 
           ;; Verify Proj B sessions
           (let ((sessionsB (kargu-session-list projB)))
             (should (= (length sessionsB) 1))
-            (should (equal (kargu--aget (car sessionsB) "id") "session-B"))))
+            (should (equal (kargu-aget (car sessionsB) "id") "session-B"))))
       (when (buffer-live-p bufA) (kill-buffer bufA))
       (when (buffer-live-p bufB) (kill-buffer bufB))
       (delete-directory temp-dir t)
@@ -309,8 +309,8 @@
             (with-temp-buffer
               (kargu-session-save buf)))
           (let ((saved (car (kargu-session-list proj-root))))
-            (should (equal (kargu--aget saved "provider") ""))
-            (should (equal (kargu--aget saved "model") ""))))
+            (should (equal (kargu-aget saved "provider") ""))
+            (should (equal (kargu-aget saved "model") ""))))
       (when (buffer-live-p buf) (kill-buffer buf))
       (delete-directory temp-dir t)
       (delete-directory proj t))))

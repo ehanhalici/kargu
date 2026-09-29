@@ -52,7 +52,7 @@ disambiguates arrays from objects in `kargu--json-encode'."
 
 (defun kargu--json-stringify-keys (object)
   "Return OBJECT with JSON object keys converted to strings.
-Walks alists and arrays recursively so `kargu--aget' (string
+Walks alists and arrays recursively so `kargu-aget' (string
 keys) works even when the parser interned keys as symbols."
   (cond
    ((kargu--object-p object)
@@ -256,41 +256,41 @@ are ignored.  Optional DEPTH caps nesting at
      ((null value) nil)
      ((eq value :json-null) nil)
      ((eq value :json-false) nil)
-     ((stringp value) (kargu--nonempty value))
+     ((stringp value) (kargu-nonempty value))
      ((numberp value) nil)
      ((>= depth kargu--json-max-depth) "[truncated]")
      ((vectorp value)
       (kargu--coerce-text (append value nil) (1+ depth)))
      ((kargu--object-p value)
-      (or (kargu--coerce-text (kargu--aget value "text") (1+ depth))
-          (kargu--coerce-text (kargu--aget value "output_text") (1+ depth))
-          (kargu--coerce-text (kargu--aget value "summary") (1+ depth))
-          (kargu--coerce-text (kargu--aget value "content") (1+ depth))))
+      (or (kargu--coerce-text (kargu-aget value "text") (1+ depth))
+          (kargu--coerce-text (kargu-aget value "output_text") (1+ depth))
+          (kargu--coerce-text (kargu-aget value "summary") (1+ depth))
+          (kargu--coerce-text (kargu-aget value "content") (1+ depth))))
      ((listp value)
       (let ((bits (delq nil (mapcar (lambda (elt)
                                       (kargu--coerce-text elt (1+ depth)))
                                     value))))
-        (and bits (kargu--nonempty (mapconcat #'identity bits "")))))
+        (and bits (kargu-nonempty (mapconcat #'identity bits "")))))
      (t nil))))
 
 (defun kargu--content-text (obj)
   "Non-empty plain `content' of OBJ, never reasoning fields."
   (and obj (not (eq obj :json-null))
-       (kargu--coerce-text (kargu--aget obj "content"))))
+       (kargu--coerce-text (kargu-aget obj "content"))))
 
 (defun kargu--reasoning-text (obj)
   "Non-empty reasoning / thinking text of OBJ, or nil."
   (when (and obj (not (eq obj :json-null)))
-    (or (kargu--coerce-text (kargu--aget obj "reasoning_content"))
-        (kargu--coerce-text (kargu--aget obj "reasoning"))
-        (kargu--coerce-text (kargu--aget obj "reasoning_details"))
-        (kargu--coerce-text (kargu--aget obj "thinking"))
-        (kargu--coerce-text (kargu--aget obj "thought")))))
+    (or (kargu--coerce-text (kargu-aget obj "reasoning_content"))
+        (kargu--coerce-text (kargu-aget obj "reasoning"))
+        (kargu--coerce-text (kargu-aget obj "reasoning_details"))
+        (kargu--coerce-text (kargu-aget obj "thinking"))
+        (kargu--coerce-text (kargu-aget obj "thought")))))
 
 (defun kargu--json-get (obj key)
-  "Like `kargu--aget' but also try KEY interned as a symbol."
-  (or (kargu--aget obj key)
-      (and (stringp key) (kargu--aget obj (intern key)))))
+  "Like `kargu-aget' but also try KEY interned as a symbol."
+  (or (kargu-aget obj key)
+      (and (stringp key) (kargu-aget obj (intern key)))))
 
 (defun kargu--json-decode-object (string)
   "Decode JSON STRING to an alist with string keys, or nil."
@@ -302,7 +302,7 @@ are ignored.  Optional DEPTH caps nesting at
                  obj)))
     (cond
      ((null err) nil)
-     ((stringp err) (kargu--nonempty err))
+     ((stringp err) (kargu-nonempty err))
      ((not (kargu--object-p err)) nil)
      (t
       (let* ((msg (or (kargu--coerce-text (kargu--json-get err "message"))
@@ -312,7 +312,7 @@ are ignored.  Optional DEPTH caps nesting at
              (meta (kargu--json-get err "metadata"))
              (meta-text
               (cond
-               ((stringp meta) (kargu--nonempty meta))
+               ((stringp meta) (kargu-nonempty meta))
                ((kargu--object-p meta)
                 (or (kargu--coerce-text (kargu--json-get meta "raw"))
                     (kargu--coerce-text (kargu--json-get meta "message"))

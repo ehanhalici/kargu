@@ -17,6 +17,7 @@
 
 (require 'ert)
 (require 'cl-lib)
+(require 'tests/test-helpers)
 (require 'kargu/tools/dape)
 (require 'kargu/loop/tools)
 (require 'kargu/languages)
@@ -76,8 +77,8 @@
       (let ((alias-name (car pair))
             (target-name (cdr pair)))
         (should (gethash alias-name kargu--tool-registry))
-        (should (equal (kargu--aget (gethash alias-name kargu--tool-registry) "description")
-                       (kargu--aget (gethash target-name kargu--tool-registry) "description")))))))
+        (should (equal (kargu-aget (gethash alias-name kargu--tool-registry) "description")
+                       (kargu-aget (gethash target-name kargu--tool-registry) "description")))))))
 
 (ert-deftest kargu-dape-validate-breakpoint-args-empty-test ()
   "Ensure empty args to debug_set_breakpoint return clear parameter guidance."
@@ -98,8 +99,51 @@
   "Ensure debug_eval rejects empty expression."
   (let ((spec (gethash "debug_eval" kargu--tool-registry)))
     (should spec)
-    (let ((res (funcall (kargu--aget spec "executor") '(("expression" . "")))))
+    (let ((res (funcall (kargu-aget spec "executor") '(("expression" . "")))))
       (should (equal res "ERROR: expression is required")))))
+
+(ert-deftest kargu-dape-get-context-chains-callbacks-test ()
+  "Context fetches stack, then scopes, then variables, then answers."
+  (let* ((var (list :name "x" :value "1"))
+         (scope (list :name "Locals" :expensive nil :variables (vector var)))
+         (frame (list :id 7 :name "main" :line 3
+                      :source (list :path "/tmp/a.c")
+                      :scopes (vector scope)))
+         (thread (list :id 1 :status "stopped" :stackFrames (vector frame)))
+         (order nil))
+    (cl-letf (((symbol-function 'kargu-dape--connection) (lambda () 'conn))
+              ((symbol-function 'dape--current-thread) (lambda (_) thread))
+              ((symbol-function 'dape--stopped-threads) (lambda (_) (list thread)))
+              ((symbol-function 'dape--stack-trace)
+               (lambda (_conn _thread _n cb)
+                 (push 'stack order)
+                 (funcall cb)))
+              ((symbol-function 'dape--current-stack-frame) (lambda (_) frame))
+              ((symbol-function 'dape--scopes)
+               (lambda (_conn _frame cb)
+                 (push 'scopes order)
+                 (funcall cb)))
+              ((symbol-function 'dape--variables)
+               (lambda (_conn _scope cb)
+                 (push 'vars order)
+                 (funcall cb)))
+              ((symbol-function 'kargu-dape--frame-path) (lambda (_c _f) "/tmp/a.c")))
+      (let ((got (kargu-test-await (lambda (cb) (kargu-dape-get-context cb)))))
+        (should (equal (reverse order) '(stack scopes vars)))
+        (should (string-search "main" got))
+        (should (string-search "x = 1" got))))))
+
+(ert-deftest kargu-dape-eval-uses-the-callback-test ()
+  "Evaluation reports through the callback instead of a blocking request."
+  (cl-letf (((symbol-function 'kargu-dape--connection) (lambda () 'conn))
+            ((symbol-function 'dape--current-stack-frame) (lambda (_) (list :id 3)))
+            ((symbol-function 'dape--evaluate-expression)
+             (lambda (_conn _id _expr _ctx cb)
+               (funcall cb (list :result "9") nil))))
+    (let ((got (kargu-test-await
+                (lambda (done)
+                  (kargu-dape-eval-expression "1+1" "repl" done)))))
+      (should (string-search "1+1 => 9" got)))))
 
 (ert-deftest kargu-dape-eval-rust-pitfall-advice-on-no-session-test ()
   "Ensure debug_eval appends active language advice for Rust method calls."

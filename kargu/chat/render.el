@@ -266,7 +266,7 @@ Only used when `kargu-chat-drop-preamble' is non-nil."
   "Render the summary status banner for STATUS in REPORT."
   ;; Plain transport: print answer here if no deltas arrived
   (when (and (eq status :done) (not kargu-chat--streamed-text))
-    (if (kargu--nonempty text)
+    (if (kargu-nonempty text)
         (progn
           (kargu-chat-insert text)
           (kargu-chat-insert "\n"))

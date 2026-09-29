@@ -40,7 +40,7 @@
   (kargu--validate-history)
   ;; Guard Clause 4: History must contain at least one user message
   (unless (cl-some (lambda (m)
-                     (equal (kargu--aget m "role") "user"))
+                     (equal (kargu-aget m "role") "user"))
                    kargu--message-history)
     (user-error "nothing to send: history has no user message"))
   ;; Guard Clause 5: History must not end on model turn
@@ -51,45 +51,38 @@
   "Roll back PROMPT from history if ADDED-PROMPT-P is non-nil."
   (when (and added-prompt-p
              kargu--message-history
-             (equal (kargu--aget (car (last kargu--message-history)) "role") "user")
-             (equal (kargu--aget (car (last kargu--message-history)) "content") prompt))
+             (equal (kargu-aget (car (last kargu--message-history)) "role") "user")
+             (equal (kargu-aget (car (last kargu--message-history)) "content") prompt))
     (setq kargu--message-history (butlast kargu--message-history))))
+
+(defun kargu--api-refuse (callback message)
+  "Tell CALLBACK the request is refused for MESSAGE.  Return nil."
+  (funcall callback `(("error" . (("message" . ,message)))))
+  nil)
 
 (defun kargu-api-send (prompt callback &optional on-delta)
   "Send the next conversation turn to OpenRouter, asynchronously.
 PROMPT is the new user message (a string), or nil to continue from history.
 CALLBACK is called with one argument: the decoded response alist.
-ON-DELTA is called with each streaming SSE delta event."
+ON-DELTA is called with each streaming SSE delta event.
+A busy client, a missing key, or a missing endpoint is refused first."
   (kargu-contract-assert #'kargu-contract-prompt-p prompt
                          "PROMPT must be a string or nil: %S" prompt)
   (kargu-contract-assert #'functionp callback
                          "CALLBACK must be callable: %S" callback)
   (kargu-contract-assert #'kargu-contract-callback-p on-delta
                          "ON-DELTA must be callable or nil: %S" on-delta)
-  (cl-block kargu-api-send
-    ;; Guard Clause 1: Request already in flight
-    (when kargu--busy
-      (funcall callback
-               `(("error" .
-                  (("message" . "request already in flight; cancel first")))))
-      (cl-return-from kargu-api-send nil))
-
-    ;; Guard Clause 2: API key resolution
-    (let ((key (kargu--resolve-api-key)))
-      (unless key
-        (funcall callback
-                 `(("error" .
-                    (("message" . "no API key: M-x kargu-edit-config, or set `kargu-api-key', or a host env/auth-source entry")))))
-        (cl-return-from kargu-api-send nil))
-
-      ;; Happy path execution
-      (let ((added-prompt-p nil)
-            (base (kargu--api-base)))
-        (unless (kargu--nonempty base)
-          (funcall callback
-                   `(("error" .
-                      (("message" . "no API endpoint: set api on the active provider")))))
-          (cl-return-from kargu-api-send nil))
+  (let ((key (and (not kargu--busy) (kargu--resolve-api-key)))
+        (base (and (not kargu--busy) (kargu--api-base))))
+    (cond
+     (kargu--busy
+      (kargu--api-refuse callback "request already in flight; cancel first"))
+     ((null key)
+      (kargu--api-refuse callback "no API key: M-x kargu-edit-config, or set `kargu-api-key', or a host env/auth-source entry"))
+     ((not (kargu-nonempty base))
+      (kargu--api-refuse callback "no API endpoint: set api on the active provider"))
+     (t
+      (let ((added-prompt-p nil))
         (when (and prompt (not (string-empty-p prompt)))
           (kargu--history-add "user" prompt)
           (setq added-prompt-p t))
@@ -116,7 +109,7 @@ ON-DELTA is called with each streaming SSE delta event."
            (kargu--api-cancel-busy)
            (kargu--api-rollback-prompt prompt added-prompt-p)
            (funcall callback
-                    (kargu--api-error-alist (error-message-string err)))))))))
+                    (kargu--api-error-alist (error-message-string err))))))))))
 
 (defun kargu-test-connection ()
   "Ping the active provider with a minimal request and report the result.

@@ -87,7 +87,7 @@ TOOLS-LEN is the number of tools available."
   ;; 1. When tools is empty (e.g. ask mode), attach cache_control to system prompt
   (when (and (= tools-len 0) (> (length raw-msgs) 0))
     (let ((sys-msg (car raw-msgs)))
-      (when (equal (kargu--aget sys-msg "role") "system")
+      (when (equal (kargu-aget sys-msg "role") "system")
         (unless (assoc "cache_control" sys-msg)
           (setcar raw-msgs
                   (append sys-msg '(("cache_control" . (("type" . "ephemeral"))))))))))
@@ -321,7 +321,7 @@ until the retry finishes or is cancelled."
     (when kargu-log-wire
       (let* ((resp (ignore-errors (plz-error-response err)))
              (body (and resp (plz-response-body resp))))
-        (when (kargu--nonempty body)
+        (when (kargu-nonempty body)
           (kargu--log-block "IN HTTP error body" body
                             (kargu--log-looks-json-p body)))))
     (if (and (natnump kargu-api-retry-max)
@@ -353,7 +353,7 @@ until the retry finishes or is cancelled."
   "Authorization headers for KEY in FORMAT.
 The format record's `:auth' selects `x-api-key' or a bearer token.
 An empty KEY sends neither."
-  (when (kargu--nonempty key)
+  (when (kargu-nonempty key)
     (if (eq (kargu-provider-format-auth format) 'x-api-key)
         `(("x-api-key" . ,key))
       `(("Authorization" . ,(concat "Bearer " key))))))
@@ -659,7 +659,7 @@ bodies are reduced to an ordinary response alist first."
         (kargu--api-dispatch-error
          callback
          (format "HTTP 200: %s" err)))
-       ((null (kargu--aget response "choices"))
+       ((null (kargu-aget response "choices"))
         (kargu--api-handle-no-choices
          response trimmed url headers payload gen callback on-delta attempt))
        (t
@@ -667,9 +667,9 @@ bodies are reduced to an ordinary response alist first."
 
 (defun kargu--record-usage (response)
   "Accumulate the token usage of RESPONSE in `kargu--session'."
-  (when-let* ((usage (kargu--aget response "usage")))
-    (let ((in (kargu--aget usage "prompt_tokens"))
-          (out (kargu--aget usage "completion_tokens")))
+  (when-let* ((usage (kargu-aget response "usage")))
+    (let ((in (kargu-aget usage "prompt_tokens"))
+          (out (kargu-aget usage "completion_tokens")))
       (kargu-session-record-usage in out)
       (when (fboundp 'kargu-state-record-tokens)
         (kargu-state-record-tokens (and (numberp in) in)

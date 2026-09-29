@@ -229,7 +229,7 @@ Without CALLBACK the string is returned; with CALLBACK it is passed there."
             (new (kargu--tool-arg-string args "new_string" "newString" "new_text"))
             (reason (kargu--tool-arg args "reason")))
         (cond
-         ((not (kargu--nonempty path))
+         ((not (kargu-nonempty path))
           (kargu--tool-missing-file-path args))
          ((or (null old) (not (stringp old)) (string-empty-p old))
           "ERROR: old_string is required and must be a unique exact block from the file")
@@ -256,7 +256,7 @@ Without CALLBACK the string is returned; with CALLBACK it is passed there."
             (contents (kargu--tool-arg-string args "contents" "content"))
             (reason (kargu--tool-arg args "reason")))
         (cond
-         ((not (kargu--nonempty path))
+         ((not (kargu-nonempty path))
           (kargu--tool-missing-file-path args))
          ((null contents)
           "ERROR: contents is required")
@@ -474,7 +474,7 @@ Returns a formatted summary of applied changes."
   "Executor for the `apply_patch' tool."
   (or (kargu-diff--mutating-disabled "apply_patch")
       (let ((patch (kargu--tool-arg args "patch" "diff" "content")))
-        (if (not (kargu--nonempty patch))
+        (if (not (kargu-nonempty patch))
             "ERROR: patch argument is required"
           (condition-case-unless-debug err
               (kargu-diff-apply-patch patch)
@@ -505,7 +505,7 @@ Returns a formatted summary of applied changes."
                          (let ((f (kargu-diff--to-int from))
                                (n (kargu-diff--to-int limit)))
                             (and f n (+ f n -1)))))))
-       (if (not (kargu--nonempty path))
+       (if (not (kargu-nonempty path))
            (kargu--tool-missing-file-path args)
          (condition-case-unless-debug err
              (kargu-diff-read-file path from to)

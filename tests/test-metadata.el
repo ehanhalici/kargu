@@ -142,8 +142,8 @@
       (should (equal (kargu-model-get-prop "advanced-reasoner" "context_length") 1000000))
       (should (equal (kargu-model-get-prop "advanced-reasoner" "max_output") 8192))
       (should (kargu-model-supports-reasoning-p "advanced-reasoner"))
-      (should (equal (kargu--aget (kargu-model-get-prop "advanced-reasoner" "pricing") "prompt") "0.000001"))
-      (should (equal (kargu--aget (kargu-model-get-prop "advanced-reasoner" "pricing") "completion") "0.000002"))
+      (should (equal (kargu-aget (kargu-model-get-prop "advanced-reasoner" "pricing") "prompt") "0.000001"))
+      (should (equal (kargu-aget (kargu-model-get-prop "advanced-reasoner" "pricing") "completion") "0.000002"))
       (should (string-match-p "1M context" (kargu-model-get-prop "advanced-reasoner" "description")))
       ;; Setting and overriding properties dynamically
       (kargu-model-set-prop "advanced-reasoner" "custom_param" "custom-val")

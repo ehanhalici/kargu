@@ -43,8 +43,8 @@
         (kargu--message-history (kargu-compact-test--history 5)))
     (let ((tail (kargu-history-compact-tail)))
       (should tail)
-      (should (equal (kargu--aget (car tail) "role") "user"))
-      (should (equal (kargu--aget (car (last tail)) "content") "answer 5")))))
+      (should (equal (kargu-aget (car tail) "role") "user"))
+      (should (equal (kargu-aget (car (last tail)) "content") "answer 5")))))
 
 (ert-deftest kargu-history-apply-compaction-keeps-summary-and-tail-test ()
   "The summary becomes an ack turn and the tail follows it."
@@ -54,11 +54,11 @@
      "the summary"
      (list '(("role" . "user") ("content" . "recent question"))))
     (should-not kargu--compaction-system)
-    (should (equal (kargu--aget (nth 0 kargu--message-history) "role") "system"))
-    (should (string-prefix-p "COMPACTION_ACK:" (kargu--aget (nth 1 kargu--message-history) "content")))
-    (should (string-search "the summary" (kargu--aget (nth 1 kargu--message-history) "content")))
-    (should (equal (kargu--aget (nth 2 kargu--message-history) "role") "assistant"))
-    (should (equal (kargu--aget (car (last kargu--message-history)) "content") "recent question"))))
+    (should (equal (kargu-aget (nth 0 kargu--message-history) "role") "system"))
+    (should (string-prefix-p "COMPACTION_ACK:" (kargu-aget (nth 1 kargu--message-history) "content")))
+    (should (string-search "the summary" (kargu-aget (nth 1 kargu--message-history) "content")))
+    (should (equal (kargu-aget (nth 2 kargu--message-history) "role") "assistant"))
+    (should (equal (kargu-aget (car (last kargu--message-history)) "content") "recent question"))))
 
 (ert-deftest kargu-history-drop-trailing-compaction-test ()
   "A failed compaction request does not stay in the history."
@@ -66,7 +66,7 @@
          (append (kargu-compact-test--history 1)
                  (list '(("role" . "user") ("content" . "COMPACTION_REQUEST: summarize"))))))
     (kargu--history-drop-trailing-compaction)
-    (should (equal (kargu--aget (car (last kargu--message-history)) "content") "answer 1"))))
+    (should (equal (kargu-aget (car (last kargu--message-history)) "content") "answer 1"))))
 
 (ert-deftest kargu-loop-compaction-runs-once-and-is-tool-free-test ()
   "One compaction turn per run; the run is tool-free while it waits."
@@ -100,7 +100,7 @@
       (should-not (plist-get run :no-tools))
       (should-not (plist-get run :compacting))
       (should (string-search "SUMMARY"
-                             (kargu--aget (nth 1 kargu--message-history) "content"))))))
+                             (kargu-aget (nth 1 kargu--message-history) "content"))))))
 
 (ert-deftest kargu-loop-compaction-failure-finishes-the-run-test ()
   "An empty summary or an error ends the run with an error and cleans the history."
@@ -116,7 +116,7 @@
        run '(("choices" . ((("message" . (("content" . ""))))))))
       (should (eq (car finished) :error))
       (should (string-search "empty summary" (cdr finished)))
-      (should (equal (kargu--aget (car (last kargu--message-history)) "content") "answer 1")))))
+      (should (equal (kargu-aget (car (last kargu--message-history)) "content") "answer 1")))))
 
 (provide 'tests/test-compact)
 ;;; test-compact.el ends here

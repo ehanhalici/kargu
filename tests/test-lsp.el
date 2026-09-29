@@ -109,6 +109,28 @@
           (should (equal called-params '(:query "bar")))
           (should (eq res 'mock-response)))))))
 
+(ert-deftest kargu-lsp-request-passes-timeout-test ()
+  "jsonrpc-request receives the configured :timeout."
+  (let ((seen nil)
+        (real-fboundp (symbol-function 'fboundp)))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'fboundp)
+                 (lambda (sym)
+                   (if (eq sym 'eglot--request)
+                       nil
+                     (funcall real-fboundp sym))))
+                ((symbol-function 'eglot-current-server) (lambda (&rest _) 'mock-server))
+                ((symbol-function 'jsonrpc-request)
+                 (lambda (_srv method params &rest keys)
+                   (setq seen (list method params keys))
+                   'ok)))
+        (let ((kargu-lsp-request-timeout 7))
+          (let ((res (kargu-lsp--request :textDocument/hover '(:x 1))))
+            (should (eq res 'ok)))
+          (should (eq (nth 0 seen) :textDocument/hover))
+          (should (equal (nth 1 seen) '(:x 1)))
+          (should (equal (nth 2 seen) '(:timeout 7))))))))
+
 (ert-deftest kargu-lsp-flymake-diags-source-tag-test ()
   "Test flymake diagnostics source tagging for Eglot."
   (let* ((temp (make-temp-file "kargu-test-diag" nil ".el"))

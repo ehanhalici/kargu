@@ -75,32 +75,32 @@ assembled.  OpenAI streams tool calls in fragments: the id and
 name arrive once, the \"arguments\" JSON string in pieces.
 Some providers send complete argument snapshots; those replace
 rather than concatenate."
-  (let* ((idx (or (kargu--aget frag "index") 0))
-         (fn (kargu--aget frag "function"))
+  (let* ((idx (or (kargu-aget frag "index") 0))
+         (fn (kargu-aget frag "function"))
          (call (or (gethash idx calls-map)
                    (puthash idx
-                            `(("id" . ,(or (kargu--aget frag "id") ""))
+                            `(("id" . ,(or (kargu-aget frag "id") ""))
                               ("type" . "function")
                               ("function" .
-                               (("name" . ,(or (and fn (kargu--aget fn "name")) ""))
+                               (("name" . ,(or (and fn (kargu-aget fn "name")) ""))
                                 ("arguments" . ""))))
                             calls-map)))
-         (cfn (kargu--aget call "function")))
-    (when-let* ((id (kargu--nonempty (kargu--aget frag "id"))))
+         (cfn (kargu-aget call "function")))
+    (when-let* ((id (kargu-nonempty (kargu-aget frag "id"))))
       (setcdr (assoc "id" call) id))
     (when fn
-      (when-let* ((name (kargu--nonempty (kargu--aget fn "name"))))
+      (when-let* ((name (kargu-nonempty (kargu-aget fn "name"))))
         (setcdr (assoc "name" cfn) name))
-      (let ((args (kargu--aget fn "arguments")))
+      (let ((args (kargu-aget fn "arguments")))
         (unless (memq args '(nil :json-null))
           (setcdr (assoc "arguments" cfn)
                   (kargu--merge-tool-args
-                   (kargu--aget cfn "arguments") args)))))))
+                   (kargu-aget cfn "arguments") args)))))))
 
 (defun kargu--extract-stream-tool-frags (delta)
   "Extract normalized list of tool call fragments from DELTA."
-  (let* ((raw-frags (or (kargu--aget delta "tool_calls")
-                        (let ((legacy (kargu--aget delta "function_call")))
+  (let* ((raw-frags (or (kargu-aget delta "tool_calls")
+                        (let ((legacy (kargu-aget delta "function_call")))
                           (and legacy (kargu--object-p legacy)
                                (list `(("index" . 0)
                                        ("id" . "call_legacy")
@@ -129,7 +129,7 @@ rather than concatenate."
   "The call at IDX in CALLS-MAP; an empty id becomes `call_IDX'.
 Tool results are matched to calls by id, so it must never be empty."
   (let ((call (gethash idx calls-map)))
-    (when (string-empty-p (or (kargu--aget call "id") ""))
+    (when (string-empty-p (or (kargu-aget call "id") ""))
       (setcdr (assoc "id" call) (format "call_%s" idx)))
     call))
 
@@ -150,14 +150,14 @@ error alist; it does not invent an empty assistant turn."
           (usage nil)
           (calls-map (make-hash-table :test #'eql)))
       (dolist (event events)
-        (let* ((choices (kargu--aget event "choices"))
+        (let* ((choices (kargu-aget event "choices"))
                (choice (cond
                         ((consp choices) (car choices))
                         ((vectorp choices) (and (> (length choices) 0) (aref choices 0)))
                         (t nil))))
           (when choice
-            (let ((delta (kargu--aget choice "delta"))
-                  (fr (kargu--aget choice "finish_reason")))
+            (let ((delta (kargu-aget choice "delta"))
+                  (fr (kargu-aget choice "finish_reason")))
               (unless (memq delta '(nil :json-null))
                 (when-let* ((chunk (kargu--content-text delta)))
                   (push chunk text-chunks))
@@ -167,7 +167,7 @@ error alist; it does not invent an empty assistant turn."
                   (kargu--merge-tool-call-fragment calls-map frag)))
               (unless (memq fr '(nil :json-null))
                 (setq finish fr)))))
-        (when-let* ((u (kargu--aget event "usage")))
+        (when-let* ((u (kargu-aget event "usage")))
           (unless (eq u :json-null)
             (setq usage u))))
       (let* ((text (if text-chunks (apply #'concat (nreverse text-chunks)) ""))

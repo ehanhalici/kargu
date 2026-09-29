@@ -52,8 +52,8 @@
 
 (defun kargu--loop-call-id (call)
   "Tool-call id of CALL, synthesizing one if the provider omitted it."
-  (if (stringp (kargu--aget call "id"))
-      (kargu--aget call "id")
+  (if (stringp (kargu-aget call "id"))
+      (kargu-aget call "id")
     (format "call_%d" (cl-incf kargu--loop-call-seq))))
 
 (defvar kargu-chat--output-marker)
@@ -136,9 +136,9 @@ on RUN, which grants three more identical calls."
 
 (defun kargu--loop-call-name (call)
   "Function name of tool CALL, or \"unknown\"."
-  (let ((fn (kargu--aget call "function")))
-    (if (and fn (stringp (kargu--aget fn "name")))
-        (kargu--aget fn "name")
+  (let ((fn (kargu-aget call "function")))
+    (if (and fn (stringp (kargu-aget fn "name")))
+        (kargu-aget fn "name")
       "unknown")))
 
 (defun kargu--loop-execute-call (run id name args sig queue)
@@ -166,9 +166,9 @@ SIG keys the per-turn result cache."
   "Execute one tool CALL of RUN, then continue with QUEUE."
   (when (kargu-loop--live-p run)
     (kargu-loop--set-state run 'tools)
-    (let* ((fn (kargu--aget call "function"))
+    (let* ((fn (kargu-aget call "function"))
            (name (kargu--loop-call-name call))
-           (args (and fn (kargu--aget fn "arguments")))
+           (args (and fn (kargu-aget fn "arguments")))
            (id (kargu--loop-call-id call))
            (sig (kargu--loop-tool-sig name args))
            (batch-cache (plist-get run :batch-cache))

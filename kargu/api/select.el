@@ -335,7 +335,7 @@ NOTE replaces the confirmation message."
      (delq nil
            (append (and live (copy-sequence live))
                    (and catalog-ids (copy-sequence catalog-ids))
-                   (and (kargu--nonempty curr) (list curr)))))))
+                   (and (kargu-nonempty curr) (list curr)))))))
 
 (defun kargu-api-select--apply-model (chosen pname-str)
   "Activate model CHOSEN for PNAME-STR, then ask for effort when it exists."
@@ -418,7 +418,7 @@ opens when the answer arrives, and Emacs stays usable meanwhile."
    ((and (fboundp 'kargu-provider-local-p) (kargu-provider-local-p provider))
     " [local]")
    ((and (fboundp 'kargu-provider-env)
-         (cl-some (lambda (v) (kargu--nonempty (getenv v)))
+         (cl-some (lambda (v) (kargu-nonempty (getenv v)))
                   (kargu-provider-env provider)))
     " [env key]")
    (t " [configured]")))

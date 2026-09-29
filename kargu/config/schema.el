@@ -90,7 +90,7 @@ from `kargu-provider-list'."
          (explicit-model (plist-get prov-plist :model))
          (cached-model (and (boundp 'kargu--live-models-cache)
                             (car-safe (gethash name kargu--live-models-cache)))))
-    (setq kargu--session-model (or (kargu--nonempty explicit-model)
+    (setq kargu--session-model (or (kargu-nonempty explicit-model)
                                   (and noninteractive cached-model)))
     (when kargu--session-model
       (kargu-state-set-model kargu--session-model)))

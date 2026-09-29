@@ -78,17 +78,18 @@
   "Show the live debug context (dape: stack, scopes, variables)."
   (interactive)
   (if (fboundp 'kargu-dape-get-context)
-      (let ((text (kargu-dape-get-context)))
-        (if (and (stringp text) (string-prefix-p "ERROR:" text))
-            (message "%s" text)
-          (kargu-ui--show-text "debug-context" text)))
+      (kargu-dape-get-context
+       (lambda (text)
+         (if (and (stringp text) (string-prefix-p "ERROR:" text))
+             (message "%s" text)
+           (kargu-ui--show-text "debug-context" text))))
     (message "kargu: dape module not loaded (debug tools unavailable)")))
 
 (defun kargu-ui-debug-eval (expr)
   "Evaluate EXPR in the paused debug session (dape) and show the result."
   (interactive "skargu debug expression: ")
   (if (fboundp 'kargu-dape-eval-expression)
-      (kargu-ui--report (kargu-dape-eval-expression expr))
+      (kargu-dape-eval-expression expr nil #'kargu-ui--report)
     (message "kargu: dape module not loaded (debug tools unavailable)")))
 
 (defun kargu-ui-breakpoints ()

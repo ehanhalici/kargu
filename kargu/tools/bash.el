@@ -18,6 +18,7 @@
 (require 'kargu/contract)
 (require 'kargu/api)
 (require 'kargu/permission)
+(require 'kargu/tools/process)
 
 (defgroup kargu-bash nil
   "Shell command tool."
@@ -140,24 +141,47 @@ Return a result string if COMMAND matches a management command, or nil."
         s
       (or (executable-find "bash") (executable-find "sh") "/bin/sh"))))
 
+(defun kargu-bash--note-truncation (out state)
+  "OUT, plus a note when STATE says the byte cap was hit."
+  (if (plist-get state :truncated)
+      (concat out (format "\n[output truncated at %d bytes]\n" kargu-process-max-bytes))
+    out))
+
+(defun kargu-bash--spawn (name command dir shell buf state sentinel)
+  "Start SHELL -c COMMAND in DIR, capturing output into BUF.
+Output stops at the byte cap.  STATE records truncation.  SENTINEL is
+the process sentinel.  Return the process."
+  (let ((proc (let ((default-directory (file-name-as-directory dir)))
+                (make-process
+                 :name name
+                 :buffer buf
+                 :command (list shell "-c" command)
+                 :connection-type 'pipe
+                 :filter (kargu-process--filter buf kargu-process-max-bytes state)
+                 :sentinel sentinel))))
+    (set-process-query-on-exit-flag proc nil)
+    proc))
+
 (defun kargu-bash--run-background (command dir shell)
   "Execute COMMAND in DIR asynchronously under SHELL and return status string."
   (let* ((id (format "p%d" (cl-incf kargu-bash--counter)))
          (buf (get-buffer-create (format "*kargu-proc-%s*" id)))
+         (state (list :truncated nil))
          proc)
     (with-current-buffer buf
       (erase-buffer)
       (setq-local buffer-offer-save nil))
-    (let ((default-directory (file-name-as-directory dir)))
-      (setq proc (make-process
-                  :name (format "kargu-bg-%s" id)
-                  :buffer buf
-                  :command (list shell "-c" command)
-                  :connection-type 'pipe
-                  :stderr buf))
-      (dolist (p (process-list))
-        (when (eq (process-buffer p) buf)
-          (set-process-query-on-exit-flag p nil))))
+    (setq proc
+          (kargu-bash--spawn
+           (format "kargu-bg-%s" id) command dir shell buf state
+           (lambda (p _event)
+             (when (and (not (process-live-p p))
+                        (plist-get state :truncated)
+                        (buffer-live-p buf))
+               (with-current-buffer buf
+                 (goto-char (point-max))
+                 (unless (string-search "output truncated" (buffer-string))
+                   (insert (kargu-bash--note-truncation "" state))))))))
     (puthash id
              (list :id id
                    :pid (process-id proc)
@@ -190,34 +214,31 @@ Return a result string if COMMAND matches a management command, or nil."
 (defun kargu-bash--run-async (command dir shell callback)
   "Execute COMMAND asynchronously in DIR under SHELL.
 Calls CALLBACK with the formatted output string upon exit or timeout.
+Output past `kargu-process-max-bytes' kills the process and says so.
 Emacs UI remains completely responsive and interactive for the user."
   (let* ((buf (generate-new-buffer " *kargu-bash*"))
+         (state (list :truncated nil))
          (start (float-time))
          (completed nil)
          (timer nil)
          (timeout-timer nil)
          proc)
-    (let ((default-directory (file-name-as-directory dir)))
-      (setq proc (make-process
-                  :name "kargu-bash"
-                  :buffer buf
-                  :command (list shell "-c" command)
-                  :connection-type 'pipe
-                  :stderr buf
-                  :sentinel
-                  (lambda (p _event)
-                    (unless completed
-                      (setq completed t)
-                      (let* ((code (process-exit-status p))
-                             (out (if (buffer-live-p buf)
-                                      (with-current-buffer buf (buffer-string))
-                                    ""))
-                             (res (kargu-bash--format-result code dir out)))
-                        (kargu-bash--log-finished command code start)
-                        (kargu-bash--cleanup-async buf timer timeout-timer)
-                        (funcall callback res))))))
-      (set-process-query-on-exit-flag proc nil)
-      (setq kargu-bash--active-async-proc proc))
+    (setq proc
+          (kargu-bash--spawn
+           "kargu-bash" command dir shell buf state
+           (lambda (p _event)
+             (when (and (not completed) (not (process-live-p p)))
+               (setq completed t)
+               (let* ((code (process-exit-status p))
+                      (out (if (buffer-live-p buf)
+                               (with-current-buffer buf (buffer-string))
+                             ""))
+                      (res (kargu-bash--format-result
+                            code dir (kargu-bash--note-truncation out state))))
+                 (kargu-bash--log-finished command code start)
+                 (kargu-bash--cleanup-async buf timer timeout-timer)
+                 (funcall callback res))))))
+    (setq kargu-bash--active-async-proc proc)
     ;; Timeout timer: kill process and return error when kargu-bash-timeout expires
     (setq timeout-timer
           (run-at-time

@@ -151,8 +151,8 @@
           ;; 3. Tool result added
           (kargu--history-add-tool-result "call_123" "lsp_project_skeleton" "# Project skeleton (702 chars)")
           ;; 4. Verify history invariants: has user, has assistant tool call, has tool response
-          (should (cl-some (lambda (m) (equal (kargu--aget m "role") "user")) kargu--message-history))
-          (should (cl-some (lambda (m) (equal (kargu--aget m "role") "tool")) kargu--message-history))
+          (should (cl-some (lambda (m) (equal (kargu-aget m "role") "user")) kargu--message-history))
+          (should (cl-some (lambda (m) (equal (kargu-aget m "role") "tool")) kargu--message-history))
           ;; 5. Next continuation turn (prompt nil) must pass history validation without error
           (let ((posted nil) (err-msg nil))
             (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda () "mock-key"))
@@ -163,8 +163,8 @@
             ;; The request must actually have gone out, carrying the wall-checked history.
             (should posted)
             (should-not err-msg)
-            (let ((roles (mapcar (lambda (m) (kargu--aget m "role"))
-                                 (append (kargu--aget posted "messages") nil))))
+            (let ((roles (mapcar (lambda (m) (kargu-aget m "role"))
+                                 (append (kargu-aget posted "messages") nil))))
               (should (member "user" roles))
               (should (member "assistant" roles))
               (should (member "tool" roles)))))

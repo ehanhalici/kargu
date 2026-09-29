@@ -67,7 +67,7 @@ NAME is the tool name, OUTPUT the result string."
 (defun kargu--history-last-role ()
   "Role of the last history message, or nil when empty."
   (when kargu--message-history
-    (kargu--aget (car (last kargu--message-history)) "role")))
+    (kargu-aget (car (last kargu--message-history)) "role")))
 
 (defun kargu--role-name (role)
   "Canonical string name of ROLE (string or symbol), or nil."
@@ -108,22 +108,22 @@ Mutates MSG and returns it."
   "Non-nil when the history ends on a tool-less assistant turn."
   (let ((last (car (last kargu--message-history))))
     (and last
-         (kargu--assistant-role-p (kargu--aget last "role"))
-         (null (kargu--calls-to-list (kargu--aget last "tool_calls"))))))
+         (kargu--assistant-role-p (kargu-aget last "role"))
+         (null (kargu--calls-to-list (kargu-aget last "tool_calls"))))))
 
 (defalias 'kargu--history-completed-assistant-tail-p #'kargu--empty-assistant-tail-p)
 
 (defun kargu--clean-assistant-message (msg)
   "Return a normalized copy of assistant message MSG."
-  (let ((content (kargu--aget msg "content"))
-        (calls (kargu--calls-to-list (kargu--aget msg "tool_calls"))))
+  (let ((content (kargu-aget msg "content"))
+        (calls (kargu--calls-to-list (kargu-aget msg "tool_calls"))))
     (let ((cleaned (if (and calls
                             (or (null content)
                                 (eq content :json-null)
                                 (equal content "")))
                        (cl-remove-if (lambda (cell) (equal (car cell) "content")) msg)
                      msg)))
-      (if (and calls (vectorp (kargu--aget cleaned "tool_calls")))
+      (if (and calls (vectorp (kargu-aget cleaned "tool_calls")))
           (cons `("tool_calls" . ,calls)
                 (cl-remove-if (lambda (cell) (equal (car cell) "tool_calls")) cleaned))
         cleaned))))
@@ -136,10 +136,10 @@ Mutates MSG and returns it."
   (let ((i 0))
     (dolist (msg kargu--message-history)
       (setq i (1+ i))
-      (let ((role (kargu--aget msg "role"))
-            (text (or (kargu--aget msg "content") ""))
-            (calls (kargu--calls-to-list (kargu--aget msg "tool_calls")))
-            (id (kargu--aget msg "tool_call_id")))
+      (let ((role (kargu-aget msg "role"))
+            (text (or (kargu-aget msg "content") ""))
+            (calls (kargu--calls-to-list (kargu-aget msg "tool_calls")))
+            (id (kargu-aget msg "tool_call_id")))
         (kargu-log 'info "[%2d] %-9s %s%s%s" i role
                    (truncate-string-to-width
                     (replace-regexp-in-string "\n" " " text) 70)

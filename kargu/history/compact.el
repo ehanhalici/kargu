@@ -54,10 +54,10 @@ bounded between `kargu-history-compact-chars' (default 45k) and 800k characters.
   "Approximate character cost of `kargu--message-history'."
   (let ((n 0))
     (dolist (msg kargu--message-history)
-      (let ((content (kargu--aget msg "content")))
+      (let ((content (kargu-aget msg "content")))
         (when (stringp content)
           (setq n (+ n (length content)))))
-      (let ((calls (kargu--aget msg "tool_calls")))
+      (let ((calls (kargu-aget msg "tool_calls")))
         (when calls
           (setq n (+ n (length (format "%s" calls)))))))
     n))
@@ -66,7 +66,7 @@ bounded between `kargu-history-compact-chars' (default 45k) and 800k characters.
   "Number of non-system messages in the history."
   (let ((n 0))
     (dolist (msg kargu--message-history)
-      (unless (equal (kargu--aget msg "role") "system")
+      (unless (equal (kargu-aget msg "role") "system")
         (setq n (1+ n))))
     n))
 
@@ -80,7 +80,7 @@ bounded between `kargu-history-compact-chars' (default 45k) and 800k characters.
 
 (defun kargu--history-compaction-msg-p (msg)
   "Non-nil when MSG is a compaction request or ack."
-  (let ((c (kargu--aget msg "content")))
+  (let ((c (kargu-aget msg "content")))
     (and (stringp c)
          (or (string-prefix-p "COMPACTION_REQUEST:" c)
              (string-prefix-p "COMPACTION_ACK:" c)))))
@@ -92,27 +92,27 @@ starts on a `user' role so the preceding assistant acknowledgment
 in the compaction summary preserves user/assistant turn alternation."
   (let (msgs)
     (dolist (msg kargu--message-history)
-      (unless (or (equal (kargu--aget msg "role") "system")
+      (unless (or (equal (kargu-aget msg "role") "system")
                   (kargu--history-compaction-msg-p msg))
         (push (copy-tree msg) msgs)))
     (setq msgs (nreverse msgs))
     (let* ((slice (last msgs (max 1 kargu-history-compact-keep)))
            (tail slice))
       ;; Walk forward past leading tool or assistant messages if a user turn exists
-      (while (and tail (not (equal (kargu--aget (car tail) "role") "user")))
+      (while (and tail (not (equal (kargu-aget (car tail) "role") "user")))
         (setq tail (cdr tail)))
       ;; If a user turn was found, use tail.  Otherwise keep the slice (skipping
       ;; leading orphan tool results) so recent context is not entirely lost.
       (or tail
           (let ((s slice))
-            (while (and s (equal (kargu--aget (car s) "role") "tool"))
+            (while (and s (equal (kargu-aget (car s) "role") "tool"))
               (setq s (cdr s)))
             s)))))
 
 (defun kargu--history-drop-trailing-compaction ()
   "Remove a trailing compaction user turn if the request failed."
   (when-let* ((last (car (last kargu--message-history))))
-    (when (and (equal (kargu--aget last "role") "user")
+    (when (and (equal (kargu-aget last "role") "user")
                (kargu--history-compaction-msg-p last))
       (setq kargu--message-history (butlast kargu--message-history)))))
 
@@ -122,7 +122,7 @@ The usual system prompt is restored (compaction overlay cleared)."
   (setq kargu--compaction-system nil)
   (let* ((sys-msg (kargu--history-fresh-system-message))
          (kept (cl-remove-if #'kargu--history-compaction-msg-p tail))
-         (first-kept-role (and kept (kargu--aget (car kept) "role"))))
+         (first-kept-role (and kept (kargu-aget (car kept) "role"))))
     (setq kargu--message-history
           (append
            (list sys-msg

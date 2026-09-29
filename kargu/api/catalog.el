@@ -71,12 +71,12 @@
    ((null data) nil)
    ((vectorp data) (append data nil))
    ((listp data)
-    (or (kargu--aget data "data")
-        (kargu--aget data "models")
-        (kargu--aget data "items")
+    (or (kargu-aget data "data")
+        (kargu-aget data "models")
+        (kargu-aget data "items")
         (and (consp (car data))
-             (or (kargu--aget (car data) "id")
-                 (kargu--aget (car data) "name"))
+             (or (kargu-aget (car data) "id")
+                 (kargu-aget (car data) "name"))
              data)))))
 
 (defun kargu-model-get-prop (model-id prop-key)
@@ -87,7 +87,7 @@ Looks up directly in the model's raw API data."
           (k-sym (if (keywordp prop-key) prop-key (intern (concat ":" (format "%s" prop-key))))))
       (cond
        ((consp data)
-        (or (kargu--aget data k-str)
+        (or (kargu-aget data k-str)
             (and (listp data) (plist-get data k-sym))))
        (t nil)))))
 
@@ -110,7 +110,7 @@ Looks up directly in the model's raw API data."
   (let ((pname (or provider-name (kargu--provider-name))))
     (dolist (m models)
       (when (listp m)
-        (let* ((id (or (kargu--aget m "id") (kargu--aget m "name")))
+        (let* ((id (or (kargu-aget m "id") (kargu-aget m "name")))
                (clean-id (if (and (stringp id) (string-prefix-p "models/" id))
                              (substring id 7)
                            id)))
@@ -137,7 +137,7 @@ A one-element list whose car is an alist is unwrapped."
   "Return KEY from raw alist or plist DATA, or nil."
   (when (listp data)
     (let ((name (if (stringp key) key (format "%s" key))))
-      (or (kargu--aget data name)
+      (or (kargu-aget data name)
           (plist-get data (intern (concat ":" name)))
           (plist-get data (intern (concat ":" (replace-regexp-in-string "_" "-" name))))
           (plist-get data (intern (concat ":" (replace-regexp-in-string "-" "_" name))))))))
@@ -314,8 +314,8 @@ This does not invent a context window or an effort list."
 
 (defun kargu--supported-parameters (data)
   "Return DATA's supported_parameters as a list, or nil when absent."
-  (let ((raw (or (kargu--aget data "supported_parameters")
-                 (kargu--aget data "supportedParameters")
+  (let ((raw (or (kargu-aget data "supported_parameters")
+                 (kargu-aget data "supportedParameters")
                  (and (listp data) (plist-get data :supported-parameters)))))
     (cond
      ((vectorp raw) (append raw nil))
@@ -327,7 +327,7 @@ This does not invent a context window or an effort list."
 A missing field is not a disable.  A false `supports_tools' flag,
 a stored `:supports-tools' nil, or a parameter list that omits
 \"tools\" are."
-  (or (let ((flag (kargu--aget data "supports_tools")))
+  (or (let ((flag (kargu-aget data "supports_tools")))
         (or (eq flag :json-false) (equal flag "false")))
       (and (listp data)
            (plist-member data :supports-tools)
@@ -365,8 +365,8 @@ both leave tools available."
 (defun kargu--reasoning-support-flag (data)
   "Return the supports-reasoning flag in DATA, or nil when it is absent."
   (and data
-       (or (kargu--aget data "supports_reasoning")
-           (kargu--aget data "supports-reasoning")
+       (or (kargu-aget data "supports_reasoning")
+           (kargu-aget data "supports-reasoning")
            (and (listp data) (plist-get data :supports-reasoning)))))
 
 (defun kargu--reasoning-disabled-p (data)
@@ -463,7 +463,7 @@ An explicit true flag counts even when the API sent no level list."
                                  (kargu-provider-models-api pname-lower))))
     (cond
      ;; If user configured a custom api-base different from default catalog api, derive from api-base:
-     ((and (kargu--nonempty api-base)
+     ((and (kargu-nonempty api-base)
            default-api
            (not (equal (kargu--strip-trailing-slashes api-base)
                        (kargu--strip-trailing-slashes default-api))))
@@ -488,7 +488,7 @@ An explicit true flag counts even when the API sent no level list."
          (delq nil
                (mapcar (lambda (m)
                          (let ((id (if (consp m)
-                                       (or (kargu--aget m "id") (kargu--aget m "name"))
+                                       (or (kargu-aget m "id") (kargu-aget m "name"))
                                      m)))
                            (if (and (stringp id) (string-prefix-p "models/" id))
                                (substring id 7)
@@ -550,7 +550,7 @@ CALLBACK receives either the list of model alists or an error alist."
   (delq nil
         (mapcar (lambda (m)
                   (let ((id (if (consp m)
-                                (or (kargu--aget m "id") (kargu--aget m "name"))
+                                (or (kargu-aget m "id") (kargu-aget m "name"))
                               m)))
                     (if (and (stringp id) (string-prefix-p "models/" id))
                         (substring id 7)
@@ -563,7 +563,7 @@ CALLBACK receives the list of model ids, or nil when the fetch failed."
   (let ((pname-lower (downcase (string-trim (format "%s" provider-name)))))
     (kargu-api-list-models
      (lambda (models)
-       (let ((ids (unless (kargu--aget models "error")
+       (let ((ids (unless (kargu-aget models "error")
                     (kargu--record-models-metadata models pname-lower)
                     (kargu--catalog-clean-model-ids models))))
          (when ids
@@ -580,10 +580,15 @@ CALLBACK receives the list of model ids, or nil when the fetch failed."
     (puthash provider-name t kargu--models-prefetched)
     (kargu-api-fetch-model-ids provider-name #'ignore)))
 
-(defun kargu-model-info (&optional model-id)
-  "Display complete metadata and all raw API properties for MODEL-ID.
-When called interactively, opens an inspector buffer with all key-value pairs."
-  (interactive)
+(defun kargu-model-info--efforts-label (efforts)
+  "One line naming EFFORTS."
+  (cond
+   ((null efforts) "none")
+   ((listp efforts) (mapconcat #'format efforts ", "))
+   (t (format "%s" efforts))))
+
+(defun kargu-model-info-facts (&optional model-id)
+  "Plist of inspector facts for MODEL-ID (or the active model)."
   (let* ((mid (or model-id (kargu--model)))
          (pname (or (kargu-model-get-prop mid "provider") (kargu--provider-name)))
          (data (kargu-model-get-metadata mid))
@@ -596,49 +601,79 @@ When called interactively, opens an inspector buffer with all key-value pairs."
                    (and (listp data) (plist-get data :description))))
          (efforts (or (kargu-model-reasoning-efforts mid pname)
                       (and (listp data) (plist-get data :reasoning-efforts))))
-         (effort-curr (or (and (boundp 'kargu-reasoning-effort) kargu-reasoning-effort) "off"))
-         (buf (get-buffer-create (format "*kargu model: %s*" mid))))
+         (effort (or (and (boundp 'kargu-reasoning-effort) kargu-reasoning-effort) "off")))
+    (list :id mid
+          :provider pname
+          :props props
+          :context ctx
+          :threshold (or thresh 45000)
+          :max-out max-out
+          :description desc
+          :efforts efforts
+          :effort effort
+          :tools (and mid (kargu-model-supports-tools-p mid)))))
+
+(defun kargu-model-info--fill (facts)
+  "Replace the current buffer with the inspector text for FACTS."
+  (let ((mid (plist-get facts :id))
+        (thresh (plist-get facts :threshold))
+        (max-out (plist-get facts :max-out))
+        (desc (plist-get facts :description))
+        (efforts (plist-get facts :efforts))
+        (props (plist-get facts :props)))
+    (erase-buffer)
+    (insert (format "Kargu Model Inspector: %s\n" mid))
+    (insert (make-string 60 ?=) "\n\n")
+    (insert (format "Provider:            %s\n" (plist-get facts :provider)))
+    (insert (format "Context Window:      %s\n"
+                    (kargu-model--context-label (plist-get facts :context))))
+    (insert (format "Compaction Limit:    %s chars\n" thresh))
+    (insert (format "Max Output Tokens:   %s\n" (or max-out "default")))
+    (insert (format "Current Effort:      %s\n" (plist-get facts :effort)))
+    (insert (format "Supported Efforts:   %s\n" (kargu-model-info--efforts-label efforts)))
+    (insert (format "Tools Supported:     %s\n" (if (plist-get facts :tools) "yes" "no")))
+    (when desc
+      (insert (format "\nDescription:\n  %s\n" desc)))
+    (insert "\n" (make-string 60 ?-) "\n")
+    (insert "Raw API Properties (Key - Value Pairs):\n")
+    (insert (make-string 60 ?-) "\n")
+    (if (null props)
+        (insert "  (No raw API properties recorded for this model)\n")
+      (dolist (item (and (listp props) props))
+        (if (consp item)
+            (insert (format "  %-26s : %S\n" (car item) (cdr item)))
+          (insert (format "  %S\n" item)))))
+    (insert "\n[Press 'e' to edit/override a property, 'q' to quit]\n")))
+
+(defun kargu-model-info--echo (facts)
+  "Echo a one-line summary of FACTS."
+  (let ((thresh (plist-get facts :threshold))
+        (max-out (plist-get facts :max-out))
+        (desc (plist-get facts :description)))
+    (message "kargu Model: %s (%s) · Context: %s · Compaction: %s chars · MaxOut: %s · Effort: %s%s"
+             (plist-get facts :id)
+             (plist-get facts :provider)
+             (kargu-model--context-label (plist-get facts :context))
+             (if thresh (format "%d" thresh) "45000")
+             (if max-out (format "%d" max-out) "default")
+             (plist-get facts :effort)
+             (if desc (format " · %s" desc) ""))))
+
+(defun kargu-model-info (&optional model-id)
+  "Display complete metadata and all raw API properties for MODEL-ID.
+When called interactively, opens an inspector buffer with all key-value pairs."
+  (interactive)
+  (let* ((facts (kargu-model-info-facts model-id))
+         (buf (get-buffer-create (format "*kargu model: %s*" (plist-get facts :id)))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (format "Kargu Model Inspector: %s\n" mid))
-        (insert (make-string 60 ?=) "\n\n")
-        (insert (format "Provider:            %s\n" pname))
-        (insert (format "Context Window:      %s\n" (kargu-model--context-label ctx)))
-        (insert (format "Compaction Limit:    %s chars\n" (or thresh 45000)))
-        (insert (format "Max Output Tokens:   %s\n" (or max-out "default")))
-        (insert (format "Current Effort:      %s\n" effort-curr))
-        (insert (format "Supported Efforts:   %s\n"
-                        (if efforts (if (listp efforts) (mapconcat #'format efforts ", ") (format "%s" efforts)) "none")))
-        (insert (format "Tools Supported:     %s\n"
-                        (if (kargu-model-supports-tools-p mid) "yes" "no")))
-        (when desc
-          (insert (format "\nDescription:\n  %s\n" desc)))
-        (insert "\n" (make-string 60 ?-) "\n")
-        (insert "Raw API Properties (Key - Value Pairs):\n")
-        (insert (make-string 60 ?-) "\n")
-        (if (null props)
-            (insert "  (No raw API properties recorded for this model)\n")
-          (dolist (item (cond ((listp props) props) (t nil)))
-            (cond
-             ((consp item)
-              (let ((k (car item))
-                    (v (cdr item)))
-                (insert (format "  %-26s : %S\n" k v))))
-             (t (insert (format "  %S\n" item))))))
-        (insert "\n[Press 'e' to edit/override a property, 'q' to quit]\n")
+        (kargu-model-info--fill facts)
         (goto-char (point-min))
         (special-mode)
         (local-set-key (kbd "e") #'kargu-model-edit-prop)))
     (if (called-interactively-p 'interactive)
         (display-buffer buf)
-      (message "kargu Model: %s (%s) · Context: %s · Compaction: %s chars · MaxOut: %s · Effort: %s%s"
-               mid pname
-               (kargu-model--context-label ctx)
-               (if thresh (format "%d" thresh) "45000")
-               (if max-out (format "%d" max-out) "default")
-               effort-curr
-               (if desc (format " · %s" desc) "")))))
+      (kargu-model-info--echo facts))))
 
 (defun kargu-model-edit-prop (model-id prop-key prop-value)
   "Interactively edit or override PROP-KEY with PROP-VALUE for MODEL-ID."

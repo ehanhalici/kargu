@@ -97,13 +97,13 @@
             ("content" . "one result only")))))
     (kargu--validate-history)
     (let* ((tool-ids (cl-loop for m in kargu--message-history
-                              when (equal (kargu--aget m "role") "tool")
-                              collect (kargu--aget m "tool_call_id"))))
+                              when (equal (kargu-aget m "role") "tool")
+                              collect (kargu-aget m "tool_call_id"))))
       (should-not (member "orphan" tool-ids))
       (should (member "c1" tool-ids))
       (should (member "c2" tool-ids)))
     ;; The user's own text is untouched.
-    (should (equal (kargu--aget (nth 1 kargu--message-history) "content") "hi"))))
+    (should (equal (kargu-aget (nth 1 kargu--message-history) "content") "hi"))))
 
 (ert-deftest kargu-law-e-selection-rejects-text-outside-the-list-test ()
   "Only a member of the candidate list is accepted."

@@ -132,7 +132,7 @@
          (hit (cl-find want skills :key (lambda (s) (plist-get s :name))
                        :test #'string-equal)))
     (cond
-     ((not (kargu--nonempty want))
+     ((not (kargu-nonempty want))
       "ERROR: skill name is required")
      ((null hit)
       (format "ERROR: skill %S not found. Available: %s"

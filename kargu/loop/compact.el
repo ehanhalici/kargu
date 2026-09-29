@@ -72,7 +72,7 @@ Return non-nil if started."
   "Event symbol for a compaction RESPONSE."
   (cond
    ((kargu-response-error-message response) 'error)
-   ((null (kargu--nonempty (kargu-response-text response))) 'empty)
+   ((null (kargu-nonempty (kargu-response-text response))) 'empty)
    (t 'ok)))
 
 (defun kargu-loop--compaction-fail (run response)
@@ -90,7 +90,7 @@ Return non-nil if started."
 (defun kargu-loop--compaction-apply (run response)
   "Apply the compaction summary in RESPONSE and resume RUN."
   (kargu-history-apply-compaction
-   (kargu--nonempty (kargu-response-text response))
+   (kargu-nonempty (kargu-response-text response))
    (plist-get run :compact-tail))
   (plist-put run :just-compacted t)
   (plist-put run :compact-tail nil)

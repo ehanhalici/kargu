@@ -65,8 +65,8 @@ are truncated to `kargu-tool-output-limit'."
   "Ensure PARAMETERS has a valid properties object when type is object."
   (let ((params (or parameters '(("type" . "object")))))
     (if (and (kargu--object-p params)
-             (equal (kargu--aget params "type") "object")
-             (null (kargu--aget params "properties")))
+             (equal (kargu-aget params "type") "object")
+             (null (kargu-aget params "properties")))
         (let ((filtered (seq-remove (lambda (cell) (and (consp cell) (equal (car cell) "properties"))) params)))
           (append filtered '(("properties" . :json-empty-object))))
       params)))
@@ -90,10 +90,10 @@ Tools hidden by `kargu--tool-visible-p' are skipped."
                  (push `(("type" . "function")
                          ("function" . (("name" . ,name)
                                         ("description" .
-                                         ,(kargu--aget spec "description"))
+                                         ,(kargu-aget spec "description"))
                                         ("parameters" .
                                          ,(kargu--sanitize-tool-parameters
-                                           (kargu--aget spec "parameters"))))))
+                                           (kargu-aget spec "parameters"))))))
                        tools)))
              kargu--tool-registry)
     (vconcat (nreverse tools))))
@@ -173,7 +173,7 @@ JSON false, nil, \"false\", and 0 are false.  A missing value is false."
   (let (found)
     (dolist (key keys)
       (unless found
-        (let ((val (kargu--aget args key)))
+        (let ((val (kargu-aget args key)))
           (cond
            ((and (stringp val) (not (string-empty-p (string-trim val))))
             (setq found (string-trim val)))
@@ -186,7 +186,7 @@ JSON false, nil, \"false\", and 0 are false.  A missing value is false."
   (let (found)
     (dolist (key keys)
       (unless found
-        (let ((val (kargu--aget args key)))
+        (let ((val (kargu-aget args key)))
           (when (stringp val)
             (setq found val)))))
     found))
@@ -316,9 +316,9 @@ agent loop can feed them back to the model for self-correction."
                          name (truncate-string-to-width raw 200))))
         (if callback (funcall callback out) out)))
      (callback
-      (kargu--execute-tool-async (kargu--aget spec "executor") args name callback))
+      (kargu--execute-tool-async (kargu-aget spec "executor") args name callback))
      (t
-      (kargu--execute-tool-sync (kargu--aget spec "executor") args name)))))
+      (kargu--execute-tool-sync (kargu-aget spec "executor") args name)))))
 
 (provide 'kargu/api/tools)
 

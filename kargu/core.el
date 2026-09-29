@@ -33,7 +33,7 @@
 
 ;;;; Alist helpers --------------------------------------------------------
 
-(defun kargu--aget (alist key &optional default)
+(defun kargu-aget (alist key &optional default)
   "Return the value for string KEY in ALIST, or DEFAULT.
 Safely handles malformed alists, dotted pairs, and non-list data."
   (if (and (consp alist) (listp (cdr alist)))
@@ -42,9 +42,12 @@ Safely handles malformed alists, dotted pairs, and non-list data."
         (error default))
     default))
 
-(defun kargu--nonempty (value)
+(defun kargu-nonempty (value)
   "VALUE if it is a non-empty string, else nil."
   (and (stringp value) (not (string-empty-p value)) value))
+
+(defalias 'kargu--aget #'kargu-aget)
+(defalias 'kargu--nonempty #'kargu-nonempty)
 
 (defun kargu-to-int (value &optional default)
   "Coerce VALUE to an integer, or return DEFAULT (defaults to nil).

@@ -191,8 +191,8 @@ uses `<kargu-sessions-directory>/<project-key>/'."
 (defun kargu-session--derive-title (messages fallback)
   "Derive a short descriptive session title from MESSAGES or FALLBACK."
   (or (cl-some (lambda (m)
-                 (when (equal (kargu--aget m "role") "user")
-                   (let ((c (kargu--aget m "content")))
+                 (when (equal (kargu-aget m "role") "user")
+                   (let ((c (kargu-aget m "content")))
                      (when (and (stringp c) (not (string-empty-p (string-trim c))))
                        (truncate-string-to-width
                         (replace-regexp-in-string "[\r\n\t]+" " " (string-trim c))
@@ -296,15 +296,15 @@ empty strings, not the config fallback."
                               (insert-file-contents file)
                               (buffer-string)))
                    (decoded (kargu--json-decode-safe content)))
-              (when (and decoded (kargu--aget decoded "id"))
+              (when (and decoded (kargu-aget decoded "id"))
                 (push decoded sessions))))
         (error
          (kargu-log 'warn "failed to read session file %s: %s"
                     file (error-message-string err)))))
     (sort sessions
           (lambda (a b)
-            (string> (or (kargu--aget a "updated_at") "")
-                     (or (kargu--aget b "updated_at") ""))))))
+            (string> (or (kargu-aget a "updated_at") "")
+                     (or (kargu-aget b "updated_at") ""))))))
 
 ;;;; Deserialization & Restoration ---------------------------------------
 
@@ -313,13 +313,13 @@ empty strings, not the config fallback."
 
 (defun kargu-session--restore-variables (data root)
   "Restore buffer-local chat session variables from DATA for project ROOT."
-  (let* ((sid (kargu--aget data "id"))
-         (title (kargu--aget data "title"))
-         (saved-root (kargu--aget data "project_root"))
-         (raw-msgs (kargu--aget data "messages"))
+  (let* ((sid (kargu-aget data "id"))
+         (title (kargu-aget data "title"))
+         (saved-root (kargu-aget data "project_root"))
+         (raw-msgs (kargu-aget data "messages"))
          (msg-list (if (vectorp raw-msgs) (append raw-msgs nil) raw-msgs))
-         (saved-prov (kargu--aget data "provider"))
-         (saved-model (kargu--aget data "model")))
+         (saved-prov (kargu-aget data "provider"))
+         (saved-model (kargu-aget data "model")))
     (setq kargu-chat--session-id sid
           kargu-chat--session-title title
           kargu-chat--project-root (or saved-root (kargu-session-project-root root))
@@ -338,12 +338,12 @@ empty strings, not the config fallback."
   (when (boundp 'kargu--session)
     (setq kargu--session
           (list :active nil
-                :id (kargu--aget data "id")
-                :requests (or (kargu--aget data "requests") 0)
-                :tokens-in (or (kargu--aget data "tokens_in") 0)
-                :tokens-out (or (kargu--aget data "tokens_out") 0)
+                :id (kargu-aget data "id")
+                :requests (or (kargu-aget data "requests") 0)
+                :tokens-in (or (kargu-aget data "tokens_in") 0)
+                :tokens-out (or (kargu-aget data "tokens_out") 0)
                 :last-prompt-tokens 0
-                :started (or (kargu--aget data "created_at") updated-at)))))
+                :started (or (kargu-aget data "created_at") updated-at)))))
 
 (defun kargu-session--render-restored-transcript (transcript updated-at message-count)
   "Render TRANSCRIPT or banner into current buffer.
@@ -381,11 +381,11 @@ Returns TARGET-BUFFER on success."
     (when data
       (with-current-buffer buf
         (let ((inhibit-read-only t)
-              (sid (kargu--aget data "id"))
-              (saved-root (kargu--aget data "project_root"))
-              (transcript (or (kargu--aget data "transcript") ""))
-              (mode-str (kargu--aget data "mode"))
-              (updated-at (or (kargu--aget data "updated_at") "earlier")))
+              (sid (kargu-aget data "id"))
+              (saved-root (kargu-aget data "project_root"))
+              (transcript (or (kargu-aget data "transcript") ""))
+              (mode-str (kargu-aget data "mode"))
+              (updated-at (or (kargu-aget data "updated_at") "earlier")))
           (unless (derived-mode-p 'kargu-chat-mode)
             (if (fboundp 'kargu-chat-mode)
                 (kargu-chat-mode)
@@ -418,10 +418,10 @@ Returns TARGET-BUFFER on success."
           (sessions (kargu-session-list proj))
           (choices (mapcar (lambda (s)
                              (cons (format "%s (%s - %s)"
-                                           (or (kargu--aget s "title") "Untitled")
-                                           (or (kargu--aget s "updated_at") "")
-                                           (or (kargu--aget s "id") ""))
-                                   (kargu--aget s "id")))
+                                           (or (kargu-aget s "title") "Untitled")
+                                           (or (kargu-aget s "updated_at") "")
+                                           (or (kargu-aget s "id") ""))
+                                   (kargu-aget s "id")))
                            sessions))
           (choice (completing-read "Delete kargu session: " choices nil t)))
      (list (cdr (assoc choice choices)) proj)))
@@ -441,10 +441,10 @@ Returns TARGET-BUFFER on success."
       (let* ((choices
               (mapcar
                (lambda (s)
-                 (let* ((title (or (kargu--aget s "title") "Untitled"))
-                        (time (or (kargu--aget s "updated_at") ""))
-                        (mode (or (kargu--aget s "mode") "agent"))
-                        (msgs (kargu--aget s "messages"))
+                 (let* ((title (or (kargu-aget s "title") "Untitled"))
+                        (time (or (kargu-aget s "updated_at") ""))
+                        (mode (or (kargu-aget s "mode") "agent"))
+                        (msgs (kargu-aget s "messages"))
                         (msg-count (if (vectorp msgs) (length msgs) (length (or msgs '()))))
                         (label (format "[%s] (%s, %d msgs) %s"
                                        time mode msg-count title)))
@@ -463,7 +463,7 @@ Returns TARGET-BUFFER on success."
                          (get-buffer-create (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*")))))
             (kargu-session-load selected buf proj-root)
             (pop-to-buffer-same-window buf)
-            (message "kargu: loaded session '%s'" (kargu--aget selected "title"))))))))
+            (message "kargu: loaded session '%s'" (kargu-aget selected "title"))))))))
 
 (defun kargu-session-auto-save-all ()
   "Save all active kargu chat buffers to disk."

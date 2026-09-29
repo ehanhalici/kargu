@@ -27,7 +27,7 @@
 (declare-function kargu-provider-prompt-file "kargu/providers/registry" (model-id))
 (declare-function kargu-lsp-build-skeleton "kargu/tools/lsp" (&optional refresh))
 (declare-function kargu-dape-live-p "kargu/tools/dape")
-(declare-function kargu-dape-get-context "kargu/tools/dape")
+(declare-function kargu-dape-context-snapshot "kargu/tools/dape")
 
 (defvar kargu--compaction-system nil
   "When non-nil, `kargu--get-system-prompt' returns this string.")
@@ -371,8 +371,8 @@ During compaction, `kargu--compaction-system' replaces this."
                                s
                              nil))
                        (error nil))))
-         (ctx (if (fboundp 'kargu-dape-get-context)
-                  (kargu-dape-get-context)
+         (ctx (if (fboundp 'kargu-dape-context-snapshot)
+                  (kargu-dape-context-snapshot)
                 nil))
          (ctx-str (if (and (stringp ctx) (not (string-prefix-p "ERROR:" ctx)))
                       (format "Current debugger state:\n%s\n\n" ctx)

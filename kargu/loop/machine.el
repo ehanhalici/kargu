@@ -117,12 +117,12 @@ PROMPT nil means continue from the existing history."
   "Forward the text or thought delta of one decoded SSE EVENT to RUN's on-delta."
   (when (kargu-loop--live-p run)
     (let* ((on-delta (plist-get run :on-delta))
-           (choices (and on-delta (kargu--aget event "choices")))
+           (choices (and on-delta (kargu-aget event "choices")))
            (choice (cond
                     ((vectorp choices) (and (> (length choices) 0) (aref choices 0)))
                     ((consp choices) (car choices))
                     (t nil)))
-           (delta (and choice (kargu--aget choice "delta")))
+           (delta (and choice (kargu-aget choice "delta")))
            (text (kargu--content-text delta))
            (reason (kargu--reasoning-text delta)))
       (when (and reason on-delta)
@@ -163,7 +163,7 @@ Reasoning-only replies are empty, not answers."
   (let ((err (kargu-response-error-message response))
         (calls (kargu--loop-tool-calls response))
         (reason (kargu--loop-finish-reason response))
-        (answer (kargu--nonempty (kargu-response-answer-text response)))
+        (answer (kargu-nonempty (kargu-response-answer-text response)))
         (continues (or (plist-get run :length-continues) 0)))
     (cond
      ((not (kargu-loop--live-p run)) 'stale)
@@ -345,7 +345,7 @@ remembers the refusal and retries without tools."
   (kargu-circuit-record-success)
   (kargu--loop-finish
    run :done
-   (kargu--nonempty (kargu-response-answer-text response))))
+   (kargu-nonempty (kargu-response-answer-text response))))
 
 (defun kargu-loop--on-empty (run _response)
   "Retry RUN after an empty tool-less reply, or finish it."

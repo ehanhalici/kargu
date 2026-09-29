@@ -71,7 +71,7 @@ Longer patterns come first so a specific model id wins over a shorter one."
   "Return the base-prompt basename for MODEL-ID, or nil.
 The file comes from `:prompt-for' on the provider catalog records.
 The same model id always selects the same file."
-  (when (kargu--nonempty model-id)
+  (when (kargu-nonempty model-id)
     (let ((id (downcase (string-trim model-id))))
       (cdr (cl-find-if (lambda (pair) (string-match-p (car pair) id))
                        (kargu-provider--prompt-rules))))))
@@ -172,18 +172,18 @@ A missing format record streams.  An explicit `:stream' nil does not."
 (defun kargu-provider-api (id)
   "Return default base URL for provider ID, or nil if unknown."
   (let ((info (kargu-provider-get id)))
-    (and info (kargu--nonempty (plist-get info :api)))))
+    (and info (kargu-nonempty (plist-get info :api)))))
 
 (defun kargu-provider-models-api (id)
   "Return dedicated models list URL for provider ID, or nil to use default."
   (let ((info (kargu-provider-get id)))
-    (and info (kargu--nonempty (or (plist-get info :models-api)
+    (and info (kargu-nonempty (or (plist-get info :models-api)
                                    (plist-get info :models-endpoint))))))
 
 (defun kargu-provider-usage-api (id)
   "Return usage / quota endpoint URL for provider ID, or nil."
   (let ((info (kargu-provider-get id)))
-    (and info (kargu--nonempty (or (plist-get info :usage-api)
+    (and info (kargu-nonempty (or (plist-get info :usage-api)
                                    (plist-get info :account-api))))))
 
 (defun kargu-provider--literal (value)
@@ -215,7 +215,7 @@ A `:models' field-spec plist is not a model list."
 (defun kargu-provider-name (id)
   "Return human-readable display name for provider ID."
   (let ((info (kargu-provider-get id)))
-    (or (and info (kargu--nonempty (plist-get info :name)))
+    (or (and info (kargu-nonempty (plist-get info :name)))
         (if (symbolp id) (symbol-name id) (format "%s" id)))))
 
 (defun kargu-provider-list ()

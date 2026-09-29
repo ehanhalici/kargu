@@ -231,9 +231,9 @@ An action that never posts runs once."
   "Concatenated string contents of PAYLOAD's messages."
   (mapconcat
    (lambda (msg)
-     (let ((content (kargu--aget msg "content")))
+     (let ((content (kargu-aget msg "content")))
        (if (stringp content) content "")))
-   (append (kargu--aget payload "messages") nil)
+   (append (kargu-aget payload "messages") nil)
    "\n"))
 
 (defun kargu-fake--fresh-chat ()
@@ -326,7 +326,7 @@ each row starts with that record cleared so it cannot leak."
 
 (defun kargu-fake--tool-count ()
   "Number of tool-result messages in the history."
-  (cl-count-if (lambda (msg) (equal (kargu--aget msg "role") "tool"))
+  (cl-count-if (lambda (msg) (equal (kargu-aget msg "role") "tool"))
                kargu--message-history))
 
 (defun kargu-fake--history-closed-p ()
@@ -337,10 +337,10 @@ the system prompt is not an orphan."
         (ok t)
         (before (kargu-fake--tool-count)))
     (dolist (msg kargu--message-history)
-      (let ((role (kargu--aget msg "role")))
+      (let ((role (kargu-aget msg "role")))
         (cond
          ((equal role "assistant")
-          (setq open (and (kargu--calls-to-list (kargu--aget msg "tool_calls")) t)))
+          (setq open (and (kargu--calls-to-list (kargu-aget msg "tool_calls")) t)))
          ((equal role "tool")
           (if open (setq open nil) (setq ok nil))))))
     (kargu--validate-history)
@@ -350,9 +350,9 @@ the system prompt is not an orphan."
   "Non-nil when history holds the canned tool result."
   (cl-some
    (lambda (msg)
-     (and (equal (kargu--aget msg "role") "tool")
-          (stringp (kargu--aget msg "content"))
-          (string-match-p "fake tool result" (kargu--aget msg "content"))))
+     (and (equal (kargu-aget msg "role") "tool")
+          (stringp (kargu-aget msg "content"))
+          (string-match-p "fake tool result" (kargu-aget msg "content"))))
    kargu--message-history))
 
 (defun kargu-fake--check (mode tools action response err)
@@ -383,16 +383,16 @@ the system prompt is not an orphan."
             (push "request was not sent" problems))
           (when payload
             (if (eq tools 'off)
-                (when (or (kargu--aget payload "tools")
+                (when (or (kargu-aget payload "tools")
                           (string-match-p "read_file" (kargu-fake--payload-text payload)))
                   (push "tools leaked into a tools-off request" problems))
-              (unless (kargu--aget payload "tools")
+              (unless (kargu-aget payload "tools")
                 (push "tools missing from a tools-on request" problems))))
           (when (and (eq response 'tool-reject) (eq tools 'on) (not (eq mode 'agent)))
             (let ((second (nth 1 kargu-fake--seen)))
               (unless second
                 (push "tool rejection did not retry" problems))
-              (when (and second (kargu--aget second "tools"))
+              (when (and second (kargu-aget second "tools"))
                 (push "retry after tool rejection still sent tools" problems)))))
       (when kargu-fake--seen
         (push "request was sent" problems)))
@@ -439,7 +439,7 @@ the system prompt is not an orphan."
     (ignore-errors (kargu-state-set-model saved-model)))
   (unless (and (stringp kargu--session-provider) (not (string-empty-p kargu--session-provider)))
     (setq kargu--session-provider "openrouter"))
-  (unless (and (stringp (kargu--model)) (not (string-empty-p (kargu--model))))
+  (unless (and (stringp kargu--session-model) (not (string-empty-p kargu--session-model)))
     (setq kargu--session-model "fake/model-a")
     (kargu-state-set-model "fake/model-a"))
   (with-current-buffer (get-buffer kargu-chat-buffer-name)

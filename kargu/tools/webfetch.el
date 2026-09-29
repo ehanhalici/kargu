@@ -17,6 +17,7 @@
 (require 'kargu/api)
 (require 'kargu/tools/process)
 (require 'url-parse)
+(require 'url-expand)
 
 (defcustom kargu-webfetch-timeout 20
   "Seconds curl may spend on a webfetch request."
@@ -26,6 +27,11 @@
 (defcustom kargu-webfetch-max-chars 50000
   "Maximum characters returned from a webfetch response body.
 Large bodies are truncated to prevent context window exhaustion."
+  :type 'natnum
+  :group 'kargu)
+
+(defcustom kargu-webfetch-resolve-timeout 5
+  "Seconds allowed for resolving one webfetch host."
   :type 'natnum
   :group 'kargu)
 
@@ -52,6 +58,77 @@ Large bodies are truncated to prevent context window exhaustion."
         (string-prefix-p "fc" h)
         (string-prefix-p "fd" h)
         (kargu-webfetch--ipv4-private-p h))))
+
+(defun kargu-webfetch--bare-host (parsed)
+  "Hostname of PARSED, without brackets around an IPv6 literal."
+  (let ((host (url-host parsed)))
+    (and host (replace-regexp-in-string "\\`\\[\\|\\]\\'" "" host))))
+
+(defun kargu-webfetch--port (parsed)
+  "Port of PARSED, or the default for its scheme."
+  (or (url-portspec parsed)
+      (cdr (assoc (downcase (or (url-type parsed) ""))
+                  '(("https" . 443) ("http" . 80))))
+      80))
+
+(defun kargu-webfetch--first-public (output)
+  "First public address in getent ahosts OUTPUT.
+The result is (public . IP), (private . IP), or (none . nil)."
+  (let (seen private)
+    (catch 'found
+      (dolist (line (split-string (or output "") "\n" t))
+        (when (string-match "\\`[ \t]*\\([^ \t]+\\)" line)
+          (let ((ip (match-string 1 line)))
+            (unless (member ip seen)
+              (push ip seen)
+              (if (kargu-webfetch--internal-host-p ip)
+                  (unless private (setq private ip))
+                (throw 'found (cons 'public ip)))))))
+      (if private (cons 'private private) (cons 'none nil)))))
+
+(defun kargu-webfetch--resolve (url callback)
+  "Resolve URL and pass (IP ERR) to CALLBACK.
+ERR is a reason string when no public address can be pinned.  The call
+returns at once; `getent' runs through `kargu-process-run'."
+  (let ((host (kargu-webfetch--bare-host (url-generic-parse-url url))))
+    (kargu-process-run
+     "getent" (list "ahosts" host)
+     (lambda (result)
+       (cond
+        ((eql (plist-get result :code) 127)
+         (funcall callback nil "webfetch cannot resolve the host: getent not found"))
+        ((or (plist-get result :timed-out)
+             (not (eql (plist-get result :code) 0)))
+         (funcall callback nil (format "webfetch could not resolve %s" host)))
+        (t
+         (let ((found (kargu-webfetch--first-public (plist-get result :output))))
+           (pcase (car found)
+             ('public (funcall callback (cdr found) nil))
+             ('private
+              (funcall callback nil
+                       (format "webfetch refuses local or private address: %s"
+                               (cdr found))))
+             (_ (funcall callback nil
+                         (format "webfetch could not resolve %s" host))))))))
+     :timeout kargu-webfetch-resolve-timeout)))
+
+(defun kargu-webfetch--resolve-mapping (host port ip)
+  "curl --resolve value pinning HOST:PORT to IP."
+  (format "%s:%d:%s" host port
+          (if (string-search ":" ip) (format "[%s]" ip) ip)))
+
+(defun kargu-webfetch--curl-args (url ip)
+  "curl arguments that GET URL from the already resolved address IP."
+  (let* ((parsed (url-generic-parse-url url))
+         (host (kargu-webfetch--bare-host parsed)))
+    (list "-sS" "-i"
+          "--max-time" (number-to-string kargu-webfetch-timeout)
+          "-A" "kargu"
+          "--proto" "=http,https"
+          "--max-filesize" "5000000"
+          "--resolve" (kargu-webfetch--resolve-mapping
+                       host (kargu-webfetch--port parsed) ip)
+          "--" url)))
 
 (defun kargu-webfetch--check-url (url)
   "Signal an error unless URL is http(s) to a public host."
@@ -105,19 +182,20 @@ LEFT redirects remain.  The final text, or an ERROR text, goes to CALLBACK."
 
 (defun kargu-webfetch--fetch (callback url left)
   "GET URL with curl; pass the outcome to CALLBACK.  LEFT redirects remain.
-curl never follows redirects itself: each hop is checked by
-`kargu-webfetch--check-url' before it is requested."
-  (kargu-process-run
-   "curl"
-   (list "-sS" "-i"
-         "--max-time" (number-to-string kargu-webfetch-timeout)
-         "-A" "kargu"
-         "--proto" "=http,https"
-         "--max-filesize" "5000000"
-         "--" url)
-   (lambda (result) (kargu-webfetch--handle callback url left result))
-   :timeout (+ kargu-webfetch-timeout 5)
-   :max-bytes 6000000))
+The host is resolved first.  A private answer, or no resolver, becomes
+ERROR text and curl is not started.  The first public address is pinned
+with --resolve so curl does not look the name up again.  Each redirect
+hop repeats this after `kargu-webfetch--check-url'."
+  (kargu-webfetch--resolve
+   url
+   (lambda (ip err)
+     (if err
+         (funcall callback (format "ERROR: %s" err))
+       (kargu-process-run
+        "curl" (kargu-webfetch--curl-args url ip)
+        (lambda (result) (kargu-webfetch--handle callback url left result))
+        :timeout (+ kargu-webfetch-timeout 5)
+        :max-bytes 6000000)))))
 
 (defun kargu-webfetch-url (callback url)
   "GET URL and pass a truncated text body to CALLBACK."

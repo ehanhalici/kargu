@@ -112,7 +112,7 @@
                                 ("id" . "c1")
                                 ("name" . "read")
                                 ("input" . (("path" . "a")))))))))
-    (should (equal (kargu--aget body "system") "be brief"))
+    (should (equal (kargu-aget body "system") "be brief"))
     (should (equal (kargu-response-answer-text norm) "hello"))
     (should (equal (kargu-response-finish-reason norm) "stop"))
     (should (equal (kargu-response-finish-reason (kargu-api-normalize-response tool))
@@ -120,7 +120,7 @@
     (let ((call (car (append (kargu-response-tool-calls
                               (kargu-api-normalize-response tool))
                              nil))))
-      (should (equal (kargu--aget (kargu--aget call "function") "name") "read")))))
+      (should (equal (kargu-aget (kargu-aget call "function") "name") "read")))))
 
 (ert-deftest kargu-tool-flag-json-false-test ()
   "JSON false is not a true tool flag."
@@ -171,7 +171,7 @@
                                                                         ("function" . (("name" . "") ("arguments" . "1}"))))))))
                                         ("finish_reason" . "tool_calls")))))))
          (resp (kargu--accumulate-stream-deltas events))
-         (call (car (kargu--aget (kargu--aget (car (kargu--aget resp "choices")) "message") "tool_calls"))))
-    (should (equal (kargu--aget (kargu--aget call "function") "name") "read_file"))
-    (should (equal (kargu--aget call "id") "call_0"))
-    (should (equal (kargu--aget (kargu--aget call "function") "arguments") "{\"a\":1}"))))
+         (call (car (kargu-aget (kargu-aget (car (kargu-aget resp "choices")) "message") "tool_calls"))))
+    (should (equal (kargu-aget (kargu-aget call "function") "name") "read_file"))
+    (should (equal (kargu-aget call "id") "call_0"))
+    (should (equal (kargu-aget (kargu-aget call "function") "arguments") "{\"a\":1}"))))

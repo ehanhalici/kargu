@@ -225,11 +225,11 @@
         (kargu--session-model "deepseek-chat")
         (kargu--message-history '((("role" . "user") ("content" . "hello")))))
     (let ((payload (kargu--build-payload)))
-      (should (equal (kargu--aget payload "model") "deepseek-chat"))
-      (should (equal (kargu--aget payload "temperature") 0.5))
-      (should (equal (kargu--aget payload "max_tokens") 8192))
-      (should (equal (kargu--aget payload "max_completion_tokens") 8192))
-      (should (equal (kargu--aget payload "reasoning_effort") "medium"))
+      (should (equal (kargu-aget payload "model") "deepseek-chat"))
+      (should (equal (kargu-aget payload "temperature") 0.5))
+      (should (equal (kargu-aget payload "max_tokens") 8192))
+      (should (equal (kargu-aget payload "max_completion_tokens") 8192))
+      (should (equal (kargu-aget payload "reasoning_effort") "medium"))
       ;; deepseek's format carries effort top-level only: no second shape.
       (should-not (assoc "reasoning" payload))
       (should-not (assoc "thinking" payload)))))
@@ -238,13 +238,13 @@
   "`kargu--extract-models-from-json' handles data, models, and bare vectors."
   ;; OpenAI / standard style: {"data": [{"id": "m1"}]}
   (let ((res1 (kargu--extract-models-from-json '(("data" . [(("id" . "m1"))])))))
-    (should (equal (kargu--aget (aref res1 0) "id") "m1")))
+    (should (equal (kargu-aget (aref res1 0) "id") "m1")))
   ;; Gemini / Ollama style: {"models": [{"id": "m2"}]}
   (let ((res2 (kargu--extract-models-from-json '(("models" . [(("id" . "m2"))])))))
-    (should (equal (kargu--aget (aref res2 0) "id") "m2")))
+    (should (equal (kargu-aget (aref res2 0) "id") "m2")))
   ;; Bare vector style: [(("id" . "m3"))]
   (let ((res3 (kargu--extract-models-from-json [(("id" . "m3"))])))
-    (should (equal (kargu--aget (car res3) "id") "m3"))))
+    (should (equal (kargu-aget (car res3) "id") "m3"))))
 
 (ert-deftest kargu-providers-tuning-cycle-test ()
   "`kargu-tune-cycle-reasoning-effort' cycles the model's API effort list."
@@ -301,11 +301,11 @@
         (kargu--session-model "anthropic/claude-3.5-sonnet")
         (kargu--message-history '((("role" . "user") ("content" . "hello")))))
     (let* ((payload (kargu--build-payload))
-           (tools (kargu--aget payload "tools")))
+           (tools (kargu-aget payload "tools")))
       (should (vectorp tools))
       (should (> (length tools) 0))
       (let ((last-tool (aref tools (1- (length tools)))))
-        (should (equal (kargu--aget last-tool "cache_control")
+        (should (equal (kargu-aget last-tool "cache_control")
                        '(("type" . "ephemeral"))))))))
 
 (ert-deftest kargu-providers-prompt-caching-payload-disabled-test ()
@@ -318,7 +318,7 @@
         (kargu--session-model "llama3")
         (kargu--message-history '((("role" . "user") ("content" . "hello")))))
     (let* ((payload (kargu--build-payload))
-           (tools (kargu--aget payload "tools")))
+           (tools (kargu-aget payload "tools")))
       (should (vectorp tools))
       (should (> (length tools) 0))
       (let ((last-tool (aref tools (1- (length tools)))))
@@ -335,17 +335,17 @@
                                   (("role" . "assistant") ("content" . "Hi there 1"))
                                   (("role" . "user") ("content" . "Hello 2")))))
     (let* ((payload (kargu--build-payload))
-           (msgs (kargu--aget payload "messages")))
+           (msgs (kargu-aget payload "messages")))
       (should (vectorp msgs))
       (should (= (length msgs) 4))
       ;; Turn 2 (assistant) should have cache_control breakpoint
       (let ((prev-turn (aref msgs 2)))
-        (should (equal (kargu--aget prev-turn "role") "assistant"))
-        (should (equal (kargu--aget prev-turn "cache_control")
+        (should (equal (kargu-aget prev-turn "role") "assistant"))
+        (should (equal (kargu-aget prev-turn "cache_control")
                        '(("type" . "ephemeral")))))
       ;; Latest turn (user 2) should NOT have cache_control
       (let ((curr-turn (aref msgs 3)))
-        (should (equal (kargu--aget curr-turn "role") "user"))
+        (should (equal (kargu-aget curr-turn "role") "user"))
         (should-not (assoc "cache_control" curr-turn))))))
 
 (ert-deftest kargu-providers-prompt-caching-payload-empty-tools-system-test ()
@@ -358,11 +358,11 @@
           (kargu--message-history '((("role" . "system") ("content" . "System instructions"))
                                     (("role" . "user") ("content" . "Hello")))))
       (let* ((payload (kargu--build-payload))
-             (msgs (kargu--aget payload "messages")))
+             (msgs (kargu-aget payload "messages")))
         (should (vectorp msgs))
         (let ((sys-msg (aref msgs 0)))
-          (should (equal (kargu--aget sys-msg "role") "system"))
-          (should (equal (kargu--aget sys-msg "cache_control")
+          (should (equal (kargu-aget sys-msg "role") "system"))
+          (should (equal (kargu-aget sys-msg "cache_control")
                          '(("type" . "ephemeral")))))))))
 
 (provide 'tests/test-providers)

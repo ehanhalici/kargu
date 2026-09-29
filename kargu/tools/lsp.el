@@ -42,6 +42,11 @@
 (declare-function jsonrpc-request "jsonrpc")
 (defvar eglot--managed-mode)
 
+(defcustom kargu-lsp-request-timeout 10
+  "Seconds an LSP request may run before the tool reports an error."
+  :type 'natnum
+  :group 'kargu)
+
 (declare-function flymake-diagnostics "flymake")
 (declare-function flymake-diagnostic-text "flymake")
 (declare-function flymake-diagnostic-beg "flymake")
@@ -254,8 +259,22 @@ Otherwise the root comes from Eglot or `project.el'."
 
 ;;;; Request dispatcher ---------------------------------------------------
 
+(defun kargu-lsp--timeout-p (err)
+  "Non-nil when ERR is an LSP request that ran out of time."
+  (string-match-p "[Tt]imed? ?out" (error-message-string err)))
+
+(defun kargu-lsp--eglot-request (server method params timeout)
+  "Call `eglot--request' for SERVER, METHOD and PARAMS, bounded by TIMEOUT.
+A build that takes keyword arguments gets :timeout; an older build gets
+TIMEOUT as the optional positional argument."
+  (let ((args (help-function-arglist 'eglot--request t)))
+    (if (or (memq '&key args) (memq '&rest args))
+        (eglot--request server method params :timeout timeout)
+      (eglot--request server method params timeout))))
+
 (defun kargu-lsp--request (method params &optional buffer)
-  "Send an LSP request with METHOD and PARAMS in BUFFER (or current) using Eglot."
+  "Send an LSP request with METHOD and PARAMS in BUFFER (or current) using Eglot.
+The call stays synchronous and gives up after `kargu-lsp-request-timeout'."
   (let* ((buf (or buffer (current-buffer))))
     (with-current-buffer buf
       (let ((server (and (fboundp 'eglot-current-server)
@@ -265,12 +284,18 @@ Otherwise the root comes from Eglot or `project.el'."
                         ((symbolp method) (intern (concat ":" (symbol-name method))))
                         ((stringp method)
                          (intern (concat ":" (replace-regexp-in-string "\\`:" "" method))))
-                        (t (intern (format ":%s" method))))))
+                        (t (intern (format ":%s" method)))))
+            (timeout kargu-lsp-request-timeout))
         (unless server
           (error "No active Eglot server in buffer %s" (buffer-name buf)))
-        (if (fboundp 'eglot--request)
-            (eglot--request server kw-method params)
-          (jsonrpc-request server kw-method params))))))
+        (condition-case err
+            (if (fboundp 'eglot--request)
+                (kargu-lsp--eglot-request server kw-method params timeout)
+              (jsonrpc-request server kw-method params :timeout timeout))
+          (error
+           (if (kargu-lsp--timeout-p err)
+               (error "LSP request timed out after %s seconds" timeout)
+             (signal (car err) (cdr err)))))))))
 
 ;;;; Symbol gathering (skeleton data) -------------------------------------
 
@@ -1291,7 +1316,7 @@ NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
                                        ("description" . "Absolute or project-relative path of the file to inspect."))))))
    (lambda (args)
      (let ((path (kargu--tool-file-path args)))
-       (if (not (kargu--nonempty path))
+       (if (not (kargu-nonempty path))
            (kargu--tool-missing-file-path args)
          (condition-case-unless-debug err
              (kargu-lsp-read-file-symbols path)
@@ -1312,7 +1337,7 @@ NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
            (sym (kargu--tool-arg args "symbol" "symbol_name" "symbolName" "name"))
            (kind (kargu--tool-arg args "kind" "symbol_kind" "symbolKind")))
        (cond
-        ((not (kargu--nonempty path))
+        ((not (kargu-nonempty path))
          (kargu--tool-missing-file-path args))
         ((or (null sym) (string-empty-p (string-trim sym)))
          "ERROR: symbol is required")
@@ -1342,7 +1367,7 @@ NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
            (kind (kargu--tool-arg args "kind" "symbol_kind" "symbolKind"))
            (reason (kargu--tool-arg args "reason")))
        (cond
-        ((not (kargu--nonempty path))
+        ((not (kargu-nonempty path))
          (kargu--tool-missing-file-path args))
         ((or (null sym) (string-empty-p (string-trim sym)))
          "ERROR: symbol is required")
