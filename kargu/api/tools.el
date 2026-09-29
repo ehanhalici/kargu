@@ -70,17 +70,9 @@ are truncated to `kargu-tool-output-limit'."
   (kargu-log 'debug "tool registered: %s" name)
   name)
 
-(defun kargu-unregister-tool (name)
-  "Remove the tool NAME from the registry."
-  (remhash name kargu--tool-registry))
-
 (defun kargu-registered-tools ()
   "Return the names of all registered tools."
   (hash-table-keys kargu--tool-registry))
-
-(defun kargu--tools-available-p ()
-  "Non-nil when at least one tool is registered."
-  (> (hash-table-count kargu--tool-registry) 0))
 
 (defun kargu--sanitize-tool-parameters (parameters)
   "Ensure PARAMETERS has a valid properties object when type is object."
@@ -160,6 +152,23 @@ concatenated or empty snapshots."
      ((or (kargu--object-p decoded) (vectorp decoded))
       (kargu--json-encode decoded))
      (t "{}"))))
+
+(defun kargu--json-true-p (val)
+  "Return t only when VAL is an explicit true.
+JSON false, nil, \"false\", and 0 are false.  A missing value is false."
+  (cond
+   ((eq val t) t)
+   ((eq val :json-true) t)
+   ((and (numberp val) (not (zerop val))) t)
+   ((and (stringp val)
+         (member (downcase (string-trim val)) '("true" "yes" "1" "on")))
+    t)
+   (t nil)))
+
+(defun kargu--tool-flag (args &rest keys)
+  "Non-nil when ARGS has an explicit true value for one of KEYS.
+`:json-false' stays false.  Use this for boolean tool arguments."
+  (kargu--json-true-p (apply #'kargu--tool-arg args keys)))
 
 (defun kargu--tool-arg (args &rest keys)
   "First non-empty value in ARGS for KEYS (string keys)."

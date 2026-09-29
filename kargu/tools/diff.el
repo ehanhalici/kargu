@@ -344,6 +344,24 @@ Returns a list of plists with keys :type, :file, :lines."
            "\n")))
     (cons old-block new-block)))
 
+(defun kargu-diff--apply-hunk (text old new rel)
+  "Replace the single occurrence of OLD in TEXT with NEW.
+Zero matches and several matches are errors.  REL names the file
+in the error.  An empty OLD appends NEW."
+  (cond
+   ((string-empty-p old)
+    (concat text (if (string-suffix-p "\n" text) "" "\n") new))
+   (t
+    (let ((matches (kargu-diff--count-literal text old)))
+      (cond
+       ((= matches 1) (kargu-diff--replace-first text old new))
+       ((= matches 0)
+        (error "Hunk failed to match in %s: %s"
+               rel (truncate-string-to-width old 60)))
+       (t
+        (error "Hunk matched %d times in %s; refusing to guess"
+               matches rel)))))))
+
 (defun kargu-diff--apply-update-op (file rel op-lines)
   "Apply an update patch operation for REL (at absolute FILE) using OP-LINES."
   (let* ((orig (or (kargu-diff--file-text file) ""))
@@ -354,12 +372,8 @@ Returns a list of plists with keys :type, :file, :lines."
         (let* ((blocks (kargu-diff--extract-hunk-blocks hunk-lines))
                (old-block (car blocks))
                (new-block (cdr blocks)))
-          (if (string-empty-p old-block)
-              (setq current-text (concat current-text (if (string-suffix-p "\n" current-text) "" "\n") new-block))
-            (if (kargu-diff--count-literal current-text old-block)
-                (setq current-text (kargu-diff--replace-first current-text old-block new-block))
-              (error "Hunk failed to match in %s: %s"
-                     rel (truncate-string-to-width old-block 60)))))))
+          (setq current-text
+                (kargu-diff--apply-hunk current-text old-block new-block rel)))))
     (kargu-diff-apply-proposal file current-text)
     (format "Updated %s" rel)))
 

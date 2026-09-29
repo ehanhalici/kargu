@@ -3,6 +3,18 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;; Ensure the package root is on `load-path` during byte/native compilation.
+(eval-and-compile
+  (let ((root (locate-dominating-file
+               (or (bound-and-true-p byte-compile-current-file)
+                   load-file-name
+                   buffer-file-name
+                   default-directory)
+               "kargu.el")))
+    (when root
+      (add-to-list 'load-path (file-name-as-directory
+                               (expand-file-name root))))))
+
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/tools/lsp)
@@ -333,6 +345,19 @@
                    "EDIT_OK:a.rs:bar:code:Method:nil"))
     (should (equal (kargu-execute-tool "edit_with_lsp" '(("file_path" . "a.rs") ("symbol" . "bar") ("new_content" . "code") ("kind" . "Method")))
                    "EDIT_OK:a.rs:bar:code:Method:nil"))))
+
+(ert-deftest kargu-lsp-symbol-end-and-name-test ()
+  "An exclusive LSP end at column 0 does not swallow the next line.
+A kind filter does not select an unrelated symbol."
+  (should (= (kargu-lsp--inclusive-end 10 13 0) 13))
+  (should (= (kargu-lsp--inclusive-end 10 12 4) 13))
+  (let ((symbols '((:name "alpha" :kind "Function")
+                   (:name "beta" :kind "Function"))))
+    (should-not (kargu-lsp--find-symbol-in-list symbols "missing" "Function"))
+    (should (equal (plist-get
+                    (car (kargu-lsp--find-symbol-in-list symbols "beta" "Function"))
+                    :name)
+                   "beta"))))
 
 (provide 'tests/test-lsp)
 ;;; test-lsp.el ends here

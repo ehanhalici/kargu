@@ -25,10 +25,9 @@
       (add-to-list 'load-path (file-name-as-directory
                                (expand-file-name root))))))
 
-(defcustom kargu-sound-notifications nil
-  "When non-nil, play sound or bell when the agent finishes or needs approval."
-  :type 'boolean
-  :group 'kargu)
+(require 'kargu/core)
+
+(defvar kargu-sound-notifications)
 
 (defun kargu-notify-sound (&optional _event)
   "Play an alert tone or ring bell for EVENT (:finish, :error, :permission)."

@@ -38,6 +38,9 @@
 
 (defvar kargu-active-mode)
 
+(declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-state--set "kargu/state/store" (key value))
+
 (defun kargu-state-set-mode (mode)
   "Set the active operating mode to MODE (`ask', `plan', `debug', or `agent').
 Validates MODE and ensures an agent run is not currently active."
@@ -46,7 +49,7 @@ Validates MODE and ensures an agent run is not currently active."
                          mode kargu-all-modes)
   (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
     (user-error "kargu: cannot change mode while an agent run is in progress (M-x kargu-loop-stop)"))
-  (kargu-state-set :mode mode)
+  (kargu-state--set :mode mode)
   (setq kargu-active-mode mode)
   (kargu-state-notify :mode mode)
   mode)
@@ -54,7 +57,7 @@ Validates MODE and ensures an agent run is not currently active."
 (defun kargu-state-set-provider (provider)
   "Set the active PROVIDER symbol."
   (kargu-contract-assert #'symbolp provider "PROVIDER must be a symbol: %S" provider)
-  (kargu-state-set :provider provider)
+  (kargu-state--set :provider provider)
   (kargu-state-notify :provider provider)
   provider)
 
@@ -62,24 +65,23 @@ Validates MODE and ensures an agent run is not currently active."
   "Set the active MODEL string identifier."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p model
                          "MODEL must be a non-empty string: %S" model)
-  (kargu-state-set :model model)
+  (kargu-state--set :model model)
   (kargu-state-notify :model model)
   model)
 
+(defun kargu-state-clear-model ()
+  "Clear the active model."
+  (kargu-state--set :model nil)
+  (kargu-state-notify :model nil)
+  nil)
+
 (defun kargu-state-set-reasoning-effort (effort)
-  "Set the active reasoning EFFORT (`low', `medium', `high', or nil)."
-  (unless (memq effort '(nil low medium high))
-    (error "Invalid reasoning effort: %S (expected low, medium, high, or nil)" effort))
-  (kargu-state-set :reasoning-effort effort)
+  "Set the active reasoning EFFORT to a symbol from the model API, or nil."
+  (unless (or (null effort) (symbolp effort))
+    (error "Invalid reasoning effort: %S (expected a symbol or nil)" effort))
+  (kargu-state--set :reasoning-effort effort)
   (kargu-state-notify :reasoning-effort effort)
   effort)
-
-(defun kargu-state-set-thinking-budget (budget)
-  "Set the active thinking BUDGET integer or nil."
-  (unless (or (null budget) (natnump budget))
-    (error "Invalid thinking budget: %S (expected integer or nil)" budget))
-  (kargu-state-set :thinking-budget budget)
-  budget)
 
 (defun kargu-state-transition-status (new-status &optional detail)
   "Transition the state machine to NEW-STATUS with optional DETAIL.
@@ -87,16 +89,11 @@ Validates that NEW-STATUS is a known status and updates `:busy'."
   (unless (memq new-status kargu-state--valid-statuses)
     (error "Invalid lifecycle status: %S (expected one of %s)"
            new-status kargu-state--valid-statuses))
-  (kargu-state-set :status new-status)
+  (kargu-state--set :status new-status)
   (let ((busy (if (memq new-status '(:idle :stopped :error :done :limit :pause)) nil t)))
-    (kargu-state-set :busy busy))
+    (kargu-state--set :busy busy))
   (kargu-state-notify :status new-status detail)
   new-status)
-
-(defun kargu-state-set-loop-run (run)
-  "Set the active loop RUN plist or nil."
-  (kargu-state-set :loop-run run)
-  run)
 
 (defun kargu-state-record-tokens (prompt-tokens completion-tokens)
   "Accumulate PROMPT-TOKENS and COMPLETION-TOKENS into cumulative usage."
@@ -110,17 +107,10 @@ Validates that NEW-STATUS is a known status and updates `:busy'."
          (cur-p (or (kargu-state-get :prompt-tokens) 0))
          (cur-c (or (kargu-state-get :completion-tokens) 0))
          (cur-tot (or (kargu-state-get :total-tokens) 0)))
-    (kargu-state-set :prompt-tokens (+ cur-p p))
-    (kargu-state-set :completion-tokens (+ cur-c c))
-    (kargu-state-set :total-tokens (+ cur-tot tot))
+    (kargu-state--set :prompt-tokens (+ cur-p p))
+    (kargu-state--set :completion-tokens (+ cur-c c))
+    (kargu-state--set :total-tokens (+ cur-tot tot))
     (kargu-state-tokens)))
-
-(defun kargu-state-set-context-buffer (buf)
-  "Set the active context buffer to BUF."
-  (kargu-contract-assert (lambda (b) (or (null b) (bufferp b) (stringp b))) buf
-                         "BUF must be a buffer, buffer name or nil: %S" buf)
-  (kargu-state-set :context-buffer buf)
-  buf)
 
 (defun kargu-state-reset ()
   "Reset state store back to clean initial state."

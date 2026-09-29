@@ -40,8 +40,11 @@
 (require 'kargu/api)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/lsp)
+(require 'kargu/tools/deps nil t)
 
 (declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-session--project-root "kargu/chat/session" (&optional buffer-or-dir))
+(declare-function kargu-deps-missing "kargu/tools/deps" (&optional root))
 
 (defgroup kargu-loop nil
   "The autonomous agent loop."
@@ -206,6 +209,11 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
   (interactive "skargu prompt: ")
   (when (kargu-loop-running-p)
     (user-error "kargu: a run is already in progress (M-x kargu-loop-stop)"))
+  (let ((missing (and (fboundp 'kargu-deps-missing)
+                      (kargu-deps-missing (kargu-session--project-root)))))
+    (when missing
+      (user-error "kargu: Run cannot start because mandatory tools are missing: %s"
+                  (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", "))))
   (kargu-contract-assert #'kargu-contract-non-empty-string-p prompt
                          "kargu: prompt must be a non-empty string: %S" prompt)
   (kargu-contract-assert #'kargu-contract-callback-p on-delta
@@ -237,8 +245,6 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
         (plist-put run :no-tools t)
         (kargu-log 'info "model '%s' does not support tools; running in tool-free mode" (kargu--model))))
     (setq kargu--loop-run run)
-    (when (fboundp 'kargu-state-set-loop-run)
-      (kargu-state-set-loop-run run))
     (when (fboundp 'kargu-state-transition-status)
       (kargu-state-transition-status :requesting))
     (plist-put kargu--session :active t)
@@ -268,8 +274,6 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
                      "run end with %d unconsumed changed file(s)"
                      (length pending))))
       (setq kargu--loop-run nil)
-      (when (fboundp 'kargu-state-set-loop-run)
-        (kargu-state-set-loop-run nil))
       (setq kargu--compaction-system nil)
       (plist-put kargu--session :active nil)
       (when (fboundp 'kargu-state-transition-status)
@@ -277,7 +281,7 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
                             status
                           :idle)))
           (kargu-state-transition-status final-st (or text (symbol-name status)))))
-      (kargu--validate-history)
+      (kargu--validate-history 'keep-assistant-tail)
       (kargu-log 'info "run end: %s (iterations=%d, healing=%d)"
                  status
                  (plist-get report :iterations)

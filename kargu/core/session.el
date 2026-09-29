@@ -29,6 +29,7 @@
 (declare-function kargu-history-reset "kargu/history/protocol" ())
 (declare-function kargu-circuit-reset "kargu/api/circuit" ())
 (declare-function kargu-state-reset "kargu/state/transitions" ())
+(declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id))
 
 ;;;; Session state --------------------------------------------------------
 
@@ -75,25 +76,42 @@ Return the updated `kargu--session' plist."
                (+ (or (plist-get kargu--session :tokens-out) 0) tokens-out)))
   kargu--session)
 
+(defun kargu-session--count-label (n)
+  "Short label for token count N."
+  (if (>= n 1000)
+      (format "%.1fk" (/ (float n) 1000))
+    (format "%d" n)))
+
+(defun kargu-session--capacity ()
+  "Context-window size of the active model, or nil when unknown."
+  (let ((cap (and (fboundp 'kargu-model-context-window)
+                  (kargu-model-context-window))))
+    (and (numberp cap) (> cap 0) cap)))
+
+(defun kargu-session--capacity-label (cap)
+  "Short label for context capacity CAP."
+  (if (>= cap 1000000)
+      (format "%dm" (/ cap 1000000))
+    (format "%dk" (/ cap 1000))))
+
 (defun kargu-session-context-info ()
-  "Return a plist (:used TOKENS :capacity CAP :percent PCT :formatted STR)."
+  "Return a plist (:used TOKENS :capacity CAP :percent PCT :formatted STR).
+CAP is nil when the model record has no context window."
   (let* ((in (or (plist-get kargu--session :last-prompt-tokens)
                  (plist-get kargu--session :tokens-in)
                  0))
-         (cap (if (fboundp 'kargu-model-context-window)
-                  (kargu-model-context-window)
-                128000))
-         (pct (if (> cap 0) (/ (* 100 in) cap) 0))
-         (in-str (if (>= in 1000)
-                     (format "%.1fk" (/ (float in) 1000))
-                   (format "%d" in)))
-         (cap-str (if (>= cap 1000000)
-                      (format "%dm" (/ cap 1000000))
-                    (format "%dk" (/ cap 1000)))))
+         (cap (kargu-session--capacity))
+         (pct (if cap (/ (* 100 in) cap) nil))
+         (in-str (kargu-session--count-label in)))
     (list :used in
           :capacity cap
           :percent pct
-          :formatted (format "%s/%s (%d%%)" in-str cap-str pct))))
+          :formatted (if cap
+                         (format "%s/%s (%d%%)"
+                                 in-str
+                                 (kargu-session--capacity-label cap)
+                                 pct)
+                       in-str))))
 
 (defvar kargu--session-provider nil
   "Session override for the active TOML provider name, or nil.")
@@ -134,6 +152,10 @@ Return the updated `kargu--session' plist."
     (kargu-state-reset))
   (setq kargu--session-provider nil
         kargu--session-model nil)
+  (when (boundp 'kargu-chat--messages)
+    (setq kargu-chat--messages nil))
+  (when (boundp 'kargu-chat--session-id)
+    (setq kargu-chat--session-id nil))
   (message "kargu session reset"))
 
 (provide 'kargu/core/session)

@@ -125,7 +125,6 @@ Mutates MSG and returns it."
          (null (kargu--calls-to-list (kargu--aget last "tool_calls"))))))
 
 (defalias 'kargu--history-completed-assistant-tail-p #'kargu--empty-assistant-tail-p)
-(defalias 'kargu-history-empty-tail-p #'kargu--empty-assistant-tail-p)
 
 (defun kargu--clean-assistant-message (msg)
   "Return a normalized copy of assistant message MSG."

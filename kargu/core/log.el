@@ -26,8 +26,25 @@
 
 (require 'kargu/core/custom)
 
+(declare-function kargu-state-mode "kargu/state/selectors" ())
+
 (defconst kargu--log-buffer "*kargu-log*"
   "Name of the kargu log buffer.")
+
+(defun kargu--log-mode-name ()
+  "Mode symbol recorded on each log line."
+  (if (fboundp 'kargu-state-mode)
+      (kargu-state-mode)
+    'ask))
+
+(defun kargu--log-level-face (level)
+  "Face for log LEVEL."
+  (pcase level
+    ((or 'error 'warn) 'font-lock-warning-face)
+    ('request 'font-lock-keyword-face)
+    ('response 'font-lock-string-face)
+    ('wire 'font-lock-type-face)
+    (_ 'font-lock-comment-face)))
 
 (defun kargu--ensure-log-buffer ()
   "Return `*kargu-log*', creating it read-only with wrapping enabled."
@@ -48,18 +65,8 @@ process filters and sentinels."
         (let ((inhibit-read-only t))
           (goto-char (point-max))
           (insert (format-time-string "%H:%M:%S ")
-                  (propertize (format "[%s/%s] " level
-                                      (if (fboundp 'kargu-state-mode)
-                                          (kargu-state-mode)
-                                        (if (boundp 'kargu-active-mode)
-                                            kargu-active-mode
-                                          'ask)))
-                              'face (pcase level
-                                      ((or 'error 'warn) 'font-lock-warning-face)
-                                      ('request 'font-lock-keyword-face)
-                                      ('response 'font-lock-string-face)
-                                      ('wire 'font-lock-type-face)
-                                      (_ 'font-lock-comment-face)))
+                  (propertize (format "[%s/%s] " level (kargu--log-mode-name))
+                              'face (kargu--log-level-face level))
                   (apply #'format format-string args)
                   "\n")))
     (error nil)))
@@ -113,12 +120,7 @@ Never signals.  Does not log API keys."
             (let ((inhibit-read-only t))
               (goto-char (point-max))
               (insert (format-time-string "%H:%M:%S ")
-                      (propertize (format "[wire/%s] "
-                                          (if (fboundp 'kargu-state-mode)
-                                              (kargu-state-mode)
-                                            (if (boundp 'kargu-active-mode)
-                                                kargu-active-mode
-                                              'ask)))
+                      (propertize (format "[wire/%s] " (kargu--log-mode-name))
                                   'face 'font-lock-type-face)
                       (format "---- %s ----\n" title)
                       body

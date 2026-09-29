@@ -35,4 +35,4 @@ Do not add comments unless asked.
 Refer to <project_toolchain> in the environment for recommended build and test commands, or look them up in the repo.
 
 # Code references
-When citing code, use path:line (example: rust/src/camera.rs:42).
+When citing code, use path:line (example: rust/src/foo.rs:42).

@@ -26,12 +26,6 @@
 
 ;;;; Buffer names ---------------------------------------------------------
 
-(defconst kargu-buffer-chat "*kargu-chat*"
-  "Name of the primary chat log buffer.")
-
-(defconst kargu-buffer-log "*kargu-log*"
-  "Name of the internal diagnostic log buffer.")
-
 (defconst kargu-buffer-plan "*kargu-plan*"
   "Name of the in-memory plan review buffer.")
 
@@ -68,21 +62,6 @@
 
 ;;;; HTTP status codes ----------------------------------------------------
 
-(defconst kargu-http-ok 200
-  "HTTP 200 OK.")
-
-(defconst kargu-http-bad-request 400
-  "HTTP 400 Bad Request.")
-
-(defconst kargu-http-unauthorized 401
-  "HTTP 401 Unauthorized.")
-
-(defconst kargu-http-forbidden 403
-  "HTTP 403 Forbidden.")
-
-(defconst kargu-http-not-found 404
-  "HTTP 404 Not Found.")
-
 (defconst kargu-http-too-many-requests 429
   "HTTP 429 Rate limited / Too Many Requests.")
 
@@ -109,9 +88,6 @@
         kargu-http-gateway-timeout
         kargu-http-overloaded)
   "HTTP status codes that qualify for retry and backoff.")
-
-(defconst kargu-default-api-timeout 90
-  "Default HTTP request timeout in seconds for AI completions.")
 
 (provide 'kargu/contract/constants)
 

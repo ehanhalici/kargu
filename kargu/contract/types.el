@@ -59,9 +59,7 @@
   "Return non-nil if CALLS is nil, :json-null, or a collection of tool calls."
   (cond
    ((or (null calls) (eq calls :json-null)) t)
-   ((vectorp calls)
-    (cl-every #'kargu-contract-tool-call-p calls))
-   ((listp calls)
+   ((or (vectorp calls) (listp calls))
     (cl-every #'kargu-contract-tool-call-p calls))
    (t nil)))
 
@@ -74,15 +72,6 @@
          (and (kargu-contract-role-p role)
               (kargu-contract-content-p content)
               (kargu-contract-tool-calls-p calls)))))
-
-(defun kargu-contract-history-p (history)
-  "Return non-nil if HISTORY is a valid message sequence."
-  (and (listp history)
-       (or (null history)
-           (and (kargu-contract-message-p (car history))
-                (equal (alist-get "role" (car history) nil nil #'equal)
-                       kargu-role-system)
-                (cl-every #'kargu-contract-message-p history)))))
 
 (defun kargu-contract-filepath-p (path)
   "Return non-nil if PATH is a non-empty string."
@@ -108,12 +97,6 @@
 (defun kargu-contract-callback-p (cb)
   "Return non-nil if CB is callable or nil."
   (or (null cb) (functionp cb)))
-
-(defun kargu-contract-response-p (resp)
-  "Return non-nil if RESP has a valid OpenAI response shape."
-  (and (consp resp)
-       (or (alist-get "choices" resp nil nil #'equal)
-           (alist-get "error" resp nil nil #'equal))))
 
 (defun kargu-contract-tool-schema-p (schema)
   "Return non-nil if SCHEMA is nil or a valid JSON schema alist.

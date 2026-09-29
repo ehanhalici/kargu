@@ -3,6 +3,18 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;; Ensure the package root is on `load-path` during byte/native compilation.
+(eval-and-compile
+  (let ((root (locate-dominating-file
+               (or (bound-and-true-p byte-compile-current-file)
+                   load-file-name
+                   buffer-file-name
+                   default-directory)
+               "kargu.el")))
+    (when root
+      (add-to-list 'load-path (file-name-as-directory
+                               (expand-file-name root))))))
+
 (require 'ert)
 (require 'kargu/history)
 
@@ -108,6 +120,17 @@
          (res (kargu--history-refresh-system-head history t)))
     (should-not (equal (alist-get "content" (car res) nil nil #'equal)
                        "old system prompt"))))
+
+(ert-deftest kargu-history-keep-assistant-tail-test ()
+  "A finished turn may keep its assistant answer."
+  (let ((kargu--message-history
+         `((("role" . "system") ("content" . "sys"))
+           (("role" . "user") ("content" . "hello"))
+           (("role" . "assistant") ("content" . "done"))))
+        (kargu-trailing-assistant-fix 'strip))
+    (kargu--validate-history 'keep-assistant-tail)
+    (should (= (length kargu--message-history) 3))
+    (should (equal (kargu--history-last-role) "assistant"))))
 
 (provide 'tests/test-history)
 

@@ -122,26 +122,6 @@
             (setq found abs))))
       found)))
 
-(defun kargu-chat--fence-lang (path)
-  "Markdown fence language tag for PATH's extension."
-  (pcase (downcase (or (file-name-extension path) ""))
-    ("el" "elisp")
-    ("rs" "rust")
-    ("py" "python")
-    ("js" "javascript")
-    ("ts" "typescript")
-    ("tsx" "tsx")
-    ("jsx" "jsx")
-    ("md" "markdown")
-    ("toml" "toml")
-    ("json" "json")
-    ((or "c" "h") "c")
-    ((or "cc" "cpp" "hh" "hpp") "cpp")
-    ("go" "go")
-    ("rb" "ruby")
-    ((or "sh" "bash") "bash")
-    (ext ext)))
-
 (defun kargu-chat--called-read (abs)
   "Synthetic Read-tool header for file ABS."
   (format "Called the Read tool with %s"
@@ -290,12 +270,6 @@ If FROM or TO is nil, processes entire buffer."
             (format "%s\n(file %s, symbol %s, lines %d-%d)\n%s\n"
                     (kargu-chat--called-read abs)
                     abs sym-part from to dump))))))))
-
-(defun kargu-chat--numbered-attach (abs)
-  "Numbered file dump for ABS, matching `read_file' output."
-  (with-temp-buffer
-    (insert-file-contents abs)
-    (format "(file %s)\n%s" abs (kargu-chat--dump-buffer-numbered))))
 
 (defun kargu-chat--attach-block (mention cap)
   "Attachment for MENTION as a synthetic `read_file' transcript.

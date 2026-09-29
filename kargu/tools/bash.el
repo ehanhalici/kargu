@@ -362,7 +362,7 @@ Strictly validates that CWD and all path arguments stay within project root."
          (kargu-bash-run
           (kargu--tool-arg args "command")
           (kargu--tool-arg args "cwd" "path" "directory")
-          (kargu--tool-arg args "background")
+          (kargu--tool-flag args "background")
           callback)
        (error
         (let ((err-msg (format "ERROR: %s" (error-message-string err))))

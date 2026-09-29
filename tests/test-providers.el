@@ -11,6 +11,18 @@
 
 ;;; Code:
 
+;; Ensure the package root is on `load-path' during byte/native compilation.
+(eval-and-compile
+  (let ((root (locate-dominating-file
+               (or (bound-and-true-p byte-compile-current-file)
+                   load-file-name
+                   buffer-file-name
+                   default-directory)
+               "kargu.el")))
+    (when root
+      (add-to-list 'load-path (file-name-as-directory
+                               (expand-file-name root))))))
+
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/core)
@@ -147,12 +159,46 @@
     (should (equal (kargu--api-base) "https://api.cerebras.ai/v1"))
     (should (equal kargu--session-model "llama3.1-70b"))))
 
+(ert-deftest kargu-providers-generic-catalog-test ()
+  "Keyless and local properties are driven by catalog.el and lookup is exact."
+  ;; Keyless runners
+  (should (kargu-provider-keyless-p "ollama"))
+  (should (kargu-provider-keyless-p "lmstudio"))
+  (should (kargu-provider-keyless-p "llamacpp"))
+  (should (kargu-provider-keyless-p "llama_cpp"))
+  (should-not (kargu-provider-keyless-p "openai"))
+  (should-not (kargu-provider-keyless-p "deepseek"))
+
+  ;; Local runners
+  (should (kargu-provider-local-p "ollama"))
+  (should (kargu-provider-local-p "lmstudio"))
+  (should (kargu-provider-local-p "llamacpp"))
+  (should (kargu-provider-local-p "llama_cpp"))
+  (should-not (kargu-provider-local-p "openai"))
+
+  ;; Exact name lookup for both llamacpp and llama_cpp
+  (let ((l1 (kargu-provider-get "llamacpp"))
+        (l2 (kargu-provider-get "llama_cpp")))
+    (should (plist-get l1 :keyless))
+    (should (plist-get l2 :keyless))
+    (should (equal (plist-get l1 :models-api) "http://127.0.0.1:8080/v1/models"))
+    (should (equal (plist-get l2 :models-api) "http://127.0.0.1:8080/v1/models")))
+
+  ;; Verify obsolete hardcoded variables/functions are removed
+  (should-not (boundp 'kargu-providers-popular))
+  (should-not (fboundp 'kargu-provider-popular-list))
+  (should-not (boundp 'kargu-providers-local-keyless))
+  (should-not (boundp 'kargu--env-key-by-host))
+  (should-not (fboundp 'kargu--env-api-key)))
+
 (ert-deftest kargu-providers-authentication-detection-test ()
   "Keyless local runners and env-configured providers report authenticated."
-  ;; Ollama is a keyless local runner
+  ;; Ollama and llama_cpp are keyless local runners
   (should (kargu-provider-authenticated-p "ollama"))
+  (should (kargu-provider-authenticated-p "llama_cpp"))
   (should (member "ollama" (kargu-connected-providers)))
-  ;; Without key, a random cloud provider is not authenticated
+  (should (member "llama_cpp" (kargu-connected-providers)))
+  ;; Without key, a cloud provider is not authenticated
   (let* ((empty-cfg (make-temp-file "kargu-empty-" nil ".toml"))
          (kargu--config-cache nil)
          (kargu--config-cache-path nil)
@@ -203,9 +249,14 @@
     (should (equal (kargu--aget (car res3) "id") "m3"))))
 
 (ert-deftest kargu-providers-tuning-cycle-test ()
-  "`kargu-tune-cycle-reasoning-effort' cycles nil -> low -> medium -> high -> nil."
+  "`kargu-tune-cycle-reasoning-effort' cycles the model's API effort list."
   (require 'kargu/chat/tune)
-  (let ((kargu-reasoning-effort nil))
+  (require 'kargu/api/catalog)
+  (let ((kargu-reasoning-effort nil)
+        (kargu--session-model "test/cycle-model"))
+    (kargu-model-set-metadata "test/cycle-model"
+                              '(:id "cycle-model"
+                                    :reasoning-efforts ("low" "medium" "high")))
     (kargu-tune-cycle-reasoning-effort)
     (should (eq kargu-reasoning-effort 'low))
     (kargu-tune-cycle-reasoning-effort)
@@ -246,7 +297,9 @@
   "Ensure `kargu--build-payload' attaches `cache_control' to last tool for caching providers."
   (require 'kargu/api/http)
   (require 'kargu/api/tools)
-  (let ((kargu--session-provider "openrouter")
+  (kargu-register-tool "mock_tool" "A mock tool for testing" nil #'ignore)
+  (let ((kargu-active-mode 'agent)
+        (kargu--session-provider "openrouter")
         (kargu--session-model "anthropic/claude-3.5-sonnet")
         (kargu--message-history '((("role" . "user") ("content" . "hello")))))
     (let* ((payload (kargu--build-payload))
@@ -261,7 +314,9 @@
   "Ensure `kargu--build-payload' does not attach `cache_control' when provider does not support it."
   (require 'kargu/api/http)
   (require 'kargu/api/tools)
-  (let ((kargu--session-provider "ollama")
+  (kargu-register-tool "mock_tool" "A mock tool for testing" nil #'ignore)
+  (let ((kargu-active-mode 'agent)
+        (kargu--session-provider "ollama")
         (kargu--session-model "llama3")
         (kargu--message-history '((("role" . "user") ("content" . "hello")))))
     (let* ((payload (kargu--build-payload))

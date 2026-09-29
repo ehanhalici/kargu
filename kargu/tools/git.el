@@ -182,52 +182,60 @@ PATH optionally filters by file path."
 
 ;;;; Stage & Unstage ------------------------------------------------------
 
+(defun kargu-git--relative-paths (paths action proj-root)
+  "Project-relative PATHS for ACTION under PROJ-ROOT, in input order.
+`.` stays `.'.  Empty entries are dropped."
+  (let (clean)
+    (dolist (p (if (listp paths) paths (list paths)))
+      (let ((trim (string-trim (format "%s" (or p "")))))
+        (unless (string-empty-p trim)
+          (push (if (string= trim ".")
+                    "."
+                  (file-relative-name
+                   (kargu-permission-assert-within-project trim proj-root action)
+                   proj-root))
+                clean))))
+    (nreverse clean)))
+
+(defun kargu-git--require-paths (paths action)
+  "PATHS, or an error naming ACTION."
+  (or paths
+      (error "at least one path must be specified to %s" action)))
+
 (defun kargu-git-stage (paths)
   "Stage PATHS (string or list of strings) via git add."
   (let* ((proj-root (kargu-permission-project-root))
-         (path-list (if (listp paths) paths (list paths)))
-         (clean-paths nil))
-    (dolist (p path-list)
-      (let ((trim (string-trim (format "%s" p))))
-        (when (not (string-empty-p trim))
-          (if (string= trim ".")
-              (push "." clean-paths)
-            (let ((abs (kargu-permission-assert-within-project trim proj-root "stage path")))
-              (push (file-relative-name abs proj-root) clean-paths))))))
-    (unless clean-paths
-      (error "at least one path must be specified to stage"))
-    (let* ((args (append (list "add" "--") (nreverse clean-paths)))
-           (res (kargu-git--run args proj-root))
-           (code (car res))
-           (out (cdr res)))
-      (kargu-git--refresh)
-      (if (= code 0)
-          (format "Staged: %s" (string-join clean-paths ", "))
-        (error "git add failed (exit %d): %s" code out)))))
+         (clean-paths (kargu-git--require-paths
+                       (kargu-git--relative-paths paths "stage path" proj-root)
+                       "stage"))
+         (res (kargu-git--run (append '("add" "--") clean-paths) proj-root))
+         (code (car res))
+         (out (cdr res)))
+    (kargu-git--refresh)
+    (if (= code 0)
+        (format "Staged: %s" (string-join clean-paths ", "))
+      (error "git add failed (exit %d): %s" code out))))
+
+(defun kargu-git--unstage-result (clean-paths proj-root)
+  "Unstage CLEAN-PATHS.  Fall back to `git reset HEAD` with the same list."
+  (let ((res (kargu-git--run
+              (append '("restore" "--staged" "--") clean-paths)
+              proj-root)))
+    (if (= (car res) 0)
+        res
+      (kargu-git--run (append '("reset" "HEAD" "--") clean-paths) proj-root))))
 
 (defun kargu-git-unstage (paths)
   "Unstage PATHS (string or list of strings) via git restore --staged."
   (let* ((proj-root (kargu-permission-project-root))
-         (path-list (if (listp paths) paths (list paths)))
-         (clean-paths nil))
-    (dolist (p path-list)
-      (let ((trim (string-trim (format "%s" p))))
-        (when (not (string-empty-p trim))
-          (if (string= trim ".")
-              (push "." clean-paths)
-            (let ((abs (kargu-permission-assert-within-project trim proj-root "unstage path")))
-              (push (file-relative-name abs proj-root) clean-paths))))))
-    (unless clean-paths
-      (error "at least one path must be specified to unstage"))
-    ;; Try git restore --staged, fallback to git reset HEAD
-    (let* ((args (append (list "restore" "--staged" "--") (nreverse clean-paths)))
-           (res (kargu-git--run args proj-root)))
-      (when (/= (car res) 0)
-        (setq res (kargu-git--run (append (list "reset" "HEAD" "--") clean-paths) proj-root)))
-      (kargu-git--refresh)
-      (if (= (car res) 0)
-          (format "Unstaged: %s" (string-join clean-paths ", "))
-        (error "git unstage failed: %s" (cdr res))))))
+         (clean-paths (kargu-git--require-paths
+                       (kargu-git--relative-paths paths "unstage path" proj-root)
+                       "unstage"))
+         (res (kargu-git--unstage-result clean-paths proj-root)))
+    (kargu-git--refresh)
+    (if (= (car res) 0)
+        (format "Unstaged: %s" (string-join clean-paths ", "))
+      (error "git unstage failed: %s" (cdr res)))))
 
 ;;;; Branch ---------------------------------------------------------------
 
@@ -352,7 +360,7 @@ PATH optionally filters by file path."
    (lambda (args)
      (kargu-safe-tool-call
       (kargu-git-diff
-       (kargu--tool-arg args "staged")
+       (kargu--tool-flag args "staged")
        (kargu--tool-arg args "path" "file")
        (kargu--tool-arg args "commit" "rev")))))
 
@@ -386,7 +394,7 @@ PATH optionally filters by file path."
      (kargu-safe-tool-call
       (kargu-git-commit
        (kargu--tool-arg args "message" "msg")
-       (kargu--tool-arg args "all")))))
+       (kargu--tool-flag args "all")))))
 
   ;; 5. git_stage
   (kargu-register-tool

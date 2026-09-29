@@ -39,6 +39,8 @@
 (require 'tests/test-confirm)
 (require 'tests/test-languages)
 (require 'tests/test-dape-commands)
+(require 'tests/test-deps)
+(require 'tests/test-fake-agent)
 
 (defun kargu-run-all-tests ()
   "Run all Kargu ERT test suites."

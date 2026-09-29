@@ -300,12 +300,6 @@ are ignored.  Optional DEPTH caps nesting at
         (kargu--coerce-text (kargu--aget obj "thinking"))
         (kargu--coerce-text (kargu--aget obj "thought")))))
 
-(defun kargu--visible-text (obj)
-  "User-visible assistant text from message or delta OBJ.
-Only `content' is returned.  Reasoning fields stay off the
-chat timeline; use `kargu--reasoning-text' for logs."
-  (kargu--content-text obj))
-
 (defun kargu--json-get (obj key)
   "Like `kargu--aget' but also try KEY interned as a symbol."
   (or (kargu--aget obj key)

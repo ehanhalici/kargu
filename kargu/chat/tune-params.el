@@ -214,15 +214,6 @@
                 (propertize (format "%d" val) 'face 'font-lock-constant-face)
               (propertize "default" 'face 'font-lock-comment-face)))))
 
-(defun kargu-tune--param-anthropic-beta-desc ()
-  "Formatted description for anthropic_beta parameter."
-  (let ((val (kargu-provider-param-get "anthropic_beta")))
-    (format "Beta Flags:        %s"
-            (if val
-                (propertize (if (vectorp val) (mapconcat #'identity val ", ") (format "%s" val))
-                            'face 'font-lock-string-face)
-              (propertize "none" 'face 'font-lock-comment-face)))))
-
 ;; Gemini Descriptions
 (defun kargu-tune--param-mime-type-desc ()
   "Formatted description for response_mime_type parameter."
@@ -269,7 +260,7 @@
 
 (defun kargu-tune--provider-params-summary-desc ()
   "Summary description of configured provider parameters for kargu-tune-menu."
-  (let* ((pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "openrouter"))
+  (let* ((pname (kargu-provider-params--active-id))
          (fmt (kargu-provider-format-type pname))
          (params (kargu-provider-params-get-all pname))
          (active-count (length params)))
@@ -478,19 +469,38 @@
   (let ((next (kargu-provider-param-toggle "parallel_tool_calls")))
     (message "kargu: parallel_tool_calls: %S" next)))
 
+(defun kargu-tune-param--set-string (key prompt cleared set)
+  "Read a string and store it under KEY.
+PROMPT is the minibuffer label.  CLEARED and SET are message formats.
+SET receives the trimmed value."
+  (let* ((curr (kargu-provider-param-get key))
+         (input (read-string prompt (if curr (format "%s" curr) "")))
+         (trimmed (string-trim input)))
+    (cond
+     ((string-empty-p trimmed)
+      (kargu-provider-param-set key nil)
+      (message "%s" cleared))
+     (t
+      (kargu-provider-param-set key trimmed)
+      (message set trimmed)))))
+
 (defun kargu-tune-param-set-user ()
   "Set end-user identifier for abuse tracking."
   (interactive)
-  (let* ((curr (kargu-provider-param-get "user"))
-         (input (read-string "End-User ID (empty to clear): "
-                             (if curr (format "%s" curr) "")))
-         (trimmed (string-trim input)))
-    (if (string-empty-p trimmed)
-        (progn
-          (kargu-provider-param-set "user" nil)
-          (message "kargu: end-user ID cleared"))
-      (kargu-provider-param-set "user" trimmed)
-      (message "kargu: end-user ID set to: %s" trimmed))))
+  (kargu-tune-param--set-string
+   "user"
+   "End-User ID (empty to clear): "
+   "kargu: end-user ID cleared"
+   "kargu: end-user ID set to: %s"))
+
+(defun kargu-tune-param-set-user-id ()
+  "Set Anthropic metadata.user_id."
+  (interactive)
+  (kargu-tune-param--set-string
+   "user_id"
+   "Metadata user ID (empty to clear): "
+   "kargu: metadata user ID cleared"
+   "kargu: metadata user ID set to: %s"))
 
 ;; Anthropic & Gemini Setters
 (defun kargu-tune-param-toggle-extended-thinking ()
@@ -593,7 +603,7 @@
 (defun kargu-tune-param-preview-json ()
   "Display preview of compiled provider JSON parameters in a popup buffer."
   (interactive)
-  (let* ((pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "openrouter"))
+  (let* ((pname (kargu-provider-params--active-id))
          (payload (kargu-provider-params-build-payload pname))
          (encoded (if payload (kargu--json-encode payload) "{}"))
          (buf (get-buffer-create "*kargu-params-preview*")))
@@ -611,7 +621,7 @@
 (defun kargu-tune-param-reset ()
   "Reset all parameters for active provider to defaults."
   (interactive)
-  (let ((pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "openrouter")))
+  (let ((pname (kargu-provider-params--active-id)))
     (kargu-provider-params-reset pname)
     (message "kargu: reset all parameters for %s" pname)))
 
@@ -623,7 +633,7 @@
   (transient-define-prefix kargu-tune-openrouter-menu ()
     "Control panel for OpenRouter routing and custom JSON parameters."
     [:description (lambda ()
-                    (let ((p (if (fboundp 'kargu--provider-name) (kargu--provider-name) "openrouter")))
+                    (let ((p (kargu-provider-params--active-id)))
                       (format "%s (OpenRouter Routing Architecture)" (propertize (upcase p) 'face 'bold))))
      ["Static Routing & Policies"
       ("s" kargu-tune-param-cycle-sort :description kargu-tune--param-sort-desc :transient t)
@@ -651,7 +661,7 @@
   (transient-define-prefix kargu-tune-openapi-menu ()
     "Control panel for Universal OpenAPI standard parameters."
     [:description (lambda ()
-                    (let ((p (if (fboundp 'kargu--provider-name) (kargu--provider-name) "openai")))
+                    (let ((p (kargu-provider-params--active-id)))
                       (format "%s (Universal OpenAPI Standard)" (propertize (upcase p) 'face 'bold))))
      ["Sampling & Determinism"
       ("s" "Random Seed" kargu-tune-param-set-seed :description kargu-tune--param-seed-desc :transient t)
@@ -672,7 +682,7 @@
   (transient-define-prefix kargu-tune-anthropic-menu ()
     "Control panel for Anthropic Messages API parameters."
     [:description (lambda ()
-                    (let ((p (if (fboundp 'kargu--provider-name) (kargu--provider-name) "anthropic")))
+                    (let ((p (kargu-provider-params--active-id)))
                       (format "%s (Anthropic Messages API)" (propertize (upcase p) 'face 'bold))))
      ["Extended Thinking"
       ("e" kargu-tune-param-toggle-extended-thinking :description kargu-tune--param-extended-thinking-desc :transient t)
@@ -680,7 +690,7 @@
      ["Sampling & Options"
       ("k" "Top K" kargu-tune-param-set-top-k :description kargu-tune--param-top-k-desc :transient t)
       ("p" "Top P" kargu-tune-param-set-top-p :description kargu-tune--param-top-p-desc :transient t)
-      ("u" "Metadata User ID" kargu-tune-param-set-user :description kargu-tune--param-user-desc :transient t)
+      ("u" "Metadata User ID" kargu-tune-param-set-user-id :description kargu-tune--param-user-desc :transient t)
       ("B" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
     [["Actions"
       ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
@@ -691,7 +701,7 @@
   (transient-define-prefix kargu-tune-gemini-menu ()
     "Control panel for Google Gemini GenerateContent API parameters."
     [:description (lambda ()
-                    (let ((p (if (fboundp 'kargu--provider-name) (kargu--provider-name) "google")))
+                    (let ((p (kargu-provider-params--active-id)))
                       (format "%s (Google Gemini API)" (propertize (upcase p) 'face 'bold))))
      ["Thinking & Sampling"
       ("b" "Thinking Budget" kargu-tune-param-set-thinking-budget :description kargu-tune--param-thinking-budget-desc :transient t)
@@ -710,7 +720,7 @@
   (transient-define-prefix kargu-tune-ollama-menu ()
     "Control panel for Ollama / Local Runner options."
     [:description (lambda ()
-                    (let ((p (if (fboundp 'kargu--provider-name) (kargu--provider-name) "ollama")))
+                    (let ((p (kargu-provider-params--active-id)))
                       (format "%s (Local Runner Options)" (propertize (upcase p) 'face 'bold))))
      ["Context & Sampling Options"
       ("c" "Context Size (num_ctx)" kargu-tune-param-set-num-ctx :description kargu-tune--param-num-ctx-desc :transient t)

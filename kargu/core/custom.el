@@ -42,16 +42,12 @@ The TOML key is never written into this variable or Custom."
                  (string :tag "API key"))
   :group 'kargu)
 
-(defcustom kargu-api-base "https://openrouter.ai/api/v1"
-  "Fallback OpenAI-compatible endpoint if the active provider has no `api'.
-Must contain the version prefix and no trailing slash."
-  :type 'string
-  :group 'kargu)
-
-(defcustom kargu-model "anthropic/claude-3.5-sonnet"
-  "Fallback model id if TOML `model' / `name' and the provider
-`models' list are unset."
-  :type 'string
+(defcustom kargu-api-base nil
+  "Fallback endpoint when the active provider has no `api'.
+Nil means the request needs an endpoint from the provider record.
+A string must contain the version prefix and no trailing slash."
+  :type '(choice (const :tag "No fallback" nil)
+                 (string :tag "Endpoint"))
   :group 'kargu)
 
 (defcustom kargu-temperature 0.2
@@ -85,10 +81,10 @@ Set to an integer (e.g. 2048, 4096) or nil for model default."
 
 (defcustom kargu-provider-parameters nil
   "Alist mapping provider ID strings to custom parameter alists.
-For example, for openrouter:
-  \\='((\"openrouter\" . ((\"sort\" . \"price\")
-                      (\"allow_fallbacks\" . :json-false)
-                      (\"zdr\" . t))))"
+For example:
+  \\='((\"example\" . ((\"sort\" . \"price\")
+                    (\"allow_fallbacks\" . :json-false)
+                    (\"zdr\" . t))))"
   :type '(alist :key-type string :value-type (alist :key-type string :value-type sexp))
   :group 'kargu)
 
@@ -120,7 +116,7 @@ LSP diagnostics (used by the loop module)."
   :group 'kargu)
 
 (defcustom kargu-app-url "https://github.com/kargu/kargu"
-  "Attribution URL sent as the HTTP-Referer header to OpenRouter."
+  "Attribution URL sent as the HTTP-Referer header."
   :type 'string
   :group 'kargu)
 
@@ -143,7 +139,7 @@ LSP diagnostics (used by the loop module)."
   '((ask   . "Mode: ASK (read-only). Analyze and explain. Do not edit files.")
     (plan  . "Mode: PLAN (read-only). Explore, then output a markdown implementation checklist. Do not edit files.")
     (debug . "Mode: DEBUG. Ground answers in DAP/runtime evidence and diagnostics. Do not edit unless asked.")
-    (agent . "Mode: AGENT. Inspect, surgical edit, verify with Flycheck/LSP diagnostics, and run compiler/tests via bash."))
+    (agent . "Mode: AGENT. Inspect, surgical edit, verify with Flymake/LSP diagnostics, and run compiler/tests via bash."))
   "Alist mapping mode symbol to the system prompt injected as the first message."
   :type '(alist :key-type symbol :value-type string)
   :group 'kargu)

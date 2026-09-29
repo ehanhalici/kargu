@@ -43,7 +43,8 @@
   "Render approval prompt with action buttons in CHAT-BUF for COMMAND in DIR."
   (with-current-buffer chat-buf
     (let ((inhibit-read-only t))
-      (when (and (markerp kargu-chat--output-marker)
+      (when (and (boundp 'kargu-chat--output-marker)
+                 (markerp kargu-chat--output-marker)
                  (eq (marker-buffer kargu-chat--output-marker) chat-buf))
         (delete-region kargu-chat--output-marker (point-max))
         (setq kargu-chat--prompt-marker nil))

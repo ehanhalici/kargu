@@ -3,10 +3,28 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;; Ensure the package root is on `load-path` during byte/native compilation.
+(eval-and-compile
+  (let ((root (locate-dominating-file
+               (or (bound-and-true-p byte-compile-current-file)
+                   load-file-name
+                   buffer-file-name
+                   default-directory)
+               "kargu.el")))
+    (when root
+      (add-to-list 'load-path (file-name-as-directory
+                               (expand-file-name root))))))
+
 (require 'ert)
 (require 'kargu/api/response)
 (require 'kargu/api/stream)
 (require 'kargu/api/circuit)
+
+(declare-function kargu-api-chat-url "kargu/api/wire" (base format))
+(declare-function kargu-api-prepare-payload "kargu/api/wire" (payload format))
+(declare-function kargu-api-normalize-response "kargu/api/wire" (response))
+(declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
+(declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
 
 (ert-deftest kargu-api-response-vector-choices-test ()
   "Ensure kargu--response-choice handles vector choices correctly (Bug 2 regression)."
@@ -71,6 +89,45 @@
   (require 'kargu/core)
   (should (numberp kargu-api-timeout))
   (should (> kargu-api-timeout 0)))
+
+(ert-deftest kargu-api-anthropic-url-and-response-test ()
+  "Anthropic format posts to /messages and comes back as choices."
+  (require 'kargu/api/wire)
+  (should (equal (kargu-api-chat-url "https://api.anthropic.com/v1" 'anthropic)
+                 "https://api.anthropic.com/v1/messages"))
+  (should (equal (kargu-api-chat-url "https://api.openai.com/v1" 'openapi)
+                 "https://api.openai.com/v1/chat/completions"))
+  (should-not (kargu-provider-format-stream-p 'anthropic))
+  (should (eq (kargu-provider-format-auth 'anthropic) 'x-api-key))
+  (let* ((payload '(("model" . "claude")
+                    ("messages" . ((("role" . "system") ("content" . "be brief"))
+                                   (("role" . "user") ("content" . "hi"))))))
+         (body (kargu-api-prepare-payload payload 'anthropic))
+         (native '(("stop_reason" . "end_turn")
+                   ("content" . ((("type" . "text") ("text" . "hello"))))
+                   ("usage" . (("input_tokens" . 3) ("output_tokens" . 1)))))
+         (norm (kargu-api-normalize-response native))
+         (tool '(("stop_reason" . "tool_use")
+                 ("content" . ((("type" . "tool_use")
+                                ("id" . "c1")
+                                ("name" . "read")
+                                ("input" . (("path" . "a")))))))))
+    (should (equal (kargu--aget body "system") "be brief"))
+    (should (equal (kargu-response-answer-text norm) "hello"))
+    (should (equal (kargu-response-finish-reason norm) "stop"))
+    (should (equal (kargu-response-finish-reason (kargu-api-normalize-response tool))
+                   "tool_calls"))
+    (let ((call (car (append (kargu-response-tool-calls
+                              (kargu-api-normalize-response tool))
+                             nil))))
+      (should (equal (kargu--aget (kargu--aget call "function") "name") "read")))))
+
+(ert-deftest kargu-tool-flag-json-false-test ()
+  "JSON false is not a true tool flag."
+  (require 'kargu/api/tools)
+  (should-not (kargu--tool-flag '(("background" . :json-false)) "background"))
+  (should (kargu--tool-flag '(("background" . t)) "background"))
+  (should-not (kargu--tool-flag '(("staged" . "false")) "staged")))
 
 (provide 'tests/test-api)
 ;;; test-api.el ends here

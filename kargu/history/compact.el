@@ -53,12 +53,13 @@ The suffix is walked back so it does not start on an orphan `tool' result."
   "Dynamic character threshold to trigger history compaction.
 Calculated as 70% of the active model's context window capacity,
 bounded between `kargu-history-compact-chars' (default 45k) and 800k characters."
-  (let* ((ctx-tokens (if (fboundp 'kargu-model-context-window)
-                         (kargu-model-context-window)
-                       128000))
-         ;; 1 token ≈ 3.5 characters in code/prose
-         (calc (round (* ctx-tokens 3.5 0.70)))
-         (floor-val (or kargu-history-compact-chars 45000)))
+  (let* ((ctx-tokens (and (fboundp 'kargu-model-context-window)
+                          (kargu-model-context-window)))
+         (floor-val (or kargu-history-compact-chars 45000))
+         ;; 1 token ≈ 3.5 characters in code/prose.  No window means the floor.
+         (calc (if (and (numberp ctx-tokens) (> ctx-tokens 0))
+                   (round (* ctx-tokens 3.5 0.70))
+                 floor-val)))
     (max floor-val (min calc 800000))))
 
 (defun kargu-history-char-count ()
@@ -150,7 +151,7 @@ The usual system prompt is restored (compaction overlay cleared)."
     (kargu-log 'info "history compacted to %d messages (%d chars)"
                      (length kargu--message-history)
                      (kargu-history-char-count))
-    (kargu--validate-history)))
+    (kargu--validate-history 'keep-assistant-tail)))
 
 (provide 'kargu/history/compact)
 

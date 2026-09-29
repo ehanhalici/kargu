@@ -36,8 +36,14 @@
 (require 'kargu/api/tools)
 (require 'kargu/api/response)
 (require 'kargu/api/stream)
+(require 'kargu/api/wire)
 (require 'kargu/api/circuit)
 (require 'kargu/providers/params)
+
+(declare-function kargu-provider-format "kargu/providers/registry" (id))
+(declare-function kargu-provider-extra-headers "kargu/providers/registry" (id))
+(declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
+(declare-function kargu-provider-format-headers "kargu/providers/registry" (format))
 
 ;;;; Asynchronous request plumbing ----------------------------------------
 
@@ -86,7 +92,6 @@ the UI and central state are left in a consistent state."
   (message "kargu: cancelled in-flight request"))
 
 (declare-function kargu-provider-prompt-caching "kargu/providers/registry" (id))
-(declare-function kargu-provider-format "kargu/providers/registry" (id))
 
 (defun kargu--apply-prompt-caching-messages (raw-msgs tools-len)
   "Attach cache_control markers to RAW-MSGS when appropriate.
@@ -157,11 +162,9 @@ included when at least one tool is VISIBLE after
                          (kargu-provider-prompt-caching pname-lower)))
          (is-anthropic-or-openrouter
           (and caching-p
-               (or (member pname-lower
-                           '("openrouter" "anthropic" "google-vertex-anthropic"
-                             "amazon-bedrock" "claudinio"))
-                   (and (fboundp 'kargu-provider-format)
-                        (eq (kargu-provider-format pname-lower) 'anthropic)))))
+               (memq (and (fboundp 'kargu-provider-format)
+                          (kargu-provider-format pname-lower))
+                     '(anthropic openrouter))))
          (raw-msgs (copy-tree kargu--message-history t))
          (payload nil))
     ;; Multi-turn prompt caching for Anthropic / OpenRouter:
@@ -345,38 +348,58 @@ until the retry finishes or is cancelled."
         (kargu-log 'error "request failed: %s" msg)
         (funcall callback (kargu--api-error-alist msg))))))
 
+(defun kargu--api-provider-format (provider-name)
+  "API format symbol for PROVIDER-NAME, or nil."
+  (when (and provider-name (fboundp 'kargu-provider-format))
+    (kargu-provider-format provider-name)))
+
+(defun kargu--api-auth-headers (key format)
+  "Authorization headers for KEY in FORMAT.
+The format record's `:auth' selects `x-api-key' or a bearer token.
+An empty KEY sends neither."
+  (when (kargu--nonempty key)
+    (if (eq (kargu-provider-format-auth format) 'x-api-key)
+        `(("x-api-key" . ,key))
+      `(("Authorization" . ,(concat "Bearer " key))))))
+
+(defun kargu--api-default-headers (format expanded)
+  "Format-record headers for FORMAT that EXPANDED does not already set."
+  (let (out)
+    (dolist (pair (kargu-provider-format-headers format))
+      (unless (assoc (car pair) expanded)
+        (push pair out)))
+    (nreverse out)))
+
+(defun kargu--api-expand-header (pair session-id)
+  "Return header PAIR, replacing a `:session' value with SESSION-ID."
+  (if (and (consp pair) (eq (cdr pair) :session))
+      (cons (car pair) session-id)
+    pair))
+
 (defun kargu--api-headers (key &optional provider-name)
   "HTTP headers for the active or specified PROVIDER-NAME.
 KEY is the resolved secret.  An empty KEY omits Authorization so
-local or keyless proxies still work.  Includes `x-opencode-session'
-for OpenCode routing/caching affinity and any provider extra-headers."
+local or keyless proxies still work.  Auth and extra headers come
+from the provider catalog `:format' and `:extra-headers'."
   (let* ((sid (if (fboundp 'kargu-session-id) (kargu-session-id) "default"))
          (pname (if provider-name
                     (format "%s" provider-name)
                   (if (fboundp 'kargu--provider-name) (kargu--provider-name) "")))
          (pname-lower (downcase (string-trim pname)))
-         (base (if (fboundp 'kargu--api-base) (kargu--api-base pname-lower) ""))
-         (is-opencode (or (string-match-p "opencode" base)
-                          (string-match-p "opencode" pname-lower)))
-         (is-anthropic (or (string-match-p "anthropic" base)
-                           (string-match-p "anthropic" pname-lower)))
+         (format (kargu--api-provider-format pname-lower))
          (extra (and (fboundp 'kargu-provider-extra-headers)
                      (kargu-provider-extra-headers pname-lower)))
-         (headers
-          (append
-           `(("Content-Type" . "application/json")
-             ("HTTP-Referer" . ,kargu-app-url)
-             ("X-Title" . "kargu"))
-           (when (kargu--nonempty key)
-             (if is-anthropic
-                 `(("x-api-key" . ,key)
-                   ("anthropic-version" . "2023-06-01"))
-               `(("Authorization" . ,(concat "Bearer " key))))))))
-    (when (or is-opencode (string-prefix-p "opencode" pname-lower))
-      (setq headers (append headers (list (cons "x-opencode-session" sid)))))
-    (when (listp extra)
-      (setq headers (append headers extra)))
-    headers))
+         (expanded (and (listp extra)
+                        (mapcar (lambda (pair)
+                                  (kargu--api-expand-header pair sid))
+                                extra))))
+    (append
+     `(("Content-Type" . "application/json")
+       ("HTTP-Referer" . ,kargu-app-url)
+       ("X-Title" . "kargu"))
+     (kargu--api-auth-headers key format)
+     (kargu--api-default-headers format expanded)
+     expanded)))
 
 (defun kargu--api-post (url headers payload gen callback &optional on-delta attempt)
   "POST PAYLOAD to URL via plz, dispatching to CALLBACK.
@@ -590,7 +613,8 @@ bodies are reduced to an ordinary response alist first."
          (attempt (or attempt 0)))
     (kargu--log-block "IN HTTP body" (or body "")
                       (kargu--log-looks-json-p trimmed))
-    (let* ((response (kargu--api-decode-body-response body trimmed parsed-events))
+    (let* ((response (kargu-api-normalize-response
+                      (kargu--api-decode-body-response body trimmed parsed-events)))
            (err (and response (kargu-response-error-message response))))
       (when (and kargu-log-wire response)
         (kargu--log-block "IN reconstructed JSON"

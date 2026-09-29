@@ -1338,7 +1338,7 @@ Always returns the current watch list."
                                     ("description" . "Set true to remove expression instead of adding."))))))
    (lambda (args)
      (kargu-dape-watch (kargu--aget args "expression")
-                       (kargu--tool-arg args "remove"))))
+                       (kargu--tool-flag args "remove"))))
 
   ;; 21. restart / debug_restart
   (kargu-register-tool

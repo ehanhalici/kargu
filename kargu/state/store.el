@@ -8,7 +8,7 @@
 
 ;; Central state store definition and low-level accessors.
 ;; Encapsulates session mode, model, provider, lifecycle status,
-;; loop execution state, and cumulative token usage.
+;; and cumulative token usage.
 
 ;;; Code:
 
@@ -35,16 +35,13 @@
   "Return a fresh initial state plist."
   (list :mode kargu-mode-ask
         :status :idle
-        :provider 'openrouter
-        :model "anthropic/claude-3.5-sonnet"
+        :provider nil
+        :model nil
         :reasoning-effort nil
-        :thinking-budget nil
         :busy nil
-        :loop-run nil
         :prompt-tokens 0
         :completion-tokens 0
-        :total-tokens 0
-        :context-buffer nil))
+        :total-tokens 0))
 
 (defun kargu-state-init ()
   "Initialize or re-initialize the state store."
@@ -62,20 +59,11 @@
         default
       val)))
 
-(defun kargu-state-set (key value)
-  "Set KEY to VALUE in the central state store."
+(defun kargu-state--set (key value)
+  "Set KEY to VALUE in the central state store.
+Callers outside `kargu/state/transitions' do not write the store."
   (setq kargu--state-store (plist-put kargu--state-store key value))
   value)
-
-(defun kargu-state-update (key fn)
-  "Update KEY in the central state store by applying FN to its current value."
-  (let* ((curr (kargu-state-get key))
-         (new-val (funcall fn curr)))
-    (kargu-state-set key new-val)))
-
-(defun kargu-state-all ()
-  "Return a copy of the entire state plist."
-  (copy-sequence kargu--state-store))
 
 (provide 'kargu/state/store)
 

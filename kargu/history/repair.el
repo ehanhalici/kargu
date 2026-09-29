@@ -189,9 +189,13 @@ FORCE-REFRESH is non-nil, generates a fresh system prompt via
             (push '("content" . "") msg))))
       (cons msg acc)))))
 
-(defun kargu--validate-history ()
+(defun kargu--validate-history (&optional keep-assistant-tail)
   "Enforce the protocol invariants required by chat providers.
-Mutates `kargu--message-history' in place and returns it."
+Mutates `kargu--message-history' in place and returns it.
+The send path leaves KEEP-ASSISTANT-TAIL nil so a payload does
+not end on an assistant turn.  A finished run and a compaction
+pass non-nil: the stored answer stays, and the next user turn
+is what makes the tail legal."
   (let* ((pending (make-hash-table :test #'equal))
          (seq 0)
          (next-seq (lambda () (cl-incf seq)))
@@ -209,9 +213,9 @@ Mutates `kargu--message-history' in place and returns it."
           nil)
          (t
           (setq out (kargu--history-process-regular-turn msg role pending out next-seq))))))
-    ;; Flush any trailing dangling tool calls & fix trailing turn
     (setq out (kargu--flush-pending pending out))
-    (setq out (kargu--history-fix-trailing-turn out))
+    (unless keep-assistant-tail
+      (setq out (kargu--history-fix-trailing-turn out)))
     (setq kargu--message-history (nreverse out))
     (kargu-log 'debug "validate: %d messages, last role %s"
                (length kargu--message-history)

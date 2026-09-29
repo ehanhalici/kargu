@@ -59,19 +59,29 @@
     (let ((file (car pending)))
       (kargu-lsp-wait-diagnostics
        file
-       (lambda (path text _timeout-p)
+       (lambda (path text timeout-p)
          (when (kargu-loop--live-p run)
            (kargu-diff-consume-file path)
-           (kargu-log 'info "loop: diagnostics settled for %s" path)
+           (kargu-log 'info "loop: diagnostics %s for %s"
+                      (if timeout-p "timed out" "settled") path)
            (kargu--loop-verify-next
             run id name result queue (cdr pending)
-            (cons (kargu--loop-diag-section path text) done)))))))))
+            (cons (kargu--loop-diag-section path text timeout-p) done)))))))))
 
-(defun kargu--loop-diag-section (path text)
-  "Build one diagnostics section plist for PATH and its TEXT."
+(defun kargu--loop-diag-section (path text timeout-p)
+  "Build one diagnostics section plist for PATH and its TEXT.
+TIMEOUT-P means the snapshot was not settled."
   (list :path path
-        :text text
-        :errors (kargu--loop-count-errors path text)))
+        :text (if timeout-p
+                  (concat (or text "")
+                          "\n(diagnostics did not settle before the timeout)")
+                text)
+        :errors (kargu--loop-count-errors path text)
+        :timeout (and timeout-p t)))
+
+(defun kargu--loop-sections-timed-out-p (sections)
+  "Non-nil when any section in SECTIONS timed out."
+  (cl-some (lambda (section) (plist-get section :timeout)) sections))
 
 (defun kargu--loop-count-errors (path text)
   "Count error-severity diagnostics for PATH."
@@ -94,19 +104,33 @@
       (setq total (+ total (or (plist-get section :errors) 0))))
     total))
 
+(defun kargu--loop-verify-headline (sections errors)
+  "Status word for SECTIONS given ERRORS."
+  (cond
+   ((> errors 0) (format "%d error(s)" errors))
+   ((kargu--loop-sections-timed-out-p sections) "diagnostics timed out")
+   (t "clean")))
+
+(defun kargu--loop-verify-footer (sections errors healing)
+  "Closing paragraph for a verification with ERRORS and HEALING."
+  (cond
+   ((> errors 0)
+    (format "\n\nSELF-HEALING (round %d of %d): the edited file reports %d error(s) above (Flymake / LSP).  Fix them now with a corrected edit_file (unique old_string / new_string), or explain why they are pre-existing."
+            (1+ healing) kargu-max-healing-steps errors))
+   ((kargu--loop-sections-timed-out-p sections)
+    "\n\nVerification incomplete: diagnostics timed out before a settled snapshot. Do not treat this edit as clean.")
+   (t
+    "\n\nVerification passed: the edited file reports no errors (Flymake & LSP clean).")))
+
 (defun kargu--loop-compose-verified (result sections errors healing)
   "Combine the tool RESULT with diagnostics SECTIONS."
   (concat
    result
    "\n\n--- Verification after edit ("
-   (if (zerop errors) "clean" (format "%d error(s)" errors))
-   ") [Flycheck / LSP] ---\n"
+   (kargu--loop-verify-headline sections errors)
+   ") [Flymake / LSP] ---\n"
    (mapconcat (lambda (section) (plist-get section :text)) sections "\n")
-   (if (zerop errors)
-       "\n\nVerification passed: the edited file reports no errors (Flycheck & LSP clean)."
-     (format
-      "\n\nSELF-HEALING (round %d of %d): the edited file reports %d error(s) above (Flycheck / LSP).  Fix them now with a corrected edit_file (unique old_string / new_string), or explain why they are pre-existing."
-      (1+ healing) kargu-max-healing-steps errors))))
+   (kargu--loop-verify-footer sections errors healing)))
 
 (provide 'kargu/loop/heal)
 

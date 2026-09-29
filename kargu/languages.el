@@ -26,6 +26,7 @@
 (require 'kargu/languages/java)
 (require 'kargu/languages/haskell)
 (require 'kargu/languages/ocaml)
+(require 'kargu/languages/elisp)
 
 (provide 'kargu/languages)
 

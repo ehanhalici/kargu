@@ -38,6 +38,7 @@
 (declare-function kargu-test-connection "kargu/api")
 (declare-function kargu-chat-select-provider "kargu/api")
 (declare-function kargu-set-model "kargu/api")
+(declare-function kargu-state-set-reasoning-effort "kargu/state" (effort))
 
 ;;;; Dynamic descriptions for transient -----------------------------------
 
@@ -140,15 +141,16 @@
 (defun kargu-tune-cycle-reasoning-effort ()
   "Cycle reasoning / thinking effort level for the active model."
   (interactive)
-  (let* ((supported (if (fboundp 'kargu-model-reasoning-efforts)
-                        (kargu-model-reasoning-efforts)
-                      '("low" "medium" "high")))
-         (levels (mapcar #'intern
-                         (cl-remove-if (lambda (e) (member (downcase e) '("off" "none")))
-                                       (or supported '("low" "medium" "high"))))))
+  (let* ((supported (and (fboundp 'kargu-model-reasoning-efforts)
+                         (kargu-model-reasoning-efforts)))
+         (levels (and supported
+                      (mapcar #'intern
+                              (cl-remove-if (lambda (e) (member (downcase (format "%s" e)) '("off" "none")))
+                                            supported)))))
     (if (null levels)
         (progn
           (setq kargu-reasoning-effort nil)
+          (kargu-state-set-reasoning-effort nil)
           (when (fboundp 'kargu-chat-refresh-footer)
             (kargu-chat-refresh-footer))
           (force-mode-line-update t)
@@ -161,6 +163,7 @@
                        (if tail (car tail) nil)))
                     (t (car levels)))))
         (setq kargu-reasoning-effort next)
+        (kargu-state-set-reasoning-effort next)
         (when (fboundp 'kargu-chat-refresh-footer)
           (kargu-chat-refresh-footer))
         (force-mode-line-update t)

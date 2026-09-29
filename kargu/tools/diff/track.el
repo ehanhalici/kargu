@@ -168,18 +168,6 @@ The file is also removed from the changed-file set consumed by the agent loop."
 
 ;;;; Diff stats -----------------------------------------------------------
 
-(defun kargu-diff-stat-added (stat)
-  "Return added lines from diff STAT."
-  (or (car-safe stat) 0))
-
-(defun kargu-diff-stat-deleted (stat)
-  "Return deleted lines from diff STAT."
-  (or (cdr-safe stat) 0))
-
-(defun kargu-diff-stat-total (stat)
-  "Return total modified lines from diff STAT."
-  (+ (kargu-diff-stat-added stat) (kargu-diff-stat-deleted stat)))
-
 (defun kargu-diff--count-unified-changes (orig-content curr-content)
   "Compute (ADDED . DELETED) line counts between ORIG-CONTENT and CURR-CONTENT.
 Uses unified diff output to tally insertions and deletions."

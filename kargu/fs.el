@@ -32,8 +32,7 @@
 
 (defconst kargu-fs-skip-dirs
   '(".git" "node_modules" ".venv" "__pycache__" ".direnv" "dist"
-    "build" "target" ".next" "vendor" "out" ".cache" ".cargo"
-    "opencode-1.18.27")
+    "build" "target" ".next" "vendor" "out" ".cache" ".cargo")
   "Directory names skipped while walking a project tree.")
 
 (defcustom kargu-fs-max-listed-files 2000

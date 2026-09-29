@@ -34,11 +34,13 @@
 (require 'kargu/api/stream)
 (require 'kargu/api/circuit)
 (require 'kargu/api/http)
+(require 'kargu/api/wire)
 
 (declare-function kargu-busy-p "kargu/api/http" ())
 (declare-function kargu-api-cancel "kargu/api/http" ())
 (declare-function kargu-api-clear-busy "kargu/api/http" ())
 (declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
 
 (defalias 'kargu--api-cancel-busy #'kargu-api-clear-busy)
 
@@ -94,25 +96,35 @@ ON-DELTA is called with each streaming SSE delta event."
         (cl-return-from kargu-api-send nil))
 
       ;; Happy path execution
-      (let ((added-prompt-p nil))
+      (let ((added-prompt-p nil)
+            (base (kargu--api-base)))
+        (unless (kargu--nonempty base)
+          (funcall callback
+                   `(("error" .
+                      (("message" . "no API endpoint: set api on the active provider")))))
+          (cl-return-from kargu-api-send nil))
         (when (and prompt (not (string-empty-p prompt)))
           (kargu--history-add "user" prompt)
           (setq added-prompt-p t))
         (condition-case-unless-debug err
             (progn
               (kargu--api-validate-preflight prompt)
-              (let ((gen (cl-incf kargu--generation)))
+              (let* ((gen (cl-incf kargu--generation))
+                     (fmt (kargu-api-active-format))
+                     (payload (kargu-api-prepare-payload
+                               (kargu--build-payload) fmt))
+                     (delta (if (kargu-provider-format-stream-p fmt) on-delta nil)))
                 (setq kargu--busy t)
                 (kargu-state-transition-status :requesting)
                 (kargu--api-post
-                 (concat (kargu--api-base) "/chat/completions")
+                 (kargu-api-chat-url base fmt)
                  (kargu--api-headers key)
-                 (kargu--build-payload)
+                 payload
                  gen
                  (lambda (resp)
                    (kargu--api-cancel-busy)
                    (funcall callback resp))
-                 on-delta)))
+                 delta)))
           (error
            (kargu--api-cancel-busy)
            (kargu--api-rollback-prompt prompt added-prompt-p)

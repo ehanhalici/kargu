@@ -518,6 +518,37 @@
     (should (string-search "debug_set_breakpoint" block))
     (should (string-search "debug_continue" block))))
 
+(ert-deftest kargu-prompt-omits-tools-when-model-cannot-call-them ()
+  "A model that cannot call tools is not told about tools in the messages."
+  (cl-letf (((symbol-function 'kargu-model-supports-tools-p) (lambda (&optional _id) nil)))
+    (should-not (kargu-prompt--tools-guidance-block))
+    (should (string-search "cannot call tools" (kargu-prompt-mode-reminder)))
+    (should-not (string-search "read_file" (kargu-prompt-mode-reminder)))))
+
+(ert-deftest kargu-chat-agent-without-tools-keeps-the-prompt ()
+  "Refusing a tool-less model in agent mode does not leave a running banner."
+  (let ((b (get-buffer-create kargu-chat-buffer-name))
+        (kargu--loop-run nil))
+    (unwind-protect
+        (with-current-buffer b
+          (kargu-chat-mode)
+          (setq-local kargu-chat--session-provider "nvidia")
+          (setq-local kargu-chat--session-model "nvidia/nemotron-3.5-content-safety:free")
+          (kargu-chat--ensure-prompt)
+          (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'agent))
+                    ((symbol-function 'kargu-model-supports-tools-p) (lambda (&optional _id) nil))
+                    ((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+                    ((symbol-function 'kargu--model) (lambda () "nvidia/nemotron-3.5-content-safety:free")))
+            (let ((err (should-error (kargu-chat--submit "look at install.sh") :type 'user-error)))
+              (should (string-match-p "does not support tool calling" (error-message-string err))))
+            (should (kargu-chat--prompt-live-p))
+            (should-not (kargu-loop-running-p))
+            (kargu-chat--ensure-running-prompt)
+            (should-not (kargu-chat--prompt-live-p))
+            (kargu-chat-stop)
+            (should (kargu-chat--prompt-live-p))))
+      (when (buffer-live-p b) (kill-buffer b)))))
+
 (ert-deftest kargu-chat-send-empty-prompt-debug-mode-test ()
   "Ensure kargu-chat-send with empty prompt in debug mode initiates debug session."
   (let ((kargu-active-mode 'debug)

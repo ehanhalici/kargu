@@ -19,7 +19,8 @@
 ;;
 ;; Public API:
 ;;   `kargu-api-send', `kargu-api-cancel', `kargu-api-list-models',
-;;   `kargu-set-model', `kargu-test-connection', `kargu-model-info'.
+;;   `kargu-set-model', `kargu-test-connection', `kargu-model-info',
+;;   `kargu-model-get-prop', `kargu-model-set-prop', `kargu-model-edit-prop'.
 
 ;;; Code:
 

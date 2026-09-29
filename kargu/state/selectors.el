@@ -42,29 +42,21 @@ Respects dynamic let-bindings of `kargu-active-mode' when present."
   (kargu-state-get :status :idle))
 
 (defun kargu-state-provider ()
-  "Return the currently active provider symbol."
-  (kargu-state-get :provider 'openrouter))
+  "Return the currently active provider symbol, or nil when unset."
+  (kargu-state-get :provider))
 
 (defun kargu-state-model ()
-  "Return the currently active model string identifier."
-  (kargu-state-get :model "anthropic/claude-3.5-sonnet"))
+  "Return the currently active model string, or nil when unset."
+  (kargu-state-get :model))
 
 (defun kargu-state-reasoning-effort ()
-  "Return the active reasoning effort (`low', `medium', `high', or nil)."
+  "Return the active reasoning effort symbol, or nil."
   (kargu-state-get :reasoning-effort nil))
-
-(defun kargu-state-thinking-budget ()
-  "Return the active thinking budget tokens or nil."
-  (kargu-state-get :thinking-budget nil))
 
 (defun kargu-state-busy-p ()
   "Return non-nil if an API request or agent loop is currently active."
   (or (kargu-state-get :busy nil)
       (not (memq (kargu-state-status) '(:idle :stopped :error :done :limit :pause)))))
-
-(defun kargu-state-loop-run ()
-  "Return the currently active loop run plist, or nil."
-  (kargu-state-get :loop-run nil))
 
 (defun kargu-state-tokens ()
   "Return a plist of cumulative session tokens.
@@ -72,10 +64,6 @@ Shape: `(:prompt P :completion C :total T)'."
   (list :prompt (or (kargu-state-get :prompt-tokens) 0)
         :completion (or (kargu-state-get :completion-tokens) 0)
         :total (or (kargu-state-get :total-tokens) 0)))
-
-(defun kargu-state-context-buffer ()
-  "Return the active context buffer or nil."
-  (kargu-state-get :context-buffer nil))
 
 (provide 'kargu/state/selectors)
 

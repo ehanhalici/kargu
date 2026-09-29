@@ -38,20 +38,11 @@
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
 (declare-function kargu--loop-forward-delta "kargu/loop/machine" (run event))
 (declare-function kargu--loop-handle-response "kargu/loop/machine" (run response))
+(declare-function kargu-loop--turn-cap "kargu/loop/machine" (run))
 
 (defvar kargu-loop--mock-continue-decision nil
   "Mock decision for `kargu-loop--prompt-continue' in unit tests.
 When non-nil, may be `:continue' or `:stop'.")
-
-(defun kargu-loop--render-continue-prompt (chat-buf max-iter batch set-decision-fn)
-  "Render turn limit banner and buttons into CHAT-BUF.
-Calls SET-DECISION-FN with chosen action when clicked."
-  (kargu-confirm--render-prompt
-   chat-buf (format "⏸  [Turn limit reached (%d turns)]" max-iter) nil
-   (format "Continue for another %d turns?" batch)
-   `((:key :continue :label ,(format "[✓ Continue (+%d turns)]" batch) :face (:inherit success :weight bold))
-     (:key :stop :label "[✗ Stop]" :face (:inherit error :weight bold)))
-   set-decision-fn))
 
 (defun kargu-loop--decide-continue (chat-buf max-iter batch)
   "Gather user decision (:continue or :stop) for extending turn limit."
@@ -77,37 +68,49 @@ Calls SET-DECISION-FN with chosen action when clicked."
      :default-action :stop
      :notify 'permission)))
 
+(defun kargu-loop--continue-batch ()
+  "How many extra turns one continue offers."
+  (or (and (boundp 'kargu-max-iterations) kargu-max-iterations) 12))
+
+(defun kargu-loop--send-continued (run prompt)
+  "Send PROMPT for RUN after the user extended the turn cap."
+  (kargu-loop--set-state run 'wait)
+  (let ((on-delta (and (plist-get run :on-delta)
+                       (lambda (event)
+                         (kargu--loop-forward-delta run event)))))
+    (kargu-api-send
+     prompt
+     (lambda (response)
+       (kargu--loop-handle-response run response))
+     on-delta)))
+
 (defun kargu-loop--apply-continue-decision (run prompt decision max-iter batch)
-  "Apply DECISION (:continue or :stop) to RUN."
-  (if (eq decision :continue)
-      (progn
-        (plist-put run :max-iterations (+ max-iter batch))
-        (plist-put run :no-tools nil)
-        (kargu-log 'info "loop: extended turn limit by %d (new cap: %d)"
-                   batch (+ max-iter batch))
-        (kargu-loop--set-state run 'wait)
-        (let ((on-delta (and (plist-get run :on-delta)
-                             (lambda (event)
-                               (kargu--loop-forward-delta run event)))))
-          (kargu-api-send
-           prompt
-           (lambda (response)
-             (kargu--loop-handle-response run response))
-           on-delta)))
+  "Apply DECISION (:continue or :stop) to RUN.
+MAX-ITER is the cap already reached.  BATCH is the extension.
+A tool-free run stays tool-free."
+  (cond
+   ((eq decision :continue)
+    (plist-put run :max-iterations (+ max-iter batch))
+    (kargu-log 'info "loop: extended turn limit by %d (new cap: %d)"
+               batch (+ max-iter batch))
+    (kargu-loop--send-continued run prompt))
+   (t
     (kargu--loop-finish
      run :limit
      (format "iteration limit reached (%d model round-trips); stopped by user."
-             max-iter))))
+             max-iter)))))
 
 (defun kargu-loop--prompt-continue (run prompt)
   "Prompt the user interactively when RUN reaches its iteration limit.
-Offers to add another batch of turns (`kargu-max-iterations') or stop."
+Offers to add another batch of turns (`kargu-max-iterations') or stop.
+The banner uses the run cap, not the attempt counter that already
+stepped past it."
   (kargu-loop--set-state run 'pause)
   (when (fboundp 'kargu-notify)
     (kargu-notify 'limit))
   (let* ((chat-buf (plist-get run :chat-buffer))
-         (max-iter (or (plist-get run :iterations) 12))
-         (batch (if (boundp 'kargu-max-iterations) kargu-max-iterations 12))
+         (max-iter (kargu-loop--turn-cap run))
+         (batch (kargu-loop--continue-batch))
          (decision (kargu-loop--decide-continue chat-buf max-iter batch)))
     (kargu-loop--apply-continue-decision run prompt decision max-iter batch)))
 

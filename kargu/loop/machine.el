@@ -81,21 +81,26 @@
     (send    . kargu-loop--request-send))
   "Request event -> handler (RUN PROMPT).")
 
-(defun kargu-loop--request-compact (run prompt)
-  "Start compaction for RUN, then resume PROMPT."
-  (kargu--loop-start-compact run prompt))
+(defun kargu-loop--turn-cap (run)
+  "Iteration cap for RUN: its own max, else `kargu-max-iterations'."
+  (or (plist-get run :max-iterations)
+      (and (boundp 'kargu-max-iterations) kargu-max-iterations)
+      12))
 
-(defun kargu-loop--max-steps-prompt (prompt)
-  "PROMPT for the last iteration, with tools hidden."
-  (if (and prompt (not (string-empty-p prompt)))
-      (concat prompt "\n\n" kargu-prompt-max-steps-nudge)
-    kargu-prompt-max-steps-nudge))
+(defun kargu-loop--request-compact (run prompt)
+  "Start compaction for RUN, then resume PROMPT.
+When the next turn would pass the cap, hand PROMPT to the normal
+send path so the continue prompt runs instead of leaving the run idle."
+  (cond
+   ((not (kargu-loop--live-p run)) nil)
+   ((kargu--loop-start-compact run prompt) nil)
+   (t (kargu-loop--request-send run prompt))))
 
 (require 'kargu/loop/ui)
 
 (defun kargu-loop--request-send (run prompt)
   "Send one model turn for RUN."
-  (let* ((max-iter (or (plist-get run :max-iterations) kargu-max-iterations))
+  (let* ((max-iter (kargu-loop--turn-cap run))
          (iterations (1+ (or (plist-get run :iterations) 0))))
     (plist-put run :iterations iterations)
     (cond

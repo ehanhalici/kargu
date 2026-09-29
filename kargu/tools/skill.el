@@ -62,10 +62,9 @@
 (defun kargu-skill--relevant-p (path root)
   "Non-nil when PATH looks like a skill file under ROOT or a skills dir."
   (let ((rel (file-relative-name path root)))
-    (or (string-match-p "\\`\\(\\.opencode/\\)?skills?/" rel)
+    (or (string-match-p "\\`skills?/" rel)
         (string-match-p "/skills?/" path)
-        (string-match-p "/\\.agents/skills/" path)
-        (string-match-p "/\\.claude/skills/" path))))
+        (string-match-p "/\\.agents/skills/" path))))
 
 (defun kargu-skill--parse (path)
   "Parse SKILL.md at PATH into a plist :name :description :path :body."

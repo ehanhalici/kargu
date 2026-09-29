@@ -36,6 +36,8 @@
 (require 'kargu/tools/toolchain)
 (require 'kargu/languages)
 
+(declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-provider-prompt-file "kargu/providers/registry" (model-id))
 (declare-function kargu-lsp-build-skeleton "kargu/tools/lsp" (&optional refresh))
 (declare-function kargu-dape-live-p "kargu/tools/dape")
 (declare-function kargu-dape-get-context "kargu/tools/dape")
@@ -66,7 +68,7 @@
   '((ask . "<system-reminder>\nThis is a read-only ASK turn. Analyze and explain. Do not call edit_by_lsp, edit_file, write_file, edit, write, or bash. If a change is needed, describe it as a proposal with paths and line numbers.\n</system-reminder>")
     (plan . "<system-reminder>\nThis is a READ-ONLY PLAN turn. Explore with read_file_symbols/read_file_outline (to inspect structure), read_symbol (to inspect specific functions), read_file/read (for line ranges/configs), workspace_grep/grep, find_files, and LSP tools. Do not call edit_by_lsp, edit_file, write_file, or bash. Produce a markdown checklist: steps, full file paths, symbols to change (verify they exist), risks, and a test strategy.\n</system-reminder>")
     (debug . "<system-reminder>\nThis is DEBUG mode with an active DAP/Dape debug session. You have full interactive control over the debugger: use `debug_get_context` or `debug_scope` to inspect the call stack and local variables (inspect in-scope variables before attempting eval); `debug_step_in` (step) to step into function calls; `debug_step_over` (next) to step line-by-line; `debug_step_out` (finish) to return to caller; `debug_continue` to run to the next breakpoint; `debug_set_breakpoint` (requires file_path and line) and `debug_clear_breakpoint` to manage stopping points; `debug_up`/`debug_down` to navigate frames; `debug_watch` to manage watchpoints; and `debug_eval` to evaluate expressions. Step through the program to isolate the bug.\n</system-reminder>")
-    (agent . "<system-reminder>\nAGENT mode: inspect with tools (prefer read_file_symbols/read_symbol before reading whole files), edit code with edit_by_lsp (fallback to edit_file for non-code files), verify with Flycheck/LSP diagnostics, and run the project compiler/test suite via bash. Be concise. Do not narrate tool plans in assistant text.\n</system-reminder>"))
+    (agent . "<system-reminder>\nAGENT mode: inspect with tools (prefer read_file_symbols/read_symbol before reading whole files), edit code with edit_by_lsp (fallback to edit_file for non-code files), verify with Flymake/LSP diagnostics, and run the project compiler/test suite via bash. Be concise. Do not narrate tool plans in assistant text.\n</system-reminder>"))
   "Alist of mode symbol to per-turn `<system-reminder>' text.")
 
 (defvar kargu-prompt--file-cache (make-hash-table :test #'equal)
@@ -95,28 +97,62 @@
                      (buffer-string))
                    kargu-prompt--file-cache)))))
 
-(defun kargu-prompt--provider-base ()
-  "Provider-specific base prompt for `kargu--model'."
-  (let ((id (downcase (or (kargu--model) ""))))
-    (or (cond
-         ((or (string-match-p "gpt-4" id)
-              (string-match-p "\\bo1\\b" id)
-              (string-match-p "\\bo3\\b" id))
-          (kargu-prompt--read-file "beast.txt"))
-         ((and (string-match-p "gpt" id) (string-match-p "codex" id))
-          (kargu-prompt--read-file "gpt.txt"))
-         ((string-match-p "gpt" id)
-          (kargu-prompt--read-file "gpt.txt"))
-         ((string-match-p "gemini-" id)
-          (kargu-prompt--read-file "gemini.txt"))
-         ((string-match-p "claude" id)
-          (kargu-prompt--read-file "anthropic.txt"))
-         ((or (string-match-p "kimi" id)
-              (string-match-p "moonshot" id))
-          (kargu-prompt--read-file "kimi.txt"))
-         (t nil))
+(defun kargu-prompt--plain-base ()
+  "Base prompt for a model that cannot call tools.
+No tool name appears here.  The request will not include a tools schema."
+  "You are kargu, an expert software engineer running inside GNU Emacs.
+Answer in plain text. Do not invent function-call markup.
+Be concise. State what you found. No greetings, no preamble.
+Do not add comments to code unless the user asked. Match existing style.
+Never commit unless the user explicitly asks.")
+
+(defun kargu-prompt--catalog-base (model-id)
+  "Base prompt file named by the provider catalog for MODEL-ID."
+  (let ((file (and (fboundp 'kargu-provider-prompt-file)
+                   (kargu-provider-prompt-file model-id))))
+    (or (and file (kargu-prompt--read-file file))
         (kargu-prompt--read-file "default.txt")
         "You are kargu, an expert software engineer running inside GNU Emacs.")))
+
+(defun kargu-prompt--provider-base ()
+  "Base prompt for the active model.
+A model that cannot call tools gets a plain base with no tool names.
+The file for a tool-capable model comes from the provider catalog record."
+  (if (kargu-prompt--tools-off-p)
+      (kargu-prompt--plain-base)
+    (kargu-prompt--catalog-base (or (kargu--model) ""))))
+
+(defvar kargu-context-buffer)
+
+(defun kargu--context-file-name ()
+  "File name of `kargu-context-buffer', or nil."
+  (cond
+   ((and (boundp 'kargu-context-buffer)
+         (bufferp kargu-context-buffer)
+         (buffer-live-p kargu-context-buffer))
+    (or (buffer-file-name kargu-context-buffer)
+        (buffer-name kargu-context-buffer)))
+   ((and (boundp 'kargu-context-buffer)
+         (stringp kargu-context-buffer)
+         (not (string-empty-p kargu-context-buffer)))
+    kargu-context-buffer)
+   (t nil)))
+
+(defun kargu--os-description ()
+  "Short OS / CPU string for the environment block."
+  (format "%s (%s)"
+          (pcase system-type
+            ('gnu/linux "linux")
+            ('darwin "darwin")
+            ('windows-nt "windows")
+            (sym (symbol-name sym)))
+          (car (split-string system-configuration "-"))))
+
+(defun kargu--shell-description ()
+  "Login shell path for the environment block."
+  (or (getenv "SHELL")
+      (and (boundp 'shell-file-name) shell-file-name)
+      "unknown"))
 
 (defun kargu-prompt--workspace ()
   "Absolute workspace / project root directory."
@@ -192,14 +228,14 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
          (format "  Build / Compiler: %s\n" (plist-get tc :build-cmd))
          (format "  Test command: %s\n" (plist-get tc :test-cmd))
          (format "  Notes: %s\n" (plist-get tc :notes))
-         "  Flycheck / LSP: Active. Edits are checked automatically for syntax and compiler errors.\n"
+         "  Flymake / LSP: Active. Edits are checked automatically for syntax and compiler errors.\n"
          "  Execution: In agent mode, use `bash' to run build and test commands.\n"
          "  Verification Rule: Always verify that tests pass and no compile errors remain before concluding your work.\n"
          "</project_toolchain>\n")
       (concat
        "<project_toolchain>\n"
        "  Language: Not automatically detected\n"
-       "  Flycheck / LSP: Active. Edits are checked automatically for syntax and compiler errors.\n"
+       "  Flymake / LSP: Active. Edits are checked automatically for syntax and compiler errors.\n"
        "  Execution: In agent mode, use `bash' to run the project's build and test commands.\n"
        "  Verification Rule: Inspect the repo for build/test tools and run them with `bash' before concluding your work.\n"
        "</project_toolchain>\n"))))
@@ -227,8 +263,20 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
      "</env>\n\n"
      (kargu-prompt--toolchain-block root))))
 
+(defun kargu-prompt--tools-off-p ()
+  "Return non-nil when the active model explicitly cannot call tools."
+  (and (fboundp 'kargu-model-supports-tools-p)
+       (not (kargu-model-supports-tools-p))))
+
+(defconst kargu-prompt--no-tools-reminder
+  "<system-reminder>\nThis model cannot call tools. Answer in plain text. Do not invent function-call markup.\n</system-reminder>"
+  "Reminder used when the active model has no tool calling.")
+
 (defun kargu-prompt--tools-guidance-block ()
-  "Tools capability and recommendation block."
+  "Tools capability and recommendation block.
+Nil when the active model cannot call tools, so the system message
+does not name tools the request will not send."
+  (unless (kargu-prompt--tools-off-p)
   (let* ((fd (or (executable-find "fd") (executable-find "fdfind")))
          (rg (executable-find "rg")))
     (concat
@@ -270,7 +318,7 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
      "  - `edit_file` (alias: edit): Surgical replacement of unique old_string copied from read_file. Fallback only for non-code files or text outside defined symbols. Always call lsp_diagnostics afterwards.\n"
      "  - `write_file` (alias: write): Complete file overwrite/creation.\n"
      "  - `bash`: Run project builds, tests, or scripts (e.g. `cargo test`, `go test`, `pytest`). Set background=true for servers.\n"
-     "</available_tools_guidance>")))
+     "</available_tools_guidance>"))))
 
 (defun kargu-prompt--instruction-block ()
   "Cached project instruction file text, or nil."
@@ -349,11 +397,15 @@ During compaction, `kargu--compaction-system' replaces this."
      "</system-reminder>")))
 
 (defun kargu-prompt-mode-reminder ()
-  "Per-turn `<system-reminder>' for `kargu-active-mode', or nil."
-  (let ((mode (kargu-state-mode)))
-    (if (eq mode 'debug)
-        (kargu-prompt-debug-message)
-      (cdr (assq mode kargu-prompt-mode-reminders)))))
+  "Per-turn `<system-reminder>' for `kargu-active-mode', or nil.
+A model that cannot call tools gets a plain-text reminder instead of
+a list of tool names."
+  (if (kargu-prompt--tools-off-p)
+      kargu-prompt--no-tools-reminder
+    (let ((mode (kargu-state-mode)))
+      (if (eq mode 'debug)
+          (kargu-prompt-debug-message)
+        (cdr (assq mode kargu-prompt-mode-reminders))))))
 
 (defconst kargu-prompt--synthetic-prefixes
   '("System Notice:" "<system-reminder>" "COMPACTION_REQUEST:" "COMPACTION_ACK:")
@@ -390,10 +442,6 @@ During compaction, `kargu--compaction-system' replaces this."
    "coding agent can continue. Follow the headings requested by the user. "
    "Do not answer the user's original task. Do not call tools.")
   "System prompt used only during a tools-off compaction turn.")
-
-(defconst kargu-prompt-max-steps-nudge
-  "<system-reminder>\nThis is the last model turn of the run. Tools are no longer available. Summarize what you did and what remains. Do not call tools.\n</system-reminder>"
-  "User nudge on the final iteration when tools are hidden.")
 
 (provide 'kargu/prompt)
 

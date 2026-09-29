@@ -3,12 +3,26 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;; Ensure the package root is on `load-path` during byte/native compilation.
+(eval-and-compile
+  (let ((root (locate-dominating-file
+               (or (bound-and-true-p byte-compile-current-file)
+                   load-file-name
+                   buffer-file-name
+                   default-directory)
+               "kargu.el")))
+    (when root
+      (add-to-list 'load-path (file-name-as-directory
+                               (expand-file-name root))))))
+
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/core)
 (require 'kargu/providers/registry)
 (require 'kargu/api)
 (require 'kargu/api/http)
+
+(declare-function kargu-model-read "kargu/api/catalog" (&optional model-id))
 
 (ert-deftest kargu-dynamic-models-openrouter-metadata-test ()
   "Test parsing and metadata extraction from OpenRouter /models schema."
@@ -28,25 +42,21 @@
             ("top_provider" . ((("max_completion_tokens" . 4096))))
             ("architecture" . ((("modality" . "text+image->text"))))))))
     (kargu--record-models-metadata models-json "openrouter")
-    ;; 1. Check DeepSeek R1 metadata
-    (let ((meta (kargu-model-get-metadata "deepseek/deepseek-r1")))
-      (should meta)
-      (should (= (plist-get meta :context-window) 131072))
-      (should (= (plist-get meta :max-output) 8192))
-      (should (equal (plist-get meta :reasoning-efforts) '("low" "medium" "high")))
-      ;; Annotation string check
+    ;; The store keeps the raw alist.  One reader extracts the fields.
+    (let ((fields (kargu-model-read "deepseek/deepseek-r1")))
+      (should (consp (kargu-model-get-metadata "deepseek/deepseek-r1")))
+      (should (= (plist-get fields :context-window) 131072))
+      (should (= (plist-get fields :max-output) 8192))
+      (should (equal (plist-get fields :reasoning-efforts) '("low" "medium" "high")))
       (let ((ann (kargu-model-annotation-string "deepseek/deepseek-r1" "openrouter")))
         (should (string-match-p "131k ctx" ann))
         (should (string-match-p "max 8k" ann))
         (should (string-match-p "🧠 think: low..high" ann))
         (should (string-match-p "\\$0.55/1M" ann))))
-    ;; 2. Check Qwen VL Free metadata
-    (let ((meta (kargu-model-get-metadata "qwen/qwen-2.5-vl-72b-instruct:free")))
-      (should meta)
-      (should (= (plist-get meta :context-window) 32768))
-      (should (plist-get meta :vision))
-      (should (plist-get meta :free))
-      ;; Annotation string check
+    (let ((fields (kargu-model-read "qwen/qwen-2.5-vl-72b-instruct:free")))
+      (should (= (plist-get fields :context-window) 32768))
+      (should (plist-get fields :vision))
+      (should (plist-get fields :free))
       (let ((ann (kargu-model-annotation-string "qwen/qwen-2.5-vl-72b-instruct:free" "openrouter")))
         (should (string-match-p "32k ctx" ann))
         (should (string-match-p "👁 vision" ann))
@@ -64,19 +74,17 @@
             ("details" . ((("parameter_size" . "32.8B")
                            ("quantization_level" . "Q4_K_M"))))))))
     (kargu--record-models-metadata ollama-json "ollama")
-    (let ((meta1 (kargu-model-get-metadata "llama3.3:70b"))
-          (meta2 (kargu-model-get-metadata "deepseek-r1:32b")))
-      (should meta1)
-      (should (equal (plist-get meta1 :params) "70.6B Q4_K_M"))
-      (should meta2)
-      (should (equal (plist-get meta2 :params) "32.8B Q4_K_M"))
-      (should (plist-get meta2 :supports-reasoning))
-      ;; Check annotation strings
+    (let ((llama (kargu-model-read "llama3.3:70b"))
+          (r1 (kargu-model-read "deepseek-r1:32b")))
+      (should (equal (plist-get llama :params) "70.6B Q4_K_M"))
+      (should (equal (plist-get r1 :params) "32.8B Q4_K_M"))
+      ;; The name "r1" is not a reasoning flag.  The record omitted one.
+      (should-not (plist-get r1 :reasoning-efforts))
       (let ((ann1 (kargu-model-annotation-string "llama3.3:70b" "ollama"))
             (ann2 (kargu-model-annotation-string "deepseek-r1:32b" "ollama")))
         (should (string-match-p "70.6B Q4_K_M" ann1))
         (should (string-match-p "32.8B Q4_K_M" ann2))
-        (should (string-match-p "🧠 think" ann2))))))
+        (should-not (string-match-p "🧠 think" ann2))))))
 
 (ert-deftest kargu-dynamic-models-google-gemini-schema-test ()
   "Test parsing Google Gemini inputTokenLimit & outputTokenLimit schema."
@@ -91,14 +99,11 @@
             ("outputTokenLimit" . 8192)
             ("description" . "Fast next-gen model")))))
     (kargu--record-models-metadata gemini-json "google")
-    (let ((meta-pro (kargu-model-get-metadata "gemini-1.5-pro"))
-          (meta-flash (kargu-model-get-metadata "gemini-2.0-flash")))
-      (should meta-pro)
-      (should (= (plist-get meta-pro :context-window) 2097152))
-      (should (= (plist-get meta-pro :max-output) 8192))
-      (should meta-flash)
-      (should (= (plist-get meta-flash :context-window) 1048576))
-      ;; Annotation string check
+    (let ((pro (kargu-model-read "gemini-1.5-pro"))
+          (flash (kargu-model-read "gemini-2.0-flash")))
+      (should (= (plist-get pro :context-window) 2097152))
+      (should (= (plist-get pro :max-output) 8192))
+      (should (= (plist-get flash :context-window) 1048576))
       (let ((ann (kargu-model-annotation-string "gemini-1.5-pro" "google")))
         (should (string-match-p "2m ctx" ann))
         (should (string-match-p "max 8k" ann))))))

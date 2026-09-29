@@ -13,7 +13,7 @@
 ;;  * `lsp_project_skeleton' — compact structural outline of the project
 ;;    via `workspace/symbol' (or `documentSymbol' fallback).
 ;;  * `lsp_diagnostics' — compiler and linter diagnostics for a file
-;;    or across the entire project (via Flymake / Flycheck).
+;;    or across the entire project (via Flymake).
 ;;  * `lsp_find_symbol' — definition locations for a named symbol.
 ;;  * `read_file_symbols' — language-agnostic outline of symbols and line
 ;;    ranges in a file via `textDocument/documentSymbol' + imenu fallback.
@@ -62,17 +62,6 @@
 (declare-function flymake-diagnostic-buffer "flymake")
 (declare-function flymake--project-diagnostics "flymake")
 (declare-function flymake-is-running "flymake")
-
-(declare-function flycheck-current-errors "flycheck")
-(declare-function flycheck-error-level "flycheck")
-(declare-function flycheck-error-line "flycheck")
-(declare-function flycheck-error-column "flycheck")
-(declare-function flycheck-error-checker "flycheck")
-(declare-function flycheck-error-message "flycheck")
-(declare-function flycheck-buffer "flycheck")
-(declare-function flycheck-mode "flycheck" (&optional arg))
-(declare-function flycheck-running-p "flycheck")
-(declare-function flycheck-get-checker-for-buffer "flycheck")
 
 (declare-function kargu-diff--mutating-disabled "kargu/tools/diff" (name))
 (declare-function kargu-diff-apply-proposal "kargu/tools/diff" (path contents &optional callback))
@@ -221,8 +210,18 @@ Signal an `error' when no Eglot session is usable."
              (file-exists-p kargu-context-buffer)
              kargu-context-buffer))))
 
+(declare-function kargu-language-resolve-root "kargu/languages/core" (&optional peek))
+
 (defun kargu--project-root ()
-  "Return the project root directory of the working context."
+  "Return the project root directory of the working context.
+A language that names its own root, such as Emacs Lisp, wins.
+Otherwise the root comes from Eglot or `project.el'."
+  (or (and (fboundp 'kargu-language-resolve-root)
+           (kargu-language-resolve-root))
+      (kargu--project-root-from-context)))
+
+(defun kargu--project-root-from-context ()
+  "Return the project root from the LSP or project context."
   (condition-case-unless-debug _err
       (let ((buffer (or (kargu-lsp--context-buffer-live)
                         (car (kargu-lsp--managed-buffers)))))
@@ -576,40 +575,11 @@ the skeleton is also displayed in a buffer."
                                :message (flymake-diagnostic-text d)))))
                    (flymake-diagnostics)))))))))
 
-(defun kargu-lsp--flycheck-diags (path)
-  "Normalized Flycheck diagnostics for PATH, or nil."
-  (when (fboundp 'flycheck-current-errors)
-    (let ((buffer (find-buffer-visiting path)))
-      (when (buffer-live-p buffer)
-        (with-current-buffer buffer
-          (delq nil
-                (mapcar
-                 (lambda (e)
-                   (let* ((level (and (fboundp 'flycheck-error-level)
-                                      (flycheck-error-level e)))
-                          (checker (and (fboundp 'flycheck-error-checker)
-                                        (flycheck-error-checker e)))
-                          (col (and (fboundp 'flycheck-error-column)
-                                    (flycheck-error-column e)))
-                          (line (and (fboundp 'flycheck-error-line)
-                                     (flycheck-error-line e)))
-                          (msg (and (fboundp 'flycheck-error-message)
-                                    (flycheck-error-message e))))
-                     (list :severity (if (eq level 'error) 1
-                                       (if (eq level 'warning) 2 3))
-                           :line (or line 0)
-                           :character (or col 1)
-                           :source (if checker (format "flycheck (%s)" checker) "flycheck")
-                           :message (or msg (and level (symbol-name level)) "unknown"))))
-                 (flycheck-current-errors))))))))
-
 (defun kargu-lsp--diagnostics-data (file-path)
   "Return normalized diagnostics for FILE-PATH as a list of plists
 (:severity :line :character :message :source), sorted by severity then line."
   (let* ((path (kargu--resolve-path file-path))
-         (flymake-data (kargu-lsp--flymake-diags path))
-         (flycheck-data (kargu-lsp--flycheck-diags path))
-         (combined (append flymake-data flycheck-data))
+         (combined (kargu-lsp--flymake-diags path))
          (seen (make-hash-table :test 'equal))
          (data nil))
     (dolist (d combined)
@@ -830,67 +800,46 @@ project buffers."
       (message "%s" text))
     text))
 
-(defalias 'kargu-lsp-project-diagnostics #'kargu-lsp-get-project-diagnostics)
-
 (defun kargu-lsp--buffer-has-checker-p (buf)
-  "Return non-nil if BUF has an active or available syntax checker."
+  "Return non-nil if BUF has Flymake or an Eglot-managed syntax checker."
   (and buf (buffer-live-p buf)
        (or (kargu-lsp--buffer-managed-p buf)
            (with-current-buffer buf
-             (or (bound-and-true-p flymake-mode)
-                 (bound-and-true-p flycheck-mode)
-                 (and (fboundp 'flycheck-get-checker-for-buffer)
-                      (flycheck-get-checker-for-buffer)))))))
-
-(defun kargu-lsp--ensure-flycheck-triggered (buf)
-  "Ensure Flycheck is started and checks BUF if available."
-  (when (and buf (buffer-live-p buf) (fboundp 'flycheck-mode))
-    (with-current-buffer buf
-      (when (and (fboundp 'flycheck-get-checker-for-buffer)
-                 (flycheck-get-checker-for-buffer))
-        (unless (bound-and-true-p flycheck-mode)
-          (ignore-errors (flycheck-mode 1)))
-        (when (and (bound-and-true-p flycheck-mode) (fboundp 'flycheck-buffer))
-          (ignore-errors (flycheck-buffer)))))))
+             (bound-and-true-p flymake-mode)))))
 
 (defun kargu-lsp--checker-busy-p (buf)
-  "Return non-nil if Flymake or Flycheck is currently actively running on BUF."
+  "Return non-nil if Flymake is currently running on BUF."
   (and buf (buffer-live-p buf)
        (with-current-buffer buf
-         (or (and (bound-and-true-p flycheck-mode)
-                  (fboundp 'flycheck-running-p)
-                  (flycheck-running-p))
-             (and (bound-and-true-p flymake-mode)
-                  (fboundp 'flymake-is-running)
-                  (flymake-is-running))))))
+         (and (bound-and-true-p flymake-mode)
+              (fboundp 'flymake-is-running)
+              (flymake-is-running)))))
 
 (defun kargu-lsp-wait-diagnostics (file-path callback &optional timeout)
   "Asynchronously wait for diagnostics of FILE-PATH to settle.
-CALLBACK is called with (PATH TEXT TIMEOUT-P) once Flymake or Flycheck
-has stabilized."
+CALLBACK is called with (PATH TEXT TIMEOUT-P) once Flymake has stabilized."
   (let* ((path (kargu--resolve-path file-path))
          (buf (find-buffer-visiting path))
-         (has-checker-p (kargu-lsp--buffer-has-checker-p buf)))
-    (kargu-lsp--ensure-flycheck-triggered buf)
-    (let* ((timeout (or timeout kargu-lsp-diag-settle-timeout))
-           (start (float-time))
-           (last-snapshot nil)
-           (polls 0))
-      (if (not has-checker-p)
-          (funcall callback path (kargu-lsp-get-diagnostics path) nil)
-        (cl-labels
-            ((tick ()
-               (let* ((busy (kargu-lsp--checker-busy-p buf))
-                      (timed-out (>= (- (float-time) start) timeout))
-                      (snapshot (kargu-lsp--diagnostics-data path)))
-                 (setq polls (1+ polls))
-                 (if (or timed-out
-                         (and (not busy) (>= polls 1) (null snapshot))
-                         (and (not busy) (>= polls 2) (equal snapshot last-snapshot)))
-                     (funcall callback path (kargu-lsp-get-diagnostics path) timed-out)
-                   (setq last-snapshot snapshot)
-                   (run-at-time 0.25 nil #'tick)))))
-          (run-at-time 0.25 nil #'tick))))))
+         (has-checker-p (kargu-lsp--buffer-has-checker-p buf))
+         (timeout (or timeout kargu-lsp-diag-settle-timeout))
+         (start (float-time))
+         (last-snapshot nil)
+         (polls 0))
+    (if (not has-checker-p)
+        (funcall callback path (kargu-lsp-get-diagnostics path) nil)
+      (cl-labels
+          ((tick ()
+             (let* ((busy (kargu-lsp--checker-busy-p buf))
+                    (timed-out (>= (- (float-time) start) timeout))
+                    (snapshot (kargu-lsp--diagnostics-data path)))
+               (setq polls (1+ polls))
+               (if (or timed-out
+                       (and (not busy) (>= polls 1) (null snapshot))
+                       (and (not busy) (>= polls 2) (equal snapshot last-snapshot)))
+                   (funcall callback path (kargu-lsp-get-diagnostics path) timed-out)
+                 (setq last-snapshot snapshot)
+                 (run-at-time 0.25 nil #'tick)))))
+        (run-at-time 0.25 nil #'tick)))))
 
 ;;;; Find definition ------------------------------------------------------
 
@@ -979,35 +928,51 @@ has stabilized."
 
 ;;;; Document symbols, outline, reading and surgical editing --------------
 
+(defun kargu-lsp--kind-label (kind-num)
+  "Symbol kind name for a numeric or string KIND-NUM."
+  (cond
+   ((numberp kind-num) (kargu-lsp--kind-name kind-num))
+   ((stringp kind-num) kind-num)
+   (t "Symbol")))
+
+(defun kargu-lsp--inclusive-end (start-line end-0 end-char)
+  "1-based inclusive end line.
+LSP END-0 is exclusive.  A character of 0 means the range stops
+at the start of that line, so the previous line is the last one
+included.  END-0 itself is then the 1-based index of that line."
+  (cond
+   ((not (numberp end-0)) start-line)
+   ((and (numberp end-char) (<= end-char 0))
+    (max start-line end-0))
+   (t (max start-line (1+ end-0)))))
+
+(defun kargu-lsp--symbol-plist (item)
+  "Normalized plist for one LSP document symbol ITEM, or nil."
+  (let* ((name (kargu-lsp--field item :name))
+         (start-0 (or (kargu-lsp--path item :range :start :line)
+                      (kargu-lsp--path item :location :range :start :line)))
+         (end-0 (or (kargu-lsp--path item :range :end :line)
+                    (kargu-lsp--path item :location :range :end :line)))
+         (end-char (or (kargu-lsp--path item :range :end :character)
+                       (kargu-lsp--path item :location :range :end :character)))
+         (start-line (if start-0 (1+ start-0) 1))
+         (children-raw (kargu-lsp--field item :children)))
+    (when name
+      (list :name name
+            :kind (kargu-lsp--kind-label (kargu-lsp--field item :kind))
+            :start-line start-line
+            :end-line (kargu-lsp--inclusive-end start-line end-0 end-char)
+            :detail (kargu-lsp--field item :detail)
+            :children (and children-raw
+                           (kargu-lsp--parse-document-symbols children-raw))))))
+
 (defun kargu-lsp--parse-document-symbols (raw)
   "Parse LSP documentSymbol RAW (vector or list) into normalized symbol plists.
 Each plist has keys :name, :kind, :start-line, :end-line, :detail, :children."
-  (let ((items (kargu-lsp--seq->list raw))
-        acc)
-    (dolist (item items)
-      (let* ((name (kargu-lsp--field item :name))
-             (kind-num (kargu-lsp--field item :kind))
-             (kind (if (numberp kind-num)
-                       (kargu-lsp--kind-name kind-num)
-                     (or (and (stringp kind-num) kind-num) "Symbol")))
-             (detail (kargu-lsp--field item :detail))
-             (start-l (or (kargu-lsp--path item :range :start :line)
-                          (kargu-lsp--path item :location :range :start :line)))
-             (end-l (or (kargu-lsp--path item :range :end :line)
-                        (kargu-lsp--path item :location :range :end :line)))
-             (start-line (if start-l (1+ start-l) 1))
-             (end-line (if end-l (1+ end-l) start-line))
-             (children-raw (kargu-lsp--field item :children))
-             (children (when children-raw
-                         (kargu-lsp--parse-document-symbols children-raw))))
-        (when name
-          (push (list :name name
-                      :kind kind
-                      :start-line start-line
-                      :end-line (max start-line end-line)
-                      :detail detail
-                      :children children)
-                acc))))
+  (let (acc)
+    (dolist (item (kargu-lsp--seq->list raw))
+      (when-let* ((plist (kargu-lsp--symbol-plist item)))
+        (push plist acc)))
     (nreverse acc)))
 
 (defun kargu-lsp--imenu-kind (raw-kind &optional pos)
@@ -1179,31 +1144,32 @@ and :end-line."
           (setq acc (nconc (nreverse (kargu-lsp--flatten-symbols children name)) acc)))))
     (nreverse acc)))
 
+(defun kargu-lsp--symbol-named-p (symbol symbol-name)
+  "Non-nil when SYMBOL's name or container-qualified name is SYMBOL-NAME."
+  (or (equal (plist-get symbol :name) symbol-name)
+      (string-equal-ignore-case (plist-get symbol :name) symbol-name)
+      (let ((cont (plist-get symbol :container)))
+        (and cont
+             (or (equal (format "%s.%s" cont (plist-get symbol :name)) symbol-name)
+                 (equal (format "%s::%s" cont (plist-get symbol :name)) symbol-name))))))
+
+(defun kargu-lsp--kind-matches-p (symbol kind)
+  "Non-nil when SYMBOL's kind equals KIND, ignoring case."
+  (string-equal-ignore-case (or (plist-get symbol :kind) "") kind))
+
 (defun kargu-lsp--find-symbol-in-list (symbols symbol-name &optional kind)
-  "Find symbol matching SYMBOL-NAME and optional KIND in flat SYMBOLS list."
-  (let* ((name-exact (cl-remove-if-not
-                      (lambda (s) (equal (plist-get s :name) symbol-name))
-                      symbols))
-         (name-ci (or name-exact
-                      (cl-remove-if-not
-                       (lambda (s) (string-equal-ignore-case (plist-get s :name) symbol-name))
-                       symbols)))
-         (qualified (or name-ci
-                        (cl-remove-if-not
-                         (lambda (s)
-                           (let ((cont (plist-get s :container)))
-                             (and cont
-                                  (or (equal (format "%s.%s" cont (plist-get s :name)) symbol-name)
-                                      (equal (format "%s::%s" cont (plist-get s :name)) symbol-name)))))
-                         symbols)))
-         (candidates (or qualified symbols)))
-    (if (and kind (not (string-empty-p (string-trim kind))))
-        (cl-remove-if-not
-         (lambda (s) (string-equal-ignore-case (or (plist-get s :kind) "") kind))
-         candidates)
-      (if (or name-exact name-ci qualified)
-          candidates
-        nil))))
+  "Find symbol matching SYMBOL-NAME and optional KIND in flat SYMBOLS list.
+A kind does not widen the search to every symbol of that kind."
+  (let ((named (cl-remove-if-not
+                (lambda (symbol) (kargu-lsp--symbol-named-p symbol symbol-name))
+                symbols)))
+    (cond
+     ((null named) nil)
+     ((and kind (not (string-empty-p (string-trim kind))))
+      (cl-remove-if-not
+       (lambda (symbol) (kargu-lsp--kind-matches-p symbol kind))
+       named))
+     (t named))))
 
 (defun kargu-lsp-read-symbol (file-path symbol-name &optional kind)
   "Read the implementation body of SYMBOL-NAME in FILE-PATH."
@@ -1319,8 +1285,6 @@ NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
                  (new-full-text (kargu-lsp--splice-symbol-content raw-text s-line e-line new-content)))
             (kargu-lsp--apply-symbol-replacement path sym new-full-text s-line e-line reason)))))))
 
-(defalias 'kargu-lsp-edit-by-lsp #'kargu-lsp-edit-symbol)
-
 ;;;; Tool registration ----------------------------------------------------
 
 (defun kargu-lsp-register-tools ()
@@ -1333,7 +1297,7 @@ NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
    (lambda (_args) (kargu-lsp-build-skeleton)))
   (kargu-register-tool
    "lsp_diagnostics"
-   "Get compiler and linter diagnostics (errors, warnings) from LSP, Flymake, and Flycheck. Pass 'file_path' to inspect a specific file, or OMIT 'file_path' (pass empty or no arguments) to scan the ENTIRE PROJECT for all compile and lint errors across all project files. Always call this after editing or building to verify zero compilation errors."
+   "Get compiler and linter diagnostics (errors, warnings) from LSP via Flymake. Pass 'file_path' to inspect a specific file, or OMIT 'file_path' (pass empty or no arguments) to scan the ENTIRE PROJECT for all compile and lint errors across all project files. Always call this after editing or building to verify zero compilation errors."
    '(("type" . "object")
      ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "Optional. Absolute or project-relative path of a specific file to check. When omitted or empty, runs a project-wide diagnostic scan across all project files."))))))

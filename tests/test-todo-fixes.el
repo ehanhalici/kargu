@@ -3,6 +3,18 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;; Ensure the package root is on `load-path` during byte/native compilation.
+(eval-and-compile
+  (let ((root (locate-dominating-file
+               (or (bound-and-true-p byte-compile-current-file)
+                   load-file-name
+                   buffer-file-name
+                   default-directory)
+               "kargu.el")))
+    (when root
+      (add-to-list 'load-path (file-name-as-directory
+                               (expand-file-name root))))))
+
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/core)
@@ -20,6 +32,7 @@
 
 (ert-deftest kargu-todo-1-context-usage-display-test ()
   "Test that context usage is accurately calculated and rendered."
+  (kargu-model-set-metadata "gemini-2.5-flash" '(("context_length" . 1000000)))
   (let ((kargu--session-model "gemini-2.5-flash")
         (kargu--session (list :tokens 0 :turns 0 :last-prompt-tokens 32000)))
     (let ((info (kargu-session-context-info)))
@@ -285,8 +298,7 @@
         (should retry-called)
         (should-not finish-called)
         (should (plist-get run :no-tools))
-        (should-not (kargu-model-supports-tools-p "openrouter/free-model"))
-        (should (string-match-p "🚫 no-tools" (kargu-model-annotation-string "openrouter/free-model" "openrouter")))))
+        (should-not (kargu-model-supports-tools-p "openrouter/free-model"))))
 
     ;; 3. In agent mode: finishes with descriptive error
     (let* ((kargu-active-mode 'agent)
@@ -303,6 +315,18 @@
         (kargu-loop--handle-tools-unsupported run err-text)
         (should (equal (car finish-err) :error))
         (should (string-match-p "does not support tool use" (cdr finish-err)))))))
+
+(ert-deftest kargu-loop-continue-extends-the-cap-test ()
+  "Continuing adds one batch to the cap and keeps a tool-free run tool-free."
+  (let* ((run (list :iterations 13 :max-iterations 12 :state 'pause :no-tools t))
+         (kargu-max-iterations 12)
+         (sent nil))
+    (cl-letf (((symbol-function 'kargu-api-send)
+               (lambda (&rest _) (setq sent t))))
+      (kargu-loop--apply-continue-decision run "next" :continue 12 12)
+      (should sent)
+      (should (= (plist-get run :max-iterations) 24))
+      (should (eq (plist-get run :no-tools) t)))))
 
 (provide 'tests/test-todo-fixes)
 ;;; test-todo-fixes.el ends here

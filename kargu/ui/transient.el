@@ -116,11 +116,6 @@
   (interactive)
   (kargu-ui--dispatch 'kargu-diff-rollback))
 
-(defun kargu-ui-rollback-all ()
-  "Roll all modified files back to their initial states."
-  (interactive)
-  (kargu-ui--dispatch 'kargu-diff-rollback-all))
-
 (defun kargu-ui-review-diff ()
   "Review changes in ediff against the pre-agent snapshot."
   (interactive)

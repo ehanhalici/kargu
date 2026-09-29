@@ -78,6 +78,12 @@
   "Normalize PROVIDER to a lowercase string."
   (downcase (string-trim (if (symbolp provider) (symbol-name provider) (format "%s" (or provider "default"))))))
 
+(defun kargu-provider-params--active-id (&optional provider)
+  "PROVIDER, the active provider id, or \"default\"."
+  (or provider
+      (and (fboundp 'kargu--provider-name) (kargu--provider-name))
+      "default"))
+
 (defun kargu-provider-format-type (provider)
   "Return format profile symbol for PROVIDER as declared in `catalog.el'.
 Returns `openrouter', `anthropic', `gemini', `ollama', `openapi',
@@ -91,7 +97,7 @@ or nil if unsupported."
 (defun kargu-register-provider-params (&rest plist)
   "Register a parameter schema for a provider or format profile.
 PLIST accepts:
-  :provider     String or symbol ID (e.g. \"openrouter\", \"anthropic\", \"openapi\").
+  :provider     String or symbol ID.  A format name selects that format's schema.
   :target-block Optional default target block string (e.g. \"provider\").
   :specs        List of parameter spec plists, each having:
                 `:key', `:label', `:type' (`enum', `boolean', `multi-enum',
@@ -127,7 +133,7 @@ PLIST accepts:
 
 (defun kargu-provider-params-find-spec (key &optional provider)
   "Return spec plist for KEY in PROVIDER."
-  (let* ((p (or provider (if (fboundp 'kargu--provider-name) (kargu--provider-name) "openrouter")))
+  (let* ((p (kargu-provider-params--active-id provider))
          (specs (kargu-provider-params-specs p))
          (k-str (if (symbolp key) (symbol-name key) (format "%s" key))))
     (cl-find-if (lambda (s) (equal (plist-get s :key) k-str)) specs)))
@@ -136,9 +142,7 @@ PLIST accepts:
 
 (defun kargu-provider-params-get-all (&optional provider)
   "Return alist of ((KEY . VALUE) ...) for PROVIDER."
-  (let* ((pid (kargu--normalize-provider-id (or provider (if (fboundp 'kargu--provider-name)
-                                                             (kargu--provider-name)
-                                                           "openrouter"))))
+  (let* ((pid (kargu--normalize-provider-id (kargu-provider-params--active-id provider)))
          (session-entry (assoc pid kargu--session-provider-params))
          (custom-entry (and (boundp 'kargu-provider-parameters)
                             (assoc pid kargu-provider-parameters))))
@@ -160,9 +164,7 @@ PLIST accepts:
 (defun kargu-provider-param-set (key value &optional provider)
   "Set parameter KEY to VALUE for PROVIDER in session store.
 If VALUE is nil, the key is removed from custom overrides."
-  (let* ((pid (kargu--normalize-provider-id (or provider (if (fboundp 'kargu--provider-name)
-                                                             (kargu--provider-name)
-                                                           "openrouter"))))
+  (let* ((pid (kargu--normalize-provider-id (kargu-provider-params--active-id provider)))
          (k-str (if (symbolp key) (symbol-name key) (format "%s" key)))
          (current-all (copy-alist (or (cdr (assoc pid kargu--session-provider-params))
                                       (and (boundp 'kargu-provider-parameters)
@@ -178,9 +180,7 @@ If VALUE is nil, the key is removed from custom overrides."
 
 (defun kargu-provider-params-reset (&optional provider)
   "Reset all custom parameters for PROVIDER to nil."
-  (let ((pid (kargu--normalize-provider-id (or provider (if (fboundp 'kargu--provider-name)
-                                                            (kargu--provider-name)
-                                                          "openrouter")))))
+  (let ((pid (kargu--normalize-provider-id (kargu-provider-params--active-id provider))))
     (setq kargu--session-provider-params
           (assoc-delete-all pid kargu--session-provider-params #'equal))
     (message "kargu: reset parameters for %s" pid)))
@@ -250,6 +250,10 @@ If INPUT is already a list or vector, returns a vector of strings."
       (error nil)))
    (t val)))
 
+(defun kargu-provider-params--without (alist keys)
+  "ALIST without entries whose key is in KEYS."
+  (cl-remove-if (lambda (cell) (member (car cell) keys)) alist))
+
 (defun kargu-provider-params--postprocess-anthropic (pid top-level)
   "Apply Anthropic-specific extensions (thinking, metadata) to TOP-LEVEL for PID."
   (let ((ext-thinking (kargu-provider-param-get "extended_thinking" pid))
@@ -264,7 +268,8 @@ If INPUT is already a list or vector, returns a vector of strings."
       (push (cons "thinking" '(("type" . "disabled"))) res))
     (when (and user-id (not (string-empty-p (format "%s" user-id))))
       (push (cons "metadata" `(("user_id" . ,user-id))) res))
-    res))
+    (kargu-provider-params--without
+     res '("extended_thinking" "thinking_budget" "user_id"))))
 
 (defun kargu-provider-params--postprocess-gemini (pid sub-blocks top-level)
   "Apply Gemini transformations (generationConfig, safetySettings) for PID.
@@ -304,11 +309,8 @@ Returns updated TOP-LEVEL."
 
 (defun kargu-provider-params-build-payload (&optional provider)
   "Build payload alist for PROVIDER to merge into chat-completions request.
-Separates parameters targeting sub-objects (such as OpenRouter's
-\"provider\": { ... }, Gemini's \"generationConfig\": { ... },
-Anthropic's \"thinking\": { ... }, or Ollama's \"options\": { ... })
-from top-level request parameters."
-  (let* ((p (or provider (if (fboundp 'kargu--provider-name) (kargu--provider-name) "openrouter")))
+Separates parameters that target a nested object from top-level fields."
+  (let* ((p (kargu-provider-params--active-id provider))
          (pid (kargu--normalize-provider-id p))
          (fmt (kargu-provider-format-type pid))
          (schema (kargu-provider-params-schema pid))

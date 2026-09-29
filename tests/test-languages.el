@@ -3,14 +3,26 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;; Ensure the package root is on `load-path` during byte/native compilation.
+(eval-and-compile
+  (let ((root (locate-dominating-file
+               (or (bound-and-true-p byte-compile-current-file)
+                   load-file-name
+                   buffer-file-name
+                   default-directory)
+               "kargu.el")))
+    (when root
+      (add-to-list 'load-path (file-name-as-directory
+                               (expand-file-name root))))))
+
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/languages)
 (require 'kargu/tools/toolchain)
 
 (ert-deftest kargu-languages-registered-all-eight-test ()
-  "Ensure all 8 target languages are registered with valid specs."
-  (let ((expected-ids '(rust c cpp golang python java haskell ocaml)))
+  "Ensure every target language is registered with a valid spec."
+  (let ((expected-ids '(rust c cpp golang python java haskell ocaml emacs-lisp)))
     (dolist (id expected-ids)
       (let ((spec (kargu-language-get id)))
         (should (kargu-language-spec-p spec))
@@ -35,7 +47,8 @@
                  ("parser.hs" . haskell)
                  ("syntax.lhs" . haskell)
                  ("ast.ml" . ocaml)
-                 ("ast.mli" . ocaml))))
+                 ("ast.mli" . ocaml)
+                 ("kargu.el" . emacs-lisp))))
     (dolist (c cases)
       (let ((spec (kargu-language-detect-by-extension (car c))))
         (should spec)
@@ -80,7 +93,21 @@
             (write-region "(lang dune 3.0)\n" nil (expand-file-name "dune-project" ml-root))
             (let ((spec (kargu-language-detect ml-root)))
               (should spec)
-              (should (eq (kargu-language-spec-id spec) 'ocaml)))))
+              (should (eq (kargu-language-spec-id spec) 'ocaml))))
+          ;; Emacs Lisp, and a Rust tree that also contains a .el file
+          (let ((el-root (expand-file-name "el-proj" temp-dir)))
+            (make-directory el-root t)
+            (write-region ";;; foo.el\n" nil (expand-file-name "foo.el" el-root))
+            (let ((spec (kargu-language-detect el-root)))
+              (should spec)
+              (should (eq (kargu-language-spec-id spec) 'emacs-lisp))))
+          (let ((mixed (expand-file-name "rust-with-el" temp-dir)))
+            (make-directory mixed t)
+            (write-region "[package]\nname = \"test\"\n" nil (expand-file-name "Cargo.toml" mixed))
+            (write-region ";;; helper.el\n" nil (expand-file-name "helper.el" mixed))
+            (let ((spec (kargu-language-detect mixed)))
+              (should spec)
+              (should (eq (kargu-language-spec-id spec) 'rust)))))
       (delete-directory temp-dir t))))
 
 (ert-deftest kargu-languages-toolchain-bridge-test ()
@@ -115,6 +142,41 @@
     (should (string-match-p "cargo check" md))
     (should (string-match-p "codelldb" md))
     (should (string-match-p "Static data access ONLY" md))))
+
+(ert-deftest kargu-languages-elisp-has-no-server-and-does-not-ask-in-batch ()
+  "Emacs Lisp does not require a language server and does not prompt in batch."
+  (let ((spec (kargu-language-get 'emacs-lisp))
+        (kargu-elisp-project-root nil))
+    (should-not (kargu-language-requires-lsp-p spec))
+    (should (eq (kargu-language-spec-root-fn spec) #'kargu-language-elisp-ask-root))
+    (cl-letf (((symbol-function 'read-directory-name)
+               (lambda (&rest _) (error "should not ask"))))
+      (should-not (kargu-language-elisp-ask-root)))
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (should (eq (kargu-language-spec-id (kargu-language-for-buffer))
+                  'emacs-lisp))
+      (should (kargu-language-root-unresolved-p))
+      (should-not (kargu-language-claim-root)))))
+
+(ert-deftest kargu-languages-elisp-asks-before-the-prompt ()
+  "An interactive Emacs Lisp buffer must choose a root before a prompt exists."
+  (let ((kargu-elisp-project-root nil)
+        (noninteractive nil)
+        (asked nil)
+        (dir (file-name-as-directory (expand-file-name default-directory))))
+    (cl-letf (((symbol-function 'read-directory-name)
+               (lambda (&rest _)
+                 (setq asked t)
+                 dir)))
+      (with-temp-buffer
+        (emacs-lisp-mode)
+        (should (kargu-language-root-unresolved-p))
+        (should-not (kargu-chat--prompt-live-p))
+        (let ((chosen (kargu-language-claim-root)))
+          (should asked)
+          (should (file-directory-p chosen))
+          (should-not (kargu-language-root-unresolved-p)))))))
 
 (provide 'tests/test-languages)
 

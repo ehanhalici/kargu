@@ -24,6 +24,62 @@
 
 (require 'kargu/providers/registry)
 
+(defconst kargu-provider--effort-list
+  '((:path ("reasoning" "supported_efforts") :type list)
+    (:path ("reasoning_efforts") :type list)
+    (:path ("effort_levels") :type list)
+    (:path ("reasoning_options" "values") :type list))
+  "Declared effort paths for an OpenAI-compatible models record.
+Each entry is `:path' and `:type' (`list' or `csv').")
+
+(defconst kargu-provider-formats
+  `((openapi
+     . (:chat-path "/chat/completions"
+        :auth bearer
+        :stream t
+        :models (:reasoning-efforts ,kargu-provider--effort-list)))
+    (openrouter
+     . (:chat-path "/chat/completions"
+        :auth bearer
+        :stream t
+        :models (:reasoning-efforts ,kargu-provider--effort-list)))
+    (gemini
+     . (:chat-path "/chat/completions"
+        :auth bearer
+        :stream t))
+    (ollama
+     . (:chat-path "/chat/completions"
+        :auth bearer
+        :stream t))
+    (anthropic
+     . (:chat-path "/messages"
+        :auth x-api-key
+        :stream nil
+        :default-headers (("anthropic-version" . "2023-06-01"))
+        :message-shape blocks
+        :response-shape blocks
+        :max-tokens-default 4096
+        :system-key "system"
+        :system-join "\n\n"
+        :copy-keys ("temperature" "top_p" "top_k" "thinking" "metadata")
+        :tool-schema-key "input_schema"
+        :tool-result (:type "tool_result" :id "tool_use_id" :content "content")
+        :content-key "content"
+        :blocks ((:type "text" :field "text" :as text)
+                 (:type "thinking" :field "thinking" :as reasoning)
+                 (:type "tool_use" :id "id" :name "name" :input "input" :as tool-call))
+        :finish (("tool_use" . "tool_calls")
+                 ("max_tokens" . "length")
+                 ("refusal" . "content_filter"))
+        :finish-default "stop"
+        :usage (("input_tokens" . "prompt_tokens")
+                ("output_tokens" . "completion_tokens"))
+        :detect ("stop_reason")
+        :detect-type "message")))
+  "Wire records keyed by catalog format symbol.
+Providers point at a format.  A provider `:models' field spec replaces
+that format's `:models' map.")
+
 (defconst kargu-providers-builtin-catalog
   '(
     (:id "302ai"
@@ -584,9 +640,21 @@
      :name "llama.cpp"
      :api "http://127.0.0.1:8080/v1"
      :models-api "http://127.0.0.1:8080/v1/models"
+     :keyless t
+     :local t
      :env nil
-     :npm "llamacpp"
-     :format ollama
+     :npm "@ai-sdk/openai-compatible"
+     :format openapi
+     :prompt-caching nil)
+    (:id "llama_cpp"
+     :name "llama.cpp"
+     :api "http://127.0.0.1:8080/v1"
+     :models-api "http://127.0.0.1:8080/v1/models"
+     :keyless t
+     :local t
+     :env nil
+     :npm "@ai-sdk/openai-compatible"
+     :format openapi
      :prompt-caching nil)
     (:id "llmgateway"
      :name "LLM Gateway"
@@ -608,6 +676,8 @@
      :name "LMStudio"
      :api "http://127.0.0.1:1234/v1"
      :models-api "http://localhost:1234/v1/models"
+     :keyless t
+     :local t
      :env ("LMSTUDIO_API_KEY")
      :npm "@ai-sdk/openai-compatible"
      :format openapi
@@ -816,7 +886,8 @@
      :name "Ollama"
      :api "http://localhost:11434/v1"
      :models-api "http://localhost:11434/api/tags"
-     :model-detail-api "http://localhost:11434/api/show"
+     :keyless t
+     :local t
      :env nil
      :npm "ollama"
      :format ollama
@@ -844,6 +915,7 @@
      :models-api "https://opencode.ai/zen/v1/models"
      :usage-api "https://opencode.ai/zen/v1/user"
      :env ("OPENCODE_API_KEY")
+     :extra-headers (("x-opencode-session" . :session))
      :npm "@ai-sdk/openai-compatible"
      :format openapi
      :prompt-caching nil)
@@ -852,6 +924,7 @@
      :api "https://opencode.ai/zen/go/v1"
      :models-api "https://opencode.ai/zen/go/v1/models"
      :env ("OPENCODE_API_KEY")
+     :extra-headers (("x-opencode-session" . :session))
      :npm "@ai-sdk/openai-compatible"
      :format openapi
      :prompt-caching nil)

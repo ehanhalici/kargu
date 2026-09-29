@@ -10,6 +10,18 @@
 
 ;;; Code:
 
+;; Ensure the package root is on `load-path` during byte/native compilation.
+(eval-and-compile
+  (let ((root (locate-dominating-file
+               (or (bound-and-true-p byte-compile-current-file)
+                   load-file-name
+                   buffer-file-name
+                   default-directory)
+               "kargu.el")))
+    (when root
+      (add-to-list 'load-path (file-name-as-directory
+                               (expand-file-name root))))))
+
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/core)
@@ -30,6 +42,8 @@
   (should (eq (kargu-provider-format-type "groq") 'openapi))
   (should (eq (kargu-provider-format-type "deepseek") 'openapi))
   (should (eq (kargu-provider-format-type "togetherai") 'openapi))
+  (should (eq (kargu-provider-format-type "llamacpp") 'openapi))
+  (should (eq (kargu-provider-format-type "llama_cpp") 'openapi))
   ;; Anthropic format providers
   (should (eq (kargu-provider-format-type "anthropic") 'anthropic))
   (should (eq (kargu-provider-format-type "google-vertex-anthropic") 'anthropic))
@@ -39,7 +53,6 @@
   (should (eq (kargu-provider-format-type "google-vertex") 'gemini))
   ;; Ollama format providers
   (should (eq (kargu-provider-format-type "ollama") 'ollama))
-  (should (eq (kargu-provider-format-type "llamacpp") 'ollama))
   ;; Unsupported format providers (returns nil)
   (should (null (kargu-provider-format-type "amazon-bedrock")))
   (should (null (kargu-provider-format-type "azure")))

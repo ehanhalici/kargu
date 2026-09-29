@@ -34,7 +34,9 @@
 (require 'kargu/api/circuit)
 
 (declare-function kargu-provider-models-api "kargu/providers/registry" (provider))
-(declare-function kargu-provider-reasoning-efforts "kargu/providers/registry" (provider))
+(declare-function kargu-provider-keyless-p "kargu/providers/registry" (provider))
+(declare-function kargu-provider-format "kargu/providers/registry" (provider))
+(declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
 (declare-function kargu--plz-error-message "kargu/api/http" (err))
 (declare-function kargu--api-headers "kargu/api/http" (key &optional provider-name))
 (declare-function kargu-history-compact-threshold "kargu/history-compact")
@@ -74,15 +76,6 @@
                      kargu--model-metadata-table)
             found)))))
 
-(defun kargu-model-context-window (&optional model-id)
-  "Return the context window size in tokens for MODEL-ID (default active model).
-Purely derived from live model metadata or session defaults."
-  (let* ((mid (or model-id (kargu--model) ""))
-         (meta (kargu-model-get-metadata mid))
-         (ctx (and meta (plist-get meta :context-window))))
-    (if (and (integerp ctx) (> ctx 0))
-        ctx
-      128000)))
 
 (defun kargu--extract-models-from-json (data)
   "Extract a list of model alists or IDs from decoded JSON DATA."
@@ -98,194 +91,34 @@ Purely derived from live model metadata or session defaults."
                  (kargu--aget (car data) "name"))
              data)))))
 
-(defun kargu--extract-efforts-from-options (model-data)
-  "Extract reasoning effort list from reasoning_options schema."
-  (let ((opts (or (kargu--aget model-data "reasoning_options")
-                  (kargu--aget model-data "reasoningOptions")
-                  (and (listp model-data) (plist-get model-data :reasoning-options))))
-        res)
-    (when (vectorp opts) (setq opts (append opts nil)))
-    (when (listp opts)
-      (dolist (opt opts)
-        (when (or (consp opt) (vectorp opt))
-          (let ((type (or (kargu--aget opt "type")
-                          (and (listp opt) (plist-get opt :type))))
-                (vals (or (kargu--aget opt "values")
-                          (kargu--aget opt "options")
-                          (and (listp opt) (plist-get opt :values))
-                          (and (listp opt) (plist-get opt :options)))))
-            (when (and (equal type "effort") vals)
-              (if (vectorp vals) (setq vals (append vals nil)))
-              (when (listp vals)
-                (setq res (append res vals))))))))
-    res))
+(defun kargu-model-get-prop (model-id prop-key)
+  "Retrieve property PROP-KEY from MODEL-ID's metadata.
+Looks up directly in the model's raw API data."
+  (when-let* ((data (kargu-model-get-metadata model-id)))
+    (let ((k-str (if (stringp prop-key) prop-key (format "%s" prop-key)))
+          (k-sym (if (keywordp prop-key) prop-key (intern (concat ":" (format "%s" prop-key))))))
+      (cond
+       ((consp data)
+        (or (kargu--aget data k-str)
+            (and (listp data) (plist-get data k-sym))))
+       (t nil)))))
 
-(defun kargu--extract-efforts-from-arrays (model-data)
-  "Extract reasoning effort list from direct effort arrays."
-  (let ((vals (or (kargu--aget model-data "reasoning_efforts")
-                  (kargu--aget model-data "reasoningEfforts")
-                  (kargu--aget model-data "supported_reasoning_efforts")
-                  (kargu--aget model-data "effort_levels")
-                  (kargu--aget model-data "effortLevels")
-                  (kargu--aget model-data "efforts")
-                  (and (listp model-data) (plist-get model-data :reasoning-efforts))
-                  (and (listp model-data) (plist-get model-data :efforts)))))
-    (cond
-     ((vectorp vals) (append vals nil))
-     ((listp vals) vals)
-     (t nil))))
-
-(defun kargu--extract-efforts-from-reasoning-obj (model-data)
-  "Extract reasoning effort list from nested reasoning object."
-  (let ((reasoning (or (kargu--aget model-data "reasoning")
-                       (and (listp model-data) (plist-get model-data :reasoning)))))
-    (when (and (listp reasoning) (consp reasoning))
-      (let ((vals (or (kargu--aget reasoning "efforts")
-                      (kargu--aget reasoning "effort")
-                      (kargu--aget reasoning "values")
-                      (kargu--aget reasoning "options")
-                      (kargu--aget reasoning "supported_efforts")
-                      (and (consp (car-safe reasoning))
-                           (or (kargu--aget (car reasoning) "efforts")
-                               (kargu--aget (car reasoning) "effort")
-                               (kargu--aget (car reasoning) "values")
-                               (kargu--aget (car reasoning) "options")
-                               (kargu--aget (car reasoning) "supported_efforts"))))))
-        (cond
-         ((vectorp vals) (append vals nil))
-         ((listp vals) vals)
-         (t nil))))))
-
-(defun kargu--extract-efforts-from-variants (model-data)
-  "Extract reasoning effort list from variants alist."
-  (let ((variants (or (kargu--aget model-data "variants")
-                      (and (listp model-data) (plist-get model-data :variants))))
-        res)
-    (when (and (listp variants) (consp variants))
-      (dolist (v variants)
-        (cond
-         ((consp v)
-          (let ((k (car v)))
-            (when (and (stringp k) (member (downcase k) '("minimal" "low" "medium" "high" "xhigh" "max" "none" "off")))
-              (push k res))))
-         ((stringp v)
-          (when (member (downcase v) '("minimal" "low" "medium" "high" "xhigh" "max" "none" "off"))
-            (push v res)))))
-      (nreverse res))))
-
-(defun kargu--clean-effort-strings (raw-efforts)
-  "Clean, deduplicate and convert RAW-EFFORTS to lowercase strings."
-  (when raw-efforts
-    (let (cleaned)
-      (dolist (item raw-efforts)
-        (let ((s (cond
-                  ((stringp item) (downcase (string-trim item)))
-                  ((symbolp item) (downcase (symbol-name item)))
-                  (t nil))))
-          (when (and s (not (string-empty-p s)) (not (member s cleaned)))
-            (push s cleaned))))
-      (nreverse cleaned))))
-
-(defun kargu--extract-reasoning-efforts (model-data)
-  "Extract supported reasoning effort strings from MODEL-DATA alist or plist.
-Returns a list of clean effort strings (e.g. \\='(\"low\" \"medium\")), or nil."
-  (when (or (consp model-data) (vectorp model-data))
-    (let ((raw (or (kargu--extract-efforts-from-options model-data)
-                   (kargu--extract-efforts-from-arrays model-data)
-                   (kargu--extract-efforts-from-reasoning-obj model-data)
-                   (kargu--extract-efforts-from-variants model-data))))
-      (kargu--clean-effort-strings raw))))
-
-(defun kargu--parse-model-limits (m top-p-alist)
-  "Return cons (CTX . MAX-OUT) tokens for model M."
-  (let* ((top-ctx (and (consp top-p-alist) (kargu--aget top-p-alist "context_length")))
-         (top-max (and (consp top-p-alist) (kargu--aget top-p-alist "max_completion_tokens")))
-         (ctx (or (kargu--aget m "context_length")
-                  (kargu--aget m "context_window")
-                  (kargu--aget m "max_input_tokens")
-                  (kargu--aget m "inputTokenLimit")
-                  (kargu--aget m "max_context_tokens")
-                  top-ctx))
-         (max-out (or (kargu--aget m "max_completion_tokens")
-                      (kargu--aget m "max_output")
-                      (kargu--aget m "max_output_tokens")
-                      (kargu--aget m "outputTokenLimit")
-                      (kargu--aget m "max_tokens")
-                      top-max)))
-    (cons (and (numberp ctx) (round ctx))
-          (and (numberp max-out) (round max-out)))))
-
-(defun kargu--parse-model-pricing (m pricing-alist)
-  "Return cons (IN-COST . OUT-COST) for model M."
-  (let ((in-cost (or (and (consp pricing-alist) (kargu--aget pricing-alist "prompt"))
-                     (kargu--aget m "input_cost")))
-        (out-cost (or (and (consp pricing-alist) (kargu--aget pricing-alist "completion"))
-                      (kargu--aget m "output_cost"))))
-    (cons in-cost out-cost)))
-
-(defun kargu--parse-model-reasoning (m clean-id)
-  "Return cons (EFFORTS . REASONING-FLAG) for model M."
-  (let* ((supp-params (or (kargu--aget m "supported_parameters")
-                          (kargu--aget m "supportedParameters")))
-         (supp-params-list (cond ((vectorp supp-params) (append supp-params nil))
-                                 ((listp supp-params) supp-params)
-                                 (t nil)))
-         (has-reasoning-param (and supp-params-list
-                                   (cl-some (lambda (p)
-                                              (and (stringp p)
-                                                   (string-match-p "reasoning" (downcase p))))
-                                            supp-params-list)))
-         (efforts (or (kargu--extract-reasoning-efforts m)
-                      (and has-reasoning-param '("low" "medium" "high"))))
-         (sr (kargu--aget m "supports_reasoning"))
-         (sr-p (and sr (not (eq sr :json-false))))
-         (r (kargu--aget m "reasoning"))
-         (r-p (and r (not (eq r :json-false))))
-         (explicit-false (or (eq sr :json-false) (eq r :json-false)))
-         (clean-lower (downcase (or clean-id "")))
-         (reasoning (cond
-                     (explicit-false :json-false)
-                     (efforts t)
-                     (has-reasoning-param t)
-                     (sr-p t)
-                     (r-p t)
-                     ((string-match-p "thinking\\|reasoning\\|r1\\|o1\\|o3\\|o4" clean-lower)
-                      t)
-                     (t nil))))
-    (cons efforts reasoning)))
-
-(defun kargu--parse-model-features (m clean-id arch-alist in-cost out-cost)
-  "Return plist of extracted features for model M."
-  (let* ((clean-lower (downcase (or clean-id "")))
-         (modality (or (and (consp arch-alist) (kargu--aget arch-alist "modality"))
-                       (kargu--aget m "modality")))
-         (supp-params (or (kargu--aget m "supported_parameters")
-                          (kargu--aget m "supportedParameters")))
-         (supp-params-list (cond ((vectorp supp-params) (append supp-params nil))
-                                 ((listp supp-params) supp-params)
-                                 (t nil)))
-         (supports-tools (cond
-                          ((null supp-params-list) t)
-                          ((member "tools" supp-params-list) t)
-                          (t nil)))
-         (param-size (or (and (consp arch-alist) (kargu--aget arch-alist "parameter_size"))
-                         (kargu--aget m "parameter_size")))
-         (quant (or (and (consp arch-alist) (kargu--aget arch-alist "quantization_level"))
-                    (kargu--aget m "quantization_level")))
-         (params (cond
-                  ((and param-size quant) (format "%s %s" param-size quant))
-                  (param-size (format "%s" param-size))
-                  (t nil)))
-         (vision (or (string-match-p "image\\|multimodal\\|vision" (format "%s" (or modality "")))
-                     (string-match-p "vision\\|vl\\|multimodal\\|image" clean-lower)))
-         (free (or (string-match-p "free" clean-lower)
-                   (and (numberp in-cost) (= in-cost 0)
-                        (numberp out-cost) (= out-cost 0)))))
-    (list :params params :vision vision :free free :supports-tools supports-tools)))
+(defun kargu-model-set-prop (model-id prop-key prop-value)
+  "Set or override PROP-KEY with PROP-VALUE in MODEL-ID's metadata."
+  (let* ((mid (or model-id (kargu--model) ""))
+         (data (kargu-model-get-metadata mid))
+         (k-str (if (stringp prop-key) prop-key (format "%s" prop-key)))
+         (updated
+          (cond
+           ((consp data)
+            (cons (cons k-str prop-value)
+                  (cl-remove-if (lambda (x) (and (consp x) (equal (car x) k-str))) data)))
+           (t (list (cons k-str prop-value))))))
+    (kargu-model-set-metadata mid updated)
+    updated))
 
 (defun kargu--record-models-metadata (models &optional provider-name)
-  "Extract and record metadata from raw MODELS list into hash table.
-PROVIDER-NAME is the associated provider ID string."
+  "Record raw model metadata objects directly from MODELS list into hash table."
   (let ((pname (or provider-name (kargu--provider-name))))
     (dolist (m models)
       (when (listp m)
@@ -294,171 +127,355 @@ PROVIDER-NAME is the associated provider ID string."
                              (substring id 7)
                            id)))
           (when (and (stringp clean-id) (not (string-empty-p clean-id)))
-            (let* ((top-p (or (kargu--aget m "top_provider") (kargu--aget m "topProvider")))
-                   (top-p-alist (if (and (consp top-p) (consp (car-safe top-p)) (consp (car-safe (car-safe top-p))))
-                                    (car top-p)
-                                  top-p))
-                   (arch (or (kargu--aget m "architecture") (kargu--aget m "details")))
-                   (arch-alist (if (and (consp arch) (consp (car-safe arch)) (consp (car-safe (car-safe arch))))
-                                   (car arch)
-                                 arch))
-                   (limits (kargu--parse-model-limits m top-p-alist))
-                   (pricing (or (kargu--aget m "pricing") (kargu--aget m "cost")))
-                   (pricing-alist (if (and (consp pricing) (consp (car-safe pricing)) (consp (car-safe (car-safe pricing))))
-                                      (car pricing)
-                                    pricing))
-                   (costs (kargu--parse-model-pricing m pricing-alist))
-                   (reasoning-info (kargu--parse-model-reasoning m clean-id))
-                   (features (kargu--parse-model-features m clean-id arch-alist (car costs) (cdr costs)))
-                   (desc (kargu--aget m "description"))
-                   (plist (list :id clean-id
-                                :provider pname
-                                :context-window (car limits)
-                                :max-output (cdr limits)
-                                :input-cost (car costs)
-                                :output-cost (cdr costs)
-                                :supports-reasoning (cdr reasoning-info)
-                                :reasoning-efforts (car reasoning-info)
-                                :supports-tools (plist-get features :supports-tools)
-                                :vision (plist-get features :vision)
-                                :params (plist-get features :params)
-                                :free (plist-get features :free)
-                                :description (and (stringp desc) desc))))
-              (kargu-model-set-metadata clean-id plist)
+            (let ((entry (if (consp m)
+                             (cons (cons "provider" pname) m)
+                           m)))
+              (kargu-model-set-metadata clean-id entry)
               (when (string-match-p "/" clean-id)
                 (let ((short-id (car (last (split-string clean-id "/")))))
                   (unless (gethash (downcase short-id) kargu--model-metadata-table)
-                    (kargu-model-set-metadata short-id plist)))))))))))
+                    (kargu-model-set-metadata short-id entry)))))))))))
 
-(defun kargu-model--annotation-badges (meta mid-clean mid pname)
-  "Collect list of annotation badge strings from META, MID-CLEAN, MID, and PNAME."
-  (let* ((ctx (or (and meta (plist-get meta :context-window))
-                  (kargu-model-context-window mid)))
-         (max-out (and meta (plist-get meta :max-output)))
-         (efforts (or (and meta (plist-get meta :reasoning-efforts))
-                      (kargu-model-reasoning-efforts mid pname)))
-         (supp-r (kargu-model-supports-reasoning-p mid pname))
-         (supp-tools (if meta (plist-get meta :supports-tools) t))
-         (vision (or (and meta (plist-get meta :vision))
-                     (string-match-p "vision\\|vl\\|multimodal\\|image" mid-clean)))
-         (params (and meta (plist-get meta :params)))
-         (free (or (and meta (plist-get meta :free))
-                   (string-match-p "free" mid-clean)))
-         (pricing (and meta (plist-get meta :input-cost)))
-         (parts nil))
-    (when (and (numberp ctx) (> ctx 0))
-      (push (if (>= ctx 1000000)
-                (format "%dm ctx" (/ ctx 1000000))
-              (format "%dk ctx" (/ ctx 1000)))
-            parts))
-    (when (and (numberp max-out) (> max-out 0))
-      (push (format "max %dk" (max 1 (/ max-out 1024))) parts))
-    (when (and (stringp params) (not (string-empty-p params)))
-      (push params parts))
+(defun kargu--unwrap-alist (value)
+  "Return VALUE when it is an alist.
+A one-element list whose car is an alist is unwrapped."
+  (if (and (consp value)
+           (consp (car-safe value))
+           (consp (car-safe (car-safe value))))
+      (car value)
+    value))
+
+(defun kargu--record-get (data key)
+  "Return KEY from raw alist or plist DATA, or nil."
+  (when (listp data)
+    (let ((name (if (stringp key) key (format "%s" key))))
+      (or (kargu--aget data name)
+          (plist-get data (intern (concat ":" name)))
+          (plist-get data (intern (concat ":" (replace-regexp-in-string "_" "-" name))))
+          (plist-get data (intern (concat ":" (replace-regexp-in-string "-" "_" name))))))))
+
+(defun kargu--nested-get (data key subkey)
+  "Return SUBKEY inside KEY of DATA."
+  (kargu--record-get (kargu--unwrap-alist (kargu--record-get data key)) subkey))
+
+(defun kargu--read-number (value)
+  "Return VALUE as an integer, or nil when it is not a number."
+  (cond
+   ((null value) nil)
+   ((integerp value) value)
+   ((numberp value) (round value))
+   ((and (stringp value) (not (string-empty-p (string-trim value))))
+    (kargu-to-int value))
+   (t nil)))
+
+(defun kargu--read-context-window (data)
+  "Context window from DATA, or nil when the record omits it."
+  (kargu--read-number
+   (or (kargu--record-get data "context_length")
+       (kargu--record-get data "context_window")
+       (kargu--record-get data "inputTokenLimit")
+       (kargu--record-get data "context-window"))))
+
+(defun kargu--read-max-output (data)
+  "Max output tokens from DATA, or nil when the record omits it."
+  (kargu--read-number
+   (or (kargu--record-get data "max_output")
+       (kargu--record-get data "outputTokenLimit")
+       (kargu--record-get data "max_completion_tokens")
+       (kargu--nested-get data "top_provider" "max_completion_tokens")
+       (kargu--record-get data "max-output"))))
+
+(defun kargu--read-input-cost (data)
+  "Prompt price from DATA as a number, or nil."
+  (let ((raw (or (kargu--nested-get data "pricing" "prompt")
+                 (kargu--record-get data "input-cost"))))
     (cond
-     ((and (listp efforts) efforts)
-      (if (and (member "low" efforts) (member "high" efforts))
-          (push "🧠 think: low..high" parts)
-        (push (format "🧠 think: %s" (mapconcat #'identity efforts ",")) parts)))
-     (supp-r
-      (push "🧠 think" parts)))
-    (when (eq supp-tools nil)
-      (push "🚫 no-tools" parts))
-    (when (string-match-p "content-safety\\|llama-guard\\|moderation" mid-clean)
-      (push "🛡️ moderation" parts))
-    (when vision
+     ((numberp raw) raw)
+     ((and (stringp raw) (not (string-empty-p raw)))
+      (ignore-errors (string-to-number raw)))
+     (t nil))))
+
+(defun kargu--zero-price-p (value)
+  "Non-nil when VALUE is a numeric zero price."
+  (cond
+   ((numberp value) (= value 0))
+   ((and (stringp value) (string-match-p "[0-9]" value))
+    (let ((n (ignore-errors (string-to-number value))))
+      (and (numberp n) (= n 0))))
+   (t nil)))
+
+(defun kargu--read-free-p (data)
+  "Non-nil when DATA says the model is free."
+  (or (and (listp data) (plist-get data :free))
+      (kargu--zero-price-p (kargu--nested-get data "pricing" "prompt"))
+      (kargu--zero-price-p (kargu--record-get data "input-cost"))))
+
+(defun kargu--read-vision-p (data)
+  "Non-nil when DATA says the model accepts images."
+  (or (and (listp data) (plist-get data :vision))
+      (let ((modality (or (kargu--nested-get data "architecture" "modality")
+                          (kargu--record-get data "modality"))))
+        (and (stringp modality) (string-match-p "image" modality) t))))
+
+(defun kargu--read-params (data)
+  "Parameter-size label from DATA, or nil."
+  (or (let ((stored (and (listp data) (plist-get data :params))))
+        (and (stringp stored) (not (string-empty-p stored)) stored))
+      (let* ((details (kargu--unwrap-alist (kargu--record-get data "details")))
+             (size (kargu--record-get details "parameter_size"))
+             (quant (kargu--record-get details "quantization_level")))
+        (cond
+         ((and (stringp size) (not (string-empty-p size))
+               (stringp quant) (not (string-empty-p quant)))
+          (format "%s %s" size quant))
+         ((and (stringp size) (not (string-empty-p size))) size)))))
+
+(defun kargu--effort-name-list (value)
+  "Effort names in list or vector VALUE, or nil.
+A bare string is not a list."
+  (cond
+   ((vectorp value) (kargu--effort-name-list (append value nil)))
+   ((and (proper-list-p value)
+         value
+         (cl-every (lambda (item)
+                     (or (stringp item)
+                         (and (symbolp item) (not (keywordp item)))))
+                   value))
+    (delq nil
+          (mapcar (lambda (item)
+                    (let ((name (if (stringp item) item (symbol-name item))))
+                      (and (not (string-empty-p name)) name)))
+                  value)))
+   (t nil)))
+
+(defun kargu--effort-csv (value)
+  "Effort names in comma-separated string VALUE, or nil."
+  (when (and (stringp value) (not (string-empty-p (string-trim value))))
+    (delq nil
+          (mapcar (lambda (part)
+                    (let ((name (string-trim part)))
+                      (and (not (string-empty-p name)) name)))
+                  (split-string value ",")))))
+
+(defun kargu--effort-names (value type)
+  "Effort names in VALUE of TYPE (`list' or `csv'), or nil."
+  (cond
+   ((eq type 'list) (kargu--effort-name-list value))
+   ((eq type 'csv) (kargu--effort-csv value))
+   (t nil)))
+
+(defun kargu--path-get (data key)
+  "KEY inside DATA.
+A list of objects is searched for KEY.  A missing key is nil."
+  (or (kargu--record-get data key)
+      (and (vectorp data) (kargu--path-get (append data nil) key))
+      (and (consp data)
+           (consp (car data))
+           (consp (caar data))
+           (cl-some (lambda (item) (kargu--path-get item key)) data))))
+
+(defun kargu--read-path (data path)
+  "Value at PATH of string keys in DATA, or nil."
+  (if (null path)
+      data
+    (kargu--read-path (kargu--path-get data (car path)) (cdr path))))
+
+(defun kargu--efforts-from-specs (data specs)
+  "Effort names in DATA at the first matching spec in SPECS, or nil.
+Each spec is `:path' and `:type'."
+  (when (and data specs)
+    (cl-some (lambda (spec)
+               (kargu--effort-names
+                (kargu--read-path data (plist-get spec :path))
+                (plist-get spec :type)))
+             specs)))
+
+(defun kargu--read-efforts (data)
+  "Effort names from DATA, or nil when the record has none.
+A stored `:reasoning-efforts' list is that list.  Otherwise the
+active provider's declared paths are read.  An undeclared key
+yields nothing."
+  (cond
+   ((null data) nil)
+   ((kargu--reasoning-disabled-p data) nil)
+   ((and (listp data)
+         (kargu--effort-name-list (plist-get data :reasoning-efforts))))
+   (t (and (fboundp 'kargu-provider-effort-specs)
+           (kargu--efforts-from-specs
+            data
+            (kargu-provider-effort-specs
+             (and (fboundp 'kargu--provider-name) (kargu--provider-name))))))))
+
+(defun kargu-model-read (&optional model-id)
+  "Read catalog fields for MODEL-ID from its raw API record.
+The plist keys are `:context-window', `:max-output', `:reasoning-efforts',
+`:vision', `:free', `:params', and `:input-cost'.  A missing field is nil.
+This does not invent a context window or an effort list."
+  (let ((data (kargu-model-get-metadata (or model-id (kargu--model) ""))))
+    (list :context-window (kargu--read-context-window data)
+          :max-output (kargu--read-max-output data)
+          :reasoning-efforts (kargu--read-efforts data)
+          :vision (kargu--read-vision-p data)
+          :free (kargu--read-free-p data)
+          :params (kargu--read-params data)
+          :input-cost (kargu--read-input-cost data))))
+
+(defun kargu-model-context-window (&optional model-id)
+  "Return the context window size for MODEL-ID, or nil when unknown."
+  (plist-get (kargu-model-read model-id) :context-window))
+
+(defun kargu--supported-parameters (data)
+  "Return DATA's supported_parameters as a list, or nil when absent."
+  (let ((raw (or (kargu--aget data "supported_parameters")
+                 (kargu--aget data "supportedParameters")
+                 (and (listp data) (plist-get data :supported-parameters)))))
+    (cond
+     ((vectorp raw) (append raw nil))
+     ((consp raw) raw)
+     (t nil))))
+
+(defun kargu--tools-explicitly-disabled-p (data)
+  "Return non-nil when DATA says tools are unavailable.
+A missing field is not a disable.  A false `supports_tools' flag,
+a stored `:supports-tools' nil, or a parameter list that omits
+\"tools\" are."
+  (or (let ((flag (kargu--aget data "supports_tools")))
+        (or (eq flag :json-false) (equal flag "false")))
+      (and (listp data)
+           (plist-member data :supports-tools)
+           (not (plist-get data :supports-tools)))
+      (let ((params (kargu--supported-parameters data)))
+        (and params (not (member "tools" params))))))
+
+(defun kargu-model-supports-tools-p (&optional model-id)
+  "Return non-nil unless MODEL-ID's API explicitly disables tools.
+Missing metadata and a missing field both leave tools available."
+  (let ((data (kargu-model-get-metadata (or model-id (kargu--model) ""))))
+    (not (and data (kargu--tools-explicitly-disabled-p data)))))
+
+(defun kargu--reasoning-support-flag (data)
+  "Return the supports-reasoning flag in DATA, or nil when it is absent."
+  (and data
+       (or (kargu--aget data "supports_reasoning")
+           (kargu--aget data "supports-reasoning")
+           (and (listp data) (plist-get data :supports-reasoning)))))
+
+(defun kargu--reasoning-disabled-p (data)
+  "Return non-nil when DATA explicitly disables reasoning."
+  (let ((flag (kargu--reasoning-support-flag data)))
+    (or (eq flag :json-false) (equal flag "false"))))
+
+(defun kargu-model-reasoning-efforts (&optional model-id provider-name)
+  "Return reasoning effort names for MODEL-ID from its API metadata.
+When metadata is missing, query PROVIDER-NAME once and read it again.
+A false `supports_reasoning' flag returns nil.  A missing list returns nil."
+  (let* ((mid (or model-id (kargu--model) ""))
+         (pname (or provider-name (kargu--provider-name)))
+         (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname ""))))
+         (data (kargu-model-get-metadata mid)))
+    (when (and (null data)
+               (not (string-empty-p pname-str))
+               (fboundp 'kargu-api-fetch-models-sync))
+      (kargu-api-fetch-models-sync pname-str))
+    (plist-get (kargu-model-read mid) :reasoning-efforts)))
+
+(defun kargu-model-supports-reasoning-p (&optional model-id provider-name)
+  "Return non-nil if MODEL-ID's API says it supports reasoning.
+An explicit true flag counts even when the API sent no level list."
+  (let* ((data (kargu-model-get-metadata (or model-id (kargu--model) "")))
+         (flag (kargu--reasoning-support-flag data)))
+    (and (not (kargu--reasoning-disabled-p data))
+         (or (memq flag '(t :json-true))
+             (equal flag "true")
+             (and (kargu-model-reasoning-efforts model-id provider-name) t)))))
+
+(defun kargu-model--context-label (ctx)
+  "Inspector label for context size CTX."
+  (if (numberp ctx)
+      (format "%d tokens (~%d chars)" ctx (round (* ctx 3.5)))
+    "unknown"))
+
+(defun kargu-model--format-context (ctx)
+  "Annotation token for context size CTX, or nil."
+  (when (and (numberp ctx) (> ctx 0))
+    (if (>= ctx 1000000)
+        (format "%dm ctx" (/ ctx 1000000))
+      (format "%dk ctx" (/ ctx 1000)))))
+
+(defun kargu-model--format-max-output (max-out)
+  "Annotation token for max output MAX-OUT, or nil."
+  (when (and (numberp max-out) (> max-out 0))
+    (format "max %dk" (max 1 (/ max-out 1024)))))
+
+(defun kargu-model--format-efforts (efforts)
+  "Annotation token for effort list EFFORTS, or nil."
+  (when (and (listp efforts) efforts)
+    (if (and (member "low" efforts) (member "high" efforts))
+        "🧠 think: low..high"
+      (format "🧠 think: %s" (mapconcat #'identity efforts ",")))))
+
+(defun kargu-model--format-price (cost free)
+  "Annotation token for input COST, or the free badge."
+  (cond
+   (free "⚡ free")
+   ((and (numberp cost) (> cost 0))
+    (format "$%.2f/1M" (* cost 1000000.0)))))
+
+(defun kargu-model--annotation-badges (fields)
+  "Badge strings for catalog FIELDS read by `kargu-model-read'."
+  (let ((parts nil))
+    (when-let* ((ctx (kargu-model--format-context (plist-get fields :context-window))))
+      (push ctx parts))
+    (when-let* ((max-out (kargu-model--format-max-output (plist-get fields :max-output))))
+      (push max-out parts))
+    (let ((params (plist-get fields :params)))
+      (when (and (stringp params) (not (string-empty-p params)))
+        (push params parts)))
+    (when-let* ((efforts (kargu-model--format-efforts (plist-get fields :reasoning-efforts))))
+      (push efforts parts))
+    (when (plist-get fields :vision)
       (push "👁 vision" parts))
-    (let ((p-num (cond ((numberp pricing) pricing)
-                       ((and (stringp pricing) (not (string-empty-p pricing)))
-                        (string-to-number pricing))
-                       (t nil))))
-      (cond
-       (free
-        (push "⚡ free" parts))
-       ((and (numberp p-num) (> p-num 0))
-        (let ((per-m (* p-num 1000000.0)))
-          (push (format "$%.2f/1M" per-m) parts)))))
+    (when-let* ((price (kargu-model--format-price
+                        (plist-get fields :input-cost)
+                        (plist-get fields :free))))
+      (push price parts))
     (nreverse parts)))
 
-(defun kargu-model-annotation-string (model-id &optional provider-name)
-  "Build a rich, compact annotation badge string for MODEL-ID."
-  (let* ((mid (or model-id ""))
-         (mid-clean (downcase (string-trim mid)))
-         (pname (or provider-name (kargu--provider-name)))
-         (meta (kargu-model-get-metadata mid))
-         (parts (kargu-model--annotation-badges meta mid-clean mid pname)))
+(defun kargu-model-annotation-string (model-id &optional _provider-name)
+  "Build a compact annotation badge string for MODEL-ID."
+  (let ((parts (kargu-model--annotation-badges (kargu-model-read model-id))))
     (if parts
         (format "  [%s]" (mapconcat #'identity parts " · "))
       "")))
 
-(defun kargu-model-supports-tools-p (&optional model-id)
-  "Return non-nil if MODEL-ID supports tools/function calling.
-Defaults to t when unknown or not explicitly set to nil."
-  (let* ((mid (or model-id (kargu--model) ""))
-         (meta (kargu-model-get-metadata mid)))
-    (if meta
-        (not (eq (plist-get meta :supports-tools) nil))
-      t)))
-
-(defun kargu-model-supports-reasoning-p (&optional model-id provider-name)
-  "Return non-nil if MODEL-ID supports thinking / reasoning."
-  (let* ((mid (or model-id (kargu--model) ""))
-         (pname (or provider-name (kargu--provider-name)))
-         (meta (kargu-model-get-metadata mid))
-         (supp (and meta (plist-get meta :supports-reasoning)))
-         (efforts (and meta (plist-get meta :reasoning-efforts)))
-         (prov-efforts (and pname (fboundp 'kargu-provider-reasoning-efforts)
-                            (kargu-provider-reasoning-efforts pname))))
-    (cond
-     ((eq supp :json-false) nil)
-     ((or efforts prov-efforts (and supp (not (eq supp :json-false)))) t)
-     (t nil))))
-
-(defun kargu-model-reasoning-efforts (&optional model-id provider-name)
-  "Return supported reasoning effort strings for MODEL-ID and PROVIDER-NAME."
-  (let* ((mid (or model-id (kargu--model) ""))
-         (mid-lower (downcase (string-trim mid)))
-         (pname (or provider-name (kargu--provider-name)))
-         (meta (kargu-model-get-metadata mid))
-         (supp (and meta (plist-get meta :supports-reasoning)))
-         (efforts (and meta (plist-get meta :reasoning-efforts)))
-         (prov-efforts (and pname (fboundp 'kargu-provider-reasoning-efforts)
-                            (kargu-provider-reasoning-efforts pname))))
-    (cond
-     ((and (listp efforts) efforts) efforts)
-     ((eq supp :json-false) nil)
-     ((and (listp prov-efforts) prov-efforts)
-      prov-efforts)
-     ((or (and supp (not (eq supp :json-false)))
-          (string-match-p "r1\\|o1\\|o3\\|o4\\|thinking\\|reasoning\\|3-7\\|3\\.7" mid-lower))
-      '("low" "medium" "high"))
-     (t nil))))
-
-(defun kargu--reasoning-effort-annotation (effort-str)
-  "Return human-readable annotation string for EFFORT-STR."
-  (let ((clean (downcase (if (stringp effort-str) effort-str (format "%s" effort-str)))))
-    (cond
-     ((member clean '("off" "none")) " [reasoning off]")
-     ((string= clean "minimal") " [minimal effort]")
-     ((string= clean "low") " [fast / low effort]")
-     ((string= clean "medium") " [balanced effort]")
-     ((string= clean "high") " [deep reasoning effort]")
-     ((string= clean "xhigh") " [extra deep effort]")
-     ((string= clean "max") " [maximum reasoning effort]")
-     (t (format " [%s effort]" clean)))))
-
 (defun kargu--catalog-models-url (pname-lower api-base)
   "Determine the models endpoint URL for PNAME-LOWER and API-BASE."
-  (let ((custom-models-url (and (fboundp 'kargu-provider-models-api)
-                               (kargu-provider-models-api pname-lower))))
-    (or custom-models-url
-        (cond
-         ((and (string-match-p "ollama" pname-lower)
-               (not (string-suffix-p "/v1" api-base)))
-          (concat api-base "/api/tags"))
-         ((string-suffix-p "/models" api-base)
-          api-base)
-         (t (concat api-base "/models"))))))
+  (let* ((default-api (and (fboundp 'kargu-provider-api) (kargu-provider-api pname-lower)))
+         (custom-models-url (and (fboundp 'kargu-provider-models-api)
+                                 (kargu-provider-models-api pname-lower))))
+    (cond
+     ;; If user configured a custom api-base different from default catalog api, derive from api-base:
+     ((and (kargu--nonempty api-base)
+           default-api
+           (not (equal (kargu--strip-trailing-slashes api-base)
+                       (kargu--strip-trailing-slashes default-api))))
+      (cond
+       ((string-suffix-p "/models" api-base) api-base)
+       ((and (fboundp 'kargu-provider-format)
+             (eq (kargu-provider-format pname-lower) 'ollama)
+             (not (string-suffix-p "/v1" api-base)))
+        (concat api-base "/api/tags"))
+       (t (concat api-base "/models"))))
+     ;; If catalog specified a dedicated models-api (and user didn't override api), use it:
+     (custom-models-url custom-models-url)
+     ;; Otherwise derive from api-base:
+     ((and (fboundp 'kargu-provider-format)
+           (eq (kargu-provider-format pname-lower) 'ollama)
+           (not (string-suffix-p "/v1" api-base)))
+      (concat api-base "/api/tags"))
+     ((string-suffix-p "/models" api-base)
+      api-base)
+     (t (concat api-base "/models")))))
 
 (defun kargu--catalog-cache-live-models (pname-lower extracted)
   "Record metadata and cache clean model IDs for PNAME-LOWER from EXTRACTED list."
@@ -486,7 +503,8 @@ CALLBACK receives either the list of model alists or an error alist."
          (pname-lower (downcase (string-trim pname-str)))
          (key (kargu--resolve-api-key pname-lower))
          (gen (cl-incf kargu--models-generation))
-         (is-keyless (member pname-lower '("ollama" "lmstudio" "llamacpp")))
+         (is-keyless (and (fboundp 'kargu-provider-keyless-p)
+                          (kargu-provider-keyless-p pname-lower)))
          (api-base (kargu--api-base pname-lower))
          (url (kargu--catalog-models-url pname-lower api-base))
          (headers (kargu--api-headers key pname-lower)))
@@ -557,25 +575,82 @@ CALLBACK receives either the list of model alists or an error alist."
     result))
 
 (defun kargu-model-info (&optional model-id)
-  "Display complete metadata and statistics for MODEL-ID (or active model)."
+  "Display complete metadata and all raw API properties for MODEL-ID.
+When called interactively, opens an inspector buffer with all key-value pairs."
   (interactive)
   (let* ((mid (or model-id (kargu--model)))
-         (pname (kargu--provider-name))
+         (pname (or (kargu-model-get-prop mid "provider") (kargu--provider-name)))
+         (data (kargu-model-get-metadata mid))
+         (props (or (and (listp data) (plist-get data :props)) data))
          (ctx (kargu-model-context-window mid))
          (thresh (and (fboundp 'kargu-history-compact-threshold)
                       (kargu-history-compact-threshold)))
-         (meta (kargu-model-get-metadata mid))
-         (max-out (and meta (plist-get meta :max-output)))
-         (desc (and meta (plist-get meta :description)))
-         (effort (or (and (boundp 'kargu-reasoning-effort) kargu-reasoning-effort) "off")))
-    (message "kargu Model: %s (%s) · Context: %s tokens (~%s chars) · Compaction: %s chars · MaxOut: %s · Effort: %s%s"
-             mid pname
-             (format "%d" ctx)
-             (format "%d" (round (* ctx 3.5)))
-             (if thresh (format "%d" thresh) "45000")
-             (if max-out (format "%d" max-out) "default")
-             effort
-             (if desc (format " · %s" desc) ""))))
+         (max-out (kargu-model-get-prop mid "max_output"))
+         (desc (or (kargu-model-get-prop mid "description")
+                   (and (listp data) (plist-get data :description))))
+         (efforts (or (kargu-model-reasoning-efforts mid pname)
+                      (and (listp data) (plist-get data :reasoning-efforts))))
+         (effort-curr (or (and (boundp 'kargu-reasoning-effort) kargu-reasoning-effort) "off"))
+         (buf (get-buffer-create (format "*kargu model: %s*" mid))))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "Kargu Model Inspector: %s\n" mid))
+        (insert (make-string 60 ?=) "\n\n")
+        (insert (format "Provider:            %s\n" pname))
+        (insert (format "Context Window:      %s\n" (kargu-model--context-label ctx)))
+        (insert (format "Compaction Limit:    %s chars\n" (or thresh 45000)))
+        (insert (format "Max Output Tokens:   %s\n" (or max-out "default")))
+        (insert (format "Current Effort:      %s\n" effort-curr))
+        (insert (format "Supported Efforts:   %s\n"
+                        (if efforts (if (listp efforts) (mapconcat #'format efforts ", ") (format "%s" efforts)) "none")))
+        (insert (format "Tools Supported:     %s\n"
+                        (if (kargu-model-supports-tools-p mid) "yes" "no")))
+        (when desc
+          (insert (format "\nDescription:\n  %s\n" desc)))
+        (insert "\n" (make-string 60 ?-) "\n")
+        (insert "Raw API Properties (Key - Value Pairs):\n")
+        (insert (make-string 60 ?-) "\n")
+        (if (null props)
+            (insert "  (No raw API properties recorded for this model)\n")
+          (dolist (item (cond ((listp props) props) (t nil)))
+            (cond
+             ((consp item)
+              (let ((k (car item))
+                    (v (cdr item)))
+                (insert (format "  %-26s : %S\n" k v))))
+             (t (insert (format "  %S\n" item))))))
+        (insert "\n[Press 'e' to edit/override a property, 'q' to quit]\n")
+        (goto-char (point-min))
+        (special-mode)
+        (local-set-key (kbd "e") #'kargu-model-edit-prop)))
+    (if (called-interactively-p 'interactive)
+        (display-buffer buf)
+      (message "kargu Model: %s (%s) · Context: %s · Compaction: %s chars · MaxOut: %s · Effort: %s%s"
+               mid pname
+               (kargu-model--context-label ctx)
+               (if thresh (format "%d" thresh) "45000")
+               (if max-out (format "%d" max-out) "default")
+               effort-curr
+               (if desc (format " · %s" desc) "")))))
+
+(defun kargu-model-edit-prop (model-id prop-key prop-value)
+  "Interactively edit or override PROP-KEY with PROP-VALUE for MODEL-ID."
+  (interactive
+   (let* ((mid (read-string (format "Model ID (default %s): " (kargu--model)) nil nil (kargu--model)))
+          (meta (kargu-model-get-metadata mid))
+          (props (and meta (plist-get meta :props)))
+          (cand-keys (delq nil (mapcar (lambda (x) (and (consp x) (format "%s" (car x))))
+                                       (and (listp props) props))))
+          (key (completing-read "Property to edit/override: "
+                                (append '("context-window" "max-output" "supports-tools" "supports-reasoning")
+                                        cand-keys)
+                                nil nil))
+          (curr-val (kargu-model-get-prop mid key))
+          (val-str (read-string (format "New value for %s (current: %S): " key curr-val))))
+     (list mid key (read val-str))))
+  (kargu-model-set-prop model-id prop-key prop-value)
+  (message "kargu: Property '%s' for model '%s' updated to %S" prop-key model-id prop-value))
 
 (provide 'kargu/api/catalog)
 

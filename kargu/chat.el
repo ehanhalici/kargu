@@ -38,12 +38,14 @@
                                (expand-file-name root))))))
 
 (require 'kargu/core)
+(require 'kargu/ui/notify)
 (require 'kargu/config)
 (require 'kargu/api)
 (require 'kargu/loop)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/lsp)
 (require 'kargu/tools/dape nil t)
+(require 'kargu/tools/deps)
 
 ;; Modular subcomponents of chat
 (require 'kargu/chat/prompt)
@@ -54,6 +56,12 @@
 (require 'kargu/chat/tune)
 (require 'kargu/chat/session)
 
+(declare-function kargu-chat-note-selection "kargu/chat/session" (&optional buffer))
+(declare-function kargu-chat-activate-selection "kargu/chat/session" (&optional buffer))
+(declare-function kargu-chat--shown-provider "kargu/chat/prompt" ())
+(declare-function kargu-chat--shown-model "kargu/chat/prompt" ())
+(declare-function kargu-chat--focus-selection "kargu/chat/prompt" (&optional open-company))
+
 (defvar company-backends)
 (defvar company-minimum-prefix-length)
 (defvar company-idle-delay)
@@ -63,26 +71,6 @@
   "Transient menu and chat sidebar for kargu."
   :group 'kargu
   :prefix "kargu-chat-")
-
-(defcustom kargu-chat-side 'right
-  "Side of the frame on which the chat sidebar appears."
-  :type '(choice (const :tag "Right" right)
-                 (const :tag "Left" left)
-                 (const :tag "Bottom" bottom)
-                 (const :tag "Top" top))
-  :group 'kargu-ui)
-
-(defcustom kargu-chat-window-width 0.38
-  "Width of the chat sidebar as a fraction of the frame width.
-Used when `kargu-chat-side' is `right' or `left'."
-  :type 'number
-  :group 'kargu-ui)
-
-(defcustom kargu-chat-window-height 0.30
-  "Height of the chat sidebar as a fraction of the frame height.
-Used when `kargu-chat-side' is `bottom' or `top'."
-  :type 'number
-  :group 'kargu-ui)
 
 (defcustom kargu-chat-attach-max-lines 150
   "Line count above which `@' file mentions are references, not bodies.
@@ -124,10 +112,12 @@ the model must call `read_file' instead of drowning the prompt."
   "<home>"   #'kargu-chat-beginning-of-line
   "RET"      #'kargu-chat-return)
 
+(defvar kargu-chat--prompt-marker)
+
 (defun kargu-chat-return ()
   "Handle RET in the chat buffer.
 Execute button action if on a button, stop run if on stop button,
-or insert newline if editing."
+or insert newline if editing prompt."
   (interactive)
   (let ((action (or (get-text-property (point) 'action)
                     (and (fboundp 'button-at)
@@ -138,8 +128,14 @@ or insert newline if editing."
       (if (functionp action)
           (funcall action (point))
         (call-interactively action)))
-     ((kargu-loop-running-p)
+     ((and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
       (message "kargu is currently running. Click [Stop] or press C-c C-k to stop."))
+     ;; If point is in the footer or transcript area (before prompt marker), never insert newline!
+     ((and (boundp 'kargu-chat--prompt-marker)
+           (markerp kargu-chat--prompt-marker)
+           (marker-position kargu-chat--prompt-marker)
+           (< (point) (marker-position kargu-chat--prompt-marker)))
+      (goto-char (point-max)))
      (t
       (newline)))))
 
@@ -220,10 +216,13 @@ Otherwise generates `*kargu-chat*<N>'."
       (kargu-chat--insert
        (concat "kargu chat — type at the prompt; "
                "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-h switch session.\n\n"))
-      (kargu-chat--ensure-prompt))
+      (kargu-chat--ensure-prompt)
+      (when (fboundp 'kargu-chat-check-and-display-missing-tools)
+        (kargu-chat-check-and-display-missing-tools proj)))
     (pop-to-buffer-same-window buf)
+    (kargu-chat-activate-selection buf)
     (with-current-buffer buf
-      (goto-char (point-max)))
+      (kargu-chat--focus-selection (called-interactively-p 'any)))
     (kargu-chat-list-buffers)
     buf))
 
@@ -235,7 +234,8 @@ Otherwise generates `*kargu-chat*<N>'."
      ((null live)
       (kargu-chat-show))
      ((= (length live) 1)
-      (pop-to-buffer-same-window (car live)))
+      (pop-to-buffer-same-window (car live))
+      (kargu-chat-activate-selection (car live)))
      (t
       (let* ((names (mapcar #'buffer-name live))
              (default-name (buffer-name (if (derived-mode-p 'kargu-chat-mode)
@@ -244,7 +244,8 @@ Otherwise generates `*kargu-chat*<N>'."
              (chosen (completing-read "Switch to kargu chat: " names nil t nil nil default-name))
              (target (get-buffer chosen)))
         (when (and target (buffer-live-p target))
-          (pop-to-buffer-same-window target)))))))
+          (pop-to-buffer-same-window target)
+          (kargu-chat-activate-selection target)))))))
 
 (defun kargu-chat--buffer (&optional target-root)
   "Return the chat buffer for TARGET-ROOT, creating or restoring it if needed.
@@ -270,6 +271,9 @@ Reuses the current buffer if it is already in `kargu-chat-mode'."
         (if (and sessions (> (length sessions) 0))
             (progn
               (kargu-session-load (car sessions) buf root)
+              (with-current-buffer buf
+                (when (fboundp 'kargu-chat-check-and-display-missing-tools)
+                  (kargu-chat-check-and-display-missing-tools root)))
               buf)
           (with-current-buffer buf
             (unless (eq major-mode 'kargu-chat-mode)
@@ -288,19 +292,37 @@ Reuses the current buffer if it is already in `kargu-chat-mode'."
                (concat "kargu chat — type at the prompt; "
                        "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-h switch session.\n\n"))
               (kargu-chat--ensure-prompt))
+            (when (fboundp 'kargu-chat-check-and-display-missing-tools)
+              (kargu-chat-check-and-display-missing-tools root))
             (current-buffer))))))))
+
+(defun kargu-chat--withhold-prompt-until-root ()
+  "Drop every chat prompt when this language still has no project root."
+  (when (and (not noninteractive) (kargu-language-root-unresolved-p))
+    (dolist (buf (kargu-chat-list-buffers))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (kargu-chat--clear-idle-prompt))))))
 
 (defun kargu-chat-show ()
   "Display the chat buffer directly in the current window without splitting.
 If the frame has 1 window, opens over that buffer.  If multiple windows exist,
-opens in whichever window is currently selected (left or right)."
+opens in whichever window is currently selected (left or right).
+A language that names its own project root, such as Emacs Lisp, asks
+for that directory before the prompt exists."
   (interactive)
-  (let* ((proj (kargu-session--project-root))
+  (kargu-chat--withhold-prompt-until-root)
+  (let* ((open-company (called-interactively-p 'any))
+         (owned (kargu-language-claim-root))
+         (proj (or owned (kargu-session--project-root)))
          (buffer (kargu-chat--buffer proj)))
     (pop-to-buffer-same-window buffer)
+    (kargu-chat-activate-selection buffer)
     (with-current-buffer buffer
       (kargu-chat--ensure-prompt)
-      (goto-char (point-max)))
+      (when (fboundp 'kargu-chat-check-and-display-missing-tools)
+        (kargu-chat-check-and-display-missing-tools proj))
+      (kargu-chat--focus-selection open-company))
     buffer))
 
 (defun kargu-chat--hide (window)
@@ -312,12 +334,9 @@ opens in whichever window is currently selected (left or right)."
 (defun kargu-chat-toggle ()
   "Toggle the kargu chat buffer in the current window."
   (interactive)
-  (let* ((proj (kargu-session--project-root))
-         (buffer (kargu-chat--buffer proj))
-         (window (and buffer (get-buffer-window buffer t))))
-    (if (and window (eq window (selected-window)))
-        (kargu-chat--hide window)
-      (kargu-chat-show))))
+  (if (derived-mode-p 'kargu-chat-mode)
+      (kargu-chat--hide (selected-window))
+    (kargu-chat-show)))
 
 (defun kargu-chat-quit ()
   "Hide the chat buffer and restore the previous buffer in the window."
@@ -326,17 +345,43 @@ opens in whichever window is currently selected (left or right)."
 
 ;;;; Commands & run submission --------------------------------------------
 
+(defun kargu-chat--require-selection ()
+  "Signal when this chat has not chosen a provider and a model."
+  (unless (and (kargu-chat--shown-provider) (kargu-chat--shown-model))
+    (user-error "kargu: select a provider and model before sending")))
+
+(defun kargu-chat--refuse-agent-without-tools ()
+  "Signal when agent mode is on and the model cannot call tools.
+The request is not sent.  Call this before the prompt is consumed
+so the typed text stays in the input."
+  (when (and (eq (kargu-state-mode) 'agent)
+             (fboundp 'kargu-model-supports-tools-p)
+             (not (kargu-model-supports-tools-p)))
+    (user-error "Model '%s' does not support tool calling; switch to a tool-capable model or ask mode"
+                (or (kargu--model) "unknown"))))
+
 (defun kargu-chat--submit (prompt)
   "Start an agent run for PROMPT in the chat buffer."
   (when (kargu-loop-running-p)
     (user-error "kargu: a run is already in progress (stop it with C-c C-k)"))
+  (let* ((proj (or (bound-and-true-p kargu-chat--project-root)
+                   (and (fboundp 'kargu-session--project-root)
+                        (kargu-session--project-root))))
+         (missing (and (fboundp 'kargu-deps-missing)
+                       (kargu-deps-missing proj))))
+    (when missing
+      (user-error "kargu: cannot send prompt: mandatory tools are missing: %s (please install them first)"
+                  (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", "))))
   (unless (and (stringp prompt)
                (not (string-empty-p (string-trim prompt))))
     (user-error "kargu: empty prompt"))
+  (kargu-chat--require-selection)
+  (kargu-chat--refuse-agent-without-tools)
   (add-to-history 'kargu-chat-input-history prompt)
   (setq kargu-chat--streamed-text nil
         kargu-chat--preamble-dropped nil
         kargu-chat--in-thought nil)
+  (kargu-chat-note-selection)
   (kargu-chat--render-user-turn prompt)
   (kargu-chat--render-agent-heading)
   (kargu-chat--ensure-running-prompt)
@@ -349,9 +394,13 @@ opens in whichever window is currently selected (left or right)."
                         (marker-position kargu-chat--output-marker))
                    (point-max))
                nil)))))
-  (kargu-loop-send (kargu-chat--expand-prompt prompt)
-                   #'kargu-chat--on-delta
-                   #'kargu-chat--on-finish)
+  (condition-case err
+      (kargu-loop-send (kargu-chat--expand-prompt prompt)
+                       #'kargu-chat--on-delta
+                       #'kargu-chat--on-finish)
+    (error
+     (kargu-chat--ensure-idle-prompt)
+     (signal (car err) (cdr err))))
   (force-mode-line-update t)
   (let ((buffer (current-buffer)))
     (when (buffer-live-p buffer)
@@ -362,6 +411,79 @@ opens in whichever window is currently selected (left or right)."
         (with-selected-window win
           (goto-char (point-max)))))))
 
+(defun kargu-chat--project ()
+  "Project root of the current chat, or the session root."
+  (or (bound-and-true-p kargu-chat--project-root)
+      (and (fboundp 'kargu-session--project-root)
+           (kargu-session--project-root))))
+
+(defun kargu-chat--missing-tools (proj)
+  "Missing mandatory tools for PROJ, or nil."
+  (and (fboundp 'kargu-deps-missing)
+       (kargu-deps-missing proj)))
+
+(defun kargu-chat--signal-missing-tools (proj missing)
+  "Show MISSING tools for PROJ and signal `user-error'."
+  (when (fboundp 'kargu-chat-check-and-display-missing-tools)
+    (kargu-chat-check-and-display-missing-tools proj t))
+  (user-error "kargu: cannot send prompt: mandatory tools are missing: %s (please install them first)"
+              (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", ")))
+
+(defun kargu-chat--debug-fallback-text ()
+  "Prompt used when debug mode is asked to start with an empty input."
+  "Debug oturumu başlatıldı. Kodu incele, breakpoint koy ve çalıştır.")
+
+(defun kargu-chat--debug-session-needed-p ()
+  "Non-nil when debug mode has no ready debugger session."
+  (and (eq (kargu-state-mode) 'debug)
+       (fboundp 'kargu-dape-ready-p)
+       (not (kargu-dape-ready-p))))
+
+(defun kargu-chat--after-debug-session (continue cancel)
+  "Start a debug session, then call CONTINUE.  CANCEL reports failure."
+  (kargu-dape-ensure-session
+   continue
+   (lambda (&optional reason)
+     (funcall cancel (or reason "user abort")))))
+
+(defun kargu-chat--send-prepared (text consume)
+  "Submit TEXT.  CONSUME non-nil deletes the matching prompt first.
+A debug session that is not ready is started before the submit."
+  (cond
+   ((kargu-chat--debug-session-needed-p)
+    (kargu-chat--after-debug-session
+     (lambda ()
+       (let ((chat-buf (kargu-chat--buffer)))
+         (kargu-chat-show)
+         (with-current-buffer chat-buf
+           (when (and consume
+                      (string= (string-trim (kargu-chat--input-text)) text))
+             (kargu-chat--consume-input))
+           (kargu-chat--submit text))))
+     (lambda (reason)
+       (message "kargu: debug session cancelled or failed: %s" reason))))
+   (t
+    (when consume
+      (kargu-chat--consume-input))
+    (kargu-chat--submit text))))
+
+(defun kargu-chat--send-input ()
+  "Read, check, and send the current chat prompt."
+  (let ((missing (kargu-chat--missing-tools (kargu-chat--project))))
+    (when missing
+      (kargu-chat--signal-missing-tools (kargu-chat--project) missing)))
+  (let ((text (string-trim (kargu-chat--input-text))))
+    (when (and (string-empty-p text) (eq (kargu-state-mode) 'debug))
+      (setq text (kargu-chat--debug-fallback-text)))
+    (unless (string-empty-p text)
+      (kargu-chat--refuse-agent-without-tools))
+    (cond
+     ((string-empty-p text)
+      (goto-char (point-max))
+      (message "kargu: type a prompt, then C-c C-c to send"))
+     (t
+      (kargu-chat--send-prepared text t)))))
+
 (defun kargu-chat-send ()
   "Send the chat prompt input, or focus the prompt if it is empty.
 Starts an autonomous agent run (`kargu-loop-send'): tool calls
@@ -370,55 +492,52 @@ review gate, and diagnostics feed back into self-healing.  Called
 from the menu with an empty prompt, this just opens the chat."
   (interactive)
   (kargu-chat-show)
-  (if (kargu-loop-running-p)
-      (message "kargu is currently running. Click [Stop] or press C-c C-k to stop.")
-    (let ((text (string-trim (kargu-chat--input-text))))
-      (when (and (string-empty-p text) (eq (kargu-state-mode) 'debug))
-        (setq text "Debug oturumu başlatıldı. Kodu incele, breakpoint koy ve çalıştır."))
-      (if (string-empty-p text)
-          (progn
-            (goto-char (point-max))
-            (message "kargu: type a prompt, then C-c C-c to send"))
-        (if (and (eq (kargu-state-mode) 'debug)
-                 (fboundp 'kargu-dape-ready-p)
-                 (not (kargu-dape-ready-p)))
-            (kargu-dape-ensure-session
-             (lambda ()
-               (let ((chat-buf (kargu-chat--buffer)))
-                 (kargu-chat-show)
-                 (with-current-buffer chat-buf
-                   (when (string= (string-trim (kargu-chat--input-text)) text)
-                     (kargu-chat--consume-input))
-                   (kargu-chat--submit text))))
-             (lambda (&optional reason)
-               (message "kargu: debug session cancelled or failed: %s" (or reason "user abort"))))
-          (kargu-chat--consume-input)
-          (kargu-chat--submit text))))))
+  (cond
+   ((kargu-loop-running-p)
+    (message "kargu is currently running. Click [Stop] or press C-c C-k to stop."))
+   (t
+    (kargu-chat--send-input))))
+
+(defun kargu-chat--prompt-text (prompt)
+  "PROMPT, or the debug fallback when PROMPT is empty in debug mode."
+  (cond
+   ((and (stringp prompt) (not (string-empty-p (string-trim prompt))))
+    prompt)
+   ((eq (kargu-state-mode) 'debug)
+    (kargu-chat--debug-fallback-text))
+   (t nil)))
+
+(defun kargu-chat--send-given (prompt)
+  "Send PROMPT from the chat buffer, discarding a live input first."
+  (let ((missing (kargu-chat--missing-tools (kargu-chat--project))))
+    (when missing
+      (kargu-chat-show)
+      (kargu-chat--signal-missing-tools (kargu-chat--project) missing)))
+  (kargu-chat-show)
+  (with-current-buffer (kargu-chat--buffer)
+    (kargu-chat--refuse-agent-without-tools)
+    (when (kargu-chat--prompt-live-p)
+      (kargu-chat--consume-input)))
+  (let ((text (kargu-chat--prompt-text prompt)))
+    (cond
+     ((kargu-chat--debug-session-needed-p)
+      (kargu-chat--after-debug-session
+       (lambda ()
+         (let ((chat-buf (kargu-chat--buffer)))
+           (kargu-chat-show)
+           (with-current-buffer chat-buf
+             (kargu-chat--submit text))))
+       (lambda (reason)
+         (message "kargu: debug session cancelled or failed: %s" reason))))
+     (t
+      (kargu-chat--submit text)))))
 
 (defun kargu-chat-prompt (&optional prompt)
   "Send PROMPT, or the chat input when called interactively."
   (interactive)
   (if (called-interactively-p 'interactive)
       (kargu-chat-send)
-    (kargu-chat-show)
-    (with-current-buffer (kargu-chat--buffer)
-      (when (kargu-chat--prompt-live-p)
-        (kargu-chat--consume-input)))
-    (let ((text (or (and (stringp prompt) (not (string-empty-p (string-trim prompt))) prompt)
-                    (and (eq (kargu-state-mode) 'debug)
-                         "Debug oturumu başlatıldı. Kodu incele, breakpoint koy ve çalıştır."))))
-      (if (and (eq (kargu-state-mode) 'debug)
-               (fboundp 'kargu-dape-ready-p)
-               (not (kargu-dape-ready-p)))
-          (kargu-dape-ensure-session
-           (lambda ()
-             (let ((chat-buf (kargu-chat--buffer)))
-               (kargu-chat-show)
-               (with-current-buffer chat-buf
-                 (kargu-chat--submit text))))
-           (lambda (&optional reason)
-             (message "kargu: debug session cancelled or failed: %s" (or reason "user abort"))))
-        (kargu-chat--submit text)))))
+    (kargu-chat--send-given prompt)))
 
 (defun kargu-chat-reset ()
   "Reset the kargu session: stop the run, clear history and counters.
@@ -433,7 +552,7 @@ The chat log itself is kept as a record."
 (defun kargu-chat-clear ()
   "Clear all previous turns in the chat log, keeping only the prompt."
   (interactive)
-  (when-let* ((buffer (get-buffer kargu-chat-buffer-name)))
+  (when-let* ((buffer (kargu-chat--target-buffer)))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (delete-region (point-min) (point-max))
@@ -443,13 +562,18 @@ The chat log itself is kept as a record."
       (message "kargu: chat transcript cleared"))))
 
 (defun kargu-chat-stop ()
-  "Stop the agent run in progress."
+  "Stop the agent run in progress.
+A running banner left behind by a failed start is cleared too, so
+the editable prompt comes back."
   (interactive)
   (if (kargu-loop-running-p)
       (progn
         (kargu-loop-stop "stopped by user")
         (force-mode-line-update t)
         (message "kargu: stopped agent run"))
+    (when (and (markerp kargu-chat--output-marker)
+               (null kargu-chat--prompt-marker))
+      (kargu-chat--ensure-idle-prompt))
     (message "kargu: no run in progress")))
 
 (kargu-log 'info "chat module loaded")

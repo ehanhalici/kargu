@@ -9,7 +9,7 @@ Kargu is an advanced autonomous agentic coding assistant for GNU Emacs. It inter
 - **Non-Blocking Asynchrony**: All network requests (HTTP POST, SSE streaming) run via `plz` child processes or timers. The Emacs UI thread is never blocked, keeping editor interaction smooth.
 - **Magit-Style Modular Layout**: Entry point is `(require 'kargu)` / `M-x kargu-menu`. Submodules follow predictable path conventions (`kargu/loop/machine` → `kargu/loop/machine.el`).
 - **Strict Protocol Safety**: A bidirectional protocol firewall ensures message payloads strictly conform to LLM provider requirements (OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter), preventing protocol rejections.
-- **Self-Healing Edit Cycle**: Tool modifications automatically trigger LSP and Flycheck diagnostics, providing automated error-correction loops within configurable round budgets.
+- **Self-Healing Edit Cycle**: Tool modifications automatically trigger LSP and Flymake diagnostics, providing automated error-correction loops within configurable round budgets.
 - **Formal Verification**: The core state machine and protocol invariants are modeled in TLA+ under `proof/` and exhaustively verified via the TLC model checker.
 
 ---
@@ -116,7 +116,7 @@ The agent loop executes an asynchronous state machine:
   - `'async`: Opens Ediff non-blockingly.
 
 ### Diagnostic Self-Healing (`kargu/loop/heal.el`)
-- After file edits, the loop enters `VERIFY_FILES` and waits for LSP/Flycheck diagnostics to settle (`kargu-lsp-wait-diagnostics`).
+- After file edits, the loop enters `VERIFY_FILES` and waits for LSP/Flymake diagnostics to settle (`kargu-lsp-wait-diagnostics`).
 - Error count evaluation:
   - If diagnostics contain errors, the `:healing` round counter increments up to `kargu-max-healing-steps` (default: 3). A `SELF-HEALING (round N of M)` block with diagnostic details is appended directly to the tool result.
   - If errors are 0, a clean verification confirmation is appended.

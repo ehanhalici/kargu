@@ -35,6 +35,9 @@
 (require 'kargu/permission/guards)
 
 (declare-function kargu-state-mode "kargu/state/selectors" ())
+(declare-function kargu-state-set-provider "kargu/state/transitions" (provider))
+(declare-function kargu-state-set-model "kargu/state/transitions" (model))
+(declare-function kargu-state-clear-model "kargu/state/transitions" ())
 (declare-function kargu-set-mode "kargu/core" (mode))
 (declare-function kargu--provider-name "kargu/api" ())
 (declare-function kargu--model "kargu/api" ())
@@ -82,6 +85,56 @@
 
 (defvar-local kargu-chat--session-model nil
   "Model identifier associated with this chat session.")
+
+(defun kargu-chat--explicit-selection (value)
+  "Return VALUE when it is a non-blank string, otherwise nil."
+  (and (stringp value)
+       (let ((s (string-trim value)))
+         (unless (string-empty-p s) s))))
+
+(defun kargu-chat-note-selection (&optional buffer)
+  "Remember the explicit provider and model on chat BUFFER.
+Only `kargu--session-provider' and `kargu--session-model' are copied.
+Config fallbacks are not.  A nil live value clears that buffer-local slot.
+The session file reads this buffer-local copy when the chat closes."
+  (let ((buf (or buffer (current-buffer)))
+        (prov (and (boundp 'kargu--session-provider)
+                   (kargu-chat--explicit-selection kargu--session-provider)))
+        (mod (and (boundp 'kargu--session-model)
+                  (kargu-chat--explicit-selection kargu--session-model))))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (when (derived-mode-p 'kargu-chat-mode)
+          (setq kargu-chat--session-provider prov
+                kargu-chat--session-model mod))))))
+
+(defun kargu-chat--apply-saved-selection (provider model)
+  "Make PROVIDER and MODEL the live selection.
+A blank value clears that part of the live selection."
+  (let ((prov (kargu-chat--explicit-selection provider))
+        (mod (kargu-chat--explicit-selection model)))
+    (setq kargu--session-provider prov
+          kargu--session-model mod)
+    (if prov
+        (when (fboundp 'kargu-state-set-provider)
+          (kargu-state-set-provider (intern prov)))
+      (when (fboundp 'kargu-state-set-provider)
+        (kargu-state-set-provider nil)))
+    (if mod
+        (when (fboundp 'kargu-state-set-model)
+          (kargu-state-set-model mod))
+      (when (fboundp 'kargu-state-clear-model)
+        (kargu-state-clear-model)))))
+
+(defun kargu-chat-activate-selection (&optional buffer)
+  "Apply BUFFER's saved provider and model to the live selection."
+  (let ((buf (or buffer (current-buffer))))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (when (derived-mode-p 'kargu-chat-mode)
+          (kargu-chat--apply-saved-selection
+           kargu-chat--session-provider
+           kargu-chat--session-model))))))
 
 (defvar-local kargu-chat--messages nil
   "Buffer-local snapshot of protocol messages for this session.")
@@ -189,31 +242,44 @@ uses `<kargu-sessions-directory>/<project-key>/'."
     (kargu-log 'info "session saved: %s (%s)" sid file)
     file))
 
+(defun kargu-session--messages-for-save ()
+  "Messages to persist from the current buffer.
+Live history wins when this buffer is the active session, so a
+snapshot taken on the first save cannot freeze later turns.
+Another buffer keeps its own snapshot."
+  (let ((live (and (boundp 'kargu--message-history) kargu--message-history))
+        (same (or (null kargu-chat--session-id)
+                  (and (boundp 'kargu--session-id)
+                       (equal kargu-chat--session-id kargu--session-id)))))
+    (cond
+     ((and same live) live)
+     (kargu-chat--messages kargu-chat--messages)
+     (t live))))
+
 (defun kargu-session-save (&optional buffer)
   "Save chat session from BUFFER (defaults to current buffer) to JSON.
-Returns the file path written, or nil if no content to save."
+Returns the file path written, or nil if no content to save.
+Saving the current chat first copies the explicit live provider and
+model onto that buffer.  A chat that has not chosen either stores
+empty strings, not the config fallback."
   (let ((buf (or buffer (current-buffer))))
+    (when (and (bufferp buf) (buffer-live-p buf) (eq buf (current-buffer)))
+      (kargu-chat-note-selection buf))
     (when (and (bufferp buf) (buffer-live-p buf))
       (with-current-buffer buf
         (let* ((root (kargu-session--project-root buf))
                (sid (or kargu-chat--session-id
                         (and (fboundp 'kargu-session-id) (kargu-session-id))
                         (format "kargu-%s" (format-time-string "%Y%m%d%H%M%S"))))
-               (messages (or kargu-chat--messages
-                              (and (boundp 'kargu--message-history) kargu--message-history)
-                              nil))
+               (messages (kargu-session--messages-for-save))
                (transcript (kargu-session--extract-transcript buf))
                (title (or kargu-chat--session-title
                           (kargu-session--derive-title messages (buffer-name buf))))
                (mode-val (if (fboundp 'kargu-state-mode)
                              (kargu-state-mode)
                            'agent))
-               (prov (or kargu-chat--session-provider
-                         (and (boundp 'kargu--session-provider) kargu--session-provider)
-                         (if (fboundp 'kargu--provider-name) (kargu--provider-name) "")))
-               (mod (or kargu-chat--session-model
-                        (and (boundp 'kargu--session-model) kargu--session-model)
-                        (if (fboundp 'kargu--model) (kargu--model) "")))
+               (prov (or (kargu-chat--explicit-selection kargu-chat--session-provider) ""))
+               (mod (or (kargu-chat--explicit-selection kargu-chat--session-model) ""))
                (usage (if (boundp 'kargu--session) kargu--session nil))
                (dir (kargu-session--project-dir root))
                (file (kargu-session--file-path sid root)))
@@ -273,13 +339,10 @@ Returns the file path written, or nil if no content to save."
           kargu-chat--messages msg-list)
     (setq-local kargu--session-id sid)
     (when (and (stringp saved-prov) (not (string-empty-p (string-trim saved-prov))))
-      (setq kargu-chat--session-provider saved-prov)
-      (when (boundp 'kargu--session-provider)
-        (setq kargu--session-provider saved-prov)))
+      (setq kargu-chat--session-provider saved-prov))
     (when (and (stringp saved-model) (not (string-empty-p (string-trim saved-model))))
-      (setq kargu-chat--session-model saved-model)
-      (when (boundp 'kargu--session-model)
-        (setq kargu--session-model saved-model)))
+      (setq kargu-chat--session-model saved-model))
+    (kargu-chat--apply-saved-selection saved-prov saved-model)
     (when (boundp 'kargu--message-history)
       (setq kargu--message-history (copy-sequence msg-list)))))
 

@@ -30,6 +30,8 @@
 (require 'kargu/config/toml)
 (require 'kargu/config/key)
 
+(declare-function kargu-chat-note-selection "kargu/chat/session" (&optional buffer))
+
 (defvar kargu--config-cache nil
   "Cached TOML config plist (:provider :model :providers), or nil.")
 
@@ -105,6 +107,8 @@ from `kargu-provider-list'."
                                   (and noninteractive cached-model)))
     (when kargu--session-model
       (kargu-state-set-model kargu--session-model)))
+  (when (fboundp 'kargu-chat-note-selection)
+    (kargu-chat-note-selection))
   (when (fboundp 'kargu-api-prefetch-models)
     (kargu-api-prefetch-models name))
   (kargu-log 'info "provider set to %s (model %s, api %s)"
@@ -131,12 +135,12 @@ from `kargu-provider-list'."
             (copy-file example path)
           (with-temp-file path
             (insert "# Local kargu credentials — do not commit.\n"
-                    "provider = \"openrouter\"\n"
-                    "model = \"anthropic/claude-3.5-sonnet\"\n\n"
-                    "[providers.openrouter]\n"
-                    "api = \"https://openrouter.ai/api/v1\"\n"
-                    "apikey = \"sk-or-v1-...\"\n"
-                    "models = [\"anthropic/claude-3.5-sonnet\"]\n"))))
+                    "provider = \"local\"\n"
+                    "model = \"\"\n\n"
+                    "[providers.local]\n"
+                    "api = \"http://127.0.0.1:1/v1\"\n"
+                    "apikey = \"...\"\n"
+                    "models = []\n"))))
       (kargu-log 'info "created config %s" path)
       (message "kargu: created %s — fill in apikey" path))
     (find-file path)))
@@ -146,6 +150,7 @@ from `kargu-provider-list'."
     (transient . "menu interface (mandatory)")
     (eglot . "LSP client (tools: skeleton, diagnostics, xref)")
     (dape . "debugger client (tools: stack, variables, eval)")
+    (magit . "Git interface (mandatory)")
     (ediff . "diff approval engine (built into Emacs)"))
   "Feature -> purpose map checked by `kargu-check-setup'.")
 
@@ -165,7 +170,9 @@ from `kargu-provider-list'."
 (defun kargu-check-setup ()
   "Check API key and dependencies; report in echo area and log."
   (interactive)
-  (let* ((missing (kargu--missing-dependencies))
+  (let* ((missing-packages (kargu--missing-dependencies))
+         (missing-tools (and (fboundp 'kargu-deps-missing)
+                             (kargu-deps-missing)))
          (key (kargu--resolve-api-key))
          problems
          warnings)
@@ -179,8 +186,16 @@ from `kargu-provider-list'."
                 "API key is empty; requests will omit Authorization"
               (format "API key looks like a placeholder (%s)" key))
             warnings)))
-    (dolist (dep missing)
-      (push (format "missing package %s (%s)" (car dep) (cdr dep)) problems))
+    (if missing-tools
+        (dolist (tool missing-tools)
+          (push (format "missing %s %s: %s (%s)"
+                        (plist-get tool :type)
+                        (plist-get tool :name)
+                        (plist-get tool :purpose)
+                        (plist-get tool :install-hint))
+                problems))
+      (dolist (dep missing-packages)
+        (push (format "missing package %s (%s)" (car dep) (cdr dep)) problems)))
     (dolist (w warnings)
       (kargu-log 'warn "%s" w))
     (if problems

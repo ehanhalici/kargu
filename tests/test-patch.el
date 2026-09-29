@@ -10,6 +10,18 @@
 
 ;;; Code:
 
+;; Ensure the package root is on `load-path` during byte/native compilation.
+(eval-and-compile
+  (let ((root (locate-dominating-file
+               (or (bound-and-true-p byte-compile-current-file)
+                   load-file-name
+                   buffer-file-name
+                   default-directory)
+               "kargu.el")))
+    (when root
+      (add-to-list 'load-path (file-name-as-directory
+                               (expand-file-name root))))))
+
 (require 'ert)
 (require 'kargu/constants)
 (require 'kargu/core)
@@ -131,6 +143,18 @@
                 (should (string-match-p "line nine" text))
                 (should-not (string-match-p "line 9" text))))))
       (delete-directory tmp-dir t))))
+
+(ert-deftest kargu-patch-unmatched-hunk-is-an-error-test ()
+  "A hunk that matches nothing is not reported as an update."
+  (should-error
+   (kargu-diff--apply-hunk "alpha\n" "missing\n" "other\n" "file.el")
+   :type 'error))
+
+(ert-deftest kargu-patch-ambiguous-hunk-is-an-error-test ()
+  "A hunk that matches twice is not applied to the first hit."
+  (should-error
+   (kargu-diff--apply-hunk "same\nsame\n" "same\n" "other\n" "file.el")
+   :type 'error))
 
 (provide 'tests/test-patch)
 
