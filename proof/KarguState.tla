@@ -60,6 +60,19 @@ InitState(defaultMode, defaultProvider, defaultModel) == [
 ]
 
 (***************************************************************************)
+(* Status classes (mirror `kargu-state-transition-status' and              *)
+(* `kargu-state-busy-p')                                                   *)
+(***************************************************************************)
+
+\* Waiting for the user (`:pause') is not busy, but the run is still alive.
+BusyOf(status) ==
+    status \notin {":idle", ":stopped", ":error", ":done", ":limit", ":pause"}
+
+\* A run exists.  `kargu-state-set-mode' refuses while this holds.
+RunLiveStatus(status) ==
+    status \notin {":idle", ":done", ":limit", ":stopped", ":error"}
+
+(***************************************************************************)
 (* Pure State Selectors (Mirrors `kargu/state/selectors.el')                *)
 (***************************************************************************)
 
@@ -68,7 +81,7 @@ GetMode(st)     == st.mode
 GetProvider(st) == st.provider
 GetModel(st)    == st.model
 GetEffort(st)   == st.effort
-GetBusy(st)     == st.busy \/ (st.status \notin {":idle", ":stopped", ":error"})
+GetBusy(st)     == st.busy \/ BusyOf(st.status)
 GetTotalTokens(st) == st.totalTokens
 
 (***************************************************************************)
@@ -77,12 +90,11 @@ GetTotalTokens(st) == st.totalTokens
 
 \* Transition status updates both status and busy flag coherently
 TransitionStatus(st, nextStatus) ==
-    LET nextBusy == nextStatus \notin {":idle", ":stopped", ":error", ":done", ":limit", ":pause"}
-    IN [st EXCEPT !.status = nextStatus, !.busy = nextBusy]
+    [st EXCEPT !.status = nextStatus, !.busy = BusyOf(nextStatus)]
 
-\* Transition mode with safety validation
+\* Transition mode: refused (state unchanged) while a run exists
 TransitionMode(st, nextMode) ==
-    IF nextMode \in StateModes
+    IF nextMode \in StateModes /\ ~RunLiveStatus(st.status)
     THEN [st EXCEPT !.mode = nextMode]
     ELSE st
 
@@ -116,7 +128,6 @@ StateInvariant(st) ==
     /\ st.effort \in StateEfforts
     /\ st.busy \in BOOLEAN
     /\ st.totalTokens = st.pTokens + st.cTokens
-    /\ (st.status \in {":idle", ":stopped", ":error"} => st.busy = FALSE)
-    /\ (st.status \notin {":idle", ":stopped", ":error"} => st.busy = TRUE)
+    /\ st.busy = BusyOf(st.status)
 
 =============================================================================

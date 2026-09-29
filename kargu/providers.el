@@ -11,17 +11,6 @@
 
 ;;; Code:
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/providers/registry)
 (require 'kargu/providers/catalog)
 (require 'kargu/providers/params)

@@ -16,19 +16,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/history)
@@ -141,7 +128,7 @@ A blank value clears that part of the live selection."
 
 ;;;; Project paths & storage helpers --------------------------------------
 
-(defun kargu-session--project-root (&optional buffer-or-dir)
+(defun kargu-session-project-root (&optional buffer-or-dir)
   "Return canonical project root directory for BUFFER-OR-DIR."
   (let ((buf (and (bufferp buffer-or-dir) (buffer-live-p buffer-or-dir) buffer-or-dir)))
     (if (and buf (buffer-local-value 'kargu-chat--project-root buf))
@@ -168,7 +155,7 @@ A blank value clears that part of the live selection."
   "Return directory path where sessions for project ROOT are stored.
 Prefers existing `<root>/.kargu/sessions/' if present, otherwise
 uses `<kargu-sessions-directory>/<project-key>/'."
-  (let* ((proj-root (kargu-session--project-root root))
+  (let* ((proj-root (kargu-session-project-root root))
          (local-dir (expand-file-name ".kargu/sessions" proj-root)))
     (if (file-directory-p local-dir)
         (file-name-as-directory local-dir)
@@ -267,7 +254,7 @@ empty strings, not the config fallback."
       (kargu-chat-note-selection buf))
     (when (and (bufferp buf) (buffer-live-p buf))
       (with-current-buffer buf
-        (let* ((root (kargu-session--project-root buf))
+        (let* ((root (kargu-session-project-root buf))
                (sid (or kargu-chat--session-id
                         (and (fboundp 'kargu-session-id) (kargu-session-id))
                         (format "kargu-%s" (format-time-string "%Y%m%d%H%M%S"))))
@@ -335,7 +322,7 @@ empty strings, not the config fallback."
          (saved-model (kargu--aget data "model")))
     (setq kargu-chat--session-id sid
           kargu-chat--session-title title
-          kargu-chat--project-root (or saved-root (kargu-session--project-root root))
+          kargu-chat--project-root (or saved-root (kargu-session-project-root root))
           kargu-chat--messages msg-list)
     (setq-local kargu--session-id sid)
     (when (and (stringp saved-prov) (not (string-empty-p (string-trim saved-prov))))
@@ -427,7 +414,7 @@ Returns TARGET-BUFFER on success."
 (defun kargu-session-delete (session-id &optional root)
   "Delete saved SESSION-ID from disk for project ROOT."
   (interactive
-   (let* ((proj (kargu-session--project-root))
+   (let* ((proj (kargu-session-project-root))
           (sessions (kargu-session-list proj))
           (choices (mapcar (lambda (s)
                              (cons (format "%s (%s - %s)"
@@ -447,7 +434,7 @@ Returns TARGET-BUFFER on success."
 (defun kargu-chat-sessions (&optional root)
   "Interactively switch to a saved chat session for project ROOT."
   (interactive)
-  (let* ((proj-root (kargu-session--project-root root))
+  (let* ((proj-root (kargu-session-project-root root))
          (sessions (kargu-session-list proj-root)))
     (if (null sessions)
         (message "kargu: no saved sessions for %s" proj-root)

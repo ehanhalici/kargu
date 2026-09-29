@@ -15,19 +15,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 
 (defconst kargu-fs-skip-dirs
@@ -39,14 +26,6 @@
   "Cap on files visited by a bounded walk."
   :type 'natnum
   :group 'kargu)
-
-(defun kargu-fs-project-root ()
-  "Resolved project directory as a directory name."
-  (file-name-as-directory
-   (expand-file-name
-    (or (and (fboundp 'kargu--project-root)
-             (ignore-errors (kargu--project-root)))
-        default-directory))))
 
 (defun kargu-fs-skipped-path-p (path)
   "Non-nil if PATH has a skipped directory component."

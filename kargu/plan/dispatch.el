@@ -12,19 +12,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/plan/buffer)
 
@@ -43,6 +30,21 @@
           (select-window win))
         (message "Edit plan freely in memory. Press C-c C-c to approve & apply, C-c C-k to cancel.")))))
 
+(declare-function kargu-chat-insert "kargu/chat/render" (text &optional face))
+
+(defun kargu-plan--close-window ()
+  "Close the window showing the plan buffer, if any."
+  (when-let* ((buf (get-buffer kargu-plan-buffer-name))
+              (win (and (buffer-live-p buf) (get-buffer-window buf))))
+    (quit-window nil win)))
+
+(defun kargu-plan--take-decision ()
+  "Claim the pending plan decision; return non-nil the first time only.
+A button stays in the transcript after it is used, so a second click
+finds no decision to make."
+  (prog1 kargu-plan--decision-pending
+    (setq kargu-plan--decision-pending nil)))
+
 (defun kargu-plan-approve ()
   "Approve the current in-memory plan and dispatch it to AI in agent mode."
   (interactive)
@@ -51,76 +53,63 @@
                         (with-current-buffer buf
                           (string-trim (buffer-substring-no-properties (point-min) (point-max))))
                       (or kargu-plan--current-plan ""))))
-    (if (string-empty-p plan-text)
-        (message "kargu: no plan text found to approve")
-      (setq kargu-plan--decision-pending nil)
-      (when-let ((win (and buf (get-buffer-window buf))))
-        (quit-window nil win))
-      (let ((chat-buf (get-buffer (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*"))))
-        (when (and chat-buf (buffer-live-p chat-buf))
-          (with-current-buffer chat-buf
-            (let ((inhibit-read-only t))
-              (save-excursion
-                (goto-char (point-max))
-                (insert (propertize "  ✓ [Plan Approved] — Switching to agent mode and applying plan...\n\n"
-                                    'face '(:inherit success :weight bold))))))))
+    (cond
+     ((not kargu-plan--decision-pending)
+      (message "kargu: this plan was already decided"))
+     ((string-empty-p plan-text)
+      (message "kargu: no plan text found to approve"))
+     (t
+      (kargu-plan--take-decision)
+      (kargu-plan--close-window)
+      (kargu-chat-insert "  ✓ [Plan Approved] — Switching to agent mode and applying plan...\n\n"
+                          '(:inherit success :weight bold))
       (kargu-set-mode 'agent)
       (let ((prompt (format "Apply the following approved plan step-by-step:\n\n%s" plan-text)))
         (if (fboundp 'kargu-chat-prompt)
             (kargu-chat-prompt prompt)
-          (message "kargu-chat-prompt unavailable"))))))
+          (message "kargu-chat-prompt unavailable")))))))
 
 (defun kargu-plan-reject ()
   "Reject and cancel the pending plan."
   (interactive)
-  (setq kargu-plan--decision-pending nil)
-  (let ((buf (get-buffer kargu-plan-buffer-name)))
-    (when (and buf (buffer-live-p buf))
-      (when-let ((win (get-buffer-window buf)))
-        (quit-window nil win))))
-  (let ((chat-buf (get-buffer (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*"))))
-    (when (and chat-buf (buffer-live-p chat-buf))
-      (with-current-buffer chat-buf
-        (let ((inhibit-read-only t))
-          (save-excursion
-            (goto-char (point-max))
-            (insert (propertize "  ✗ [Plan Rejected] — Plan cancelled.\n\n"
-                                'face 'font-lock-warning-face)))))))
-  (message "kargu: plan cancelled"))
+  (if (not (kargu-plan--take-decision))
+      (message "kargu: this plan was already decided")
+    (kargu-plan--close-window)
+    (kargu-chat-insert "  ✗ [Plan Rejected] — Plan cancelled.\n\n" 'font-lock-warning-face)
+    (message "kargu: plan cancelled")))
+
+(defun kargu-plan--button (label action face help)
+  "A transcript button showing LABEL that calls ACTION, drawn with FACE."
+  (make-text-button label nil
+                    'action (lambda (_) (funcall action))
+                    'face face
+                    'help-echo help
+                    'follow-link t))
 
 (defun kargu-plan-handle-response (report)
   "Render plan approval buttons and populate `*kargu-plan*' for REPORT."
   (let ((plan-text (kargu-plan-extract-text report)))
     (when (and (stringp plan-text) (not (string-empty-p plan-text)))
       (kargu-plan-setup-buffer plan-text)
-      (let ((chat-buf (get-buffer (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*"))))
-        (when (and chat-buf (buffer-live-p chat-buf))
-          (with-current-buffer chat-buf
-            (let ((inhibit-read-only t))
-              (save-excursion
-                (goto-char (point-max))
-                (insert "\n")
-                (insert (propertize "  📋 [Plan Ready] — Choose an option below:\n"
-                                    'face '(:inherit font-lock-doc-face :weight bold)))
-                (insert "     ")
-                (insert-button
-                 "[✓ Approve & Apply]"
-                 'action (lambda (_) (kargu-plan-approve))
-                 'face '(:inherit success :weight bold)
-                 'help-echo "Approve plan and start autonomous execution in Agent mode")
-                (insert "   ")
-                (insert-button
-                 "[✏ View / Edit Plan]"
-                 'action (lambda (_) (kargu-plan-view))
-                 'face '(:inherit warning :weight bold)
-                 'help-echo "Open and edit plan in a side window (in-memory, no disk save)")
-                (insert "   ")
-                (insert-button
-                 "[✗ Reject]"
-                 'action (lambda (_) (kargu-plan-reject))
-                 'face '(:inherit error :weight bold)
-                 'help-echo "Reject and cancel plan")
-                (insert "\n\n"))))))
+      (kargu-chat-insert "\n")
+      (kargu-chat-insert "  📋 [Plan Ready] — Choose an option below:\n"
+                          '(:inherit font-lock-doc-face :weight bold))
+      (kargu-chat-insert "     ")
+      (kargu-chat-insert
+       (kargu-plan--button "[✓ Approve & Apply]" #'kargu-plan-approve
+                           '(:inherit success :weight bold)
+                           "Approve plan and start autonomous execution in Agent mode"))
+      (kargu-chat-insert "   ")
+      (kargu-chat-insert
+       (kargu-plan--button "[✏ View / Edit Plan]" #'kargu-plan-view
+                           '(:inherit warning :weight bold)
+                           "Open and edit plan in a side window (in-memory, no disk save)"))
+      (kargu-chat-insert "   ")
+      (kargu-chat-insert
+       (kargu-plan--button "[✗ Reject]" #'kargu-plan-reject
+                           '(:inherit error :weight bold)
+                           "Reject and cancel plan"))
+      (kargu-chat-insert "\n\n")
       (message "kargu plan: click [✓ Approve & Apply], [✏ View / Edit Plan], or [✗ Reject]."))))
 
 (provide 'kargu/plan/dispatch)

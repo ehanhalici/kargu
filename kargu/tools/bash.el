@@ -14,19 +14,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/api)
@@ -138,10 +125,10 @@ Return a result string if COMMAND matches a management command, or nil."
     (cond
      ((equal cmd "list")
       (kargu-bash--manage-list))
-     ((string-prefix-p "kill " cmd)
-      (kargu-bash--manage-kill (string-trim (substring cmd 5))))
-     ((string-prefix-p "status " cmd)
-      (kargu-bash--manage-status (string-trim (substring cmd 7))))
+     ((string-match "\\`kill \\(p[0-9]+\\)\\'" cmd)
+      (kargu-bash--manage-kill (match-string 1 cmd)))
+     ((string-match "\\`status \\(p[0-9]+\\)\\'" cmd)
+      (kargu-bash--manage-status (match-string 1 cmd)))
      (t nil))))
 
 (defun kargu-bash--resolve-shell ()
@@ -262,55 +249,43 @@ Emacs UI remains completely responsive and interactive for the user."
     (message "kargu: started '%s' asynchronously in background (timeout %ds)..."
              (truncate-string-to-width command 40) kargu-bash-timeout)))
 
-(defun kargu-bash--run-sync (command dir shell)
-  "Execute COMMAND synchronously in DIR under SHELL within timeout bounds.
-Emits live progress updates and redisplays to avoid freezing the window."
-  (let* ((buf (generate-new-buffer " *kargu-bash*"))
-         (start (float-time))
-         (last-msg 0.0)
-         proc)
-    (unwind-protect
-        (progn
-          (let ((default-directory (file-name-as-directory dir)))
-            (setq proc (make-process
-                        :name "kargu-bash"
-                        :buffer buf
-                        :command (list shell "-c" command)
-                        :connection-type 'pipe
-                        :stderr buf))
-            (set-process-query-on-exit-flag proc nil))
-          (with-local-quit
-            (while (process-live-p proc)
-              (let ((elapsed (- (float-time) start)))
-                (when (> elapsed kargu-bash-timeout)
-                  (ignore-errors (kill-process proc))
-                  (error "bash timed out after %ds: %s"
-                         kargu-bash-timeout
-                         (truncate-string-to-width command 80)))
-                (when (>= (- elapsed last-msg) 0.5)
-                  (setq last-msg elapsed)
-                  (message "kargu: running '%s' (%.1fs / %ds) [C-g to cancel]..."
-                           (truncate-string-to-width command 40)
-                           elapsed kargu-bash-timeout)
-                  (redisplay)))
-              (accept-process-output proc 0.05)))
-          (if (process-live-p proc)
-              (progn
-                (ignore-errors (kill-process proc))
-                (error "bash command interrupted by user (C-g): %s"
-                       (truncate-string-to-width command 80)))
-            (let* ((code (process-exit-status proc))
-                   (out (with-current-buffer buf (buffer-string))))
-              (kargu-bash--log-finished command code start)
-              (kargu-bash--format-result code dir out))))
-      (kargu-bash--clean-buffer-processes buf)
-      (when (buffer-live-p buf)
-        (kill-buffer buf)))))
+(defun kargu-bash--rejection-text (command dir root)
+  "Model-facing text for a COMMAND in DIR the user refused (ROOT is the project)."
+  (concat "Permission denied: Command execution was rejected by the user.\n"
+          "  - Rejected command: '" command "'\n"
+          "  - Working directory: '" dir "'\n"
+          "  - Allowed project root: '" root "'\n"
+          "  - Reason: The user chose not to grant execution permission for this shell command.\n"
+          "  - Guidance: Do not repeatedly execute the identical command without user clarification. Consider an alternative approach that works strictly within '" root "' or ask the user for guidance."))
+
+(defun kargu-bash--start (command dir background callback)
+  "Start approved COMMAND in DIR; deliver the result to CALLBACK when non-nil."
+  (let ((shell (kargu-bash--resolve-shell)))
+    (cond
+     (background
+      (let ((res (kargu-bash--run-background command dir shell)))
+        (if callback (funcall callback res) res)))
+     (callback
+      (kargu-bash--run-async command dir shell callback))
+     (t
+      (error "bash commands never run synchronously: pass a CALLBACK")))))
+
+(defun kargu-bash--run-async-approved (command dir root background callback)
+  "Ask for approval of COMMAND, then start it; CALLBACK gets the result."
+  (kargu-permission-request-approval-async
+   command dir (kargu-permission-command-risks command)
+   (lambda (approved)
+     (if approved
+         (kargu-bash--start command dir background callback)
+       (funcall callback
+                (format "ERROR: %s" (kargu-bash--rejection-text command dir root)))))))
 
 (defun kargu-bash-run (command &optional cwd background callback)
   "Run COMMAND in CWD, capturing stdout and stderr.
-When CALLBACK is non-nil, execute asynchronously without blocking
-the Emacs UI and call CALLBACK with the result string upon completion.
+With CALLBACK the call returns at once: approval, execution and the result
+all arrive asynchronously.  Without CALLBACK only background processes and
+process management (`list', `status', `kill') are served, since Emacs never
+waits for a command.
 When BACKGROUND is non-nil, start a persistent background process.
 Strictly validates that CWD and all path arguments stay within project root."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p command
@@ -320,29 +295,14 @@ Strictly validates that CWD and all path arguments stay within project root."
         (if callback (funcall callback mgmt) mgmt)
       (let* ((root (kargu-permission-project-root))
              (dir (kargu-bash--cwd cwd)))
-        ;; Sandboxing check: command cannot escape project root
         (kargu-permission-validate-command command root dir)
-        ;; User approval check: 1-click button prompt in chat
-        (unless (kargu-permission-request-approval command dir)
-          (let ((err-text
-                 (concat "Permission denied: Command execution was rejected by the user.\n"
-                         "  - Rejected command: '" command "'\n"
-                         "  - Working directory: '" dir "'\n"
-                         "  - Allowed project root: '" root "'\n"
-                         "  - Reason: The user chose not to grant execution permission for this shell command.\n"
-                         "  - Guidance: Do not repeatedly execute the identical command without user clarification. Consider an alternative approach that works strictly within '" root "' or ask the user for guidance.")))
-            (if callback
-                (funcall callback (format "ERROR: %s" err-text))
-              (error "%s" err-text))))
-        (let ((shell (kargu-bash--resolve-shell)))
-          (cond
-           (background
-            (let ((res (kargu-bash--run-background command dir shell)))
-              (if callback (funcall callback res) res)))
-           (callback
-            (kargu-bash--run-async command dir shell callback))
-           (t
-            (kargu-bash--run-sync command dir shell))))))))
+        (cond
+         (callback
+          (kargu-bash--run-async-approved command dir root background callback))
+         ((kargu-permission-request-approval
+           command dir (kargu-permission-command-risks command))
+          (kargu-bash--start command dir background nil))
+         (t (error "%s" (kargu-bash--rejection-text command dir root))))))))
 
 (defun kargu-bash-register-tools ()
   "Register the bash tool."

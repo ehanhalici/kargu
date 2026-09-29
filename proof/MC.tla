@@ -1,9 +1,9 @@
 --------------------------------- MODULE MC ---------------------------------
 (***************************************************************************)
-(* Realistic, comprehensive Model Checking instantiation of KarguLoop.     *)
-(* Explores all edge cases, user cancellations, provider & network errors, *)
-(* circuit breaker trips, AI response errors, diagnostic healing loops,    *)
-(* compaction, mode safety gating, and doom loop detection.                *)
+(* Model Checking instantiation of KarguLoop.  Every action of the loop    *)
+(* is enabled: user cancellation and pauses, provider and network errors,  *)
+(* the circuit breaker, healing rounds, compaction, mode gating and doom   *)
+(* approval.                                                               *)
 (***************************************************************************)
 
 EXTENDS KarguLoop
@@ -35,22 +35,30 @@ MCNext ==
     \/ FollowUpPrompt("Refactor the code")
     \/ \E m \in AllModes : SetMode(m)
     \/ ResetSession
+    \/ RequestCompact
+    \/ RequestPause
     \/ RequestSend
+    \/ RequestBlocked
     \/ \E txt \in {"Here is the answer."} : ModelReceiveAnswer(txt)
     \/ \E calls \in ToolCallSequences : ModelReceiveToolCalls(calls)
     \/ ModelReceiveLengthTruncated
     \/ ModelReceiveOverflow
     \/ ModelReceiveEmpty
     \/ ModelReceiveUpstreamError
+    \/ ModelReceiveError
+    \/ ModelReceiveToolsUnsupported
+    \/ RecoverRetry
+    \/ RecoverStop
     \/ ExecuteNextTool
+    \/ DoomApprove
+    \/ DoomStop
     \/ VerifyFiles(TRUE)
     \/ VerifyFiles(FALSE)
     \/ CompactionFinish(TRUE)
     \/ CompactionFinish(FALSE)
     \/ UserStop
     \/ CircuitCooldownCanaryAction
-    \/ LoopPause
-    \/ PauseDecisionContinue(MaxIterations)
+    \/ PauseDecisionContinue
     \/ PauseDecisionStop
 
 MCSpec == Init /\ [][MCNext]_vars
@@ -58,5 +66,6 @@ MCSpec == Init /\ [][MCNext]_vars
 StateConstraint ==
     /\ generation <= 2
     /\ Len(history) <= 12
+    /\ turnCap <= 2 * MaxIterations
 
 =============================================================================

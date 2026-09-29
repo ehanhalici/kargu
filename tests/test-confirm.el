@@ -50,14 +50,16 @@
   (with-temp-buffer
     (let* ((chat-buf (current-buffer))
            (kargu-confirm--mock-decision :retry)
-           (res (kargu-ui-confirm
-                 :title "⚠️  [Test Prompt]"
-                 :details "Mock error detail"
-                 :notice "Pick an option"
-                 :actions '((:key :retry :label "[Retry]")
-                            (:key :stop :label "[Stop]"))
-                 :chat-buffer chat-buf
-                 :default-action :stop)))
+           (res nil))
+      (kargu-ui-confirm
+       :title "⚠️  [Test Prompt]"
+       :details "Mock error detail"
+       :notice "Pick an option"
+       :actions '((:key :retry :label "[Retry]")
+                  (:key :stop :label "[Stop]"))
+       :chat-buffer chat-buf
+       :default-action :stop
+       :on-decision (lambda (d) (setq res d)))
       (should (eq res :retry))
       (let ((content (buffer-string)))
         (should (string-match-p "Test Prompt" content))
@@ -66,13 +68,55 @@
 
 (ert-deftest kargu-confirm-noninteractive-default-test ()
   "Ensure kargu-ui-confirm returns default action in batch mode without mock."
-  (let ((kargu-confirm--mock-decision nil))
-    (should (eq (kargu-ui-confirm
-                 :title "⚠️  [Headless Prompt]"
-                 :actions '((:key :ok :label "[OK]")
-                            (:key :cancel :label "[Cancel]"))
-                 :default-action :cancel)
-                :cancel))))
+  (let ((kargu-confirm--mock-decision nil)
+        (res nil))
+    (kargu-ui-confirm
+     :title "⚠️  [Headless Prompt]"
+     :actions '((:key :ok :label "[OK]")
+                (:key :cancel :label "[Cancel]"))
+     :default-action :cancel
+     :on-decision (lambda (d) (setq res d)))
+    (should (eq res :cancel))))
+
+(ert-deftest kargu-confirm-button-click-answers-once-test ()
+  "A click answers through the callback exactly once and never waits."
+  (with-temp-buffer
+    (let ((kargu-confirm--mock-decision nil)
+          (kargu-confirm--pending nil)
+          (answers nil)
+          (noninteractive nil))
+      (cl-letf (((symbol-function 'kargu-chat-show) #'ignore)
+                ((symbol-function 'recenter) #'ignore))
+        (kargu-ui-confirm
+         :title "Ask" :chat-buffer (current-buffer)
+         :actions '((:key :yes :label "[Yes]") (:key :no :label "[No]"))
+         :on-decision (lambda (d) (push d answers))))
+      (should (null answers))
+      (should (= (length kargu-confirm--pending) 1))
+      (goto-char (point-min))
+      (search-forward "[Yes]")
+      (backward-char 2)
+      (push-button)
+      (push-button)
+      (should (equal answers '(:yes)))
+      (should (null kargu-confirm--pending)))))
+
+(ert-deftest kargu-confirm-dismiss-all-silences-callbacks-test ()
+  "Dismissing prompts (run stopped) never calls their callbacks."
+  (with-temp-buffer
+    (let ((kargu-confirm--mock-decision nil)
+          (kargu-confirm--pending nil)
+          (called nil)
+          (noninteractive nil))
+      (cl-letf (((symbol-function 'kargu-chat-show) #'ignore)
+                ((symbol-function 'recenter) #'ignore))
+        (kargu-ui-confirm
+         :title "Ask" :chat-buffer (current-buffer)
+         :actions '((:key :yes :label "[Yes]"))
+         :on-decision (lambda (_d) (setq called t))))
+      (kargu-confirm-dismiss-all)
+      (should-not called)
+      (should (null kargu-confirm--pending)))))
 
 (ert-deftest kargu-confirm-network-timeout-recovery-retry-test ()
   "Ensure kargu-loop--recover-or-finish resets circuit and retries request on :retry."
@@ -136,7 +180,7 @@
                  (lambda (_r _p) (setq retried t)))
                 ((symbol-function 'kargu-circuit-reset)
                  (lambda () nil)))
-        (kargu-loop--on-error run response)
+        (kargu--loop-handle-response run response)
         (should retried)
         (let ((content (buffer-string)))
           (should (string-match-p "curl 28: Operation timeout" content)))))))
@@ -151,10 +195,8 @@
            (kargu--loop-run run)
            (kargu-confirm--mock-decision :retry)
            (retried nil))
-      (cl-letf (((symbol-function 'kargu-circuit-allow-request-p)
-                 (lambda () nil))
-                ((symbol-function 'kargu-circuit-record-failure)
-                 (lambda (_err) nil))
+      (cl-letf (((symbol-function 'kargu-circuit-open-p)
+                 (lambda () t))
                 ((symbol-function 'kargu-circuit-reset)
                  (lambda () nil))
                 ((symbol-function 'kargu--loop-request)

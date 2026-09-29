@@ -132,6 +132,44 @@
     (should (= (length kargu--message-history) 3))
     (should (equal (kargu--history-last-role) "assistant"))))
 
+(ert-deftest kargu-history-tool-continuation-test ()
+  "Test that tool continuation after assistant tool call preserves user message."
+  (let ((kargu--message-history nil)
+        (kargu--busy nil))
+    (unwind-protect
+        (progn
+          ;; 1. User turn added
+          (kargu--history-add "user" "@description.md a bakarak bu projedeki hatalarin raporunu cikartir misin")
+          ;; 2. Assistant turn with tool_calls added (as when model executes lsp_project_skeleton)
+          (let ((msg '(("role" . "assistant")
+                       ("content" . "Let me explore the codebase...")
+                       ("tool_calls" . [(("id" . "call_123")
+                                         ("type" . "function")
+                                         ("function" . (("name" . "lsp_project_skeleton")
+                                                        ("arguments" . "{}"))))]))))
+            (setq kargu--message-history (append kargu--message-history (list msg))))
+          ;; 3. Tool result added
+          (kargu--history-add-tool-result "call_123" "lsp_project_skeleton" "# Project skeleton (702 chars)")
+          ;; 4. Verify history invariants: has user, has assistant tool call, has tool response
+          (should (cl-some (lambda (m) (equal (kargu--aget m "role") "user")) kargu--message-history))
+          (should (cl-some (lambda (m) (equal (kargu--aget m "role") "tool")) kargu--message-history))
+          ;; 5. Next continuation turn (prompt nil) must pass history validation without error
+          (let ((posted nil) (err-msg nil))
+            (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda () "mock-key"))
+                      ((symbol-function 'kargu--api-post)
+                       (lambda (_url _headers payload &rest _) (setq posted payload))))
+              (kargu-api-send nil (lambda (resp)
+                                    (setq err-msg (kargu-response-error-message resp)))))
+            ;; The request must actually have gone out, carrying the wall-checked history.
+            (should posted)
+            (should-not err-msg)
+            (let ((roles (mapcar (lambda (m) (kargu--aget m "role"))
+                                 (append (kargu--aget posted "messages") nil))))
+              (should (member "user" roles))
+              (should (member "assistant" roles))
+              (should (member "tool" roles)))))
+      (setq kargu--busy nil))))
+
 (provide 'tests/test-history)
 
 ;;; test-history.el ends here

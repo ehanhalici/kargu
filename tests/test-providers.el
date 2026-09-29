@@ -23,6 +23,7 @@
       (add-to-list 'load-path (file-name-as-directory
                                (expand-file-name root))))))
 
+(require 'tests/test-helpers)
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/core)
@@ -215,7 +216,7 @@
       (when (file-exists-p empty-cfg) (delete-file empty-cfg)))))
 
 (ert-deftest kargu-providers-payload-tuning-test ()
-  "Payload builder respects reasoning effort, thinking budget, and max tokens."
+  "Payload builder respects reasoning effort and max tokens in the provider's shape."
   (let ((kargu-reasoning-effort 'medium)
         (kargu-thinking-budget 4096)
         (kargu-max-tokens 8192)
@@ -229,12 +230,9 @@
       (should (equal (kargu--aget payload "max_tokens") 8192))
       (should (equal (kargu--aget payload "max_completion_tokens") 8192))
       (should (equal (kargu--aget payload "reasoning_effort") "medium"))
-      (let ((reasoning (kargu--aget payload "reasoning")))
-        (should (equal (kargu--aget reasoning "effort") "medium"))
-        (should (equal (kargu--aget reasoning "max_tokens") 4096)))
-      (let ((thinking (kargu--aget payload "thinking")))
-        (should (equal (kargu--aget thinking "type") "enabled"))
-        (should (equal (kargu--aget thinking "budget_tokens") 4096))))))
+      ;; deepseek's format carries effort top-level only: no second shape.
+      (should-not (assoc "reasoning" payload))
+      (should-not (assoc "thinking" payload)))))
 
 (ert-deftest kargu-providers-extract-models-test ()
   "`kargu--extract-models-from-json' handles data, models, and bare vectors."
@@ -298,7 +296,7 @@
   (require 'kargu/api/http)
   (require 'kargu/api/tools)
   (kargu-register-tool "mock_tool" "A mock tool for testing" nil #'ignore)
-  (let ((kargu-active-mode 'agent)
+  (let ((_ (kargu-test-mode 'agent))
         (kargu--session-provider "openrouter")
         (kargu--session-model "anthropic/claude-3.5-sonnet")
         (kargu--message-history '((("role" . "user") ("content" . "hello")))))
@@ -315,7 +313,7 @@
   (require 'kargu/api/http)
   (require 'kargu/api/tools)
   (kargu-register-tool "mock_tool" "A mock tool for testing" nil #'ignore)
-  (let ((kargu-active-mode 'agent)
+  (let ((_ (kargu-test-mode 'agent))
         (kargu--session-provider "ollama")
         (kargu--session-model "llama3")
         (kargu--message-history '((("role" . "user") ("content" . "hello")))))

@@ -24,19 +24,6 @@
 (require 'button)
 (require 'project nil t)
 (require 'company nil t)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/ui/notify)
 (require 'kargu/config)
@@ -171,7 +158,7 @@ The header line shows the active mode, model, and context usage.
   (setq-local require-final-newline nil)
   (setq-local header-line-format '(:eval (kargu-chat--header-string)))
   (unless kargu-chat--project-root
-    (setq-local kargu-chat--project-root (kargu-session--project-root)))
+    (setq-local kargu-chat--project-root (kargu-session-project-root)))
   (unless kargu-chat--session-id
     (setq-local kargu-chat--session-id (kargu-session-id)))
   (add-to-list 'kargu-chat-buffers (current-buffer))
@@ -202,7 +189,7 @@ Otherwise generates `*kargu-chat*<N>'."
            (read-string "Session name (optional): "))))
   (when (and (derived-mode-p 'kargu-chat-mode) (bound-and-true-p kargu-session-auto-save))
     (ignore-errors (kargu-session-save (current-buffer))))
-  (let* ((proj (kargu-session--project-root))
+  (let* ((proj (kargu-session-project-root))
          (base-name (if (and (stringp name) (not (string-empty-p (string-trim name))))
                         (format "*kargu-chat: %s*" (string-trim name))
                       kargu-chat-buffer-name))
@@ -213,7 +200,7 @@ Otherwise generates `*kargu-chat*<N>'."
       (setq-local kargu-chat--session-id (and (fboundp 'kargu-session-id) (kargu-session-id)))
       (when (and (stringp name) (not (string-empty-p (string-trim name))))
         (setq-local kargu-chat--session-title (string-trim name)))
-      (kargu-chat--insert
+      (kargu-chat-insert
        (concat "kargu chat — type at the prompt; "
                "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-h switch session.\n\n"))
       (kargu-chat--ensure-prompt)
@@ -250,7 +237,7 @@ Otherwise generates `*kargu-chat*<N>'."
 (defun kargu-chat--buffer (&optional target-root)
   "Return the chat buffer for TARGET-ROOT, creating or restoring it if needed.
 Reuses the current buffer if it is already in `kargu-chat-mode'."
-  (let ((root (or target-root (kargu-session--project-root))))
+  (let ((root (or target-root (kargu-session-project-root))))
     (cond
      ;; Current buffer is already a matching chat buffer
      ((and (derived-mode-p 'kargu-chat-mode)
@@ -288,7 +275,7 @@ Reuses the current buffer if it is already in `kargu-chat-mode'."
                  '(read-only t front-sticky t
                    rear-nonsticky (read-only face front-sticky)))))
             (unless (kargu-chat--prompt-live-p)
-              (kargu-chat--insert
+              (kargu-chat-insert
                (concat "kargu chat — type at the prompt; "
                        "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-h switch session.\n\n"))
               (kargu-chat--ensure-prompt))
@@ -314,7 +301,7 @@ for that directory before the prompt exists."
   (kargu-chat--withhold-prompt-until-root)
   (let* ((open-company (called-interactively-p 'any))
          (owned (kargu-language-claim-root))
-         (proj (or owned (kargu-session--project-root)))
+         (proj (or owned (kargu-session-project-root)))
          (buffer (kargu-chat--buffer proj)))
     (pop-to-buffer-same-window buffer)
     (kargu-chat-activate-selection buffer)
@@ -350,50 +337,58 @@ for that directory before the prompt exists."
   (unless (and (kargu-chat--shown-provider) (kargu-chat--shown-model))
     (user-error "kargu: select a provider and model before sending")))
 
+(declare-function kargu-loop-require-tools-for-agent "kargu/loop" ())
+(declare-function kargu-model-forget-tools-refusals "kargu/api/catalog" ())
+
 (defun kargu-chat--refuse-agent-without-tools ()
   "Signal when agent mode is on and the model cannot call tools.
 The request is not sent.  Call this before the prompt is consumed
 so the typed text stays in the input."
-  (when (and (eq (kargu-state-mode) 'agent)
-             (fboundp 'kargu-model-supports-tools-p)
-             (not (kargu-model-supports-tools-p)))
-    (user-error "Model '%s' does not support tool calling; switch to a tool-capable model or ask mode"
-                (or (kargu--model) "unknown"))))
+  (kargu-loop-require-tools-for-agent))
 
-(defun kargu-chat--submit (prompt)
-  "Start an agent run for PROMPT in the chat buffer."
-  (when (kargu-loop-running-p)
-    (user-error "kargu: a run is already in progress (stop it with C-c C-k)"))
-  (let* ((proj (or (bound-and-true-p kargu-chat--project-root)
-                   (and (fboundp 'kargu-session--project-root)
-                        (kargu-session--project-root))))
-         (missing (and (fboundp 'kargu-deps-missing)
-                       (kargu-deps-missing proj))))
-    (when missing
-      (user-error "kargu: cannot send prompt: mandatory tools are missing: %s (please install them first)"
-                  (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", "))))
+(defun kargu-chat--preflight (prompt)
+  "Signal `user-error' when PROMPT cannot be sent now.
+Nothing is consumed or rendered, so a refusal keeps the typed input."
   (unless (and (stringp prompt)
                (not (string-empty-p (string-trim prompt))))
     (user-error "kargu: empty prompt"))
   (kargu-chat--require-selection)
   (kargu-chat--refuse-agent-without-tools)
-  (add-to-history 'kargu-chat-input-history prompt)
+  (kargu-loop-preflight))
+
+(defun kargu-chat--reset-stream-state ()
+  "Forget the stream flags of the previous run in this chat buffer."
   (setq kargu-chat--streamed-text nil
         kargu-chat--preamble-dropped nil
-        kargu-chat--in-thought nil)
+        kargu-chat--in-thought nil))
+
+(defun kargu-chat--mark-answer-start ()
+  "Remember where the assistant answer of this turn begins."
+  (setq kargu-chat--answer-start
+        (copy-marker
+         (or (and (markerp kargu-chat--output-marker)
+                  (marker-position kargu-chat--output-marker))
+             (point-max))
+         nil)))
+
+(defun kargu-chat--follow-end (buffer)
+  "Move point and every window showing BUFFER to its end."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (goto-char (point-max)))
+    (dolist (win (get-buffer-window-list buffer nil t))
+      (set-window-point win (point-max)))))
+
+(defun kargu-chat--submit (prompt)
+  "Start an agent run for PROMPT in the chat buffer."
+  (kargu-chat--preflight prompt)
+  (add-to-history 'kargu-chat-input-history prompt)
+  (kargu-chat--reset-stream-state)
   (kargu-chat-note-selection)
   (kargu-chat--render-user-turn prompt)
   (kargu-chat--render-agent-heading)
   (kargu-chat--ensure-running-prompt)
-  (let ((buf (current-buffer)))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (setq kargu-chat--answer-start
-              (copy-marker
-               (or (and (markerp kargu-chat--output-marker)
-                        (marker-position kargu-chat--output-marker))
-                   (point-max))
-               nil)))))
+  (kargu-chat--mark-answer-start)
   (condition-case err
       (kargu-loop-send (kargu-chat--expand-prompt prompt)
                        #'kargu-chat--on-delta
@@ -402,20 +397,13 @@ so the typed text stays in the input."
      (kargu-chat--ensure-idle-prompt)
      (signal (car err) (cdr err))))
   (force-mode-line-update t)
-  (let ((buffer (current-buffer)))
-    (when (buffer-live-p buffer)
-      (with-current-buffer buffer
-        (goto-char (point-max)))
-      (dolist (win (get-buffer-window-list buffer nil t))
-        (set-window-point win (point-max))
-        (with-selected-window win
-          (goto-char (point-max)))))))
+  (kargu-chat--follow-end (current-buffer)))
 
 (defun kargu-chat--project ()
   "Project root of the current chat, or the session root."
   (or (bound-and-true-p kargu-chat--project-root)
-      (and (fboundp 'kargu-session--project-root)
-           (kargu-session--project-root))))
+      (and (fboundp 'kargu-session-project-root)
+           (kargu-session-project-root))))
 
 (defun kargu-chat--missing-tools (proj)
   "Missing mandatory tools for PROJ, or nil."
@@ -448,7 +436,9 @@ so the typed text stays in the input."
 
 (defun kargu-chat--send-prepared (text consume)
   "Submit TEXT.  CONSUME non-nil deletes the matching prompt first.
-A debug session that is not ready is started before the submit."
+A debug session that is not ready is started before the submit.
+Every refusal happens before the input is consumed."
+  (kargu-chat--preflight text)
   (cond
    ((kargu-chat--debug-session-needed-p)
     (kargu-chat--after-debug-session
@@ -514,11 +504,11 @@ from the menu with an empty prompt, this just opens the chat."
       (kargu-chat-show)
       (kargu-chat--signal-missing-tools (kargu-chat--project) missing)))
   (kargu-chat-show)
-  (with-current-buffer (kargu-chat--buffer)
-    (kargu-chat--refuse-agent-without-tools)
-    (when (kargu-chat--prompt-live-p)
-      (kargu-chat--consume-input)))
   (let ((text (kargu-chat--prompt-text prompt)))
+    (with-current-buffer (kargu-chat--buffer)
+      (kargu-chat--preflight text)
+      (when (kargu-chat--prompt-live-p)
+        (kargu-chat--consume-input)))
     (cond
      ((kargu-chat--debug-session-needed-p)
       (kargu-chat--after-debug-session
@@ -545,7 +535,8 @@ The chat log itself is kept as a record."
   (interactive)
   (when (y-or-n-p "Reset the kargu session (history + counters)? ")
     (kargu-session-reset)
-    (kargu-chat--insert "\n— session reset —\n"
+    (kargu-model-forget-tools-refusals)
+    (kargu-chat-insert "\n— session reset —\n"
                         'kargu-chat-meta)
     (kargu-chat--ensure-prompt)))
 

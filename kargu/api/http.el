@@ -15,21 +15,8 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'plz)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
-(require 'kargu/constants)
+(require 'kargu/contract/constants)
 (require 'kargu/config)
 (require 'kargu/json)
 (require 'kargu/history)
@@ -91,7 +78,8 @@ the UI and central state are left in a consistent state."
   (kargu-log 'warn "request cancelled")
   (message "kargu: cancelled in-flight request"))
 
-(declare-function kargu-provider-prompt-caching "kargu/providers/registry" (id))
+(declare-function kargu-provider-cache-marker-p "kargu/providers/registry" (id))
+(declare-function kargu-provider-reasoning-shape "kargu/providers/registry" (id))
 
 (defun kargu--apply-prompt-caching-messages (raw-msgs tools-len)
   "Attach cache_control markers to RAW-MSGS when appropriate.
@@ -125,75 +113,84 @@ TOOLS-LEN is the number of tools available."
       (setq tools (vconcat tools-list))))
   tools)
 
-(defun kargu--build-reasoning-params ()
-  "Construct reasoning effort and thinking budget request entries."
-  (let ((payload-entries nil)
-        (reasoning-alist nil))
-    (when (and (boundp 'kargu-reasoning-effort)
-               kargu-reasoning-effort)
-      (let ((effort (cond ((symbolp kargu-reasoning-effort)
-                           (symbol-name kargu-reasoning-effort))
-                          ((stringp kargu-reasoning-effort)
-                           kargu-reasoning-effort))))
-        (unless (member effort '("none" "nil" "off"))
-          (push (cons "reasoning_effort" effort) payload-entries)
-          (push (cons "effort" effort) reasoning-alist))))
-    (when (and (boundp 'kargu-thinking-budget)
-               (integerp kargu-thinking-budget)
-               (> kargu-thinking-budget 0))
-      (push (cons "thinking" `(("type" . "enabled")
-                               ("budget_tokens" . ,kargu-thinking-budget)))
-            payload-entries)
-      (push (cons "max_tokens" kargu-thinking-budget) reasoning-alist))
-    (when reasoning-alist
-      (push (cons "reasoning" (reverse reasoning-alist)) payload-entries))
-    (nreverse payload-entries)))
+(defun kargu-reasoning-effort-level ()
+  "The reasoning effort to send as a string, or nil to send none.
+The one place that reads `kargu-reasoning-effort': nil, \"off\" and the
+empty string mean the user chose no effort.  \"none\" is a real level
+that some models accept, so it is sent."
+  (let ((effort (and kargu-reasoning-effort
+                     (string-trim (format "%s" kargu-reasoning-effort)))))
+    (and effort
+         (not (member (downcase effort) '("" "nil" "off")))
+         effort)))
+
+(defun kargu-reasoning-budget ()
+  "The thinking token budget when it is a positive integer, else nil."
+  (and (integerp kargu-thinking-budget)
+       (> kargu-thinking-budget 0)
+       kargu-thinking-budget))
+
+(defun kargu--build-reasoning-params (&optional provider)
+  "Request entries for effort and thinking budget in PROVIDER's wire shape.
+The shape comes from the provider's format record (`:reasoning-shape')."
+  (let ((effort (kargu-reasoning-effort-level))
+        (budget (kargu-reasoning-budget))
+        (shape (if (fboundp 'kargu-provider-reasoning-shape)
+                   (kargu-provider-reasoning-shape
+                    (or provider (kargu--provider-name)))
+                 'effort)))
+    (pcase shape
+      ('thinking
+       (and budget
+            `(("thinking" . (("type" . "enabled")
+                             ("budget_tokens" . ,budget))))))
+      ('nested
+       (let ((nested (append (and effort `(("effort" . ,effort)))
+                             (and budget `(("max_tokens" . ,budget))))))
+         (and nested `(("reasoning" . ,nested)))))
+      (_ (and effort `(("reasoning_effort" . ,effort)))))))
+
+(defun kargu--payload-merge (payload extra)
+  "PAYLOAD with the entries of EXTRA added; an EXTRA key replaces its twin."
+  (append (seq-remove (lambda (cell) (assoc (car cell) extra)) payload)
+          extra))
+
+(defun kargu--payload-sampling-entries ()
+  "Request entries for temperature and the output token cap."
+  (append (and kargu-temperature `(("temperature" . ,kargu-temperature)))
+          (and kargu-max-tokens `(("max_tokens" . ,kargu-max-tokens)
+                                  ("max_completion_tokens" . ,kargu-max-tokens)))))
+
+(defun kargu--payload-tools-entries (tools cache-marked)
+  "Request entries for the TOOLS vector; none when it is empty.
+CACHE-MARKED puts a cache marker on the last tool."
+  (when (> (length tools) 0)
+    `(("tools" . ,(if cache-marked (kargu--apply-prompt-caching-tools tools) tools))
+      ("tool_choice" . "auto"))))
 
 (defun kargu--build-payload (&rest extra)
   "Assemble the chat-completions request payload.
-EXTRA is a list of additional (KEY . VALUE) conses appended to
-the payload (e.g. (\"stream\" . t)).  The \"tools\" array is only
-included when at least one tool is VISIBLE after
-`kargu--tools-visible-p' filtering."
+EXTRA is a list of additional (KEY . VALUE) conses that replace or add
+entries (e.g. (\"stream\" . t)).  The \"tools\" array is only included when
+at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
   (let* ((tools (kargu--build-tools-vector))
-         (pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "default"))
-         (pname-lower (downcase (string-trim (if (symbolp pname) (symbol-name pname) (format "%s" pname)))))
-         (caching-p (and (fboundp 'kargu-provider-prompt-caching)
-                         (kargu-provider-prompt-caching pname-lower)))
-         (is-anthropic-or-openrouter
-          (and caching-p
-               (memq (and (fboundp 'kargu-provider-format)
-                          (kargu-provider-format pname-lower))
-                     '(anthropic openrouter))))
-         (raw-msgs (copy-tree kargu--message-history t))
-         (payload nil))
-    ;; Multi-turn prompt caching for Anthropic / OpenRouter:
-    (when is-anthropic-or-openrouter
-      (setq raw-msgs (kargu--apply-prompt-caching-messages raw-msgs (length tools))))
-
-    (setq payload `(("model" . ,(kargu--model))
-                    ("messages" . ,(vconcat raw-msgs))))
-    (when kargu-temperature
-      (setq payload (append payload `(("temperature" . ,kargu-temperature)))))
-    (when kargu-max-tokens
-      (setq payload (append payload `(("max_tokens" . ,kargu-max-tokens)
-                                      ("max_completion_tokens" . ,kargu-max-tokens)))))
-
-    (let ((reasoning-params (kargu--build-reasoning-params)))
-      (when reasoning-params
-        (setq payload (append payload reasoning-params))))
-
-    (when (> (length tools) 0)
-      (when is-anthropic-or-openrouter
-        (setq tools (kargu--apply-prompt-caching-tools tools)))
-      (setq payload (append payload `(("tools" . ,tools)
-                                      ("tool_choice" . "auto")))))
-    (when (fboundp 'kargu-provider-params-build-payload)
-      (let ((provider-params (kargu-provider-params-build-payload)))
-        (when provider-params
-          (setq payload (append payload provider-params)))))
-    (when extra
-      (setq payload (append payload (copy-sequence extra))))
+         (cache-marked (kargu-provider-cache-marker-p
+                        (downcase (string-trim (format "%s" (kargu--provider-name))))))
+         (messages (copy-tree kargu--message-history t))
+         (payload
+          (append
+           `(("model" . ,(kargu--model))
+             ("messages" . ,(vconcat (if cache-marked
+                                         (kargu--apply-prompt-caching-messages
+                                          messages (length tools))
+                                       messages))))
+           (kargu--payload-sampling-entries)
+           (kargu--payload-tools-entries tools cache-marked))))
+    (dolist (entries (list (kargu--build-reasoning-params)
+                           (and (fboundp 'kargu-provider-params-build-payload)
+                                (kargu-provider-params-build-payload))
+                           extra))
+      (setq payload (kargu--payload-merge payload entries)))
     payload))
 
 (defun kargu--summarize-http-body (body &optional status)
@@ -237,10 +234,6 @@ available, instead of dumping raw JSON."
           (format "plz error: %s" detail)))
     (error (format "%S" err))))
 
-(defconst kargu--api-retry-statuses
-  (or (bound-and-true-p kargu-http-retry-statuses) '(429 500 502 503 504 529))
-  "HTTP statuses that trigger exponential backoff retry.")
-
 (defun kargu--plz-http-status (err)
   "Numeric HTTP status from plz error ERR, or nil."
   (ignore-errors
@@ -266,13 +259,13 @@ available, instead of dumping raw JSON."
 
 (defun kargu--api-retry-after-seconds (err)
   "Retry-After delay in seconds from ERR, or nil."
-  (let ((raw (kargu--plz-header err "retry-after")))
+  (let ((raw (and err (kargu--plz-header err "retry-after"))))
     (when (and (stringp raw) (string-match "\\`[0-9]+\\'" (string-trim raw)))
-      (max 0 (string-to-number raw)))))
+      (min kargu-api-retry-after-max (string-to-number raw)))))
 
 (defun kargu--api-retryable-p (err)
   "Non-nil when ERR is an HTTP status we retry."
-  (memq (kargu--plz-http-status err) kargu--api-retry-statuses))
+  (memq (kargu--plz-http-status err) kargu-http-retry-statuses))
 
 (defun kargu--api-retry-delay (attempt err)
   "Seconds to wait before retry ATTEMPT (0-based) after ERR.
@@ -295,9 +288,10 @@ HTTP 200 bodies can still carry an SSE `error' event with a 502
 or \"overloaded\" text; those are retryable the same way as a
 transport-level 502."
   (and (stringp message)
-       (let ((s (downcase message)))
-         (or (string-match-p "\\[\\(429\\|500\\|502\\|503\\|529\\)\\]" message)
-             (string-match-p "HTTP \\(429\\|500\\|502\\|503\\|529\\)\\>" message)
+       (let ((s (downcase message))
+             (retry-alt (mapconcat #'number-to-string kargu-http-retry-statuses "\\|")))
+         (or (string-match-p (format "\\[\\(%s\\)\\]" retry-alt) message)
+             (string-match-p (format "HTTP \\(%s\\)\\>" retry-alt) message)
              (string-match-p "\\<overloaded\\>" s)
              (string-match-p "temporarily unavailable" s)
              (string-match-p "upstream error" s)))))
@@ -344,7 +338,9 @@ until the retry finishes or is cancelled."
                                             callback on-delta (1+ attempt))))))
       (setq kargu--busy nil)
       (let ((msg (kargu--plz-error-message err)))
-        (kargu-circuit-record-failure msg)
+        (when (or (kargu--api-retryable-p err)
+                  (null (kargu--plz-http-status err)))
+          (kargu-circuit-record-failure msg))
         (kargu-log 'error "request failed: %s" msg)
         (funcall callback (kargu--api-error-alist msg))))))
 
@@ -362,26 +358,32 @@ An empty KEY sends neither."
         `(("x-api-key" . ,key))
       `(("Authorization" . ,(concat "Bearer " key))))))
 
+(defun kargu--api-session-id ()
+  "Session id sent in headers that ask for it."
+  (if (fboundp 'kargu-session-id) (kargu-session-id) "default"))
+
 (defun kargu--api-default-headers (format expanded)
   "Format-record headers for FORMAT that EXPANDED does not already set."
   (let (out)
     (dolist (pair (kargu-provider-format-headers format))
       (unless (assoc (car pair) expanded)
-        (push pair out)))
+        (push (kargu--api-expand-header pair (kargu--api-session-id)) out)))
     (nreverse out)))
 
 (defun kargu--api-expand-header (pair session-id)
-  "Return header PAIR, replacing a `:session' value with SESSION-ID."
-  (if (and (consp pair) (eq (cdr pair) :session))
-      (cons (car pair) session-id)
-    pair))
+  "Return header PAIR with a symbolic value filled in.
+`:session' becomes SESSION-ID and `:app-url' becomes `kargu-app-url'."
+  (pcase (cdr-safe pair)
+    (:session (cons (car pair) session-id))
+    (:app-url (cons (car pair) kargu-app-url))
+    (_ pair)))
 
 (defun kargu--api-headers (key &optional provider-name)
   "HTTP headers for the active or specified PROVIDER-NAME.
 KEY is the resolved secret.  An empty KEY omits Authorization so
 local or keyless proxies still work.  Auth and extra headers come
 from the provider catalog `:format' and `:extra-headers'."
-  (let* ((sid (if (fboundp 'kargu-session-id) (kargu-session-id) "default"))
+  (let* ((sid (kargu--api-session-id))
          (pname (if provider-name
                     (format "%s" provider-name)
                   (if (fboundp 'kargu--provider-name) (kargu--provider-name) "")))
@@ -394,9 +396,7 @@ from the provider catalog `:format' and `:extra-headers'."
                                   (kargu--api-expand-header pair sid))
                                 extra))))
     (append
-     `(("Content-Type" . "application/json")
-       ("HTTP-Referer" . ,kargu-app-url)
-       ("X-Title" . "kargu"))
+     '(("Content-Type" . "application/json"))
      (kargu--api-auth-headers key format)
      (kargu--api-default-headers format expanded)
      expanded)))
@@ -409,7 +409,8 @@ streaming transport; otherwise a single asynchronous request.
 ATTEMPT is the 0-based retry count.  Neither transport ever
 blocks the UI thread."
   (cl-block kargu--api-post
-    (unless (kargu-circuit-allow-request-p)
+    (unless (or (and attempt (> attempt 0))
+                (kargu-circuit-allow-request-p))
       (setq kargu--busy nil)
       (let ((err-msg (format "Circuit breaker OPEN: upstream provider degraded; %s"
                              (kargu-circuit-status-string))))
@@ -477,6 +478,11 @@ of the entire SSE body text."
          (events-acc nil)
          (on-event (lambda (event)
                      (push event events-acc)))
+         ;; A reply that arrives after the run was cancelled reaches no one.
+         (live-delta (and on-delta
+                          (lambda (event)
+                            (when (= gen kargu--generation)
+                              (funcall on-delta event)))))
          (timeout (bound-and-true-p kargu-api-timeout)))
     (kargu--log-out-payload stream-payload)
     (setq kargu--current-process
@@ -488,8 +494,9 @@ of the entire SSE body text."
                   (when (numberp timeout) (list :timeout timeout))
                   (list
                    :filter (lambda (process string)
-                             (kargu--stream-filter process string on-delta on-event))
+                             (kargu--stream-filter process string live-delta on-event))
                    :then (lambda (body)
+                           (kargu--stream-flush kargu--current-process live-delta on-event)
                            (setq kargu--current-process nil)
                            (when (= gen kargu--generation)
                              (kargu--api-handle-body
@@ -534,6 +541,18 @@ line.  The filter never signals."
     (error
      (kargu-log 'error "stream filter error: %s"
                       (error-message-string err)))))
+
+(defun kargu--stream-flush (process on-delta on-event)
+  "Handle the last SSE line of PROCESS when the stream ended without a newline."
+  (when (processp process)
+    (let ((rest (process-get process :kargu-raw)))
+      (process-put process :kargu-raw nil)
+      (when (and (stringp rest) (not (string-empty-p (string-trim rest))))
+        (condition-case-unless-debug err
+            (kargu--stream-line process (decode-coding-string rest 'utf-8)
+                                on-delta on-event)
+          (error (kargu-log 'error "stream flush error: %s"
+                            (error-message-string err))))))))
 
 (defun kargu--stream-line (process line on-delta &optional on-event)
   "Handle one complete SSE LINE from PROCESS.
@@ -581,8 +600,12 @@ ignored.  PROCESS is only used for logging context."
   (funcall callback response))
 
 (defun kargu--api-dispatch-error (callback msg)
-  "Mark kargu as not busy and invoke CALLBACK with an error alist for MSG."
+  "Mark kargu as not busy and invoke CALLBACK with an error alist for MSG.
+An upstream-unavailable MSG counts against the circuit breaker here, so
+the loop never has to record it again."
   (setq kargu--busy nil)
+  (when (kargu--api-error-looks-retryable-p msg)
+    (kargu-circuit-record-failure msg))
   (funcall callback (kargu--api-error-alist msg)))
 
 (defun kargu--api-handle-no-choices (response trimmed url headers payload gen

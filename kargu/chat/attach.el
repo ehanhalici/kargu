@@ -16,20 +16,8 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'json)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
+(require 'kargu/permission)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/lsp)
 
@@ -105,7 +93,8 @@
     (cl-labels
         ((try (rel root)
            (let ((abs (expand-file-name rel root)))
-             (when (file-regular-p abs)
+             (when (and (file-regular-p abs)
+                        (kargu-permission-within-project-p abs root))
                abs))))
       (dolist (root roots)
         (unless found
@@ -117,7 +106,7 @@
             (unless found
               (setq found (try rest root))))))
       (when (not found)
-        (let ((abs (ignore-errors (kargu--resolve-path mention))))
+        (let ((abs (ignore-errors (kargu-permission-resolve mention "mention"))))
           (when (and abs (file-regular-p abs))
             (setq found abs))))
       found)))

@@ -20,16 +20,18 @@
 (require 'kargu/languages)
 (require 'kargu/tools/toolchain)
 
-(ert-deftest kargu-languages-registered-all-eight-test ()
+(ert-deftest kargu-languages-registered-all-test ()
   "Ensure every target language is registered with a valid spec."
-  (let ((expected-ids '(rust c cpp golang python java haskell ocaml emacs-lisp)))
+  (let ((expected-ids '(rust c cpp golang python java haskell ocaml javascript typescript emacs-lisp)))
     (dolist (id expected-ids)
       (let ((spec (kargu-language-get id)))
         (should (kargu-language-spec-p spec))
         (should (eq (kargu-language-spec-id spec) id))
         (should (stringp (kargu-language-spec-name spec)))
         (should (consp (kargu-language-spec-extensions spec)))
-        (should (plist-get (kargu-language-spec-toolchain spec) :build-cmd))
+        (should (plist-get (kargu-language-toolchain spec default-directory) :build-cmd))
+        (when (kargu-language-requires-lsp-p spec)
+          (should (plist-get (kargu-language-spec-lsp spec) :binaries)))
         (should (plist-get (kargu-language-spec-debugger spec) :adapter))))))
 
 (ert-deftest kargu-languages-extension-detection-test ()
@@ -181,3 +183,27 @@
 (provide 'tests/test-languages)
 
 ;;; tests/test-languages.el ends here
+
+(ert-deftest kargu-languages-web-and-java-toolchain-follow-the-project-test ()
+  "The JavaScript, TypeScript and Java toolchains are read from the project."
+  (let ((dir (make-temp-file "kargu-web-" t)))
+    (unwind-protect
+        (progn
+          (write-region "{}" nil (expand-file-name "package.json" dir))
+          (write-region "" nil (expand-file-name "pnpm-lock.yaml" dir))
+          (should (eq (kargu-language-spec-id (kargu-language-detect dir)) 'javascript))
+          (should (equal (plist-get (kargu-toolchain-detect dir) :test-cmd) "pnpm test"))
+          (write-region "{}" nil (expand-file-name "tsconfig.json" dir))
+          (should (eq (kargu-language-spec-id (kargu-language-detect dir)) 'typescript))
+          (should (string-match-p "tsc --noEmit"
+                                  (plist-get (kargu-toolchain-detect dir) :build-cmd))))
+      (delete-directory dir t))
+    (setq dir (make-temp-file "kargu-java-" t))
+    (unwind-protect
+        (progn
+          (write-region "" nil (expand-file-name "pom.xml" dir))
+          (should (equal (plist-get (kargu-toolchain-detect dir) :test-cmd) "mvn test"))
+          (write-region "" nil (expand-file-name "build.gradle" dir))
+          (delete-file (expand-file-name "pom.xml" dir))
+          (should (equal (plist-get (kargu-toolchain-detect dir) :test-cmd) "gradle test")))
+      (delete-directory dir t))))

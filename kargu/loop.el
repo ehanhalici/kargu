@@ -17,33 +17,21 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/state)
 (require 'kargu/config)
 (require 'kargu/prompt)
 (require 'kargu/history)
-(require 'kargu/history-compact)
+(require 'kargu/history/compact)
 (require 'kargu/api)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/lsp)
 (require 'kargu/tools/deps nil t)
+(require 'kargu/ui/confirm)
 
 (declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id))
-(declare-function kargu-session--project-root "kargu/chat/session" (&optional buffer-or-dir))
+(declare-function kargu-session-project-root "kargu/chat/session" (&optional buffer-or-dir))
 (declare-function kargu-deps-missing "kargu/tools/deps" (&optional root))
 
 (defgroup kargu-loop nil
@@ -119,14 +107,12 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
 
 (defun kargu-loop--active-mode ()
   "Return the active mode symbol."
-  (if (fboundp 'kargu-state-mode)
-      (kargu-state-mode)
-    (or (bound-and-true-p kargu-active-mode) 'ask)))
+  (kargu-state-mode))
 
-(defun kargu-loop--tool-visible-p (name)
+(defun kargu-loop-tool-visible-p (name)
   "Return non-nil when tool NAME may be advertised to the model."
   (let ((mode (kargu-loop--active-mode)))
-    (and (not (plist-get kargu--loop-run :no-tools))
+    (and (kargu-tools-enabled-p)
          (cond
           ((member name kargu-loop-debug-tools)
            (memq mode '(debug agent)))
@@ -183,7 +169,7 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
             "running: state %s, iteration %d/%d, healing rounds %d/%d, verifications %d, model request %s"
             (or (plist-get kargu--loop-run :state) 'request)
             (or (plist-get kargu--loop-run :iterations) 0)
-            kargu-max-iterations
+            (kargu-loop--turn-cap kargu--loop-run)
             (or (plist-get kargu--loop-run :healing) 0)
             kargu-max-healing-steps
             (or (plist-get kargu--loop-run :verifications) 0)
@@ -204,46 +190,67 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
                 (or err "")))
             120)))
 
-(defun kargu-loop-send (prompt &optional on-delta on-finish)
-  "Start an agent run with PROMPT (a non-empty string)."
-  (interactive "skargu prompt: ")
+(defun kargu-tools-enabled-p (&optional run)
+  "Return non-nil when tools may be used for RUN (default: the live run).
+The single answer to \"can this request use tools\": the model must not be
+ruled out by the catalog or by a provider refusal, and RUN must not have
+switched tools off (for example while compacting)."
+  (and (kargu-model-supports-tools-p)
+       (not (plist-get (or run kargu--loop-run) :no-tools))))
+
+(defun kargu-loop-require-tools-for-agent ()
+  "Signal `user-error' when agent mode is on and the model cannot call tools."
+  (when (and (eq (kargu-loop--active-mode) 'agent)
+             (not (kargu-model-supports-tools-p)))
+    (user-error "Model '%s' does not support tool calling; switch to a tool-capable model or ask mode"
+                (or (kargu--model) "unknown"))))
+
+(defun kargu-loop-preflight ()
+  "Signal `user-error' when a run cannot start now.
+Return non-nil when the run must be tool-free (the model cannot call tools
+and the mode is not agent).  Touches no state, so a refused start leaves
+the diff run files and the UI as they were."
   (when (kargu-loop-running-p)
     (user-error "kargu: a run is already in progress (M-x kargu-loop-stop)"))
   (let ((missing (and (fboundp 'kargu-deps-missing)
-                      (kargu-deps-missing (kargu-session--project-root)))))
+                      (kargu-deps-missing (kargu-session-project-root)))))
     (when missing
       (user-error "kargu: Run cannot start because mandatory tools are missing: %s"
                   (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", "))))
+  (kargu-loop-require-tools-for-agent)
+  (not (kargu-model-supports-tools-p)))
+
+(defun kargu-loop-send (prompt &optional on-delta on-finish)
+  "Start an agent run with PROMPT (a non-empty string)."
+  (interactive "skargu prompt: ")
   (kargu-contract-assert #'kargu-contract-non-empty-string-p prompt
                          "kargu: prompt must be a non-empty string: %S" prompt)
   (kargu-contract-assert #'kargu-contract-callback-p on-delta
                          "kargu: on-delta must be callable or nil: %S" on-delta)
   (kargu-contract-assert #'kargu-contract-callback-p on-finish
                          "kargu: on-finish must be callable or nil: %S" on-finish)
-  (let ((run (list :prompt prompt
-                   :state 'request
-                   :chat-buffer (current-buffer)
-                   :max-iterations (if (boundp 'kargu-max-iterations) kargu-max-iterations 12)
-                   :on-delta on-delta
-                   :on-finish (or on-finish
-                                  #'kargu-loop--message-report)
-                   :iterations 0
-                   :healing 0
-                   :verifications 0
-                   :empty-retries 0
-                   :upstream-retries 0
-                   :compactions 0
-                   :length-continues 0
-                   :doom-sigs nil)))
+  (let* ((no-tools (kargu-loop-preflight))
+         (run (list :prompt prompt
+                    :state 'request
+                    :chat-buffer (current-buffer)
+                    :max-iterations (if (boundp 'kargu-max-iterations) kargu-max-iterations 12)
+                    :on-delta on-delta
+                    :on-finish (or on-finish
+                                   #'kargu-loop--message-report)
+                    :iterations 0
+                    :healing 0
+                    :verifications 0
+                    :empty-retries 0
+                    :upstream-retries 0
+                    :compactions 0
+                    :length-continues 0
+                    :doom-sigs nil)))
+    (when no-tools
+      (plist-put run :no-tools t)
+      (kargu-log 'info "model '%s' does not support tools; running in tool-free mode" (kargu--model)))
     (setq kargu--compaction-system nil)
     (when (fboundp 'kargu-diff-reset-run-files)
       (kargu-diff-reset-run-files))
-    (when (and (fboundp 'kargu-model-supports-tools-p)
-               (not (kargu-model-supports-tools-p)))
-      (if (eq (kargu-loop--active-mode) 'agent)
-          (user-error "Model '%s' does not support tool calling; switch to a tool-capable model or ask mode" (kargu--model))
-        (plist-put run :no-tools t)
-        (kargu-log 'info "model '%s' does not support tools; running in tool-free mode" (kargu--model))))
     (setq kargu--loop-run run)
     (when (fboundp 'kargu-state-transition-status)
       (kargu-state-transition-status :requesting))
@@ -274,6 +281,9 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
                      "run end with %d unconsumed changed file(s)"
                      (length pending))))
       (setq kargu--loop-run nil)
+      (kargu-confirm-dismiss-all)
+      (when (and (memq status '(:stopped :error)) (fboundp 'kargu-diff-abort-all-sessions))
+        (kargu-diff-abort-all-sessions))
       (setq kargu--compaction-system nil)
       (plist-put kargu--session :active nil)
       (when (fboundp 'kargu-state-transition-status)

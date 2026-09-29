@@ -26,7 +26,8 @@ Rather than running heavy external daemons or separate browser windows, Kargu tu
   - **`plan`**: Multi-step implementation planning in an in-memory buffer before executing.
   - **`agent`**: Autonomous multi-turn problem solving with tool execution.
   - **`debug`**: Contextual assistance plugged directly into your active DAP session.
-- **Human-in-the-Loop Safety**: Interactive UI approval buttons for destructive operations and bash commands, complete with fallback confirmations.
+- **Human-in-the-Loop Safety**: Dangerous shell commands and paths outside the project always ask. File edits follow the review mode: `auto` (default) applies them at once and keeps a rollback snapshot, `async` and `blocking` write only after you accept the diff. Approvals are non-blocking buttons with a prompt fallback.
+- **Formally Checked Loop**: The agent loop and the protocol wall are specified in TLA+ (`proof/`) and checked exhaustively with TLC.
 
 ---
 
@@ -52,46 +53,28 @@ Clone the repository and add it to your Emacs `load-path`:
 
 Kargu can be configured via a simple TOML configuration file (`~/.config/kargu/config.toml` or `~/.emacs.d/kargu.toml`), environment variables, or Emacs `auth-source`.
 
-Run `M-x kargu-edit-config` to generate or edit your configuration:
+Run `M-x kargu-edit-config` to generate or edit your configuration. A commented example is in [`config.toml.example`](config.toml.example).
+
+The API key of the active provider is looked up in this order:
+
+1. the `kargu-api-key` variable (applies to the active provider only)
+2. `apikey` in the provider's TOML table; `${VAR}` is replaced by the environment variable `VAR`
+3. an explicit empty `apikey = ""` means "no key needed" and ends the search
+4. the environment variable the provider catalog names (for example `OPENAI_API_KEY`)
+5. `auth-source`, by the host of the provider's API URL
 
 ```toml
-# Local kargu credentials.  Copy this file to one of:
-#   ~/.config/kargu/config.toml
-#   ~/.emacs.d/kargu.toml
-# Do not commit the copy; it is per-machine.
+provider = "openrouter"
+model = "anthropic/claude-sonnet-4.5"
 
-provider = "opencode"
-model = "nemotron-3-ultra-free"
+[providers.openrouter]
+apikey = "${OPENROUTER_API_KEY}"   # read from the environment
 
-
-
-[providers.opencode]
-apikey = "[ENCRYPTION_KEY]"
-
-# --- DeepSeek (URL defaults to https://api.deepseek.com/v1) ---
-[providers.deepseek]
-apikey = "sk-..."
-
-# --- Groq (URL defaults to https://api.groq.com/openai/v1) ---
-[providers.groq]
-apikey = "gsk_..."
-
-# --- OpenAI (URL defaults to https://api.openai.com/v1) ---
-[providers.openai]
-apikey = "sk-..."
-
-# --- Anthropic (URL defaults to https://api.anthropic.com/v1) ---
-[providers.anthropic]
-apikey = "sk-ant-..."
-
-# --- Together AI (URL defaults to https://api.together.xyz/v1) ---
-[providers.togetherai]
-apikey = "..."
-
-# --- Ollama (local runner, no key required) ---
 [providers.ollama]
-apikey = ""
-# api defaults to "http://localhost:11434/v1"
+apikey = ""                        # local runner, keyless
+
+[providers."302ai"]                # names that start with a digit or hold dots are quoted
+apikey = "${AI302_API_KEY}"
 ```
 
 ---

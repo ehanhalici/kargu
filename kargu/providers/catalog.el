@@ -11,17 +11,6 @@
 
 ;;; Code:
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/providers/registry)
 
 (defconst kargu-provider--effort-list
@@ -42,20 +31,32 @@ Each entry is `:path' and `:type' (`list' or `csv').")
      . (:chat-path "/chat/completions"
         :auth bearer
         :stream t
+        :reasoning-shape nested
+        :params-menu kargu-tune-openrouter-menu
+        :cache-marker t
+        :default-headers (("HTTP-Referer" . :app-url) ("X-Title" . "kargu"))
         :models (:reasoning-efforts ,kargu-provider--effort-list)))
     (gemini
      . (:chat-path "/chat/completions"
         :auth bearer
-        :stream t))
+        :stream t
+        :params-menu kargu-tune-gemini-menu
+        :params-post kargu-provider-params--postprocess-gemini))
     (ollama
      . (:chat-path "/chat/completions"
         :auth bearer
-        :stream t))
+        :stream t
+        :params-menu kargu-tune-ollama-menu
+        :native-models (:path "/api/tags" :unless-suffix "/v1")))
     (anthropic
      . (:chat-path "/messages"
         :auth x-api-key
         :stream nil
         :default-headers (("anthropic-version" . "2023-06-01"))
+        :reasoning-shape thinking
+        :params-menu kargu-tune-anthropic-menu
+        :params-post kargu-provider-params--postprocess-anthropic
+        :cache-marker t
         :message-shape blocks
         :response-shape blocks
         :max-tokens-default 4096
@@ -77,6 +78,18 @@ Each entry is `:path' and `:type' (`list' or `csv').")
         :detect ("stop_reason")
         :detect-type "message")))
   "Wire records keyed by catalog format symbol.
+`:cache-marker' non-nil means the request carries `cache_control' markers
+for providers that enable prompt caching.  `:native-models' names the models
+path of a server whose own API differs from the OpenAI one, used unless the
+base URL ends in the given suffix.  A header value `:app-url' or `:session'
+is filled in when the request is built.
+`:params-menu' is the transient command that tunes the provider's own
+parameters (default `kargu-tune-openapi-menu'); `:params-post' is the
+function that shapes those parameters for the wire, called with the
+provider id, the nested blocks table and the top-level entries.
+`:reasoning-shape' says how the request carries reasoning settings:
+`effort' (default, top-level `reasoning_effort'), `nested' (a `reasoning'
+object) or `thinking' (a `thinking' object with a token budget).
 Providers point at a format.  A provider `:models' field spec replaces
 that format's `:models' map.")
 

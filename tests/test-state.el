@@ -99,16 +99,14 @@
   (kargu-state-reset))
 
 (ert-deftest kargu-state-mode-synchronization-test ()
-  "Test that kargu-state-set-mode synchronizes kargu-active-mode."
+  "Test that kargu-state-set-mode writes the store."
   (kargu-state-reset)
   (kargu-state-set-mode 'agent)
   (should (eq (kargu-state-mode) 'agent))
-  (should (eq kargu-active-mode 'agent))
   (kargu-state-set-mode 'ask)
   (should (eq (kargu-state-mode) 'ask))
-  (should (eq kargu-active-mode 'ask))
   (kargu-state-reset))
 
-(provide 'test-state)
+(provide 'tests/test-state)
 
 ;;; test-state.el ends here

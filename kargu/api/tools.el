@@ -13,19 +13,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/contract)
@@ -87,11 +74,11 @@ are truncated to `kargu-tool-output-limit'."
 (defun kargu--tool-visible-p (name)
   "Return non-nil if tool NAME is visible to the model.
 Delegates to `kargu--tools-visible-p' if set, otherwise to
-`kargu-loop--tool-visible-p' if defined, defaulting to t."
+`kargu-loop-tool-visible-p' if defined, defaulting to t."
   (if kargu--tools-visible-p
       (funcall kargu--tools-visible-p name)
-    (if (fboundp 'kargu-loop--tool-visible-p)
-        (kargu-loop--tool-visible-p name)
+    (if (fboundp 'kargu-loop-tool-visible-p)
+        (kargu-loop-tool-visible-p name)
       t)))
 
 (defun kargu--build-tools-vector ()
@@ -137,6 +124,17 @@ Concatenated JSON objects keep the last object."
             (list (cons "_raw" trimmed)))))))
    ((kargu--object-p arguments) arguments)
    (t arguments)))
+
+(defun kargu--tool-arguments-invalid-p (arguments)
+  "Non-nil when ARGUMENTS is text that is not one JSON object.
+An empty string and `{}' are valid: they mean no arguments."
+  (and (stringp arguments)
+       (let ((trimmed (string-trim arguments)))
+         (and (not (string-empty-p trimmed))
+              (not (equal trimmed "{}"))
+              (let ((parsed (kargu--json-decode-lenient trimmed)))
+                (not (and parsed (or (null (cdr parsed))
+                                     (kargu--object-p (cdr parsed))))))))))
 
 (defun kargu--encode-tool-arguments (arguments)
   "Return ARGUMENTS as a single valid JSON object string.
@@ -261,27 +259,28 @@ so the model can inspect remaining lines using `read_file'."
           (kargu--json-encode arguments)
         (error (format "%S" arguments))))))
 
+(defun kargu--executor-async-p (executor)
+  "Non-nil when EXECUTOR accepts a completion callback as second argument."
+  (let ((arity (func-arity executor)))
+    (or (eq (cdr arity) 'many)
+        (>= (cdr arity) 2))))
+
 (defun kargu--execute-tool-async (executor args name callback)
-  "Execute EXECUTOR with ARGS asynchronously, invoking CALLBACK with result."
-  (condition-case-unless-debug err
-      (let* ((on-done (lambda (res)
-                        (let* ((formatted (kargu--format-tool-result res))
-                               (final (kargu--truncate-for-model formatted)))
-                          (kargu--log-block (format "tool %s result" name) formatted)
-                          (funcall callback final))))
-             (called-async nil))
-        (condition-case _arity-err
-            (progn
-              (funcall executor args on-done)
-              (setq called-async t))
-          (wrong-number-of-arguments nil))
-        (unless called-async
-          (let ((sync-res (funcall executor args)))
-            (funcall on-done sync-res))))
-    (error
-     (let ((out (format "ERROR: tool %s failed: %s"
-                        name (error-message-string err))))
-       (funcall callback out)))))
+  "Execute EXECUTOR with ARGS, invoking CALLBACK exactly once with the result.
+An executor taking (ARGS CALLBACK) reports through the callback itself; one
+taking only ARGS returns the result."
+  (let ((on-done (lambda (res)
+                   (let* ((formatted (kargu--format-tool-result res))
+                          (final (kargu--truncate-for-model formatted)))
+                     (kargu--log-block (format "tool %s result" name) formatted)
+                     (funcall callback final)))))
+    (condition-case-unless-debug err
+        (if (kargu--executor-async-p executor)
+            (funcall executor args on-done)
+          (funcall on-done (funcall executor args)))
+      (error
+       (funcall callback (format "ERROR: tool %s failed: %s"
+                                 name (error-message-string err)))))))
 
 (defun kargu--execute-tool-sync (executor args name)
   "Execute EXECUTOR with ARGS synchronously and return truncated result."
@@ -311,6 +310,10 @@ agent loop can feed them back to the model for self-correction."
     (cond
      ((null spec)
       (let ((out (format "ERROR: no such tool: %s" name)))
+        (if callback (funcall callback out) out)))
+     ((kargu--tool-arguments-invalid-p arguments)
+      (let ((out (format "ERROR: the arguments of tool %s are not a valid JSON object; send one JSON object. Received: %s"
+                         name (truncate-string-to-width raw 200))))
         (if callback (funcall callback out) out)))
      (callback
       (kargu--execute-tool-async (kargu--aget spec "executor") args name callback))

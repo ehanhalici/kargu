@@ -13,19 +13,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (defun kargu--toml-unescape (string)
   "Undo basic TOML escapes in STRING (the inside of a quoted value)."
   (replace-regexp-in-string
@@ -148,8 +135,8 @@ RAW may be a quoted string, single-quoted string, array, or bare token."
            ((or (string-empty-p line) (eq (aref line 0) ?#))
             nil)
            ((string-match
-             "\\`\\[providers?\\.\\([A-Za-z][A-Za-z0-9_-]*\\)\\]\\'" line)
-            (setq section (match-string 1 line)))
+             "\\`\\[providers?\\.\\(?:\\([A-Za-z0-9][A-Za-z0-9_-]*\\)\\|\"\\([^\"]+\\)\"\\)\\][ \t]*\\(?:#.*\\)?\\'" line)
+            (setq section (or (match-string 1 line) (match-string 2 line))))
            ((eq (aref line 0) ?\[)
             (setq section 'skip))
            ((eq section 'skip)

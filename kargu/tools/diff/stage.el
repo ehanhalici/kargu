@@ -14,17 +14,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/permission)
 (require 'kargu/tools/diff/track)
@@ -46,17 +35,6 @@ Dynamically bound while the hook runs.")
 
 ;;;; Helpers --------------------------------------------------------------
 
-(defun kargu-diff--resolve (path)
-  "Expand PATH (absolute or project-relative) to an absolute name
-and assert that it is strictly within the project root."
-  (unless (and (stringp path) (not (string-empty-p (string-trim path))))
-    (error "path must be a non-empty string"))
-  (let* ((root (kargu-permission-project-root))
-          (abs (if (file-name-absolute-p path)
-                   (expand-file-name path)
-                 (expand-file-name path root))))
-    (kargu-permission-assert-within-project abs root "file")))
-
 (defalias 'kargu-diff--to-int #'kargu-to-int)
 
 (defun kargu-diff--count-literal (haystack needle)
@@ -68,17 +46,18 @@ and assert that it is strictly within the project root."
     (with-temp-buffer
       (insert haystack)
       (goto-char (point-min))
-      (let ((count 0))
+      (let ((count 0)
+            (case-fold-search nil))
         (while (search-forward needle nil t)
           (setq count (1+ count)))
         count))))
 
 (defun kargu-diff--replace-first (haystack old new)
-  "Replace the first literal occurrence of OLD in HAYSTACK with NEW."
+  "Replace the first literal, case-sensitive OLD in HAYSTACK with NEW."
   (with-temp-buffer
     (insert haystack)
     (goto-char (point-min))
-    (if (not (search-forward old nil t))
+    (if (not (let ((case-fold-search nil)) (search-forward old nil t)))
         haystack
       (replace-match new t t)
       (buffer-string))))
@@ -104,7 +83,7 @@ missing or not unique so the model can re-read and retry."
     (error "old_string must be a non-empty string"))
   (unless (stringp new-string)
     (error "new_string must be a string"))
-  (let ((path (kargu-diff--resolve file-path)))
+  (let ((path (kargu-permission-resolve file-path "file")))
     (unless (or (file-exists-p path) (find-buffer-visiting path))
       (error (concat "No such file: '%s'\n"
                      "  - Attempted file: '%s'\n"
@@ -215,7 +194,7 @@ quits ediff).  Return value: an outcome plist with :status
 blocking review), plus :file, :saved and a model-facing :message."
   (unless (stringp new-content)
     (error "new-content must be a string"))
-  (let* ((path (kargu-diff--resolve file-path))
+  (let* ((path (kargu-permission-resolve file-path "file"))
          (exists (file-exists-p path))
          (buf-a (kargu-diff--open-proposal-buffer path))
          (original (with-current-buffer buf-a (buffer-string)))

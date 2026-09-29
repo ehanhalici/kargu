@@ -17,23 +17,12 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/loop)
 (require 'kargu/languages)
 (require 'kargu/tools/deps)
+
+(declare-function kargu-chat--target-buffer "kargu/chat/render" ())
 
 (declare-function kargu-chat-stop "kargu/chat")
 (declare-function kargu-chat-select-mode-company "kargu/api" (&optional _event))
@@ -89,19 +78,17 @@ ACTION-FN is called on RET or click. MOUSE-FN is called with event if supplied."
                 'button t
                 'action (lambda (_) (funcall action-fn)))))
 
+(declare-function kargu-chat--explicit-selection "kargu/chat/session" (value))
+
 (defun kargu-chat--shown-provider ()
-  "Provider chosen for this chat buffer, or nil."
-  (let ((value (bound-and-true-p kargu-chat--session-provider)))
-    (and (stringp value)
-         (let ((s (string-trim value)))
-           (unless (string-empty-p s) s)))))
+  "Provider chosen for this chat buffer, or nil.
+A chat shows its own choice, never the live or configured fallback, so a
+fresh chat asks for a selection."
+  (kargu-chat--explicit-selection (bound-and-true-p kargu-chat--session-provider)))
 
 (defun kargu-chat--shown-model ()
   "Model chosen for this chat buffer, or nil."
-  (let ((value (bound-and-true-p kargu-chat--session-model)))
-    (and (stringp value)
-         (let ((s (string-trim value)))
-           (unless (string-empty-p s) s)))))
+  (kargu-chat--explicit-selection (bound-and-true-p kargu-chat--session-model)))
 
 (defun kargu-chat--footer-model-label (raw-m)
   "Return cons (LABEL . FACE) for RAW-M model in footer."
@@ -120,9 +107,7 @@ ACTION-FN is called on RET or click. MOUSE-FN is called with event if supplied."
 
 (defun kargu-chat--footer-mode-button ()
   "Build the mode button for the footer."
-  (let ((mode-name (upcase (symbol-name (if (fboundp 'kargu-state-mode)
-                                           (kargu-state-mode)
-                                         (or (bound-and-true-p kargu-active-mode) 'ask))))))
+  (let ((mode-name (upcase (symbol-name (kargu-state-mode)))))
     (kargu-chat--footer-button
      (format "[%s]" mode-name) 'bold
      "mouse-1 or RET: switch mode with company list (C-c C-x)"
@@ -202,8 +187,8 @@ If FORCE is non-nil, re-displays the banner even if state hasn't changed.
 Returns list of missing tools."
   (let* ((root (or target-root
                    (bound-and-true-p kargu-chat--project-root)
-                   (and (fboundp 'kargu-session--project-root)
-                        (kargu-session--project-root))))
+                   (and (fboundp 'kargu-session-project-root)
+                        (kargu-session-project-root))))
          (missing (and (fboundp 'kargu-deps-missing)
                        (kargu-deps-missing root)))
          (current-ids (mapcar (lambda (m) (plist-get m :id)) missing)))
@@ -213,8 +198,8 @@ Returns list of missing tools."
         (setq-local kargu-chat--missing-tools-state current-ids)
         (let ((banner (propertize (concat (kargu-deps-format-missing-report missing) "\n\n")
                                   'face 'error)))
-          (if (fboundp 'kargu-chat--insert)
-              (kargu-chat--insert banner)
+          (if (fboundp 'kargu-chat-insert)
+              (kargu-chat-insert banner)
             (let ((inhibit-read-only t))
               (save-excursion
                 (goto-char (point-max))
@@ -226,8 +211,8 @@ Returns list of missing tools."
       (setq-local kargu-chat--missing-tools-state nil)
       (let ((msg (propertize "[kargu] ✓ All mandatory tools ready! You can now send prompts.\n\n"
                              'face 'font-lock-keyword-face)))
-        (if (fboundp 'kargu-chat--insert)
-            (kargu-chat--insert msg)
+        (if (fboundp 'kargu-chat-insert)
+            (kargu-chat-insert msg)
           (let ((inhibit-read-only t))
             (save-excursion
               (goto-char (point-max))
@@ -247,8 +232,8 @@ Contains clickable mode, provider, model, context usage, and effort buttons."
          (e-btn (kargu-chat--footer-effort-button))
          (params-btn (kargu-chat--footer-params-button pname))
          (root (or (bound-and-true-p kargu-chat--project-root)
-                   (and (fboundp 'kargu-session--project-root)
-                        (kargu-session--project-root))))
+                   (and (fboundp 'kargu-session-project-root)
+                        (kargu-session-project-root))))
          (missing (and (fboundp 'kargu-deps-missing)
                        (kargu-deps-missing root)))
          (blocked-badge
@@ -281,14 +266,6 @@ Contains clickable mode, provider, model, context usage, and effort buttons."
      'read-only t
      'front-sticky t
      'rear-nonsticky '(read-only face field front-sticky))))
-
-(defun kargu-chat--target-buffer ()
-  "Chat buffer for the command in progress.
-The current buffer wins when it is already a kargu chat.
-Otherwise the named chat buffer is used."
-  (cond
-   ((derived-mode-p 'kargu-chat-mode) (current-buffer))
-   (t (get-buffer kargu-chat-buffer-name))))
 
 (defun kargu-chat-refresh-footer ()
   "Refresh the footer line at the bottom of the chat buffer in-place."
@@ -323,7 +300,7 @@ Otherwise the named chat buffer is used."
               (kargu-chat--ensure-running-prompt))))
         (force-mode-line-update t)))))
 
-(defun kargu-chat--goto-footer-field (field)
+(defun kargu-chat-goto-footer-field (field)
   "Move point to the start of FIELD button inside footer.
 FIELD is \\='mode, \\='provider, \\='model, or \\='effort.
 Return point if found, or nil."
@@ -375,11 +352,11 @@ Return nil when this buffer has no live prompt."
    ((not (kargu-chat--shown-provider))
     (if open-company
         (kargu-chat-select-provider-company)
-      (kargu-chat--goto-footer-field 'provider)))
+      (kargu-chat-goto-footer-field 'provider)))
    ((not (kargu-chat--shown-model))
     (if open-company
         (kargu-chat-select-model-company)
-      (kargu-chat--goto-footer-field 'model)))
+      (kargu-chat-goto-footer-field 'model)))
    (t (kargu-chat--goto-prompt))))
 
 (defun kargu-chat--propertize-log (text &optional face)

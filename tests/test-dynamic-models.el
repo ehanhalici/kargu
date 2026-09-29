@@ -126,5 +126,13 @@
     (should (assoc "X-Custom-Header" headers))
     (should (equal (cdr (assoc "X-Custom-Header" headers)) "CustomVal"))))
 
+(ert-deftest kargu-provider-catalog-endpoints-test ()
+  "Test that provider endpoints are dynamic and no hallucinated models are statically registered."
+  (let ((opencode-models (kargu-provider-models "opencode")))
+    ;; Static models should not exist
+    (should-not opencode-models)
+    (should (equal (kargu-provider-models-api "opencode") "https://opencode.ai/zen/v1/models"))
+    (should (equal (kargu-provider-usage-api "opencode") "https://opencode.ai/zen/v1/user"))))
+
 (provide 'tests/test-dynamic-models)
 ;;; test-dynamic-models.el ends here

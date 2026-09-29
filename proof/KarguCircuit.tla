@@ -3,7 +3,7 @@
 (* Formal specification of Kargu Circuit Breaker and API Classification.   *)
 (* Faithfully mirrors:                                                     *)
 (*   - `kargu/api/circuit.el`  (State machine, thresholds, transitions)     *)
-(*   - `kargu/api/response.el` (Response shapes, classification)           *)
+(*   - `kargu/loop/machine.el` (Response classification events)            *)
 (***************************************************************************)
 
 EXTENDS Naturals, Sequences, FiniteSets, TLC, KarguContract
@@ -36,17 +36,21 @@ CircuitCooldownCanary(cState, cFailures) ==
     ELSE [state |-> cState,      failures |-> cFailures]
 
 (***************************************************************************)
-(* API Response Classification Events (Mirrors `kargu-loop--classify')     *)
+(* Response classification events (mirror `kargu-loop--classify-response'  *)
+(* in `kargu/loop/machine.el', in the order the classifier tries them).    *)
+(*                                                                         *)
+(*   stale             the run was stopped meanwhile: nothing happens      *)
+(*   overflow          context window exceeded: compact once, else recover *)
+(*   tools-unsupported the provider refused tool use                       *)
+(*   upstream-retry    retryable error with retries left                   *)
+(*   error             any other error: the user decides                   *)
+(*   content-filter    the provider blocked the reply: the user decides    *)
+(*   tools / length / answer / empty                                       *)
 (***************************************************************************)
 
 ClassificationEvents == {
-    "tools",        \* Response contains assistant tool calls
-    "answer",       \* Final assistant textual answer
-    "error",        \* Upstream API error message
-    "length",       \* Truncated by token limit; can continue
-    "overflow",     \* Context window overflowed; triggers compaction
-    "empty",        \* Empty content returned
-    "upstream"      \* 502/503/network failure; triggers circuit record failure
+    "stale", "overflow", "tools-unsupported", "upstream-retry", "error",
+    "content-filter", "tools", "length", "answer", "empty"
 }
 
 =============================================================================

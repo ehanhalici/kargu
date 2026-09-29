@@ -29,6 +29,8 @@ GateToolError(name, mode) ==
 (***************************************************************************)
 (* Doom Loop Detection (Mirrors `kargu--loop-doom-p')                      *)
 (* Detects 3 consecutive identical tool calls (same name and arguments).   *)
+(* The user may approve the third call, which clears the history and       *)
+(* grants three more (`kargu-loop--request-doom-approval').                *)
 (***************************************************************************)
 
 ToolSignature(call) ==
@@ -46,19 +48,13 @@ DoomLoopDetected(sigs, sig) ==
 MakeToolResult(id, name, output) ==
     MakeMsg("tool", output, << >>, id, name)
 
-(****************************************************************************)
-(* Batch Dedup (Mirrors `kargu--loop-tools-batch-cache' in tools.el)        *)
-(* Within a single assistant turn, if the same (name, arguments) pair       *)
-(* appears more than once, subsequent calls reuse the first result.         *)
-(****************************************************************************)
+(***************************************************************************)
+(* Signature history: the last two signatures, newest first.               *)
+(* `kargu--loop-doom-p' keeps three including the current call; the        *)
+(* current one is checked before it is stored, so two suffice here.        *)
+(***************************************************************************)
 
-BatchDedup(calls, sig) ==
-    \E k \in 1..Len(calls) :
-        /\ calls[k].name \o ":" \o calls[k].arguments = sig
-        /\ k < Len(calls)   \* not the first occurrence (first is executed)
-
-IsDuplicateInBatch(calls, idx) ==
-    LET sig == calls[idx].name \o ":" \o calls[idx].arguments
-    IN \E k \in 1..(idx-1) : calls[k].name \o ":" \o calls[k].arguments = sig
+PushSig(sigs, sig) ==
+    IF Len(sigs) >= 2 THEN <<sig, sigs[1]>> ELSE <<sig>> \o sigs
 
 =============================================================================

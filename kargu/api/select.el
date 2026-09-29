@@ -15,17 +15,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/state)
 (require 'kargu/config/key)
@@ -41,10 +30,10 @@
 (declare-function kargu-provider-local-p "kargu/providers/registry" (provider))
 (declare-function kargu-set-provider "kargu/providers" (provider))
 (declare-function kargu--config-providers "kargu/config" ())
-(declare-function kargu-chat--goto-footer-field "kargu/chat/prompt" (field))
+(declare-function kargu-chat-goto-footer-field "kargu/chat/prompt" (field))
 (declare-function kargu-chat--goto-prompt "kargu/chat/prompt" ())
 (declare-function kargu-state-clear-model "kargu/state/transitions" ())
-(declare-function kargu-history-compact-threshold "kargu/history-compact" ())
+(declare-function kargu-history-compact-threshold "kargu/history/compact" ())
 (declare-function kargu-chat-note-selection "kargu/chat/session" (&optional buffer))
 
 (defvar company-backends)
@@ -119,8 +108,8 @@ Company only confirms a listed candidate.  Fuzzy matching only filters."
 (defun kargu-api-select--open-field (field)
   "Clear the footer FIELD between brackets and return a start marker.
 Insertion at point is writable.  `inhibit-read-only' is not set locally."
-  (unless (and (fboundp 'kargu-chat--goto-footer-field)
-               (kargu-chat--goto-footer-field field))
+  (unless (and (fboundp 'kargu-chat-goto-footer-field)
+               (kargu-chat-goto-footer-field field))
     (user-error "kargu: chat footer field not found: %s" field))
   (let* ((inner-start (point))
          (inner-end (save-excursion
@@ -186,8 +175,8 @@ finished hook."
 
 (defun kargu-api-select--stay-on-field (field)
   "After a cancelled selection, leave point on footer FIELD."
-  (when (fboundp 'kargu-chat--goto-footer-field)
-    (kargu-chat--goto-footer-field field)))
+  (when (fboundp 'kargu-chat-goto-footer-field)
+    (kargu-chat-goto-footer-field field)))
 
 (defun kargu-api-select--listen (start candidates apply field)
   "On Company finish, accept the candidate.  On cancel, stay on FIELD."
@@ -340,12 +329,7 @@ NOTE replaces the confirmation message."
 (defun kargu-chat--collect-model-candidates (pname-str live-ids catalog-ids)
   "Collect model ids for PNAME-STR from LIVE-IDS, the cache, and CATALOG-IDS."
   (let* ((cached (and (null live-ids) (gethash pname-str kargu--live-models-cache)))
-         (sync-models (and (null live-ids) (null cached)
-                           (progn
-                             (message "kargu: querying live model catalog from %s (%s)..."
-                                      pname-str (kargu--api-base pname-str))
-                             (kargu-api-fetch-models-sync pname-str))))
-         (live (or live-ids cached sync-models))
+         (live (or live-ids cached))
          (curr (kargu--model)))
     (delete-dups
      (delq nil
@@ -381,14 +365,9 @@ NOTE replaces the confirmation message."
     (force-mode-line-update t)
     (kargu-api-select--continue #'kargu-chat--goto-prompt)))
 
-(defun kargu-chat-select-model-company (&optional live-ids catalog-ids provider-name _event)
-  "Select a model for PROVIDER-NAME with Company in the footer.
-LIVE-IDS and CATALOG-IDS are optional id lists already fetched by the caller."
-  (interactive (list nil nil nil last-input-event))
-  (kargu-api-select--guard)
-  (let* ((pname (or provider-name (kargu--provider-name)))
-         (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname "default"))))
-         (models (kargu-chat--collect-model-candidates pname-str live-ids catalog-ids)))
+(defun kargu-chat--open-model-selector (pname-str live-ids catalog-ids)
+  "Open the model selector for PNAME-STR over the ids known so far."
+  (let ((models (kargu-chat--collect-model-candidates pname-str live-ids catalog-ids)))
     (unless models
       (user-error "kargu: no models returned for %s" pname-str))
     (kargu-api-select
@@ -396,6 +375,32 @@ LIVE-IDS and CATALOG-IDS are optional id lists already fetched by the caller."
      (mapcar (lambda (m) (cons m (kargu-model-annotation-string m pname-str)))
              models)
      (lambda (chosen) (kargu-api-select--apply-model chosen pname-str)))))
+
+(defun kargu-chat--models-known-p (pname-str live-ids)
+  "Non-nil when model ids for PNAME-STR are at hand without a request."
+  (or live-ids (gethash pname-str kargu--live-models-cache)))
+
+(defun kargu-chat-select-model-company (&optional live-ids catalog-ids provider-name _event)
+  "Select a model for PROVIDER-NAME with Company in the footer.
+LIVE-IDS and CATALOG-IDS are optional id lists already fetched by the caller.
+Without any known ids the live catalog is requested first; the selector
+opens when the answer arrives, and Emacs stays usable meanwhile."
+  (interactive (list nil nil nil last-input-event))
+  (kargu-api-select--guard)
+  (let* ((pname (or provider-name (kargu--provider-name)))
+         (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname "default")))))
+    (if (or (kargu-chat--models-known-p pname-str live-ids) catalog-ids)
+        (kargu-chat--open-model-selector pname-str live-ids catalog-ids)
+      (message "kargu: querying live model catalog from %s (%s)..."
+               pname-str (kargu--api-base pname-str))
+      (let ((chat (current-buffer)))
+        (kargu-api-fetch-model-ids
+         pname-str
+         (lambda (ids)
+           (with-current-buffer (if (buffer-live-p chat) chat (current-buffer))
+             (condition-case err
+                 (kargu-chat--open-model-selector pname-str ids nil)
+               (user-error (message "%s" (error-message-string err)))))))))))
 
 ;;;; Provider -------------------------------------------------------------
 

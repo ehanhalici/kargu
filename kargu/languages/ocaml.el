@@ -33,6 +33,11 @@
         "Value is not bound in the current frame or requires module qualification (`Module.value`). Check `debug_scope`.")
        ("Cannot evaluate" .
         "The debug adapter cannot evaluate complex functional expressions at runtime. Inspect bound values directly.")))
+   :lsp
+   '(:name "ocamllsp"
+     :binaries ("ocamllsp")
+     :purpose "Language Server for OCaml"
+     :hint "opam install ocaml-lsp-server")
    :lsp-notes
    "OCaml symbols: let bindings, modules, module types, variants, records. OCaml-LSP provides precise types on hover and document outlines."))
 

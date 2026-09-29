@@ -13,19 +13,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/providers)
 
@@ -120,48 +107,65 @@ otherwise provider's catalog default URL, else `kargu-api-base'."
                  (and (kargu--nonempty val) val)))
              envs)))
 
+(defun kargu--expand-env-refs (value)
+  "VALUE with each ${NAME} replaced by that environment variable.
+Nil when VALUE is not a string or a referenced variable is unset or empty."
+  (when (stringp value)
+    (catch 'unset
+      (replace-regexp-in-string
+       "\\${\\([A-Za-z_][A-Za-z0-9_]*\\)}"
+       (lambda (m)
+         (or (kargu--nonempty (getenv (match-string 1 m)))
+             (throw 'unset nil)))
+       value t t))))
+
+(defun kargu--auth-source-api-key (api)
+  "Secret auth-source holds for the host of URL API, or nil."
+  (let* ((host (and api (kargu--url-host api)))
+         (found (and host (progn (require 'auth-source)
+                                 (auth-source-search :host host :max 1)))))
+    (when found
+      (let ((secret (plist-get (car found) :secret)))
+        (kargu--nonempty
+         (cond
+          ((functionp secret) (funcall secret))
+          ((stringp secret) secret)))))))
+
+(defun kargu--provider-toml-plist (pname-lower provider-name)
+  "TOML plist of PNAME-LOWER; the active provider's when PROVIDER-NAME is nil."
+  (if-let* ((entry (assoc pname-lower (and (fboundp 'kargu--config-providers)
+                                           (kargu--config-providers)))))
+      (cdr entry)
+    (and (null provider-name) (fboundp 'kargu--provider-plist)
+         (kargu--provider-plist))))
+
 (defun kargu--resolve-api-key (&optional provider-name)
   "Resolve the API key for the active or specified PROVIDER-NAME.
-Multi-tier resolution:
-1. `kargu-api-key' global variable override.
-2. TOML configuration `:apikey' for the provider.
-3. Environment variables declared on the provider in catalog (`:env').
+In order:
+1. `kargu-api-key', for the active provider only, so another provider's
+   key is never sent to it.
+2. The provider's TOML `apikey', with ${VAR} references expanded.  An
+   explicit empty string means keyless and stops the search.
+3. Environment variables the catalog declares for the provider (`:env').
 4. Auth-source credentials for the provider endpoint host."
   (let* ((pname (or provider-name (kargu--provider-name)))
-         (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" pname)))
-         (pname-lower (downcase (string-trim pname-str)))
-         (entry (assoc pname-lower (and (fboundp 'kargu--config-providers) (kargu--config-providers))))
-         (toml-plist (if entry
-                         (cdr entry)
-                       (if (and (null provider-name) (fboundp 'kargu--provider-plist))
-                           (kargu--provider-plist)
-                         nil)))
-         (toml-key (and toml-plist (plist-get toml-plist :apikey)))
-         (env-val (kargu--provider-env-api-key pname-lower)))
+         (pname-lower (downcase (string-trim (format "%s" pname))))
+         (active (or (null provider-name)
+                     (equal pname-lower
+                            (downcase (string-trim (format "%s" (kargu--provider-name)))))))
+         (toml-plist (kargu--provider-toml-plist pname-lower provider-name))
+         (raw-key (and toml-plist (plist-get toml-plist :apikey)))
+         (toml-key (kargu--nonempty (kargu--expand-env-refs raw-key))))
     (cond
-     ;; 1. Global override
-     ((and (boundp 'kargu-api-key) (kargu--nonempty kargu-api-key)))
-     ;; 2. Explicit TOML config for this provider
-     ((kargu--nonempty toml-key))
-     ;; 3. Provider-declared environment variables from catalog
-     ((kargu--nonempty env-val))
-     ;; 4. Auth-source lookup for endpoint host
-     ((let* ((api (or (and toml-plist (plist-get toml-plist :api))
-                      (and (fboundp 'kargu-provider-api) (kargu-provider-api pname-lower))
-                      (and (null provider-name) (kargu--api-base))
-                      kargu-api-base))
-             (host (and api (kargu--url-host api)))
-             (found (and host (progn (require 'auth-source)
-                                     (auth-source-search :host host :max 1)))))
-        (when found
-          (let ((secret (plist-get (car found) :secret)))
-            (kargu--nonempty
-             (cond
-              ((functionp secret) (funcall secret))
-              ((stringp secret) secret)))))))
-     ;; 5. Explicit empty string key in TOML (e.g. keyless proxy/local runner)
-     ((and toml-plist (plist-member toml-plist :apikey)) "")
-     (t nil))))
+     ((and active (boundp 'kargu-api-key) (kargu--nonempty kargu-api-key)))
+     (toml-key)
+     ((and toml-plist (equal raw-key "")) "")
+     ((kargu--nonempty (kargu--provider-env-api-key pname-lower)))
+     ((kargu--auth-source-api-key
+       (or (and toml-plist (plist-get toml-plist :api))
+           (and (fboundp 'kargu-provider-api) (kargu-provider-api pname-lower))
+           (and (null provider-name) (kargu--api-base))
+           kargu-api-base))))))
 
 (provide 'kargu/config/key)
 

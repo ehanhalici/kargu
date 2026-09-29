@@ -13,19 +13,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 
 (defgroup kargu-permission nil
@@ -61,28 +48,49 @@
 (declare-function eglot-current-server "eglot")
 (declare-function eglot-project "eglot" (server))
 
+(defun kargu-permission-context-root ()
+  "Project root of the current buffer from Eglot or `project.el'.
+Falls back to `default-directory'.  Not canonicalized; callers that
+need the canonical root use `kargu-permission-project-root'."
+  (condition-case-unless-debug nil
+      (let* ((server (and (fboundp 'eglot-current-server)
+                          (eglot-current-server)))
+             (proj (or (and server (fboundp 'eglot-project)
+                            (eglot-project server))
+                       (and (fboundp 'project-current)
+                            (project-current))))
+             (root (and proj (fboundp 'project-root) (project-root proj))))
+        (if root
+            (file-name-as-directory (expand-file-name root))
+          default-directory))
+    (error default-directory)))
+
 (defun kargu-permission-project-root (&optional buffer)
   "Return the canonical project root directory for BUFFER (or current).
-The returned directory always ends with a slash and has symlinks resolved."
+The one answer to \"where is the project\": an explicit override, then
+the language or LSP context, then Eglot / `project.el' of BUFFER.  The
+result ends with a slash and has symlinks resolved."
   (let ((raw-root
          (or kargu-permission--override-root
              (and (fboundp 'kargu--project-root)
                   (if (and buffer (buffer-live-p buffer))
                       (with-current-buffer buffer (kargu--project-root))
                     (kargu--project-root)))
-             (when (and buffer (buffer-live-p buffer))
-               (with-current-buffer buffer
-                 (let* ((proj (or (and (fboundp 'eglot-current-server)
-                                       (eglot-current-server)
-                                       (fboundp 'eglot-project)
-                                       (eglot-project (eglot-current-server)))
-                                  (and (fboundp 'project-current)
-                                       (project-current))))
-                        (root (and proj (fboundp 'project-root) (project-root proj))))
-                   (or (and root (file-name-as-directory (expand-file-name root)))
-                       default-directory))))
-             default-directory)))
+             (if (and buffer (buffer-live-p buffer))
+                 (with-current-buffer buffer (kargu-permission-context-root))
+               (kargu-permission-context-root)))))
     (file-name-as-directory (file-truename (expand-file-name raw-root)))))
+
+(defun kargu-permission-resolve (path &optional label root)
+  "Return PATH as an absolute name that is inside the project.
+A relative PATH is taken from ROOT (default `kargu-permission-project-root').
+LABEL names the resource in the refusal.  Signals when PATH is empty
+or, in strict mode, when it escapes the root."
+  (unless (and (stringp path) (not (string-empty-p (string-trim path))))
+    (error "path must be a non-empty string"))
+  (let* ((base (or root (kargu-permission-project-root)))
+         (abs (expand-file-name path base)))
+    (kargu-permission-assert-within-project abs base label)))
 
 (defun kargu-permission-within-project-p (path &optional root)
   "Return non-nil if PATH is inside ROOT (canonicalized).

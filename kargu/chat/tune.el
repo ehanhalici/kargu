@@ -15,17 +15,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/config)
 (require 'kargu/api)
@@ -145,7 +134,7 @@
                          (kargu-model-reasoning-efforts)))
          (levels (and supported
                       (mapcar #'intern
-                              (cl-remove-if (lambda (e) (member (downcase (format "%s" e)) '("off" "none")))
+                              (cl-remove-if (lambda (e) (equal (downcase (format "%s" e)) "off"))
                                             supported)))))
     (if (null levels)
         (progn

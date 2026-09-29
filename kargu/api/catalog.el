@@ -14,19 +14,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'plz)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/json)
@@ -34,12 +21,13 @@
 (require 'kargu/api/circuit)
 
 (declare-function kargu-provider-models-api "kargu/providers/registry" (provider))
+(declare-function kargu-provider-native-models-path "kargu/providers/registry" (id api-base))
 (declare-function kargu-provider-keyless-p "kargu/providers/registry" (provider))
 (declare-function kargu-provider-format "kargu/providers/registry" (provider))
 (declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
 (declare-function kargu--plz-error-message "kargu/api/http" (err))
 (declare-function kargu--api-headers "kargu/api/http" (key &optional provider-name))
-(declare-function kargu-history-compact-threshold "kargu/history-compact")
+(declare-function kargu-history-compact-threshold "kargu/history/compact")
 
 (defvar kargu--models-generation 0
   "Separate generation counter for model-catalog requests.")
@@ -347,11 +335,32 @@ a stored `:supports-tools' nil, or a parameter list that omits
       (let ((params (kargu--supported-parameters data)))
         (and params (not (member "tools" params))))))
 
+(defvar kargu--tools-refused (make-hash-table :test #'equal)
+  "Provider/model pairs whose endpoint answered that it cannot use tools.
+This is what the endpoint said in this session; it is not catalog data.")
+
+(defun kargu--tools-refusal-key (model-id)
+  "Key of MODEL-ID at the active provider in `kargu--tools-refused'."
+  (format "%s/%s" (kargu--provider-name) (or model-id "")))
+
+(defun kargu-model-mark-tools-refused (&optional model-id)
+  "Remember that the active provider refused tool use for MODEL-ID."
+  (puthash (kargu--tools-refusal-key (or model-id (kargu--model) "")) t
+           kargu--tools-refused))
+
+(defun kargu-model-forget-tools-refusals ()
+  "Forget every provider refusal of tool use."
+  (clrhash kargu--tools-refused))
+
 (defun kargu-model-supports-tools-p (&optional model-id)
-  "Return non-nil unless MODEL-ID's API explicitly disables tools.
-Missing metadata and a missing field both leave tools available."
-  (let ((data (kargu-model-get-metadata (or model-id (kargu--model) ""))))
-    (not (and data (kargu--tools-explicitly-disabled-p data)))))
+  "Return non-nil unless tools are ruled out for MODEL-ID.
+Ruled out means the API metadata explicitly disables them or the provider
+refused tool use in this session.  Missing metadata and a missing field
+both leave tools available."
+  (let* ((mid (or model-id (kargu--model) ""))
+         (data (kargu-model-get-metadata mid)))
+    (not (or (gethash (kargu--tools-refusal-key mid) kargu--tools-refused)
+             (and data (kargu--tools-explicitly-disabled-p data))))))
 
 (defun kargu--reasoning-support-flag (data)
   "Return the supports-reasoning flag in DATA, or nil when it is absent."
@@ -367,16 +376,15 @@ Missing metadata and a missing field both leave tools available."
 
 (defun kargu-model-reasoning-efforts (&optional model-id provider-name)
   "Return reasoning effort names for MODEL-ID from its API metadata.
-When metadata is missing, query PROVIDER-NAME once and read it again.
+When metadata is missing, PROVIDER-NAME is queried in the background (once)
+and nil is returned until the answer arrives.
 A false `supports_reasoning' flag returns nil.  A missing list returns nil."
   (let* ((mid (or model-id (kargu--model) ""))
          (pname (or provider-name (kargu--provider-name)))
          (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname ""))))
          (data (kargu-model-get-metadata mid)))
-    (when (and (null data)
-               (not (string-empty-p pname-str))
-               (fboundp 'kargu-api-fetch-models-sync))
-      (kargu-api-fetch-models-sync pname-str))
+    (when (and (null data) (not (string-empty-p pname-str)))
+      (kargu--prefetch-models-once pname-str))
     (plist-get (kargu-model-read mid) :reasoning-efforts)))
 
 (defun kargu-model-supports-reasoning-p (&optional model-id provider-name)
@@ -461,18 +469,14 @@ An explicit true flag counts even when the API sent no level list."
                        (kargu--strip-trailing-slashes default-api))))
       (cond
        ((string-suffix-p "/models" api-base) api-base)
-       ((and (fboundp 'kargu-provider-format)
-             (eq (kargu-provider-format pname-lower) 'ollama)
-             (not (string-suffix-p "/v1" api-base)))
-        (concat api-base "/api/tags"))
+       ((kargu-provider-native-models-path pname-lower api-base)
+        (concat api-base (kargu-provider-native-models-path pname-lower api-base)))
        (t (concat api-base "/models"))))
      ;; If catalog specified a dedicated models-api (and user didn't override api), use it:
      (custom-models-url custom-models-url)
      ;; Otherwise derive from api-base:
-     ((and (fboundp 'kargu-provider-format)
-           (eq (kargu-provider-format pname-lower) 'ollama)
-           (not (string-suffix-p "/v1" api-base)))
-      (concat api-base "/api/tags"))
+     ((kargu-provider-native-models-path pname-lower api-base)
+      (concat api-base (kargu-provider-native-models-path pname-lower api-base)))
      ((string-suffix-p "/models" api-base)
       api-base)
      (t (concat api-base "/models")))))
@@ -541,38 +545,40 @@ CALLBACK receives either the list of model alists or an error alist."
   (let ((pname (or provider-name (kargu--provider-name))))
     (kargu-api-list-models #'ignore pname)))
 
-(defun kargu-api-fetch-models-sync (&optional provider-name)
-  "Fetch and cache the model catalog synchronously from PROVIDER-NAME."
-  (let* ((pname (or provider-name (kargu--provider-name)))
-         (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname "default"))))
-         (pname-lower (downcase (string-trim pname-str)))
-         (result nil)
-         (done nil))
+(defun kargu--catalog-clean-model-ids (models)
+  "Plain model id strings in the decoded /models answer MODELS."
+  (delq nil
+        (mapcar (lambda (m)
+                  (let ((id (if (consp m)
+                                (or (kargu--aget m "id") (kargu--aget m "name"))
+                              m)))
+                    (if (and (stringp id) (string-prefix-p "models/" id))
+                        (substring id 7)
+                      id)))
+                (kargu--extract-models-from-json models))))
+
+(defun kargu-api-fetch-model-ids (provider-name callback)
+  "Fetch and cache the model catalog of PROVIDER-NAME without waiting.
+CALLBACK receives the list of model ids, or nil when the fetch failed."
+  (let ((pname-lower (downcase (string-trim (format "%s" provider-name)))))
     (kargu-api-list-models
      (lambda (models)
-       (let ((err (kargu--aget models "error")))
-         (unless err
-           (kargu--record-models-metadata models pname-lower)
-           (let* ((raw-ids (kargu--extract-models-from-json models))
-                  (clean-ids
-                   (delq nil
-                         (mapcar (lambda (m)
-                                   (let ((id (if (consp m)
-                                                 (or (kargu--aget m "id") (kargu--aget m "name"))
-                                               m)))
-                                     (if (and (stringp id) (string-prefix-p "models/" id))
-                                         (substring id 7)
-                                       id)))
-                                 raw-ids))))
-             (setq result clean-ids)))
-         (setq done t)))
-     pname-lower)
-    (let ((start (float-time)))
-      (while (and (not done) (< (- (float-time) start) 5.0))
-        (accept-process-output nil 0.05)))
-    (when result
-      (puthash pname-lower result kargu--live-models-cache))
-    result))
+       (let ((ids (unless (kargu--aget models "error")
+                    (kargu--record-models-metadata models pname-lower)
+                    (kargu--catalog-clean-model-ids models))))
+         (when ids
+           (puthash pname-lower ids kargu--live-models-cache))
+         (funcall callback ids)))
+     pname-lower)))
+
+(defvar kargu--models-prefetched (make-hash-table :test #'equal)
+  "Providers whose model catalog was already requested in the background.")
+
+(defun kargu--prefetch-models-once (provider-name)
+  "Start a background catalog fetch for PROVIDER-NAME unless one was started."
+  (unless (gethash provider-name kargu--models-prefetched)
+    (puthash provider-name t kargu--models-prefetched)
+    (kargu-api-fetch-model-ids provider-name #'ignore)))
 
 (defun kargu-model-info (&optional model-id)
   "Display complete metadata and all raw API properties for MODEL-ID.

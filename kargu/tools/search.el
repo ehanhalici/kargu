@@ -24,24 +24,12 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/api)
 (require 'kargu/api/tools)
 (require 'kargu/permission)
+(require 'kargu/tools/process)
 (require 'kargu/tools/lsp)
 (require 'kargu/fs)
 
@@ -68,14 +56,10 @@
 (defun kargu-search--resolve (path root)
   "Resolve optional PATH against ROOT; assert it is strictly inside ROOT."
   (let* ((effective-root (or root (kargu-permission-project-root)))
-         (abs (cond
-               ((or (null path) (and (stringp path) (string-empty-p (string-trim path))))
-                effective-root)
-               ((file-name-absolute-p path)
-                (expand-file-name path))
-               (t
-                (expand-file-name path effective-root)))))
-    (kargu-permission-assert-within-project abs effective-root "search path")
+         (blank (or (null path) (and (stringp path) (string-empty-p (string-trim path)))))
+         (abs (if blank
+                  effective-root
+                (kargu-permission-resolve path "search path" effective-root))))
     (unless (file-exists-p abs)
       (error (concat "No such search path: '%s'\n"
                      "  - Attempted search path: '%s'\n"
@@ -92,14 +76,17 @@
       (setq args (append args (list "--glob" (format "!**/%s/**" dir)))))
     args))
 
-(defun kargu-search--run (program args)
-  "Run PROGRAM with ARGS in `default-directory'.
-Return (EXIT-CODE . STDOUT).  Missing executable is exit 127."
-  (if (not (executable-find program))
-      (cons 127 "")
-    (with-temp-buffer
-      (cons (apply #'call-process program nil t nil args)
-            (buffer-string)))))
+(defun kargu-search--run (program args root callback)
+  "Run PROGRAM with ARGS in ROOT without waiting.
+CALLBACK receives (EXIT-CODE . STDOUT); a missing program is exit 127 and a
+timeout is exit -1."
+  (kargu-process-run
+   program args
+   (lambda (result)
+     (funcall callback
+              (cons (if (plist-get result :timed-out) -1 (plist-get result :code))
+                    (or (plist-get result :output) ""))))
+   :dir root))
 
 (defun kargu-search--truncate-lines (text max-lines)
   "Keep the first MAX-LINES lines of TEXT; note if truncated."
@@ -118,71 +105,68 @@ Return (EXIT-CODE . STDOUT).  Missing executable is exit 127."
 
 ;;;; Grep -----------------------------------------------------------------
 
-(defun kargu-search-grep (pattern &optional path glob max-matches)
-  "Search for PATTERN under PATH (default: project root).
+(defun kargu-search-grep (callback pattern &optional path glob max-matches)
+  "Search for PATTERN under PATH (default: project root); report to CALLBACK.
 GLOB optionally restricts files (ripgrep `--glob').  MAX-MATCHES
 caps the number of hits returned."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p pattern
                          "pattern is required: %S" pattern)
   (let* ((root (kargu-search--root))
-         (default-directory root)
          (target (kargu-search--resolve path root))
          (cap (max 1 (kargu-search--to-int
-                      max-matches kargu-search-default-max-matches)))
-         (rg (executable-find "rg"))
-         (grep (executable-find "grep")))
+                      max-matches kargu-search-default-max-matches))))
     (cond
-     (rg
-      (kargu-search--grep-rg pattern target glob cap))
-     (grep
-      (kargu-search--grep-gnu pattern target glob cap))
+     ((executable-find "rg")
+      (kargu-search--grep-rg callback pattern target root glob cap))
+     ((executable-find "grep")
+      (kargu-search--grep-gnu callback pattern target root glob cap))
      (t
       (error "Neither rg nor grep is on PATH")))))
 
-(defun kargu-search--grep-rg (pattern target glob cap)
-  "Ripgrep PATTERN in TARGET; return at most CAP hits."
-  (let* ((args (append
-                (list "-n" "-H" "--no-heading" "--color" "never"
-                      "--max-count" (number-to-string cap))
-                (kargu-search--rg-exclude-args)
-                (when (and (stringp glob) (not (string-empty-p glob)))
-                  (list "--glob" glob))
-                (list "--" pattern target)))
-         (result (kargu-search--run "rg" args))
-         (code (car result))
-         (out (cdr result)))
-    (unless (memq code '(0 1))
-      (error "rg failed (exit %s): %s"
-             code (string-trim (or out ""))))
-    (if (string-empty-p (string-trim out))
-        (format "No matches for %S" pattern)
-      (kargu-search--truncate-lines out cap))))
+(defun kargu-search--grep-report (callback label pattern cap result)
+  "Turn the grep RESULT of tool LABEL into the text CALLBACK receives."
+  (kargu-process-deliver
+   callback
+   (lambda ()
+     (let ((code (car result))
+           (out (cdr result)))
+       (unless (memq code '(0 1))
+         (error "%s failed (exit %s): %s" label code (string-trim (or out ""))))
+       (if (string-empty-p (string-trim out))
+           (format "No matches for %S" pattern)
+         (kargu-search--truncate-lines out cap))))))
 
-(defun kargu-search--grep-gnu (pattern target glob cap)
-  "GNU grep fallback for PATTERN in TARGET."
-  (let* ((exclude
-          (apply #'append
-                 (mapcar (lambda (dir)
-                           (list "--exclude-dir" dir))
-                         kargu-fs-skip-dirs)))
-         (include
-          (when (and (stringp glob) (not (string-empty-p glob)))
-            (list "--include"
-                  (if (string-match "/\\([^/]+\\)\\'" glob)
-                      (match-string 1 glob)
-                    glob))))
+(defun kargu-search--grep-rg (callback pattern target root glob cap)
+  "Ripgrep PATTERN in TARGET; report at most CAP hits to CALLBACK."
+  (let ((args (append
+               (list "-n" "-H" "--no-heading" "--color" "never"
+                     "--max-count" (number-to-string cap))
+               (kargu-search--rg-exclude-args)
+               (when (and (stringp glob) (not (string-empty-p glob)))
+                 (list "--glob" glob))
+               (list "--" pattern target))))
+    (kargu-search--run
+     "rg" args root
+     (lambda (result)
+       (kargu-search--grep-report callback "rg" pattern cap result)))))
+
+(defun kargu-search--grep-gnu (callback pattern target root glob cap)
+  "GNU grep fallback for PATTERN in TARGET; report to CALLBACK."
+  (let* ((exclude (apply #'append
+                         (mapcar (lambda (dir) (list "--exclude-dir" dir))
+                                 kargu-fs-skip-dirs)))
+         (include (when (and (stringp glob) (not (string-empty-p glob)))
+                    (list "--include"
+                          (if (string-match "/\\([^/]+\\)\\'" glob)
+                              (match-string 1 glob)
+                            glob))))
          (args (append (list "-R" "-n" "-H" "-I")
                        exclude include
-                       (list "--" pattern target)))
-         (result (kargu-search--run "grep" args))
-         (code (car result))
-         (out (cdr result)))
-    (unless (memq code '(0 1))
-      (error "grep failed (exit %s): %s"
-             code (string-trim (or out ""))))
-    (if (string-empty-p (string-trim out))
-        (format "No matches for %S" pattern)
-      (kargu-search--truncate-lines out cap))))
+                       (list "--" pattern target))))
+    (kargu-search--run
+     "grep" args root
+     (lambda (result)
+       (kargu-search--grep-report callback "grep" pattern cap result)))))
 
 ;;;; Glob -----------------------------------------------------------------
 
@@ -247,80 +231,83 @@ caps the number of hits returned."
           "(empty directory)"
         (string-join (sort (nreverse lines) #'string<) "\n")))))
 
-(defun kargu-search-glob (pattern &optional path)
+(defun kargu-search-glob (callback pattern &optional path)
   "List files matching glob PATTERN under PATH (default: project root).
-Prefers fd, then ripgrep, then Elisp directory walk."
+The list goes to CALLBACK.  Prefers fd, then ripgrep, then a bounded Elisp walk."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p pattern
                          "pattern is required: %S" pattern)
   (let* ((root (kargu-search--root))
-         (default-directory root)
          (target (kargu-search--resolve path root))
-         (fd (kargu-search-fd-executable))
-         (rg (kargu-search-rg-executable)))
+         (fd (kargu-search-fd-executable)))
     (cond
-     (fd
-      (kargu-search--glob-fd fd pattern target root))
-     (rg
-      (kargu-search--glob-rg pattern target root))
+     (fd (kargu-search--glob-fd callback fd pattern target root))
+     ((kargu-search-rg-executable)
+      (kargu-search--glob-rg callback pattern target root))
      (t
-      (kargu-search--glob-elisp pattern target root)))))
+      (kargu-process-deliver
+       callback
+       (lambda () (kargu-search--glob-elisp pattern target root)))))))
 
-(defun kargu-search--glob-fd (fd-exe pattern target root)
-  "List files matching PATTERN under TARGET via fd."
-  (let* ((norm-pattern (kargu-search--normalize-glob pattern))
-         (args (list "--color" "never" "--hidden"
-                     "--glob" norm-pattern
-                     "--base-directory" target))
-         (result (kargu-search--run fd-exe args))
-         (code (car result))
-         (out (cdr result)))
-    (if (/= code 0)
-        ;; Fall back to rg or elisp walk if fd fails with arguments
-        (let ((rg (kargu-search-rg-executable)))
-          (if rg
-              (kargu-search--glob-rg pattern target root)
-            (kargu-search--glob-elisp pattern target root)))
-      (if (string-empty-p (string-trim out))
-          (format "No files matching %S" pattern)
-        (let* ((files (split-string out "\n" t))
-               (rels (mapcar (lambda (f)
-                               (kargu-search--rel (expand-file-name f target) root))
-                             files))
-               (cap 200)
-               (n (length rels)))
-          (concat (string-join (cl-subseq rels 0 (min cap n)) "\n")
-                  (if (> n cap)
-                      (format "\n... (%d more files truncated)" (- n cap))
-                    "\n")))))))
+(defun kargu-search--format-files (files pattern)
+  "Text for the project-relative FILES matching PATTERN, capped."
+  (if (null files)
+      (format "No files matching %S" pattern)
+    (let ((n (length files))
+          (cap 200))
+      (concat (string-join (cl-subseq files 0 (min cap n)) "\n")
+              (if (> n cap)
+                  (format "\n... (%d more files truncated)" (- n cap))
+                "\n")))))
 
-(defun kargu-search--glob-rg (pattern target root)
-  "List files matching PATTERN under TARGET via ripgrep."
-  (let* ((args (append
-                (list "--files" "--color" "never")
-                (kargu-search--rg-exclude-args)
-                (list "--glob" (kargu-search--normalize-glob pattern)
-                      "--" target)))
-         (result (kargu-search--run "rg" args))
-         (code (car result))
-         (out (cdr result)))
-    (unless (memq code '(0 1))
-      (error "rg --files failed (exit %s): %s"
-             code (string-trim (or out ""))))
-    (if (string-empty-p (string-trim out))
-        (format "No files matching %S" pattern)
-      (let* ((files (split-string out "\n" t))
-             (rels (mapcar (lambda (f) (kargu-search--rel f root)) files))
-             (cap 200)
-             (n (length rels)))
-        (concat (string-join (cl-subseq rels 0 (min cap n)) "\n")
-                (if (> n cap)
-                    (format "\n... (%d more files truncated)" (- n cap))
-                  "\n"))))))
+(defun kargu-search--glob-fallback (callback pattern target root)
+  "List PATTERN under TARGET with rg, or a bounded walk when rg is missing."
+  (if (kargu-search-rg-executable)
+      (kargu-search--glob-rg callback pattern target root)
+    (kargu-process-deliver
+     callback (lambda () (kargu-search--glob-elisp pattern target root)))))
+
+(defun kargu-search--glob-fd (callback fd-exe pattern target root)
+  "List files matching PATTERN under TARGET via fd; report to CALLBACK."
+  (kargu-search--run
+   fd-exe
+   (list "--color" "never" "--hidden"
+         "--glob" (kargu-search--normalize-glob pattern)
+         "--base-directory" target)
+   root
+   (lambda (result)
+     (if (/= (car result) 0)
+         (kargu-search--glob-fallback callback pattern target root)
+       (kargu-process-deliver
+        callback
+        (lambda ()
+          (kargu-search--format-files
+           (mapcar (lambda (f) (kargu-search--rel (expand-file-name f target) root))
+                   (split-string (cdr result) "\n" t))
+           pattern)))))))
+
+(defun kargu-search--glob-rg (callback pattern target root)
+  "List files matching PATTERN under TARGET via ripgrep; report to CALLBACK."
+  (kargu-search--run
+   "rg"
+   (append (list "--files" "--color" "never")
+           (kargu-search--rg-exclude-args)
+           (list "--glob" (kargu-search--normalize-glob pattern) "--" target))
+   root
+   (lambda (result)
+     (kargu-process-deliver
+      callback
+      (lambda ()
+        (unless (memq (car result) '(0 1))
+          (error "rg --files failed (exit %s): %s"
+                 (car result) (string-trim (or (cdr result) ""))))
+        (kargu-search--format-files
+         (mapcar (lambda (f) (kargu-search--rel f root))
+                 (split-string (cdr result) "\n" t))
+         pattern))))))
 
 (defun kargu-search--glob-elisp (pattern target root)
-  "List files matching PATTERN under TARGET without ripgrep."
+  "List files matching PATTERN under TARGET without ripgrep (a bounded walk)."
   (let* ((re (kargu-search--glob-to-regexp pattern))
-         (cap-out 200)
          (match-p (lambda (path)
                     (or (string-match-p re (kargu-search--rel path root))
                         (string-match-p re (kargu-search--rel path target))
@@ -330,17 +317,24 @@ Prefers fd, then ripgrep, then Elisp directory walk."
               (kargu-fs-walk target kargu-fs-max-listed-files match-p)
             (let ((path (expand-file-name target)))
               (and (funcall match-p path)
-                   (list path)))))
-         (acc (mapcar (lambda (p) (kargu-search--rel p root)) files)))
-    (if (null acc)
-        (format "No files matching %S" pattern)
-      (let ((n (length acc)))
-        (concat (string-join (cl-subseq acc 0 (min cap-out n)) "\n")
-                (if (> n cap-out)
-                    (format "\n... (%d more files truncated)" (- n cap-out))
-                  "\n"))))))
+                   (list path))))))
+    (kargu-search--format-files
+     (mapcar (lambda (p) (kargu-search--rel p root)) files)
+     pattern)))
 
 ;;;; Tool registration -----------------------------------------------------
+
+(defun kargu-search--executor (body)
+  "Tool executor for a search tool.
+BODY takes the decoded arguments and a DONE function and starts the
+search; DONE receives the result string.  The search never blocks Emacs, so
+a callback is required."
+  (lambda (args &optional callback)
+    (if (null callback)
+        "ERROR: search tools run asynchronously; call them with a callback"
+      (condition-case-unless-debug err
+          (funcall body args callback)
+        (error (funcall callback (format "ERROR: %s" (error-message-string err))))))))
 
 (defun kargu-search-register-tools ()
   "Register workspace search and listing tools.
@@ -359,9 +353,10 @@ All tools are read-only and available in all modes."
                       ("max_matches" . (("type" . "integer")
                                         ("description" . "Maximum hits to return (default 50).")))))
      ("required" . ["pattern"]))
-   (lambda (args)
-     (kargu-safe-tool-call
+   (kargu-search--executor
+    (lambda (args done)
       (kargu-search-grep
+       done
        (kargu--tool-arg args "pattern")
        (kargu--tool-arg args "path" "file_path" "filePath")
        (kargu--tool-arg args "glob")
@@ -377,9 +372,10 @@ All tools are read-only and available in all modes."
                       ("path" . (("type" . "string")
                                  ("description" . "Directory to search (default: project root).")))))
      ("required" . ["pattern"]))
-   (lambda (args)
-     (kargu-safe-tool-call
+   (kargu-search--executor
+    (lambda (args done)
       (kargu-search-glob
+       done
        (kargu--tool-arg args "pattern")
        (kargu--tool-arg args "path" "file_path" "filePath")))))
 

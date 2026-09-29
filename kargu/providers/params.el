@@ -23,22 +23,14 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/json)
 
+(declare-function kargu-reasoning-budget "kargu/api/http" ())
+
 (declare-function kargu--provider-name "kargu/core")
 (declare-function kargu-provider-get "kargu/providers/registry" (id))
+(declare-function kargu-provider-format-field "kargu/providers/registry" (id field))
 
 ;;;; Predefined Format Constants -------------------------------------------
 
@@ -78,7 +70,7 @@
   "Normalize PROVIDER to a lowercase string."
   (downcase (string-trim (if (symbolp provider) (symbol-name provider) (format "%s" (or provider "default"))))))
 
-(defun kargu-provider-params--active-id (&optional provider)
+(defun kargu-provider-params-active-id (&optional provider)
   "PROVIDER, the active provider id, or \"default\"."
   (or provider
       (and (fboundp 'kargu--provider-name) (kargu--provider-name))
@@ -97,7 +89,7 @@ or nil if unsupported."
 (defun kargu-register-provider-params (&rest plist)
   "Register a parameter schema for a provider or format profile.
 PLIST accepts:
-  :provider     String or symbol ID.  A format name selects that format's schema.
+   :provider     String or symbol ID; a format name selects that format schema.
   :target-block Optional default target block string (e.g. \"provider\").
   :specs        List of parameter spec plists, each having:
                 `:key', `:label', `:type' (`enum', `boolean', `multi-enum',
@@ -117,7 +109,7 @@ PLIST accepts:
     pid))
 
 (defun kargu-provider-params-schema (provider)
-  "Return schema plist for PROVIDER, falling back to its format profile or default."
+  "Return schema plist for PROVIDER, else its format profile or default."
   (when provider
     (let* ((p (kargu--normalize-provider-id provider))
            (fmt-sym (kargu-provider-format-type p))
@@ -133,7 +125,7 @@ PLIST accepts:
 
 (defun kargu-provider-params-find-spec (key &optional provider)
   "Return spec plist for KEY in PROVIDER."
-  (let* ((p (kargu-provider-params--active-id provider))
+  (let* ((p (kargu-provider-params-active-id provider))
          (specs (kargu-provider-params-specs p))
          (k-str (if (symbolp key) (symbol-name key) (format "%s" key))))
     (cl-find-if (lambda (s) (equal (plist-get s :key) k-str)) specs)))
@@ -142,7 +134,7 @@ PLIST accepts:
 
 (defun kargu-provider-params-get-all (&optional provider)
   "Return alist of ((KEY . VALUE) ...) for PROVIDER."
-  (let* ((pid (kargu--normalize-provider-id (kargu-provider-params--active-id provider)))
+  (let* ((pid (kargu--normalize-provider-id (kargu-provider-params-active-id provider)))
          (session-entry (assoc pid kargu--session-provider-params))
          (custom-entry (and (boundp 'kargu-provider-parameters)
                             (assoc pid kargu-provider-parameters))))
@@ -164,7 +156,7 @@ PLIST accepts:
 (defun kargu-provider-param-set (key value &optional provider)
   "Set parameter KEY to VALUE for PROVIDER in session store.
 If VALUE is nil, the key is removed from custom overrides."
-  (let* ((pid (kargu--normalize-provider-id (kargu-provider-params--active-id provider)))
+  (let* ((pid (kargu--normalize-provider-id (kargu-provider-params-active-id provider)))
          (k-str (if (symbolp key) (symbol-name key) (format "%s" key)))
          (current-all (copy-alist (or (cdr (assoc pid kargu--session-provider-params))
                                       (and (boundp 'kargu-provider-parameters)
@@ -180,7 +172,7 @@ If VALUE is nil, the key is removed from custom overrides."
 
 (defun kargu-provider-params-reset (&optional provider)
   "Reset all custom parameters for PROVIDER to nil."
-  (let ((pid (kargu--normalize-provider-id (kargu-provider-params--active-id provider))))
+  (let ((pid (kargu--normalize-provider-id (kargu-provider-params-active-id provider))))
     (setq kargu--session-provider-params
           (assoc-delete-all pid kargu--session-provider-params #'equal))
     (message "kargu: reset parameters for %s" pid)))
@@ -254,15 +246,21 @@ If INPUT is already a list or vector, returns a vector of strings."
   "ALIST without entries whose key is in KEYS."
   (cl-remove-if (lambda (cell) (member (car cell) keys)) alist))
 
-(defun kargu-provider-params--postprocess-anthropic (pid top-level)
+(defun kargu-provider-params--postprocess-anthropic (pid _sub-blocks top-level)
   "Apply Anthropic-specific extensions (thinking, metadata) to TOP-LEVEL for PID."
   (let ((ext-thinking (kargu-provider-param-get "extended_thinking" pid))
-        (budget (kargu-provider-param-get "thinking_budget" pid))
+        (budget (let ((own (kargu-provider-param-get "thinking_budget" pid)))
+                  (if (and (numberp own) (> own 0))
+                      own
+                    (kargu-reasoning-budget))))
         (user-id (kargu-provider-param-get "user_id" pid))
         (res top-level))
-    (when (or (eq ext-thinking t) (and (numberp budget) (> budget 0)))
+    ;; The API rejects enabled thinking without a budget, so no budget
+    ;; means no thinking object rather than an invented one.
+    (when (and (not (eq ext-thinking :json-false))
+               (numberp budget) (> budget 0))
       (push (cons "thinking" `(("type" . "enabled")
-                               ("budget_tokens" . ,(or budget 2048))))
+                               ("budget_tokens" . ,budget)))
             res))
     (when (eq ext-thinking :json-false)
       (push (cons "thinking" '(("type" . "disabled"))) res))
@@ -310,9 +308,8 @@ Returns updated TOP-LEVEL."
 (defun kargu-provider-params-build-payload (&optional provider)
   "Build payload alist for PROVIDER to merge into chat-completions request.
 Separates parameters that target a nested object from top-level fields."
-  (let* ((p (kargu-provider-params--active-id provider))
+  (let* ((p (kargu-provider-params-active-id provider))
          (pid (kargu--normalize-provider-id p))
-         (fmt (kargu-provider-format-type pid))
          (schema (kargu-provider-params-schema pid))
          (default-target (and schema (plist-get schema :target-block)))
          (params (kargu-provider-params-get-all pid))
@@ -338,11 +335,8 @@ Separates parameters that target a nested object from top-level fields."
                   (push (cons key json-val) top-level))))))))
 
     ;; Format-specific post-processing
-    (cond
-     ((eq fmt 'anthropic)
-      (setq top-level (kargu-provider-params--postprocess-anthropic pid top-level)))
-     ((eq fmt 'gemini)
-      (setq top-level (kargu-provider-params--postprocess-gemini pid sub-blocks top-level))))
+    (when-let* ((post (kargu-provider-format-field pid :params-post)))
+      (setq top-level (funcall post pid sub-blocks top-level)))
 
     ;; Convert sub-blocks hash table into payload alists
     (maphash (lambda (block-name entries)

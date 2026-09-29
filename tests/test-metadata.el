@@ -24,7 +24,7 @@
                                (expand-file-name root))))))
 
 (require 'ert)
-(require 'kargu/constants)
+(require 'kargu/contract/constants)
 (require 'kargu/core)
 (require 'kargu/api)
 (require 'kargu/api/catalog)
@@ -299,9 +299,9 @@
           (kargu-chat-mode)
           (kargu-chat--ensure-idle-prompt)
           ;; Test field navigation in footer
-          (should (kargu-chat--goto-footer-field 'provider))
-          (should (kargu-chat--goto-footer-field 'model))
-          (should (kargu-chat--goto-footer-field 'effort))
+          (should (kargu-chat-goto-footer-field 'provider))
+          (should (kargu-chat-goto-footer-field 'model))
+          (should (kargu-chat-goto-footer-field 'effort))
           ;; Batch selection returns an exact candidate to APPLY.
           (cl-letf (((symbol-function 'kargu--completing-read-with-company)
                      (lambda (_prompt cands &optional _def _ann)

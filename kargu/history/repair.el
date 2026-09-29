@@ -12,19 +12,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/prompt)
 (require 'kargu/history/protocol)
@@ -67,28 +54,33 @@ The table is cleared upon completion."
   (clrhash pending)
   out-rev)
 
+(defun kargu--history-fresh-system-message ()
+  "A new system message; records the key it was built for."
+  (setq kargu--system-key (kargu-prompt-system-key))
+  `(("role" . "system")
+    ("content" . ,(kargu--get-system-prompt))))
+
+(defun kargu--history-system-current-p (sys)
+  "Non-nil when the stored system message SYS still matches the session.
+An unchanged prompt is kept byte for byte so the provider prompt cache hits;
+a changed mode, tool support, model or compaction overlay rebuilds it."
+  (let ((content (kargu--aget sys "content")))
+    (and (stringp content)
+         (not (string-empty-p (string-trim content)))
+         (equal kargu--system-key (kargu-prompt-system-key)))))
+
 (defun kargu--history-refresh-system-head (history &optional force-refresh)
-  "Return cons of (HEAD-MSG . REMAINING-MSGS).
-Preserves existing non-empty system prompt content to guarantee KV cache prefix
-alignment across turns and reloaded sessions.  If absent, empty, or if
-FORCE-REFRESH is non-nil, generates a fresh system prompt via
-`kargu--get-system-prompt'."
-  (let ((rest (copy-tree history t)))
-    (if (and rest (equal (kargu--aget (car rest) "role") "system"))
-        (let* ((sys (copy-tree (pop rest) t))
-               (content (kargu--aget sys "content")))
-          (if (and (not force-refresh)
-                   (stringp content)
-                   (not (string-empty-p (string-trim content))))
-              ;; Stable system prompt preserved for prompt cache hit
-              (cons sys rest)
-            (if (assoc "content" sys)
-                (setcdr (assoc "content" sys) (kargu--get-system-prompt))
-              (push `("content" . ,(kargu--get-system-prompt)) sys))
-            (cons sys rest)))
-      (cons `(("role" . "system")
-              ("content" . ,(kargu--get-system-prompt)))
-            rest))))
+  "Return cons of (HEAD-MSG . REMAINING-MSGS) for HISTORY.
+The existing system message is preserved while `kargu-prompt-system-key'
+is unchanged.  A missing, empty or stale one, or FORCE-REFRESH, builds a
+fresh message via `kargu--get-system-prompt'."
+  (let* ((rest (copy-tree history t))
+         (sys (and rest
+                   (equal (kargu--aget (car rest) "role") "system")
+                   (copy-tree (pop rest) t))))
+    (if (and sys (not force-refresh) (kargu--history-system-current-p sys))
+        (cons sys rest)
+      (cons (kargu--history-fresh-system-message) rest))))
 
 (defun kargu--history-process-tool-result (msg pending out)
   "Validate tool result MSG against PENDING table and return updated OUT."
@@ -99,6 +91,10 @@ FORCE-REFRESH is non-nil, generates a fresh system prompt via
           (cons msg out))
       (kargu-log 'warn "validate: dropping orphan tool result %s" (or id "(no id)"))
       out)))
+
+(defvar kargu--system-key)
+(declare-function kargu-prompt-system-key "kargu/prompt" ())
+(declare-function kargu--history-compaction-msg-p "kargu/history/compact" (msg))
 
 (defun kargu--history-merge-consecutive-content (msg out &optional trim-p)
   "Merge content string of MSG into head of OUT, optionally applying TRIM-P."
@@ -172,7 +168,8 @@ FORCE-REFRESH is non-nil, generates a fresh system prompt via
            (kargu--calls-to-list (kargu--aget msg "tool_calls")))
       (kargu--history-process-assistant-with-calls msg pending acc next-seq))
      ((and (equal role "user")
-           (equal (kargu--aget (car acc) "role") "user"))
+           (equal (kargu--aget (car acc) "role") "user")
+           (not (kargu--history-compaction-msg-p msg)))
       (kargu--history-merge-consecutive-user msg acc))
      ((and (kargu--assistant-role-p role)
            acc

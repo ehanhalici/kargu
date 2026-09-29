@@ -12,19 +12,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/state)
@@ -142,25 +129,33 @@ history which is restored afterwards."
     (user-error
      "An agent run is in progress; stop it first (M-x kargu-loop-stop)"))
   ;; Guard Clause 2: Circuit breaker status
-  (unless (kargu-circuit-allow-request-p)
+  (when (kargu-circuit-open-p)
     (user-error "Circuit breaker is %s; cannot ping until cooldown"
                 (kargu-circuit-status-string)))
-  (let ((kargu--message-history nil)
-        (kargu-temperature nil)
-        (kargu-max-tokens 32))
+  (let ((saved kargu--message-history))
+    (setq kargu--message-history nil)
     (kargu--history-add "user" "Reply with the single word: pong")
     (message "kargu: pinging %s (%s)..." (kargu--provider-name) (kargu--model))
-    (kargu-api-send
-     nil
-     (lambda (response)
-       (let ((err (kargu-response-error-message response)))
-         (if err
-             (progn
-               (kargu-log 'error "test-connection: %s" err)
-               (message "kargu: FAILED — %s" err))
-           (message "kargu: OK — model replied: %s"
-                    (truncate-string-to-width
-                     (or (kargu-response-text response) "") 60))))))))
+    (let ((kargu-temperature nil)
+          (kargu-max-tokens 32))
+      (kargu-api-send
+       nil
+       (lambda (response)
+         ;; The reply was stored into the scratch history; the real one is
+         ;; put back before anything else can look at it.
+         (setq kargu--message-history saved)
+         (kargu--report-ping response))))))
+
+(defun kargu--report-ping (response)
+  "Tell the user how the connection test RESPONSE went."
+  (let ((err (kargu-response-error-message response)))
+    (if err
+        (progn
+          (kargu-log 'error "test-connection: %s" err)
+          (message "kargu: FAILED — %s" err))
+      (message "kargu: OK — model replied: %s"
+               (truncate-string-to-width
+                (or (kargu-response-text response) "") 60)))))
 
 (provide 'kargu/api/client)
 

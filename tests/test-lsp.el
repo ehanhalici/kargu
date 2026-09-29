@@ -15,6 +15,7 @@
       (add-to-list 'load-path (file-name-as-directory
                                (expand-file-name root))))))
 
+(require 'tests/test-helpers)
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/tools/lsp)
@@ -261,7 +262,7 @@
 
 (defun kargu-lsp-test-temp-file (prefix)
   "Create a temporary file inside project root for testing."
-  (let ((tmp-dir (file-name-as-directory (expand-file-name ".test-tmp" (kargu-permission-project-root)))))
+  (let ((tmp-dir (file-name-as-directory (kargu-permission-project-root))))
     (unless (file-directory-p tmp-dir)
       (make-directory tmp-dir t))
     (make-temp-file (expand-file-name prefix tmp-dir))))
@@ -292,7 +293,7 @@
 (ert-deftest kargu-lsp-edit-by-lsp-test ()
   "Test that kargu-lsp-edit-symbol replaces symbol body cleanly."
   (let* ((orig "def first():\n    return 1\n\ndef second():\n    return 2\n")
-         (kargu-active-mode 'agent)
+         (_ (kargu-test-mode 'agent))
          (tmp (kargu-lsp-test-temp-file "kargu-edit-test.py")))
     (with-temp-file tmp (insert orig))
     (unwind-protect
@@ -307,7 +308,7 @@
                   ((symbol-function 'kargu-diff--describe)
                    (lambda (_p) "Applied edit.")))
           (let ((res (kargu-lsp-edit-symbol tmp "second" "def second():\n    return 200\n    # updated")))
-            (should (string-search "Successfully replaced Function `second`" res))
+            (should (string-search "Edit of Function `second`" res))
             (with-temp-buffer
               (insert-file-contents tmp)
               (let ((text (buffer-string)))

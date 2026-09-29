@@ -27,17 +27,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/api)
@@ -222,41 +211,11 @@ Otherwise the root comes from Eglot or `project.el'."
 
 (defun kargu--project-root-from-context ()
   "Return the project root from the LSP or project context."
-  (condition-case-unless-debug _err
-      (let ((buffer (or (kargu-lsp--context-buffer-live)
-                        (car (kargu-lsp--managed-buffers)))))
-        (if (buffer-live-p buffer)
-            (with-current-buffer buffer
-              (let* ((server (and (fboundp 'eglot-current-server)
-                                  (ignore-errors (eglot-current-server))))
-                     (proj (or (and server
-                                    (fboundp 'eglot-project)
-                                    (ignore-errors (eglot-project server)))
-                               (and (fboundp 'project-current)
-                                    (ignore-errors (project-current)))))
-                     (root (and proj (fboundp 'project-root)
-                                (ignore-errors (project-root proj)))))
-                (if root
-                    (file-name-as-directory (expand-file-name root))
-                  default-directory)))
-          default-directory))
-    (error default-directory)))
-
-(defun kargu--resolve-path (path)
-  "Expand PATH to an absolute name and assert it is within the project root."
-  (cond
-   ((and (stringp path) (not (string-empty-p (string-trim path)))
-         (file-name-absolute-p path))
-    (let ((abs (expand-file-name path)))
-      (if (fboundp 'kargu-permission-assert-within-project)
-          (kargu-permission-assert-within-project abs nil "lsp path")
-        abs)))
-   ((and (stringp path) (not (string-empty-p (string-trim path))))
-    (let ((abs (expand-file-name path (kargu--project-root))))
-      (if (fboundp 'kargu-permission-assert-within-project)
-          (kargu-permission-assert-within-project abs nil "lsp path")
-        abs)))
-   (t (error "path must be a non-empty string"))))
+  (let ((buffer (or (kargu-lsp--context-buffer-live)
+                    (car (kargu-lsp--managed-buffers)))))
+    (if (buffer-live-p buffer)
+        (with-current-buffer buffer (kargu-permission-context-root))
+      default-directory)))
 
 ;;;; URI helpers & Symbol kinds -------------------------------------------
 
@@ -578,7 +537,7 @@ the skeleton is also displayed in a buffer."
 (defun kargu-lsp--diagnostics-data (file-path)
   "Return normalized diagnostics for FILE-PATH as a list of plists
 (:severity :line :character :message :source), sorted by severity then line."
-  (let* ((path (kargu--resolve-path file-path))
+  (let* ((path (kargu-permission-resolve file-path "lsp path"))
          (combined (kargu-lsp--flymake-diags path))
          (seen (make-hash-table :test 'equal))
          (data nil))
@@ -623,7 +582,7 @@ the skeleton is also displayed in a buffer."
 (defun kargu-lsp-get-diagnostics (file-path)
   "Return a text report of diagnostics for FILE-PATH."
   (interactive (list (read-file-name "Diagnostics for file: ")))
-  (let* ((path (kargu--resolve-path file-path))
+  (let* ((path (kargu-permission-resolve file-path "lsp path"))
          (open (find-buffer-visiting path))
          (data (kargu-lsp--diagnostics-data path))
          (text
@@ -818,7 +777,7 @@ project buffers."
 (defun kargu-lsp-wait-diagnostics (file-path callback &optional timeout)
   "Asynchronously wait for diagnostics of FILE-PATH to settle.
 CALLBACK is called with (PATH TEXT TIMEOUT-P) once Flymake has stabilized."
-  (let* ((path (kargu--resolve-path file-path))
+  (let* ((path (kargu-permission-resolve file-path "lsp path"))
          (buf (find-buffer-visiting path))
          (has-checker-p (kargu-lsp--buffer-has-checker-p buf))
          (timeout (or timeout kargu-lsp-diag-settle-timeout))
@@ -1058,7 +1017,7 @@ and :end-line."
 
 (defun kargu-lsp-get-file-symbols (file-path)
   "Retrieve document symbols for FILE-PATH via Eglot or `imenu'."
-  (let* ((path (kargu--resolve-path file-path))
+  (let* ((path (kargu-permission-resolve file-path "lsp path"))
          (buf (or (find-buffer-visiting path)
                   (find-file-noselect path)))
          symbols)
@@ -1126,7 +1085,7 @@ and :end-line."
 
 (defun kargu-lsp-read-file-symbols (file-path)
   "Return a language-agnostic symbol outline for FILE-PATH."
-  (let* ((path (kargu--resolve-path file-path))
+  (let* ((path (kargu-permission-resolve file-path "lsp path"))
          (symbols (kargu-lsp-get-file-symbols path)))
     (kargu-lsp-format-symbols-outline path symbols)))
 
@@ -1173,7 +1132,7 @@ A kind does not widen the search to every symbol of that kind."
 
 (defun kargu-lsp-read-symbol (file-path symbol-name &optional kind)
   "Read the implementation body of SYMBOL-NAME in FILE-PATH."
-  (let* ((path (kargu--resolve-path file-path))
+  (let* ((path (kargu-permission-resolve file-path "lsp path"))
          (symbols (kargu-lsp-get-file-symbols path))
          (flat (kargu-lsp--flatten-symbols symbols))
          (matches (kargu-lsp--find-symbol-in-list flat symbol-name kind)))
@@ -1219,6 +1178,17 @@ A kind does not widen the search to every symbol of that kind."
     (format "ERROR: Symbol '%s'%s not found in %s.\nAvailable symbols:\n%s"
             symbol-name (if kind (format " (kind: %s)" kind) "") path avail)))
 
+(defun kargu-lsp--format-ambiguous-symbol-error (symbol-name matches)
+  "Error string listing MATCHES for the ambiguous SYMBOL-NAME."
+  (format "ERROR: Symbol '%s' is ambiguous (%d matches); nothing was edited. Repeat the call with `kind' or a qualified name (Container.name). Candidates:\n%s"
+          symbol-name (length matches)
+          (mapconcat
+           (lambda (s)
+             (format "  • %s %s (lines %d-%d)"
+                     (plist-get s :kind) (plist-get s :name)
+                     (plist-get s :start-line) (plist-get s :end-line)))
+           matches "\n")))
+
 (defun kargu-lsp--splice-symbol-content (raw-text s-line e-line new-content)
   "Replace lines S-LINE to E-LINE in RAW-TEXT with NEW-CONTENT."
   (let* ((file-lines (split-string raw-text "\n"))
@@ -1245,18 +1215,11 @@ A kind does not widen the search to every symbol of that kind."
   (when (and (stringp reason) (not (string-empty-p reason)))
     (message "kargu edit_by_lsp proposal for %s (%s): %s" path (plist-get sym :name) reason)
     (kargu-log 'info "lsp: edit_by_lsp reason: %s" reason))
-  (require 'kargu/tools/diff nil t)
-  (if (and (fboundp 'kargu-diff-apply-proposal)
-           (fboundp 'kargu-diff--describe))
-      (let ((prop (kargu-diff-apply-proposal path new-full-text)))
-        (format "Successfully replaced %s `%s` (lines %d-%d) in %s.\n%s"
-                (plist-get sym :kind) (plist-get sym :name)
-                s-line e-line path
-                (kargu-diff--describe prop)))
-    (with-temp-file path (insert new-full-text))
-    (format "Replaced %s `%s` (lines %d-%d) in %s"
+  (let ((prop (kargu-diff-apply-proposal path new-full-text)))
+    (format "Edit of %s `%s` (lines %d-%d) in %s:\n%s"
             (plist-get sym :kind) (plist-get sym :name)
-            s-line e-line path)))
+            s-line e-line path
+            (kargu-diff--describe prop))))
 
 (defun kargu-lsp-edit-symbol (file-path symbol-name new-content &optional kind reason)
   "Replace the body of SYMBOL-NAME in FILE-PATH with NEW-CONTENT.
@@ -1264,7 +1227,7 @@ NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
   (or (and (fboundp 'kargu-diff--mutating-disabled)
            (or (kargu-diff--mutating-disabled "edit_by_lsp")
                (kargu-diff--mutating-disabled "edit_symbol")))
-      (let* ((path (kargu--resolve-path file-path))
+      (let* ((path (kargu-permission-resolve file-path "lsp path"))
              (symbols (kargu-lsp-get-file-symbols path))
              (flat (kargu-lsp--flatten-symbols symbols))
              (matches (kargu-lsp--find-symbol-in-list flat symbol-name kind)))
@@ -1273,6 +1236,8 @@ NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
           (format "ERROR: file does not exist: %s" path))
          ((null matches)
           (kargu-lsp--format-missing-symbol-error symbol-name path flat kind))
+         ((cdr matches)
+          (kargu-lsp--format-ambiguous-symbol-error symbol-name matches))
          (t
           (let* ((sym (car matches))
                  (s-line (plist-get sym :start-line))
@@ -1373,7 +1338,7 @@ NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
    (lambda (args)
      (let ((path (kargu--tool-file-path args))
            (sym (kargu--tool-arg args "symbol" "symbol_name" "symbolName" "name"))
-           (new (kargu--tool-arg args "new_content" "newContent" "content" "new_string" "newString" "code"))
+           (new (kargu--tool-arg-string args "new_content" "newContent" "content" "new_string" "newString" "code"))
            (kind (kargu--tool-arg args "kind" "symbol_kind" "symbolKind"))
            (reason (kargu--tool-arg args "reason")))
        (cond

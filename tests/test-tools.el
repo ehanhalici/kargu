@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+(require 'tests/test-helpers)
 (require 'ert)
 (require 'kargu/permission)
 (require 'kargu/chat)
@@ -14,11 +15,8 @@
 (declare-function rust-mode "rust-mode" ())
 
 (defun kargu-test-temp-file (prefix)
-  "Create a temporary file inside the project root for testing."
-  (let ((tmp-dir (file-name-as-directory (expand-file-name ".test-tmp" (kargu-permission-project-root)))))
-    (unless (file-directory-p tmp-dir)
-      (make-directory tmp-dir t))
-    (make-temp-file (expand-file-name prefix tmp-dir))))
+  "Create a temporary file inside the scratch project root for testing."
+  (make-temp-file (expand-file-name prefix (kargu-permission-project-root))))
 
 (ert-deftest kargu-diff-read-file-window-test ()
   "Ensure kargu-diff-read-file extracts line windows past 60,000 chars without error."
@@ -40,18 +38,21 @@
 
 (ert-deftest kargu-search-glob-subdirectory-test ()
   "Ensure kargu-search--glob-elisp matches files under subdirectories."
-  (let* ((root (locate-dominating-file default-directory "kargu.el"))
-         (target (expand-file-name "kargu" root))
-         (res (kargu-search--glob-elisp "*.el" target root)))
-    (should (stringp res))
-    (should-not (string-prefix-p "No files matching" res))
-    (should (string-search "core.el" res))))
+  (kargu-test-with-git-repo '(("kargu/core.el" . "x") ("kargu/tools/a.el" . "y") ("readme.md" . "z"))
+    (let* ((target (expand-file-name "kargu" repo))
+           (res (kargu-search--glob-elisp "*.el" target repo)))
+      (should (stringp res))
+      (should-not (string-prefix-p "No files matching" res))
+      (should (string-search "core.el" res))
+      (should-not (string-search "readme.md" res)))))
 
 (ert-deftest kargu-search-list-files-test ()
   "Ensure kargu-search-list-files lists directory entries with [DIR] and [FILE] tags."
-  (let ((out (kargu-search-list-files)))
-    (should (stringp out))
-    (should (string-search "kargu.el" out))))
+  (kargu-test-with-git-repo '(("top.el" . "x") ("sub/inner.el" . "y"))
+    (let ((out (kargu-search-list-files)))
+      (should (stringp out))
+      (should (string-search "top.el" out))
+      (should (string-search "sub" out)))))
 
 (ert-deftest kargu-search-tool-recommendations-test ()
   "Ensure kargu-search-tool-recommendations returns a valid string with fd/find and rg/grep."
@@ -174,7 +175,7 @@
         (when (buffer-live-p b-dired) (kill-buffer b-dired))))))
 
 (ert-deftest kargu-diff-stage-edit-blocking-layout-test ()
-  "Ensure kargu-diff-stage-edit in blocking mode restores window configuration on exit."
+  "In blocking review mode the staged proposal answers by callback and the layout returns after ediff quits."
   (save-window-excursion
     (delete-other-windows)
     (let* ((b-code (generate-new-buffer "code.el"))
@@ -206,8 +207,17 @@
                                (when (buffer-live-p ctl)
                                  (with-current-buffer ctl
                                    (ediff-really-quit nil))))))
-              (let ((outcome (kargu-diff-apply-proposal path "line 1\nline 2 modified\n" nil)))
-                (should (plist-get outcome :status))
+              (let* ((final nil)
+                     (outcome (kargu-diff-apply-proposal
+                               path "line 1\nline 2 modified\n"
+                               (lambda (o) (setq final o)))))
+                (should (eq (plist-get outcome :status) :staged))
+                (let ((deadline (+ (float-time) 3)))
+                  (while (and (null final) (< (float-time) deadline))
+                    (accept-process-output nil 0.05)))
+                (accept-process-output nil 0.1)
+                (should final)
+                (should (plist-get final :status))
                 (should (= (length (window-list)) 3))
                 (let* ((windows (window-list))
                        (names (mapcar (lambda (w) (buffer-name (window-buffer w))) windows)))
@@ -221,7 +231,7 @@
 (ert-deftest kargu-diff-write-file-overwrite-existing-test ()
   "Ensure write_file allows overwriting existing non-empty files without error."
   (let ((temp (kargu-test-temp-file "kargu-write-test"))
-        (kargu-active-mode 'agent)
+        (_ (kargu-test-mode 'agent))
         (kargu-diff-review-mode 'auto))
     (unwind-protect
         (progn
@@ -241,7 +251,7 @@
 (ert-deftest kargu-diff-rollback-multi-step-to-initial-test ()
   "Ensure rollback reverts all the way to initial state before any edit in the series."
   (let ((temp (kargu-test-temp-file "kargu-rb-test"))
-        (kargu-active-mode 'agent)
+        (_ (kargu-test-mode 'agent))
         (kargu-diff-review-mode 'auto))
     (unwind-protect
         (progn
@@ -268,7 +278,7 @@
 (ert-deftest kargu-diff-rollback-single-step-test ()
   "Ensure rollback with single-step reverts only the last edit step."
   (let ((temp (kargu-test-temp-file "kargu-rb-step-test"))
-        (kargu-active-mode 'agent)
+        (_ (kargu-test-mode 'agent))
         (kargu-diff-review-mode 'auto))
     (unwind-protect
         (progn
@@ -294,7 +304,7 @@
   "Ensure rollback of a file created by agent deletes the file."
   (let* ((temp (kargu-test-temp-file "kargu-rb-created-test"))
          (path (expand-file-name temp))
-         (kargu-active-mode 'agent)
+         (_ (kargu-test-mode 'agent))
          (kargu-diff-review-mode 'auto))
     (delete-file path) ; file does not exist initially
     (unwind-protect
@@ -465,19 +475,19 @@
 
 (ert-deftest kargu-loop-debug-mode-tool-visibility-test ()
   "Ensure debug tools are visible in debug mode, while mutating tools are hidden."
-  (let ((kargu-active-mode 'debug))
+  (let ((_ (kargu-test-mode 'debug)))
     (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'debug)))
       ;; Debug tools should be visible in debug mode
-      (should (kargu-loop--tool-visible-p "debug_get_context"))
-      (should (kargu-loop--tool-visible-p "debug_step_in"))
-      (should (kargu-loop--tool-visible-p "debug_step_over"))
-      (should (kargu-loop--tool-visible-p "debug_set_breakpoint"))
-      (should (kargu-loop--tool-visible-p "read_file"))
-      (should (kargu-loop--tool-visible-p "workspace_grep"))
+      (should (kargu-loop-tool-visible-p "debug_get_context"))
+      (should (kargu-loop-tool-visible-p "debug_step_in"))
+      (should (kargu-loop-tool-visible-p "debug_step_over"))
+      (should (kargu-loop-tool-visible-p "debug_set_breakpoint"))
+      (should (kargu-loop-tool-visible-p "read_file"))
+      (should (kargu-loop-tool-visible-p "workspace_grep"))
       ;; File mutating tools must be hidden in debug mode
-      (should-not (kargu-loop--tool-visible-p "edit_file"))
-      (should-not (kargu-loop--tool-visible-p "write_file"))
-      (should-not (kargu-loop--tool-visible-p "bash"))
+      (should-not (kargu-loop-tool-visible-p "edit_file"))
+      (should-not (kargu-loop-tool-visible-p "write_file"))
+      (should-not (kargu-loop-tool-visible-p "bash"))
       ;; Debug tools should not be blocked by gate in debug mode
       (should-not (kargu-loop--gate-tool "debug_step_over"))
       (should-not (kargu-loop--gate-tool "debug_set_breakpoint"))
@@ -486,7 +496,7 @@
 
 (ert-deftest kargu-prompt-debug-message-content-test ()
   "Ensure kargu-prompt-debug-message contains LSP schema, pause notice, and multi-tool calling rule."
-  (let ((kargu-active-mode 'debug))
+  (let ((_ (kargu-test-mode 'debug)))
     (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'debug))
               ((symbol-function 'kargu-lsp-build-skeleton) (lambda () "fn main() { ... }"))
               ((symbol-function 'kargu-dape-get-context) (lambda () "Paused at src/main.rs:10\nStack: main()")))
@@ -551,7 +561,7 @@
 
 (ert-deftest kargu-chat-send-empty-prompt-debug-mode-test ()
   "Ensure kargu-chat-send with empty prompt in debug mode initiates debug session."
-  (let ((kargu-active-mode 'debug)
+  (let ((_ (kargu-test-mode 'debug))
         (ensure-called nil)
         (submitted-text nil)
         (b (get-buffer-create kargu-chat-buffer-name)))
@@ -565,6 +575,7 @@
                      (lambda (on-ready _on-cancel)
                        (setq ensure-called t)
                        (funcall on-ready)))
+                    ((symbol-function 'kargu-chat--preflight) #'ignore)
                     ((symbol-function 'kargu-chat--submit)
                      (lambda (text)
                        (setq submitted-text text))))
@@ -572,6 +583,82 @@
             (should ensure-called)
             (should (string-search "Debug oturumu başlatıldı" submitted-text))))
       (when (buffer-live-p b) (kill-buffer b)))))
+
+(ert-deftest kargu-chat-refused-send-keeps-typed-input-test ()
+  "A send refused by a preflight check leaves the typed prompt in place."
+  (let ((b (get-buffer-create kargu-chat-buffer-name))
+        (kargu--loop-run nil))
+    (unwind-protect
+        (with-current-buffer b
+          (kargu-chat-mode)
+          (setq-local kargu-chat--session-provider "p")
+          (setq-local kargu-chat--session-model "m")
+          (kargu-chat--ensure-prompt)
+          (goto-char (point-max))
+          (let ((inhibit-read-only t)) (insert "my precious prompt"))
+          (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'agent))
+                    ((symbol-function 'kargu-model-supports-tools-p) (lambda (&optional _) nil))
+                    ((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+                    ((symbol-function 'kargu--model) (lambda () "m")))
+            (should-error (kargu-chat--send-input) :type 'user-error)
+            (should (kargu-chat--prompt-live-p))
+            (should (string-match-p "my precious prompt" (kargu-chat--input-text)))))
+      (when (buffer-live-p b) (kill-buffer b)))))
+
+(ert-deftest kargu-chat-stream-flags-are-buffer-local-test ()
+  "Deltas of one chat never flip the stream flags of another chat."
+  (let ((a (generate-new-buffer "*kargu-a*"))
+        (b (generate-new-buffer "*kargu-b*")))
+    (unwind-protect
+        (progn
+          (dolist (buf (list a b))
+            (with-current-buffer buf (kargu-chat-mode) (kargu-chat--ensure-prompt)))
+          (let ((kargu--loop-run (list :chat-buffer a)))
+            (kargu-chat--on-delta "hello"))
+          (should (buffer-local-value 'kargu-chat--streamed-text a))
+          (should-not (buffer-local-value 'kargu-chat--streamed-text b))
+          (with-current-buffer a
+            (should (string-match-p "hello" (buffer-string)))))
+      (kill-buffer a) (kill-buffer b))))
+
+(ert-deftest kargu-test-connection-leaves-history-alone-test ()
+  "The connection test neither adds its ping nor the reply to the real history."
+  (let ((kargu--message-history (list '(("role" . "user") ("content" . "real"))))
+        (kargu--loop-run nil))
+    (cl-letf (((symbol-function 'kargu-circuit-allow-request-p) (lambda () t))
+              ((symbol-function 'kargu-api-send)
+               (lambda (_p cb &optional _d)
+                 ;; the http layer stores the reply into the current history
+                 (setq kargu--message-history
+                       (append kargu--message-history
+                               (list '(("role" . "assistant") ("content" . "pong")))))
+                 (funcall cb '(("choices" . ((("message" . (("content" . "pong")))))))))))
+      (kargu-test-connection)
+      (should (equal kargu--message-history
+                     (list '(("role" . "user") ("content" . "real"))))))))
+
+(ert-deftest kargu-loop-refused-start-leaves-run-state-alone-test ()
+  "A start refused by the preflight does not reset the run's diff files."
+  (let ((kargu--loop-run nil)
+        (reset nil))
+    (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'agent))
+              ((symbol-function 'kargu-loop--active-mode) (lambda () 'agent))
+              ((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-model-supports-tools-p) (lambda (&optional _) nil))
+              ((symbol-function 'kargu-diff-reset-run-files) (lambda () (setq reset t))))
+      (should-error (kargu-loop-send "hi") :type 'user-error)
+      (should-not reset)
+      (should-not kargu--loop-run))))
+
+(ert-deftest kargu-bad-tool-arguments-go-back-to-the-model-test ()
+  "Text that is not a JSON object is an error result; `{}' is no arguments."
+  (kargu-register-tool "kargu_arg_probe" "probe"
+                       '(("type" . "object") ("properties" . :json-empty-object))
+                       (lambda (_args) "ran"))
+  (should (equal (kargu-execute-tool "kargu_arg_probe" "{}") "ran"))
+  (should (equal (kargu-execute-tool "kargu_arg_probe" "") "ran"))
+  (should (string-prefix-p "ERROR: the arguments of tool kargu_arg_probe"
+                           (kargu-execute-tool "kargu_arg_probe" "{not json"))))
 
 (provide 'tests/test-tools)
 ;;; test-tools.el ends here

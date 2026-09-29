@@ -16,18 +16,6 @@
 
 ;;; Code:
 
-;; Ensure the package root is on `load-path' during compilation.
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/ui/notify)
 (require 'kargu/ui/transient)
 

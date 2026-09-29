@@ -8,6 +8,20 @@
 
 (require 'kargu/languages/core)
 
+(defun kargu-language-java-toolchain (root)
+  "Toolchain plist for the Java project at ROOT: Gradle when it has a build file."
+  (if (or (kargu-languages--has-file-p root "build.gradle")
+          (kargu-languages--has-file-p root "build.gradle.kts"))
+      (let ((gw (if (kargu-languages--has-file-p root "gradlew") "./gradlew" "gradle")))
+        (list :build-cmd (format "%s build -x test" gw)
+              :test-cmd (format "%s test" gw)
+              :lint-cmd (format "%s check" gw)
+              :notes "Run Gradle build and test tasks using the `bash` tool."))
+    (list :build-cmd "mvn compile"
+          :test-cmd "mvn test"
+          :lint-cmd "mvn checkstyle:check"
+          :notes "Run Maven goals using the `bash` tool.")))
+
 (defconst kargu-language-java-spec
   (kargu-make-language-spec
    :id 'java
@@ -15,11 +29,7 @@
    :priority 75
    :extensions '("java")
    :detectors '("pom.xml" "build.gradle" "build.gradle.kts")
-   :toolchain
-   '(:build-cmd "mvn compile || ./gradlew build -x test"
-     :test-cmd "mvn test || ./gradlew test"
-     :lint-cmd "mvn checkstyle:check"
-     :notes "Run Maven or Gradle goals using the `bash` tool.")
+   :toolchain #'kargu-language-java-toolchain
    :debugger
    '(:adapter "java"
      :supports-eval t
@@ -33,6 +43,11 @@
         "Variable or method is not accessible in this frame's scope. Check local variable names in `debug_scope`.")
        ("NullPointerException" .
         "Attempted to invoke a method on a null object reference. Inspect the object with `debug_eval` first.")))
+   :lsp
+   '(:name "jdtls"
+     :binaries ("jdtls")
+     :purpose "Language Server for Java (code completion and definitions)"
+     :hint "brew install jdtls (or your system package manager)")
    :lsp-notes
    "Java symbols: classes, interfaces, records, methods, fields. JDTLS handles outline and refactorings."))
 

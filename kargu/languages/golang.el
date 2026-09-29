@@ -38,6 +38,11 @@
         "Delve does not support function execution in expressions. Access struct fields or inspect variable values directly.")
        ("could not find symbol" .
         "Symbol not found in the current scope. Check local variable names via `debug_scope`.")))
+   :lsp
+   '(:name "gopls"
+     :binaries ("gopls")
+     :purpose "Language Server for Go (code completion and symbol navigation)"
+     :hint "go install golang.org/x/tools/gopls@latest")
    :lsp-notes
    "Go symbols: functions, methods, structs, interfaces, types. Use gopls with `read_file_symbols` and `edit_by_lsp` for refactoring."))
 

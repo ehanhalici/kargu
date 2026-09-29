@@ -21,17 +21,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/providers/params)
@@ -41,6 +30,7 @@
 
 (declare-function kargu--provider-name "kargu/core")
 (declare-function kargu-chat-refresh-footer "kargu/chat/prompt")
+(declare-function kargu-provider-format-field "kargu/providers/registry" (id field))
 (declare-function kargu-tune-openrouter-menu "kargu/chat/tune-params")
 (declare-function kargu-tune-openapi-menu "kargu/chat/tune-params")
 (declare-function kargu-tune-anthropic-menu "kargu/chat/tune-params")
@@ -260,7 +250,7 @@
 
 (defun kargu-tune--provider-params-summary-desc ()
   "Summary description of configured provider parameters for kargu-tune-menu."
-  (let* ((pname (kargu-provider-params--active-id))
+  (let* ((pname (kargu-provider-params-active-id))
          (fmt (kargu-provider-format-type pname))
          (params (kargu-provider-params-get-all pname))
          (active-count (length params)))
@@ -603,7 +593,7 @@ SET receives the trimmed value."
 (defun kargu-tune-param-preview-json ()
   "Display preview of compiled provider JSON parameters in a popup buffer."
   (interactive)
-  (let* ((pname (kargu-provider-params--active-id))
+  (let* ((pname (kargu-provider-params-active-id))
          (payload (kargu-provider-params-build-payload pname))
          (encoded (if payload (kargu--json-encode payload) "{}"))
          (buf (get-buffer-create "*kargu-params-preview*")))
@@ -621,7 +611,7 @@ SET receives the trimmed value."
 (defun kargu-tune-param-reset ()
   "Reset all parameters for active provider to defaults."
   (interactive)
-  (let ((pname (kargu-provider-params--active-id)))
+  (let ((pname (kargu-provider-params-active-id)))
     (kargu-provider-params-reset pname)
     (message "kargu: reset all parameters for %s" pname)))
 
@@ -633,7 +623,7 @@ SET receives the trimmed value."
   (transient-define-prefix kargu-tune-openrouter-menu ()
     "Control panel for OpenRouter routing and custom JSON parameters."
     [:description (lambda ()
-                    (let ((p (kargu-provider-params--active-id)))
+                    (let ((p (kargu-provider-params-active-id)))
                       (format "%s (OpenRouter Routing Architecture)" (propertize (upcase p) 'face 'bold))))
      ["Static Routing & Policies"
       ("s" kargu-tune-param-cycle-sort :description kargu-tune--param-sort-desc :transient t)
@@ -661,7 +651,7 @@ SET receives the trimmed value."
   (transient-define-prefix kargu-tune-openapi-menu ()
     "Control panel for Universal OpenAPI standard parameters."
     [:description (lambda ()
-                    (let ((p (kargu-provider-params--active-id)))
+                    (let ((p (kargu-provider-params-active-id)))
                       (format "%s (Universal OpenAPI Standard)" (propertize (upcase p) 'face 'bold))))
      ["Sampling & Determinism"
       ("s" "Random Seed" kargu-tune-param-set-seed :description kargu-tune--param-seed-desc :transient t)
@@ -682,7 +672,7 @@ SET receives the trimmed value."
   (transient-define-prefix kargu-tune-anthropic-menu ()
     "Control panel for Anthropic Messages API parameters."
     [:description (lambda ()
-                    (let ((p (kargu-provider-params--active-id)))
+                    (let ((p (kargu-provider-params-active-id)))
                       (format "%s (Anthropic Messages API)" (propertize (upcase p) 'face 'bold))))
      ["Extended Thinking"
       ("e" kargu-tune-param-toggle-extended-thinking :description kargu-tune--param-extended-thinking-desc :transient t)
@@ -701,7 +691,7 @@ SET receives the trimmed value."
   (transient-define-prefix kargu-tune-gemini-menu ()
     "Control panel for Google Gemini GenerateContent API parameters."
     [:description (lambda ()
-                    (let ((p (kargu-provider-params--active-id)))
+                    (let ((p (kargu-provider-params-active-id)))
                       (format "%s (Google Gemini API)" (propertize (upcase p) 'face 'bold))))
      ["Thinking & Sampling"
       ("b" "Thinking Budget" kargu-tune-param-set-thinking-budget :description kargu-tune--param-thinking-budget-desc :transient t)
@@ -720,7 +710,7 @@ SET receives the trimmed value."
   (transient-define-prefix kargu-tune-ollama-menu ()
     "Control panel for Ollama / Local Runner options."
     [:description (lambda ()
-                    (let ((p (kargu-provider-params--active-id)))
+                    (let ((p (kargu-provider-params-active-id)))
                       (format "%s (Local Runner Options)" (propertize (upcase p) 'face 'bold))))
      ["Context & Sampling Options"
       ("c" "Context Size (num_ctx)" kargu-tune-param-set-num-ctx :description kargu-tune--param-num-ctx-desc :transient t)
@@ -742,13 +732,9 @@ SET receives the trimmed value."
          (fmt (kargu-provider-format-type pname)))
     (if (null fmt)
         (message "kargu: Parameter tuning is not supported yet for provider '%s'" pname)
-      (pcase fmt
-        ('openrouter (call-interactively #'kargu-tune-openrouter-menu))
-        ('anthropic (call-interactively #'kargu-tune-anthropic-menu))
-        ('gemini (call-interactively #'kargu-tune-gemini-menu))
-        ('ollama (call-interactively #'kargu-tune-ollama-menu))
-        ('openapi (call-interactively #'kargu-tune-openapi-menu))
-        (_ (call-interactively #'kargu-tune-openapi-menu))))))
+      (call-interactively
+       (or (kargu-provider-format-field pname :params-menu)
+           #'kargu-tune-openapi-menu)))))
 
 (provide 'kargu/chat/tune-params)
 

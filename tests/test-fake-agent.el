@@ -254,8 +254,9 @@ An action that never posts runs once."
 
 (defun kargu-fake--arm-tools (tools)
   "Apply TOOLS (`on' or `off') to the active model's metadata.
-An earlier tool rejection stores `:supports-tools' nil.  `on'
-writes t so that record cannot leak into the next row."
+An earlier tool rejection is remembered in `kargu--tools-refused';
+each row starts with that record cleared so it cannot leak."
+  (clrhash kargu--tools-refused)
   (let ((id (kargu--model)))
     (when (and (stringp id) (not (string-empty-p id)))
       (kargu-model-set-metadata
@@ -483,6 +484,7 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
          (saved-meta (copy-hash-table kargu--model-metadata-table))
          (saved-models (and (hash-table-p kargu--live-models-cache)
                             (copy-hash-table kargu--live-models-cache)))
+         (kargu--tools-refused (make-hash-table :test #'equal))
          (kargu-api-key "sk-fake")
          (kargu-loop-empty-retries 0)
          (kargu-loop-upstream-retries 0)
@@ -498,8 +500,8 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
                   ((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
                   ((symbol-function 'kargu-dape-ready-p) (lambda (&rest _) t))
                   ((symbol-function 'kargu-api-prefetch-models) (lambda (&rest _) nil))
-                  ((symbol-function 'kargu-api-fetch-models-sync)
-                   (lambda (&rest _) '("fake/model-a")))
+                  ((symbol-function 'kargu-api-fetch-model-ids)
+                   (lambda (_provider callback) (funcall callback '("fake/model-a"))))
                   ((symbol-function 'kargu-api-select--provider-candidates)
                    (lambda () '("openrouter")))
                   ((symbol-function 'kargu--completing-read-with-company)

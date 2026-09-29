@@ -15,24 +15,12 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/prompt)
 (require 'kargu/history/protocol)
 
 (declare-function kargu--validate-history "kargu/history/repair")
+(declare-function kargu--history-fresh-system-message "kargu/history/repair" ())
 (declare-function kargu-model-context-window "kargu/api" (&optional model-id))
 
 (defcustom kargu-history-compact-chars 45000
@@ -132,12 +120,12 @@ in the compaction summary preserves user/assistant turn alternation."
   "Replace the history with SUMMARY plus preserved TAIL.
 The usual system prompt is restored (compaction overlay cleared)."
   (setq kargu--compaction-system nil)
-  (let* ((kept (cl-remove-if #'kargu--history-compaction-msg-p tail))
+  (let* ((sys-msg (kargu--history-fresh-system-message))
+         (kept (cl-remove-if #'kargu--history-compaction-msg-p tail))
          (first-kept-role (and kept (kargu--aget (car kept) "role"))))
     (setq kargu--message-history
           (append
-           (list `(("role" . "system")
-                   ("content" . ,(kargu--get-system-prompt)))
+           (list sys-msg
                  `(("role" . "user")
                    ("content" . ,(format "COMPACTION_ACK: Prior work summary:\n%s"
                                          summary)))

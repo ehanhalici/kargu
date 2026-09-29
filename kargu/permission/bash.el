@@ -14,19 +14,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/permission/guards)
 
 (defun kargu-permission-allowed-binary-p (path)
@@ -39,7 +26,7 @@
                       (let ((d (file-name-as-directory (file-truename dir))))
                         (string-prefix-p d (file-truename path))))
                     kargu-permission-allowed-binary-dirs)
-           (string-match-p "\\`/nix/store/[^/]+-[^/]+/bin/" path))))
+           (string-match-p "\\`/nix/store/[^/]+-[^/]+/bin/" (file-truename path)))))
 
 (defun kargu-permission-tokenize-command (cmd)
   "Tokenize shell CMD respecting quotes, operators, and subshells."
@@ -72,6 +59,53 @@
             (push (cons :word (substring cmd start i)) tokens))))))
     (nreverse tokens)))
 
+(defconst kargu-permission-interpreters
+  '("sh" "bash" "zsh" "dash" "ksh" "fish" "csh" "tcsh"
+    "python" "python2" "python3" "perl" "ruby" "node" "nodejs" "php" "lua"
+    "awk" "gawk" "emacs" "osascript" "pwsh" "powershell")
+  "Programs that can run code the path validator cannot see.")
+
+(defconst kargu-permission-code-flags
+  '("-c" "-e" "-E" "-r" "-x" "--eval" "--exec" "--command" "--execute" "--eval-expression")
+  "Flags that make an interpreter run the following text as code.")
+
+(defun kargu-permission--command-words (command)
+  "Word tokens of COMMAND, by command position, as lists of strings.
+Commands are split on ; & | and newlines so each segment is one list."
+  (let (segments)
+    (dolist (seg (split-string command "[;&|\n]+" t "[ \t]+"))
+      (push (split-string seg "[ \t]+" t) segments))
+    (nreverse segments)))
+
+(defun kargu-permission--segment-risk (words)
+  "Reason string when the command WORDS run code that cannot be inspected."
+  (let* ((head (car words))
+         (base (and head (file-name-nondirectory head))))
+    (cond
+     ((null base) nil)
+     ((member base '("eval" "exec" "source" "." "xargs" "sudo" "doas" "nohup" "env" "command" "time" "timeout"))
+      (format "`%s' runs another command the validator cannot see" base))
+     ((and (member base kargu-permission-interpreters)
+           (cl-some (lambda (w) (member w kargu-permission-code-flags)) (cdr words)))
+      (format "`%s' runs inline code" base)))))
+
+(defun kargu-permission-command-risks (command)
+  "Reasons why COMMAND cannot be fully checked by the path validator.
+Return nil for a command made only of plain words and quoted literals.
+A non-nil result means the command may touch paths the tokenizer never
+sees, so it needs an explicit human approval."
+  (let (risks)
+    (when (string-match-p "\\$(\\|`\\|\\$'\\|\\${\\|\\$\"\\|<(\\|>(" command)
+      (push "shell expansion ($(...), backticks, $'...', ${...}) builds paths at run time" risks))
+    (when (string-match-p "\\\\/" command)
+      (push "backslash-escaped slash hides a path" risks))
+    (when (string-match-p "|[ \t]*\\(?:[^ \t|;&]*/\\)?\\(?:ba\\|z\\|da\\|k\\)?sh\\b" command)
+      (push "pipes data into a shell" risks))
+    (dolist (words (kargu-permission--command-words command))
+      (when-let* ((r (kargu-permission--segment-risk words)))
+        (push r risks)))
+    (nreverse (delete-dups risks))))
+
 (defun kargu-permission--validate-cwd (effective-cwd effective-root cwd)
   "Signal an error if EFFECTIVE-CWD is not within EFFECTIVE-ROOT."
   (unless (kargu-permission-within-project-p effective-cwd effective-root)
@@ -98,6 +132,16 @@
                          "  - Reason: Directory traversal (..) attempting to escape the project boundary is prohibited.\n"
                          "  - Guidance: You only have permission to execute commands and access files within '%s'. Please modify your command to operate strictly inside the project root.")
                  tok tok expanded effective-root effective-root))))
+     ((and (not (string-prefix-p "-" tok))
+           (not (string-prefix-p "/" tok))
+           (not (string-prefix-p "~" tok))
+           (not (string-empty-p tok))
+           (file-exists-p (expand-file-name tok effective-cwd))
+           (not (kargu-permission-within-project-p
+                 (expand-file-name tok effective-cwd) effective-root)))
+      (error (concat "Permission denied: '%s' resolves outside the permitted workspace boundary "
+                     "(a symbolic link points out of '%s').")
+             tok effective-root))
      ((string-prefix-p "~" tok)
       (let ((expanded (expand-file-name tok)))
         (unless (kargu-permission-within-project-p expanded effective-root)

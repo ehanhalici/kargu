@@ -15,6 +15,7 @@
       (add-to-list 'load-path (file-name-as-directory
                                (expand-file-name root))))))
 
+(require 'tests/test-helpers)
 (require 'ert)
 (require 'kargu/permission)
 (require 'kargu/tools/diff)
@@ -52,7 +53,7 @@
 
 (ert-deftest kargu-permission-file-tools-rejection-test ()
   "Ensure read_file, write_file, and edit_file reject paths outside the project root."
-  (let ((kargu-active-mode 'agent)
+  (let ((_ (kargu-test-mode 'agent))
         (kargu-diff-review-mode 'auto))
     ;; read_file on /etc/passwd
     (should-error (kargu-diff-read-file "/etc/passwd") :type 'error)
@@ -69,9 +70,9 @@
 
 (ert-deftest kargu-permission-search-tools-rejection-test ()
   "Ensure workspace search tools reject searches outside project root."
-  (should-error (kargu-search-grep "pattern" "/etc") :type 'error)
-  (should-error (kargu-search-glob "*.txt" "/tmp") :type 'error)
-  (should-error (kargu-search-grep "pattern" "../") :type 'error))
+  (should-error (kargu-search-grep #'ignore "pattern" "/etc") :type 'error)
+  (should-error (kargu-search-glob #'ignore "*.txt" "/tmp") :type 'error)
+  (should-error (kargu-search-grep #'ignore "pattern" "../") :type 'error))
 
 (ert-deftest kargu-permission-bash-cwd-rejection-test ()
   "Ensure bash tool rejects working directory outside project root."
@@ -136,25 +137,69 @@
   (let ((kargu-permission--mock-decision :reject))
     (should-error (kargu-bash-run "git status") :type 'error)))
 
+(defun kargu-test-permission-click (label)
+  "Click the button named LABEL in the current buffer."
+  (goto-char (point-min))
+  (search-forward label)
+  (backward-char 2)
+  (push-button))
+
 (ert-deftest kargu-permission-interactive-prompt-and-decision-flow-test ()
-  "Ensure approval prompt correctly renders buttons and wait-for-decision captures approved."
-  (with-temp-buffer
-    (let ((chat-buf (current-buffer))
-          (decision nil))
-      (kargu-permission--render-approval-prompt
-       chat-buf "make test" "/tmp/proj" (lambda (d) (setq decision d)))
-      ;; Verify prompt was rendered with buttons
-      (let ((content (buffer-string)))
-        (should (string-match-p "Bash Permission Approval" content))
-        (should (string-match-p "make test" content))
-        (should (string-match-p "\\[✓ Approve\\]" content))
-        (should (string-match-p "\\[✗ Reject\\]" content)))
-      ;; Simulate clicking [✓ Approve]
-      (setq decision :approved)
-      (cl-letf (((symbol-function 'recursive-edit) #'ignore))
-        (let ((result (kargu-permission--wait-for-decision chat-buf (lambda () decision))))
-          (should (eq result :approved))
-          (should (string-match-p "Approved, executing" (buffer-string))))))))
+  "The approval prompt shows buttons and answers by callback, without waiting."
+  (dolist (case '(("[✓ Approve]" . t) ("[✗ Reject]" . nil)))
+    (with-temp-buffer
+      (let ((kargu-permission--mock-decision nil)
+            (kargu-confirm--mock-decision nil)
+            (kargu-confirm--pending nil)
+            (kargu-permission-confirm-bash t)
+            (noninteractive nil)
+            (verdict :unanswered)
+            (kargu--loop-run (list :chat-buffer (current-buffer))))
+        (cl-letf (((symbol-function 'kargu-chat-show) #'ignore)
+                  ((symbol-function 'recenter) #'ignore))
+          (kargu-permission-request-approval-async
+           "make test" "/tmp/proj" nil (lambda (v) (setq verdict v))))
+        (let ((content (buffer-string)))
+          (should (string-match-p "Bash Permission Approval" content))
+          (should (string-match-p "make test" content))
+          (should (string-match-p "\\[✓ Approve\\]" content))
+          (should (string-match-p "\\[✗ Reject\\]" content)))
+        (should (eq verdict :unanswered))
+        (kargu-test-permission-click (car case))
+        (should (eq verdict (cdr case)))))))
+
+(ert-deftest kargu-permission-call-async-asks-then-reruns-test ()
+  "A tool body that needs approval is re-run once after the human approves."
+  (let ((kargu-permission--mock-decision nil)
+        (kargu-permission-confirm-bash t)
+        (asked nil) (runs 0) (result nil))
+    (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
+               (lambda (cmd _dir _risks cb) (push cmd asked) (funcall cb t)))
+              ((symbol-function 'kargu-permission--auto-decision) (lambda (_) nil)))
+      (kargu-permission-call-async
+       (lambda (done)
+         (cl-incf runs)
+         (unless (kargu-permission-approve "git commit" "/tmp") (error "no"))
+         (funcall done "committed"))
+       (lambda (r) (setq result r))))
+    (should (equal result "committed"))
+    (should (equal asked '("git commit")))
+    (should (= runs 2))))
+
+(ert-deftest kargu-permission-call-async-rejection-is-an-error-result-test ()
+  "A refused approval becomes an ERROR result and the side effect never runs."
+  (let ((effect nil) (result nil))
+    (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
+               (lambda (_c _d _r cb) (funcall cb nil)))
+              ((symbol-function 'kargu-permission--auto-decision) (lambda (_) nil)))
+      (kargu-permission-call-async
+       (lambda (done)
+         (unless (kargu-permission-approve "git commit" "/tmp") (error "no"))
+         (setq effect t)
+         (funcall done "ok"))
+       (lambda (r) (setq result r))))
+    (should-not effect)
+    (should (string-prefix-p "ERROR:" result))))
 
 (ert-deftest kargu-permission-detailed-error-message-test ()
   "Ensure kargu-permission-assert-within-project provides structured, detailed error messages."
@@ -212,7 +257,7 @@
 
 (ert-deftest kargu-permission-detailed-mode-gating-test ()
   "Ensure kargu-loop--gate-tool returns detailed error messages for blocked mutating tools."
-  (let ((kargu-active-mode 'plan))
+  (let ((_ (kargu-test-mode 'plan)))
     (let ((msg (kargu-loop--gate-tool "bash")))
       (should (stringp msg))
       (should (string-match-p "Tool `bash' is blocked in plan mode" msg))

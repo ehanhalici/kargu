@@ -13,19 +13,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/json)
 
@@ -99,10 +86,10 @@ rather than concatenate."
                                 ("arguments" . ""))))
                             calls-map)))
          (cfn (kargu--aget call "function")))
-    (when (kargu--aget frag "id")
-      (setcdr (assoc "id" call) (kargu--aget frag "id")))
+    (when-let* ((id (kargu--nonempty (kargu--aget frag "id"))))
+      (setcdr (assoc "id" call) id))
     (when fn
-      (when-let* ((name (kargu--aget fn "name")))
+      (when-let* ((name (kargu--nonempty (kargu--aget fn "name"))))
         (setcdr (assoc "name" cfn) name))
       (let ((args (kargu--aget fn "arguments")))
         (unless (memq args '(nil :json-null))
@@ -137,6 +124,14 @@ rather than concatenate."
     (unless (or has-text calls)
       (push `("content" . "") message))
     message))
+
+(defun kargu--stream-call-with-id (idx calls-map)
+  "The call at IDX in CALLS-MAP; an empty id becomes `call_IDX'.
+Tool results are matched to calls by id, so it must never be empty."
+  (let ((call (gethash idx calls-map)))
+    (when (string-empty-p (or (kargu--aget call "id") ""))
+      (setcdr (assoc "id" call) (format "call_%s" idx)))
+    call))
 
 (defun kargu--accumulate-stream-deltas (events)
   "Reduce parsed SSE EVENTS into a response shaped like an
@@ -177,7 +172,7 @@ error alist; it does not invent an empty assistant turn."
             (setq usage u))))
       (let* ((text (if text-chunks (apply #'concat (nreverse text-chunks)) ""))
              (reasoning (if reasoning-chunks (apply #'concat (nreverse reasoning-chunks)) ""))
-             (calls (mapcar (lambda (idx) (gethash idx calls-map))
+             (calls (mapcar (lambda (idx) (kargu--stream-call-with-id idx calls-map))
                             (sort (hash-table-keys calls-map) #'<)))
              (message (kargu--assemble-stream-message text reasoning calls)))
         `(("choices" . ((("index" . 0)

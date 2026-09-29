@@ -11,23 +11,10 @@
 ;;; Code:
 
 (require 'cl-lib)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/prompt)
 (require 'kargu/history)
-(require 'kargu/history-compact)
+(require 'kargu/history/compact)
 (require 'kargu/api)
 
 (defvar kargu-max-iterations)
@@ -67,6 +54,9 @@ Return non-nil if started."
     (plist-put run :no-tools t)
     (plist-put run :compact-tail (kargu-history-compact-tail))
     (setq kargu--compaction-system kargu-prompt-compaction-system)
+    ;; The request is its own user turn; it must never merge into a previous one.
+    (when (equal (kargu--history-last-role) "user")
+      (kargu--history-add "assistant" "Understood."))
     (kargu-api-send
      kargu-prompt-compaction-user
      (lambda (response)

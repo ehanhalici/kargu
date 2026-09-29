@@ -10,7 +10,7 @@
 ;; LSP nuances, build/test commands, and debugger adapter constraints.
 ;;
 ;; Supported languages: C, C++, Rust, Go, Haskell, OCaml, Java, Python,
-;; Emacs Lisp.
+;; JavaScript, TypeScript, Emacs Lisp.
 ;; Public API:
 ;;   `kargu-language-register', `kargu-language-get',
 ;;   `kargu-language-detect', `kargu-language-detect-by-extension',
@@ -24,17 +24,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
 
 (require 'kargu/core)
 (require 'kargu/fs)
@@ -50,10 +39,13 @@
   priority                      ; Integer priority for detection order (higher = earlier)
   extensions                    ; List of file extensions without dot: ("rs")
   detectors                     ; List of filenames or functions taking ROOT -> non-nil
-  toolchain                     ; Plist: :build-cmd, :test-cmd, :lint-cmd, :notes
+  toolchain                     ; Plist :build-cmd :test-cmd :lint-cmd :notes, or a
+                                ;   function of ROOT that returns such a plist
   debugger                      ; Plist: :adapter, :supports-eval, :supports-method-calls,
                                 ;        :eval-guidance, :common-eval-pitfalls,
                                 ;        :variable-inspection-advice
+  lsp                           ; Plist :name :binaries :purpose :hint of the
+                                ;   language server, checked by `kargu-deps'
   lsp-notes                     ; String: notes about symbols, outlines, and edits
   (requires-lsp t)              ; Nil when this language has no language server
   modes                         ; Major modes that identify this language
@@ -63,6 +55,8 @@
 
 (defvar kargu-languages--registry (make-hash-table :test #'eq)
   "Map of language ID symbol -> `kargu-language-spec'.")
+
+(declare-function kargu-permission-project-root "kargu/permission/guards" (&optional buffer))
 
 (defun kargu-language-register (spec)
   "Register SPEC in `kargu-languages--registry'."
@@ -81,6 +75,13 @@
     (sort specs (lambda (a b)
                   (> (or (kargu-language-spec-priority a) 0)
                      (or (kargu-language-spec-priority b) 0))))))
+
+(defun kargu-language-toolchain (spec &optional root)
+  "The toolchain plist of SPEC, resolved against ROOT when it is a function."
+  (let ((tc (and spec (kargu-language-spec-toolchain spec))))
+    (if (functionp tc)
+        (funcall tc (or root default-directory))
+      tc)))
 
 ;;;; Detection -------------------------------------------------------------
 
@@ -174,8 +175,8 @@ session that still has no directory signals `user-error'."
 First checks ROOT detectors, then the visiting file buffer extension,
 or defaults to nil."
   (let* ((r (or root
-                (and (fboundp 'kargu--project-root)
-                     (ignore-errors (kargu--project-root)))
+                (and (fboundp 'kargu-permission-project-root)
+                     (ignore-errors (kargu-permission-project-root)))
                 default-directory))
          (detected (and r (kargu-language-detect r))))
     (or detected
@@ -188,7 +189,7 @@ or defaults to nil."
   (if (null spec)
       ""
     (let* ((name (kargu-language-spec-name spec))
-           (tc (kargu-language-spec-toolchain spec))
+           (tc (kargu-language-toolchain spec))
            (dbg (kargu-language-spec-debugger spec))
            (lsp (kargu-language-spec-lsp-notes spec))
            (eval-guide (plist-get dbg :eval-guidance))

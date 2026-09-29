@@ -33,6 +33,11 @@
         "Variable is not defined in the current frame. Check `debug_scope` for available local/global variables.")
        ("AttributeError:" .
         "Attribute does not exist on the object. Evaluate `dir(obj)` or inspect the object structure in `debug_scope`.")))
+   :lsp
+   '(:name "pyright / pylsp"
+     :binaries ("pyright-langserver" "pyright" "basedpyright-langserver" "basedpyright" "pylsp" "jedi-language-server")
+     :purpose "Language Server for Python (code analysis and symbol navigation)"
+     :hint "pip install pyright (or pip install python-lsp-server)")
    :lsp-notes
    "Python symbols: functions (def), classes (class), async functions, methods. Pyright/Basedpyright provides precise symbol outlines."))
 

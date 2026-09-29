@@ -13,17 +13,6 @@
 
 ;;; Code:
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (defgroup kargu nil
   "Agentic AI development assistant for Emacs."
   :group 'tools
@@ -96,6 +85,17 @@ process filter."
 
 (defcustom kargu-api-retry-max 5
   "How many times to retry a chat request after HTTP 429/5xx."
+  :type 'natnum
+  :group 'kargu)
+
+(defcustom kargu-http-retry-statuses '(429 500 502 503 504 529)
+  "HTTP statuses that are retried with backoff and count against the breaker.
+Error text from a 200 response that names one of these is treated the same."
+  :type '(repeat integer)
+  :group 'kargu)
+
+(defcustom kargu-api-retry-after-max 60
+  "Longest wait in seconds honoured from a Retry-After header."
   :type 'natnum
   :group 'kargu)
 

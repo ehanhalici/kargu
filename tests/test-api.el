@@ -129,5 +129,49 @@
   (should (kargu--tool-flag '(("background" . t)) "background"))
   (should-not (kargu--tool-flag '(("staged" . "false")) "staged")))
 
+(ert-deftest kargu-api-opencode-session-header-test ()
+  "Test that x-opencode-session header is generated and passed for OpenCode."
+  (let ((kargu--session-provider "opencode")
+        (kargu--session-id nil))
+    (let ((headers (kargu--api-headers "test-key")))
+      (should (assoc "x-opencode-session" headers))
+      (should (stringp (cdr (assoc "x-opencode-session" headers))))
+      (should (> (length (cdr (assoc "x-opencode-session" headers))) 10)))))
+
 (provide 'tests/test-api)
 ;;; test-api.el ends here
+
+(ert-deftest kargu-circuit-half-open-lets-one-probe-through-test ()
+  "After the cooldown a single probe passes; asking whether it is open changes nothing."
+  (kargu-circuit-reset)
+  (let ((kargu-circuit-cooldown-seconds 0.0))
+    (dotimes (_ kargu-circuit-failure-threshold)
+      (kargu-circuit-record-failure "500"))
+    (should (eq kargu-circuit--state :open))
+    (should-not (kargu-circuit-open-p))
+    (should (eq kargu-circuit--state :open))
+    (should (kargu-circuit-allow-request-p))
+    (should (eq kargu-circuit--state :half-open))
+    (should-not (kargu-circuit-allow-request-p))
+    (should (kargu-circuit-open-p))
+    (kargu-circuit-record-success)
+    (should (kargu-circuit-allow-request-p)))
+  (kargu-circuit-reset))
+
+(ert-deftest kargu-retry-statuses-have-one-list-test ()
+  (let ((kargu-http-retry-statuses '(418)))
+    (should (kargu--api-error-looks-retryable-p "HTTP 418: teapot"))
+    (should-not (kargu--api-error-looks-retryable-p "HTTP 502: bad gateway"))))
+
+(ert-deftest kargu-stream-tool-calls-keep-name-and-get-an-id-test ()
+  "An empty later name does not erase the name; an empty id becomes call_N."
+  (let* ((events (list '(("choices" . ((("delta" . (("tool_calls" . ((("index" . 0)
+                                                                        ("function" . (("name" . "read_file") ("arguments" . "{\"a\":"))))))))))))
+                       '(("choices" . ((("delta" . (("tool_calls" . ((("index" . 0) ("id" . "")
+                                                                        ("function" . (("name" . "") ("arguments" . "1}"))))))))
+                                        ("finish_reason" . "tool_calls")))))))
+         (resp (kargu--accumulate-stream-deltas events))
+         (call (car (kargu--aget (kargu--aget (car (kargu--aget resp "choices")) "message") "tool_calls"))))
+    (should (equal (kargu--aget (kargu--aget call "function") "name") "read_file"))
+    (should (equal (kargu--aget call "id") "call_0"))
+    (should (equal (kargu--aget (kargu--aget call "function") "arguments") "{\"a\":1}"))))

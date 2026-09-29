@@ -24,25 +24,11 @@
 (require 'subr-x)
 (require 'ediff)
 
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/state/selectors)
 (require 'kargu/api)
 (require 'kargu/permission)
-(require 'kargu/tools/lsp)         ; only for kargu--resolve-path
 
 ;;;; Customization --------------------------------------------------------
 
@@ -58,9 +44,9 @@
             Rollback snapshots are kept so the user can review
             changes via `kargu-diff-review' or roll back via
             `kargu-diff-rollback' after the run finishes.
-`blocking'  the tool call blocks (a recursive edit) and pops up
-            an ediff session for human hunk-by-hunk approval
-            before anything is saved to disk.
+`blocking'  an ediff session pops up for human hunk-by-hunk approval
+            before anything is saved to disk; the tool result is
+            delivered when the human quits ediff (Emacs never waits).
 `async'     the tool returns immediately with a STAGED result;
             the final outcome is delivered when ediff is quitted."
   :type '(choice (const :tag "Auto-apply and save (review afterwards)" auto)
@@ -144,9 +130,11 @@ Returns a cons cell `(BODY . TRUNCATED-P)'."
 (defun kargu-diff--resolve-read-target (file-path)
   "Resolve FILE-PATH to (PATH . TEXT).
 Signals an error if file does not exist or looks binary."
-  (let* ((live-buf (and (stringp file-path) (get-buffer file-path)))
+  (let* ((live-buf (and (stringp file-path)
+                        (string-match-p "\\`\\*kargu-output-[0-9]+\\*\\'" file-path)
+                        (get-buffer file-path)))
          (is-buf (and live-buf (buffer-live-p live-buf)))
-         (path (if is-buf file-path (kargu-diff--resolve file-path))))
+         (path (if is-buf file-path (kargu-permission-resolve file-path "file"))))
     (if (and (not is-buf) (not (file-exists-p path)))
         (error (concat "No such file: '%s'\n"
                        "  - Attempted file: '%s'\n"
@@ -209,12 +197,36 @@ an exact `old_string' without the prefix."
        "ERROR: %s is disabled in %s mode; switch to agent mode (M-x kargu-set-mode) before modifying files"
        name mode))))
 
-(defun kargu-diff--edit-file-tool (args)
+(defun kargu-diff--with-review-callback (callback run)
+  "Run RUN for an editing tool and deliver its result.
+RUN takes the outcome callback DONE, which is non-nil only when the tool
+was called asynchronously in `blocking' review mode: the result then
+arrives once the human finishes the ediff review, without ever waiting for
+it.  RUN returns the result string, or `deferred' when DONE will deliver it.
+Without CALLBACK the string is returned; with CALLBACK it is passed there."
+  (let* ((done (and callback
+                    (eq kargu-diff-review-mode 'blocking)
+                    (lambda (outcome)
+                      (funcall callback (kargu-diff--describe outcome)))))
+         (result (condition-case-unless-debug err
+                     (funcall run done)
+                   (error (format "ERROR: %s" (error-message-string err))))))
+    (cond
+     ((eq result 'deferred) nil)
+     (callback (funcall callback result) nil)
+     (t result))))
+
+(defun kargu-diff--edit-file-tool (args &optional callback)
   "Executor for the `edit_file' tool: unique replace, stage, review."
+  (kargu-diff--with-review-callback
+   callback (lambda (done) (kargu-diff--edit-file-result args done))))
+
+(defun kargu-diff--edit-file-result (args done)
+  "Result of an `edit_file' call with ARGS; DONE is the outcome callback."
   (or (kargu-diff--mutating-disabled "edit_file")
       (let ((path (kargu--tool-file-path args))
-            (old (kargu--tool-arg args "old_string" "oldString" "old_text"))
-            (new (kargu--tool-arg args "new_string" "newString" "new_text"))
+            (old (kargu--tool-arg-string args "old_string" "oldString" "old_text"))
+            (new (kargu--tool-arg-string args "new_string" "newString" "new_text"))
             (reason (kargu--tool-arg args "reason")))
         (cond
          ((not (kargu--nonempty path))
@@ -229,13 +241,16 @@ an exact `old_string' without the prefix."
           (when (and (stringp reason) (not (string-empty-p reason)))
             (message "kargu edit proposal for %s: %s" path reason)
             (kargu-log 'info "diff: edit reason: %s" reason))
-          (condition-case-unless-debug err
-              (kargu-diff--describe
-               (kargu-diff-apply-replace path old new))
-            (error (format "ERROR: %s" (error-message-string err)))))))))
+          (let ((outcome (kargu-diff-apply-replace path old new done)))
+            (if done 'deferred (kargu-diff--describe outcome))))))))
 
-(defun kargu-diff--write-file-tool (args)
+(defun kargu-diff--write-file-tool (args &optional callback)
   "Executor for the `write_file' tool: create or overwrite a file via ediff."
+  (kargu-diff--with-review-callback
+   callback (lambda (done) (kargu-diff--write-file-result args done))))
+
+(defun kargu-diff--write-file-result (args done)
+  "Result of a `write_file' call with ARGS; DONE is the outcome callback."
   (or (kargu-diff--mutating-disabled "write_file")
       (let ((path (kargu--tool-file-path args))
             (contents (kargu--tool-arg-string args "contents" "content"))
@@ -248,7 +263,7 @@ an exact `old_string' without the prefix."
          ((not (stringp contents))
           "ERROR: contents must be a string")
          (t
-          (let ((abs (ignore-errors (kargu-diff--resolve path))))
+          (let ((abs (ignore-errors (kargu-permission-resolve path "file"))))
             (cond
              ((and abs (file-directory-p abs))
               (format "ERROR: %s is a directory" abs))
@@ -256,11 +271,8 @@ an exact `old_string' without the prefix."
               (when (and (stringp reason) (not (string-empty-p reason)))
                 (message "kargu write proposal for %s: %s" path reason)
                 (kargu-log 'info "diff: write reason: %s" reason))
-              (condition-case-unless-debug err
-                  (kargu-diff--describe
-                   (kargu-diff-apply-proposal path contents))
-                (error (format "ERROR: %s"
-                               (error-message-string err))))))))))))
+              (let ((outcome (kargu-diff-apply-proposal path contents done)))
+                (if done 'deferred (kargu-diff--describe outcome)))))))))))
 
 (defun kargu-diff--parse-patch-lines (lines)
   "Parse patch LINES into structured operations.
@@ -299,56 +311,62 @@ Returns a list of plists with keys :type, :file, :lines."
     (funcall flush-op)
     (nreverse ops)))
 
-(defun kargu-diff--split-update-hunks (op-lines)
-  "Group OP-LINES into separate hunks demarcated by @@ markers."
-  (let ((hunks nil)
-        (curr-hunk nil))
-    (dolist (l op-lines)
-      (cond
-       ((string-prefix-p "*** Move to:" l)
-        nil)
-       ((string-prefix-p "@@" l)
-        (when curr-hunk
-          (push (nreverse curr-hunk) hunks)
-          (setq curr-hunk nil)))
-       (t
-        (push l curr-hunk))))
-    (when curr-hunk
-      (push (nreverse curr-hunk) hunks))
-    (setq hunks (nreverse hunks))
-    (or hunks (list nil))))
-
-(defun kargu-diff--extract-hunk-blocks (hunk-lines)
-  "Extract (OLD-BLOCK . NEW-BLOCK) from HUNK-LINES."
-  (let* ((old-block
-          (string-join
-           (delq nil
-                 (mapcar (lambda (l)
-                           (cond
-                            ((string-prefix-p "-" l) (substring l 1))
-                            ((string-prefix-p "+" l) nil)
-                            ((string-prefix-p " " l) (substring l 1))
-                            (t l)))
-                         hunk-lines))
-           "\n"))
-         (new-block
-          (string-join
-           (delq nil
-                 (mapcar (lambda (l)
-                           (cond
-                            ((string-prefix-p "+" l) (substring l 1))
-                            ((string-prefix-p "-" l) nil)
-                            ((string-prefix-p " " l) (substring l 1))
-                            (t l)))
-                         hunk-lines))
-           "\n")))
-    (cons old-block new-block)))
-
-(defun kargu-diff--apply-hunk (text old new rel)
-  "Replace the single occurrence of OLD in TEXT with NEW.
-Zero matches and several matches are errors.  REL names the file
-in the error.  An empty OLD appends NEW."
+(defun kargu-diff--hunk-line-hint (header)
+  "Line number an `@@' HEADER names, or nil.
+`@@ -A,B +C,D @@' names A, the line a pure addition follows (0 is the top of
+the file); a bare `@@ N' names N."
   (cond
+   ((string-match "\\`@@ -\\([0-9]+\\)" header)
+    (string-to-number (match-string 1 header)))
+   ((string-match "\\`@@ \\([0-9]+\\)\\_>" header)
+    (string-to-number (match-string 1 header)))))
+
+(defun kargu-diff--split-update-hunks (op-lines)
+  "Group OP-LINES into hunks demarcated by @@ markers.
+Each hunk is (LINE-HINT . LINES), LINE-HINT being what its header names."
+  (let ((hunks nil) (curr-hunk nil) (hint nil))
+    (cl-flet ((flush () (when curr-hunk (push (cons hint (nreverse curr-hunk)) hunks))
+                (setq curr-hunk nil hint nil)))
+      (dolist (l op-lines)
+        (cond
+         ((string-prefix-p "*** Move to:" l) nil)
+         ((string-prefix-p "@@" l)
+          (flush)
+          (setq hint (kargu-diff--hunk-line-hint l)))
+         (t (push l curr-hunk))))
+      (flush))
+    (nreverse hunks)))
+
+(defun kargu-diff--hunk-blocks (hunk-lines)
+  "Extract (OLD-BLOCK . NEW-BLOCK) from HUNK-LINES."
+  (cl-flet ((block-of (drop keep)
+              (string-join
+               (delq nil
+                     (mapcar (lambda (l)
+                               (cond
+                                ((string-prefix-p drop l) nil)
+                                ((or (string-prefix-p keep l) (string-prefix-p " " l))
+                                 (substring l 1))
+                                (t l)))
+                             hunk-lines))
+               "\n")))
+    (cons (block-of "+" "-") (block-of "-" "+"))))
+
+(defun kargu-diff--insert-after-line (text new line)
+  "TEXT with NEW inserted after its LINE-th line (0 is the top)."
+  (let* ((lines (split-string text "\n"))
+         (line (min line (length lines))))
+    (string-join (append (seq-take lines line) (list new) (seq-drop lines line))
+                 "\n")))
+
+(defun kargu-diff--apply-hunk (text old new rel &optional line-hint)
+  "Replace the single occurrence of OLD in TEXT with NEW.
+Zero matches and several matches are errors.  REL names the file in the
+error.  An empty OLD is a pure addition: NEW goes after LINE-HINT when
+the hunk header named one, else at the end."
+  (cond
+   ((and (string-empty-p old) line-hint)
+    (kargu-diff--insert-after-line text new line-hint))
    ((string-empty-p old)
     (concat text (if (string-suffix-p "\n" text) "" "\n") new))
    (t
@@ -362,56 +380,93 @@ in the error.  An empty OLD appends NEW."
         (error "Hunk matched %d times in %s; refusing to guess"
                matches rel)))))))
 
-(defun kargu-diff--apply-update-op (file rel op-lines)
-  "Apply an update patch operation for REL (at absolute FILE) using OP-LINES."
-  (let* ((orig (or (kargu-diff--file-text file) ""))
-         (hunks (kargu-diff--split-update-hunks op-lines))
-         (current-text orig))
-    (dolist (hunk-lines hunks)
-      (when hunk-lines
-        (let* ((blocks (kargu-diff--extract-hunk-blocks hunk-lines))
-               (old-block (car blocks))
-               (new-block (cdr blocks)))
-          (setq current-text
-                (kargu-diff--apply-hunk current-text old-block new-block rel)))))
-    (kargu-diff-apply-proposal file current-text)
-    (format "Updated %s" rel)))
+(defun kargu-diff--update-text (orig rel op-lines)
+  "ORIG with the hunks of OP-LINES applied; REL names the file in errors."
+  (let ((text orig))
+    (dolist (hunk (kargu-diff--split-update-hunks op-lines))
+      (let ((blocks (kargu-diff--hunk-blocks (cdr hunk))))
+        (setq text (kargu-diff--apply-hunk text (car blocks) (cdr blocks)
+                                           rel (car hunk)))))
+    text))
 
-(defun kargu-diff--apply-patch-op (op)
-  "Apply a single patch operation OP and return a result summary string."
+;;;; Patch: plan first, then write ----------------------------------------
+
+(defun kargu-diff--patch-current (state file)
+  "Text of FILE as the patch has left it so far, or nil when it is absent.
+STATE maps a file to (:text TEXT) or (:deleted TEXT)."
+  (let ((entry (gethash file state)))
+    (cond
+     ((null entry) (and (file-exists-p file) (or (kargu-diff--file-text file) "")))
+     ((eq (car entry) :deleted) nil)
+     (t (cadr entry)))))
+
+(defun kargu-diff--plan-patch-op (state op)
+  "Fold OP into STATE without touching any file; return its summary line.
+Signals when OP cannot apply, so a bad patch changes nothing."
   (let* ((type (plist-get op :type))
          (rel (plist-get op :file))
-         (file (kargu-diff--resolve rel))
-         (op-lines (plist-get op :lines)))
+         (file (kargu-permission-resolve rel "file"))
+         (lines (plist-get op :lines))
+         (current (kargu-diff--patch-current state file)))
     (pcase type
       ('add
-       (let* ((content-lines
-               (mapcar (lambda (l)
-                         (if (string-prefix-p "+" l) (substring l 1) l))
-                       op-lines))
-              (content (string-join content-lines "\n")))
-         (kargu-diff-apply-proposal file content)
+       (when current
+         (error "Cannot add %s: it already exists; use Update File" rel))
+       (let ((content-lines (mapcar (lambda (l) (if (string-prefix-p "+" l) (substring l 1) l))
+                                    lines)))
+         (puthash file (list :text (concat (string-join content-lines "\n") "\n")) state)
          (format "Added %s (%d lines)" rel (length content-lines))))
-      ('delete
-       (when (file-exists-p file)
-         (kargu-diff-apply-proposal file ""))
-       (format "Deleted %s" rel))
       ('update
-       (kargu-diff--apply-update-op file rel op-lines)))))
+       (unless current
+         (error "Cannot update %s: no such file" rel))
+       (puthash file (list :text (kargu-diff--update-text current rel lines)) state)
+       (format "Updated %s" rel))
+      ('delete
+       (unless current
+         (error "Cannot delete %s: no such file" rel))
+       (unless (eq kargu-diff-review-mode 'auto)
+         (error "Deleting %s through a patch is only supported in `auto' review mode; delete it with the bash tool, which asks for approval" rel))
+       (puthash file (list :deleted current) state)
+       (format "Deleted %s" rel)))))
+
+(defun kargu-diff--delete-file (file original)
+  "Delete FILE, keeping ORIGINAL as its rollback snapshot."
+  (puthash file (cons (list :content original :created-new nil :at (current-time))
+                      (gethash file kargu-diff--snapshots))
+           kargu-diff--snapshots)
+  (when-let* ((buf (find-buffer-visiting file)))
+    (with-current-buffer buf (set-buffer-modified-p nil))
+    (kill-buffer buf))
+  (delete-file file)
+  (puthash file (list :status :applied-full :saved t
+                      :at (format-time-string "%H:%M:%S"))
+           kargu-diff--changed)
+  (when (boundp 'kargu-diff--run-modified-files)
+    (cl-pushnew file kargu-diff--run-modified-files :test #'equal)))
+
+(defun kargu-diff--commit-patch (state)
+  "Write every change in STATE through the proposal pipeline."
+  (maphash (lambda (file entry)
+             (if (eq (car entry) :deleted)
+                 (kargu-diff--delete-file file (cadr entry))
+               (kargu-diff-apply-proposal file (cadr entry))))
+           state))
 
 (defun kargu-diff-apply-patch (patch-text)
   "Parse and apply PATCH-TEXT supporting '*** Add File: <path>',
 '*** Update File: <path>', and '*** Delete File: <path>' within optional
 '*** Begin Patch' and '*** End Patch' envelopes.
-Applies edits through the proposal and rollback pipeline.
+The whole patch is checked first; if any operation cannot apply, no file
+is touched.  Edits then go through the proposal and rollback pipeline.
 Returns a formatted summary of applied changes."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p patch-text
                          "PATCH-TEXT must be a non-empty string: %S" patch-text)
-  (let* ((lines (split-string (string-trim patch-text) "\n"))
-         (ops (kargu-diff--parse-patch-lines lines)))
+  (let* ((ops (kargu-diff--parse-patch-lines (split-string (string-trim patch-text) "\n")))
+         (state (make-hash-table :test #'equal)))
     (unless ops
       (error "No valid patch operations found (expected '*** Add File:', '*** Update File:', or '*** Delete File:')"))
-    (let ((results (mapcar #'kargu-diff--apply-patch-op ops)))
+    (let ((results (mapcar (lambda (op) (kargu-diff--plan-patch-op state op)) ops)))
+      (kargu-diff--commit-patch state)
       (format "Patch successfully applied to %d file(s):\n  • %s"
               (length results) (string-join results "\n  • ")))))
 

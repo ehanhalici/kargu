@@ -14,17 +14,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/permission)
 
@@ -60,8 +49,6 @@ agent loop reads this after tool calls and removes entries via
         (message "kargu: no rollback snapshots")
       (message "kargu rollback snapshots: %s"
                (string-join paths ", ")))))
-
-(declare-function kargu-diff--resolve "kargu/tools/diff/stage" (path))
 
 (defun kargu-diff--rollback-created-file (path buffer)
   "Roll back an agent-created file at PATH, killing BUFFER and deleting the file."
@@ -119,9 +106,7 @@ The file is also removed from the changed-file set consumed by the agent loop."
                (completing-read "Roll back file to initial state: " paths nil t)
              (user-error "No rollback snapshots yet")))
          current-prefix-arg))
-  (let* ((path (if (fboundp 'kargu-diff--resolve)
-                   (kargu-diff--resolve file-path)
-                 (expand-file-name file-path)))
+  (let* ((path (kargu-permission-resolve file-path "file"))
          (stack (gethash path kargu-diff--snapshots)))
     (if (null stack)
         (user-error "No snapshot for %s" path)
@@ -153,9 +138,7 @@ The file is also removed from the changed-file set consumed by the agent loop."
 
 (defun kargu-diff-consume-file (path)
   "Remove PATH from the changed-file set (the loop handled it)."
-  (let ((resolved (if (fboundp 'kargu-diff--resolve)
-                      (kargu-diff--resolve path)
-                    (expand-file-name path))))
+  (let ((resolved (kargu-permission-resolve path "file")))
     (remhash resolved kargu-diff--changed)))
 
 (defun kargu-diff-reset-run-files ()
@@ -168,42 +151,47 @@ The file is also removed from the changed-file set consumed by the agent loop."
 
 ;;;; Diff stats -----------------------------------------------------------
 
+(defun kargu-diff--trim-common-lines (old new)
+  "Drop the common leading and trailing lines of the line lists OLD and NEW.
+Return (OLD-MIDDLE . NEW-MIDDLE)."
+  (while (and old new (equal (car old) (car new)))
+    (setq old (cdr old) new (cdr new)))
+  (let ((rold (reverse old))
+        (rnew (reverse new)))
+    (while (and rold rnew (equal (car rold) (car rnew)))
+      (setq rold (cdr rold) rnew (cdr rnew)))
+    (cons (nreverse rold) (nreverse rnew))))
+
+(defun kargu-diff--count-unmatched (lines other)
+  "How many of LINES have no counterpart in OTHER (each counterpart used once)."
+  (let ((pool (make-hash-table :test #'equal))
+        (unmatched 0))
+    (dolist (line other)
+      (puthash line (1+ (gethash line pool 0)) pool))
+    (dolist (line lines)
+      (let ((n (gethash line pool 0)))
+        (if (> n 0)
+            (puthash line (1- n) pool)
+          (setq unmatched (1+ unmatched)))))
+    unmatched))
+
 (defun kargu-diff--count-unified-changes (orig-content curr-content)
   "Compute (ADDED . DELETED) line counts between ORIG-CONTENT and CURR-CONTENT.
-Uses unified diff output to tally insertions and deletions."
-  (let ((file-orig (make-temp-file "kargu-stat-orig"))
-        (file-curr (make-temp-file "kargu-stat-curr"))
-        (added 0)
-        (deleted 0))
-    (unwind-protect
-        (condition-case nil
-            (progn
-              (with-temp-file file-orig (insert orig-content))
-              (with-temp-file file-curr (insert curr-content))
-              (with-temp-buffer
-                (call-process "diff" nil t nil "-u" file-orig file-curr)
-                (goto-char (point-min))
-                (while (not (eobp))
-                  (let ((line (buffer-substring (line-beginning-position) (line-end-position))))
-                    (cond
-                     ((string-prefix-p "+++" line) nil)
-                     ((string-prefix-p "---" line) nil)
-                     ((string-prefix-p "+" line) (setq added (1+ added)))
-                     ((string-prefix-p "-" line) (setq deleted (1+ deleted)))))
-                  (forward-line 1)))
-              (cons added deleted))
-          (error (cons 0 0)))
-      (when (file-exists-p file-orig) (delete-file file-orig))
-      (when (file-exists-p file-curr) (delete-file file-curr)))))
+Common leading and trailing lines are skipped, then the lines left on each
+side are matched as multisets.  It runs in-process in linear time, so the
+chat never waits for an external `diff'."
+  (let* ((middle (kargu-diff--trim-common-lines
+                  (split-string orig-content "\n")
+                  (split-string curr-content "\n"))))
+    (cons (kargu-diff--count-unmatched (cdr middle) (car middle))
+          (kargu-diff--count-unmatched (car middle) (cdr middle)))))
 
 (defun kargu-diff-file-stats (file-path)
   "Return (ADDED . DELETED) line counts for FILE-PATH.
 Compares FILE-PATH against its pre-agent snapshot.  If no snapshot
 exists or diff fails, return (0 . 0)."
   (let ((path (ignore-errors
-                (if (fboundp 'kargu-diff--resolve)
-                    (kargu-diff--resolve file-path)
-                  (expand-file-name file-path)))))
+                (kargu-permission-resolve file-path "file"))))
     (if (null path)
         (cons 0 0)
       (let* ((stack (gethash path kargu-diff--snapshots))

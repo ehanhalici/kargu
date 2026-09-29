@@ -17,7 +17,7 @@
 
 (require 'ert)
 (require 'kargu/contract)
-(require 'kargu/result)
+(require 'kargu/contract/result)
 
 (ert-deftest kargu-contract-mode-test ()
   "Test interaction mode contracts."

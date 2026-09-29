@@ -17,26 +17,13 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/config)
 (require 'kargu/state/selectors)
 (require 'kargu/tools/toolchain)
 (require 'kargu/languages)
 
-(declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-tools-enabled-p "kargu/loop" (&optional run))
 (declare-function kargu-provider-prompt-file "kargu/providers/registry" (model-id))
 (declare-function kargu-lsp-build-skeleton "kargu/tools/lsp" (&optional refresh))
 (declare-function kargu-dape-live-p "kargu/tools/dape")
@@ -79,6 +66,8 @@
 
 (defconst kargu-prompt--env-ttl 5.0
   "Seconds to reuse `kargu-prompt--env-cache'.")
+
+(declare-function kargu-permission-project-root "kargu/permission/guards" (&optional buffer))
 
 (defun kargu-prompt-clear-cache ()
   "Drop the environment / instruction / prompt-file cache."
@@ -156,25 +145,31 @@ The file for a tool-capable model comes from the provider catalog record."
 
 (defun kargu-prompt--workspace ()
   "Absolute workspace / project root directory."
-  (if (fboundp 'kargu-fs-project-root)
-      (kargu-fs-project-root)
-    (file-name-as-directory
-     (expand-file-name
-      (or (and (fboundp 'kargu--project-root)
-               (ignore-errors (kargu--project-root)))
-          default-directory)))))
+  (kargu-permission-project-root))
+
+(defun kargu-prompt--git-dir (root)
+  "The git directory of the repository containing ROOT, or nil.
+A worktree or submodule has a `.git' file that names the real directory."
+  (when-let* ((top (locate-dominating-file root ".git")))
+    (let ((dot-git (expand-file-name ".git" top)))
+      (if (file-directory-p dot-git)
+          dot-git
+        (with-temp-buffer
+          (insert-file-contents dot-git nil 0 1000)
+          (when (re-search-forward "^gitdir: *\\(.+\\)$" nil t)
+            (expand-file-name (match-string 1) top)))))))
 
 (defun kargu-prompt--git-info (root)
-  "Return (REPO-P . BRANCH) for ROOT with a single git invocation."
-  (let ((default-directory root))
-    (if (not (executable-find "git"))
+  "Return (REPO-P . BRANCH) for ROOT by reading `HEAD'; no git process runs."
+  (let* ((git-dir (ignore-errors (kargu-prompt--git-dir root)))
+         (head (and git-dir (expand-file-name "HEAD" git-dir))))
+    (if (not (and head (file-readable-p head)))
         (cons nil "(none)")
       (with-temp-buffer
-        (if (eq 0 (call-process "git" nil t nil
-                                "rev-parse" "--abbrev-ref" "HEAD"))
-            (let ((branch (string-trim (buffer-string))))
-              (cons t (if (string-empty-p branch) "(none)" branch)))
-          (cons nil "(none)"))))))
+        (insert-file-contents head nil 0 500)
+        (cons t (if (re-search-forward "^ref: refs/heads/\\(.+\\)$" nil t)
+                    (match-string 1)
+                  "HEAD"))))))
 
 (defun kargu-prompt--read-instructions (root)
   "Load the first readable instruction file under ROOT, or nil."
@@ -192,7 +187,8 @@ The file for a tool-capable model comes from the provider catalog record."
                                           (and size (min size limit)))
                     (buffer-string)))
              (capped (if (and size (> size limit))
-                         (concat raw "\n... [truncated]\n")
+                         (format "%s\n... [instructions truncated: first %d of %d bytes shown]\n"
+                                 raw limit size)
                        raw)))
         (format "Instructions from: %s\n%s" found capped)))))
 
@@ -264,9 +260,8 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
      (kargu-prompt--toolchain-block root))))
 
 (defun kargu-prompt--tools-off-p ()
-  "Return non-nil when the active model explicitly cannot call tools."
-  (and (fboundp 'kargu-model-supports-tools-p)
-       (not (kargu-model-supports-tools-p))))
+  "Return non-nil when the active request cannot use tools."
+  (not (kargu-tools-enabled-p)))
 
 (defconst kargu-prompt--no-tools-reminder
   "<system-reminder>\nThis model cannot call tools. Answer in plain text. Do not invent function-call markup.\n</system-reminder>"
@@ -345,8 +340,19 @@ does not name tools the request will not send."
     kargu-prompt--mode-block)
   "Ordered functions whose non-empty strings form the system prompt.")
 
+(defvar kargu--system-key nil
+  "Value of `kargu-prompt-system-key' the stored system message was built for.")
+
+(defun kargu-prompt-system-key ()
+  "Everything the system prompt text depends on that can change mid-session.
+When this differs from `kargu--system-key' the stored system message is stale."
+  (list (kargu-state-mode)
+        (and (kargu-prompt--tools-off-p) t)
+        (kargu--model)
+        (and kargu--compaction-system t)))
+
 (defun kargu--get-system-prompt ()
-  "Return the system prompt for `kargu-active-mode'.
+  "Return the system prompt for the active mode.
 During compaction, `kargu--compaction-system' replaces this."
   (or kargu--compaction-system
       (string-join
@@ -397,7 +403,7 @@ During compaction, `kargu--compaction-system' replaces this."
      "</system-reminder>")))
 
 (defun kargu-prompt-mode-reminder ()
-  "Per-turn `<system-reminder>' for `kargu-active-mode', or nil.
+  "Per-turn `<system-reminder>' for the active mode, or nil.
 A model that cannot call tools gets a plain-text reminder instead of
 a list of tool names."
   (if (kargu-prompt--tools-off-p)

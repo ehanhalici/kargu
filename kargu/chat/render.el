@@ -9,7 +9,7 @@
 ;; Transcript formatting, insertion above prompt, streaming deltas,
 ;; thoughts styling, tool activity timeline, and finish reporting.
 ;; Requires: `kargu/core', `kargu/chat/prompt', `kargu/tools/diff'.
-;; Public: `kargu-chat--insert`, `kargu-chat--render-user-turn`,
+;; Public: `kargu-chat-insert`, `kargu-chat--render-user-turn`,
 ;; `kargu-chat--render-agent-heading`, `kargu-chat--on-delta`,
 ;; `kargu-chat--on-finish`.
 
@@ -18,19 +18,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'button)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/state/selectors)
 (require 'kargu/api/tools)
@@ -80,19 +67,19 @@ transcript above the tool activity lines."
   :type 'boolean
   :group 'kargu-ui)
 
-(defvar kargu-chat--streamed-text nil
+(defvar-local kargu-chat--streamed-text nil
   "Whether the current run has streamed any answer text.
 When the plain (non-streaming) transport is used, the final answer
 arrives only with the run report; the chat then prints it once
 instead of relying on deltas.")
 
-(defvar kargu-chat--in-thought nil
+(defvar-local kargu-chat--in-thought nil
   "Non-nil when currently streaming thought/reasoning tokens.")
 
-(defvar kargu-chat--answer-start nil
+(defvar-local kargu-chat--answer-start nil
   "Marker at the start of streamed assistant text for the current turn.")
 
-(defvar kargu-chat--preamble-dropped nil
+(defvar-local kargu-chat--preamble-dropped nil
   "Non-nil after streamed CoT was removed because a tool call started.")
 
 (defun kargu-chat--target-buffer ()
@@ -133,7 +120,7 @@ instead of relying on deltas.")
          (set-window-point (car pair) (point-max)))
         (_ nil)))))
 
-(defun kargu-chat--insert (text &optional face)
+(defun kargu-chat-insert (text &optional face)
   "Insert TEXT into the transcript above the prompt.
 Windows whose point is at the output marker follow the insert;
 windows in the prompt stay in the prompt; windows scrolled
@@ -171,69 +158,80 @@ process filters and callbacks."
 
 (defun kargu-chat--render-user-turn (prompt)
   "Render PROMPT as the next user turn in the chat log."
-  (kargu-chat--insert "\n\n")
-  (kargu-chat--insert
+  (kargu-chat-insert "\n\n")
+  (kargu-chat-insert
    (format "## you · %s\n" (format-time-string "%H:%M"))
    'kargu-chat-user-heading)
-  (kargu-chat--insert prompt)
-  (kargu-chat--insert "\n"))
+  (kargu-chat-insert prompt)
+  (kargu-chat-insert "\n"))
 
 (defun kargu-chat--render-agent-heading ()
   "Open the next assistant turn in the chat log."
-  (kargu-chat--insert "\n")
-  (kargu-chat--insert
+  (kargu-chat-insert "\n")
+  (kargu-chat-insert
    (format "## kargu · %s\n" (kargu--model))
    'kargu-chat-agent-heading))
 
 (defun kargu-chat--on-delta (text &optional kind)
   "Append one streamed TEXT fragment of the assistant answer.
-KIND may be `thought' when streaming reasoning tokens."
+KIND may be `thought' when streaming reasoning tokens.  The stream flags
+are buffer-local, so the fragment is handled inside the run's chat buffer
+whatever buffer is current when the process filter fires."
+  (let ((buffer (kargu-chat--target-buffer)))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (kargu-chat--stream-delta text kind)))))
+
+(defun kargu-chat--stream-delta (text kind)
+  "Render streamed TEXT of KIND in the current chat buffer."
   (when (and (stringp text) (not (string-empty-p text))
              (not kargu-chat--preamble-dropped))
     (setq kargu-chat--streamed-text t)
     (cond
      ((eq kind 'thought)
-      (kargu-chat--insert text 'kargu-chat-thought))
+      (kargu-chat-insert text 'kargu-chat-thought))
      ((string-match "<think>" text)
       (let* ((idx (string-match "<think>" text))
              (before (substring text 0 idx))
              (after (substring text (+ idx (length "<think>")))))
         (when (not (string-empty-p before))
-          (kargu-chat--insert before (if kargu-chat--in-thought 'kargu-chat-thought nil)))
+          (kargu-chat-insert before (if kargu-chat--in-thought 'kargu-chat-thought nil)))
         (setq kargu-chat--in-thought t)
         (if (string-match "</think>" after)
             (let* ((end-idx (string-match "</think>" after))
                    (thought (substring after 0 end-idx))
                    (rest (substring after (+ end-idx (length "</think>")))))
               (when (not (string-empty-p thought))
-                (kargu-chat--insert thought 'kargu-chat-thought))
+                (kargu-chat-insert thought 'kargu-chat-thought))
               (setq kargu-chat--in-thought nil)
               (when (not (string-empty-p rest))
-                (kargu-chat--insert rest nil)))
+                (kargu-chat-insert rest nil)))
           (when (not (string-empty-p after))
-            (kargu-chat--insert after 'kargu-chat-thought)))))
+            (kargu-chat-insert after 'kargu-chat-thought)))))
      ((string-match "</think>" text)
       (let* ((idx (string-match "</think>" text))
              (thought (substring text 0 idx))
              (after (substring text (+ idx (length "</think>")))))
         (when (not (string-empty-p thought))
-          (kargu-chat--insert thought 'kargu-chat-thought))
+          (kargu-chat-insert thought 'kargu-chat-thought))
         (setq kargu-chat--in-thought nil)
         (when (not (string-empty-p after))
-          (kargu-chat--insert after nil))))
+          (kargu-chat-insert after nil))))
      (kargu-chat--in-thought
-      (kargu-chat--insert text 'kargu-chat-thought))
+      (kargu-chat-insert text 'kargu-chat-thought))
      (t
-      (kargu-chat--insert text nil)))))
+      (kargu-chat-insert text nil)))))
 
 (defun kargu-chat--drop-streamed-preamble ()
   "Delete streamed assistant text that preceded the first tool call.
 Only used when `kargu-chat-drop-preamble' is non-nil."
-  (when (and kargu-chat-drop-preamble
-             (not kargu-chat--preamble-dropped)
-             (markerp kargu-chat--answer-start))
+  (when kargu-chat-drop-preamble
     (let ((buffer (kargu-chat--target-buffer)))
-      (when (and buffer (eq (marker-buffer kargu-chat--answer-start) buffer))
+      (when (and (buffer-live-p buffer)
+                 (buffer-local-value 'kargu-chat--answer-start buffer)
+                 (not (buffer-local-value 'kargu-chat--preamble-dropped buffer))
+                 (eq (marker-buffer (buffer-local-value 'kargu-chat--answer-start buffer))
+                     buffer))
         (with-current-buffer buffer
           (let* ((inhibit-read-only t)
                  (beg (marker-position kargu-chat--answer-start))
@@ -270,31 +268,31 @@ Only used when `kargu-chat-drop-preamble' is non-nil."
   (when (and (eq status :done) (not kargu-chat--streamed-text))
     (if (kargu--nonempty text)
         (progn
-          (kargu-chat--insert text)
-          (kargu-chat--insert "\n"))
-      (kargu-chat--insert "— empty model response\n" 'kargu-chat-meta)))
+          (kargu-chat-insert text)
+          (kargu-chat-insert "\n"))
+      (kargu-chat-insert "— empty model response\n" 'kargu-chat-meta)))
   ;; Interrupted runs carry reason as report text
   (when (and (memq status '(:stopped :limit))
              (stringp text) (not (string-empty-p text)))
-    (kargu-chat--insert (concat text "\n") 'kargu-chat-meta))
+    (kargu-chat-insert (concat text "\n") 'kargu-chat-meta))
   (pcase status
     (:done
-     (kargu-chat--insert
+     (kargu-chat-insert
       (format "— done · %d model turn(s) · %d healing round(s) · %d verification(s)\n"
               (or (plist-get report :iterations) 0)
               (or (plist-get report :healing) 0)
               (or (plist-get report :verifications) 0))
       'kargu-chat-meta))
     (:error
-     (kargu-chat--insert
+     (kargu-chat-insert
       (format "— ERROR: %s\n" (or error "unknown error"))
       'kargu-chat-error))
     (:stopped
-     (kargu-chat--insert "— run stopped\n" 'kargu-chat-meta))
+     (kargu-chat-insert "— run stopped\n" 'kargu-chat-meta))
     (:limit
-     (kargu-chat--insert "— stopped: iteration limit\n" 'kargu-chat-meta))
+     (kargu-chat-insert "— stopped: iteration limit\n" 'kargu-chat-meta))
     (_
-     (kargu-chat--insert "— run ended\n" 'kargu-chat-meta))))
+     (kargu-chat-insert "— run ended\n" 'kargu-chat-meta))))
 
 (defun kargu-chat--render-modified-file (file)
   "Render stats and ediff/rollback action buttons for modified FILE."
@@ -316,22 +314,30 @@ Only used when `kargu-chat-drop-preamble' is non-nil."
                               (if (fboundp 'kargu-diff-rollback)
                                   (kargu-diff-rollback file)
                                 (message "kargu-diff-rollback unavailable"))))))
-    (kargu-chat--insert (format "  • %s (%s)  " file stat-str))
-    (kargu-chat--insert diff-btn)
-    (kargu-chat--insert "  ")
-    (kargu-chat--insert rb-btn)
-    (kargu-chat--insert "\n")))
+    (kargu-chat-insert (format "  • %s (%s)  " file stat-str))
+    (kargu-chat-insert diff-btn)
+    (kargu-chat-insert "  ")
+    (kargu-chat-insert rb-btn)
+    (kargu-chat-insert "\n")))
 
 (defun kargu-chat--render-modified-files (modified)
   "Render summary list of MODIFIED files."
   (when (and (listp modified) modified)
-    (kargu-chat--insert "\nModified file(s):\n" 'kargu-chat-meta)
+    (kargu-chat-insert "\nModified file(s):\n" 'kargu-chat-meta)
     (dolist (file modified)
       (kargu-chat--render-modified-file file))))
 
 (defun kargu-chat--on-finish (report)
-  "Render the final REPORT plist of an agent run.
+  "Render the final REPORT plist of an agent run in the run's chat buffer.
 See `kargu-loop-send' for the shape of the report."
+  (let ((buffer (kargu-chat--target-buffer)))
+    (if (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (kargu-chat--render-report report))
+      (kargu-chat--render-report report))))
+
+(defun kargu-chat--render-report (report)
+  "Render REPORT into the current chat buffer (or only notify without one)."
   (setq kargu-chat--in-thought nil)
   (let ((status (plist-get report :status))
         (text (plist-get report :text))
@@ -340,19 +346,17 @@ See `kargu-loop-send' for the shape of the report."
         (modified (plist-get report :modified-files))
         (buffer (kargu-chat--target-buffer)))
     (kargu-chat--clear-running-prompt-banner buffer)
-    (kargu-chat--insert "\n")
+    (kargu-chat-insert "\n")
     (kargu-chat--render-finish-status status report text error)
     (kargu-chat--render-modified-files modified)
     (when (and (listp pending) pending)
-      (kargu-chat--insert
+      (kargu-chat-insert
        (format "unverified changed file(s): %s\nroll back with M-x kargu-diff-rollback or the menu's r\n"
                (string-join pending ", "))
        'kargu-chat-error))
-    (kargu-chat--insert "\n")
+    (kargu-chat-insert "\n")
     (when (and (eq status :done)
-               (eq (if (fboundp 'kargu-state-mode)
-                       (kargu-state-mode)
-                     (or (bound-and-true-p kargu-active-mode) 'ask))
+               (eq (kargu-state-mode)
                    'plan)
                (fboundp 'kargu-plan-handle-response))
       (kargu-plan-handle-response report))
@@ -374,11 +378,11 @@ See `kargu-loop-send' for the shape of the report."
 (defun kargu-chat--finish-tool-activity (live result)
   "Render tool activity completion with RESULT into LIVE chat buffer."
   (when live
-    (kargu-chat--insert
+    (kargu-chat-insert
      (format "[%s]\n" (kargu-chat--result-summary result))
      'kargu-chat-tool)
-    (setq kargu-chat--preamble-dropped nil)
     (with-current-buffer live
+      (setq kargu-chat--preamble-dropped nil)
       (when (markerp kargu-chat--output-marker)
         (setq kargu-chat--answer-start (copy-marker kargu-chat--output-marker nil))))))
 
@@ -397,8 +401,8 @@ afterwards.  FN is the original function."
                      (point-max))))
           (unless (or (<= pos (point-min))
                       (eq (char-before pos) ?\n))
-            (kargu-chat--insert "\n"))))
-      (kargu-chat--insert (format "  → %s " name)
+            (kargu-chat-insert "\n"))))
+      (kargu-chat-insert (format "  → %s " name)
                           'kargu-chat-tool))
     (if callback
         (funcall fn name arguments

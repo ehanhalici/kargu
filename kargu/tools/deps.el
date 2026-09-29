@@ -25,19 +25,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/languages/core)
 
@@ -105,60 +92,19 @@
   :type 'boolean
   :group 'kargu-deps)
 
-(defcustom kargu-deps-lsp-server-table
-  '((rust
-     :name "rust-analyzer"
-     :binaries ("rust-analyzer")
-     :purpose "Language Server for Rust (code analysis, symbols, diagnostics)"
-     :hint "rustup component add rust-analyzer")
-    (golang
-     :name "gopls"
-     :binaries ("gopls")
-     :purpose "Language Server for Go (code completion and symbol navigation)"
-     :hint "go install golang.org/x/tools/gopls@latest")
-    (python
-     :name "pyright / pylsp"
-     :binaries ("pyright-langserver" "pyright" "basedpyright-langserver" "basedpyright" "pylsp" "jedi-language-server")
-     :purpose "Language Server for Python (code analysis and symbol navigation)"
-     :hint "pip install pyright (or pip install python-lsp-server)")
-    (c
-     :name "clangd / ccls"
-     :binaries ("clangd" "ccls")
-     :purpose "Language Server for C (code analysis and definitions)"
-     :hint "apt install clangd (or brew install llvm)")
-    (cpp
-     :name "clangd / ccls"
-     :binaries ("clangd" "ccls")
-     :purpose "Language Server for C++ (code analysis and definitions)"
-     :hint "apt install clangd (or brew install llvm)")
-    (java
-     :name "jdtls"
-     :binaries ("jdtls")
-     :purpose "Language Server for Java (code completion and definitions)"
-     :hint "brew install jdtls (or your system package manager)")
-    (haskell
-     :name "haskell-language-server"
-     :binaries ("haskell-language-server-wrapper" "haskell-language-server")
-     :purpose "Language Server for Haskell"
-     :hint "ghcup install hls")
-    (ocaml
-     :name "ocamllsp"
-     :binaries ("ocamllsp")
-     :purpose "Language Server for OCaml"
-     :hint "opam install ocaml-lsp-server")
-    (javascript
-     :name "typescript-language-server"
-     :binaries ("typescript-language-server" "vtsls")
-     :purpose "Language Server for JavaScript"
-     :hint "npm install -g typescript-language-server typescript")
-    (typescript
-     :name "typescript-language-server"
-     :binaries ("typescript-language-server" "vtsls")
-     :purpose "Language Server for TypeScript"
-     :hint "npm install -g typescript-language-server typescript"))
-  "Alist mapping language ID to LSP server metadata and candidate binaries."
+(defcustom kargu-deps-lsp-server-overrides nil
+  "Alist mapping language ID to an LSP server plist that replaces the profile's.
+Each value has `:name', `:binaries', `:purpose' and `:hint', like the `:lsp'
+field of a language profile.  The profiles under `kargu/languages/' supply
+the defaults."
   :type 'alist
   :group 'kargu-deps)
+
+(defun kargu-deps--lsp-entry (lang-spec)
+  "LSP server plist for LANG-SPEC: a user override, else the profile's own."
+  (or (cdr (assq (kargu-language-spec-id lang-spec)
+                 kargu-deps-lsp-server-overrides))
+      (kargu-language-spec-lsp lang-spec)))
 
 ;;;; Detection Helpers ----------------------------------------------------
 
@@ -175,8 +121,8 @@
 
 (defun kargu-deps--active-eglot-server-p (&optional root)
   "Return non-nil if an active Eglot server is running for ROOT."
-  (let ((proj-root (or root (and (fboundp 'kargu-session--project-root)
-                                 (kargu-session--project-root)))))
+  (let ((proj-root (or root (and (fboundp 'kargu-session-project-root)
+                                 (kargu-session-project-root)))))
     (cl-some (lambda (b)
                (and (buffer-live-p b)
                     (with-current-buffer b
@@ -193,8 +139,8 @@
 
 (defun kargu-deps-detect-project-language (&optional root)
   "Detect programming language spec for ROOT or active buffer."
-  (let* ((proj (or root (and (fboundp 'kargu-session--project-root)
-                             (kargu-session--project-root))
+  (let* ((proj (or root (and (fboundp 'kargu-session-project-root)
+                             (kargu-session-project-root))
                    default-directory))
          (spec (and (fboundp 'kargu-language-detect)
                     (kargu-language-detect proj))))
@@ -213,7 +159,7 @@ A language whose spec sets `requires-lsp' to nil is satisfied."
              (kargu-language-requires-lsp-p lang-spec))
     (let* ((lang-id (kargu-language-spec-id lang-spec))
            (lang-name (kargu-language-spec-name lang-spec))
-           (entry (cdr (assq lang-id kargu-deps-lsp-server-table)))
+           (entry (kargu-deps--lsp-entry lang-spec))
            (candidates (and entry (plist-get entry :binaries)))
            (server-name (or (and entry (plist-get entry :name)) (format "%s-lsp" lang-id)))
            (purpose (or (and entry (plist-get entry :purpose))

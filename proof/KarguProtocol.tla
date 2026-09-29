@@ -3,10 +3,10 @@
 (* Complete formal specification of Kargu's LLM message protocol,         *)
 (* history validation invariants, and message transformations.             *)
 (* Faithfully mirrors:                                                     *)
-(*   - `kargu/constants.el`                                                *)
-(*   - `kargu/history.el` (`kargu--validate-history`, `kargu--history-add`)*)
+(*   - `kargu/contract/constants.el`                                       *)
+(*   - `kargu/history/protocol.el` (`kargu--history-add`)                  *)
+(*   - `kargu/history/repair.el` (`kargu--validate-history`)               *)
 (*   - `kargu/history/compact.el` (`kargu-history-apply-compaction`)       *)
-(*   - `kargu/api/response.el` (`kargu-response-record-assistant`)         *)
 (***************************************************************************)
 
 EXTENDS Naturals, Sequences, FiniteSets, TLC, KarguContract
@@ -78,67 +78,78 @@ ProtocolFirewallValid(hist) ==
     /\ HasAtLeastOneUser(hist)
 
 (***************************************************************************)
-(* Complete Implementation of `kargu--validate-history'                    *)
-(* Faithfully mirrors lines 167-302 of `kargu/history.el'.                 *)
+(* `kargu--validate-history' (kargu/history/repair.el)                     *)
+(*                                                                         *)
+(* Repair order, exactly as in the code:                                   *)
+(*   1. The head system message is taken out (or created); every other     *)
+(*      system message is dropped.                                         *)
+(*   2. One forward scan drops orphan tool results and, when any other     *)
+(*      turn arrives, flushes the calls still unanswered with a synthetic  *)
+(*      result.                                                            *)
+(*   3. Consecutive user turns are merged; consecutive assistant text      *)
+(*      turns are merged, and an assistant text turn is folded into the    *)
+(*      assistant turn with calls that follows it.                         *)
+(*   4. Only then, in `strip' mode, trailing assistant turns are removed.  *)
+(*      A trailing assistant turn with calls was answered in step 2, so it *)
+(*      is no longer trailing.                                             *)
 (***************************************************************************)
 
-\* Strips trailing assistant messages when fix is 'strip'
+\* Strips trailing assistant messages
 RECURSIVE DropTrailingAssistants(_)
 DropTrailingAssistants(hist) ==
     IF Len(hist) > 0 /\ IsAssistant(hist[Len(hist)])
     THEN DropTrailingAssistants(SubSeq(hist, 1, Len(hist) - 1))
     ELSE hist
 
-\* Flushes pending tool calls by appending synthetic error results
-FlushPending(outSeq, pendingIds, idToName) ==
-    IF pendingIds = {}
-    THEN outSeq
-    ELSE LET orderedIds == CHOOSE seq \in [1..Cardinality(pendingIds) -> pendingIds] :
-                            \A x, y \in 1..Cardinality(pendingIds) : x # y => seq[x] # seq[y]
-             synResults == [k \in 1..Cardinality(pendingIds) |->
-                 MakeMsg("tool",
-                         "ERROR: this tool call was never answered (run interrupted). Treat it as a failed tool result and recover.",
-                         << >>,
-                         orderedIds[k],
-                         idToName[orderedIds[k]])]
-         IN outSeq \o synResults
+\* The ids of a sequence, as a set
+IdSet(ids) == {ids[i] : i \in 1..Len(ids)}
 
-\* Pass 1: Forward scan - Drops orphan tool results and tracks answered calls
-RECURSIVE Pass1(_, _, _, _, _)
-Pass1(inSeq, outSeq, pendingIds, seenIds, idToName) ==
+\* Flushes pending tool calls by appending synthetic error results, in the
+\* order the calls were made (`kargu--flush-pending' sorts by sequence).
+FlushPending(outSeq, pendingIds, idToName) ==
+    outSeq \o [k \in 1..Len(pendingIds) |->
+                MakeMsg("tool",
+                        "ERROR: interrupted before response",
+                        << >>,
+                        pendingIds[k],
+                        idToName[pendingIds[k]])]
+
+\* Step 2: forward scan.  System turns are dropped, orphan tool results are
+\* dropped, every other turn flushes what is still pending.  PENDINGIDS is
+\* a sequence: the unanswered call ids of the last assistant turn, in order.
+RECURSIVE Pass1(_, _, _, _)
+Pass1(inSeq, outSeq, pendingIds, idToName) ==
     IF inSeq = << >>
-    THEN [out |-> outSeq, pending |-> pendingIds, seen |-> seenIds, names |-> idToName]
+    THEN [out |-> outSeq, pending |-> pendingIds, names |-> idToName]
     ELSE LET m == Head(inSeq)
              rest == Tail(inSeq)
          IN
-         IF IsAssistant(m) /\ HasToolCalls(m)
-         THEN LET newIds   == {m.tool_calls[k].id : k \in 1..Len(m.tool_calls)}
-                  newNames == [id \in newIds |->
+         IF IsSystem(m)
+         THEN Pass1(rest, outSeq, pendingIds, idToName)
+         ELSE IF IsTool(m)
+         THEN IF m.tool_call_id \in IdSet(pendingIds)
+              THEN Pass1(rest,
+                         outSeq \o <<m>>,
+                         SelectSeq(pendingIds, LAMBDA id : id # m.tool_call_id),
+                         idToName)
+              ELSE Pass1(rest, outSeq, pendingIds, idToName)  \* orphan result
+         ELSE IF HasToolCalls(m)
+         THEN LET newIds   == [k \in 1..Len(m.tool_calls) |-> m.tool_calls[k].id]
+                  newNames == [id \in IdSet(newIds) |->
                                 m.tool_calls[CHOOSE k \in 1..Len(m.tool_calls) : m.tool_calls[k].id = id].name]
-                  combinedNames == [id \in (DOMAIN idToName) \cup newIds |->
-                                      IF id \in DOMAIN idToName THEN idToName[id] ELSE newNames[id]]
+                  combined == [id \in (DOMAIN idToName) \cup IdSet(newIds) |->
+                                IF id \in DOMAIN idToName THEN idToName[id] ELSE newNames[id]]
               IN Pass1(rest,
                        FlushPending(outSeq, pendingIds, idToName) \o <<m>>,
                        newIds,
-                       seenIds \cup newIds,
-                       combinedNames)
-         ELSE IF IsTool(m)
-         THEN IF m.tool_call_id \in pendingIds
-              THEN Pass1(rest,
-                         outSeq \o <<m>>,
-                         pendingIds \ {m.tool_call_id},
-                         seenIds,
-                         idToName)
-              ELSE Pass1(rest, outSeq, pendingIds, seenIds, idToName)  \* Drop orphan tool result
-         ELSE IF IsUser(m) \/ IsSystem(m)
-         THEN Pass1(rest,
+                       combined)
+         ELSE \* user turn or assistant text turn
+              Pass1(rest,
                     FlushPending(outSeq, pendingIds, idToName) \o <<m>>,
-                    {},
-                    seenIds,
+                    << >>,
                     idToName)
-         ELSE Pass1(rest, outSeq \o <<m>>, pendingIds, seenIds, idToName)
 
-\* Pass 2: Merges consecutive user turns
+\* Step 3a: merge consecutive user turns
 RECURSIVE MergeConsecutiveUsers(_)
 MergeConsecutiveUsers(seq) ==
     IF Len(seq) <= 1 THEN seq
@@ -153,30 +164,62 @@ MergeConsecutiveUsers(seq) ==
               IN MergeConsecutiveUsers(<<merged>> \o rst)
          ELSE <<h1>> \o MergeConsecutiveUsers(SubSeq(seq, 2, Len(seq)))
 
-\* Complete history repair function with Ingress / Egress assertion
+\* Step 3b: an assistant text turn followed by another assistant turn becomes
+\* one turn; the calls (if any) of the second are kept.
+RECURSIVE MergeConsecutiveAssistants(_)
+MergeConsecutiveAssistants(seq) ==
+    IF Len(seq) <= 1 THEN seq
+    ELSE LET h1 == seq[1]
+             h2 == seq[2]
+             rst == SubSeq(seq, 3, Len(seq))
+         IN
+         IF IsAssistant(h1) /\ ~HasToolCalls(h1) /\ IsAssistant(h2)
+         THEN LET merged == MakeMsg("assistant",
+                                    h1.content \o "\n\n" \o h2.content,
+                                    h2.tool_calls, "", "")
+              IN MergeConsecutiveAssistants(<<merged>> \o rst)
+         ELSE <<h1>> \o MergeConsecutiveAssistants(SubSeq(seq, 2, Len(seq)))
+
+DefaultSystemMsg == MakeMsg("system", "SYSTEM_PROMPT", << >>, "", "")
+
+\* Complete history repair.  FIX is "strip" for a request; any other value
+\* (a finished or interrupted run) keeps a trailing assistant answer.
 ValidateHistory(hist, fix) ==
     IF Assert(ContractHistory(hist), "Ingress contract violation in ValidateHistory")
     THEN
-        LET stripped == IF fix = "strip" THEN DropTrailingAssistants(hist) ELSE hist
-            p1       == Pass1(stripped, << >>, {}, {}, [x \in {} |-> ""])
+        LET hasSys   == Len(hist) > 0 /\ IsSystem(hist[1])
+            sysMsg   == IF hasSys THEN hist[1] ELSE DefaultSystemMsg
+            body     == IF hasSys THEN SubSeq(hist, 2, Len(hist)) ELSE hist
+            p1       == Pass1(body, << >>, << >>, [x \in {} |-> ""])
             flushed  == FlushPending(p1.out, p1.pending, p1.names)
-            merged   == MergeConsecutiveUsers(flushed)
-            repaired == IF Len(merged) = 0 \/ ~IsSystem(merged[1])
-                        THEN <<MakeMsg("system", "SYSTEM_PROMPT", << >>, "", "")>> \o merged
-                        ELSE merged
-        IN repaired
+            merged   == MergeConsecutiveAssistants(MergeConsecutiveUsers(flushed))
+            trimmed  == IF fix = "strip" THEN DropTrailingAssistants(merged) ELSE merged
+        IN <<sysMsg>> \o trimmed
     ELSE hist
 
 (***************************************************************************)
-(* Compaction Transformation (`kargu/history/compact.el')                  *)
+(* Compaction (`kargu/history/compact.el')                                 *)
+(*                                                                         *)
+(* The summary becomes a `COMPACTION_ACK:' user turn answered by a fixed   *)
+(* assistant turn.  The kept tail starts on a user turn when it holds one  *)
+(* (`kargu-history-compact-tail'); compaction turns are never kept.        *)
 (***************************************************************************)
+
+SummaryTexts == {"Summary of previous turns"}
+
+AckUserText(summary) == "COMPACTION_ACK: Prior work summary:\n" \o summary
+AckAssistantText == "Acknowledged. Continuing from the summary."
+
+IsCompactionMsg(m) ==
+    \/ IsUser(m) /\ m.content \in {AckUserText(s) : s \in SummaryTexts}
+    \/ IsAssistant(m) /\ m.content = AckAssistantText
 
 RECURSIVE FilterSystemAndAck(_)
 FilterSystemAndAck(seq) ==
     IF seq = << >> THEN << >>
     ELSE LET h == Head(seq)
              t == FilterSystemAndAck(Tail(seq))
-         IN IF IsSystem(h) \/ h.content = "COMPACTION_ACK"
+         IN IF IsSystem(h) \/ IsCompactionMsg(h)
             THEN t
             ELSE <<h>> \o t
 
@@ -184,18 +227,22 @@ TakeTail(seq, n) ==
     IF Len(seq) <= n THEN seq
     ELSE SubSeq(seq, Len(seq) - n + 1, Len(seq))
 
+\* Drop leading turns up to the first user turn, if the tail has one
+DropToFirstUser(seq) ==
+    IF \E i \in 1..Len(seq) : IsUser(seq[i])
+    THEN LET first == CHOOSE i \in 1..Len(seq) :
+                        IsUser(seq[i]) /\ \A j \in 1..(i-1) : ~IsUser(seq[j])
+         IN SubSeq(seq, first, Len(seq))
+    ELSE seq
+
 ApplyCompaction(hist, summaryText, keepCount) ==
     IF Assert(ContractHistory(hist), "Ingress contract violation in ApplyCompaction")
     THEN
-        LET sysMsg  == IF Len(hist) > 0 /\ IsSystem(hist[1])
-                       THEN hist[1]
-                       ELSE MakeMsg("system", "SYSTEM_PROMPT", << >>, "", "")
-            nonSys  == FilterSystemAndAck(hist)
-            tail    == TakeTail(nonSys, keepCount)
-            ackMsg  == MakeMsg("assistant", "COMPACTION_ACK", << >>, "", "")
-            sumMsg  == MakeMsg("user", summaryText, << >>, "", "")
-            newHist == <<sysMsg, sumMsg, ackMsg>> \o tail
-        IN ValidateHistory(newHist, "strip")
+        LET sysMsg  == IF Len(hist) > 0 /\ IsSystem(hist[1]) THEN hist[1] ELSE DefaultSystemMsg
+            tail    == DropToFirstUser(TakeTail(FilterSystemAndAck(hist), keepCount))
+            ackUser == MakeMsg("user", AckUserText(summaryText), << >>, "", "")
+            ackAsst == MakeMsg("assistant", AckAssistantText, << >>, "", "")
+        IN ValidateHistory(<<sysMsg, ackUser, ackAsst>> \o tail, "keep")
     ELSE hist
 
 =============================================================================

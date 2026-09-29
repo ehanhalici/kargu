@@ -22,8 +22,9 @@
       (add-to-list 'load-path (file-name-as-directory
                                (expand-file-name root))))))
 
+(require 'tests/test-helpers)
 (require 'ert)
-(require 'kargu/constants)
+(require 'kargu/contract/constants)
 (require 'kargu/core)
 (require 'kargu/plan)
 
@@ -70,7 +71,7 @@
     (unwind-protect
         (cl-letf (((symbol-function 'kargu-chat-prompt)
                    (lambda (prompt) (setq dispatched-prompt prompt))))
-          (setq kargu-active-mode 'plan)
+          (kargu-test-mode 'plan)
           ;; User edits buffer without saving to disk
           (with-current-buffer buf
             (erase-buffer)
@@ -78,7 +79,7 @@
           ;; User clicks approve
           (kargu-plan-approve)
           ;; Mode must be switched to agent
-          (should (eq kargu-active-mode 'agent))
+          (should (eq (kargu-state-mode) 'agent))
           ;; Decision pending reset
           (should-not kargu-plan--decision-pending)
           ;; Dispatched prompt must contain the edited text
@@ -120,3 +121,15 @@
 (provide 'tests/test-plan)
 
 ;;; test-plan.el ends here
+
+(ert-deftest kargu-plan-decision-is-taken-once-test ()
+  "A button that stays in the transcript cannot approve or reject a plan twice."
+  (let ((buf (kargu-plan-setup-buffer "Plan"))
+        (dispatched 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'kargu-chat-prompt) (lambda (_p) (cl-incf dispatched))))
+          (kargu-plan-approve)
+          (kargu-plan-approve)
+          (kargu-plan-reject)
+          (should (= dispatched 1)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))

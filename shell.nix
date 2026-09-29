@@ -1,13 +1,15 @@
-# shell.nix
+# shell.nix --- tools for checking Kargu's TLA+ specification.
+#
+#   nix-shell --run 'proof/run_tlc.sh'              # exhaustive scan
+#   nix-shell --run 'proof/run_tlc.sh --simulate'   # quick smoke test
 { pkgs ? import <nixpkgs> {} }:
 
 pkgs.mkShell {
   buildInputs = with pkgs; [
-    tlaps
-    tlaplus
+    tlaplus   # TLC model checker: `tlc'
   ];
 
   shellHook = ''
-    echo "Insider Notification System dev environment loaded!"
+    echo "Kargu proof shell: run proof/run_tlc.sh"
   '';
 }

@@ -40,6 +40,11 @@
         "Pointer variable: use `->` instead of `.`.")
        ("cannot access memory at address" .
         "Segmentation fault / null pointer dereference. Inspect the pointer value before dereferencing.")))
+   :lsp
+   '(:name "clangd / ccls"
+     :binaries ("clangd" "ccls")
+     :purpose "Language Server for C (code analysis and definitions)"
+     :hint "apt install clangd (or brew install llvm)")
    :lsp-notes
    "C symbols: functions, structs, unions, enums, typedefs. Use clangd for accurate cross-references."))
 

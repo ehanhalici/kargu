@@ -14,19 +14,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/api)
 (require 'kargu/fs)
@@ -42,15 +29,11 @@
 (defconst kargu-skill--ttl 8.0
   "Seconds to reuse `kargu-skill--cache'.")
 
+(declare-function kargu-permission-project-root "kargu/permission/guards" (&optional buffer))
+
 (defun kargu-skill--root ()
   "Project root used for skill discovery."
-  (if (fboundp 'kargu-fs-project-root)
-      (kargu-fs-project-root)
-    (file-name-as-directory
-     (expand-file-name
-      (or (and (fboundp 'kargu--project-root)
-               (ignore-errors (kargu--project-root)))
-          default-directory)))))
+  (kargu-permission-project-root))
 
 (defun kargu-skill--user-dir ()
   "User-level skills directory, or nil."
@@ -159,9 +142,7 @@
      (t
       (let* ((body (or (plist-get hit :body) ""))
              (limit kargu-skill-max-chars)
-             (capped (if (> (length body) limit)
-                         (concat (substring body 0 limit) "\n... [truncated]\n")
-                       body)))
+             (capped (kargu-cap-text body limit "skill")))
         (format "<skill_content name=\"%s\">\n# Skill: %s\n\n%s\nBase directory: %s\n</skill_content>"
                 (plist-get hit :name)
                 (plist-get hit :name)

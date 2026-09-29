@@ -19,17 +19,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'auth-source)
 
@@ -135,6 +124,34 @@ One spec plist or a list of spec plists both count."
   "Effort path specs for provider ID, or nil when none are declared."
   (let ((wire (kargu-provider-wire id)))
     (kargu-provider--effort-specs (and wire (plist-get wire :models)))))
+
+(defun kargu-provider-cache-marker-p (id)
+  "Non-nil when requests to provider ID carry prompt-cache markers.
+The provider must enable prompt caching and its format must place markers."
+  (and (kargu-provider-prompt-caching id)
+       (plist-get (kargu-provider-format-record (kargu-provider-format id))
+                  :cache-marker)
+       t))
+
+(defun kargu-provider-native-models-path (id api-base)
+  "Models path of ID's own API when API-BASE is not OpenAI-compatible, or nil."
+  (let* ((spec (plist-get (kargu-provider-format-record (kargu-provider-format id))
+                          :native-models))
+         (suffix (plist-get spec :unless-suffix)))
+    (and spec
+         (not (and suffix (string-suffix-p suffix api-base)))
+         (plist-get spec :path))))
+
+(defun kargu-provider-format-field (id field)
+  "FIELD of provider ID's format record, or nil."
+  (plist-get (kargu-provider-format-record (kargu-provider-format id)) field))
+
+(defun kargu-provider-reasoning-shape (id)
+  "How provider ID's requests carry reasoning settings.
+One of `effort' (the default), `nested' or `thinking'."
+  (or (plist-get (kargu-provider-format-record (kargu-provider-format id))
+                 :reasoning-shape)
+      'effort))
 
 (defun kargu-provider-format-auth (format)
   "Auth style for FORMAT: `x-api-key' or `bearer'."

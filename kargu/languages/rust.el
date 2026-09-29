@@ -43,6 +43,11 @@
         "The variable is a pointer or reference in LLDB. Use arrow `->` or dereference with `(*ptr).field`.")
        ("no member named" .
         "Field not found in debug symbol table. Inspect all fields of the struct using `debug_scope` or check the source with `read_symbol`.")))
+   :lsp
+   '(:name "rust-analyzer"
+     :binaries ("rust-analyzer")
+     :purpose "Language Server for Rust (code analysis, symbols, diagnostics)"
+     :hint "rustup component add rust-analyzer")
    :lsp-notes
    "Rust symbol outline: functions (fn), structs (struct), enums (enum), traits (trait), impl blocks. Prefer `edit_by_lsp` to replace target function bodies without fragile string matching."))
 

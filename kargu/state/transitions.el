@@ -13,19 +13,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/contract/types)
 (require 'kargu/contract/assert)
 (require 'kargu/state/store)
@@ -35,8 +22,6 @@
 (defconst kargu-state--valid-statuses
   '(:idle :requesting :waiting-model :executing-tools :verifying :compacting :pause :done :limit :stopped :error)
   "List of valid lifecycle statuses for the Kargu state machine.")
-
-(defvar kargu-active-mode)
 
 (declare-function kargu-loop-running-p "kargu/loop" ())
 (declare-function kargu-state--set "kargu/state/store" (key value))
@@ -50,7 +35,6 @@ Validates MODE and ensures an agent run is not currently active."
   (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
     (user-error "kargu: cannot change mode while an agent run is in progress (M-x kargu-loop-stop)"))
   (kargu-state--set :mode mode)
-  (setq kargu-active-mode mode)
   (kargu-state-notify :mode mode)
   mode)
 
@@ -115,8 +99,6 @@ Validates that NEW-STATUS is a known status and updates `:busy'."
 (defun kargu-state-reset ()
   "Reset state store back to clean initial state."
   (let ((fresh (kargu-state-init)))
-    (when (boundp 'kargu-active-mode)
-      (setq kargu-active-mode 'ask))
     (kargu-state-notify :status :idle "reset")
     fresh))
 

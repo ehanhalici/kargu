@@ -24,18 +24,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
-(require 'kargu/constants)
+(require 'kargu/contract/constants)
 (require 'kargu/contract)
 (require 'kargu/state)
 (require 'kargu/core/custom)
@@ -68,10 +57,18 @@ Handles integers, floats (rounded), and integer strings."
         default))
    (t default)))
 
-;;;; Mode state -----------------------------------------------------------
+(defun kargu-cap-text (text limit &optional label)
+  "TEXT cut to LIMIT characters, with a one-line note when it was cut.
+The note names LABEL (default \"text\") and the original length.  A
+non-natural LIMIT leaves TEXT alone.  This is the one wording for a cut
+that is not the model-bound tool output (see `kargu--truncate-for-model')."
+  (if (and (natnump limit) (> (length text) limit))
+      (concat (substring text 0 limit)
+              (format "\n... [%s truncated: %d of %d chars shown]"
+                      (or label "text") limit (length text)))
+    text))
 
-(defvar kargu-active-mode 'ask
-  "Current operating mode: one of `ask', `plan', `debug', `agent'.")
+;;;; Mode state -----------------------------------------------------------
 
 (defun kargu--publish-mode (mode)
   "Refresh chat footers and the mode line after MODE changes."

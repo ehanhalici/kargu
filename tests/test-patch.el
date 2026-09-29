@@ -22,8 +22,9 @@
       (add-to-list 'load-path (file-name-as-directory
                                (expand-file-name root))))))
 
+(require 'tests/test-helpers)
 (require 'ert)
-(require 'kargu/constants)
+(require 'kargu/contract/constants)
 (require 'kargu/core)
 (require 'kargu/permission)
 (require 'kargu/tools/diff)
@@ -33,7 +34,7 @@
   (let* ((tmp-dir (make-temp-file "kargu-patch-test" t))
          (kargu-permission--override-root tmp-dir)
          (kargu-diff-review-mode 'auto)
-         (kargu-active-mode 'agent)
+         (_ (kargu-test-mode 'agent))
          (new-file-rel "new_module.el")
          (patch-text
           (concat "*** Begin Patch\n"
@@ -70,7 +71,7 @@
   (let* ((tmp-dir (make-temp-file "kargu-patch-update" t))
          (kargu-permission--override-root tmp-dir)
          (kargu-diff-review-mode 'auto)
-         (kargu-active-mode 'agent)
+         (_ (kargu-test-mode 'agent))
          (file-rel "main.py")
          (abs-file (expand-file-name file-rel tmp-dir))
          (initial-content "def hello():\n    print(\"Hello world\")\n")
@@ -95,13 +96,13 @@
 
 (ert-deftest kargu-patch-mode-safety-test ()
   "Test that `apply_patch' is blocked in non-agent modes."
-  (let ((kargu-active-mode 'ask))
+  (let ((_ (kargu-test-mode 'ask)))
     (should (string-match-p "ERROR: apply_patch is disabled in ask mode"
                             (kargu-diff--apply-patch-tool '((patch . "*** Begin Patch\n*** End Patch"))))))
-  (let ((kargu-active-mode 'plan))
+  (let ((_ (kargu-test-mode 'plan)))
     (should (string-match-p "ERROR: apply_patch is disabled in plan mode"
                             (kargu-diff--apply-patch-tool '((patch . "*** Begin Patch\n*** End Patch"))))))
-  (let ((kargu-active-mode 'debug))
+  (let ((_ (kargu-test-mode 'debug)))
     (should (string-match-p "ERROR: apply_patch is disabled in debug mode"
                             (kargu-diff--apply-patch-tool '((patch . "*** Begin Patch\n*** End Patch")))))))
 
@@ -110,7 +111,7 @@
   (let* ((tmp-dir (make-temp-file "kargu-patch-multihunk" t))
          (kargu-permission--override-root tmp-dir)
          (kargu-diff-review-mode 'auto)
-         (kargu-active-mode 'agent)
+         (_ (kargu-test-mode 'agent))
          (file-rel "multi.txt")
          (abs-file (expand-file-name file-rel tmp-dir))
          (initial-content "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n")
@@ -159,3 +160,36 @@
 (provide 'tests/test-patch)
 
 ;;; test-patch.el ends here
+
+(ert-deftest kargu-patch-is-all-or-nothing-and-deletes-for-real-test ()
+  "A bad hunk changes no file; a delete removes the file; @@ N inserts after line N."
+  (let* ((tmp (make-temp-file "kargu-patch-atomic" t))
+         (kargu-permission--override-root tmp)
+         (kargu-diff-review-mode 'auto)
+         (_ (kargu-test-mode 'agent))
+         (a (expand-file-name "a.txt" tmp))
+         (b (expand-file-name "b.txt" tmp)))
+    (unwind-protect
+        (progn
+          (write-region "one\ntwo\nthree\n" nil a)
+          (write-region "x\n" nil b)
+          ;; Second operation cannot match: the first must not be written either.
+          (should-error
+           (kargu-diff-apply-patch
+            (concat "*** Update File: a.txt\n@@\n-one\n+ONE\n"
+                    "*** Update File: b.txt\n@@\n-nothing like this\n+y\n")))
+          (should (equal (with-temp-buffer (insert-file-contents a) (buffer-string))
+                         "one\ntwo\nthree\n"))
+          ;; @@ names a line: a pure addition goes after it.
+          (kargu-diff-apply-patch "*** Update File: a.txt\n@@ -1,0 +2,1 @@\n+inserted\n")
+          (should (equal (with-temp-buffer (insert-file-contents a) (buffer-string))
+                         "one\ninserted\ntwo\nthree\n"))
+          ;; Delete removes the file and leaves a rollback snapshot.
+          (kargu-diff-apply-patch "*** Delete File: b.txt\n")
+          (should-not (file-exists-p b))
+          (should (gethash b kargu-diff--snapshots))
+          (kargu-diff-rollback b)
+          (should (file-exists-p b))
+          ;; Adding an existing file is refused.
+          (should-error (kargu-diff-apply-patch "*** Add File: a.txt\n+z\n")))
+      (delete-directory tmp t))))

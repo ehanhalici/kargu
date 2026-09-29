@@ -46,24 +46,11 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/api)
 (require 'kargu/languages)
-(require 'kargu/tools/lsp)         ; for kargu--resolve-path
+(require 'kargu/permission)
 (require 'dape nil t)
 
 (defvar dape--request-blocking)
@@ -545,12 +532,6 @@ or \"watch\")."
         (format "[ACTIVE BREAKPOINTS: %d]\n%s"
                 count (string-join (nreverse entries) "\n")))))))
 
-(defun kargu-dape--resolve (path)
-  "Resolve PATH with the shared resolver when available."
-  (if (fboundp 'kargu--resolve-path)
-      (kargu--resolve-path path)
-    (expand-file-name path)))
-
 (defun kargu-dape-toggle-breakpoint (file-path line)
   "Toggle a source breakpoint at FILE-PATH:LINE through dape.
 Works with or without a live session: dape records the breakpoint
@@ -564,7 +545,7 @@ and (re) sends it to the adapter when appropriate."
     "ERROR: line must be a positive integer (1-based)")
    (t
    (condition-case-unless-debug err
-       (let* ((path (kargu-dape--resolve file-path))
+       (let* ((path (kargu-permission-resolve file-path "dape path"))
               (buffer (find-file-noselect path)))
          (with-current-buffer buffer
            (save-excursion
@@ -606,7 +587,7 @@ Returns structured confirmation with file, line, code snippet, and total count."
    ((not (and (natnump line) (> line 0)))
     "ERROR: line must be a positive integer (1-based)")
    (t
-    (let* ((resolved (kargu-dape--resolve file-path))
+    (let* ((resolved (kargu-permission-resolve file-path "dape path"))
            (abs-path (expand-file-name resolved)))
       (if (kargu-dape--breakpoint-at-p abs-path line)
           (let ((src (kargu-dape--source-line abs-path line)))
@@ -631,7 +612,7 @@ Returns structured confirmation with file, line, and remaining count."
    ((not (and (natnump line) (> line 0)))
     "ERROR: line must be a positive integer (1-based)")
    (t
-    (let* ((resolved (kargu-dape--resolve file-path))
+    (let* ((resolved (kargu-permission-resolve file-path "dape path"))
            (abs-path (expand-file-name resolved)))
       (if (not (kargu-dape--breakpoint-at-p abs-path line))
           (format "[BREAKPOINT NOT FOUND]\nNo breakpoint exists at %s:%d to remove.\nActive breakpoints: %d"
@@ -667,7 +648,7 @@ Returns structured confirmation with file, line, and remaining count."
      ctx
      "\n\nAvailable Next Actions:\n"
      "  - Inspect Variables: Review in-scope variables above. For struct/vector fields, use `debug_scope` (or `debug_inspect_variable`).\n"
-     "  - Custom Evaluation: Use `debug_eval` (Note: for Rust/C++, do not invoke runtime methods like .len(); inspect fields directly).\n"
+     "  - Custom Evaluation: Use `debug_eval` (the language profile in the system prompt says what expressions the adapter can evaluate).\n"
      "  - Stack Navigation: `debug_up` (caller), `debug_down` (callee), `debug_stack` (all frames), `debug_threads`.\n"
      "  - Step & Continue: `debug_step_over` (next), `debug_step_in` (step), `debug_step_out` (out), or `debug_continue`.\n"
      "  - Breakpoints: `debug_set_breakpoint`, `debug_clear_breakpoint`, `debug_list_breakpoints`.\n"
@@ -681,74 +662,63 @@ Returns structured confirmation with file, line, and remaining count."
   (when (boundp 'dape-active-mode-off-hook)
     (remove-hook 'dape-active-mode-off-hook hook-exit)))
 
+(defun kargu-dape--running-message (action-name timeout)
+  "Report text for ACTION-NAME still running after TIMEOUT seconds."
+  (format "[DEBUGGER STILL RUNNING]\nAction '%s' initiated, but program did not pause within %ds timeout (still running or waiting for input).\nUse `debug_pause` to pause execution."
+          action-name (round timeout)))
+
+(defun kargu-dape--show-report (report)
+  "Show the debugger REPORT in the echo area (interactive commands)."
+  (message "kargu debug: %s" report))
+
 (defun kargu-dape--action-and-wait (action-fn action-name &optional callback timeout)
-  "Execute ACTION-FN on connection and wait for stopped state.
-If CALLBACK is provided, operates asynchronously.
-Otherwise, blocks with `accept-process-output' until stopped or TIMEOUT.
-Returns a rich structured debugging report containing:
-- Execution status & action name
-- Source code context snippet around paused line (with `=>')
-- Full call stack frames
-- In-scope variables (locals, arguments, globals)
-- Next available actions guidance."
+  "Run ACTION-FN on the connection; report the stopped state without waiting.
+CALLBACK receives, exactly once, a structured debugging report: the stop
+location with source context, the call stack and the variables, or a note
+that the program exited or is still running after TIMEOUT seconds.  Without
+CALLBACK the report is shown in the echo area, and a fixed text is returned."
   (let ((conn (kargu-dape--connection)))
-    (if (stringp conn)
-        (if callback (funcall callback conn) conn)
-      (let* ((timeout (or timeout 10.0))
-             (done nil)
-             (result nil)
-             (timer nil)
-             (hook-stop nil)
-             (hook-exit nil)
-             (cleanup (lambda () (kargu-dape--cleanup-wait timer hook-stop hook-exit))))
-        (setq hook-stop
-              (lambda (&rest _)
-                (unless done
-                  (setq done t)
-                  (funcall cleanup)
-                  (let ((msg (kargu-dape--format-stopped-report action-name)))
-                    (setq result msg)
-                    (when callback (funcall callback msg))))))
-        (setq hook-exit
-              (lambda (&rest _)
-                (unless done
-                  (setq done t)
-                  (funcall cleanup)
-                  (let ((msg (format "[DEBUGGER PROGRAM EXITED]\nAction '%s' completed: program finished execution / session terminated." action-name)))
-                    (setq result msg)
-                    (when callback (funcall callback msg))))))
-        ;; Global hooks
-        (when (boundp 'dape-stopped-hook)
-          (add-hook 'dape-stopped-hook hook-stop))
-        (when (boundp 'dape-active-mode-off-hook)
-          (add-hook 'dape-active-mode-off-hook hook-exit))
-        (condition-case err
-            (funcall action-fn conn)
-          (error
-           (funcall cleanup)
-           (let ((err-msg (format "ERROR during %s: %s" action-name (error-message-string err))))
-             (if callback (funcall callback err-msg) err-msg))))
-        (if callback
-            (setq timer
-                  (run-at-time
-                   timeout nil
-                   (lambda ()
-                     (unless done
-                       (setq done t)
-                       (funcall cleanup)
-                       (funcall callback
-                                (format "[DEBUGGER STILL RUNNING]\nAction '%s' initiated, but program did not pause within %ds timeout (still running or waiting for input).\nUse `debug_pause` to pause execution."
-                                        action-name (round timeout)))))))
-          ;; Synchronous wait
-          (let ((start (float-time)))
-            (while (and (not done) (< (- (float-time) start) timeout))
-              (accept-process-output nil 0.05))
-            (unless done
-              (funcall cleanup)
-              (setq result
-                    (format "[DEBUGGER STILL RUNNING]\nAction '%s' initiated, but program did not pause within %ds timeout.\nUse `debug_pause` to pause execution."
-                            action-name (round timeout)))))
-          result)))))
+    (cond
+     ((stringp conn)
+      (if callback (funcall callback conn) conn))
+     (t
+      (kargu-dape--start-action conn action-fn action-name
+                                (or callback #'kargu-dape--show-report)
+                                (or timeout 10.0))
+      (unless callback
+        (format "Action '%s' started; the result appears in the echo area." action-name))))))
+
+(defun kargu-dape--start-action (conn action-fn action-name callback timeout)
+  "Run ACTION-FN on CONN and deliver one report about ACTION-NAME to CALLBACK."
+  (let* ((done nil)
+         (timer nil)
+         (hook-stop nil)
+         (hook-exit nil)
+         (finish (lambda (text)
+                   (unless done
+                     (setq done t)
+                     (kargu-dape--cleanup-wait timer hook-stop hook-exit)
+                     (funcall callback text)))))
+    (setq hook-stop
+          (lambda (&rest _)
+            (funcall finish (kargu-dape--format-stopped-report action-name))))
+    (setq hook-exit
+          (lambda (&rest _)
+            (funcall finish
+                     (format "[DEBUGGER PROGRAM EXITED]\nAction '%s' completed: program finished execution / session terminated." action-name))))
+    (when (boundp 'dape-stopped-hook)
+      (add-hook 'dape-stopped-hook hook-stop))
+    (when (boundp 'dape-active-mode-off-hook)
+      (add-hook 'dape-active-mode-off-hook hook-exit))
+    (setq timer (run-at-time timeout nil
+                             (lambda ()
+                               (funcall finish
+                                        (kargu-dape--running-message action-name timeout)))))
+    (condition-case err
+        (funcall action-fn conn)
+      (error
+       (funcall finish (format "ERROR during %s: %s"
+                               action-name (error-message-string err)))))))
 
 (defun kargu-dape-step-over (&optional callback)
   "Step to the next line in the current frame (skip calls)."
@@ -815,6 +785,10 @@ Returns a rich structured debugging report containing:
                  (detected-adapter (and dbg (plist-get dbg :adapter)))
                  (chosen (or (and config-name (not (string-empty-p config-name)) (intern config-name))
                              detected-adapter)))
+            (unless (kargu-permission-approve
+                     (format "start debug adapter %s" (or chosen "(interactive)"))
+                     (kargu-permission-project-root))
+              (error "starting the debugger was not approved by the user"))
             (if chosen
                 (progn
                   (dape chosen)
@@ -1133,8 +1107,14 @@ Always returns the current watch list."
    '(("type" . "object")
      ("properties" . (("config_name" . (("type" . "string")
                                         ("description" . "Optional dape configuration name (e.g. 'lldb-vscode', 'dlv', 'debugpy')."))))))
-   (lambda (args)
-     (kargu-dape-start (kargu--tool-arg args "config_name"))))
+   (lambda (args &optional callback)
+     (let ((thunk (lambda (done)
+                    (funcall done (kargu-dape-start (kargu--tool-arg args "config_name"))))))
+       (if callback
+           (kargu-permission-call-async thunk callback)
+         (let (result)
+           (funcall thunk (lambda (r) (setq result r)))
+           result)))))
 
   ;; 2. debug_get_context
   (kargu-register-tool
@@ -1147,7 +1127,7 @@ Always returns the current watch list."
   ;; 3. eval / debug_eval
   (kargu-register-tool
    "debug_eval"
-   "Evaluate an expression in the paused frame and return its value. (Note: In Rust/C++, avoid runtime method calls like .len())."
+   "Evaluate an expression in the paused frame and return its value. (what the adapter can evaluate depends on the language; see the language profile)."
    '(("type" . "object")
      ("properties" . (("expression" . (("type" . "string")
                                        ("description" . "Expression to evaluate.")))

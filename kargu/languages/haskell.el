@@ -38,6 +38,11 @@
         "The identifier is not in the current lexical environment. Check local bindings via `debug_scope`.")
        ("Unevaluated" .
         "The expression is currently an unevaluated lazy thunk. Forcing evaluation may cause side effects or termination.")))
+   :lsp
+   '(:name "haskell-language-server"
+     :binaries ("haskell-language-server-wrapper" "haskell-language-server")
+     :purpose "Language Server for Haskell"
+     :hint "ghcup install hls")
    :lsp-notes
    "Haskell symbols: functions, data types, typeclasses, type synonyms. HLS (Haskell Language Server) provides type signatures and code actions."))
 

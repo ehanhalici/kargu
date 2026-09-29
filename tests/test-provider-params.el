@@ -286,3 +286,21 @@
 (provide 'tests/test-provider-params)
 
 ;;; test-provider-params.el ends here
+
+(ert-deftest kargu-reasoning-request-shape-follows-the-catalog-test ()
+  "Effort and budget are read in one place and shaped by the provider's format."
+  (let ((kargu-reasoning-effort 'none) (kargu-thinking-budget nil))
+    (should (equal (kargu--build-reasoning-params "openai")
+                   '(("reasoning_effort" . "none"))))
+    (should (equal (kargu--build-reasoning-params "openrouter")
+                   '(("reasoning" . (("effort" . "none")))))))
+  (let ((kargu-reasoning-effort "off") (kargu-thinking-budget 4096))
+    (should-not (kargu--build-reasoning-params "openai"))
+    (should (equal (kargu--build-reasoning-params "openrouter")
+                   '(("reasoning" . (("max_tokens" . 4096))))))
+    (should (equal (kargu--build-reasoning-params "anthropic")
+                   '(("thinking" . (("type" . "enabled") ("budget_tokens" . 4096))))))))
+
+(ert-deftest kargu-payload-merge-replaces-duplicate-keys-test ()
+  (should (equal (kargu--payload-merge '(("a" . 1) ("thinking" . 2)) '(("thinking" . 3)))
+                 '(("a" . 1) ("thinking" . 3)))))

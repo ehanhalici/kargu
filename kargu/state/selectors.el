@@ -10,32 +10,12 @@
 
 ;;; Code:
 
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/state/store)
-
-(defvar kargu-active-mode)
 
 (defun kargu-state-mode ()
   "Return the currently active operating mode symbol (`ask', `plan', etc.).
-Respects dynamic let-bindings of `kargu-active-mode' when present."
-  (let ((store-mode (kargu-state-get :mode 'ask)))
-    (if (and (boundp 'kargu-active-mode)
-             kargu-active-mode
-             (not (eq kargu-active-mode store-mode)))
-        kargu-active-mode
-      store-mode)))
+The state store is the only place the mode lives."
+  (kargu-state-get :mode 'ask))
 
 (defun kargu-state-status ()
   "Return the current lifecycle status symbol (`:idle', `:requesting', etc.)."

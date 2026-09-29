@@ -40,6 +40,11 @@
         "Pointer variable: use `->` instead of `.`.")
        ("no matching member function" .
         "Method may be inlined, templated, or uninstantiated in the debug binary. Access fields directly.")))
+   :lsp
+   '(:name "clangd / ccls"
+     :binaries ("clangd" "ccls")
+     :purpose "Language Server for C++ (code analysis and definitions)"
+     :hint "apt install clangd (or brew install llvm)")
    :lsp-notes
    "C++ symbols: classes, structs, namespaces, template specializations, methods. Clangd provides accurate type hierarchy and hover documentation."))
 

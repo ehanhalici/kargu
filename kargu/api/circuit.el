@@ -16,19 +16,6 @@
 ;;; Code:
 
 (require 'cl-lib)
-;; Ensure the package root is on `load-path' during byte/native
-;; compilation from a subdirectory (Magit-style kargu/core features).
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'kargu/core)
 (require 'kargu/contract/assert)
 
@@ -50,26 +37,42 @@
 (defvar kargu-circuit--failure-count 0
   "Count of consecutive failures in closed or half-open state.")
 
+(defvar kargu-circuit--probe-inflight nil
+  "Non-nil while the single half-open probe request is outstanding.")
+
 (defvar kargu-circuit--last-failure-time 0.0
   "Float timestamp of the most recent failure.")
 
 ;;;; State transitions & checks -------------------------------------------
 
+(defun kargu-circuit--cooling-p ()
+  "Non-nil while the circuit is :open and its cooldown has not elapsed."
+  (and (eq kargu-circuit--state :open)
+       (< (- (float-time) kargu-circuit--last-failure-time)
+          kargu-circuit-cooldown-seconds)))
+
+(defun kargu-circuit-open-p ()
+  "Return non-nil when a request would be refused right now.
+Unlike `kargu-circuit-allow-request-p' this changes nothing, so it may
+be asked as often as needed."
+  (or (kargu-circuit--cooling-p)
+      (and (eq kargu-circuit--state :half-open)
+           kargu-circuit--probe-inflight)))
+
 (defun kargu-circuit-allow-request-p ()
-  "Return non-nil if a request is allowed through the circuit breaker.
-If :open and the cooldown period has elapsed, transitions to :half-open."
+  "Return non-nil if a request may be sent, and claim the slot for it.
+After the cooldown one request is let through as a probe (:half-open);
+until its result is recorded every other request is refused.  Call this
+only from the code that is about to send."
   (cond
    ((eq kargu-circuit--state :closed) t)
-   ((eq kargu-circuit--state :half-open) t)
-   ((eq kargu-circuit--state :open)
-    (let ((elapsed (- (float-time) kargu-circuit--last-failure-time)))
-      (if (>= elapsed kargu-circuit-cooldown-seconds)
-          (progn
-            (setq kargu-circuit--state :half-open)
-            (kargu-log 'info "circuit breaker: cooldown elapsed; half-open canary probe")
-            t)
-        nil)))
-   (t t)))
+   ((kargu-circuit-open-p) nil)
+   (t
+    (when (eq kargu-circuit--state :open)
+      (setq kargu-circuit--state :half-open)
+      (kargu-log 'info "circuit breaker: cooldown elapsed; half-open canary probe"))
+    (setq kargu-circuit--probe-inflight t)
+    t)))
 
 (defun kargu-circuit-record-success ()
   "Record a successful request, resetting the failure count and closing circuit."
@@ -78,6 +81,7 @@ If :open and the cooldown period has elapsed, transitions to :half-open."
             (> kargu-circuit--failure-count 0))
     (kargu-log 'info "circuit breaker: request succeeded; resetting to :closed"))
   (setq kargu-circuit--state :closed
+        kargu-circuit--probe-inflight nil
         kargu-circuit--failure-count 0))
 
 (defun kargu-circuit-record-failure (&optional reason)
@@ -85,7 +89,8 @@ If :open and the cooldown period has elapsed, transitions to :half-open."
 If failures reach `kargu-circuit-failure-threshold', trips circuit to :open."
   (kargu-contract-assert (lambda (r) (or (null r) (stringp r))) reason
                          "REASON must be a string or nil: %S" reason)
-  (setq kargu-circuit--last-failure-time (float-time))
+  (setq kargu-circuit--last-failure-time (float-time)
+        kargu-circuit--probe-inflight nil)
   (setq kargu-circuit--failure-count (1+ kargu-circuit--failure-count))
   (cond
    ((eq kargu-circuit--state :half-open)
@@ -108,6 +113,7 @@ If failures reach `kargu-circuit-failure-threshold', trips circuit to :open."
   "Manually reset the circuit breaker to :closed state."
   (interactive)
   (setq kargu-circuit--state :closed
+        kargu-circuit--probe-inflight nil
         kargu-circuit--failure-count 0
         kargu-circuit--last-failure-time 0.0)
   (kargu-log 'info "circuit breaker: manually reset to :closed")

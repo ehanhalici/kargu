@@ -31,9 +31,8 @@
 ;; Entry point is `(require 'kargu)' / `M-x kargu-menu'.  Nested
 ;; files are Magit-style features: `(require 'kargu/loop/machine)'
 ;; loads `kargu/loop/machine.el'.  Submodules require `kargu/core',
-;; not `kargu'.  Each nested file puts the package root (the
-;; directory that contains `kargu.el') on `load-path' so byte-comp
-;; and native-comp work when Emacs compiles from a subdirectory.
+;; not `kargu'.  Only this file puts the package root on `load-path';
+;; byte-compile nested files with `-L <package root>'.
 ;; Load order:
 ;;
 ;;   kargu.el                 package header, load-path, requires
@@ -42,7 +41,7 @@
 ;;   kargu/json.el            decode/encode (depth 32)
 ;;   kargu/prompt.el          system prompt parts
 ;;   kargu/history.el         queue + firewall
-;;   kargu/history-compact.el threshold, tail, apply
+;;   kargu/history/compact.el threshold, tail, apply
 ;;   kargu/fs.el              skip-dirs + bounded walk
 ;;   kargu/api.el             send, cancel, models
 ;;   kargu/api/*.el           response, tools, http, stream
@@ -88,19 +87,20 @@
                                (expand-file-name root))))))
 
 (require 'kargu/core)
-(require 'kargu/constants)
-(require 'kargu/result)
+(require 'kargu/contract/constants)
+(require 'kargu/contract/result)
 (require 'kargu/contract)
 (require 'kargu/state)
 (require 'kargu/permission)
 (require 'kargu/providers)
 (require 'kargu/config)
 (require 'kargu/json)
+(require 'kargu/tools/process)
 (require 'kargu/tools/toolchain)
 (require 'kargu/prompt)
 (require 'kargu/history)
 (require 'kargu/history/compact)
-(require 'kargu/history-compact)
+(require 'kargu/history/compact)
 (require 'kargu/fs)
 (require 'kargu/api/circuit)
 (require 'kargu/api)
