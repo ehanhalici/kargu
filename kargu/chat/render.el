@@ -245,12 +245,57 @@ Only used when `kargu-chat-drop-preamble' is non-nil."
                   kargu-chat--preamble-dropped t)))))))
 
 (defun kargu-chat--result-summary (result)
-  "One-line summary of a tool RESULT for the chat timeline."
+  "One-line summary of a tool RESULT for the chat timeline.
+Errors keep their first line.  A normal result is `ok'."
   (cond
    ((not (stringp result)) "no output")
    ((string-prefix-p "ERROR:" result)
-    (truncate-string-to-width result 100))
-   (t (format "%d chars" (length result)))))
+    (truncate-string-to-width
+     (replace-regexp-in-string "[\r\n]+" " " result) 100))
+   (t "ok")))
+
+(defun kargu-chat--tool-target-string (val)
+  "VAL as a single-line tool target, or nil."
+  (let ((text (cond
+               ((and (stringp val) (not (string-empty-p (string-trim val))))
+                (string-trim val))
+               ((and (listp val) val)
+                (mapconcat (lambda (item) (format "%s" item)) val " "))
+               ((and val (not (eq val :json-null)))
+                (format "%s" val)))))
+    (when (and (stringp text) (not (string-empty-p text)))
+      (truncate-string-to-width
+       (replace-regexp-in-string "[\r\n]+" " " text) 80))))
+
+(defun kargu-chat--tool-target (name arguments)
+  "Short target of tool NAME from ARGUMENTS: command, URL, or path."
+  (let* ((args (kargu--decode-tool-arguments arguments))
+         (command (kargu-chat--tool-target-string
+                   (kargu--tool-arg args "command")))
+         (url (kargu-chat--tool-target-string
+               (kargu--tool-arg args "url")))
+         (path (kargu-chat--tool-target-string
+                (or (kargu--tool-file-path args)
+                    (kargu--tool-arg args "directory" "dir" "cwd"))))
+         (pattern (kargu-chat--tool-target-string
+                   (kargu--tool-arg args "pattern" "query"))))
+    (cond
+     ((and (stringp name)
+           (or (string-prefix-p "bash" name) (equal name "shell"))
+           command)
+      command)
+     (url url)
+     ((and pattern path) (kargu-chat--tool-target-string (format "%s %s" pattern path)))
+     (pattern pattern)
+     (path path)
+     (command command))))
+
+(defun kargu-chat--tool-heading (name arguments)
+  "Timeline heading for tool NAME called with ARGUMENTS."
+  (let ((target (kargu-chat--tool-target name arguments)))
+    (if target
+        (format "  → %s %s" name target)
+      (format "  → %s" name))))
 
 (defun kargu-chat--clear-running-prompt-banner (buffer)
   "Clear any in-flight prompt banner from BUFFER before printing final report."
@@ -402,8 +447,9 @@ afterwards.  FN is the original function."
           (unless (or (<= pos (point-min))
                       (eq (char-before pos) ?\n))
             (kargu-chat-insert "\n"))))
-      (kargu-chat-insert (format "  → %s " name)
-                          'kargu-chat-tool))
+      (kargu-chat-insert
+       (concat (kargu-chat--tool-heading name arguments) " ")
+       'kargu-chat-tool))
     (if callback
         (funcall fn name arguments
                  (lambda (result)

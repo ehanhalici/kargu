@@ -28,6 +28,7 @@
 (declare-function kargu--loop-request "kargu/loop/machine" (run prompt))
 (declare-function kargu-loop--live-p "kargu/loop" (run))
 (declare-function kargu-loop--turn-cap "kargu/loop/machine" (run))
+(declare-function kargu-notify "kargu/ui/notify" (type &optional msg))
 
 (defvar kargu-loop--mock-continue-decision nil
   "Mock decision for `kargu-loop--prompt-continue' in unit tests.

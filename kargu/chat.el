@@ -48,6 +48,29 @@
 (declare-function kargu-chat--shown-provider "kargu/chat/prompt" ())
 (declare-function kargu-chat--shown-model "kargu/chat/prompt" ())
 (declare-function kargu-chat--focus-selection "kargu/chat/prompt" (&optional open-company))
+(declare-function kargu-eglot-connected-p "kargu/tools/lsp" ())
+(defvar kargu-eglot-required-message)
+
+(defvar-local kargu-chat--awaiting-eglot nil
+  "Non-nil when this chat must not accept a prompt until Eglot connects.")
+
+(defvar-local kargu-chat--eglot-notice-p nil
+  "Non-nil when the missing-Eglot notice is already in this chat.")
+
+(defun kargu-chat--workspace-blocked-p ()
+  "Return non-nil when an interactive session must wait for Eglot.
+Every language, including Emacs Lisp, needs a live connection.
+Batch Emacs is never blocked."
+  (and (not noninteractive)
+       (not (kargu-eglot-connected-p))))
+
+(defun kargu-chat--refuse-without-eglot ()
+  "Remove the prompt and say that Eglot is not connected."
+  (kargu-chat--clear-idle-prompt)
+  (unless kargu-chat--eglot-notice-p
+    (setq-local kargu-chat--eglot-notice-p t)
+    (kargu-chat-insert (concat kargu-eglot-required-message "\n\n") 'error))
+  (message "%s" kargu-eglot-required-message))
 
 (defvar company-backends)
 (defvar company-minimum-prefix-length)
@@ -189,7 +212,8 @@ Otherwise generates `*kargu-chat*<N>'."
            (read-string "Session name (optional): "))))
   (when (and (derived-mode-p 'kargu-chat-mode) (bound-and-true-p kargu-session-auto-save))
     (ignore-errors (kargu-session-save (current-buffer))))
-  (let* ((proj (kargu-session-project-root))
+  (let* ((blocked (kargu-chat--workspace-blocked-p))
+         (proj (kargu-session-project-root))
          (base-name (if (and (stringp name) (not (string-empty-p (string-trim name))))
                         (format "*kargu-chat: %s*" (string-trim name))
                       kargu-chat-buffer-name))
@@ -197,15 +221,18 @@ Otherwise generates `*kargu-chat*<N>'."
     (with-current-buffer buf
       (kargu-chat-mode)
       (setq-local kargu-chat--project-root proj)
+      (setq-local kargu-chat--awaiting-eglot blocked)
       (setq-local kargu-chat--session-id (and (fboundp 'kargu-session-id) (kargu-session-id)))
       (when (and (stringp name) (not (string-empty-p (string-trim name))))
         (setq-local kargu-chat--session-title (string-trim name)))
       (kargu-chat-insert
        (concat "kargu chat — type at the prompt; "
                "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-h switch session.\n\n"))
-      (kargu-chat--ensure-prompt)
-      (when (fboundp 'kargu-chat-check-and-display-missing-tools)
-        (kargu-chat-check-and-display-missing-tools proj)))
+      (if blocked
+          (kargu-chat--refuse-without-eglot)
+        (kargu-chat--ensure-prompt)
+        (when (fboundp 'kargu-chat-check-and-display-missing-tools)
+          (kargu-chat-check-and-display-missing-tools proj))))
     (pop-to-buffer-same-window buf)
     (kargu-chat-activate-selection buf)
     (with-current-buffer buf
@@ -283,33 +310,28 @@ Reuses the current buffer if it is already in `kargu-chat-mode'."
               (kargu-chat-check-and-display-missing-tools root))
             (current-buffer))))))))
 
-(defun kargu-chat--withhold-prompt-until-root ()
-  "Drop every chat prompt when this language still has no project root."
-  (when (and (not noninteractive) (kargu-language-root-unresolved-p))
-    (dolist (buf (kargu-chat-list-buffers))
-      (when (buffer-live-p buf)
-        (with-current-buffer buf
-          (kargu-chat--clear-idle-prompt))))))
-
 (defun kargu-chat-show ()
   "Display the chat buffer directly in the current window without splitting.
 If the frame has 1 window, opens over that buffer.  If multiple windows exist,
 opens in whichever window is currently selected (left or right).
-A language that names its own project root, such as Emacs Lisp, asks
-for that directory before the prompt exists."
+Without a live Eglot connection the prompt is withheld.  The project
+root comes from that connection."
   (interactive)
-  (kargu-chat--withhold-prompt-until-root)
   (let* ((open-company (called-interactively-p 'any))
-         (owned (kargu-language-claim-root))
-         (proj (or owned (kargu-session-project-root)))
+         (blocked (kargu-chat--workspace-blocked-p))
+         (proj (kargu-session-project-root))
          (buffer (kargu-chat--buffer proj)))
     (pop-to-buffer-same-window buffer)
     (kargu-chat-activate-selection buffer)
     (with-current-buffer buffer
-      (kargu-chat--ensure-prompt)
-      (when (fboundp 'kargu-chat-check-and-display-missing-tools)
-        (kargu-chat-check-and-display-missing-tools proj))
-      (kargu-chat--focus-selection open-company))
+      (setq-local kargu-chat--awaiting-eglot blocked)
+      (if blocked
+          (kargu-chat--refuse-without-eglot)
+        (setq-local kargu-chat--eglot-notice-p nil)
+        (kargu-chat--ensure-prompt)
+        (when (fboundp 'kargu-chat-check-and-display-missing-tools)
+          (kargu-chat-check-and-display-missing-tools proj))
+        (kargu-chat--focus-selection open-company)))
     buffer))
 
 (defun kargu-chat--hide (window)
@@ -459,6 +481,8 @@ Every refusal happens before the input is consumed."
 
 (defun kargu-chat--send-input ()
   "Read, check, and send the current chat prompt."
+  (when kargu-chat--awaiting-eglot
+    (user-error "%s" kargu-eglot-required-message))
   (let ((missing (kargu-chat--missing-tools (kargu-chat--project))))
     (when missing
       (kargu-chat--signal-missing-tools (kargu-chat--project) missing)))
@@ -506,6 +530,8 @@ from the menu with an empty prompt, this just opens the chat."
   (kargu-chat-show)
   (let ((text (kargu-chat--prompt-text prompt)))
     (with-current-buffer (kargu-chat--buffer)
+      (when kargu-chat--awaiting-eglot
+        (user-error "%s" kargu-eglot-required-message))
       (kargu-chat--preflight text)
       (when (kargu-chat--prompt-live-p)
         (kargu-chat--consume-input)))

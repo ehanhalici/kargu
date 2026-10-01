@@ -20,11 +20,21 @@
 (require 'kargu/api/stream)
 (require 'kargu/api/circuit)
 
+(defvar kargu-api-timeout)
+(defvar kargu-api-stall-timeout)
+(defvar kargu-api-stream-ceiling)
+
 (declare-function kargu-api-chat-url "kargu/api/wire" (base format))
 (declare-function kargu-api-prepare-payload "kargu/api/wire" (payload format))
 (declare-function kargu-api-normalize-response "kargu/api/wire" (response))
 (declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
 (declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
+(declare-function kargu--api-headers "kargu/api/http" (key &optional provider-name))
+(declare-function kargu--api-error-looks-retryable-p "kargu/api/http" (message))
+(declare-function kargu--stream-filter "kargu/api/http" (process string on-delta &optional on-event))
+(declare-function kargu--api-arm-stream-watch "kargu/api/http" (process))
+(declare-function kargu--api-stream-watch-tick "kargu/api/http" (process))
+(declare-function kargu--api-cancel-stream-watch "kargu/api/http" (process))
 
 (ert-deftest kargu-api-response-vector-choices-test ()
   "Ensure kargu--response-choice handles vector choices correctly (Bug 2 regression)."
@@ -88,7 +98,31 @@
   "Ensure kargu-api-timeout has a valid default."
   (require 'kargu/core)
   (should (numberp kargu-api-timeout))
-  (should (> kargu-api-timeout 0)))
+  (should (> kargu-api-timeout 0))
+  (should (numberp kargu-api-stall-timeout))
+  (should (> kargu-api-stall-timeout 0))
+  (should (numberp kargu-api-stream-ceiling))
+  (should (> kargu-api-stream-ceiling kargu-api-timeout)))
+
+(ert-deftest kargu-api-stream-stall-watch-test ()
+  "A dead stream process drops its watch without recording an abort."
+  (require 'kargu/api/http)
+  (let* ((buf (generate-new-buffer " *kargu-stall*"))
+         (proc (start-process "kargu-stall" buf "sleep" "30")))
+    (unwind-protect
+        (progn
+          (process-put proc :kargu-last-byte 0)
+          (kargu--stream-filter proc "data: {}\n" nil)
+          (should (> (or (process-get proc :kargu-last-byte) 0) 0))
+          (kargu--api-arm-stream-watch proc)
+          (should (process-get proc :kargu-stream-timer))
+          (delete-process proc)
+          (kargu--api-stream-watch-tick proc)
+          (should-not (process-get proc :kargu-stream-abort))
+          (should-not (process-get proc :kargu-stream-timer)))
+      (kargu--api-cancel-stream-watch proc)
+      (when (process-live-p proc) (delete-process proc))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest kargu-api-anthropic-url-and-response-test ()
   "Anthropic format posts to /messages and comes back as choices."

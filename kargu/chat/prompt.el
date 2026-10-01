@@ -390,12 +390,12 @@ Return nil when this buffer has no live prompt."
 
 (defun kargu-chat--ensure-idle-prompt ()
   "Make sure the chat buffer ends with an editable `kargu> ' prompt.
-No prompt is inserted while the language still needs a project root."
+No prompt is inserted while this chat is waiting for an Eglot connection."
   (let ((buffer (kargu-chat--target-buffer)))
     (when buffer
       (with-current-buffer buffer
         (cond
-         ((and (not noninteractive) (kargu-language-root-unresolved-p))
+         ((bound-and-true-p kargu-chat--awaiting-eglot)
           (kargu-chat--clear-idle-prompt))
          (t
           (when (and (markerp kargu-chat--output-marker)

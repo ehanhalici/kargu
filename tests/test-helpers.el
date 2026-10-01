@@ -55,6 +55,17 @@ is deleted afterwards, so no test depends on the working tree of Kargu."
 
 ;;;; Mode and state isolation ----------------------------------------------
 
+(declare-function kargu-state--set "kargu/state/store" (key value))
+(declare-function kargu-state-mode "kargu/state/selectors" ())
+
+(defvar kargu--message-history)
+(defvar kargu--loop-run)
+(defvar kargu--busy)
+(defvar kargu--session-provider)
+(defvar kargu--session-model)
+(defvar kargu--tools-refused)
+(defvar kargu--model-metadata-table)
+
 (defun kargu-test-mode (mode)
   "Make MODE the active mode for the running test and return it.
 The mode lives only in the state store.  `kargu-test--isolate' restores

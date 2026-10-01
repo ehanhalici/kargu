@@ -37,6 +37,10 @@
 (defvar kargu--busy nil
   "Non-nil while a chat request is in flight.")
 
+(defvar kargu-api-timeout)
+(defvar kargu-api-stall-timeout)
+(defvar kargu-api-stream-ceiling)
+
 (defvar kargu--current-process nil
   "Active plz curl process for the in-flight chat request.")
 
@@ -60,6 +64,69 @@ touching plz internals.")
     (when (fboundp 'kargu-state-transition-status)
       (kargu-state-transition-status :idle))))
 
+(defun kargu--api-positive-seconds (value)
+  "VALUE when it is a positive number of seconds, otherwise nil."
+  (and (numberp value) (> value 0) value))
+
+(defun kargu--api-note-stream-byte (process)
+  "Record that PROCESS just received streaming output."
+  (when (processp process)
+    (process-put process :kargu-last-byte (float-time))))
+
+(defun kargu--api-stream-abort-message (reason)
+  "User-facing abort text for stream REASON `stall' or `ceiling'."
+  (if (eq reason 'ceiling)
+      "stream exceeded ceiling"
+    "stream stalled"))
+
+(defun kargu--api-cancel-stream-watch (process)
+  "Cancel the stall timer on PROCESS, if any."
+  (when (processp process)
+    (let ((timer (process-get process :kargu-stream-timer)))
+      (when timer
+        (cancel-timer timer)
+        (process-put process :kargu-stream-timer nil)))))
+
+(defun kargu--api-stream-watch-tick (process)
+  "Abort PROCESS when the stream stalls or passes its ceiling."
+  (if (not (and (processp process) (process-live-p process)))
+      (kargu--api-cancel-stream-watch process)
+    (let* ((now (float-time))
+           (started (or (process-get process :kargu-stream-started) now))
+           (last (or (process-get process :kargu-last-byte) started))
+           (stall (kargu--api-positive-seconds
+                   (bound-and-true-p kargu-api-stall-timeout)))
+           (ceiling (kargu--api-positive-seconds
+                     (bound-and-true-p kargu-api-stream-ceiling)))
+           (reason (cond
+                    ((and ceiling (>= (- now started) ceiling)) 'ceiling)
+                    ((and stall (>= (- now last) stall)) 'stall))))
+      (when reason
+        (process-put process :kargu-stream-abort reason)
+        (kargu--api-cancel-stream-watch process)
+        (kargu-log 'warn "stream abort: %s" (kargu--api-stream-abort-message reason))
+        (ignore-errors (delete-process process))))))
+
+(defun kargu--api-arm-stream-watch (process)
+  "Start the stall and ceiling watch for streaming PROCESS."
+  (when (processp process)
+    (let ((now (float-time)))
+      (process-put process :kargu-stream-started now)
+      (process-put process :kargu-last-byte now)
+      (process-put process :kargu-stream-abort nil)
+      (kargu--api-cancel-stream-watch process)
+      (process-put process :kargu-stream-timer
+                   (run-at-time 1 1 #'kargu--api-stream-watch-tick process)))))
+
+(defun kargu--api-fail-stream (gen reason callback)
+  "Fail generation GEN with stream REASON and invoke CALLBACK."
+  (when (and callback (= gen kargu--generation))
+    (setq kargu--busy nil)
+    (let ((msg (kargu--api-stream-abort-message reason)))
+      (kargu-circuit-record-failure msg)
+      (kargu-log 'error "request failed: %s" msg)
+      (funcall callback (kargu--api-error-alist msg)))))
+
 (defun kargu-api-cancel ()
   "Cancel the current request or in-flight agent call.
 Stale response callbacks are turned into no-ops via the
@@ -67,6 +134,7 @@ generation counter; the active curl process is terminated and
 the UI and central state are left in a consistent state."
   (interactive)
   (cl-incf kargu--generation)
+  (kargu--api-cancel-stream-watch kargu--current-process)
   (when (and (processp kargu--current-process)
              (process-live-p kargu--current-process))
     (ignore-errors (delete-process kargu--current-process)))
@@ -483,30 +551,35 @@ of the entire SSE body text."
                           (lambda (event)
                             (when (= gen kargu--generation)
                               (funcall on-delta event)))))
-         (timeout (bound-and-true-p kargu-api-timeout)))
+         (process nil))
     (kargu--log-out-payload stream-payload)
-    (setq kargu--current-process
-          (apply #'plz 'post url
-                 :headers headers
-                 :body (kargu--json-encode stream-payload)
-                 :as 'string
-                 (append
-                  (when (numberp timeout) (list :timeout timeout))
-                  (list
-                   :filter (lambda (process string)
-                             (kargu--stream-filter process string live-delta on-event))
-                   :then (lambda (body)
-                           (kargu--stream-flush kargu--current-process live-delta on-event)
-                           (setq kargu--current-process nil)
-                           (when (= gen kargu--generation)
-                             (kargu--api-handle-body
-                              body callback url headers payload gen on-delta
-                              (or attempt 0) (nreverse events-acc))))
-                   :else (lambda (err)
-                           (setq kargu--current-process nil)
+    (setq process
+          (plz 'post url
+               :headers headers
+               :body (kargu--json-encode stream-payload)
+               :as 'string
+               :filter (lambda (proc string)
+                         (kargu--stream-filter proc string live-delta on-event))
+               :then (lambda (body)
+                       (kargu--api-cancel-stream-watch process)
+                       (kargu--stream-flush process live-delta on-event)
+                       (setq kargu--current-process nil)
+                       (when (= gen kargu--generation)
+                         (kargu--api-handle-body
+                          body callback url headers payload gen on-delta
+                          (or attempt 0) (nreverse events-acc))))
+               :else (lambda (err)
+                       (let ((reason (and (processp process)
+                                          (process-get process :kargu-stream-abort))))
+                         (kargu--api-cancel-stream-watch process)
+                         (setq kargu--current-process nil)
+                         (if reason
+                             (kargu--api-fail-stream gen reason callback)
                            (kargu--api-on-transport-error
                             url headers payload gen callback on-delta
-                            (or attempt 0) err))))))))
+                            (or attempt 0) err))))))
+    (setq kargu--current-process process)
+    (kargu--api-arm-stream-watch process)))
 
 (defun kargu--stream-filter (process string on-delta &optional on-event)
   "plz process filter for SSE responses.
@@ -518,6 +591,7 @@ forwarding each data event to ON-DELTA and ON-EVENT.  Lines are only cut at
 newline bytes: UTF-8 continuation bytes never contain 0x0A, so a
 chunk boundary can never split a character inside a complete
 line.  The filter never signals."
+  (kargu--api-note-stream-byte process)
   (condition-case-unless-debug err
       (let ((buffer (process-buffer process)))
         (when (buffer-live-p buffer)

@@ -168,6 +168,30 @@
                 ((symbol-function 'project-root) (lambda (proj) (cdr proj))))
         (should (equal (kargu--project-root) "/tmp/repo/"))))))
 
+(ert-deftest kargu-project-root-follows-eglot-not-temp-directory ()
+  "A buffer under /tmp/ does not replace the Eglot server's project."
+  (let ((managed (generate-new-buffer "main.py")))
+    (unwind-protect
+        (progn
+          (with-current-buffer managed
+            (setq buffer-file-name "/home/emrehan/kod/try/dikte/main.py")
+            (setq default-directory "/home/emrehan/kod/try/dikte/")
+            (setq-local eglot--managed-mode t))
+          (with-temp-buffer
+            (setq default-directory "/tmp/")
+            (cl-letf (((symbol-function 'eglot-current-server)
+                       (lambda (&rest _) 'mock-server))
+                      ((symbol-function 'project-current) (lambda (&rest _) nil))
+                      ((symbol-function 'eglot--project)
+                       (lambda (_server)
+                         '(eglot--project . "/home/emrehan/kod/try/dikte/")))
+                      ((symbol-function 'project-root)
+                       (lambda (proj) (cdr proj))))
+              (should (equal (kargu--project-root)
+                             "/home/emrehan/kod/try/dikte/"))
+              (should (kargu-eglot-connected-p)))))
+      (when (buffer-live-p managed) (kill-buffer managed)))))
+
 (ert-deftest kargu-missing-dependencies-with-eglot-test ()
   "Test that kargu--missing-dependencies checks eglot availability."
   (cl-letf (((symbol-function 'locate-library)

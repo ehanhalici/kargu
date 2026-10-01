@@ -118,5 +118,70 @@
       (should (string-search "empty summary" (cdr finished)))
       (should (equal (kargu-aget (car (last kargu--message-history)) "content") "answer 1")))))
 
+(ert-deftest kargu-loop-compaction-timeout-asks-to-retry-test ()
+  "A compaction curl timeout asks to retry, and retry sends compaction again."
+  (with-temp-buffer
+    (let* ((run (list :state 'compact :compacting t :compactions 1
+                      :chat-buffer (current-buffer)
+                      :saved-no-tools nil :no-tools t))
+           (kargu--loop-run run)
+           (kargu--message-history
+            (append (kargu-compact-test--history 1)
+                    (list '(("role" . "user")
+                            ("content" . "COMPACTION_REQUEST: x")))))
+           (kargu-confirm--mock-decision :retry)
+           (sent nil)
+           (finished nil)
+           (resp '(("error" . (("message" . "plz error: curl 28: Operation timeout."))))))
+      (cl-letf (((symbol-function 'kargu-api-send)
+                 (lambda (&rest _) (setq sent t)))
+                ((symbol-function 'kargu--loop-finish)
+                 (lambda (_run status text) (setq finished (cons status text))))
+                ((symbol-function 'kargu-circuit-reset) #'ignore))
+        (kargu--loop-handle-compaction run resp)
+        (should sent)
+        (should-not finished)
+        (should (plist-get run :compacting))
+        (should (string-match-p "Retry Compaction" (buffer-string)))
+        (should (string-match-p "curl 28: Operation timeout" (buffer-string)))))))
+
+(ert-deftest kargu-loop-compaction-timeout-stop-finishes-the-run-test ()
+  "Stopping after a compaction timeout ends the run and drops the request."
+  (with-temp-buffer
+    (let* ((run (list :state 'compact :compacting t :compactions 1
+                      :chat-buffer (current-buffer)))
+           (kargu--loop-run run)
+           (kargu--message-history
+            (append (kargu-compact-test--history 1)
+                    (list '(("role" . "user")
+                            ("content" . "COMPACTION_REQUEST: x")))))
+           (kargu-confirm--mock-decision :stop)
+           (finished nil))
+      (cl-letf (((symbol-function 'kargu--loop-finish)
+                 (lambda (_run status text) (setq finished (cons status text)))))
+        (kargu--loop-handle-compaction
+         run '(("error" . (("message" . "plz error: curl 28: Operation timeout.")))))
+        (should (eq (car finished) :error))
+        (should (string-search "curl 28" (cdr finished)))
+        (should (equal (kargu-aget (car (last kargu--message-history)) "content")
+                       "answer 1"))))))
+
+(ert-deftest kargu-loop-compaction-other-error-finishes-without-asking-test ()
+  "A compaction error that is not a timeout still ends the run at once."
+  (let* ((run (list :state 'compact :compacting t :compactions 1))
+         (kargu--loop-run run)
+         (kargu--message-history (kargu-compact-test--history 1))
+         (finished nil)
+         (asked nil))
+    (cl-letf (((symbol-function 'kargu--loop-finish)
+               (lambda (_run status text) (setq finished (cons status text))))
+              ((symbol-function 'kargu-ui-confirm)
+               (lambda (&rest _) (setq asked t))))
+      (kargu--loop-handle-compaction
+       run '(("error" . (("message" . "HTTP 400: bad request")))))
+      (should-not asked)
+      (should (eq (car finished) :error))
+      (should (string-search "HTTP 400" (cdr finished))))))
+
 (provide 'tests/test-compact)
 ;;; test-compact.el ends here

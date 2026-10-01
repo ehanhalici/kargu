@@ -183,13 +183,28 @@
     (message "kargu mode: agent (autonomous, ediff-confirmed edits)")
     (call-interactively #'kargu-menu))
 
+  (defvar kargu-menu--eglot-blocked nil
+    "Non-nil when `kargu-menu' opened without an Eglot connection.")
+
+  (defun kargu-menu--eglot-blocked-p ()
+    "Return non-nil when this menu must wait for Eglot."
+    kargu-menu--eglot-blocked)
+
+  (declare-function kargu-chat--workspace-blocked-p "kargu/chat" ())
+  (defvar kargu-eglot-required-message)
+
   (transient-define-prefix kargu-menu ()
     "kargu control panel.
 
 The mode keys (a, p, d, x) switch the state store mode
 and keep this menu open; the choice applies from the next request
 on.  Every other key performs one action and closes the menu.
-The chat sidebar (c) is where agent runs stream their output."
+The chat sidebar (c) is where agent runs stream their output.
+A project with no live Eglot connection shows an error here and
+does not accept a prompt."
+    ["Workspace"
+     :if kargu-menu--eglot-blocked-p
+     ("!" "Eglot is not connected — start it before typing a prompt" ignore)]
     ["Mode"
      ("a" "ask: read-only answers" kargu-menu--ask)
      ("p" "plan: implementation plan, no edits" kargu-menu--plan)
@@ -226,7 +241,12 @@ The chat sidebar (c) is where agent runs stream their output."
      ("z" "reset session" kargu-chat-reset)
      ("L" "log buffer" kargu-show-log)
      ("W" "wire log (full I/O)" kargu-toggle-wire-log)
-     ("H" "protocol history" kargu-ui-history)])
+     ("H" "protocol history" kargu-ui-history)]
+    (interactive)
+    (setq kargu-menu--eglot-blocked (kargu-chat--workspace-blocked-p))
+    (when kargu-menu--eglot-blocked
+      (message "%s" kargu-eglot-required-message))
+    (transient-setup 'kargu-menu))
 
   (kargu-log 'info "ui module loaded (menu)"))
 

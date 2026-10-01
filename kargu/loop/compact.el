@@ -24,6 +24,8 @@
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
 (declare-function kargu--loop-request "kargu/loop/machine" (run prompt))
 (declare-function kargu-loop--turn-cap "kargu/loop/machine" (run))
+(declare-function kargu-ui-confirm "kargu/ui/confirm" (&rest plist))
+(declare-function kargu-circuit-reset "kargu/api/circuit" ())
 
 (defun kargu--loop-compact-allowed-p (run)
   "Non-nil when RUN may start at most one compaction turn."
@@ -75,12 +77,60 @@ Return non-nil if started."
    ((null (kargu-nonempty (kargu-response-text response))) 'empty)
    (t 'ok)))
 
+(defun kargu--loop-timeout-error-p (err)
+  "Non-nil when ERR is a curl, stall, or stream-ceiling timeout."
+  (and (stringp err)
+       (let ((s (downcase err)))
+         (or (string-match-p "curl 28" s)
+             (string-match-p "operation timeout" s)
+             (string-match-p "stream stalled" s)
+             (string-match-p "stream exceeded ceiling" s)))))
+
+(defun kargu-loop--compaction-apply-retry (run err decision)
+  "Retry the compaction of RUN, or finish it with ERR."
+  (cond
+   ((not (kargu-loop--live-p run)) nil)
+   ((eq decision :retry)
+    (kargu-log 'info "loop: user requested compaction retry after: %s" err)
+    (when (fboundp 'kargu-circuit-reset)
+      (kargu-circuit-reset))
+    (kargu--loop-begin-compaction run))
+   (t
+    (kargu-log 'info "loop: user stopped run after compaction error: %s" err)
+    (kargu--loop-finish run :error err))))
+
+(defun kargu-loop--compaction-prompt-retry (run err)
+  "Ask whether to retry the compaction that failed with ERR."
+  (kargu-ui-confirm
+   :title "⚠️  [Compaction Interrupted / Network Error]"
+   :details (format "Compaction failed or timed out:\n%s" err)
+   :notice "Choose whether to retry compaction or stop the current agent run."
+   :actions '((:key :retry
+               :label "[↻ Retry Compaction]"
+               :face (:inherit success :weight bold)
+               :help "Send the compaction request again"
+               :message "     -> [↻ Retrying compaction...]\n\n")
+              (:key :stop
+               :label "[✗ Stop Run]"
+               :face (:inherit error :weight bold)
+               :help "Abort the current agent run with this error"
+               :message "     -> [✗ Stopped by user]\n\n"))
+   :chat-buffer (plist-get run :chat-buffer)
+   :fallback-prompt (format "Compaction timed out: %s. Retry compaction? " err)
+   :default-action :stop
+   :notify 'permission
+   :on-decision (lambda (decision)
+                  (kargu-loop--compaction-apply-retry run err decision))))
+
 (defun kargu-loop--compaction-fail (run response)
-  "Fail RUN after a compaction error in RESPONSE."
-  (kargu--history-drop-trailing-compaction)
-  (kargu--loop-finish run :error
-                     (format "compaction failed: %s"
-                             (kargu-response-error-message response))))
+  "Fail RUN after a compaction error in RESPONSE.
+A timeout asks whether to retry the compaction.  Other errors end the run."
+  (let ((err (format "compaction failed: %s"
+                     (kargu-response-error-message response))))
+    (kargu--history-drop-trailing-compaction)
+    (if (kargu--loop-timeout-error-p err)
+        (kargu-loop--compaction-prompt-retry run err)
+      (kargu--loop-finish run :error err))))
 
 (defun kargu-loop--compaction-empty (run _response)
   "Fail RUN when compaction produced no summary."

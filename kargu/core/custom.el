@@ -121,8 +121,24 @@ LSP diagnostics (used by the loop module)."
   :group 'kargu)
 
 (defcustom kargu-api-timeout 90
-  "Timeout in seconds for HTTP requests to the LLM provider via plz."
+  "Timeout in seconds for a non-streaming chat request.
+Streaming requests ignore this.  They use `kargu-api-stall-timeout'
+and `kargu-api-stream-ceiling' instead.  plz maps this value to
+curl --max-time, a cap on the whole transfer."
   :type '(choice (natnum :tag "Seconds") (const :tag "No timeout" nil))
+  :group 'kargu)
+
+(defcustom kargu-api-stall-timeout 45
+  "Seconds a streaming response may go without bytes before it is aborted.
+nil disables the stall watch.  The abort message is \"stream stalled\",
+which is not a curl --max-time failure."
+  :type '(choice (natnum :tag "Seconds") (const :tag "No stall timeout" nil))
+  :group 'kargu)
+
+(defcustom kargu-api-stream-ceiling 900
+  "Maximum seconds a streaming response may run, even while bytes arrive.
+nil disables the ceiling.  The abort message is \"stream exceeded ceiling\"."
+  :type '(choice (natnum :tag "Seconds") (const :tag "No ceiling" nil))
   :group 'kargu)
 
 (defcustom kargu-log-wire nil

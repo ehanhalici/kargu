@@ -15,8 +15,7 @@
 ;;   `kargu-language-register', `kargu-language-get',
 ;;   `kargu-language-detect', `kargu-language-detect-by-extension',
 ;;   `kargu-language-for-buffer', `kargu-language-context-spec',
-;;   `kargu-language-resolve-root', `kargu-language-claim-root',
-;;   `kargu-language-root-unresolved-p', `kargu-language-requires-lsp-p',
+;;   `kargu-language-requires-lsp-p',
 ;;   `kargu-language-active', `kargu-language-prompt-guidance',
 ;;   `kargu-language-eval-hint'.
 
@@ -48,8 +47,7 @@
                                 ;   language server, checked by `kargu-deps'
   lsp-notes                     ; String: notes about symbols, outlines, and edits
   (requires-lsp t)              ; Nil when this language has no language server
-  modes                         ; Major modes that identify this language
-  root-fn)                      ; Function returning the project root, or nil
+  modes)                        ; Major modes that identify this language
 
 ;;;; Registry --------------------------------------------------------------
 
@@ -140,35 +138,6 @@ call `kargu--project-root'."
       (let ((root (and (boundp 'kargu-chat--project-root)
                        kargu-chat--project-root)))
         (and (stringp root) (kargu-language-detect root)))))
-
-(defun kargu-language-resolve-root (&optional peek)
-  "Return the project root chosen by this buffer's language, or nil.
-A language with no `root-fn' returns nil.  PEEK non-nil returns a
-root that is already known and does not ask.  This does not call
-`kargu--project-root'."
-  (let* ((spec (kargu-language-context-spec))
-         (fn (and spec (kargu-language-spec-root-fn spec))))
-    (when (functionp fn)
-      (funcall fn peek))))
-
-(defun kargu-language-root-unresolved-p ()
-  "Return non-nil when this language must name a root and has not."
-  (let ((spec (kargu-language-context-spec)))
-    (and spec
-         (functionp (kargu-language-spec-root-fn spec))
-         (not (kargu-language-resolve-root 'peek)))))
-
-(defun kargu-language-claim-root ()
-  "Return this language's project root, asking when it is missing.
-Nil when the language does not choose its own root.  An interactive
-session that still has no directory signals `user-error'."
-  (if (not (kargu-language-root-unresolved-p))
-      (kargu-language-resolve-root 'peek)
-    (or (kargu-language-resolve-root)
-        (unless noninteractive
-          (user-error "kargu: choose a %s project root before typing a prompt"
-                      (kargu-language-spec-name
-                       (kargu-language-context-spec)))))))
 
 (defun kargu-language-active (&optional root)
   "Return the active language spec for ROOT or current buffer context.

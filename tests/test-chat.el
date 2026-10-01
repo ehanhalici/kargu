@@ -16,6 +16,9 @@
 (require 'kargu/providers/catalog)
 (require 'kargu/tools/lsp)
 
+(declare-function kargu-chat--tool-heading "kargu/chat/render" (name arguments))
+(declare-function kargu-chat--result-summary "kargu/chat/render" (result))
+
 (ert-deftest kargu-chat-context-usage-footer-test ()
   "Test that context usage is accurately calculated and rendered."
   (kargu-model-set-metadata "gemini-2.5-flash" '(("context_length" . 1000000)))
@@ -197,6 +200,26 @@
             (should (equal (kargu-aget (kargu--build-payload) "model") "model-shared"))))
       (when (buffer-live-p buf1) (kill-buffer buf1))
       (when (buffer-live-p buf2) (kill-buffer buf2)))))
+
+(ert-deftest kargu-chat-tool-heading-shows-path-test ()
+  "Tool lines name the target, and a normal result is ok rather than a char count."
+  (require 'kargu/chat/render)
+  (should (equal (kargu-chat--tool-heading
+                  "read_file" '(("path" . "kargu/loop/machine.el")))
+                 "  → read_file kargu/loop/machine.el"))
+  (should (equal (kargu-chat--tool-heading
+                  "bash" '(("command" . "git status")))
+                 "  → bash git status"))
+  (should (equal (kargu-chat--tool-heading
+                  "workspace_grep" '(("pattern" . "classify")
+                                     ("path" . "kargu/loop")))
+                 "  → workspace_grep classify kargu/loop"))
+  (should (equal (kargu-chat--tool-heading
+                  "webfetch" '(("url" . "https://example.com")))
+                 "  → webfetch https://example.com"))
+  (should (equal (kargu-chat--result-summary "file contents") "ok"))
+  (should (string-prefix-p "ERROR:" (kargu-chat--result-summary "ERROR: missing")))
+  (should-not (string-match-p "chars" (kargu-chat--result-summary "file contents"))))
 
 (provide 'tests/test-chat)
 ;;; test-chat.el ends here

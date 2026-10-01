@@ -7,7 +7,9 @@
 ;;; Commentary:
 
 ;; Request and model-response paths are: classify -> alist lookup.
-;; Caps: one compaction and one `Continue.' per run.
+;; Caps: one compaction per run.  A truncated reply that already has
+;; answer text continues once.  A truncated or reasoning-only reply
+;; with no answer asks for another turn batch when the cap is spent.
 
 ;;; Code:
 
@@ -48,6 +50,10 @@
 (defconst kargu--loop-empty-notice
   "System Notice: You returned an empty response without calling any tools. Please inspect the code using the available tools and address the user query."
   "User message injected when the model returns neither text nor tools.")
+
+(defconst kargu--loop-thought-notice
+  "System Notice: Your previous turn contained only reasoning and no answer or tool call. Continue: write the answer or call a tool."
+  "User message injected when the model returns reasoning and nothing else.")
 
 ;;;; Request --------------------------------------------------------------
 
@@ -155,16 +161,25 @@ PROMPT nil means continue from the existing history."
      ((listp calls) calls)
      (t nil))))
 
+(defun kargu-loop--under-turn-cap-p (run)
+  "Non-nil when RUN still has a model turn left under its cap."
+  (< (or (plist-get run :iterations) 0) (kargu-loop--turn-cap run)))
+
 (defun kargu-loop--classify-response (run response)
   "Event for RESPONSE inside RUN.
 Order: stale, overflow, tools-unsupported, upstream-retry, error,
-content-filter, tools, length (once), answer, empty.
-Reasoning-only replies are empty, not answers."
+content-filter, tools, length, answer, thought, empty.
+A truncated reply with no answer stays `length'.  Reasoning with no
+answer and no tools is `thought', never a successful answer.  Either
+handler requests again; at the turn cap that request asks to continue.
+A truncated reply that already has answer text continues once."
   (let ((err (kargu-response-error-message response))
         (calls (kargu--loop-tool-calls response))
         (reason (kargu--loop-finish-reason response))
         (answer (kargu-nonempty (kargu-response-answer-text response)))
-        (continues (or (plist-get run :length-continues) 0)))
+        (reasoning (kargu-nonempty (kargu-response-reasoning-text response)))
+        (continues (or (plist-get run :length-continues) 0))
+        (under-cap (kargu-loop--under-turn-cap-p run)))
     (cond
      ((not (kargu-loop--live-p run)) 'stale)
      ((and err (kargu-response-overflow-p response)
@@ -181,12 +196,15 @@ Reasoning-only replies are empty, not answers."
      ((member reason '("content-filter" "content_filter")) 'content-filter)
      ((and (listp calls) calls (kargu-tools-enabled-p run)) 'tools)
      ((and (member reason kargu-loop--length-reasons)
-           (< continues 1)
-           (< (or (plist-get run :iterations) 0) (kargu-loop--turn-cap run)))
+           (not answer))
       'length)
-     ((member reason kargu-loop--length-reasons)
-      (if answer 'answer 'empty))
+     ((and (member reason kargu-loop--length-reasons)
+           (< continues 1)
+           under-cap)
+      'length)
+     ((member reason kargu-loop--length-reasons) 'answer)
      (answer 'answer)
+     (reasoning 'thought)
      (t 'empty))))
 
 (defconst kargu/loop--on-response
@@ -199,6 +217,7 @@ Reasoning-only replies are empty, not answers."
     (tools    . kargu-loop--on-tools)
     (length   . kargu-loop--on-length)
     (answer   . kargu-loop--on-answer)
+    (thought  . kargu-loop--on-thought)
     (empty    . kargu-loop--on-empty))
   "Model-response event -> handler (RUN RESPONSE).")
 
@@ -331,13 +350,23 @@ remembers the refusal and retries without tools."
     (kargu--loop-next-call run (append calls nil))))
 
 (defun kargu-loop--on-length (run _response)
-  "One `Continue.' after a truncated completion.
- Records a circuit breaker success (model did respond)."
+  "Continue RUN after a truncated completion.
+A reply with answer text continues once.  A reply with no answer
+requests again; at the turn cap that request asks to continue.
+Records a circuit breaker success (model did respond)."
   (kargu-circuit-record-success)
   (plist-put run :length-continues
              (1+ (or (plist-get run :length-continues) 0)))
   (kargu-log 'info "loop: truncated; continuing")
   (kargu--loop-request run kargu--continue-nudge))
+
+(defun kargu-loop--on-thought (run _response)
+  "Ask RUN to answer or call a tool after a reasoning-only reply.
+Does not consume the empty-response budget.  At the turn cap the
+request asks whether to continue."
+  (kargu-circuit-record-success)
+  (kargu-log 'warn "loop: reasoning only; asking for an answer or a tool call")
+  (kargu--loop-request run kargu--loop-thought-notice))
 
 (defun kargu-loop--on-answer (run response)
   "Finish RUN with the assistant content of RESPONSE.

@@ -43,6 +43,55 @@
 (defvar kargu-confirm--pending nil
   "Prompts that are on screen and not yet answered.")
 
+(defvar-local kargu-confirm--focus nil
+  "Marker on the first option button of the confirmation in this buffer.")
+
+(defun kargu-confirm--lock (start end)
+  "Mark START to END as transcript: visible, but not editable."
+  (when (< start end)
+    (add-text-properties
+     start end
+     '(read-only t
+       front-sticky t
+       rear-nonsticky (read-only face front-sticky)))))
+
+(defun kargu-confirm--note-focus (pos)
+  "Remember POS as the first option button in the current buffer."
+  (if (markerp kargu-confirm--focus)
+      (move-marker kargu-confirm--focus pos)
+    (setq kargu-confirm--focus (copy-marker pos))))
+
+(defun kargu-confirm--focus-position (chat-buf)
+  "Position of the first option button in CHAT-BUF, or its end."
+  (with-current-buffer chat-buf
+    (if (and (markerp kargu-confirm--focus)
+             (eq (marker-buffer kargu-confirm--focus) chat-buf))
+        (marker-position kargu-confirm--focus)
+      (point-max))))
+
+(defun kargu-confirm--place-point (chat-buf)
+  "Move CHAT-BUF's point onto its first option button.
+Every window showing CHAT-BUF follows, and that line sits at the
+bottom of the window.  The position is read from CHAT-BUF, never
+from whichever buffer is current."
+  (when (buffer-live-p chat-buf)
+    (with-current-buffer chat-buf
+      (let ((pos (kargu-confirm--focus-position chat-buf)))
+        (goto-char pos)
+        (dolist (w (get-buffer-window-list chat-buf nil t))
+          (set-window-point w pos)
+          (with-selected-window w (recenter -1)))))))
+
+(defun kargu-confirm--show-end (chat-buf)
+  "Move CHAT-BUF's point and its windows to the end of CHAT-BUF."
+  (when (buffer-live-p chat-buf)
+    (with-current-buffer chat-buf
+      (let ((end (point-max)))
+        (goto-char end)
+        (dolist (w (get-buffer-window-list chat-buf nil t))
+          (set-window-point w end)
+          (with-selected-window w (recenter -1)))))))
+
 (defun kargu-confirm--resolve-chat-buffer (&optional target-buf)
   "Resolve and return a live chat buffer, or nil."
   (or (and (bufferp target-buf) (buffer-live-p target-buf) target-buf)
@@ -51,22 +100,36 @@
       (get-buffer "*kargu-chat*")))
 
 (defun kargu-confirm--render-action-buttons (actions set-decision-fn)
-  "Render clickable button widgets for ACTIONS calling SET-DECISION-FN on click."
+  "Render clickable buttons for ACTIONS calling SET-DECISION-FN on click.
+mouse-1, mouse-2 and RET all decide on the first press."
   (let ((first t))
     (dolist (act actions)
       (let* ((act-key (plist-get act :key))
              (label (or (plist-get act :label) (format "[%s]" act-key)))
              (face (or (plist-get act :face) 'bold))
              (help (or (plist-get act :help) (format "Click to %s" act-key)))
-             (captured act-key))
+             (captured act-key)
+             (command (lambda ()
+                        (interactive)
+                        (funcall set-decision-fn captured)))
+             (map (make-sparse-keymap)))
+        (set-keymap-parent map button-map)
+        (define-key map [mouse-1] command)
+        (define-key map [mouse-2] command)
+        (define-key map (kbd "RET") command)
         (unless first
           (insert "  "))
         (setq first nil)
-        (insert-button
-         label
-         'action (lambda (_) (funcall set-decision-fn captured))
-         'face face
-         'help-echo help)))))
+        (let ((start (point)))
+          (insert-button
+           label
+           'action (lambda (_) (funcall set-decision-fn captured))
+           'face face
+           'mouse-face 'highlight
+           'help-echo help
+           'keymap map
+           'follow-link t)
+          (add-text-properties start (point) `(keymap ,map local-map ,map)))))))
 
 (defun kargu-confirm--render-prompt (chat-buf title details notice actions set-decision-fn)
   "Render confirmation banner, DETAILS, NOTICE, and button ACTIONS in CHAT-BUF.
@@ -80,23 +143,26 @@ SET-DECISION-FN is called with the chosen action key when clicked."
         (when (boundp 'kargu-chat--prompt-marker)
           (setq kargu-chat--prompt-marker nil)))
       (goto-char (point-max))
-      (unless (or (bobp) (eq (char-before) ?\n))
-        (insert "\n"))
-      (insert "\n")
-      (when title
-        (insert (propertize (format "  %s\n" title)
-                            'face '(:inherit warning :weight bold))))
-      (when (and details (stringp details) (not (string-empty-p (string-trim details))))
-        (dolist (line (split-string (string-trim details) "\n"))
-          (insert (format "     %s\n"
-                          (truncate-string-to-width (string-trim line) 140)))))
-      (when (and notice (stringp notice) (not (string-empty-p (string-trim notice))))
-        (insert (format "     %s\n" (string-trim notice))))
-      (insert "     ")
-      (kargu-confirm--render-action-buttons actions set-decision-fn)
-      (insert "\n\n")
-      (when (boundp 'kargu-chat--output-marker)
-        (setq kargu-chat--output-marker (copy-marker (point-max) t))))))
+      (let ((start (point)))
+        (unless (or (bobp) (eq (char-before) ?\n))
+          (insert "\n"))
+        (insert "\n")
+        (when title
+          (insert (propertize (format "  %s\n" title)
+                              'face '(:inherit warning :weight bold))))
+        (when (and details (stringp details) (not (string-empty-p (string-trim details))))
+          (dolist (line (split-string (string-trim details) "\n"))
+            (insert (format "     %s\n"
+                            (truncate-string-to-width (string-trim line) 140)))))
+        (when (and notice (stringp notice) (not (string-empty-p (string-trim notice))))
+          (insert (format "     %s\n" (string-trim notice))))
+        (insert "     ")
+        (kargu-confirm--note-focus (point))
+        (kargu-confirm--render-action-buttons actions set-decision-fn)
+        (insert "\n\n")
+        (kargu-confirm--lock start (point))
+        (when (boundp 'kargu-chat--output-marker)
+          (setq kargu-chat--output-marker (copy-marker (point-max) t)))))))
 
 (defun kargu-confirm--decision-message (actions decision)
   "Audit line for DECISION taken from ACTIONS."
@@ -119,15 +185,16 @@ SET-DECISION-FN is called with the chosen action key when clicked."
     (with-current-buffer chat-buf
       (let ((inhibit-read-only t))
         (goto-char (point-max))
-        (insert (propertize (kargu-confirm--decision-message actions decision)
-                            'face (if (memq decision '(:stop :reject :cancel))
-                                      'font-lock-warning-face
-                                    'font-lock-string-face)))
+        (let ((start (point)))
+          (insert (propertize (kargu-confirm--decision-message actions decision)
+                              'face (if (memq decision '(:stop :reject :cancel))
+                                        'font-lock-warning-face
+                                      'font-lock-string-face)))
+          (kargu-confirm--lock start (point)))
         (when (boundp 'kargu-chat--output-marker)
           (setq kargu-chat--output-marker (copy-marker (point-max) t))))
       (kargu-confirm--restore-prompt))
-    (dolist (w (get-buffer-window-list chat-buf nil t))
-      (set-window-point w (point-max)))))
+    (kargu-confirm--show-end chat-buf)))
 
 (defun kargu-confirm--settle (req decision &optional silent)
   "Answer REQ once with DECISION.  SILENT skips the callback (dismissal)."
@@ -147,13 +214,11 @@ Called when a run is stopped so no button can act on a dead run."
     (kargu-confirm--settle req :cancel t)))
 
 (defun kargu-confirm--reveal (chat-buf)
-  "Make CHAT-BUF visible and scroll it to the prompt."
+  "Make CHAT-BUF visible and put point on its first option button."
   (unless (or noninteractive (get-buffer-window chat-buf t))
     (when (fboundp 'kargu-chat-show)
       (kargu-chat-show)))
-  (dolist (w (get-buffer-window-list chat-buf nil t))
-    (set-window-point w (point-max))
-    (with-selected-window w (recenter -1)))
+  (kargu-confirm--place-point chat-buf)
   (message "Action required: click an option button in the chat"))
 
 (defun kargu-confirm--ask-in-minibuffer (fallback actions default-action)

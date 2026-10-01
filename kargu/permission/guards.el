@@ -47,22 +47,38 @@
 
 (declare-function eglot-current-server "eglot")
 (declare-function eglot-project "eglot" (server))
+(declare-function eglot--project "eglot" (server))
+
+(defun kargu-permission--eglot-server-root (server)
+  "Return the project directory stored on Eglot SERVER, or nil.
+This Emacs exposes that directory as `eglot--project', not
+`eglot-project'."
+  (when server
+    (let* ((proj (cond
+                  ((fboundp 'eglot-project)
+                   (ignore-errors (eglot-project server)))
+                  ((fboundp 'eglot--project)
+                   (ignore-errors (eglot--project server)))))
+           (root (cond
+                  ((stringp proj) proj)
+                  ((and proj (fboundp 'project-root))
+                   (ignore-errors (project-root proj))))))
+      (when (and (stringp root) (not (string-empty-p root)))
+        (file-name-as-directory (expand-file-name root))))))
 
 (defun kargu-permission-context-root ()
   "Project root of the current buffer from Eglot or `project.el'.
-Falls back to `default-directory'.  Not canonicalized; callers that
-need the canonical root use `kargu-permission-project-root'."
+The Eglot server's own project wins.  Otherwise `project.el', then
+`default-directory'.  Not canonicalized; callers that need the
+canonical root use `kargu-permission-project-root'."
   (condition-case-unless-debug nil
-      (let* ((server (and (fboundp 'eglot-current-server)
-                          (eglot-current-server)))
-             (proj (or (and server (fboundp 'eglot-project)
-                            (eglot-project server))
-                       (and (fboundp 'project-current)
-                            (project-current))))
-             (root (and proj (fboundp 'project-root) (project-root proj))))
-        (if root
-            (file-name-as-directory (expand-file-name root))
-          default-directory))
+      (or (and (fboundp 'eglot-current-server)
+               (kargu-permission--eglot-server-root (eglot-current-server)))
+          (let* ((proj (and (fboundp 'project-current) (project-current)))
+                 (root (and proj (fboundp 'project-root) (project-root proj))))
+            (if (stringp root)
+                (file-name-as-directory (expand-file-name root))
+              default-directory)))
     (error default-directory)))
 
 (defun kargu-permission-project-root (&optional buffer)

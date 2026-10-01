@@ -97,9 +97,55 @@
       (search-forward "[Yes]")
       (backward-char 2)
       (push-button)
+      (goto-char (point-min))
+      (search-forward "[Yes]")
+      (backward-char 2)
       (push-button)
       (should (equal answers '(:yes)))
       (should (null kargu-confirm--pending)))))
+
+(ert-deftest kargu-confirm-options-are-read-only-and-click-once ()
+  "Option text cannot be edited, and mouse-1 is bound on the first press."
+  (with-temp-buffer
+    (kargu-confirm--render-prompt
+     (current-buffer) "Ask" "details" "notice"
+     '((:key :yes :label "[Yes]") (:key :no :label "[No]"))
+     #'ignore)
+    (goto-char (kargu-confirm--focus-position (current-buffer)))
+    (should (looking-at (regexp-quote "[Yes]")))
+    (should (get-text-property (point) 'read-only))
+    (should (get-text-property (point) 'front-sticky))
+    (let ((map (get-text-property (point) 'keymap)))
+      (should (keymapp map))
+      (should (commandp (lookup-key map [mouse-1])))
+      (should (commandp (lookup-key map [mouse-2])))
+      (should (commandp (lookup-key map (kbd "RET")))))
+    (goto-char (point-min))
+    (search-forward "Ask")
+    (should (get-text-property (1- (point)) 'read-only))
+    (goto-char (kargu-confirm--focus-position (current-buffer)))
+    (should-error (insert "x") :type 'text-read-only)))
+
+(ert-deftest kargu-confirm-place-point-uses-the-chat-buffer ()
+  "Point lands on the first option even when another buffer is current."
+  (let ((chat (generate-new-buffer " *kargu-confirm-focus*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer chat
+            (insert (make-string 8000 ?x))
+            (kargu-confirm--render-prompt
+             chat "Ask" nil nil
+             '((:key :yes :label "[Yes]") (:key :no :label "[No]"))
+             #'ignore)
+            (goto-char (point-min)))
+          (with-temp-buffer
+            (insert "short")
+            (kargu-confirm--place-point chat)
+            (should (< (point-max) 20)))
+          (with-current-buffer chat
+            (should (looking-at (regexp-quote "[Yes]")))
+            (should (> (point) 8000))))
+      (kill-buffer chat))))
 
 (ert-deftest kargu-confirm-dismiss-all-silences-callbacks-test ()
   "Dismissing prompts (run stopped) never calls their callbacks."

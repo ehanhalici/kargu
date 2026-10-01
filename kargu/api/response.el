@@ -224,8 +224,9 @@ so a fake empty assistant cannot poison the next POST."
         (setq kargu--message-history
               (append kargu--message-history (list msg)))
         (kargu--log-assistant-wire response)
-        (kargu-log 'response "assistant turn stored: %d chars text, %s tool call(s)"
+        (kargu-log 'response "assistant turn stored: %d chars text, %d chars reasoning, %d tool call(s)"
                          (length (or content ""))
+                         (length (or reason ""))
                          (length (or (kargu-aget msg "tool_calls") ())))
         msg)))))
 

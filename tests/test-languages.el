@@ -19,6 +19,8 @@
 (require 'cl-lib)
 (require 'kargu/languages)
 (require 'kargu/tools/toolchain)
+(require 'kargu/tools/deps)
+(require 'kargu/chat)
 
 (ert-deftest kargu-languages-registered-all-test ()
   "Ensure every target language is registered with a valid spec."
@@ -145,40 +147,124 @@
     (should (string-match-p "codelldb" md))
     (should (string-match-p "Static data access ONLY" md))))
 
-(ert-deftest kargu-languages-elisp-has-no-server-and-does-not-ask-in-batch ()
-  "Emacs Lisp does not require a language server and does not prompt in batch."
-  (let ((spec (kargu-language-get 'emacs-lisp))
-        (kargu-elisp-project-root nil))
-    (should-not (kargu-language-requires-lsp-p spec))
-    (should (eq (kargu-language-spec-root-fn spec) #'kargu-language-elisp-ask-root))
-    (cl-letf (((symbol-function 'read-directory-name)
-               (lambda (&rest _) (error "should not ask"))))
-      (should-not (kargu-language-elisp-ask-root)))
+(defun kargu-languages--kill-chats ()
+  "Kill chat buffers created by a language test."
+  (dolist (buf (buffer-list))
+    (when (and (buffer-live-p buf)
+               (eq (buffer-local-value 'major-mode buf) 'kargu-chat-mode))
+      (kill-buffer buf))))
+
+(ert-deftest kargu-languages-elisp-requires-eglot-and-does-not-ask ()
+  "Emacs Lisp requires a language server and never asks for a project root."
+  (let ((spec (kargu-language-get 'emacs-lisp)))
+    (should (kargu-language-requires-lsp-p spec))
+    (should (member "ellsp" (plist-get (kargu-language-spec-lsp spec) :binaries)))
     (with-temp-buffer
       (emacs-lisp-mode)
       (should (eq (kargu-language-spec-id (kargu-language-for-buffer))
-                  'emacs-lisp))
-      (should (kargu-language-root-unresolved-p))
-      (should-not (kargu-language-claim-root)))))
+                  'emacs-lisp)))
+    (with-temp-buffer
+      (lisp-interaction-mode)
+      (should (eq (kargu-language-spec-id (kargu-language-for-buffer))
+                  'emacs-lisp)))))
 
-(ert-deftest kargu-languages-elisp-asks-before-the-prompt ()
-  "An interactive Emacs Lisp buffer must choose a root before a prompt exists."
-  (let ((kargu-elisp-project-root nil)
+(ert-deftest kargu-languages-emacs-lisp-without-eglot-blocks-the-prompt ()
+  "An Emacs Lisp buffer without Eglot shows the error and does not ask for a root."
+  (let ((root (make-temp-file "kargu-el-noeglot-" t))
+        (kargu-session-auto-restore nil)
+        (kargu-context-buffer nil)
+        (noninteractive nil))
+    (unwind-protect
+        (with-temp-buffer
+          (setq default-directory (file-name-as-directory root))
+          (emacs-lisp-mode)
+          (write-region ";;; a.el\n" nil (expand-file-name "a.el" root))
+          (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
+                    ((symbol-function 'read-directory-name)
+                     (lambda (&rest _) (error "should not ask for a directory"))))
+            (should (kargu-chat--workspace-blocked-p))
+            (kargu-chat-show)
+            (should kargu-chat--awaiting-eglot)
+            (should-not (kargu-chat--prompt-live-p))
+            (should (string-match-p "Eglot is not connected" (buffer-string)))
+            (should-not (string-match-p "no language server" (buffer-string)))
+            (should-error (kargu-chat--send-input) :type 'user-error)))
+      (kargu-languages--kill-chats)
+      (delete-directory root t))))
+
+(ert-deftest kargu-languages-without-eglot-blocks-the-prompt ()
+  "A project with no Eglot connection shows the error and has no prompt."
+  (let ((root (make-temp-file "kargu-noeglot-" t))
+        (kargu-session-auto-restore nil)
+        (kargu-context-buffer nil)
+        (noninteractive nil))
+    (unwind-protect
+        (with-temp-buffer
+          (setq default-directory (file-name-as-directory root))
+          (write-region "" nil (expand-file-name "shell.nix" root))
+          (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
+                    ((symbol-function 'read-directory-name)
+                     (lambda (&rest _) (error "should not ask for a directory"))))
+            (should (kargu-chat--workspace-blocked-p))
+            (kargu-chat-show)
+            (should kargu-chat--awaiting-eglot)
+            (should-not (kargu-chat--prompt-live-p))
+            (should (string-match-p "Eglot is not connected" (buffer-string)))
+            (should-error (kargu-chat--send-input) :type 'user-error)))
+      (kargu-languages--kill-chats)
+      (delete-directory root t))))
+
+(ert-deftest kargu-languages-eglot-connection-allows-the-prompt ()
+  "A live Eglot server for this project allows the prompt."
+  (let ((root (make-temp-file "kargu-eglot-ok-" t))
+        (kargu-session-auto-restore nil)
+        (kargu-context-buffer nil)
         (noninteractive nil)
-        (asked nil)
-        (dir (file-name-as-directory (expand-file-name default-directory))))
-    (cl-letf (((symbol-function 'read-directory-name)
-               (lambda (&rest _)
-                 (setq asked t)
-                 dir)))
-      (with-temp-buffer
-        (emacs-lisp-mode)
-        (should (kargu-language-root-unresolved-p))
-        (should-not (kargu-chat--prompt-live-p))
-        (let ((chosen (kargu-language-claim-root)))
-          (should asked)
-          (should (file-directory-p chosen))
-          (should-not (kargu-language-root-unresolved-p)))))))
+        (eglot-buf (generate-new-buffer "app.py")))
+    (unwind-protect
+        (progn
+          (with-current-buffer eglot-buf
+            (setq buffer-file-name (expand-file-name "app.py" root))
+            (setq default-directory (file-name-as-directory root))
+            (setq-local eglot--managed-mode t))
+          (with-temp-buffer
+            (setq default-directory (file-name-as-directory root))
+            (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
+                      ((symbol-function 'eglot-current-server) (lambda () t))
+                      ((symbol-function 'read-directory-name)
+                       (lambda (&rest _) (error "should not ask for a directory"))))
+              (should (kargu-eglot-connected-p))
+              (should-not (kargu-chat--workspace-blocked-p))
+              (kargu-chat-show)
+              (should-not kargu-chat--awaiting-eglot)
+              (should (kargu-chat--prompt-live-p)))))
+      (kargu-languages--kill-chats)
+      (when (buffer-live-p eglot-buf) (kill-buffer eglot-buf))
+      (delete-directory root t))))
+
+(ert-deftest kargu-languages-emacs-lisp-eglot-allows-the-prompt ()
+  "A live Eglot server in an Emacs Lisp buffer allows the prompt and does not ask."
+  (let ((root (make-temp-file "kargu-el-eglot-" t))
+        (kargu-session-auto-restore nil)
+        (kargu-context-buffer nil)
+        (noninteractive nil))
+    (unwind-protect
+        (with-temp-buffer
+          (setq default-directory (file-name-as-directory root))
+          (setq buffer-file-name (expand-file-name "a.el" root))
+          (emacs-lisp-mode)
+          (setq-local eglot--managed-mode t)
+          (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
+                    ((symbol-function 'eglot-current-server) (lambda () t))
+                    ((symbol-function 'read-directory-name)
+                     (lambda (&rest _) (error "should not ask for a directory"))))
+            (should (kargu-eglot-connected-p))
+            (should-not (kargu-chat--workspace-blocked-p))
+            (kargu-chat-show)
+            (should-not kargu-chat--awaiting-eglot)
+            (should (kargu-chat--prompt-live-p))))
+      (kargu-languages--kill-chats)
+      (delete-directory root t))))
 
 (provide 'tests/test-languages)
 

@@ -204,23 +204,38 @@ Signal an `error' when no Eglot session is usable."
              (file-exists-p kargu-context-buffer)
              kargu-context-buffer))))
 
-(declare-function kargu-language-resolve-root "kargu/languages/core" (&optional peek))
+(defconst kargu-eglot-required-message
+  "kargu: Eglot is not connected to a language server. Visit a project file, start Eglot, then open kargu again."
+  "Error shown when this project has no live Eglot connection.")
+
+(defun kargu--eglot-workspace-buffer ()
+  "Return the Eglot-managed buffer that names the workspace, or nil.
+The current buffer wins when Eglot manages it.  Otherwise the most
+recent managed file buffer.  `default-directory' is not consulted:
+a chat or temporary buffer must not hide the server's project."
+  (or (and (kargu-lsp--buffer-managed-p (current-buffer))
+           (current-buffer))
+      (car (kargu-lsp--managed-buffers))))
+
+(declare-function kargu-permission--eglot-server-root "kargu/permission/guards" (server))
 
 (defun kargu--project-root ()
-  "Return the project root directory of the working context.
-A language that names its own root, such as Emacs Lisp, wins.
-Otherwise the root comes from Eglot or `project.el'."
-  (or (and (fboundp 'kargu-language-resolve-root)
-           (kargu-language-resolve-root))
-      (kargu--project-root-from-context)))
+  "Return the connected Eglot server's project root, or nil.
+The directory is the one stored on the server.  The user is never
+asked, and `default-directory' is not used in its place."
+  (let ((buffer (kargu--eglot-workspace-buffer)))
+    (when (and (buffer-live-p buffer)
+               (fboundp 'eglot-current-server))
+      (kargu-permission--eglot-server-root
+       (with-current-buffer buffer
+         (eglot-current-server))))))
 
-(defun kargu--project-root-from-context ()
-  "Return the project root from the LSP or project context."
-  (let ((buffer (or (kargu-lsp--context-buffer-live)
-                    (car (kargu-lsp--managed-buffers)))))
-    (if (buffer-live-p buffer)
-        (with-current-buffer buffer (kargu-permission-context-root))
-      default-directory)))
+(defun kargu-eglot-connected-p ()
+  "Return non-nil when Eglot manages a file.
+The current buffer's directory does not matter.  A server started
+in the project counts even if this buffer is a chat or lives under
+`temporary-file-directory'."
+  (consp (kargu-lsp--managed-buffers)))
 
 ;;;; URI helpers & Symbol kinds -------------------------------------------
 
@@ -663,8 +678,11 @@ the skeleton is also displayed in a buffer."
             :message text))))
 
 (defun kargu-lsp--collect-project-diagnostics (root)
-  "Collect raw diagnostics across the project ROOT from Flymake and open buffers."
-  (let* ((all-diags nil)
+  "Collect raw diagnostics across the project ROOT from Flymake and open buffers.
+Nil when ROOT is not a directory string."
+  (if (not (stringp root))
+      nil
+    (let* ((all-diags nil)
          (flymake-proj (when (fboundp 'flymake--project-diagnostics)
                          (condition-case _err
                              (let ((default-directory root))
@@ -684,7 +702,7 @@ the skeleton is also displayed in a buffer."
           (push extracted all-diags))))
     (dolist (d open-proj-diags)
       (push d all-diags))
-    all-diags))
+    all-diags)))
 
 (defun kargu-lsp--group-diagnostics-by-file (all-diags)
   "Deduplicate and group ALL-DIAGS by file.
