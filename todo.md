@@ -86,7 +86,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 - **`chat/session.el:284-306`: Senkron büyük JSON okuma donması.** `kargu-session-list`, dizindeki tüm `.json` oturum dosyalarını diskten tek tek senkron okur ve `json-read` ile ayrıştırır. Çok sayıda veya büyük oturum dosyası olduğunda Emacs'i kilitler.
 - **`chat/attach.el:89-110`: Boyut kontrolsüz Base64 yüklemesi.** Eklenen dosyaların boyutu denetlenmeden `base64-encode-string` çağrılır. Büyük dosyalarda (örn. 50MB log/video) bellek şişmesi ve GC takılmaları yaşanır.
 - **`plan/dispatch.el:45, 51`: Çoklu oturumlarda global durum çakışması.** `kargu-plan--decision-pending` ve `kargu-plan--current-plan` değişkenleri globaldir (buffer-local değildir). Farklı projelerde veya tamponlarda aynı anda plan çalıştırıldığında durumlar birbirini ezer.
-- **`state/store.el:64-78`: Doğrudan `plist-put` mutasyonu.** State güncellemelerinde yerinde mutasyon yapılması, önceki state referansını tutan reaktif gözlemcileri yanıltır ve anlık görüntülerin bozulmasına yol açar.
 
 #### 3. Dil Profilleri ve Araç Zinciri Sorunları (`languages/`)
 - **`languages/elisp.el:46`: Var olmayan `ellsp` bağımlılığı.** Elisp dil profili zorunlu LSP sunucusu olarak `ellsp` tanımlar. Standart bir `ellsp` binary'si bulunmadığından, `kargu-deps` Elisp projelerinde bağımlılık hatası üretir.
@@ -129,9 +128,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
   - Dizi içinde 2 elemanlı string alt listeleri bulunan matris veya komut parametreleri (örneğin `'(("git" "status") ("git" "diff"))` veya `'(("header1" "value1") ("header2" "value2"))`), `("git" "status")` hücresi `(cons "git" (cons "status" nil))` şeklinde olduğundan bu denetimden geçer ve bir JSON nesnesi sayılır.
   - `kargu--json-encode` bu listeyi `[["git", "status"], ["git", "diff"]]` dizisi yerine `{"git": ["status"], "git": ["diff"]}` nesnesi olarak bozuk kodlar.
 #### 11. Planlama, Oturum Durumu ve Dape Yaşam Döngüsü Detayları (`plan/dispatch.el`, `tools/dape/session.el`, `tools/dape/execution.el`, `state/hooks.el`)
-- **`state/hooks.el:36-45`: Dinleyici Hatalarının State Bildirimini Kesmesi ve Durum Tutarsızlığı (K).**
-  - `kargu-state-notify` fonksiyonu, `run-hook-with-args` çağrılarını koruyucu bir `condition-case` içine almaz.
-  - UI veya harici bir paket `kargu-state-change-hook` veya `kargu-state-mode-hook`'a bir fonksiyon bağladığında, bu fonksiyonda oluşacak ufak bir hata (ör. kapalı tampon erişimi) state geçiş fonksiyonunun ortasında patlar; sonraki dinleyiciler ve durum senkronizasyonu yarıda kesilir.
 
 #### 12. Dil Belirleme Eksiklikleri ve UI Onay Motoru Kilitlenmeleri (`languages/core.el`, `languages/*.el`, `ui/confirm.el`)
 - **`languages/javascript.el:28-36`: JavaScript Projelerinde `npm run build` Zorunluluğu ve Derleme Hatası (K).**

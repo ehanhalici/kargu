@@ -1,4 +1,4 @@
-;;; kargu/state/store.el --- Central state store definition -*- lexical-binding: t; -*-
+;;; store.el --- Central state store definition -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -49,9 +49,10 @@
 (defun kargu-state--set (key value)
   "Set KEY to VALUE in the central state store.
 Callers outside `kargu/state/transitions' do not write the store."
-  (setq kargu--state-store (plist-put kargu--state-store key value))
+  (setq kargu--state-store
+        (plist-put (copy-sequence kargu--state-store) key value))
   value)
 
 (provide 'kargu/state/store)
 
-;;; kargu/state/store.el ends here
+;;; store.el ends here

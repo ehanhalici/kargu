@@ -122,6 +122,42 @@
   (should (eq (kargu-state-mode) 'ask))
   (kargu-state-reset))
 
+(ert-deftest kargu-state-snapshots-remain-stable-after-transitions-test ()
+  "Holding an earlier store reference never observes later writes."
+  (let* ((kargu--state-store (kargu-state-initial))
+         (before kargu--state-store)
+         (expected (copy-sequence before)))
+    (kargu-state-set-model "next-model")
+    (kargu-state-set-provider 'next-provider)
+    (kargu-state-record-tokens 10 5)
+    (kargu-state-transition-status :requesting)
+    (should (equal before expected))
+    (should-not (eq before kargu--state-store))
+    (should (eq (kargu-state-status) :requesting))
+    (should (kargu-state-busy-p))))
+
+(ert-deftest kargu-state-listener-failures-do-not-interrupt-notification-test ()
+  "A failing listener cannot skip later hooks or leave state half updated."
+  (let ((kargu--state-store (kargu-state-initial))
+        (kargu-state-change-hook nil)
+        (kargu-state-status-hook nil)
+        events logs)
+    (setq kargu-state-change-hook
+          (list (lambda (&rest _) (string-match "bad" "bad") (error "broken listener"))
+                (lambda (key value) (push (list key value) events) :non-nil)))
+    (setq kargu-state-status-hook
+          (list (lambda (status detail) (push (list status detail) events))))
+    (cl-letf (((symbol-function 'kargu-log)
+               (lambda (_level format &rest args) (push (apply #'format format args) logs))))
+      (string-match "saved" "saved")
+      (let ((saved (match-data)))
+        (kargu-state-transition-status :requesting "start")
+        (should (equal (match-data) saved))))
+    (should (equal (nreverse events) '((:status :requesting) (:requesting "start"))))
+    (should (cl-some (lambda (line) (string-search "broken listener" line)) logs))
+    (should (kargu-state-busy-p))
+    (should (eq (kargu-state-status) :requesting))))
+
 (provide 'tests/test-state)
 
 ;;; test-state.el ends here
