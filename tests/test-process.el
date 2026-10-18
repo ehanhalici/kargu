@@ -57,6 +57,18 @@
     (should (equal (plist-get r :timeout) 0.2))
     (should (string-search "after 0.2s" (kargu-process-failure "test" r)))))
 
+(ert-deftest kargu-process-run-closes-standard-input-test ()
+  "Programs waiting for input receive EOF without needing a deadline."
+  (dolist (command '(("cat") ("sh" "-c" "read answer || printf eof")))
+    (let ((result (kargu-test-await
+                   (lambda (callback)
+                     (kargu-process-run (car command) (cdr command) callback
+                                        :timeout 1)))))
+      (should (= (plist-get result :code) 0))
+      (should-not (plist-get result :timed-out))
+      (when (equal (car command) "sh")
+        (should (equal (plist-get result :output) "eof"))))))
+
 (ert-deftest kargu-process-run-caps-output-test ()
   "A command that writes past the cap is killed and flagged."
   (let ((r (kargu-test-await

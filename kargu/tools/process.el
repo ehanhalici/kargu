@@ -125,6 +125,7 @@ OPTS: `:dir' working directory, `:timeout' seconds (default
 `kargu-process-max-bytes').  An explicit nil timeout disables the deadline.
 `:output-policy' can be `tail' to retain recent output without killing;
 `:buffer' and `:keep-buffer' provide a persistent live output buffer.
+Standard input is closed immediately; interactive commands are unsupported.
 Return the process, or nil when none started."
   (let ((exe (executable-find program)))
     (if (not exe)
@@ -160,6 +161,7 @@ Return the process, or nil when none started."
           (setq timer (kargu-process--deadline proc timeout state))
           (set-process-sentinel
            proc (kargu-process--sentinel callback buffer state timer))
+          (when (process-live-p proc) (process-send-eof proc))
           proc)
       (error
        (plist-put state :done t)
