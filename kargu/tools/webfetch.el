@@ -1,4 +1,4 @@
-;;; kargu/tools/webfetch.el --- Fetch a URL -*- lexical-binding: t; -*-
+;;; webfetch.el --- Fetch a URL -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -12,6 +12,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/api)
@@ -113,12 +114,12 @@ returns at once; `getent' runs through `kargu-process-run'."
      :timeout kargu-webfetch-resolve-timeout)))
 
 (defun kargu-webfetch--resolve-mapping (host port ip)
-  "curl --resolve value pinning HOST:PORT to IP."
+  "Return a curl --resolve value pinning HOST:PORT to IP."
   (format "%s:%d:%s" host port
           (if (string-search ":" ip) (format "[%s]" ip) ip)))
 
 (defun kargu-webfetch--curl-args (url ip)
-  "curl arguments that GET URL from the already resolved address IP."
+  "Return curl arguments that GET URL from the resolved address IP."
   (let* ((parsed (url-generic-parse-url url))
          (host (kargu-webfetch--bare-host parsed)))
     (list "-sS" "-i"
@@ -135,24 +136,55 @@ returns at once; `getent' runs through `kargu-process-run'."
   (let* ((parsed (url-generic-parse-url url))
          (host (url-host parsed)))
     (unless (member (downcase (or (url-type parsed) "")) '("http" "https"))
-      (error "webfetch only fetches http or https URLs: %s" url))
+      (error "Webfetch only fetches http or https URLs: %s" url))
     (when (or (null host) (string-empty-p host)
               (kargu-webfetch--internal-host-p host))
-      (error "webfetch refuses local or private address: %s" (or host url)))))
+      (error "Webfetch refuses local or private address: %s" (or host url)))))
 
 (defconst kargu-webfetch--max-redirects 5
   "Redirects followed before webfetch gives up.")
 
-(defun kargu-webfetch--split-response (raw)
-  "Split a curl -i answer RAW into a plist (:status :location :body)."
-  (let* ((sep (string-match "\r?\n\r?\n" raw))
-         (head (if sep (substring raw 0 sep) raw))
-         (body (if sep (substring raw (match-end 0)) ""))
-         (status (and (string-match "\\`HTTP/[0-9.]+ \\([0-9]+\\)" head)
+(defconst kargu-webfetch--header-separator
+  (rx (opt "\r") "\n" (opt "\r") "\n")
+  "Separator between one HTTP header block and its following bytes.")
+
+(defun kargu-webfetch--parse-head (head)
+  "Read status and redirect location from one HTTP header block HEAD."
+  (let* ((case-fold-search t)
+         (status (and (string-match
+                       (rx string-start "HTTP/" (+ (any digit ".")) " "
+                           (group (= 3 digit)) (or " " line-end)) head)
                       (string-to-number (match-string 1 head))))
-         (location (and (string-match "^[Ll]ocation:[ \t]*\\([^\r\n]+\\)" head)
+         (location (and (string-match
+                         (rx line-start "Location:" (* blank)
+                             (group (+ (not (any "\r\n"))))) head)
                         (string-trim (match-string 1 head)))))
-    (list :status status :location location :body body)))
+    (list :status status :location location)))
+
+(defun kargu-webfetch--split-response (raw)
+  "Split final curl -i response RAW into (:status :location :body).
+Skip informational responses and preserve the caller's match data."
+  (save-match-data
+    (let ((offset 0))
+      (catch 'final
+        (while (string-match kargu-webfetch--header-separator raw offset)
+          (let* ((head (substring raw offset (match-beginning 0)))
+                 (body-start (match-end 0))
+                 (reply (kargu-webfetch--parse-head head))
+                 (status (plist-get reply :status)))
+            (setq offset body-start)
+            (unless (and status (<= 100 status 199))
+              (throw 'final (plist-put reply :body (substring raw body-start))))))
+        (error "Webfetch: incomplete HTTP response")))))
+
+(defun kargu-webfetch--read-response (result url)
+  "Parse curl RESULT from URL, or signal a transport failure."
+  (cond
+   ((plist-get result :timed-out) (error "Webfetch timed out: %s" url))
+   ((not (eql (plist-get result :code) 0))
+    (error "Curl exit %s: %s" (plist-get result :code)
+           (truncate-string-to-width (or (plist-get result :output) "") 200))))
+  (kargu-webfetch--split-response (or (plist-get result :output) "")))
 
 (defun kargu-webfetch--format-body (body)
   "BODY capped to `kargu-webfetch-max-chars', with a note when cut."
@@ -163,21 +195,19 @@ returns at once; `getent' runs through `kargu-process-run'."
   "Turn the curl RESULT for URL into a body, or follow a redirect.
 LEFT redirects remain.  The final text, or an ERROR text, goes to CALLBACK."
   (condition-case-unless-debug err
-      (let* ((code (plist-get result :code))
-             (reply (kargu-webfetch--split-response (or (plist-get result :output) "")))
+      (let* ((reply (kargu-webfetch--read-response result url))
              (status (plist-get reply :status))
              (location (plist-get reply :location)))
         (cond
-         ((plist-get result :timed-out) (error "webfetch timed out: %s" url))
-         ((not (eql code 0))
-          (error "curl exit %s: %s" code
-                 (truncate-string-to-width (or (plist-get result :output) "") 200)))
+         ((null status) (error "Webfetch: invalid HTTP response"))
          ((and status (<= 300 status 399) location)
-          (when (<= left 0) (error "webfetch: too many redirects"))
+          (when (<= left 0) (error "Webfetch: too many redirects"))
           (let ((next (url-expand-file-name location url)))
             (kargu-webfetch--check-url next)
             (kargu-webfetch--fetch callback next (1- left))))
-         (t (funcall callback (kargu-webfetch--format-body (plist-get reply :body))))))
+         ((<= 200 status 299)
+          (funcall callback (kargu-webfetch--format-body (plist-get reply :body))))
+         (t (error "Webfetch: HTTP %d from %s" status url))))
     (error (funcall callback (format "ERROR: %s" (error-message-string err))))))
 
 (defun kargu-webfetch--fetch (callback url left)
@@ -203,7 +233,7 @@ hop repeats this after `kargu-webfetch--check-url'."
                          "Invalid webfetch URL (must be http or https): %S" url)
   (kargu-webfetch--check-url url)
   (unless (executable-find "curl")
-    (error "curl not found"))
+    (error "Curl not found"))
   (kargu-webfetch--fetch callback url kargu-webfetch--max-redirects))
 
 (defun kargu-webfetch-register-tools ()
@@ -226,4 +256,4 @@ hop repeats this after `kargu-webfetch--check-url'."
 
 (provide 'kargu/tools/webfetch)
 
-;;; kargu/tools/webfetch.el ends here
+;;; webfetch.el ends here

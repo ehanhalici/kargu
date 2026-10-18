@@ -44,10 +44,43 @@
 
 (ert-deftest kargu-webfetch-handle-reports-failures-as-error-text-test ()
   "Timeouts and curl failures become ERROR text for the model."
-  (should (string-prefix-p "ERROR: webfetch timed out"
+  (should (string-prefix-p "ERROR: Webfetch timed out"
                            (kargu-webfetch-test--run '(:code nil :timed-out t :output ""))))
-  (should (string-prefix-p "ERROR: curl exit 7"
+  (should (string-prefix-p "ERROR: Curl exit 7"
                            (kargu-webfetch-test--run '(:code 7 :output "refused")))))
+
+(ert-deftest kargu-webfetch-skips-informational-response-headers-test ()
+  "Only the final response determines status, location and returned body."
+  (dolist (newline '("\r\n" "\n"))
+    (let* ((raw (mapconcat #'identity
+                           '("HTTP/1.1 100 Continue" "" "HTTP/2 103 Early Hints"
+                             "Location: /not-the-final-location" ""
+                             "HTTP/2 200 OK" "Content-Type: text/plain" ""
+                             "HTTP/1.1 404 is literal body text") newline))
+           reply)
+      (string-match "saved" "saved")
+      (let ((saved (match-data)))
+        (setq reply (kargu-webfetch--split-response raw))
+        (should (equal (match-data) saved)))
+      (should (= (plist-get reply :status) 200))
+      (should-not (plist-get reply :location))
+      (should (equal (plist-get reply :body) "HTTP/1.1 404 is literal body text")))))
+
+(ert-deftest kargu-webfetch-http-errors-are-not-successful-documents-test ()
+  "HTTP errors, missing statuses and incomplete redirects return ERROR text."
+  (dolist (status '(400 403 404 429 500 503))
+    (let ((out (kargu-webfetch-test--run
+                (list :code 0 :output (format "HTTP/2 %s Error\r\n\r\nerror page" status)))))
+      (should (string-prefix-p "ERROR:" out))
+      (should (string-search (number-to-string status) out))))
+  (dolist (raw '("" "not HTTP\r\n\r\nbody" "HTTP/1.1 100 Continue\r\n\r\n"
+                 "HTTP/1.1 200 OK\r\nHeader: unfinished"
+                 "HTTP/1.1 302 Found\r\n\r\nredirect without location"))
+    (should (string-prefix-p "ERROR:" (kargu-webfetch-test--run
+                                      (list :code 0 :output raw)))))
+  (should (equal (kargu-webfetch-test--run
+                  '(:code 0 :output "HTTP/2 204 No Content\r\n\r\n"))
+                 "(empty body)")))
 
 (ert-deftest kargu-webfetch-redirect-to-a-private-host-is-refused-test ()
   "Every redirect hop is checked, so a public URL cannot bounce to localhost."
@@ -55,7 +88,7 @@
     (cl-letf (((symbol-function 'kargu-webfetch--fetch)
                (lambda (&rest _) (setq fetched t))))
       (should (string-prefix-p
-               "ERROR: webfetch refuses local or private address"
+               "ERROR: Webfetch refuses local or private address"
                (kargu-webfetch-test--run
                 '(:code 0 :output "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1/admin\r\n\r\n"))))
       (should-not fetched))))
