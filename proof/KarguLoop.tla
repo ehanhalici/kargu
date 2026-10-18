@@ -327,6 +327,16 @@ ModelReceiveLengthTruncated ==
                    verifications, emptyRetries, upstreamRetries, compactions,
                    ToolVars, Flags, runStatus, generation>>
 
+(* Reasoning-only replies consume the same global turn budget.             *)
+ModelReceiveThought ==
+    /\ state = "WAIT_MODEL"
+    /\ state ' = "REQUEST"
+    /\ circuitState ' = "CLOSED"
+    /\ circuitFailures ' = 0
+    /\ UNCHANGED <<history, activeMode, iterations, turnCap, healing,
+                   verifications, emptyRetries, upstreamRetries, compactions,
+                   lengthContinues, ToolVars, Flags, runStatus, generation>>
+
 (* overflow: compact once; if that is not possible the user decides *)
 ModelReceiveOverflow ==
     /\ state = "WAIT_MODEL"

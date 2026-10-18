@@ -57,7 +57,7 @@ CircuitCooldownCanary(cState, cFailures) ==
 
 ClassificationEvents == {
     "stale", "overflow", "tools-unsupported", "upstream-retry", "error",
-    "content-filter", "tools", "length", "answer", "empty"
+    "content-filter", "tools", "length", "answer", "thought", "empty"
 }
 
 =============================================================================

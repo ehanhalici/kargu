@@ -189,6 +189,11 @@ NEXT-SEQ-FN supplies each invocation's stable sequence number."
   "Process MSG with ROLE, flushing PENDING into OUT.
 NEXT-SEQ supplies each invocation's stable sequence number."
   (let ((acc (kargu--flush-pending pending out)))
+    (when (and (equal role "user")
+               (not (kargu--history-content-present-p (kargu-aget msg "content"))))
+      (if (assoc "content" msg)
+          (setcdr (assoc "content" msg) kargu--continue-nudge)
+        (push (cons "content" kargu--continue-nudge) msg)))
     (cond
      ((and (kargu--assistant-role-p role)
            (kargu--calls-to-list (kargu-aget msg "tool_calls")))
@@ -213,10 +218,12 @@ NEXT-SEQ supplies each invocation's stable sequence number."
 
 (defun kargu--history-ensure-user (history)
   "Insert a user nudge into HISTORY only if no user turn remains."
-  (unless (seq-some (lambda (message) (equal (kargu-aget message "role") "user")) history)
-    (setcdr history (cons (list '("role" . "user") (cons "content" kargu--continue-nudge))
-                         (cdr history))))
-  history)
+  (if (seq-some (lambda (message) (equal (kargu-aget message "role") "user")) history)
+      history
+    (let ((nudge (list '("role" . "user") (cons "content" kargu--continue-nudge))))
+      (if history
+          (progn (setcdr history (cons nudge (cdr history))) history)
+        (list nudge)))))
 
 (defun kargu--validate-history (&optional keep-assistant-tail)
   "Enforce the protocol invariants required by chat providers.

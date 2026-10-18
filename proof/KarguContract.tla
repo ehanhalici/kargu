@@ -22,7 +22,7 @@ MutatingToolNames == {"edit_file", "write_file", "bash", "apply_patch",
                        "edit", "write", "patch",
                        "git_commit", "git_stage", "git_unstage",
                        "git_branch", "git_stash"}
-ReadOnlyToolNames == {"read_file", "lsp_skeleton", "grep"}
+ReadOnlyToolNames == {"read_file", "lsp_skeleton", "grep", "git_branches", "git_stashes"}
 DebugToolNames    == {"debug_toggle_breakpoint"}
 AllToolNames      == MutatingToolNames \cup ReadOnlyToolNames \cup DebugToolNames
 

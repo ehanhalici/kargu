@@ -51,7 +51,7 @@ proof/
 |---|---|---|
 | `KarguContract.tla` | `kargu/contract/{constants,types,assert,result}.el` | Roles, modes, tool names, `ContractMessage`, `ContractHistory`, ingress assertions. |
 | `KarguProtocol.tla` | `kargu/history/{repair,protocol,compact}.el` | `ValidateHistory` in the code's order, `ProtocolFirewallValid`, `ApplyCompaction`. |
-| `KarguCircuit.tla` | `kargu/api/circuit.el`, `kargu/loop/machine.el` | Breaker transitions and the ten response events. |
+| `KarguCircuit.tla` | `kargu/api/circuit.el`, `kargu/loop/machine.el` | Breaker transitions and response classification events. |
 | `KarguTools.tla` | `kargu/loop/tools.el`, `kargu/loop.el` | `GateToolAllowed`, `DoomLoopDetected`, `PushSig`. |
 | `KarguState.tla` | `kargu/state/*.el` | `BusyOf`, `RunLiveStatus`, `TransitionStatus`, `TransitionMode`, `StateInvariant`. |
 | `KarguLoop.tla` | `kargu/loop.el`, `kargu/loop/*.el` | The state machine; every action names the handler it mirrors. |
@@ -70,7 +70,7 @@ The code never blocks while it waits for the user. Three states stand for those 
 
 Request path (`kargu-loop--on-request`): `RequestCompact`, `RequestPause`, `RequestSend`, `RequestBlocked` (open breaker).
 
-Response path (`kargu/loop--on-response`): `ModelReceiveAnswer`, `ModelReceiveToolCalls`, `ModelReceiveLengthTruncated`, `ModelReceiveOverflow`, `ModelReceiveEmpty`, `ModelReceiveUpstreamError` (retryable), `ModelReceiveError` (other failures and the content filter), `ModelReceiveToolsUnsupported`.
+Response path (`kargu/loop--on-response`): `ModelReceiveAnswer`, `ModelReceiveToolCalls`, `ModelReceiveLengthTruncated`, `ModelReceiveThought`, `ModelReceiveOverflow`, `ModelReceiveEmpty`, `ModelReceiveUpstreamError` (retryable), `ModelReceiveError` (other failures and the content filter), `ModelReceiveToolsUnsupported`.
 
 Tools and healing: `ExecuteNextTool`, `DoomApprove`, `DoomStop`, `VerifyFiles`. An edit is verified only while healing rounds remain; with the budget spent the run goes on.
 
@@ -97,11 +97,18 @@ exceptions, duplicate deliveries and replacement by a newer request or run.
 4. only then, when `fix = "strip"`, remove trailing assistant turns.
 5. when no user remains, insert `Continue.` immediately after the system turn.
 
-The forward scan drops empty assistant text turns before merging. Constant
-ingress fixtures in `MC.tla` check empty, system-only, assistant-only, orphan
+The forward scan drops empty assistant text turns before merging and turns
+empty user content into a minimal `Continue.` nudge. Constant ingress fixtures
+in `MC.tla` check empty, system-only, assistant-only, orphan
 tool and empty-assistant histories. The bounded model represents text content;
 ERT additionally checks mixed text/attachment blocks and preservation of their
 order when user or assistant turns are merged.
+
+`ModelReceiveThought` returns reasoning-only replies to `REQUEST` without an
+independent empty-response retry budget. The global turn cap still pauses the
+run before another request, as checked by exhaustive scanning and repeated-reply
+ERT coverage. Read-only branch/stash listing does not grant mutation rights.
+Synthetic thought/retry notices are abstracted away in the bounded model.
 
 The bounded loop abstracts request size with `CompactionThreshold`. ERT checks
 the concrete short-window calculation and serialized history/schema estimate;
@@ -161,9 +168,9 @@ Run on 2026-10-18 with TLC 2.19, 24 workers:
 
 ```
 Model checking completed. No error has been found.
-731356619 states generated, 85781147 distinct states found, 0 states left on queue.
-The depth of the complete state graph search is 44.
-Finished in 09min 43s
+732574164 states generated, 85787393 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 42.
+Finished in 10min 11s
 ```
 
 Changing a guard breaks the check: with the `~noTools` guard removed from `ModelReceiveToolCalls`, a simulation reports `Safety_ToolsOffMeansNoToolWork` violated within a second. The numbers above are those of a real run; repeat it after every change to the specification and replace them.

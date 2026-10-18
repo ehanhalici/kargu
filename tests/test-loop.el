@@ -495,6 +495,23 @@
         (should prompted)
         (should-not finished)))))
 
+(ert-deftest kargu-loop-repeated-reasoning-stops-at-the-global-turn-cap-test ()
+  "Repeated reasoning-only replies pause before a fourth request is sent."
+  (let* ((run (list :state 'request :iterations 0 :max-iterations 3 :no-tools t))
+         (kargu--loop-run run) (posts 0) (questions 0))
+    (kargu-test-mode 'ask)
+    (cl-letf (((symbol-function 'kargu-api-send)
+               (lambda (_prompt callback &rest _)
+                 (cl-incf posts)
+                 (should (<= posts 3))
+                 (funcall callback (kargu-test--reasoning-response "stop" nil "reasoning"))))
+              ((symbol-function 'kargu-ui-confirm)
+               (lambda (&rest _) (cl-incf questions))))
+      (kargu--loop-request run "go")
+      (should (= posts 3))
+      (should (= questions 1))
+      (should (eq (plist-get run :state) 'pause)))))
+
 (ert-deftest kargu-loop-stop-reasoning-is-thought-test ()
   "Reasoning with no answer is thought, and the cap asks to continue."
   (let* ((resp (kargu-test--reasoning-response "stop" "" "planning the edit"))

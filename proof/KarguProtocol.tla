@@ -67,6 +67,9 @@ AssistantContentNonEmpty(hist) ==
 HasAtLeastOneUser(hist) ==
     \E i \in 1..Len(hist) : IsUser(hist[i])
 
+UserContentNonEmpty(hist) ==
+    \A i \in 1..Len(hist) : IsUser(hist[i]) => hist[i].content # ""
+
 (* Combined Protocol Firewall Invariant *)
 ProtocolFirewallValid(hist) ==
     /\ FirstMessageIsSystem(hist)
@@ -76,6 +79,7 @@ ProtocolFirewallValid(hist) ==
     /\ NoConsecutiveUser(hist)
     /\ AssistantContentNonEmpty(hist)
     /\ HasAtLeastOneUser(hist)
+    /\ UserContentNonEmpty(hist)
 
 (***************************************************************************)
 (* `kargu--validate-history' (kargu/history/repair.el)                     *)
@@ -147,10 +151,12 @@ Pass1(inSeq, outSeq, pendingIds, idToName) ==
          ELSE IF IsAssistant(m) /\ m.content = ""
          THEN Pass1(rest, FlushPending(outSeq, pendingIds, idToName), << >>, idToName)
          ELSE \* user turn or nonempty assistant text turn
-              Pass1(rest,
-                    FlushPending(outSeq, pendingIds, idToName) \o <<m>>,
-                    << >>,
-                    idToName)
+              LET normalized == IF IsUser(m) /\ m.content = ""
+                                THEN [m EXCEPT !.content = "Continue."] ELSE m
+              IN Pass1(rest,
+                       FlushPending(outSeq, pendingIds, idToName) \o <<normalized>>,
+                       << >>,
+                       idToName)
 
 \* Step 3a: merge consecutive user turns
 RECURSIVE MergeConsecutiveUsers(_)

@@ -13,6 +13,7 @@ EXTENDS KarguLoop
 ProtocolRepairCases == {
     << >>,
     <<DefaultSystemMsg>>,
+    <<MakeMsg("user", "", << >>, "", "")>>,
     <<MakeMsg("assistant", "answer", << >>, "", "")>>,
     <<MakeMsg("user", "first", << >>, "", ""),
       MakeMsg("assistant", "", << >>, "", ""),
@@ -57,6 +58,7 @@ MCNext ==
     \/ \E txt \in {"Here is the answer."} : ModelReceiveAnswer(txt)
     \/ \E calls \in ToolCallSequences : ModelReceiveToolCalls(calls)
     \/ ModelReceiveLengthTruncated
+    \/ ModelReceiveThought
     \/ ModelReceiveOverflow
     \/ ModelReceiveEmpty
     \/ ModelReceiveUpstreamError

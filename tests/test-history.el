@@ -18,6 +18,12 @@
 (require 'ert)
 (require 'kargu/history)
 
+(ert-deftest kargu-history-ensure-user-accepts-empty-history-test ()
+  "A user nudge can be created before the system head is installed."
+  (let ((history (kargu--history-ensure-user nil)))
+    (should (= (length history) 1))
+    (should (equal (kargu-aget (car history) "role") "user"))
+    (should (equal (kargu-aget (car history) "content") "Continue."))))
 (ert-deftest kargu-history-firewall-always-retains-a-user-turn-test ()
   "Empty, system-only and stripped histories still contain a user prompt."
   (dolist (history '(nil
@@ -31,6 +37,14 @@
                           (and (equal (kargu-aget message "role") "user")
                                (kargu-nonempty (kargu-aget message "content"))))
                         kargu--message-history)))))
+
+(ert-deftest kargu-history-empty-user-content-becomes-a-minimal-nudge-test ()
+  "Corrupt empty user content cannot survive the protocol wall."
+  (dolist (content '(nil "" " \n" :json-null [] [(("type" . "text") ("text" . ""))]))
+    (let ((kargu--message-history (list (list '("role" . "user") (cons "content" content)))))
+      (kargu--validate-history)
+      (should (= (length kargu--message-history) 2))
+      (should (equal (kargu-aget (cadr kargu--message-history) "content") "Continue.")))))
 
 (ert-deftest kargu-history-drops-empty-assistant-turns-before-merging-test ()
   "Empty assistant text does not reach a payload or prevent user merging."

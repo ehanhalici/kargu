@@ -102,10 +102,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 6. **[K - Düşük] Proje İçi `.kargu/sessions/` Dizininde Git İhlali.**
    - **Dosya / Satır:** `kargu/chat/session.el:155-158`
    - **Sorun:** Proje kökünde `.kargu/sessions` varsa oturumlar buraya yazılır. `.kargu/` varsayılan `.gitignore` şablonlarında hariç tutulmadığı için hassas sohbet verileri yanlışlıkla git'e eklenebilir.
-7. **[K - Orta] `kargu--history-ensure-user` boş/nil geçmişte `(wrong-type-argument consp nil)` ile çöker.**
-   - **Dosya / Satır:** `kargu/history/repair.el:221-224`
-   - **Sorun:** `kargu--history-ensure-user` fonksiyonu `(unless (seq-some (lambda (message) (equal (kargu-aget message "role") "user")) history) (setcdr history ...))` şeklinde çalışır. Geçmiş boş bir liste (`nil`) olduğunda veya sıfırlandıktan sonra `(setcdr nil ...)` çağrısı `(wrong-type-argument consp nil)` hatasıyla çöker.
-   - **Öneri:** `(unless (consp history) (list (list '("role" . "user") (cons "content" kargu--continue-nudge))))` koruması eklenmeli veya `push` ile liste oluşturulmalıdır.
 8. **[K - Yüksek] Çoklu projede oluşturulan `*kargu-chat*<N>` tamponları yerine çıktılar ve model seçimleri hep ilk tampona (`*kargu-chat*`) yönlendirilir.**
    - **Dosya / Satır:** `kargu/chat.el:270-272`, `kargu/chat/transcript.el:61`, `kargu/api/select.el:214`
    - **Sorun:** İkinci bir proje açıldığında `kargu-chat--create-project-buffer`, `(generate-new-buffer kargu-chat-buffer-name)` ile `*kargu-chat*<2>` oluşturur. Ancak `kargu-chat-output-buffer` ve `kargu-api-select--chat-buffer`, çağrı sohbet tamponunun dışındaki bir pencereden (kod tamponu, onay kutusu, zamanlayıcı veya model seçim açılır menüsü) tetiklendiğinde `(get-buffer kargu-chat-buffer-name)` yani `*kargu-chat*` arar. Sonuç olarak Proje 2'nin model seçimleri, footer güncellemeleri veya bildirimleri her zaman Proje 1'in penceresine yönlendirilir.
@@ -123,9 +119,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 3. **[K - Orta] Plan durumunun global olması.**
    - **Dosya / Satır:** `kargu/plan/dispatch.el:45, 51`
    - **Sorun:** `kargu-plan--decision-pending` ve `kargu-plan--current-plan` globaldir; farklı projelerdeki plan tamponları birbirinin durumunu ezer.
-4. **[D - Düşük] Yalnızca düşünce (reasoning-only) turlarında bütçe sayacı.**
-   - **Dosya / Satır:** `kargu/loop/machine.el:411-417`
-   - **Sorun:** Model araç çağırmadan veya yanıt vermeden yalnızca düşünce ürettiğinde, bu durum `:iterations` tavanıyla sınırlıdır (sonsuz döngü olmaz). Ancak `empty-retries` gibi ayrı bir bütçe sayacı yoktur ve her tur geçmişe bir `"System Notice"` ekler.
 5. **[K - Yüksek] İkinci `length` kesintisi tamamlanmış cevap (`'answer`) sayılarak `:done` ile sonlandırılır.**
    - **Dosya / Satır:** `kargu/loop/machine.el:236-240`
    - **Sorun:** Model yanıtı `max_tokens` nedeniyle kesildiğinde ilkinde `(< continues 1)` doğru olduğu için `'length` sınıflandırılır ve `"Continue."` ile devam edilir. Ancak ikinci kez `length` kesintisi yaşandığında `(< continues 1)` `nil` olduğu için bir sonraki kural olan `((member reason kargu-loop--length-reasons) 'answer)` devreye girer. `kargu-loop--on-answer` çağrılarak yarım kalmış metin başarıyla bitmiş gibi kabul edilir ve koşu `:done` ile kapatılır. Modelin cevabı veya kodu ortasında kesilmiş olmasına rağmen sisteme ve kullanıcıya başarı raporu verilir.
