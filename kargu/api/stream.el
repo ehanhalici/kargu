@@ -13,31 +13,49 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
 (require 'kargu/core)
 (require 'kargu/json)
 
 ;;;; SSE stream parsing ---------------------------------------------------
 
+(defun kargu-sse-decode-data (data)
+  "Decode one SSE DATA payload, retaining malformed JSON as an error event."
+  (condition-case nil
+      (kargu--json-decode data)
+    (error '(("error" . (("message" . "Invalid JSON in SSE data event")))))))
+
 (defun kargu--sse-parse (text)
   "Parse a complete OpenAI-style SSE TEXT body.
-Return the list of decoded data objects, ignoring comments,
-keep-alive pings and the terminal \"data: [DONE]\" marker."
+Return decoded data objects and `:done' for the terminal marker.
+Ignore comments and keep-alive pings."
   (let (events)
     (dolist (line (split-string text "\n" t))
       (setq line (string-trim-right line "\r"))
       (when (string-prefix-p "data:" line)
         (let ((data (string-trim (substring line (length "data:")))))
-          (when (and (not (string-empty-p data))
-                     (not (equal data "[DONE]")))
-            (when-let* ((event (kargu--json-decode-safe data)))
-              (push event events))))))
+          (cond
+           ((equal data "[DONE]") (push :done events))
+           ((not (string-empty-p data))
+            (when-let* ((event (kargu-sse-decode-data data)))
+              (push event events)))))))
     (nreverse events)))
 
 (defun kargu--sse-event-error-message (event)
   "Provider error text when EVENT carries an `error' field, or nil."
   (and (kargu--object-p event)
-       (assoc "error" event)
+       (not (memq (kargu-aget event "error") '(nil :json-null :json-false)))
        (or (kargu--provider-error-text event) "streaming error")))
+
+(defun kargu--stream-fragment-index (frag)
+  "Return FRAG's nonnegative integer index, accepting decimal strings."
+  (let ((index (kargu-aget frag "index")))
+    (cond
+     ((null index) 0)
+     ((natnump index) index)
+     ((and (stringp index) (string-match-p (rx bos (+ digit) eos) index))
+      (string-to-number index))
+     (t (error "Invalid streamed tool-call index: %S" index)))))
 
 (defun kargu--tool-args-fragment-string (new)
   "Normalize a streamed tool-arguments fragment NEW to a string, or nil."
@@ -75,18 +93,21 @@ assembled.  OpenAI streams tool calls in fragments: the id and
 name arrive once, the \"arguments\" JSON string in pieces.
 Some providers send complete argument snapshots; those replace
 rather than concatenate."
-  (let* ((idx (or (kargu-aget frag "index") 0))
+  (let* ((idx (kargu--stream-fragment-index frag))
          (fn (kargu-aget frag "function"))
          (call (or (gethash idx calls-map)
                    (puthash idx
-                            `(("id" . ,(or (kargu-aget frag "id") ""))
-                              ("type" . "function")
-                              ("function" .
-                               (("name" . ,(or (and fn (kargu-aget fn "name")) ""))
-                                ("arguments" . ""))))
+                            (list (cons "id" (or (kargu-aget frag "id") ""))
+                                  (cons "type" "function")
+                                  (cons "function"
+                                        (list (cons "name" (or (and fn (kargu-aget fn "name")) ""))
+                                              (cons "arguments" ""))))
                             calls-map)))
          (cfn (kargu-aget call "function")))
     (when-let* ((id (kargu-nonempty (kargu-aget frag "id"))))
+      (when (and (kargu-nonempty (kargu-aget call "id"))
+                 (not (equal id (kargu-aget call "id"))))
+        (error "Conflicting tool-call identities at stream index %s" idx))
       (setcdr (assoc "id" call) id))
     (when fn
       (when-let* ((name (kargu-nonempty (kargu-aget fn "name"))))
@@ -125,52 +146,64 @@ rather than concatenate."
     message))
 
 
+(cl-defstruct (kargu-stream--state (:constructor kargu-stream--make-state))
+  "Content and completion state of one streamed response."
+  (status :pending) text reasoning finish usage error
+  (calls (make-hash-table :test #'eql)))
+
+(defun kargu-stream--accept-choice (state choice)
+  "Accumulate CHOICE content and explicit completion into STATE."
+  (let ((delta (kargu-aget choice "delta"))
+        (finish (kargu-aget choice "finish_reason")))
+    (unless (memq delta '(nil :json-null))
+      (when-let* ((text (kargu--content-text delta))) (push text (kargu-stream--state-text state)))
+      (when-let* ((reason (kargu--reasoning-text delta))) (push reason (kargu-stream--state-reasoning state)))
+      (dolist (frag (kargu--extract-stream-tool-frags delta))
+        (kargu--merge-tool-call-fragment (kargu-stream--state-calls state) frag)))
+    (when (and (stringp finish) (not (string-empty-p finish)))
+      (setf (kargu-stream--state-finish state) finish
+            (kargu-stream--state-status state) :finished))))
+
+(defun kargu-stream--accept-event (state event)
+  "Accumulate decoded EVENT or the internal terminal marker into STATE."
+  (unless (eq (kargu-stream--state-status state) :error)
+    (cond
+     ((eq event :done) (setf (kargu-stream--state-status state) :finished))
+     ((kargu--sse-event-error-message event)
+      (setf (kargu-stream--state-status state) :error
+            (kargu-stream--state-error state) (kargu--sse-event-error-message event)))
+     (t
+      (when-let* ((choice (car (kargu-seq-to-list (kargu-aget event "choices")))))
+        (kargu-stream--accept-choice state choice))
+      (when-let* ((usage (kargu-aget event "usage")))
+        (unless (eq usage :json-null) (setf (kargu-stream--state-usage state) usage)))))))
+
+(defun kargu-stream--render-response (state)
+  "Build a canonical response from completed STATE, never from partial data."
+  (let* ((table (kargu-stream--state-calls state))
+         (call-list (mapcar (lambda (index) (gethash index table)) (sort (hash-table-keys table) #'<)))
+         (message (kargu--assemble-stream-message
+                   (apply #'concat (nreverse (kargu-stream--state-text state)))
+                   (apply #'concat (nreverse (kargu-stream--state-reasoning state)))
+                   call-list))
+         (usage (kargu-stream--state-usage state)))
+    `(("choices" . ((("index" . 0) ("message" . ,message)
+                     ("finish_reason" . ,(or (kargu-stream--state-finish state)
+                                             (if call-list "tool_calls" "stop"))))))
+      ,@(when usage `(("usage" . ,usage))))))
+
 (defun kargu--accumulate-stream-deltas (events)
-  "Convert decoded SSE EVENTS to a chat-completions response.
-Every consumer (loop, UI,
-history) stays on a single code path regardless of transport.
-Content and reasoning are concatenated separately; tool-call
-fragments are merged by index.  An SSE `error' event becomes an
-error alist; it does not invent an empty assistant turn."
-  (catch 'kargu-sse
-    (dolist (event events)
-      (when-let* ((err (kargu--sse-event-error-message event)))
-        (throw 'kargu-sse `(("error" . (("message" . ,err)))))))
-    (let ((text-chunks nil)
-          (reasoning-chunks nil)
-          (finish nil)
-          (usage nil)
-          (calls-map (make-hash-table :test #'eql)))
-      (dolist (event events)
-        (let* ((choices (kargu-aget event "choices"))
-               (choice (cond
-                        ((consp choices) (car choices))
-                        ((vectorp choices) (and (> (length choices) 0) (aref choices 0)))
-                        (t nil))))
-          (when choice
-            (let ((delta (kargu-aget choice "delta"))
-                  (fr (kargu-aget choice "finish_reason")))
-              (unless (memq delta '(nil :json-null))
-                (when-let* ((chunk (kargu--content-text delta)))
-                  (push chunk text-chunks))
-                (when-let* ((rchunk (kargu--reasoning-text delta)))
-                  (push rchunk reasoning-chunks))
-                (dolist (frag (kargu--extract-stream-tool-frags delta))
-                  (kargu--merge-tool-call-fragment calls-map frag)))
-              (unless (memq fr '(nil :json-null))
-                (setq finish fr)))))
-        (when-let* ((u (kargu-aget event "usage")))
-          (unless (eq u :json-null)
-            (setq usage u))))
-      (let* ((text (if text-chunks (apply #'concat (nreverse text-chunks)) ""))
-             (reasoning (if reasoning-chunks (apply #'concat (nreverse reasoning-chunks)) ""))
-             (calls (mapcar (lambda (idx) (gethash idx calls-map))
-                            (sort (hash-table-keys calls-map) #'<)))
-             (message (kargu--assemble-stream-message text reasoning calls)))
-        `(("choices" . ((("index" . 0)
-                         ("message" . ,message)
-                         ("finish_reason" . ,(or finish "stop")))))
-          ,@(when usage `(("usage" . ,usage))))))))
+  "Convert decoded SSE EVENTS to a response only after explicit completion.
+A finish reason or :done marker establishes completion.  Partial content
+and tool fragments without either produce an error, never executable calls."
+  (condition-case err
+      (let ((state (kargu-stream--make-state)))
+        (dolist (event events) (kargu-stream--accept-event state event))
+        (pcase (kargu-stream--state-status state)
+          (:finished (kargu-stream--render-response state))
+          (:error `(("error" . (("message" . ,(kargu-stream--state-error state))))))
+          (_ '(("error" . (("message" . "Incomplete SSE response: no finish_reason or [DONE] before EOF")))))))
+    (error `(("error" . (("message" . ,(format "Invalid SSE response: %s" (error-message-string err)))))))))
 
 (provide 'kargu/api/stream)
 

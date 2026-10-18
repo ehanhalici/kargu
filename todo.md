@@ -15,7 +15,6 @@ Not: Bu bölüm büyük ölçüde statik okumadan çıktı; yalnız "Test çalı
 ### Yüksek öncelik
 
 - **Bash doğrulaması gerçek bir sandbox değil; genişletme ve kod çalıştırma yüzeyleri açık.** Brace açılımı `{/etc/passwd,x}`, `-o/etc/x` gibi birleşik seçenekler, `FOO=1 python -c ...`, sürümlü yorumlayıcılar, `busybox`, `find -exec`, Git pager ayarları ve build scriptleri için tokenizer/risk denetimi eksik. `kargu-permission-confirm-bash` nil olsa bile çözümlenemeyen sözdizimi insan onayını zorunlu kılmalı. Sadece komut dizesi ayrıştırmasıyla işletim sistemi sandbox'ı garantisi verilemez; gerçek izolasyon ayrı bir süreç/sandbox tasarımı gerektiriyor.
-- **Yarım kalan akış başarı sayılır.** (K) `kargu/api/stream.el:180` `finish_reason` yoksa `"stop"` yazıyor; `[DONE]` görülmedi mi kontrolü yok (`api/sse.el:74`). Proxy bağlantıyı düzgünce kapatırsa yarım metin veya yarım JSON tool argümanı tam yanıt gibi işlenir.
 ### Orta öncelik
 
 - **Akış başlatma hatası iki eşzamanlı istek üretebilir.** (K) `kargu/api/http.el:160-168`: akış başladıktan sonra (ör. `kargu--api-arm-stream-watch` hata verirse) `condition-case` düz isteği de başlatıyor; ilk akış hâlâ canlı, iki callback teslim eder. Hata, yalnız `plz` başlamadan önceki aşamalarla sınırlanmalı veya ilk istek iptal edilmeli.
@@ -44,7 +43,6 @@ Not: Bu bölüm büyük ölçüde statik okumadan çıktı; yalnız "Test çalı
 - `kargu/history/repair.el`: `kargu--system-key` `defvar`'ı (satır 95) kullanıldığı fonksiyonlardan (satır 59-70) sonra; bayt derleme "free variable" uyarısı.
 - `kargu/api/retry.el`: 429 (kota bitti/`insufficient_quota`) de yeniden deneniyor; HTTP düzeyi (`kargu-api-retry-max`) × döngü düzeyi (`kargu-loop-upstream-retries`) çarpılıyor, toplam bekleme belirsiz uzun olabilir. `Retry-After` HTTP-tarih biçimi desteklenmiyor.
 - `kargu/api/http.el`: akış stall `delete-process` sonrası `plz` `:else` yolunun nasıl tetiklendiği doğrulanmalı (`kargu-http--fail-request` bayrağa göre ayrıştırıyor, güvenli görünüyor).
-- `kargu/api/stream.el`: `index` sayı değilse (dize) `gethash`/`sort #'<` bozulur; bazı sağlayıcılar paralel çağrıların hepsini `index: 0` ile gönderir ve parçalar tek çağrıya birleşir (D).
 - `kargu/loop/compact.el` + `history/compact.el`: koşu başına tek sıkıştırma; ikinci taşmada kullanıcıya soruluyor. `COMPACTION_*` ile başlayan kullanıcı iletisi kuyruktan sessizce atılır.
 - `kargu/core.el`: `kargu-to-int` `"12abc"` → 12 (junk-allowed) ve NaN float'ta hata.
 - `kargu/loop.el:279`: `kargu-diff-changed-files` `fboundp` korumasız, komşu çağrılar korumalı (tutarsız).
@@ -234,3 +232,7 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 - İşlev/veri/koşullu breakpoint, exception filtreleri, değişken atama, bellek ve disassembly için adaptör capability'sine bağlı şemalar eklenmeli. Ham, sınırsız DAP isteği yerine ayrı doğrulanan araçlar; hedefi değiştiren işlemlerde açık onay ve callback testleri gerekiyor.
 - Dape oturum sahipliği proje köküne bağlanmalı; başka projede açılmış global oturum, seçilen projenin debug oturumu sayılmamalı. Kaynak tamponu seçimindeki diğer-proje fallback'i de bu sınırla birlikte ele alınmalı.
 - Kargu ön kontrolü asenkron olsa da Dape'nin bazı adapter `ensure`/`fn` adımları senkron dış komut/Eglot isteği çalıştırıyor. Tüm dillerde kilitlenmeme için adaptör başlatma katmanının ayrıca tasarlanması gerekiyor; kurulu Dape paketine geçici yama yapılmamalı.
+
+#### Yeni inceleme: API geri çağrı hatalarının sahipliği
+
+- `kargu-api--send-turn` içindeki başlangıç `condition-case` kapsamına senkron teslim edilen callback devamı da giriyor. Bu devam hata fırlatırsa aynı callback'e ikinci kez hata yanıtı verilebiliyor; asenkron teslimde ise hata başka sınırda kalıyor. İstek seviyesinde tek-teslim ve devam-hatası sözleşmesi, iptal/retry nesliyle birlikte düzenlenmeli. Regresyon: senkron başarı callback'i hata versin; teslim sayısı bir kalsın, koşu açık kalmasın ve yeni istek iptal edilmesin.

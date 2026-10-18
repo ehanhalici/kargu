@@ -12,6 +12,7 @@
 
 (require 'kargu/core)
 (require 'kargu/json)
+(require 'kargu/api/stream)
 
 (defun kargu--api-note-stream-byte (process)
   "Record that PROCESS just received streaming output."
@@ -71,10 +72,12 @@ ignored.  PROCESS is only used for logging context."
     (setq line (string-trim-right line "\r"))
     (when (string-prefix-p "data:" line)
       (let ((data (string-trim (substring line (length "data:")))))
-        (when (and (not (string-empty-p data))
-                   (not (equal data "[DONE]")))
+        (cond
+         ((equal data "[DONE]")
+          (when (functionp on-event) (funcall on-event :done)))
+         ((not (string-empty-p data))
           (kargu--log-block "SSE data" data t)
-          (when-let* ((event (kargu--json-decode-safe data)))
+          (when-let* ((event (kargu-sse-decode-data data)))
             (when (functionp on-event)
               (funcall on-event event))
             (when (functionp on-delta)
@@ -82,7 +85,7 @@ ignored.  PROCESS is only used for logging context."
                   (funcall on-delta event)
                 (error
                  (kargu-log 'warn "on-delta callback failed: %s"
-                            (error-message-string err)))))))))))
+                            (error-message-string err))))))))))))
 
 (provide 'kargu/api/sse)
 

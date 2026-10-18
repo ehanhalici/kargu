@@ -19,6 +19,11 @@ Concrete ID generation and collisions with earlier conversation turns are
 covered by ERT for plain, streamed, native and legacy wire formats. The bounded
 loop model treats call IDs as opaque labels, not generated UUIDs.
 
+Transport completion is checked before a response enters the loop: an SSE
+finish reason or `[DONE]` is required. Truncation and malformed events enter
+the existing `ModelReceiveError` path, never `ModelReceiveToolCalls`. ERT covers
+this transport boundary separately from the loop's abstract response actions.
+
 ## 1. Modules
 
 ```
