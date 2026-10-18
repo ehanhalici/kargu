@@ -1,4 +1,4 @@
-;;; kargu/providers/registry.el --- LLM Provider Registry -*- lexical-binding: t; -*-
+;;; registry.el --- LLM Provider Registry -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -22,8 +22,8 @@
 (require 'kargu/core)
 (require 'auth-source)
 
-(declare-function kargu--url-host "kargu/config")
-(declare-function kargu--config-providers "kargu/config")
+(declare-function kargu--url-host "kargu/config/key")
+(declare-function kargu--config-providers "kargu/config/schema")
 
 (defvar kargu-providers--table (make-hash-table :test 'equal)
   "Hash table mapping provider ID strings to provider metadata plists.")
@@ -178,13 +178,13 @@ A missing format record streams.  An explicit `:stream' nil does not."
   "Return dedicated models list URL for provider ID, or nil to use default."
   (let ((info (kargu-provider-get id)))
     (and info (kargu-nonempty (or (plist-get info :models-api)
-                                   (plist-get info :models-endpoint))))))
+                                  (plist-get info :models-endpoint))))))
 
 (defun kargu-provider-usage-api (id)
   "Return usage / quota endpoint URL for provider ID, or nil."
   (let ((info (kargu-provider-get id)))
     (and info (kargu-nonempty (or (plist-get info :usage-api)
-                                   (plist-get info :account-api))))))
+                                  (plist-get info :account-api))))))
 
 (defun kargu-provider--literal (value)
   "Return VALUE, unwrapping a quoted catalog form."

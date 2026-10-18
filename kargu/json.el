@@ -1,4 +1,4 @@
-;;; kargu/json.el --- JSON encode/decode and text coerce -*- lexical-binding: t; -*-
+;;; json.el --- JSON encode/decode and text coerce -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -107,15 +107,15 @@ interned as symbols and then rewritten to strings."
       (kargu--json-stringify-keys raw))))
 
 (defun kargu--json-decode-safe (string)
-  "Like `kargu--json-decode' but return nil on failure."
+  "Decode JSON STRING, logging failures and returning nil."
   (condition-case-unless-debug err
       (kargu--json-decode string)
     (error
      (kargu-log 'warn "bad JSON (%s): %s"
-                      (error-message-string err)
-                      (if kargu-log-wire
-                          (kargu--log-limit (or string ""))
-                        (truncate-string-to-width (or string "") 160)))
+                (error-message-string err)
+                (if kargu-log-wire
+                    (kargu--log-limit (or string ""))
+                  (truncate-string-to-width (or string "") 160)))
      (kargu--log-block "bad JSON input" (or string ""))
      nil)))
 
@@ -129,8 +129,6 @@ accepted; use `kargu--json-decode-last-value-checked' for those."
          (kargu--json-whole-string-p s)
          (cons 'ok (kargu--json-decode s)))))
 
-(declare-function json-read "json" ())
-
 (defun kargu--json-whole-string-p (string)
   "Non-nil when STRING is exactly one JSON value (no trailing tokens)."
   (and (stringp string)
@@ -140,7 +138,7 @@ accepted; use `kargu--json-decode-last-value-checked' for those."
                   (with-temp-buffer
                     (insert s)
                     (goto-char (point-min))
-                    (json-read)
+                    (json-parse-buffer)
                     (skip-chars-forward " \t\n\r")
                     (eobp))
                 (error nil))))))
@@ -164,7 +162,7 @@ object.  VALUE may be nil when that last value is `{}`."
           (let (last-start last-end)
             (while (progn (skip-chars-forward " \t\n\r") (not (eobp)))
               (setq last-start (point))
-              (json-read)
+              (json-parse-buffer)
               (setq last-end (point)))
             (when last-start
               (cons 'ok
@@ -182,9 +180,9 @@ Return (ok . VALUE) or nil.  VALUE may be nil for `{}`."
      ((kargu--json-decode-last-value-checked trimmed))
      (t
       (kargu-log 'warn "bad JSON: %s"
-                       (if kargu-log-wire
-                           (kargu--log-limit trimmed)
-                         (truncate-string-to-width trimmed 160)))
+                 (if kargu-log-wire
+                     (kargu--log-limit trimmed)
+                   (truncate-string-to-width trimmed 160)))
       (kargu--log-block "bad JSON input" (or string ""))
       nil))))
 
@@ -210,7 +208,7 @@ Conventions:
   * nil / t / :json-null / :json-false round-trip to
     null / true / null / false.
 This encoder exists because histories mix data we built
-(alist-based) with data decoded from responses (list-based), and
+using alists, with data decoded from responses (list-based), and
 plain `json-encode' cannot tell a list of alists from an alist."
   (let ((depth (or depth 0)))
     (cond
@@ -288,7 +286,7 @@ are ignored.  Optional DEPTH caps nesting at
         (kargu--coerce-text (kargu-aget obj "thought")))))
 
 (defun kargu--json-get (obj key)
-  "Like `kargu-aget' but also try KEY interned as a symbol."
+  "Read KEY from OBJ, also accepting an interned symbol key."
   (or (kargu-aget obj key)
       (and (stringp key) (kargu-aget obj (intern key)))))
 
@@ -327,4 +325,4 @@ are ignored.  Optional DEPTH caps nesting at
 
 (provide 'kargu/json)
 
-;;; kargu/json.el ends here
+;;; json.el ends here

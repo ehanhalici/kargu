@@ -50,21 +50,52 @@
             (lambda (cb) (kargu-process-run "kargu-no-such-program" nil cb)))))
     (should (eql (plist-get r :code) 127))))
 
+(ert-deftest kargu-process-output-cap-counts-bytes-test ()
+  "The output cap counts bytes and preserves whole Unicode characters."
+  (with-temp-buffer
+    (let ((state (list :truncated nil)))
+      (funcall (kargu-process--filter (current-buffer) 5 state) nil "ağ🙂z")
+      (should (plist-get state :truncated))
+      (should (equal (buffer-string) "ağ"))
+      (should (<= (string-bytes (buffer-string)) 5))
+      (funcall (kargu-process--filter (current-buffer) 5 state) nil "more")
+      (should (equal (buffer-string) "ağ")))))
+
+(ert-deftest kargu-process-start-failure-cleans-resources-test ()
+  "A failed sentinel setup releases the process, timer and output buffer."
+  (let (process timer output results)
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest _)
+                 (setq process (start-process "kargu-start-failure" nil "sleep" "30"))))
+              ((symbol-function 'kargu-process--filter)
+               (lambda (buffer &rest _) (setq output buffer) #'ignore))
+              ((symbol-function 'run-at-time)
+               (lambda (&rest _) (setq timer (timer-create))))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (&rest _) (error "Sentinel setup failed"))))
+      (should-not (kargu-process-run "sleep" '("30")
+                                     (lambda (result) (push result results)))))
+    (should (= (length results) 1))
+    (should (= (plist-get (car results) :code) -1))
+    (should-not (process-live-p process))
+    (should-not (buffer-live-p output))
+    (should-not (memq timer timer-list))))
+
 (ert-deftest kargu-git-tool-needs-a-callback-and-answers-by-it-test ()
   "git tools never run while Emacs waits; with a callback they answer."
   (kargu-test-with-git-repo '(("a.txt" . "x\n"))
-    (let ((spec (gethash "git_status" kargu--tool-registry)))
-      (should (string-prefix-p "ERROR:" (funcall (kargu-aget spec "executor") nil)))
-      (let ((out (kargu-test-await
-                  (lambda (cb) (funcall (kargu-aget spec "executor") nil cb)))))
-        (should (string-search "Head:" out))))))
+                            (let ((spec (gethash "git_status" kargu--tool-registry)))
+                              (should (string-prefix-p "ERROR:" (funcall (kargu-aget spec "executor") nil)))
+                              (let ((out (kargu-test-await
+                                          (lambda (cb) (funcall (kargu-aget spec "executor") nil cb)))))
+                                (should (string-search "Head:" out))))))
 
 (ert-deftest kargu-search-grep-runs-asynchronously-test ()
   "workspace_grep finds a known string and answers by callback."
   (kargu-test-with-git-repo '(("kargu/tools/process.el" . "(defun kargu-process-run ())\n"))
-    (let ((out (kargu-test-await
-                (lambda (cb) (kargu-search-grep cb "kargu-process-run" "kargu/tools/process.el")))))
-      (should (string-search "kargu-process-run" out)))))
+                            (let ((out (kargu-test-await
+                                        (lambda (cb) (kargu-search-grep cb "kargu-process-run" "kargu/tools/process.el")))))
+                              (should (string-search "kargu-process-run" out)))))
 
 (ert-deftest kargu-diff-line-stats-test ()
   "Added and deleted line counts follow a unified diff for a single edit."

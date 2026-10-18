@@ -100,7 +100,6 @@
 (require 'kargu/prompt)
 (require 'kargu/history)
 (require 'kargu/history/compact)
-(require 'kargu/history/compact)
 (require 'kargu/fs)
 (require 'kargu/api/circuit)
 (require 'kargu/api)

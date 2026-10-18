@@ -1,4 +1,4 @@
-;;; kargu/permission/guards.el --- Project boundary guards -*- lexical-binding: t; -*-
+;;; guards.el --- Project boundary guards -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -49,7 +49,7 @@
 (declare-function eglot-project "eglot" (server))
 (declare-function eglot--project "eglot" (server))
 
-(defun kargu-permission--eglot-server-root (server)
+(defun kargu-permission-eglot-server-root (server)
   "Return the project directory stored on Eglot SERVER, or nil.
 This Emacs exposes that directory as `eglot--project', not
 `eglot-project'."
@@ -73,7 +73,7 @@ The Eglot server's own project wins.  Otherwise `project.el', then
 canonical root use `kargu-permission-project-root'."
   (condition-case-unless-debug nil
       (or (and (fboundp 'eglot-current-server)
-               (kargu-permission--eglot-server-root (eglot-current-server)))
+               (kargu-permission-eglot-server-root (eglot-current-server)))
           (let* ((proj (and (fboundp 'project-current) (project-current)))
                  (root (and proj (fboundp 'project-root) (project-root proj))))
             (if (stringp root)
@@ -88,10 +88,10 @@ the language or LSP context, then Eglot / `project.el' of BUFFER.  The
 result ends with a slash and has symlinks resolved."
   (let ((raw-root
          (or kargu-permission--override-root
-             (and (fboundp 'kargu--project-root)
+             (and (fboundp 'kargu-lsp-project-root)
                   (if (and buffer (buffer-live-p buffer))
-                      (with-current-buffer buffer (kargu--project-root))
-                    (kargu--project-root)))
+                      (with-current-buffer buffer (kargu-lsp-project-root))
+                    (kargu-lsp-project-root)))
              (if (and buffer (buffer-live-p buffer))
                  (with-current-buffer buffer (kargu-permission-context-root))
                (kargu-permission-context-root)))))
@@ -103,7 +103,7 @@ A relative PATH is taken from ROOT (default `kargu-permission-project-root').
 LABEL names the resource in the refusal.  Signals when PATH is empty
 or, in strict mode, when it escapes the root."
   (unless (and (stringp path) (not (string-empty-p (string-trim path))))
-    (error "path must be a non-empty string"))
+    (error "Path must be a non-empty string"))
   (let* ((base (or root (kargu-permission-project-root)))
          (abs (expand-file-name path base)))
     (kargu-permission-assert-within-project abs base label)))
@@ -146,4 +146,4 @@ Return the expanded absolute file name."
 
 (provide 'kargu/permission/guards)
 
-;;; kargu/permission/guards.el ends here
+;;; guards.el ends here

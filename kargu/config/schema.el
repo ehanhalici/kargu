@@ -1,4 +1,4 @@
-;;; kargu/config/schema.el --- Configuration cache and setup verification -*- lexical-binding: t; -*-
+;;; schema.el --- Configuration cache and setup verification -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -38,8 +38,8 @@
        (expand-file-name ".config" (or (getenv "HOME") "~")))))
 
 (defun kargu-config-file ()
-  "Return the local TOML path: existing XDG file, else existing
-`locate-user-emacs-file' kargu.toml, else the XDG path (to create)."
+  "Return the existing TOML configuration path or the default XDG path.
+Prefer an existing XDG file, then kargu.toml in the Emacs directory."
   (let ((xdg (kargu--xdg-config-file))
         (emacs (locate-user-emacs-file "kargu.toml")))
     (cond
@@ -48,7 +48,7 @@
      (t xdg))))
 
 (defun kargu--config-plist ()
-  "Return the TOML config plist, rereading when the file changes."
+  "Return the cached configuration plist, refreshing modified files."
   (let ((path (kargu-config-file)))
     (if (not (file-readable-p path))
         (setq kargu--config-cache nil
@@ -81,7 +81,7 @@ from `kargu-provider-list'."
           (all-names (kargu-provider-list))
           (choices (delete-dups (append cfg-names all-names))))
      (unless choices
-       (user-error "kargu: no providers available"))
+       (user-error "Kargu: no providers available"))
      (list (completing-read "kargu provider: " choices nil nil
                             nil nil (kargu--provider-name)))))
   (setq kargu--session-provider name)
@@ -91,7 +91,7 @@ from `kargu-provider-list'."
          (cached-model (and (boundp 'kargu--live-models-cache)
                             (car-safe (gethash name kargu--live-models-cache)))))
     (setq kargu--session-model (or (kargu-nonempty explicit-model)
-                                  (and noninteractive cached-model)))
+                                   (and noninteractive cached-model)))
     (when kargu--session-model
       (kargu-state-set-model kargu--session-model)))
   (when (fboundp 'kargu-chat-note-selection)
@@ -154,15 +154,9 @@ from `kargu-provider-list'."
                           (locate-library (symbol-name feat)))))))
                 kargu--dependencies))
 
-(defun kargu-check-setup ()
-  "Check API key and dependencies; report in echo area and log."
-  (interactive)
-  (let* ((missing-packages (kargu--missing-dependencies))
-         (missing-tools (and (fboundp 'kargu-deps-missing)
-                             (kargu-deps-missing)))
-         (key (kargu--resolve-api-key))
-         problems
-         warnings)
+(defun kargu--setup-problems (key missing-tools missing-packages)
+  "Return problems and warnings for KEY, MISSING-TOOLS and MISSING-PACKAGES."
+  (let (problems warnings)
     (cond
      ((null key)
       (push (format "no API key (M-x kargu-edit-config → %s)"
@@ -183,6 +177,17 @@ from `kargu-provider-list'."
                 problems))
       (dolist (dep missing-packages)
         (push (format "missing package %s (%s)" (car dep) (cdr dep)) problems)))
+    (cons problems warnings)))
+
+(defun kargu-check-setup ()
+  "Check API key and dependencies; report in the echo area and log."
+  (interactive)
+  (let* ((key (kargu--resolve-api-key))
+         (report (kargu--setup-problems
+                  key (and (fboundp 'kargu-deps-missing) (kargu-deps-missing))
+                  (kargu--missing-dependencies)))
+         (problems (car report))
+         (warnings (cdr report)))
     (dolist (w warnings)
       (kargu-log 'warn "%s" w))
     (if problems
@@ -211,4 +216,4 @@ from `kargu-provider-list'."
 
 (provide 'kargu/config/schema)
 
-;;; kargu/config/schema.el ends here
+;;; schema.el ends here

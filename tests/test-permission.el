@@ -17,6 +17,17 @@
 
 (require 'tests/test-helpers)
 (require 'ert)
+(require 'cl-lib)
+
+(ert-deftest kargu-permission-async-result-is-delivered-once-test ()
+  "A tool completing twice can deliver only its first asynchronous result."
+  (let (done results)
+    (kargu-permission-call-async
+     (lambda (callback) (setq done callback))
+     (lambda (result) (push result results)))
+    (funcall done "first")
+    (funcall done "second")
+    (should (equal results '("first")))))
 (require 'kargu/permission)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/bash)

@@ -1,4 +1,4 @@
-;;; kargu/chat/attach.el --- Synthetic Read for @ file mentions -*- lexical-binding: t; -*-
+;;; attach.el --- Synthetic Read for @ file mentions -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -26,11 +26,11 @@
 
 
 (defun kargu-chat--symbol-mention-p (token)
-  "Return non-nil if TOKEN looks like a symbol mention ('file::symbol')."
+  "Return non-nil for a symbol mention TOKEN such as file::symbol."
   (string-match-p "::" token))
 
 (defun kargu-chat--file-mention-p (token)
-  "Return non-nil if TOKEN looks like a file path, not a symbol or bare name."
+  "Return non-nil for a file path TOKEN."
   (and (not (kargu-chat--symbol-mention-p token))
        (or (string-match-p "/" token)
            (string-match-p "\\.[A-Za-z0-9]+\\'" token))))
@@ -174,53 +174,57 @@ If FROM or TO is nil, processes entire buffer."
                nil t))
       (match-beginning 0))))
 
+(defconst kargu-chat--symbol-fallback-lines 35
+  "Maximum extra lines attached when structural symbol bounds are unavailable.")
+
+(defun kargu-chat--python-symbol-end (found-pos)
+  "Return the last nonblank body line of the Python symbol at FOUND-POS."
+  (save-excursion
+    (goto-char found-pos)
+    (beginning-of-line)
+    (let ((indent (current-indentation))
+          (last-line (line-number-at-pos)))
+      (forward-line 1)
+      (while (and (not (eobp))
+                  (or (save-excursion (skip-chars-forward " \t") (eolp))
+                      (> (current-indentation) indent)))
+        (unless (save-excursion (skip-chars-forward " \t") (eolp))
+          (setq last-line (line-number-at-pos)))
+        (forward-line 1))
+      last-line)))
+
 (defun kargu-chat--compute-symbol-bounds (found-pos)
-  "Compute `(START-LINE . END-LINE)' starting at FOUND-POS based on major mode."
-  (goto-char found-pos)
-  (beginning-of-line)
-  (let ((def-line (line-number-at-pos (point)))
-        (start-line (line-number-at-pos (point)))
-        end-line)
-    (cond
-     ;; Lisp-like: try forward-sexp
-     ((derived-mode-p 'emacs-lisp-mode 'lisp-mode 'scheme-mode 'clojure-mode)
-      (condition-case nil
-          (save-excursion
-            (goto-char found-pos)
-            (beginning-of-defun)
-            (setq start-line (line-number-at-pos))
-            (forward-sexp 1)
-            (setq end-line (line-number-at-pos)))
-        (error nil)))
-     ;; Brace languages (C, C++, Go, Rust, Java, JS, TS, etc.)
-     ((save-excursion
-        (goto-char found-pos)
-        (search-forward "{" (line-end-position 3) t))
-      (condition-case nil
-          (save-excursion
-            (goto-char found-pos)
-            (search-forward "{" nil t)
-            (backward-char 1)
-            (forward-list 1)
-            (setq end-line (line-number-at-pos)))
-        (error nil)))
-     ;; Python / indentation-based
-     ((derived-mode-p 'python-mode 'python-ts-mode)
-      (save-excursion
-        (goto-char found-pos)
-        (forward-line 1)
-        (let ((last-line def-line))
-          (while (and (not (eobp))
-                      (or (looking-at "^[ \t]*$")
-                          (> (current-indentation) 0)))
-            (unless (looking-at "^[ \t]*$")
-              (setq last-line (line-number-at-pos)))
-            (forward-line 1))
-          (setq end-line last-line)))))
-    (unless (and end-line (>= end-line start-line))
-      (setq end-line (min (count-lines (point-min) (point-max))
-                          (+ start-line 35))))
-    (cons start-line end-line)))
+  "Return (START-LINE . END-LINE) of the symbol at FOUND-POS."
+  (save-excursion
+    (goto-char found-pos)
+    (beginning-of-line)
+    (let ((start-line (line-number-at-pos)) end-line)
+      (cond
+       ((derived-mode-p 'emacs-lisp-mode 'lisp-mode 'scheme-mode 'clojure-mode)
+        (condition-case nil
+            (progn
+              (beginning-of-defun)
+              (setq start-line (line-number-at-pos))
+              (forward-sexp 1)
+              (setq end-line (line-number-at-pos)))
+          (scan-error nil)))
+       ((derived-mode-p 'python-mode 'python-ts-mode)
+        (setq end-line (kargu-chat--python-symbol-end found-pos)))
+       ((save-excursion
+          (goto-char found-pos)
+          (search-forward "{" (line-end-position 3) t))
+        (condition-case nil
+            (progn
+              (goto-char found-pos)
+              (search-forward "{" nil t)
+              (backward-char 1)
+              (forward-list 1)
+              (setq end-line (line-number-at-pos)))
+          (scan-error nil))))
+      (unless (and end-line (>= end-line start-line))
+        (setq end-line (min (count-lines (point-min) (point-max))
+                            (+ start-line kargu-chat--symbol-fallback-lines))))
+      (cons start-line end-line))))
 
 (defun kargu-chat--extract-symbol-range (abs sym-name)
   "Return (START-LINE . END-LINE) for SYM-NAME in file ABS."
@@ -311,4 +315,4 @@ stay a compact reference.  The chat buffer still shows the unwrapped prompt."
 
 (provide 'kargu/chat/attach)
 
-;;; kargu/chat/attach.el ends here
+;;; attach.el ends here

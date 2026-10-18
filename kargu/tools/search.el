@@ -1,4 +1,4 @@
-;;; kargu/tools/search.el --- workspace_grep and glob -*- lexical-binding: t; -*-
+;;; search.el --- workspace_grep and glob -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -71,10 +71,8 @@
 
 (defun kargu-search--rg-exclude-args ()
   "Ripgrep `--glob' arguments that skip junk directories."
-  (let (args)
-    (dolist (dir kargu-fs-skip-dirs)
-      (setq args (append args (list "--glob" (format "!**/%s/**" dir)))))
-    args))
+  (cl-loop for dir in kargu-fs-skip-dirs
+           append (list "--glob" (format "!**/%s/**" dir))))
 
 (defun kargu-search--run (program args root callback)
   "Run PROGRAM with ARGS in ROOT without waiting.
@@ -171,7 +169,7 @@ caps the number of hits returned."
 ;;;; Glob -----------------------------------------------------------------
 
 (defun kargu-search--normalize-glob (glob)
-  "Treat a basename glob like `*.el' as `**/*.el'."
+  "Normalize GLOB so a basename pattern also matches nested files."
   (cond
    ((or (null glob) (string-empty-p glob)) "**/*")
    ((string-match-p "/" glob) glob)
@@ -218,7 +216,7 @@ caps the number of hits returned."
   (let* ((root (kargu-search--root))
          (target (kargu-search--resolve path root)))
     (unless (file-directory-p target)
-      (error "path %s is not a directory" target))
+      (error "Path %s is not a directory" target))
     (let* ((entries (directory-files target nil directory-files-no-dot-files-regexp t))
            (lines nil))
       (dolist (entry entries)
@@ -260,14 +258,15 @@ The list goes to CALLBACK.  Prefers fd, then ripgrep, then a bounded Elisp walk.
                 "\n")))))
 
 (defun kargu-search--glob-fallback (callback pattern target root)
-  "List PATTERN under TARGET with rg, or a bounded walk when rg is missing."
+  "Find PATTERN in TARGET under ROOT and report to CALLBACK.
+Use ripgrep when available and otherwise a bounded directory walk."
   (if (kargu-search-rg-executable)
       (kargu-search--glob-rg callback pattern target root)
     (kargu-process-deliver
      callback (lambda () (kargu-search--glob-elisp pattern target root)))))
 
 (defun kargu-search--glob-fd (callback fd-exe pattern target root)
-  "List files matching PATTERN under TARGET via fd; report to CALLBACK."
+  "Find PATTERN in TARGET under ROOT using FD-EXE; report to CALLBACK."
   (kargu-search--run
    fd-exe
    (list "--color" "never" "--hidden"
@@ -298,7 +297,7 @@ The list goes to CALLBACK.  Prefers fd, then ripgrep, then a bounded Elisp walk.
       callback
       (lambda ()
         (unless (memq (car result) '(0 1))
-          (error "rg --files failed (exit %s): %s"
+          (error "Rg --files failed (exit %s): %s"
                  (car result) (string-trim (or (cdr result) ""))))
         (kargu-search--format-files
          (mapcar (lambda (f) (kargu-search--rel f root))
@@ -306,7 +305,7 @@ The list goes to CALLBACK.  Prefers fd, then ripgrep, then a bounded Elisp walk.
          pattern))))))
 
 (defun kargu-search--glob-elisp (pattern target root)
-  "List files matching PATTERN under TARGET without ripgrep (a bounded walk)."
+  "Find PATTERN in TARGET within ROOT using a bounded directory walk."
   (let* ((re (kargu-search--glob-to-regexp pattern))
          (match-p (lambda (path)
                     (or (string-match-p re (kargu-search--rel path root))
@@ -336,74 +335,74 @@ a callback is required."
           (funcall body args callback)
         (error (funcall callback (format "ERROR: %s" (error-message-string err))))))))
 
+(defconst kargu-search--tool-specs
+  (list
+   (list
+    "workspace_grep"
+    "Search file contents for regex or literal text pattern. ALWAYS use this (or rg/grep) instead of reading entire files when searching for definitions, usages, or text. Uses `rg' (ripgrep) if available, otherwise GNU grep. Read-only, available in all modes."
+    '(("type" . "object")
+      ("properties" . (("pattern" . (("type" . "string")
+                                     ("description" . "Search pattern (regex or literal).")))
+                       ("path" . (("type" . "string")
+                                  ("description" . "File or directory to search (default: project root).")))
+                       ("glob" . (("type" . "string")
+                                  ("description" . "Optional file glob, e.g. *.el or **/*.rs.")))
+                       ("max_matches" . (("type" . "integer")
+                                         ("description" . "Maximum hits to return (default 50).")))))
+      ("required" . ["pattern"]))
+    (kargu-search--executor
+     (lambda (args done)
+       (kargu-search-grep
+        done
+        (kargu--tool-arg args "pattern")
+        (kargu--tool-arg args "path" "file_path" "filePath")
+        (kargu--tool-arg args "glob")
+        (kargu--tool-arg args "max_matches" "maxMatches" "limit")))))
+   (list
+    "find_files"
+    "Find project files matching a glob pattern (e.g. **/*.rs, *.el, *test*). Uses `fd' if available (preferred over `find'), otherwise `rg --files' or directory walk. Read-only, available in all modes."
+    '(("type" . "object")
+      ("properties" . (("pattern" . (("type" . "string")
+                                     ("description" . "Glob pattern such as **/*.rs or *.el.")))
+                       ("path" . (("type" . "string")
+                                  ("description" . "Directory to search (default: project root).")))))
+      ("required" . ["pattern"]))
+    (kargu-search--executor
+     (lambda (args done)
+       (kargu-search-glob
+        done
+        (kargu--tool-arg args "pattern")
+        (kargu--tool-arg args "path" "file_path" "filePath")))))
+   (list
+    "list_files"
+    "List files and directories directly under a project path (similar to `ls'). Read-only, available in all modes."
+    '(("type" . "object")
+      ("properties" . (("path" . (("type" . "string")
+                                  ("description" . "Directory path to list (default: project root).")))))
+      ("required" . []))
+    (lambda (args)
+      (kargu-safe-tool-call
+       (kargu-search-list-files
+        (kargu--tool-arg args "path" "directory" "dir"))))))
+  "Tool schemas and executors for search operations.")
+
+(defconst kargu-search--tool-aliases
+  '(("grep" . "workspace_grep")
+    ("rg" . "workspace_grep")
+    ("find_files_by_glob" . "find_files")
+    ("find" . "find_files")
+    ("fd" . "find_files")
+    ("glob" . "find_files")
+    ("ls" . "list_files")
+    ("dir" . "list_files"))
+  "Aliases for the search tools.")
+
 (defun kargu-search-register-tools ()
-  "Register workspace search and listing tools.
-All tools are read-only and available in all modes."
-  ;; 1. workspace_grep (grep, rg)
-  (kargu-register-tool
-   "workspace_grep"
-   "Search file contents for regex or literal text pattern. ALWAYS use this (or rg/grep) instead of reading entire files when searching for definitions, usages, or text. Uses `rg' (ripgrep) if available, otherwise GNU grep. Read-only, available in all modes."
-   '(("type" . "object")
-     ("properties" . (("pattern" . (("type" . "string")
-                                    ("description" . "Search pattern (regex or literal).")))
-                      ("path" . (("type" . "string")
-                                 ("description" . "File or directory to search (default: project root).")))
-                      ("glob" . (("type" . "string")
-                                 ("description" . "Optional file glob, e.g. *.el or **/*.rs.")))
-                      ("max_matches" . (("type" . "integer")
-                                        ("description" . "Maximum hits to return (default 50).")))))
-     ("required" . ["pattern"]))
-   (kargu-search--executor
-    (lambda (args done)
-      (kargu-search-grep
-       done
-       (kargu--tool-arg args "pattern")
-       (kargu--tool-arg args "path" "file_path" "filePath")
-       (kargu--tool-arg args "glob")
-       (kargu--tool-arg args "max_matches" "maxMatches" "limit")))))
-
-  ;; 2. find_files (find, fd, glob, find_files_by_glob)
-  (kargu-register-tool
-   "find_files"
-   "Find project files matching a glob pattern (e.g. **/*.rs, *.el, *test*). Uses `fd' if available (preferred over `find'), otherwise `rg --files' or directory walk. Read-only, available in all modes."
-   '(("type" . "object")
-     ("properties" . (("pattern" . (("type" . "string")
-                                    ("description" . "Glob pattern such as **/*.rs or *.el.")))
-                      ("path" . (("type" . "string")
-                                 ("description" . "Directory to search (default: project root).")))))
-     ("required" . ["pattern"]))
-   (kargu-search--executor
-    (lambda (args done)
-      (kargu-search-glob
-       done
-       (kargu--tool-arg args "pattern")
-       (kargu--tool-arg args "path" "file_path" "filePath")))))
-
-  ;; 3. list_files (ls, dir)
-  (kargu-register-tool
-   "list_files"
-   "List files and directories directly under a project path (similar to `ls'). Read-only, available in all modes."
-   '(("type" . "object")
-     ("properties" . (("path" . (("type" . "string")
-                                 ("description" . "Directory path to list (default: project root).")))))
-     ("required" . []))
-   (lambda (args)
-     (kargu-safe-tool-call
-      (kargu-search-list-files
-       (kargu--tool-arg args "path" "directory" "dir")))))
-
-  ;; Aliases
-  (kargu-register-tool-alias "grep" "workspace_grep")
-  (kargu-register-tool-alias "rg" "workspace_grep")
-  (kargu-register-tool-alias "find_files_by_glob" "find_files")
-  (kargu-register-tool-alias "find" "find_files")
-  (kargu-register-tool-alias "fd" "find_files")
-  (kargu-register-tool-alias "glob" "find_files")
-  (kargu-register-tool-alias "ls" "list_files")
-  (kargu-register-tool-alias "dir" "list_files"))
+  "Register the search tools and their aliases."
+  (kargu-register-tools kargu-search--tool-specs kargu-search--tool-aliases))
 
 (kargu-search-register-tools)
 
 (provide 'kargu/tools/search)
 
-;;; kargu/tools/search.el ends here
+;;; search.el ends here

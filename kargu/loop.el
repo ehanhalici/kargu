@@ -1,4 +1,4 @@
-;;; kargu/loop.el --- Agent run: send, stop, status -*- lexical-binding: t; -*-
+;;; loop.el --- Agent run: send, stop, status -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -148,7 +148,7 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
   (not (null kargu--loop-run)))
 
 (defun kargu-loop-stop (&optional reason)
-  "Stop the agent run in progress, if any."
+  "Stop the current agent run, optionally recording REASON."
   (interactive)
   (if (null kargu--loop-run)
       (message "kargu: no run in progress")
@@ -179,7 +179,7 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
     report))
 
 (defun kargu-loop--message-report (report)
-  "Default ON-FINISH handler: echo the run outcome."
+  "Display the agent outcome from REPORT in the echo area."
   (message "kargu: %s — %s"
            (plist-get report :status)
            (truncate-string-to-width
@@ -211,17 +211,18 @@ Return non-nil when the run must be tool-free (the model cannot call tools
 and the mode is not agent).  Touches no state, so a refused start leaves
 the diff run files and the UI as they were."
   (when (kargu-loop-running-p)
-    (user-error "kargu: a run is already in progress (M-x kargu-loop-stop)"))
+    (user-error "Kargu: a run is already in progress (M-x kargu-loop-stop)"))
   (let ((missing (and (fboundp 'kargu-deps-missing)
                       (kargu-deps-missing (kargu-session-project-root)))))
     (when missing
-      (user-error "kargu: Run cannot start because mandatory tools are missing: %s"
+      (user-error "Kargu: Run cannot start because mandatory tools are missing: %s"
                   (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", "))))
   (kargu-loop-require-tools-for-agent)
   (not (kargu-model-supports-tools-p)))
 
 (defun kargu-loop-send (prompt &optional on-delta on-finish)
-  "Start an agent run with PROMPT (a non-empty string)."
+  "Start an agent run with PROMPT.
+Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
   (interactive "skargu prompt: ")
   (kargu-contract-assert #'kargu-contract-non-empty-string-p prompt
                          "kargu: prompt must be a non-empty string: %S" prompt)
@@ -260,53 +261,50 @@ the diff run files and the UI as they were."
     (kargu--loop-request run (kargu-prompt-wrap-user prompt))
     run))
 
+(defun kargu-loop--finish-report (run status text)
+  "Build the completion report for RUN with STATUS and TEXT."
+  (let ((report (list :status status
+                      :text (if (eq status :error) "" (or text ""))
+                      :iterations (or (plist-get run :iterations) 0)
+                      :healing (or (plist-get run :healing) 0)
+                      :verifications (or (plist-get run :verifications) 0))))
+    (when (eq status :error)
+      (plist-put report :error (or text "unknown error")))
+    (when (fboundp 'kargu-diff-run-modified-files)
+      (when-let* ((modified (kargu-diff-run-modified-files)))
+        (plist-put report :modified-files (copy-sequence modified))))
+    (when-let* ((pending (kargu-diff-changed-files)))
+      (plist-put report :pending-files pending)
+      (kargu-log 'warn "run end with %d unconsumed changed file(s)" (length pending)))
+    report))
+
 (defun kargu--loop-finish (run status &optional text)
   "End RUN with STATUS and TEXT; deliver the report to on-finish."
   (when (kargu-loop--live-p run)
-    (let ((report (list :status status
-                        :text (if (eq status :error) "" (or text ""))
-                        :iterations (or (plist-get run :iterations) 0)
-                        :healing (or (plist-get run :healing) 0)
-                        :verifications
-                        (or (plist-get run :verifications) 0))))
-      (when (eq status :error)
-        (plist-put report :error (or text "unknown error")))
-      (when (fboundp 'kargu-diff-run-modified-files)
-        (when-let* ((modified (kargu-diff-run-modified-files)))
-          (plist-put report :modified-files (copy-sequence modified))))
-      (let ((pending (kargu-diff-changed-files)))
-        (when pending
-          (plist-put report :pending-files pending)
-          (kargu-log 'warn
-                     "run end with %d unconsumed changed file(s)"
-                     (length pending))))
+    (let ((report (kargu-loop--finish-report run status text)))
       (setq kargu--loop-run nil)
       (kargu-confirm-dismiss-all)
-      (when (and (memq status '(:stopped :error)) (fboundp 'kargu-diff-abort-all-sessions))
+      (when (and (memq status '(:stopped :error))
+                 (fboundp 'kargu-diff-abort-all-sessions))
         (kargu-diff-abort-all-sessions))
       (setq kargu--compaction-system nil)
       (plist-put kargu--session :active nil)
       (when (fboundp 'kargu-state-transition-status)
         (let ((final-st (if (memq status '(:done :limit :stopped :error))
-                            status
-                          :idle)))
+                            status :idle)))
           (kargu-state-transition-status final-st (or text (symbol-name status)))))
       (kargu--validate-history 'keep-assistant-tail)
       (kargu-log 'info "run end: %s (iterations=%d, healing=%d)"
-                 status
-                 (plist-get report :iterations)
-                 (plist-get report :healing))
+                 status (plist-get report :iterations) (plist-get report :healing))
       (condition-case-unless-debug err
-          (let ((on-finish (plist-get run :on-finish)))
-            (when on-finish
-              (funcall on-finish report)))
-        (error
-         (kargu-log 'error "on-finish callback failed: %s"
-                    (error-message-string err))))
+          (when-let* ((on-finish (plist-get run :on-finish)))
+            (funcall on-finish report))
+        (error (kargu-log 'error "on-finish callback failed: %s"
+                          (error-message-string err))))
       report)))
 
 (defun kargu-loop--reset-guard (&rest _args)
-  "Stop a running agent loop before the session resets."
+  "Stop a running agent loop before resetting the session."
   (when (kargu-loop-running-p)
     (kargu-loop-stop "session reset")))
 
@@ -321,4 +319,4 @@ the diff run files and the UI as they were."
 
 (provide 'kargu/loop)
 
-;;; kargu/loop.el ends here
+;;; loop.el ends here

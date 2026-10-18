@@ -1,4 +1,4 @@
-;;; kargu/api/select.el --- Footer Company selection -*- lexical-binding: t; -*-
+;;; select.el --- Footer Company selection -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -28,8 +28,8 @@
 (declare-function kargu-connected-providers "kargu/providers/registry" ())
 (declare-function kargu-provider-env "kargu/providers/registry" (provider))
 (declare-function kargu-provider-local-p "kargu/providers/registry" (provider))
-(declare-function kargu-set-provider "kargu/providers" (provider))
-(declare-function kargu--config-providers "kargu/config" ())
+(declare-function kargu-set-provider "kargu/config/schema" (provider))
+(declare-function kargu--config-providers "kargu/config/schema" ())
 (declare-function kargu-chat-goto-footer-field "kargu/chat/prompt" (field))
 (declare-function kargu-chat--goto-prompt "kargu/chat/prompt" ())
 (declare-function kargu-state-clear-model "kargu/state/transitions" ())
@@ -110,7 +110,7 @@ Company only confirms a listed candidate.  Fuzzy matching only filters."
 Insertion at point is writable.  `inhibit-read-only' is not set locally."
   (unless (and (fboundp 'kargu-chat-goto-footer-field)
                (kargu-chat-goto-footer-field field))
-    (user-error "kargu: chat footer field not found: %s" field))
+    (user-error "Kargu: chat footer field not found: %s" field))
   (let* ((inner-start (point))
          (inner-end (save-excursion
                       (if (search-forward "]" (line-end-position) t)
@@ -154,13 +154,11 @@ interactive UI is footer Company and does not use this function."
         (funcall apply plain)
       (when (fboundp 'kargu-chat-refresh-footer)
         (kargu-chat-refresh-footer))
-      (user-error "kargu: %s is not a valid %s" (or plain "") field))))
+      (user-error "Kargu: %s is not a valid %s" (or plain "") field))))
 
 (defun kargu-api-select--continue (fn)
-  "Run FN after the current selection returns.
-Batch and minibuffer selection run FN immediately.  Footer Company
-runs FN on a timer so the next list is not opened inside Company's
-finished hook."
+  "Run FN after completing the current selection.
+Use a timer for footer Company selection and run immediately in batch."
   (if (and (not noninteractive)
            (featurep 'company)
            (kargu-api-select--chat-buffer))
@@ -179,7 +177,8 @@ finished hook."
     (kargu-chat-goto-footer-field field)))
 
 (defun kargu-api-select--listen (start candidates apply field)
-  "On Company finish, accept the candidate.  On cancel, stay on FIELD."
+  "Watch completion at START for CANDIDATES in footer FIELD.
+Invoke APPLY with the accepted candidate."
   (let ((done nil)
         (finish nil)
         (cancel nil))
@@ -215,7 +214,7 @@ finished hook."
   "Start Company for CANDIDATES inside footer FIELD, then call APPLY."
   (let ((chat-buf (kargu-api-select--chat-buffer)))
     (unless chat-buf
-      (user-error "kargu: chat buffer not found"))
+      (user-error "Kargu: chat buffer not found"))
     (with-current-buffer chat-buf
       (let ((win (get-buffer-window (current-buffer))))
         (if win (select-window win) (pop-to-buffer (current-buffer))))
@@ -235,7 +234,7 @@ ANNOTATIONS is an alist of (CANDIDATE . NOTE).  APPLY receives a string
 that is a member of CANDIDATES.  Without a display, read in the minibuffer."
   (let ((cands (kargu-api-select--strings candidates)))
     (unless cands
-      (user-error "kargu: no %s choices" field))
+      (user-error "Kargu: no %s choices" field))
     (if (and (not noninteractive)
              (featurep 'company)
              (kargu-api-select--chat-buffer))
@@ -251,7 +250,7 @@ that is a member of CANDIDATES.  Without a display, read in the minibuffer."
   "Signal an error when the agent is running or thinking."
   (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
             (and (fboundp 'kargu-busy-p) (kargu-busy-p)))
-    (user-error "kargu: cannot change this while the agent is running or thinking (stop with C-c C-k first)")))
+    (user-error "Kargu: cannot change this while the agent is running or thinking (stop with C-c C-k first)")))
 
 ;;;; Mode -----------------------------------------------------------------
 
@@ -366,10 +365,10 @@ NOTE replaces the confirmation message."
     (kargu-api-select--continue #'kargu-chat--goto-prompt)))
 
 (defun kargu-chat--open-model-selector (pname-str live-ids catalog-ids)
-  "Open the model selector for PNAME-STR over the ids known so far."
+  "Select a model for PNAME-STR from LIVE-IDS and CATALOG-IDS."
   (let ((models (kargu-chat--collect-model-candidates pname-str live-ids catalog-ids)))
     (unless models
-      (user-error "kargu: no models returned for %s" pname-str))
+      (user-error "Kargu: no models returned for %s" pname-str))
     (kargu-api-select
      'model models
      (mapcar (lambda (m) (cons m (kargu-model-annotation-string m pname-str)))
@@ -377,7 +376,7 @@ NOTE replaces the confirmation message."
      (lambda (chosen) (kargu-api-select--apply-model chosen pname-str)))))
 
 (defun kargu-chat--models-known-p (pname-str live-ids)
-  "Non-nil when model ids for PNAME-STR are at hand without a request."
+  "Return non-nil for known model ids in LIVE-IDS or provider PNAME-STR."
   (or live-ids (gethash pname-str kargu--live-models-cache)))
 
 (defun kargu-chat-select-model-company (&optional live-ids catalog-ids provider-name _event)
@@ -444,7 +443,7 @@ The model stays empty until that next list confirms one."
   (kargu-api-select--guard)
   (let ((providers (kargu-api-select--provider-candidates)))
     (unless providers
-      (user-error "kargu: no providers with API keys found. Add keys with M-x kargu-edit-config"))
+      (user-error "Kargu: no providers with API keys found.  Add keys with M-x kargu-edit-config"))
     (kargu-api-select
      'provider providers
      (mapcar (lambda (p) (cons p (kargu-api-select--provider-note p))) providers)
@@ -482,4 +481,4 @@ asks with the footer Company list."
 
 (provide 'kargu/api/select)
 
-;;; kargu/api/select.el ends here
+;;; select.el ends here

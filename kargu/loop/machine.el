@@ -1,4 +1,4 @@
-;;; kargu/loop/machine.el --- Classify events, dispatch handlers -*- lexical-binding: t; -*-
+;;; machine.el --- Classify events, dispatch handlers -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -30,8 +30,8 @@
 (defvar kargu-chat--prompt-marker)
 
 (declare-function kargu-chat--prompt-live-p "kargu/chat/prompt")
-(declare-function kargu--api-error-looks-retryable-p "kargu/api/http" (message))
-(declare-function kargu--api-retry-delay "kargu/api/http" (attempt err))
+(declare-function kargu--api-error-looks-retryable-p "kargu/api/retry" (message))
+(declare-function kargu--api-retry-delay "kargu/api/retry" (attempt err))
 
 (declare-function kargu-loop--live-p "kargu/loop" (run))
 (declare-function kargu-loop--active-mode "kargu/loop" ())
@@ -45,7 +45,7 @@
 (declare-function kargu--model "kargu/config/key" ())
 
 (defconst kargu-loop--length-reasons '("length" "max_tokens")
-  "finish_reason values that mean the completion was truncated.")
+  "Finish reasons indicating a truncated completion.")
 
 (defconst kargu--loop-empty-notice
   "System Notice: You returned an empty response without calling any tools. Please inspect the code using the available tools and address the user query."
@@ -92,7 +92,7 @@ send path so the continue prompt runs instead of leaving the run idle."
 (require 'kargu/loop/ui)
 
 (defun kargu-loop--request-send (run prompt)
-  "Send one model turn for RUN, or ask to extend the cap when it is spent."
+  "Send PROMPT for RUN, or ask to extend its exhausted turn cap."
   (let ((iterations (or (plist-get run :iterations) 0)))
     (if (>= iterations (kargu-loop--turn-cap run))
         (kargu-loop--prompt-continue run prompt)
@@ -222,8 +222,7 @@ A truncated reply that already has answer text continues once."
   "Model-response event -> handler (RUN RESPONSE).")
 
 (defun kargu-loop--on-overflow (run response)
-  "Compact RUN after a context-window overflow.
-Records a circuit breaker success (API responded, just context overflow)."
+  "Handle the context overflow RESPONSE by compacting RUN."
   (kargu-circuit-record-success)
   (if (kargu--loop-start-compact run nil)
       (kargu-log 'warn "loop: context overflow; compacting")
@@ -302,15 +301,15 @@ remembers the refusal and retries without tools."
    :details (format "The model request failed or timed out:\n%s" err)
    :notice "Choose whether to retry the request or stop the current agent run."
    :actions '((:key :retry
-               :label "[↻ Retry Request]"
-               :face (:inherit success :weight bold)
-               :help "Reset circuit breaker and retry the model request"
-               :message "     -> [↻ Retrying model request...]\n\n")
+                    :label "[↻ Retry Request]"
+                    :face (:inherit success :weight bold)
+                    :help "Reset circuit breaker and retry the model request"
+                    :message "     -> [↻ Retrying model request...]\n\n")
               (:key :stop
-               :label "[✗ Stop Run]"
-               :face (:inherit error :weight bold)
-               :help "Abort the current agent run with this error"
-               :message "     -> [✗ Stopped by user]\n\n"))
+                    :label "[✗ Stop Run]"
+                    :face (:inherit error :weight bold)
+                    :help "Abort the current agent run with this error"
+                    :message "     -> [✗ Stopped by user]\n\n"))
    :chat-buffer (plist-get run :chat-buffer)
    :fallback-prompt (format "Request failed: %s. Retry request? " err)
    :default-action :stop
@@ -323,7 +322,7 @@ remembers the refusal and retries without tools."
   (or (kargu-response-error-message response) "unknown error"))
 
 (defun kargu-loop--on-tools-unsupported (run response)
-  "Retry RUN without tools after the provider refused them."
+  "Handle unsupported tools in RESPONSE and retry RUN when allowed."
   (kargu-loop--handle-tools-unsupported run (kargu-loop--response-error response)))
 
 (defun kargu-loop--on-upstream-retry (run response)
@@ -331,19 +330,19 @@ remembers the refusal and retries without tools."
   (kargu-loop--retry-upstream run (kargu-loop--response-error response)))
 
 (defun kargu-loop--on-content-filter (run _response)
-  "Offer recovery after the provider's content filter blocked the reply."
+  "Offer recovery for RUN after a content-filter block."
   (kargu-loop--recover-or-finish
    run "The response was blocked by the provider's content filter"))
 
 (defun kargu-loop--on-error (run response)
-  "Ask the user to retry or stop after the error in RESPONSE."
+  "Offer recovery for RUN after the error in RESPONSE."
   (let ((err (kargu-loop--response-error response)))
     (kargu-log 'error "loop: request failed: %s" err)
     (kargu-loop--recover-or-finish run err)))
 
 (defun kargu-loop--on-tools (run response)
-  "Queue tool calls from RESPONSE.
- Records a circuit breaker success (model responded with tool calls)."
+  "Queue tool records from RESPONSE for RUN.
+Record success in the circuit breaker."
   (kargu-circuit-record-success)
   (let ((calls (kargu--loop-tool-calls response)))
     (kargu-log 'info "loop: %d tool call(s) to execute" (length calls))
@@ -370,7 +369,7 @@ request asks whether to continue."
 
 (defun kargu-loop--on-answer (run response)
   "Finish RUN with the assistant content of RESPONSE.
- Records a circuit breaker success (model answered successfully)."
+Record success in the circuit breaker."
   (kargu-circuit-record-success)
   (kargu--loop-finish
    run :done
@@ -398,4 +397,4 @@ request asks whether to continue."
 
 (provide 'kargu/loop/machine)
 
-;;; kargu/loop/machine.el ends here
+;;; machine.el ends here

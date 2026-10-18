@@ -1,4 +1,4 @@
-;;; kargu/api/catalog.el --- Dynamic model catalog and metadata -*- lexical-binding: t; -*-
+;;; catalog.el --- Dynamic model catalog and metadata -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -25,8 +25,8 @@
 (declare-function kargu-provider-keyless-p "kargu/providers/registry" (provider))
 (declare-function kargu-provider-format "kargu/providers/registry" (provider))
 (declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
-(declare-function kargu--plz-error-message "kargu/api/http" (err))
-(declare-function kargu--api-headers "kargu/api/http" (key &optional provider-name))
+(declare-function kargu--plz-error-message "kargu/api/retry" (err))
+(declare-function kargu--api-headers "kargu/api/request" (key &optional provider-name))
 (declare-function kargu-history-compact-threshold "kargu/history/compact")
 
 (defvar kargu--models-generation 0
@@ -36,8 +36,9 @@
   "Session cache of live model ID lists, keyed by provider name.")
 
 (defvar kargu--model-metadata-table (make-hash-table :test 'equal)
-  "Hash table mapping model ID string to metadata plist:
-(:id :context-window :max-output :description :supports-reasoning :reasoning-efforts).")
+  "Model metadata indexed by model identifier.
+Fields include :id, :context-window, :max-output, :description,
+:supports-reasoning and :reasoning-efforts.")
 
 (defun kargu-model-set-metadata (id plist)
   "Register metadata PLIST for model ID string."
@@ -106,7 +107,7 @@ Looks up directly in the model's raw API data."
     updated))
 
 (defun kargu--record-models-metadata (models &optional provider-name)
-  "Record raw model metadata objects directly from MODELS list into hash table."
+  "Record raw MODELS metadata for the optional PROVIDER-NAME."
   (let ((pname (or provider-name (kargu--provider-name))))
     (dolist (m models)
       (when (listp m)
@@ -193,13 +194,13 @@ A one-element list whose car is an alist is unwrapped."
    (t nil)))
 
 (defun kargu--read-free-p (data)
-  "Non-nil when DATA says the model is free."
+  "Return non-nil for a free model described by DATA."
   (or (and (listp data) (plist-get data :free))
       (kargu--zero-price-p (kargu--nested-get data "pricing" "prompt"))
       (kargu--zero-price-p (kargu--record-get data "input-cost"))))
 
 (defun kargu--read-vision-p (data)
-  "Non-nil when DATA says the model accepts images."
+  "Return non-nil for image support declared in DATA."
   (or (and (listp data) (plist-get data :vision))
       (let ((modality (or (kargu--nested-get data "architecture" "modality")
                           (kargu--record-get data "modality"))))
@@ -323,10 +324,8 @@ This does not invent a context window or an effort list."
      (t nil))))
 
 (defun kargu--tools-explicitly-disabled-p (data)
-  "Return non-nil when DATA says tools are unavailable.
-A missing field is not a disable.  A false `supports_tools' flag,
-a stored `:supports-tools' nil, or a parameter list that omits
-\"tools\" are."
+  "Return non-nil for an explicit tool disable in DATA.
+Missing metadata leaves tool support enabled."
   (or (let ((flag (kargu-aget data "supports_tools")))
         (or (eq flag :json-false) (equal flag "false")))
       (and (listp data)
@@ -370,7 +369,7 @@ both leave tools available."
            (and (listp data) (plist-get data :supports-reasoning)))))
 
 (defun kargu--reasoning-disabled-p (data)
-  "Return non-nil when DATA explicitly disables reasoning."
+  "Return non-nil for an explicit reasoning disable in DATA."
   (let ((flag (kargu--reasoning-support-flag data)))
     (or (eq flag :json-false) (equal flag "false"))))
 
@@ -388,8 +387,8 @@ A false `supports_reasoning' flag returns nil.  A missing list returns nil."
     (plist-get (kargu-model-read mid) :reasoning-efforts)))
 
 (defun kargu-model-supports-reasoning-p (&optional model-id provider-name)
-  "Return non-nil if MODEL-ID's API says it supports reasoning.
-An explicit true flag counts even when the API sent no level list."
+  "Return reasoning support for MODEL-ID and optional PROVIDER-NAME.
+An explicit true flag is sufficient even without an API effort list."
   (let* ((data (kargu-model-get-metadata (or model-id (kargu--model) "")))
          (flag (kargu--reasoning-support-flag data)))
     (and (not (kargu--reasoning-disabled-p data))
@@ -423,7 +422,7 @@ An explicit true flag counts even when the API sent no level list."
       (format "🧠 think: %s" (mapconcat #'identity efforts ",")))))
 
 (defun kargu-model--format-price (cost free)
-  "Annotation token for input COST, or the free badge."
+  "Format input COST, or a badge when FREE is non-nil."
   (cond
    (free "⚡ free")
    ((and (numberp cost) (> cost 0))
@@ -529,9 +528,9 @@ CALLBACK receives either the list of model alists or an error alist."
                          (funcall cb
                                   `(("error" .
                                      (("message" . ,(format "unexpected /models body from %s: %s"
-                                                           pname-str
-                                                           (truncate-string-to-width
-                                                            (or body "") 200)))))))))))
+                                                            pname-str
+                                                            (truncate-string-to-width
+                                                             (or body "") 200)))))))))))
            :else (lambda (err)
                    (when (= gen kargu--models-generation)
                      (funcall cb
@@ -695,4 +694,4 @@ When called interactively, opens an inspector buffer with all key-value pairs."
 
 (provide 'kargu/api/catalog)
 
-;;; kargu/api/catalog.el ends here
+;;; catalog.el ends here

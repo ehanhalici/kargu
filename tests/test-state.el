@@ -98,6 +98,21 @@
         (kargu-state-unsubscribe :provider prov-fn))))
   (kargu-state-reset))
 
+(ert-deftest kargu-state-token-notifications-see-complete-totals-test ()
+  "Token listeners see all counters updated before the first notification."
+  (let ((kargu--state-store (kargu-state-initial))
+        (kargu-state-change-hook nil)
+        keys)
+    (add-hook 'kargu-state-change-hook
+              (lambda (key value)
+                (push (cons key value) keys)
+                (should (equal (kargu-state-tokens)
+                               '(:prompt 10 :completion 5 :total 15)))))
+    (kargu-state-record-tokens 10 5)
+    (should (equal (nreverse keys)
+                   '((:prompt-tokens . 10) (:completion-tokens . 5)
+                     (:total-tokens . 15))))))
+
 (ert-deftest kargu-state-mode-synchronization-test ()
   "Test that kargu-state-set-mode writes the store."
   (kargu-state-reset)

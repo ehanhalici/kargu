@@ -22,6 +22,36 @@
 (require 'kargu/loop/tools)
 (require 'kargu/languages)
 
+(ert-deftest kargu-dape-session-wait-cleans-up-once-test ()
+  "Readiness and timeout both release launch hooks and timers exactly once."
+  (dolist (outcome '(:ready :cancelled))
+    (let ((dape-start-hook nil)
+          (dape-stopped-hook nil)
+          (ready 0) (cancelled 0) wait)
+      (cl-letf (((symbol-function 'kargu-dape-ready-p) (lambda () nil)))
+        (unwind-protect
+            (progn
+              (setq wait (kargu-dape--wait-for-session-ready
+                          (lambda () (cl-incf ready))
+                          (lambda (_) (cl-incf cancelled))))
+              (run-hooks 'dape-start-hook)
+              (let ((poll (kargu-dape--session-wait-timer wait))
+                    (deferred (kargu-dape--session-wait-deferred wait)))
+                (if (eq outcome :ready)
+                    (run-hooks 'dape-stopped-hook)
+                  (setf (kargu-dape--session-wait-started wait) 0)
+                  (kargu-dape--poll-session-wait wait))
+                (kargu-dape--poll-session-wait wait)
+                (kargu-dape--finish-session-wait wait :ready)
+                (should (= (+ ready cancelled) 1))
+                (should (eq (kargu-dape--session-wait-state wait) outcome))
+                (should-not dape-start-hook)
+                (should-not dape-stopped-hook)
+                (should-not (memq poll timer-list))
+                (should-not (memq deferred timer-list))))
+          (when wait
+            (kargu-dape--finish-session-wait wait :cancelled "test cleanup")))))))
+
 (ert-deftest kargu-dape-tools-registered-all-twenty-test ()
   "Ensure all 20 Dape interactive commands are registered as first-class tools."
   (let ((expected-tools '("debug_start"

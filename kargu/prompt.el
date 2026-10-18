@@ -1,4 +1,4 @@
-;;; kargu/prompt.el --- System prompt assembly -*- lexical-binding: t; -*-
+;;; prompt.el --- System prompt assembly -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -25,9 +25,9 @@
 
 (declare-function kargu-tools-enabled-p "kargu/loop" (&optional run))
 (declare-function kargu-provider-prompt-file "kargu/providers/registry" (model-id))
-(declare-function kargu-lsp-build-skeleton "kargu/tools/lsp" (&optional refresh))
-(declare-function kargu-dape-live-p "kargu/tools/dape")
-(declare-function kargu-dape-context-snapshot "kargu/tools/dape")
+(declare-function kargu-lsp-build-skeleton "kargu/tools/lsp/skeleton" (&optional refresh))
+(declare-function kargu-dape-live-p "kargu/tools/dape/session")
+(declare-function kargu-dape-context-snapshot "kargu/tools/dape/context")
 
 (defvar kargu--compaction-system nil
   "When non-nil, `kargu--get-system-prompt' returns this string.")
@@ -113,7 +113,7 @@ The file for a tool-capable model comes from the provider catalog record."
 
 (defvar kargu-context-buffer)
 
-(defun kargu--context-file-name ()
+(defun kargu-prompt--context-file-name ()
   "File name of `kargu-context-buffer', or nil."
   (cond
    ((and (boundp 'kargu-context-buffer)
@@ -160,7 +160,7 @@ A worktree or submodule has a `.git' file that names the real directory."
             (expand-file-name (match-string 1) top)))))))
 
 (defun kargu-prompt--git-info (root)
-  "Return (REPO-P . BRANCH) for ROOT by reading `HEAD'; no git process runs."
+  "Return repository status and branch for ROOT by reading Git HEAD."
   (let* ((git-dir (ignore-errors (kargu-prompt--git-dir root)))
          (head (and git-dir (expand-file-name "HEAD" git-dir))))
     (if (not (and head (file-readable-p head)))
@@ -254,7 +254,7 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
      (format "  Shell: %s\n" (kargu--shell-description))
      (format "  Git Branch: %s\n" (or (plist-get env :branch) "(none)"))
      (format "  Context file: %s\n"
-             (or (kargu--context-file-name) "(none)"))
+             (or (kargu-prompt--context-file-name) "(none)"))
      (format "  Mode: %s\n" (kargu-state-mode))
      "</env>\n\n"
      (kargu-prompt--toolchain-block root))))
@@ -267,53 +267,58 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
   "<system-reminder>\nThis model cannot call tools. Answer in plain text. Do not invent function-call markup.\n</system-reminder>"
   "Reminder used when the active model has no tool calling.")
 
+(defconst kargu-prompt--tools-guidance-intro
+  (concat "<available_tools_guidance>\n"
+          "  Execution & Multiple Tool Calling Rule:\n"
+          "  - You can call MULTIPLE tools in a single turn! They will be executed sequentially in order and their results returned together.\n"
+          "  - For example, in debug mode you can set a breakpoint (`debug_set_breakpoint` with file_path and line, e.g. `{\"file_path\": \"src/main.rs\", \"line\": 42}`) AND continue (`debug_continue`) in the same turn; the debugger sets the breakpoint, runs until it is hit, and returns both the confirmation and the full stopped state with source context, stack frames, and variables.\n"
+          "  - In exploration, batch tools like `list_files`, `workspace_grep`, `read_file`, and `git_status` together in a single turn to avoid unnecessary round-trip delays.\n\n"
+          "  File & Code Exploration Tools (available in all modes):\n"
+          "  - `read_file_symbols` (alias: read_file_outline, outline, file_symbols): Language-agnostic outline of symbols (functions, structs, classes, methods, types) and their exact line ranges via LSP documentSymbol. ALWAYS use this BEFORE reading a large file to inspect its structure and avoid wasting tokens.\n"
+          "  - `read_symbol` (alias: get_symbol): Read the exact implementation body of a specific symbol (function, struct, class, method) by name.\n")
+  "Shared introduction to the tool guidance.")
+
+(defconst kargu-prompt--tools-guidance-body
+  (concat "  - `read_file` (alias: read): Read numbered lines of an exact file (requires 'file_path', optional 'from_line', 'to_line'). Reserved for specific line ranges or non-code files (markdown, yaml, config). Before reading a large code file, always prefer `read_file_symbols` / `read_symbol`.\n"
+          "  - `lsp_project_skeleton`: Compact outline of all symbols (functions, types) across the whole project. Call first to orient yourself.\n"
+          "  - `lsp_diagnostics`: Compiler and linter diagnostics. Pass 'file_path' to inspect one file, or call with NO arguments (empty/omitted file_path) to scan the ENTIRE PROJECT for all compile/lint errors.\n"
+          "  - `list_files` (alias: ls, dir): List directory entries under a path.\n"
+          "  - Git inspection tools: `git_status`, `git_diff`, `git_log`, `git_blame`.\n"
+          "  Debugging & Runtime Control Tools (debug and agent modes):\n"
+          "  - `debug_get_context` / `debug_scope`: Inspect call-stack and in-scope local variables of the paused frame. ALWAYS inspect in-scope variables before attempting evaluation.\n"
+          "  - `debug_step_over` (alias: next): Step to next line in current function.\n"
+          "  - `debug_step_in` (alias: step): Step into the function call at current line.\n"
+          "  - `debug_step_out` (alias: finish, out): Step out of the current function.\n"
+          "  - `debug_continue` (alias: continue): Resume execution until next breakpoint or exit.\n"
+          "  - `debug_pause`: Pause running debuggee.\n"
+          "  - `debug_restart`: Restart debug session.\n"
+          "  - `debug_set_breakpoint` / `debug_clear_breakpoint` / `debug_toggle_breakpoint`: Manage breakpoints at file_path:line.\n"
+          "  - `debug_up` / `debug_down`: Navigate stack frames up or down.\n"
+          "  - `debug_threads` / `debug_stack` / `debug_modules` / `debug_sources`: Inspect debuggee runtime state.\n"
+          "  - `debug_watch`: Add/remove/list watch expressions.\n"
+          "  - `debug_eval`: Evaluate expression (check active language rules; e.g. avoid method calls in Rust).\n"
+          "  - `debug_kill` / `debug_disconnect` / `debug_quit`: Terminate or exit debug session.\n"
+          "  Execution & Modification Tools (agent mode only):\n"
+          "  - `edit_by_lsp` (alias: edit_symbol, edit_with_lsp): Replace the entire implementation body or definition of a specific symbol (function, method, class, struct, type) with new code. ALWAYS PREFER THIS over edit_file for modifying code definitions.\n"
+          "  - `edit_file` (alias: edit): Surgical replacement of unique old_string copied from read_file. Fallback only for non-code files or text outside defined symbols. Always call lsp_diagnostics afterwards.\n"
+          "  - `write_file` (alias: write): Complete file overwrite/creation.\n"
+          "  - `bash`: Run project builds, tests, or scripts (e.g. `cargo test`, `go test`, `pytest`). Set background=true for servers.\n"
+          "</available_tools_guidance>")
+  "Shared reference for inspection, debugger and editing tools.")
+
 (defun kargu-prompt--tools-guidance-block ()
-  "Tools capability and recommendation block.
-Nil when the active model cannot call tools, so the system message
-does not name tools the request will not send."
+  "Return tool guidance when the current request can use tools."
   (unless (kargu-prompt--tools-off-p)
-  (let* ((fd (or (executable-find "fd") (executable-find "fdfind")))
-         (rg (executable-find "rg")))
-    (concat
-     "<available_tools_guidance>\n"
-     "  Execution & Multiple Tool Calling Rule:\n"
-     "  - You can call MULTIPLE tools in a single turn! They will be executed sequentially in order and their results returned together.\n"
-     "  - For example, in debug mode you can set a breakpoint (`debug_set_breakpoint` with file_path and line, e.g. `{\"file_path\": \"src/main.rs\", \"line\": 42}`) AND continue (`debug_continue`) in the same turn; the debugger sets the breakpoint, runs until it is hit, and returns both the confirmation and the full stopped state with source context, stack frames, and variables.\n"
-     "  - In exploration, batch tools like `list_files`, `workspace_grep`, `read_file`, and `git_status` together in a single turn to avoid unnecessary round-trip delays.\n\n"
-     "  File & Code Exploration Tools (available in all modes):\n"
-     "  - `read_file_symbols` (alias: read_file_outline, outline, file_symbols): Language-agnostic outline of symbols (functions, structs, classes, methods, types) and their exact line ranges via LSP documentSymbol. ALWAYS use this BEFORE reading a large file to inspect its structure and avoid wasting tokens.\n"
-     "  - `read_symbol` (alias: get_symbol): Read the exact implementation body of a specific symbol (function, struct, class, method) by name.\n"
-     (if fd
-         "  - `find_files` (alias: glob, find, fd, find_files_by_glob): Find file paths matching a glob pattern (requires 'pattern', e.g. \"**/*.rs\"). Recommended: `fd` is available.\n"
-       "  - `find_files` (alias: glob, find, find_files_by_glob): Find file paths matching a glob pattern (requires 'pattern', e.g. \"**/*.rs\").\n")
-     (if rg
-         "  - `workspace_grep` (alias: grep, rg): Search code contents across files for a text or regex pattern (requires 'pattern'). Recommended: `rg` (ripgrep) is available. NEVER use read_file to search; use workspace_grep!\n"
-       "  - `workspace_grep` (alias: grep, rg): Search code contents across files for a text or regex pattern (requires 'pattern'). NEVER use read_file to search; use workspace_grep!\n")
-     "  - `read_file` (alias: read): Read numbered lines of an exact file (requires 'file_path', optional 'from_line', 'to_line'). Reserved for specific line ranges or non-code files (markdown, yaml, config). Before reading a large code file, always prefer `read_file_symbols` / `read_symbol`.\n"
-     "  - `lsp_project_skeleton`: Compact outline of all symbols (functions, types) across the whole project. Call first to orient yourself.\n"
-     "  - `lsp_diagnostics`: Compiler and linter diagnostics. Pass 'file_path' to inspect one file, or call with NO arguments (empty/omitted file_path) to scan the ENTIRE PROJECT for all compile/lint errors.\n"
-     "  - `list_files` (alias: ls, dir): List directory entries under a path.\n"
-     "  - Git inspection tools: `git_status`, `git_diff`, `git_log`, `git_blame`.\n"
-     "  Debugging & Runtime Control Tools (debug and agent modes):\n"
-     "  - `debug_get_context` / `debug_scope`: Inspect call-stack and in-scope local variables of the paused frame. ALWAYS inspect in-scope variables before attempting evaluation.\n"
-     "  - `debug_step_over` (alias: next): Step to next line in current function.\n"
-     "  - `debug_step_in` (alias: step): Step into the function call at current line.\n"
-     "  - `debug_step_out` (alias: finish, out): Step out of the current function.\n"
-     "  - `debug_continue` (alias: continue): Resume execution until next breakpoint or exit.\n"
-     "  - `debug_pause`: Pause running debuggee.\n"
-     "  - `debug_restart`: Restart debug session.\n"
-     "  - `debug_set_breakpoint` / `debug_clear_breakpoint` / `debug_toggle_breakpoint`: Manage breakpoints at file_path:line.\n"
-     "  - `debug_up` / `debug_down`: Navigate stack frames up or down.\n"
-     "  - `debug_threads` / `debug_stack` / `debug_modules` / `debug_sources`: Inspect debuggee runtime state.\n"
-     "  - `debug_watch`: Add/remove/list watch expressions.\n"
-     "  - `debug_eval`: Evaluate expression (check active language rules; e.g. avoid method calls in Rust).\n"
-     "  - `debug_kill` / `debug_disconnect` / `debug_quit`: Terminate or exit debug session.\n"
-     "  Execution & Modification Tools (agent mode only):\n"
-     "  - `edit_by_lsp` (alias: edit_symbol, edit_with_lsp): Replace the entire implementation body or definition of a specific symbol (function, method, class, struct, type) with new code. ALWAYS PREFER THIS over edit_file for modifying code definitions.\n"
-     "  - `edit_file` (alias: edit): Surgical replacement of unique old_string copied from read_file. Fallback only for non-code files or text outside defined symbols. Always call lsp_diagnostics afterwards.\n"
-     "  - `write_file` (alias: write): Complete file overwrite/creation.\n"
-     "  - `bash`: Run project builds, tests, or scripts (e.g. `cargo test`, `go test`, `pytest`). Set background=true for servers.\n"
-     "</available_tools_guidance>"))))
+    (let ((fd (or (executable-find "fd") (executable-find "fdfind")))
+          (rg (executable-find "rg")))
+      (concat kargu-prompt--tools-guidance-intro
+              (if fd
+                  "  - `find_files` (alias: glob, find, fd, find_files_by_glob): Find file paths matching a glob pattern (requires 'pattern', e.g. \"**/*.rs\"). Recommended: `fd` is available.\n"
+                "  - `find_files` (alias: glob, find, find_files_by_glob): Find file paths matching a glob pattern (requires 'pattern', e.g. \"**/*.rs\").\n")
+              (if rg
+                  "  - `workspace_grep` (alias: grep, rg): Search code contents across files for a text or regex pattern (requires 'pattern'). Recommended: `rg` (ripgrep) is available. NEVER use read_file to search; use workspace_grep!\n"
+                "  - `workspace_grep` (alias: grep, rg): Search code contents across files for a text or regex pattern (requires 'pattern'). NEVER use read_file to search; use workspace_grep!\n")
+              kargu-prompt--tools-guidance-body))))
 
 (defun kargu-prompt--instruction-block ()
   "Cached project instruction file text, or nil."
@@ -379,7 +384,7 @@ During compaction, `kargu--compaction-system' replaces this."
                     ""))
          (lang-guidance (if (fboundp 'kargu-language-prompt-guidance)
                             (kargu-language-prompt-guidance (and (fboundp 'kargu-language-active)
-                                                                (kargu-language-active)))
+                                                                 (kargu-language-active)))
                           "")))
     (concat
      "<system-reminder>\n"
@@ -451,4 +456,4 @@ a list of tool names."
 
 (provide 'kargu/prompt)
 
-;;; kargu/prompt.el ends here
+;;; prompt.el ends here

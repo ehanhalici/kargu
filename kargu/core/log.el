@@ -1,4 +1,4 @@
-;;; kargu/core/log.el --- Logging engine -*- lexical-binding: t; -*-
+;;; log.el --- Logging engine -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -71,13 +71,12 @@ process filters and sentinels."
       s)))
 
 (defun kargu--log-looks-json-p (text)
-  "Non-nil when TEXT looks like a JSON object or array."
+  "Return non-nil for JSON object or array TEXT."
   (and (stringp text)
        (let ((s (string-trim text)))
          (or (string-prefix-p "{" s) (string-prefix-p "[" s)))))
 
 (declare-function json-pretty-print "json" (begin end &optional minimize))
-(declare-function json-read "json" ())
 
 (defun kargu--log-pretty (text)
   "Pretty-print TEXT when it is a single JSON value; otherwise TEXT."
@@ -89,18 +88,17 @@ process filters and sentinels."
           (with-temp-buffer
             (insert text)
             (goto-char (point-min))
-            (json-read)
+            (json-parse-buffer)
             (skip-chars-forward " \t\n\r")
             (unless (eobp)
-              (error "trailing json"))
+              (error "Trailing json"))
             (json-pretty-print (point-min) (point-max))
             (buffer-string)))
       (error text))))
 
 (defun kargu--log-block (title text &optional pretty)
-  "Append a titled dump of TEXT to the log when `kargu-log-wire' is on.
-When PRETTY is non-nil, try to JSON-pretty-print TEXT first.
-Never signals.  Does not log API keys."
+  "Append TEXT under TITLE when wire logging is enabled.
+Try JSON formatting when PRETTY is non-nil.  Never signal."
   (when (and (boundp 'kargu-log-wire) kargu-log-wire)
     (condition-case _err
         (let* ((raw (if (stringp text) text (format "%s" (or text ""))))
@@ -118,7 +116,7 @@ Never signals.  Does not log API keys."
       (error nil))))
 
 (defun kargu--log-wire (format-string &rest args)
-  "Like `kargu-log' at `wire', only when `kargu-log-wire' is on."
+  "Log FORMAT-STRING with ARGS only when wire logging is enabled."
   (when (and (boundp 'kargu-log-wire) kargu-log-wire)
     (apply #'kargu-log 'wire format-string args)))
 
@@ -137,4 +135,4 @@ Never signals.  Does not log API keys."
 
 (provide 'kargu/core/log)
 
-;;; kargu/core/log.el ends here
+;;; log.el ends here

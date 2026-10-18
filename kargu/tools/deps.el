@@ -1,4 +1,4 @@
-;;; kargu/tools/deps.el --- Mandatory toolchain & dependency validation -*- lexical-binding: t; -*-
+;;; deps.el --- Mandatory toolchain & dependency validation -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -116,7 +116,7 @@ the defaults."
            (ignore-errors (package-installed-p pkg)))))
 
 (defun kargu-deps-executable-installed-p (exe)
-  "Return non-nil if executable EXE is found in `exec-path'."
+  "Return non-nil for EXE in the variable `exec-path'."
   (not (null (executable-find exe))))
 
 (defun kargu-deps--active-eglot-server-p (&optional root)
@@ -146,14 +146,13 @@ the defaults."
                     (kargu-language-detect proj))))
     (or spec
         (let ((file (or (buffer-file-name)
-                        (and (fboundp 'kargu--context-file)
-                             (kargu--context-file)))))
+                        (and (fboundp 'kargu-lsp-context-file)
+                             (kargu-lsp-context-file)))))
           (when (and file (fboundp 'kargu-language-detect-by-extension))
             (kargu-language-detect-by-extension file))))))
 
 (defun kargu-deps--check-lsp-server (lang-spec &optional root)
-  "Return plist of missing LSP server for LANG-SPEC, or nil if satisfied.
-A language whose spec sets `requires-lsp' to nil is satisfied."
+  "Return missing server information for LANG-SPEC in ROOT, or nil."
   (when (and kargu-deps-check-lsp-server
              lang-spec
              (kargu-language-requires-lsp-p lang-spec))
@@ -306,8 +305,8 @@ Each plist contains:
   "Signal a `user-error' if any mandatory tools are missing for ROOT."
   (when-let* ((missing (kargu-deps-missing root)))
     (let ((names (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", ")))
-      (user-error "kargu: cannot send prompt: mandatory tools are missing: %s (please install them first)" names))))
+      (user-error "Kargu: cannot send prompt: mandatory tools are missing: %s (please install them first)" names))))
 
 (provide 'kargu/tools/deps)
 
-;;; kargu/tools/deps.el ends here
+;;; deps.el ends here

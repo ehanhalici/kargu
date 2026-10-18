@@ -34,6 +34,19 @@
     (should (string-prefix-p "project-bar-" slug3))
     (should-not (equal slug1 slug3))))
 
+(ert-deftest kargu-session-explicit-root-bypasses-workspace-test ()
+  "An explicit session root never falls back to an unrelated workspace."
+  (let* ((root (make-temp-file "kargu-session-root-" t))
+         (expected (file-name-as-directory (file-truename root))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'kargu-permission-project-root)
+                   (lambda (&rest _) (error "Must not resolve the workspace"))))
+          (should (equal (kargu-session-project-root root) expected))
+          (with-temp-buffer
+            (setq-local kargu-chat--project-root root)
+            (should (equal (kargu-session-project-root (current-buffer)) expected))))
+      (delete-directory root t))))
+
 (ert-deftest kargu-session-save-and-load-test ()
   "Ensure saving and restoring chat session preserves messages, transcript, and metadata."
   (let* ((temp-dir (make-temp-file "kargu-test-sessions-" t))

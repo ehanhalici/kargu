@@ -1,4 +1,4 @@
-;;; kargu/tools/bash.el --- Shell command tool -*- lexical-binding: t; -*-
+;;; bash.el --- Shell command tool -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -142,15 +142,14 @@ Return a result string if COMMAND matches a management command, or nil."
       (or (executable-find "bash") (executable-find "sh") "/bin/sh"))))
 
 (defun kargu-bash--note-truncation (out state)
-  "OUT, plus a note when STATE says the byte cap was hit."
+  "Return OUT with a truncation note when the cap is recorded in STATE."
   (if (plist-get state :truncated)
       (concat out (format "\n[output truncated at %d bytes]\n" kargu-process-max-bytes))
     out))
 
 (defun kargu-bash--spawn (name command dir shell buf state sentinel)
-  "Start SHELL -c COMMAND in DIR, capturing output into BUF.
-Output stops at the byte cap.  STATE records truncation.  SENTINEL is
-the process sentinel.  Return the process."
+  "Start process NAME using SHELL and COMMAND in DIR, with output BUF.
+Use STATE for the output cap and SENTINEL for completion."
   (let ((proc (let ((default-directory (file-name-as-directory dir)))
                 (make-process
                  :name name
@@ -203,72 +202,43 @@ the process sentinel.  Return the process."
     (ignore-errors (kill-process kargu-bash--active-async-proc))
     (setq kargu-bash--active-async-proc nil)))
 
-(defun kargu-bash--cleanup-async (buf timer timeout-timer)
-  "Cancel TIMERS and clean up BUF after async bash run."
-  (setq kargu-bash--active-async-proc nil)
-  (when timer (cancel-timer timer))
-  (when timeout-timer (cancel-timer timeout-timer))
-  (kargu-bash--clean-buffer-processes buf)
-  (when (buffer-live-p buf) (kill-buffer buf)))
+(defun kargu-bash--async-result (command dir start result)
+  "Format RESULT for COMMAND in DIR, logging elapsed time since START."
+  (if (plist-get result :timed-out)
+      (progn
+        (message "kargu: [bash] '%s' timed out (%ds)"
+                 (truncate-string-to-width command 30) kargu-bash-timeout)
+        (format "ERROR: bash timed out after %ds: %s"
+                kargu-bash-timeout (truncate-string-to-width command 80)))
+    (kargu-bash--log-finished command (plist-get result :code) start)
+    (kargu-bash--format-result
+     (plist-get result :code) dir
+     (kargu-bash--note-truncation (plist-get result :output) result))))
 
 (defun kargu-bash--run-async (command dir shell callback)
-  "Execute COMMAND asynchronously in DIR under SHELL.
-Calls CALLBACK with the formatted output string upon exit or timeout.
-Output past `kargu-process-max-bytes' kills the process and says so.
-Emacs UI remains completely responsive and interactive for the user."
-  (let* ((buf (generate-new-buffer " *kargu-bash*"))
-         (state (list :truncated nil))
-         (start (float-time))
-         (completed nil)
-         (timer nil)
-         (timeout-timer nil)
-         proc)
-    (setq proc
-          (kargu-bash--spawn
-           "kargu-bash" command dir shell buf state
-           (lambda (p _event)
-             (when (and (not completed) (not (process-live-p p)))
-               (setq completed t)
-               (let* ((code (process-exit-status p))
-                      (out (if (buffer-live-p buf)
-                               (with-current-buffer buf (buffer-string))
-                             ""))
-                      (res (kargu-bash--format-result
-                            code dir (kargu-bash--note-truncation out state))))
-                 (kargu-bash--log-finished command code start)
-                 (kargu-bash--cleanup-async buf timer timeout-timer)
-                 (funcall callback res))))))
-    (setq kargu-bash--active-async-proc proc)
-    ;; Timeout timer: kill process and return error when kargu-bash-timeout expires
-    (setq timeout-timer
-          (run-at-time
-           kargu-bash-timeout nil
-           (lambda ()
-             (unless completed
-               (setq completed t)
-               (when (process-live-p proc)
-                 (ignore-errors (kill-process proc)))
-               (let ((err-msg (format "ERROR: bash timed out after %ds: %s"
-                                      kargu-bash-timeout
-                                      (truncate-string-to-width command 80))))
-                 (message "kargu: [bash] '%s' timed out (%ds)"
-                          (truncate-string-to-width command 30)
-                          kargu-bash-timeout)
-                 (kargu-bash--cleanup-async buf timer timeout-timer)
-                 (funcall callback err-msg))))))
-    ;; Periodic status ticker in minibuffer so user sees elapsed time
-    (setq timer
-          (run-at-time
-           1.0 1.0
-           (lambda ()
-             (unless completed
-               (when (process-live-p proc)
-                 (let ((elapsed (- (float-time) start)))
-                   (message "kargu: running '%s' (%.1fs / %ds) [waiting in background]..."
-                            (truncate-string-to-width command 40)
-                            elapsed kargu-bash-timeout)))))))
-    (message "kargu: started '%s' asynchronously in background (timeout %ds)..."
-             (truncate-string-to-width command 40) kargu-bash-timeout)))
+  "Run COMMAND in DIR using SHELL and deliver its output to CALLBACK."
+  (let ((start (float-time)) ticker process)
+    (setq process
+          (kargu-process-run
+           shell (list "-c" command)
+           (lambda (result)
+             (when (timerp ticker) (cancel-timer ticker))
+             (when (eq process kargu-bash--active-async-proc)
+               (setq kargu-bash--active-async-proc nil))
+             (funcall callback (kargu-bash--async-result command dir start result)))
+           :dir dir :timeout kargu-bash-timeout))
+    (when (process-live-p process)
+      (setq kargu-bash--active-async-proc process
+            ticker (run-at-time
+                    1.0 1.0
+                    (lambda ()
+                      (when (process-live-p process)
+                        (message "kargu: running '%s' (%.1fs / %ds) [waiting in background]..."
+                                 (truncate-string-to-width command 40)
+                                 (- (float-time) start) kargu-bash-timeout)))))
+      (message "kargu: started '%s' asynchronously in background (timeout %ds)..."
+               (truncate-string-to-width command 40) kargu-bash-timeout))
+    process))
 
 (defun kargu-bash--rejection-text (command dir root)
   "Model-facing text for a COMMAND in DIR the user refused (ROOT is the project)."
@@ -280,7 +250,8 @@ Emacs UI remains completely responsive and interactive for the user."
           "  - Guidance: Do not repeatedly execute the identical command without user clarification. Consider an alternative approach that works strictly within '" root "' or ask the user for guidance."))
 
 (defun kargu-bash--start (command dir background callback)
-  "Start approved COMMAND in DIR; deliver the result to CALLBACK when non-nil."
+  "Start approved COMMAND in DIR and deliver output to CALLBACK.
+Return a persistent process identifier when BACKGROUND is non-nil."
   (let ((shell (kargu-bash--resolve-shell)))
     (cond
      (background
@@ -289,10 +260,11 @@ Emacs UI remains completely responsive and interactive for the user."
      (callback
       (kargu-bash--run-async command dir shell callback))
      (t
-      (error "bash commands never run synchronously: pass a CALLBACK")))))
+      (error "Bash commands never run synchronously: pass a CALLBACK")))))
 
 (defun kargu-bash--run-async-approved (command dir root background callback)
-  "Ask for approval of COMMAND, then start it; CALLBACK gets the result."
+  "Approve COMMAND in DIR within ROOT and deliver output to CALLBACK.
+Start a persistent process when BACKGROUND is non-nil."
   (kargu-permission-request-approval-async
    command dir (kargu-permission-command-risks command)
    (lambda (approved)
@@ -353,4 +325,4 @@ Strictly validates that CWD and all path arguments stay within project root."
 
 (provide 'kargu/tools/bash)
 
-;;; kargu/tools/bash.el ends here
+;;; bash.el ends here

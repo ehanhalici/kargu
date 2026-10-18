@@ -1,4 +1,4 @@
-;;; kargu/providers/params.el --- Extensible JSON parameters for LLM providers -*- lexical-binding: t; -*-
+;;; params.el --- Extensible JSON parameters for LLM providers -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -26,9 +26,9 @@
 (require 'kargu/core)
 (require 'kargu/json)
 
-(declare-function kargu-reasoning-budget "kargu/api/http" ())
+(declare-function kargu-reasoning-budget "kargu/api/request" ())
 
-(declare-function kargu--provider-name "kargu/core")
+(declare-function kargu--provider-name "kargu/config/key")
 (declare-function kargu-provider-get "kargu/providers/registry" (id))
 (declare-function kargu-provider-format-field "kargu/providers/registry" (id field))
 
@@ -270,8 +270,7 @@ If INPUT is already a list or vector, returns a vector of strings."
      res '("extended_thinking" "thinking_budget" "user_id"))))
 
 (defun kargu-provider-params--postprocess-gemini (pid sub-blocks top-level)
-  "Apply Gemini transformations (generationConfig, safetySettings) for PID.
-Returns updated TOP-LEVEL."
+  "Transform SUB-BLOCKS and TOP-LEVEL parameters for Gemini provider PID."
   (let ((budget (kargu-provider-param-get "thinking_budget" pid))
         (safety (kargu-provider-param-get "safety_threshold" pid))
         (raw-gen (gethash "generationConfig" sub-blocks))
@@ -305,43 +304,41 @@ Returns updated TOP-LEVEL."
             res))
     res))
 
-(defun kargu-provider-params-build-payload (&optional provider)
-  "Build payload alist for PROVIDER to merge into chat-completions request.
-Separates parameters that target a nested object from top-level fields."
-  (let* ((p (kargu-provider-params-active-id provider))
-         (pid (kargu--normalize-provider-id p))
-         (schema (kargu-provider-params-schema pid))
+(defun kargu-provider-params--partition (provider)
+  "Return top-level entries and nested blocks for PROVIDER."
+  (let* ((schema (kargu-provider-params-schema provider))
          (default-target (and schema (plist-get schema :target-block)))
-         (params (kargu-provider-params-get-all pid))
          (sub-blocks (make-hash-table :test 'equal))
-         (top-level nil))
-    (dolist (entry params)
-      (let* ((key (car entry))
-             (val (cdr entry)))
-        (when (and val (not (eq val :omit)))
-          (let* ((spec (kargu-provider-params-find-spec key pid))
-                 (type (and spec (plist-get spec :type)))
-                 (target (or (and spec (plist-get spec :target))
-                             default-target
-                             :top-level))
-                 (json-val (kargu-provider-params--format-value val type key)))
-            (when json-val
-              (if (and (equal key "custom_body") (consp json-val))
-                  (setq top-level (append top-level json-val))
-                (if (and target (not (eq target :top-level)))
-                    (let* ((t-str (if (symbolp target) (symbol-name target) (format "%s" target)))
-                           (existing (gethash t-str sub-blocks)))
-                      (puthash t-str (append existing (list (cons key json-val))) sub-blocks))
-                  (push (cons key json-val) top-level))))))))
+         top-level custom-blocks)
+    (dolist (entry (kargu-provider-params-get-all provider))
+      (let ((key (car entry)) (value (cdr entry)))
+        (when (and value (not (eq value :omit)))
+          (let* ((spec (kargu-provider-params-find-spec key provider))
+                 (target (or (plist-get spec :target) default-target :top-level))
+                 (json-value (kargu-provider-params--format-value
+                              value (plist-get spec :type) key)))
+            (when json-value
+              (cond
+               ((and (equal key "custom_body") (consp json-value))
+                (push json-value custom-blocks))
+               ((not (eq target :top-level))
+                (let ((name (format "%s" target)))
+                  (push (cons key json-value) (gethash name sub-blocks))))
+               (t (push (cons key json-value) top-level))))))))
+    (maphash (lambda (name entries) (puthash name (nreverse entries) sub-blocks))
+             sub-blocks)
+    (cons (nconc top-level (apply #'append (nreverse custom-blocks))) sub-blocks)))
 
-    ;; Format-specific post-processing
+(defun kargu-provider-params-build-payload (&optional provider)
+  "Build request parameters for PROVIDER from top-level and nested entries."
+  (let* ((pid (kargu--normalize-provider-id (kargu-provider-params-active-id provider)))
+         (parts (kargu-provider-params--partition pid))
+         (top-level (car parts))
+         (sub-blocks (cdr parts)))
     (when-let* ((post (kargu-provider-format-field pid :params-post)))
       (setq top-level (funcall post pid sub-blocks top-level)))
-
-    ;; Convert sub-blocks hash table into payload alists
-    (maphash (lambda (block-name entries)
-               (when entries
-                 (push (cons block-name entries) top-level)))
+    (maphash (lambda (name entries)
+               (when entries (push (cons name entries) top-level)))
              sub-blocks)
     top-level))
 

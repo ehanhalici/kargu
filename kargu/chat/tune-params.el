@@ -1,4 +1,4 @@
-;;; kargu/chat/tune-params.el --- Transient UI for provider JSON parameters -*- lexical-binding: t; -*-
+;;; tune-params.el --- Transient UI for provider JSON parameters -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -28,7 +28,7 @@
 (eval-and-compile
   (require 'transient nil t))
 
-(declare-function kargu--provider-name "kargu/core")
+(declare-function kargu--provider-name "kargu/config/key")
 (declare-function kargu-chat-refresh-footer "kargu/chat/prompt")
 (declare-function kargu-provider-format-field "kargu/providers/registry" (id field))
 (declare-function kargu-tune-openrouter-menu "kargu/chat/tune-params")
@@ -162,7 +162,7 @@
               (propertize "default" 'face 'font-lock-comment-face)))))
 
 (defun kargu-tune--param-parallel-tools-desc ()
-  "Formatted description for parallel_tool_calls parameter."
+  "Describe the parallel tool parameter."
   (format "Parallel Tools:    %s"
           (kargu-tune--format-bool (kargu-provider-param-get "parallel_tool_calls"))))
 
@@ -454,7 +454,7 @@
    "Presence Penalty (-2.0 to 2.0, empty to clear): "))
 
 (defun kargu-tune-param-toggle-parallel-tool-calls ()
-  "Toggle parallel tool calls flag."
+  "Toggle parallel tool execution."
   (interactive)
   (let ((next (kargu-provider-param-toggle "parallel_tool_calls")))
     (message "kargu: parallel_tool_calls: %S" next)))
@@ -621,107 +621,107 @@ SET receives the trimmed value."
 
   ;; 1. OpenRouter Menu
   (transient-define-prefix kargu-tune-openrouter-menu ()
-    "Control panel for OpenRouter routing and custom JSON parameters."
-    [:description (lambda ()
-                    (let ((p (kargu-provider-params-active-id)))
-                      (format "%s (OpenRouter Routing Architecture)" (propertize (upcase p) 'face 'bold))))
-     ["Static Routing & Policies"
-      ("s" kargu-tune-param-cycle-sort :description kargu-tune--param-sort-desc :transient t)
-      ("d" kargu-tune-param-cycle-data-collection :description kargu-tune--param-data-collection-desc :transient t)
-      ("Q" "Quantizations Filter" kargu-tune-param-select-quantizations :description kargu-tune--param-quantizations-desc :transient t)]
-     ["Guarantees & Flags"
-      ("f" kargu-tune-param-toggle-allow-fallbacks :description kargu-tune--param-allow-fallbacks-desc :transient t)
-      ("p" kargu-tune-param-toggle-require-parameters :description kargu-tune--param-require-parameters-desc :transient t)
-      ("z" kargu-tune-param-toggle-zdr :description kargu-tune--param-zdr-desc :transient t)
-      ("t" kargu-tune-param-toggle-enforce-distillable-text :description kargu-tune--param-distillable-desc :transient t)]]
-    [["Dynamic Routing Lists"
-      ("o" "Provider Order" kargu-tune-param-set-order :description kargu-tune--param-order-desc :transient t)
-      ("x" "Only Providers" kargu-tune-param-set-only :description kargu-tune--param-only-desc :transient t)
-      ("i" "Ignore Providers" kargu-tune-param-set-ignore :description kargu-tune--param-ignore-desc :transient t)]
-     ["Thresholds & Custom Body"
-      ("m" "Min Throughput (TPS)" kargu-tune-param-set-min-throughput :description kargu-tune--param-throughput-desc :transient t)
-      ("l" "Max Latency (TTFT)" kargu-tune-param-set-max-latency :description kargu-tune--param-latency-desc :transient t)
-      ("b" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
-    [["Actions"
-      ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
-      ("R" "Reset Parameters" kargu-tune-param-reset :transient t)
-      ("q" "Back / Quit" transient-quit-one)]])
+                           "Control panel for OpenRouter routing and custom JSON parameters."
+                           [:description (lambda ()
+                                           (let ((p (kargu-provider-params-active-id)))
+                                             (format "%s (OpenRouter Routing Architecture)" (propertize (upcase p) 'face 'bold))))
+                                         ["Static Routing & Policies"
+                                          ("s" kargu-tune-param-cycle-sort :description kargu-tune--param-sort-desc :transient t)
+                                          ("d" kargu-tune-param-cycle-data-collection :description kargu-tune--param-data-collection-desc :transient t)
+                                          ("Q" "Quantizations Filter" kargu-tune-param-select-quantizations :description kargu-tune--param-quantizations-desc :transient t)]
+                                         ["Guarantees & Flags"
+                                          ("f" kargu-tune-param-toggle-allow-fallbacks :description kargu-tune--param-allow-fallbacks-desc :transient t)
+                                          ("p" kargu-tune-param-toggle-require-parameters :description kargu-tune--param-require-parameters-desc :transient t)
+                                          ("z" kargu-tune-param-toggle-zdr :description kargu-tune--param-zdr-desc :transient t)
+                                          ("t" kargu-tune-param-toggle-enforce-distillable-text :description kargu-tune--param-distillable-desc :transient t)]]
+                           [["Dynamic Routing Lists"
+                             ("o" "Provider Order" kargu-tune-param-set-order :description kargu-tune--param-order-desc :transient t)
+                             ("x" "Only Providers" kargu-tune-param-set-only :description kargu-tune--param-only-desc :transient t)
+                             ("i" "Ignore Providers" kargu-tune-param-set-ignore :description kargu-tune--param-ignore-desc :transient t)]
+                            ["Thresholds & Custom Body"
+                             ("m" "Min Throughput (TPS)" kargu-tune-param-set-min-throughput :description kargu-tune--param-throughput-desc :transient t)
+                             ("l" "Max Latency (TTFT)" kargu-tune-param-set-max-latency :description kargu-tune--param-latency-desc :transient t)
+                             ("b" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
+                           [["Actions"
+                             ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
+                             ("R" "Reset Parameters" kargu-tune-param-reset :transient t)
+                             ("q" "Back / Quit" transient-quit-one)]])
 
   ;; 2. Universal OpenAPI Menu (Vivgrid, OpenAI, DeepSeek, Groq, Cerebras, etc.)
   (transient-define-prefix kargu-tune-openapi-menu ()
-    "Control panel for Universal OpenAPI standard parameters."
-    [:description (lambda ()
-                    (let ((p (kargu-provider-params-active-id)))
-                      (format "%s (Universal OpenAPI Standard)" (propertize (upcase p) 'face 'bold))))
-     ["Sampling & Determinism"
-      ("s" "Random Seed" kargu-tune-param-set-seed :description kargu-tune--param-seed-desc :transient t)
-      ("p" "Top P" kargu-tune-param-set-top-p :description kargu-tune--param-top-p-desc :transient t)
-      ("F" "Frequency Penalty" kargu-tune-param-set-frequency-penalty :description kargu-tune--param-penalties-desc :transient t)
-      ("P" "Presence Penalty" kargu-tune-param-set-presence-penalty :description (lambda () "") :transient t)]
-     ["Tier & Execution Features"
-      ("t" kargu-tune-param-cycle-service-tier :description kargu-tune--param-tier-desc :transient t)
-      ("T" kargu-tune-param-toggle-parallel-tool-calls :description kargu-tune--param-parallel-tools-desc :transient t)
-      ("u" "End-User ID" kargu-tune-param-set-user :description kargu-tune--param-user-desc :transient t)
-      ("b" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
-    [["Actions"
-      ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
-      ("R" "Reset Parameters" kargu-tune-param-reset :transient t)
-      ("q" "Back / Quit" transient-quit-one)]])
+                           "Control panel for Universal OpenAPI standard parameters."
+                           [:description (lambda ()
+                                           (let ((p (kargu-provider-params-active-id)))
+                                             (format "%s (Universal OpenAPI Standard)" (propertize (upcase p) 'face 'bold))))
+                                         ["Sampling & Determinism"
+                                          ("s" "Random Seed" kargu-tune-param-set-seed :description kargu-tune--param-seed-desc :transient t)
+                                          ("p" "Top P" kargu-tune-param-set-top-p :description kargu-tune--param-top-p-desc :transient t)
+                                          ("F" "Frequency Penalty" kargu-tune-param-set-frequency-penalty :description kargu-tune--param-penalties-desc :transient t)
+                                          ("P" "Presence Penalty" kargu-tune-param-set-presence-penalty :description (lambda () "") :transient t)]
+                                         ["Tier & Execution Features"
+                                          ("t" kargu-tune-param-cycle-service-tier :description kargu-tune--param-tier-desc :transient t)
+                                          ("T" kargu-tune-param-toggle-parallel-tool-calls :description kargu-tune--param-parallel-tools-desc :transient t)
+                                          ("u" "End-User ID" kargu-tune-param-set-user :description kargu-tune--param-user-desc :transient t)
+                                          ("b" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
+                           [["Actions"
+                             ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
+                             ("R" "Reset Parameters" kargu-tune-param-reset :transient t)
+                             ("q" "Back / Quit" transient-quit-one)]])
 
   ;; 3. Anthropic Menu
   (transient-define-prefix kargu-tune-anthropic-menu ()
-    "Control panel for Anthropic Messages API parameters."
-    [:description (lambda ()
-                    (let ((p (kargu-provider-params-active-id)))
-                      (format "%s (Anthropic Messages API)" (propertize (upcase p) 'face 'bold))))
-     ["Extended Thinking"
-      ("e" kargu-tune-param-toggle-extended-thinking :description kargu-tune--param-extended-thinking-desc :transient t)
-      ("b" "Thinking Budget" kargu-tune-param-set-thinking-budget :description kargu-tune--param-thinking-budget-desc :transient t)]
-     ["Sampling & Options"
-      ("k" "Top K" kargu-tune-param-set-top-k :description kargu-tune--param-top-k-desc :transient t)
-      ("p" "Top P" kargu-tune-param-set-top-p :description kargu-tune--param-top-p-desc :transient t)
-      ("u" "Metadata User ID" kargu-tune-param-set-user-id :description kargu-tune--param-user-desc :transient t)
-      ("B" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
-    [["Actions"
-      ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
-      ("R" "Reset Parameters" kargu-tune-param-reset :transient t)
-      ("q" "Back / Quit" transient-quit-one)]])
+                           "Control panel for Anthropic Messages API parameters."
+                           [:description (lambda ()
+                                           (let ((p (kargu-provider-params-active-id)))
+                                             (format "%s (Anthropic Messages API)" (propertize (upcase p) 'face 'bold))))
+                                         ["Extended Thinking"
+                                          ("e" kargu-tune-param-toggle-extended-thinking :description kargu-tune--param-extended-thinking-desc :transient t)
+                                          ("b" "Thinking Budget" kargu-tune-param-set-thinking-budget :description kargu-tune--param-thinking-budget-desc :transient t)]
+                                         ["Sampling & Options"
+                                          ("k" "Top K" kargu-tune-param-set-top-k :description kargu-tune--param-top-k-desc :transient t)
+                                          ("p" "Top P" kargu-tune-param-set-top-p :description kargu-tune--param-top-p-desc :transient t)
+                                          ("u" "Metadata User ID" kargu-tune-param-set-user-id :description kargu-tune--param-user-desc :transient t)
+                                          ("B" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
+                           [["Actions"
+                             ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
+                             ("R" "Reset Parameters" kargu-tune-param-reset :transient t)
+                             ("q" "Back / Quit" transient-quit-one)]])
 
   ;; 4. Google Gemini Menu
   (transient-define-prefix kargu-tune-gemini-menu ()
-    "Control panel for Google Gemini GenerateContent API parameters."
-    [:description (lambda ()
-                    (let ((p (kargu-provider-params-active-id)))
-                      (format "%s (Google Gemini API)" (propertize (upcase p) 'face 'bold))))
-     ["Thinking & Sampling"
-      ("b" "Thinking Budget" kargu-tune-param-set-thinking-budget :description kargu-tune--param-thinking-budget-desc :transient t)
-      ("p" "Top P" kargu-tune-param-set-top-p :description kargu-tune--param-top-p-desc :transient t)
-      ("k" "Top K" kargu-tune-param-set-top-k :description kargu-tune--param-top-k-desc :transient t)]
-     ["Config & Safety"
-      ("m" kargu-tune-param-cycle-response-mime-type :description kargu-tune--param-mime-type-desc :transient t)
-      ("s" kargu-tune-param-cycle-safety-threshold :description kargu-tune--param-safety-desc :transient t)
-      ("B" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
-    [["Actions"
-      ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
-      ("R" "Reset Parameters" kargu-tune-param-reset :transient t)
-      ("q" "Back / Quit" transient-quit-one)]])
+                           "Control panel for Google Gemini GenerateContent API parameters."
+                           [:description (lambda ()
+                                           (let ((p (kargu-provider-params-active-id)))
+                                             (format "%s (Google Gemini API)" (propertize (upcase p) 'face 'bold))))
+                                         ["Thinking & Sampling"
+                                          ("b" "Thinking Budget" kargu-tune-param-set-thinking-budget :description kargu-tune--param-thinking-budget-desc :transient t)
+                                          ("p" "Top P" kargu-tune-param-set-top-p :description kargu-tune--param-top-p-desc :transient t)
+                                          ("k" "Top K" kargu-tune-param-set-top-k :description kargu-tune--param-top-k-desc :transient t)]
+                                         ["Config & Safety"
+                                          ("m" kargu-tune-param-cycle-response-mime-type :description kargu-tune--param-mime-type-desc :transient t)
+                                          ("s" kargu-tune-param-cycle-safety-threshold :description kargu-tune--param-safety-desc :transient t)
+                                          ("B" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
+                           [["Actions"
+                             ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
+                             ("R" "Reset Parameters" kargu-tune-param-reset :transient t)
+                             ("q" "Back / Quit" transient-quit-one)]])
 
   ;; 5. Ollama / Local Runner Menu
   (transient-define-prefix kargu-tune-ollama-menu ()
-    "Control panel for Ollama / Local Runner options."
-    [:description (lambda ()
-                    (let ((p (kargu-provider-params-active-id)))
-                      (format "%s (Local Runner Options)" (propertize (upcase p) 'face 'bold))))
-     ["Context & Sampling Options"
-      ("c" "Context Size (num_ctx)" kargu-tune-param-set-num-ctx :description kargu-tune--param-num-ctx-desc :transient t)
-      ("r" "Repeat Penalty" kargu-tune-param-set-repeat-penalty :description kargu-tune--param-repeat-penalty-desc :transient t)
-      ("p" "Top P" kargu-tune-param-set-top-p :description kargu-tune--param-top-p-desc :transient t)
-      ("k" "Top K" kargu-tune-param-set-top-k :description kargu-tune--param-top-k-desc :transient t)
-      ("b" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
-    [["Actions"
-      ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
-      ("R" "Reset Parameters" kargu-tune-param-reset :transient t)
-      ("q" "Back / Quit" transient-quit-one)]]))
+                           "Control panel for Ollama / Local Runner options."
+                           [:description (lambda ()
+                                           (let ((p (kargu-provider-params-active-id)))
+                                             (format "%s (Local Runner Options)" (propertize (upcase p) 'face 'bold))))
+                                         ["Context & Sampling Options"
+                                          ("c" "Context Size (num_ctx)" kargu-tune-param-set-num-ctx :description kargu-tune--param-num-ctx-desc :transient t)
+                                          ("r" "Repeat Penalty" kargu-tune-param-set-repeat-penalty :description kargu-tune--param-repeat-penalty-desc :transient t)
+                                          ("p" "Top P" kargu-tune-param-set-top-p :description kargu-tune--param-top-p-desc :transient t)
+                                          ("k" "Top K" kargu-tune-param-set-top-k :description kargu-tune--param-top-k-desc :transient t)
+                                          ("b" "Custom JSON Body" kargu-tune-param-set-custom-body :description kargu-tune--param-custom-body-desc :transient t)]]
+                           [["Actions"
+                             ("j" "Preview JSON Payload" kargu-tune-param-preview-json :transient t)
+                             ("R" "Reset Parameters" kargu-tune-param-reset :transient t)
+                             ("q" "Back / Quit" transient-quit-one)]]))
 
 ;;;; Dynamic Menu Dispatcher ----------------------------------------------
 

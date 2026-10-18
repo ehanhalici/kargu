@@ -18,12 +18,12 @@ Kargu is an advanced autonomous agentic coding assistant for GNU Emacs. It inter
 
 Kargu defines four distinct operational modes. The mode lives only in the state store (`kargu-state-mode`):
 
-| Mode | Mutating Tools Allowed | Description |
-|---|---|---|
-| `ask` | ❌ No | Pure conversational query mode. Answers questions without modifying files or running commands. |
-| `plan` | ❌ No | Implementation planning mode. Inspects workspace architecture and drafts plans without applying changes. |
-| `debug` | ❌ No | Interactive debugging mode. Inspects stack traces, breakpoints, and runtime variables via `dape`. |
-| `agent` | ✅ Yes | Full autonomous mode. Searches, reads, edits files, runs shell commands, and conducts self-healing edits. |
+| Mode    | Mutating Tools Allowed | Description                                                                                               |
+|---------|------------------------|-----------------------------------------------------------------------------------------------------------|
+| `ask`   | ❌ No                  | Pure conversational query mode. Answers questions without modifying files or running commands.            |
+| `plan`  | ❌ No                  | Implementation planning mode. Inspects workspace architecture and drafts plans without applying changes.  |
+| `debug` | ❌ No                  | Interactive debugging mode. Inspects stack traces, breakpoints, and runtime variables via `dape`.         |
+| `agent` | ✅ Yes                 | Full autonomous mode. Searches, reads, edits files, runs shell commands, and conducts self-healing edits. |
 
 ### Tool Visibility & Execution Gating
 - Mutating tools (`edit_file`, `write_file`, `edit`, `write`, `bash`, `debug_toggle_breakpoint`, `apply_patch`, `patch`, `git_commit`, `git_stage`, `git_unstage`, `git_branch`, `git_stash`) are only advertised in the LLM tool schema and executable when `kargu-state-mode` is `agent`. Whether tools are used at all is one decision, `kargu-tools-enabled-p`: the API metadata must not disable them, the provider must not have refused them in this session, and the run must not have switched them off (compaction).
@@ -158,7 +158,7 @@ When history character cost exceeds the compaction threshold (calculated dynamic
 ## 7. Chat Interface & Context Attachments (`kargu/chat/`)
 
 - **Sidebar Interface (`*kargu-chat*`)**: Header with model indicator, provider status, and interactive mode buttons (`[ask]`, `[plan]`, `[debug]`, `[agent]`).
-- **Real-Time Streaming (`kargu/chat/render.el`)**: Streams assistant text deltas and collapsible thought blocks (`<thought>...</thought>`). Multi-turn tool runs dynamically reset stream preamble markers to prevent rendering lockouts.
+- **Real-Time Streaming (`kargu/chat/stream.el`)**: Renders answer and reasoning deltas, including inline `<think>...</think>` markers split across chunks. Transcript insertion lives in `kargu/chat/transcript.el`; tool activity and run reports live in `kargu/chat/render.el`.
 - **Mention Cleaning (`kargu-chat--clean-at-token`)**: Robust mention extractor cleans `@` tokens:
   - Strips outer brackets (`@[...]`, `@{...}`, `(<...>)`),
   - Strips quotes (`"..."`, `'...'`, `` `...` ``),
@@ -242,10 +242,13 @@ kargu/
 │   │   ├── catalog.el     # Live /models catalog, metadata cache, tool-refusal memory
 │   │   ├── circuit.el     # Circuit breaker (closed / open / half-open probe)
 │   │   ├── client.el      # kargu-api-send, cancel, connection test
-│   │   ├── http.el        # Async plz client, payload build, retry with backoff
+│   │   ├── http.el        # Async plz attempts, generation guards and completion
+│   │   ├── request.el     # Payload assembly and provider headers
+│   │   ├── retry.el       # HTTP errors, classification and retry scheduling
+│   │   ├── sse.el         # Incremental UTF-8/SSE transport decoding
 │   │   ├── response.el    # Response accessors, reasoning extraction
 │   │   ├── select.el      # Model selection (company / transient)
-│   │   ├── stream.el      # SSE chunk parser and tool-call fragments
+│   │   ├── stream.el      # SSE event reduction and tool-call fragments
 │   │   ├── tools.el       # Tool registry, schema builder, argument check
 │   │   └── wire.el        # Wire-level logging
 │   │
@@ -269,7 +272,9 @@ kargu/
 │   │   ├── complete.el    # Company backend for files and LSP symbols
 │   │   ├── header.el      # Header line with mode buttons
 │   │   ├── prompt.el      # Prompt input area, submit, preflight
-│   │   ├── render.el      # Fontification, streaming deltas, thought blocks
+│   │   ├── render.el      # Tool activity and final run reports
+│   │   ├── stream.el      # Answer/reasoning rendering and split thought markers
+│   │   ├── transcript.el  # Transcript faces, insertion and window following
 │   │   ├── session.el     # Session save / load / list
 │   │   ├── tune.el        # Effort and parameter tuning
 │   │   └── tune-params.el # Per-format parameter menus
@@ -277,12 +282,14 @@ kargu/
 │   └── tools/
 │       ├── process.el     # The one timed make-process helper (callback style)
 │       ├── bash.el        # Shell tool with approval and async output
-│       ├── dape.el        # Debugging context, breakpoints, eval
+│       ├── dape.el        # Debugger facade
+│       ├── dape/          # session, render, context, execution, commands, register
 │       ├── deps.el        # Mandatory dependency and language-server check
 │       ├── diff.el        # Edit, write and atomic apply_patch, rollback
 │       ├── diff/          # stage.el, review.el, track.el
 │       ├── git.el         # Git tools (callback style)
-│       ├── lsp.el         # Skeleton, diagnostics, xref, symbols
+│       ├── lsp.el         # LSP facade
+│       ├── lsp/           # context, skeleton, diagnostics, symbols, register
 │       ├── search.el      # ripgrep / grep / fd search (callback style)
 │       ├── skill.el       # SKILL.md discovery and load
 │       ├── toolchain.el   # Register API; strategies come from language profiles

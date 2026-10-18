@@ -1,4 +1,4 @@
-;;; kargu/tools/git.el --- Magit and Git tools suite -*- lexical-binding: t; -*-
+;;; git.el --- Magit and Git tools suite -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -79,7 +79,7 @@ A name that starts with a dash would be read by git as an option."
 (defun kargu-git--approve (description root)
   "Ask the human to approve the git change DESCRIPTION in ROOT, or signal."
   (unless (kargu-permission-approve (concat "git " description) root)
-    (error "git %s was not approved by the user" description)))
+    (error "Git %s was not approved by the user" description)))
 
 ;;;; Status ---------------------------------------------------------------
 
@@ -145,21 +145,22 @@ A name that starts with a dash would be read by git as an option."
         callback
         (lambda ()
           (unless (eql (car res) 0)
-            (error "git status failed: %s" (cdr res)))
+            (error "Git status failed: %s" (cdr res)))
           (let ((lines (split-string (cdr res) "\n" t)))
             (kargu-git--format-status proj-root (or (car lines) "") (cdr lines)))))))))
 
 ;;;; Diff -----------------------------------------------------------------
 
 (defun kargu-git--path-args (path root what)
-  "Arguments limiting a command to PATH under ROOT, or nil for no PATH."
+  "Resolve optional PATH under ROOT, using WHAT in refusal messages."
   (when (and (stringp path) (not (string-empty-p (string-trim path))))
     (let ((abs (kargu-permission-assert-within-project path root what)))
       (list "--" (file-relative-name abs root)))))
 
 (defun kargu-git-diff (callback &optional staged path commit)
-  "Pass git diff to CALLBACK.  STAGED non-nil diffs staged changes.
-PATH optionally limits diff to a file.  COMMIT optionally specifies revision."
+  "Deliver the Git diff to CALLBACK.
+Use the index when STAGED is non-nil, restrict to PATH when provided,
+and compare against COMMIT when specified."
   (let* ((root (kargu-permission-project-root))
          (args (append (list "diff" "--no-color")
                        (and staged (list "--cached"))
@@ -207,7 +208,7 @@ names the operation in the error."
       (lambda ()
         (if (eql (car res) 0)
             (funcall ok-text (cdr res))
-          (error "git %s failed (exit %d): %s" fail-what (car res) (cdr res))))))))
+          (error "Git %s failed (exit %d): %s" fail-what (car res) (cdr res))))))))
 
 (defun kargu-git-commit (callback message &optional all)
   "Create a git commit with MESSAGE and pass the outcome to CALLBACK.
@@ -242,7 +243,7 @@ ALL optionally stages modified files."
 (defun kargu-git--require-paths (paths action)
   "PATHS, or an error naming ACTION."
   (or paths
-      (error "at least one path must be specified to %s" action)))
+      (error "At least one path must be specified to %s" action)))
 
 (defun kargu-git-stage (callback paths)
   "Stage PATHS (string or list of strings) via git add; report to CALLBACK."
@@ -256,7 +257,7 @@ ALL optionally stages modified files."
                        "add")))
 
 (defun kargu-git-unstage (callback paths)
-  "Unstage PATHS (string or list of strings) via git restore --staged."
+  "Unstage PATHS and deliver the result to CALLBACK."
   (let* ((root (kargu-permission-project-root))
          (clean (kargu-git--require-paths
                  (kargu-git--relative-paths paths "unstage path" root)
@@ -285,7 +286,7 @@ ALL optionally stages modified files."
   "Branch action -> (GIT-ARGS-BEFORE-NAME SUCCESS-FORMAT).")
 
 (defun kargu-git--branch-change (act name root callback)
-  "Run the changing branch action ACT on NAME in ROOT after approval."
+  "Run branch action ACT on NAME in ROOT and report to CALLBACK."
   (let* ((spec (cdr (assoc act kargu-git--branch-actions)))
          (branch (kargu-git--check-ref name "branch name"))
          (args (append (nth 0 spec) (list branch))))
@@ -295,7 +296,7 @@ ALL optionally stages modified files."
                        (format "branch %s" act))))
 
 (defun kargu-git-branch (callback action &optional name)
-  "Perform branch ACTION: list, create, switch, or delete.  NAME is branch."
+  "Perform branch ACTION on optional NAME and report to CALLBACK."
   (let* ((root (kargu-permission-project-root))
          (act (downcase (string-trim (or action "list")))))
     (cond
@@ -305,12 +306,12 @@ ALL optionally stages modified files."
      ((assoc act kargu-git--branch-actions)
       (kargu-git--branch-change act name root callback))
      (t
-      (error "unknown branch action: %s; use list, create, switch, or delete" action)))))
+      (error "Unknown branch action: %s; use list, create, switch, or delete" action)))))
 
 ;;;; Stash ----------------------------------------------------------------
 
 (defun kargu-git--stash-change (act message root callback)
-  "Run stash ACT (push, pop, drop) with optional MESSAGE after approval."
+  "Run stash ACT with MESSAGE in ROOT and report to CALLBACK."
   (let ((args (append (list "stash" act)
                       (and (equal act "push")
                            (stringp message)
@@ -320,7 +321,7 @@ ALL optionally stages modified files."
     (kargu-git--change args root callback #'identity (format "stash %s" act))))
 
 (defun kargu-git-stash (callback action &optional message)
-  "Perform stash ACTION: push, pop, list, or drop.  MESSAGE is optional label."
+  "Perform stash ACTION with optional MESSAGE and report to CALLBACK."
   (let* ((root (kargu-permission-project-root))
          (act (downcase (string-trim (or action "list")))))
     (cond
@@ -334,14 +335,14 @@ ALL optionally stages modified files."
      ((member act '("push" "pop" "drop"))
       (kargu-git--stash-change act message root callback))
      (t
-      (error "unknown stash action: %s; use list, push, pop, or drop" action)))))
+      (error "Unknown stash action: %s; use list, push, pop, or drop" action)))))
 
 ;;;; Blame ----------------------------------------------------------------
 
 (defun kargu-git-blame (callback file-path &optional start-line end-line)
   "Pass git blame for FILE-PATH between START-LINE and END-LINE to CALLBACK."
   (unless (and (stringp file-path) (not (string-empty-p (string-trim file-path))))
-    (error "file_path is required"))
+    (error "File_path is required"))
   (let* ((root (kargu-permission-project-root))
          (abs (kargu-permission-assert-within-project file-path root "blame file"))
          (args (append (list "blame" "--date=short")
@@ -356,7 +357,7 @@ ALL optionally stages modified files."
         (lambda ()
           (if (eql (car res) 0)
               (cdr res)
-            (error "git blame failed: %s" (cdr res)))))))))
+            (error "Git blame failed: %s" (cdr res)))))))))
 
 ;;;; Interactive Magit launcher -------------------------------------------
 
@@ -386,147 +387,135 @@ through `kargu-permission-approve', which may re-run BODY after the answer."
          callback)
       "ERROR: git tools run asynchronously; call them with a callback")))
 
+(defconst kargu-git--tool-specs
+  (list
+   (list
+    "git_status"
+    "Show structured Git repository status (branch, upstream, staged, unstaged, untracked). Magit-style. Read-only, available in all modes."
+    '(("type" . "object")
+      ("properties" . ()))
+    (kargu-git--executor
+     (lambda (_args done) (kargu-git-status done))))
+   (list
+    "git_diff"
+    "Show Git diff (staged changes with staged:true, unstaged, or specific commit/path). Read-only, available in all modes."
+    '(("type" . "object")
+      ("properties" . (("staged" . (("type" . "boolean")
+                                    ("description" . "If true, show staged changes (--cached).")))
+                       ("path" . (("type" . "string")
+                                  ("description" . "Optional file or directory path to diff.")))
+                       ("commit" . (("type" . "string")
+                                    ("description" . "Optional commit hash or reference.")))))
+      ("required" . []))
+    (kargu-git--executor
+     (lambda (args done)
+       (kargu-git-diff done
+                       (kargu--tool-flag args "staged")
+                       (kargu--tool-arg args "path" "file")
+                       (kargu--tool-arg args "commit" "rev")))))
+   (list
+    "git_log"
+    "Show recent Git commit log. Read-only, available in all modes."
+    '(("type" . "object")
+      ("properties" . (("max_count" . (("type" . "integer")
+                                       ("description" . "Maximum commits to show (default 10).")))
+                       ("path" . (("type" . "string")
+                                  ("description" . "Optional file path to limit history to.")))))
+      ("required" . []))
+    (kargu-git--executor
+     (lambda (args done)
+       (kargu-git-log done
+                      (kargu-to-int (kargu--tool-arg args "max_count" "limit" "n"))
+                      (kargu--tool-arg args "path" "file")))))
+   (list
+    "git_commit"
+    "Record staged changes in repository. Agent mode only."
+    '(("type" . "object")
+      ("properties" . (("message" . (("type" . "string")
+                                     ("description" . "Commit message.")))
+                       ("all" . (("type" . "boolean")
+                                 ("description" . "If true, automatically stage all modified tracked files.")))))
+      ("required" . ["message"]))
+    (kargu-git--executor
+     (lambda (args done)
+       (kargu-git-commit done
+                         (kargu--tool-arg args "message" "msg")
+                         (kargu--tool-flag args "all")))))
+   (list
+    "git_stage"
+    "Stage file(s) into git index (git add). Agent mode only."
+    '(("type" . "object")
+      ("properties" . (("paths" . (("type" . "string")
+                                   ("description" . "File path or pattern to stage (e.g. '.' for all).")))))
+      ("required" . ["paths"]))
+    (kargu-git--executor
+     (lambda (args done)
+       (kargu-git-stage done
+                        (kargu--tool-arg args "paths" "path" "file" "files")))))
+   (list
+    "git_unstage"
+    "Unstage file(s) from git index (git restore --staged). Agent mode only."
+    '(("type" . "object")
+      ("properties" . (("paths" . (("type" . "string")
+                                   ("description" . "File path to unstage.")))))
+      ("required" . ["paths"]))
+    (kargu-git--executor
+     (lambda (args done)
+       (kargu-git-unstage done
+                          (kargu--tool-arg args "paths" "path" "file" "files")))))
+   (list
+    "git_branch"
+    "Manage Git branches (list, create, switch, delete). Agent mode only."
+    '(("type" . "object")
+      ("properties" . (("action" . (("type" . "string")
+                                    ("description" . "Action: list, create, switch, or delete.")))
+                       ("name" . (("type" . "string")
+                                  ("description" . "Branch name.")))))
+      ("required" . ["action"]))
+    (kargu-git--executor
+     (lambda (args done)
+       (kargu-git-branch done
+                         (kargu--tool-arg args "action")
+                         (kargu--tool-arg args "name" "branch")))))
+   (list
+    "git_stash"
+    "Stash changes in a dirty working directory (push, pop, list, drop). Agent mode only."
+    '(("type" . "object")
+      ("properties" . (("action" . (("type" . "string")
+                                    ("description" . "Action: push, pop, list, or drop.")))
+                       ("message" . (("type" . "string")
+                                     ("description" . "Optional stash message for push.")))))
+      ("required" . ["action"]))
+    (kargu-git--executor
+     (lambda (args done)
+       (kargu-git-stash done
+                        (kargu--tool-arg args "action")
+                        (kargu--tool-arg args "message" "msg")))))
+   (list
+    "git_blame"
+    "Show line-by-line Git commit and author information for a file. Read-only, available in all modes."
+    '(("type" . "object")
+      ("properties" . (("file_path" . (("type" . "string")
+                                       ("description" . "File path to blame.")))
+                       ("start_line" . (("type" . "integer")
+                                        ("description" . "Optional start line.")))
+                       ("end_line" . (("type" . "integer")
+                                      ("description" . "Optional end line.")))))
+      ("required" . ["file_path"]))
+    (kargu-git--executor
+     (lambda (args done)
+       (kargu-git-blame done
+                        (kargu--tool-arg args "file_path" "path" "file")
+                        (kargu-to-int (kargu--tool-arg args "start_line"))
+                        (kargu-to-int (kargu--tool-arg args "end_line")))))))
+  "Tool schemas and executors for git operations.")
+
 (defun kargu-git-register-tools ()
-  "Register Git and Magit tools with Kargu."
-  ;; 1. git_status
-  (kargu-register-tool
-   "git_status"
-   "Show structured Git repository status (branch, upstream, staged, unstaged, untracked). Magit-style. Read-only, available in all modes."
-   '(("type" . "object")
-     ("properties" . ()))
-   (kargu-git--executor
-    (lambda (_args done) (kargu-git-status done))))
-
-  ;; 2. git_diff
-  (kargu-register-tool
-   "git_diff"
-   "Show Git diff (staged changes with staged:true, unstaged, or specific commit/path). Read-only, available in all modes."
-   '(("type" . "object")
-     ("properties" . (("staged" . (("type" . "boolean")
-                                  ("description" . "If true, show staged changes (--cached).")))
-                      ("path" . (("type" . "string")
-                                 ("description" . "Optional file or directory path to diff.")))
-                      ("commit" . (("type" . "string")
-                                   ("description" . "Optional commit hash or reference.")))))
-     ("required" . []))
-   (kargu-git--executor
-    (lambda (args done)
-      (kargu-git-diff done
-       (kargu--tool-flag args "staged")
-       (kargu--tool-arg args "path" "file")
-       (kargu--tool-arg args "commit" "rev")))))
-
-  ;; 3. git_log
-  (kargu-register-tool
-   "git_log"
-   "Show recent Git commit log. Read-only, available in all modes."
-   '(("type" . "object")
-     ("properties" . (("max_count" . (("type" . "integer")
-                                      ("description" . "Maximum commits to show (default 10).")))
-                      ("path" . (("type" . "string")
-                                 ("description" . "Optional file path to limit history to.")))))
-     ("required" . []))
-   (kargu-git--executor
-    (lambda (args done)
-      (kargu-git-log done
-       (kargu-to-int (kargu--tool-arg args "max_count" "limit" "n"))
-       (kargu--tool-arg args "path" "file")))))
-
-  ;; 4. git_commit
-  (kargu-register-tool
-   "git_commit"
-   "Record staged changes in repository. Agent mode only."
-   '(("type" . "object")
-     ("properties" . (("message" . (("type" . "string")
-                                    ("description" . "Commit message.")))
-                      ("all" . (("type" . "boolean")
-                                ("description" . "If true, automatically stage all modified tracked files.")))))
-     ("required" . ["message"]))
-   (kargu-git--executor
-    (lambda (args done)
-      (kargu-git-commit done
-       (kargu--tool-arg args "message" "msg")
-       (kargu--tool-flag args "all")))))
-
-  ;; 5. git_stage
-  (kargu-register-tool
-   "git_stage"
-   "Stage file(s) into git index (git add). Agent mode only."
-   '(("type" . "object")
-     ("properties" . (("paths" . (("type" . "string")
-                                  ("description" . "File path or pattern to stage (e.g. '.' for all).")))))
-     ("required" . ["paths"]))
-   (kargu-git--executor
-    (lambda (args done)
-      (kargu-git-stage done
-       (kargu--tool-arg args "paths" "path" "file" "files")))))
-
-  ;; 6. git_unstage
-  (kargu-register-tool
-   "git_unstage"
-   "Unstage file(s) from git index (git restore --staged). Agent mode only."
-   '(("type" . "object")
-     ("properties" . (("paths" . (("type" . "string")
-                                  ("description" . "File path to unstage.")))))
-     ("required" . ["paths"]))
-   (kargu-git--executor
-    (lambda (args done)
-      (kargu-git-unstage done
-       (kargu--tool-arg args "paths" "path" "file" "files")))))
-
-  ;; 7. git_branch
-  (kargu-register-tool
-   "git_branch"
-   "Manage Git branches (list, create, switch, delete). Agent mode only."
-   '(("type" . "object")
-     ("properties" . (("action" . (("type" . "string")
-                                   ("description" . "Action: list, create, switch, or delete.")))
-                      ("name" . (("type" . "string")
-                                 ("description" . "Branch name.")))))
-     ("required" . ["action"]))
-   (kargu-git--executor
-    (lambda (args done)
-      (kargu-git-branch done
-       (kargu--tool-arg args "action")
-       (kargu--tool-arg args "name" "branch")))))
-
-  ;; 8. git_stash
-  (kargu-register-tool
-   "git_stash"
-   "Stash changes in a dirty working directory (push, pop, list, drop). Agent mode only."
-   '(("type" . "object")
-     ("properties" . (("action" . (("type" . "string")
-                                   ("description" . "Action: push, pop, list, or drop.")))
-                      ("message" . (("type" . "string")
-                                    ("description" . "Optional stash message for push.")))))
-     ("required" . ["action"]))
-   (kargu-git--executor
-    (lambda (args done)
-      (kargu-git-stash done
-       (kargu--tool-arg args "action")
-       (kargu--tool-arg args "message" "msg")))))
-
-  ;; 9. git_blame
-  (kargu-register-tool
-   "git_blame"
-   "Show line-by-line Git commit and author information for a file. Read-only, available in all modes."
-   '(("type" . "object")
-     ("properties" . (("file_path" . (("type" . "string")
-                                      ("description" . "File path to blame.")))
-                      ("start_line" . (("type" . "integer")
-                                       ("description" . "Optional start line.")))
-                      ("end_line" . (("type" . "integer")
-                                     ("description" . "Optional end line.")))))
-     ("required" . ["file_path"]))
-   (kargu-git--executor
-    (lambda (args done)
-      (kargu-git-blame done
-       (kargu--tool-arg args "file_path" "path" "file")
-       (kargu-to-int (kargu--tool-arg args "start_line"))
-       (kargu-to-int (kargu--tool-arg args "end_line")))))))
+  "Register the git tools."
+  (kargu-register-tools kargu-git--tool-specs))
 
 (kargu-git-register-tools)
 
 (provide 'kargu/tools/git)
 
-;;; kargu/tools/git.el ends here
+;;; git.el ends here

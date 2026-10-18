@@ -1,4 +1,4 @@
-;;; kargu/api/client.el --- Chat send, cancel, connection test -*- lexical-binding: t; -*-
+;;; client.el --- Chat send, cancel, connection test -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -36,16 +36,16 @@
   ;; Guard Clause 3: Completed assistant turn cannot continue without prompt
   (when (and (or (null prompt) (string-empty-p prompt))
              (kargu--history-completed-assistant-tail-p))
-    (user-error "nothing to continue; send a user message"))
+    (user-error "Nothing to continue; send a user message"))
   (kargu--validate-history)
   ;; Guard Clause 4: History must contain at least one user message
   (unless (cl-some (lambda (m)
                      (equal (kargu-aget m "role") "user"))
                    kargu--message-history)
-    (user-error "nothing to send: history has no user message"))
+    (user-error "Nothing to send: history has no user message"))
   ;; Guard Clause 5: History must not end on model turn
   (when (kargu--assistant-role-p (kargu--history-last-role))
-    (user-error "refusing to send: history still ends on a model turn")))
+    (user-error "Refusing to send: history still ends on a model turn")))
 
 (defun kargu--api-rollback-prompt (prompt added-prompt-p)
   "Roll back PROMPT from history if ADDED-PROMPT-P is non-nil."
@@ -61,7 +61,7 @@
   nil)
 
 (defun kargu-api-send (prompt callback &optional on-delta)
-  "Send the next conversation turn to OpenRouter, asynchronously.
+  "Send the next conversation turn to the active provider asynchronously.
 PROMPT is the new user message (a string), or nil to continue from history.
 CALLBACK is called with one argument: the decoded response alist.
 ON-DELTA is called with each streaming SSE delta event.
@@ -82,34 +82,39 @@ A busy client, a missing key, or a missing endpoint is refused first."
      ((not (kargu-nonempty base))
       (kargu--api-refuse callback "no API endpoint: set api on the active provider"))
      (t
-      (let ((added-prompt-p nil))
-        (when (and prompt (not (string-empty-p prompt)))
-          (kargu--history-add "user" prompt)
-          (setq added-prompt-p t))
-        (condition-case-unless-debug err
-            (progn
-              (kargu--api-validate-preflight prompt)
-              (let* ((gen (cl-incf kargu--generation))
-                     (fmt (kargu-api-active-format))
-                     (payload (kargu-api-prepare-payload
-                               (kargu--build-payload) fmt))
-                     (delta (if (kargu-provider-format-stream-p fmt) on-delta nil)))
-                (setq kargu--busy t)
-                (kargu-state-transition-status :requesting)
-                (kargu--api-post
-                 (kargu-api-chat-url base fmt)
-                 (kargu--api-headers key)
-                 payload
-                 gen
-                 (lambda (resp)
-                   (kargu--api-cancel-busy)
-                   (funcall callback resp))
-                 delta)))
-          (error
-           (kargu--api-cancel-busy)
-           (kargu--api-rollback-prompt prompt added-prompt-p)
-           (funcall callback
-                    (kargu--api-error-alist (error-message-string err))))))))))
+      (kargu-api--send-turn :prompt prompt :callback callback :on-delta on-delta
+                            :key key :base base)))))
+
+(cl-defun kargu-api--send-turn (&key prompt callback on-delta key base)
+  "Append PROMPT and start a request using KEY and BASE.
+Deliver events to ON-DELTA and the response to CALLBACK."
+  (let ((added-prompt-p (and prompt (not (string-empty-p prompt)))))
+    (when added-prompt-p (kargu--history-add "user" prompt))
+    (condition-case-unless-debug err
+        (progn
+          (kargu--api-validate-preflight prompt)
+          (kargu-api--start-turn :callback callback :on-delta on-delta
+                                 :key key :base base))
+      (error
+       (kargu--api-cancel-busy)
+       (kargu--api-rollback-prompt prompt added-prompt-p)
+       (funcall callback (kargu--api-error-alist (error-message-string err)))))))
+
+(cl-defun kargu-api--start-turn (&key callback on-delta key base)
+  "Post the validated history using KEY and BASE.
+Deliver events to ON-DELTA and the response to CALLBACK."
+  (let* ((gen (cl-incf kargu--generation))
+         (fmt (kargu-api-active-format))
+         (payload (kargu-api-prepare-payload (kargu--build-payload) fmt))
+         (delta (and (kargu-provider-format-stream-p fmt) on-delta)))
+    (setq kargu--busy t)
+    (kargu-state-transition-status :requesting)
+    (kargu--api-post
+     (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
+     (lambda (response)
+       (kargu--api-cancel-busy)
+       (funcall callback response))
+     delta)))
 
 (defun kargu-test-connection ()
   "Ping the active provider with a minimal request and report the result.
@@ -152,4 +157,4 @@ history which is restored afterwards."
 
 (provide 'kargu/api/client)
 
-;;; kargu/api/client.el ends here
+;;; client.el ends here

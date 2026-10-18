@@ -1,4 +1,4 @@
-;;; kargu/api/tools.el --- Tool registry and execution -*- lexical-binding: t; -*-
+;;; tools.el --- Tool registry and execution -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -21,7 +21,7 @@
 
 (defvar kargu--tool-registry (make-hash-table :test #'equal)
   "Map tool NAME (string) to spec alist with keys:
-  \"description\"  one-line description shown to the model
+\"description\"  one-line description shown to the model
   \"parameters\"   JSON schema as an alist (arrays as vectors)
   \"executor\"     function of one argument: the decoded
                   arguments alist.  Returns a string, an alist to
@@ -60,6 +60,15 @@ are truncated to `kargu-tool-output-limit'."
 (defun kargu-registered-tools ()
   "Return the names of all registered tools."
   (hash-table-keys kargu--tool-registry))
+
+(defun kargu-register-tools (specs &optional aliases)
+  "Register tool SPECS and their optional ALIASES.
+Each spec is (NAME DESCRIPTION PARAMETERS EXECUTOR).
+Each alias is (ALIAS . NAME)."
+  (dolist (spec specs)
+    (apply #'kargu-register-tool spec))
+  (dolist (alias aliases)
+    (kargu-register-tool-alias (car alias) (cdr alias))))
 
 (defun kargu--sanitize-tool-parameters (parameters)
   "Ensure PARAMETERS has a valid properties object when type is object."
@@ -203,7 +212,7 @@ JSON false, nil, \"false\", and 0 are false.  A missing value is false."
     (mapconcat (lambda (cell) (format "%s" (car cell))) args ", ")))
 
 (defun kargu--tool-missing-file-path (args)
-  "Error string when a file path argument was missing."
+  "Describe the missing file path in tool ARGS."
   (let ((keys (kargu--tool-arg-keys args)))
     (if (and (kargu--object-p args)
              (or (assoc "pattern" args)
@@ -266,9 +275,8 @@ so the model can inspect remaining lines using `read_file'."
         (>= (cdr arity) 2))))
 
 (defun kargu--execute-tool-async (executor args name callback)
-  "Execute EXECUTOR with ARGS, invoking CALLBACK exactly once with the result.
-An executor taking (ARGS CALLBACK) reports through the callback itself; one
-taking only ARGS returns the result."
+  "Run tool NAME's EXECUTOR with ARGS and deliver the result to CALLBACK.
+Support executors returning a value or accepting their own callback."
   (let ((on-done (lambda (res)
                    (let* ((formatted (kargu--format-tool-result res))
                           (final (kargu--truncate-for-model formatted)))
@@ -283,7 +291,7 @@ taking only ARGS returns the result."
                                  name (error-message-string err)))))))
 
 (defun kargu--execute-tool-sync (executor args name)
-  "Execute EXECUTOR with ARGS synchronously and return truncated result."
+  "Run tool NAME's EXECUTOR with ARGS and return the truncated result."
   (let ((out
          (condition-case-unless-debug err
              (kargu--format-tool-result (funcall executor args))
@@ -322,4 +330,4 @@ agent loop can feed them back to the model for self-correction."
 
 (provide 'kargu/api/tools)
 
-;;; kargu/api/tools.el ends here
+;;; tools.el ends here

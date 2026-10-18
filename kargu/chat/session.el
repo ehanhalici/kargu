@@ -1,4 +1,4 @@
-;;; kargu/chat/session.el --- Persistent project-scoped chat sessions -*- lexical-binding: t; -*-
+;;; session.el --- Persistent project-scoped chat sessions -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -26,8 +26,8 @@
 (declare-function kargu-state-set-model "kargu/state/transitions" (model))
 (declare-function kargu-state-clear-model "kargu/state/transitions" ())
 (declare-function kargu-set-mode "kargu/core" (mode))
-(declare-function kargu--provider-name "kargu/api" ())
-(declare-function kargu--model "kargu/api" ())
+(declare-function kargu--provider-name "kargu/config/key" ())
+(declare-function kargu--model "kargu/config/key" ())
 (declare-function kargu-chat--ensure-idle-prompt "kargu/chat/prompt" ())
 (declare-function kargu-chat-list-buffers "kargu/chat" ())
 
@@ -129,19 +129,16 @@ A blank value clears that part of the live selection."
 ;;;; Project paths & storage helpers --------------------------------------
 
 (defun kargu-session-project-root (&optional buffer-or-dir)
-  "Return canonical project root directory for BUFFER-OR-DIR."
-  (let ((buf (and (bufferp buffer-or-dir) (buffer-live-p buffer-or-dir) buffer-or-dir)))
-    (if (and buf (buffer-local-value 'kargu-chat--project-root buf))
-        (buffer-local-value 'kargu-chat--project-root buf)
-      (let ((dir (if (stringp buffer-or-dir)
-                     buffer-or-dir
-                   (and buf (buffer-local-value 'default-directory buf)))))
-        (file-name-as-directory
-         (file-truename
-          (if dir
-              (let ((default-directory dir))
-                (kargu-permission-project-root))
-            (kargu-permission-project-root))))))))
+  "Return the canonical project root for BUFFER-OR-DIR.
+An explicit directory or a buffer's saved project root takes precedence
+over the current workspace."
+  (let* ((buffer (and (buffer-live-p buffer-or-dir) buffer-or-dir))
+         (root (cond
+                ((stringp buffer-or-dir) buffer-or-dir)
+                ((and buffer
+                      (buffer-local-value 'kargu-chat--project-root buffer)))
+                (t (kargu-permission-project-root buffer)))))
+    (file-name-as-directory (file-truename (expand-file-name root)))))
 
 (defun kargu-session--project-key (root)
   "Return a deterministic, safe filesystem slug for project ROOT."
@@ -202,7 +199,8 @@ uses `<kargu-sessions-directory>/<project-key>/'."
       "New Session"))
 
 (defun kargu-session--build-data (sid root title usage mode-val prov mod transcript messages)
-  "Construct session serializable alist for session SID under ROOT."
+  "Build session data for SID under ROOT, with TITLE and USAGE.
+Store MODE-VAL, provider PROV, model MOD, TRANSCRIPT and MESSAGES."
   `(("id" . ,sid)
     ("project_root" . ,root)
     ("project_name" . ,(file-name-nondirectory (directory-file-name root)))
@@ -364,17 +362,21 @@ Uses UPDATED-AT and MESSAGE-COUNT for status banner."
     (insert (concat "kargu chat — type at the prompt; "
                     "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-b switch chat.\n\n"))))
 
+(defun kargu-session--read-data (session-or-id root)
+  "Read SESSION-OR-ID in project ROOT, or return the supplied session data."
+  (if (consp session-or-id)
+      session-or-id
+    (let ((f (kargu-session--file-path session-or-id root)))
+      (when (file-readable-p f)
+        (with-temp-buffer
+          (insert-file-contents f)
+          (kargu--json-decode-safe (buffer-string)))))))
+
 (defun kargu-session-load (session-or-id &optional target-buffer root)
   "Restore SESSION-OR-ID into TARGET-BUFFER for project ROOT.
 SESSION-OR-ID may be a session alist or a session id string.
 Returns TARGET-BUFFER on success."
-  (let* ((data (if (consp session-or-id)
-                   session-or-id
-                 (let ((f (kargu-session--file-path session-or-id root)))
-                   (when (file-readable-p f)
-                     (with-temp-buffer
-                       (insert-file-contents f)
-                       (kargu--json-decode-safe (buffer-string)))))))
+  (let* ((data (kargu-session--read-data session-or-id root))
          (buf (or target-buffer
                   (get-buffer (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*"))
                   (get-buffer-create (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*")))))
@@ -478,4 +480,4 @@ Returns TARGET-BUFFER on success."
 
 (provide 'kargu/chat/session)
 
-;;; kargu/chat/session.el ends here
+;;; session.el ends here

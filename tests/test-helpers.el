@@ -65,6 +65,10 @@ is deleted afterwards, so no test depends on the working tree of Kargu."
 (defvar kargu--session-model)
 (defvar kargu--tools-refused)
 (defvar kargu--model-metadata-table)
+(defvar kargu--state-store)
+(defvar kargu--session)
+(defvar kargu--session-id)
+(defvar kargu-context-buffer)
 
 (defun kargu-test-mode (mode)
   "Make MODE the active mode for the running test and return it.
@@ -87,10 +91,13 @@ the previous mode when the test ends."
   kargu-test--scratch-root)
 
 (defun kargu-test--isolate (run-test &rest args)
-  "Run one test in the scratch root, with the store's mode restored afterwards.
+  "Run RUN-TEST with ARGS in a scratch root and an isolated state store.
 Tests never see the working tree of Kargu as their project."
-  (let ((saved (kargu-state-mode))
-        (default-directory (kargu-test-scratch-root))
+  (let ((default-directory (kargu-test-scratch-root))
+        (kargu--state-store (copy-tree kargu--state-store))
+        (kargu--session (copy-tree kargu--session))
+        (kargu--session-id kargu--session-id)
+        (kargu-context-buffer kargu-context-buffer)
         ;; Global state a test may touch; each test starts from and leaves it as found.
         (kargu--message-history kargu--message-history)
         (kargu--loop-run kargu--loop-run)
@@ -99,8 +106,7 @@ Tests never see the working tree of Kargu as their project."
         (kargu--session-model kargu--session-model)
         (kargu--tools-refused (copy-hash-table kargu--tools-refused))
         (kargu--model-metadata-table (copy-hash-table kargu--model-metadata-table)))
-    (unwind-protect (apply run-test args)
-      (kargu-state--set :mode saved))))
+    (apply run-test args)))
 
 (advice-add 'ert-run-test :around #'kargu-test--isolate)
 

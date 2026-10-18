@@ -1,4 +1,4 @@
-;;; kargu/state/transitions.el --- Validated state transitions -*- lexical-binding: t; -*-
+;;; transitions.el --- Validated state transitions -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -33,7 +33,7 @@ Validates MODE and ensures an agent run is not currently active."
                          "Invalid kargu mode: %S (expected one of %s)"
                          mode kargu-all-modes)
   (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
-    (user-error "kargu: cannot change mode while an agent run is in progress (M-x kargu-loop-stop)"))
+    (user-error "Kargu: cannot change mode while an agent run is in progress (M-x kargu-loop-stop)"))
   (kargu-state--set :mode mode)
   (kargu-state-notify :mode mode)
   mode)
@@ -94,6 +94,8 @@ Validates that NEW-STATUS is a known status and updates `:busy'."
     (kargu-state--set :prompt-tokens (+ cur-p p))
     (kargu-state--set :completion-tokens (+ cur-c c))
     (kargu-state--set :total-tokens (+ cur-tot tot))
+    (dolist (key '(:prompt-tokens :completion-tokens :total-tokens))
+      (kargu-state-notify key (kargu-state-get key)))
     (kargu-state-tokens)))
 
 (defun kargu-state-reset ()
@@ -104,4 +106,4 @@ Validates that NEW-STATUS is a known status and updates `:busy'."
 
 (provide 'kargu/state/transitions)
 
-;;; kargu/state/transitions.el ends here
+;;; transitions.el ends here

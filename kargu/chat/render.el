@@ -1,4 +1,4 @@
-;;; kargu/chat/render.el --- Transcript formatting and streaming rendering -*- lexical-binding: t; -*-
+;;; render.el --- Tool activity and run reporting -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -6,243 +6,16 @@
 
 ;;; Commentary:
 
-;; Transcript formatting, insertion above prompt, streaming deltas,
-;; thoughts styling, tool activity timeline, and finish reporting.
-;; Requires: `kargu/core', `kargu/chat/prompt', `kargu/tools/diff'.
-;; Public: `kargu-chat-insert`, `kargu-chat--render-user-turn`,
-;; `kargu-chat--render-agent-heading`, `kargu-chat--on-delta`,
-;; `kargu-chat--on-finish`.
+;; Render tool activity and completed run reports.
 
 ;;; Code:
 
-(require 'cl-lib)
-(require 'subr-x)
-(require 'button)
-(require 'kargu/core)
-(require 'kargu/state/selectors)
+(require 'kargu/chat/transcript)
+(require 'kargu/chat/stream)
 (require 'kargu/api/tools)
-(require 'kargu/chat/prompt)
 (require 'kargu/tools/diff)
 
-(declare-function kargu-plan-handle-response "kargu/plan" (report))
-
-(defface kargu-chat-user-heading
-  '((t :inherit font-lock-preprocessor-face :weight bold))
-  "Face for user turn headings in the chat log."
-  :group 'kargu-ui)
-
-(defface kargu-chat-agent-heading
-  '((t :inherit font-lock-function-name-face :weight bold))
-  "Face for assistant turn headings in the chat log."
-  :group 'kargu-ui)
-
-(defface kargu-chat-meta
-  '((t :inherit font-lock-comment-face))
-  "Face for meta lines (run reports, notices) in the chat log."
-  :group 'kargu-ui)
-
-(defface kargu-chat-tool
-  '((t :inherit font-lock-builtin-face))
-  "Face for tool activity lines in the chat log."
-  :group 'kargu-ui)
-
-(defface kargu-chat-error
-  '((t :inherit error))
-  "Face for error reports in the chat log."
-  :group 'kargu-ui)
-
-(defface kargu-chat-thought
-  '((((class color) (background dark))
-     :foreground "#8a8a8a" :slant italic)
-    (((class color) (background light))
-     :foreground "#666666" :slant italic)
-    (t :inherit shadow :slant italic))
-  "Face for model thoughts and reasoning in the chat log."
-  :group 'kargu-ui)
-
-(defcustom kargu-chat-drop-preamble nil
-  "When non-nil, delete assistant text that preceded a tool call.
-When nil (default), pre-tool explanations are kept in the chat
-transcript above the tool activity lines."
-  :type 'boolean
-  :group 'kargu-ui)
-
-(defvar-local kargu-chat--streamed-text nil
-  "Whether the current run has streamed any answer text.
-When the plain (non-streaming) transport is used, the final answer
-arrives only with the run report; the chat then prints it once
-instead of relying on deltas.")
-
-(defvar-local kargu-chat--in-thought nil
-  "Non-nil when currently streaming thought/reasoning tokens.")
-
-(defvar-local kargu-chat--answer-start nil
-  "Marker at the start of streamed assistant text for the current turn.")
-
-(defvar-local kargu-chat--preamble-dropped nil
-  "Non-nil after streamed CoT was removed because a tool call started.")
-
-(defun kargu-chat--target-buffer ()
-  "Return the active chat buffer for rendering."
-  (or (and (bound-and-true-p kargu--loop-run)
-           (plist-get kargu--loop-run :chat-buffer)
-           (buffer-live-p (plist-get kargu--loop-run :chat-buffer))
-           (plist-get kargu--loop-run :chat-buffer))
-      (and (derived-mode-p 'kargu-chat-mode) (current-buffer))
-      (get-buffer kargu-chat-buffer-name)))
-
-(defun kargu-chat--compute-window-follow-states (windows in-start at)
-  "Calculate follow target (`input', `output', or nil) for each window in WINDOWS."
-  (mapcar
-   (lambda (window)
-     (let ((wp (window-point window)))
-       (cons window
-             (cond
-              ((and in-start (>= wp in-start)) 'input)
-              ((or (>= wp at) (>= wp (1- at))) 'output)
-              ((and (fboundp 'kargu-loop-running-p)
-                    (kargu-loop-running-p)
-                    (>= wp (- at 300)))
-               'output)
-              (t nil)))))
-   windows))
-
-(defun kargu-chat--apply-window-follow-states (follow-pairs)
-  "Update window points according to computed FOLLOW-PAIRS."
-  (let ((out-pos (if (markerp kargu-chat--output-marker)
-                     (marker-position kargu-chat--output-marker)
-                   (point-max))))
-    (dolist (pair follow-pairs)
-      (pcase (cdr pair)
-        ('output
-         (set-window-point (car pair) out-pos))
-        ('input
-         (set-window-point (car pair) (point-max)))
-        (_ nil)))))
-
-(defun kargu-chat-insert (text &optional face)
-  "Insert TEXT into the transcript above the prompt.
-Windows whose point is at the output marker follow the insert;
-windows in the prompt stay in the prompt; windows scrolled
-elsewhere stay untouched.  Never signals, so it is safe from
-process filters and callbacks."
-  (let ((buffer (kargu-chat--target-buffer)))
-    (when (and buffer (stringp text) (not (string-empty-p text)))
-      (condition-case-unless-debug err
-          (with-current-buffer buffer
-            (let* ((inhibit-read-only t)
-                   (inhibit-modification-hooks t)
-                   (at (if (and (markerp kargu-chat--output-marker)
-                                (eq (marker-buffer kargu-chat--output-marker)
-                                    (current-buffer)))
-                           (marker-position kargu-chat--output-marker)
-                         (point-max)))
-                   (in-start (and (markerp kargu-chat--prompt-marker)
-                                  (eq (marker-buffer kargu-chat--prompt-marker)
-                                      (current-buffer))
-                                  (marker-position kargu-chat--prompt-marker)))
-                   (at-end (>= (point) at))
-                   (windows (get-buffer-window-list buffer nil t))
-                   (follow (kargu-chat--compute-window-follow-states windows in-start at)))
-              (save-excursion
-                (goto-char at)
-                (insert (kargu-chat--propertize-log text face)))
-              (when at-end
-                (goto-char (if (markerp kargu-chat--output-marker)
-                               (marker-position kargu-chat--output-marker)
-                             (point-max))))
-              (kargu-chat--apply-window-follow-states follow)))
-        (error
-         (kargu-log 'warn "chat insert failed: %s"
-                          (error-message-string err)))))))
-
-(defun kargu-chat--render-user-turn (prompt)
-  "Render PROMPT as the next user turn in the chat log."
-  (kargu-chat-insert "\n\n")
-  (kargu-chat-insert
-   (format "## you · %s\n" (format-time-string "%H:%M"))
-   'kargu-chat-user-heading)
-  (kargu-chat-insert prompt)
-  (kargu-chat-insert "\n"))
-
-(defun kargu-chat--render-agent-heading ()
-  "Open the next assistant turn in the chat log."
-  (kargu-chat-insert "\n")
-  (kargu-chat-insert
-   (format "## kargu · %s\n" (kargu--model))
-   'kargu-chat-agent-heading))
-
-(defun kargu-chat--on-delta (text &optional kind)
-  "Append one streamed TEXT fragment of the assistant answer.
-KIND may be `thought' when streaming reasoning tokens.  The stream flags
-are buffer-local, so the fragment is handled inside the run's chat buffer
-whatever buffer is current when the process filter fires."
-  (let ((buffer (kargu-chat--target-buffer)))
-    (when (buffer-live-p buffer)
-      (with-current-buffer buffer
-        (kargu-chat--stream-delta text kind)))))
-
-(defun kargu-chat--stream-delta (text kind)
-  "Render streamed TEXT of KIND in the current chat buffer."
-  (when (and (stringp text) (not (string-empty-p text))
-             (not kargu-chat--preamble-dropped))
-    (setq kargu-chat--streamed-text t)
-    (cond
-     ((eq kind 'thought)
-      (kargu-chat-insert text 'kargu-chat-thought))
-     ((string-match "<think>" text)
-      (let* ((idx (string-match "<think>" text))
-             (before (substring text 0 idx))
-             (after (substring text (+ idx (length "<think>")))))
-        (when (not (string-empty-p before))
-          (kargu-chat-insert before (if kargu-chat--in-thought 'kargu-chat-thought nil)))
-        (setq kargu-chat--in-thought t)
-        (if (string-match "</think>" after)
-            (let* ((end-idx (string-match "</think>" after))
-                   (thought (substring after 0 end-idx))
-                   (rest (substring after (+ end-idx (length "</think>")))))
-              (when (not (string-empty-p thought))
-                (kargu-chat-insert thought 'kargu-chat-thought))
-              (setq kargu-chat--in-thought nil)
-              (when (not (string-empty-p rest))
-                (kargu-chat-insert rest nil)))
-          (when (not (string-empty-p after))
-            (kargu-chat-insert after 'kargu-chat-thought)))))
-     ((string-match "</think>" text)
-      (let* ((idx (string-match "</think>" text))
-             (thought (substring text 0 idx))
-             (after (substring text (+ idx (length "</think>")))))
-        (when (not (string-empty-p thought))
-          (kargu-chat-insert thought 'kargu-chat-thought))
-        (setq kargu-chat--in-thought nil)
-        (when (not (string-empty-p after))
-          (kargu-chat-insert after nil))))
-     (kargu-chat--in-thought
-      (kargu-chat-insert text 'kargu-chat-thought))
-     (t
-      (kargu-chat-insert text nil)))))
-
-(defun kargu-chat--drop-streamed-preamble ()
-  "Delete streamed assistant text that preceded the first tool call.
-Only used when `kargu-chat-drop-preamble' is non-nil."
-  (when kargu-chat-drop-preamble
-    (let ((buffer (kargu-chat--target-buffer)))
-      (when (and (buffer-live-p buffer)
-                 (buffer-local-value 'kargu-chat--answer-start buffer)
-                 (not (buffer-local-value 'kargu-chat--preamble-dropped buffer))
-                 (eq (marker-buffer (buffer-local-value 'kargu-chat--answer-start buffer))
-                     buffer))
-        (with-current-buffer buffer
-          (let* ((inhibit-read-only t)
-                 (beg (marker-position kargu-chat--answer-start))
-                 (end (and (markerp kargu-chat--output-marker)
-                           (eq (marker-buffer kargu-chat--output-marker)
-                               buffer)
-                           (marker-position kargu-chat--output-marker))))
-            (when (and beg end (> end beg))
-              (delete-region beg end))
-            (setq kargu-chat--streamed-text nil
-                  kargu-chat--preamble-dropped t)))))))
+(declare-function kargu-plan-handle-response "kargu/plan/dispatch" (report))
 
 (defun kargu-chat--result-summary (result)
   "One-line summary of a tool RESULT for the chat timeline.
@@ -308,7 +81,7 @@ Errors keep their first line.  A normal result is `ok'."
           (delete-region kargu-chat--output-marker (point-max)))))))
 
 (defun kargu-chat--render-finish-status (status report text error)
-  "Render the summary status banner for STATUS in REPORT."
+  "Render STATUS from REPORT, with answer TEXT or ERROR details."
   ;; Plain transport: print answer here if no deltas arrived
   (when (and (eq status :done) (not kargu-chat--streamed-text))
     (if (kargu-nonempty text)
@@ -375,7 +148,7 @@ Errors keep their first line.  A normal result is `ok'."
 (defun kargu-chat--on-finish (report)
   "Render the final REPORT plist of an agent run in the run's chat buffer.
 See `kargu-loop-send' for the shape of the report."
-  (let ((buffer (kargu-chat--target-buffer)))
+  (let ((buffer (kargu-chat-output-buffer)))
     (if (buffer-live-p buffer)
         (with-current-buffer buffer
           (kargu-chat--render-report report))
@@ -383,13 +156,14 @@ See `kargu-loop-send' for the shape of the report."
 
 (defun kargu-chat--render-report (report)
   "Render REPORT into the current chat buffer (or only notify without one)."
+  (kargu-chat-flush-stream)
   (setq kargu-chat--in-thought nil)
   (let ((status (plist-get report :status))
         (text (plist-get report :text))
         (error (plist-get report :error))
         (pending (plist-get report :pending-files))
         (modified (plist-get report :modified-files))
-        (buffer (kargu-chat--target-buffer)))
+        (buffer (kargu-chat-output-buffer)))
     (kargu-chat--clear-running-prompt-banner buffer)
     (kargu-chat-insert "\n")
     (kargu-chat--render-finish-status status report text error)
@@ -413,7 +187,7 @@ See `kargu-loop-send' for the shape of the report."
       (ignore-errors (kargu-session-save buffer)))
     (kargu-chat--ensure-idle-prompt)
     (force-mode-line-update t)
-    (let ((buf (kargu-chat--target-buffer)))
+    (let ((buf (kargu-chat-output-buffer)))
       (when (buffer-live-p buf)
         (with-current-buffer buf
           (goto-char (point-max)))
@@ -427,7 +201,8 @@ See `kargu-loop-send' for the shape of the report."
      (format "[%s]\n" (kargu-chat--result-summary result))
      'kargu-chat-tool)
     (with-current-buffer live
-      (setq kargu-chat--preamble-dropped nil)
+      (setq kargu-chat--preamble-dropped nil
+            kargu-chat--in-thought nil)
       (when (markerp kargu-chat--output-marker)
         (setq kargu-chat--answer-start (copy-marker kargu-chat--output-marker nil))))))
 
@@ -437,9 +212,10 @@ Prints the tool NAME before it runs — visible while long tools or
 the human ediff gate block — and a one-line summary of the result
 afterwards.  FN is the original function."
   (kargu-chat--drop-streamed-preamble)
-  (let ((live (kargu-chat--target-buffer)))
+  (let ((live (kargu-chat-output-buffer)))
     (when live
       (with-current-buffer live
+        (kargu-chat-flush-stream)
         (let ((pos (if (and (markerp kargu-chat--output-marker)
                             (eq (marker-buffer kargu-chat--output-marker) live))
                        (marker-position kargu-chat--output-marker)
@@ -465,4 +241,4 @@ afterwards.  FN is the original function."
 
 (provide 'kargu/chat/render)
 
-;;; kargu/chat/render.el ends here
+;;; render.el ends here

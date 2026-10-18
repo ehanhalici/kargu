@@ -1,4 +1,4 @@
-;;; kargu/tools/diff.el --- Shadow buffers, ediff, rollback -*- lexical-binding: t; -*-
+;;; diff.el --- Shadow buffers, ediff, rollback -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -154,9 +154,9 @@ Signals an error if file does not exist or looks binary."
 (defun kargu-diff--validate-read-bounds (from to total)
   "Validate that FROM and TO are within bounds of TOTAL lines."
   (when (> from total)
-    (error "from_line (%d) exceeds file line count (%d)" from total))
+    (error "From_line (%d) exceeds file line count (%d)" from total))
   (when (< to from)
-    (error "to_line (%d) is before from_line (%d)" to from)))
+    (error "To_line (%d) is before from_line (%d)" to from)))
 
 (defun kargu-diff-read-file (file-path &optional from-line to-line)
   "Return a model-oriented dump of FILE-PATH.
@@ -217,7 +217,7 @@ Without CALLBACK the string is returned; with CALLBACK it is passed there."
      (t result))))
 
 (defun kargu-diff--edit-file-tool (args &optional callback)
-  "Executor for the `edit_file' tool: unique replace, stage, review."
+  "Edit the unique text from ARGS, reporting the result to CALLBACK."
   (kargu-diff--with-review-callback
    callback (lambda (done) (kargu-diff--edit-file-result args done))))
 
@@ -245,7 +245,7 @@ Without CALLBACK the string is returned; with CALLBACK it is passed there."
             (if done 'deferred (kargu-diff--describe outcome))))))))
 
 (defun kargu-diff--write-file-tool (args &optional callback)
-  "Executor for the `write_file' tool: create or overwrite a file via ediff."
+  "Write the file described by ARGS, reporting the result to CALLBACK."
   (kargu-diff--with-review-callback
    callback (lambda (done) (kargu-diff--write-file-result args done))))
 
@@ -278,16 +278,16 @@ Without CALLBACK the string is returned; with CALLBACK it is passed there."
   "Parse patch LINES into structured operations.
 Returns a list of plists with keys :type, :file, :lines."
   (let* ((ops nil)
-        (curr-type nil)
-        (curr-file nil)
-        (curr-lines nil)
-        (flush-op
-         (lambda ()
-           (when (and curr-type curr-file)
-             (push (list :type curr-type :file curr-file :lines (nreverse curr-lines)) ops)
-             (setq curr-type nil
-                   curr-file nil
-                   curr-lines nil)))))
+         (curr-type nil)
+         (curr-file nil)
+         (curr-lines nil)
+         (flush-op
+          (lambda ()
+            (when (and curr-type curr-file)
+              (push (list :type curr-type :file curr-file :lines (nreverse curr-lines)) ops)
+              (setq curr-type nil
+                    curr-file nil
+                    curr-lines nil)))))
     (dolist (raw lines)
       (let ((line (string-trim-right raw)))
         (cond
@@ -353,7 +353,7 @@ Each hunk is (LINE-HINT . LINES), LINE-HINT being what its header names."
     (cons (block-of "+" "-") (block-of "-" "+"))))
 
 (defun kargu-diff--insert-after-line (text new line)
-  "TEXT with NEW inserted after its LINE-th line (0 is the top)."
+  "Insert NEW into TEXT after LINE, with zero indicating the top."
   (let* ((lines (split-string text "\n"))
          (line (min line (length lines))))
     (string-join (append (seq-take lines line) (list new) (seq-drop lines line))
@@ -453,12 +453,9 @@ Signals when OP cannot apply, so a bad patch changes nothing."
            state))
 
 (defun kargu-diff-apply-patch (patch-text)
-  "Parse and apply PATCH-TEXT supporting '*** Add File: <path>',
-'*** Update File: <path>', and '*** Delete File: <path>' within optional
-'*** Begin Patch' and '*** End Patch' envelopes.
-The whole patch is checked first; if any operation cannot apply, no file
-is touched.  Edits then go through the proposal and rollback pipeline.
-Returns a formatted summary of applied changes."
+  "Validate and apply PATCH-TEXT with add, update and delete operations.
+Check the entire patch before applying proposals through the review and
+rollback pipeline.  Return a summary of the applied operations."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p patch-text
                          "PATCH-TEXT must be a non-empty string: %S" patch-text)
   (let* ((ops (kargu-diff--parse-patch-lines (split-string (string-trim patch-text) "\n")))
@@ -471,7 +468,7 @@ Returns a formatted summary of applied changes."
               (length results) (string-join results "\n  • ")))))
 
 (defun kargu-diff--apply-patch-tool (args)
-  "Executor for the `apply_patch' tool."
+  "Apply the patch supplied in tool ARGS."
   (or (kargu-diff--mutating-disabled "apply_patch")
       (let ((patch (kargu--tool-arg args "patch" "diff" "content")))
         (if (not (kargu-nonempty patch))
@@ -480,65 +477,65 @@ Returns a formatted summary of applied changes."
               (kargu-diff-apply-patch patch)
             (error (format "ERROR: %s" (error-message-string err))))))))
 
-(defun kargu-diff-register-tools ()
-  "Register the diff, edit, write, read and apply_patch tools."
-  (kargu-register-tool
-   "read_file"
-   "Read a source file with numbered lines (\"12 | code\"). Before reading a large code file, prefer 'read_file_symbols' (outline) to see its structure or 'read_symbol' to inspect a specific function/struct. Requires 'file_path'. NEVER pass search patterns or regex here. Use from_line/to_line (or limit) to page through specific sections, or for non-code files (config, markdown, yaml)."
-   '(("type" . "object")
-     ("properties" . (("file_path" . (("type" . "string")
+(defconst kargu-diff--tool-specs
+  (list
+   (list
+    "read_file"
+    "Read a source file with numbered lines (\"12 | code\"). Before reading a large code file, prefer 'read_file_symbols' (outline) to see its structure or 'read_symbol' to inspect a specific function/struct. Requires 'file_path'. NEVER pass search patterns or regex here. Use from_line/to_line (or limit) to page through specific sections, or for non-code files (config, markdown, yaml)."
+    '(("type" . "object")
+      ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "Absolute or project-relative path of the file (or output buffer) to read. Must be a valid file path, NOT a search pattern or regex.")))
-                      ("from_line" . (("type" . "integer")
+                       ("from_line" . (("type" . "integer")
                                        ("description" . "First 1-based line to return (inclusive).")))
-                      ("to_line" . (("type" . "integer")
+                       ("to_line" . (("type" . "integer")
                                      ("description" . "Last 1-based line to return (inclusive).")))
-                      ("limit" . (("type" . "integer")
+                       ("limit" . (("type" . "integer")
                                    ("description" . "Maximum number of lines to return from from_line.")))))
-     ("required" . ["file_path"]))
-   (lambda (args)
-     (let* ((path (kargu--tool-file-path args))
-            (from (or (kargu--tool-arg args "from_line" "fromLine")
-                      (kargu--tool-arg args "offset")))
-            (limit (kargu--tool-arg args "limit"))
-            (to (or (kargu--tool-arg args "to_line" "toLine")
-                    (and from limit
-                         (let ((f (kargu-diff--to-int from))
-                               (n (kargu-diff--to-int limit)))
+      ("required" . ["file_path"]))
+    (lambda (args)
+      (let* ((path (kargu--tool-file-path args))
+             (from (or (kargu--tool-arg args "from_line" "fromLine")
+                       (kargu--tool-arg args "offset")))
+             (limit (kargu--tool-arg args "limit"))
+             (to (or (kargu--tool-arg args "to_line" "toLine")
+                     (and from limit
+                          (let ((f (kargu-diff--to-int from))
+                                (n (kargu-diff--to-int limit)))
                             (and f n (+ f n -1)))))))
-       (if (not (kargu-nonempty path))
-           (kargu--tool-missing-file-path args)
-         (condition-case-unless-debug err
-             (kargu-diff-read-file path from to)
-           (error (format "ERROR: %s" (error-message-string err))))))))
-  (kargu-register-tool
-   "edit_file"
-   "Replace an exact unique block of text in an existing file. NOTE: For modifying existing code definitions (functions, classes, structs, methods, types), ALWAYS PREFER 'edit_by_lsp' instead. Use edit_file only as a fallback for non-code files (markdown, configs) or text outside defined symbols. Read the file first with read_file, then pass the exact old_string (include enough surrounding lines to make it unique) and the new_string replacement. The human reviews the change in ediff (b accepts a hunk, a keeps the original). After an accepted edit, immediately call lsp_diagnostics on the file."
-   '(("type" . "object")
-     ("properties" . (("file_path" . (("type" . "string")
+        (if (not (kargu-nonempty path))
+            (kargu--tool-missing-file-path args)
+          (condition-case-unless-debug err
+              (kargu-diff-read-file path from to)
+            (error (format "ERROR: %s" (error-message-string err))))))))
+   (list
+    "edit_file"
+    "Replace an exact unique block of text in an existing file. NOTE: For modifying existing code definitions (functions, classes, structs, methods, types), ALWAYS PREFER 'edit_by_lsp' instead. Use edit_file only as a fallback for non-code files (markdown, configs) or text outside defined symbols. Read the file first with read_file, then pass the exact old_string (include enough surrounding lines to make it unique) and the new_string replacement. The human reviews the change in ediff (b accepts a hunk, a keeps the original). After an accepted edit, immediately call lsp_diagnostics on the file."
+    '(("type" . "object")
+      ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "Absolute or project-relative path of the file to edit.")))
-                      ("old_string" . (("type" . "string")
+                       ("old_string" . (("type" . "string")
                                         ("description" . "The exact unique string to replace, copied from read_file without the line-number prefix.")))
-                      ("new_string" . (("type" . "string")
+                       ("new_string" . (("type" . "string")
                                         ("description" . "The replacement string.")))
-                      ("reason" . (("type" . "string")
+                       ("reason" . (("type" . "string")
                                     ("description" . "One-sentence justification of the edit, shown to the human during review.")))))
-     ("required" . ["file_path" "old_string" "new_string"]))
-   #'kargu-diff--edit-file-tool)
-  (kargu-register-tool
-   "write_file"
-   "Write or rewrite a file completely. Overwrites the entire file with contents (or creates it if it does not exist). Note: for small, localized changes to an existing file, prefer edit_file to save tokens and avoid merge conflicts. Use write_file when replacing the entire file or creating a new file. The human reviews the proposal in ediff before it is saved."
-   '(("type" . "object")
-     ("properties" . (("file_path" . (("type" . "string")
+      ("required" . ["file_path" "old_string" "new_string"]))
+    #'kargu-diff--edit-file-tool)
+   (list
+    "write_file"
+    "Write or rewrite a file completely. Overwrites the entire file with contents (or creates it if it does not exist). Note: for small, localized changes to an existing file, prefer edit_file to save tokens and avoid merge conflicts. Use write_file when replacing the entire file or creating a new file. The human reviews the proposal in ediff before it is saved."
+    '(("type" . "object")
+      ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "Absolute or project-relative path of the file to write or create.")))
-                      ("contents" . (("type" . "string")
+                       ("contents" . (("type" . "string")
                                       ("description" . "Complete contents of the file.")))
-                      ("reason" . (("type" . "string")
+                       ("reason" . (("type" . "string")
                                     ("description" . "One-sentence justification, shown during review.")))))
-     ("required" . ["file_path" "contents"]))
-   #'kargu-diff--write-file-tool)
-  (kargu-register-tool
-   "apply_patch"
-   "Apply a multi-file unified patch across multiple files in a single tool call. Agent mode only.
+      ("required" . ["file_path" "contents"]))
+    #'kargu-diff--write-file-tool)
+   (list
+    "apply_patch"
+    "Apply a multi-file unified patch across multiple files in a single tool call. Agent mode only.
 Format:
 *** Begin Patch
 *** Add File: path/to/file.ext
@@ -550,15 +547,23 @@ Format:
 +new line
 *** Delete File: path/to/file.ext
 *** End Patch"
-   '(("type" . "object")
-     ("properties" . (("patch" . (("type" . "string")
+    '(("type" . "object")
+      ("properties" . (("patch" . (("type" . "string")
                                    ("description" . "Complete unified patch text with file envelopes.")))))
-     ("required" . ["patch"]))
-   #'kargu-diff--apply-patch-tool)
-  (kargu-register-tool-alias "read" "read_file")
-  (kargu-register-tool-alias "edit" "edit_file")
-  (kargu-register-tool-alias "write" "write_file")
-  (kargu-register-tool-alias "patch" "apply_patch"))
+      ("required" . ["patch"]))
+    #'kargu-diff--apply-patch-tool))
+  "Tool schemas and executors for diff operations.")
+
+(defconst kargu-diff--tool-aliases
+  '(("read" . "read_file")
+    ("edit" . "edit_file")
+    ("write" . "write_file")
+    ("patch" . "apply_patch"))
+  "Aliases for the diff tools.")
+
+(defun kargu-diff-register-tools ()
+  "Register the diff tools and their aliases."
+  (kargu-register-tools kargu-diff--tool-specs kargu-diff--tool-aliases))
 
 (kargu-diff-register-tools)
 
@@ -571,4 +576,4 @@ Format:
 
 (provide 'kargu/tools/diff)
 
-;;; kargu/tools/diff.el ends here
+;;; diff.el ends here

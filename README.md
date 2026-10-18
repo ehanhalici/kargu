@@ -53,7 +53,7 @@ Clone the repository and add it to your Emacs `load-path`:
 
 Kargu can be configured via a simple TOML configuration file (`~/.config/kargu/config.toml` or `~/.emacs.d/kargu.toml`), environment variables, or Emacs `auth-source`.
 
-Run `M-x kargu-edit-config` to generate or edit your configuration. A commented example is in [`config.toml.example`](config.toml.example).
+Run `M-x kargu-edit-config` to generate or edit your configuration.
 
 The API key of the active provider is looked up in this order:
 
@@ -81,15 +81,15 @@ apikey = "${AI302_API_KEY}"
 
 ## Quick Start & Usage
 
-| Command | Description |
-| :--- | :--- |
-| `M-x kargu-menu` | Open the main Transient control panel |
-| `M-x kargu-chat` | Open or focus the interactive chat buffer (`*kargu*`) |
-| `M-x kargu-set-mode` | Switch mode (`ask`, `plan`, `agent`, `debug`) |
-| `M-x kargu-set-provider` | Switch active provider |
-| `M-x kargu-set-model` | Select active model |
-| `M-x kargu-check-setup` | Check environment, API keys, and package dependencies |
-| `M-x kargu-test-connection`| Ping active provider endpoint |
+| Command                     | Description                                           |
+|:----------------------------|:------------------------------------------------------|
+| `M-x kargu-menu`            | Open the main Transient control panel                 |
+| `M-x kargu-chat`            | Open or focus the interactive chat buffer (`*kargu*`) |
+| `M-x kargu-set-mode`        | Switch mode (`ask`, `plan`, `agent`, `debug`)         |
+| `M-x kargu-set-provider`    | Switch active provider                                |
+| `M-x kargu-set-model`       | Select active model                                   |
+| `M-x kargu-check-setup`     | Check environment, API keys, and package dependencies |
+| `M-x kargu-test-connection` | Ping active provider endpoint                         |
 
 ### Plan Mode Workflow
 1. Switch to `plan` mode (`M-x kargu-set-mode` -> `plan`).
@@ -99,6 +99,23 @@ apikey = "${AI302_API_KEY}"
 5. Click **`[✓ Approve & Apply]`** to automatically switch to `agent` mode and execute the verified plan.
 
 ---
+
+## Development
+
+The LSP and Dape entry points load focused submodules for session access,
+data collection, formatting and tool registration. HTTP request construction,
+retry handling and SSE decoding are separate modules. Chat transcript insertion
+and streaming parsing are independent of tool activity and run reporting.
+
+With the required Emacs packages installed, run the offline ERT suite with:
+
+```sh
+emacs --batch -Q -L . --eval '(progn (require (quote package)) (package-initialize))' -l tests/run-tests.el
+```
+
+Tests use temporary projects and mocked provider responses. See
+[`proof/README.md`](proof/README.md) for the exhaustive TLA+ checks required
+when loop transitions or protocol invariants change.
 
 ## License
 

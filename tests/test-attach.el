@@ -41,43 +41,55 @@
 (ert-deftest kargu-attach-short-file-is-inlined-with-line-numbers-test ()
   "A short file becomes a synthetic Read transcript."
   (kargu-attach-test--with-project '(("a.txt" . "one\ntwo\n"))
-    (let ((out (kargu-chat--expand-prompt "look at @a.txt")))
-      (should (string-prefix-p "<user_query>\nlook at @a.txt\n</user_query>" out))
-      (should (string-search "Called the Read tool with" out))
-      (should (string-search "two" out))
-      (should (string-search "<attached_files>" out)))))
+                                   (let ((out (kargu-chat--expand-prompt "look at @a.txt")))
+                                     (should (string-prefix-p "<user_query>\nlook at @a.txt\n</user_query>" out))
+                                     (should (string-search "Called the Read tool with" out))
+                                     (should (string-search "two" out))
+                                     (should (string-search "<attached_files>" out)))))
 
 (ert-deftest kargu-attach-long-file-is-referenced-not-inlined-test ()
   "A file over the line limit is referenced so the model reads it on demand."
   (kargu-attach-test--with-project
-      (list (cons "big.txt" (mapconcat #'number-to-string (number-sequence 1 400) "\n")))
-    (let ((kargu-chat-attach-max-lines 50))
-      (let ((out (kargu-chat--expand-prompt "read @big.txt")))
-        (should (string-search "<referenced_file" out))
-        (should-not (string-search "\n399\n" out))))))
+   (list (cons "big.txt" (mapconcat #'number-to-string (number-sequence 1 400) "\n")))
+   (let ((kargu-chat-attach-max-lines 50))
+     (let ((out (kargu-chat--expand-prompt "read @big.txt")))
+       (should (string-search "<referenced_file" out))
+       (should-not (string-search "\n399\n" out))))))
 
 (ert-deftest kargu-attach-missing-file-says-not-found-test ()
   "An unknown mention is reported, not silently dropped."
   (kargu-attach-test--with-project '(("a.txt" . "x\n"))
-    (should (string-search "(not found)" (kargu-chat--expand-prompt "see @nope.txt")))))
+                                   (should (string-search "(not found)" (kargu-chat--expand-prompt "see @nope.txt")))))
 
 (ert-deftest kargu-attach-refuses-paths-outside-the-project-test ()
   "A mention that climbs out of the project is not attached."
   (kargu-attach-test--with-project '(("a.txt" . "x\n"))
-    (let ((outside (make-temp-file "kargu-outside-")))
-      (unwind-protect
-          (progn
-            (write-region "secret\n" nil outside nil 'silent)
-            (should-not (string-search
-                         "secret"
-                         (kargu-chat--expand-prompt
-                          (format "see @../%s" (file-name-nondirectory outside))))))
-        (delete-file outside)))))
+                                   (let ((outside (make-temp-file "kargu-outside-")))
+                                     (unwind-protect
+                                         (progn
+                                           (write-region "secret\n" nil outside nil 'silent)
+                                           (should-not (string-search
+                                                        "secret"
+                                                        (kargu-chat--expand-prompt
+                                                         (format "see @../%s" (file-name-nondirectory outside))))))
+                                       (delete-file outside)))))
 
 (ert-deftest kargu-attach-prompt-without-mentions-is-only-the-query-test ()
   "No mention means no attachment block."
   (should (equal (kargu-chat--expand-prompt "hello")
                  "<user_query>\nhello\n</user_query>")))
+
+(ert-deftest kargu-attach-python-symbol-stops-before-sibling-method-test ()
+  "An indented Python method excludes its sibling and preserves point."
+  (with-temp-buffer
+    (insert "class C:\n    def first(self):\n        return {\"x\": 1}\n\n    def second(self):\n        return 2\n")
+    (python-mode)
+    (goto-char (point-min))
+    (search-forward "def first")
+    (let ((found (- (point) (length "def first")))
+          (saved (point)))
+      (should (equal (kargu-chat--compute-symbol-bounds found) '(2 . 3)))
+      (should (= (point) saved)))))
 
 (provide 'tests/test-attach)
 ;;; test-attach.el ends here

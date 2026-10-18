@@ -1,4 +1,4 @@
-;;; kargu/plan/dispatch.el --- Plan review actions and dispatch -*- lexical-binding: t; -*-
+;;; dispatch.el --- Plan review actions and dispatch -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -30,7 +30,7 @@
           (select-window win))
         (message "Edit plan freely in memory. Press C-c C-c to approve & apply, C-c C-k to cancel.")))))
 
-(declare-function kargu-chat-insert "kargu/chat/render" (text &optional face))
+(declare-function kargu-chat-insert "kargu/chat/transcript" (text &optional face))
 
 (defun kargu-plan--close-window ()
   "Close the window showing the plan buffer, if any."
@@ -62,7 +62,7 @@ finds no decision to make."
       (kargu-plan--take-decision)
       (kargu-plan--close-window)
       (kargu-chat-insert "  ✓ [Plan Approved] — Switching to agent mode and applying plan...\n\n"
-                          '(:inherit success :weight bold))
+                         '(:inherit success :weight bold))
       (kargu-set-mode 'agent)
       (let ((prompt (format "Apply the following approved plan step-by-step:\n\n%s" plan-text)))
         (if (fboundp 'kargu-chat-prompt)
@@ -79,7 +79,7 @@ finds no decision to make."
     (message "kargu: plan cancelled")))
 
 (defun kargu-plan--button (label action face help)
-  "A transcript button showing LABEL that calls ACTION, drawn with FACE."
+  "Build a LABEL button invoking ACTION with FACE and HELP text."
   (make-text-button label nil
                     'action (lambda (_) (funcall action))
                     'face face
@@ -93,7 +93,7 @@ finds no decision to make."
       (kargu-plan-setup-buffer plan-text)
       (kargu-chat-insert "\n")
       (kargu-chat-insert "  📋 [Plan Ready] — Choose an option below:\n"
-                          '(:inherit font-lock-doc-face :weight bold))
+                         '(:inherit font-lock-doc-face :weight bold))
       (kargu-chat-insert "     ")
       (kargu-chat-insert
        (kargu-plan--button "[✓ Approve & Apply]" #'kargu-plan-approve
@@ -114,4 +114,4 @@ finds no decision to make."
 
 (provide 'kargu/plan/dispatch)
 
-;;; kargu/plan/dispatch.el ends here
+;;; dispatch.el ends here

@@ -1,4 +1,4 @@
-;;; kargu/history/protocol.el --- Protocol message history queue -*- lexical-binding: t; -*-
+;;; protocol.el --- Protocol message history queue -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -16,7 +16,7 @@
 (require 'kargu/contract)
 (require 'kargu/prompt)
 
-(declare-function kargu-api-cancel "kargu/api/client" ())
+(declare-function kargu-api-cancel "kargu/api/http" ())
 
 (defvar kargu--message-history nil
   "Conversation history, oldest first.
@@ -95,7 +95,8 @@ Mutates MSG and returns it."
   msg)
 
 (defun kargu--calls-to-list (calls)
-  "Convert CALLS to a list of tool-call alists, or nil if empty."
+  "Normalize tool-call records into a list.
+Read CALLS as a list or vector and return nil for empty input."
   (cond
    ((null calls) nil)
    ((eq calls :json-null) nil)
@@ -152,4 +153,4 @@ Mutates MSG and returns it."
 
 (provide 'kargu/history/protocol)
 
-;;; kargu/history/protocol.el ends here
+;;; protocol.el ends here

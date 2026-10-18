@@ -1,4 +1,4 @@
-;;; kargu/chat/complete.el --- @ company for files and LSP symbols -*- lexical-binding: t; -*-
+;;; complete.el --- @ company for files and LSP symbols -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -26,7 +26,7 @@
   "Cache of project files for `@' completion.
 Format: (:roots ROOTS :time TIME :files FILES).")
 (defvar kargu-chat--prompt-marker nil)
-(declare-function kargu-chat--in-input-p "kargu/chat")
+(declare-function kargu-chat--in-input-p "kargu/chat/prompt")
 (declare-function company-begin-backend "company")
 (declare-function company-manual-begin "company")
 
@@ -56,8 +56,8 @@ Format: (:roots ROOTS :time TIME :files FILES).")
 
 (defun kargu-chat--completion-root ()
   "Project root used for `@' file completion."
-  (or (and (fboundp 'kargu--project-root)
-           (ignore-errors (kargu--project-root)))
+  (or (and (fboundp 'kargu-lsp-project-root)
+           (ignore-errors (kargu-lsp-project-root)))
       (let ((buf (cond
                   ((and (boundp 'kargu-context-buffer)
                         (bufferp kargu-context-buffer)
@@ -273,7 +273,7 @@ QUERY and STRING should already be downcased."
          (sym (intern str)))
     (cond
      ((memq sym '(function method variable struct class interface module
-                  constant field property enum enum-member file folder snippet text))
+                           constant field property enum enum-member file folder snippet text))
       sym)
      ((string-prefix-p "func" str) 'function)
      ((string-prefix-p "var" str) 'variable)
@@ -283,7 +283,8 @@ QUERY and STRING should already be downcased."
      (t 'variable))))
 
 (defun kargu-chat--score-symbol-item (item root has-delim file-q sym-q q)
-  "Calculate scoring record for symbol ITEM, or nil if unmatched."
+  "Score symbol ITEM under ROOT for query Q.
+HAS-DELIM distinguishes qualified FILE-Q and SYM-Q fragments."
   (let* ((path (nth 0 item))
          (line (nth 1 item))
          (name (nth 2 item))
@@ -354,8 +355,8 @@ QUERY can match the symbol name, the file path, or both if QUERY contains `::'."
               (or (kargu-chat--symbol-candidates q) nil)))))
 
 (defun kargu-chat-company (command &optional arg &rest _ignored)
-  "Company backend for `@' file and LSP symbol mentions in the chat prompt.
-Matching is fuzzy (flex): `@lib.rs' completes `rust/src/lib.rs'."
+  "Handle Company COMMAND and optional ARG for chat mentions.
+Ignore extra arguments in _IGNORED.  Match files and LSP symbols fuzzily."
   (interactive (list 'interactive))
   (cl-case command
     (interactive (company-begin-backend 'kargu-chat-company))
@@ -379,4 +380,4 @@ Matching is fuzzy (flex): `@lib.rs' completes `rust/src/lib.rs'."
 
 (provide 'kargu/chat/complete)
 
-;;; kargu/chat/complete.el ends here
+;;; complete.el ends here

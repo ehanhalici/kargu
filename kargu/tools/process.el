@@ -1,4 +1,4 @@
-;;; kargu/tools/process.el --- Non-blocking external commands -*- lexical-binding: t; -*-
+;;; process.el --- Non-blocking external commands -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -27,6 +27,9 @@
   "Output bytes after which an external command is killed."
   :type 'natnum
   :group 'kargu)
+
+(defconst kargu-process--buffer-name " *kargu-process*"
+  "Name used for temporary command output buffers.")
 
 (defun kargu-process--finish (callback buffer state)
   "Deliver the result of a finished process in BUFFER to CALLBACK.
@@ -57,18 +60,27 @@ BUFFER holds the output; STATE records how the process ended."
         (kargu-process--finish callback buffer state)))))
 
 (defun kargu-process--filter (buffer max-bytes state)
-  "Process filter appending to BUFFER; kills the process past MAX-BYTES.
-STATE records that the output was cut."
+  "Return an output filter for BUFFER with cap MAX-BYTES and shared STATE."
   (lambda (proc chunk)
     (when (and (buffer-live-p buffer) (not (plist-get state :truncated)))
       (with-current-buffer buffer
-        (goto-char (point-max))
-        (insert chunk)
-        (when (> (buffer-size) max-bytes)
-          (delete-region (1+ max-bytes) (point-max))
-          (plist-put state :truncated t)
-          (when (process-live-p proc)
-            (kill-process proc)))))))
+        (save-excursion
+          (save-restriction
+            (widen)
+            (goto-char (point-max))
+            (insert chunk)
+            (when (> (1- (position-bytes (point-max))) max-bytes)
+              (kargu-process--truncate-output max-bytes)
+              (plist-put state :truncated t)
+              (when (process-live-p proc)
+                (kill-process proc)))))))))
+
+(defun kargu-process--truncate-output (max-bytes)
+  "Limit the current buffer to MAX-BYTES without splitting a character."
+  (let ((byte-end (1+ max-bytes)))
+    (while (not (byte-to-position byte-end))
+      (setq byte-end (1- byte-end)))
+    (delete-region (byte-to-position byte-end) (point-max))))
 
 (defun kargu-process--fail (callback message)
   "Deliver a failed start with MESSAGE to CALLBACK."
@@ -90,7 +102,7 @@ OPTS: `:dir' working directory, `:timeout' seconds (default
 
 (defun kargu-process--start (exe args callback opts)
   "Start EXE with ARGS per OPTS and wire timeout, cap and CALLBACK."
-  (let* ((buffer (generate-new-buffer " *kargu-process*"))
+  (let* ((buffer (generate-new-buffer kargu-process--buffer-name))
          (state (list :done nil :timed-out nil :truncated nil :code nil))
          (timeout (or (plist-get opts :timeout) kargu-process-timeout))
          (max-bytes (or (plist-get opts :max-bytes) kargu-process-max-bytes))
@@ -119,12 +131,15 @@ OPTS: `:dir' working directory, `:timeout' seconds (default
            proc (kargu-process--sentinel callback buffer state timer))
           proc)
       (error
-       (kill-buffer buffer)
+       (plist-put state :done t)
+       (when (timerp timer) (cancel-timer timer))
+       (when (process-live-p proc) (delete-process proc))
+       (when (buffer-live-p buffer) (kill-buffer buffer))
        (kargu-process--fail callback (error-message-string err))
        nil))))
 
 (defun kargu-process-deliver (callback thunk)
-  "Call CALLBACK with the string THUNK returns, or with an ERROR string."
+  "Deliver THUNK's result to CALLBACK, converting failures to error text."
   (funcall callback
            (condition-case-unless-debug err
                (funcall thunk)
@@ -143,4 +158,4 @@ OPTS: `:dir' working directory, `:timeout' seconds (default
 
 (provide 'kargu/tools/process)
 
-;;; kargu/tools/process.el ends here
+;;; process.el ends here

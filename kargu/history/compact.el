@@ -1,4 +1,4 @@
-;;; kargu/history/compact.el --- History size compaction -*- lexical-binding: t; -*-
+;;; compact.el --- History size compaction -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -21,7 +21,7 @@
 
 (declare-function kargu--validate-history "kargu/history/repair")
 (declare-function kargu--history-fresh-system-message "kargu/history/repair" ())
-(declare-function kargu-model-context-window "kargu/api" (&optional model-id))
+(declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id))
 
 (defcustom kargu-history-compact-chars 45000
   "Baseline character threshold for compaction when dynamic detection is disabled.
@@ -137,10 +137,10 @@ The usual system prompt is restored (compaction overlay cleared)."
                      ("content" . "Please proceed with the task."))))
            kept))
     (kargu-log 'info "history compacted to %d messages (%d chars)"
-                     (length kargu--message-history)
-                     (kargu-history-char-count))
+               (length kargu--message-history)
+               (kargu-history-char-count))
     (kargu--validate-history 'keep-assistant-tail)))
 
 (provide 'kargu/history/compact)
 
-;;; kargu/history/compact.el ends here
+;;; compact.el ends here

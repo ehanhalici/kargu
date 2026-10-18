@@ -17,6 +17,33 @@
 
 (require 'tests/test-helpers)
 (require 'ert)
+
+(ert-deftest kargu-lsp-skeleton-cache-is-project-scoped-test ()
+  "A skeleton from another project is never reused."
+  (let ((kargu-lsp--skeleton-cache
+         (list :root "/project-a/" :text "cached" :time (current-time))))
+    (cl-letf (((symbol-function 'kargu-lsp-project-root) (lambda () "/project-b/")))
+      (should-not (kargu-lsp--cached-skeleton)))
+    (cl-letf (((symbol-function 'kargu-lsp-project-root) (lambda () "/project-a/")))
+      (should (equal (kargu-lsp--cached-skeleton) "cached")))))
+
+(ert-deftest kargu-lsp-skeleton-respects-total-symbol-cap-test ()
+  "The total symbol cap also limits the final file's contribution."
+  (let ((root (make-temp-file "kargu-skeleton-" t))
+        (kargu-lsp-skeleton-max-symbols 3)
+        (kargu-lsp-skeleton-max-per-file 2))
+    (unwind-protect
+        (let* ((a (expand-file-name "a.el" root))
+               (b (expand-file-name "b.el" root))
+               (text (kargu-lsp--render-skeleton
+                      root "test"
+                      (list (list a 1 "first" 12) (list a 2 "second" 12)
+                            (list b 1 "third" 12) (list b 2 "hidden" 12)))))
+          (should (string-prefix-p "# Project skeleton" text))
+          (should (string-search "third (Function)" text))
+          (should-not (string-search "hidden (Function)" text))
+          (should (string-search "1 more hidden" text)))
+      (delete-directory root t))))
 (require 'cl-lib)
 (require 'kargu/tools/lsp)
 (require 'kargu/config/schema)
@@ -61,16 +88,16 @@
   "Test converting SymbolInformation, WorkspaceSymbol and hash-tables."
   ;; Plist with location: range
   (let* ((item '(:name "my-function"
-                 :kind 12
-                 :location (:uri "file:///tmp/test.el"
-                            :range (:start (:line 41 :character 0)))))
+                       :kind 12
+                       :location (:uri "file:///tmp/test.el"
+                                       :range (:start (:line 41 :character 0)))))
          (res (kargu-lsp--symbol-information-item item)))
     (should (equal res (list "/tmp/test.el" 42 "my-function" 12))))
   ;; Plist with targetUri and targetRange (WorkspaceSymbol / LocationLink)
   (let* ((item '(:name "MyClass"
-                 :kind 5
-                 :location (:targetUri "file:///tmp/class.el"
-                            :targetSelectionRange (:start (:line 9 :character 4)))))
+                       :kind 5
+                       :location (:targetUri "file:///tmp/class.el"
+                                             :targetSelectionRange (:start (:line 9 :character 4)))))
          (res (kargu-lsp--symbol-information-item item)))
     (should (equal res (list "/tmp/class.el" 10 "MyClass" 5))))
   ;; Hash table representation
@@ -158,7 +185,7 @@
         (delete-file temp)))))
 
 (ert-deftest kargu-project-root-eglot-resolution-test ()
-  "Test that kargu--project-root extracts root from Eglot server project."
+  "Test that kargu-lsp-project-root extracts root from Eglot server project."
   (with-temp-buffer
     (setq-local buffer-file-name "/tmp/repo/src/main.rs")
     (setq-local eglot--managed-mode t)
@@ -166,7 +193,7 @@
       (cl-letf (((symbol-function 'eglot-current-server) (lambda (&rest _) 'mock-server))
                 ((symbol-function 'eglot-project) (lambda (&rest _) '(project . "/tmp/repo/")))
                 ((symbol-function 'project-root) (lambda (proj) (cdr proj))))
-        (should (equal (kargu--project-root) "/tmp/repo/"))))))
+        (should (equal (kargu-lsp-project-root) "/tmp/repo/"))))))
 
 (ert-deftest kargu-project-root-follows-eglot-not-temp-directory ()
   "A buffer under /tmp/ does not replace the Eglot server's project."
@@ -187,7 +214,7 @@
                          '(eglot--project . "/home/emrehan/kod/try/dikte/")))
                       ((symbol-function 'project-root)
                        (lambda (proj) (cdr proj))))
-              (should (equal (kargu--project-root)
+              (should (equal (kargu-lsp-project-root)
                              "/home/emrehan/kod/try/dikte/"))
               (should (kargu-eglot-connected-p)))))
       (when (buffer-live-p managed) (kill-buffer managed)))))
@@ -215,7 +242,7 @@
   (let* ((mock-root (file-name-as-directory (expand-file-name "/tmp/mock-project")))
          (mock-file-1 (expand-file-name "src/lib.rs" mock-root))
          (mock-file-2 (expand-file-name "src/main.rs" mock-root)))
-    (cl-letf (((symbol-function 'kargu--project-root) (lambda () mock-root))
+    (cl-letf (((symbol-function 'kargu-lsp-project-root) (lambda () mock-root))
               ((symbol-function 'flymake--project-diagnostics)
                (lambda (&rest _)
                  (list 'diag-1 'diag-2 'diag-3)))

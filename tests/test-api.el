@@ -24,6 +24,96 @@
 (defvar kargu-api-stall-timeout)
 (defvar kargu-api-stream-ceiling)
 
+(ert-deftest kargu-api-stale-callback-keeps-new-process-test ()
+  "Old plain and streaming completions cannot clear a new request."
+  (dolist (stream '(nil t))
+    (let ((kargu--generation 10)
+          (kargu--current-process nil)
+          then else delivered)
+      (cl-letf (((symbol-function 'plz)
+                 (lambda (_method _url &rest options)
+                   (setq then (plist-get options :then)
+                         else (plist-get options :else))
+                   'old-process)))
+        (if stream
+            (kargu--api-post-streaming "https://example.invalid" nil nil 10
+                                       (lambda (_) (setq delivered t)) #'ignore)
+          (kargu--api-post-plain "https://example.invalid" nil nil 10
+                                 (lambda (_) (setq delivered t))))
+        (setq kargu--generation 11 kargu--current-process 'new-process)
+        (funcall then "{}")
+        (should (eq kargu--current-process 'new-process))
+        (funcall else nil)
+        (should (eq kargu--current-process 'new-process))
+        (should-not delivered)))))
+
+(ert-deftest kargu-api-completion-is-delivered-once-test ()
+  "A repeated transport completion delivers its result only once."
+  (dolist (stream '(nil t))
+    (let ((kargu--generation 20)
+          (kargu--current-process nil)
+          then else (delivered 0))
+      (cl-letf (((symbol-function 'plz)
+                 (lambda (_method _url &rest options)
+                   (setq then (plist-get options :then)
+                         else (plist-get options :else))
+                   nil))
+                ((symbol-function 'kargu--api-handle-body)
+                 (lambda (_body callback &rest _) (funcall callback 'ok))))
+        (if stream
+            (kargu--api-post-streaming "https://example.invalid" nil nil 20
+                                       (lambda (_) (cl-incf delivered)) #'ignore)
+          (kargu--api-post-plain "https://example.invalid" nil nil 20
+                                 (lambda (_) (cl-incf delivered))))
+        (funcall then "{}")
+        (funcall then "{}")
+        (funcall else nil)
+        (should (= delivered 1))))))
+
+(ert-deftest kargu-api-stream-flush-forwards-final-event-test ()
+  "A final SSE line without a newline reaches both consumers."
+  (with-temp-buffer
+    (let* ((kargu--generation 30)
+           (kargu--current-process nil)
+           (process (make-pipe-process :name "kargu-flush" :buffer (current-buffer)))
+           events parsed
+           (request (kargu-http--make-request
+                     :generation 30 :process process :attempt 0
+                     :on-delta (lambda (event) (push event events)))))
+      (unwind-protect
+          (progn
+            (process-put process :kargu-raw "data: {\"choices\":[]}")
+            (cl-letf (((symbol-function 'kargu--api-handle-body)
+                       (lambda (&rest args) (setq parsed (nth 8 args)))))
+              (kargu-http--finish-stream request ""))
+            (should (= (length events) 1))
+            (should (equal events parsed)))
+        (delete-process process)))))
+
+(ert-deftest kargu-api-sse-preserves-split-utf8-and-match-data-test ()
+  "Split UTF-8 bytes reconstruct one event without leaking callback matches."
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (let* ((process (make-pipe-process :name "kargu-utf8" :buffer (current-buffer)))
+           (raw (encode-coding-string "data: {\"content\":\"ğ🙂\"}\n" 'utf-8))
+           (split (1+ (string-search (encode-coding-string "ğ" 'utf-8) raw)))
+           events
+           (callback (lambda (event)
+                       (string-match "changed" "changed")
+                       (push event events))))
+      (unwind-protect
+          (progn
+            (string-match "saved" "saved")
+            (let ((saved (match-data)))
+              (kargu--stream-filter process (substring raw 0 split) callback)
+              (should-not events)
+              (kargu--stream-filter process (substring raw split) callback)
+              (should (equal (match-data) saved)))
+            (should (= (length events) 1))
+            (should (equal (kargu-aget (car events) "content") "ğ🙂"))
+            (should (equal (buffer-string) raw)))
+        (delete-process process)))))
+
 (declare-function kargu-api-chat-url "kargu/api/wire" (base format))
 (declare-function kargu-api-prepare-payload "kargu/api/wire" (payload format))
 (declare-function kargu-api-normalize-response "kargu/api/wire" (response))
@@ -200,9 +290,9 @@
 (ert-deftest kargu-stream-tool-calls-keep-name-and-get-an-id-test ()
   "An empty later name does not erase the name; an empty id becomes call_N."
   (let* ((events (list '(("choices" . ((("delta" . (("tool_calls" . ((("index" . 0)
-                                                                        ("function" . (("name" . "read_file") ("arguments" . "{\"a\":"))))))))))))
+                                                                      ("function" . (("name" . "read_file") ("arguments" . "{\"a\":"))))))))))))
                        '(("choices" . ((("delta" . (("tool_calls" . ((("index" . 0) ("id" . "")
-                                                                        ("function" . (("name" . "") ("arguments" . "1}"))))))))
+                                                                      ("function" . (("name" . "") ("arguments" . "1}"))))))))
                                         ("finish_reason" . "tool_calls")))))))
          (resp (kargu--accumulate-stream-deltas events))
          (call (car (kargu-aget (kargu-aget (car (kargu-aget resp "choices")) "message") "tool_calls"))))

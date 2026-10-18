@@ -1,4 +1,4 @@
-;;; kargu/permission/bash.el --- Shell command validation -*- lexical-binding: t; -*-
+;;; bash.el --- Shell command validation -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -107,7 +107,7 @@ sees, so it needs an explicit human approval."
     (nreverse (delete-dups risks))))
 
 (defun kargu-permission--validate-cwd (effective-cwd effective-root cwd)
-  "Signal an error if EFFECTIVE-CWD is not within EFFECTIVE-ROOT."
+  "Check EFFECTIVE-CWD against EFFECTIVE-ROOT, reporting the supplied CWD."
   (unless (kargu-permission-within-project-p effective-cwd effective-root)
     (error (concat "Permission denied: working directory '%s' is outside the permitted workspace boundary.\n"
                    "  - Attempted working directory: '%s' (resolved to '%s')\n"
@@ -116,8 +116,37 @@ sees, so it needs an explicit human approval."
                    "  - Guidance: You do not have permission to run commands outside '%s'. Please set 'cwd' to a subdirectory within the project root or omit 'cwd' to run directly in the project root.")
            (or cwd "") (or cwd "") effective-cwd effective-root effective-root)))
 
+(defconst kargu-permission--traversal-error
+  (concat "Permission denied: path traversal '%s' escapes the permitted workspace boundary.\n"
+          "  - Attempted path: '%s' (resolved to '%s')\n"
+          "  - Allowed project root: '%s'\n"
+          "  - Reason: Directory traversal (..) attempting to escape the project boundary is prohibited.\n"
+          "  - Guidance: You only have permission to execute commands and access files within '%s'. Please modify your command to operate strictly inside the project root.")
+  "Refusal template for a traversal outside the workspace.")
+
+(defconst kargu-permission--symlink-error
+  (concat "Permission denied: '%s' resolves outside the permitted workspace boundary "
+          "(a symbolic link points out of '%s').")
+  "Refusal template for a symlink outside the workspace.")
+
+(defconst kargu-permission--home-path-error
+  (concat "Permission denied: home directory path '%s' escapes the permitted workspace boundary.\n"
+          "  - Attempted path: '%s' (resolved to '%s')\n"
+          "  - Allowed project root: '%s'\n"
+          "  - Reason: Accessing files in the user's home directory outside the project root is prohibited.\n"
+          "  - Guidance: You do not have permission to access external home directories. Please only work inside '%s'.")
+  "Refusal template for a home-path outside the workspace.")
+
+(defconst kargu-permission--system-path-error
+  (concat "Permission denied: external system path '%s' is outside the permitted workspace boundary.\n"
+          "  - Attempted path: '%s'\n"
+          "  - Allowed project root: '%s'\n"
+          "  - Reason: Absolute system paths outside the project root are prohibited (only standard system binaries and device sinks are permitted).\n"
+          "  - Guidance: You do not have permission to access '%s'. You must restrict all script executions, file creations, and inspections to within '%s'.")
+  "Refusal template for a system-path outside the workspace.")
+
 (defun kargu-permission--validate-token (tok-cons effective-cwd effective-root)
-  "Validate token cons (TYPE . TOK) against EFFECTIVE-CWD and EFFECTIVE-ROOT."
+  "Validate TOK-CONS against EFFECTIVE-CWD and EFFECTIVE-ROOT."
   (let* ((type (car tok-cons))
          (tok (cdr tok-cons)))
     (cond
@@ -126,11 +155,7 @@ sees, so it needs an explicit human approval."
           (string= tok ".."))
       (let ((expanded (expand-file-name tok effective-cwd)))
         (unless (kargu-permission-within-project-p expanded effective-root)
-          (error (concat "Permission denied: path traversal '%s' escapes the permitted workspace boundary.\n"
-                         "  - Attempted path: '%s' (resolved to '%s')\n"
-                         "  - Allowed project root: '%s'\n"
-                         "  - Reason: Directory traversal (..) attempting to escape the project boundary is prohibited.\n"
-                         "  - Guidance: You only have permission to execute commands and access files within '%s'. Please modify your command to operate strictly inside the project root.")
+          (error kargu-permission--traversal-error
                  tok tok expanded effective-root effective-root))))
      ((and (not (string-prefix-p "-" tok))
            (not (string-prefix-p "/" tok))
@@ -139,17 +164,12 @@ sees, so it needs an explicit human approval."
            (file-exists-p (expand-file-name tok effective-cwd))
            (not (kargu-permission-within-project-p
                  (expand-file-name tok effective-cwd) effective-root)))
-      (error (concat "Permission denied: '%s' resolves outside the permitted workspace boundary "
-                     "(a symbolic link points out of '%s').")
+      (error kargu-permission--symlink-error
              tok effective-root))
      ((string-prefix-p "~" tok)
       (let ((expanded (expand-file-name tok)))
         (unless (kargu-permission-within-project-p expanded effective-root)
-          (error (concat "Permission denied: home directory path '%s' escapes the permitted workspace boundary.\n"
-                         "  - Attempted path: '%s' (resolved to '%s')\n"
-                         "  - Allowed project root: '%s'\n"
-                         "  - Reason: Accessing files in the user's home directory outside the project root is prohibited.\n"
-                         "  - Guidance: You do not have permission to access external home directories. Please only work inside '%s'.")
+          (error kargu-permission--home-path-error
                  tok tok expanded effective-root effective-root))))
      ((string-prefix-p "/" tok)
       (cond
@@ -158,11 +178,7 @@ sees, so it needs an explicit human approval."
        ((string-prefix-p "/dev/fd/" tok) nil)
        ((and (eq type :word) (kargu-permission-allowed-binary-p tok)) nil)
        (t
-        (error (concat "Permission denied: external system path '%s' is outside the permitted workspace boundary.\n"
-                       "  - Attempted path: '%s'\n"
-                       "  - Allowed project root: '%s'\n"
-                       "  - Reason: Absolute system paths outside the project root are prohibited (only standard system binaries and device sinks are permitted).\n"
-                       "  - Guidance: You do not have permission to access '%s'. You must restrict all script executions, file creations, and inspections to within '%s'.")
+        (error kargu-permission--system-path-error
                tok tok effective-root tok effective-root)))))))
 
 (defun kargu-permission-validate-command (command &optional root cwd)
@@ -170,7 +186,7 @@ sees, so it needs an explicit human approval."
 Signal an error if any path argument, redirection, or traversal
 escapes ROOT."
   (unless (and (stringp command) (not (string-empty-p (string-trim command))))
-    (error "command must be a non-empty string"))
+    (error "Command must be a non-empty string"))
   (when kargu-permission-strict-mode
     (let* ((effective-root (file-name-as-directory
                             (file-truename (or root (kargu-permission-project-root)))))
@@ -188,4 +204,4 @@ escapes ROOT."
 
 (provide 'kargu/permission/bash)
 
-;;; kargu/permission/bash.el ends here
+;;; bash.el ends here

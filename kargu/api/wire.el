@@ -1,4 +1,4 @@
-;;; kargu/api/wire.el --- Format-record request and response bridge -*- lexical-binding: t; -*-
+;;; wire.el --- Format-record request and response bridge -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -21,7 +21,7 @@
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-format-record "kargu/providers/registry" (format))
-(declare-function kargu--provider-name "kargu/config/schema" ())
+(declare-function kargu--provider-name "kargu/config/key" ())
 
 (defun kargu-api--as-list (value)
   "VALUE as a list.  Vectors become lists.  Other types become nil."
@@ -278,4 +278,4 @@ A blocks body becomes one choice.  Bodies that already have
 
 (provide 'kargu/api/wire)
 
-;;; kargu/api/wire.el ends here
+;;; wire.el ends here

@@ -19,6 +19,27 @@
 (declare-function kargu-chat--tool-heading "kargu/chat/render" (name arguments))
 (declare-function kargu-chat--result-summary "kargu/chat/render" (result))
 
+(ert-deftest kargu-chat-inline-thoughts-preserve-match-data-test ()
+  "Multiple inline thought blocks render in order without leaking matches."
+  (with-temp-buffer
+    (let ((kargu-chat--streamed-text nil)
+          (kargu-chat--in-thought nil)
+          (kargu-chat--preamble-dropped nil)
+          chunks)
+      (string-match "value" "saved value")
+      (let ((saved (match-data)))
+        (cl-letf (((symbol-function 'kargu-chat-output-buffer) #'current-buffer)
+                  ((symbol-function 'kargu-chat-insert)
+                   (lambda (text &optional face)
+                     (string-match "changed" "changed")
+                     (push (cons text face) chunks))))
+          (kargu-chat--on-delta "A<think>B</think>C<think>D</think>E"))
+        (should (equal (match-data) saved)))
+      (should (equal (nreverse chunks)
+                     '(("A") ("B" . kargu-chat-thought) ("C")
+                       ("D" . kargu-chat-thought) ("E"))))
+      (should-not kargu-chat--in-thought))))
+
 (ert-deftest kargu-chat-context-usage-footer-test ()
   "Test that context usage is accurately calculated and rendered."
   (kargu-model-set-metadata "gemini-2.5-flash" '(("context_length" . 1000000)))
@@ -32,6 +53,63 @@
     ;; Verify footer contains context info
     (let ((footer (kargu-chat--footer-string)))
       (should (string-match-p "ctx:" footer)))))
+
+(ert-deftest kargu-chat-thought-tags-survive-every-chunk-boundary-test ()
+  "Reasoning markers split at any byte preserve content and faces."
+  (let ((text "A<think>B</think>C"))
+    (dotimes (split (length text))
+      (with-temp-buffer
+        (let ((kargu-chat--streamed-text nil)
+              (kargu-chat--in-thought nil)
+              (kargu-chat--preamble-dropped nil))
+          (cl-letf (((symbol-function 'kargu-chat-insert)
+                     (lambda (value &optional face)
+                       (insert (propertize value 'face face)))))
+            (kargu-chat--stream-delta (substring text 0 split) nil)
+            (kargu-chat--stream-delta (substring text split) nil)
+            (kargu-chat-flush-stream))
+          (should (equal (buffer-string) "ABC"))
+          (should-not (get-text-property 1 'face))
+          (should (eq (get-text-property 2 'face) 'kargu-chat-thought))
+          (should-not (get-text-property 3 'face)))))))
+
+(ert-deftest kargu-chat-trailing-thought-prefix-is-preserved-test ()
+  "An incomplete marker at the end remains literal transcript text."
+  (with-temp-buffer
+    (let ((kargu-chat--streamed-text nil)
+          (kargu-chat--in-thought nil)
+          (kargu-chat--preamble-dropped nil))
+      (cl-letf (((symbol-function 'kargu-chat-insert)
+                 (lambda (text &optional _face) (insert text))))
+        (kargu-chat--stream-delta "literal <thi" nil)
+        (should (equal (buffer-string) "literal "))
+        (kargu-chat-flush-stream)
+        (should (equal (buffer-string) "literal <thi"))))))
+
+(ert-deftest kargu-chat-project-buffer-does-not-overwrite-another-test ()
+  "Opening another project preserves the first project's live chat."
+  (let* ((temp (make-temp-file "kargu-project-chats-" t))
+         (kargu-sessions-directory (expand-file-name "sessions" temp))
+         (kargu-chat-buffer-name "*kargu-project-chats-test*")
+         (kargu-session-auto-restore nil)
+         (a (expand-file-name "a" temp))
+         (b (expand-file-name "b" temp))
+         first second)
+    (unwind-protect
+        (progn
+          (make-directory a t)
+          (make-directory b t)
+          (cl-letf (((symbol-function 'kargu-chat-check-and-display-missing-tools) #'ignore))
+            (setq first (kargu-chat--buffer a)
+                  second (kargu-chat--buffer b)))
+          (should-not (eq first second))
+          (should (equal (buffer-local-value 'kargu-chat--project-root first)
+                         (file-name-as-directory (file-truename a))))
+          (should (equal (buffer-local-value 'kargu-chat--project-root second)
+                         (file-name-as-directory (file-truename b)))))
+      (when (buffer-live-p first) (kill-buffer first))
+      (when (buffer-live-p second) (kill-buffer second))
+      (delete-directory temp t))))
 
 (ert-deftest kargu-chat-multiple-buffers-test ()
   "Test creating and switching multiple independent chat buffers."
@@ -88,92 +166,92 @@
 (ert-deftest kargu-chat-company-at-mention-test ()
   "Test that `@' mention completion works at prompt and restores cleanly."
   (kargu-test-with-git-repo '(("tests/test-git.el" . "x") ("tests/test-fs.el" . "y") ("main.el" . "z"))
-  (let ((chat-buf (get-buffer-create "*kargu-chat-complete-test*")))
-    (unwind-protect
-        (with-current-buffer chat-buf
-          (kargu-chat-mode)
-          (kargu-chat--ensure-idle-prompt)
-          (goto-char (point-max))
-          ;; Initial prompt state must have kargu-chat-company
-          (should (equal company-backends '(kargu-chat-company)))
-          (should (= company-minimum-prefix-length 1))
-          ;; Type `@'
-          (insert "@")
-          (should (equal (kargu-chat--at-prefix) "@"))
-          (let ((cands (kargu-chat-company 'candidates "@")))
-            (should (listp cands))
-            (should (> (length cands) 0)))
-          ;; Rogue company-backend clearing
-          (let ((rogue (lambda (&rest _) nil)))
-            (setq company-backend rogue)
-            (kargu-chat--maybe-company)
-            (should-not (eq company-backend rogue))
-            (should (equal company-backends '(kargu-chat-company))))
-          (setq company-backend nil)
-          ;; Typing `@' calls maybe-company which triggers company-manual-begin
-          (let ((triggered nil))
-            (cl-letf (((symbol-function 'company-manual-begin) (lambda () (setq triggered t))))
-              (kargu-chat--maybe-company)
-              (should triggered)))
-          ;; Test symbol completion candidates with LSP symbols
-          (cl-letf (((symbol-function 'kargu-lsp-all-symbols)
-                     (lambda (&optional _q _r)
-                       '(("/path/to/main.go" 42 "CalcTotal" "Function")
-                         ("/path/to/user.go" 10 "UserStruct" "Struct")))))
-            ;; Query without ::
-            (let ((sym-cands (kargu-chat--symbol-candidates "Calc")))
-              (should (listp sym-cands))
-              (should (> (length sym-cands) 0))
-              (should (cl-some (lambda (c) (string-match-p "CalcTotal" c)) sym-cands)))
-            ;; Query with :: delimiter
-            (let ((cands (kargu-chat-company 'candidates "@main.go::Calc")))
-              (should (listp cands))
-              (should (> (length cands) 0))
-              (should (cl-some (lambda (c) (string-match-p "CalcTotal" c)) cands))))
-          ;; Ensure company-backends invariant holds
-          (should (equal company-backends '(kargu-chat-company)))
-          (should-not company-backend)
-          (should (= company-minimum-prefix-length 1)))
-      (kill-buffer chat-buf)))))
+                            (let ((chat-buf (get-buffer-create "*kargu-chat-complete-test*")))
+                              (unwind-protect
+                                  (with-current-buffer chat-buf
+                                    (kargu-chat-mode)
+                                    (kargu-chat--ensure-idle-prompt)
+                                    (goto-char (point-max))
+                                    ;; Initial prompt state must have kargu-chat-company
+                                    (should (equal company-backends '(kargu-chat-company)))
+                                    (should (= company-minimum-prefix-length 1))
+                                    ;; Type `@'
+                                    (insert "@")
+                                    (should (equal (kargu-chat--at-prefix) "@"))
+                                    (let ((cands (kargu-chat-company 'candidates "@")))
+                                      (should (listp cands))
+                                      (should (> (length cands) 0)))
+                                    ;; Rogue company-backend clearing
+                                    (let ((rogue (lambda (&rest _) nil)))
+                                      (setq company-backend rogue)
+                                      (kargu-chat--maybe-company)
+                                      (should-not (eq company-backend rogue))
+                                      (should (equal company-backends '(kargu-chat-company))))
+                                    (setq company-backend nil)
+                                    ;; Typing `@' calls maybe-company which triggers company-manual-begin
+                                    (let ((triggered nil))
+                                      (cl-letf (((symbol-function 'company-manual-begin) (lambda () (setq triggered t))))
+                                        (kargu-chat--maybe-company)
+                                        (should triggered)))
+                                    ;; Test symbol completion candidates with LSP symbols
+                                    (cl-letf (((symbol-function 'kargu-lsp-all-symbols)
+                                               (lambda (&optional _q _r)
+                                                 '(("/path/to/main.go" 42 "CalcTotal" "Function")
+                                                   ("/path/to/user.go" 10 "UserStruct" "Struct")))))
+                                      ;; Query without ::
+                                      (let ((sym-cands (kargu-chat--symbol-candidates "Calc")))
+                                        (should (listp sym-cands))
+                                        (should (> (length sym-cands) 0))
+                                        (should (cl-some (lambda (c) (string-match-p "CalcTotal" c)) sym-cands)))
+                                      ;; Query with :: delimiter
+                                      (let ((cands (kargu-chat-company 'candidates "@main.go::Calc")))
+                                        (should (listp cands))
+                                        (should (> (length cands) 0))
+                                        (should (cl-some (lambda (c) (string-match-p "CalcTotal" c)) cands))))
+                                    ;; Ensure company-backends invariant holds
+                                    (should (equal company-backends '(kargu-chat-company)))
+                                    (should-not company-backend)
+                                    (should (= company-minimum-prefix-length 1)))
+                                (kill-buffer chat-buf)))))
 (ert-deftest kargu-company-at-symbol-typing-cycle-test ()
   "Test that continuous typing after `@' preserves company-backend and handles kind/require-match."
   (kargu-test-with-git-repo '(("tests/test-git.el" . "x") ("tests/test-fs.el" . "y") ("main.el" . "z"))
-  (let ((chat-buf (get-buffer-create "*kargu-chat-typing-test*")))
-    (unwind-protect
-        (with-current-buffer chat-buf
-          (kargu-chat-mode)
-          (kargu-chat--ensure-idle-prompt)
-          (goto-char (point-max))
-          ;; 1. Verify kargu-chat-company protocol commands
-          (let ((file-cands (kargu-chat-company 'candidates "@tests/test-git.el")))
-            (should (consp file-cands))
-            (let ((cand (car file-cands)))
-              (should (equal (get-text-property 0 'company-backend cand) 'kargu-chat-company))
-              (should (equal (kargu-chat-company 'kind cand) 'file))
-              (should (stringp (kargu-chat-company 'meta cand)))))
-          (should (eq (kargu-chat-company 'require-match) 'never))
+                            (let ((chat-buf (get-buffer-create "*kargu-chat-typing-test*")))
+                              (unwind-protect
+                                  (with-current-buffer chat-buf
+                                    (kargu-chat-mode)
+                                    (kargu-chat--ensure-idle-prompt)
+                                    (goto-char (point-max))
+                                    ;; 1. Verify kargu-chat-company protocol commands
+                                    (let ((file-cands (kargu-chat-company 'candidates "@tests/test-git.el")))
+                                      (should (consp file-cands))
+                                      (let ((cand (car file-cands)))
+                                        (should (equal (get-text-property 0 'company-backend cand) 'kargu-chat-company))
+                                        (should (equal (kargu-chat-company 'kind cand) 'file))
+                                        (should (stringp (kargu-chat-company 'meta cand)))))
+                                    (should (eq (kargu-chat-company 'require-match) 'never))
 
-          ;; 2. Simulate typing `@' followed by incremental characters
-          (insert "@")
-          (kargu-chat--maybe-company)
-          (should (equal company-backend 'kargu-chat-company))
-          (should (consp company-candidates))
+                                    ;; 2. Simulate typing `@' followed by incremental characters
+                                    (insert "@")
+                                    (kargu-chat--maybe-company)
+                                    (should (equal company-backend 'kargu-chat-company))
+                                    (should (consp company-candidates))
 
-          ;; 3. Insert character while completion is active
-          (insert "s")
-          (kargu-chat--maybe-company)
-          ;; company-backend must NOT be reset to nil
-          (should (equal company-backend 'kargu-chat-company))
+                                    ;; 3. Insert character while completion is active
+                                    (insert "s")
+                                    (kargu-chat--maybe-company)
+                                    ;; company-backend must NOT be reset to nil
+                                    (should (equal company-backend 'kargu-chat-company))
 
-          ;; 4. Verify kind call on candidate works cleanly (no void: nil error)
-          (let ((kind (company-call-backend 'kind (car company-candidates))))
-            (should (memq kind '(file function variable struct method))))
+                                    ;; 4. Verify kind call on candidate works cleanly (no void: nil error)
+                                    (let ((kind (company-call-backend 'kind (car company-candidates))))
+                                      (should (memq kind '(file function variable struct method))))
 
-          ;; 5. Even if company-backend were forced to nil, candidate property prevents crash
-          (setq company-backend nil)
-          (let ((cand (car (kargu-chat-company 'candidates "@tests"))))
-            (should (equal (company-call-backend 'kind cand) 'file))))
-      (kill-buffer chat-buf)))))
+                                    ;; 5. Even if company-backend were forced to nil, candidate property prevents crash
+                                    (setq company-backend nil)
+                                    (let ((cand (car (kargu-chat-company 'candidates "@tests"))))
+                                      (should (equal (company-call-backend 'kind cand) 'file))))
+                                (kill-buffer chat-buf)))))
 (ert-deftest kargu-chat-request-uses-the-buffer-model-test ()
   "A request from a chat carries that chat's model, and the other chat keeps its own."
   (let ((buf1 (get-buffer-create "*kargu-chat-sel-1*"))

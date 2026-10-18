@@ -1,4 +1,4 @@
-;;; kargu/permission/policy.el --- Approval confirmation UI -*- lexical-binding: t; -*-
+;;; policy.el --- Approval confirmation UI -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -50,15 +50,15 @@ never by waiting."
    :details (format "Command: $ %s\nDirectory: %s"
                     (kargu-permission--shown-command command risks) dir)
    :actions '((:key :approve
-               :label "[✓ Approve]"
-               :face (:inherit success :weight bold)
-               :help "Click to approve and execute command"
-               :message "     -> [✓ Approved, executing...]\n\n")
+                    :label "[✓ Approve]"
+                    :face (:inherit success :weight bold)
+                    :help "Click to approve and execute command"
+                    :message "     -> [✓ Approved, executing...]\n\n")
               (:key :reject
-               :label "[✗ Reject]"
-               :face (:inherit error :weight bold)
-               :help "Click to reject command"
-               :message "     -> [✗ Rejected]\n\n"))
+                    :label "[✗ Reject]"
+                    :face (:inherit error :weight bold)
+                    :help "Click to reject command"
+                    :message "     -> [✗ Rejected]\n\n"))
    :chat-buffer (and (bound-and-true-p kargu--loop-run)
                      (plist-get kargu--loop-run :chat-buffer))
    :fallback-prompt (format "Execute Kargu command? $ %s (dir: %s) "
@@ -69,8 +69,8 @@ never by waiting."
                   (funcall on-decision (eq decision :approve)))))
 
 (defun kargu-permission-request-approval-async (command dir risks on-decision)
-  "Decide whether COMMAND may run in DIR and pass the verdict to ON-DECISION.
-The verdict is t or nil.  Nothing blocks: a human answer arrives by callback."
+  "Evaluate RISKS for COMMAND in DIR and send the verdict to ON-DECISION.
+Request a human decision asynchronously when necessary."
   (pcase (kargu-permission--auto-decision risks)
     ('approve (funcall on-decision t))
     ('reject (funcall on-decision nil))
@@ -86,9 +86,8 @@ or `kargu-permission-call-async' for that."
   (eq (kargu-permission--auto-decision risks) 'approve))
 
 (defun kargu-permission-approve (command dir &optional risks)
-  "Return t when COMMAND in DIR is approved, or nil when it is rejected.
-Inside `kargu-permission-call-async' an unanswered request unwinds the tool
-body to ask the human; the body then runs again with the approval recorded."
+  "Return approval for COMMAND in DIR after evaluating optional RISKS.
+Inside asynchronous permission handling, defer an unanswered request."
   (cond
    ((member command kargu-permission--preapproved) t)
    ((and kargu-permission--deferring
@@ -112,10 +111,13 @@ becomes an ERROR result.  PREAPPROVED lists commands already approved."
   (let* ((kargu-permission--preapproved preapproved)
          (in-catch t)
          (early :pending)
+         (delivered nil)
          (done (lambda (result)
-                 (if in-catch
-                     (setq early result)
-                   (funcall callback result))))
+                 (unless delivered
+                   (setq delivered t)
+                   (if in-catch
+                       (setq early result)
+                     (funcall callback result)))))
          (request (catch 'kargu-permission-defer
                     (let ((kargu-permission--deferring t))
                       (kargu-permission--run-thunk thunk done))
@@ -126,7 +128,8 @@ becomes an ERROR result.  PREAPPROVED lists commands already approved."
      ((not (eq early :pending)) (funcall callback early)))))
 
 (defun kargu-permission--defer-to-user (request thunk callback preapproved)
-  "Ask about REQUEST, then re-run THUNK or report the rejection to CALLBACK."
+  "Ask about REQUEST and resume THUNK with PREAPPROVED commands.
+Report rejection or the resumed result to CALLBACK."
   (pcase-let ((`(,command ,dir ,risks) request))
     (kargu-permission-request-approval-async
      command dir risks
@@ -138,4 +141,4 @@ becomes an ERROR result.  PREAPPROVED lists commands already approved."
 
 (provide 'kargu/permission/policy)
 
-;;; kargu/permission/policy.el ends here
+;;; policy.el ends here

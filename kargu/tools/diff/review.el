@@ -1,4 +1,4 @@
-;;; kargu/tools/diff/review.el --- Ediff review sessions and interactive interaction -*- lexical-binding: t; -*-
+;;; review.el --- Ediff review sessions and interactive interaction -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -61,8 +61,25 @@ our quit hook, e.g. it was killed directly."
       (kargu-diff--abort-session session t)
       (kargu-log 'warn "diff: dropped abandoned review for %s" path))))
 
+(defun kargu-diff--close-review-control (control)
+  "Close review CONTROL without running its completion hook."
+  (when (buffer-live-p control)
+    (with-current-buffer control
+      (remove-hook 'ediff-quit-hook #'kargu-diff--ediff-quit t)
+      (when (boundp 'ediff-quit-hook)
+        (setq ediff-quit-hook
+              (remq #'kargu-diff--ediff-quit ediff-quit-hook)))
+      (condition-case-unless-debug _err
+          (with-current-buffer control
+            (if (fboundp 'ediff-really-quit)
+                (ediff-really-quit nil)
+              (kill-buffer control)))
+        (error
+         (when (buffer-live-p control)
+           (kill-buffer control)))))))
+
 (defun kargu-diff--abort-session (session &optional silent)
-  "Cancel the active review for SESSION."
+  "Cancel review SESSION without notification when SILENT is non-nil."
   (let ((path (plist-get session :path))
         (buf-a (plist-get session :buffer-a))
         (shadow (plist-get session :shadow-buffer))
@@ -77,20 +94,7 @@ our quit hook, e.g. it was killed directly."
           (erase-buffer)
           (insert original)
           (set-buffer-modified-p nil))))
-    (when (buffer-live-p control)
-      (with-current-buffer control
-        (remove-hook 'ediff-quit-hook #'kargu-diff--ediff-quit t)
-        (when (boundp 'ediff-quit-hook)
-          (setq ediff-quit-hook
-                (remq #'kargu-diff--ediff-quit ediff-quit-hook)))
-        (condition-case-unless-debug _err
-            (with-current-buffer control
-              (if (fboundp 'ediff-really-quit)
-                  (ediff-really-quit nil)
-                (kill-buffer control)))
-          (error
-           (when (buffer-live-p control)
-             (kill-buffer control))))))
+    (kargu-diff--close-review-control control)
     (when (buffer-live-p shadow)
       (with-current-buffer shadow (set-buffer-modified-p nil))
       (kill-buffer shadow))
@@ -162,8 +166,8 @@ Called when a run ends without its answer, so no ediff outlives its run."
                       (kargu-diff--restore-wconfig wconfig)
                       (run-at-time 0 nil
                                    (lambda (buf)
-                                      (when (buffer-live-p buf)
-                                        (kill-buffer buf)))
+                                     (when (buffer-live-p buf)
+                                       (kill-buffer buf)))
                                    buf-orig))
                     nil t)
           (add-hook 'kill-buffer-hook
@@ -171,17 +175,16 @@ Called when a run ends without its answer, so no ediff outlives its run."
                       (kargu-diff--restore-wconfig wconfig)
                       (run-at-time 0 nil
                                    (lambda (buf)
-                                      (when (buffer-live-p buf)
-                                        (kill-buffer buf)))
+                                     (when (buffer-live-p buf)
+                                       (kill-buffer buf)))
                                    buf-orig))
                     nil t)))
       ctl)))
 
 (defun kargu-diff-review (&optional file-path)
-  "Review changes made to FILE-PATH in ediff against the pre-agent snapshot.
-Buffer A (left) displays the original pre-agent snapshot, and Buffer B
-(right) displays the current file buffer.  Ediff's native `a' key can
-selectively revert individual hunks back to the original version."
+  "Review FILE-PATH against its pre-agent snapshot in Ediff.
+Buffer A holds the original text and buffer B the current file.
+Use the Ediff command `ediff-copy-A-to-B' to revert individual hunks."
   (interactive
    (list (let ((paths (or (and (boundp 'kargu-diff--run-modified-files)
                                kargu-diff--run-modified-files)
@@ -191,10 +194,10 @@ selectively revert individual hunks back to the original version."
                                 nil nil (car paths))
              (user-error "No modified files or rollback snapshots available")))))
   (let* ((path (kargu-permission-resolve (or file-path
-                                        (car (or (and (boundp 'kargu-diff--run-modified-files)
-                                                      kargu-diff--run-modified-files)
-                                                 (kargu-diff-snapshot-paths))))
-                                        "file"))
+                                             (car (or (and (boundp 'kargu-diff--run-modified-files)
+                                                           kargu-diff--run-modified-files)
+                                                      (kargu-diff-snapshot-paths))))
+                                         "file"))
          (stack (gethash path kargu-diff--snapshots)))
     (unless stack
       (user-error "No rollback snapshot recorded for %s" path))
@@ -203,7 +206,7 @@ selectively revert individual hunks back to the original version."
       (kargu-diff--rollback-review path original))))
 
 (defun kargu-diff--setup-ediff-control (control path wconfig)
-  "Configure hooks on ediff CONTROL buffer for PATH."
+  "Configure review CONTROL for PATH, restoring WCONFIG after completion."
   (let ((ctrl-buf (if (bufferp control)
                       control
                     (and (stringp control) (get-buffer control)))))
@@ -220,8 +223,26 @@ selectively revert individual hunks back to the original version."
                   nil t)))
     ctrl-buf))
 
+(defun kargu-diff--open-review-control (path buf-a shadow)
+  "Start an Ediff review for PATH using BUF-A and SHADOW."
+  (condition-case-unless-debug err
+      (let ((ediff-window-setup-function (if (boundp 'kargu-diff-ediff-window-setup-function)
+                                             (or kargu-diff-ediff-window-setup-function #'ediff-setup-windows-plain)
+                                           #'ediff-setup-windows-plain))
+            (ediff-split-window-function (if (boundp 'kargu-diff-ediff-split-window-function)
+                                             (or kargu-diff-ediff-split-window-function #'split-window-horizontally)
+                                           #'split-window-horizontally)))
+        (ediff-buffers buf-a shadow))
+    (error
+     (remhash path kargu-diff--sessions)
+     (when (buffer-live-p shadow) (kill-buffer shadow))
+     (kargu-diff--maybe-drop-hook)
+     (error "Could not start ediff review: %s"
+            (error-message-string err)))))
+
 (defun kargu-diff--apply-interactive (path buf-a original new-content exists callback)
-  "Stage NEW-CONTENT in a shadow buffer and launch interactive ediff review."
+  "Review NEW-CONTENT for PATH in BUF-A, reporting to CALLBACK.
+Record ORIGINAL and whether the file already EXISTS."
   (let* ((wconfig (current-window-configuration))
          (shadow (kargu-diff--make-shadow path new-content))
          (snap (list :content original
@@ -244,20 +265,7 @@ selectively revert individual hunks back to the original version."
     (add-hook 'ediff-quit-hook #'kargu-diff--ediff-quit)
     (when (fboundp 'kargu-notify)
       (kargu-notify 'permission))
-    (let ((control (condition-case-unless-debug err
-                       (let ((ediff-window-setup-function (if (boundp 'kargu-diff-ediff-window-setup-function)
-                                                             (or kargu-diff-ediff-window-setup-function #'ediff-setup-windows-plain)
-                                                           #'ediff-setup-windows-plain))
-                             (ediff-split-window-function (if (boundp 'kargu-diff-ediff-split-window-function)
-                                                             (or kargu-diff-ediff-split-window-function #'split-window-horizontally)
-                                                           #'split-window-horizontally)))
-                         (ediff-buffers buf-a shadow))
-                     (error
-                      (remhash path kargu-diff--sessions)
-                      (when (buffer-live-p shadow) (kill-buffer shadow))
-                      (kargu-diff--maybe-drop-hook)
-                      (error "Could not start ediff review: %s"
-                             (error-message-string err))))))
+    (let ((control (kargu-diff--open-review-control path buf-a shadow)))
       (plist-put session :ediff-control (kargu-diff--setup-ediff-control control path wconfig)))
     (let ((outcome (list :status :staged :file path :saved nil)))
       (plist-put outcome :message (kargu-diff--describe outcome))
@@ -282,8 +290,8 @@ associated session by looking at ediff's buffer A and B."
     (kargu-diff--maybe-drop-hook)))
 
 (defun kargu-diff--evaluate-buffer-status (buf-a original proposal created-new)
-  "Evaluate review status in BUF-A compared to ORIGINAL and PROPOSAL.
-Returns `(STATUS . SAVED)'."
+  "Compare BUF-A to ORIGINAL and PROPOSAL, returning (STATUS . SAVED).
+Remove an untouched rejected file buffer when CREATED-NEW is non-nil."
   (if (not (buffer-live-p buf-a))
       (cons :rejected nil)
     (with-current-buffer buf-a
@@ -364,4 +372,4 @@ the session callback and schedules shadow cleanup."
 
 (provide 'kargu/tools/diff/review)
 
-;;; kargu/tools/diff/review.el ends here
+;;; review.el ends here
