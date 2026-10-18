@@ -111,16 +111,13 @@ The symbol `quit' cancels the read.")
 (defun kargu-fake--deliver (gen callback on-delta item)
   "Give ITEM to CALLBACK when GEN is still current.
 A cancelled generation drops the reply.  Deltas go out first.
-A successful body is stored in history, as the real transport does
-inside `kargu--api-handle-success'."
+The client, not this transport stub, stores the assistant turn."
   (when (= gen kargu--generation)
     (setq kargu-fake--delivered t)
     (dolist (piece (plist-get item :deltas))
       (when (functionp on-delta)
         (funcall on-delta (kargu-fake--delta piece))))
     (let ((response (kargu-fake--body item)))
-      (unless (kargu-response-error-message response)
-        (kargu--history-append-assistant response))
       (funcall callback response))))
 
 (defun kargu-fake--post (_url _headers payload gen callback &optional on-delta _attempt)

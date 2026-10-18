@@ -325,7 +325,6 @@ ATTEMPT is the retry count."
   (setq kargu--busy nil)
   (kargu-circuit-record-success)
   (kargu--record-usage response)
-  (kargu--history-append-assistant response)
   (funcall callback response))
 
 (defun kargu--api-dispatch-error (callback msg)

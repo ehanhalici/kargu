@@ -656,20 +656,31 @@
       (kill-buffer a) (kill-buffer b))))
 
 (ert-deftest kargu-test-connection-leaves-history-alone-test ()
-  "The connection test neither adds its ping nor the reply to the real history."
-  (let ((kargu--message-history (list '(("role" . "user") ("content" . "real"))))
-        (kargu--loop-run nil))
-    (cl-letf (((symbol-function 'kargu-circuit-allow-request-p) (lambda () t))
-              ((symbol-function 'kargu-api-send)
-               (lambda (_p cb &optional _d)
-                 ;; the http layer stores the reply into the current history
-                 (setq kargu--message-history
-                       (append kargu--message-history
-                               (list '(("role" . "assistant") ("content" . "pong")))))
-                 (funcall cb '(("choices" . ((("message" . (("content" . "pong")))))))))))
-      (kargu-test-connection)
-      (should (equal kargu--message-history
-                     (list '(("role" . "user") ("content" . "real"))))))))
+  "Pending, cancelled and completed pings never modify real conversation turns."
+  (dolist (outcome '(success error cancel))
+    (let* ((original (list '(("role" . "user") ("content" . "real"))))
+           (kargu--message-history original)
+           (kargu--loop-run nil) (kargu--busy nil)
+           (kargu-circuit--state :closed)
+           (kargu-circuit--probe-inflight nil)
+           held payload)
+      (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) "test-key"))
+                ((symbol-function 'kargu--api-base) (lambda (&rest _) "https://example.invalid"))
+                ((symbol-function 'plz)
+                 (lambda (_method _url &rest options)
+                   (setq held (plist-get options :then)
+                         payload (kargu--json-decode (plist-get options :body))) nil)))
+        (kargu-test-connection)
+        (should (eq kargu--message-history original))
+        (should-not (kargu-aget payload "tools"))
+        (should (= (length (kargu-aget payload "messages")) 2))
+        (should (< (length (kargu--json-encode payload)) 1000))
+        (setq kargu--message-history (append original '( (("role" . "user") ("content" . "new")))))
+        (let ((new-history kargu--message-history))
+          (when (eq outcome 'cancel) (kargu-api-cancel))
+          (funcall held (if (eq outcome 'error) "{\"error\":{\"message\":\"Rejected\"}}"
+                          "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"pong\"},\"finish_reason\":\"stop\"}]}"))
+          (should (eq kargu--message-history new-history)))))))
 
 (ert-deftest kargu-loop-refused-start-leaves-run-state-alone-test ()
   "A start refused by the preflight does not reset the run's diff files."

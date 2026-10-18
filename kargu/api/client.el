@@ -72,6 +72,11 @@ A busy client, a missing key, or a missing endpoint is refused first."
                          "CALLBACK must be callable: %S" callback)
   (kargu-contract-assert #'kargu-contract-callback-p on-delta
                          "ON-DELTA must be callable or nil: %S" on-delta)
+  (kargu-api--send :prompt prompt :callback callback :on-delta on-delta))
+
+(cl-defun kargu-api--send (&key prompt callback on-delta (record-turn t))
+  "Validate connection settings and send PROMPT to CALLBACK and ON-DELTA.
+RECORD-TURN permits storage of the reply in the active conversation."
   (let ((key (and (not kargu--busy) (kargu--resolve-api-key)))
         (base (and (not kargu--busy) (kargu--api-base))))
     (cond
@@ -83,26 +88,28 @@ A busy client, a missing key, or a missing endpoint is refused first."
       (kargu--api-refuse callback "no API endpoint: set api on the active provider"))
      (t
       (kargu-api--send-turn :prompt prompt :callback callback :on-delta on-delta
-                            :key key :base base)))))
+                            :key key :base base :record-turn record-turn)))))
 
-(cl-defun kargu-api--send-turn (&key prompt callback on-delta key base)
+(cl-defun kargu-api--send-turn (&key prompt callback on-delta key base (record-turn t))
   "Append PROMPT and start a request using KEY and BASE.
-Deliver events to ON-DELTA and the response to CALLBACK."
+Deliver events to ON-DELTA and the response to CALLBACK.
+RECORD-TURN permits storage of the reply in the active conversation."
   (let ((added-prompt-p (and prompt (not (string-empty-p prompt)))))
     (when added-prompt-p (kargu--history-add "user" prompt))
     (condition-case-unless-debug err
         (progn
           (kargu--api-validate-preflight prompt)
           (kargu-api--start-turn :callback callback :on-delta on-delta
-                                 :key key :base base))
+                                 :key key :base base :record-turn record-turn))
       (error
        (kargu--api-cancel-busy)
        (kargu--api-rollback-prompt prompt added-prompt-p)
        (funcall callback (kargu--api-error-alist (error-message-string err)))))))
 
-(cl-defun kargu-api--start-turn (&key callback on-delta key base)
+(cl-defun kargu-api--start-turn (&key callback on-delta key base (record-turn t))
   "Post the validated history using KEY and BASE.
-Deliver events to ON-DELTA and the response to CALLBACK."
+Deliver events to ON-DELTA and the response to CALLBACK.
+RECORD-TURN permits storage of the reply in the active conversation."
   (let* ((gen (cl-incf kargu--generation))
          (fmt (kargu-api-active-format))
          (payload (kargu-api-prepare-payload (kargu--build-payload) fmt))
@@ -112,14 +119,16 @@ Deliver events to ON-DELTA and the response to CALLBACK."
     (kargu--api-post
      (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
      (lambda (response)
-       (kargu--api-cancel-busy)
+       (unwind-protect
+           (when (and record-turn (not (kargu-response-error-message response)))
+             (kargu-api-store-assistant-turn response))
+         (kargu--api-cancel-busy))
        (funcall callback response))
      delta)))
 
 (defun kargu-test-connection ()
   "Ping the active provider with a minimal request and report the result.
-The conversation history is untouched: the ping uses a scratch
-history which is restored afterwards."
+Build the payload in a temporary history binding; never store the reply."
   (interactive)
   ;; Guard Clause 1: Loop active
   (when (and (fboundp 'kargu-loop-running-p)
@@ -130,19 +139,15 @@ history which is restored afterwards."
   (when (kargu-circuit-open-p)
     (user-error "Circuit breaker is %s; cannot ping until cooldown"
                 (kargu-circuit-status-string)))
-  (let ((saved kargu--message-history))
-    (setq kargu--message-history nil)
-    (kargu--history-add "user" "Reply with the single word: pong")
+  (let ((kargu--message-history nil)
+        (kargu--system-key nil)
+        (kargu--compaction-system "Reply briefly to the connectivity test.")
+        (kargu--tools-visible-p #'ignore)
+        (kargu-temperature nil)
+        (kargu-max-tokens 32))
     (message "kargu: pinging %s (%s)..." (kargu--provider-name) (kargu--model))
-    (let ((kargu-temperature nil)
-          (kargu-max-tokens 32))
-      (kargu-api-send
-       nil
-       (lambda (response)
-         ;; The reply was stored into the scratch history; the real one is
-         ;; put back before anything else can look at it.
-         (setq kargu--message-history saved)
-         (kargu--report-ping response))))))
+    (kargu-api--send :prompt "Reply with the single word: pong"
+                     :callback #'kargu--report-ping :record-turn nil)))
 
 (defun kargu--report-ping (response)
   "Tell the user how the connection test RESPONSE went."
