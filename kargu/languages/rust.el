@@ -1,8 +1,12 @@
-;;; kargu/languages/rust.el --- Rust language profile for Kargu -*- lexical-binding: t; -*-
+;;; rust.el --- Rust language profile for Kargu -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Part of kargu.
+
+;;; Commentary:
+
+;; Register Rust modes, project detection and toolchain metadata.
 
 ;;; Code:
 
@@ -14,6 +18,7 @@
    :name "Rust"
    :priority 100
    :extensions '("rs")
+   :modes '(rust-mode rust-ts-mode rustic-mode)
    :detectors '("Cargo.toml")
    :toolchain
    '(:build-cmd "cargo check"
@@ -49,10 +54,11 @@
      :purpose "Language Server for Rust (code analysis, symbols, diagnostics)"
      :hint "rustup component add rust-analyzer")
    :lsp-notes
-   "Rust symbol outline: functions (fn), structs (struct), enums (enum), traits (trait), impl blocks. Prefer `edit_by_lsp` to replace target function bodies without fragile string matching."))
+   "Rust symbol outline: functions (fn), structs (struct), enums (enum), traits (trait), impl blocks. Prefer `edit_by_lsp` to replace target function bodies without fragile string matching.")
+  "Language profile for Rust buffers and projects.")
 
 (kargu-language-register kargu-language-rust-spec)
 
 (provide 'kargu/languages/rust)
 
-;;; kargu/languages/rust.el ends here
+;;; rust.el ends here

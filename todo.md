@@ -14,7 +14,6 @@ Not: Bu bölüm büyük ölçüde statik okumadan çıktı; yalnız "Test çalı
 
 ### Yüksek öncelik
 
-- **Bash doğrulaması gerçek bir sandbox değil; genişletme ve kod çalıştırma yüzeyleri açık.** Brace açılımı `{/etc/passwd,x}`, `-o/etc/x` gibi birleşik seçenekler, `FOO=1 python -c ...`, sürümlü yorumlayıcılar, `busybox`, `find -exec`, Git pager ayarları ve build scriptleri için tokenizer/risk denetimi eksik. `kargu-permission-confirm-bash` nil olsa bile çözümlenemeyen sözdizimi insan onayını zorunlu kılmalı. Sadece komut dizesi ayrıştırmasıyla işletim sistemi sandbox'ı garantisi verilemez; gerçek izolasyon ayrı bir süreç/sandbox tasarımı gerektiriyor.
 ### Orta öncelik
 
 - **Yeniden denemede kısmi akış UI'da yinelenir.** (K) `kargu/api/http.el:376-382`: akış içinden gelen retry edilebilir hata (`overloaded` vb.) UI'ya kısmi metin delta'ları gittikten sonra yeniden denemeye yol açar; yeni akış aynı metni baştan yazar. Retry öncesi UI'da bu turun çıktısı geri alınmalı/işaretlenmeli.
@@ -135,10 +134,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
   - UI veya harici bir paket `kargu-state-change-hook` veya `kargu-state-mode-hook`'a bir fonksiyon bağladığında, bu fonksiyonda oluşacak ufak bir hata (ör. kapalı tampon erişimi) state geçiş fonksiyonunun ortasında patlar; sonraki dinleyiciler ve durum senkronizasyonu yarıda kesilir.
 
 #### 12. Dil Belirleme Eksiklikleri ve UI Onay Motoru Kilitlenmeleri (`languages/core.el`, `languages/*.el`, `ui/confirm.el`)
-- **`languages/*.el`: 8 Farklı Dilde (Rust, Python, Go, C, C++, Java, Haskell, OCaml) `:modes` Tanımının Bulunmaması (K).**
-  - `kargu-make-language-spec` içinde `modes` alanı yer almasına rağmen, yalnızca `typescript.el`, `javascript.el` ve `elisp.el` dosyalarında `:modes` atanmıştır.
-  - Rust, Python, Go, C, C++, Java, Haskell ve OCaml spesifikasyonlarında `:modes` tamamen boş (`nil`) bırakılmıştır.
-  - `kargu-language-for-buffer` fonksiyonu, `kargu-language--mode-matches-p` ile tamponun major mode'unu denetler. Diske henüz kaydedilmemiş (buffer-file-name nil olan) veya geçici/DAP ayrıştırma tamponlarında `rust-mode`, `python-mode`, `go-mode` vb. çalışsa bile dil profili `nil` döner; dile özgü derleme, test ve debug talimatları oluşturulamaz.
 - **`languages/javascript.el:28-36`: JavaScript Projelerinde `npm run build` Zorunluluğu ve Derleme Hatası (K).**
   - Standart JavaScript (Node.js/Express) projelerinde çoğu zaman derleme adımı (`"build"` scripti) bulunmaz.
   - Ancak `kargu-language-js-toolchain`, TypeScript dışındaki düz JS projeleri için de `:build-cmd (format "%s run build" pm)` döner.

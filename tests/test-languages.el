@@ -22,6 +22,27 @@
 (require 'kargu/tools/deps)
 (require 'kargu/chat)
 
+(ert-deftest kargu-languages-unsaved-buffer-major-modes-test ()
+  "Language profiles work before a buffer has any file or project marker."
+  (dolist (entry '((rust rust-mode rust-ts-mode rustic-mode)
+                   (python python-mode python-ts-mode)
+                   (golang go-mode go-ts-mode)
+                   (c c-mode c-ts-mode)
+                   (cpp c++-mode c++-ts-mode)
+                   (java java-mode java-ts-mode)
+                   (haskell haskell-mode literate-haskell-mode haskell-ts-mode)
+                   (ocaml tuareg-mode caml-mode ocaml-ts-mode)))
+    (dolist (mode (cdr entry))
+      (with-temp-buffer
+        (setq major-mode mode buffer-file-name nil)
+        (let ((spec (kargu-language-for-buffer)))
+          (should spec)
+          (should (eq (kargu-language-spec-id spec) (car entry)))))))
+  (with-temp-buffer
+    (setq major-mode 'kargu-test-derived-rust-mode)
+    (cl-letf (((get 'kargu-test-derived-rust-mode 'derived-mode-parent) 'rust-mode))
+      (should (eq (kargu-language-spec-id (kargu-language-for-buffer)) 'rust)))))
+
 (ert-deftest kargu-languages-registered-all-test ()
   "Ensure every target language is registered with a valid spec."
   (let ((expected-ids '(rust c cpp golang python java haskell ocaml javascript typescript emacs-lisp)))

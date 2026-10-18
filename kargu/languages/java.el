@@ -1,8 +1,12 @@
-;;; kargu/languages/java.el --- Java language profile for Kargu -*- lexical-binding: t; -*-
+;;; java.el --- Java language profile for Kargu -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Part of kargu.
+
+;;; Commentary:
+
+;; Register Java modes, project detection and toolchain metadata.
 
 ;;; Code:
 
@@ -28,6 +32,7 @@
    :name "Java"
    :priority 75
    :extensions '("java")
+   :modes '(java-mode java-ts-mode)
    :detectors '("pom.xml" "build.gradle" "build.gradle.kts")
    :toolchain #'kargu-language-java-toolchain
    :debugger
@@ -49,10 +54,11 @@
      :purpose "Language Server for Java (code completion and definitions)"
      :hint "brew install jdtls (or your system package manager)")
    :lsp-notes
-   "Java symbols: classes, interfaces, records, methods, fields. JDTLS handles outline and refactorings."))
+   "Java symbols: classes, interfaces, records, methods, fields. JDTLS handles outline and refactorings.")
+  "Language profile for Java buffers and projects.")
 
 (kargu-language-register kargu-language-java-spec)
 
 (provide 'kargu/languages/java)
 
-;;; kargu/languages/java.el ends here
+;;; java.el ends here

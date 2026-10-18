@@ -1,8 +1,12 @@
-;;; kargu/languages/ocaml.el --- OCaml language profile for Kargu -*- lexical-binding: t; -*-
+;;; ocaml.el --- OCaml language profile for Kargu -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Part of kargu.
+
+;;; Commentary:
+
+;; Register OCaml modes, project detection and toolchain metadata.
 
 ;;; Code:
 
@@ -14,6 +18,7 @@
    :name "OCaml"
    :priority 70
    :extensions '("ml" "mli")
+   :modes '(tuareg-mode caml-mode ocaml-ts-mode)
    :detectors '("dune-project" "dune" "_oasis" "opam")
    :toolchain
    '(:build-cmd "dune build"
@@ -39,10 +44,11 @@
      :purpose "Language Server for OCaml"
      :hint "opam install ocaml-lsp-server")
    :lsp-notes
-   "OCaml symbols: let bindings, modules, module types, variants, records. OCaml-LSP provides precise types on hover and document outlines."))
+   "OCaml symbols: let bindings, modules, module types, variants, records. OCaml-LSP provides precise types on hover and document outlines.")
+  "Language profile for OCaml buffers and projects.")
 
 (kargu-language-register kargu-language-ocaml-spec)
 
 (provide 'kargu/languages/ocaml)
 
-;;; kargu/languages/ocaml.el ends here
+;;; ocaml.el ends here
