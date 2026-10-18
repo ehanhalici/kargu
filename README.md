@@ -138,6 +138,11 @@ terminating the process. Stop cancels the foreground tool; background
 jobs continue until explicitly cancelled. Other bounded tools keep their
 normal timeouts. A positive `kargu-bash-timeout` opts into a deadline.
 
+Git commands use a separate `kargu-git-timeout` (nil by default), allowing
+hooks and signing to finish. Stop cancels Git work owned by the agent and
+prevents cancelled callbacks from launching fallback commands. An interrupted
+Git write may leave a lock file; check for another Git process before recovery.
+
 Shell validation and approval are best-effort guards, not an operating-system
 sandbox. Keep shell confirmation enabled for untrusted commands; command strings
 can invoke scripts and interpreters whose filesystem effects cannot be inferred

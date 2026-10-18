@@ -44,6 +44,7 @@ STATE is the mutable plist holding the exit code and the kill reasons."
                  (list :code (plist-get state :code)
                        :output output
                        :timed-out (plist-get state :timed-out)
+                       :timeout (plist-get state :timeout)
                        :truncated (plist-get state :truncated)))
       (error
        (kargu-log 'error "process callback failed: %s" (error-message-string err))))))
@@ -145,6 +146,7 @@ Return the process, or nil when none started."
                                                    default-directory))))
          (timer nil)
          (proc nil))
+    (plist-put state :timeout timeout)
     (condition-case err
         (progn
           (setq proc (make-process
@@ -179,7 +181,9 @@ Return the process, or nil when none started."
   "Error text for a failed RESULT of the command named LABEL."
   (cond
    ((plist-get result :timed-out)
-    (format "%s timed out after %ss" label kargu-process-timeout))
+    (format "%s timed out after %ss" label
+            (if (plist-member result :timeout) (plist-get result :timeout)
+              kargu-process-timeout)))
    ((eql (plist-get result :code) 127)
     (format "%s is not installed" label))
    (t

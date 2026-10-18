@@ -49,6 +49,17 @@ CANCEL optionally cancels underlying work when the task is terminated."
        (or (null (kargu-async-task-owner task))
            (eq (kargu-async-task-owner task) kargu--loop-run))))
 
+(defun kargu-async-add-cleanup (task function)
+  "Register resource cleanup FUNCTION for TASK without replacing earlier cleanup.
+If TASK has already ended, release the newly acquired resource immediately."
+  (if (kargu-async-pending-p task)
+      (let ((previous (kargu-async-task-cancel task)))
+        (setf (kargu-async-task-cancel task)
+              (lambda ()
+                (unwind-protect (funcall function)
+                  (when previous (funcall previous))))))
+    (funcall function)))
+
 (defun kargu-async--close (task state)
   "Close TASK in terminal STATE and release its resources."
   (when (eq (kargu-async-task-state task) :pending)

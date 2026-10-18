@@ -23,6 +23,49 @@
 
 (defconst kargu-git-test--files '(("a.txt" . "one\ntwo\nthree\n") ("src/b.el" . "(message \"b\")\n")))
 
+(ert-deftest kargu-git-deadline-is-independent-of-the-generic-runner-test ()
+  "Git hooks/signing have no implicit 30-second process deadline."
+  (let ((kargu-process-timeout 30) options)
+    (cl-letf (((symbol-function 'kargu-process-run)
+               (lambda (_program _args _callback &rest opts) (setq options opts) nil)))
+      (let ((kargu-git-timeout nil))
+        (kargu-git--run '("status") default-directory #'ignore)
+        (should (plist-member options :timeout))
+        (should-not (plist-get options :timeout)))
+      (let ((kargu-git-timeout 12))
+        (kargu-git--run '("status") default-directory #'ignore)
+        (should (= (plist-get options :timeout) 12))))))
+
+(ert-deftest kargu-git-cancelled-task-kills-process-and-never-starts-fallback-test ()
+  "Cancelling an in-flight unstage cannot launch a second mutating Git command."
+  (kargu-test-with-git-repo kargu-git-test--files
+    (let* ((run (list :state 'tools)) (kargu--loop-run run)
+           (task (kargu-async-start #'ignore))
+           (runner (symbol-function 'kargu-process-run))
+           (kargu-permission--mock-decision :approve)
+           (starts 0) process result settled)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-process-run)
+                     (lambda (_program _args callback &rest opts)
+                       (cl-incf starts)
+                       (apply runner "sleep" '("30")
+                              (lambda (value) (setq settled t) (funcall callback value)) opts))))
+            (funcall (kargu-async-wrap
+                      task (lambda ()
+                             (setq process (kargu-git-unstage
+                                            (lambda (text) (setq result text)) "a.txt")))))
+            (should (process-live-p process))
+            (kargu-async-cancel-owner run)
+            (let ((deadline (+ (float-time) 2)))
+              (while (and (not settled) (< (float-time) deadline))
+                (accept-process-output process 0.02)))
+            (should settled)
+            (should-not (process-live-p process))
+            (should (= starts 1))
+            (should-not result))
+        (kargu-async-cancel-owner run)
+        (when process (kargu-process-cancel process))))))
+
 (ert-deftest kargu-git-status-test ()
   "Ensure kargu-git-status returns formatted Magit-style sections."
   (kargu-test-with-git-repo kargu-git-test--files

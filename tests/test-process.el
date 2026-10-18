@@ -53,7 +53,9 @@
   "A command that outlives its timeout is killed and reported."
   (let ((r (kargu-test-await
             (lambda (cb) (kargu-process-run "sleep" '("30") cb :timeout 0.2)))))
-    (should (plist-get r :timed-out))))
+    (should (plist-get r :timed-out))
+    (should (equal (plist-get r :timeout) 0.2))
+    (should (string-search "after 0.2s" (kargu-process-failure "test" r)))))
 
 (ert-deftest kargu-process-run-caps-output-test ()
   "A command that writes past the cap is killed and flagged."

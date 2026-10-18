@@ -34,12 +34,20 @@
 (require 'kargu/api/tools)
 (require 'kargu/permission)
 (require 'kargu/tools/process)
+(require 'kargu/async)
 (require 'magit nil t)
 
 (defgroup kargu-git nil
   "Git and Magit integration tools."
   :group 'kargu
   :prefix "kargu-git-")
+
+(defcustom kargu-git-timeout nil
+  "Optional deadline in seconds for Git commands.
+Nil lets hooks and signing finish without a deadline.  Stopping the owning
+agent task still cancels the Git process."
+  :type '(choice (const :tag "No deadline" nil) (number :tag "Seconds"))
+  :group 'kargu-git)
 
 ;;;; Helpers --------------------------------------------------------------
 
@@ -48,22 +56,28 @@
   (when (fboundp 'magit-refresh)
     (ignore-errors (magit-refresh))))
 
+(defun kargu-git--result (result)
+  "Convert process RESULT to an exit-code/output pair."
+  (let ((code (plist-get result :code))
+        (out (string-trim (or (plist-get result :output) ""))))
+    (cond
+     ((plist-get result :timed-out)
+      (cons -1 (kargu-process-failure "Git" result)))
+     ((eql code 127) (cons 127 "Git executable not found on PATH"))
+     (t (cons code out)))))
+
 (defun kargu-git--run (args root callback)
   "Run git with ARGS in project ROOT without waiting.
 CALLBACK receives (EXIT-CODE . TRIMMED-OUTPUT); a missing git or a timeout
 gives a nonzero code with the reason as output."
-  (kargu-process-run
-   "git" args
-   (lambda (result)
-     (let ((code (plist-get result :code))
-           (out (string-trim (or (plist-get result :output) ""))))
-       (funcall callback
-                (cond
-                 ((plist-get result :timed-out)
-                  (cons -1 (kargu-process-failure "git" result)))
-                 ((eql code 127) (cons 127 "git executable not found on PATH"))
-                 (t (cons code out))))))
-   :dir (or root (kargu-permission-project-root))))
+  (let* ((task kargu-async--current-task)
+         (deliver (lambda (result) (funcall callback (kargu-git--result result))))
+         (process (kargu-process-run
+                   "git" args (if task (kargu-async-wrap task deliver) deliver)
+                   :dir (or root (kargu-permission-project-root)) :timeout kargu-git-timeout)))
+    (when (and task (processp process))
+      (kargu-async-add-cleanup task (lambda () (kargu-process-cancel process))))
+    process))
 
 (defun kargu-git--check-ref (value what)
   "VALUE as a trimmed string, or an error when it cannot be a plain WHAT.

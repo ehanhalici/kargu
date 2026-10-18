@@ -65,5 +65,17 @@
       (should-error (kargu-async-start #'ignore :timeout 1)))
     (should-not kargu-async--pending)))
 
+(ert-deftest kargu-async-cleanups-compose-and-release-late-resources-test ()
+  "Cleanup registration preserves earlier cleanup even when a newer one fails."
+  (let ((cleaned nil) delivered)
+    (let ((task (kargu-async-start (lambda (value _error) (setq delivered value)))))
+      (kargu-async-add-cleanup task (lambda () (push 'first cleaned)))
+      (kargu-async-add-cleanup task (lambda () (push 'second cleaned) (error "cleanup failure")))
+      (kargu-async-finish task "ok")
+      (should (equal cleaned '(first second)))
+      (should (equal delivered "ok"))
+      (kargu-async-add-cleanup task (lambda () (push 'late cleaned)))
+      (should (equal cleaned '(late first second))))))
+
 (provide 'tests/test-async)
 ;;; test-async.el ends here
