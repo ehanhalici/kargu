@@ -172,6 +172,7 @@
     (should-error (kargu-git-commit #'ignore "msg"))
     (should-error (kargu-git-stage #'ignore "kargu.el"))
     (should-error (kargu-git-stash #'ignore "drop"))
+    (should-error (kargu-git-stash #'ignore "push"))
     (should-error (kargu-git-branch #'ignore "create" "kargu-test-branch"))))
 
 (ert-deftest kargu-webfetch-refuses-local-addresses-test ()

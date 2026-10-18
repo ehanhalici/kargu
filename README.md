@@ -174,8 +174,11 @@ Git commands use a separate `kargu-git-timeout` (nil by default), allowing
 hooks and signing to finish. Stop cancels Git work owned by the agent and
 prevents cancelled callbacks from launching fallback commands. An interrupted
 Git write may leave a lock file; check for another Git process before recovery.
-`git_branches` and `git_stashes` are read-only in all modes. Stash pop/drop
-requires an explicit `stash@{N}` entry from `git_stashes`; omitting it is refused.
+`git_branches` and `git_stashes` are read-only in all modes. Stash `apply`
+requires an explicit `stash@{N}` entry from `git_stashes`; its immutable object
+ID is resolved before approval, and applying never deletes the stash. `pop`
+and `drop` are refused because an index may change while approval is pending.
+Delete entries manually through Git/Magit after reviewing the applied result.
 
 Shell validation and approval are best-effort guards, not an operating-system
 sandbox. Keep shell confirmation enabled for untrusted commands; command strings

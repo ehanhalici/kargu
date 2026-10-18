@@ -374,25 +374,66 @@ ALL optionally stages modified files."
 
 ;;;; Stash ----------------------------------------------------------------
 
-(cl-defun kargu-git--stash-change (act &key message root callback stash)
+(cl-defun kargu-git--stash-change (act &key message root callback)
   "Run stash ACT with MESSAGE in ROOT and report to CALLBACK.
-STASH must explicitly select an entry for pop or drop."
+Only push is accepted; applying a stash has a separate identity-bound path."
   (let ((args (append (list "stash" act)
                       (and (equal act "push")
                            (stringp message)
                            (not (string-empty-p (string-trim message)))
-                           (list "-m" (string-trim message)))
-                      (when (member act '("pop" "drop"))
-                        (unless (and (stringp stash)
-                                     (string-match-p (rx bos "stash@{" (+ digit) "}" eos) stash))
-                          (error "Explicit stash@{N} reference required for stash %s; list entries with git_stashes" act))
-                        (list stash)))))
+                           (list "-m" (string-trim message))))))
     (kargu-git--approve (string-join args " ") root)
     (kargu-git--change args root callback #'identity (format "stash %s" act))))
 
+(defconst kargu-git--object-id-regexp
+  (rx bos (or (= 40 xdigit) (= 64 xdigit)) eos)
+  "Full Git object IDs for the supported repository object formats.")
+
+(defun kargu-git--apply-stash-object (task root object)
+  "Ask to apply immutable stash OBJECT under ROOT, owned by TASK."
+  (let ((decision-state :pending))
+    (kargu-permission-request-approval-async
+     (format "git stash apply %s" object) root nil
+     (kargu-async-wrap
+      task
+      (lambda (approved)
+        (when (eq decision-state :pending)
+          (setq decision-state :answered)
+          (if (not approved)
+              (kargu-async-finish task nil "Stash apply was not approved")
+            (kargu-git--change
+             (list "stash" "apply" object) root
+             (lambda (result) (kargu-async-finish task result))
+             (lambda (output) (format "%s\nStash %s retained; delete manually with Git/Magit if desired."
+                                      output object))
+             "stash apply"))))))))
+
+(defun kargu-git--stash-apply (stash root callback)
+  "Resolve STASH in ROOT before approval; deliver its application to CALLBACK."
+  (unless (and (stringp stash)
+               (string-match-p (rx bos "stash@{" (+ digit) "}" eos) stash))
+    (user-error "Explicit stash@{N} reference required; list entries with git_stashes"))
+  (let* ((resolution-state :pending)
+         (task (kargu-async-start
+                (lambda (value error)
+                  (funcall callback (if error (concat "ERROR: " error) value)))))
+         (kargu-async--current-task task))
+    (kargu-git--run
+     (list "rev-parse" "--verify" (concat stash "^{commit}")) root
+     (kargu-async-wrap
+      task (lambda (result)
+             (when (eq resolution-state :pending)
+               (setq resolution-state :answered)
+               (let ((object (string-trim (cdr result))))
+                 (if (and (zerop (car result))
+                          (string-match-p kargu-git--object-id-regexp object))
+                     (kargu-git--apply-stash-object task root object)
+                   (kargu-async-finish task nil "Cannot resolve the selected stash")))))))))
+
 (cl-defun kargu-git-stash (callback action &optional message &key stash)
   "Perform stash ACTION with optional MESSAGE and report to CALLBACK.
-For pop or drop, STASH must explicitly name a stash@{N} entry."
+For apply, STASH must name a stash@{N} entry.  Its object ID is captured
+before approval.  Pop/drop are refused; delete manually with Git/Magit."
   (let* ((root (kargu-permission-project-root))
          (act (downcase (string-trim (or action "list")))))
     (cond
@@ -403,10 +444,13 @@ For pop or drop, STASH must explicitly name a stash@{N} entry."
                                  (if (string-empty-p (cdr res))
                                      "(no stash entries)"
                                    (cdr res))))))
-     ((member act '("push" "pop" "drop"))
-      (kargu-git--stash-change act :message message :root root :callback callback :stash stash))
+     ((string= act "push")
+      (kargu-git--stash-change act :message message :root root :callback callback))
+     ((string= act "apply") (kargu-git--stash-apply stash root callback))
+     ((member act '("pop" "drop"))
+      (user-error "Stash pop/drop are unsafe across approval; use apply, then delete manually with Git/Magit"))
      (t
-      (error "Unknown stash action: %s; use list, push, pop, or drop" action)))))
+      (error "Unknown stash action: %s; use list, push, or apply" action)))))
 
 ;;;; Blame ----------------------------------------------------------------
 
@@ -574,14 +618,15 @@ through `kargu-permission-approve', which may re-run BODY after the answer."
                          (kargu--tool-arg args "name" "branch")))))
    (list
     "git_stash"
-    "Stash changes (push, pop, list, drop). Pop/drop require an explicit stash@{N} entry; use git_stashes first. Agent mode only."
+    "Stash changes (push, apply, list). Apply pins the selected object before approval and never deletes it. Pop/drop are refused; delete manually with Git/Magit. Agent mode only."
     '(("type" . "object")
       ("properties" . (("action" . (("type" . "string")
-                                    ("description" . "Action: push, pop, list, or drop.")))
+                                    ("description" . "Action: push, apply, or list. Pop/drop are unsupported.")
+                                    ("enum" . ["push" "apply" "list"])))
                        ("message" . (("type" . "string")
                                      ("description" . "Optional stash message for push.")))
                        ("stash" . (("type" . "string")
-                                   ("description" . "Required for pop/drop: explicit stash@{N} reference, for example stash@{1}.")))))
+                                   ("description" . "Required for apply: explicit stash@{N} reference, for example stash@{1}.")))))
       ("required" . ["action"]))
     (kargu-git--executor
      (lambda (args done)
