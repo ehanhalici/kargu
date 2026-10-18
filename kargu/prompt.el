@@ -22,6 +22,7 @@
 (require 'kargu/state/selectors)
 (require 'kargu/tools/toolchain)
 (require 'kargu/languages)
+(require 'kargu/api/cache)
 
 (declare-function kargu-tools-enabled-p "kargu/loop" (&optional run))
 (declare-function kargu-provider-prompt-file "kargu/providers/registry" (model-id))
@@ -267,6 +268,7 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
   "Reminder used when the active model has no tool calling.")
 
 (declare-function kargu-registered-tools "kargu/api/tools" ())
+(declare-function kargu-advertised-tools "kargu/api/tools" ())
 (declare-function kargu-tool-description "kargu/api/tools" (name))
 (declare-function kargu-tool-visible-p "kargu/api/tools" (name))
 (declare-function kargu-eglot-connected-p "kargu/tools/lsp/context" ())
@@ -279,11 +281,13 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
      "You can call MULTIPLE tools in one turn; execution is sequential.\n"
      "Search first; read only relevant line ranges. Use structural tools "
      "when available. Verify edits with available diagnostics and tests.\n"
+     (if kargu-low-usage-mode
+         "Low usage mode: use targeted searches, small line ranges and concise results. Do not repeat unchanged file reads or request whole-project dumps.\n"
+       "")
      (mapconcat
       (lambda (name)
         (format "- `%s`: %s" name (kargu-tool-description name)))
-      (sort (seq-filter #'kargu-tool-visible-p (kargu-registered-tools))
-            #'string<)
+      (kargu-advertised-tools)
       "\n")
      "\n</available_tools_guidance>")))
 
@@ -305,11 +309,10 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
 
 (defconst kargu-prompt--parts
   '(kargu-prompt--provider-base
-    kargu--environment-block
-    kargu-prompt--tools-guidance-block
     kargu-prompt--instruction-block
     kargu-prompt--skills-block
-    kargu-prompt--mode-block)
+    kargu-prompt--mode-block
+    kargu-prompt--tools-guidance-block)
   "Ordered functions whose non-empty strings form the system prompt.")
 
 (defvar kargu--system-key nil
@@ -322,17 +325,26 @@ When this differs from `kargu--system-key' the stored system message is stale."
         (and (kargu-prompt--tools-off-p) t)
         (kargu--model)
         (and (kargu-eglot-connected-p) t)
-        (and kargu--compaction-system t)))
+        (and kargu--compaction-system t)
+        (kargu-prompt--workspace)
+        (kargu-prompt--context-file-name)
+        (format-time-string "%Y-%m-%d")
+        (kargu-prompt--cached-env (kargu-prompt--workspace))
+        (kargu-advertised-tools)
+        kargu-low-usage-mode))
 
 (defun kargu--get-system-prompt ()
   "Return the system prompt for the active mode.
 During compaction, `kargu--compaction-system' replaces this."
   (or kargu--compaction-system
       (string-join
-       (delq nil (mapcar (lambda (fn)
-                           (let ((s (funcall fn)))
-                             (and (stringp s) (not (string-empty-p (string-trim s))) s)))
-                         kargu-prompt--parts))
+       (append
+        (delq nil (mapcar (lambda (fn)
+                            (let ((s (funcall fn)))
+                              (and (stringp s) (not (string-empty-p (string-trim s))) s)))
+                          kargu-prompt--parts))
+        (list (concat kargu-cache-runtime-boundary (kargu--environment-block)
+                      "</runtime_environment>")))
        "\n\n")))
 
 (declare-function kargu-dape-tool-guide "kargu/tools/dape/policy" ())

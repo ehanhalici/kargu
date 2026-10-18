@@ -108,6 +108,26 @@ configure provider-side routing presets in the provider dashboard instead.
 
 ## Development
 
+### Prompt caching and low usage
+
+Enable `kargu-low-usage-mode` with `setq` or the tuning menu's `l` key.
+It caps tool-result context at 6,000 characters and project outlines at 200
+symbols (both customizable). Complete tool output remains in an Emacs buffer
+and can be read in ranges. The selected model and output-token limit stay
+unchanged; disabling the mode restores the normal context limits.
+
+Schemas contain sorted canonical tool names; compatibility aliases still
+execute but are not repeated in prompts. Stable instructions precede a changing
+environment suffix. Explicit cache markers use content blocks and survive the
+native Messages adapter. OpenRouter also receives a stable session header.
+`M-x kargu-session-usage` shows provider-reported cache reads/writes and a hit
+ratio for requests with measured input and cache-read counts. Missing counters
+remain `unknown`, not zero. Actual hits depend on provider/model eligibility,
+minimum prefix size and expiry; no cache-warming requests are sent.
+
+Wire behavior follows the [OpenRouter caching guide](https://openrouter.ai/docs/guides/best-practices/prompt-caching)
+and [Anthropic caching guide](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+
 ### Long-running shell jobs
 
 Shell tools have no duration limit by default (`kargu-bash-timeout` is nil).

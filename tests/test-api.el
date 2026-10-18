@@ -236,7 +236,7 @@
                                 ("id" . "c1")
                                 ("name" . "read")
                                 ("input" . (("path" . "a")))))))))
-    (should (equal (kargu-aget body "system") "be brief"))
+    (should (equal (kargu-aget (car (kargu-aget body "system")) "text") "be brief"))
     (should (equal (kargu-response-answer-text norm) "hello"))
     (should (equal (kargu-response-finish-reason norm) "stop"))
     (should (equal (kargu-response-finish-reason (kargu-api-normalize-response tool))

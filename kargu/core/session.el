@@ -1,4 +1,4 @@
-;;; kargu/core/session.el --- Session state and usage counters -*- lexical-binding: t; -*-
+;;; session.el --- Session state and usage counters -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -65,6 +65,28 @@ Return the updated `kargu--session' plist."
                (+ (or (plist-get kargu--session :tokens-out) 0) tokens-out)))
   kargu--session)
 
+(defun kargu-session-record-cache-usage (input read write)
+  "Accumulate reported cache INPUT, READ and WRITE counters only when known."
+  (dolist (entry (list (cons :cache-read read) (cons :cache-write write)))
+    (when (natnump (cdr entry))
+      (plist-put kargu--session (car entry)
+                 (+ (or (plist-get kargu--session (car entry)) 0) (cdr entry)))))
+  (when (and (natnump read) (natnump input))
+    (plist-put kargu--session :cache-measured-read
+               (+ (or (plist-get kargu--session :cache-measured-read) 0) read))
+    (plist-put kargu--session :cache-measured-input
+               (+ (or (plist-get kargu--session :cache-measured-input) 0) input))))
+
+(defun kargu-session--cache-report ()
+  "Return observed cache counters, distinguishing missing data from zero."
+  (let ((input (plist-get kargu--session :cache-measured-input)))
+    (format "  cache-read: %s  cache-write: %s  measured-hit: %s"
+            (or (plist-get kargu--session :cache-read) "unknown")
+            (or (plist-get kargu--session :cache-write) "unknown")
+            (if (and (numberp input) (> input 0))
+                (format "%.1f%%" (/ (* 100.0 (plist-get kargu--session :cache-measured-read)) input))
+              "unknown"))))
+
 (defun kargu-session--count-label (n)
   "Short label for token count N."
   (if (>= n 1000)
@@ -117,6 +139,7 @@ CAP is nil when the model record has no context window."
                          (or (plist-get kargu--session :tokens-in) 0)
                          (or (plist-get kargu--session :tokens-out) 0)
                          (plist-get ctx-info :formatted))))
+    (setq report (concat report (kargu-session--cache-report)))
     (when (called-interactively-p 'any)
       (message "kargu %s" report))
     report))
@@ -149,4 +172,4 @@ CAP is nil when the model record has no context window."
 
 (provide 'kargu/core/session)
 
-;;; kargu/core/session.el ends here
+;;; session.el ends here

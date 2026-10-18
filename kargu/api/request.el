@@ -14,6 +14,7 @@
 (require 'kargu/config)
 (require 'kargu/history)
 (require 'kargu/api/tools)
+(require 'kargu/api/cache)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-extra-headers "kargu/providers/registry" (id))
@@ -23,37 +24,6 @@
 (declare-function kargu-provider-cache-marker-p "kargu/providers/registry" (id))
 (declare-function kargu-provider-reasoning-shape "kargu/providers/registry" (id))
 
-(defun kargu--apply-prompt-caching-messages (raw-msgs tools-len)
-  "Attach cache_control markers to RAW-MSGS when appropriate.
-TOOLS-LEN is the number of tools available."
-  ;; 1. When tools is empty (e.g. ask mode), attach cache_control to system prompt
-  (when (and (= tools-len 0) (> (length raw-msgs) 0))
-    (let ((sys-msg (car raw-msgs)))
-      (when (equal (kargu-aget sys-msg "role") "system")
-        (unless (assoc "cache_control" sys-msg)
-          (setcar raw-msgs
-                  (append sys-msg '(("cache_control" . (("type" . "ephemeral"))))))))))
-  ;; 2. Attach cache_control to the last completed turn before current prompt
-  ;; (turn length - 2) so past conversation history is 100% cached on multi-turn
-  ;; sessions and restored history chats.
-  (when (>= (length raw-msgs) 2)
-    (let* ((target-idx (- (length raw-msgs) 2))
-           (target-msg (nth target-idx raw-msgs)))
-      (unless (assoc "cache_control" target-msg)
-        (setcar (nthcdr target-idx raw-msgs)
-                (append target-msg '(("cache_control" . (("type" . "ephemeral")))))))))
-  raw-msgs)
-
-(defun kargu--apply-prompt-caching-tools (tools)
-  "Attach cache_control marker to the last tool definition in TOOLS vector."
-  (let* ((tools-list (append tools nil))
-         (last-idx (1- (length tools-list)))
-         (last-tool (nth last-idx tools-list)))
-    (unless (assoc "cache_control" last-tool)
-      (setcar (nthcdr last-idx tools-list)
-              (append last-tool '(("cache_control" . (("type" . "ephemeral"))))))
-      (setq tools (vconcat tools-list))))
-  tools)
 
 (defun kargu-reasoning-effort-level ()
   "The reasoning effort to send as a string, or nil to send none.
@@ -107,7 +77,7 @@ The shape comes from the provider's format record (`:reasoning-shape')."
   "Request entries for the TOOLS vector; none when it is empty.
 CACHE-MARKED puts a cache marker on the last tool."
   (when (> (length tools) 0)
-    `(("tools" . ,(if cache-marked (kargu--apply-prompt-caching-tools tools) tools))
+    `(("tools" . ,(if cache-marked (kargu-cache-prepare-tools tools) tools))
       ("tool_choice" . "auto"))))
 
 (defun kargu--build-payload (&rest extra)
@@ -123,8 +93,7 @@ at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
           (append
            `(("model" . ,(kargu--model))
              ("messages" . ,(vconcat (if cache-marked
-                                         (kargu--apply-prompt-caching-messages
-                                          messages (length tools))
+                                         (kargu-cache-prepare-messages messages)
                                        messages))))
            (kargu--payload-sampling-entries)
            (kargu--payload-tools-entries tools cache-marked))))

@@ -69,6 +69,9 @@ Each entry is `:path' and `:type' (`list' or `csv').")
         :finish-default "stop"
         :usage (("input_tokens" . "prompt_tokens")
                 ("output_tokens" . "completion_tokens"))
+        :cache-usage (:read "cache_read_input_tokens"
+                      :write "cache_creation_input_tokens"
+                      :input-excludes-cache t)
         :detect ("stop_reason")
         :detect-type "message")))
   "Wire records keyed by catalog format symbol.
@@ -938,6 +941,7 @@ that format's `:models' map.")
      :api "https://openrouter.ai/api/v1"
      :models-api "https://openrouter.ai/api/v1/models"
      :usage-api "https://openrouter.ai/api/v1/auth/key"
+     :extra-headers (("x-session-id" . :session))
      :env ("OPENROUTER_API_KEY")
      :npm "@openrouter/ai-sdk-provider"
      :format openrouter

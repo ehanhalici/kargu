@@ -38,7 +38,7 @@
 (defun kargu-lsp--workspace-key (query)
   "Return the identity and document-version key for workspace QUERY."
   (let ((buffer (kargu-lsp--managed-buffer)))
-    (list (kargu-lsp-project-root) query
+    (list (kargu-lsp-project-root) query kargu-low-usage-mode
           (and buffer (with-current-buffer buffer (eglot-current-server)))
           (mapcar (lambda (buf)
                     (list (buffer-file-name buf)
@@ -194,7 +194,9 @@ With CALLBACK, collect LSP data asynchronously before delivering the list."
 
 (defun kargu-lsp--render-skeleton (root source items)
   "Render symbol ITEMS for ROOT with the origin label SOURCE."
-  (let* ((by-file (kargu-lsp--group-project-symbols root items))
+  (let* ((kargu-lsp-skeleton-max-symbols
+          (kargu-usage-limit kargu-lsp-skeleton-max-symbols kargu-low-usage-symbol-limit))
+         (by-file (kargu-lsp--group-project-symbols root items))
          (paths (sort (hash-table-keys by-file) #'string<))
          (total (cl-loop for symbols being the hash-values of by-file
                          sum (length symbols)))

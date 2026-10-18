@@ -100,6 +100,25 @@ Error text from a 200 response that names one of these is treated the same."
   :type 'natnum
   :group 'kargu)
 
+(defcustom kargu-low-usage-mode nil
+  "Use smaller tool results and project outlines without changing the model."
+  :type 'boolean
+  :group 'kargu)
+
+(defcustom kargu-low-usage-output-limit 6000
+  "Maximum tool-result characters when low usage mode is enabled."
+  :type 'natnum
+  :group 'kargu)
+
+(defcustom kargu-low-usage-symbol-limit 200
+  "Maximum project-outline symbols when low usage mode is enabled."
+  :type 'natnum
+  :group 'kargu)
+
+(defun kargu-usage-limit (normal reduced)
+  "Return NORMAL, limited to REDUCED when low usage mode is enabled."
+  (if kargu-low-usage-mode (min normal reduced) normal))
+
 (defcustom kargu-tool-output-limit 24000
   "Maximum characters of a tool result fed back to the model."
   :type 'natnum

@@ -53,7 +53,8 @@ are truncated to `kargu-tool-output-limit'."
   (kargu-contract-assert #'kargu-contract-tool-executor-p executor
                          "EXECUTOR must be callable: %S" executor)
   (puthash name
-           `(("description" . ,description)
+           `(("name" . ,name)
+             ("description" . ,description)
              ("parameters" . ,parameters)
              ("executor" . ,executor)
              ("policy" . ,policy))
@@ -65,13 +66,28 @@ are truncated to `kargu-tool-output-limit'."
   "Return the names of all registered tools."
   (hash-table-keys kargu--tool-registry))
 
+(defun kargu-canonical-tool-name (name)
+  "Return the canonical tool name for NAME, resolving compatibility aliases."
+  (or (kargu-aget (gethash name kargu--tool-registry) "name") name))
+
+(defun kargu--tool-spec (name)
+  "Return the current canonical specification of tool NAME."
+  (gethash (kargu-canonical-tool-name name) kargu--tool-registry))
+
+(defun kargu-advertised-tools ()
+  "List visible canonical tool names in deterministic order."
+  (sort (seq-filter (lambda (name)
+                      (and (equal name (kargu-canonical-tool-name name))
+                           (kargu-tool-visible-p name)))
+                    (kargu-registered-tools)) #'string<))
+
 (defun kargu-tool-description (name)
   "Return the registered description of tool NAME."
-  (kargu-aget (gethash name kargu--tool-registry) "description"))
+  (kargu-aget (kargu--tool-spec name) "description"))
 
 (defun kargu-set-tool-policy (name policy)
   "Set POLICY for registered tool NAME and its aliases."
-  (setcdr (assoc "policy" (gethash name kargu--tool-registry)) policy))
+  (setcdr (assoc "policy" (kargu--tool-spec name)) policy))
 
 (defun kargu-register-tools (specs &optional aliases policy)
   "Register tool SPECS and their optional ALIASES.
@@ -96,7 +112,7 @@ a spec supplies its own fifth element."
 
 (defun kargu-tool-policy-error (name)
   "Return a refusal for unavailable tool NAME, or nil when allowed."
-  (let* ((policy (kargu-aget (gethash name kargu--tool-registry) "policy"))
+  (let* ((policy (kargu-aget (kargu--tool-spec name) "policy"))
          (modes (plist-get policy :modes))
          (available (plist-get policy :available-p)))
     (cond
@@ -111,26 +127,26 @@ Delegates to `kargu--tools-visible-p' if set, otherwise to
 `kargu-loop-tool-visible-p' if defined, defaulting to t."
   (and (not (kargu-tool-policy-error name))
        (if kargu--tools-visible-p
-      (funcall kargu--tools-visible-p name)
-    (if (fboundp 'kargu-loop-tool-visible-p)
-        (kargu-loop-tool-visible-p name)
-      t))))
+	   (funcall kargu--tools-visible-p name)
+	 (if (fboundp 'kargu-loop-tool-visible-p)
+             (kargu-loop-tool-visible-p name)
+	   t))))
 
 (defun kargu--build-tools-vector ()
   "Build the OpenAI \"tools\" array (as a vector) from the registry.
 Tools hidden by `kargu--tool-visible-p' are skipped."
   (let (tools)
-    (maphash (lambda (name spec)
-               (when (kargu--tool-visible-p name)
-                 (push `(("type" . "function")
-                         ("function" . (("name" . ,name)
-                                        ("description" .
-                                         ,(kargu-aget spec "description"))
-                                        ("parameters" .
-                                         ,(kargu--sanitize-tool-parameters
-                                           (kargu-aget spec "parameters"))))))
-                       tools)))
-             kargu--tool-registry)
+    (dolist (name (kargu-advertised-tools))
+      (let ((spec (gethash name kargu--tool-registry)))
+        (when (kargu--tool-visible-p name)
+          (push `(("type" . "function")
+                  ("function" . (("name" . ,name)
+                                 ("description" .
+                                  ,(kargu-aget spec "description"))
+                                 ("parameters" .
+                                  ,(kargu--sanitize-tool-parameters
+                                    (kargu-aget spec "parameters"))))))
+                tools))))
     (vconcat (nreverse tools))))
 
 (defalias 'kargu-tool-visible-p #'kargu--tool-visible-p)
@@ -258,20 +274,22 @@ JSON false, nil, \"false\", and 0 are false.  A missing value is false."
   "Truncate STRING to `kargu-tool-output-limit' characters.
 Preserves the complete output in a buffer named `*kargu-output-<N>*'
 so the model can inspect remaining lines using `read_file'."
-  (if (and (natnump kargu-tool-output-limit)
-           (> (length string) kargu-tool-output-limit))
-      (let* ((omitted (- (length string) kargu-tool-output-limit))
-             (id (cl-incf kargu--truncated-counter))
-             (buf-name (format "*kargu-output-%d*" id)))
-        (with-current-buffer (get-buffer-create buf-name)
-          (let ((inhibit-read-only t))
-            (erase-buffer)
-            (insert string)
-            (setq-local buffer-offer-save nil)))
-        (concat (substring string 0 kargu-tool-output-limit)
-                (format "\n... [Output truncated: omitted %d chars. Complete output (%d chars) preserved in buffer '%s'. You can read specific line ranges using read_file with path='%s' from_line=N to_line=M]"
-                        omitted (length string) buf-name buf-name)))
-    string))
+  (let ((kargu-tool-output-limit
+         (kargu-usage-limit kargu-tool-output-limit kargu-low-usage-output-limit)))
+    (if (and (natnump kargu-tool-output-limit)
+             (> (length string) kargu-tool-output-limit))
+	(let* ((omitted (- (length string) kargu-tool-output-limit))
+               (id (cl-incf kargu--truncated-counter))
+               (buf-name (format "*kargu-output-%d*" id)))
+          (with-current-buffer (get-buffer-create buf-name)
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (insert string)
+              (setq-local buffer-offer-save nil)))
+          (concat (substring string 0 kargu-tool-output-limit)
+                  (format "\n... [Output truncated: omitted %d chars. Complete output (%d chars) preserved in buffer '%s'. You can read specific line ranges using read_file with path='%s' from_line=N to_line=M]"
+                          omitted (length string) buf-name buf-name)))
+      string)))
 
 (defmacro kargu-safe-tool-call (&rest body)
   "Execute BODY, catching errors and formatting as an ERROR string."
@@ -320,7 +338,8 @@ so the model can inspect remaining lines using `read_file'."
       task (lambda ()
              (if (kargu--executor-async-p executor)
                  (let ((result (funcall executor args on-done)))
-                   (when (stringp result) (funcall on-done result)))
+                   (when (and (stringp result) (string-prefix-p "ERROR:" result))
+                     (funcall on-done result)))
                (funcall on-done (funcall executor args))))))))
 
 (defun kargu--execute-tool-sync (executor args name)
@@ -339,7 +358,7 @@ so the model can inspect remaining lines using `read_file'."
 When CALLBACK is provided, run asynchronously if the tool supports it.
 Errors are captured and returned as \"ERROR: ...\" results so the
 agent loop can feed them back to the model for self-correction."
-  (let* ((spec (gethash name kargu--tool-registry))
+  (let* ((spec (kargu--tool-spec name))
          (raw (kargu--tool-raw-args arguments))
          (args (kargu--decode-tool-arguments arguments)))
     (kargu--log-block (format "tool %s arguments (raw)" name) raw

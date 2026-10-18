@@ -341,7 +341,8 @@
       ;; Turn 2 (assistant) should have cache_control breakpoint
       (let ((prev-turn (aref msgs 2)))
         (should (equal (kargu-aget prev-turn "role") "assistant"))
-        (should (equal (kargu-aget prev-turn "cache_control")
+        (should-not (assoc "cache_control" prev-turn))
+        (should (equal (kargu-aget (aref (kargu-aget prev-turn "content") 0) "cache_control")
                        '(("type" . "ephemeral")))))
       ;; Latest turn (user 2) should NOT have cache_control
       (let ((curr-turn (aref msgs 3)))
@@ -362,7 +363,8 @@
         (should (vectorp msgs))
         (let ((sys-msg (aref msgs 0)))
           (should (equal (kargu-aget sys-msg "role") "system"))
-          (should (equal (kargu-aget sys-msg "cache_control")
+          (should-not (assoc "cache_control" sys-msg))
+          (should (equal (kargu-aget (aref (kargu-aget sys-msg "content") 0) "cache_control")
                          '(("type" . "ephemeral")))))))))
 
 (provide 'tests/test-providers)

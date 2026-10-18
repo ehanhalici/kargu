@@ -51,7 +51,7 @@
    (sort (seq-filter (lambda (name)
                        (and (string-prefix-p "debug_" name)
                             (kargu-tool-visible-p name)))
-                     (kargu-registered-tools)) #'string<)
+                     (kargu-advertised-tools)) #'string<)
    "\n"))
 
 (provide 'kargu/tools/dape/policy)

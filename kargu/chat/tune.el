@@ -93,6 +93,12 @@
 
 ;;;; Interactive setters --------------------------------------------------
 
+(defun kargu-tune-toggle-low-usage ()
+  "Toggle bounded tool context without changing the selected model."
+  (interactive)
+  (setq kargu-low-usage-mode (not kargu-low-usage-mode))
+  (message "Kargu: low usage mode %s" (if kargu-low-usage-mode "on" "off")))
+
 (defun kargu-tune-set-temperature ()
   "Prompt for sampling temperature (0.0 to 2.0 or nil)."
   (interactive)
@@ -216,6 +222,7 @@
                                          ("e" kargu-tune-cycle-reasoning-effort :description kargu-tune--reasoning-effort-desc :transient t)
                                          ("b" kargu-tune-set-thinking-budget :description kargu-tune--thinking-budget-desc :transient t)]
                            [:description "Session Flags & Toggles"
+                                         ("l" "Toggle low usage mode" kargu-tune-toggle-low-usage :transient t)
                                          ("s" kargu-tune-toggle-stream :description kargu-tune--stream-desc :transient t)
                                          ("r" kargu-tune-toggle-review-mode :description kargu-tune--review-mode-desc :transient t)]
                            [:description "Actions"
