@@ -19,6 +19,7 @@
 (require 'kargu/core)
 (require 'kargu/fs)
 (require 'kargu/tools/lsp)
+(require 'kargu/permission/guards)
 
 (defvar kargu-context-buffer nil)
 (defvar kargu-chat-max-listed-files 2000)
@@ -56,40 +57,13 @@ Format: (:roots ROOTS :time TIME :files FILES).")
 
 (defun kargu-chat--completion-root ()
   "Project root used for `@' file completion."
-  (or (and (fboundp 'kargu-lsp-project-root)
-           (ignore-errors (kargu-lsp-project-root)))
-      (let ((buf (cond
-                  ((and (boundp 'kargu-context-buffer)
-                        (bufferp kargu-context-buffer)
-                        (buffer-live-p kargu-context-buffer))
-                   kargu-context-buffer)
-                  ((and (boundp 'kargu-context-buffer)
-                        (stringp kargu-context-buffer))
-                   (or (get-file-buffer kargu-context-buffer)
-                       (get-buffer kargu-context-buffer))))))
-        (and (buffer-live-p buf)
-             (with-current-buffer buf
-               (when (fboundp 'project-current)
-                 (let ((project (project-current)))
-                   (and project (project-root project)))))))
-      default-directory))
+  (kargu-permission-project-root))
 
 (defun kargu-chat--completion-roots ()
-  "Project roots to search: context, visiting buffers, known projects."
-  (let (roots)
-    (cl-labels ((add (dir)
-                  (when (and (stringp dir) (file-directory-p dir))
-                    (push (file-name-as-directory (expand-file-name dir))
-                          roots))))
-      (add (kargu-chat--completion-root))
-      (dolist (buf (buffer-list))
-        (let ((file (buffer-file-name buf)))
-          (when file
-            (with-current-buffer buf
-              (if (and (fboundp 'project-current) (project-current))
-                  (add (project-root (project-current)))
-                (add (file-name-directory file)))))))
-      (delete-dups roots))))
+  "Return only the selected project's canonical completion root."
+  (let ((root (kargu-chat--completion-root)))
+    (when (and (stringp root) (file-directory-p root))
+      (list (file-name-as-directory (file-truename root))))))
 
 (defun kargu-chat--walk-files (dir)
   "Recursively list up to `kargu-chat-max-listed-files' under DIR."
@@ -104,18 +78,22 @@ walk the tree.  Falls back to a bounded walk otherwise."
         (project (and (fboundp 'project-current)
                       (fboundp 'project-files)
                       (project-current nil root))))
-    (if project
-        (let (kept)
-          (catch 'full
-            (dolist (f (project-files project))
-              (let ((abs (expand-file-name f)))
-                (unless (or (kargu-fs-skipped-path-p abs root)
-                            (kargu-fs-ignore-file-p abs))
-                  (push abs kept)
-                  (when (>= (length kept) cap)
-                    (throw 'full t))))))
-          (nreverse kept))
-      (kargu-chat--walk-files root))))
+    (when (> cap 0)
+      (if (and project
+               (equal (file-name-as-directory (file-truename (project-root project)))
+                      (file-name-as-directory (file-truename root))))
+          (let ((count 0) kept)
+            (catch 'full
+              (dolist (f (project-files project))
+		(let ((abs (expand-file-name f)))
+                  (unless (or (not (file-in-directory-p abs root))
+                              (kargu-fs-skipped-path-p abs root)
+                              (kargu-fs-ignore-file-p abs))
+                    (push abs kept)
+                    (when (>= (cl-incf count) cap)
+                      (throw 'full t))))))
+            (nreverse kept))
+	(kargu-chat--walk-files root)))))
 
 (defun kargu-chat--collect-files (roots)
   "Relative display paths for files under ROOTS.
@@ -138,7 +116,8 @@ root directory name so `@rust/src/lib.rs' is findable."
                       acc)))))))
     (dolist (buf (buffer-list))
       (let ((file (buffer-file-name buf)))
-        (when file
+        (when (and file (not (kargu-fs-ignore-file-p file))
+                   (seq-some (lambda (root) (file-in-directory-p file root)) roots))
           (let ((key (expand-file-name file)))
             (unless (gethash key seen)
               (puthash key t seen)

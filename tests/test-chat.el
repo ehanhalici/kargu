@@ -446,6 +446,26 @@
             (should (= (point) (+ kargu-chat--prompt-marker 4)))
             (should (= (mark) (+ kargu-chat--prompt-marker 8)))))))))
 
+(ert-deftest kargu-chat-completion-never-adds-unrelated-buffer-roots-test ()
+  "An unrelated file buffer is neither scanned nor offered as a mention."
+  (kargu-test-with-git-repo '(("local.el" . "local"))
+    (let ((foreign (generate-new-buffer " *kargu-foreign-completion*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer foreign
+              (setq buffer-file-name "/tmp/other-project/secret.el"))
+            (cl-letf (((symbol-function 'project-current)
+                       (lambda (&rest _) (error "Must not scan other buffer projects"))))
+              (should (equal (kargu-chat--completion-roots) (list repo))))
+            (cl-letf (((symbol-function 'kargu-chat--project-absolute-files)
+                       (lambda (root)
+                         (should (equal root repo))
+                         (list (expand-file-name "local.el" root)))))
+              (let ((files (kargu-chat--collect-files (kargu-chat--completion-roots))))
+                (should (member "local.el" files))
+                (should-not (member "secret.el" files)))))
+        (kill-buffer foreign)))))
+
 (ert-deftest kargu-chat-unowned-tool-calls-do-not-pollute-transcript-test ()
   "Calling the tool API outside a loop leaves an existing chat untouched."
   (with-temp-buffer
