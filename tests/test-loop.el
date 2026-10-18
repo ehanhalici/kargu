@@ -470,8 +470,8 @@
                                  ("reasoning_content" . ,(or reasoning ""))))
                    ("finish_reason" . ,reason))))))
 
-(ert-deftest kargu-loop-reasoning-only-stays-open-test ()
-  "A truncated reply with no answer stays length, including at the turn cap."
+(ert-deftest kargu-loop-truncated-reasoning-is-never-a-success-test ()
+  "A truncated reply stays length and exhausted continuation fails explicitly."
   (let* ((resp (kargu-test--reasoning-response "length" "" "still thinking"))
          (open (list :state 'wait :iterations 2 :length-continues 1))
          (capped (list :state 'wait :iterations 12 :max-iterations 12
@@ -492,8 +492,33 @@
                  (lambda (&rest _) nil)))
         (let ((kargu--loop-run capped))
           (kargu-loop--on-length capped resp))
-        (should prompted)
-        (should-not finished)))))
+        (should-not prompted)
+        (should finished)))))
+
+(ert-deftest kargu-loop-incomplete-responses-finish-as-errors-test ()
+  "Repeated truncation and empty-response exhaustion never report :done."
+  (dolist (case '(("length" "partial" 3 2)
+                  ("length" "" 3 2)
+                  ("length" "partial" 1 1)
+                  ("stop" "" 3 2)))
+    (let* ((posts 0) report
+           (kargu-loop-empty-retries 1)
+           (run (list :state 'request :iterations 0 :max-iterations (nth 2 case)
+                      :no-tools t :on-finish (lambda (value) (setq report value))))
+           (kargu--loop-run run))
+      (kargu-test-mode 'ask)
+      (cl-letf (((symbol-function 'kargu-api-send)
+                 (lambda (_prompt callback &rest _)
+                   (cl-incf posts)
+                   (should (<= posts (nth 3 case)))
+                   (funcall callback
+                            (kargu-test--reasoning-response (car case) (cadr case)))))
+                ((symbol-function 'kargu-history-needs-compact-p) (lambda () nil)))
+        (kargu--loop-request run "go")
+        (should (= posts (nth 3 case)))
+        (should (eq (plist-get report :status) :error))
+        (should (stringp (plist-get report :error)))
+        (should-not (kargu-loop-running-p))))))
 
 (ert-deftest kargu-loop-repeated-reasoning-stops-at-the-global-turn-cap-test ()
   "Repeated reasoning-only replies pause before a fourth request is sent."

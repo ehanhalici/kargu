@@ -212,9 +212,7 @@ A truncated reply that already has answer text continues once."
         (calls (kargu--loop-tool-calls response))
         (reason (kargu--loop-finish-reason response))
         (answer (kargu-nonempty (kargu-response-answer-text response)))
-        (reasoning (kargu-nonempty (kargu-response-reasoning-text response)))
-        (continues (or (plist-get run :length-continues) 0))
-        (under-cap (kargu-loop--under-turn-cap-p run)))
+        (reasoning (kargu-nonempty (kargu-response-reasoning-text response))))
     (cond
      ((not (kargu-loop--live-p run)) 'stale)
      ((and err (kargu-response-overflow-p response)
@@ -230,14 +228,7 @@ A truncated reply that already has answer text continues once."
      (err 'error)
      ((member reason '("content-filter" "content_filter")) 'content-filter)
      ((and (listp calls) calls (kargu-tools-enabled-p run)) 'tools)
-     ((and (member reason kargu-loop--length-reasons)
-           (not answer))
-      'length)
-     ((and (member reason kargu-loop--length-reasons)
-           (< continues 1)
-           under-cap)
-      'length)
-     ((member reason kargu-loop--length-reasons) 'answer)
+     ((member reason kargu-loop--length-reasons) 'length)
      (answer 'answer)
      (reasoning 'thought)
      (t 'empty))))
@@ -398,15 +389,18 @@ Record success in the circuit breaker."
     (kargu--loop-next-call run (append calls nil))))
 
 (defun kargu-loop--on-length (run _response)
-  "Continue RUN after a truncated completion.
-A reply with answer text continues once.  A reply with no answer
-requests again; at the turn cap that request asks to continue.
-Records a circuit breaker success (model did respond)."
+  "Continue RUN once after truncation, or finish with an incomplete error.
+Record a circuit breaker success because the model did respond."
   (kargu-circuit-record-success)
-  (plist-put run :length-continues
-             (1+ (or (plist-get run :length-continues) 0)))
-  (kargu-log 'info "loop: truncated; continuing")
-  (kargu--loop-request run kargu--continue-nudge))
+  (if (and (< (or (plist-get run :length-continues) 0) 1)
+           (kargu-loop--under-turn-cap-p run))
+      (progn
+        (plist-put run :length-continues 1)
+        (kargu-log 'info "loop: truncated; continuing")
+        (kargu--loop-request run kargu--continue-nudge))
+    (kargu--loop-finish
+     run :error
+     "The model response is incomplete: its output limit was reached and no automatic continuation remains. Increase the output limit or ask to continue.")))
 
 (defun kargu-loop--on-thought (run _response)
   "Ask RUN to answer or call a tool after a reasoning-only reply.
@@ -430,7 +424,7 @@ Record success in the circuit breaker."
         (cap (or kargu-loop-empty-retries 0)))
     (if (>= n cap)
         (kargu--loop-finish
-         run :done "(the model returned an empty response)")
+         run :error "The model returned an empty response after all allowed retries")
       (plist-put run :empty-retries (1+ n))
       (kargu-log 'warn "loop: empty response, retry %d/%d"
                  (1+ n) cap)

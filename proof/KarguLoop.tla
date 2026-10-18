@@ -313,19 +313,22 @@ ModelReceiveToolCalls(calls) ==
     /\ UNCHANGED <<activeMode, Counters, doomSigs, pendingToolCall,
                    pendingVerifyFiles, Flags, runStatus, generation>>
 
-(* length: one `Continue.' per run, and only below the cap.  Otherwise a    *)
-(* truncated reply is judged as an answer or as empty.                      *)
+(* length: one `Continue.' per run below the cap, otherwise explicit error. *)
 ModelReceiveLengthTruncated ==
     /\ state = "WAIT_MODEL"
-    /\ lengthContinues < 1
-    /\ iterations < turnCap
-    /\ lengthContinues ' = lengthContinues + 1
-    /\ state           ' = "REQUEST"
+    /\ IF lengthContinues < 1 /\ iterations < turnCap
+       THEN /\ lengthContinues ' = lengthContinues + 1
+            /\ state ' = "REQUEST"
+            /\ UNCHANGED <<history, runStatus>>
+       ELSE /\ state ' = "ERROR"
+            /\ runStatus ' = "error"
+            /\ history ' = ValidateHistory(history, "keep")
+            /\ UNCHANGED lengthContinues
     /\ circuitState    ' = "CLOSED"
     /\ circuitFailures ' = 0
-    /\ UNCHANGED <<history, activeMode, iterations, turnCap, healing,
+    /\ UNCHANGED <<activeMode, iterations, turnCap, healing,
                    verifications, emptyRetries, upstreamRetries, compactions,
-                   ToolVars, Flags, runStatus, generation>>
+                   ToolVars, Flags, generation>>
 
 (* Reasoning-only replies consume the same global turn budget.             *)
 ModelReceiveThought ==
@@ -358,8 +361,8 @@ ModelReceiveEmpty ==
        THEN /\ emptyRetries ' = emptyRetries + 1
             /\ state        ' = "REQUEST"
             /\ runStatus    ' = "none"
-       ELSE /\ state        ' = "DONE"
-            /\ runStatus    ' = "done"
+       ELSE /\ state        ' = "ERROR"
+            /\ runStatus    ' = "error"
             /\ UNCHANGED emptyRetries
     /\ UNCHANGED <<history, activeMode, iterations, turnCap, healing,
                    verifications, upstreamRetries, compactions, lengthContinues,

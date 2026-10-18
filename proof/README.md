@@ -110,6 +110,10 @@ run before another request, as checked by exhaustive scanning and repeated-reply
 ERT coverage. Read-only branch/stash listing does not grant mutation rights.
 Synthetic thought/retry notices are abstracted away in the bounded model.
 
+Truncated replies have one automatic continuation below the turn cap.
+Further truncation, truncation at the cap, and exhausted empty-response retries
+finish in `ERROR`, never in the successful `DONE` state.
+
 The bounded loop abstracts request size with `CompactionThreshold`. ERT checks
 the concrete short-window calculation and serialized history/schema estimate;
 the model does not implement a provider tokenizer or image token accounting.
@@ -168,9 +172,9 @@ Run on 2026-10-18 with TLC 2.19, 24 workers:
 
 ```
 Model checking completed. No error has been found.
-732574164 states generated, 85787393 distinct states found, 0 states left on queue.
-The depth of the complete state graph search is 42.
-Finished in 10min 11s
+729094900 states generated, 85318093 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 43.
+Finished in 10min 02s
 ```
 
 Changing a guard breaks the check: with the `~noTools` guard removed from `ModelReceiveToolCalls`, a simulation reports `Safety_ToolsOffMeansNoToolWork` violated within a second. The numbers above are those of a real run; repeat it after every change to the specification and replace them.

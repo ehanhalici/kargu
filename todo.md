@@ -105,14 +105,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 3. **[K - Orta] Plan durumunun global olması.**
    - **Dosya / Satır:** `kargu/plan/dispatch.el:45, 51`
    - **Sorun:** `kargu-plan--decision-pending` ve `kargu-plan--current-plan` globaldir; farklı projelerdeki plan tamponları birbirinin durumunu ezer.
-5. **[K - Yüksek] İkinci `length` kesintisi tamamlanmış cevap (`'answer`) sayılarak `:done` ile sonlandırılır.**
-   - **Dosya / Satır:** `kargu/loop/machine.el:236-240`
-   - **Sorun:** Model yanıtı `max_tokens` nedeniyle kesildiğinde ilkinde `(< continues 1)` doğru olduğu için `'length` sınıflandırılır ve `"Continue."` ile devam edilir. Ancak ikinci kez `length` kesintisi yaşandığında `(< continues 1)` `nil` olduğu için bir sonraki kural olan `((member reason kargu-loop--length-reasons) 'answer)` devreye girer. `kargu-loop--on-answer` çağrılarak yarım kalmış metin başarıyla bitmiş gibi kabul edilir ve koşu `:done` ile kapatılır. Modelin cevabı veya kodu ortasında kesilmiş olmasına rağmen sisteme ve kullanıcıya başarı raporu verilir.
-   - **Öneri:** İkinci kesintide `'answer` yerine `'error` veya kullanıcıya ek devam hakkı sunan bir onay mekanizması tetiklenmeli; yarım çıktı `:done` ile maskelenmemelidir.
-6. **[K - Orta] `empty-retries` tavanına ulaşıldığında koşu `:error` yerine `:done` ile kapatılır.**
-   - **Dosya / Satır:** `kargu/loop/machine.el:429-434`
-   - **Sorun:** Model ardışık olarak boş yanıt verdiğinde yeniden deneme sayacı artırılır. Sayı `kargu-loop-empty-retries` tavanına ulaştığında `(kargu--loop-finish run :done "(the model returned an empty response)")` çağrılmaktadır. Modelden hiçbir yanıt alınamamış bariz bir hata durumu `:error` yerine `:done` başarı durumuyla sonlandırılır.
-   - **Öneri:** `kargu--loop-finish run :error ...` çağrılmalı ve yaşam döngüsü hataya geçirilmelidir.
 7. **[K - Yüksek] `run` kaydında `:mode` tutulmaz; global `kargu--state-store` okunur ve tek bir koşu tüm Emacs kiplerini kilitler.**
    - **Dosya / Satır:** `kargu/loop.el:224-232, 106-108, 122-144`, `kargu/state/transitions.el:39-40`
    - **Sorun:** (a) `kargu-loop--new-run` oluşturulurken `:mode` kaydı tutulmaz; araç izinleri (`kargu-loop--gate-tool`) doğrudan merkezi `(kargu-state-mode)`'u sorgular. (b) `kargu-state-set-mode`, `(kargu-loop-running-p)` aktif olduğu sürece `user-error` fırlatarak kip değişimini Emacs genelinde engeller. Bir projede arka planda uzun bir agent koşusu varken diğer projelerde `ask`/`plan`/`debug` kiplerine geçilemez.
