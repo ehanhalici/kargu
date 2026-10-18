@@ -16,6 +16,7 @@
 (require 'kargu/core)
 (require 'kargu/state/selectors)
 (require 'kargu/chat/prompt)
+(require 'kargu/chat/routing)
 
 (defface kargu-chat-user-heading
   '((t :inherit font-lock-preprocessor-face :weight bold))
@@ -58,7 +59,7 @@
            (buffer-live-p (plist-get kargu--loop-run :chat-buffer))
            (plist-get kargu--loop-run :chat-buffer))
       (and (derived-mode-p 'kargu-chat-mode) (current-buffer))
-      (get-buffer kargu-chat-buffer-name)))
+      (kargu-chat-find-buffer)))
 
 (defun kargu-chat--compute-window-follow-states (windows in-start at)
   "Choose follow targets for WINDOWS using prompt IN-START and output AT."

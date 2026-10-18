@@ -20,6 +20,7 @@
 (require 'kargu/json)
 (require 'kargu/history)
 (require 'kargu/permission/guards)
+(require 'kargu/chat/routing)
 
 (declare-function kargu-state-mode "kargu/state/selectors" ())
 (declare-function kargu-state-set-provider "kargu/state/transitions" (provider))
@@ -57,9 +58,6 @@
   :group 'kargu-session)
 
 ;;;; Buffer-local session state -------------------------------------------
-
-(defvar-local kargu-chat--project-root nil
-  "Canonical project root directory associated with this chat buffer.")
 
 (defvar-local kargu-chat--session-id nil
   "Session identifier associated with this chat buffer.")

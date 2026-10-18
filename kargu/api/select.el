@@ -19,6 +19,7 @@
 (require 'kargu/state)
 (require 'kargu/config/key)
 (require 'kargu/api/catalog)
+(require 'kargu/chat/routing)
 
 (declare-function company-mode "company" (&optional arg))
 (declare-function company-manual-begin "company" ())
@@ -211,7 +212,7 @@ Invoke APPLY with the accepted candidate."
   (or (and (markerp kargu-chat--output-marker)
            (marker-position kargu-chat--output-marker)
            (current-buffer))
-      (get-buffer kargu-chat-buffer-name)))
+      (kargu-chat-find-buffer)))
 
 (defun kargu-api-select--in-footer (field candidates annotations apply)
   "Start Company for CANDIDATES inside footer FIELD, then call APPLY."

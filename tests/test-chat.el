@@ -19,6 +19,33 @@
 (declare-function kargu-chat--tool-heading "kargu/chat/render" (name arguments))
 (declare-function kargu-chat--result-summary "kargu/chat/render" (result))
 
+(ert-deftest kargu-chat-buffer-lookup-is-project-aware-test ()
+  "Source-buffer commands target their project, not the first named chat."
+  (let* ((kargu-chat-buffer-name (generate-new-buffer-name "*kargu-route-test*"))
+         (first (generate-new-buffer kargu-chat-buffer-name))
+         (second (generate-new-buffer kargu-chat-buffer-name))
+         (root (kargu-permission-project-root))
+         (other (file-name-as-directory (expand-file-name "other" root))))
+    (unwind-protect
+        (progn
+          (with-current-buffer first
+            (setq major-mode 'kargu-chat-mode kargu-chat--project-root root))
+          (with-current-buffer second
+            (setq major-mode 'kargu-chat-mode kargu-chat--project-root other))
+          (with-temp-buffer
+            (let ((kargu-permission--override-root other) (kargu--loop-run nil))
+              (should (eq (kargu-chat-output-buffer) second))
+              (should (eq (kargu-api-select--chat-buffer) second)))
+            (let ((kargu-permission--override-root
+                   (file-name-as-directory (expand-file-name "absent" root))))
+              (should-not (kargu-chat-find-buffer))))
+          (let ((kargu--loop-run (list :chat-buffer first))
+                (kargu-permission--override-root other))
+            (should (eq (kargu-chat-output-buffer) first))
+            (should (eq (kargu-api-select--chat-buffer) second))))
+      (kill-buffer first)
+      (kill-buffer second))))
+
 (ert-deftest kargu-chat-inline-thoughts-preserve-match-data-test ()
   "Multiple inline thought blocks render in order without leaking matches."
   (with-temp-buffer
