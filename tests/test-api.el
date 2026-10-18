@@ -229,7 +229,7 @@
   (with-temp-buffer
     (set-buffer-multibyte nil)
     (let* ((process (make-pipe-process :name "kargu-utf8" :buffer (current-buffer)))
-           (raw (encode-coding-string "data: {\"content\":\"ğ🙂\"}\n" 'utf-8))
+           (raw (encode-coding-string "data: {\"content\":\"ğ🙂\"}\n\n" 'utf-8))
            (split (1+ (string-search (encode-coding-string "ğ" 'utf-8) raw)))
            events
            (callback (lambda (event)

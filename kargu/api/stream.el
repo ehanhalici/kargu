@@ -25,20 +25,56 @@
       (kargu--json-decode data)
     (error '(("error" . (("message" . "Invalid JSON in SSE data event")))))))
 
+(cl-defstruct (kargu-sse-parser (:constructor kargu-sse-parser-create))
+  "Pending fields of one SSE event, shared by both transport paths."
+  data event)
+
+(defun kargu-sse--dispatch (parser)
+  "Take and decode PARSER's pending event, if it has data fields."
+  (let ((lines (nreverse (kargu-sse-parser-data parser)))
+        (type (kargu-sse-parser-event parser)))
+    (setf (kargu-sse-parser-data parser) nil
+          (kargu-sse-parser-event parser) nil)
+    (when lines
+      (let ((data (mapconcat #'identity lines "\n")))
+        (kargu--log-block "SSE data" data t)
+        (if (equal (string-trim data) "[DONE]")
+            :done
+          (let ((event (kargu-sse-decode-data data)))
+            (if (and (equal type "error")
+                     (memq (kargu-aget event "error") '(nil :json-null :json-false)))
+                (list (cons "error"
+                            (or (kargu--provider-error-text event)
+                                (kargu-nonempty (kargu-aget event "message"))
+                                "Provider sent an SSE error event")))
+              event)))))))
+
+(defun kargu-sse-parser-feed (parser line)
+  "Consume one complete SSE LINE in PARSER; return a completed event or nil.
+Blank lines delimit events.  Data fields are joined with newlines; comments,
+HTTP headers and unknown fields are ignored."
+  (save-match-data
+    (setq line (string-remove-suffix "\r" line))
+    (cond
+     ((string-empty-p line) (kargu-sse--dispatch parser))
+     ((string-prefix-p ":" line) nil)
+     (t
+      (let* ((colon (string-search ":" line))
+             (field (if colon (substring line 0 colon) line))
+             (value (if colon (string-remove-prefix " " (substring line (1+ colon))) "")))
+        (pcase field
+          ("data" (push value (kargu-sse-parser-data parser)))
+          ("event" (setf (kargu-sse-parser-event parser) value)))
+        nil)))))
+
 (defun kargu--sse-parse (text)
   "Parse a complete OpenAI-style SSE TEXT body.
 Return decoded data objects and `:done' for the terminal marker.
 Ignore comments and keep-alive pings."
-  (let (events)
-    (dolist (line (split-string text "\n" t))
-      (setq line (string-trim-right line "\r"))
-      (when (string-prefix-p "data:" line)
-        (let ((data (string-trim (substring line (length "data:")))))
-          (cond
-           ((equal data "[DONE]") (push :done events))
-           ((not (string-empty-p data))
-            (when-let* ((event (kargu-sse-decode-data data)))
-              (push event events)))))))
+  (let ((parser (kargu-sse-parser-create)) events)
+    (dolist (line (append (split-string text "\n" nil) '("")))
+      (when-let* ((event (kargu-sse-parser-feed parser line)))
+        (push event events)))
     (nreverse events)))
 
 (defun kargu--sse-event-error-message (event)

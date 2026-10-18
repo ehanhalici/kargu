@@ -83,5 +83,34 @@
     (should (string-search "Invalid streamed tool-call index" (kargu-response-error-message response)))
     (should-not (kargu-response-tool-calls response))))
 
+(ert-deftest kargu-stream-multiline-events-match-incremental-decoding-test ()
+  "Multiline data is one event; event:error wraps otherwise plain payloads."
+  (let* ((body (concat ": ping\r\n\r\nevent: message\r\ndata: {\r\n"
+                       "data: \"choices\": [{\"delta\":{\"content\":\"answer\"}}]}\r\n\r\n"
+                       "event: error\ndata: {\"message\":\"provider failed\"}\n\n"
+                       "data: [DONE]\n\n"))
+         (expected (kargu--sse-parse body)))
+    (should (= (length expected) 3))
+    (should (equal (kargu-response-error-message (nth 1 expected)) "provider failed"))
+    (should (eq (nth 2 expected) :done))
+    (with-temp-buffer
+      (let ((process (make-pipe-process :name "kargu-sse-multiline" :buffer (current-buffer)))
+            events)
+        (unwind-protect
+            (progn
+              (dotimes (index (length body))
+                (kargu--stream-filter process (substring body index (1+ index)) nil
+                                      (lambda (event) (push event events))))
+              (kargu--stream-flush process nil (lambda (event) (push event events)))
+              (should (equal (nreverse events) expected)))
+          (delete-process process))))))
+
+(ert-deftest kargu-stream-explicit-error-events-never-look-successful-test ()
+  "An error event remains an error even with a null or scalar payload."
+  (dolist (data '("null" "{\"error\":null,\"message\":\"failed\"}" "\"failed\""))
+    (let* ((events (kargu--sse-parse (concat "event: error\ndata: " data "\n\n")))
+           (response (kargu--accumulate-stream-deltas events)))
+      (should (kargu-response-error-message response)))))
+
 (provide 'tests/test-stream)
 ;;; test-stream.el ends here

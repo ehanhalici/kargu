@@ -45,7 +45,7 @@ ON-DELTA and ON-EVENT while retaining incomplete UTF-8 lines."
                 (let ((complete (decode-coding-string
                                  (substring raw 0 (1+ pos)) 'utf-8)))
                   (process-put process :kargu-raw (substring raw (1+ pos)))
-                  (dolist (line (split-string complete "\n" t))
+                  (dolist (line (split-string (string-remove-suffix "\n" complete) "\n" nil))
                     (kargu--stream-line process line on-delta on-event)))))))
       (error
        (kargu-log 'error "stream filter error: %s"
@@ -61,31 +61,26 @@ ON-DELTA and ON-EVENT while retaining incomplete UTF-8 lines."
             (kargu--stream-line process (decode-coding-string rest 'utf-8)
                                 on-delta on-event)
           (error (kargu-log 'error "stream flush error: %s"
-                            (error-message-string err))))))))
+                            (error-message-string err)))))
+      (kargu--stream-line process "" on-delta on-event))))
 
 (defun kargu--stream-line (process line on-delta &optional on-event)
   "Handle one complete SSE LINE from PROCESS.
-Non-\"data:\" lines (HTTP headers, comments, keep-alives) are
-ignored.  PROCESS is only used for logging context."
+Retain partial events until their blank-line delimiter.  Deliver completed
+events to ON-EVENT and data events to ON-DELTA."
   (save-match-data
-    (ignore process)
-    (setq line (string-trim-right line "\r"))
-    (when (string-prefix-p "data:" line)
-      (let ((data (string-trim (substring line (length "data:")))))
-        (cond
-         ((equal data "[DONE]")
-          (when (functionp on-event) (funcall on-event :done)))
-         ((not (string-empty-p data))
-          (kargu--log-block "SSE data" data t)
-          (when-let* ((event (kargu-sse-decode-data data)))
-            (when (functionp on-event)
-              (funcall on-event event))
-            (when (functionp on-delta)
-              (condition-case-unless-debug err
-                  (funcall on-delta event)
-                (error
-                 (kargu-log 'warn "on-delta callback failed: %s"
-                            (error-message-string err))))))))))))
+    (let ((parser (or (process-get process :kargu-sse-parser)
+                      (let ((new (kargu-sse-parser-create)))
+                        (process-put process :kargu-sse-parser new)
+                        new))))
+      (when-let* ((event (kargu-sse-parser-feed parser line)))
+        (when (functionp on-event) (funcall on-event event))
+        (when (and (not (eq event :done)) (functionp on-delta))
+          (condition-case-unless-debug err
+              (funcall on-delta event)
+            (error
+             (kargu-log 'warn "on-delta callback failed: %s"
+                        (error-message-string err)))))))))
 
 (provide 'kargu/api/sse)
 
