@@ -275,9 +275,20 @@ Without CALLBACK the string is returned; with CALLBACK it is passed there."
               (let ((outcome (kargu-diff-apply-proposal path contents done)))
                 (if done 'deferred (kargu-diff--describe outcome)))))))))))
 
+(defun kargu-diff--validate-patch-directives (lines)
+  "Reject unsupported envelope directives in patch LINES before planning."
+  (dolist (line lines)
+    (when (and (string-prefix-p "*** " line)
+               (not (member line '("*** Begin Patch" "*** End Patch")))
+               (not (seq-some (lambda (prefix) (string-prefix-p prefix line))
+                              '("*** Add File:" "*** Update File:" "*** Delete File:"))))
+      (error "Unsupported patch directive: %s; use Add/Update/Delete File envelopes"
+             line))))
+
 (defun kargu-diff--parse-patch-lines (lines)
   "Parse patch LINES into structured operations.
 Returns a list of plists with keys :type, :file, :lines."
+  (kargu-diff--validate-patch-directives lines)
   (let* ((ops nil)
          (curr-type nil)
          (curr-file nil)
@@ -330,7 +341,6 @@ Each hunk is (LINE-HINT . LINES), LINE-HINT being what its header names."
                 (setq curr-hunk nil hint nil)))
       (dolist (l op-lines)
         (cond
-         ((string-prefix-p "*** Move to:" l) nil)
          ((string-prefix-p "@@" l)
           (flush)
           (setq hint (kargu-diff--hunk-line-hint l)))
@@ -536,7 +546,8 @@ rollback pipeline.  Return a summary of the applied operations."
     #'kargu-diff--write-file-tool)
    (list
     "apply_patch"
-    "Apply a multi-file unified patch across multiple files in a single tool call. Agent mode only.
+    "Apply a multi-file patch with Add/Update/Delete File envelopes. Agent mode only.
+Move to, End of File and other envelope directives are unsupported and rejected before writing.
 Format:
 *** Begin Patch
 *** Add File: path/to/file.ext

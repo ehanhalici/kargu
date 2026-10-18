@@ -19,9 +19,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 2. **[K - Orta] `apply_patch` atomik değildir.**
    - **Dosya / Satır:** `kargu/tools/diff.el:450-456`
    - **Sorun:** Patch planı önceden doğrulansa bile yazma aşamasında `maphash` sırayla dosyaları yazar. Dosyalardan biri yazılırken disk hatası veya kilit oluşursa önceki dosyalar diske yazılmış kalır, rollback tetiklenmez.
-3. **[K - Orta] Yama sözdiziminde `*** Move to:` ve `*** End of File` karmaşası.**
-   - **Dosya / Satır:** `kargu/tools/diff.el:312-313, 335`
-   - **Sorun:** `*** Move to:` satırları `kargu-diff--split-update-hunks` içinde sessizce atlanır ve dosya taşınmaz. Bazı modellerin eklediği `*** End of File` satırı ise `curr-lines` içine yama metni olarak girerek hunk eşleşmesini bozar (`Add File` durumunda dosya sonuna bu satır yazılır).
 5. **[D - Düşük] `read_file` bellek tüketimi.**
    - **Dosya / Satır:** `kargu/tools/diff.el:147-154, 175-180`
    - **Sorun:** `from_line`/`to_line` aralığı verilmiş olsa dahi dosya önce tamamen arabelleğe okunur ve `split-string` ile tüm satır listesi oluşturulur. Çok büyük dosyalarda (100MB+) gereksiz bellek ve GC yükü oluşturur.

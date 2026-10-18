@@ -29,6 +29,19 @@
 (require 'kargu/permission)
 (require 'kargu/tools/diff)
 
+(ert-deftest kargu-patch-rejects-unsupported-directives-before-writing-test ()
+  "Unsupported move/EOF directives never silently change patch contents."
+  (kargu-test-with-git-repo '(("original.txt" . "old\n"))
+    (dolist (directive '("*** Move to: moved.txt" "*** End of File" "*** Unknown"))
+      (should-error
+       (kargu-diff-apply-patch
+        (format "*** Begin Patch\n*** Add File: created.txt\n+created\n*** Update File: original.txt\n%s\n@@\n-old\n+new\n*** End Patch"
+                directive)))
+      (should-not (file-exists-p (expand-file-name "created.txt" repo)))
+      (with-temp-buffer
+        (insert-file-contents (expand-file-name "original.txt" repo))
+        (should (equal (buffer-string) "old\n"))))))
+
 (ert-deftest kargu-patch-add-and-delete-file-test ()
   "Test that `apply_patch' adds a new file and can delete a file."
   (let* ((tmp-dir (make-temp-file "kargu-patch-test" t))
