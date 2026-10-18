@@ -12,21 +12,28 @@ EXTENDS Naturals, Sequences, FiniteSets, TLC, KarguContract
 (* Circuit States & Configuration                                          *)
 (***************************************************************************)
 
-CircuitStates == {"CLOSED", "OPEN", "HALF_OPEN"}
+(* HALF_OPEN is unclaimed; PROBING is HALF_OPEN with probe-inflight true. *)
+CircuitStates == {"CLOSED", "OPEN", "HALF_OPEN", "PROBING"}
 
 (***************************************************************************)
 (* Circuit Breaker Transitions (Pure Functional Model)                     *)
 (***************************************************************************)
 
 CircuitAllowRequest(cState) ==
-    cState # "OPEN"
+    cState \notin {"OPEN", "PROBING"}
+
+CircuitClaimProbe(cState) ==
+    IF cState = "HALF_OPEN" THEN "PROBING" ELSE cState
+
+CircuitReleaseProbe(cState) ==
+    IF cState = "PROBING" THEN "HALF_OPEN" ELSE cState
 
 CircuitRecordSuccess ==
     [state |-> "CLOSED", failures |-> 0]
 
 CircuitRecordFailure(cState, cFailures, threshold) ==
     LET newFailures == cFailures + 1
-    IN IF cState = "HALF_OPEN" \/ newFailures >= threshold
+    IN IF cState \in {"HALF_OPEN", "PROBING"} \/ newFailures >= threshold
        THEN [state |-> "OPEN", failures |-> newFailures]
        ELSE [state |-> cState, failures |-> newFailures]
 

@@ -62,6 +62,7 @@ touching plz internals.")
 (defun kargu-api-clear-busy ()
   "Clear the in-flight busy flag and update status when no loop is active."
   (setq kargu--busy nil)
+  (kargu-circuit-release-probe)
   (unless (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
     (when (fboundp 'kargu-state-transition-status)
       (kargu-state-transition-status :idle))))
@@ -131,6 +132,7 @@ generation counter; the active curl process is terminated and
 the UI and central state are left in a consistent state."
   (interactive)
   (cl-incf kargu--generation)
+  (kargu-circuit-release-probe)
   (kargu--api-cancel-stream-watch kargu--current-process)
   (when (and (processp kargu--current-process)
              (process-live-p kargu--current-process))
@@ -331,8 +333,9 @@ ATTEMPT is the retry count."
 An upstream-unavailable MSG counts against the circuit breaker here, so
 the loop never has to record it again."
   (setq kargu--busy nil)
-  (when (kargu--api-error-looks-retryable-p msg)
-    (kargu-circuit-record-failure msg))
+  (if (kargu--api-error-looks-retryable-p msg)
+      (kargu-circuit-record-failure msg)
+    (kargu-circuit-release-probe))
   (funcall callback (kargu--api-error-alist msg)))
 
 (defun kargu--api-handle-no-choices (response trimmed url headers payload gen

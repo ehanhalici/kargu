@@ -1,4 +1,4 @@
-;;; kargu/api/circuit.el --- Circuit breaker pattern for API requests -*- lexical-binding: t; -*-
+;;; circuit.el --- Circuit breaker pattern for API requests -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -74,6 +74,11 @@ only from the code that is about to send."
     (setq kargu-circuit--probe-inflight t)
     t)))
 
+(defun kargu-circuit-release-probe ()
+  "Release a finished or cancelled canary without declaring upstream healthy.
+Keep the failure count and circuit state; the next request may probe again."
+  (setq kargu-circuit--probe-inflight nil))
+
 (defun kargu-circuit-record-success ()
   "Record a successful request, resetting the failure count and closing circuit."
   (when (or (eq kargu-circuit--state :half-open)
@@ -134,4 +139,4 @@ If failures reach `kargu-circuit-failure-threshold', trips circuit to :open."
 
 (provide 'kargu/api/circuit)
 
-;;; kargu/api/circuit.el ends here
+;;; circuit.el ends here

@@ -169,6 +169,42 @@
   (should (eq kargu-circuit--state :closed))
   (should (kargu-circuit-allow-request-p)))
 
+(ert-deftest kargu-circuit-cancel-and-rejection-release-canary-test ()
+  "Cancellation and terminal rejections free the canary without resetting failures."
+  (dolist (outcome '(cancel http-error body-error startup-error))
+    (let ((kargu-circuit--state :half-open)
+          (kargu-circuit--probe-inflight nil)
+          (kargu-circuit--failure-count 4)
+          (kargu--current-process nil)
+          (kargu--generation 50)
+          (kargu--busy t) responses)
+      (should (kargu-circuit-allow-request-p))
+      (should-not (kargu-circuit-allow-request-p))
+      (pcase outcome
+        ('cancel (kargu-api-cancel))
+        ('startup-error (kargu-api-clear-busy))
+        ('body-error (kargu--api-dispatch-error (lambda (value) (push value responses)) "Invalid request"))
+        ('http-error
+         (cl-letf (((symbol-function 'kargu--plz-http-status) (lambda (_) 401))
+                   ((symbol-function 'kargu--plz-error-message) (lambda (_) "Unauthorized")))
+           (kargu--api-on-transport-error nil nil nil 50
+                                          (lambda (value) (push value responses)) nil 0 'mock-error))))
+      (should-not kargu-circuit--probe-inflight)
+      (should (eq kargu-circuit--state :half-open))
+      (should (= kargu-circuit--failure-count 4))
+      (should (kargu-circuit-allow-request-p)))))
+
+(ert-deftest kargu-circuit-retry-keeps-exclusive-canary-test ()
+  "A scheduled transport retry retains its canary until actual completion."
+  (let ((kargu-circuit--state :half-open)
+        (kargu-circuit--probe-inflight t)
+        (kargu--generation 70) (kargu-api-retry-max 1) scheduled)
+    (cl-letf (((symbol-function 'kargu--plz-http-status) (lambda (_) 503))
+              ((symbol-function 'run-at-time) (lambda (&rest _) (setq scheduled t))))
+      (kargu--api-on-transport-error nil nil nil 70 #'ignore nil 0 'mock-error)
+      (should scheduled)
+      (should-not (kargu-circuit-allow-request-p)))))
+
 (ert-deftest kargu-api-stream-accumulator-chunks-test ()
   "Test linear stream accumulator with multiple text chunks and reasoning."
   (let* ((ev1 '(("choices" . [(("index" . 0)

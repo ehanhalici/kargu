@@ -168,9 +168,10 @@ receives events, and ATTEMPT counts completed retries."
                                             callback on-delta (1+ attempt))))))
       (setq kargu--busy nil)
       (let ((msg (kargu--plz-error-message err)))
-        (when (or (kargu--api-retryable-p err)
-                  (null (kargu--plz-http-status err)))
-          (kargu-circuit-record-failure msg))
+        (if (or (kargu--api-retryable-p err)
+                (null (kargu--plz-http-status err)))
+            (kargu-circuit-record-failure msg)
+          (kargu-circuit-release-probe))
         (kargu-log 'error "request failed: %s" msg)
         (funcall callback (kargu--api-error-alist msg))))))
 

@@ -259,9 +259,10 @@ RequestSend ==
           /\ history ' = cleanHist
     /\ state      ' = "WAIT_MODEL"
     /\ iterations ' = iterations + 1
+    /\ circuitState ' = CircuitClaimProbe(circuitState)
     /\ UNCHANGED <<activeMode, healing, verifications, emptyRetries,
                    upstreamRetries, compactions, lengthContinues, turnCap,
-                   ToolVars, Flags, runStatus, generation, Circuit>>
+                   ToolVars, Flags, runStatus, generation, circuitFailures>>
 
 (* An open breaker turns the send into an error answer (`kargu--api-post') *)
 RequestBlocked ==
@@ -334,6 +335,8 @@ ModelReceiveOverflow ==
 (* empty *)
 ModelReceiveEmpty ==
     /\ state = "WAIT_MODEL"
+    /\ circuitState ' = "CLOSED"
+    /\ circuitFailures ' = 0
     /\ IF emptyRetries < MaxEmptyRetries
        THEN /\ emptyRetries ' = emptyRetries + 1
             /\ state        ' = "REQUEST"
@@ -343,7 +346,7 @@ ModelReceiveEmpty ==
             /\ UNCHANGED emptyRetries
     /\ UNCHANGED <<history, activeMode, iterations, turnCap, healing,
                    verifications, upstreamRetries, compactions, lengthContinues,
-                   ToolVars, Flags, generation, Circuit>>
+                   ToolVars, Flags, generation>>
 
 (* upstream-retry / retryable error: the HTTP layer has already recorded the *)
 (* failure in the breaker.  With retries left the run retries unless the     *)
@@ -362,17 +365,19 @@ ModelReceiveUpstreamError ==
                    verifications, emptyRetries, compactions, lengthContinues,
                    ToolVars, Flags, runStatus, generation>>
 
-(* error / content-filter: any other failure.  The breaker is not touched. *)
+(* Other failures release the canary without declaring upstream healthy. *)
 ModelReceiveError ==
     /\ state = "WAIT_MODEL"
     /\ state ' = "RECOVER"
+    /\ circuitState ' = CircuitReleaseProbe(circuitState)
     /\ UNCHANGED <<history, activeMode, Counters, ToolVars, Flags, runStatus,
-                   generation, Circuit>>
+                   generation, circuitFailures>>
 
 (* tools-unsupported: the provider refused tool use.  Agent mode cannot work *)
 (* without tools and ends; other modes retry tool-free.                      *)
 ModelReceiveToolsUnsupported ==
     /\ state = "WAIT_MODEL"
+    /\ circuitState ' = CircuitReleaseProbe(circuitState)
     /\ ~noTools
     /\ IF activeMode = "agent"
        THEN /\ state     ' = "ERROR"
@@ -382,7 +387,7 @@ ModelReceiveToolsUnsupported ==
             /\ noTools   ' = TRUE
             /\ UNCHANGED runStatus
     /\ UNCHANGED <<history, activeMode, Counters, ToolVars, savedNoTools,
-                   compacting, generation, Circuit>>
+                   compacting, generation, circuitFailures>>
 
 (***************************************************************************)
 (* RECOVER: the user's answer to `kargu-loop--recover-or-finish'           *)
@@ -515,7 +520,8 @@ UserStop ==
     /\ compacting         ' = FALSE
     /\ noTools            ' = FALSE
     /\ savedNoTools       ' = FALSE
-    /\ UNCHANGED <<activeMode, Counters, doomSigs, generation, Circuit>>
+    /\ circuitState       ' = CircuitReleaseProbe(circuitState)
+    /\ UNCHANGED <<activeMode, Counters, doomSigs, generation, circuitFailures>>
 
 (* `kargu-loop--apply-continue-decision' :continue: one more batch *)
 PauseDecisionContinue ==
@@ -600,6 +606,9 @@ Safety_NoPendingVerifyOutsideVerify ==
 \* A model request is never sent through an open breaker
 Safety_CircuitBreakerSoundness ==
     state = "WAIT_MODEL" => circuitState # "OPEN"
+
+Safety_NoAbandonedCanary ==
+    circuitState = "PROBING" => state = "WAIT_MODEL"
 
 \* Law 5: with tools off, no tool work is in progress
 Safety_ToolsOffMeansNoToolWork ==

@@ -9,6 +9,11 @@ abstracts external probes as a boolean result passed to `SetMode`; failed
 or obsolete probes never publish a mode transition. Probe callbacks and
 mode-selection races are also covered by the offline ERT tests.
 
+For the breaker, `HALF_OPEN` denotes an unclaimed canary slot and `PROBING`
+denotes the same runtime state with `probe-inflight` set. Cancellation and
+terminal non-upstream errors release that slot without clearing the failure
+count or declaring the provider healthy. Retries retain ownership.
+
 ## 1. Modules
 
 ```
@@ -79,6 +84,7 @@ TLC checks these in every reachable state, together with a deadlock check:
 | `Safety_NoToolQueueOutsideExec` | Outside `EXEC_TOOLS`, `DOOM_WAIT` and `VERIFY_FILES` the queue and the pending call are empty. |
 | `Safety_NoPendingVerifyOutsideVerify` | No file waits for diagnostics outside `VERIFY_FILES`. |
 | `Safety_CircuitBreakerSoundness` | No request is in flight while the breaker is `OPEN`. |
+| `Safety_NoAbandonedCanary` | A claimed canary exists only while a model request is in flight. |
 | `Safety_ToolsOffMeansNoToolWork` | With tools off no tool work is in progress (law 5). |
 | `Safety_WaitingForUserIsIdle` | In `PAUSE` and `RECOVER` nothing else is in flight. |
 | `Safety_CompactingMatchesState` | The compaction flag holds exactly in `COMPACT_WAIT`. |
