@@ -24,9 +24,7 @@
            (and (or (kargu-languages--has-file-p root "Makefile")
                     (kargu-languages--has-file-p root "CMakeLists.txt")
                     (kargu-languages--has-file-p root "compile_commands.json"))
-                (ignore-errors
-                  (cl-some (lambda (f) (string-match-p "\\.c\\'" f))
-                           (directory-files root nil "\\.c$" t))))))
+                (kargu-fs-has-extension-p root '("c")))))
    :toolchain
    '(:build-cmd "cmake -B build && cmake --build build || make"
      :test-cmd "ctest --test-dir build || make test"

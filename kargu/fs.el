@@ -110,6 +110,19 @@ Return the list of kept paths without recursive Lisp calls."
   (and (stringp root)
        (file-exists-p (expand-file-name filename root))))
 
+(defun kargu-fs-has-extension-p (root extensions)
+  "Find a file under ROOT with one of EXTENSIONS using a bounded walk.
+Stop at the first match; honor the walk's skip and symlink policies."
+  (save-match-data
+    (catch 'kargu-fs-found
+      (kargu-fs-walk
+       root nil
+       (lambda (file)
+         (when (member (file-name-extension file) extensions)
+           (throw 'kargu-fs-found t))
+         nil))
+      nil)))
+
 (defun kargu-rel-path (path &optional root)
   "Return PATH relative to ROOT when it is inside ROOT.
 ROOT defaults to project root or `default-directory'."

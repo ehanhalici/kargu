@@ -85,7 +85,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 
 #### 3. Dil Profilleri ve Araç Zinciri Sorunları (`languages/`)
 - **`languages/elisp.el:46`: Var olmayan `ellsp` bağımlılığı.** Elisp dil profili zorunlu LSP sunucusu olarak `ellsp` tanımlar. Standart bir `ellsp` binary'si bulunmadığından, `kargu-deps` Elisp projelerinde bağımlılık hatası üretir.
-- **`languages/c.el:23`, `cpp.el:23`, `golang.el:21`: Özyinelemesiz dosya denetimi.** `(directory-files root nil "\\.c$" t)` kök dizinde doğrudan dosya arar. Kaynak kodları `src/`, `cmd/` veya `lib/` altında olan standart projeleri tanıyamaz ve C/C++/Go profili devreye girmez.
 - **`tools/dape/render.el:112`: Ham ANSI kaçış dizileri.** Hata ayıklayıcı çıktılarında gelen renk ve kontrol kodları temizlenmeden LLM context'ine aktarılır, gereksiz token tüketir.
 
 #### 4. Çekirdek ve Sözleşme Sorunları (`core/`, `contract/`)

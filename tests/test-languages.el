@@ -232,6 +232,7 @@
 (ert-deftest kargu-languages-eglot-connection-allows-the-prompt ()
   "A live Eglot server for this project allows the prompt."
   (let ((root (make-temp-file "kargu-eglot-ok-" t))
+        (kargu-permission--override-root nil)
         (kargu-session-auto-restore nil)
         (kargu-context-buffer nil)
         (noninteractive nil)
@@ -260,6 +261,7 @@
 (ert-deftest kargu-languages-emacs-lisp-eglot-allows-the-prompt ()
   "A live Eglot server in an Emacs Lisp buffer allows the prompt and does not ask."
   (let ((root (make-temp-file "kargu-el-eglot-" t))
+        (kargu-permission--override-root nil)
         (kargu-session-auto-restore nil)
         (kargu-context-buffer nil)
         (noninteractive nil))
@@ -299,6 +301,23 @@
   (should (equal (plist-get (kargu-language-toolchain (kargu-language-get 'python))
                             :build-cmd)
                  "python -m compileall -q .")))
+
+(ert-deftest kargu-languages-nested-c-cpp-and-go-projects-test ()
+  "Source files in src/cmd directories participate in project detection."
+  (dolist (case '((c "src/main.c" "Makefile")
+                  (cpp "src/main.cpp" "CMakeLists.txt")
+                  (golang "cmd/app/main.go" nil)))
+    (let ((root (make-temp-file "kargu-language-nested-" t)))
+      (unwind-protect
+          (progn
+            (when (nth 2 case)
+              (with-temp-file (expand-file-name (nth 2 case) root) (insert "")))
+            (let ((file (expand-file-name (nth 1 case) root)))
+              (make-directory (file-name-directory file) t)
+              (with-temp-file file (insert "source")))
+            (should (eq (kargu-language-spec-id (kargu-language-detect root))
+                        (car case))))
+        (delete-directory root t)))))
 
 (provide 'tests/test-languages)
 

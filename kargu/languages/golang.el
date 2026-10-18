@@ -22,9 +22,7 @@
    :detectors
    (list "go.mod" "go.sum"
          (lambda (root)
-           (ignore-errors
-             (cl-some (lambda (f) (string-match-p "\\.go\\'" f))
-                      (directory-files root nil "\\.go$" t)))))
+           (kargu-fs-has-extension-p root '("go"))))
    :toolchain
    '(:build-cmd "go build ./..."
      :test-cmd "go test -v ./..."

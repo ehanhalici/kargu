@@ -209,7 +209,8 @@
   (with-temp-buffer
     (setq-local buffer-file-name "/tmp/repo/src/main.rs")
     (setq-local eglot--managed-mode t)
-    (let ((kargu-context-buffer (current-buffer)))
+    (let ((kargu-context-buffer (current-buffer))
+          (kargu-permission--override-root nil))
       (cl-letf (((symbol-function 'eglot-current-server) (lambda (&rest _) 'mock-server))
                 ((symbol-function 'eglot-project) (lambda (&rest _) '(project . "/tmp/repo/")))
                 ((symbol-function 'project-root) (lambda (proj) (cdr proj))))
@@ -217,7 +218,8 @@
 
 (ert-deftest kargu-project-root-follows-eglot-not-temp-directory ()
   "A buffer under /tmp/ does not replace the Eglot server's project."
-  (let ((managed (generate-new-buffer "main.py")))
+  (let ((managed (generate-new-buffer "main.py"))
+        (kargu-permission--override-root nil))
     (unwind-protect
         (progn
           (with-current-buffer managed

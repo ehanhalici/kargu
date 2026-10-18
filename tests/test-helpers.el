@@ -94,6 +94,7 @@ the previous mode when the test ends."
   "Run RUN-TEST with ARGS in a scratch root and an isolated state store.
 Tests never see the working tree of Kargu as their project."
   (let ((default-directory (kargu-test-scratch-root))
+        (kargu-permission--override-root (kargu-test-scratch-root))
         (kargu--state-store (copy-tree kargu--state-store))
         (kargu--session (copy-tree kargu--session))
         (kargu--session-id kargu--session-id)
