@@ -4,11 +4,7 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 
 ### Modül: `tools/process.el` & `tools/bash/`
 
-1. **[K - Orta] Standard Error (stderr) ile stdout ayrıştırılmadan birleştiriliyor.**
-   - **Dosya / Satır:** `kargu/tools/process.el:120-122`, `159`
-   - **Sorun:** stdout ve stderr aynı arabelleğe yazılıyor. Yapılandırılmış çıktı bekleyen tüketicilerde (örn. `git status`, `rg --json`) komut satırından gelen stderr uyarıları (örn. `warning: LF will be replaced by CRLF`) veriyi bozar.
-   - **Gereken:** Yapılandırılmış tüketiciler için ayrı stderr; Bash için mevcut birleşik akış seçeneği. Stderr borusunun boşalması, iptal, byte kotası ve tam-bir-kez callback birlikte tasarlanmalı. Kota yüzünden kesilen Git/arama çıktıları da sıradan komut hatasından ayrılmalı.
-2. **[D - Düşük] Büyük çıktılarda artımlı filtre maliyeti.**
+1. **[D - Düşük] Büyük çıktılarda artımlı filtre maliyeti.**
    - **Dosya / Satır:** `kargu/tools/process.el:76`
    - **Sorun:** Her gelen parçada `(position-bytes (point-max))` çağrılıyor; çok baytlı büyük arabelleklerde bu hesaplama parçalı akışta işlemci yükü oluşturabilir.
    - **Doğrulama:** Bu bir ölçülmüş yavaşlık değildir. Önce çok baytlı, çok parçalı çıktıda profil/benchmark alınmalı; Emacs'in konum önbelleği hesaba katılmadan sayaç optimizasyonu eklenmemeli.
@@ -126,6 +122,7 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 
 ### Yeni inceleme bulguları
 
+- **Sağlayıcı uygunluk kontrolü genel anahtarın sahibini ayırmıyor.** `kargu-provider-authenticated-p`, aktif sağlayıcıya ait `kargu-api-key` değerini diğer sağlayıcılar için de geçerli sayıyor. Uygunluk ve gerçek anahtar çözümleme aynı sağlayıcı kimliği/öncelik sözleşmesini kullanmalı; başka sağlayıcının anahtarı aday listesini genişletmemeli veya başka uca gönderilmemeli.
 - **Araç çıktı arşivinde toplam bellek sınırı yok.** `kargu/api/tools.el` büyük sonuçları `*kargu-output-*` tamponlarında tutuyor. Sayı ve toplam karakter kotası, eski çıktılar için tahliye politikası ve kotayı aşan tek çıktının kısmen saklandığını doğru anlatan bir sonuç sözleşmesi gerekiyor. Kullanıcının düzenlediği veya dosyaya dönüştürdüğü tamponlar otomatik silinmemeli.
 - **Dosya yazma ve rollback yolu daraltılmış/kirli tamponları güvenli yönetmiyor.** `diff/stage.el` içindeki `kargu-diff--file-text` ve proposal snapshot'ı yalnız erişilebilir bölgeyi okuyor; tam dosya yerine eksik rollback metni saklanabilir. Otomatik yazma `erase-buffer`/`save-buffer` ile kullanıcının kaydedilmemiş değişikliklerini de kaydediyor ve save-hook dönüşümlerini başarı sonucuyla uzlaştırmıyor. Tampon daraltması/point korunmalı; kullanıcı değişiklikleri, diskte dış değişiklik, kodlama ve başarısız kaydetme için açık işlem/geri alma sözleşmesi ve testler gerekiyor.
 - **Tanı raporunun güncelliği ve bekleyen poll sahipliği.** `kargu-lsp-wait-diagnostics`, checker var fakat henüz yeni rapor yayımlamamışsa boş veya iki eşit snapshot'ı yerleşmiş kabul edebiliyor. Belge sürümü/report-generation bariyeri ve çalışmayı başlatan tampon/kökü yakalayan, iptal edilebilir tek-teslimli bir bekleyici gerekiyor. Backend geç yanıtı, buffer kapanması, proje değişimi ve run stop birlikte test edilmeli.

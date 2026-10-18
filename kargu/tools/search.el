@@ -78,13 +78,18 @@
 (defun kargu-search--run (program args root callback)
   "Run PROGRAM with ARGS in ROOT without waiting.
 CALLBACK receives (EXIT-CODE . STDOUT); a missing program is exit 127 and a
-timeout is exit -1."
+timeout or truncated output is exit -1."
   (kargu-process-run
    program args
    (lambda (result)
-     (funcall callback
-              (cons (if (plist-get result :timed-out) -1 (plist-get result :code))
-                    (or (plist-get result :output) ""))))
+     (let* ((code (plist-get result :code))
+            (incomplete (or (plist-get result :timed-out)
+                            (plist-get result :truncated)))
+            (failed (or incomplete (not (memq code '(0 1))))))
+       (funcall callback
+                (cons (if incomplete -1 code)
+                      (if failed (kargu-process-failure program result)
+                        (or (plist-get result :output) ""))))))
    :dir root))
 
 (defun kargu-search--truncate-lines (text max-lines)

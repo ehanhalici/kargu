@@ -52,7 +52,7 @@
                       (lambda (callback)
                         (kargu-process-run "sh" (list "-c" command) callback :dir repo)))))
         (should-not (= (plist-get result :code) 0))
-        (should (string-search "fixture-fails" (plist-get result :output)))))))
+        (should (string-search "fixture-fails" (plist-get result :stderr)))))))
 
 (ert-deftest kargu-languages-unsaved-buffer-major-modes-test ()
   "Language profiles work before a buffer has any file or project marker."

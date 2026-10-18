@@ -62,9 +62,10 @@ agent task still cancels the Git process."
   (let ((code (plist-get result :code))
         (out (string-trim (or (plist-get result :output) ""))))
     (cond
-     ((plist-get result :timed-out)
+     ((or (plist-get result :timed-out) (plist-get result :truncated))
       (cons -1 (kargu-process-failure "Git" result)))
      ((eql code 127) (cons 127 "Git executable not found on PATH"))
+     ((not (eql code 0)) (cons code (kargu-process-failure "Git" result)))
      (t (cons code out)))))
 
 (defun kargu-git--run (args root callback)

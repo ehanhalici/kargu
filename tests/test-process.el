@@ -19,6 +19,95 @@
 (require 'kargu)
 (require 'tests/test-helpers)
 
+(ert-deftest kargu-process-separates-and-drains-stderr-test ()
+  "A successful command's warnings never enter its structured stdout."
+  (let ((deliveries 0) result)
+    (setq result
+          (kargu-test-await
+           (lambda (callback)
+             (kargu-process-run
+              "sh" '("-c" "printf '{\"ok\":true}'; printf warning >&2")
+              (lambda (value) (cl-incf deliveries) (funcall callback value))))))
+    (should (= deliveries 1))
+    (should (= (plist-get result :code) 0))
+    (should (equal (plist-get result :output) "{\"ok\":true}"))
+    (should (equal (plist-get result :stderr) "warning"))))
+
+(ert-deftest kargu-process-stderr-cap-cancels-owner-once-test ()
+  "An overflowing stderr pipe terminates its owner, not just the pipe."
+  (let ((deliveries 0) process)
+    (let ((result (kargu-test-await
+                   (lambda (callback)
+                     (setq process
+                           (kargu-process-run
+                            "sh" '("-c" "while :; do printf warning >&2; done")
+                            (lambda (value)
+                              (cl-incf deliveries) (funcall callback value))
+                            :timeout 2 :max-bytes 128))))))
+      (should (= deliveries 1))
+      (should (plist-get result :truncated))
+      (should-not (plist-get result :timed-out))
+      (should-not (process-live-p process))
+      (should (<= (string-bytes (plist-get result :stderr)) 128)))))
+
+(ert-deftest kargu-process-merged-stderr-is-explicit-test ()
+  "Shell clients can opt into the historical combined stream."
+  (let ((result (kargu-test-await
+                 (lambda (callback)
+                   (kargu-process-run
+                    "sh" '("-c" "printf out; printf err >&2") callback
+                    :stderr 'merge)))))
+    (should (string-search "out" (plist-get result :output)))
+    (should (string-search "err" (plist-get result :output)))
+    (should (equal (plist-get result :stderr) ""))))
+
+(ert-deftest kargu-process-start-failure-releases-stderr-test ()
+  "A failed main process start cannot leak the previously created pipe."
+  (let ((before (process-list)) received)
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest _) (error "Cannot start main process"))))
+      (kargu-process-run "sh" nil (lambda (value) (setq received value))))
+    (should (= (plist-get received :code) -1))
+    (should-not (seq-difference (process-list) before))
+    (should-not (seq-find
+                 (lambda (buffer)
+                   (string-prefix-p kargu-process--stderr-name (buffer-name buffer)))
+                 (buffer-list)))))
+
+(ert-deftest kargu-process-stderr-late-close-precedes-delivery-test ()
+  "The main process exiting does not discard pending stderr data."
+  (let ((result (kargu-test-await
+                 (lambda (callback)
+                   (kargu-process-run
+                    "sh" '("-c" "(sleep 0.05; printf late >&2) & printf out")
+                    callback :timeout 1)))))
+    (should (equal (plist-get result :output) "out"))
+    (should (equal (plist-get result :stderr) "late"))
+    (should-not (plist-get result :timed-out))))
+
+(ert-deftest kargu-process-deadline-covers-stderr-drain-test ()
+  "Inherited stderr cannot outlive a bounded command's deadline."
+  (let ((result (kargu-test-await
+                 (lambda (callback)
+                   (kargu-process-run
+                    "sh" '("-c" "(sleep 1; printf late >&2) & printf out")
+                    callback :timeout 0.05)))))
+    (should (plist-get result :timed-out))
+    (should (equal (plist-get result :output) "out"))))
+
+(ert-deftest kargu-structured-consumers-refuse-truncated-output-test ()
+  "Quota-killed Git and search results cannot be parsed as complete records."
+  (let ((result '(:code 0 :output "partial" :truncated t)))
+    (should (= (car (kargu-git--result result)) -1))
+    (cl-letf (((symbol-function 'kargu-process-run)
+               (lambda (_program _args callback &rest _options)
+                 (funcall callback result))))
+      (let (received)
+        (kargu-search--run "rg" nil default-directory
+                           (lambda (value) (setq received value)))
+        (should (= (car received) -1))
+        (should (string-search "output limit" (cdr received)))))))
+
 (ert-deftest kargu-bash-shell-selection-ignores-login-shell-test ()
   "The Bash tool never runs its commands through Fish or Nushell."
   (let ((shell-file-name "/usr/bin/nu")

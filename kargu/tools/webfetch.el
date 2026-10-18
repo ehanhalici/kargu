@@ -99,7 +99,7 @@ returns at once; `getent' runs through `kargu-process-run'."
        (cond
         ((eql (plist-get result :code) 127)
          (funcall callback nil "webfetch cannot resolve the host: getent not found"))
-        ((or (plist-get result :timed-out)
+        ((or (plist-get result :timed-out) (plist-get result :truncated)
              (not (eql (plist-get result :code) 0)))
          (funcall callback nil (format "webfetch could not resolve %s" host)))
         (t
@@ -182,9 +182,11 @@ Skip informational responses and preserve the caller's match data."
   "Parse curl RESULT from URL, or signal a transport failure."
   (cond
    ((plist-get result :timed-out) (error "Webfetch timed out: %s" url))
+   ((plist-get result :truncated) (error "%s" (kargu-process-failure "Curl" result)))
    ((not (eql (plist-get result :code) 0))
     (error "Curl exit %s: %s" (plist-get result :code)
-           (truncate-string-to-width (or (plist-get result :output) "") 200))))
+           (truncate-string-to-width (or (kargu-nonempty (plist-get result :stderr))
+                                        (plist-get result :output) "") 200))))
   (kargu-webfetch--split-response (or (plist-get result :output) "")))
 
 (defun kargu-webfetch--format-body (body)

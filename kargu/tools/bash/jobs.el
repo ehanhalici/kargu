@@ -120,6 +120,7 @@ BACKGROUND jobs return a status message; CALLBACK receives foreground results."
                  shell (list "-c" command)
                  (lambda (result) (kargu-bash--job-finished job result callback))
                  :dir directory :timeout kargu-bash-timeout :output-policy 'tail
+                 :stderr 'merge
                  :buffer buffer :keep-buffer t)))
       (setf (kargu-bash--job-process job) proc)
       (when (process-live-p proc)
