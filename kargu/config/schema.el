@@ -57,15 +57,10 @@ Prefer an existing XDG file, then kargu.toml in the Emacs directory."
       (let ((mtime (file-attribute-modification-time (file-attributes path))))
         (unless (and (equal path kargu--config-cache-path)
                      (equal mtime kargu--config-mtime))
-          (setq kargu--config-cache-path path
-                kargu--config-mtime mtime
-                kargu--config-cache
-                (condition-case err
-                    (kargu--read-toml-config path)
-                  (error
-                   (kargu-log 'warn "config %s: %s" path
-                              (error-message-string err))
-                   nil))))
+          (let ((parsed (kargu--read-toml-config path)))
+            (setq kargu--config-cache-path path
+                  kargu--config-mtime mtime
+                  kargu--config-cache parsed)))
         kargu--config-cache))))
 
 (defun kargu--config-providers ()

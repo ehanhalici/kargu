@@ -48,10 +48,7 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 
 ### Modül: `config/` (Yapılandırma & Anahtarlar)
 
-1. **[K - Orta] `config/toml.el` eksik TOML spesifikasyon desteği.**
-   - **Dosya / Satır:** `kargu/config/toml.el:51-68, 148-156`
-   - **Sorun:** (a) Sayılar ve boolean değerler dize (`"100"`) olarak ayrıştırılır; (b) Yalnızca `[provider.X]` veya üst düzey atamalar okunur, diğer tablolar `skip` edilir; (c) `"""` çok satırlı dizeler veya satır içi tablolar desteklenmez.
-2. **[K - Orta] `auth-source-search` ana iş parçacığını dondurabilir.**
+1. **[K - Orta] `auth-source-search` ana iş parçacığını dondurabilir.**
    - **Dosya / Satır:** `kargu/providers/registry.el:292`, `kargu/config/key.el:134`
    - **Sorun:** GPG şifreli `.authinfo.gpg` kullanan sistemlerde `auth-source-search` pinentry veya disk beklemesi nedeniyle Emacs UI'ını senkron olarak kilitler. `kargu-connected-providers` fonksiyonu bu aramayı katalogdaki 160+ sağlayıcı için döngüde çalıştırır.
 

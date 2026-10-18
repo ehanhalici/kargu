@@ -55,6 +55,15 @@ Clone the repository and add it to your Emacs `load-path`:
 
 Kargu can be configured via a simple TOML configuration file (`~/.config/kargu/config.toml` or `~/.emacs.d/kargu.toml`), environment variables, or Emacs `auth-source`.
 
+The configuration reader intentionally supports a strict TOML subset:
+single-line basic/literal strings and string arrays (including multiline
+arrays and comments). Top-level keys are `provider`, `model`, `name` (legacy
+alias), `api`, `apikey`, and `review_mode`; provider tables accept `api`,
+`apikey`, `model`, and `models`. Review modes are `auto`, `async`, and `blocking`.
+Unknown keys/tables, duplicate definitions, wrong types and unsupported TOML
+constructs are rejected with a file/line error. A malformed reload is not
+partially applied and must be corrected before requests can use that config.
+
 Run `M-x kargu-edit-config` to generate or edit your configuration.
 
 Project walks and searches exclude names in `kargu-fs-skip-dirs` at every
