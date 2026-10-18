@@ -243,6 +243,17 @@ Contains clickable mode, provider, model, context usage, and effort buttons."
      'front-sticky t
      'rear-nonsticky '(read-only face field front-sticky))))
 
+(defun kargu-chat--refresh-idle-footer ()
+  "Replace only the footer, leaving the prompt and draft untouched."
+  (save-excursion
+    (let ((start (marker-position kargu-chat--output-marker))
+          (end (- kargu-chat--prompt-marker
+                  (length kargu-chat--prompt-string))))
+      (delete-region start end)
+      (goto-char start)
+      (insert (kargu-chat--footer-string))
+      (set-marker kargu-chat--output-marker start))))
+
 (defun kargu-chat-refresh-footer ()
   "Refresh the footer line at the bottom of the chat buffer in-place."
   (let ((buf (or (and (markerp kargu-chat--output-marker)
@@ -255,23 +266,7 @@ Contains clickable mode, provider, model, context usage, and effort buttons."
                    (marker-position kargu-chat--output-marker))
           (let ((inhibit-read-only t))
             (if (kargu-chat--prompt-live-p)
-                (let* ((input (buffer-substring-no-properties
-                               kargu-chat--prompt-marker (point-max))))
-                  (delete-region kargu-chat--output-marker (point-max))
-                  (goto-char (point-max))
-                  (let ((start (point)))
-                    (insert (kargu-chat--footer-string))
-                    (insert (propertize
-                             kargu-chat--prompt-string
-                             'face 'kargu-chat-prompt
-                             'field 'prompt
-                             'read-only t
-                             'front-sticky t
-                             'rear-nonsticky '(read-only face field front-sticky)))
-                    (setq kargu-chat--prompt-marker (point-marker))
-                    (set-marker-insertion-type kargu-chat--prompt-marker nil)
-                    (setq kargu-chat--output-marker (copy-marker start t))
-                    (insert input)))
+                (kargu-chat--refresh-idle-footer)
               (delete-region kargu-chat--output-marker (point-max))
               (kargu-chat--ensure-running-prompt))))
         (force-mode-line-update t)))))
@@ -449,10 +444,11 @@ No prompt is inserted while this chat is waiting for an Eglot connection."
          (>= pos (marker-position kargu-chat--prompt-marker)))))
 
 (defun kargu-chat-beginning-of-line ()
-  "Move to the start of input, or the beginning of the line."
+  "Move to the current line start without entering the prompt prefix."
   (interactive "^")
   (if (kargu-chat--in-input-p)
-      (goto-char kargu-chat--prompt-marker)
+      (goto-char (max (marker-position kargu-chat--prompt-marker)
+                      (line-beginning-position)))
     (beginning-of-line)))
 
 (defun kargu-chat--input-text ()

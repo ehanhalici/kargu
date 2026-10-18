@@ -67,7 +67,8 @@
      (let ((wp (window-point window)))
        (cons window
              (cond
-              ((and in-start (>= wp in-start)) 'input)
+              ((and in-start (>= wp in-start))
+               (cons 'input (- wp in-start)))
               ((or (>= wp at) (>= wp (1- at))) 'output)
               ((and (fboundp 'kargu-loop-running-p)
                     (kargu-loop-running-p)
@@ -85,8 +86,8 @@
       (pcase (cdr pair)
         ('output
          (set-window-point (car pair) out-pos))
-        ('input
-         (set-window-point (car pair) (point-max)))
+        (`(input . ,offset)
+         (set-window-point (car pair) (+ kargu-chat--prompt-marker offset)))
         (_ nil)))))
 
 (defun kargu-chat-insert (text &optional face)
@@ -109,7 +110,8 @@ Never signal from a process filter or callback."
                                   (eq (marker-buffer kargu-chat--prompt-marker)
                                       (current-buffer))
                                   (marker-position kargu-chat--prompt-marker)))
-                   (at-end (>= (point) at))
+                   (at-end (and (>= (point) at)
+                                (not (and in-start (>= (point) in-start)))))
                    (windows (get-buffer-window-list buffer nil t))
                    (follow (kargu-chat--compute-window-follow-states windows in-start at)))
               (save-excursion

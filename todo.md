@@ -86,7 +86,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 - **`providers/registry.el:286`: 160+ sağlayıcı için senkron auth-source araması (Emacs Donması).** `kargu-connected-providers`, katalogdaki 160'tan fazla sağlayıcının her biri için döngü içinde `(auth-source-search :host host :max 1)` çalıştırır. Kullanıcının `auth-sources` yapılandırmasında GPG şifreli dosya varsa Emacs UI iş parçacığı saniyelerce donar veya pinentry pencereleriyle kilitlenir.
 - **Native wire biçiminde çok modlu içerik dönüşümü eksik.** `kargu-api--text-blocks` text bloklarını ve cache işaretlerini koruyor, fakat OpenAI `image_url` gibi blokları native Messages `image/source` biçimine çevirmiyor. Görsel/dosya içerik tipleri için ayrı adaptör ve round-trip testleri gerekiyor.
 - **`chat/render.el:238-241`: Global `advice` sızıntısı.** `kargu-execute-tool` fonksiyonuna global `defadvice` eklenmesi, kütüphanenin başka yerlerinden veya arka plan/test işlemlerinden yapılan tüm araç çağrılarının kullanıcının sohbet tamponunu kirletmesine yol açar.
-- **`chat/prompt.el:283-300`: Footer yenilemede imlecin zorla sona fırlaması.** `kargu-chat-refresh-footer`, altbilgiyi güncellerken bölgeyi silip yeniden ekler. Kullanıcı giriş alanında metin düzenlerken herhangi bir asenkron olayda imleç `point-max`'a fırlar ve kullanıcının yazma akışını keser.
 - **`chat/session.el:284-306`: Senkron büyük JSON okuma donması.** `kargu-session-list`, dizindeki tüm `.json` oturum dosyalarını diskten tek tek senkron okur ve `json-read` ile ayrıştırır. Çok sayıda veya büyük oturum dosyası olduğunda Emacs'i kilitler.
 - **`chat/attach.el:89-110`: Boyut kontrolsüz Base64 yüklemesi.** Eklenen dosyaların boyutu denetlenmeden `base64-encode-string` çağrılır. Büyük dosyalarda (örn. 50MB log/video) bellek şişmesi ve GC takılmaları yaşanır.
 - **`plan/dispatch.el:45, 51`: Çoklu oturumlarda global durum çakışması.** `kargu-plan--decision-pending` ve `kargu-plan--current-plan` değişkenleri globaldir (buffer-local değildir). Farklı projelerde veya tamponlarda aynı anda plan çalıştırıldığında durumlar birbirini ezer.
@@ -115,7 +114,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 - **`tools/skill.el:61-65`: CRLF Satır Sonlarında SKILL.md Frontmatter Ayrıştırma Başarısızlığı.** `kargu-skill--parse`, YAML frontmatter kapanışını `(string-match "\n---\n" raw 3)` ile arar. Dosya Windows CRLF (`\r\n`) satır sonlarına sahipse bu regex eşleşmez; frontmatter ayrıştırılamaz, `description` nil kalır ve ham YAML başlığı gövde metnine karışır. Ayrıca çok satırlı YAML `description: >` veya `description: |` alanları tek satırlı regex nedeniyle ilk satırda kesilir.
 - **`tools/skill.el:88-91`: 400 Dosya Sınırı Nedeniyle Becerilerin (Skills) Keşfedilememesi.** `kargu-skill--collect`, proje kökünü `(kargu-fs-walk root 400 ...)` ile tarar. Kök dizinde 400'den fazla dosya bulunan projelerde, `.agents/skills/` veya `skills/` dizinlerine sıra gelmeden tarama 400 sınırında durur ve projedeki beceriler model tarafından asla görülemez.
 - **`chat/complete.el:77-92, 163-174`: `@` Tamamlamasında Tüm Açık Tamponların Taranması ve Arayüz Donması.** `kargu-chat--completion-roots`, `(buffer-list)` içindeki tüm açık tamponların dosya yollarını toplayarak kök dizin listesine ekler. Kullanıcı ev dizininden (`~/.bashrc`) bir dosya açmışsa, her `@` karakteri yazıldığında (8 saniyelik çok kısa önbellek süresi dolunca) ev dizinindeki 2000 dosya senkron olarak taranır ve Emacs arayüzü yazma sırasında donar.
-- **`chat/transcript.el:88-89`: Kullanıcı Yazarken Giriş Alanı İmlecinin Sona Zorlanması.** `kargu-chat-insert`, yeni bir log veya model çıktısı eklendiğinde `('input (set-window-point (car pair) (point-max)))` çalıştırır. Kullanıcı istem kutusunda bir metnin ortasını düzenlerken arkaplandan gelen her stream parçacığı veya araç çıktısı pencere imlecini zorla `point-max`'a atarak kullanıcının yazımını kesintiye uğratır.
 
 #### 7. İstem Montajı, Önbellekleme ve Bellek Performansı (`prompt.el`, `history/protocol.el`, `providers/registry.el`)
 - **`prompt.el:340-365`: Debug Modunda Her Turda Tüm Proje İskeletinin Kullanıcı Mesajına Eklenmesi (K).** `kargu-prompt-debug-message`, her kullanıcı mesajına eklenen `<system-reminder>` içine her turda senkron olarak `(kargu-lsp-build-skeleton)` ile oluşturulan tam proje sembol iskeletini gömer. Büyük projelerde 10-20 bin karakteri bulan bu iskelet, 10 turluk bir debug oturumunda her turda tekrar tekrar kullanıcı mesajı olarak geçmişe eklenerek yüzbinlerce gereksiz jeton (token) tüketimine ve context window'un erkenden dolmasına yol açar.
@@ -205,16 +203,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 - **`chat/complete.el:98-118` & `chat/attach.el:89-93`: Çoklu `@` Bahsetmelerinde Senkron Dizin Taramasının Yinelenmesi (K).**
   - `kargu-chat--resolve-mention-file`, her `@` bahsetmesi için `(kargu-chat--completion-roots)` fonksiyonunu baştan çağırır.
   - Açık tamponların ve projelerin kök dizinleri her bahsetmede tek tek gezilir; `project-files` çağrısı 10 binlerce dosyalık projelerde her `@` işareti için Emacs UI iş parçacığında yeniden çalıştırılarak belirgin donmalara yol açar.
-
-#### 17. Sohbet Arayüzü Düzenleme ve İmleç Gezinme Hataları (`chat/prompt.el`)
-- **`chat/prompt.el:476-481`: Çok Satırlı Girişlerde `C-a` Tuşunun Her Zaman İlk Satıra Atlaması (K).**
-  - `kargu-chat-beginning-of-line`, imleç giriş alanındaysa (`kargu-chat--in-input-p`) doğrudan `(goto-char kargu-chat--prompt-marker)` çalıştırır.
-  - Kullanıcı istem kutusuna çok satırlı bir metin yazdığında, örneğin 3. satırın başındayken veya ortasındayken `C-a` bastığında o satırın başına gitmek yerine doğrudan 1. satırın başına (tüm girdinin en başına) fırlar. Bu durum Emacs'in standart satır başı düzenleme akışını bozar.
-- **`chat/prompt.el:283-300`: Footer Güncellendiğinde Kullanıcı İmlecinin Konum Kaybı (K).**
-  - Model seçimi, parametre menüsü, durum değişimi veya jeton sayacı güncellemelerinde `kargu-chat-refresh-footer` tetiklenir.
-  - Fonksiyon `delete-region` ve `insert input` yaparken kullanıcının imleç pozisyonunu (`point`) veya pencere noktalarını saklamaz.
-  - Kullanıcı giriş kutusunda yazdığı uzun bir cümlenin ortasını düzeltirken arkaplandan gelen herhangi bir reaktif güncellemede imleç zorla metnin en sonuna (`point-max`) taşınır ve kullanıcının yazımını böler.
-
 
 #### Debug araçlarının kapsamını genişletme
 

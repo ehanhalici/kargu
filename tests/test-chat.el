@@ -308,5 +308,62 @@
       (should (eq opened 'kargu-menu))
       (should (kargu-menu--lsp-unavailable-p)))))
 
+(ert-deftest kargu-chat-output-preserves-draft-cursors-test ()
+  "Streaming output preserves separate input offsets in every window."
+  (save-window-excursion
+    (with-temp-buffer
+      (kargu-chat-mode)
+      (kargu-chat--ensure-idle-prompt)
+      (insert "first line\nsecond line")
+      (switch-to-buffer (current-buffer))
+      (let* ((first (selected-window))
+             (second (split-window first nil 'below))
+             (start (marker-position kargu-chat--prompt-marker)))
+        (goto-char (+ start 3))
+        (set-mark (+ start 8))
+        (set-window-point second (+ start 15))
+        (dotimes (_ 3) (kargu-chat-insert "output\n"))
+        (setq start (marker-position kargu-chat--prompt-marker))
+        (should (= (point) (+ start 3)))
+        (should (= (mark) (+ start 8)))
+        (should (= (window-point first) (+ start 3)))
+        (should (= (window-point second) (+ start 15)))
+        (should (equal (kargu-chat--input-text) "first line\nsecond line"))))))
+
+(ert-deftest kargu-chat-footer-preserves-draft-cursors-test ()
+  "Footer replacement keeps draft properties, mark and window offsets."
+  (save-window-excursion
+    (with-temp-buffer
+      (kargu-chat-mode)
+      (kargu-chat--ensure-idle-prompt)
+      (insert (propertize "first line\nsecond line" 'kargu-test t))
+      (switch-to-buffer (current-buffer))
+      (let ((second (split-window (selected-window) nil 'below)))
+        (dolist (offset '(0 3 15 22))
+          (goto-char (+ kargu-chat--prompt-marker offset))
+          (set-mark (+ kargu-chat--prompt-marker 8))
+          (set-window-point second (+ kargu-chat--prompt-marker 12))
+          (cl-letf (((symbol-function 'kargu-chat--footer-string)
+                     (lambda () (propertize "a changed footer\n" 'field 'prompt))))
+            (kargu-chat-refresh-footer))
+          (should (= (point) (+ kargu-chat--prompt-marker offset)))
+          (should (= (mark) (+ kargu-chat--prompt-marker 8)))
+          (should (= (window-point second) (+ kargu-chat--prompt-marker 12)))
+          (should (get-text-property kargu-chat--prompt-marker 'kargu-test))
+          (should (kargu-chat--prompt-live-p)))))))
+
+(ert-deftest kargu-chat-beginning-of-line-respects-input-lines-test ()
+  "C-a visits each input line start without entering the prompt prefix."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (kargu-chat--ensure-idle-prompt)
+    (insert "first\nsecond\nthird")
+    (dolist (offset '(17 11 5))
+      (goto-char (+ kargu-chat--prompt-marker offset))
+      (let ((expected (max (marker-position kargu-chat--prompt-marker)
+                           (line-beginning-position))))
+        (kargu-chat-beginning-of-line)
+        (should (= (point) expected))))))
+
 (provide 'tests/test-chat)
 ;;; test-chat.el ends here
