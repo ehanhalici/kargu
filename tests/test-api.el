@@ -24,6 +24,87 @@
 (defvar kargu-api-stall-timeout)
 (defvar kargu-api-stream-ceiling)
 
+(ert-deftest kargu-api-watch-startup-failure-never-launches-a-second-request-test ()
+  "Watch failure closes the stream before delivering a single error result."
+  (with-temp-buffer
+    (let* ((old (make-pipe-process :name "kargu-startup-old" :buffer (current-buffer)))
+           (new (make-pipe-process :name "kargu-startup-new" :buffer (current-buffer)))
+           (kargu--generation 50) (kargu--current-process nil)
+           (kargu--busy t) (kargu-stream t)
+           (requests 0) options results)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-circuit-allow-request-p) (lambda () t))
+                    ((symbol-function 'plz)
+                     (lambda (_method _url &rest args)
+                       (cl-incf requests) (setq options args) old))
+                    ((symbol-function 'kargu--api-arm-stream-watch)
+                     (lambda (process)
+                       (process-put process :kargu-stream-timer
+                                    (run-at-time 60 nil #'ignore))
+                       (error "watch setup failed"))))
+            (kargu--api-post
+             "https://example.invalid" nil nil 50
+             (lambda (response)
+               (push response results)
+               (setq kargu--current-process new kargu--busy t))
+             #'ignore)
+            (should (= requests 1))
+            (should (= (length results) 1))
+            (should (string-search "watch setup failed"
+                                   (kargu-response-error-message (car results))))
+            (should-not (process-live-p old))
+            (should-not (process-get old :kargu-stream-timer))
+            (funcall (plist-get options :then) "{}")
+            (funcall (plist-get options :else) nil)
+            (should (= (length results) 1))
+            (should (eq kargu--current-process new))
+            (should (process-live-p new))
+            (should kargu--busy))
+        (kargu--api-cancel-stream-watch old)
+        (delete-process old)
+        (delete-process new)))))
+
+(ert-deftest kargu-api-synchronous-completion-keeps-new-process-test ()
+  "A synchronous completion cannot publish an obsolete process afterwards."
+  (dolist (stream '(nil t))
+    (let ((kargu--generation 60) (kargu--current-process nil) armed)
+      (cl-letf (((symbol-function 'plz)
+                 (lambda (_method _url &rest options)
+                   (funcall (plist-get options :then) "{}")
+                   'old-process))
+                ((symbol-function 'kargu--api-handle-body)
+                 (lambda (_body callback &rest _) (funcall callback 'ok)))
+                ((symbol-function 'kargu--api-arm-stream-watch)
+                 (lambda (_) (setq armed t))))
+        (let ((finish (lambda (_)
+                        (setq kargu--generation 61
+                              kargu--current-process 'new-process))))
+          (if stream
+              (kargu--api-post-streaming "https://example.invalid" nil nil 60 finish #'ignore)
+            (kargu--api-post-plain "https://example.invalid" nil nil 60 finish)))
+        (should (eq kargu--current-process 'new-process))
+        (should-not armed)))))
+
+(ert-deftest kargu-api-stream-start-errors-do-not-trigger-plain-fallback-test ()
+  "A startup or synchronous continuation error never resends the request."
+  (dolist (completed '(nil t))
+    (let ((kargu--generation 70) (kargu--current-process nil)
+          (kargu-stream t) (requests 0) (delivered 0))
+      (cl-letf (((symbol-function 'kargu-circuit-allow-request-p) (lambda () t))
+                ((symbol-function 'plz)
+                 (lambda (_method _url &rest options)
+                   (cl-incf requests)
+                   (when completed (funcall (plist-get options :then) "{}"))
+                   (error "transport startup failed")))
+                ((symbol-function 'kargu--api-handle-body)
+                 (lambda (_body callback &rest _) (funcall callback 'ok))))
+        (should-error
+         (kargu--api-post "https://example.invalid" nil nil 70
+                          (lambda (_) (cl-incf delivered) (error "continuation failed"))
+                          #'ignore))
+        (should (= requests 1))
+        (should (= delivered (if completed 1 0)))))))
+
 (ert-deftest kargu-api-stale-callback-keeps-new-process-test ()
   "Old plain and streaming completions cannot clear a new request."
   (dolist (stream '(nil t))

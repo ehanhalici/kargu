@@ -24,6 +24,12 @@ finish reason or `[DONE]` is required. Truncation and malformed events enter
 the existing `ModelReceiveError` path, never `ModelReceiveToolCalls`. ERT covers
 this transport boundary separately from the loop's abstract response actions.
 
+A local stream-watch startup failure closes the attempt before delivering an
+error through the existing `ModelReceiveError` path. It never launches a plain
+duplicate. Process publication is conditional on pending state and generation,
+including when a transport callback completes synchronously; ERT covers this
+resource-ownership boundary without adding a loop transition.
+
 ## 1. Modules
 
 ```

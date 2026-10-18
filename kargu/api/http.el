@@ -160,14 +160,8 @@ ATTEMPT is the zero-based retry count."
       (cl-return-from kargu--api-post nil))
     (let ((attempt (or attempt 0)))
       (if (and on-delta kargu-stream)
-          (condition-case-unless-debug err
-              (kargu--api-post-streaming url headers payload gen callback
-                                         on-delta attempt)
-            (error
-             (kargu-log 'warn "streaming unavailable (%s); using plain request"
-                        (error-message-string err))
-             (kargu--api-post-plain url headers payload gen callback
-                                    on-delta attempt)))
+          (kargu--api-post-streaming url headers payload gen callback
+                                     on-delta attempt)
         (kargu--api-post-plain url headers payload gen callback
                                on-delta attempt)))))
 
@@ -176,13 +170,56 @@ ATTEMPT is the zero-based retry count."
   url headers payload generation callback on-delta attempt process events
   (state :pending))
 
+(defun kargu-http--live-request-p (request)
+  "Return non-nil when REQUEST is pending in the current generation."
+  (and (eq (kargu-http--request-state request) :pending)
+       (= (kargu-http--request-generation request) kargu--generation)))
+
 (defun kargu-http--claim-response (request)
   "Claim REQUEST once if its generation is still current."
-  (when (and (eq (kargu-http--request-state request) :pending)
-             (= (kargu-http--request-generation request) kargu--generation))
+  (when (kargu-http--live-request-p request)
     (setf (kargu-http--request-state request) :finished)
     (setq kargu--current-process nil)
     t))
+
+(defun kargu-http--release-process (request)
+  "Stop REQUEST's process and watch without touching a newer request."
+  (let ((process (kargu-http--request-process request)))
+    (kargu--api-cancel-stream-watch process)
+    (when (eq kargu--current-process process)
+      (setq kargu--current-process nil))
+    (when (and (processp process) (process-live-p process))
+      (delete-process process))))
+
+(defun kargu-http--track-process (request process)
+  "Publish PROCESS only while REQUEST is live; return it if published."
+  (setf (kargu-http--request-process request) process)
+  (cond
+   ((kargu-http--live-request-p request)
+    (setq kargu--current-process process))
+   (t
+    (setf (kargu-http--request-state request) :finished)
+    (kargu-http--release-process request)
+    nil)))
+
+(defun kargu-http--watch-stream (request)
+  "Arm REQUEST's watch, cleaning up and reporting a local startup failure."
+  (let ((failure (condition-case err
+                     (progn
+                       (kargu--api-arm-stream-watch
+                        (kargu-http--request-process request))
+                       nil)
+                   (error err))))
+    (when failure
+      (let ((deliver (kargu-http--claim-response request)))
+        (setf (kargu-http--request-state request) :finished)
+        (kargu-http--release-process request)
+        (when deliver
+          (kargu-api-clear-busy)
+          (funcall (kargu-http--request-callback request)
+                   (kargu--api-error-alist
+                    (format "Stream watchdog startup failed: %s"
+                            (error-message-string failure)))))))))
 
 (defun kargu-http--log-request (request transport)
   "Log REQUEST metadata and its TRANSPORT without credentials."
@@ -220,8 +257,7 @@ ATTEMPT is the zero-based retry count."
 (defun kargu-http--finish-stream (request body)
   "Finish REQUEST's stream and deliver BODY once."
   (kargu--api-cancel-stream-watch (kargu-http--request-process request))
-  (when (and (= (kargu-http--request-generation request) kargu--generation)
-             (eq (kargu-http--request-state request) :pending))
+  (when (kargu-http--live-request-p request)
     (kargu--stream-flush
      (kargu-http--request-process request)
      (kargu-http--live-delta request)
@@ -253,8 +289,7 @@ ATTEMPT is the zero-based retry count."
 (defun kargu-http--live-delta (request)
   "Return a callback forwarding deltas only while REQUEST is live."
   (lambda (event)
-    (when (and (= (kargu-http--request-generation request) kargu--generation)
-               (eq (kargu-http--request-state request) :pending))
+    (when (kargu-http--live-request-p request)
       (when-let* ((on-delta (kargu-http--request-on-delta request)))
         (funcall on-delta event)))))
 
@@ -265,8 +300,8 @@ GEN identifies the request; ON-DELTA and ATTEMPT are retained for retries."
                   :url url :headers headers :payload payload :generation gen
                   :callback callback :on-delta on-delta :attempt (or attempt 0))))
     (kargu-http--log-request request 'plain)
-    (setq kargu--current-process
-          (plz 'post url
+    (kargu-http--track-process
+     request (plz 'post url
                :headers headers :body (kargu--json-encode payload)
                :as 'string :timeout kargu-api-timeout
                :then (lambda (body) (kargu-http--finish-plain request body))
@@ -300,9 +335,8 @@ ATTEMPT is the retry count."
                          (kargu--stream-filter proc string on-delta on-event))
                :then (lambda (body) (kargu-http--finish-stream request body))
                :else (lambda (err) (kargu-http--fail-request request err)))))
-    (setf (kargu-http--request-process request) process)
-    (setq kargu--current-process process)
-    (kargu--api-arm-stream-watch process)))
+    (when (kargu-http--track-process request process)
+      (kargu-http--watch-stream request))))
 
 (defun kargu--api-decode-body-response (body trimmed parsed-events)
   "Decode HTTP BODY using TRIMMED text or PARSED-EVENTS."
