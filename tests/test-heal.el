@@ -48,6 +48,12 @@ The finished result and the run are bound to `result' and `run'."
     (should (string-search "Verification incomplete" result))
     (should-not (string-search "Verification passed" result))))
 
+(ert-deftest kargu-heal-no-checker-is-never-clean-test ()
+  "Unavailable diagnostics have a distinct outcome, not a successful check."
+  (kargu-heal-test--with-verification nil nil nil
+    (should (string-search "Verification incomplete" result))
+    (should-not (string-search "Verification passed" result))))
+
 (ert-deftest kargu-heal-counts-error-markers-in-the-text-test ()
   "Without structured data, [error] markers in the text are counted."
   (cl-letf (((symbol-function 'kargu-lsp--diagnostics-data) (lambda (_p) nil)))

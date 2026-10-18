@@ -277,12 +277,27 @@
       (should-not (assq 'eglot missing)))))
 
 (ert-deftest kargu-lsp-get-project-diagnostics-clean-test ()
-  "Test that kargu-lsp-get-project-diagnostics reports [Project Clean] when no errors exist."
+  "An empty cached project snapshot is not a project-wide clean certificate."
   (cl-letf (((symbol-function 'flymake--project-diagnostics) (lambda (&rest _) nil)))
     (let ((report (kargu-lsp-get-project-diagnostics)))
       (should (stringp report))
-      (should (string-search "[Project Clean]" report))
-      (should (string-search "No compile or linter diagnostics found across the project" report)))))
+      (should (string-search "[No observed diagnostics]" report))
+      (should-not (string-search "[Project Clean]" report))
+      (should (string-search "available project snapshot" report)))))
+
+(ert-deftest kargu-lsp-no-checker-reports-unavailable-test ()
+  "An unopened file or a buffer without a checker is never clean evidence."
+  (kargu-test-with-git-repo '(("unchecked.txt" . "unchecked\n"))
+    (let* ((path (expand-file-name "unchecked.txt" repo))
+           (buffer (find-file-noselect path)) result)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-lsp--buffer-managed-p) (lambda (_) nil)))
+            (with-current-buffer buffer (setq-local flymake-mode nil))
+            (should (string-search "diagnostics unavailable" (kargu-lsp-get-diagnostics path)))
+            (kargu-lsp-wait-diagnostics
+             path (lambda (file text timeout) (setq result (list file text timeout))))
+            (should (equal result (list path nil nil))))
+        (kill-buffer buffer)))))
 
 (ert-deftest kargu-lsp-get-project-diagnostics-with-diags-test ()
   "Test that kargu-lsp-get-project-diagnostics formats and groups diagnostics by file."

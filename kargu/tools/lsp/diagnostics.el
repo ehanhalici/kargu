@@ -109,7 +109,9 @@ Sort records by severity and then line number."
          (text
           (cond
            ((and (not data) (not open))
-            (format "%s: no diagnostics available (file is not open in Emacs; open it or use read_file first)" path))
+            (format "%s: diagnostics unavailable (file is not open in Emacs; read_file does not start a checker). Open the file in Emacs or run project tests." path))
+           ((and (not data) (not (kargu-lsp--buffer-has-checker-p open)))
+            (format "%s: diagnostics unavailable (no active Flymake/Eglot checker); run project tests instead." path))
            (t (kargu-lsp-format-diagnostics path data)))))
     (when (called-interactively-p 'any)
       (message "%s" text))
@@ -239,7 +241,7 @@ Return a list `(TOTAL-COUNT BY-FILE-HASH)'."
 (defun kargu-lsp--format-project-diagnostics (root total-count by-file)
   "Format aggregated diagnostics for ROOT given TOTAL-COUNT and BY-FILE table."
   (if (zerop total-count)
-      (format "[Project Clean] No compile or linter diagnostics found across the project (root: %s)." root)
+      (format "[No observed diagnostics] No diagnostics in the available project snapshot (root: %s). Unopened files and unreported checks are not verified; this is not a project-wide build/test result." root)
     (let* ((files (hash-table-keys by-file))
            (sorted-files
             (sort files
@@ -292,7 +294,8 @@ project buffers."
 
 (defun kargu-lsp-wait-diagnostics (file-path callback &optional timeout)
   "Wait asynchronously for FILE-PATH diagnostics and invoke CALLBACK.
-Stop after TIMEOUT seconds, or use `kargu-lsp-diag-settle-timeout'."
+Stop after TIMEOUT seconds, or use `kargu-lsp-diag-settle-timeout'.
+CALLBACK receives (PATH TEXT TIMED-OUT); nil TEXT means no checker is available."
   (let* ((path (kargu-permission-resolve file-path "lsp path"))
          (buf (find-buffer-visiting path))
          (has-checker-p (kargu-lsp--buffer-has-checker-p buf))
@@ -301,19 +304,23 @@ Stop after TIMEOUT seconds, or use `kargu-lsp-diag-settle-timeout'."
          (last-snapshot nil)
          (polls 0))
     (if (not has-checker-p)
-        (funcall callback path (kargu-lsp-get-diagnostics path) nil)
+        (funcall callback path nil nil)
       (cl-labels
           ((tick ()
              (let* ((busy (kargu-lsp--checker-busy-p buf))
                     (timed-out (>= (- (float-time) start) timeout))
                     (snapshot (kargu-lsp--diagnostics-data path)))
                (setq polls (1+ polls))
-               (if (or timed-out
+               (cond
+                ((not (kargu-lsp--buffer-has-checker-p buf))
+                 (funcall callback path nil nil))
+                ((or timed-out
                        (and (not busy) (>= polls 1) (null snapshot))
                        (and (not busy) (>= polls 2) (equal snapshot last-snapshot)))
-                   (funcall callback path (kargu-lsp-get-diagnostics path) timed-out)
+                 (funcall callback path (kargu-lsp-get-diagnostics path) timed-out))
+                (t
                  (setq last-snapshot snapshot)
-                 (run-at-time 0.25 nil #'tick)))))
+                 (run-at-time 0.25 nil #'tick))))))
         (run-at-time 0.25 nil #'tick)))))
 
 (provide 'kargu/tools/lsp/diagnostics)
