@@ -81,9 +81,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 1. **[K - Yüksek] Çoklu sohbet tamponlarında Global Değişken Çakışması.**
    - **Dosya / Satır:** `kargu/core/session.el:34-42`, `kargu/history/protocol.el:23`, `kargu/state/store.el:18-31`
    - **Sorun:** `kargu--session`, `kargu--message-history` ve merkezi durum deposu `kargu--state-store` global `defvar` olarak tutulmaktadır. Kullanıcı iki ayrı projede iki ayrı Kargu tamponu açtığında sayaçlar, mesaj geçmişleri, `:mode`, `:status` ve `:busy` bayrakları birbirini ezer. Bir tampondaki işlem diğer tüm tamponların durumunu bozar.
-2. **[K - Yüksek] Gecikmeli debug gönderiminde geç tampon çözümü ve sessiz prompt kaybı.**
-   - **Dosya / Satır:** `kargu/chat.el:524-530`
-   - **Sorun:** `kargu-chat--send-prepared` içindeki `continue` lambdasında `(kargu-chat--buffer)` fonksiyonu leksikal olarak çağrıldığı an değil, debug oturumu başlatıldıktan (asenkron) sonra çağrılır. Kullanıcı debugger beklerken proje değiştirirse girdi yanlış projeye gönderilir. Ayrıca bekleme esnasında kullanıcı girdi kutusuna bir karakter dahi yazarsa prompt doğrulamadan geçemez ve hiçbir uyarı verilmeksizin sessizce yok sayılır.
 3. **[K - Orta] `kargu-history-char-count` her turda tüm geçmişi JSON'a çevirerek karakter sayar.**
    - **Dosya / Satır:** `kargu/history/compact.el:63-71`
    - **Sorun:** `(+ (length (kargu--json-encode (vconcat kargu--message-history))) ...)` çağrısı her adımda ve her sıkıştırma eşiği kontrolünde tüm mesaj geçmişini baştan sona JSON string'e çevirir. Yüzlerce mesajlık oturumlarda yüksek CPU tüketimi ve gereksiz GC baskısı oluşturur.

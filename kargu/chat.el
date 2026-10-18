@@ -512,6 +512,50 @@ When PRESERVE-DRAFT is non-nil, keep unsent input after completion too."
    (lambda (&optional reason)
      (funcall cancel (or reason "user abort")))))
 
+(cl-defstruct (kargu-chat--debug-prompt (:constructor kargu-chat--make-debug-prompt))
+  "Captured chat and input awaiting debugger readiness."
+  buffer session root text input preserve-draft (state :pending))
+
+(defun kargu-chat--resume-debug-prompt (pending)
+  "Submit PENDING only in its unchanged originating chat."
+  (when (eq (kargu-chat--debug-prompt-state pending) :pending)
+    (setf (kargu-chat--debug-prompt-state pending) :done)
+    (let ((buffer (kargu-chat--debug-prompt-buffer pending)))
+      (if (not (buffer-live-p buffer))
+          (message "kargu: debug prompt not sent: its chat was closed")
+        (with-current-buffer buffer
+          (cond
+           ((or (not (derived-mode-p 'kargu-chat-mode))
+                (not (equal kargu-chat--session-id (kargu-chat--debug-prompt-session pending)))
+                (not (equal kargu-chat--project-root (kargu-chat--debug-prompt-root pending)))
+                (not (eq (kargu-state-mode) 'debug)))
+            (message "kargu: debug prompt not sent: chat, session or mode changed; send it again"))
+           ((and (not (kargu-chat--debug-prompt-preserve-draft pending))
+                 (not (equal (kargu-chat--input-text) (kargu-chat--debug-prompt-input pending))))
+            (message "kargu: input changed while starting the debugger; nothing was sent, review and send again"))
+           (t
+            (condition-case err
+                (let ((kargu-permission--override-root (kargu-chat--debug-prompt-root pending)))
+                  (kargu-loop-preflight)
+                  (kargu-chat-activate-selection buffer)
+                  (kargu-chat--submit
+                   (kargu-chat--debug-prompt-text pending)
+                   :preserve-draft (kargu-chat--debug-prompt-preserve-draft pending)))
+              (error (message "kargu: debug prompt not sent: %s" (error-message-string err)))))))))))
+
+(defun kargu-chat--await-debug-prompt (text preserve-draft)
+  "Wait for debug startup before submitting TEXT with PRESERVE-DRAFT policy."
+  (let ((pending (kargu-chat--make-debug-prompt
+                  :buffer (current-buffer) :session kargu-chat--session-id
+                  :root kargu-chat--project-root :text (copy-sequence text)
+                  :input (kargu-chat--input-text) :preserve-draft preserve-draft)))
+    (kargu-chat--after-debug-session
+     (lambda () (kargu-chat--resume-debug-prompt pending))
+     (lambda (reason)
+       (when (eq (kargu-chat--debug-prompt-state pending) :pending)
+         (setf (kargu-chat--debug-prompt-state pending) :done)
+         (message "kargu: debug session cancelled or failed: %s" reason))))))
+
 (cl-defun kargu-chat--send-prepared (text &key preserve-draft)
   "Submit TEXT, keeping an unrelated input when PRESERVE-DRAFT is non-nil.
 A debug session that is not ready is started before the submit.
@@ -519,17 +563,7 @@ Every refusal happens before the input is consumed."
   (kargu-chat--preflight text)
   (cond
    ((kargu-chat--debug-session-needed-p)
-    (kargu-chat--after-debug-session
-     (lambda ()
-       (let ((chat-buf (kargu-chat--buffer)))
-         (kargu-chat-show)
-         (with-current-buffer chat-buf
-           (when (or preserve-draft
-                     (string= (string-trim (kargu-chat--input-text)) text)
-                     (string-empty-p (kargu-chat--input-text)))
-             (kargu-chat--submit text :preserve-draft preserve-draft)))))
-     (lambda (reason)
-       (message "kargu: debug session cancelled or failed: %s" reason))))
+    (kargu-chat--await-debug-prompt text preserve-draft))
    (t
     (kargu-chat--submit text :preserve-draft preserve-draft))))
 

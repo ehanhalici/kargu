@@ -19,6 +19,39 @@
 (declare-function kargu-chat--tool-heading "kargu/chat/render" (name arguments))
 (declare-function kargu-chat--result-summary "kargu/chat/render" (result))
 
+(ert-deftest kargu-chat-delayed-debug-prompts-retain-their-owner-test ()
+  "Debugger callbacks neither switch chats nor silently discard edited input."
+  (dolist (case '(ready edited preserved closed replaced cancelled))
+    (let ((origin (generate-new-buffer " *kargu-debug-origin*")) ready cancel sent notices)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-chat--after-debug-session)
+                     (lambda (success failure) (setq ready success cancel failure)))
+                    ((symbol-function 'kargu-chat--input-text) #'buffer-string)
+                    ((symbol-function 'kargu-loop-preflight) #'ignore)
+                    ((symbol-function 'kargu-chat-activate-selection) #'ignore)
+                    ((symbol-function 'kargu-chat--submit)
+                     (lambda (text &rest options)
+                       (push (list (current-buffer) text (plist-get options :preserve-draft)) sent)))
+                    ((symbol-function 'message)
+                     (lambda (format &rest arguments)
+                       (push (apply #'format format arguments) notices))))
+            (kargu-test-mode 'debug)
+            (with-current-buffer origin
+              (setq major-mode 'kargu-chat-mode kargu-chat--session-id "original")
+              (insert "original prompt")
+              (kargu-chat--await-debug-prompt "original prompt" (eq case 'preserved))
+              (pcase case
+                ((or 'edited 'preserved) (insert " new draft"))
+                ('replaced (setq kargu-chat--session-id "replacement"))))
+            (when (eq case 'closed) (kill-buffer origin))
+            (when (eq case 'cancelled) (funcall cancel "cancelled"))
+            (with-temp-buffer (funcall ready) (funcall ready))
+            (if (memq case '(ready preserved))
+                (should (equal sent (list (list origin "original prompt" (eq case 'preserved)))))
+              (should-not sent)
+              (should notices)))
+        (when (buffer-live-p origin) (kill-buffer origin))))))
+
 (ert-deftest kargu-chat-buffer-lookup-is-project-aware-test ()
   "Source-buffer commands target their project, not the first named chat."
   (let* ((kargu-chat-buffer-name (generate-new-buffer-name "*kargu-route-test*"))
