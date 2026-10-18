@@ -209,5 +209,65 @@
                             '(:code 0 :output "HTTP/1.1 302 Found\r\nLocation: /b\r\n\r\n"))
     (should (string-search "too many redirects" got))))
 
+(ert-deftest kargu-webfetch-stop-during-dns-never-starts-curl-test ()
+  "Stop closes the owned resolver and invalidates its late completion."
+  (let* ((run (list :state 'tools)) (kargu--loop-run run)
+         (kargu-async--pending nil) resolve commands delivered
+         (pipe (make-pipe-process :name "kargu-test-resolve" :noquery t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'kargu-process-run)
+                   (lambda (program _args callback &rest _)
+                     (push program commands) (setq resolve callback) pipe))
+                  ((symbol-function 'kargu-process-cancel)
+                   (lambda (process) (delete-process process))))
+          (kargu-webfetch-url (lambda (value) (setq delivered value)) "https://example.com/")
+          (kargu-async-cancel-owner run)
+          (setq kargu--loop-run nil)
+          (should-not (process-live-p pipe))
+          (funcall resolve '(:code 0 :output "93.184.216.34 STREAM host\n"))
+          (should (equal commands '("getent")))
+          (should-not delivered)
+          (should-not kargu-async--pending))
+      (when (process-live-p pipe) (delete-process pipe)))))
+
+(ert-deftest kargu-webfetch-stop-during-curl-never-follows-redirect-test ()
+  "A late redirect response cannot continue a cancelled request chain."
+  (let* ((run (list :state 'tools)) (kargu--loop-run run)
+         (kargu-async--pending nil) curl commands delivered)
+    (cl-letf (((symbol-function 'kargu-process-run)
+               (lambda (program _args callback &rest _)
+                 (push program commands)
+                 (if (equal program "getent")
+                     (funcall callback '(:code 0 :output "93.184.216.34 STREAM host\n"))
+                   (setq curl callback)))))
+      (kargu-webfetch-url (lambda (value) (setq delivered value)) "https://example.com/")
+      (kargu-async-cancel-owner run)
+      (setq kargu--loop-run nil)
+      (funcall curl '(:code 0 :output "HTTP/2 302 Found\r\nLocation: /next\r\n\r\n"))
+      (should (equal (reverse commands) '("getent" "curl")))
+      (should-not delivered)
+      (should-not kargu-async--pending))))
+
+(ert-deftest kargu-webfetch-context-change-prevents-the-next-process-test ()
+  "A closed origin or changed project prevents DNS from starting curl."
+  (dolist (change '(closed-buffer changed-project))
+    (let ((origin (generate-new-buffer " *kargu-fetch-origin*"))
+          (root "/captured-project/") (kargu-async--pending nil) resolve commands result)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-permission-project-root) (lambda (&optional _) root))
+                    ((symbol-function 'kargu-process-run)
+                     (lambda (program _args callback &rest _)
+                       (push program commands) (setq resolve callback))))
+            (with-current-buffer origin
+              (kargu-webfetch-url (lambda (value) (setq result value)) "https://example.com/"))
+            (pcase change
+              ('closed-buffer (kill-buffer origin))
+              (_ (setq root "/different-project/")))
+            (funcall resolve '(:code 0 :output "93.184.216.34 STREAM host\n"))
+            (should (string-prefix-p "ERROR:" result))
+            (should (equal commands '("getent")))
+            (should-not kargu-async--pending))
+        (when (buffer-live-p origin) (kill-buffer origin))))))
+
 (provide 'tests/test-webfetch)
 ;;; test-webfetch.el ends here

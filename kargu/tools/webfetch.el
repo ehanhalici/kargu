@@ -15,6 +15,7 @@
 (require 'rx)
 (require 'kargu/core)
 (require 'kargu/contract)
+(require 'kargu/async)
 (require 'kargu/api)
 (require 'kargu/tools/process)
 (require 'kargu/net/address)
@@ -36,6 +37,15 @@ Large bodies are truncated to prevent context window exhaustion."
   "Seconds allowed for resolving one webfetch host."
   :type 'natnum
   :group 'kargu)
+
+(cl-defun kargu-webfetch--run (program args &key callback options)
+  "Run PROGRAM with ARGS and OPTIONS, guarding CALLBACK with its owning task."
+  (let* ((task kargu-async--current-task)
+         (process (apply #'kargu-process-run program args
+                         (if task (kargu-async-wrap task callback) callback) options)))
+    (when (and task (processp process))
+      (kargu-async-add-cleanup task (lambda () (kargu-process-cancel process))))
+    process))
 
 (defun kargu-webfetch--internal-host-p (host)
   "Non-nil when HOST names this machine or a private network."
@@ -82,8 +92,8 @@ The result is (public . IP), (private . IP), or (none . nil)."
 ERR is a reason string when no public address can be pinned.  The call
 returns at once; `getent' runs through `kargu-process-run'."
   (let ((host (kargu-webfetch--bare-host (url-generic-parse-url url))))
-    (kargu-process-run
-     "getent" (list "ahosts" host)
+    (kargu-webfetch--run
+     "getent" (list "ahosts" host) :callback
      (lambda (result)
        (cond
         ((eql (plist-get result :code) 127)
@@ -101,7 +111,7 @@ returns at once; `getent' runs through `kargu-process-run'."
                                (cdr found))))
              (_ (funcall callback nil
                          (format "webfetch could not resolve %s" host))))))))
-     :timeout kargu-webfetch-resolve-timeout)))
+     :options (list :timeout kargu-webfetch-resolve-timeout))))
 
 (defun kargu-webfetch--resolve-mapping (host port ip)
   "Return a curl --resolve value pinning HOST:PORT to IP."
@@ -213,11 +223,11 @@ hop repeats this after `kargu-webfetch--check-url'."
    (lambda (ip err)
      (if err
          (funcall callback (format "ERROR: %s" err))
-       (kargu-process-run
-        "curl" (kargu-webfetch--curl-args url ip)
+       (kargu-webfetch--run
+        "curl" (kargu-webfetch--curl-args url ip) :callback
         (lambda (result) (kargu-webfetch--handle callback url left result))
-        :timeout (+ kargu-webfetch-timeout 5)
-        :max-bytes 6000000)))))
+        :options (list :timeout (+ kargu-webfetch-timeout 5)
+                       :max-bytes 6000000))))))
 
 (defun kargu-webfetch-url (callback url)
   "GET URL and pass a truncated text body to CALLBACK."
@@ -226,7 +236,20 @@ hop repeats this after `kargu-webfetch--check-url'."
   (kargu-webfetch--check-url url)
   (unless (executable-find "curl")
     (error "Curl not found"))
-  (kargu-webfetch--fetch callback url kargu-webfetch--max-redirects))
+  (let* ((origin (current-buffer))
+         (root (kargu-permission-project-root))
+         (task (kargu-async-start
+                (lambda (value error)
+                  (funcall callback (if error (concat "ERROR: " error) value)))
+                :valid-p (lambda ()
+                           (and (buffer-live-p origin)
+                                (with-current-buffer origin
+                                  (equal root (kargu-permission-project-root)))))))
+         (kargu-async--current-task task))
+    (condition-case err
+        (kargu-webfetch--fetch
+         (lambda (value) (kargu-async-finish task value)) url kargu-webfetch--max-redirects)
+      (error (kargu-async-finish task nil (error-message-string err))))))
 
 (defun kargu-webfetch-register-tools ()
   "Register the webfetch tool."
