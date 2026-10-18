@@ -14,9 +14,11 @@
 (require 'subr-x)
 (require 'kargu/core)
 (require 'kargu/plan/buffer)
+(require 'kargu/state/selectors)
 
 (defvar kargu-chat-buffer-name)
 (declare-function kargu-chat-prompt "kargu/chat" (&optional prompt))
+(declare-function kargu-loop-running-p "kargu/loop" ())
 
 (defun kargu-plan-view ()
   "Display the in-memory plan buffer in a suitable window for editing."
@@ -45,6 +47,29 @@ finds no decision to make."
   (prog1 kargu-plan--decision-pending
     (setq kargu-plan--decision-pending nil)))
 
+(defun kargu-plan--dispatch-approved (plan-text)
+  "Dispatch PLAN-TEXT, restoring the decision if startup fails."
+  (unless (fboundp 'kargu-chat-prompt)
+    (user-error "Kargu: chat dispatch is unavailable; the plan is still pending"))
+  (let ((plan kargu-plan--current-plan)
+        (mode (kargu-state-mode))
+        (dispatched nil))
+    (kargu-plan--take-decision)
+    (unwind-protect
+        (progn
+          (kargu-set-mode 'agent)
+          (kargu-chat-prompt
+           (format "Apply the following approved plan step-by-step:\n\n%s" plan-text))
+          (setq dispatched t))
+      (unless dispatched
+        (when (eq plan kargu-plan--current-plan)
+          (setq kargu-plan--decision-pending t))
+        (unless (or (kargu-loop-running-p) (eq mode (kargu-state-mode)))
+          (kargu-set-mode mode))))
+    (kargu-plan--close-window)
+    (kargu-chat-insert "  ✓ [Plan Approved] — Dispatched in agent mode.\n\n"
+                       '(:inherit success :weight bold))))
+
 (defun kargu-plan-approve ()
   "Approve the current in-memory plan and dispatch it to AI in agent mode."
   (interactive)
@@ -59,15 +84,7 @@ finds no decision to make."
      ((string-empty-p plan-text)
       (message "kargu: no plan text found to approve"))
      (t
-      (kargu-plan--take-decision)
-      (kargu-plan--close-window)
-      (kargu-chat-insert "  ✓ [Plan Approved] — Switching to agent mode and applying plan...\n\n"
-                         '(:inherit success :weight bold))
-      (kargu-set-mode 'agent)
-      (let ((prompt (format "Apply the following approved plan step-by-step:\n\n%s" plan-text)))
-        (if (fboundp 'kargu-chat-prompt)
-            (kargu-chat-prompt prompt)
-          (message "kargu-chat-prompt unavailable")))))))
+      (kargu-plan--dispatch-approved plan-text)))))
 
 (defun kargu-plan-reject ()
   "Reject and cancel the pending plan."

@@ -107,9 +107,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 ---
 
 ### Modül: `loop/` & `plan/`
-1. **[K - Orta] Plan onayı (`kargu-plan-approve`) erken karar tüketimi nedeniyle kilitlenebilir.**
-   - **Dosya / Satır:** `kargu/plan/dispatch.el:62-70`
-   - **Sorun:** `(kargu-plan--take-decision)` çağrısı `(kargu-chat-prompt prompt)` çağrısından önce yapılır. `kargu-chat-prompt` mevcut değilse veya hata fırlatırsa `kargu-plan--decision-pending` zaten `nil` yapılmış olduğundan kullanıcı aynı planı tekrar onaylayamaz veya yeniden deneyemez (`"kargu: this plan was already decided"` mesajı verir).
 2. **[K - Orta] Durdurulan koşularda dosya tüketim sızıntısı.**
    - **Dosya / Satır:** `kargu/loop/heal.el:50-51`
    - **Sorun:** LSP tanıları beklenirken koşu durdurulursa (`kargu-loop-stop`), `(when (kargu-loop--live-p run) (kargu-diff-consume-file path))` atlanır. Düzenlenen dosya `kargu-diff--changed` tablosunda kalır ve sonraki koşunun bitiş raporuna `:pending-files` olarak sızar.

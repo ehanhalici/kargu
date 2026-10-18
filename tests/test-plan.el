@@ -89,6 +89,29 @@
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
 
+(ert-deftest kargu-plan-failed-dispatch-can-be-approved-again-test ()
+  "A failed startup preserves plan approval and restores the previous mode."
+  (let ((buffer (kargu-plan-setup-buffer "retryable plan")) (attempts 0))
+    (unwind-protect
+        (progn
+          (kargu-test-mode 'plan)
+          (cl-letf (((symbol-function 'kargu-chat-prompt)
+                     (lambda (_prompt)
+                       (cl-incf attempts)
+                       (kargu-plan-approve)
+                       (when (= attempts 1) (error "Startup refused")))))
+            (should-error (kargu-plan-approve))
+            (should kargu-plan--decision-pending)
+            (should (eq (kargu-state-mode) 'plan))
+            (kargu-plan-approve)
+            (should (= attempts 2))
+            (should-not kargu-plan--decision-pending))
+          (setq kargu-plan--decision-pending t)
+          (cl-letf (((symbol-function 'kargu-chat-prompt) nil))
+            (should-error (kargu-plan-approve))
+            (should kargu-plan--decision-pending)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
 (ert-deftest kargu-plan-reject-test ()
   "Test that `kargu-plan-reject' cancels the pending plan."
   (let* ((text "Plan to reject")
