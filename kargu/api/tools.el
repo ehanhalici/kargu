@@ -151,6 +151,10 @@ Tools hidden by `kargu--tool-visible-p' are skipped."
 
 (defalias 'kargu-tool-visible-p #'kargu--tool-visible-p)
 
+(defun kargu-tool-schema-char-count ()
+  "Return the serialized character cost of currently advertised tool schemas."
+  (length (kargu--json-encode (kargu--build-tools-vector))))
+
 (defun kargu-register-tool-alias (alias name)
   "Expose registered tool NAME under ALIAS as well."
   (let ((spec (gethash name kargu--tool-registry)))

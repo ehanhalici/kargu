@@ -22,10 +22,18 @@
 (declare-function kargu--validate-history "kargu/history/repair")
 (declare-function kargu--history-fresh-system-message "kargu/history/repair" ())
 (declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-tool-schema-char-count "kargu/api/tools" ())
+
+(defconst kargu-history--chars-per-token 3.5
+  "Estimated characters per token for text and code.")
+(defconst kargu-history--compact-ratio 0.70
+  "Fraction of a known context window available before compaction.")
+(defconst kargu-history--compact-ceiling 800000
+  "Largest dynamic compaction threshold in characters.")
 
 (defcustom kargu-history-compact-chars 45000
-  "Baseline character threshold for compaction when dynamic detection is disabled.
-When positive, serves as the minimum floor for dynamic compaction."
+  "Fallback character threshold when the model's context window is unknown.
+A known window takes precedence, even when smaller than this value."
   :type 'natnum
   :group 'kargu)
 
@@ -39,28 +47,27 @@ The suffix is walked back so it does not start on an orphan `tool' result."
 
 (defun kargu-history-compact-threshold ()
   "Dynamic character threshold to trigger history compaction.
-Calculated as 70% of the active model's context window capacity,
-bounded between `kargu-history-compact-chars' (default 45k) and 800k characters."
+Use 70% of the active model's window with 3.5 characters per token,
+capped at 800k characters.  With no known window, use the configured
+`kargu-history-compact-chars' fallback."
   (let* ((ctx-tokens (and (fboundp 'kargu-model-context-window)
                           (kargu-model-context-window)))
-         (floor-val (or kargu-history-compact-chars 45000))
-         ;; 1 token ≈ 3.5 characters in code/prose.  No window means the floor.
-         (calc (if (and (numberp ctx-tokens) (> ctx-tokens 0))
-                   (round (* ctx-tokens 3.5 0.70))
-                 floor-val)))
-    (max floor-val (min calc 800000))))
+         (fallback (or kargu-history-compact-chars 45000)))
+    ;; Budget heuristic; actual tokenization is provider-specific.
+    (if (and (numberp ctx-tokens) (> ctx-tokens 0))
+        (min kargu-history--compact-ceiling
+             (max 1 (round (* ctx-tokens kargu-history--chars-per-token
+                              kargu-history--compact-ratio))))
+      fallback)))
 
 (defun kargu-history-char-count ()
-  "Approximate character cost of `kargu--message-history'."
-  (let ((n 0))
-    (dolist (msg kargu--message-history)
-      (let ((content (kargu-aget msg "content")))
-        (when (stringp content)
-          (setq n (+ n (length content)))))
-      (let ((calls (kargu-aget msg "tool_calls")))
-        (when calls
-          (setq n (+ n (length (format "%s" calls)))))))
-    n))
+  "Estimate serialized history and advertised schema character cost.
+Include system text, structured content, attachments and list/vector tool
+invocations.  Image tokenization remains provider-dependent."
+  (+ (length (kargu--json-encode (vconcat kargu--message-history)))
+     (if (fboundp 'kargu-tool-schema-char-count)
+         (kargu-tool-schema-char-count)
+       0)))
 
 (defun kargu-history-non-system-count ()
   "Number of non-system messages in the history."

@@ -62,8 +62,8 @@
     ;; 128k tokens * 3.5 chars * 0.70 = 313,600 chars
     (should (= (kargu-history-compact-threshold) 313600)))
   (cl-letf (((symbol-function 'kargu-model-context-window) (lambda (&optional _) 10000)))
-    ;; 10k tokens * 3.5 chars * 0.70 = 24,500 chars -> bounded by floor 45,000
-    (should (= (kargu-history-compact-threshold) 45000))))
+    ;; The configured fallback never overrides a smaller known window.
+    (should (= (kargu-history-compact-threshold) 24500))))
 
 (ert-deftest kargu-output-truncation-and-buffer-read-test ()
   "Test that outputs exceeding 24k chars are preserved and readable via read_file."

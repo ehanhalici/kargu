@@ -37,6 +37,23 @@
         (should (> (kargu-history-char-count) 50))
         (should (kargu-history-needs-compact-p))))))
 
+(ert-deftest kargu-history-small-windows-and-structured-cost-test ()
+  "A small window wins over the fallback; structured blocks and schemas count."
+  (let ((kargu-history-compact-chars 45000)
+        (image (make-string 4000 ?a)))
+    (cl-letf (((symbol-function 'kargu-model-context-window) (lambda (&rest _) 1024)))
+      (should (= (kargu-history-compact-threshold) (round (* 1024 3.5 0.70)))))
+    (let ((kargu--message-history
+           (list (list '("role" . "user")
+                       (cons "content" (vector (list '("type" . "image_url")
+                                                      (cons "image_url" image)))))
+                 '(("role" . "assistant")
+                   ("tool_calls" . ((("id" . "c1") ("function" . (("arguments" . "large args"))))))))))
+      (cl-letf (((symbol-function 'kargu-tool-schema-char-count) (lambda () 123)))
+        (should (= (kargu-history-char-count)
+                   (+ 123 (length (kargu--json-encode (vconcat kargu--message-history))))))
+        (should (> (kargu-history-char-count) 4000))))))
+
 (ert-deftest kargu-history-compact-tail-starts-on-a-user-turn-test ()
   "The kept tail never starts on an assistant or a tool result."
   (let ((kargu-history-compact-keep 3)
