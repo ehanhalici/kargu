@@ -1,4 +1,4 @@
-;;; kargu/config/key.el --- Multi-tier API key and endpoint resolution -*- lexical-binding: t; -*-
+;;; key.el --- Multi-tier API key and endpoint resolution -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -117,18 +117,22 @@ otherwise provider's catalog default URL, else `kargu-api-base'."
 
 (defun kargu--expand-env-refs (value)
   "VALUE with each ${NAME} replaced by that environment variable.
-Nil when VALUE is not a string or a referenced variable is unset or empty."
-  (when (stringp value)
-    (catch 'unset
-      (replace-regexp-in-string
-       "\\${\\([A-Za-z_][A-Za-z0-9_]*\\)}"
-       (lambda (m)
-         (or (kargu-nonempty (getenv (match-string 1 m)))
-             (throw 'unset nil)))
-       value t t))))
+Return nil for non-strings or unset/empty references; log only missing names."
+  (save-match-data
+    (when (stringp value)
+      (catch 'unset
+        (replace-regexp-in-string
+         (rx "${" (group (any alpha "_") (* (any alnum "_"))) "}")
+         (lambda (match)
+           (let ((name (match-string 1 match)))
+             (or (kargu-nonempty (getenv name))
+                 (progn
+                   (kargu-log 'warn "Configured environment variable %s is unset or empty; trying remaining credential sources" name)
+                   (throw 'unset nil)))))
+         value t t)))))
 
 (defun kargu--auth-source-api-key (api)
-  "Secret auth-source holds for the host of URL API, or nil."
+  "Return the auth-source secret for URL API's host, or nil."
   (let* ((host (and api (kargu--url-host api)))
          (found (and host (progn (require 'auth-source)
                                  (auth-source-search :host host :max 1)))))
@@ -177,4 +181,4 @@ In order:
 
 (provide 'kargu/config/key)
 
-;;; kargu/config/key.el ends here
+;;; key.el ends here

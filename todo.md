@@ -19,10 +19,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 5. **[D - Düşük] `read_file` bellek tüketimi.**
    - **Dosya / Satır:** `kargu/tools/diff.el:147-154, 175-180`
    - **Sorun:** `from_line`/`to_line` aralığı verilmiş olsa dahi dosya önce tamamen arabelleğe okunur ve `split-string` ile tüm satır listesi oluşturulur. Çok büyük dosyalarda (100MB+) gereksiz bellek ve GC yükü oluşturur.
-6. **[D - Düşük] `diff.el` yükleme zamanı yapılandırması.**
-   - **Dosya / Satır:** `kargu/tools/diff.el:573-579`
-   - **Sorun:** `kargu--config-plist` dosya yükleme anında okunur; çalışma zamanında TOML yapılandırması yeniden yüklendiğinde `review-mode` güncellenmez.
-
 ---
 
 ### Modül: `tools/search.el` & `tools/webfetch.el`
@@ -71,10 +67,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 2. **[K - Orta] `auth-source-search` ana iş parçacığını dondurabilir.**
    - **Dosya / Satır:** `kargu/providers/registry.el:292`, `kargu/config/key.el:134`
    - **Sorun:** GPG şifreli `.authinfo.gpg` kullanan sistemlerde `auth-source-search` pinentry veya disk beklemesi nedeniyle Emacs UI'ını senkron olarak kilitler. `kargu-connected-providers` fonksiyonu bu aramayı katalogdaki 160+ sağlayıcı için döngüde çalıştırır.
-3. **[K - Düşük] `kargu--expand-env-refs` sessizce nil döner.**
-   - **Dosya / Satır:** `kargu/config/key.el:121-128`
-   - **Sorun:** Yapılandırmadaki `${TANIMSIZ_VAR}` referansı bulunamadığında uyarı vermeden `nil` döner ve sistem sessizce auth-source'a düşer; kullanıcı yazım hatalarını fark edemez.
-
 ---
 
 ### Modül: `chat/`, `history/` & `core/` (Oturum İzolasyonu ve Bellek)

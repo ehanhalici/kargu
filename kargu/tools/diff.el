@@ -639,7 +639,8 @@ Format:
 
 ;; Apply review_mode from TOML config if present
 (when (fboundp 'kargu--config-plist)
-  (when-let* ((mode-str (plist-get (kargu--config-plist) :review-mode)))
+  (when-let* ((mode-str (plist-get (kargu--config-plist) :review-mode))
+              ((stringp mode-str)))
     (let ((m (intern (downcase (string-trim mode-str)))))
       (when (memq m '(auto blocking async))
         (setq kargu-diff-review-mode m)))))

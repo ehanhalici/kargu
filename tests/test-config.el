@@ -8,6 +8,40 @@
 (require 'ert)
 (require 'kargu/config)
 
+(ert-deftest kargu-config-review-mode-applies-on-reload-test ()
+  "TOML parsing refreshes review mode even after the diff module was loaded."
+  (let ((file (make-temp-file "kargu-review-config-" nil ".toml"))
+        (kargu-diff-review-mode 'auto))
+    (unwind-protect
+        (progn
+          (dolist (mode '("blocking" "async" "auto"))
+            (write-region (format "review_mode = %S\n" mode) nil file)
+            (kargu--read-toml-config file)
+            (should (eq kargu-diff-review-mode (intern mode))))
+          (cl-letf (((symbol-function 'kargu--config-plist)
+                     (lambda () '(:review-mode 42))))
+            (load "kargu/tools/diff" nil t)
+            (should (eq kargu-diff-review-mode 'auto))))
+      (delete-file file))))
+
+(ert-deftest kargu-config-missing-environment-reference-is-actionable-test ()
+  "Missing references warn by name without exposing credential text or matches."
+  (let ((process-environment (cons "KARGU_ENV_TEST_SECRET=ok" process-environment)) notices)
+    (setenv "KARGU_ENV_TEST_ABSENT" nil)
+    (cl-letf (((symbol-function 'kargu-log)
+               (lambda (level format &rest arguments)
+                 (push (cons level (apply #'format format arguments)) notices))))
+      (string-match "keep" "keep")
+      (let ((match (match-data)))
+        (should (equal (kargu--expand-env-refs "prefix-${KARGU_ENV_TEST_SECRET}-suffix")
+                       "prefix-ok-suffix"))
+        (should-not (kargu--expand-env-refs "private-literal-${KARGU_ENV_TEST_ABSENT}"))
+        (should (equal (match-data) match)))
+      (should (= (length notices) 1))
+      (should (eq (caar notices) 'warn))
+      (should (string-search "KARGU_ENV_TEST_ABSENT" (cdar notices)))
+      (should-not (string-search "private-literal" (cdar notices))))))
+
 (ert-deftest kargu-setup-reports-all-mandatory-dependencies-test ()
   "CLI and package failures appear together; optional integrations do not block."
   (let ((problems (car (kargu--setup-problems
