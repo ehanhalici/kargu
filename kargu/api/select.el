@@ -266,8 +266,7 @@ that is a member of CANDIDATES.  Without a display, read in the minibuffer."
 
 (defun kargu-api-select--apply-mode (chosen)
   "Set the execution mode to CHOSEN."
-  (kargu-set-mode (intern chosen))
-  (message "kargu: mode set to '%s'." (upcase chosen)))
+  (kargu-set-mode (intern chosen)))
 
 (defun kargu-chat-select-mode-company (&optional _event)
   "Select an execution mode with Company in the footer."

@@ -1,4 +1,4 @@
-;;; kargu/core.el --- Slim core: helpers, mode, env -*- lexical-binding: t; -*-
+;;; core.el --- Slim core: helpers, mode, env -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -73,8 +73,13 @@ that is not the model-bound tool output (see `kargu--truncate-for-model')."
 
 ;;;; Mode state -----------------------------------------------------------
 
+(defvar kargu-mode-prepare-functions nil
+  "Alist of modes to asynchronous preparation functions taking a continuation.")
+(defvar kargu--mode-selection-generation 0
+  "Generation used to discard an obsolete asynchronous mode selection.")
+
 (defun kargu--publish-mode (mode)
-  "Refresh chat footers and the mode line after MODE changes."
+  "Publish MODE to chat footers and the mode line."
   (kargu-log 'info "mode set to `%s'" mode)
   (dolist (buf (buffer-list))
     (when (and (buffer-live-p buf)
@@ -94,9 +99,17 @@ that is not the model-bound tool output (see `kargu--truncate-for-model')."
   (kargu-contract-assert #'kargu-contract-mode-p mode
                          "Unknown kargu mode: %s (expected one of %s)"
                          mode kargu-all-modes)
-  (kargu-state-set-mode mode)
-  (kargu--publish-mode mode)
-  mode)
+  (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+    (user-error "Kargu: Stop the active run before changing mode"))
+  (let* ((generation (cl-incf kargu--mode-selection-generation))
+         (prepare (alist-get mode kargu-mode-prepare-functions))
+         (apply-mode
+          (lambda ()
+            (when (= generation kargu--mode-selection-generation)
+              (kargu-state-set-mode mode)
+              (kargu--publish-mode mode)
+              mode))))
+    (if prepare (funcall prepare apply-mode) (funcall apply-mode))))
 
 (defun kargu-mode-ask ()
   "Switch kargu to ask mode (read-only answers)."
@@ -120,5 +133,4 @@ that is not the model-bound tool output (see `kargu--truncate-for-model')."
 
 (provide 'kargu/core)
 
-;;; kargu/core.el ends here
-
+;;; core.el ends here

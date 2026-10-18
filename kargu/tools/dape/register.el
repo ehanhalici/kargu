@@ -12,6 +12,7 @@
 
 (require 'kargu/api/tools)
 (require 'kargu/tools/dape/commands)
+(require 'kargu/tools/dape/preflight)
 
 ;;;; Tool registration -----------------------------------------------------
 
@@ -24,13 +25,7 @@
       ("properties" . (("config_name" . (("type" . "string")
                                          ("description" . "Optional dape configuration name (e.g. 'lldb-vscode', 'dlv', 'debugpy')."))))))
     (lambda (args &optional callback)
-      (let ((thunk (lambda (done)
-                     (funcall done (kargu-dape-start (kargu--tool-arg args "config_name"))))))
-        (if callback
-            (kargu-permission-call-async thunk callback)
-          (let (result)
-            (funcall thunk (lambda (r) (setq result r)))
-            result)))))
+      (kargu-dape-start (kargu--tool-arg args "config_name") callback)))
    (list
     "debug_get_context"
     "Inspect the live debug session: the paused thread's call-stack and all in-scope variables."

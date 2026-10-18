@@ -190,9 +190,10 @@ FollowUpPrompt(prompt) ==
     /\ UNCHANGED <<activeMode, Circuit>>
 
 (* SetMode: `kargu-state-set-mode' refuses while a run is live (law 3) *)
-SetMode(newMode) ==
+SetMode(newMode, debugReady) ==
     /\ AssertIngress(ContractMode(newMode), "SetMode: Mode must satisfy ContractMode")
     /\ state \in RunOver
+    /\ ModeAdmitted(newMode, debugReady)
     /\ newMode # activeMode
     /\ activeMode ' = newMode
     /\ UNCHANGED <<state, history, Counters, ToolVars, Flags, runStatus,

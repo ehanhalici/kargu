@@ -1,4 +1,4 @@
-;;; kargu/ui/transient.el --- Transient menu definitions -*- lexical-binding: t; -*-
+;;; transient.el --- Transient menu definitions -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -30,7 +30,7 @@
 (declare-function kargu-tune-menu "kargu/chat/tune")
 
 (defun kargu-ui--show-text (name text)
-  "Pop to a read-only buffer *kargu-NAME* showing TEXT."
+  "Display TEXT in a read-only buffer identified by NAME."
   (let ((buffer (get-buffer-create (format "*kargu-%s*" name))))
     (with-current-buffer buffer
       (special-mode)
@@ -100,12 +100,12 @@
     (message "kargu: dape module not loaded (debug tools unavailable)")))
 
 (defun kargu-ui-rollback ()
-  "Roll a file back to its initial state before agent edits in this series."
+  "Restore a file to its initial snapshot before the agent's edits."
   (interactive)
   (kargu-ui--dispatch 'kargu-diff-rollback))
 
 (defun kargu-ui-review-diff ()
-  "Review changes in ediff against the pre-agent snapshot."
+  "Open ediff for the pre-agent and current snapshots."
   (interactive)
   (kargu-ui--dispatch 'kargu-diff-review))
 
@@ -183,14 +183,10 @@
     (message "kargu mode: agent (autonomous, ediff-confirmed edits)")
     (call-interactively #'kargu-menu))
 
-  (defvar kargu-menu--eglot-blocked nil
-    "Non-nil when `kargu-menu' opened without an Eglot connection.")
+  (defun kargu-menu--lsp-unavailable-p ()
+    "Return non-nil when this project cannot offer LSP tools."
+    (not (kargu-eglot-connected-p)))
 
-  (defun kargu-menu--eglot-blocked-p ()
-    "Return non-nil when this menu must wait for Eglot."
-    kargu-menu--eglot-blocked)
-
-  (declare-function kargu-chat--workspace-blocked-p "kargu/chat" ())
   (defvar kargu-eglot-required-message)
 
   (transient-define-prefix kargu-menu ()
@@ -200,11 +196,10 @@ The mode keys (a, p, d, x) switch the state store mode
 and keep this menu open; the choice applies from the next request
 on.  Every other key performs one action and closes the menu.
 The chat sidebar (c) is where agent runs stream their output.
-A project with no live Eglot connection shows an error here and
-does not accept a prompt."
+LSP is optional; a missing connection only hides structural tools."
     ["Workspace"
-     :if kargu-menu--eglot-blocked-p
-     ("!" "Eglot is not connected — start it before typing a prompt" ignore)]
+     :if kargu-menu--lsp-unavailable-p
+     ("!" "Eglot inactive — chat works without LSP tools" ignore)]
     ["Mode"
      ("a" "ask: read-only answers" kargu-menu--ask)
      ("p" "plan: implementation plan, no edits" kargu-menu--plan)
@@ -243,8 +238,7 @@ does not accept a prompt."
      ("W" "wire log (full I/O)" kargu-toggle-wire-log)
      ("H" "protocol history" kargu-ui-history)]
     (interactive)
-    (setq kargu-menu--eglot-blocked (kargu-chat--workspace-blocked-p))
-    (when kargu-menu--eglot-blocked
+    (when (kargu-menu--lsp-unavailable-p)
       (message "%s" kargu-eglot-required-message))
     (transient-setup 'kargu-menu))
 
@@ -252,4 +246,4 @@ does not accept a prompt."
 
 (provide 'kargu/ui/transient)
 
-;;; kargu/ui/transient.el ends here
+;;; transient.el ends here

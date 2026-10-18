@@ -126,21 +126,17 @@ Returns t when a thread is stopped or when the session is live and active."
                   (ignore-errors (dape--stopped-threads conn)))
              (bound-and-true-p dape-active-mode)))))
 
+(declare-function kargu-dape-selected-config "kargu/tools/dape/preflight" ())
+(declare-function kargu-dape-launch-config "kargu/tools/dape/preflight" (name))
+
 (defun kargu-dape--interactive-launch-dape (target-buf)
-  "Interactively launch Dape in TARGET-BUF with :stopOnEntry preserved."
-  (let ((orig-config-fns (and (boundp 'dape-default-config-functions)
-                              dape-default-config-functions)))
-    (when (and target-buf (buffer-live-p target-buf))
+  "Launch the verified adapter in TARGET-BUF with stop-on-entry enabled."
+  (let ((name (kargu-dape-selected-config)))
+    (unless name (user-error "Kargu: Verify an adapter by selecting debug mode first"))
+    (when (buffer-live-p target-buf)
       (setq kargu-context-buffer target-buf))
-    (message "kargu: launching dape in %s; please enter configuration in the minibuffer..."
-             (buffer-name target-buf))
-    (when (boundp 'dape-default-config-functions)
-      (add-to-list 'dape-default-config-functions #'kargu-dape--ensure-stop-on-entry))
-    (unwind-protect
-        (with-current-buffer target-buf
-          (call-interactively #'dape))
-      (when (boundp 'dape-default-config-functions)
-        (setq dape-default-config-functions orig-config-fns)))))
+    (with-current-buffer target-buf
+      (kargu-dape-launch-config name))))
 
 (defconst kargu-dape--session-poll-interval 0.5
   "Seconds between debug session readiness checks.")

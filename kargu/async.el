@@ -15,7 +15,7 @@
 
 (defvar kargu-async--pending nil
   "Pending asynchronous tasks, including their run owners.")
-(defvar kargu--loop-run)
+(defvar kargu--loop-run nil)
 (defvar kargu-async--current-task nil
   "Dynamically bound parent while an asynchronous operation starts or resumes.")
 

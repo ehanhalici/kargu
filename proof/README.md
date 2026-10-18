@@ -4,6 +4,11 @@ This directory holds the TLA+ specification of Kargu's agent loop and protocol w
 
 The check is exhaustive over a bounded model. It is a proof for those bounds, not for every parameter value.
 
+Debug mode admission requires a successful adapter preflight. The model
+abstracts external probes as a boolean result passed to `SetMode`; failed
+or obsolete probes never publish a mode transition. Probe callbacks and
+mode-selection races are also covered by the offline ERT tests.
+
 ## 1. Modules
 
 ```

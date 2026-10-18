@@ -90,8 +90,8 @@
       (kargu-state-subscribe :provider prov-fn)
       (unwind-protect
           (progn
-            (kargu-state-set-mode 'debug)
-            (should (eq notified-mode 'debug))
+            (kargu-state-set-mode 'plan)
+            (should (eq notified-mode 'plan))
             (kargu-state-set-provider 'cerebras)
             (should (eq notified-provider 'cerebras)))
         (kargu-state-unsubscribe :mode mode-fn)

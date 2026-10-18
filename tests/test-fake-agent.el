@@ -490,6 +490,8 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
          (kargu-loop-upstream-retries 0)
          (kargu-confirm--mock-decision :stop)
          (kargu-session-auto-save nil)
+         (kargu-mode-prepare-functions nil)
+         (kargu-state-before-mode-change-hook nil)
          (failures nil))
     (unwind-protect
         (cl-letf (((symbol-function 'kargu--api-post) #'kargu-fake--post)

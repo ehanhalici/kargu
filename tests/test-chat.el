@@ -299,5 +299,14 @@
   (should (string-prefix-p "ERROR:" (kargu-chat--result-summary "ERROR: missing")))
   (should-not (string-match-p "chars" (kargu-chat--result-summary "file contents"))))
 
+(ert-deftest kargu-menu-without-eglot-remains-usable-test ()
+  "The menu opens without referencing the removed Eglot admission gate."
+  (let (opened)
+    (cl-letf (((symbol-function 'kargu-eglot-connected-p) (lambda () nil))
+              ((symbol-function 'transient-setup) (lambda (prefix &rest _) (setq opened prefix))))
+      (kargu-menu)
+      (should (eq opened 'kargu-menu))
+      (should (kargu-menu--lsp-unavailable-p)))))
+
 (provide 'tests/test-chat)
 ;;; test-chat.el ends here

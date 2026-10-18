@@ -15,8 +15,10 @@ cd "${SCRIPT_DIR}"
 TLC_BIN="$(command -v tlc 2>/dev/null || true)"
 if [[ -z "${TLC_BIN}" ]]; then
     if command -v nix-shell >/dev/null 2>&1; then
+        KARGU_TLC_COMMAND=(bash "${SCRIPT_DIR}/run_tlc.sh" "$@")
+        printf -v KARGU_TLC_RUN '%q ' "${KARGU_TLC_COMMAND[@]}"
         exec nix-shell "${SCRIPT_DIR}/../shell.nix" --run \
-            "bash \"${SCRIPT_DIR}/run_tlc.sh\" $(printf '%q ' "$@")"
+            "${KARGU_TLC_RUN}"
     fi
     echo "ERROR: tlc (TLA+ model checker) not found in PATH and nix-shell unavailable." >&2
     exit 1

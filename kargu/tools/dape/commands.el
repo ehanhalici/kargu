@@ -12,30 +12,6 @@
 
 (require 'kargu/tools/dape/execution)
 
-(defun kargu-dape-start (&optional config-name)
-  "Start or attach a Dape debugging session with CONFIG-NAME."
-  (condition-case err
-      (if (not (fboundp 'dape))
-          "ERROR: dape is not installed or loaded"
-        (if (kargu-dape-live-p)
-            "Debug session is already running. Use `debug_restart` to restart or `debug_pause` to pause."
-          (let* ((spec (and (fboundp 'kargu-language-active) (kargu-language-active)))
-                 (dbg (and spec (kargu-language-spec-debugger spec)))
-                 (detected-adapter (and dbg (plist-get dbg :adapter)))
-                 (chosen (or (and config-name (not (string-empty-p config-name)) (intern config-name))
-                             detected-adapter)))
-            (unless (kargu-permission-approve
-                     (format "start debug adapter %s" (or chosen "(interactive)"))
-                     (kargu-permission-project-root))
-              (error "Starting the debugger was not approved by the user"))
-            (if chosen
-                (progn
-                  (dape chosen)
-                  (format "Debug session started with configuration '%s'." chosen))
-              (with-current-buffer (kargu-dape--target-buffer)
-                (call-interactively #'dape))
-              "Debug session launched."))))
-    (error (format "ERROR: debug start failed: %s" (error-message-string err)))))
 
 (defun kargu-dape--after-stack-select (conn n label callback)
   "Report frame N of CONN under LABEL, then the refreshed context, to CALLBACK."

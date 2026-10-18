@@ -52,6 +52,65 @@
           (when wait
             (kargu-dape--finish-session-wait wait :cancelled "test cleanup")))))))
 
+(ert-deftest kargu-dape-missing-dependencies-leave-mode-unchanged-test ()
+  "Missing adapter executables reject debug without publishing a mode change."
+  (kargu-test-mode 'ask)
+  (let ((kargu-dape-config 'missing)
+        (dape-configs '((missing command "kargu-nonexistent-adapter")))
+        (kargu-dape--verified nil))
+    (cl-letf (((symbol-function 'kargu-dape-live-p) (lambda () nil)))
+      (kargu-set-mode 'debug)
+      (should (eq (kargu-state-mode) 'ask))
+      (should-error (kargu-state-set-mode 'debug) :type 'user-error))))
+
+(ert-deftest kargu-dape-debug-waits-for-module-probe-test ()
+  "A module adapter is checked asynchronously before debug mode is published."
+  (kargu-test-mode 'ask)
+  (let ((kargu-dape-config 'configured)
+        (dape-configs '((configured command "python" command-args ("-m" "debugpy.adapter"))))
+        (kargu-dape--verified nil) probe)
+    (cl-letf (((symbol-function 'kargu-dape-live-p) (lambda () nil))
+              ((symbol-function 'executable-find) (lambda (_) "/test/python"))
+              ((symbol-function 'kargu-process-run)
+               (lambda (_program _args callback &rest _opts) (setq probe callback) nil)))
+      (kargu-set-mode 'debug)
+      (should (eq (kargu-state-mode) 'ask))
+      (funcall probe '(:code 0))
+      (should (eq (kargu-state-mode) 'debug))
+      (should (eq (kargu-dape-selected-config) 'configured)))))
+
+(ert-deftest kargu-dape-failed-or-stale-probe-does-not-switch-mode-test ()
+  "Probe failure and a newer user selection cannot switch into debug."
+  (dolist (scenario '(failure stale running))
+    (kargu-test-mode 'ask)
+    (let ((kargu-dape-config 'configured)
+          (dape-configs '((configured command "python" command-args ("-m" "debugpy.adapter"))))
+          (kargu-dape--verified nil) probe)
+      (cl-letf (((symbol-function 'kargu-dape-live-p) (lambda () nil))
+                ((symbol-function 'executable-find) (lambda (_) "/test/python"))
+                ((symbol-function 'kargu-process-run)
+                 (lambda (_program _args callback &rest _opts) (setq probe callback) nil)))
+        (kargu-set-mode 'debug)
+        (when (eq scenario 'stale) (kargu-set-mode 'plan))
+        (when (eq scenario 'running) (setq kargu--loop-run (list :state 'tools)))
+        (funcall probe (list :code (if (eq scenario 'failure) 1 0)))
+        (should (eq (kargu-state-mode) (if (eq scenario 'stale) 'plan 'ask)))
+        (setq kargu--loop-run nil)))))
+
+(ert-deftest kargu-dape-start-uses-a-verified-plist-after-approval-test ()
+  "Startup passes Dape its actual config plist, not an unsupported symbol."
+  (let ((kargu-dape-config 'demo)
+        (dape-configs '((demo command "sh" :program "main")))
+        (kargu-dape--verified nil)
+        (kargu-permission--mock-decision :approve) seen result)
+    (cl-letf (((symbol-function 'kargu-dape-live-p) (lambda () nil))
+              ((symbol-function 'kargu-dape--target-buffer) #'current-buffer)
+              ((symbol-function 'dape) (lambda (config &rest _) (setq seen config))))
+      (kargu-dape-start "demo" (lambda (text) (setq result text)))
+      (should (equal (plist-get seen 'command) "sh"))
+      (should (eq (plist-get seen :stopOnEntry) t))
+      (should (string-search "started" result)))))
+
 (ert-deftest kargu-dape-tools-registered-all-twenty-test ()
   "Ensure all 20 Dape interactive commands are registered as first-class tools."
   (let ((expected-tools '("debug_start"
