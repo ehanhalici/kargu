@@ -36,6 +36,14 @@
 (defconst kargu-skill--ttl 8.0
   "Seconds to reuse `kargu-skill--cache'.")
 
+(defconst kargu-skill--project-directories
+  '("skills" "skill" ".agents/skills" ".claude/skills" ".codex/skills")
+  "Standard project directories inspected before the general file walk.")
+(defconst kargu-skill--project-scan-limit 400
+  "Maximum ordinary files visited per project skill fallback scan.")
+(defconst kargu-skill--user-scan-limit 100
+  "Maximum ordinary files visited by the user skill fallback scan.")
+
 (declare-function kargu-permission-project-root "kargu/permission/guards" (&optional buffer))
 
 (defun kargu-skill--root ()
@@ -51,10 +59,9 @@
 
 (defun kargu-skill--relevant-p (path root)
   "Check whether PATH names a skill below ROOT or a skills directory."
-  (let ((rel (file-relative-name path root)))
-    (or (string-match-p "\\`skills?/" rel)
-        (string-match-p "/skills?/" path)
-        (string-match-p "/\\.agents/skills/" path))))
+  (save-match-data
+    (string-match-p (rx (or bos "/") "skill" (? "s") "/")
+                    (file-relative-name path root))))
 
 (defun kargu-skill--read (path)
   "Read bounded UTF-8 skill text at PATH, rejecting oversized files."
@@ -137,29 +144,56 @@ Normalize surrounding metadata whitespace; preserve literal internal lines."
                     description (kargu-skill--field frontmatter "description"))))))
       (list :name name :description description :path path :body body))))
 
-(defun kargu-skill--collect ()
-  "Return the list of skill plists for the current workspace."
-  (let* ((root (kargu-skill--root))
-         (acc nil)
-         (visit (lambda (path)
-                  (when (and (string-equal (file-name-nondirectory path) "SKILL.md")
-                             (or (kargu-skill--relevant-p path root)
-                                 (string-prefix-p (or (kargu-skill--user-dir) "\0") path)))
-                    (condition-case-unless-debug err
-                        (push (kargu-skill--parse path) acc)
-                      (error
-                       (kargu-log 'warn "skill parse failed %s: %s"
-                                        path (error-message-string err))))))))
-    (kargu-fs-walk root 400 (lambda (f)
-                              (when (string-equal (file-name-nondirectory f) "SKILL.md")
-                                (funcall visit f))
-                              nil))
+(defun kargu-skill--metadata-files (directory)
+  "Inspect DIRECTORY and immediate skill folders before traversing their assets."
+  (let ((children (condition-case nil
+                      (seq-filter #'file-directory-p
+                                  (directory-files directory t directory-files-no-dot-files-regexp))
+                    (file-error nil))) paths)
+    (dolist (dir (cons directory (seq-take children kargu-fs-max-visited-directories)))
+      (let ((path (expand-file-name "SKILL.md" dir)))
+        (when (and (file-regular-p path)
+                   (file-in-directory-p path directory)
+                   (or (equal dir directory)
+                       (not (member (file-name-nondirectory dir) kargu-fs-skip-dirs))))
+          (push path paths))))
+    (nreverse paths)))
+
+(defun kargu-skill--paths-under (directory limit)
+  "Find metadata in DIRECTORY first, then walk at most LIMIT ordinary files."
+  (when (file-directory-p directory)
+    (append (kargu-skill--metadata-files directory)
+            (kargu-fs-walk directory limit
+                           (lambda (path)
+                             (equal (file-name-nondirectory path) "SKILL.md"))))))
+
+(defun kargu-skill--collect-paths (root)
+  "Find skill metadata in ROOT and user directories without scanning assets first."
+  (let (paths)
+    (dolist (relative kargu-skill--project-directories)
+      (let ((directory (expand-file-name relative root)))
+        (when (and (file-directory-p directory) (file-in-directory-p directory root))
+          (dolist (path (kargu-skill--paths-under directory kargu-skill--project-scan-limit))
+            (push path paths)))))
+    (dolist (path (kargu-fs-walk
+                  root kargu-skill--project-scan-limit
+                  (lambda (file) (and (equal (file-name-nondirectory file) "SKILL.md")
+                                     (kargu-skill--relevant-p file root)))))
+      (push path paths))
     (when-let* ((user (kargu-skill--user-dir)))
-      (kargu-fs-walk user 100 (lambda (f)
-                                (when (string-equal (file-name-nondirectory f) "SKILL.md")
-                                  (funcall visit f))
-                                nil)))
-    (nreverse acc)))
+      (dolist (path (kargu-skill--paths-under user kargu-skill--user-scan-limit))
+        (push path paths)))
+    (delete-dups (nreverse paths))))
+
+(defun kargu-skill--collect ()
+  "Return parsed skills for the current workspace, skipping invalid metadata."
+  (let (skills)
+    (dolist (path (kargu-skill--collect-paths (kargu-skill--root)))
+      (condition-case err
+          (push (kargu-skill--parse path) skills)
+        (error (kargu-log 'warn "Skill parse failed %s: %s"
+                           path (error-message-string err)))))
+    (nreverse skills)))
 
 (defun kargu-skill-list ()
   "Cached list of skill plists."

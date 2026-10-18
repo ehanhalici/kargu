@@ -149,6 +149,38 @@
         (should (equal (plist-get skill :description) (nth 2 case)))
         (should (equal (plist-get skill :body) (nth 3 case)))))))
 
+(ert-deftest kargu-skill-discovery-prioritizes-metadata-over-project-assets-test ()
+  "Root files and a skill's examples cannot hide sibling skill metadata."
+  (kargu-fs-test--with-tree
+      (append (cl-loop for index below 450 collect
+                        (cons (format "asset-%04d.txt" index) "x"))
+              (cl-loop for index below 450 collect
+                        (cons (format "skills/first/examples/asset-%04d.txt" index) "x"))
+              '(("skills/first/SKILL.md" . "---\nname: first\n---\nfirst body")
+                ("skills/second/SKILL.md" . "---\nname: second\n---\nsecond body")
+                (".agents/skills/third/SKILL.md" . "---\nname: third\n---\nthird body")))
+    (let ((kargu-permission--override-root root) (kargu-skill--cache nil))
+      (cl-letf (((symbol-function 'kargu-skill--user-dir) #'ignore))
+        (should (equal (sort (mapcar (lambda (skill) (plist-get skill :name))
+                                     (kargu-skill-list)) #'string<)
+                       '("first" "second" "third")))))))
+
+(ert-deftest kargu-skill-prioritized-discovery-still-confines-symlinks-test ()
+  "Direct metadata discovery never follows project skill links outside the root."
+  (kargu-fs-test--with-tree '(("skills/local/SKILL.md" . "local body"))
+    (let ((outside (make-temp-file "kargu-foreign-skills-" t))
+          (kargu-permission--override-root root))
+      (unwind-protect
+          (progn
+            (with-temp-file (expand-file-name "SKILL.md" outside) (insert "foreign body"))
+            (make-directory (expand-file-name ".agents" root))
+            (make-symbolic-link outside (expand-file-name ".agents/skills" root))
+            (make-symbolic-link outside (expand-file-name "skills/escape" root))
+            (cl-letf (((symbol-function 'kargu-skill--user-dir) #'ignore))
+              (should (equal (mapcar (lambda (skill) (plist-get skill :name))
+                                     (kargu-skill--collect)) '("local")))))
+        (delete-directory outside t)))))
+
 (ert-deftest kargu-skill-discovery-parses-front-matter-test ()
   "A SKILL.md under skills/ is found with name, description and body."
   (kargu-fs-test--with-tree `(("skills/deploy/SKILL.md" . ,kargu-skill-test--skill)
