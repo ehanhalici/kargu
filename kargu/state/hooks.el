@@ -11,7 +11,7 @@
 
 ;;; Code:
 
-(require 'kargu/core/log)
+(require 'kargu/core/observers)
 
 (defvar kargu-state-change-hook nil
   "Hook run whenever any state key changes.
@@ -33,32 +33,18 @@ Functions are called with one argument: (NEW-MODEL).")
   "Hook run when `:status' changes.
 Functions are called with two arguments: (NEW-STATUS DETAIL).")
 
-(defun kargu-state--run-hook (hook &rest arguments)
-  "Run HOOK with ARGUMENTS, logging individual listener failures."
-  (apply #'run-hook-wrapped
-         hook
-         (lambda (function &rest args)
-           (condition-case err
-               (save-match-data
-                 (save-current-buffer (apply function args)))
-             (error
-              (kargu-log 'warn "State listener %S on %s failed: %s"
-                         function hook (error-message-string err))))
-           nil)
-         arguments))
-
 (defun kargu-state-notify (key value &optional detail)
   "Notify every listener that KEY changed to VALUE, with optional DETAIL."
-  (kargu-state--run-hook 'kargu-state-change-hook key value)
+  (kargu-run-observers 'kargu-state-change-hook key value)
   (pcase key
     (:mode
-     (kargu-state--run-hook 'kargu-state-mode-hook value))
+     (kargu-run-observers 'kargu-state-mode-hook value))
     (:provider
-     (kargu-state--run-hook 'kargu-state-provider-hook value))
+     (kargu-run-observers 'kargu-state-provider-hook value))
     (:model
-     (kargu-state--run-hook 'kargu-state-model-hook value))
+     (kargu-run-observers 'kargu-state-model-hook value))
     (:status
-     (kargu-state--run-hook 'kargu-state-status-hook value detail))))
+     (kargu-run-observers 'kargu-state-status-hook value detail))))
 
 (defun kargu-state-subscribe (event fn)
   "Subscribe function FN to state EVENT.

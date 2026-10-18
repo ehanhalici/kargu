@@ -13,6 +13,7 @@
 
 (require 'cl-lib)
 (require 'kargu/core)
+(require 'kargu/core/observers)
 (require 'kargu/history)
 (require 'kargu/api)
 (require 'kargu/tools/diff)
@@ -161,20 +162,6 @@ on RUN, which grants three more identical calls."
     (error (kargu--loop-finish run :error
                                (format "Tool continuation failed: %s" (error-message-string err))))))
 
-(defun kargu-loop--notify-tool (hook &rest arguments)
-  "Notify every observer on HOOK with ARGUMENTS, isolating failures."
-  (apply #'run-hook-wrapped
-         hook
-         (lambda (function &rest args)
-           (condition-case err
-               (save-match-data
-                 (save-current-buffer (apply function args)))
-             (error
-              (kargu-log 'warn "Tool observer %S failed: %s"
-                         function (error-message-string err))))
-           nil)
-         arguments))
-
 (cl-defun kargu--loop-execute-call (run &key id name args sig queue)
   "Run tool NAME with ARGS for call ID of RUN and continue with QUEUE.
 SIG keys the read-only cache; delivery is claimed before any continuation."
@@ -185,11 +172,11 @@ SIG keys the read-only cache; delivery is claimed before any continuation."
           (lambda (result)
             (when (and (eq state :pending) (kargu-loop--live-p run))
               (setq state :delivered)
-              (kargu-loop--notify-tool 'kargu-loop-tool-finish-hook run result)
+              (kargu-run-observers 'kargu-loop-tool-finish-hook run result)
               (when (kargu-loop--live-p run)
                 (kargu--loop-complete-tool run :id id :name name :result result
                                            :queue queue :sig sig))))))
-    (kargu-loop--notify-tool 'kargu-loop-tool-start-hook run name args)
+    (kargu-run-observers 'kargu-loop-tool-start-hook run name args)
     (condition-case err
         (when (kargu-loop--live-p run)
           (if-let* ((gate (kargu-loop--gate-tool name)))
