@@ -89,7 +89,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 - **`tools/dape/render.el:112`: Ham ANSI kaçış dizileri.** Hata ayıklayıcı çıktılarında gelen renk ve kontrol kodları temizlenmeden LLM context'ine aktarılır, gereksiz token tüketir.
 
 #### 4. Çekirdek ve Sözleşme Sorunları (`core/`, `contract/`)
-- **`core/log.el:52-60`: Sınırsız log tamponu bellek sızıntısı.** `*kargu-log*` tamponu için hiçbir satır veya bayt sınırı konmamıştır; uzun süren oturumlarda yüzbinlerce satır birikerek Emacs'in RAM kullanımını şişirir.
 - **`contract/assert.el:34`: Geliştirme dışı modda hataların sessizce yutulması.** Sözleşme kontrolleri strict mod kapalıyken sessizce `nil` döner; bu durum asıl hatayı gizler ve ilerleyen adımlarda açıklanamayan tip hatalarına yol açar.
 #### 5. Protokol, Geçmiş ve Devre Kesici Derin Analizi (`history/`, `circuit.el`, `loop/`, `git.el`)
 - **`history/repair.el:102-113`: Çok Modlu Eklerin Sessizce Silinmesi (Multimodal Silent Erasure) (K).** `kargu--history-merge-consecutive-content`, ardışık kullanıcı veya asistan mesajlarını birleştirirken `(stringp (kargu-aget msg "content"))` kontrolü yapar. Görsel veya dosya içeren çok modlu bloklarda `stringp` nil döndüğü için ek verisi boş string sayılır ve önceki mesajın içeriği sadece metinle ezilerek görsel kalıcı olarak geçmişten silinir.

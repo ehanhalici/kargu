@@ -108,5 +108,25 @@
   (should (= (kargu-to-int 1.6) 2))
   (should (= (kargu-to-int 42) 42)))
 
+(ert-deftest kargu-log-retention-caps-lines-and-wire-dumps-test ()
+  "Both logging paths retain only a bounded newest suffix."
+  (let ((kargu--log-buffer " *kargu-test-bounded-log*")
+        (kargu-log-buffer-max-chars 128) (kargu-log-wire t))
+    (unwind-protect
+        (progn
+          (dotimes (_ 30) (kargu-log 'info "%s" (make-string 100 ?x)))
+          (with-current-buffer (get-buffer kargu--log-buffer)
+            (should (<= (buffer-size) 128)))
+          (kargu--log-block "large" (make-string 2000 ?w))
+          (with-current-buffer (get-buffer kargu--log-buffer)
+            (should (<= (buffer-size) 128))
+            (should (string-suffix-p "---- end large ----\n" (buffer-string))))
+          (let ((kargu-log-buffer-max-chars 0))
+            (kargu-log 'info "discard")
+            (with-current-buffer (get-buffer kargu--log-buffer)
+              (should (zerop (buffer-size))))))
+      (when-let* ((buffer (get-buffer kargu--log-buffer)))
+        (kill-buffer buffer)))))
+
 (provide 'tests/test-contract)
 ;;; test-contract.el ends here
