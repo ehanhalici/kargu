@@ -78,7 +78,6 @@ Komut: `emacs -Q --batch --eval "(package-initialize)" -l tests/run-tests.el` �
 Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`, `plan/`, `state/`, `languages/`, `tools/dape/`, `core/`, `contract/`) baştan sona taranmış ve aşağıdaki sorunlar tespit edilmiştir:
 
 #### 1. Kritik Hatalar (Çökme, Deadlock, Veri Kaybı)
-- **`ui/confirm.el:142-156`: Eşzamanlı onay ezilmesi (Orphaned Callback Deadlock).** `kargu-confirm-render`, `(when (overlay-start ov) (delete-region ...))` ile mevcut onay butonlarını silip üzerine yazar. Birinci onay yanıtlanmadan ikinci bir onay isteği gelirse, ilk overlay ezilir; kullanıcının yanıtlayamadığı ilk callback kilitlenir ve ilgili araç çağrısı sonsuza dek askıda kalır.
 #### 2. Yüksek / Orta Öncelikli Sorunlar
 - **`providers/registry.el:286`: 160+ sağlayıcı için senkron auth-source araması (Emacs Donması).** `kargu-connected-providers`, katalogdaki 160'tan fazla sağlayıcının her biri için döngü içinde `(auth-source-search :host host :max 1)` çalıştırır. Kullanıcının `auth-sources` yapılandırmasında GPG şifreli dosya varsa Emacs UI iş parçacığı saniyelerce donar veya pinentry pencereleriyle kilitlenir.
 - **Native wire biçiminde çok modlu içerik dönüşümü eksik.** `kargu-api--text-blocks` text bloklarını ve cache işaretlerini koruyor, fakat OpenAI `image_url` gibi blokları native Messages `image/source` biçimine çevirmiyor. Görsel/dosya içerik tipleri için ayrı adaptör ve round-trip testleri gerekiyor.
@@ -134,9 +133,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
   - Standart JavaScript (Node.js/Express) projelerinde çoğu zaman derleme adımı (`"build"` scripti) bulunmaz.
   - Ancak `kargu-language-js-toolchain`, TypeScript dışındaki düz JS projeleri için de `:build-cmd (format "%s run build" pm)` döner.
   - Birçok Node.js projesinde `npm run build` komutu `npm ERR! Missing script: "build"` hatasıyla (`exit 1`) başarısız olur ve ajanın derleme doğrulaması yapmasını engeller.
-- **`ui/confirm.el:142-145, 207-208`: Çoklu Onay İsteklerinde Önceki İsteklerin Sessizce Silinmesi ve İptalde Callback Çağrılmaması (K).**
-  - `kargu-confirm--render-prompt`, tampona yeni bir onay kutusu çizerken `(delete-region kargu-chat--output-marker (point-max))` ile mevcut bölgeyi siler. Yanıt bekleyen bir onay varken ikinci bir onay tetiklenirse, ilk onayın butonları ekrandan silinir ancak `kargu-confirm--pending` listesinde kalır; kullanıcının tıklayamayacağı bu istek sonsuza dek askıda kalır.
-  - `kargu-confirm-dismiss-all` (koşu durdurulduğunda çağrılır), bekleyen tüm istekleri temizlerken `(kargu-confirm--settle req :cancel t)` çağırır. Ancak `:silent` parametresi `t` verildiğinden `on-decision` callback'i çalıştırılmaz; arkada onay sonucunu bekleyen asenkron araçlar koşu sonlandığında iptal edildiğini öğrenemez ve bellek sızıntısına yol açar.
 
 #### 13. Arama ve Git Araçlarındaki Yol/Regex Uyuşmazlıkları (`tools/search.el`, `tools/git.el`)
 - **`tools/search.el:140-141`: `rg --max-count` Parametresinin Dosya Başına Sınır Olarak Çalışması (K).**

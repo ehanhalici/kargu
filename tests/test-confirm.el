@@ -147,22 +147,71 @@
             (should (> (point) 8000))))
       (kill-buffer chat))))
 
-(ert-deftest kargu-confirm-dismiss-all-silences-callbacks-test ()
-  "Dismissing prompts (run stopped) never calls their callbacks."
+(ert-deftest kargu-confirm-dismiss-all-delivers-cancellation-once-test ()
+  "Dismissing prompts delivers cancellation once and leaves no pending work."
   (with-temp-buffer
     (let ((kargu-confirm--mock-decision nil)
           (kargu-confirm--pending nil)
-          (called nil)
+          (answers nil)
           (noninteractive nil))
       (cl-letf (((symbol-function 'kargu-chat-show) #'ignore)
                 ((symbol-function 'recenter) #'ignore))
         (kargu-ui-confirm
          :title "Ask" :chat-buffer (current-buffer)
          :actions '((:key :yes :label "[Yes]"))
-         :on-decision (lambda (_d) (setq called t))))
+         :on-decision (lambda (decision) (push decision answers))))
       (kargu-confirm-dismiss-all)
-      (should-not called)
+      (kargu-confirm-dismiss-all)
+      (should (equal answers '(:cancel)))
       (should (null kargu-confirm--pending)))))
+
+(ert-deftest kargu-confirm-concurrent-prompts-remain-actionable-test ()
+  "Settling one prompt never removes another prompt's actionable button."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (kargu-chat--ensure-idle-prompt)
+    (let ((kargu-confirm--pending nil) (noninteractive nil) answers)
+      (cl-letf (((symbol-function 'kargu-chat-show) #'ignore)
+                ((symbol-function 'recenter) #'ignore))
+        (dolist (key '(:first :second))
+          (kargu-ui-confirm
+           :title (symbol-name key) :chat-buffer (current-buffer)
+           :actions (list (list :key key :label (format "[%s]" key)))
+           :on-decision (lambda (decision) (push decision answers)))))
+      (dolist (key '(:first :second))
+        (goto-char (point-min))
+        (search-forward (format "[%s]" key))
+        (backward-char 2)
+        (push-button))
+      (should (equal (nreverse answers) '(:first :second)))
+      (should-not kargu-confirm--pending))))
+
+(ert-deftest kargu-confirm-killing-origin-delivers-cancellation-test ()
+  "Closing the origin buffer cannot strand pending confirmation callbacks."
+  (let ((buffer (generate-new-buffer " *kargu-confirm-close*"))
+        (kargu-confirm--pending nil) (noninteractive nil) answers)
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'kargu-chat-show) #'ignore)
+                    ((symbol-function 'recenter) #'ignore))
+            (kargu-ui-confirm
+             :chat-buffer buffer :actions '((:key :yes :label "[Yes]"))
+             :on-decision (lambda (decision) (push decision answers))))
+          (kill-buffer buffer)
+          (should (equal answers '(:cancel)))
+          (should-not kargu-confirm--pending))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest kargu-confirm-callback-failure-does-not-strand-other-prompts-test ()
+  "One failing cancellation callback cannot block the remaining cancellations."
+  (let ((kargu-confirm--pending nil) cancelled)
+    (push (kargu-confirm--req-create :on-decision (lambda (_) (setq cancelled t)))
+          kargu-confirm--pending)
+    (push (kargu-confirm--req-create :on-decision (lambda (_) (error "Broken callback")))
+          kargu-confirm--pending)
+    (kargu-confirm-dismiss-all)
+    (should cancelled)
+    (should-not kargu-confirm--pending)))
 
 (ert-deftest kargu-confirm-network-timeout-recovery-retry-test ()
   "Ensure kargu-loop--recover-or-finish resets circuit and retries request on :retry."

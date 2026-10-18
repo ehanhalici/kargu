@@ -1,4 +1,4 @@
-;;; kargu/ui/confirm.el --- Reusable interactive confirmation and recovery UI -*- lexical-binding: t; -*-
+;;; confirm.el --- Interactive confirmation and recovery UI -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -93,15 +93,14 @@ from whichever buffer is current."
           (with-selected-window w (recenter -1)))))))
 
 (defun kargu-confirm--resolve-chat-buffer (&optional target-buf)
-  "Resolve and return a live chat buffer, or nil."
+  "Return live TARGET-BUF or the default chat buffer, if available."
   (or (and (bufferp target-buf) (buffer-live-p target-buf) target-buf)
       (and (bound-and-true-p kargu-chat-buffer-name)
            (get-buffer kargu-chat-buffer-name))
       (get-buffer "*kargu-chat*")))
 
 (defun kargu-confirm--render-action-buttons (actions set-decision-fn)
-  "Render clickable buttons for ACTIONS calling SET-DECISION-FN on click.
-mouse-1, mouse-2 and RET all decide on the first press."
+  "Render clickable ACTIONS invoking SET-DECISION-FN on the first press."
   (let ((first t))
     (dolist (act actions)
       (let* ((act-key (plist-get act :key))
@@ -132,7 +131,7 @@ mouse-1, mouse-2 and RET all decide on the first press."
           (add-text-properties start (point) `(keymap ,map local-map ,map)))))))
 
 (defun kargu-confirm--render-prompt (chat-buf title details notice actions set-decision-fn)
-  "Render confirmation banner, DETAILS, NOTICE, and button ACTIONS in CHAT-BUF.
+  "Render TITLE, DETAILS, NOTICE and button ACTIONS in CHAT-BUF.
 SET-DECISION-FN is called with the chosen action key when clicked."
   (with-current-buffer chat-buf
     (let ((inhibit-read-only t))
@@ -180,7 +179,7 @@ SET-DECISION-FN is called with the chosen action key when clicked."
         (kargu-chat--ensure-idle-prompt)))))
 
 (defun kargu-confirm--write-audit (chat-buf actions decision)
-  "Record DECISION in CHAT-BUF and restore its prompt."
+  "Record DECISION from ACTIONS in CHAT-BUF and restore its prompt."
   (when (buffer-live-p chat-buf)
     (with-current-buffer chat-buf
       (let ((inhibit-read-only t))
@@ -196,22 +195,40 @@ SET-DECISION-FN is called with the chosen action key when clicked."
       (kargu-confirm--restore-prompt))
     (kargu-confirm--show-end chat-buf)))
 
-(defun kargu-confirm--settle (req decision &optional silent)
-  "Answer REQ once with DECISION.  SILENT skips the callback (dismissal)."
+(defun kargu-confirm--deliver (req decision)
+  "Deliver REQ's DECISION once, logging a failing continuation."
+  (condition-case err
+      (let ((buffer (kargu-confirm--req-chat-buf req)))
+        (with-current-buffer (if (buffer-live-p buffer) buffer (current-buffer))
+          (save-match-data
+            (funcall (kargu-confirm--req-on-decision req) decision))))
+    (error (kargu-log 'warn "Confirmation callback failed: %s"
+                      (error-message-string err)))))
+
+(defun kargu-confirm--settle (req decision)
+  "Answer REQ once with DECISION, including explicit cancellation."
   (unless (kargu-confirm--req-resolved req)
     (setf (kargu-confirm--req-resolved req) t)
     (setq kargu-confirm--pending (delq req kargu-confirm--pending))
-    (kargu-confirm--write-audit (kargu-confirm--req-chat-buf req)
-                                (kargu-confirm--req-actions req)
-                                decision)
-    (unless silent
-      (funcall (kargu-confirm--req-on-decision req) decision))))
+    (unless (eq decision :cancel)
+      (condition-case err
+          (kargu-confirm--write-audit (kargu-confirm--req-chat-buf req)
+                                     (kargu-confirm--req-actions req) decision)
+        (error (kargu-log 'warn "Confirmation audit failed: %s"
+                          (error-message-string err)))))
+    (kargu-confirm--deliver req decision)))
+
+(defun kargu-confirm--cancel-buffer ()
+  "Cancel every unanswered confirmation belonging to the closing buffer."
+  (dolist (req (copy-sequence kargu-confirm--pending))
+    (when (eq (kargu-confirm--req-chat-buf req) (current-buffer))
+      (kargu-confirm--settle req :cancel))))
 
 (defun kargu-confirm-dismiss-all ()
-  "Cancel every unanswered prompt without calling its callback.
-Called when a run is stopped so no button can act on a dead run."
+  "Cancel every unanswered prompt, delivering :cancel to its callback.
+Claim each request before delivery so stale buttons remain inert."
   (dolist (req (copy-sequence kargu-confirm--pending))
-    (kargu-confirm--settle req :cancel t)))
+    (kargu-confirm--settle req :cancel)))
 
 (defun kargu-confirm--reveal (chat-buf)
   "Make CHAT-BUF visible and put point on its first option button."
@@ -222,7 +239,7 @@ Called when a run is stopped so no button can act on a dead run."
   (message "Action required: click an option button in the chat"))
 
 (defun kargu-confirm--ask-in-minibuffer (fallback actions default-action)
-  "Ask FALLBACK with `y-or-n-p' and return the action key."
+  "Ask FALLBACK with ACTIONS, using DEFAULT-ACTION for rejection."
   (if (y-or-n-p fallback)
       (or (and actions (plist-get (car actions) :key)) :ok)
     default-action))
@@ -269,6 +286,8 @@ before this function returns; interactively it runs when a button is clicked."
         (let ((req (kargu-confirm--req-create
                     :chat-buf chat-buf :actions actions :on-decision on-decision)))
           (push req kargu-confirm--pending)
+          (with-current-buffer chat-buf
+            (add-hook 'kill-buffer-hook #'kargu-confirm--cancel-buffer nil t))
           (kargu-confirm--render-prompt
            chat-buf title (plist-get plist :details) (plist-get plist :notice)
            actions (lambda (d) (kargu-confirm--settle req d)))
@@ -277,4 +296,4 @@ before this function returns; interactively it runs when a button is clicked."
 
 (provide 'kargu/ui/confirm)
 
-;;; kargu/ui/confirm.el ends here
+;;; confirm.el ends here
