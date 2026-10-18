@@ -282,9 +282,21 @@ ALL optionally stages modified files."
      (lambda (res)
        (if (eql (car res) 0)
            (kargu-git--refresh-and-deliver callback (format "Unstaged: %s" (string-join clean ", ")))
-         (kargu-git--change (append '("reset" "HEAD" "--") clean) root callback
-                            (lambda (_) (format "Unstaged: %s" (string-join clean ", ")))
-                            "unstage"))))))
+         (kargu-git--unstage-fallback clean :root root :callback callback))))))
+
+(cl-defun kargu-git--unstage-fallback (paths &key root callback)
+  "Unstage PATHS in ROOT even before the first commit; report to CALLBACK."
+  (kargu-git--run
+   '("rev-parse" "--verify" "HEAD") root
+   (lambda (result)
+     (let ((command (pcase (car result)
+                      (0 '("reset" "HEAD" "--"))
+                      (128 '("rm" "--cached" "-r" "--ignore-unmatch" "--")))))
+       (if command
+           (kargu-git--change
+            (append command paths) root callback
+            (lambda (_) (format "Unstaged: %s" (string-join paths ", "))) "unstage")
+         (funcall callback (format "ERROR: Cannot inspect Git HEAD: %s" (cdr result))))))))
 
 (defun kargu-git--refresh-and-deliver (callback text)
   "Refresh Magit and pass TEXT to CALLBACK."

@@ -66,6 +66,19 @@
         (kargu-async-cancel-owner run)
         (when process (kargu-process-cancel process))))))
 
+(ert-deftest kargu-git-unstage-before-the-first-commit-preserves-files-test ()
+  "Unstaging an unborn branch clears its index without deleting working files."
+  (kargu-test-with-git-repo kargu-git-test--files
+    (should (zerop (call-process "git" nil nil nil "checkout" "--orphan" "unborn")))
+    (let ((kargu-permission--mock-decision :approve))
+      (let ((result (kargu-test-await (lambda (callback) (kargu-git-unstage callback ".")))))
+        (should (string-search "Unstaged:" result)))
+      (should (file-exists-p (expand-file-name "a.txt" repo)))
+      (should (file-exists-p (expand-file-name "src/b.el" repo)))
+      (with-temp-buffer
+        (should (zerop (call-process "git" nil t nil "ls-files")))
+        (should (string-empty-p (buffer-string)))))))
+
 (ert-deftest kargu-git-status-test ()
   "Ensure kargu-git-status returns formatted Magit-style sections."
   (kargu-test-with-git-repo kargu-git-test--files
