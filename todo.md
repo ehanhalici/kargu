@@ -13,9 +13,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 ---
 
 ### Modül: `tools/diff.el` & `tools/diff/`
-1. **[K - Yüksek] `apply_patch` inceleme kiplerinde (`blocking`/`async`) yanlış başarı döner.**
-   - **Dosya / Satır:** `kargu/tools/diff.el:450-471`
-   - **Sorun:** `kargu-diff--commit-patch`, `kargu-diff-apply-proposal` fonksiyonunu callbacksiz çağırır ve sonucunu beklemez. İnceleme kipi `blocking` veya `async` olduğunda ediff açık ve insan onayı bekleniyor olsa bile `apply_patch` anında modele `"Patch successfully applied to N file(s)"` döner.
 2. **[K - Orta] `apply_patch` atomik değildir.**
    - **Dosya / Satır:** `kargu/tools/diff.el:450-456`
    - **Sorun:** Patch planı önceden doğrulansa bile yazma aşamasında `maphash` sırayla dosyaları yazar. Dosyalardan biri yazılırken disk hatası veya kilit oluşursa önceki dosyalar diske yazılmış kalır, rollback tetiklenmez.

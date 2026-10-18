@@ -455,38 +455,96 @@ Signals when OP cannot apply, so a bad patch changes nothing."
   (when (boundp 'kargu-diff--run-modified-files)
     (cl-pushnew file kargu-diff--run-modified-files :test #'equal)))
 
-(defun kargu-diff--commit-patch (state)
-  "Write every change in STATE through the proposal pipeline."
-  (maphash (lambda (file entry)
-             (if (eq (car entry) :deleted)
-                 (kargu-diff--delete-file file (cadr entry))
-               (kargu-diff-apply-proposal file (cadr entry))))
-           state))
+(cl-defstruct (kargu-diff--patch-batch (:constructor kargu-diff--make-patch-batch))
+  "One patch's review outcomes and single completion delivery."
+  (state :launching) pending outcomes callback)
 
-(defun kargu-diff-apply-patch (patch-text)
+(defun kargu-diff--patch-summary (batch)
+  "Describe BATCH without treating pending or rejected proposals as applied."
+  (if (> (kargu-diff--patch-batch-pending batch) 0)
+      (format "STAGED: %d patch proposal(s) await human review; do not treat them as applied."
+              (kargu-diff--patch-batch-pending batch))
+    (let* ((outcomes (hash-table-values (kargu-diff--patch-batch-outcomes batch)))
+           (complete (seq-every-p
+                      (lambda (outcome)
+                        (memq (plist-get outcome :status) '(:applied-full :unchanged)))
+                      outcomes)))
+      (format "%s to %d file(s):\n  • %s"
+              (if complete "Patch successfully applied" "Patch NOT fully applied")
+              (length outcomes)
+              (mapconcat (lambda (outcome)
+                           (or (plist-get outcome :message) (kargu-diff--describe outcome)))
+                         outcomes "\n  • ")))))
+
+(defun kargu-diff--finish-patch (batch)
+  "Deliver BATCH once after all proposals have reached a final outcome."
+  (when (and (eq (kargu-diff--patch-batch-state batch) :waiting)
+             (zerop (kargu-diff--patch-batch-pending batch)))
+    (setf (kargu-diff--patch-batch-state batch) :done)
+    (when-let* ((callback (kargu-diff--patch-batch-callback batch)))
+      (condition-case-unless-debug err
+          (funcall callback (kargu-diff--patch-summary batch))
+        (error (kargu-log 'error "Patch callback failed: %s" (error-message-string err)))))))
+
+(defun kargu-diff--settle-patch-file (batch file outcome)
+  "Record FILE's OUTCOME in BATCH, ignoring duplicate review delivery."
+  (unless (gethash file (kargu-diff--patch-batch-outcomes batch))
+    (puthash file outcome (kargu-diff--patch-batch-outcomes batch))
+    (cl-decf (kargu-diff--patch-batch-pending batch))
+    (kargu-diff--finish-patch batch)))
+
+(defun kargu-diff--stage-patch-file (batch file entry)
+  "Stage FILE's planned ENTRY and collect its final outcome in BATCH."
+  (let ((done (lambda (outcome) (kargu-diff--settle-patch-file batch file outcome))))
+    (condition-case-unless-debug err
+        (if (eq (car entry) :deleted)
+            (progn
+              (kargu-diff--delete-file file (cadr entry))
+              (funcall done (list :status :applied-full :file file :saved t)))
+          (kargu-diff-apply-proposal file (cadr entry) done))
+      (error (funcall done (list :status :error :file file
+                                :message (format "ERROR: %s: %s" file
+                                                 (error-message-string err))))))))
+
+(defun kargu-diff--commit-patch (state callback)
+  "Stage the proposals in STATE and report their final summary to CALLBACK."
+  (let ((batch (kargu-diff--make-patch-batch
+                :pending (hash-table-count state)
+                :outcomes (make-hash-table :test #'equal) :callback callback)))
+    (maphash (lambda (file entry) (kargu-diff--stage-patch-file batch file entry)) state)
+    (setf (kargu-diff--patch-batch-state batch) :waiting)
+    (kargu-diff--finish-patch batch)
+    (kargu-diff--patch-summary batch)))
+
+(defun kargu-diff-apply-patch (patch-text &optional callback)
   "Validate and apply PATCH-TEXT with add, update and delete operations.
 Check the entire patch before applying proposals through the review and
-rollback pipeline.  Return a summary of the applied operations."
+rollback pipeline.  Return a summary, or STAGED while review is pending.
+CALLBACK receives the final summary once all file reviews have finished."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p patch-text
                          "PATCH-TEXT must be a non-empty string: %S" patch-text)
   (let* ((ops (kargu-diff--parse-patch-lines (split-string (string-trim patch-text) "\n")))
          (state (make-hash-table :test #'equal)))
     (unless ops
       (error "No valid patch operations found (expected '*** Add File:', '*** Update File:', or '*** Delete File:')"))
-    (let ((results (mapcar (lambda (op) (kargu-diff--plan-patch-op state op)) ops)))
-      (kargu-diff--commit-patch state)
-      (format "Patch successfully applied to %d file(s):\n  • %s"
-              (length results) (string-join results "\n  • ")))))
+    (mapc (lambda (op) (kargu-diff--plan-patch-op state op)) ops)
+    (kargu-diff--commit-patch state callback)))
 
-(defun kargu-diff--apply-patch-tool (args)
-  "Apply the patch supplied in tool ARGS."
-  (or (kargu-diff--mutating-disabled "apply_patch")
-      (let ((patch (kargu--tool-arg args "patch" "diff" "content")))
-        (if (not (kargu-nonempty patch))
-            "ERROR: patch argument is required"
-          (condition-case-unless-debug err
-              (kargu-diff-apply-patch patch)
-            (error (format "ERROR: %s" (error-message-string err))))))))
+(defun kargu-diff--apply-patch-tool (args &optional callback)
+  "Apply the patch in ARGS, reporting final review results to CALLBACK."
+  (let ((delivered nil))
+    (cl-labels ((deliver (text)
+                  (unless delivered
+                    (setq delivered t)
+                    (if callback (funcall callback text) text))))
+      (condition-case-unless-debug err
+          (let* ((patch (kargu--tool-arg args "patch" "diff" "content"))
+                 (failure (or (kargu-diff--mutating-disabled "apply_patch")
+                              (unless (kargu-nonempty patch)
+                                "ERROR: patch argument is required"))))
+            (if failure (deliver failure)
+              (kargu-diff-apply-patch patch (and callback #'deliver))))
+        (error (deliver (format "ERROR: %s" (error-message-string err))))))))
 
 (defconst kargu-diff--tool-specs
   (list
