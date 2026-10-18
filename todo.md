@@ -1,143 +1,185 @@
-## Açık sorunlar
+# Açık sorunlar
 
+Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan kayıtlar kaldırılır. Yalnız açık sorunlar tutulur.
 
-## Önceki kayıtlar için inceleme notları
+### Modül: `tools/process.el` & `tools/bash/`
+3. **[K - Orta] Standard Error (stderr) ile stdout ayrıştırılmadan birleştiriliyor.**
+   - **Dosya / Satır:** `kargu/tools/process.el:120-122`, `159`
+   - **Sorun:** stdout ve stderr aynı arabelleğe yazılıyor. Yapılandırılmış çıktı bekleyen tüketicilerde (örn. `git status`, `rg --json`) komut satırından gelen stderr uyarıları (örn. `warning: LF will be replaced by CRLF`) veriyi bozar.
+4. **[D - Düşük] Büyük çıktılarda artımlı filtre maliyeti.**
+   - **Dosya / Satır:** `kargu/tools/process.el:76`
+   - **Sorun:** Her gelen parçada `(position-bytes (point-max))` çağrılıyor; çok baytlı büyük arabelleklerde bu hesaplama parçalı akışta işlemci yükü oluşturabilir.
 
-- Streaming timeout: Güncel kod normal istek timeout'u ile streaming stall/ceiling sınırlarını ayırıyor. Eski logdaki 90 saniyelik curl timeout'u mevcut sürümde canlı sağlayıcıyla yeniden üretilmedi; kayıt açık bırakıldı.
-- Yalnız düşünceyle biten yanıt: Döngüde artık ayrı `thought` sınıflandırması var. Eski sağlayıcı örneğinin tekrar doğrulanması gerekiyor.
-- Araç hedefinin gösterimi: Güncel başlık kodu dosya/komut/URL gösteriyor ve dosya yolu için test var. Sorun sürerse araç adı, gerçek arguments ve görünen başlık birlikte kaydedilmeli.
-- Akışı cümle bazında gösterme: Bu bir davranış/performans işi olarak açık. UI güncellemelerini birleştirmek sağlayıcının gönderdiği ağ verisini azaltmaz; metin/düşünce sırasını ve son parçanın flush edilmesini korumalı.
+---
 
-## 2026-10-18 kod okuması: olası bug / hata karmaşası bulguları
+### Modül: `tools/diff.el` & `tools/diff/`
+1. **[K - Yüksek] `apply_patch` inceleme kiplerinde (`blocking`/`async`) yanlış başarı döner.**
+   - **Dosya / Satır:** `kargu/tools/diff.el:450-471`
+   - **Sorun:** `kargu-diff--commit-patch`, `kargu-diff-apply-proposal` fonksiyonunu callbacksiz çağırır ve sonucunu beklemez. İnceleme kipi `blocking` veya `async` olduğunda ediff açık ve insan onayı bekleniyor olsa bile `apply_patch` anında modele `"Patch successfully applied to N file(s)"` döner.
+2. **[K - Orta] `apply_patch` atomik değildir.**
+   - **Dosya / Satır:** `kargu/tools/diff.el:450-456`
+   - **Sorun:** Patch planı önceden doğrulansa bile yazma aşamasında `maphash` sırayla dosyaları yazar. Dosyalardan biri yazılırken disk hatası veya kilit oluşursa önceki dosyalar diske yazılmış kalır, rollback tetiklenmez.
+3. **[K - Orta] Yama sözdiziminde `*** Move to:` ve `*** End of File` karmaşası.**
+   - **Dosya / Satır:** `kargu/tools/diff.el:312-313, 335`
+   - **Sorun:** `*** Move to:` satırları `kargu-diff--split-update-hunks` içinde sessizce atlanır ve dosya taşınmaz. Bazı modellerin eklediği `*** End of File` satırı ise `curr-lines` içine yama metni olarak girerek hunk eşleşmesini bozar (`Add File` durumunda dosya sonuna bu satır yazılır).
+5. **[D - Düşük] `read_file` bellek tüketimi.**
+   - **Dosya / Satır:** `kargu/tools/diff.el:147-154, 175-180`
+   - **Sorun:** `from_line`/`to_line` aralığı verilmiş olsa dahi dosya önce tamamen arabelleğe okunur ve `split-string` ile tüm satır listesi oluşturulur. Çok büyük dosyalarda (100MB+) gereksiz bellek ve GC yükü oluşturur.
+6. **[D - Düşük] `diff.el` yükleme zamanı yapılandırması.**
+   - **Dosya / Satır:** `kargu/tools/diff.el:573-579`
+   - **Sorun:** `kargu--config-plist` dosya yükleme anında okunur; çalışma zamanında TOML yapılandırması yeniden yüklendiğinde `review-mode` güncellenmez.
 
-Not: Bu bölüm büyük ölçüde statik okumadan çıktı; yalnız "Test çalıştırma sonuçları" bölümündeki maddeler çalıştırılarak doğrulandı. Her madde için "Kesinlik": **K** = kodda doğrudan görülüyor, **D** = davranış sağlayıcıya/ortama bağlı, doğrulanmalı. Okunmayan alanlar en altta.
+---
 
-### Yüksek öncelik
+### Modül: `tools/search.el` & `tools/webfetch.el`
+1. **[K - Orta] `workspace_grep` `rg --max-count` parametresi dosya başına uygulanır.**
+   - **Dosya / Satır:** `kargu/tools/search.el:142`
+   - **Sorun:** Ripgrep sözdiziminde `--max-count <cap>`, tüm arama için değil, her bir dosya içindeki maksimum eşleşme sayısıdır. 100 dosyalık bir depoda `cap=50` verildiğinde ripgrep 5000 eşleşme üretebilir; her ne kadar Elisp tarafında sonradan budansa da gereksiz disk I/O ve işlemci harcanır.
+2. **[K - Yüksek] `webfetch` macOS, BSD ve Alpine konteynerlerinde `getent` yokluğu nedeniyle çalışmaz.**
+   - **Dosya / Satır:** `kargu/tools/webfetch.el:91-105`
+   - **Sorun:** IP çözümlemesi yalnızca harici `getent ahosts <host>` komutuna bağlanmıştır. macOS, FreeBSD veya minimal Docker (Alpine) ortamlarında `getent` bulunmaz (`exit 127`). `nslookup`, `host`, `dig` veya Emacs dahili `dns-lookup-host` alternatifi tanımlanmadığından bu sistemlerde webfetch %100 başarısız olur.
+3. **[K - Yüksek] `webfetch` SSRF adres normalizasyonu eksikliği (IPv6 ve alternatif IPv4 formatları).**
+   - **Dosya / Satır:** `kargu/tools/webfetch.el:40-62`
+   - **Sorun:** `kargu-webfetch--internal-host-p` denetimi yalnızca `fe80:`, `fc`, `fd` öneklerini ve `localhost`, `::1` gibi sabitleri arar. `::ffff:127.0.0.1` (IPv4-mapped IPv6), `0:0:0:0:0:0:0:1` (açık IPv6 loopback), tamsayı IPv4 (`2130706433`), eksik noktalı IPv4 (`127.1`) veya `0` adresleri bu kontrolden geçerek `nil` döner (meşru sayılır) ve curl bu adreslere yerel bağlantı kurar.
 
-### Orta öncelik
+---
 
-- **Doom-loop tespiti meşru tekrarları keser.** (K) `kargu/loop/tools.el:45-51`: imza turlar arası global; düzenle→test→düzenle döngüsünde aynı `bash`/`lsp_diagnostics` komutu 3 kez çağrılınca onay ister veya koşuyu durdurur. İmza, araya mutasyon girdiğinde sıfırlanmalı (ürün kararı).
-- **`apply_patch` atomik değil ve inceleme kipinde yanlış başarı bildirir.** (D) `kargu/tools/diff.el:447-468`: önce hepsi planlanıyor (iyi), sonra dosyalar sırayla yazılıyor; ortada biri hata verirse öncekiler diske yazılmış kalır. `blocking`/`async` modda `kargu-diff-apply-proposal` callback'siz çağrılıyor (diff/stage.el okunmadı); insan onayından önce "Patch successfully applied" dönebilir ve `delete` yalnız `auto`'da desteklenir. Doğrulanmalı.
-- **Süreç çıktı kotası ve tüketicilerin kısmi sonuç sözleşmesi.** Genel yürütücü kota aşımında süreci sonlandırıyor; `git diff`/`git blame`/`rg` tüketicileri `:truncated` bayrağını ayrı işlemeyip sinyal kodunu normal komut hatası gibi sunuyor. Kısmi okuma çıktıları açıkça işaretlenmeli, protokol çıktısı kullanan ayrıştırıcılar eksik veriyi başarı saymamalı. İkili çıktı gerektiren tüketiciler için de açık bir kodlama seçeneği yok.
-- **Webfetch IPv6 adreslerini normalize etmiyor.** `kargu/tools/webfetch.el` özel ağ denetimini metin önekleriyle yapıyor. IPv4-mapped IPv6 (`::ffff:127.0.0.1`, `::ffff:7f00:1`), genişletilmiş loopback (`0:0:0:0:0:0:0:1`), link-local aralığının `fe80:` dışındaki gösterimleri ve NAT64 aralıkları ayrıca ele alınmalı. Hostname veya DNS sonucu önce doğrulanmış sayısal adrese dönüştürülmeli, ardından IPv4/IPv6 CIDR politikası uygulanmalı; alternatif gösterimlerin eşdeğerliği ve yönlendirmelerin her adımındaki adres sabitlemesi için test gerekiyor.
-- **Varsayılan dizin dışlaması meşru kaynak adlarını da gizleyebilir.** Ortak `kargu-fs-skip-dirs` listesi ve `rg` globları `src/build/`, `src/vendor/` gibi adları da dışlıyor. Hangi dışlamaların proje `.gitignore` dosyasına bırakılacağı ve hangilerinin kullanıcı tarafından ayarlanacağı netleştirilmeli.
-- **Proje becerilerinin güven politikası belirsiz.** Klonlanan depodaki beceri açıklamaları ve seçilen becerilerin talimatları otomatik keşfediliyor. Kaynak güveni, kullanıcı onayı ve proje/kullanıcı becerileri arasındaki öncelik için açık bir politika gerekiyor; metadata'yı kaçışlamak tek başına anlamsal prompt enjeksiyonunu engellemez.
-- **`json.el` kodlama belirsizlikleri.** (K) `kargu/json.el:196-243`: boş liste `null` olarak kodlanır (`[]` olmalı); örn. `required: []` veya boş `tools`. Bu `git.el` şemalarında `("properties" . ())` ile `{}` yerine `null` gönderebilir (sağlayıcıya bağlı, D). `kargu--object-p` `((a b) (c d))` gibi liste listesini nesne sayar.
-- **İstek yükü sağlayıcıya göre bozulabilir.** (D) `kargu/api/request.el:101-105`: `max_tokens` ve `max_completion_tokens` birlikte gönderiliyor; OpenAI o-seri/yeni modeller `max_tokens`'ı reddeder, katı uçlar bilinmeyen alanı reddeder. `temperature` muhakeme modellerinde (yalnız 1) 400 verir.
-- **`read_file` kayıtları.** (K) `kargu/tools/diff.el:161-188`: dosya sonundaki `\n` yüzünden `split-string` fazladan boş satır sayıyor (10 satırlık dosya "of 11" gösterir, `11 | ` satırı). Disk içeriği okunuyor; kaydedilmemiş (inceleme bekleyen) tampon değişiklikleri görünmez. Pencere verilince (`from/to`) sınır yok, yalnız genel `kargu-tool-output-limit`.
-- **`diff.el` yükleme zamanı yapılandırması.** (D) `kargu/tools/diff.el:570-575`: `kargu--config-plist` dosya yüklendiğinde okunuyor; yapılandırma sonra yüklenirse `review-mode` yok sayılır; `mode-str` string değilse `string-trim` hata verir.
+### Modül: `json.el` & `fs.el`
+1. **[K - Yüksek] Boş JSON Nesnesi (`{}`) decode/encode döngüsünde `null`'a dönüşür.**
+   - **Dosya / Satır:** `kargu/json.el:216-223`
+   - **Sorun:** Boş bir JSON nesnesi `"{}"` decode edildiğinde Elisp `nil` döner. Ancak `kargu--json-encode`, `(null object)` gördüğünde doğrudan `"null"` üretir. OpenAI ve Anthropic API'lerinde `arguments: {}` bekleyen araç çağrılarında `null` gitmesi `400 Bad Request` hatasına neden olur.
+2. **[K - Yüksek] 2 boyutlu listeler JSON nesnesi (Alist) olarak kodlanır.**
+   - **Dosya / Satır:** `kargu/json.el:41-51, 231-238`
+   - **Sorun:** `kargu--object-p`, her elemanın `(consp cell)` ve `(car cell)`'in string/symbol olduğunu denetler. İki elemanlı string listelerinden oluşan matrisler (örn. `'(("a" "b") ("c" "d"))`), `("a" . ("b" . nil))` yapısında olduğu için nesne sanılır ve `{"a": ["b"], "c": ["d"]}` olarak hatalı kodlanır.
+3. **[D - Orta] Varsayılan dizin dışlaması meşru kod dizinlerini gizleyebilir.**
+   - **Dosya / Satır:** `kargu/fs.el:31-38`
+   - **Sorun:** `kargu-fs-skip-dirs` listesi `build`, `vendor`, `dist`, `out` gibi dizinleri koşulsuz dışlar. Projenin kaynak kodları `src/vendor/` veya `src/build/` altında yer alıyorsa bu dosyalar aramalarda ve listelemelerde görünmez.
 
-### Düşük öncelik / temizlik
+---
 
-- `kargu/api/retry.el`: 429 (kota bitti/`insufficient_quota`) de yeniden deneniyor; HTTP düzeyi (`kargu-api-retry-max`) × döngü düzeyi (`kargu-loop-upstream-retries`) çarpılıyor, toplam bekleme belirsiz uzun olabilir. `Retry-After` HTTP-tarih biçimi desteklenmiyor.
-- `kargu/api/http.el`: akış stall `delete-process` sonrası `plz` `:else` yolunun nasıl tetiklendiği doğrulanmalı (`kargu-http--fail-request` bayrağa göre ayrıştırıyor, güvenli görünüyor).
-- `kargu/loop/compact.el` + `history/compact.el`: koşu başına tek sıkıştırma; ikinci taşmada kullanıcıya soruluyor. `COMPACTION_*` ile başlayan kullanıcı iletisi kuyruktan sessizce atılır.
-- `kargu/loop.el:279`: `kargu-diff-changed-files` `fboundp` korumasız, komşu çağrılar korumalı (tutarsız).
+### Modül: `api/` (İstekler, Devre Kesici, Yeniden Deneme)
+1. **[D - Orta] Model istek yükünde `max_tokens` ve `max_completion_tokens` çakışması.**
+   - **Dosya / Satır:** `kargu/api/request.el:73-74`
+   - **Sorun:** Her iki alan da aynı anda yüklenir. OpenAI'ın yeni muhakeme modelleri (o1, o3-mini) veya katı OpenAI uyumlu proxy'ler `max_tokens` alanını görünce isteği reddeder. Benzer şekilde muhakeme modellerinde `temperature` gönderilmesi `400` hatası verebilir.
+2. **[K - Düşük] Devre kesici (Circuit Breaker) çift başarı kaydı.**
+   - **Dosya / Satır:** `kargu/api/http.el` & `kargu/loop/machine.el:395, 405, 415, 422`
+   - **Sorun:** HTTP 200 yanıtı alındığında HTTP katmanı `kargu-circuit-record-success` çağırır; döngü makinesinde `on-tools`, `on-thought`, `on-answer` da tekrar çağırır. Half-open durumunda sayaçlar tutarsız ilerleyebilir.
+3. **[K - Düşük] `Retry-After` başlığı HTTP-Date biçimini desteklemiyor.**
+   - **Dosya / Satır:** `kargu/api/retry.el:103-107`
+   - **Sorun:** Yalnızca tamsayı saniye formatı (`[0-9]+`) okunmaktadır; RFC standartlarındaki HTTP-Date formatı (örn. `Wed, 21 Oct 2026 07:28:00 GMT`) yok sayılır ve varsayılan backoff'a düşer.
+4. **[K - Düşük] `func-arity` kırılganlığı.**
+   - **Dosya / Satır:** `kargu/loop/machine.el:158`, `kargu/api/tools.el:323`
+   - **Sorun:** `&optional` veya `&rest` içeren lambda fonksiyonlarında `(cdr (func-arity cb))` beklenen 1 değerini vermeyebilir, delta iletimi yanlış kola sapabilir.
 
-### Ürün/iş kararı gerektirenler (koda dokunmadan not)
+---
 
-- Eglot yoksa "bash ile ara" yönlendirmesi var ama `bash` yalnız agent kipinde açık (`kargu-loop-mutating-tools`); ask/plan kipinde LSP olmayan bir dilde yapısal arama araçsız kalır. Salt okunur bir `bash` alt kümesi (veya `workspace_grep`/`find_files` öne çıkarma) kararı.
-- `kargu-permission-confirm-bash nil` ve `strict-mode nil` birlikte "korumasız" kip; belgelensin veya birleştirilsin.
-- Üç özdeş çağrı kuralı (doom-loop) düzenle/test döngüsünü de keser; eşik/sıfırlama politikası.
-- Eğer `describing.md`/`skills.md` tasarımı Eglot-sonrası durumu anlatıyorsa güncel olup olmadığı kontrol edilmeli (okunmadı).
+### Modül: `config/` (Yapılandırma & Anahtarlar)
+1. **[K - Orta] `config/toml.el` eksik TOML spesifikasyon desteği.**
+   - **Dosya / Satır:** `kargu/config/toml.el:51-68, 148-156`
+   - **Sorun:** (a) Sayılar ve boolean değerler dize (`"100"`) olarak ayrıştırılır; (b) Yalnızca `[provider.X]` veya üst düzey atamalar okunur, diğer tablolar `skip` edilir; (c) `"""` çok satırlı dizeler veya satır içi tablolar desteklenmez.
+2. **[K - Orta] `auth-source-search` ana iş parçacığını dondurabilir.**
+   - **Dosya / Satır:** `kargu/providers/registry.el:292`, `kargu/config/key.el:134`
+   - **Sorun:** GPG şifreli `.authinfo.gpg` kullanan sistemlerde `auth-source-search` pinentry veya disk beklemesi nedeniyle Emacs UI'ını senkron olarak kilitler. `kargu-connected-providers` fonksiyonu bu aramayı katalogdaki 160+ sağlayıcı için döngüde çalıştırır.
+3. **[K - Düşük] `kargu--expand-env-refs` sessizce nil döner.**
+   - **Dosya / Satır:** `kargu/config/key.el:121-128`
+   - **Sorun:** Yapılandırmadaki `${TANIMSIZ_VAR}` referansı bulunamadığında uyarı vermeden `nil` döner ve sistem sessizce auth-source'a düşer; kullanıcı yazım hatalarını fark edemez.
 
-### Test çalıştırma sonuçları
+---
 
-Komut: `emacs -Q --batch --eval "(package-initialize)" -l tests/run-tests.el` → **380 test, 373 geçti, 7 başarısız**.
+### Modül: `chat/`, `history/` & `core/` (Oturum İzolasyonu ve Bellek)
+1. **[K - Yüksek] Çoklu sohbet tamponlarında Global Değişken Çakışması.**
+   - **Dosya / Satır:** `kargu/core/session.el:34-42`, `kargu/history/protocol.el:23`, `kargu/state/store.el:18-31`
+   - **Sorun:** `kargu--session`, `kargu--message-history` ve merkezi durum deposu `kargu--state-store` global `defvar` olarak tutulmaktadır. Kullanıcı iki ayrı projede iki ayrı Kargu tamponu açtığında sayaçlar, mesaj geçmişleri, `:mode`, `:status` ve `:busy` bayrakları birbirini ezer. Bir tampondaki işlem diğer tüm tamponların durumunu bozar.
+2. **[K - Yüksek] Gecikmeli debug gönderiminde geç tampon çözümü ve sessiz prompt kaybı.**
+   - **Dosya / Satır:** `kargu/chat.el:524-530`
+   - **Sorun:** `kargu-chat--send-prepared` içindeki `continue` lambdasında `(kargu-chat--buffer)` fonksiyonu leksikal olarak çağrıldığı an değil, debug oturumu başlatıldıktan (asenkron) sonra çağrılır. Kullanıcı debugger beklerken proje değiştirirse girdi yanlış projeye gönderilir. Ayrıca bekleme esnasında kullanıcı girdi kutusuna bir karakter dahi yazarsa prompt doğrulamadan geçemez ve hiçbir uyarı verilmeksizin sessizce yok sayılır.
+3. **[K - Orta] `kargu-history-char-count` her turda tüm geçmişi JSON'a çevirerek karakter sayar.**
+   - **Dosya / Satır:** `kargu/history/compact.el:63-71`
+   - **Sorun:** `(+ (length (kargu--json-encode (vconcat kargu--message-history))) ...)` çağrısı her adımda ve her sıkıştırma eşiği kontrolünde tüm mesaj geçmişini baştan sona JSON string'e çevirir. Yüzlerce mesajlık oturumlarda yüksek CPU tüketimi ve gereksiz GC baskısı oluşturur.
+4. **[K - Orta] $O(N^2)$ Geçmiş Bellek Ayırma (Cons Allocation).**
+   - **Dosya / Satır:** `kargu/history/protocol.el:39`, `kargu/api/response.el:225`
+   - **Sorun:** Her mesaj eklendiğinde `(setq kargu--message-history (append kargu--message-history (list msg)))` ile liste baştan kopyalanır. Yüzlerce adımlı uzun oturumlarda gereksiz Garbage Collection (GC) duraksamalarına yol açar.
+5. **[K - Orta] Senkron JSON Oturum Okuma.**
+   - **Dosya / Satır:** `kargu/chat/session.el:284-306`
+   - **Sorun:** `kargu-session-list`, projedeki tüm `.json` oturum dosyalarını diskten senkron okur ve ayrıştırır. Dosya sayısı arttıkça Emacs donar.
+6. **[K - Düşük] Proje İçi `.kargu/sessions/` Dizininde Git İhlali.**
+   - **Dosya / Satır:** `kargu/chat/session.el:155-158`
+   - **Sorun:** Proje kökünde `.kargu/sessions` varsa oturumlar buraya yazılır. `.kargu/` varsayılan `.gitignore` şablonlarında hariç tutulmadığı için hassas sohbet verileri yanlışlıkla git'e eklenebilir.
+7. **[K - Orta] `kargu--history-ensure-user` boş/nil geçmişte `(wrong-type-argument consp nil)` ile çöker.**
+   - **Dosya / Satır:** `kargu/history/repair.el:221-224`
+   - **Sorun:** `kargu--history-ensure-user` fonksiyonu `(unless (seq-some (lambda (message) (equal (kargu-aget message "role") "user")) history) (setcdr history ...))` şeklinde çalışır. Geçmiş boş bir liste (`nil`) olduğunda veya sıfırlandıktan sonra `(setcdr nil ...)` çağrısı `(wrong-type-argument consp nil)` hatasıyla çöker.
+   - **Öneri:** `(unless (consp history) (list (list '("role" . "user") (cons "content" kargu--continue-nudge))))` koruması eklenmeli veya `push` ile liste oluşturulmalıdır.
+8. **[K - Yüksek] Çoklu projede oluşturulan `*kargu-chat*<N>` tamponları yerine çıktılar ve model seçimleri hep ilk tampona (`*kargu-chat*`) yönlendirilir.**
+   - **Dosya / Satır:** `kargu/chat.el:270-272`, `kargu/chat/transcript.el:61`, `kargu/api/select.el:214`
+   - **Sorun:** İkinci bir proje açıldığında `kargu-chat--create-project-buffer`, `(generate-new-buffer kargu-chat-buffer-name)` ile `*kargu-chat*<2>` oluşturur. Ancak `kargu-chat-output-buffer` ve `kargu-api-select--chat-buffer`, çağrı sohbet tamponunun dışındaki bir pencereden (kod tamponu, onay kutusu, zamanlayıcı veya model seçim açılır menüsü) tetiklendiğinde `(get-buffer kargu-chat-buffer-name)` yani `*kargu-chat*` arar. Sonuç olarak Proje 2'nin model seçimleri, footer güncellemeleri veya bildirimleri her zaman Proje 1'in penceresine yönlendirilir.
+   - **Öneri:** Proje köküne (`kargu-permission-project-root`) göre eşleşen sohbet tamponu bulunmalı veya tampon yerel referansı saklanmalıdır.
 
-- **Gerçek bug (doğrulandı): `kargu-process-cancel` süreç grubunu öldürmüyor.** `tests/test-process.el:95` `kargu-process-cancel-terminates-child-process-group-test` başarısız: `sh -c "sleep 30 & ...; wait"` iptalden sonra 2 sn içinde callback gelmiyor; torun süreç boruyu açık tuttuğu için sentinel tetiklenmiyor. Etkisi: bash `kill pN`/stop/cancel yalnız kabuğu öldürür, alt süreçler (dev sunucusu vb.) öksüz kalır, iş "running" görünür ve sonucu teslim edilmez (`tools/bash/jobs.el`, `tools/process.el:90-93`). Çözüm: `setsid`/`start-process` ile ayrı süreç grubu ve `(signal-process (- pid) 'TERM)` sonra `KILL`; callback'in iptalde garanti teslimi.
-- **Test kırılganlığı (ortamsal): 6 `kargu-permission-*` testi** (`within-project`, `assert-within-project`, `file-tools-rejection`, `search-tools-rejection`, `bash-command-external-paths-rejection`, `bash-command-redirection-rejection`). Bu makinede `/tmp/.git` var; `/tmp/kargu-scratch-*` kökü `project-current` ile `/tmp/` olarak bulunuyor ve `/tmp` "proje içi" sayılıyor. Testler `/tmp`'nin VCS deposu içinde olmadığını varsayıyor. Çözüm: `tests/test-helpers.el` `kargu-test--isolate` içinde proje kökünü açıkça (`kargu-permission--override-root`) sabitle veya temp dizini VCS'siz bir yere kur. (Ayrıca üretim tarafı: `/tmp/.git` gibi üst dizin deposu, proje kökünü beklenenden geniş yapabilir; geniş kök = geniş yazma izni.)
+---
 
-### Ek bulgular (ikinci okuma turu)
+### Modül: `loop/` & `plan/`
+1. **[K - Orta] Plan onayı (`kargu-plan-approve`) erken karar tüketimi nedeniyle kilitlenebilir.**
+   - **Dosya / Satır:** `kargu/plan/dispatch.el:62-70`
+   - **Sorun:** `(kargu-plan--take-decision)` çağrısı `(kargu-chat-prompt prompt)` çağrısından önce yapılır. `kargu-chat-prompt` mevcut değilse veya hata fırlatırsa `kargu-plan--decision-pending` zaten `nil` yapılmış olduğundan kullanıcı aynı planı tekrar onaylayamaz veya yeniden deneyemez (`"kargu: this plan was already decided"` mesajı verir).
+2. **[K - Orta] Durdurulan koşularda dosya tüketim sızıntısı.**
+   - **Dosya / Satır:** `kargu/loop/heal.el:50-51`
+   - **Sorun:** LSP tanıları beklenirken koşu durdurulursa (`kargu-loop-stop`), `(when (kargu-loop--live-p run) (kargu-diff-consume-file path))` atlanır. Düzenlenen dosya `kargu-diff--changed` tablosunda kalır ve sonraki koşunun bitiş raporuna `:pending-files` olarak sızar.
+3. **[K - Orta] Plan durumunun global olması.**
+   - **Dosya / Satır:** `kargu/plan/dispatch.el:45, 51`
+   - **Sorun:** `kargu-plan--decision-pending` ve `kargu-plan--current-plan` globaldir; farklı projelerdeki plan tamponları birbirinin durumunu ezer.
+4. **[D - Düşük] Yalnızca düşünce (reasoning-only) turlarında bütçe sayacı.**
+   - **Dosya / Satır:** `kargu/loop/machine.el:411-417`
+   - **Sorun:** Model araç çağırmadan veya yanıt vermeden yalnızca düşünce ürettiğinde, bu durum `:iterations` tavanıyla sınırlıdır (sonsuz döngü olmaz). Ancak `empty-retries` gibi ayrı bir bütçe sayacı yoktur ve her tur geçmişe bir `"System Notice"` ekler.
+5. **[K - Yüksek] İkinci `length` kesintisi tamamlanmış cevap (`'answer`) sayılarak `:done` ile sonlandırılır.**
+   - **Dosya / Satır:** `kargu/loop/machine.el:236-240`
+   - **Sorun:** Model yanıtı `max_tokens` nedeniyle kesildiğinde ilkinde `(< continues 1)` doğru olduğu için `'length` sınıflandırılır ve `"Continue."` ile devam edilir. Ancak ikinci kez `length` kesintisi yaşandığında `(< continues 1)` `nil` olduğu için bir sonraki kural olan `((member reason kargu-loop--length-reasons) 'answer)` devreye girer. `kargu-loop--on-answer` çağrılarak yarım kalmış metin başarıyla bitmiş gibi kabul edilir ve koşu `:done` ile kapatılır. Modelin cevabı veya kodu ortasında kesilmiş olmasına rağmen sisteme ve kullanıcıya başarı raporu verilir.
+   - **Öneri:** İkinci kesintide `'answer` yerine `'error` veya kullanıcıya ek devam hakkı sunan bir onay mekanizması tetiklenmeli; yarım çıktı `:done` ile maskelenmemelidir.
+6. **[K - Orta] `empty-retries` tavanına ulaşıldığında koşu `:error` yerine `:done` ile kapatılır.**
+   - **Dosya / Satır:** `kargu/loop/machine.el:429-434`
+   - **Sorun:** Model ardışık olarak boş yanıt verdiğinde yeniden deneme sayacı artırılır. Sayı `kargu-loop-empty-retries` tavanına ulaştığında `(kargu--loop-finish run :done "(the model returned an empty response)")` çağrılmaktadır. Modelden hiçbir yanıt alınamamış bariz bir hata durumu `:error` yerine `:done` başarı durumuyla sonlandırılır.
+   - **Öneri:** `kargu--loop-finish run :error ...` çağrılmalı ve yaşam döngüsü hataya geçirilmelidir.
+7. **[K - Yüksek] `run` kaydında `:mode` tutulmaz; global `kargu--state-store` okunur ve tek bir koşu tüm Emacs kiplerini kilitler.**
+   - **Dosya / Satır:** `kargu/loop.el:224-232, 106-108, 122-144`, `kargu/state/transitions.el:39-40`
+   - **Sorun:** (a) `kargu-loop--new-run` oluşturulurken `:mode` kaydı tutulmaz; araç izinleri (`kargu-loop--gate-tool`) doğrudan merkezi `(kargu-state-mode)`'u sorgular. (b) `kargu-state-set-mode`, `(kargu-loop-running-p)` aktif olduğu sürece `user-error` fırlatarak kip değişimini Emacs genelinde engeller. Bir projede arka planda uzun bir agent koşusu varken diğer projelerde `ask`/`plan`/`debug` kiplerine geçilemez.
+   - **Öneri:** `run` nesnesine immutable `:mode` alanı eklenmeli, araç denetimleri bu alandan yapılmalı ve kip kilitleri proje/oturum düzeyine indirgenmelidir.
 
-#### Yüksek / orta
+---
 
-- **`jobs.el`: öldürme/iptal yalnız kabuğu öldürür** (yukarıdaki test). Ek: önplan işin callback'i iptalde hiç gelmeyebilir; yalnız tek önplan süreç izleniyor (`kargu-bash--active-async-proc`); kuyruk çıktısı (4 MB'a kadar) kısaltılmadan modele aktarılmadan önce bellekte tutulur; biten arka plan iş tamponları yalnız 20'den fazlasında temizlenir.
-- **`diff/stage.el`: `kargu-diff--apply-auto` tüm tamponu silip yeniden yazar, sonra `save-buffer`.** (K) Kullanıcının kaydedilmemiş düzenlemeleri de sessizce kaydedilir; `before-save-hook` (formatlayıcı, boşluk temizleme) içeriği değiştirir ama araç "APPLIED" der; "file changed on disk" ve "dizin yok, oluşturulsun mu?" soruları `y-or-n-p` ile bloklar veya hata verir. `write_file` yeni dizine yazarsa `make-directory` yok: snapshot itilmiş, tampon kirli kalır (D). `find-file-noselect` tamponları sonsuza kadar açık tutar, major-mode/eglot kancalarını tetikler, büyük dosyada soru sorar.
-- **`diff/review.el`: reddedilen inceleme boş (no-op) snapshot bırakır;** `:created-new` ile sonraki `kargu-diff-rollback` aynı yolda artık kullanıcıya ait olabilecek dosyayı siler. `kargu-diff--ediff-quit` oturumu A tamponuyla eşler; kullanıcının aynı tampondaki kendi ediff'ini kapatması oturumu bitirebilir (kenar durum).
-- **`diff/track.el`: snapshot yığınları (`kargu-diff--snapshots`) koşu başına sıfırlanmaz** (yalnız `run-modified-files` sıfırlanır). "İlk durum" rollback'i, Emacs oturumundaki ilk ajan düzenlemesinin durumudur; koşular arasında kullanıcının elle yaptığı düzenlemeleri siler. Her düzenleme için tam dosya içeriği tutulur (sınırsız bellek). Açık olmayan dosyalarda rollback `write-region` ile varsayılan kodlama kullanır (CRLF/kodlama bozulabilir). `kargu-diff-changed-files` global (koşu/proje başına değil).
-- **`lsp/context.el`: `kargu-lsp--request` `:valid-p` `buffer-chars-modified-tick` karşılaştırır;** tamponda herhangi bir değişiklik (ajanın kendi düzenlemesi, kullanıcı yazısı) uçuştaki isteği "Connection or document changed" ile iptal eder. `kargu-lsp-request-timeout` iki kez uygulanır (jsonrpc `:timeout` + görev zamanlayıcısı). `kargu-lsp--field` alist/plist belirsizliği kırılgan.
-- **`lsp/diagnostics.el`: yanlış "Verification passed" riski.** (K) Ayar süresi (3 sn) dolunca anlık görüntü boşsa (polls≥1, snapshot nil, meşgul değil) LSP henüz yayınlamadan "settled" ilan edilir. `kargu-lsp-get-diagnostics` dosya açık değilse "no diagnostics available (file is not open...)" metni döner; `heal.el` bunu temiz metin sayar. Denetleyici yoksa `kargu-lsp-wait-diagnostics` anında döner. `kargu-lsp--flymake-diags` `:character 1` sabit (sütun kaybı). `string-prefix-p root (expand-file-name fn)` symlink/truename uyumsuzluğunda dosyaları kaçırır. Yalnız ziyaret edilmiş tamponlarda tanı var; açılmamış dosya "temiz" ile ayırt edilemez.
-- **`lsp/symbols.el`: `kargu-lsp--splice-symbol-content` satır aralığı kullanır;** CRLF/`\r`, çok baytlı karakter, dosya sonu satırı belirsiz; `string-trim-right new-content "[\r\n]+"` kasıtlı boş satırları siler. `kargu-lsp--symbol-named-p` büyük/küçük harfe duyarsız (`Foo` ve `foo` belirsiz/yanlış eşleşir). Sembol aralığı LSP/imenu anlık görüntüsünden gelir, arada düzenleme olursa bayat; `end-of-defun` imenu yedeği Lisp dışı modlarda yanlış aralık verir. `kargu-lsp-edit-symbol` callback yolunda `kargu-lsp-get-file-symbols` callback'i içindeki hatalar yakalanmaz. `kargu-lsp-find-definition` callback'siz çağrıda `kargu-lsp--ws-symbols`'ı senkron çağırır (D).
-- **`lsp/register.el`:** `lsp_diagnostics` ve `list` türü araçlar senkron çalışır (callback yok); `kargu-lsp--tool-aliases` `outline` gibi genel adlar içerir (çakışma riski).
-- **`config/toml.el` (K):** (a) Yalnız `api/apikey/model/models` bölüm anahtarları okunur, diğerleri sessizce atılır; (b) sayı/boolean değerler dize olarak döner (`max_tokens = 100` → `"100"`); (c) `"""` çok satırlı dizeler, `\uXXXX` kaçışı, satır içi tablolar desteklenmiyor (sessizce yanlış okunur); (d) çok satırlı dizide yorum satırı (`# "x"`) içindeki tırnaklı metin öğe sayılır; (e) bölüm adı büyük/küçük harf korunur ama `kargu--api-base`/`kargu--resolve-api-key` `downcase` ile arar → `[provider.OpenAI]` bulunamaz; `kargu--provider-plist` ise `name`'i olduğu gibi arar (tutarsız); (f) yinelenen bölüm sessizce birleşir; (g) ayrıştırma hatası ilgili satırı belirtmez, bozuk dosya yarım yapılandırma verir.
-- **`config/key.el`:** `kargu--expand-env-refs` tanımsız `${VAR}` için nil döner ve sessizce env/auth-source'a düşer (kullanıcı yanlış yazımı fark etmez, uyarı yok). `kargu--auth-source-api-key` `auth-source-search` GPG/pinentry ile sohbet sırasında bloklayabilir ve her çağrıda yeniden sorgular (önbellek yok; her istekte). `kargu--api-key-placeholder-p` `...` ile biten gerçek anahtarı (nadir) placeholder sayar.
-- **Onay sonrası thunk yeniden çalıştırma sözleşmesi.** `permission/policy.el` onaydan sonra araç gövdesini baştan çalıştırıyor. Bir araç ikinci onayı ilk yan etkiden sonra isterse önceki adımlar tekrarlanabilir. Mevcut "bütün onayları yan etkilerden önce iste" sözleşmesinin çok adımlı araçlarda denetlenmesi veya replay yerine açık devam adımlarına taşınması gerekiyor.
+### Modül: `tools/git.el`
+1. **[K - Orta] `git_blame` tekil `start_line` veya `end_line` verildiğinde satır kısıtını tamamen yok sayar.**
+   - **Dosya / Satır:** `kargu/tools/git.el:412-421`
+   - **Sorun:** `kargu-git-blame` içindeki `(and start-line end-line (list (format "-L%d,%d" start-line end-line)))` denetimi nedeniyle, argümanlardan yalnızca biri verildiğinde (örn. yalnızca `start_line: 120`), ifade `nil` döner ve git'e hiçbir `-L` argümanı eklenmez. Sonuç olarak tüm dosya için satır satır blame çalıştırılır; binlerce satırlık dosyalarda aşırı CPU ve bellek harcanarak modele istenmeyen devasa bir çıktı döner.
+   - **Öneri:** `(when (or start-line end-line) (list (format "-L%d,%s" (or start-line 1) (if end-line (number-to-string end-line) ""))))` şeklinde esnek aralık desteği sağlanmalıdır.
 
-### Üçüncü okuma turu: Kod tabanının tamamı (kapsamlı tarama ve tespit edilen tüm olası sorunlar)
+---
 
-Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`, `plan/`, `state/`, `languages/`, `tools/dape/`, `core/`, `contract/`) baştan sona taranmış ve aşağıdaki sorunlar tespit edilmiştir:
+### Modül: `tools/dape/`
+1. **[K - Yüksek] Hedef tampon ve canlı bağlantı çalışma alanı sınırına kilitli değil.**
+   - **Dosya / Satır:** `kargu/tools/dape/session.el:65-95, 104-112`
+   - **Sorun:** `kargu-dape--target-buffer`, `buffer-list` içerisindeki herhangi bir `prog-mode` tamponunu seçer; seçilen tamponun `kargu-permission-project-root` sınırları içinde olduğunu doğrulamaz. Başka bir projeden açık kalmış bir dosya debug hedefi yapılabilir. Benzer şekilde `kargu-dape--raw-connection`, `dape--live-connections` listesinden projeye bakılmaksızın ilk veya durdurulmuş bağlantıyı alır; farklı projelerdeki hata ayıklama oturumları birbirine karışabilir.
+2. **[K - Orta] `kargu-dape--verified` küreseldir; çoklu projede doğrulama durumunu ezer.**
+   - **Dosya / Satır:** `kargu/tools/dape/preflight.el:23, 64-80, 126`
+   - **Sorun:** Dape adaptör doğrulama sonucu (`kargu-dape--verified`) tek bir global `defvar`'da saklanır ve `(list (kargu-permission-project-root) ...)` anahtarıyla kıyaslanır. Proje A'da debug kipi başarıyla doğrulandıktan sonra Proje B'de debug oturumu açılırsa veya doğrulanırsa `kargu-dape--verified` ezilir. Tekrar Proje A'ya dönüldüğünde `(equal kargu-dape--verified (kargu-dape--config-key config))` eşleşmeyerek `"Debugger project or configuration changed; select debug again"` hatası verir ve kullanıcıyı gereksiz onay döngüsüne sokar.
+   - **Öneri:** Doğrulama durumu proje kök dizinine göre indekslenen bir hash tablosunda tutulmalıdır.
 
-#### 1. Kritik Hatalar (Çökme, Deadlock, Veri Kaybı)
-#### 2. Yüksek / Orta Öncelikli Sorunlar
-- **`providers/registry.el:286`: 160+ sağlayıcı için senkron auth-source araması (Emacs Donması).** `kargu-connected-providers`, katalogdaki 160'tan fazla sağlayıcının her biri için döngü içinde `(auth-source-search :host host :max 1)` çalıştırır. Kullanıcının `auth-sources` yapılandırmasında GPG şifreli dosya varsa Emacs UI iş parçacığı saniyelerce donar veya pinentry pencereleriyle kilitlenir.
-- **Native wire biçiminde çok modlu içerik dönüşümü eksik.** `kargu-api--text-blocks` text bloklarını ve cache işaretlerini koruyor, fakat OpenAI `image_url` gibi blokları native Messages `image/source` biçimine çevirmiyor. Görsel/dosya içerik tipleri için ayrı adaptör ve round-trip testleri gerekiyor.
-- **`chat/session.el:284-306`: Senkron büyük JSON okuma donması.** `kargu-session-list`, dizindeki tüm `.json` oturum dosyalarını diskten tek tek senkron okur ve `json-read` ile ayrıştırır. Çok sayıda veya büyük oturum dosyası olduğunda Emacs'i kilitler.
-- **`plan/dispatch.el:45, 51`: Çoklu oturumlarda global durum çakışması.** `kargu-plan--decision-pending` ve `kargu-plan--current-plan` değişkenleri globaldir (buffer-local değildir). Farklı projelerde veya tamponlarda aynı anda plan çalıştırıldığında durumlar birbirini ezer.
+---
 
-#### 3. Dil Profilleri ve Araç Zinciri Sorunları (`languages/`)
+### Modül: `languages/` (Dil Profilleri)
+1. **[K - Orta] `languages/elisp.el` doğrulama komutları hedefsizdir.**
+   - **Dosya / Satır:** `kargu/languages/elisp.el:33-35`
+   - **Sorun:** `:build-cmd` (`batch-byte-compile`) ve `:lint-cmd` (`check-parens`) dosya argümanı olmadan çağrılmaktadır; `:test-cmd` (`ert-run-tests-batch-and-exit`) test dosyalarını yüklemeden çalıştırılır. Model bu komutları doğrudan çalıştırdığında gerçek dosyalar denetlenmez.
 
-#### 4. Çekirdek ve Sözleşme Sorunları (`core/`, `contract/`)
-#### 5. Protokol, Geçmiş ve Devre Kesici Derin Analizi (`history/`, `circuit.el`, `loop/`, `git.el`)
-- **`loop/heal.el:50`: İptal Edilen Koşularda Dosya Tüketim Sızıntısı (Unconsumed Changed Files).** `kargu--loop-verify-next` içinde LSP tanıları beklenirken kullanıcı koşuyu durdurursa (`kargu-loop-stop`), callback içindeki `(when (kargu-loop--live-p run) (kargu-diff-consume-file path) ...)` bloğu atlanır. Düzenlenen dosya `kargu-diff-changed-files` listesinden silinmez ve bir sonraki koşuya bayat dosya uyarısı olarak sarkar.
-- **`loop/machine.el:207, 362-368`: Sınırsız Düşünce Döngüsü (Unbounded Reasoning Loop).** Model yalnızca düşünce (reasoning/thinking) üretip yanıt veya araç çağrısı vermediğinde `thought` olayı tetiklenir ve `kargu-loop--on-thought` çalışır. Boş yanıtlarda (`empty-retries`) ve üst akış hatalarında (`upstream-retries`) sayaç bulunmasına rağmen `thought` için hiçbir retry sayacı veya bütçe tanımlanmamıştır; model her adımda yalnızca düşünce verirse gereksiz token tüketimiyle döngüde kalır.
-#### 6. Ağ, Web Erişimi, Beceriler ve Otomatik Tamamlama (`tools/webfetch.el`, `tools/skill.el`, `chat/complete.el`, `chat/transcript.el`)
-- **`tools/webfetch.el:94-100`: macOS / BSD / Minimal Linux Ortamlarında `getent` Yokluğu Nedeniyle Webfetch Çökmesi (K).** SSRF koruması için IP çözümlemesi yalnızca `getent ahosts <host>` komutuna bağlanmıştır. macOS, FreeBSD, OpenBSD veya minimal Docker konteynerlerinde (Alpine) `getent` komutu bulunmaz (`exit 127`). Kodda `nslookup`, `host`, `dig` veya Emacs dahili `dns-lookup-host` gibi hiçbir yedek çözümleyici tanımlanmadığından, bu sistemlerde `webfetch` tüm URL isteklerinde istisnasız `%100` başarısız olur (`ERROR: webfetch cannot resolve the host: getent not found`).
-- **Büyük projelerde dosya tamamlamasının senkron taraması.** `chat/complete.el` seçili proje için `project-files` veya sınırlı dosya yürüyüşünü tamamlamanın içinde çalıştırıyor. Büyük/uzak depolarda önbelleğin arka planda yenilenmesi ve güncellik bildirimi tasarlanmalı; aday sayısını kısıtlamak `project-files` listesinin oluşturulma maliyetini sınırlamıyor.
+---
 
-#### 7. İstem Montajı, Önbellekleme ve Bellek Performansı (`prompt.el`, `history/protocol.el`, `providers/registry.el`)
-- **`prompt.el:340-365`: Debug Modunda Her Turda Tüm Proje İskeletinin Kullanıcı Mesajına Eklenmesi (K).** `kargu-prompt-debug-message`, her kullanıcı mesajına eklenen `<system-reminder>` içine her turda senkron olarak `(kargu-lsp-build-skeleton)` ile oluşturulan tam proje sembol iskeletini gömer. Büyük projelerde 10-20 bin karakteri bulan bu iskelet, 10 turluk bir debug oturumunda her turda tekrar tekrar kullanıcı mesajı olarak geçmişe eklenerek yüzbinlerce gereksiz jeton (token) tüketimine ve context window'un erkenden dolmasına yol açar.
-- **`prompt.el:321-325`: `kargu-prompt-system-key` Eksikliği Nedeniyle Talimat ve Beceri Değişikliklerinin Fark Edilmemesi (K).** Sistem isteminin güncelliğini denetleyen `kargu-prompt-system-key`, yalnızca mod, model, eglot ve kompaksiyon durumunu kontrol eder. Oturum sırasında projedeki `AGENTS.md`, `CLAUDE.md` veya `SKILL.md` dosyaları değiştirilse dahi anahtar değişmediği için sistem istemi yenilenmez (`kargu--history-system-current-p` t döner); model güncellenen talimatları veya yeni eklenen becerileri göremez.
-- **`prompt.el:50-52` & `providers/registry.el:58-77`: Tanımsız `:prompt-for` Kuralları ve Model Taban İstem Dosyası Eksikliği.** Kod dokümantasyonunda belirtilen modele özgü sistem istemi dosyası (`prompt/*.txt`) mimarisi fiilen çalışmamaktadır; çünkü `providers/catalog.el` içindeki hiçbir model/sağlayıcı tanımında `:prompt-for` anahtarı yer almaz ve `kargu/prompt/` dizininde `default.txt` dışında hiçbir dosya (`anthropic.txt`, `openai.txt`, vb.) bulunmaz.
-- **`history/protocol.el:39`: $O(N^2)$ Geçmiş Bellek Ayırma (Cons Allocation).** `kargu--history-add` fonksiyonu her mesaj eklendiğinde `(setq kargu--message-history (append kargu--message-history (list msg)))` çağrısıyla tüm geçmiş listesini baştan kopyalar. Yüzlerce araç çağrısı ve adımdan oluşan uzun oturumlarda veya `/goal` kurgularında $O(N^2)$ liste tahsisi nedeniyle yoğun Emacs Garbage Collection (GC) duraksamaları ve bellek şişmesi meydana gelir.
+### Modül: `tools/lsp/` (LSP & Tanı Araçları)
+1. **[K - Orta] `buffer-chars-modified-tick` uçuştaki istekleri iptal eder.**
+   - **Dosya / Satır:** `kargu/tools/lsp/context.el:284-293`
+   - **Sorun:** Tamponda herhangi bir karakter değiştiğinde (`tick` değişimi), uçuştaki LSP isteği geçersiz sayılır. Hızlı ardışık işlemlerde tanı/sembol istekleri düşebilir.
+2. **[K - Düşük] Flymake tanı sütun kaybı.**
+   - **Dosya / Satır:** `kargu/tools/lsp/diagnostics.el:41`
+   - **Sorun:** `:character 1` değeri sabittir, hatanın bulunduğu tam sütun bilgisi modele iletilmez.
+3. **[K - Düşük] Açık olmayan (visiting edilmemiş) dosyalar için LSP tanıları alınamaz.**
+   - **Dosya / Satır:** `kargu/tools/lsp/diagnostics.el:23-24, 95-101`
+   - **Sorun:** `kargu-lsp-get-diagnostics`, `(find-buffer-visiting path)` kontrolü yapar; `kargu-lsp--flymake-diags` Flymake tanılarını yalnızca dosya Emacs'te canlı bir arabellekte açıksa (`(buffer-live-p buffer)`) alabilir. Arabelleğe alınmamış bir dosya için `lsp_diagnostics` çağrıldığında `"%s: no diagnostics available (file is not open in Emacs; open it or use read_file first)"` mesajı döner ve tanı denetimi yapılamaz.
+   - **Öneri:** Açık olmayan dosyalar için geçici olarak `find-file-noselect` ile arabellek oluşturulup tanıların okunması veya otomatik açılma desteği eklenmelidir.
 
-#### 8. Çoklu Oturum İzolasyonu, Kullanıcı Giriş Kaybı ve Arayüz Kırılganlığı (`chat.el`, `core/session.el`, `chat/tune.el`, `tools/deps.el`)
-- **`core/session.el:34-43, 124-148`: Global `kargu--session` ve `kargu--message-history` Nedeniyle Çoklu Tampon Çakışması (K).** `kargu--session` ve mesaj geçmişi global değişkenlerde tutulur. Kullanıcı iki ayrı projede iki ayrı Kargu sohbet tamponu açtığında sayaçlar birbirine karışır; bir tampondaki `kargu-session-reset` diğer projedeki tüm sohbet geçmişini ve devre kesici durumunu sessizce sıfırlar.
-- **`chat/session.el:155-158`: Proje İçi `.kargu/sessions/` Dizininde Hassas Veri Sızıntısı ve Git İhlali.** Eğer proje kökünde `.kargu/sessions` dizini varsa, oturum dosyaları merkezi `~/.config/` yerine doğrudan proje köküne yazılır. Kargu'nun varsayılan `.gitignore` şablonunda veya depolarında `.kargu/` hariç tutulmadığından, tüm sohbet geçmişi, API yanıtları ve özel prompt verileri git'e commit edilebilir hale gelir.
-#### 10. JSON Ayrıştırma/Kodlama, Dosya Sistemi Gezinmesi ve Dizin Dışlama Hataları (`json.el`, `fs.el`)
-- **`json.el:216-223, 122-130`: Boş JSON Nesnesi (`{}`) Çözülüp Geri Kodlandığında `null`'a Dönüşmesi ve API 400 Hataları (K).**
-  - `kargu--json-decode`, boş bir JSON nesnesi olan `"{}"` metnini Emacs Lisp'in boş listesi `nil` olarak çözer.
-  - Ancak `kargu--json-encode`, `(null object)` durumunda doğrudan `"null"` string'ini döner (yalnızca `:json-empty-object` veya `:empty-object` sembollerini `{}` yapar).
-  - Sonuç: Boş bir nesne (`{}`) decode edilip tekrar encode edildiğinde `"null"` olarak serileştirilir. OpenAI ve Anthropic API'lerinde `arguments: {}` veya `parameters: {}` bekleyen uçlar, `null` gönderildiğinde `400 Bad Request: expected object, got null` hatası vererek isteği reddeder.
-- **`json.el:41-51`: İki Boyutlu Dizi / Liste Listelerinin Hatalı Şekilde JSON Nesnesi (Alist) Olarak Kodlanması (K).**
-  - `kargu--object-p` yüklemi, `cl-every` ile her elemanın `(consp cell)` ve `(or (stringp (car cell)) (symbolp (car cell)))` olduğunu denetler.
-  - Dizi içinde 2 elemanlı string alt listeleri bulunan matris veya komut parametreleri (örneğin `'(("git" "status") ("git" "diff"))` veya `'(("header1" "value1") ("header2" "value2"))`), `("git" "status")` hücresi `(cons "git" (cons "status" nil))` şeklinde olduğundan bu denetimden geçer ve bir JSON nesnesi sayılır.
-  - `kargu--json-encode` bu listeyi `[["git", "status"], ["git", "diff"]]` dizisi yerine `{"git": ["status"], "git": ["diff"]}` nesnesi olarak bozuk kodlar.
-#### 11. Planlama, Oturum Durumu ve Dape Yaşam Döngüsü Detayları (`plan/dispatch.el`, `tools/dape/session.el`, `tools/dape/execution.el`, `state/hooks.el`)
-
-#### 12. Dil Belirleme Eksiklikleri ve UI Onay Motoru Kilitlenmeleri (`languages/core.el`, `languages/*.el`, `ui/confirm.el`)
-
-#### 13. Arama ve Git Araçlarındaki Yol/Regex Uyuşmazlıkları (`tools/search.el`, `tools/git.el`)
-- **`tools/search.el:140-141`: `rg --max-count` Parametresinin Dosya Başına Sınır Olarak Çalışması (K).**
-  - `kargu-search--grep-rg`, çağrıya `--max-count <cap>` argümanı ekler.
-  - Ripgrep spesifikasyonunda `--max-count`, arama genelinde toplam eşleşme sayısını değil, **her bir dosya içindeki** maksimum eşleşme sayısını sınırlar.
-  - Yüzlerce dosyanın bulunduğu bir depoda `cap` 50 olarak verilse dahi, her dosyadan 50'şer eşleşme toplanarak binlerce satırlık çıktı üretilir ve süreç gereksiz CPU/bellek tüketir.
-
-#### 14. Formal Protokol İhlalleri ve Geçmiş Onarım Tutarsızlıkları (`history/repair.el`, `proof/KarguProtocol.tla`)
-
-#### 15. Bash Yetki ve Güvenlik Denetleyicisi Atlatma Açıkları (`permission/bash.el`, `permission/guards.el`)
-- **`permission/guards.el:74-83`: Üst Dizinlerdeki `.git` Nedeniyle Çalışma Alanı Sınırının `/tmp` veya Ev Dizinine Taşması (K).**
-  - `kargu-permission-context-root`, kök dizini belirlerken `(project-current)` kullanır. `project.el`, mevcut dizinden yukarı doğru tarama yaparak en yakın VCS deposunu bulur.
-  - Eğer `/tmp` veya kullanıcının ev dizini (`~`) içinde geçmişten kalma bir `.git` deposu varsa, `/tmp/scratch` içinde çalışan bir işlem için `project-current` kökü `/tmp/` veya `~` olarak tespit eder.
-  - Bu durumda `kargu-permission-within-project-p` tüm `/tmp/` veya tüm ev dizinini "proje içi" kabul eder; Kargu'nun dosya kısıtlama kuralları tamamen işlevsiz hale gelerek sisteme geniş yazma izni verir.
-
-#### Debug araçlarının kapsamını genişletme
-
-- İşlev/veri/koşullu breakpoint, exception filtreleri, değişken atama, bellek ve disassembly için adaptör capability'sine bağlı şemalar eklenmeli. Ham, sınırsız DAP isteği yerine ayrı doğrulanan araçlar; hedefi değiştiren işlemlerde açık onay ve callback testleri gerekiyor.
-- Dape oturum sahipliği proje köküne bağlanmalı; başka projede açılmış global oturum, seçilen projenin debug oturumu sayılmamalı. Kaynak tamponu seçimindeki diğer-proje fallback'i de bu sınırla birlikte ele alınmalı.
-- Kargu ön kontrolü asenkron olsa da Dape'nin bazı adapter `ensure`/`fn` adımları senkron dış komut/Eglot isteği çalıştırıyor. Tüm dillerde kilitlenmeme için adaptör başlatma katmanının ayrıca tasarlanması gerekiyor; kurulu Dape paketine geçici yama yapılmamalı.
-
-#### Yeni inceleme: ertelenmiş sohbet ve plan başlangıcının sahipliği
-
-- **Geciken debug başlangıcı yanlış sohbete gönderim yapabiliyor.** `kargu-chat--send-prepared` içindeki devam, başlangıçtaki sohbeti saklamak yerine callback anında `kargu-chat--buffer` ve `kargu-chat-show` ile yeniden seçiyor. Çevrimdışı mock ile doğrulandı: A tamponundan başlatılan debug hazırlığının devamında tampon çözümleyici B'yi döndürünce `submit` B içinde çalışıyor. Başlangıç sohbeti, proje, sağlayıcı/model ve iptal nesli birlikte sahiplenilmeli; başka sohbet açılması, başlangıç tamponunun kapanması veya beklerken yeni koşu başlaması yanlış projeye gönderim yapmamalı. Global geçmiş/oturum izolasyonu maddesiyle birlikte ele alınmalı.
-- **Başlangıç reddedilince planın yeniden onaylanması engelleniyor.** `kargu-plan-approve`, `kargu-chat-prompt` başarıyla koşu başlatmadan önce `kargu-plan--take-decision` çağırıyor ve onaylandı mesajını yazıyor. Çevrimdışı mock ile doğrulandı: gönderim `user-error` verince `decision-pending` nil kalıyor; aynı planı yeniden onaylamak mümkün olmuyor. Sohbetin gönderim kabulü, senkron ret ve ertelenmiş debug hazırlığı için açık bir sonuç sözleşmesi gerekiyor. Regresyon: ret sonrası plan yeniden denenebilsin; gerçekten başlayan koşu ise çift tıklamayla ikinci kez gönderilmesin.
-
-#### Kabuk izolasyonu için kalan kapsam
-
-- Kabuk metni denetimi işletim sistemi sandbox'ı değildir. Build/test scriptleri, Git hook ve yapılandırmaları, bilinmeyen yürütücüler veya dolaylı dosya erişimleri metinden tam çıkarılamaz. Gerçek izolasyon için Linux/bubblewrap zorunluluğu, isteğe bağlı destek veya çapraz platform kapsamı kararlaştırılmalı; seçilen politika araç açıklamaları ve bağımlılık kontrolüne de yansıtılmalı. Sözdizimi denetimini bir OS güvenlik sınırı olarak sunmamak gerekiyor.
-
-- **Elisp profilinin doğrulama komutları gerçek dosya/test yüklemiyor.** `languages/elisp.el` içindeki `batch-byte-compile` dosya argümanı olmadan, `check-parens` boş batch tamponunda, ERT ise test dosyası yüklemeden öneriliyor. Profil proje runner'ını tanımalı; genel derleme/lint komutu gerçekten hedef dosyaları kontrol etmeli ve test altyapısı yokken başarı varsaymamalı.
-
-- **İptal edilen Git hook/imza işlemlerinde kilit kurtarma bildirimi.** Kullanıcının durdurduğu veya özel deadline ile kesilen Git işlemi `.git/index.lock` bırakabilir. Başka bir Git sürecine ait kilidi otomatik silmeden, kullanıcıya doğrulanabilir kurtarma yönlendirmesi verilmeli; canlı süreç/kilit sahipliği ayrıca kontrol edilmeli.
-
-- **Onay beklerken stash referansının kimliği değişebilir.** `stash@{N}` sayısal reflog seçicisidir; kullanıcı/başka süreç yeni stash eklerse aynı seçici başka nesneyi adlandırır. Pop/drop için onay anındaki nesne kimliği de yakalanmalı, devamda doğrulanmalı ve değişiklikte yeniden onay istenmeli. Git'in eşzamanlı reflog güncellemeleriyle yarış için kilit/atomik işlem sınırı ayrıca tasarlanmalı; yalnız seçici metnini onaylamak hedef kimliğini sabitlemez.
+---

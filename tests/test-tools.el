@@ -26,6 +26,29 @@
     (should (string-search "lines 1-2 of 2" (kargu-diff-read-file "two.txt")))
     (should-error (kargu-diff-read-file "one.txt" 2 2))))
 
+(ert-deftest kargu-diff-shadow-buffers-never-clobber-existing-content-test ()
+  "Same-basename proposals never erase each other or user-owned buffers."
+  (let* ((path (expand-file-name "src/shared.el" default-directory))
+         (existing (generate-new-buffer (kargu-diff--shadow-name path)))
+         first second)
+    (unwind-protect
+        (progn
+          (with-current-buffer existing (insert "user draft"))
+          (setq first (kargu-diff--make-shadow path "first proposal")
+                second (kargu-diff--make-shadow
+                        (expand-file-name "tests/shared.el" default-directory)
+                        "second proposal"))
+          (should (buffer-live-p existing))
+          (should (with-current-buffer existing (buffer-modified-p)))
+          (should (equal (with-current-buffer existing (buffer-string)) "user draft"))
+          (should (equal (with-current-buffer first (buffer-string)) "first proposal"))
+          (should (equal (with-current-buffer second (buffer-string)) "second proposal"))
+          (should-not (eq first second)))
+      (dolist (buffer (list existing first second))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer))))))
+
 (ert-deftest kargu-diff-read-file-prefers-full-live-buffer-test ()
   "Unsaved text is visible without changing the source buffer's narrowing or point."
   (kargu-test-with-git-repo '(("live.el" . "disk version\n"))

@@ -1,4 +1,4 @@
-;;; kargu/tools/diff/stage.el --- Shadow buffer creation and staging logic -*- lexical-binding: t; -*-
+;;; stage.el --- Shadow buffer creation and staging logic -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -77,12 +77,13 @@ Dynamically bound while the hook runs.")
 (defun kargu-diff-apply-replace (file-path old-string new-string &optional callback)
   "Replace the unique OLD-STRING in FILE-PATH with NEW-STRING.
 The replacement is staged through `kargu-diff-apply-proposal'
-(shadow buffer + ediff).  Signal an error when OLD-STRING is
-missing or not unique so the model can re-read and retry."
+using a shadow buffer and ediff.  Signal an error when OLD-STRING is
+missing or not unique so the model can re-read and retry.
+CALLBACK receives the final review outcome when supplied."
   (unless (and (stringp old-string) (not (string-empty-p old-string)))
-    (error "old_string must be a non-empty string"))
+    (error "The old_string must be a non-empty string"))
   (unless (stringp new-string)
-    (error "new_string must be a string"))
+    (error "The new_string must be a string"))
   (let ((path (kargu-permission-resolve file-path "file")))
     (unless (or (file-exists-p path) (find-buffer-visiting path))
       (error (concat "No such file: '%s'\n"
@@ -101,7 +102,7 @@ missing or not unique so the model can re-read and retry."
     (let* ((original (or (kargu-diff--file-text path) ""))
            (matches (kargu-diff--count-literal original old-string)))
       (unless (= matches 1)
-        (error "old_string not found or not unique (matches: %d). Re-read the file with read_file and provide a unique context."
+        (error "The old_string was not found or is not unique (matches: %d); re-read the file with read_file and provide unique context"
                matches))
       (kargu-diff-apply-proposal
        path
@@ -153,26 +154,15 @@ missing or not unique so the model can re-read and retry."
 
 (defun kargu-diff--make-shadow (path content)
   "Create a fresh shadow buffer holding CONTENT for PATH.
-A stale shadow of the same name is killed first (shadows are
-disposable).  The buffer is never file-backed, has undo disabled
-and starts unmodified, so killing it later can never prompt."
-  (let* ((name (kargu-diff--shadow-name path))
-         (stale (get-buffer name)))
-    (when stale
-      (condition-case-unless-debug _err
-          (progn
-            (with-current-buffer stale (set-buffer-modified-p nil))
-            (kill-buffer stale))
-        (error (setq name (generate-new-buffer-name name)))))
-    (let ((buffer (get-buffer-create name)))
-      (with-current-buffer buffer
-        (fundamental-mode)
-        (buffer-disable-undo buffer)
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert content))
-        (set-buffer-modified-p nil))
-      buffer)))
+An existing buffer is never reused or killed, even for the same path.
+The new buffer is unfiled, has undo disabled and starts unmodified."
+  (let ((buffer (generate-new-buffer (kargu-diff--shadow-name path))))
+    (with-current-buffer buffer
+      (fundamental-mode)
+      (buffer-disable-undo buffer)
+      (insert content)
+      (set-buffer-modified-p nil))
+    buffer))
 
 ;;;; Core: staging and the ediff review -----------------------------------
 
@@ -193,7 +183,7 @@ quits ediff).  Return value: an outcome plist with :status
 :unchanged or :staged (review pending - async mode, or a postponed
 blocking review), plus :file, :saved and a model-facing :message."
   (unless (stringp new-content)
-    (error "new-content must be a string"))
+    (error "New-content must be a string"))
   (let* ((path (kargu-permission-resolve file-path "file"))
          (exists (file-exists-p path))
          (buf-a (kargu-diff--open-proposal-buffer path))
@@ -229,7 +219,8 @@ blocking review), plus :file, :saved and a model-facing :message."
     buf))
 
 (defun kargu-diff--apply-auto (path buf-a original new-content exists callback)
-  "Apply NEW-CONTENT to BUF-A automatically without interactive review."
+  "Apply NEW-CONTENT to BUF-A at PATH and notify CALLBACK.
+ORIGINAL is the rollback text; EXISTS says whether PATH already exists."
   (let ((snap (list :content original
                     :created-new (not exists)
                     :at (current-time))))
@@ -263,4 +254,4 @@ blocking review), plus :file, :saved and a model-facing :message."
 
 (provide 'kargu/tools/diff/stage)
 
-;;; kargu/tools/diff/stage.el ends here
+;;; stage.el ends here
