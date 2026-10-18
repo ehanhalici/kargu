@@ -148,12 +148,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
   - `kargu-confirm-dismiss-all` (koşu durdurulduğunda çağrılır), bekleyen tüm istekleri temizlerken `(kargu-confirm--settle req :cancel t)` çağırır. Ancak `:silent` parametresi `t` verildiğinden `on-decision` callback'i çalıştırılmaz; arkada onay sonucunu bekleyen asenkron araçlar koşu sonlandığında iptal edildiğini öğrenemez ve bellek sızıntısına yol açar.
 
 #### 13. Arama ve Git Araçlarındaki Yol/Regex Uyuşmazlıkları (`tools/search.el`, `tools/git.el`)
-- **`tools/search.el:178-191, 307-322`: Kök Dizindeki Dosyaların Elisp Glob Eşleşmesinden (`find_files`) Tamamen Dışlanması (K).**
-  - `kargu-search--normalize-glob`, `/` içermeyen `*.el`, `*.js`, `Makefile` gibi dosya kalıplarını `"**/"` önekiyle birleştirerek `"**/*.el"` yapar.
-  - `kargu-search--glob-to-regexp`, `**` karakterini `\0` yaparak `re` ifadesini `\`.*/[^/]*\.el\'` şeklinde regex'e dönüştürür.
-  - Regex içindeki `.*/` kısmı mutlak surette en az bir adet dizin ayracı (`/`) zorunlu kılar.
-  - Proje kök dizinindeki dosyaların (`kargu.el`, `index.js`, `README.md`, `Cargo.toml`) göreceli yolu dizin ayracı içermez (`"kargu.el"`).
-  - Sonuç: `fd` veya `rg` kurulu olmayan sistemlerde (veya fallback durumunda) `find_files` ile aranan hiçbir kök dizin dosyası Elisp gezgini tarafından bulunamaz; model projenin giriş noktasını veya kök dosyalarını göremez.
 - **`tools/search.el:140-141`: `rg --max-count` Parametresinin Dosya Başına Sınır Olarak Çalışması (K).**
   - `kargu-search--grep-rg`, çağrıya `--max-count <cap>` argümanı ekler.
   - Ripgrep spesifikasyonunda `--max-count`, arama genelinde toplam eşleşme sayısını değil, **her bir dosya içindeki** maksimum eşleşme sayısını sınırlar.

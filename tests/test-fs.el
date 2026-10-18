@@ -165,5 +165,41 @@
 				  (should (< (length out) 300))
 				  (should (string-search "truncated" out)))))))
 
+(ert-deftest kargu-search-elisp-globs-match-zero-or-more-directories-test ()
+  "A recursive glob includes root files and every nested directory depth."
+  (dolist (pattern '("*.el" "**/*.el"))
+    (let ((regexp (kargu-search--glob-to-regexp pattern)))
+      (dolist (path '("main.el" "src/main.el" "src/deep/main.el"))
+        (should (string-match-p regexp path)))
+      (should-not (string-match-p regexp "main.elc"))))
+  (let ((regexp (kargu-search--glob-to-regexp "src/**/test?.el")))
+    (dolist (path '("src/test1.el" "src/a/test2.el" "src/a/b/test3.el"))
+      (should (string-match-p regexp path)))
+    (dolist (path '("test1.el" "src/test12.el" "src/a/test.elc"))
+      (should-not (string-match-p regexp path))))
+  (should (string-match-p (kargu-search--glob-to-regexp "main+.el") "main+.el"))
+  (should-not (string-match-p (kargu-search--glob-to-regexp "main+.el") "main.el")))
+
+(ert-deftest kargu-search-find-files-fallback-includes-project-root-test ()
+  "The public find-files path works without fd or rg, including file targets."
+  (kargu-fs-test--with-tree
+   '(("main.el" . "x") ("src/child.el" . "x") ("src/deep/grandchild.el" . "x")
+     ("Makefile" . "x") ("src/Makefile" . "x"))
+   (let ((kargu-permission--override-root root))
+     (cl-letf (((symbol-function 'kargu-search-fd-executable) (lambda () nil))
+               ((symbol-function 'kargu-search-rg-executable) (lambda () nil)))
+       (dolist (pattern '("*.el" "**/*.el"))
+         (let ((result (kargu-test-await
+                        (lambda (done) (kargu-search-glob done pattern)))))
+           (should (equal (sort (split-string result "\n" t) #'string<)
+                          '("main.el" "src/child.el" "src/deep/grandchild.el")))))
+       (let ((result (kargu-test-await
+                      (lambda (done) (kargu-search-glob done "Makefile")))))
+         (should (equal (sort (split-string result "\n" t) #'string<)
+                        '("Makefile" "src/Makefile"))))
+       (should (equal (kargu-test-await
+                       (lambda (done) (kargu-search-glob done "*.el" "main.el")))
+                      "main.el\n"))))))
+
 (provide 'tests/test-fs)
 ;;; test-fs.el ends here

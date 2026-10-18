@@ -24,6 +24,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/api)
@@ -178,17 +179,24 @@ caps the number of hits returned."
 (defun kargu-search--glob-to-regexp (glob)
   "Regexp matching a project-relative path against GLOB."
   (let* ((g (kargu-search--normalize-glob glob))
-         (g (replace-regexp-in-string "\\*\\*" "\0" g))
-         (re (mapconcat
-              (lambda (ch)
-                (pcase ch
-                  (?\0 ".*")
-                  (?* "[^/]*")
-                  (?? "[^/]")
-                  (c (regexp-quote (char-to-string c)))))
-              (string-to-list g)
-              "")))
-    (concat "\\`" re "\\'")))
+         (size (length g))
+         (pos 0)
+         parts)
+    (while (< pos size)
+      (let ((char (aref g pos)))
+        (cl-incf pos)
+        (cond
+         ((and (= char ?*) (< pos size) (= (aref g pos) ?*))
+          (cl-incf pos)
+          (cond
+           ((and (< pos size) (= (aref g pos) ?/))
+            (cl-incf pos)
+            (push (rx (* (seq (+ (not (any "/"))) "/"))) parts))
+           (t (push (rx (* anything)) parts))))
+         ((= char ?*) (push (rx (* (not (any "/")))) parts))
+         ((= char ??) (push (rx (not (any "/"))) parts))
+         (t (push (regexp-quote (char-to-string char)) parts)))))
+    (concat (rx string-start) (string-join (nreverse parts)) (rx string-end))))
 
 (defun kargu-search-fd-executable ()
   "Return the path to fd (or fdfind) if available on PATH."
