@@ -117,14 +117,12 @@ visible window visiting a file, or any project file buffer."
     (and conn (not (stringp conn)))))
 
 (defun kargu-dape-ready-p ()
-  "Return non-nil if a dape session is active and ready for debugging.
-Returns t when a thread is stopped or when the session is live and active."
+  "Return non-nil only when a live Dape session has a stopped thread."
   (let ((conn (kargu-dape--raw-connection)))
     (and conn
          (not (stringp conn))
-         (or (and (fboundp 'dape--stopped-threads)
-                  (ignore-errors (dape--stopped-threads conn)))
-             (bound-and-true-p dape-active-mode)))))
+         (fboundp 'dape--stopped-threads)
+         (dape--stopped-threads conn))))
 
 (declare-function kargu-dape-selected-config "kargu/tools/dape/preflight" ())
 (declare-function kargu-dape-launch-config "kargu/tools/dape/preflight" (name))
@@ -188,7 +186,7 @@ Returns t when a thread is stopped or when the session is live and active."
           (run-at-time
            kargu-dape--session-poll-interval nil
            (lambda ()
-             (when (or (kargu-dape-ready-p) (kargu-dape-live-p))
+             (when (kargu-dape-ready-p)
                (kargu-dape--finish-session-wait wait :ready)))))))
 
 (defun kargu-dape--wait-for-session-ready (on-ready &optional on-cancel)
@@ -217,6 +215,8 @@ If cancelled or start fails within timeout, calls ON-CANCEL."
   (cond
    ((kargu-dape-ready-p)
     (funcall on-ready))
+   ((kargu-dape-live-p)
+    (kargu-dape--wait-for-session-ready on-ready on-cancel))
    ((not (fboundp 'dape))
     (message "kargu: dape is not installed or loaded")
     (when on-cancel (funcall on-cancel "dape is not installed")))

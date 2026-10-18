@@ -516,7 +516,9 @@
 (ert-deftest kargu-loop-debug-mode-tool-visibility-test ()
   "Ensure debug tools are visible in debug mode, while mutating tools are hidden."
   (let ((_ (kargu-test-mode 'debug)))
-    (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'debug)))
+    (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'debug))
+              ((symbol-function 'kargu-dape--raw-connection) (lambda () 'conn))
+              ((symbol-function 'dape--stopped-threads) (lambda (_) '(thread))))
       ;; Debug tools should be visible in debug mode
       (should (kargu-loop-tool-visible-p "debug_get_context"))
       (should (kargu-loop-tool-visible-p "debug_step_in"))
@@ -535,28 +537,19 @@
       (should (stringp (kargu-loop--gate-tool "edit_file"))))))
 
 (ert-deftest kargu-prompt-debug-message-content-test ()
-  "Ensure kargu-prompt-debug-message contains LSP schema, pause notice, and multi-tool calling rule."
+  "Explain the debugger without inventing a paused session or hidden tools."
   (let ((_ (kargu-test-mode 'debug)))
     (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'debug))
-              ((symbol-function 'kargu-lsp-build-skeleton) (lambda () "fn main() { ... }"))
+              ((symbol-function 'kargu-dape-tool-guide) (lambda () "debug_set_breakpoint"))
               ((symbol-function 'kargu-dape-context-snapshot) (lambda () "Paused at src/main.rs:10\nStack: main()")))
       (let ((msg (kargu-prompt-debug-message)))
         (should (stringp msg))
-        ;; Check Turkish instructions
-        (should (string-search "DEBUG modundasın" msg))
-        (should (string-search "Kodun LSP şeması (semboller tablosu)" msg))
-        (should (string-search "fn main() { ... }" msg))
-        (should (string-search "Debug başladı ve şu an çalışmıyor" msg))
-        (should (string-search "breakpoint koyup run edebilirsin" msg))
-        (should (string-search "Aynı anda birden fazla komut" msg))
         (should (string-search "debug_set_breakpoint" msg))
-        (should (string-search "debug_continue" msg))
-        (should (string-search "list_files" msg))
-        ;; Check English instructions for multi-model reliability
         (should (string-search "DEBUG mode" msg))
-        (should (string-search "paused at entry" msg))
-        (should (string-search "MULTIPLE tools in a single turn" msg))
-        (should (string-search "Current debugger state:" msg))
+        (should-not (string-search "paused at entry" msg))
+        (should-not (string-search "debug_continue" msg))
+        (should (string-search "execute sequentially" msg))
+        (should (string-search "Observed debugger state:" msg))
         (should (string-search "Paused at src/main.rs:10" msg))))))
 
 (ert-deftest kargu-prompt-tools-guidance-multi-tool-test ()
@@ -567,7 +560,7 @@
     (should (string-search "MULTIPLE tools in one turn" block))
     (should (string-search "execution is sequential" block))
     (should (string-search "debug_set_breakpoint" block))
-    (should (string-search "debug_continue" block))))
+    (should-not (string-search "debug_continue" block))))
 
 (ert-deftest kargu-prompt-omits-tools-when-model-cannot-call-them ()
   "A model that cannot call tools is not told about tools in the messages."

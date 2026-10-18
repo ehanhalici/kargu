@@ -20,11 +20,11 @@ AllModes == {"ask", "plan", "debug", "agent"}
 
 MutatingToolNames == {"edit_file", "write_file", "bash", "apply_patch",
                        "edit", "write", "patch",
-                       "debug_toggle_breakpoint",
                        "git_commit", "git_stage", "git_unstage",
                        "git_branch", "git_stash"}
 ReadOnlyToolNames == {"read_file", "lsp_skeleton", "grep"}
-AllToolNames      == MutatingToolNames \cup ReadOnlyToolNames
+DebugToolNames    == {"debug_toggle_breakpoint"}
+AllToolNames      == MutatingToolNames \cup ReadOnlyToolNames \cup DebugToolNames
 
 (***************************************************************************)
 (* Message Schema                                                          *)

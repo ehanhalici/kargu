@@ -63,6 +63,11 @@ MCNext ==
 
 MCSpec == Init /\ [][MCNext]_vars
 
+Safety_DebugGate ==
+    \A mode \in AllModes :
+        GateToolAllowed("debug_toggle_breakpoint", mode) =
+            (mode \in {"debug", "agent"})
+
 StateConstraint ==
     /\ generation <= 2
     /\ Len(history) <= 12

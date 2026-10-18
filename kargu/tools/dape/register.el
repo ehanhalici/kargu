@@ -13,6 +13,7 @@
 (require 'kargu/api/tools)
 (require 'kargu/tools/dape/commands)
 (require 'kargu/tools/dape/preflight)
+(require 'kargu/tools/dape/policy)
 
 ;;;; Tool registration -----------------------------------------------------
 
@@ -254,7 +255,11 @@
 
 (defun kargu-dape-register-tools ()
   "Register the DAPE tools and their aliases."
-  (kargu-register-tools kargu-dape--tool-specs kargu-dape--tool-aliases))
+  (kargu-register-tools
+   (mapcar (lambda (spec)
+             (append spec (list (kargu-dape-tool-policy (car spec)))))
+           kargu-dape--tool-specs)
+   kargu-dape--tool-aliases))
 
 (kargu-dape-register-tools)
 

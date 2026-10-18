@@ -1,9 +1,10 @@
 ## Açık sorunlar
 
-### debug icin dape ve kullanacagi dile ozel tool yoksa kullaniciya mesaj verdir ve debug moduna sokturtma
-- debug modundan once kontrol yapilsin ve gerekli aracalar yoksa debug mododuna sokturtmasin
-- debug modu su anda hicbir ai agent yoneticisi tarafindan desteklenmiyor, o yuzden mevzunun ne oldugunu cok iyi acikla ki ai bu toollari iyi kullanabilsin
-- debug sirasinda kullanilabilecek tum ozellikleri tool olarak ai a saglayalim
+### Debug araçlarının kapsamını genişletme
+
+- İşlev/veri/koşullu breakpoint, exception filtreleri, değişken atama, bellek ve disassembly için adaptör capability'sine bağlı şemalar eklenmeli. Ham, sınırsız DAP isteği yerine ayrı doğrulanan araçlar; hedefi değiştiren işlemlerde açık onay ve callback testleri gerekiyor.
+- Dape oturum sahipliği proje köküne bağlanmalı; başka projede açılmış global oturum, seçilen projenin debug oturumu sayılmamalı. Kaynak tamponu seçimindeki diğer-proje fallback'i de bu sınırla birlikte ele alınmalı.
+- Kargu ön kontrolü asenkron olsa da Dape'nin bazı adapter `ensure`/`fn` adımları senkron dış komut/Eglot isteği çalıştırıyor. Tüm dillerde kilitlenmeme için adaptör başlatma katmanının ayrıca tasarlanması gerekiyor; kurulu Dape paketine geçici yama yapılmamalı.
 
 ### opencode hatasi
 - opencode u provider olarak sectigimde modelleri listeleyemiyorum, bir bakar misin
@@ -205,13 +206,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
   - Kullanıcı `*kargu-plan*` tamponunda planı onaylamak için `C-c C-c` bastığında, `kargu-plan-approve` fonksiyonu `(kargu-chat-prompt prompt)` çağırır.
   - `kargu-chat-prompt` arka planda `kargu-chat--send-given`'i çalıştırır; bu fonksiyon `(when (kargu-chat--prompt-live-p) (kargu-chat--consume-input))` ile sohbet tamponundaki mevcut kullanıcı girdisini temizler.
   - Eğer kullanıcı plan oluşturulurken sohbet alanına bir taslak not veya sonraki adım için bir komut yazmışsa, plan onayıyla birlikte bu metin kullanıcıya sorulmadan kalıcı olarak silinir.
-- **`tools/dape/session.el:195`: Program Henüz Duraklamadan Oturumun `:ready` Sayılması ve DAP İsteklerinin Reddedilmesi (K).**
-  - `kargu-dape--session-started` içindeki deferred probe kontrolünde `(when (or (kargu-dape-ready-p) (kargu-dape-live-p)) (kargu-dape--finish-session-wait wait :ready))` mantığı yer alır.
-  - `kargu-dape-live-p`, Dape adaptör süreci başladığı anda (program henüz başlangıçta `:stopOnEntry` ile duraklamadan, aktif olarak koşarken) `t` döner.
-  - Oturum `:ready` ilan edildiği için Kargu ajanı hemen `dape_get_context`, `debug_stack` veya `debug_eval` istekleri gönderir. Ancak DAP protokolünde koşan bir iş parçacığının yığını sorgulanamaz; adaptör `"Thread is running, cannot inspect stack"` hatası dönerek ajanın ilk debug turunu başarısızlığa uğratır.
-- **`tools/dape/execution.el:96-100`: Dape Program Çıkışında (`dape-active-mode-off-hook`) Durum Eşitsizliği Nedeniyle Asılı Kalma (K).**
-  - `hook-exit` dinleyicisi `(unless (eq conn (kargu-dape--raw-connection)) (kargu-async-finish ...))` kontrolü yapar.
-  - `dape-active-mode-off-hook` tetiklendiği mikro-saniyede `kargu-dape--raw-connection` henüz nil yapılmamışsa ve eski `conn` nesnesini dönüyorsa, `unless` şartı sağlanmaz; görev tamamlanamaz (`kargu-async-finish` çağrılmaz) ve timer temizlenmediği için debug aracı timeout süresine kadar askıda kalır.
 - **`state/hooks.el:36-45`: Dinleyici Hatalarının State Bildirimini Kesmesi ve Durum Tutarsızlığı (K).**
   - `kargu-state-notify` fonksiyonu, `run-hook-with-args` çağrılarını koruyucu bir `condition-case` içine almaz.
   - UI veya harici bir paket `kargu-state-change-hook` veya `kargu-state-mode-hook`'a bir fonksiyon bağladığında, bu fonksiyonda oluşacak ufak bir hata (ör. kapalı tampon erişimi) state geçiş fonksiyonunun ortasında patlar; sonraki dinleyiciler ve durum senkronizasyonu yarıda kesilir.
@@ -290,8 +284,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 - **`config/schema.el:138, 149-151`: Eglot'un İsteğe Bağlı Yapılmasına Rağmen `kargu-check-setup` Tarafından Hata Olarak Raporlanması (K).**
   - Eglot bağımlılığı kaldırılmış ve isteğe bağlı hale getirilmiş olmasına rağmen, `kargu--dependencies` listesinde `(eglot . "LSP client...")` tanımı hala aktif bir bağımlılık olarak tutulmaktadır.
   - Eglot'un bulunmadığı Emacs ortamlarında `M-x kargu-check-setup` çalıştırıldığında `kargu setup issues: missing package eglot` hatası üretilerek kurulum başarısız ilan edilir ve kullanıcı yanıltılır.
-
-
 
 
 

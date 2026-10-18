@@ -335,45 +335,30 @@ During compaction, `kargu--compaction-system' replaces this."
                          kargu-prompt--parts))
        "\n\n")))
 
+(declare-function kargu-dape-tool-guide "kargu/tools/dape/policy" ())
+
 (defun kargu-prompt-debug-message ()
-  "Construct the debug mode message for the AI with LSP schema and guidance."
-  (let* ((skeleton (when (fboundp 'kargu-lsp-build-skeleton)
-                     (condition-case nil
-                         (let ((s (kargu-lsp-build-skeleton)))
-                           (if (and (stringp s) (not (string-prefix-p "ERROR:" s)))
-                               s
-                             nil))
-                       (error nil))))
-         (ctx (if (fboundp 'kargu-dape-context-snapshot)
-                  (kargu-dape-context-snapshot)
-                nil))
-         (ctx-str (if (and (stringp ctx) (not (string-prefix-p "ERROR:" ctx)))
-                      (format "Current debugger state:\n%s\n\n" ctx)
-                    ""))
-         (lang-guidance (if (fboundp 'kargu-language-prompt-guidance)
-                            (kargu-language-prompt-guidance (and (fboundp 'kargu-language-active)
-                                                                 (kargu-language-active)))
-                          "")))
+  "Explain the debugger workflow using observed state and available tools."
+  (let ((context (and (fboundp 'kargu-dape-context-snapshot)
+                      (kargu-dape-context-snapshot)))
+        (language (and (fboundp 'kargu-language-prompt-guidance)
+                       (kargu-language-prompt-guidance (kargu-language-active)))))
     (concat
-     "<system-reminder>\n"
-     "Şu anda DEBUG modundasın. / You are currently in DEBUG mode.\n\n"
-     (if (and (stringp lang-guidance) (not (string-empty-p lang-guidance)))
-         (concat lang-guidance "\n\n")
-       "")
-     (if skeleton
-         (format "Kodun LSP şeması (semboller tablosu) / Code LSP schema:\n```\n%s\n```\n\n" skeleton)
-       "Kodun LSP şeması / Code LSP schema: (LSP/eglot sembol tablosu henüz hazır değil; `lsp_project_skeleton' ile bakabilirsin)\n\n")
-     "Debug başladı ve şu an çalışmıyor (girişte duraklatıldı). İstediğin yerlere breakpoint koyup run edebilirsin.\n"
-     "Debugger started and is currently paused at entry. You can place breakpoints where you want and run/continue.\n\n"
-     "ÖNEMLİ (Çoklu Komut): Aynı anda birden fazla komut (tool call) gönderebilirsin! Gönderdiğin komutlar sırayla arka arkaya çalıştırılıp çıktıları sana topluca dönecektir.\n"
-     "IMPORTANT (Multi-Tool Calling): You can call MULTIPLE tools in a single turn! They will be executed sequentially and all their outputs returned together.\n"
-     "Örnekler / Examples:\n"
-     "- Debug: `debug_set_breakpoint' ile (file_path ve line vererek, örn: {\"file_path\": \"src/main.rs\", \"line\": 42}) breakpoint koyup hemen ardından aynı turda `debug_continue' (run) diyebilirsin; program breakpoint'e gelene kadar koşup durduğunda hem breakpoint onayı hem de duraklanan konumun kaynak kodu, stack ve değişkenleri tek seferde sana döner.\n"
-     "- İnceleme: `list_files', `workspace_grep', `read_file', `git_status' gibi komutları tek bir turda topluca gönderebilirsin.\n\n"
-     ctx-str
-     "Kullanabileceğin 20 debug komutu: `debug_set_breakpoint', `debug_clear_breakpoint', `debug_toggle_breakpoint', `debug_list_breakpoints', `debug_continue' (run), `debug_step_over' (next), `debug_step_in' (step), `debug_step_out' (out/finish), `debug_pause', `debug_up', `debug_down', `debug_threads', `debug_stack', `debug_modules', `debug_sources', `debug_scope', `debug_watch', `debug_eval', `debug_restart', `debug_kill', `debug_disconnect', `debug_quit'.\n"
-     "Tavsiye / Tip: Değişkenleri ve koleksiyon uzunluklarını görmek için eval çalıştırmadan önce duraklama anında listelenen in-scope variables'a (`debug_scope' / `debug_get_context') bakınız.\n"
-     "</system-reminder>")))
+     "<system-reminder>\nYou are in DEBUG mode, not a shell-based debugger.\n"
+     "The tools connect to Emacs Dape and its language-specific DAP adapter. "
+     "Do not start a second debugger, invent commands, or assume the target is paused. "
+     "Only advertised tools are available; availability changes with session state "
+     "and adapter capabilities. Files remain read-only in this mode.\n"
+     "Workflow: inspect the observed state, set a file/line breakpoint, continue, "
+     "then inspect the stopped stack and scopes. Use returned frame, thread and "
+     "variable identifiers, never guessed ones. Evaluate only when needed; "
+     "expressions can execute code and change the target. "
+     "A running/timeout report is not evidence that a breakpoint was reached. "
+     "Pause before inspecting a running target. Tool calls execute sequentially.\n"
+     (or language "") "\nObserved debugger state:\n" (or context "Unknown") "\n"
+     "Currently available debugger tools:\n"
+     (if (fboundp 'kargu-dape-tool-guide) (kargu-dape-tool-guide) "")
+     "\n</system-reminder>")))
 
 (defun kargu-prompt-mode-reminder ()
   "Per-turn `<system-reminder>' for the active mode, or nil.

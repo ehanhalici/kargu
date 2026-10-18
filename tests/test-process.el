@@ -113,7 +113,12 @@
             (while (and (not result) (< (float-time) deadline))
               (accept-process-output process 0.02)))
           (should result)
-          (let ((attributes (process-attributes child)))
+          ;; The parent sentinel may run before the kernel reaps its child.
+          (let ((deadline (+ (float-time) 2)) attributes)
+            (while (and (setq attributes (process-attributes child))
+                        (not (equal (alist-get 'state attributes) "Z"))
+                        (< (float-time) deadline))
+              (accept-process-output nil 0.01))
             (should (or (not attributes)
                         (equal (alist-get 'state attributes) "Z")))))
       (when process (kargu-process-cancel process))

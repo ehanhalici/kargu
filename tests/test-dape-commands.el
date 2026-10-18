@@ -22,6 +22,44 @@
 (require 'kargu/loop/tools)
 (require 'kargu/languages)
 
+(ert-deftest kargu-dape-policy-covers-all-tools-and-aliases-test ()
+  "Every debugger executor and alias obeys the same mode and session policy."
+  (dolist (mode '(ask plan))
+    (kargu-test-mode mode)
+    (dolist (name (append (mapcar #'car kargu-dape--tool-specs)
+                          (mapcar #'car kargu-dape--tool-aliases)))
+      (should-not (kargu-tool-visible-p name))
+      (should (string-prefix-p "ERROR:" (kargu-execute-tool name nil)))))
+  (kargu-test-mode 'debug)
+  (cl-letf (((symbol-function 'kargu-dape--raw-connection) (lambda () 'conn))
+            ((symbol-function 'dape--stopped-threads) (lambda (_) nil))
+            ((symbol-function 'dape--capable-p) (lambda (_conn _cap) nil)))
+    (should (kargu-tool-visible-p "debug_pause"))
+    (should-not (kargu-tool-visible-p "debug_scope"))
+    (should-not (kargu-tool-visible-p "scope"))
+    (should-not (kargu-tool-visible-p "debug_restart"))
+    (should-not (string-search "debug_scope" (kargu-dape-tool-guide)))))
+
+(ert-deftest kargu-dape-running-is-not-inspectable-test ()
+  "An active adapter is not ready for inspection until a thread stops."
+  (let ((dape-active-mode t))
+    (cl-letf (((symbol-function 'kargu-dape--raw-connection) (lambda () 'conn))
+              ((symbol-function 'dape--stopped-threads) (lambda (_) nil)))
+      (should-not (kargu-dape-ready-p)))))
+
+(ert-deftest kargu-dape-exit-hook-completes-even-before-connection-reset-test ()
+  "The inactive hook finishes a wait even if Dape still exposes its connection."
+  (let ((dape-stopped-hook nil) (dape-active-mode-off-hook nil) results)
+    (cl-letf (((symbol-function 'kargu-dape--raw-connection) (lambda () 'conn)))
+      (kargu-dape--start-action 'conn #'ignore "continue"
+                                (lambda (text) (push text results)) 30)
+      (run-hooks 'dape-active-mode-off-hook)
+      (run-hooks 'dape-active-mode-off-hook)
+      (should (= (length results) 1))
+      (should (string-search "PROGRAM EXITED" (car results)))
+      (should-not dape-stopped-hook)
+      (should-not dape-active-mode-off-hook))))
+
 (ert-deftest kargu-dape-session-wait-cleans-up-once-test ()
   "Readiness and timeout both release launch hooks and timers exactly once."
   (dolist (outcome '(:ready :cancelled))

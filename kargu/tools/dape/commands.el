@@ -12,6 +12,9 @@
 
 (require 'kargu/tools/dape/execution)
 
+(declare-function dape--modules "dape" (conn))
+(declare-function dape--sources "dape" (conn))
+
 
 (defun kargu-dape--after-stack-select (conn n label callback)
   "Report frame N of CONN under LABEL, then the refreshed context, to CALLBACK."
@@ -136,7 +139,7 @@ The text is passed to CALLBACK."
     (if (null conn)
         "ERROR: no live dape session"
       (condition-case err
-          (let* ((modules (kargu-dape--seq->list (plist-get conn :modules))))
+          (let* ((modules (kargu-dape--seq->list (dape--modules conn))))
             (if (null modules)
                 "[MODULES: 0 loaded or not reported by adapter]"
               (let ((lines (list (format "[MODULES: %d loaded]" (length modules)))))
@@ -156,7 +159,7 @@ The text is passed to CALLBACK."
     (if (null conn)
         "ERROR: no live dape session"
       (condition-case err
-          (let* ((sources (kargu-dape--seq->list (plist-get conn :loadedSources))))
+          (let* ((sources (kargu-dape--seq->list (dape--sources conn))))
             (if (null sources)
                 "[SOURCES: not available from adapter]"
               (let ((lines (list (format "[SOURCES: %d loaded]" (length sources)))))

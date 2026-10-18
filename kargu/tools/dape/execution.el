@@ -95,9 +95,8 @@ display the report in the echo area."
     (setq hook-exit
           (kargu-async-wrap
            task (lambda (&rest _)
-                  (unless (eq conn (kargu-dape--raw-connection))
-                    (kargu-async-finish
-                     task (format "[DEBUGGER PROGRAM EXITED]\nAction '%s' completed." name))))))
+                  (kargu-async-finish
+                   task (format "[DEBUGGER PROGRAM EXITED]\nAction '%s' completed." name)))))
     (add-hook 'dape-stopped-hook hook-stop)
     (add-hook 'dape-active-mode-off-hook hook-exit)
     (setq wait-timer
