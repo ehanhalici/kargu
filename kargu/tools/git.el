@@ -373,18 +373,25 @@ ALL optionally stages modified files."
 
 ;;;; Stash ----------------------------------------------------------------
 
-(defun kargu-git--stash-change (act message root callback)
-  "Run stash ACT with MESSAGE in ROOT and report to CALLBACK."
+(cl-defun kargu-git--stash-change (act &key message root callback stash)
+  "Run stash ACT with MESSAGE in ROOT and report to CALLBACK.
+STASH must explicitly select an entry for pop or drop."
   (let ((args (append (list "stash" act)
                       (and (equal act "push")
                            (stringp message)
                            (not (string-empty-p (string-trim message)))
-                           (list "-m" (string-trim message))))))
+                           (list "-m" (string-trim message)))
+                      (when (member act '("pop" "drop"))
+                        (unless (and (stringp stash)
+                                     (string-match-p (rx bos "stash@{" (+ digit) "}" eos) stash))
+                          (error "Explicit stash@{N} reference required for stash %s; list entries with git_stashes" act))
+                        (list stash)))))
     (kargu-git--approve (string-join args " ") root)
     (kargu-git--change args root callback #'identity (format "stash %s" act))))
 
-(defun kargu-git-stash (callback action &optional message)
-  "Perform stash ACTION with optional MESSAGE and report to CALLBACK."
+(cl-defun kargu-git-stash (callback action &optional message &key stash)
+  "Perform stash ACTION with optional MESSAGE and report to CALLBACK.
+For pop or drop, STASH must explicitly name a stash@{N} entry."
   (let* ((root (kargu-permission-project-root))
          (act (downcase (string-trim (or action "list")))))
     (cond
@@ -396,7 +403,7 @@ ALL optionally stages modified files."
                                      "(no stash entries)"
                                    (cdr res))))))
      ((member act '("push" "pop" "drop"))
-      (kargu-git--stash-change act message root callback))
+      (kargu-git--stash-change act :message message :root root :callback callback :stash stash))
      (t
       (error "Unknown stash action: %s; use list, push, pop, or drop" action)))))
 
@@ -554,18 +561,21 @@ through `kargu-permission-approve', which may re-run BODY after the answer."
                          (kargu--tool-arg args "name" "branch")))))
    (list
     "git_stash"
-    "Stash changes in a dirty working directory (push, pop, list, drop). Agent mode only."
+    "Stash changes (push, pop, list, drop). Pop/drop require an explicit stash@{N} entry; use git_stashes first. Agent mode only."
     '(("type" . "object")
       ("properties" . (("action" . (("type" . "string")
                                     ("description" . "Action: push, pop, list, or drop.")))
                        ("message" . (("type" . "string")
-                                     ("description" . "Optional stash message for push.")))))
+                                     ("description" . "Optional stash message for push.")))
+                       ("stash" . (("type" . "string")
+                                   ("description" . "Required for pop/drop: explicit stash@{N} reference, for example stash@{1}.")))))
       ("required" . ["action"]))
     (kargu-git--executor
      (lambda (args done)
        (kargu-git-stash done
                         (kargu--tool-arg args "action")
-                        (kargu--tool-arg args "message" "msg")))))
+                        (kargu--tool-arg args "message" "msg")
+                        :stash (kargu--tool-arg args "stash")))))
    (list
     "git_blame"
     "Show line-by-line Git commit and author information for a file. Read-only, available in all modes."

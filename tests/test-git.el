@@ -142,6 +142,36 @@
         (should (string-search "main" branches))
         (should (equal stashes "(no stash entries)"))))))
 
+(ert-deftest kargu-git-stash-mutations-require-an-explicit-entry-test ()
+  "No implicit top-of-stack mutation or option-shaped reference is accepted."
+  (let ((kargu-permission--mock-decision :approve))
+    (dolist (action '("pop" "drop"))
+      (dolist (stash '(nil "" "HEAD" "--all" "stash@{-1}" "stash@{1} --all"))
+        (should-error (kargu-git-stash #'ignore action nil :stash stash))))))
+
+(ert-deftest kargu-git-stash-uses-the-selected-reflog-entry-test ()
+  "Dropping an older entry preserves the newest stash; popping selects it explicitly."
+  (kargu-test-with-git-repo kargu-git-test--files
+    (with-temp-file (expand-file-name "a.txt" repo) (insert "older stash\n"))
+    (should (zerop (call-process "git" nil nil nil "stash" "push" "-m" "older")))
+    (with-temp-file (expand-file-name "a.txt" repo) (insert "newer stash\n"))
+    (should (zerop (call-process "git" nil nil nil "stash" "push" "-m" "newer")))
+    (let ((kargu-permission--mock-decision :approve))
+      (let ((result (kargu-test-await
+                     (lambda (callback)
+                       (kargu-git-stash callback "drop" nil :stash "stash@{1}")))))
+        (should-not (string-prefix-p "ERROR:" result)))
+      (let ((entries (kargu-test-await (lambda (callback) (kargu-git-stash callback "list")))))
+        (should (string-search "newer" entries))
+        (should-not (string-search "older" entries)))
+      (let ((result (kargu-test-await
+                     (lambda (callback)
+                       (kargu-git-stash callback "pop" nil :stash "stash@{0}")))))
+        (should-not (string-prefix-p "ERROR:" result)))
+      (with-temp-buffer
+        (insert-file-contents (expand-file-name "a.txt" repo))
+        (should (equal (buffer-string) "newer stash\n"))))))
+
 (ert-deftest kargu-git-status-test ()
   "Ensure kargu-git-status returns formatted Magit-style sections."
   (kargu-test-with-git-repo kargu-git-test--files
