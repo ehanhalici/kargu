@@ -52,7 +52,8 @@
         (should (eq (kargu-language-spec-id spec) id))
         (should (stringp (kargu-language-spec-name spec)))
         (should (consp (kargu-language-spec-extensions spec)))
-        (should (plist-get (kargu-language-toolchain spec default-directory) :build-cmd))
+        (unless (eq id 'javascript)
+          (should (plist-get (kargu-language-toolchain spec default-directory) :build-cmd)))
         (when (kargu-language-requires-lsp-p spec)
           (should (plist-get (kargu-language-spec-lsp spec) :binaries)))
         (should (plist-get (kargu-language-spec-debugger spec) :adapter))))))
@@ -280,6 +281,25 @@
       (kargu-languages--kill-chats)
       (delete-directory root t))))
 
+(ert-deftest kargu-languages-js-build-step-must-exist-test ()
+  "Plain JavaScript never advertises an absent build script."
+  (let ((root (make-temp-file "kargu-js-build-" t)))
+    (unwind-protect
+        (dolist (entry '(("{}" nil)
+                         ("{\"scripts\":{\"test\":\"node test.js\"}}" nil)
+                         ("{\"scripts\":{\"build\":\"\"}}" nil)
+                         ("{\"scripts\":{\"build\":\"bundler\"}}" "npm run build")))
+          (write-region (car entry) nil (expand-file-name "package.json" root) nil 'silent)
+          (should (equal (plist-get (kargu-language-js-toolchain root) :build-cmd)
+                         (cadr entry))))
+      (delete-directory root t))))
+
+(ert-deftest kargu-languages-python-build-has-no-placeholder-test ()
+  "Python compilation is project-wide and contains no unexpanded file marker."
+  (should (equal (plist-get (kargu-language-toolchain (kargu-language-get 'python))
+                            :build-cmd)
+                 "python -m compileall -q .")))
+
 (provide 'tests/test-languages)
 
 ;;; tests/test-languages.el ends here
@@ -289,7 +309,8 @@
   (let ((dir (make-temp-file "kargu-web-" t)))
     (unwind-protect
         (progn
-          (write-region "{}" nil (expand-file-name "package.json" dir))
+          (write-region "{\"scripts\":{\"test\":\"node test.js\"}}" nil
+                        (expand-file-name "package.json" dir))
           (write-region "" nil (expand-file-name "pnpm-lock.yaml" dir))
           (should (eq (kargu-language-spec-id (kargu-language-detect dir)) 'javascript))
           (should (equal (plist-get (kargu-toolchain-detect dir) :test-cmd) "pnpm test"))

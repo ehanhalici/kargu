@@ -21,7 +21,7 @@
    :modes '(python-mode python-ts-mode)
    :detectors '("pyproject.toml" "setup.py" "setup.cfg" "requirements.txt" "Pipfile")
    :toolchain
-   '(:build-cmd "python -m py_compile <file>"
+   '(:build-cmd "python -m compileall -q ."
      :test-cmd "pytest || python -m unittest discover"
      :lint-cmd "ruff check || mypy ."
      :notes "Run tests using `pytest` via `bash`. Check typing with `mypy` or `ruff`.")

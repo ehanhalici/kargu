@@ -89,7 +89,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 #### 3. Dil Profilleri ve Araç Zinciri Sorunları (`languages/`)
 - **`languages/elisp.el:46`: Var olmayan `ellsp` bağımlılığı.** Elisp dil profili zorunlu LSP sunucusu olarak `ellsp` tanımlar. Standart bir `ellsp` binary'si bulunmadığından, `kargu-deps` Elisp projelerinde bağımlılık hatası üretir.
 - **`languages/c.el:23`, `cpp.el:23`, `golang.el:21`: Özyinelemesiz dosya denetimi.** `(directory-files root nil "\\.c$" t)` kök dizinde doğrudan dosya arar. Kaynak kodları `src/`, `cmd/` veya `lib/` altında olan standart projeleri tanıyamaz ve C/C++/Go profili devreye girmez.
-- **`languages/python.el:19`: Yerine konmayan `<file>` yer tutucusu.** `:build-cmd "python -m py_compile <file>"` içindeki `<file>` dizesi hiçbir zaman dosya adıyla değiştirilmez; doğrudan çalıştırıldığında `python: can't open file '<file>'` hatası verir.
 - **`tools/dape/render.el:112`: Ham ANSI kaçış dizileri.** Hata ayıklayıcı çıktılarında gelen renk ve kontrol kodları temizlenmeden LLM context'ine aktarılır, gereksiz token tüketir.
 
 #### 4. Çekirdek ve Sözleşme Sorunları (`core/`, `contract/`)
@@ -129,10 +128,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 #### 11. Planlama, Oturum Durumu ve Dape Yaşam Döngüsü Detayları (`plan/dispatch.el`, `tools/dape/session.el`, `tools/dape/execution.el`, `state/hooks.el`)
 
 #### 12. Dil Belirleme Eksiklikleri ve UI Onay Motoru Kilitlenmeleri (`languages/core.el`, `languages/*.el`, `ui/confirm.el`)
-- **`languages/javascript.el:28-36`: JavaScript Projelerinde `npm run build` Zorunluluğu ve Derleme Hatası (K).**
-  - Standart JavaScript (Node.js/Express) projelerinde çoğu zaman derleme adımı (`"build"` scripti) bulunmaz.
-  - Ancak `kargu-language-js-toolchain`, TypeScript dışındaki düz JS projeleri için de `:build-cmd (format "%s run build" pm)` döner.
-  - Birçok Node.js projesinde `npm run build` komutu `npm ERR! Missing script: "build"` hatasıyla (`exit 1`) başarısız olur ve ajanın derleme doğrulaması yapmasını engeller.
 
 #### 13. Arama ve Git Araçlarındaki Yol/Regex Uyuşmazlıkları (`tools/search.el`, `tools/git.el`)
 - **`tools/search.el:140-141`: `rg --max-count` Parametresinin Dosya Başına Sınır Olarak Çalışması (K).**

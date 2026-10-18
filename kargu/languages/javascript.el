@@ -1,4 +1,4 @@
-;;; kargu/languages/javascript.el --- JavaScript / Node.js profile for Kargu -*- lexical-binding: t; -*-
+;;; javascript.el --- JavaScript / Node.js profile for Kargu -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -14,6 +14,32 @@
 ;;; Code:
 
 (require 'kargu/languages/core)
+(require 'json)
+
+(defconst kargu-language-js--metadata-max-bytes 262144
+  "Maximum package.json bytes read while discovering toolchain metadata.")
+
+(defun kargu-language-js--scripts (root)
+  "Return package scripts from ROOT without reading unbounded metadata."
+  (let ((file (expand-file-name "package.json" root)))
+    (when (file-readable-p file)
+      (condition-case err
+          (with-temp-buffer
+            (insert-file-contents file nil 0 kargu-language-js--metadata-max-bytes)
+            (let ((package (json-parse-buffer :object-type 'hash-table)))
+              (when (hash-table-p package)
+                (let ((scripts (gethash "scripts" package)))
+                  (and (hash-table-p scripts) scripts)))))
+        (error (kargu-log 'warn "Cannot read package scripts: %s"
+                          (error-message-string err)))))))
+
+(defun kargu-language-js--script-command (scripts manager name)
+  "Return MANAGER's command for NAME when present in SCRIPTS."
+  (when-let* ((script (and scripts (gethash name scripts))))
+    (when (and (stringp script) (not (string-empty-p (string-trim script))))
+      (if (equal name "test")
+          (format "%s test" manager)
+        (format "%s run %s" manager name)))))
 
 (defun kargu-language-js-package-manager (root)
   "Package manager for the JavaScript project at ROOT, from its lock file."
@@ -26,16 +52,15 @@
    (t "npm")))
 
 (defun kargu-language-js-toolchain (root &optional typescript)
-  "Toolchain plist for the project at ROOT; TYPESCRIPT adds a type check."
+  "Return commands for ROOT, with optional TYPESCRIPT validation."
   (let* ((pm (kargu-language-js-package-manager root))
-         (test-cmd (format "%s test" pm)))
-    (list :build-cmd (if typescript
-                         (format "%s run build || npx tsc --noEmit" pm)
-                       (format "%s run build" pm))
-          :test-cmd test-cmd
-          :lint-cmd (format "%s run lint" pm)
-          :notes (format "Package manager: %s. Use `%s' to execute tests."
-                         pm test-cmd))))
+         (scripts (kargu-language-js--scripts root)))
+    (list :build-cmd (or (kargu-language-js--script-command scripts pm "build")
+                         (and typescript "npx tsc --noEmit"))
+          :test-cmd (kargu-language-js--script-command scripts pm "test")
+          :lint-cmd (kargu-language-js--script-command scripts pm "lint")
+          :notes (format "Package manager: %s. Only use scripts defined in package.json."
+                         pm))))
 
 (defconst kargu-language-javascript-spec
   (kargu-make-language-spec
@@ -65,10 +90,11 @@
      :purpose "Language Server for JavaScript"
      :hint "npm install -g typescript-language-server typescript")
    :lsp-notes
-   "JavaScript symbols: functions, classes, methods, exported constants. Prefer `edit_by_lsp` to replace a whole function body."))
+   "JavaScript symbols: functions, classes, methods, exported constants. Prefer `edit_by_lsp` to replace a whole function body.")
+  "Language profile for JavaScript buffers and projects.")
 
 (kargu-language-register kargu-language-javascript-spec)
 
 (provide 'kargu/languages/javascript)
 
-;;; kargu/languages/javascript.el ends here
+;;; javascript.el ends here
