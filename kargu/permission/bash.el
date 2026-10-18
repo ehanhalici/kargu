@@ -7,8 +7,7 @@
 ;;; Commentary:
 
 ;; Shell command tokenization and escape analysis.
-;; Prevents shell injections, directory traversal (..), home escapes (~),
-;; and unauthorized filesystem modifications.
+;; Best-effort path checks and approval requirements, not OS isolation.
 
 ;;; Code:
 
@@ -70,6 +69,15 @@
   '("-c" "-e" "-E" "-r" "-x" "--eval" "--exec" "--command" "--execute" "--eval-expression")
   "Flags that make an interpreter run the following text as code.")
 
+(defconst kargu-permission--versioned-interpreter-pattern
+  (rx bos (or "python" "lua" "php") (+ digit) (* "." (+ digit)) eos)
+  "Version-qualified interpreters whose inline code still needs approval.")
+
+(defun kargu-permission--interpreter-p (name)
+  "Return non-nil when NAME identifies a known or versioned interpreter."
+  (or (member name kargu-permission-interpreters)
+      (string-match-p kargu-permission--versioned-interpreter-pattern name)))
+
 (defun kargu-permission--command-words (command)
   "Word tokens of COMMAND, by command position, as lists of strings.
 Commands are split on ; & | and newlines so each segment is one list."
@@ -84,28 +92,50 @@ Commands are split on ; & | and newlines so each segment is one list."
          (base (and head (file-name-nondirectory head))))
     (cond
      ((null base) nil)
-     ((member base '("eval" "exec" "source" "." "xargs" "sudo" "doas" "nohup" "env" "command" "time" "timeout"))
+     ((or (string-match-p (rx (any "='\"\\")) base)
+          (member base '("eval" "exec" "source" "." "xargs" "sudo" "doas" "nohup"
+                         "env" "command" "time" "timeout" "busybox" "toolbox")))
       (format "`%s' runs another command the validator cannot see" base))
-     ((and (member base kargu-permission-interpreters)
+     ((and (kargu-permission--interpreter-p base)
            (cl-some (lambda (w) (member w kargu-permission-code-flags)) (cdr words)))
-      (format "`%s' runs inline code" base)))))
+      (format "`%s' runs inline code" base))
+     ((and (equal base "find")
+           (seq-intersection words '("-exec" "-execdir" "-ok" "-okdir") #'equal))
+      "find executes another command")
+     ((and (equal base "git")
+           (cl-some (lambda (word)
+                      (or (string-prefix-p "-c" word)
+                          (string-prefix-p "--config-env" word)
+                          (string-prefix-p "--exec-path" word)
+                          (equal word "--paginate")))
+                    (cdr words)))
+      "Git configuration or pager flags can execute another command"))))
 
 (defun kargu-permission-command-risks (command)
   "Reasons why COMMAND cannot be fully checked by the path validator.
 Return nil for a command made only of plain words and quoted literals.
 A non-nil result means the command may touch paths the tokenizer never
 sees, so it needs an explicit human approval."
-  (let (risks)
-    (when (string-match-p "\\$(\\|`\\|\\$'\\|\\${\\|\\$\"\\|<(\\|>(" command)
-      (push "shell expansion ($(...), backticks, $'...', ${...}) builds paths at run time" risks))
-    (when (string-match-p "\\\\/" command)
-      (push "backslash-escaped slash hides a path" risks))
-    (when (string-match-p "|[ \t]*\\(?:[^ \t|;&]*/\\)?\\(?:ba\\|z\\|da\\|k\\)?sh\\b" command)
-      (push "pipes data into a shell" risks))
-    (dolist (words (kargu-permission--command-words command))
-      (when-let* ((r (kargu-permission--segment-risk words)))
-        (push r risks)))
-    (nreverse (delete-dups risks))))
+  (save-match-data
+    (let (risks)
+      (when (string-match-p (rx (any "{}\\")) command)
+	(push "braces or escapes can change paths after validation" risks))
+      (when (cl-some (lambda (token)
+                       (let ((word (cdr token)))
+			 (and (string-prefix-p "-" word)
+                              (string-match-p (rx (any "/~")) word))))
+                     (kargu-permission-tokenize-command command))
+	(push "an option contains an embedded path the validator cannot interpret" risks))
+      (when (string-match-p "\\$(\\|`\\|\\$'\\|\\${\\|\\$\"\\|<(\\|>(" command)
+	(push "shell expansion ($(...), backticks, $'...', ${...}) builds paths at run time" risks))
+      (when (string-match-p "\\\\/" command)
+	(push "backslash-escaped slash hides a path" risks))
+      (when (string-match-p "|[ \t]*\\(?:[^ \t|;&]*/\\)?\\(?:ba\\|z\\|da\\|k\\)?sh\\b" command)
+	(push "pipes data into a shell" risks))
+      (dolist (words (kargu-permission--command-words command))
+	(when-let* ((r (kargu-permission--segment-risk words)))
+          (push r risks)))
+      (nreverse (delete-dups risks)))))
 
 (defun kargu-permission--validate-cwd (effective-cwd effective-root cwd)
   "Check EFFECTIVE-CWD against EFFECTIVE-ROOT, reporting the supplied CWD."
@@ -162,10 +192,19 @@ sees, so it needs an explicit human approval."
          (or (getenv name) reference)))
      command t t)))
 
+(defun kargu-permission--option-path (token)
+  "Extract an unambiguous absolute or home path attached to option TOKEN."
+  (save-match-data
+    (when (string-match
+           (rx bos "-" (+ (any alpha "-")) (? "=")
+               (group (any "/~") (* anychar)) eos) token)
+      (match-string 1 token))))
+
 (defun kargu-permission--validate-token (tok-cons effective-cwd effective-root)
   "Validate TOK-CONS against EFFECTIVE-CWD and EFFECTIVE-ROOT."
-  (let* ((type (car tok-cons))
-         (tok (cdr tok-cons)))
+  (let* ((path (kargu-permission--option-path (cdr tok-cons)))
+         (type (if path :quoted (car tok-cons)))
+         (tok (or path (cdr tok-cons))))
     (cond
      ((or (string-match-p "\\`\\.\\.\\(/\\|\\'\\)" tok)
           (string-match-p "/\\.\\.\\(/\\|\\'\\)" tok)
@@ -205,17 +244,18 @@ escapes ROOT."
   (unless (and (stringp command) (not (string-empty-p (string-trim command))))
     (error "Command must be a non-empty string"))
   (when kargu-permission-strict-mode
-    (let* ((effective-root (file-name-as-directory
-                            (file-truename (or root (kargu-permission-project-root)))))
-           (effective-cwd (file-name-as-directory
-                           (file-truename (or cwd effective-root)))))
-      ;; 1. Check working directory
-      (kargu-permission--validate-cwd effective-cwd effective-root cwd)
-      ;; 2. Substitute common environment variables and validate tokens
-      (let* ((expanded-cmd (kargu-permission--expand-environment command))
-             (tokens (kargu-permission-tokenize-command expanded-cmd)))
-        (dolist (tok-cons tokens)
-          (kargu-permission--validate-token tok-cons effective-cwd effective-root))))))
+    (save-match-data
+      (let* ((effective-root (file-name-as-directory
+                              (file-truename (or root (kargu-permission-project-root)))))
+             (effective-cwd (file-name-as-directory
+                             (file-truename (or cwd effective-root)))))
+	;; 1. Check working directory
+	(kargu-permission--validate-cwd effective-cwd effective-root cwd)
+	;; 2. Substitute common environment variables and validate tokens
+	(let* ((expanded-cmd (kargu-permission--expand-environment command))
+               (tokens (kargu-permission-tokenize-command expanded-cmd)))
+          (dolist (tok-cons tokens)
+            (kargu-permission--validate-token tok-cons effective-cwd effective-root)))))))
 
 (provide 'kargu/permission/bash)
 
