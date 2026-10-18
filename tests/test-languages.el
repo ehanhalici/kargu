@@ -22,6 +22,38 @@
 (require 'kargu/tools/deps)
 (require 'kargu/chat)
 
+(ert-deftest kargu-language-elisp-commands-validate-real-files-test ()
+  "Build and lint see real filenames, and ERT loads an existing runner."
+  (kargu-test-with-git-repo
+      '(("a space.el" . "(defun fixture () t)\n")
+        ("broken.el" . "(defun broken (\n"))
+    (let* ((toolchain (kargu-language-elisp-toolchain repo))
+           (build (plist-get toolchain :build-cmd))
+           (lint (plist-get toolchain :lint-cmd)))
+      (should-not (plist-get toolchain :test-cmd))
+      (dolist (command (list build lint))
+        (let ((result (kargu-test-await
+                       (lambda (callback)
+                         (kargu-process-run "sh" (list "-c" command) callback :dir repo)))))
+          (should-not (= (plist-get result :code) 0))))
+      (write-region "(defun fixed () t)\n" nil (expand-file-name "broken.el" repo))
+      (dolist (command (list build lint))
+        (let ((result (kargu-test-await
+                       (lambda (callback)
+                         (kargu-process-run "sh" (list "-c" command) callback :dir repo)))))
+          (should (= (plist-get result :code) 0))))
+      (should (file-exists-p (expand-file-name "a space.elc" repo)))
+      (make-directory (expand-file-name "tests" repo))
+      (write-region
+       "(require 'ert)\n(ert-deftest fixture-fails () (should nil))\n(ert-run-tests-batch-and-exit)\n"
+       nil (expand-file-name "tests/run-tests.el" repo))
+      (let* ((command (plist-get (kargu-language-elisp-toolchain repo) :test-cmd))
+             (result (kargu-test-await
+                      (lambda (callback)
+                        (kargu-process-run "sh" (list "-c" command) callback :dir repo)))))
+        (should-not (= (plist-get result :code) 0))
+        (should (string-search "fixture-fails" (plist-get result :output)))))))
+
 (ert-deftest kargu-languages-unsaved-buffer-major-modes-test ()
   "Language profiles work before a buffer has any file or project marker."
   (dolist (entry '((rust rust-mode rust-ts-mode rustic-mode)

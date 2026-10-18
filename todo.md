@@ -135,10 +135,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 ---
 
 ### Modül: `languages/` (Dil Profilleri)
-1. **[K - Orta] `languages/elisp.el` doğrulama komutları hedefsizdir.**
-   - **Dosya / Satır:** `kargu/languages/elisp.el:33-35`
-   - **Sorun:** `:build-cmd` (`batch-byte-compile`) ve `:lint-cmd` (`check-parens`) dosya argümanı olmadan çağrılmaktadır; `:test-cmd` (`ert-run-tests-batch-and-exit`) test dosyalarını yüklemeden çalıştırılır. Model bu komutları doğrudan çalıştırdığında gerçek dosyalar denetlenmez.
-
 ---
 
 ### Modül: `tools/lsp/` (LSP & Tanı Araçları)

@@ -20,6 +20,35 @@
       (ignore-errors
         (directory-files root nil "\\.el\\'" t))))
 
+(defun kargu-language-elisp--file-command (arguments)
+  "Return an Emacs command applying ARGUMENTS to actual project Lisp files."
+  (format "find . -path './.git' -prune -o -type f -name '*.el' -exec emacs -Q --batch %s {} +"
+          arguments))
+
+(defun kargu-language-elisp-toolchain (root)
+  "Return validation commands for actual Lisp files and a runner in ROOT."
+  (let ((runner (seq-find (lambda (path) (file-regular-p (expand-file-name path root)))
+                          '("tests/run-tests.el" "test/run-tests.el")))
+        (lint '(progn
+                 (dolist (file command-line-args-left)
+                   (with-temp-buffer
+                     (insert-file-contents file)
+                     (emacs-lisp-mode)
+                     (check-parens)))
+                 (setq command-line-args-left nil))))
+    (list :build-cmd (kargu-language-elisp--file-command "-L . -f batch-byte-compile")
+          :test-cmd (and runner
+                         (concat "emacs -Q --batch -L . --eval "
+                                 (shell-quote-argument "(progn (require 'package) (package-initialize))")
+                                 " -l " (shell-quote-argument runner)))
+          :lint-cmd (kargu-language-elisp--file-command
+                     (concat "--eval " (shell-quote-argument (prin1-to-string lint))))
+          :notes (concat
+                  "Use native xref and imenu, not an external language server. "
+                  "Build and parenthesis checks target project .el files. "
+                  (if runner "The test command loads the existing project runner."
+                    "No conventional ERT runner was found; read project instructions to select tests. Never treat zero loaded tests as verification.")))))
+
 (defconst kargu-language-elisp-spec
   (kargu-make-language-spec
    :id 'emacs-lisp
@@ -29,11 +58,7 @@
    :modes '(emacs-lisp-mode)
    :requires-lsp nil
    :detectors (list #'kargu-language-elisp--present-p)
-   :toolchain
-   '(:build-cmd "emacs -Q --batch -f batch-byte-compile"
-     :test-cmd "emacs -Q --batch -l ert -f ert-run-tests-batch-and-exit"
-     :lint-cmd "emacs -Q --batch -f check-parens"
-     :notes "Use Emacs's built-in xref for definitions and imenu for file outlines. No external language server is required.")
+   :toolchain #'kargu-language-elisp-toolchain
    :debugger
    '(:adapter "none"
      :supports-eval nil
