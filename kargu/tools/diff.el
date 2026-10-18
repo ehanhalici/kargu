@@ -457,7 +457,7 @@ Signals when OP cannot apply, so a bad patch changes nothing."
 
 (cl-defstruct (kargu-diff--patch-batch (:constructor kargu-diff--make-patch-batch))
   "One patch's review outcomes and single completion delivery."
-  (state :launching) pending outcomes callback)
+  (state :launching) pending outcomes callback owner)
 
 (defun kargu-diff--patch-summary (batch)
   "Describe BATCH without treating pending or rejected proposals as applied."
@@ -496,21 +496,25 @@ Signals when OP cannot apply, so a bad patch changes nothing."
 (defun kargu-diff--stage-patch-file (batch file entry)
   "Stage FILE's planned ENTRY and collect its final outcome in BATCH."
   (let ((done (lambda (outcome) (kargu-diff--settle-patch-file batch file outcome))))
-    (condition-case-unless-debug err
-        (if (eq (car entry) :deleted)
-            (progn
-              (kargu-diff--delete-file file (cadr entry))
-              (funcall done (list :status :applied-full :file file :saved t)))
-          (kargu-diff-apply-proposal file (cadr entry) done))
-      (error (funcall done (list :status :error :file file
-                                :message (format "ERROR: %s: %s" file
-                                                 (error-message-string err))))))))
+    (if (and (kargu-diff--patch-batch-owner batch)
+             (not (eq (kargu-diff--patch-batch-owner batch) kargu--loop-run)))
+        (funcall done (list :status :interrupted :file file))
+      (condition-case-unless-debug err
+          (if (eq (car entry) :deleted)
+              (progn
+		(kargu-diff--delete-file file (cadr entry))
+		(funcall done (list :status :applied-full :file file :saved t)))
+            (kargu-diff-apply-proposal file (cadr entry) done))
+	(error (funcall done (list :status :error :file file
+                                   :message (format "ERROR: %s: %s" file
+                                                    (error-message-string err)))))))))
 
 (defun kargu-diff--commit-patch (state callback)
   "Stage the proposals in STATE and report their final summary to CALLBACK."
   (let ((batch (kargu-diff--make-patch-batch
                 :pending (hash-table-count state)
-                :outcomes (make-hash-table :test #'equal) :callback callback)))
+                :outcomes (make-hash-table :test #'equal) :callback callback
+                :owner kargu--loop-run)))
     (maphash (lambda (file entry) (kargu-diff--stage-patch-file batch file entry)) state)
     (setf (kargu-diff--patch-batch-state batch) :waiting)
     (kargu-diff--finish-patch batch)

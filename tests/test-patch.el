@@ -29,6 +29,20 @@
 (require 'kargu/permission)
 (require 'kargu/tools/diff)
 
+(ert-deftest kargu-patch-stopped-owner-cannot-stage-later-files-test ()
+  "Cancellation during an earlier proposal prevents later file side effects."
+  (kargu-test-with-git-repo '(("a.txt" . "a\n") ("b.txt" . "b\n"))
+    (let ((kargu--loop-run (list :state 'tools)) (staged 0))
+      (cl-letf (((symbol-function 'kargu-diff-apply-proposal)
+                 (lambda (file _text &optional callback)
+                   (cl-incf staged)
+                   (setq kargu--loop-run nil)
+                   (funcall callback (list :status :applied-full :file file)))))
+        (let ((result (kargu-diff-apply-patch
+                       "*** Begin Patch\n*** Update File: a.txt\n@@\n-a\n+new a\n*** Update File: b.txt\n@@\n-b\n+new b\n*** End Patch")))
+          (should (= staged 1))
+          (should (string-prefix-p "Patch NOT fully applied" result)))))))
+
 (ert-deftest kargu-patch-waits-for-all-review-outcomes-test ()
   "Blocking and async patches deliver once, after every human decision."
   (dolist (mode '(blocking async))
