@@ -125,9 +125,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 - **`core/session.el:34-43, 124-148`: Global `kargu--session` ve `kargu--message-history` Nedeniyle Çoklu Tampon Çakışması (K).** `kargu--session` ve mesaj geçmişi global değişkenlerde tutulur. Kullanıcı iki ayrı projede iki ayrı Kargu sohbet tamponu açtığında sayaçlar birbirine karışır; bir tampondaki `kargu-session-reset` diğer projedeki tüm sohbet geçmişini ve devre kesici durumunu sessizce sıfırlar.
 - **`chat/render.el:214` & `chat/stream.el:114-135`: Çoklu Araç Çağrılarında Önceki Araç Loglarının Sohbet Günlüğünden Silinmesi (K).** `kargu-chat-drop-preamble` aktifken, model tek bir turda birden fazla araç çağırdığında (ardışık/paralel araçlar), ilk araç tamamlandıktan sonra ikinci araç başladığında `(kargu-chat--drop-streamed-preamble)` tekrar tetiklenir. `kargu-chat--answer-start` ile `kargu-chat--output-marker` arasındaki aralık silindiği için, tamamlanan ilk aracın çıktı ve başlık satırı sohbet günlüğünden tamamen silinir. 5 araç çağrıldığında yalnızca sonuncunun kaydı ekranda kalır.
 - **`chat/session.el:155-158`: Proje İçi `.kargu/sessions/` Dizininde Hassas Veri Sızıntısı ve Git İhlali.** Eğer proje kökünde `.kargu/sessions` dizini varsa, oturum dosyaları merkezi `~/.config/` yerine doğrudan proje köküne yazılır. Kargu'nun varsayılan `.gitignore` şablonunda veya depolarında `.kargu/` hariç tutulmadığından, tüm sohbet geçmişi, API yanıtları ve özel prompt verileri git'e commit edilebilir hale gelir.
-#### 9. Dosya & Sembol Ekleri (`@file::symbol`) ve İstem Genişletme Sorunları (`chat/attach.el`)
-- **`chat/attach.el:157-175`: `@file::symbol` Sembol Aramasında İmleç Kayması ve Lisp Dışı Tüm Dillerde Başarısızlık (K).** `kargu-chat--find-symbol-pos` fonksiyonu, sembol tanımını bulmak için `(or (re-search-forward ...) (re-search-forward ...) ...)` zinciri kullanır. Ancak `(goto-char (point-min))` yalnızca zincirin başında bir kez çağrılır. İlk regex (Elisp `defun/defvar`) Lisp dışı bir dilde (Rust, Python, Go, TypeScript, C++) eşleşmediğinde, `re-search-forward` başarısız olur ve tampon imlecini `(point-max)` konumunda bırakır. Zincirdeki diğer tüm dil regex'leri (`fn`, `function`, `def`, `class`, `struct`) aramaya `point-max`'tan başladıkları için anında başarısız olur. Sonuç: Elisp haricindeki hiçbir dilde `@dosya::sembol` çalışmaz ve modele her zaman `(symbol not found in file)` hatası iletilir.
-
 #### 10. JSON Ayrıştırma/Kodlama, Dosya Sistemi Gezinmesi ve Dizin Dışlama Hataları (`json.el`, `fs.el`)
 - **`json.el:216-223, 122-130`: Boş JSON Nesnesi (`{}`) Çözülüp Geri Kodlandığında `null`'a Dönüşmesi ve API 400 Hataları (K).**
   - `kargu--json-decode`, boş bir JSON nesnesi olan `"{}"` metnini Emacs Lisp'in boş listesi `nil` olarak çözer.
@@ -188,16 +185,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
   - `kargu-permission-context-root`, kök dizini belirlerken `(project-current)` kullanır. `project.el`, mevcut dizinden yukarı doğru tarama yaparak en yakın VCS deposunu bulur.
   - Eğer `/tmp` veya kullanıcının ev dizini (`~`) içinde geçmişten kalma bir `.git` deposu varsa, `/tmp/scratch` içinde çalışan bir işlem için `project-current` kökü `/tmp/` veya `~` olarak tespit eder.
   - Bu durumda `kargu-permission-within-project-p` tüm `/tmp/` veya tüm ev dizinini "proje içi" kabul eder; Kargu'nun dosya kısıtlama kuralları tamamen işlevsiz hale gelerek sisteme geniş yazma izni verir.
-
-#### 16. İstem Genişletme ve Dosya Eki Sahte Eşleşmeleri (`chat/attach.el`, `chat/complete.el`)
-- **`chat/attach.el:32-36, 89-112, 273-276`: E-posta Adreslerinin (`user@domain.com`) Sahte Dosya Eki Sayılması ve İstem Kirliliği (K).**
-  - `kargu-chat--file-mention-p`, uzantı benzeri bir nokta içeren her `@` ifadesini (`string-match-p "\\.[A-Za-z0-9]+\\'" token`) dosya yolu kabul eder.
-  - Kullanıcı istem içinde bir e-posta adresi (`destek@firma.com`) veya domain adı yazdığında, sistem bunu bir dosya yolu sanarak diskte `firma.com` aramaya başlar.
-  - Dosya bulunamadığında ise modele gönderilen nihai isteme `<code_selection path="firma.com">(not found)</code_selection>` XML bloğu enjekte edilir.
-  - Model istemde dosya ekleme hatası olduğunu sanarak asıl soru yerine "firma.com dosyasını bulamadım" uyarısı verir ve yanıtın bağlamı bozulur.
-- **`chat/complete.el:98-118` & `chat/attach.el:89-93`: Çoklu `@` Bahsetmelerinde Senkron Dizin Taramasının Yinelenmesi (K).**
-  - `kargu-chat--resolve-mention-file`, her `@` bahsetmesi için `(kargu-chat--completion-roots)` fonksiyonunu baştan çağırır.
-  - Açık tamponların ve projelerin kök dizinleri her bahsetmede tek tek gezilir; `project-files` çağrısı 10 binlerce dosyalık projelerde her `@` işareti için Emacs UI iş parçacığında yeniden çalıştırılarak belirgin donmalara yol açar.
 
 #### Debug araçlarının kapsamını genişletme
 

@@ -91,5 +91,50 @@
       (should (equal (kargu-chat--compute-symbol-bounds found) '(2 . 3)))
       (should (= (point) saved)))))
 
+(ert-deftest kargu-attach-email-addresses-are-not-mentions-test ()
+  "Email addresses and package handles do not trigger file attachments."
+  (should (equal (kargu-chat--at-tokens
+                  "user@domain.com, <other+tag@firma.com> pkg@1.2 @a.el (@b.py)")
+                 '("a.el" "b.py")))
+  (let ((prompt "Write to user@domain.com"))
+    (cl-letf (((symbol-function 'kargu-chat--completion-roots)
+               (lambda () (ert-fail "Email must not scan project roots"))))
+      (should (equal (kargu-chat--expand-prompt prompt)
+                     (format "<user_query>\n%s\n</user_query>" prompt))))))
+
+(ert-deftest kargu-attach-symbol-search-preserves-editor-state-test ()
+  "Each language search starts independently and preserves point and matches."
+  (dolist (source '("(defun target () t)\n" "fn target() {}\n"
+                    "func target() {}\n" "function target() {}\n"
+                    "def target():\n    pass\n" "class target {}\n"
+                    "struct target {}\n" "target = 1\n"))
+    (with-temp-buffer
+      (insert source)
+      (goto-char (point-max))
+      (string-match "saved" "saved")
+      (let ((saved-point (point)) (saved-match (match-data)))
+        (let ((found (kargu-chat--find-symbol-pos "target")))
+          (should (numberp found))
+          (should (= (line-number-at-pos found) 1)))
+        (should (= (point) saved-point))
+        (should (equal (match-data) saved-match))
+        (should-not (kargu-chat--find-symbol-pos "not_here"))
+        (should (= (point) saved-point))))))
+
+(ert-deftest kargu-attach-expansion-collects-roots-once-test ()
+  "Mixed file and symbol mentions reuse roots for this expansion only."
+  (kargu-attach-test--with-project
+   '(("a.el" . "(defun target () t)\n") ("b.txt" . "second file\n"))
+   (let ((calls 0))
+     (cl-letf (((symbol-function 'kargu-chat--completion-roots)
+                (lambda () (cl-incf calls) (list root))))
+       (dotimes (n 2)
+         (let ((out (kargu-chat--expand-prompt
+                     "@a.el @b.txt @a.el::target @missing.txt")))
+           (should (string-search "second file" out))
+           (should (string-search "symbol target" out))
+           (should (string-search "(not found)" out))
+           (should (= calls (1+ n)))))))))
+
 (provide 'tests/test-attach)
 ;;; test-attach.el ends here
