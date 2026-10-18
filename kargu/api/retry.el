@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'plz)
+(require 'time-date)
 (require 'kargu/core)
 (require 'kargu/core/observers)
 (require 'kargu/config)
@@ -102,9 +103,17 @@ available, instead of dumping raw JSON."
 
 (defun kargu--api-retry-after-seconds (err)
   "Retry-After delay in seconds from ERR, or nil."
-  (let ((raw (and err (kargu--plz-header err "retry-after"))))
-    (when (and (stringp raw) (string-match "\\`[0-9]+\\'" (string-trim raw)))
-      (min kargu-api-retry-after-max (string-to-number raw)))))
+  (save-match-data
+    (when-let* ((raw (and err (kargu--plz-header err "retry-after")))
+                ((stringp raw)))
+      (let* ((value (string-trim raw))
+             (seconds
+              (if (string-match-p (rx string-start (+ digit) string-end) value)
+                  (string-to-number value)
+                (condition-case nil
+                    (float-time (time-subtract (date-to-time value) (current-time)))
+                  (error nil)))))
+        (when seconds (max 0 (min kargu-api-retry-after-max seconds)))))))
 
 (defun kargu--api-retryable-p (err)
   "Non-nil when ERR is an HTTP status we retry."

@@ -24,6 +24,24 @@
 (defvar kargu-api-stall-timeout)
 (defvar kargu-api-stream-ceiling)
 
+(ert-deftest kargu-api-retry-after-supports-dates-and-bounds-test ()
+  "Retry-After accepts HTTP dates, clamps delays and preserves match data."
+  (let* ((now (date-to-time "Sun, 18 Oct 2026 12:00:00 GMT"))
+         (kargu-api-retry-after-max 120))
+    (dolist (case '((" 10 " . 10) ("999" . 120)
+                    ("Sun, 18 Oct 2026 12:01:00 GMT" . 60)
+                    ("Sun, 18 Oct 2026 13:00:00 GMT" . 120)
+                    ("Sun, 18 Oct 2026 11:00:00 GMT" . 0)
+                    ("invalid" . nil)))
+      (cl-letf (((symbol-function 'kargu--plz-header) (lambda (&rest _) (car case)))
+                ((symbol-function 'current-time) (lambda () now)))
+        (string-match "keep" "keep")
+        (let ((match (match-data)))
+          (if (cdr case)
+              (should (= (kargu--api-retry-after-seconds 'error) (cdr case)))
+            (should-not (kargu--api-retry-after-seconds 'error)))
+          (should (equal (match-data) match)))))))
+
 (ert-deftest kargu-api-retry-observers-cannot-post-after-cancellation-test ()
   "Retry observers run once, and cancellation during notification prevents POST."
   (let* ((kargu--generation 100) (posts 0) (observations 0)

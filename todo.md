@@ -64,9 +64,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 2. **[K - Düşük] Devre kesici (Circuit Breaker) çift başarı kaydı.**
    - **Dosya / Satır:** `kargu/api/http.el` & `kargu/loop/machine.el:395, 405, 415, 422`
    - **Sorun:** HTTP 200 yanıtı alındığında HTTP katmanı `kargu-circuit-record-success` çağırır; döngü makinesinde `on-tools`, `on-thought`, `on-answer` da tekrar çağırır. Half-open durumunda sayaçlar tutarsız ilerleyebilir.
-3. **[K - Düşük] `Retry-After` başlığı HTTP-Date biçimini desteklemiyor.**
-   - **Dosya / Satır:** `kargu/api/retry.el:103-107`
-   - **Sorun:** Yalnızca tamsayı saniye formatı (`[0-9]+`) okunmaktadır; RFC standartlarındaki HTTP-Date formatı (örn. `Wed, 21 Oct 2026 07:28:00 GMT`) yok sayılır ve varsayılan backoff'a düşer.
 4. **[K - Düşük] `func-arity` kırılganlığı.**
    - **Dosya / Satır:** `kargu/loop/machine.el:158`, `kargu/api/tools.el:323`
    - **Sorun:** `&optional` veya `&rest` içeren lambda fonksiyonlarında `(cdr (func-arity cb))` beklenen 1 değerini vermeyebilir, delta iletimi yanlış kola sapabilir.
