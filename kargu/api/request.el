@@ -14,7 +14,6 @@
 (require 'kargu/config)
 (require 'kargu/history)
 (require 'kargu/api/tools)
-(require 'kargu/providers/params)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-extra-headers "kargu/providers/registry" (id))
@@ -130,8 +129,6 @@ at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
            (kargu--payload-sampling-entries)
            (kargu--payload-tools-entries tools cache-marked))))
     (dolist (entries (list (kargu--build-reasoning-params)
-                           (and (fboundp 'kargu-provider-params-build-payload)
-                                (kargu-provider-params-build-payload))
                            extra))
       (setq payload (kargu--payload-merge payload entries)))
     payload))

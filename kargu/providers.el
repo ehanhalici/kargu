@@ -1,4 +1,4 @@
-;;; kargu/providers.el --- Provider definitions and resolution -*- lexical-binding: t; -*-
+;;; providers.el --- Provider definitions and resolution -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -13,8 +13,7 @@
 
 (require 'kargu/providers/registry)
 (require 'kargu/providers/catalog)
-(require 'kargu/providers/params)
 
 (provide 'kargu/providers)
 
-;;; kargu/providers.el ends here
+;;; providers.el ends here

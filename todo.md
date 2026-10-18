@@ -7,10 +7,6 @@
 - Kargu ön kontrolü asenkron olsa da Dape'nin bazı adapter `ensure`/`fn` adımları senkron dış komut/Eglot isteği çalıştırıyor. Tüm dillerde kilitlenmeme için adaptör başlatma katmanının ayrıca tasarlanması gerekiyor; kurulu Dape paketine geçici yama yapılmamalı.
 
 
-### params tarafinda duzenleme
-- istekleri ozellestirmek icin konulmustu ama ozellikle openrouter ustunden yapildi
-- ancak her provider bunu desteklemeyebilir, kod karmasasi da olsuturdugu icin bu ozelligi kaldiralim
-- openrouter ile bu ayarlari yapmak istersek zaten preset belirleyebiliyoruz, geri kalan da zaten bu ozellikleri az destekliyor, yani kaldir gitsin
 
 ### Koddaki karmasa
 - kodda karmasa olabilir, state machine tarzi ve moduller arasi iletisimle bu sorunu coz,
@@ -127,7 +123,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 
 #### 2. Yüksek / Orta Öncelikli Sorunlar
 - **`providers/registry.el:286`: 160+ sağlayıcı için senkron auth-source araması (Emacs Donması).** `kargu-connected-providers`, katalogdaki 160'tan fazla sağlayıcının her biri için döngü içinde `(auth-source-search :host host :max 1)` çalıştırır. Kullanıcının `auth-sources` yapılandırmasında GPG şifreli dosya varsa Emacs UI iş parçacığı saniyelerce donar veya pinentry pencereleriyle kilitlenir.
-- **`providers/params.el:265`: Anthropic API 400 Bad Request hatası.** Anthropic Messages API, `{"type": "disabled"}` yükünü geçersiz kabul eder. Thinking özelliği kapalıyken `thinking` anahtarı payload'dan tamamen çıkarılmalıdır; aksi halde Anthropic modelleri 400 hatası verir.
 - **`api/wire.el:58, 143`: Çok modlu (Multimodal) veri kaybı ve sabit tool-call id çakışması.** `kargu-api--text`, `(format "%s" content)` kullanır; bu durum görsel ve dosya eklerini lisp string'ine çevirerek API'ye bozuk iletir. Ayrıca araç çağrısında ID eksikse `"call"` sabit değeri verilir; paralel araç çağrılarında birden fazla çağrı aynı `"call"` ID'sini alarak yanıtların karışmasına neden olur.
 - **`chat/render.el:238-241`: Global `advice` sızıntısı.** `kargu-execute-tool` fonksiyonuna global `defadvice` eklenmesi, kütüphanenin başka yerlerinden veya arka plan/test işlemlerinden yapılan tüm araç çağrılarının kullanıcının sohbet tamponunu kirletmesine yol açar.
 - **`chat/prompt.el:283-300`: Footer yenilemede imlecin zorla sona fırlaması.** `kargu-chat-refresh-footer`, altbilgiyi güncellerken bölgeyi silip yeniden ekler. Kullanıcı giriş alanında metin düzenlerken herhangi bir asenkron olayda imleç `point-max`'a fırlar ve kullanıcının yazma akışını keser.
@@ -145,8 +140,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 #### 4. Çekirdek ve Sözleşme Sorunları (`core/`, `contract/`)
 - **`core/log.el:52-60`: Sınırsız log tamponu bellek sızıntısı.** `*kargu-log*` tamponu için hiçbir satır veya bayt sınırı konmamıştır; uzun süren oturumlarda yüzbinlerce satır birikerek Emacs'in RAM kullanımını şişirir.
 - **`contract/assert.el:34`: Geliştirme dışı modda hataların sessizce yutulması.** Sözleşme kontrolleri strict mod kapalıyken sessizce `nil` döner; bu durum asıl hatayı gizler ve ilerleyen adımlarda açıklanamayan tip hatalarına yol açar.
-- **`chat/tune-params.el:660`: Transient menü hizalama bozulması.** `kargu-tune-param-set-presence-penalty` tanımındaki `(lambda () "")` açıklaması menüde boşluk ve hizalama hatasına neden olur.
-
 #### 5. Protokol, Geçmiş ve Devre Kesici Derin Analizi (`history/`, `circuit.el`, `loop/`, `git.el`)
 - **`api/http.el:127-145` & `loop.el:160`: İptal Sonrası Devre Kesici Kilitlenmesi (Deadlock) (K).** `kargu-api-cancel`, curl sürecini sonlandırıp nesil sayacını (`kargu--generation`) artırır. Ancak `kargu-circuit--probe-inflight` bayrağını sıfırlamaz ve hata kaydetmez. Devre yarı açıkken (`:half-open`) gönderilen bir test isteği kullanıcı tarafından iptal edilirse, `probe-inflight` sonsuza dek `t` kalır. `(kargu-circuit-open-p)` sürekli `t` döneceğinden, tüm sonraki istekler bloke olur ve kullanıcı Emacs'i yeniden başlatana veya `M-x kargu-circuit-reset` çalıştırana kadar sistem kilitlenir.
 - **`history/repair.el:102-113`: Çok Modlu Eklerin Sessizce Silinmesi (Multimodal Silent Erasure) (K).** `kargu--history-merge-consecutive-content`, ardışık kullanıcı veya asistan mesajlarını birleştirirken `(stringp (kargu-aget msg "content"))` kontrolü yapar. Görsel veya dosya içeren çok modlu bloklarda `stringp` nil döndüğü için ek verisi boş string sayılır ve önceki mesajın içeriği sadece metinle ezilerek görsel kalıcı olarak geçmişten silinir.
@@ -173,7 +166,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 #### 8. Çoklu Oturum İzolasyonu, Kullanıcı Giriş Kaybı ve Arayüz Kırılganlığı (`chat.el`, `core/session.el`, `chat/tune.el`, `tools/deps.el`)
 - **`chat.el:388-398` & `prompt.el:504-510`: Preflight Başarısızlığında Kullanıcı Girişinin Silinmesi ve Tampon Kirliliği (K).** `kargu-chat--submit`, kullanıcı mesajını ve asistan başlığını (`## kargu · <model>`) sohbet günlüğüne yazıp giriş kutusunu sildikten (`consume-input`) sonra `kargu-loop-send`'i çağırır. Eğer `kargu-loop-send` (araç gereksinimi, eksik bağımlılık, çalışan koşu varlığı vb. nedenlerle) hata verirse, kullanıcının yazdığı metin giriş alanından tamamen silinmiş olur ve sohbet tamponunda içi boş öksüz bir asistan başlığı kalır.
 - **`core/session.el:34-43, 124-148`: Global `kargu--session` ve `kargu--message-history` Nedeniyle Çoklu Tampon Çakışması (K).** `kargu--session` ve mesaj geçmişi global değişkenlerde tutulur. Kullanıcı iki ayrı projede iki ayrı Kargu sohbet tamponu açtığında sayaçlar birbirine karışır; bir tampondaki `kargu-session-reset` diğer projedeki tüm sohbet geçmişini ve devre kesici durumunu sessizce sıfırlar.
-- **`chat/tune.el:44-46`: Model Tanımsızken `kargu-tune-menu` Çökmesi (K).** `kargu-tune--model-desc`, `(propertize (kargu--model) 'face 'bold)` çağrısı yapar. Model henüz seçilmemişse `kargu--model` nil döner ve `(propertize nil ...)` ifadesi `wrong-type-argument stringp nil` hatası fırlatarak Transient parametre menüsünü açılmadan çökertir.
 - **`chat/render.el:214` & `chat/stream.el:114-135`: Çoklu Araç Çağrılarında Önceki Araç Loglarının Sohbet Günlüğünden Silinmesi (K).** `kargu-chat-drop-preamble` aktifken, model tek bir turda birden fazla araç çağırdığında (ardışık/paralel araçlar), ilk araç tamamlandıktan sonra ikinci araç başladığında `(kargu-chat--drop-streamed-preamble)` tekrar tetiklenir. `kargu-chat--answer-start` ile `kargu-chat--output-marker` arasındaki aralık silindiği için, tamamlanan ilk aracın çıktı ve başlık satırı sohbet günlüğünden tamamen silinir. 5 araç çağrıldığında yalnızca sonuncunun kaydı ekranda kalır.
 - **`chat/session.el:155-158`: Proje İçi `.kargu/sessions/` Dizininde Hassas Veri Sızıntısı ve Git İhlali.** Eğer proje kökünde `.kargu/sessions` dizini varsa, oturum dosyaları merkezi `~/.config/` yerine doğrudan proje köküne yazılır. Kargu'nun varsayılan `.gitignore` şablonunda veya depolarında `.kargu/` hariç tutulmadığından, tüm sohbet geçmişi, API yanıtları ve özel prompt verileri git'e commit edilebilir hale gelir.
 #### 9. Dosya & Sembol Ekleri (`@file::symbol`) ve İstem Genişletme Sorunları (`chat/attach.el`)
@@ -281,6 +273,3 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 - **`config/schema.el:138, 149-151`: Eglot'un İsteğe Bağlı Yapılmasına Rağmen `kargu-check-setup` Tarafından Hata Olarak Raporlanması (K).**
   - Eglot bağımlılığı kaldırılmış ve isteğe bağlı hale getirilmiş olmasına rağmen, `kargu--dependencies` listesinde `(eglot . "LSP client...")` tanımı hala aktif bir bağımlılık olarak tutulmaktadır.
   - Eglot'un bulunmadığı Emacs ortamlarında `M-x kargu-check-setup` çalıştırıldığında `kargu setup issues: missing package eglot` hatası üretilerek kurulum başarısız ilan edilir ve kullanıcı yanıltılır.
-
-
-

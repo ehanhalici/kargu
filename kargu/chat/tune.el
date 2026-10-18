@@ -19,7 +19,6 @@
 (require 'kargu/config)
 (require 'kargu/api)
 (require 'kargu/providers)
-(require 'kargu/chat/tune-params)
 
 (eval-and-compile
   (require 'transient nil t))
@@ -43,7 +42,7 @@
 
 (defun kargu-tune--model-desc ()
   "Formatted description for active model."
-  (format "Model:    %s" (propertize (kargu--model) 'face 'bold)))
+  (format "Model:    %s" (propertize (or (kargu--model) "not selected") 'face 'bold)))
 
 (defun kargu-tune--temperature-desc ()
   "Formatted description for temperature."
@@ -54,8 +53,8 @@
                       'face 'bold)))
 
 (defun kargu-tune--max-tokens-desc ()
-  "Formatted description for max tokens / context length."
-  (format "Max Tokens (ctx): %s"
+  "Formatted description for the output token limit."
+  (format "Output Tokens:    %s"
           (propertize (if kargu-max-tokens
                           (format "%d" kargu-max-tokens)
                         "nil (provider default)")
@@ -215,8 +214,7 @@
                                          ("t" kargu-tune-set-temperature :description kargu-tune--temperature-desc :transient t)
                                          ("c" kargu-tune-set-max-tokens :description kargu-tune--max-tokens-desc :transient t)
                                          ("e" kargu-tune-cycle-reasoning-effort :description kargu-tune--reasoning-effort-desc :transient t)
-                                         ("b" kargu-tune-set-thinking-budget :description kargu-tune--thinking-budget-desc :transient t)
-                                         (">" kargu-tune-provider-params-menu :description kargu-tune--provider-params-summary-desc)]
+                                         ("b" kargu-tune-set-thinking-budget :description kargu-tune--thinking-budget-desc :transient t)]
                            [:description "Session Flags & Toggles"
                                          ("s" kargu-tune-toggle-stream :description kargu-tune--stream-desc :transient t)
                                          ("r" kargu-tune-toggle-review-mode :description kargu-tune--review-mode-desc :transient t)]

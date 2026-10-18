@@ -82,6 +82,11 @@ apikey = "${AI302_API_KEY}"
 
 ## Quick Start & Usage
 
+The tuning menu retains temperature, output-token limit, reasoning effort and
+thinking budget. Provider-specific JSON parameters and the `[params]` footer
+have been removed. Legacy `kargu-provider-parameters` settings are ignored;
+configure provider-side routing presets in the provider dashboard instead.
+
 | Command                     | Description                                           |
 |:----------------------------|:------------------------------------------------------|
 | `M-x kargu-menu`            | Open the main Transient control panel                 |

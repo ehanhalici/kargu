@@ -262,6 +262,42 @@
       (should (stringp (cdr (assoc "x-opencode-session" headers))))
       (should (> (length (cdr (assoc "x-opencode-session" headers))) 10)))))
 
+(ert-deftest kargu-reasoning-request-shape-follows-the-catalog-test ()
+  "Effort and budget are shaped by the declared provider format."
+  (let ((kargu-reasoning-effort 'none) (kargu-thinking-budget nil))
+    (should (equal (kargu--build-reasoning-params "openai")
+                   '(("reasoning_effort" . "none"))))
+    (should (equal (kargu--build-reasoning-params "openrouter")
+                   '(("reasoning" . (("effort" . "none")))))))
+  (let ((kargu-reasoning-effort "off") (kargu-thinking-budget 4096))
+    (should-not (kargu--build-reasoning-params "openai"))
+    (should (equal (kargu--build-reasoning-params "openrouter")
+                   '(("reasoning" . (("max_tokens" . 4096))))))
+    (should (equal (kargu--build-reasoning-params "anthropic")
+                   '(("thinking" . (("type" . "enabled") ("budget_tokens" . 4096))))))))
+
+(ert-deftest kargu-payload-merge-replaces-duplicate-keys-test ()
+  "Explicit entries replace existing keys without duplicate payload fields."
+  (should (equal (kargu--payload-merge '(("a" . 1) ("thinking" . 2)) '(("thinking" . 3)))
+                 '(("a" . 1) ("thinking" . 3)))))
+
+(ert-deftest kargu-payload-no-provider-custom-parameters-test ()
+  "Legacy custom JSON settings cannot override the supported core settings."
+  (let ((kargu-temperature 0.2) (kargu-max-tokens 1234)
+        (kargu-reasoning-effort nil) (kargu-thinking-budget nil)
+        (kargu--message-history '((("role" . "system") ("content" . "System"))
+                                  (("role" . "user") ("content" . "Hi")))))
+    (let ((payload (kargu--build-payload)))
+      (should (equal (kargu-aget payload "temperature") 0.2))
+      (should (= (kargu-aget payload "max_tokens") 1234))
+      (should-not (kargu-aget payload "provider"))
+      (should-not (string-search "[params" (kargu-chat--footer-string))))))
+
+(ert-deftest kargu-tune-unselected-model-description-test ()
+  "The remaining tuning menu works before a model has been selected."
+  (cl-letf (((symbol-function 'kargu--model) (lambda () nil)))
+    (should (string-search "not selected" (kargu-tune--model-desc)))))
+
 (provide 'tests/test-api)
 ;;; test-api.el ends here
 

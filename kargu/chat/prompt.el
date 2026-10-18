@@ -32,8 +32,6 @@
 (declare-function kargu--provider-name "kargu/config/key")
 (declare-function kargu--model "kargu/config/key")
 (declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id))
-(declare-function kargu-provider-params-get-all "kargu/providers/params" (&optional provider))
-(declare-function kargu-tune-provider-params-menu "kargu/chat/tune-params")
 (defvar kargu-reasoning-effort)
 
 (defcustom kargu-chat-buffer-name "*kargu-chat*"
@@ -158,25 +156,6 @@ fresh chat asks for a selection."
      #'kargu-chat-select-effort-company
      (lambda (e) (interactive "e") (kargu-chat-select-effort-company e)))))
 
-(defun kargu-chat--footer-params-button (pname)
-  "Build the provider parameters button for PNAME for the footer."
-  (let* ((active-params (and pname
-                             (fboundp 'kargu-provider-params-get-all)
-                             (kargu-provider-params-get-all pname)))
-         (params-count (length active-params))
-         (params-label (if (> params-count 0) (format "[params: %d]" params-count) "[params]"))
-         (params-face (if (> params-count 0) 'font-lock-keyword-face 'font-lock-comment-face)))
-    (kargu-chat--footer-button
-     params-label params-face
-     "mouse-1 or RET: configure provider routing & parameters"
-     (lambda () (interactive)
-       (if (fboundp 'kargu-tune-provider-params-menu)
-           (call-interactively #'kargu-tune-provider-params-menu)
-         (message "kargu: provider parameters menu not available")))
-     (lambda (_e) (interactive "e")
-       (if (fboundp 'kargu-tune-provider-params-menu)
-           (call-interactively #'kargu-tune-provider-params-menu)
-         (message "kargu: provider parameters menu not available"))))))
 
 (defvar-local kargu-chat--missing-tools-state nil
   "List of missing tool IDs currently displayed as an error banner in this buffer.")
@@ -236,13 +215,11 @@ Returns list of missing tools."
 (defun kargu-chat--footer-string ()
   "Build the interactive footer line shown at the bottom of the chat buffer.
 Contains clickable mode, provider, model, context usage, and effort buttons."
-  (let* ((pname (kargu-chat--shown-provider))
-         (mode-btn (kargu-chat--footer-mode-button))
+  (let* ((mode-btn (kargu-chat--footer-mode-button))
          (p-btn (kargu-chat--footer-provider-button))
          (m-btn (kargu-chat--footer-model-button))
          (ctx-btn (kargu-chat--footer-context-button))
          (e-btn (kargu-chat--footer-effort-button))
-         (params-btn (kargu-chat--footer-params-button pname))
          (blocked-badge (kargu-chat--blocked-badge)))
     (propertize
      (concat "\n\n"
@@ -259,8 +236,6 @@ Contains clickable mode, provider, model, context usage, and effort buttons."
              "  "
              (propertize "effort: " 'face 'font-lock-comment-face)
              e-btn
-             "  "
-             params-btn
              (or blocked-badge "")
              "\n")
      'field 'prompt
