@@ -4,7 +4,7 @@
 - [x] Eglot'u isteğe bağlı yap; proje kapsamlı ortak araç yetenek kapısı. Eglot/Dape normal kullanım için zorunlu değil; LSP yoksa istem kullanılabilir. Şema, rehber, doğrudan yürütme ve alias'lar aynı politikayı kullanıyor. `edit_by_lsp` salt okunur kip kaçışı da kapatıldı. Doğrulama: 366/366 ERT testi.
 - [x] LSP isteklerini ve tüketicilerini asenkronlaştır. `jsonrpc-async-request`, tek teslimli görevler, proje/sunucu/belge sürümü anahtarlı önbellekler, Company callback'leri ve onay sonucunu bekleyen sembol düzenleme eklendi. İstemde yalnız hazır snapshot okunur; senkron ağ yolu kaldırıldı.
 - [x] DAP callback zincirlerinde tek sonuç, hata ve iptal temizliği. Tüm inspection zincirleri 30 saniyelik ortak görev yaşam döngüsünde; stack/scopes/variables/eval hata ve bağlantı kaybı tek ERROR üretir. Adımlama dinleyicileri iptalde temizlenir. Frame gezinmesindeki Dape senkron beklemesi kaldırıldı. Doğrulama: 373/373 ERT testi.
-- [ ] Süresiz, izlenebilir ve iptal edilebilir Bash işleri.
+- [x] Süresiz, izlenebilir ve iptal edilebilir Bash işleri. Varsayılan timeout nil; açık pozitif deadline desteklenir. Ortak runner'ın tail politikası çıktı kotasında süreci öldürmez. Ön/arka plan işleri proje kapsamlı kimlik, canlı log ve iptal komutlarıyla izlenir; tamamlanan loglar sınırlıdır. Unicode sınırları ve Unix çocuk süreç iptali test edildi. Doğrulama: 377/377 ERT testi.
 - [ ] Debug ön koşulları, adapter yetenekleri ve araç kapsamı.
 - [ ] OpenCode model kataloğu ve eşzamanlı istek teslimi.
 - [ ] Sağlayıcıya özgü özel params özelliğini kaldır.
@@ -34,6 +34,7 @@ Her adım testleriyle ayrı commit olarak kaydedilir. `skills.md` yereldir ve Gi
 - Kabul: Adapter bağlantısı her aşamada kesildiğinde veya istek hata verdiğinde tam bir ERROR sonucu teslim edilir; sonraki geç callback ikinci sonuç üretmez; koşu durdurulduğunda bekleyen iş temizlenir.
 
 ### Uzun surecek isler icin 30 sn sinirini esnet
+- Durum: tamamlandı. `M-x kargu-bash-show-process`, çıktı tamponunda iptal ve `bash` list/status/kill desteklenir. Stop ön plan işini iptal eder; arka plan işleri açık iptale kadar sürer.
 - Su anda bir bash script cagrilacagi zaman sure siniri konuluyor, ama bu cok yanlis, belki saatler surecek bir script calisabilir
 - bu scriptin calismasi kullanici tarafindan takip edilip iptal edilebilmeli, ama ne kadar uzun surerse sursun kargu bunu desteklemeli
 

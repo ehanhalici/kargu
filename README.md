@@ -103,6 +103,16 @@ apikey = "${AI302_API_KEY}"
 
 ## Development
 
+### Long-running shell jobs
+
+Shell tools have no duration limit by default (`kargu-bash-timeout` is nil).
+Use `M-x kargu-bash-show-process` to follow a live log and `C-c C-k` in
+that log to cancel the job. The assistant can use `bash` commands `list`,
+`status p1`, and `kill p1`. Output retains a bounded recent tail without
+terminating the process. Stop cancels the foreground tool; background
+jobs continue until explicitly cancelled. Other bounded tools keep their
+normal timeouts. A positive `kargu-bash-timeout` opts into a deadline.
+
 The LSP and Dape entry points load focused submodules for session access,
 data collection, formatting and tool registration. HTTP request construction,
 retry handling and SSE decoding are separate modules. Chat transcript insertion
