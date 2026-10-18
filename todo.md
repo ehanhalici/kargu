@@ -145,11 +145,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 ---
 
 ### Modül: `tools/git.el`
-1. **[K - Orta] `git_blame` tekil `start_line` veya `end_line` verildiğinde satır kısıtını tamamen yok sayar.**
-   - **Dosya / Satır:** `kargu/tools/git.el:412-421`
-   - **Sorun:** `kargu-git-blame` içindeki `(and start-line end-line (list (format "-L%d,%d" start-line end-line)))` denetimi nedeniyle, argümanlardan yalnızca biri verildiğinde (örn. yalnızca `start_line: 120`), ifade `nil` döner ve git'e hiçbir `-L` argümanı eklenmez. Sonuç olarak tüm dosya için satır satır blame çalıştırılır; binlerce satırlık dosyalarda aşırı CPU ve bellek harcanarak modele istenmeyen devasa bir çıktı döner.
-   - **Öneri:** `(when (or start-line end-line) (list (format "-L%d,%s" (or start-line 1) (if end-line (number-to-string end-line) ""))))` şeklinde esnek aralık desteği sağlanmalıdır.
-
 ---
 
 ### Modül: `tools/dape/`

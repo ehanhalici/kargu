@@ -409,15 +409,27 @@ For pop or drop, STASH must explicitly name a stash@{N} entry."
 
 ;;;; Blame ----------------------------------------------------------------
 
+(defun kargu-git--blame-range (start-line end-line)
+  "Build a validated blame range for START-LINE and END-LINE."
+  (let ((start (kargu-to-int start-line))
+        (end (kargu-to-int end-line)))
+    (unless (and (or (null start-line) (and start (> start 0)))
+                 (or (null end-line) (and end (> end 0))))
+      (error "Blame line numbers must be positive integers"))
+    (when (and start end (> start end))
+      (error "Blame start line must not exceed end line"))
+    (when (or start end)
+      (list (format "-L%d,%s" (or start 1) (or end ""))))))
+
 (defun kargu-git-blame (callback file-path &optional start-line end-line)
-  "Pass git blame for FILE-PATH between START-LINE and END-LINE to CALLBACK."
+  "Pass git blame for FILE-PATH between START-LINE and END-LINE to CALLBACK.
+An omitted start defaults to the first line; an omitted end means EOF."
   (unless (and (stringp file-path) (not (string-empty-p (string-trim file-path))))
     (error "File_path is required"))
   (let* ((root (kargu-permission-project-root))
          (abs (kargu-permission-assert-within-project file-path root "blame file"))
          (args (append (list "blame" "--date=short")
-                       (and start-line end-line
-                            (list (format "-L%d,%d" start-line end-line)))
+                       (kargu-git--blame-range start-line end-line)
                        (list "--" (file-relative-name abs root)))))
     (kargu-git--run
      args root
@@ -583,16 +595,18 @@ through `kargu-permission-approve', which may re-run BODY after the answer."
       ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "File path to blame.")))
                        ("start_line" . (("type" . "integer")
-                                        ("description" . "Optional start line.")))
+                                        ("minimum" . 1)
+                                        ("description" . "Optional start line, defaults to 1.")))
                        ("end_line" . (("type" . "integer")
-                                      ("description" . "Optional end line.")))))
+                                      ("minimum" . 1)
+                                      ("description" . "Optional end line, defaults to end of file.")))))
       ("required" . ["file_path"]))
     (kargu-git--executor
      (lambda (args done)
        (kargu-git-blame done
                         (kargu--tool-arg args "file_path" "path" "file")
-                        (kargu-to-int (kargu--tool-arg args "start_line"))
-                        (kargu-to-int (kargu--tool-arg args "end_line")))))))
+                        (kargu--tool-arg args "start_line")
+                        (kargu--tool-arg args "end_line"))))))
   "Tool schemas and executors for git operations.")
 
 (defun kargu-git-register-tools ()

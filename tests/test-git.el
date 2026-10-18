@@ -201,6 +201,22 @@
     (let ((out (kargu-test-await (lambda (cb) (kargu-git-log cb 5)))))
       (should (string-search "first commit" out)))))
 
+(ert-deftest kargu-git-blame-honors-single-ended-ranges-test ()
+  "Either blame endpoint restricts output; invalid ranges fail before launch."
+  (kargu-test-with-git-repo '(("range.txt" . "blame-first\nblame-second\nblame-third\n"))
+    (let ((from (kargu-test-await
+                 (lambda (callback) (kargu-git-blame callback "range.txt" 2))))
+          (to (kargu-test-await
+               (lambda (callback) (kargu-git-blame callback "range.txt" nil 2)))))
+      (should-not (string-search "blame-first" from))
+      (should (string-search "blame-second" from))
+      (should (string-search "blame-third" from))
+      (should (string-search "blame-first" to))
+      (should (string-search "blame-second" to))
+      (should-not (string-search "blame-third" to)))
+    (dolist (range '((0 nil) (nil -1) (3 2) ("bad" nil)))
+      (should-error (kargu-git-blame #'ignore "range.txt" (car range) (cadr range))))))
+
 (ert-deftest kargu-git-blame-test ()
   "Ensure kargu-git-blame returns line annotations for a project file."
   (kargu-test-with-git-repo kargu-git-test--files
