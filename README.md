@@ -186,7 +186,10 @@ can invoke scripts and interpreters whose filesystem effects cannot be inferred
 by the path tokenizer. Remaining parser limitations are tracked in `todo.md`.
 
 Webfetch validates numeric resolver results before pinning a connection and
-repeats that check for each redirect. Its conservative address policy uses the
+repeats that check for each redirect. Numeric URLs need no DNS; missing or
+unsupported `getent ahosts` falls back to the system resolver in an isolated
+Emacs child process, bounded by the resolution timeout and cancelled on Stop.
+The main UI thread never calls the blocking system resolver. Its conservative address policy uses the
 [IANA IPv4](https://www.iana.org/assignments/iana-ipv4-special-registry/) and
 [IPv6 special-purpose registries](https://www.iana.org/assignments/iana-ipv6-special-registry/);
 it also excludes the whole IPv6 IETF-assignment and transition ranges rather

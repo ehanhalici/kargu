@@ -19,9 +19,6 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 1. **[K - Orta] `workspace_grep` `rg --max-count` parametresi dosya başına uygulanır.**
    - **Dosya / Satır:** `kargu/tools/search.el:142`
    - **Sorun:** Ripgrep sözdiziminde `--max-count <cap>`, tüm arama için değil, her bir dosya içindeki maksimum eşleşme sayısıdır. 100 dosyalık bir depoda `cap=50` verildiğinde ripgrep 5000 eşleşme üretebilir; her ne kadar Elisp tarafında sonradan budansa da gereksiz disk I/O ve işlemci harcanır.
-2. **[D - Yüksek] `webfetch` yalnız `getent ahosts` çözümleyicisine bağlı.**
-   - **Dosya / Satır:** `kargu/tools/webfetch.el:91-105`
-   - **Sorun:** `getent` veya `ahosts` veritabanı olmayan sistemlerde DNS çözümü yapılamaz. Platform adını sabitlemek yerine mevcut çözümleyici yetenekleri keşfedilmeli; alternatif de asenkron çalışmalı ve curl için doğrulanmış sayısal IP üretmeli.
 
 ---
 

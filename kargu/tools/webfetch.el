@@ -19,6 +19,7 @@
 (require 'kargu/api)
 (require 'kargu/tools/process)
 (require 'kargu/net/address)
+(require 'kargu/net/resolve)
 (require 'url-parse)
 (require 'url-expand)
 
@@ -87,31 +88,47 @@ The result is (public . IP), (private . IP), or (none . nil)."
                     (throw 'found (cons 'public ip))))))))
         (if private (cons 'private private) (cons 'none nil))))))
 
+(defun kargu-webfetch--resolved (callback host result)
+  "Deliver validated resolver RESULT for HOST to CALLBACK as (IP ERR)."
+  (cond
+   ((or (plist-get result :timed-out) (plist-get result :truncated)
+        (not (eql (plist-get result :code) 0)))
+    (funcall callback nil (format "webfetch could not resolve %s" host)))
+   (t
+    (let ((found (kargu-webfetch--first-public (plist-get result :output))))
+      (pcase (car found)
+        ('public (funcall callback (cdr found) nil))
+        ('private
+         (funcall callback nil
+                  (format "webfetch refuses local or private address: %s" (cdr found))))
+        (_ (funcall callback nil (format "webfetch could not resolve %s" host))))))))
+
+(defun kargu-webfetch--resolve-fallback (host callback)
+  "Resolve HOST in an isolated Emacs process, delivering (IP ERR) to CALLBACK."
+  (if-let* ((command (kargu-resolver-command host)))
+      (kargu-webfetch--run
+       (car command) (cdr command) :callback
+       (lambda (result) (kargu-webfetch--resolved callback host result))
+       :options (list :timeout kargu-webfetch-resolve-timeout))
+    (funcall callback nil
+             "webfetch cannot resolve the host: getent not found or unsupported, and no Emacs resolver is available")))
+
 (defun kargu-webfetch--resolve (url callback)
-  "Resolve URL and pass (IP ERR) to CALLBACK.
-ERR is a reason string when no public address can be pinned.  The call
-returns at once; `getent' runs through `kargu-process-run'."
-  (let ((host (kargu-webfetch--bare-host (url-generic-parse-url url))))
-    (kargu-webfetch--run
-     "getent" (list "ahosts" host) :callback
-     (lambda (result)
-       (cond
-        ((eql (plist-get result :code) 127)
-         (funcall callback nil "webfetch cannot resolve the host: getent not found"))
-        ((or (plist-get result :timed-out) (plist-get result :truncated)
-             (not (eql (plist-get result :code) 0)))
-         (funcall callback nil (format "webfetch could not resolve %s" host)))
-        (t
-         (let ((found (kargu-webfetch--first-public (plist-get result :output))))
-           (pcase (car found)
-             ('public (funcall callback (cdr found) nil))
-             ('private
-              (funcall callback nil
-                       (format "webfetch refuses local or private address: %s"
-                               (cdr found))))
-             (_ (funcall callback nil
-                         (format "webfetch could not resolve %s" host))))))))
-     :options (list :timeout kargu-webfetch-resolve-timeout))))
+  "Resolve URL asynchronously and pass (IP ERR) to CALLBACK.
+Numeric URLs need no DNS.  Unsupported getent databases and missing getent
+fall back to an isolated Emacs worker; timeout or quota failures do not."
+  (let* ((host (kargu-webfetch--bare-host (url-generic-parse-url url)))
+         (literal (kargu-ip-address host)))
+    (if literal
+        (kargu-webfetch--resolved callback host (list :code 0 :output (kargu-ip-format literal)))
+      (kargu-webfetch--run
+       "getent" (list "ahosts" host) :callback
+       (lambda (result)
+         (if (and (not (eql (plist-get result :code) 0))
+                  (not (plist-get result :timed-out)) (not (plist-get result :truncated)))
+             (kargu-webfetch--resolve-fallback host callback)
+           (kargu-webfetch--resolved callback host result)))
+       :options (list :timeout kargu-webfetch-resolve-timeout)))))
 
 (defun kargu-webfetch--resolve-mapping (host port ip)
   "Return a curl --resolve value pinning HOST:PORT to IP."

@@ -58,5 +58,32 @@
         (should (eq (and (kargu-ip--prefix-p address prefix bits) t)
                     (zerop (ash (logxor left right) (- bits 32)))))))))
 
+(ert-deftest kargu-resolver-worker-handles-native-address-vectors-test ()
+  "The worker converts both native address families without emitting names."
+  (require 'kargu/net/resolve)
+  (cl-letf (((symbol-function 'network-lookup-address-info)
+             (lambda (_host) '([127 0 0 1 0] [#x2606 #x4700 0 0 0 0 0 #x1111 0]))))
+    (should (equal (kargu-resolver--addresses "test.example")
+                   '("127.0.0.1" "2606:4700:0:0:0:0:0:1111")))))
+
+(ert-deftest kargu-resolver-worker-arguments-are-data-not-code-test ()
+  "An unusual hostname cannot inject evaluated Lisp or command-line switches."
+  (require 'kargu/net/resolve)
+  (let* ((host "x\") (error \"injected\")")
+         (command (kargu-resolver-command host)))
+    (should (equal (car (last command)) host))
+    (should-not (member "--eval" command))))
+
+(ert-deftest kargu-resolver-worker-command-resolves-a-numeric-literal-test ()
+  "A real isolated child can emit numeric output without a DNS dependency."
+  (require 'kargu/net/resolve)
+  (require 'kargu/tools/process)
+  (let* ((command (kargu-resolver-command "127.0.0.1"))
+         (result (kargu-test-await
+                  (lambda (callback)
+                    (kargu-process-run (car command) (cdr command) callback :timeout 5)))))
+    (should (= (plist-get result :code) 0))
+    (should (equal (plist-get result :output) "127.0.0.1"))))
+
 (provide 'tests/test-address)
 ;;; test-address.el ends here

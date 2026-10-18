@@ -171,10 +171,11 @@
       (should (string-prefix-p "ERROR:" result)))))
 
 (ert-deftest kargu-webfetch-refuses-when-getent-is-missing-test ()
-  "Without a resolver the request is not sent."
+  "Without either asynchronous resolver the request is not sent."
   (let ((got nil)
         (curled nil))
-    (cl-letf (((symbol-function 'kargu-process-run)
+    (cl-letf (((symbol-function 'kargu-resolver-command) (lambda (_) nil))
+              ((symbol-function 'kargu-process-run)
                (lambda (prog _args cb &rest _)
                  (if (equal prog "getent")
                      (funcall cb '(:code 127 :output ""))
@@ -183,6 +184,76 @@
                              "https://example.com/a" 1)
       (should (string-search "getent not found" got))
       (should-not curled))))
+
+(ert-deftest kargu-webfetch-falls-back-to-isolated-emacs-resolver-test ()
+  "Missing or unsupported getent falls back without blocking the UI thread."
+  (dolist (code '(127 2))
+    (let (commands result curl-args)
+      (cl-letf (((symbol-function 'kargu-resolver-command)
+                 (lambda (host) (list "test-emacs" "lookup" host)))
+                ((symbol-function 'network-lookup-address-info)
+                 (lambda (&rest _) (ert-fail "Parent attempted synchronous DNS")))
+                ((symbol-function 'kargu-process-run)
+                 (lambda (program args callback &rest _)
+                   (push program commands)
+                   (pcase program
+                     ("getent" (funcall callback (list :code code :output "")))
+                     ("test-emacs" (funcall callback '(:code 0 :output "2606:4700::1111\n")))
+                     ("curl" (setq curl-args args)
+                      (funcall callback '(:code 0 :output "HTTP/2 200 OK\r\n\r\nresult")))))))
+        (kargu-webfetch-url (lambda (value) (setq result value)) "https://example.com/")
+        (should (equal result "result"))
+        (should (equal (reverse commands) '("getent" "test-emacs" "curl")))
+        (should (member "example.com:443:[2606:4700:0:0:0:0:0:1111]" curl-args))))))
+
+(ert-deftest kargu-webfetch-fallback-is-still-subject-to-address-policy-test ()
+  "Fallback output cannot bypass private-address, timeout or quota checks."
+  (dolist (answer '((:code 0 :output "::ffff:127.0.0.1\n")
+                    (:code 0 :output "not-a-numeric-IP\n")
+                    (:code 0 :output "93.184.216.34\n" :truncated t)
+                    (:code 0 :output "93.184.216.34\n" :timed-out t)))
+    (let (commands result)
+      (cl-letf (((symbol-function 'kargu-resolver-command) (lambda (_) '("test-emacs")))
+                ((symbol-function 'kargu-process-run)
+                 (lambda (program _args callback &rest _)
+                   (push program commands)
+                   (funcall callback (if (equal program "getent") '(:code 127 :output "") answer)))))
+        (kargu-webfetch-url (lambda (value) (setq result value)) "https://example.com/")
+        (should (string-prefix-p "ERROR:" result))
+        (should (equal (reverse commands) '("getent" "test-emacs")))))))
+
+(ert-deftest kargu-webfetch-numeric-host-needs-no-dns-test ()
+  "A public numeric URL is parsed directly without a resolver subprocess."
+  (let (address error)
+    (cl-letf (((symbol-function 'kargu-process-run)
+               (lambda (&rest _) (ert-fail "Numeric literal attempted DNS"))))
+      (kargu-webfetch--resolve "https://[2606:4700::1111]/"
+                               (lambda (ip failure) (setq address ip error failure)))
+      (should (equal address "2606:4700:0:0:0:0:0:1111"))
+      (should-not error))))
+
+(ert-deftest kargu-webfetch-stop-during-fallback-never-starts-curl-test ()
+  "The fallback resolver is owned and cancelled just like getent."
+  (let* ((run (list :state 'tools)) (kargu--loop-run run)
+         (kargu-async--pending nil) lookup commands delivered
+         (pipe (make-pipe-process :name "kargu-test-fallback" :noquery t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'kargu-resolver-command) (lambda (_) '("test-emacs")))
+                  ((symbol-function 'kargu-process-run)
+                   (lambda (program _args callback &rest _)
+                     (push program commands)
+                     (if (equal program "getent") (funcall callback '(:code 127 :output ""))
+                       (setq lookup callback) pipe)))
+                  ((symbol-function 'kargu-process-cancel) (lambda (process) (delete-process process))))
+          (kargu-webfetch-url (lambda (value) (setq delivered value)) "https://example.com/")
+          (kargu-async-cancel-owner run)
+          (setq kargu--loop-run nil)
+          (should-not (process-live-p pipe))
+          (funcall lookup '(:code 0 :output "93.184.216.34\n"))
+          (should (equal (reverse commands) '("getent" "test-emacs")))
+          (should-not delivered)
+          (should-not kargu-async--pending))
+      (when (process-live-p pipe) (delete-process pipe)))))
 
 (ert-deftest kargu-webfetch-pins-the-resolved-address-test ()
   "curl is started with --resolve set to the first public address."
