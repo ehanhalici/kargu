@@ -32,59 +32,79 @@
             name
             kind))))
 
-(defun kargu-lsp--ws-symbols (query)
-  "Return flat ((PATH LINE NAME KIND)...) for QUERY via workspace/symbol."
-  (condition-case-unless-debug err
-      (let ((items (kargu-lsp--seq->list
-                    (kargu-lsp--request :workspace/symbol `(:query ,query)))))
-        (delq nil (mapcar #'kargu-lsp--symbol-information-item items)))
-    (error
-     (kargu-log 'warn "workspace/symbol %S failed: %s"
-                query (error-message-string err))
-     nil)))
+(defvar kargu-lsp--workspace-cache (make-hash-table :test #'equal)
+  "Workspace symbol snapshots keyed by project, server and query.")
 
-(defun kargu-lsp--doc-symbol-walk (items path)
-  "Flatten documentSymbol ITEMS (nested children) for PATH."
-  (cl-loop for item in (kargu-lsp--seq->list items)
-           for name = (kargu-lsp--field item :name)
-           for kind = (kargu-lsp--field item :kind)
-           for line = (or (kargu-lsp--path item :range :start :line)
-                          (kargu-lsp--path item :location :range :start :line))
-           when (and name path)
-           append (cons (list path (1+ (or line 0)) name kind)
-                        (kargu-lsp--doc-symbol-walk
-                         (kargu-lsp--field item :children) path))))
+(defun kargu-lsp--workspace-key (query)
+  "Return the identity and document-version key for workspace QUERY."
+  (let ((buffer (kargu-lsp--managed-buffer)))
+    (list (kargu-lsp-project-root) query
+          (and buffer (with-current-buffer buffer (eglot-current-server)))
+          (mapcar (lambda (buf)
+                    (list (buffer-file-name buf)
+                          (with-current-buffer buf (buffer-chars-modified-tick))))
+                  (kargu-lsp--project-buffers)))))
 
-(defun kargu-lsp--doc-symbols ()
-  "Gather symbols via textDocument/documentSymbol over open Eglot buffers."
-  (let (acc (count 0))
-    (dolist (buffer (kargu-lsp--managed-buffers))
-      (when (< count 40)
-        (let ((path (buffer-file-name buffer)))
-          (condition-case-unless-debug _err
-              (with-current-buffer buffer
-                (let ((items (kargu-lsp--seq->list
-                              (kargu-lsp--request :textDocument/documentSymbol
-                                                  `(:textDocument
-                                                    (:uri ,(kargu-lsp--buffer-uri buffer)))
-                                                  buffer))))
-                  (setq acc (nconc acc (kargu-lsp--doc-symbol-walk items path))
-                        count (1+ count))))
-            (error nil)))))
-    acc))
+(defun kargu-lsp--project-buffers ()
+  "Return managed buffers belonging to the selected project."
+  (let ((root (kargu-lsp--workspace-root)))
+    (seq-filter (lambda (buf)
+                  (with-current-buffer buf
+                    (equal root (when-let* ((dir (kargu-permission-eglot-server-root
+                                                 (eglot-current-server))))
+                                  (file-name-as-directory (file-truename dir))))))
+                (kargu-lsp--managed-buffers))))
 
-(defun kargu-lsp--gather-symbols ()
-  "Return (SOURCE . ITEMS) for the skeleton, or signal an error."
-  (kargu-lsp--with-session
-   (lambda ()
-     (let ((ws (kargu-lsp--ws-symbols "")))
-       (if ws
-           (cons "workspace/symbol" ws)
-         (kargu-log 'warn "skeleton: workspace/symbol empty; falling back to documentSymbol")
-         (let ((doc (kargu-lsp--doc-symbols)))
-           (if doc
-               (cons "textDocument/documentSymbol (open buffers only)" doc)
-             (error "No symbols available: workspace/symbol returned nothing and no Eglot buffers are open"))))))))
+(defun kargu-lsp--ws-symbols (query &optional callback)
+  "Get workspace QUERY symbols asynchronously through CALLBACK.
+Without CALLBACK return only an already collected snapshot."
+  (let* ((key (kargu-lsp--workspace-key query))
+         (cached (gethash key kargu-lsp--workspace-cache)))
+    (if (null callback) cached
+      (let ((buffer (kargu-lsp--managed-buffer)))
+        (if (not buffer) (funcall callback nil "No project LSP connection")
+          (kargu-lsp--request
+           :workspace/symbol `(:query ,query)
+           (lambda (raw error)
+             (let ((items (unless error
+                            (delq nil (mapcar #'kargu-lsp--symbol-information-item
+                                               (kargu-lsp--seq->list raw))))))
+               (unless error
+                 (clrhash kargu-lsp--workspace-cache)
+                 (puthash key items kargu-lsp--workspace-cache))
+               (funcall callback items error)))
+           buffer))))))
+
+(declare-function kargu-lsp-get-file-symbols "kargu/tools/lsp/symbols"
+                  (file-path &optional callback))
+
+(defun kargu-lsp--doc-symbols (callback)
+  "Collect open project document symbols asynchronously for CALLBACK."
+  (kargu-lsp--doc-symbols-next
+   (seq-take (kargu-lsp--project-buffers) 40) nil callback))
+
+(defun kargu-lsp--doc-symbols-next (buffers items callback)
+  "Collect symbols from BUFFERS onto ITEMS and deliver them to CALLBACK."
+  (if (null buffers) (funcall callback items nil)
+    (let ((path (buffer-file-name (car buffers))))
+      (kargu-lsp-get-file-symbols
+       path (lambda (symbols error)
+              (if error (funcall callback nil error)
+                (kargu-lsp--doc-symbols-next
+                 (cdr buffers)
+                 (append items (mapcar (lambda (sym)
+                                        (list path (plist-get sym :start-line)
+                                              (plist-get sym :name)
+                                              (plist-get sym :kind)))
+                                      (kargu-lsp--flatten-symbols symbols)))
+                 callback)))))))
+
+(defun kargu-lsp--gather-symbols (callback)
+  "Collect project symbols and deliver (ITEMS ERROR) to CALLBACK."
+  (kargu-lsp--ws-symbols
+   "" (lambda (items _error)
+        (if items (funcall callback items nil)
+          (kargu-lsp--doc-symbols callback)))))
 
 (defun kargu-lsp--imenu-symbols (&optional roots)
   "Gather symbols via `imenu' from open file-visiting buffers.
@@ -106,37 +126,28 @@ If ROOTS is provided, only include buffers under ROOTS."
               (error nil))))))
     (nreverse acc)))
 
-(defun kargu-lsp-all-symbols (&optional query roots)
-  "Return flat list of ((PATH LINE NAME KIND) ...) matching optional QUERY.
-Combines LSP symbols with Emacs `imenu' across ROOTS."
-  (let ((seen (make-hash-table :test #'equal))
-        acc)
-    (condition-case nil
-        (let ((buf (kargu-lsp--managed-buffer)))
-          (when (buffer-live-p buf)
-            (with-current-buffer buf
-              (let ((lsp-items (or (kargu-lsp--ws-symbols (or query ""))
-                                   (kargu-lsp--doc-symbols))))
-                (dolist (item lsp-items)
-                  (let* ((path (nth 0 item))
-                         (line (nth 1 item))
-                         (name (nth 2 item))
-                         (kind (kargu-lsp--kind-name (nth 3 item)))
-                         (key (cons path name)))
-                    (unless (gethash key seen)
-                      (puthash key t seen)
-                      (push (list path line name kind) acc))))))))
-      (error nil))
-    (dolist (item (kargu-lsp--imenu-symbols roots))
-      (let* ((path (nth 0 item))
-             (line (nth 1 item))
-             (name (nth 2 item))
-             (kind (nth 3 item))
-             (key (cons path name)))
-        (unless (gethash key seen)
-          (puthash key t seen)
-          (push (list path line name kind) acc))))
-    (nreverse acc)))
+(defun kargu-lsp--merge-symbols (items roots)
+  "Combine LSP ITEMS and local imenu snapshots under ROOTS."
+  (let ((seen (make-hash-table :test #'equal)) result)
+    (dolist (item (append items (kargu-lsp--imenu-symbols roots)))
+      (let ((path (car item)) (name (nth 2 item)))
+        (when (and (or (null roots)
+                       (seq-some (lambda (root) (file-in-directory-p path root)) roots))
+                   (not (gethash (cons path name) seen)))
+          (puthash (cons path name) t seen)
+          (push (list path (nth 1 item) name
+                      (kargu-lsp--kind-label (nth 3 item))) result))))
+    (nreverse result)))
+
+(defun kargu-lsp-all-symbols (&optional query roots callback)
+  "Return cached/local symbols matching QUERY under ROOTS.
+With CALLBACK, collect LSP data asynchronously before delivering the list."
+  (if (and callback (kargu-eglot-connected-p))
+      (kargu-lsp--ws-symbols
+       (or query "") (lambda (items _error)
+                      (funcall callback (kargu-lsp--merge-symbols items roots))))
+    (let ((items (kargu-lsp--merge-symbols (kargu-lsp--ws-symbols (or query "")) roots)))
+      (if callback (funcall callback items) items))))
 
 ;;;; Skeleton rendering & caching -----------------------------------------
 
@@ -148,7 +159,10 @@ Combines LSP symbols with Emacs `imenu' across ROOTS."
   (when (and kargu-lsp--skeleton-cache
              (stringp (plist-get kargu-lsp--skeleton-cache :text))
              (equal (plist-get kargu-lsp--skeleton-cache :root)
-                    (kargu-lsp-project-root)))
+                    (kargu-lsp-project-root))
+             (or (not (plist-member kargu-lsp--skeleton-cache :key))
+                 (equal (plist-get kargu-lsp--skeleton-cache :key)
+                        (kargu-lsp--workspace-key ""))))
     (let ((age (- (float-time)
                   (float-time (plist-get kargu-lsp--skeleton-cache :time)))))
       (when (< age kargu-lsp-skeleton-ttl)
@@ -173,7 +187,7 @@ Combines LSP symbols with Emacs `imenu' across ROOTS."
          (lines (list (concat (file-relative-name path root) ":"))))
     (dolist (symbol shown)
       (push (format "  %s (%s) :%d" (nth 2 symbol)
-                    (kargu-lsp--kind-name (nth 3 symbol)) (nth 1 symbol)) lines))
+                    (kargu-lsp--kind-label (nth 3 symbol)) (nth 1 symbol)) lines))
     (when (> hidden 0)
       (push (format "  ... (%d more hidden)" hidden) lines))
     (cons (length shown) lines)))
@@ -201,19 +215,30 @@ Combines LSP symbols with Emacs `imenu' across ROOTS."
                           kargu-lsp-skeleton-max-symbols) lines)))))
     (string-join (nreverse lines) "\n")))
 
-(defun kargu-lsp--compute-skeleton ()
-  "Build the skeleton text; return text or an \"ERROR: ...\" string."
-  (condition-case-unless-debug err
-      (let* ((data (kargu-lsp--gather-symbols))
-             (source (car data))
-             (items (cdr data))
-             (root (kargu-lsp-project-root)))
-        (kargu-log 'info "skeleton built: %d symbols via %s"
-                   (length items) source)
-        (kargu-lsp--render-skeleton root source items))
-    (error
-     (kargu-log 'warn "skeleton failed: %s" (error-message-string err))
-     (format "ERROR: %s" (error-message-string err)))))
+(defun kargu-lsp--compute-skeleton (callback)
+  "Collect the skeleton asynchronously and deliver text to CALLBACK."
+  (let* ((root (kargu-lsp-project-root))
+         (key (kargu-lsp--workspace-key ""))
+         (task (kargu-async-start
+                (lambda (value error)
+                  (funcall callback (if error (concat "ERROR: " error) value)))
+                :timeout kargu-lsp-request-timeout)))
+    (funcall
+     (kargu-async-wrap
+      task (lambda ()
+             (kargu-lsp--gather-symbols
+              (kargu-async-wrap
+               task
+               (lambda (items error)
+                 (cond
+                  (error (kargu-async-finish task nil error))
+                  ((not (equal key (kargu-lsp--workspace-key "")))
+                   (kargu-async-finish task nil "Workspace changed; retry the outline"))
+                  (t
+                   (let ((text (kargu-lsp--render-skeleton root "workspace/document" items)))
+                     (setq kargu-lsp--skeleton-cache
+                           (list :text text :time (current-time) :root root :key key))
+                     (kargu-async-finish task text))))))))))))
 
 (defun kargu-lsp--show-skeleton (text)
   "Display the skeleton TEXT in a dedicated buffer."
@@ -225,27 +250,18 @@ Combines LSP symbols with Emacs `imenu' across ROOTS."
     (special-mode))
   (pop-to-buffer (get-buffer "*kargu-skeleton*")))
 
-(defun kargu-lsp-build-skeleton (&optional refresh)
-  "Return the project skeleton text, cached per `kargu-lsp-skeleton-ttl'.
-REFRESH non-nil bypasses and resets the cache.  Interactively
-the skeleton is also displayed in a buffer."
+(defun kargu-lsp-build-skeleton (&optional refresh callback)
+  "Return the cached project outline, or collect it for CALLBACK.
+REFRESH invalidates the snapshot.  Interactive use collects and displays it."
   (interactive "P")
-  (when refresh
-    (setq kargu-lsp--skeleton-cache nil))
-  (let ((text (or (kargu-lsp--cached-skeleton)
-                  (kargu-lsp--compute-skeleton))))
-    (when (and text
-               (not (string-prefix-p "ERROR:" text))
-               (not (kargu-lsp--cached-skeleton)))
-      (setq kargu-lsp--skeleton-cache
-            (list :text text
-                  :time (current-time)
-                  :root (kargu-lsp-project-root))))
-    (when (called-interactively-p 'any)
-      (if (and text (string-prefix-p "ERROR:" text))
-          (message "%s" text)
-        (kargu-lsp--show-skeleton text)))
-    text))
+  (when refresh (setq kargu-lsp--skeleton-cache nil))
+  (let ((done (or callback (and (called-interactively-p 'any)
+                                #'kargu-lsp--show-skeleton)))
+        (cached (kargu-lsp--cached-skeleton)))
+    (cond
+     ((null done) cached)
+     (cached (funcall done cached))
+     (t (kargu-lsp--compute-skeleton done)))))
 
 (provide 'kargu/tools/lsp/skeleton)
 

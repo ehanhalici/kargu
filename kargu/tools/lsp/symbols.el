@@ -26,77 +26,70 @@
           (kargu-lsp--path loc :range :start :line)
           0)))
 
-(defun kargu-lsp--ws-definitions (symbol-name)
-  "Definition candidates for SYMBOL-NAME via workspace/symbol."
-  (let* ((items (kargu-lsp--ws-symbols symbol-name))
-         (exact (cl-remove-if-not
-                 (lambda (item) (equal (nth 2 item) symbol-name))
-                 items))
+(defun kargu-lsp--format-definitions (symbol-name items)
+  "Describe ITEMS matching SYMBOL-NAME, or return nil when none exist."
+  (let* ((exact (seq-filter (lambda (item) (equal (nth 2 item) symbol-name)) items))
          (hits (seq-take (or exact items) kargu-lsp-definition-max-hits)))
     (when hits
-      (concat
-       (format "Definition candidates for `%s':\n" symbol-name)
-       (mapconcat
-        (lambda (item)
-          (format "  %s:%d  (%s)" (nth 0 item) (nth 1 item)
-                  (kargu-lsp--kind-name (nth 3 item))))
-        hits "\n")
-       (when (and items (null exact))
-         "\n(no exact name match; fuzzy candidates listed)")))))
+      (concat (format "Definition candidates for `%s':\n" symbol-name)
+              (mapconcat (lambda (item)
+                           (format "  %s:%d  (%s)" (car item) (nth 1 item)
+                                   (kargu-lsp--kind-label (nth 3 item))))
+                         hits "\n")
+              (unless exact "\n(no exact name match; fuzzy candidates listed)")))))
 
-(defun kargu-lsp--definitions-via-occurrence (symbol-name)
-  "Fallback: find an occurrence of SYMBOL-NAME and issue textDocument/definition."
-  (cl-loop for buffer in (kargu-lsp--managed-buffers)
-           for found = (with-current-buffer buffer
-                         (save-excursion
-                           (save-restriction
-                             (widen)
-                             (goto-char (point-min))
-                             (when (re-search-forward
-                                    (concat "\\_<" (regexp-quote symbol-name) "\\_>")
-                                    nil t)
-                               (list (line-number-at-pos (point))
-                                     (- (point) (line-beginning-position)))))))
-           when found
-           return (with-current-buffer buffer
-                    (let* ((line (1- (nth 0 found)))
-                           (character (nth 1 found))
-                           (raw (kargu-lsp--seq->list
-                                 (kargu-lsp--request
-                                  :textDocument/definition
-                                  `(:textDocument (:uri ,(kargu-lsp--buffer-uri buffer))
-                                                  :position (:line ,line :character ,character))
-                                  buffer)))
-                           (hits (delq nil
-                                       (mapcar (lambda (loc)
-                                                 (let ((uri (kargu-lsp--loc-uri loc)))
-                                                   (when uri
-                                                     (format "  %s:%d"
-                                                             (kargu-lsp--uri-to-path uri)
-                                                             (kargu-lsp--loc-line loc)))))
-                                               raw))))
-                      (when hits
-                        (concat
-                         (format "Definition(s) of `%s' (from an occurrence in %s):\n"
-                                 symbol-name (buffer-file-name buffer))
-                         (string-join (seq-take hits kargu-lsp-definition-max-hits) "\n")))))))
+(defun kargu-lsp--symbol-occurrence (name)
+  "Find a local occurrence of NAME in this project's managed buffers."
+  (save-match-data
+    (cl-loop for buf in (kargu-lsp--project-buffers)
+             for position =
+             (with-current-buffer buf
+               (save-excursion
+                 (save-restriction
+                   (widen)
+                   (goto-char (point-min))
+                   (when (re-search-forward (concat "\\_<" (regexp-quote name) "\\_>") nil t)
+                     (list :line (1- (line-number-at-pos (match-beginning 0)))
+                           :character (- (match-beginning 0) (line-beginning-position)))))))
+             when position return (cons buf position))))
 
-(defun kargu-lsp-find-definition (symbol-name)
-  "Return text describing the definition sites of SYMBOL-NAME."
+(defun kargu-lsp--definitions-via-occurrence (name callback)
+  "Request the definition of an occurrence of NAME for CALLBACK."
+  (let ((occurrence (kargu-lsp--symbol-occurrence name)))
+    (if (null occurrence)
+        (funcall callback (format "No definition found for `%s'" name))
+      (let ((buf (car occurrence)))
+        (kargu-lsp--request
+         :textDocument/definition
+         `(:textDocument (:uri ,(kargu-lsp--buffer-uri buf)) :position ,(cdr occurrence))
+         (lambda (raw error)
+           (funcall
+            callback
+            (if error (concat "ERROR: " error)
+              (let ((locations (if (kargu-lsp--loc-uri raw) (list raw)
+                                 (kargu-lsp--seq->list raw))))
+                (concat
+                 (format "Definition(s) of `%s':\n" name)
+                 (mapconcat (lambda (loc)
+                              (format "  %s:%d" (kargu-lsp--uri-to-path (kargu-lsp--loc-uri loc))
+                                      (kargu-lsp--loc-line loc)))
+                            (seq-take locations kargu-lsp-definition-max-hits) "\n"))))))
+         buf)))))
+
+(defun kargu-lsp-find-definition (symbol-name &optional callback)
+  "Describe definition sites of SYMBOL-NAME without blocking.
+CALLBACK receives fresh results; interactive use reports them on completion."
   (interactive "sSymbol: ")
-  (let ((text
-         (condition-case-unless-debug err
-             (kargu-lsp--with-session
-              (lambda ()
-                (or (kargu-lsp--ws-definitions symbol-name)
-                    (kargu-lsp--definitions-via-occurrence symbol-name)
-                    (format "No definition found for `%s' in the workspace" symbol-name))))
-           (error
-            (kargu-log 'warn "find-definition: %s" (error-message-string err))
-            (format "ERROR: %s" (error-message-string err))))))
-    (when (called-interactively-p 'any)
-      (message "%s" text))
-    text))
+  (let ((done (or callback (and (called-interactively-p 'any)
+                                (lambda (text) (message "%s" text))))))
+    (if (null done)
+        (kargu-lsp--format-definitions symbol-name (kargu-lsp--ws-symbols symbol-name))
+      (kargu-lsp--ws-symbols
+       symbol-name
+       (lambda (items _error)
+         (let ((text (kargu-lsp--format-definitions symbol-name items)))
+           (if text (funcall done text)
+             (kargu-lsp--definitions-via-occurrence symbol-name done))))))))
 
 ;;;; Document symbols, outline, reading and surgical editing --------------
 
@@ -225,32 +218,54 @@ and :end-line."
                       (< (plist-get a :end-line) (plist-get b :end-line))
                     (< (plist-get a :start-line) (plist-get b :start-line))))))))
 
-(defun kargu-lsp-get-file-symbols (file-path)
-  "Retrieve document symbols for FILE-PATH via Eglot or `imenu'."
-  (let* ((path (kargu-permission-resolve file-path "lsp path"))
-         (buf (or (find-buffer-visiting path)
-                  (find-file-noselect path)))
-         symbols)
-    (unless (file-regular-p path)
-      (error "File does not exist or is not a regular file: %s" path))
-    ;; 1. Try Eglot textDocument/documentSymbol
-    (when (and (buffer-live-p buf) (kargu-lsp--buffer-managed-p buf))
-      (condition-case-unless-debug err
-          (with-current-buffer buf
-            (let ((raw (kargu-lsp--request
-                        :textDocument/documentSymbol
-                        `(:textDocument (:uri ,(kargu-lsp--buffer-uri buf)))
-                        buf)))
-              (when raw
-                (setq symbols (kargu-lsp--parse-document-symbols raw)))))
-        (error
-         (kargu-log 'warn "documentSymbol failed for %s: %s; falling back to imenu"
-                    path (error-message-string err)))))
-    ;; 2. Fall back to imenu
-    (unless symbols
-      (when (buffer-live-p buf)
-        (setq symbols (kargu-lsp--imenu-document-symbols buf))))
-    symbols))
+(defvar kargu-lsp--file-symbol-cache (make-hash-table :test #'eq :weakness 'key)
+  "Document symbols keyed by buffer, server and modification tick.")
+
+(defun kargu-lsp--symbol-buffer (file-path)
+  "Resolve FILE-PATH safely and return its visiting buffer."
+  (let ((path (kargu-permission-resolve file-path "lsp path")))
+    (unless (file-regular-p path) (error "Not a regular file: %s" path))
+    (or (find-buffer-visiting path)
+        (let ((enable-local-variables :safe) (enable-local-eval nil)
+              (enable-dir-local-variables nil))
+          (find-file-noselect path)))))
+
+(defun kargu-lsp--cached-file-symbols (buffer)
+  "Return a valid cached symbol snapshot for BUFFER."
+  (with-current-buffer buffer
+    (let ((entry (gethash buffer kargu-lsp--file-symbol-cache)))
+      (when (and entry
+                 (eq (plist-get entry :server)
+                     (and (fboundp 'eglot-current-server) (eglot-current-server)))
+                 (equal (plist-get entry :tick) (buffer-chars-modified-tick)))
+        (plist-get entry :symbols)))))
+
+(defun kargu-lsp-get-file-symbols (file-path &optional callback)
+  "Get document symbols for FILE-PATH without waiting for a server.
+With CALLBACK, deliver (SYMBOLS ERROR) from an asynchronous request.
+Without CALLBACK, return a cached or local imenu snapshot only."
+  (let* ((buf (kargu-lsp--symbol-buffer file-path))
+         (cached (kargu-lsp--cached-file-symbols buf)))
+    (cond
+     ((null callback) (or cached (kargu-lsp--imenu-document-symbols buf)))
+     (cached (funcall callback cached nil))
+     ((not (kargu-lsp--buffer-managed-p buf))
+      (funcall callback (kargu-lsp--imenu-document-symbols buf) nil))
+     (t
+      (kargu-lsp--request
+       :textDocument/documentSymbol
+       `(:textDocument (:uri ,(kargu-lsp--buffer-uri buf)))
+       (lambda (raw error)
+         (if error
+             (funcall callback nil error)
+           (let ((symbols (or (kargu-lsp--parse-document-symbols raw)
+                              (kargu-lsp--imenu-document-symbols buf))))
+             (puthash buf (list :server (with-current-buffer buf (eglot-current-server))
+                                :tick (with-current-buffer buf (buffer-chars-modified-tick))
+                                :symbols symbols)
+                      kargu-lsp--file-symbol-cache)
+             (funcall callback symbols nil))))
+       buf)))))
 
 (defun kargu-lsp-format-symbols-outline (file-path symbols)
   "Render SYMBOLS tree as a compact outline string for FILE-PATH."
@@ -293,11 +308,16 @@ and :end-line."
       (format "File: %s (%d symbol(s) found)\n%s"
               file-path count body))))
 
-(defun kargu-lsp-read-file-symbols (file-path)
-  "Return a language-agnostic symbol outline for FILE-PATH."
-  (let* ((path (kargu-permission-resolve file-path "lsp path"))
-         (symbols (kargu-lsp-get-file-symbols path)))
-    (kargu-lsp-format-symbols-outline path symbols)))
+(defun kargu-lsp-read-file-symbols (file-path &optional callback)
+  "Return an outline for FILE-PATH, or deliver it asynchronously to CALLBACK."
+  (let ((path (kargu-permission-resolve file-path "lsp path")))
+    (if callback
+        (kargu-lsp-get-file-symbols
+         path (lambda (symbols error)
+                (funcall callback
+                         (if error (concat "ERROR: " error)
+                           (kargu-lsp-format-symbols-outline path symbols)))))
+      (kargu-lsp-format-symbols-outline path (kargu-lsp-get-file-symbols path)))))
 
 (defun kargu-lsp--flatten-symbols (symbols &optional container)
   "Flatten SYMBOLS while retaining their optional CONTAINER."
@@ -340,36 +360,29 @@ A kind does not widen the search to every symbol of that kind."
        named))
      (t named))))
 
-(defun kargu-lsp-read-symbol (file-path symbol-name &optional kind)
-  "Read the implementation body of SYMBOL-NAME in FILE-PATH."
-  (let* ((path (kargu-permission-resolve file-path "lsp path"))
-         (symbols (kargu-lsp-get-file-symbols path))
-         (flat (kargu-lsp--flatten-symbols symbols))
-         (matches (kargu-lsp--find-symbol-in-list flat symbol-name kind)))
-    (cond
-     ((null matches)
-      (let ((avail (if flat
-                       (mapconcat
-                        (lambda (s)
-                          (format "  • %s %s [%s]"
-                                  (plist-get s :kind)
-                                  (plist-get s :name)
-                                  (if (> (plist-get s :end-line) (plist-get s :start-line))
-                                      (format "lines %d-%d" (plist-get s :start-line) (plist-get s :end-line))
-                                    (format "line %d" (plist-get s :start-line)))))
-                        (seq-take flat 30)
-                        "\n")
-                     "  (no symbols found in file)")))
-        (format "ERROR: Symbol '%s'%s not found in %s.\nAvailable symbols:\n%s"
-                symbol-name (if kind (format " (kind: %s)" kind) "") path avail)))
-     (t
-      (let* ((sym (car matches))
-             (s-line (plist-get sym :start-line))
-             (e-line (plist-get sym :end-line)))
-        (require 'kargu/tools/diff nil t)
-        (if (fboundp 'kargu-diff-read-file)
-            (kargu-diff-read-file path s-line e-line)
-          (format "(symbol %s lines %d-%d)" symbol-name s-line e-line)))))))
+(cl-defun kargu-lsp--read-symbol (path symbols &key name kind)
+  "Read NAME of KIND from the SYMBOLS snapshot in PATH."
+  (let* ((flat (kargu-lsp--flatten-symbols symbols))
+         (matches (kargu-lsp--find-symbol-in-list flat name kind)))
+    (if (null matches)
+        (kargu-lsp--format-missing-symbol-error name path flat kind)
+      (let ((sym (car matches)))
+        (kargu-diff-read-file path (plist-get sym :start-line)
+                              (plist-get sym :end-line))))))
+
+(defun kargu-lsp-read-symbol (file-path symbol-name &optional kind callback)
+  "Read SYMBOL-NAME in FILE-PATH, optionally filtered by KIND.
+With CALLBACK, fetch symbols asynchronously and deliver the text once."
+  (let ((path (kargu-permission-resolve file-path "lsp path")))
+    (if callback
+        (kargu-lsp-get-file-symbols
+         path (lambda (symbols error)
+                (funcall callback
+                         (if error (concat "ERROR: " error)
+                           (kargu-lsp--read-symbol path symbols
+                                                  :name symbol-name :kind kind)))))
+      (kargu-lsp--read-symbol path (kargu-lsp-get-file-symbols path)
+                             :name symbol-name :kind kind))))
 
 (defun kargu-lsp--format-missing-symbol-error (symbol-name path flat kind)
   "Describe a missing SYMBOL-NAME in PATH using FLAT candidates and KIND."
@@ -420,45 +433,48 @@ A kind does not widen the search to every symbol of that kind."
         (setq new-full-text (concat new-full-text "\n")))
       new-full-text)))
 
-(defun kargu-lsp--apply-symbol-replacement (path sym new-full-text s-line e-line reason)
-  "Apply NEW-FULL-TEXT to PATH replacing SYM (lines S-LINE to E-LINE)."
-  (when (and (stringp reason) (not (string-empty-p reason)))
-    (message "kargu edit_by_lsp proposal for %s (%s): %s" path (plist-get sym :name) reason)
-    (kargu-log 'info "lsp: edit_by_lsp reason: %s" reason))
-  (let ((prop (kargu-diff-apply-proposal path new-full-text)))
-    (format "Edit of %s `%s` (lines %d-%d) in %s:\n%s"
-            (plist-get sym :kind) (plist-get sym :name)
-            s-line e-line path
-            (kargu-diff--describe prop))))
+(cl-defun kargu-lsp--replace-symbol (path symbols &key name content kind reason callback)
+  "Replace NAME of KIND from SYMBOLS in PATH with CONTENT.
+REASON describes the proposal.  CALLBACK receives its final review outcome."
+  (let* ((flat (kargu-lsp--flatten-symbols symbols))
+         (matches (kargu-lsp--find-symbol-in-list flat name kind))
+         (error (cond
+                 ((null matches) (kargu-lsp--format-missing-symbol-error name path flat kind))
+                 ((cdr matches) (kargu-lsp--format-ambiguous-symbol-error name matches)))))
+    (if error
+        (if callback (funcall callback error) error)
+      (let* ((symbol (car matches))
+             (text (kargu-lsp--splice-symbol-content
+                    (kargu-diff--file-text path) (plist-get symbol :start-line)
+                    (plist-get symbol :end-line) content))
+             (describe (lambda (outcome)
+                         (format "Edit of %s `%s` in %s:\n%s"
+                                 (plist-get symbol :kind) name path
+                                 (kargu-diff--describe outcome)))))
+        (when reason (kargu-log 'info "symbol edit: %s" reason))
+        (if callback
+            (kargu-diff-apply-proposal path text
+                                      (lambda (outcome) (funcall callback (funcall describe outcome))))
+          (funcall describe (kargu-diff-apply-proposal path text)))))))
 
-(defun kargu-lsp-edit-symbol (file-path symbol-name new-content &optional kind reason)
-  "Replace the body of SYMBOL-NAME in FILE-PATH with NEW-CONTENT.
-NEW-CONTENT is staged through `kargu-diff-apply-proposal'."
-  (or (and (fboundp 'kargu-diff--mutating-disabled)
-           (or (kargu-diff--mutating-disabled "edit_by_lsp")
-               (kargu-diff--mutating-disabled "edit_symbol")))
-      (let* ((path (kargu-permission-resolve file-path "lsp path"))
-             (symbols (kargu-lsp-get-file-symbols path))
-             (flat (kargu-lsp--flatten-symbols symbols))
-             (matches (kargu-lsp--find-symbol-in-list flat symbol-name kind)))
-        (cond
-         ((not (file-exists-p path))
-          (format "ERROR: file does not exist: %s" path))
-         ((null matches)
-          (kargu-lsp--format-missing-symbol-error symbol-name path flat kind))
-         ((cdr matches)
-          (kargu-lsp--format-ambiguous-symbol-error symbol-name matches))
-         (t
-          (let* ((sym (car matches))
-                 (s-line (plist-get sym :start-line))
-                 (e-line (plist-get sym :end-line))
-                 (raw-text (or (and (fboundp 'kargu-diff--file-text)
-                                    (kargu-diff--file-text path))
-                               (with-temp-buffer
-                                 (insert-file-contents path)
-                                 (buffer-string))))
-                 (new-full-text (kargu-lsp--splice-symbol-content raw-text s-line e-line new-content)))
-            (kargu-lsp--apply-symbol-replacement path sym new-full-text s-line e-line reason)))))))
+(cl-defun kargu-lsp-edit-symbol (file-path symbol-name new-content &optional kind reason callback)
+  "Replace SYMBOL-NAME in FILE-PATH with NEW-CONTENT.
+KIND narrows matches; REASON describes the proposal.  CALLBACK waits
+for asynchronous symbol collection and human review when required."
+  (let ((blocked (kargu-diff--mutating-disabled "edit_by_lsp"))
+        (path (kargu-permission-resolve file-path "lsp path")))
+    (cond
+     (blocked (if callback (funcall callback blocked) blocked))
+     (callback
+      (kargu-lsp-get-file-symbols
+       path (lambda (symbols error)
+              (if error (funcall callback (concat "ERROR: " error))
+                (kargu-lsp--replace-symbol
+                 path symbols :name symbol-name :content new-content
+                 :kind kind :reason reason :callback callback)))))
+     (t (kargu-lsp--replace-symbol
+         path (kargu-lsp-get-file-symbols path) :name symbol-name
+         :content new-content :kind kind :reason reason)))))
 
 (provide 'kargu/tools/lsp/symbols)
 

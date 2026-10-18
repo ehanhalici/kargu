@@ -16,6 +16,7 @@
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/permission)
+(require 'kargu/async)
 (require 'eglot nil t)
 (require 'imenu nil t)
 
@@ -23,8 +24,7 @@
 (declare-function eglot-project "eglot")
 (declare-function eglot-uri-to-path "eglot")
 (declare-function eglot-path-to-uri "eglot")
-(declare-function eglot--request "eglot")
-(declare-function jsonrpc-request "jsonrpc")
+(declare-function jsonrpc-async-request "jsonrpc")
 (defvar eglot--managed-mode)
 
 (defcustom kargu-lsp-request-timeout 10
@@ -186,15 +186,6 @@ Used to route LSP requests to the right workspace and default file arguments.")
      (delete-dups (cons (or (kargu-lsp--context-buffer-live) (current-buffer))
                         (kargu-lsp--managed-buffers))))))
 
-(defun kargu-lsp--with-session (fn)
-  "Call FN with an Eglot-managed buffer current; return FN's result.
-Signal an `error' when no Eglot session is usable."
-  (let ((buffer (kargu-lsp--managed-buffer)))
-    (if (null buffer)
-        (error "No active LSP session: run M-x eglot in a project buffer (or set `kargu-context-buffer')")
-      (with-current-buffer buffer
-        (funcall fn)))))
-
 (defun kargu-lsp-context-file ()
   "Return the context file name, or nil."
   (let ((buffer (kargu-lsp--context-buffer-live)))
@@ -272,43 +263,38 @@ asked, and `default-directory' is not used in its place."
 
 ;;;; Request dispatcher ---------------------------------------------------
 
-(defun kargu-lsp--timeout-p (err)
-  "Non-nil when ERR is an LSP request that ran out of time."
-  (string-match-p "[Tt]imed? ?out" (error-message-string err)))
-
-(defun kargu-lsp--eglot-request (server method params timeout)
-  "Call `eglot--request' for SERVER, METHOD and PARAMS, bounded by TIMEOUT.
-A build that takes keyword arguments gets :timeout; an older build gets
-TIMEOUT as the optional positional argument."
-  (let ((args (help-function-arglist 'eglot--request t)))
-    (if (or (memq '&key args) (memq '&rest args))
-        (eglot--request server method params :timeout timeout)
-      (eglot--request server method params timeout))))
-
-(defun kargu-lsp--request (method params &optional buffer)
-  "Send an LSP request with METHOD and PARAMS in BUFFER (or current) using Eglot.
-The call stays synchronous and gives up after `kargu-lsp-request-timeout'."
-  (let* ((buf (or buffer (current-buffer))))
-    (with-current-buffer buf
-      (let ((server (and (fboundp 'eglot-current-server)
-                         (eglot-current-server)))
-            (kw-method (cond
-                        ((keywordp method) method)
-                        ((symbolp method) (intern (concat ":" (symbol-name method))))
-                        ((stringp method)
-                         (intern (concat ":" (replace-regexp-in-string "\\`:" "" method))))
-                        (t (intern (format ":%s" method)))))
-            (timeout kargu-lsp-request-timeout))
-        (unless server
-          (error "No active Eglot server in buffer %s" (buffer-name buf)))
-        (condition-case err
-            (if (fboundp 'eglot--request)
-                (kargu-lsp--eglot-request server kw-method params timeout)
-              (jsonrpc-request server kw-method params :timeout timeout))
-          (error
-           (if (kargu-lsp--timeout-p err)
-               (error "LSP request timed out after %s seconds" timeout)
-             (signal (car err) (cdr err)))))))))
+(defun kargu-lsp--request (method params callback &optional buffer)
+  "Send METHOD and PARAMS asynchronously from BUFFER.
+CALLBACK receives (VALUE ERROR); return a cancellable task immediately."
+  (let* ((buf (or buffer (current-buffer)))
+         (server (and (buffer-live-p buf)
+                      (with-current-buffer buf (eglot-current-server))))
+         (tick (and (buffer-live-p buf)
+                    (with-current-buffer buf (buffer-chars-modified-tick))))
+         (task (kargu-async-start
+                callback :timeout kargu-lsp-request-timeout
+                :valid-p
+                (lambda ()
+                  (and (buffer-live-p buf)
+                       (with-current-buffer buf
+                         (and (eq server (eglot-current-server))
+                              (= tick (buffer-chars-modified-tick)))))))))
+    (funcall
+     (kargu-async-wrap
+      task
+      (lambda ()
+        (unless server (error "No active Eglot server"))
+        (with-current-buffer buf
+          (jsonrpc-async-request
+           server (intern (concat ":" (string-remove-prefix ":" (format "%s" method))))
+           params :timeout kargu-lsp-request-timeout
+           :success-fn (kargu-async-wrap
+                        task (lambda (value) (kargu-async-finish task value)))
+           :error-fn (kargu-async-wrap
+                      task (lambda (err) (kargu-async-finish task nil (format "%s" err))))
+           :timeout-fn (kargu-async-wrap
+                        task (lambda () (kargu-async-finish task nil "LSP request timed out"))))))))
+    task))
 
 (provide 'kargu/tools/lsp/context)
 

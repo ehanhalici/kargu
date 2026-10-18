@@ -2,7 +2,7 @@
 
 - [x] Başlangıç refactoring'i: LSP/DAP, HTTP ve sohbet sorumlulukları ayrıldı; süreç, oturum izolasyonu ve akış regresyonları giderildi. Doğrulama: 362/362 çevrimdışı ERT testi.
 - [x] Eglot'u isteğe bağlı yap; proje kapsamlı ortak araç yetenek kapısı. Eglot/Dape normal kullanım için zorunlu değil; LSP yoksa istem kullanılabilir. Şema, rehber, doğrudan yürütme ve alias'lar aynı politikayı kullanıyor. `edit_by_lsp` salt okunur kip kaçışı da kapatıldı. Doğrulama: 366/366 ERT testi.
-- [ ] LSP isteklerini ve tüketicilerini asenkronlaştır.
+- [x] LSP isteklerini ve tüketicilerini asenkronlaştır. `jsonrpc-async-request`, tek teslimli görevler, proje/sunucu/belge sürümü anahtarlı önbellekler, Company callback'leri ve onay sonucunu bekleyen sembol düzenleme eklendi. İstemde yalnız hazır snapshot okunur; senkron ağ yolu kaldırıldı.
 - [ ] DAP callback zincirlerinde tek sonuç, hata ve iptal temizliği.
 - [ ] Süresiz, izlenebilir ve iptal edilebilir Bash işleri.
 - [ ] Debug ön koşulları, adapter yetenekleri ve araç kapsamı.
@@ -15,6 +15,7 @@ Her adım testleriyle ayrı commit olarak kaydedilir. `skills.md` yereldir ve Gi
 ## 2026-10-18 refactoring sırasında doğrulanan kapsamlı işler
 
 ### LSP isteklerini callback tabanlı hale getir
+- Durum: tamamlandı. Gecikmeli sahte sunucu, tek teslim, timeout, iptal, eski belge reddi, Company ve bekleyen review regresyonları eklendi.
 
 - Konum: `kargu/tools/lsp/context.el`, `kargu-lsp--request` ve `kargu-lsp--eglot-request`.
 - Bulgu: Araçlar Eglot'un senkron istek yolunu veya `jsonrpc-request` kullanıyor. `kargu-lsp-request-timeout` beklemeyi sınırlar; isteği asenkron yapmaz. Yavaş dil sunucusunda araç ve istek hazırlama akışı yanıt bekler.

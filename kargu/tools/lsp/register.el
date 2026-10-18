@@ -24,7 +24,7 @@
     "Get a compact map of the whole project: every file with its symbols (functions, types, classes, constants) and line numbers. Use this FIRST to orient yourself; it is far cheaper than reading files."
     '(("type" . "object")
       ("properties" . :json-empty-object))
-    (lambda (_args) (kargu-lsp-build-skeleton)))
+    (lambda (_args &optional callback) (kargu-lsp-build-skeleton nil callback)))
    (list
     "lsp_diagnostics"
     "Get compiler and linter diagnostics (errors, warnings) from LSP via Flymake. Pass 'file_path' to inspect a specific file, or OMIT 'file_path' (pass empty or no arguments) to scan the ENTIRE PROJECT for all compile and lint errors across all project files. Always call this after editing or building to verify zero compilation errors."
@@ -43,23 +43,23 @@
       ("properties" . (("symbol_name" . (("type" . "string")
                                          ("description" . "Name of the symbol to look up, e.g. the function or type name.")))))
       ("required" . ["symbol_name"]))
-    (lambda (args)
+    (lambda (args &optional callback)
       (let ((name (kargu--tool-arg args "symbol_name" "symbolName" "symbol")))
         (if (or (null name) (string-empty-p name))
             "ERROR: symbol_name is required"
-          (kargu-lsp-find-definition name)))))
+          (kargu-lsp-find-definition name callback)))))
    (list
     "read_file_symbols"
     "Get a language-agnostic outline of symbols (functions, classes, structs, methods, enums, types) and their exact line ranges in a file using LSP documentSymbol. ALWAYS use this BEFORE reading a large file to inspect its structure and avoid wasting tokens."
     '(("type" . "object")
       ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "Absolute or project-relative path of the file to inspect."))))))
-    (lambda (args)
+    (lambda (args &optional callback)
       (let ((path (kargu--tool-file-path args)))
         (if (not (kargu-nonempty path))
             (kargu--tool-missing-file-path args)
           (condition-case-unless-debug err
-              (kargu-lsp-read-file-symbols path)
+              (kargu-lsp-read-file-symbols path callback)
             (error (format "ERROR: %s" (error-message-string err))))))))
    (list
     "read_symbol"
@@ -72,7 +72,7 @@
                        ("kind" . (("type" . "string")
                                   ("description" . "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type).")))))
       ("required" . ["file_path" "symbol"]))
-    (lambda (args)
+    (lambda (args &optional callback)
       (let ((path (kargu--tool-file-path args))
             (sym (kargu--tool-arg args "symbol" "symbol_name" "symbolName" "name"))
             (kind (kargu--tool-arg args "kind" "symbol_kind" "symbolKind")))
@@ -83,7 +83,7 @@
           "ERROR: symbol is required")
          (t
           (condition-case-unless-debug err
-              (kargu-lsp-read-symbol path sym kind)
+              (kargu-lsp-read-symbol path sym kind callback)
             (error (format "ERROR: %s" (error-message-string err)))))))))
    (list
     "edit_by_lsp"
@@ -100,7 +100,7 @@
                        ("reason" . (("type" . "string")
                                     ("description" . "Optional explanation for the change.")))))
       ("required" . ["file_path" "symbol" "new_content"]))
-    (lambda (args)
+    (lambda (args &optional callback)
       (let ((path (kargu--tool-file-path args))
             (sym (kargu--tool-arg args "symbol" "symbol_name" "symbolName" "name"))
             (new (kargu--tool-arg-string args "new_content" "newContent" "content" "new_string" "newString" "code"))
@@ -115,7 +115,7 @@
           "ERROR: new_content is required")
          (t
           (condition-case-unless-debug err
-              (kargu-lsp-edit-symbol path sym new kind reason)
+              (kargu-lsp-edit-symbol path sym new kind reason callback)
             (error (format "ERROR: %s" (error-message-string err))))))))))
   "Tool schemas and executors exposed by the LSP adapter.")
 

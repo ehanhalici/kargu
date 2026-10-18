@@ -51,13 +51,6 @@
   (file-name-directory (or load-file-name buffer-file-name))
   "Directory of `kargu/prompt.el', parent of `prompt/*.txt'.")
 
-(defconst kargu-prompt-mode-reminders
-  '((ask . "<system-reminder>\nThis is a read-only ASK turn. Analyze and explain. Do not call edit_by_lsp, edit_file, write_file, edit, write, or bash. If a change is needed, describe it as a proposal with paths and line numbers.\n</system-reminder>")
-    (plan . "<system-reminder>\nThis is a READ-ONLY PLAN turn. Explore with read_file_symbols/read_file_outline (to inspect structure), read_symbol (to inspect specific functions), read_file/read (for line ranges/configs), workspace_grep/grep, find_files, and LSP tools. Do not call edit_by_lsp, edit_file, write_file, or bash. Produce a markdown checklist: steps, full file paths, symbols to change (verify they exist), risks, and a test strategy.\n</system-reminder>")
-    (debug . "<system-reminder>\nThis is DEBUG mode with an active DAP/Dape debug session. You have full interactive control over the debugger: use `debug_get_context` or `debug_scope` to inspect the call stack and local variables (inspect in-scope variables before attempting eval); `debug_step_in` (step) to step into function calls; `debug_step_over` (next) to step line-by-line; `debug_step_out` (finish) to return to caller; `debug_continue` to run to the next breakpoint; `debug_set_breakpoint` (requires file_path and line) and `debug_clear_breakpoint` to manage stopping points; `debug_up`/`debug_down` to navigate frames; `debug_watch` to manage watchpoints; and `debug_eval` to evaluate expressions. Step through the program to isolate the bug.\n</system-reminder>")
-    (agent . "<system-reminder>\nAGENT mode: inspect with tools (prefer read_file_symbols/read_symbol before reading whole files), edit code with edit_by_lsp (fallback to edit_file for non-code files), verify with Flymake/LSP diagnostics, and run the project compiler/test suite via bash. Be concise. Do not narrate tool plans in assistant text.\n</system-reminder>"))
-  "Alist of mode symbol to per-turn `<system-reminder>' text.")
-
 (defvar kargu-prompt--file-cache (make-hash-table :test #'equal)
   "Map basename to loaded prompt file text.")
 

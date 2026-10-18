@@ -320,21 +320,17 @@ HAS-DELIM distinguishes qualified FILE-Q and SYM-Q fragments."
      'kargu-ann (format "%s :%s" kind (or line "?"))
      'kargu-match (kargu-chat--match-property match-q cand-str))))
 
-(defun kargu-chat--symbol-candidates (query)
-  "Symbol mention candidates matching QUERY (without the leading `@').
+(defun kargu-chat--symbol-candidates-from (query all-symbols)
+  "Format ALL-SYMBOLS matching QUERY (without the leading `@').
 Formatted as `@file::symbol' (e.g., `@main.go::CalcTotal').
 QUERY can match the symbol name, the file path, or both if QUERY contains `::'."
   (condition-case nil
       (let* ((root (kargu-chat--completion-root))
-             (roots (kargu-chat--completion-roots))
              (q (or query ""))
              (has-delim (string-match-p "::" q))
              (file-q (and has-delim (car (split-string q "::"))))
              (sym-q (and has-delim (or (cadr (split-string q "::")) "")))
              (match-q (if has-delim sym-q q))
-             (all-symbols (if (fboundp 'kargu-lsp-all-symbols)
-                              (kargu-lsp-all-symbols match-q roots)
-                            nil))
              scored)
         (dolist (item all-symbols)
           (when-let* ((rec (kargu-chat--score-symbol-item item root has-delim file-q sym-q q)))
@@ -345,6 +341,32 @@ QUERY can match the symbol name, the file path, or both if QUERY contains `::'."
                  until (>= n 40)
                  collect (kargu-chat--format-symbol-candidate rec match-q)))
     (error nil)))
+
+(defun kargu-chat--symbol-candidates (query)
+  "Return cached/local symbol candidates for QUERY without network waits."
+  (kargu-chat--symbol-candidates-from
+   query (kargu-lsp-all-symbols query (kargu-chat--completion-roots))))
+
+(defun kargu-chat--async-candidates (prefix callback)
+  "Fetch symbol candidates for PREFIX and deliver them to CALLBACK."
+  (let* ((query (string-remove-prefix "@" prefix))
+         (roots (kargu-chat--completion-roots))
+         (symbol-query (if (string-search "::" query)
+                           (car (last (split-string query "::"))) query))
+         (task (kargu-async-start
+                (lambda (values _error) (funcall callback values))
+                :timeout kargu-lsp-request-timeout)))
+    (funcall
+     (kargu-async-wrap
+      task (lambda ()
+             (kargu-lsp-all-symbols
+              symbol-query roots
+              (kargu-async-wrap
+               task (lambda (items)
+                      (kargu-async-finish
+                       task (append (unless (string-search "::" query)
+                                      (kargu-chat--file-candidates query))
+                                    (kargu-chat--symbol-candidates-from query items)))))))))))
 
 (defun kargu-chat--at-candidates (prefix)
   "Company candidates for PREFIX, a string beginning with `@'."
@@ -361,7 +383,11 @@ Ignore extra arguments in _IGNORED.  Match files and LSP symbols fuzzily."
   (cl-case command
     (interactive (company-begin-backend 'kargu-chat-company))
     (prefix (kargu-chat--at-prefix))
-    (candidates (kargu-chat--at-candidates arg))
+    (candidates
+     (if (kargu-eglot-connected-p)
+         (cons :async (lambda (callback)
+                        (kargu-chat--async-candidates arg callback)))
+       (kargu-chat--at-candidates arg)))
     (annotation (or (get-text-property 0 'kargu-ann arg) ""))
     (kind (or (get-text-property 0 'kargu-kind arg) 'file))
     (meta

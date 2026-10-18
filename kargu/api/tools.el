@@ -16,6 +16,7 @@
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/contract)
+(require 'kargu/async)
 
 ;;;; Tool registry ---------------------------------------------------------
 
@@ -302,20 +303,25 @@ so the model can inspect remaining lines using `read_file'."
         (>= (cdr arity) 2))))
 
 (defun kargu--execute-tool-async (executor args name callback)
-  "Run tool NAME's EXECUTOR with ARGS and deliver the result to CALLBACK.
-Support executors returning a value or accepting their own callback."
-  (let ((on-done (lambda (res)
-                   (let* ((formatted (kargu--format-tool-result res))
-                          (final (kargu--truncate-for-model formatted)))
-                     (kargu--log-block (format "tool %s result" name) formatted)
-                     (funcall callback final)))))
-    (condition-case-unless-debug err
-        (if (kargu--executor-async-p executor)
-            (funcall executor args on-done)
-          (funcall on-done (funcall executor args)))
-      (error
-       (funcall callback (format "ERROR: tool %s failed: %s"
-                                 name (error-message-string err)))))))
+  "Run tool NAME's EXECUTOR with ARGS and deliver once to CALLBACK."
+  (let* ((task (kargu-async-start
+                (lambda (value error)
+                  (funcall callback (if error (format "ERROR: tool %s failed: %s" name error)
+                                      value)))))
+         (on-done
+          (kargu-async-wrap
+           task (lambda (res)
+                  (let* ((formatted (kargu--format-tool-result res))
+                         (final (kargu--truncate-for-model formatted)))
+                    (kargu--log-block (format "tool %s result" name) formatted)
+                    (kargu-async-finish task final))))))
+    (funcall
+     (kargu-async-wrap
+      task (lambda ()
+             (if (kargu--executor-async-p executor)
+                 (let ((result (funcall executor args on-done)))
+                   (when (stringp result) (funcall on-done result)))
+               (funcall on-done (funcall executor args))))))))
 
 (defun kargu--execute-tool-sync (executor args name)
   "Run tool NAME's EXECUTOR with ARGS and return the truncated result."

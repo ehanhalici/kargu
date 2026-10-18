@@ -154,6 +154,7 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
   (interactive)
   (if (null kargu--loop-run)
       (message "kargu: no run in progress")
+    (kargu-async-cancel-owner kargu--loop-run)
     (when (fboundp 'kargu-bash-kill-active-async)
       (kargu-bash-kill-active-async))
     (kargu-api-cancel)
@@ -284,6 +285,7 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
   "End RUN with STATUS and TEXT; deliver the report to on-finish."
   (when (kargu-loop--live-p run)
     (let ((report (kargu-loop--finish-report run status text)))
+      (kargu-async-cancel-owner run)
       (setq kargu--loop-run nil)
       (kargu-confirm-dismiss-all)
       (when (and (memq status '(:stopped :error))
