@@ -55,9 +55,10 @@ Large bodies are truncated to prevent context window exhaustion."
         (string-suffix-p ".localhost" h)
         (string-suffix-p ".local" h)
         (string-suffix-p ".internal" h)
-        (string-prefix-p "fe80:" h)
-        (string-prefix-p "fc" h)
-        (string-prefix-p "fd" h)
+        (and (string-search ":" h)
+             (or (string-prefix-p "fe80:" h)
+                 (string-prefix-p "fc" h)
+                 (string-prefix-p "fd" h)))
         (kargu-webfetch--ipv4-private-p h))))
 
 (defun kargu-webfetch--bare-host (parsed)
@@ -122,7 +123,7 @@ returns at once; `getent' runs through `kargu-process-run'."
   "Return curl arguments that GET URL from the resolved address IP."
   (let* ((parsed (url-generic-parse-url url))
          (host (kargu-webfetch--bare-host parsed)))
-    (list "-sS" "-i"
+    (list "--disable" "-sS" "-i" "--noproxy" "*"
           "--max-time" (number-to-string kargu-webfetch-timeout)
           "-A" "kargu"
           "--proto" "=http,https"

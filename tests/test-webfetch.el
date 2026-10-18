@@ -18,6 +18,27 @@
   (should-error (kargu-webfetch--check-url "ftp://example.com/x"))
   (should (null (kargu-webfetch--check-url "https://example.com/x"))))
 
+(ert-deftest kargu-webfetch-address-prefixes-do-not-reject-domain-names-test ()
+  "IPv6 ULA prefixes apply only to addresses, never to ordinary DNS names."
+  (dolist (host '("fdroid.org" "fcc.gov" "fda.gov" "fd.io" "fc-example.org"))
+    (should-not (kargu-webfetch--internal-host-p host))
+    (should-not (kargu-webfetch--check-url (concat "https://" host "/"))))
+  (dolist (host '("fc00::1" "FD12:3456::1" "[fd00::1]"))
+    (should (kargu-webfetch--internal-host-p host))))
+
+(ert-deftest kargu-webfetch-ignores-curl-config-and-environment-proxies-test ()
+  "DNS pinning cannot be overridden by a curlrc or a proxy environment."
+  (let* ((process-environment
+          (append '("http_proxy=http://127.0.0.1:8080"
+                    "https_proxy=http://127.0.0.1:8080"
+                    "ALL_PROXY=socks5://127.0.0.1:1080") process-environment))
+         (args (kargu-webfetch--curl-args "https://example.com/a" "93.184.216.34")))
+    (should (equal (car args) "--disable"))
+    (should (equal (cadr (member "--noproxy" args)) "*"))
+    (should (equal (cadr (member "--resolve" args))
+                   "example.com:443:93.184.216.34"))
+    (should-not (member "--location" args))))
+
 (ert-deftest kargu-webfetch-splits-status-location-and-body-test ()
   "The curl -i answer splits into status, redirect target and body."
   (let ((reply (kargu-webfetch--split-response
