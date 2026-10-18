@@ -178,6 +178,30 @@
         (should-not (car result))
         (should (string-search "changed" (cadr result)))))))
 
+(ert-deftest kargu-lsp-diagnostics-preserve-real-locations-test ()
+  "Character columns survive Unicode, tabs, narrowing and deduplication."
+  (require 'flymake)
+  (kargu-test-with-git-repo '(("columns.el" . "önce\n\t🙂wrong\n"))
+    (let* ((path (expand-file-name "columns.el" repo))
+           (buffer (find-file-noselect path)))
+      (unwind-protect
+          (with-current-buffer buffer
+            (let* ((diag (flymake-make-diagnostic buffer 8 9 :error "wrong"))
+                   (other (flymake-make-diagnostic buffer 9 10 :error "wrong")))
+              (narrow-to-region 9 (point-max))
+              (goto-char 10)
+              (cl-letf (((symbol-function 'flymake-diagnostics)
+                         (lambda (&rest _) (list diag other))))
+                (let ((local (car (kargu-lsp--flymake-diags path)))
+                      (project (kargu-lsp--extract-flymake-diag diag)))
+                  (dolist (record (list local project))
+                    (should (= (plist-get record :line) 2))
+                    (should (= (plist-get record :character) 3)))
+                  (should (= (length (kargu-lsp--diagnostics-data path)) 2))
+                  (should (= (point) 10))
+                  (should (= (point-min) 9))))))
+        (kill-buffer buffer)))))
+
 (ert-deftest kargu-lsp-flymake-diags-source-tag-test ()
   "Test flymake diagnostics source tagging for Eglot."
   (let* ((temp (make-temp-file "kargu-test-diag" nil ".el"))

@@ -166,9 +166,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 1. **[K - Orta] `buffer-chars-modified-tick` uçuştaki istekleri iptal eder.**
    - **Dosya / Satır:** `kargu/tools/lsp/context.el:284-293`
    - **Sorun:** Tamponda herhangi bir karakter değiştiğinde (`tick` değişimi), uçuştaki LSP isteği geçersiz sayılır. Hızlı ardışık işlemlerde tanı/sembol istekleri düşebilir.
-2. **[K - Düşük] Flymake tanı sütun kaybı.**
-   - **Dosya / Satır:** `kargu/tools/lsp/diagnostics.el:41`
-   - **Sorun:** `:character 1` değeri sabittir, hatanın bulunduğu tam sütun bilgisi modele iletilmez.
 3. **[K - Düşük] Açık olmayan (visiting edilmemiş) dosyalar için LSP tanıları alınamaz.**
    - **Dosya / Satır:** `kargu/tools/lsp/diagnostics.el:23-24, 95-101`
    - **Sorun:** `kargu-lsp-get-diagnostics`, `(find-buffer-visiting path)` kontrolü yapar; `kargu-lsp--flymake-diags` Flymake tanılarını yalnızca dosya Emacs'te canlı bir arabellekte açıksa (`(buffer-live-p buffer)`) alabilir. Arabelleğe alınmamış bir dosya için `lsp_diagnostics` çağrıldığında `"%s: no diagnostics available (file is not open in Emacs; open it or use read_file first)"` mesajı döner ve tanı denetimi yapılamaz.

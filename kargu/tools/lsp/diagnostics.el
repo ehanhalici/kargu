@@ -16,6 +16,20 @@
 
 ;;;; Diagnostics ----------------------------------------------------------
 
+(defun kargu-lsp--diagnostic-location (locus position)
+  "Return one-based (LINE . COLUMN) for POSITION in LOCUS."
+  (cond
+   ((and (bufferp locus) (buffer-live-p locus) (number-or-marker-p position))
+    (with-current-buffer locus
+      (save-excursion
+        (save-restriction
+          (widen)
+          (goto-char position)
+          (cons (line-number-at-pos) (1+ (- (point) (line-beginning-position))))))))
+   ((consp position) (cons (car position) (or (cdr position) 1)))
+   ((numberp position) (cons (if (> position 1000000) 1 position) 1))
+   (t '(1 . 1))))
+
 (defun kargu-lsp--flymake-diags (path)
   "Normalized Flymake diagnostics for PATH, or nil."
   (when (and (fboundp 'flymake-diagnostics)
@@ -30,15 +44,15 @@
                      (let* ((beg (if (fboundp 'flymake-diagnostic-beg)
                                      (flymake-diagnostic-beg d)
                                    (flymake-diagnostic-point d)))
-                            (pos (if (consp beg) (car beg) beg))
+                            (location (kargu-lsp--diagnostic-location buffer beg))
                             (type (flymake-diagnostic-type d)))
-                       (when (number-or-marker-p pos)
+                       (when beg
                          (list :severity (pcase type
                                            ((or :error 'flymake-error 'e :flymake-error) 1)
                                            ((or :warning 'flymake-warning 'w :flymake-warning) 2)
                                            (_ 3))
-                               :line (line-number-at-pos pos)
-                               :character 1
+                               :line (car location)
+                               :character (cdr location)
                                :source source
                                :message (flymake-diagnostic-text d)))))
                    (flymake-diagnostics)))))))))
@@ -51,10 +65,8 @@ Sort records by severity and then line number."
          (seen (make-hash-table :test 'equal))
          (data nil))
     (dolist (d combined)
-      (let ((key (format "%s:%s:%s"
-                         (plist-get d :line)
-                         (plist-get d :severity)
-                         (plist-get d :message))))
+      (let ((key (list (plist-get d :line) (plist-get d :character)
+                       (plist-get d :severity) (plist-get d :message))))
         (unless (gethash key seen)
           (puthash key t seen)
           (push d data))))
@@ -103,17 +115,6 @@ Sort records by severity and then line number."
       (message "%s" text))
     text))
 
-(defun kargu-lsp--diagnostic-line (locus pos)
-  "Return the line number of diagnostic POS in LOCUS."
-  (cond
-   ((and (bufferp locus) (buffer-live-p locus) (number-or-marker-p pos))
-    (with-current-buffer locus
-      (save-excursion
-        (goto-char (if (markerp pos) (marker-position pos) pos))
-        (line-number-at-pos))))
-   ((numberp pos) (if (> pos 1000000) 1 pos))
-   (t 1)))
-
 (defun kargu-lsp--extract-flymake-diag (diag)
   "Extract (:file :severity :line :character :source :message) from Flymake DIAG."
   (let* ((locus (or (and (fboundp 'flymake-diagnostic-buffer)
@@ -130,8 +131,7 @@ Sort records by severity and then line number."
                   (flymake-diagnostic-beg diag)
                 (and (fboundp 'flymake-diagnostic-point)
                      (flymake-diagnostic-point diag))))
-         (pos (if (consp beg) (car beg) beg))
-         (line (kargu-lsp--diagnostic-line locus pos))
+         (location (kargu-lsp--diagnostic-location locus beg))
          (type (and (fboundp 'flymake-diagnostic-type) (flymake-diagnostic-type diag)))
          (text (and (fboundp 'flymake-diagnostic-text) (flymake-diagnostic-text diag)))
          (backend (and (fboundp 'flymake-diagnostic-backend) (flymake-diagnostic-backend diag)))
@@ -145,8 +145,8 @@ Sort records by severity and then line number."
                         ((or :error 'flymake-error 'e :flymake-error) 1)
                         ((or :warning 'flymake-warning 'w :flymake-warning) 2)
                         (_ 3))
-            :line line
-            :character 1
+            :line (car location)
+            :character (cdr location)
             :source source
             :message text))))
 
