@@ -18,6 +18,37 @@
   "Create a temporary file inside the scratch project root for testing."
   (make-temp-file (expand-file-name prefix (kargu-permission-project-root))))
 
+(ert-deftest kargu-diff-read-file-counts-logical-lines-test ()
+  "A terminal newline ends the last line instead of inventing another line."
+  (kargu-test-with-git-repo '(("one.txt" . "one\n") ("two.txt" . "one\n\n"))
+    (should (string-search "lines 1-1 of 1" (kargu-diff-read-file "one.txt")))
+    (should-not (string-search "2 |" (kargu-diff-read-file "one.txt")))
+    (should (string-search "lines 1-2 of 2" (kargu-diff-read-file "two.txt")))
+    (should-error (kargu-diff-read-file "one.txt" 2 2))))
+
+(ert-deftest kargu-diff-read-file-prefers-full-live-buffer-test ()
+  "Unsaved text is visible without changing the source buffer's narrowing or point."
+  (kargu-test-with-git-repo '(("live.el" . "disk version\n"))
+    (let* ((path (expand-file-name "live.el" repo))
+           (buffer (find-file-noselect path)))
+      (unwind-protect
+          (with-current-buffer buffer
+            (erase-buffer)
+            (insert "first\nunsaved\nlast\n")
+            (narrow-to-region 7 14)
+            (goto-char 9)
+            (let ((text (kargu-diff-read-file path)))
+              (should (string-search "lines 1-3 of 3" text))
+              (should (string-search "1 | first" text))
+              (should (string-search "2 | unsaved" text))
+              (should (string-search "3 | last" text))
+              (should (= (point) 9))
+              (should (= (point-min) 7))
+              (should (= (point-max) 14))
+              (should (buffer-modified-p))))
+        (with-current-buffer buffer (set-buffer-modified-p nil))
+        (kill-buffer buffer)))))
+
 (ert-deftest kargu-diff-read-file-window-test ()
   "Ensure kargu-diff-read-file extracts line windows past 60,000 chars without error."
   (let ((temp (kargu-test-temp-file "kargu-test-diff")))

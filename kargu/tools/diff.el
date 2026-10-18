@@ -129,21 +129,24 @@ Returns a cons cell `(BODY . TRUNCATED-P)'."
 
 (defun kargu-diff--resolve-read-target (file-path)
   "Resolve FILE-PATH to (PATH . TEXT).
-Signals an error if file does not exist or looks binary."
+Prefer the full unsaved visiting buffer without changing its narrowing.
+Signal for a missing or binary target."
   (let* ((live-buf (and (stringp file-path)
                         (string-match-p "\\`\\*kargu-output-[0-9]+\\*\\'" file-path)
                         (get-buffer file-path)))
          (is-buf (and live-buf (buffer-live-p live-buf)))
-         (path (if is-buf file-path (kargu-permission-resolve file-path "file"))))
-    (if (and (not is-buf) (not (file-exists-p path)))
+         (path (if is-buf file-path (kargu-permission-resolve file-path "file")))
+         (visiting (or live-buf (find-buffer-visiting path))))
+    (if (and (not (buffer-live-p visiting)) (not (file-exists-p path)))
         (error (concat "No such file: '%s'\n"
                        "  - Attempted file: '%s'\n"
                        "  - Allowed project root: '%s'\n"
                        "  - Reason: The file does not exist within the permitted workspace boundary.\n"
                        "  - Guidance: Use `find_files' or `list_files' to locate existing files inside '%s', or use `write_file' if you intend to create a new file.")
                path file-path (kargu-permission-project-root) (kargu-permission-project-root))
-      (let ((text (if is-buf
-                      (with-current-buffer live-buf (buffer-string))
+      (let ((text (if (buffer-live-p visiting)
+                      (with-current-buffer visiting
+                        (save-restriction (widen) (buffer-string)))
                     (with-temp-buffer
                       (insert-file-contents path)
                       (buffer-string)))))
@@ -170,7 +173,7 @@ an exact `old_string' without the prefix."
   (let* ((target (kargu-diff--resolve-read-target file-path))
          (path (car target))
          (text (cdr target))
-         (lines (split-string text "\n"))
+         (lines (split-string (string-remove-suffix "\n" text) "\n"))
          (total (max 1 (length lines)))
          (has-window (or from-line to-line))
          (from (max 1 (or (kargu-diff--to-int from-line) 1)))
