@@ -379,23 +379,64 @@ Nothing is consumed or rendered, so a refusal keeps the typed input."
     (dolist (win (get-buffer-window-list buffer nil t))
       (set-window-point win (point-max)))))
 
-(defun kargu-chat--submit (prompt)
-  "Start an agent run for PROMPT in the chat buffer."
-  (kargu-chat--preflight prompt)
-  (add-to-history 'kargu-chat-input-history prompt)
+(cl-defstruct (kargu-chat--submission
+               (:constructor kargu-chat--make-submission))
+  "Prompt region and cursor positions before publishing a user turn."
+  start footer prompt-offset point mark windows)
+
+(defun kargu-chat--capture-submission ()
+  "Capture the live prompt and cursors for a rejected submission."
+  (let ((start (marker-position kargu-chat--output-marker)))
+    (kargu-chat--make-submission
+     :start start :footer (buffer-substring start (point-max))
+     :prompt-offset (- kargu-chat--prompt-marker start)
+     :point (point) :mark (mark t)
+     :windows (mapcar (lambda (win) (cons win (window-point win)))
+                      (get-buffer-window-list (current-buffer) nil t)))))
+
+(defun kargu-chat--rollback-submission (saved)
+  "Restore prompt and cursors from SAVED after startup rejection."
+  (let ((inhibit-read-only t)
+        (start (kargu-chat--submission-start saved)))
+    (delete-region start (point-max))
+    (goto-char start)
+    (insert (kargu-chat--submission-footer saved))
+    (setq kargu-chat--output-marker (copy-marker start t)
+          kargu-chat--prompt-marker
+          (copy-marker (+ start (kargu-chat--submission-prompt-offset saved)))
+          kargu-chat--answer-start nil)
+    (goto-char (kargu-chat--submission-point saved))
+    (set-marker (mark-marker) (kargu-chat--submission-mark saved))
+    (dolist (pair (kargu-chat--submission-windows saved))
+      (when (and (window-live-p (car pair))
+                 (eq (window-buffer (car pair)) (current-buffer)))
+        (set-window-point (car pair) (cdr pair))))))
+
+(defun kargu-chat--publish-submission (prompt)
+  "Render PROMPT and its running banner before callbacks can arrive."
+  (kargu-chat--consume-input)
   (kargu-chat--reset-stream-state)
   (kargu-chat-note-selection)
   (kargu-chat--render-user-turn prompt)
   (kargu-chat--render-agent-heading)
   (kargu-chat--ensure-running-prompt)
-  (kargu-chat--mark-answer-start)
-  (condition-case err
-      (kargu-loop-send (kargu-chat--expand-prompt prompt)
-                       #'kargu-chat--on-delta
-                       #'kargu-chat--on-finish)
-    (error
-     (kargu-chat--ensure-idle-prompt)
-     (signal (car err) (cdr err))))
+  (kargu-chat--mark-answer-start))
+
+(defun kargu-chat--submit (prompt)
+  "Start a run for PROMPT, restoring the draft if startup is rejected."
+  (kargu-chat--preflight prompt)
+  (let ((expanded (kargu-chat--expand-prompt prompt))
+        (saved (kargu-chat--capture-submission)))
+    (condition-case err
+        (progn
+          (kargu-chat--publish-submission prompt)
+          (kargu-loop-send expanded #'kargu-chat--on-delta
+                           #'kargu-chat--on-finish))
+      (error
+       (unless (kargu-loop-running-p)
+         (kargu-chat--rollback-submission saved))
+       (signal (car err) (cdr err)))))
+  (add-to-history 'kargu-chat-input-history prompt)
   (force-mode-line-update t)
   (kargu-chat--follow-end (current-buffer)))
 
@@ -435,7 +476,7 @@ Nothing is consumed or rendered, so a refusal keeps the typed input."
      (funcall cancel (or reason "user abort")))))
 
 (defun kargu-chat--send-prepared (text consume)
-  "Submit TEXT.  CONSUME non-nil deletes the matching prompt first.
+  "Submit TEXT.  CONSUME non-nil requires a matching prompt after debug setup.
 A debug session that is not ready is started before the submit.
 Every refusal happens before the input is consumed."
   (kargu-chat--preflight text)
@@ -446,15 +487,13 @@ Every refusal happens before the input is consumed."
        (let ((chat-buf (kargu-chat--buffer)))
          (kargu-chat-show)
          (with-current-buffer chat-buf
-           (when (and consume
-                      (string= (string-trim (kargu-chat--input-text)) text))
-             (kargu-chat--consume-input))
-           (kargu-chat--submit text))))
+           (when (or (not consume)
+                     (string= (string-trim (kargu-chat--input-text)) text)
+                     (string-empty-p (kargu-chat--input-text)))
+             (kargu-chat--submit text)))))
      (lambda (reason)
        (message "kargu: debug session cancelled or failed: %s" reason))))
    (t
-    (when consume
-      (kargu-chat--consume-input))
     (kargu-chat--submit text))))
 
 (defun kargu-chat--send-input ()
@@ -498,7 +537,7 @@ from the menu with an empty prompt, this just opens the chat."
    (t nil)))
 
 (defun kargu-chat--send-given (prompt)
-  "Send PROMPT from the chat buffer, discarding a live input first."
+  "Send PROMPT from the chat buffer after startup validation."
   (let ((missing (kargu-chat--missing-tools (kargu-chat--project))))
     (when missing
       (kargu-chat-show)
@@ -506,21 +545,7 @@ from the menu with an empty prompt, this just opens the chat."
   (kargu-chat-show)
   (let ((text (kargu-chat--prompt-text prompt)))
     (with-current-buffer (kargu-chat--buffer)
-      (kargu-chat--preflight text)
-      (when (kargu-chat--prompt-live-p)
-        (kargu-chat--consume-input)))
-    (cond
-     ((kargu-chat--debug-session-needed-p)
-      (kargu-chat--after-debug-session
-       (lambda ()
-         (let ((chat-buf (kargu-chat--buffer)))
-           (kargu-chat-show)
-           (with-current-buffer chat-buf
-             (kargu-chat--submit text))))
-       (lambda (reason)
-         (message "kargu: debug session cancelled or failed: %s" reason))))
-     (t
-      (kargu-chat--submit text)))))
+      (kargu-chat--send-prepared text nil))))
 
 (defun kargu-chat-prompt (&optional prompt)
   "Send PROMPT, or the chat input when called interactively."

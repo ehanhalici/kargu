@@ -365,5 +365,48 @@
         (kargu-chat-beginning-of-line)
         (should (= (point) expected))))))
 
+(ert-deftest kargu-chat-startup-rejection-restores-input-test ()
+  "A late startup refusal restores the complete prompt without orphan turns."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (setq-local kargu-chat--session-provider "p"
+                kargu-chat--session-model "m")
+    (kargu-chat--ensure-idle-prompt)
+    (insert (propertize "  keep my draft  \n" 'kargu-test t))
+    (goto-char (+ kargu-chat--prompt-marker 4))
+    (set-mark (+ kargu-chat--prompt-marker 8))
+    (let ((before (buffer-string))
+          (saved-point (point))
+          (saved-mark (mark))
+          (kargu-chat-input-history nil)
+          (kargu--loop-run nil))
+      (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+                ((symbol-function 'kargu-chat--expand-prompt) #'identity)
+                ((symbol-function 'kargu-loop-send)
+                 (lambda (&rest _) (user-error "late refusal"))))
+        (should-error (kargu-chat--send-input) :type 'user-error))
+      (should (equal-including-properties (buffer-string) before))
+      (should (= (point) saved-point))
+      (should (= (mark) saved-mark))
+      (should (kargu-chat--prompt-live-p))
+      (should-not kargu-chat-input-history)
+      (should-not (kargu-loop-running-p)))))
+
+(ert-deftest kargu-chat-expansion-failure-keeps-input-test ()
+  "Attachment expansion failure happens before draft or transcript mutation."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (setq-local kargu-chat--session-provider "p"
+                kargu-chat--session-model "m")
+    (kargu-chat--ensure-idle-prompt)
+    (insert "@file.md")
+    (let ((before (buffer-string)))
+      (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+                ((symbol-function 'kargu-chat--expand-prompt)
+                 (lambda (_) (error "unreadable attachment"))))
+        (should-error (kargu-chat--send-input)))
+      (should (equal-including-properties (buffer-string) before))
+      (should (kargu-chat--prompt-live-p)))))
+
 (provide 'tests/test-chat)
 ;;; test-chat.el ends here
