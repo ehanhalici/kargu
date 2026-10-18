@@ -1,4 +1,4 @@
-;;; kargu/core/custom.el --- All defcustom declarations -*- lexical-binding: t; -*-
+;;; custom.el --- All defcustom declarations -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -78,8 +78,7 @@ For example:
   :group 'kargu)
 
 (defcustom kargu-stream t
-  "When non-nil, stream responses incrementally (SSE) over a plz
-process filter."
+  "When non-nil, stream responses incrementally using SSE."
   :type 'boolean
   :group 'kargu)
 
@@ -105,8 +104,7 @@ Error text from a 200 response that names one of these is treated the same."
   :group 'kargu)
 
 (defcustom kargu-max-healing-steps 3
-  "Maximum self-correction rounds after an edit introduces new
-LSP diagnostics (used by the loop module)."
+  "Maximum self-correction rounds after edits introduce diagnostics."
   :type 'natnum
   :group 'kargu)
 
@@ -142,7 +140,7 @@ nil disables the ceiling.  The abort message is \"stream exceeded ceiling\"."
   :group 'kargu)
 
 (defcustom kargu-log-wire nil
-  "When non-nil, dump full request and response bodies into `*kargu-log*'."
+  "When non-nil, dump request and response bodies into the log buffer."
   :type 'boolean
   :group 'kargu)
 
@@ -155,7 +153,7 @@ nil disables the ceiling.  The abort message is \"stream exceeded ceiling\"."
   '((ask   . "Mode: ASK (read-only). Analyze and explain. Do not edit files.")
     (plan  . "Mode: PLAN (read-only). Explore, then output a markdown implementation checklist. Do not edit files.")
     (debug . "Mode: DEBUG. Ground answers in DAP/runtime evidence and diagnostics. Do not edit unless asked.")
-    (agent . "Mode: AGENT. Inspect, surgical edit, verify with Flymake/LSP diagnostics, and run compiler/tests via bash."))
+    (agent . "Mode: AGENT. Inspect, edit surgically, verify with available diagnostics, and run project compiler/tests."))
   "Alist mapping mode symbol to the system prompt injected as the first message."
   :type '(alist :key-type symbol :value-type string)
   :group 'kargu)
@@ -167,4 +165,4 @@ nil disables the ceiling.  The abort message is \"stream exceeded ceiling\"."
 
 (provide 'kargu/core/custom)
 
-;;; kargu/core/custom.el ends here
+;;; custom.el ends here

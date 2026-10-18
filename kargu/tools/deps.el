@@ -38,7 +38,7 @@
   :prefix "kargu-deps-")
 
 (defcustom kargu-deps-mandatory-packages
-  '(plz transient eglot dape magit)
+  '(plz transient magit)
   "List of mandatory Emacs packages required for Kargu operation."
   :type '(repeat symbol)
   :group 'kargu-deps)
@@ -216,9 +216,10 @@ the defaults."
 
 ;;;; Main Validation Functions --------------------------------------------
 
-(defun kargu-deps-missing (&optional root)
+(defun kargu-deps-missing (&optional root include-optional)
   "Return a list of missing dependency plists for ROOT.
-Checks mandatory Emacs packages, system CLI executables, and project LSP server.
+Checks mandatory packages and CLI executables.  INCLUDE-OPTIONAL also
+checks the project LSP server for setup diagnostics, not run admission.
 Each plist contains:
   :id           - Symbol or string identifying the tool
   :name         - Human-readable name string
@@ -257,7 +258,7 @@ Each plist contains:
                 missing))))
 
     ;; 3. Check language-specific LSP server if project language detected
-    (when kargu-deps-check-lsp-server
+    (when (and include-optional kargu-deps-check-lsp-server)
       (when-let* ((lang-spec (kargu-deps-detect-project-language root))
                   (lsp-missing (kargu-deps--check-lsp-server lang-spec root)))
         (push lsp-missing missing)))

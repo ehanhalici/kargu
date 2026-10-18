@@ -558,10 +558,11 @@
 
 (ert-deftest kargu-prompt-tools-guidance-multi-tool-test ()
   "Ensure kargu-prompt--tools-guidance-block explains multi-tool sequential execution."
+  (kargu-test-mode 'agent)
   (let ((block (kargu-prompt--tools-guidance-block)))
     (should (stringp block))
-    (should (string-search "Execution & Multiple Tool Calling Rule:" block))
-    (should (string-search "MULTIPLE tools in a single turn" block))
+    (should (string-search "MULTIPLE tools in one turn" block))
+    (should (string-search "execution is sequential" block))
     (should (string-search "debug_set_breakpoint" block))
     (should (string-search "debug_continue" block))))
 

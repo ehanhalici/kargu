@@ -113,6 +113,7 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
   "Return non-nil when tool NAME may be advertised to the model."
   (let ((mode (kargu-loop--active-mode)))
     (and (kargu-tools-enabled-p)
+         (not (kargu-tool-policy-error name))
          (cond
           ((member name kargu-loop-debug-tools)
            (memq mode '(debug agent)))
@@ -124,6 +125,7 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
   "Return an error string when NAME may not run in the active mode."
   (let ((mode (kargu-loop--active-mode)))
     (cond
+     ((kargu-tool-policy-error name))
      ((and (member name kargu-loop-debug-tools)
            (not (memq mode '(debug agent))))
       (format

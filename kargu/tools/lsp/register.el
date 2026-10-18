@@ -134,7 +134,11 @@
 
 (defun kargu-lsp-register-tools ()
   "Register the LSP tools and their aliases."
-  (kargu-register-tools kargu-lsp--tool-specs kargu-lsp--tool-aliases))
+  (kargu-register-tools
+   kargu-lsp--tool-specs kargu-lsp--tool-aliases
+   '(:available-p kargu-lsp-unavailable-reason))
+  (kargu-set-tool-policy
+   "edit_by_lsp" '(:modes (agent) :available-p kargu-lsp-unavailable-reason)))
 
 (kargu-lsp-register-tools)
 

@@ -206,6 +206,7 @@
             (setq-local eglot--managed-mode t))
           (with-temp-buffer
             (setq default-directory "/tmp/")
+            (setq-local kargu-chat--project-root "/home/emrehan/kod/try/dikte/")
             (cl-letf (((symbol-function 'eglot-current-server)
                        (lambda (&rest _) 'mock-server))
                       ((symbol-function 'project-current) (lambda (&rest _) nil))
@@ -284,6 +285,7 @@
   "Test that lsp_diagnostics tool dispatches to project diagnostics when file_path is omitted."
   (cl-letf (((symbol-function 'kargu-lsp-get-project-diagnostics)
              (lambda () "MOCK_PROJECT_DIAGNOSTICS_REPORT"))
+            ((symbol-function 'kargu-eglot-connected-p) (lambda () t))
             ((symbol-function 'kargu-lsp-get-diagnostics)
              (lambda (path) (format "MOCK_FILE_DIAGS: %s" path))))
     ;; 1. Empty args ({})
@@ -395,6 +397,8 @@
   "Test execution of read_file_symbols, read_symbol, edit_by_lsp and their aliases."
   (cl-letf (((symbol-function 'kargu-lsp-read-file-symbols)
              (lambda (path) (format "SYMBOLS_OUTLINE_FOR:%s" path)))
+            ((symbol-function 'kargu-eglot-connected-p) (lambda () t))
+            ((symbol-function 'kargu-state-mode) (lambda () 'agent))
             ((symbol-function 'kargu-lsp-read-symbol)
              (lambda (path sym kind) (format "BODY_OF:%s:%s:%s" path sym kind)))
             ((symbol-function 'kargu-lsp-edit-symbol)
@@ -432,6 +436,52 @@ A kind filter does not select an unrelated symbol."
                     (car (kargu-lsp--find-symbol-in-list symbols "beta" "Function"))
                     :name)
                    "beta"))))
+
+(ert-deftest kargu-lsp-unavailable-tools-are-hidden-and-rejected-test ()
+  "Unavailable LSP tools and aliases agree in prompts, schemas and execution."
+  (kargu-test-mode 'agent)
+  (cl-letf (((symbol-function 'kargu-eglot-connected-p) (lambda () nil)))
+    (dolist (name '("lsp_project_skeleton" "lsp_diagnostics" "lsp_find_symbol"
+                    "read_file_symbols" "read_symbol" "edit_by_lsp"
+                    "outline" "get_symbol" "edit_symbol"))
+      (should-not (kargu-tool-visible-p name))
+      (should (kargu-loop--gate-tool name))
+      (should (string-prefix-p "ERROR: LSP" (kargu-execute-tool name nil))))
+    (let ((prompt (kargu--get-system-prompt))
+          (reminder (kargu-prompt-mode-reminder)))
+      (should-not (string-search "lsp_diagnostics" prompt))
+      (should-not (string-search "edit_by_lsp" prompt))
+      (should-not (string-search "read_file_symbols" reminder))
+      (should (string-search "workspace_grep" prompt)))))
+
+(ert-deftest kargu-lsp-edit-policy-applies-to-canonical-name-and-aliases-test ()
+  "Symbol edits cannot bypass read-only modes through a canonical name."
+  (cl-letf (((symbol-function 'kargu-eglot-connected-p) (lambda () t)))
+    (dolist (mode '(ask plan debug))
+      (kargu-test-mode mode)
+      (dolist (name '("edit_by_lsp" "edit_symbol" "edit_with_lsp"))
+        (should-not (kargu-tool-visible-p name))
+        (should (kargu-loop--gate-tool name))
+        (should (string-prefix-p "ERROR:" (kargu-execute-tool name nil)))))))
+
+(ert-deftest kargu-lsp-unrelated-project-does-not-count-test ()
+  "A managed file in another workspace cannot grant LSP access."
+  (let ((kargu-context-buffer nil)
+        (managed (generate-new-buffer " *kargu-other-project*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer managed
+            (setq buffer-file-name "/tmp/kargu-project-a/main.py")
+            (setq-local eglot--managed-mode t))
+          (with-temp-buffer
+            (setq-local kargu-chat--project-root "/tmp/kargu-project-b/")
+            (cl-letf (((symbol-function 'eglot-current-server)
+                       (lambda () 'other-server))
+                      ((symbol-function 'kargu-permission-eglot-server-root)
+                       (lambda (_) "/tmp/kargu-project-a/")))
+              (should-not (kargu-eglot-connected-p))
+              (should-not (kargu-lsp-project-root)))))
+      (kill-buffer managed))))
 
 (provide 'tests/test-lsp)
 ;;; test-lsp.el ends here

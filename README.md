@@ -35,7 +35,8 @@ Rather than running heavy external daemons or separate browser windows, Kargu tu
 
 ### Prerequisites
 - GNU Emacs 29.1 or newer
-- Required packages: `plz`, `transient`, `eglot`, `dape`, `company`, `magit`
+- Required packages: `plz`, `transient`, `company`, `magit`
+- Optional integrations: `eglot` and a language server for LSP tools; `dape` and a configured debug adapter for debug mode. Kargu works without LSP.
 - Command-line utilities: `rg` (ripgrep) or `grep`, `curl`, `git`
 
 ### Setup

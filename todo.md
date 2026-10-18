@@ -1,7 +1,7 @@
 ## Uygulama kaydı
 
 - [x] Başlangıç refactoring'i: LSP/DAP, HTTP ve sohbet sorumlulukları ayrıldı; süreç, oturum izolasyonu ve akış regresyonları giderildi. Doğrulama: 362/362 çevrimdışı ERT testi.
-- [ ] Eglot'u isteğe bağlı yap; proje kapsamlı ortak araç yetenek kapısı.
+- [x] Eglot'u isteğe bağlı yap; proje kapsamlı ortak araç yetenek kapısı. Eglot/Dape normal kullanım için zorunlu değil; LSP yoksa istem kullanılabilir. Şema, rehber, doğrudan yürütme ve alias'lar aynı politikayı kullanıyor. `edit_by_lsp` salt okunur kip kaçışı da kapatıldı. Doğrulama: 366/366 ERT testi.
 - [ ] LSP isteklerini ve tüketicilerini asenkronlaştır.
 - [ ] DAP callback zincirlerinde tek sonuç, hata ve iptal temizliği.
 - [ ] Süresiz, izlenebilir ve iptal edilebilir Bash işleri.
@@ -36,6 +36,7 @@ Her adım testleriyle ayrı commit olarak kaydedilir. `skills.md` yereldir ve Gi
 - bu scriptin calismasi kullanici tarafindan takip edilip iptal edilebilmeli, ama ne kadar uzun surerse sursun kargu bunu desteklemeli
 
 ### eglot zorunlulugunu kaldir
+- Durum: tamamlandı; proje izolasyonu, Eglot'suz sohbet, LSP araç/alias reddi ve salt okunur sembol düzenleme regresyonları eklendi.
 - bazi dillerin lsp serveri hic yok, eglot a bakarak lsp zorunlulugu verirsek bazi dillerde karguyu hic kullanamayiz
 - eglot aktif degilse kullaniciya bir uyari yazisi goster, eglot aktif degil, lsp ile ilgili tool kullanimi ai a verilemeyecek de
 - eglot aktif degilken lsp toollarinin kullanimini ai promtundan cikart, artik ai lsp toollarini kullanamasin onun yerine bash scriptleri ile aradigini bulsun

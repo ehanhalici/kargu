@@ -35,11 +35,13 @@ kargu-loop to implement mode-aware gating (mutating tools
 are only advertised in agent mode).  Tool EXECUTION is unaffected
 by this gate; it only shapes what the model is told about.")
 
-(defun kargu-register-tool (name description parameters executor)
+(defun kargu-register-tool (name description parameters executor &optional policy)
   "Register (or replace) the tool NAME for the model.
 DESCRIPTION is a string, PARAMETERS a JSON-schema alist, and
 EXECUTOR a function of one argument (the decoded arguments
-alist) whose return value becomes the tool result.  Long results
+alist) whose return value becomes the tool result.  POLICY optionally
+declares :modes and an :available-p function returning a refusal or nil.
+Long results
 are truncated to `kargu-tool-output-limit'."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p name
                          "NAME must be a non-empty string: %S" name)
@@ -52,7 +54,8 @@ are truncated to `kargu-tool-output-limit'."
   (puthash name
            `(("description" . ,description)
              ("parameters" . ,parameters)
-             ("executor" . ,executor))
+             ("executor" . ,executor)
+             ("policy" . ,policy))
            kargu--tool-registry)
   (kargu-log 'debug "tool registered: %s" name)
   name)
@@ -61,12 +64,22 @@ are truncated to `kargu-tool-output-limit'."
   "Return the names of all registered tools."
   (hash-table-keys kargu--tool-registry))
 
-(defun kargu-register-tools (specs &optional aliases)
+(defun kargu-tool-description (name)
+  "Return the registered description of tool NAME."
+  (kargu-aget (gethash name kargu--tool-registry) "description"))
+
+(defun kargu-set-tool-policy (name policy)
+  "Set POLICY for registered tool NAME and its aliases."
+  (setcdr (assoc "policy" (gethash name kargu--tool-registry)) policy))
+
+(defun kargu-register-tools (specs &optional aliases policy)
   "Register tool SPECS and their optional ALIASES.
 Each spec is (NAME DESCRIPTION PARAMETERS EXECUTOR).
-Each alias is (ALIAS . NAME)."
+Each alias is (ALIAS . NAME).  POLICY is shared by the group unless
+a spec supplies its own fifth element."
   (dolist (spec specs)
-    (apply #'kargu-register-tool spec))
+    (apply #'kargu-register-tool
+           (append (seq-take spec 4) (list (or (nth 4 spec) policy)))))
   (dolist (alias aliases)
     (kargu-register-tool-alias (car alias) (cdr alias))))
 
@@ -80,15 +93,27 @@ Each alias is (ALIAS . NAME)."
           (append filtered '(("properties" . :json-empty-object))))
       params)))
 
+(defun kargu-tool-policy-error (name)
+  "Return a refusal for unavailable tool NAME, or nil when allowed."
+  (let* ((policy (kargu-aget (gethash name kargu--tool-registry) "policy"))
+         (modes (plist-get policy :modes))
+         (available (plist-get policy :available-p)))
+    (cond
+     ((and modes (not (memq (kargu-state-mode) modes)))
+      (format "ERROR: Tool %s is unavailable in %s mode."
+              name (kargu-state-mode)))
+     (available (funcall available)))))
+
 (defun kargu--tool-visible-p (name)
   "Return non-nil if tool NAME is visible to the model.
 Delegates to `kargu--tools-visible-p' if set, otherwise to
 `kargu-loop-tool-visible-p' if defined, defaulting to t."
-  (if kargu--tools-visible-p
+  (and (not (kargu-tool-policy-error name))
+       (if kargu--tools-visible-p
       (funcall kargu--tools-visible-p name)
     (if (fboundp 'kargu-loop-tool-visible-p)
         (kargu-loop-tool-visible-p name)
-      t)))
+      t))))
 
 (defun kargu--build-tools-vector ()
   "Build the OpenAI \"tools\" array (as a vector) from the registry.
@@ -106,6 +131,8 @@ Tools hidden by `kargu--tool-visible-p' are skipped."
                        tools)))
              kargu--tool-registry)
     (vconcat (nreverse tools))))
+
+(defalias 'kargu-tool-visible-p #'kargu--tool-visible-p)
 
 (defun kargu-register-tool-alias (alias name)
   "Expose registered tool NAME under ALIAS as well."
@@ -318,6 +345,9 @@ agent loop can feed them back to the model for self-correction."
     (cond
      ((null spec)
       (let ((out (format "ERROR: no such tool: %s" name)))
+        (if callback (funcall callback out) out)))
+     ((kargu-tool-policy-error name)
+      (let ((out (kargu-tool-policy-error name)))
         (if callback (funcall callback out) out)))
      ((kargu--tool-arguments-invalid-p arguments)
       (let ((out (format "ERROR: the arguments of tool %s are not a valid JSON object; send one JSON object. Received: %s"

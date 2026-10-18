@@ -162,14 +162,29 @@ Used to route LSP requests to the right workspace and default file arguments.")
   "Return all file-backed Eglot-managed buffers, most recent first."
   (cl-remove-if-not #'kargu-lsp--buffer-managed-p (buffer-list)))
 
+(defun kargu-lsp--workspace-root ()
+  "Return the selected workspace without searching unrelated servers."
+  (let ((root (or kargu-permission--override-root
+                  (bound-and-true-p kargu-chat--project-root)
+                  (with-current-buffer (or (kargu-lsp--context-buffer-live)
+                                           (current-buffer))
+                    (kargu-permission-context-root)))))
+    (file-name-as-directory (file-truename root))))
+
 (defun kargu-lsp--managed-buffer ()
-  "Return the buffer used to route LSP requests, or nil.
-Priority: a managed context buffer, then any managed buffer, then
-the context buffer itself."
-  (or (let ((buffer (kargu-lsp--context-buffer-live)))
-        (and buffer (kargu-lsp--buffer-managed-p buffer) buffer))
-      (car (kargu-lsp--managed-buffers))
-      (kargu-lsp--context-buffer-live)))
+  "Return an Eglot buffer belonging to the selected workspace, or nil."
+  (let ((root (kargu-lsp--workspace-root)))
+    (cl-find-if
+     (lambda (buffer)
+       (and (kargu-lsp--buffer-managed-p buffer)
+            (let ((server-root
+              (with-current-buffer buffer
+                (kargu-permission-eglot-server-root (eglot-current-server)))))
+         (and server-root
+              (equal root (file-name-as-directory
+                           (file-truename server-root)))))))
+     (delete-dups (cons (or (kargu-lsp--context-buffer-live) (current-buffer))
+                        (kargu-lsp--managed-buffers))))))
 
 (defun kargu-lsp--with-session (fn)
   "Call FN with an Eglot-managed buffer current; return FN's result.
@@ -189,16 +204,14 @@ Signal an `error' when no Eglot session is usable."
              kargu-context-buffer))))
 
 (defconst kargu-eglot-required-message
-  "kargu: Eglot is not connected to a language server. Visit a project file, start Eglot, then open kargu again."
-  "Error shown when this project has no live Eglot connection.")
+  "Kargu: Eglot bu projede aktif değil. LSP araçları modele verilmeyecek; dosya/arama araçları ve agent kipinde Bash kullanılabilir."
+  "Notice shown when this project has no live Eglot connection.")
 
 (defun kargu--eglot-workspace-buffer ()
   "Return the Eglot-managed buffer naming the workspace.
 Prefer the current managed buffer, then the most recent managed file
 buffer.  Ignore the variable `default-directory' in temporary buffers."
-  (or (and (kargu-lsp--buffer-managed-p (current-buffer))
-           (current-buffer))
-      (car (kargu-lsp--managed-buffers))))
+  (kargu-lsp--managed-buffer))
 
 (declare-function kargu-permission-eglot-server-root "kargu/permission/guards" (server))
 
@@ -214,11 +227,13 @@ asked, and `default-directory' is not used in its place."
          (eglot-current-server))))))
 
 (defun kargu-eglot-connected-p ()
-  "Return non-nil when Eglot manages a file.
-The current buffer's directory does not matter.  A server started
-in the project counts even if this buffer is a chat or lives under
-the variable `temporary-file-directory'."
-  (consp (kargu-lsp--managed-buffers)))
+  "Return non-nil when the selected project has a live Eglot buffer."
+  (and (kargu-lsp--managed-buffer) t))
+
+(defun kargu-lsp-unavailable-reason ()
+  "Return an LSP tool refusal when the project has no connection."
+  (unless (kargu-eglot-connected-p)
+    "ERROR: LSP is unavailable in this project. Use file/search tools, or Bash in agent mode."))
 
 ;;;; URI helpers & Symbol kinds -------------------------------------------
 

@@ -481,7 +481,7 @@ rollback pipeline.  Return a summary of the applied operations."
   (list
    (list
     "read_file"
-    "Read a source file with numbered lines (\"12 | code\"). Before reading a large code file, prefer 'read_file_symbols' (outline) to see its structure or 'read_symbol' to inspect a specific function/struct. Requires 'file_path'. NEVER pass search patterns or regex here. Use from_line/to_line (or limit) to page through specific sections, or for non-code files (config, markdown, yaml)."
+    "Read a file with numbered lines (\"12 | code\"). Requires file_path. Search first, then use from_line/to_line (or limit) to read relevant sections rather than entire large files. Use structural inspection when available. NEVER pass search patterns or regex here."
     '(("type" . "object")
       ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "Absolute or project-relative path of the file (or output buffer) to read. Must be a valid file path, NOT a search pattern or regex.")))
@@ -509,7 +509,7 @@ rollback pipeline.  Return a summary of the applied operations."
             (error (format "ERROR: %s" (error-message-string err))))))))
    (list
     "edit_file"
-    "Replace an exact unique block of text in an existing file. NOTE: For modifying existing code definitions (functions, classes, structs, methods, types), ALWAYS PREFER 'edit_by_lsp' instead. Use edit_file only as a fallback for non-code files (markdown, configs) or text outside defined symbols. Read the file first with read_file, then pass the exact old_string (include enough surrounding lines to make it unique) and the new_string replacement. The human reviews the change in ediff (b accepts a hunk, a keeps the original). After an accepted edit, immediately call lsp_diagnostics on the file."
+    "Replace an exact unique block in an existing file. Read the relevant lines first, then supply old_string with enough surrounding text to be unique and new_string. Prefer structural editing when available. Changes follow the active review policy and retain rollback snapshots. Verify with available diagnostics and project tests."
     '(("type" . "object")
       ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "Absolute or project-relative path of the file to edit.")))
