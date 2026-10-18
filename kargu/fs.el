@@ -17,10 +17,14 @@
 (require 'subr-x)
 (require 'kargu/core)
 
-(defconst kargu-fs-skip-dirs
+(defcustom kargu-fs-skip-dirs
   '(".git" "node_modules" ".venv" "__pycache__" ".direnv" "dist"
     "build" "target" ".next" "vendor" "out" ".cache" ".cargo")
-  "Directory names skipped while walking a project tree.")
+  "Directory names excluded at every depth by project walks and searches.
+Remove a name such as build or vendor when it contains project sources.
+This explicit filter also applies to the fallback without Git ignore support."
+  :type '(repeat string)
+  :group 'kargu)
 
 (defcustom kargu-fs-max-listed-files 2000
   "Cap on files visited by a bounded walk."

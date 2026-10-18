@@ -41,10 +41,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 2. **[K - Yüksek] 2 boyutlu listeler JSON nesnesi (Alist) olarak kodlanır.**
    - **Dosya / Satır:** `kargu/json.el:41-51, 231-238`
    - **Sorun:** `kargu--object-p`, her elemanın `(consp cell)` ve `(car cell)`'in string/symbol olduğunu denetler. İki elemanlı string listelerinden oluşan matrisler (örn. `'(("a" "b") ("c" "d"))`), `("a" . ("b" . nil))` yapısında olduğu için nesne sanılır ve `{"a": ["b"], "c": ["d"]}` olarak hatalı kodlanır.
-3. **[D - Orta] Varsayılan dizin dışlaması meşru kod dizinlerini gizleyebilir.**
-   - **Dosya / Satır:** `kargu/fs.el:31-38`
-   - **Sorun:** `kargu-fs-skip-dirs` listesi `build`, `vendor`, `dist`, `out` gibi dizinleri koşulsuz dışlar. Projenin kaynak kodları `src/vendor/` veya `src/build/` altında yer alıyorsa bu dosyalar aramalarda ve listelemelerde görünmez.
-
 ---
 
 ### Modül: `api/` (İstekler, Devre Kesici, Yeniden Deneme)

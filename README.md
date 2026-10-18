@@ -1,4 +1,5 @@
 # Kargu
+
 > [!WARNING]
 > **Active Development**: Kargu is actively being developed and evolving rapidly. Errors or unexpected behavior may occur. Please feel free to [report issues](https://github.com/ehanhalici/kargu/issues) or submit feedback!
 
@@ -55,6 +56,10 @@ Clone the repository and add it to your Emacs `load-path`:
 Kargu can be configured via a simple TOML configuration file (`~/.config/kargu/config.toml` or `~/.emacs.d/kargu.toml`), environment variables, or Emacs `auth-source`.
 
 Run `M-x kargu-edit-config` to generate or edit your configuration.
+
+Project walks and searches exclude names in `kargu-fs-skip-dirs` at every
+directory depth. Customize this list when names such as `build` or `vendor`
+contain your source code; the same setting applies to fallback traversal.
 
 The API key of the active provider is looked up in this order:
 

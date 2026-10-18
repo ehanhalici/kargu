@@ -32,6 +32,22 @@
 			    (let ((names (mapcar (lambda (f) (file-relative-name f root)) (kargu-fs-walk root))))
 			      (should (equal (sort names #'string<) '("a.el" "sub/b.el"))))))
 
+(ert-deftest kargu-fs-configurable-exclusions-keep-legitimate-source-names-test ()
+  "Removing a generated-directory exclusion exposes source in walks and grep."
+  (kargu-fs-test--with-tree '(("src/build/main.el" . "needle\n")
+                              ("src/vendor/library.el" . "needle\n")
+                              (".git/secret" . "needle\n"))
+    (let ((kargu-fs-skip-dirs '(".git"))
+          (kargu-permission--override-root root))
+      (let ((files (kargu-fs-walk root)))
+        (should (= (length files) 2))
+        (should (member (expand-file-name "src/build/main.el" root) files)))
+      (let ((output (kargu-test-await
+                     (lambda (callback) (kargu-search-grep callback "needle")))))
+        (should (string-search "src/build/main.el" output))
+        (should (string-search "src/vendor/library.el" output))
+        (should-not (string-search ".git/secret" output))))))
+
 (ert-deftest kargu-fs-walk-cap-counts-visited-files-test ()
   "The cap bounds visited files, whether or not the filter keeps them."
   (kargu-fs-test--with-tree (mapcar (lambda (i) (cons (format "f%d.txt" i) "x")) (number-sequence 1 10))
