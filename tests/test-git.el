@@ -124,6 +124,24 @@
       (should (string-search "Staged changes (0)" status))
       (should (string-search "Unstaged changes (0)" status)))))
 
+(ert-deftest kargu-git-read-only-lists-work-in-ask-and-plan-test ()
+  "List-only schemas do not expose branch or stash mutation in read-only modes."
+  (kargu-test-with-git-repo kargu-git-test--files
+    (dolist (mode '(ask plan))
+      (kargu-test-mode mode)
+      (dolist (tool '("git_branches" "git_stashes"))
+        (should (kargu-tool-visible-p tool))
+        (should-not (kargu-loop--gate-tool tool)))
+      (dolist (tool '("git_branch" "git_stash"))
+        (should-not (kargu-tool-visible-p tool))
+        (should (string-prefix-p "ERROR:" (kargu-execute-tool tool nil))))
+      (let ((branches (kargu-test-await
+                       (lambda (callback) (kargu-execute-tool "git_branches" nil callback))))
+            (stashes (kargu-test-await
+                      (lambda (callback) (kargu-execute-tool "git_stashes" nil callback)))))
+        (should (string-search "main" branches))
+        (should (equal stashes "(no stash entries)"))))))
+
 (ert-deftest kargu-git-status-test ()
   "Ensure kargu-git-status returns formatted Magit-style sections."
   (kargu-test-with-git-repo kargu-git-test--files

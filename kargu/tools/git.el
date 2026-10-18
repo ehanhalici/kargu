@@ -453,6 +453,18 @@ through `kargu-permission-approve', which may re-run BODY after the answer."
 (defconst kargu-git--tool-specs
   (list
    (list
+    "git_branches"
+    "List local and remote Git branches. Read-only, available in every mode."
+    '(("type" . "object") ("properties" . :json-empty-object))
+    (kargu-git--executor
+     (lambda (_args done) (kargu-git-branch done "list"))))
+   (list
+    "git_stashes"
+    "List Git stash entries and their indices. Read-only, available in every mode."
+    '(("type" . "object") ("properties" . :json-empty-object))
+    (kargu-git--executor
+     (lambda (_args done) (kargu-git-stash done "list"))))
+   (list
     "git_status"
     "Show structured Git repository status (branch, upstream, staged, unstaged, untracked). Magit-style. Read-only, available in all modes."
     '(("type" . "object")

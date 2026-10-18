@@ -72,7 +72,8 @@
   '("read_file" "read_file_symbols" "read_symbol" "read_file_outline"
     "list_files" "find_files" "workspace_grep" "grep_search" "grep"
     "lsp_definitions" "lsp_references" "lsp_hover" "lsp_project_skeleton"
-    "lsp_skeleton" "git_status" "git_diff" "git_log" "git_show" "git_blame")
+    "lsp_skeleton" "git_status" "git_diff" "git_log" "git_show" "git_blame"
+    "git_branches" "git_stashes")
   "Read-only tool results safe to reuse until the next uncacheable operation.")
 
 (defun kargu-loop--tool-cacheable-p (name)
