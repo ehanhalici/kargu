@@ -19,6 +19,24 @@
 (require 'kargu)
 (require 'tests/test-helpers)
 
+(ert-deftest kargu-bash-shell-selection-ignores-login-shell-test ()
+  "The Bash tool never runs its commands through Fish or Nushell."
+  (let ((shell-file-name "/usr/bin/nu")
+        (process-environment (cons "SHELL=/usr/bin/fish" process-environment)))
+    (dolist (available '(bash sh none))
+      (cl-letf (((symbol-function 'executable-find)
+                 (lambda (program)
+                   (cond
+                    ((equal program "bash")
+                     (and (eq available 'bash) "/bin/bash"))
+                    ((equal program "sh")
+                     (and (memq available '(bash sh)) "/bin/sh"))
+                    (t (ert-fail "The login shell must not be consulted"))))))
+        (pcase available
+          ('bash (should (equal (kargu-bash--resolve-shell) "/bin/bash")))
+          ('sh (should (equal (kargu-bash--resolve-shell) "/bin/sh")))
+          (_ (should-error (kargu-bash--resolve-shell))))))))
+
 (ert-deftest kargu-process-run-returns-before-the-command-ends-test ()
   "The starter returns at once; the result arrives by callback."
   (let ((got nil)

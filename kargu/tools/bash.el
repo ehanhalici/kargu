@@ -48,11 +48,10 @@
   (kargu-bash-manage-job command))
 
 (defun kargu-bash--resolve-shell ()
-  "Find an executable shell binary."
-  (or (and (getenv "SHELL") (executable-find (getenv "SHELL")))
-      (and shell-file-name (executable-find shell-file-name))
-      (executable-find "bash") (executable-find "sh")
-      (error "No executable shell is available")))
+  "Find Bash, falling back to POSIX sh without using the login shell."
+  (or (executable-find "bash")
+      (executable-find "sh")
+      (error "Bash tool requires an executable bash or sh")))
 
 (defun kargu-bash--run-background (command dir shell)
   "Start persistent COMMAND in DIR using SHELL and return its job ID."
