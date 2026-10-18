@@ -179,6 +179,12 @@ In order:
            (and (null provider-name) (kargu--api-base))
            kargu-api-base))))))
 
+(defun kargu-config-api-key (&optional provider-name)
+  "Resolve PROVIDER-NAME's credential using the configuration precedence.
+The global override belongs to the active provider only.  An explicit
+empty TOML key denotes keyless access; missing references fall through."
+  (kargu--resolve-api-key provider-name))
+
 (provide 'kargu/config/key)
 
 ;;; key.el ends here

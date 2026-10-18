@@ -24,6 +24,7 @@
 
 (declare-function kargu--url-host "kargu/config/key")
 (declare-function kargu--config-providers "kargu/config/schema")
+(declare-function kargu-config-api-key "kargu/config/key" (&optional provider-name))
 
 (defvar kargu-providers--table (make-hash-table :test 'equal)
   "Hash table mapping provider ID strings to provider metadata plists.")
@@ -263,34 +264,10 @@ Checks provider metadata in registry and TOML config."
 
 (defun kargu-provider-authenticated-p (id)
   "Non-nil if provider ID has an API key available or is a keyless runner.
-Checks TOML configuration, environment variables, and auth-source."
-  (let* ((id-str (if (symbolp id) (symbol-name id) (format "%s" id)))
-         (id-lower (downcase (string-trim id-str))))
-    (cond
-     ;; Global override
-     ((and (boundp 'kargu-api-key) (kargu-provider-valid-key-p kargu-api-key)) t)
-     ;; Keyless runner (catalog or config)
-     ((kargu-provider-keyless-p id-lower) t)
-     ;; Check TOML configured providers table
-     ((let* ((providers (and (fboundp 'kargu--config-providers)
-                             (kargu--config-providers)))
-             (entry (assoc id-lower providers)))
-        (and entry
-             (or (plist-get (cdr entry) :keyless)
-                 (kargu-provider-valid-key-p (plist-get (cdr entry) :apikey))))))
-     ;; Check provider-specific environment variables
-     ((let ((envs (kargu-provider-env id-lower)))
-        (cl-some (lambda (var)
-                   (let ((val (getenv var)))
-                     (and (kargu-provider-valid-key-p val) val)))
-                 envs)))
-     ;; Check auth-source for provider host
-     ((let* ((api (kargu-provider-api id-lower))
-             (host (and api (fboundp 'kargu--url-host) (kargu--url-host api))))
-        (when host
-          (ignore-errors
-            (car (auth-source-search :host host :max 1))))))
-     (t nil))))
+Use the same credential owner and precedence as actual requests."
+  (require 'kargu/config)
+  (or (kargu-provider-keyless-p id)
+      (kargu-provider-valid-key-p (kargu-config-api-key id))))
 
 (defun kargu-connected-providers ()
   "Return list of all registered provider IDs that are authenticated or keyless."

@@ -89,5 +89,20 @@
         (setenv "KARGU_TEST_KEY" nil)
         (setenv "KARGU_TEST_ENV" nil)))))
 
+(ert-deftest kargu-provider-detection-respects-credential-owner-test ()
+  "Only the active provider can use the global credential override."
+  (let ((kargu--session-provider "alpha")
+        (kargu-api-key "active-only")
+        (process-environment (copy-sequence process-environment)))
+    (setenv "KARGU_ABSENT_PROVIDER_KEY" nil)
+    (cl-letf (((symbol-function 'kargu--config-providers)
+               (lambda () '(("alpha") ("beta" :apikey "${KARGU_ABSENT_PROVIDER_KEY}"))))
+              ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
+              ((symbol-function 'kargu-provider-env) (lambda (_) nil))
+              ((symbol-function 'kargu--auth-source-api-key) (lambda (_) nil)))
+      (should (kargu-provider-authenticated-p "alpha"))
+      (should-not (kargu-provider-authenticated-p "beta"))
+      (should-not (kargu--resolve-api-key "beta")))))
+
 (provide 'tests/test-config)
 ;;; test-config.el ends here
