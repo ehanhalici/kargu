@@ -85,7 +85,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 
 #### 3. Dil Profilleri ve Araç Zinciri Sorunları (`languages/`)
 - **`languages/elisp.el:46`: Var olmayan `ellsp` bağımlılığı.** Elisp dil profili zorunlu LSP sunucusu olarak `ellsp` tanımlar. Standart bir `ellsp` binary'si bulunmadığından, `kargu-deps` Elisp projelerinde bağımlılık hatası üretir.
-- **`tools/dape/render.el:112`: Ham ANSI kaçış dizileri.** Hata ayıklayıcı çıktılarında gelen renk ve kontrol kodları temizlenmeden LLM context'ine aktarılır, gereksiz token tüketir.
 
 #### 4. Çekirdek ve Sözleşme Sorunları (`core/`, `contract/`)
 - **`contract/assert.el:34`: Geliştirme dışı modda hataların sessizce yutulması.** Sözleşme kontrolleri strict mod kapalıyken sessizce `nil` döner; bu durum asıl hatayı gizler ve ilerleyen adımlarda açıklanamayan tip hatalarına yol açar.

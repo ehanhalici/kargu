@@ -22,6 +22,23 @@
 (require 'kargu/loop/tools)
 (require 'kargu/languages)
 
+(ert-deftest kargu-dape-render-strips-terminal-control-sequences-test ()
+  "Colors and terminal hyperlinks never enter variable or context text."
+  (let* ((colored "\e[31mvalue\e[0m")
+         (linked "\e]8;;https://example.invalid\avariable\e]8;;\a")
+         (frame (list :id 1 :name colored
+                      :source '(:path "main.el") :line 1)))
+    (should (equal (kargu-dape--trunc colored) "value"))
+    (should (equal (kargu-dape--plain-text linked) "variable"))
+    (should (equal (kargu-dape--plain-text "\e]0;title\e\\text") "text"))
+    (should (equal (kargu-dape--format-var-line
+                    (list :name linked :value colored))
+                   "  variable = value"))
+    (cl-letf (((symbol-function 'dape--file-name-local) (lambda (_conn path) path)))
+      (let ((text (kargu-dape--render-context nil nil (list frame) frame)))
+        (should (string-search "value" text))
+        (should-not (string-search "\e" text))))))
+
 (ert-deftest kargu-dape-delayed-frame-range-error-delivers-once-test ()
   "An out-of-range selection after a delayed stack reply closes the task."
   (let* ((frame '(:id 1 :name "main"))

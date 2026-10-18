@@ -11,13 +11,26 @@
 ;;; Code:
 
 (require 'kargu/tools/dape/session)
+(require 'ansi-color)
+(require 'rx)
 
 ;;;; Rendering helpers -----------------------------------------------------
+
+(defconst kargu-dape--osc-pattern
+  (rx "\e]" (*? anychar) (or "\a" "\e\\"))
+  "Terminal operating-system commands, terminated by BEL or ST.")
+
+(defun kargu-dape--plain-text (text)
+  "Strip terminal color and control sequences from adapter TEXT."
+  (save-match-data
+    (let ((ansi-color-context nil))
+      (ansi-color-filter-apply
+       (replace-regexp-in-string kargu-dape--osc-pattern "" (or text "") t t)))))
 
 (defun kargu-dape--trunc (string)
   "Truncate a variable value STRING for the model."
   (let ((one-line (replace-regexp-in-string
-                   "\n" "\\\\n" (or string ""))))
+                   "\n" "\\\\n" (kargu-dape--plain-text string))))
     (truncate-string-to-width one-line
                               kargu-dape-variable-value-width)))
 
@@ -35,7 +48,7 @@
         (vref (plist-get v :variablesReference)))
     (format "%s%s = %s%s"
             pad
-            (or (plist-get v :name) "?")
+            (kargu-dape--plain-text (or (plist-get v :name) "?"))
             (kargu-dape--trunc (or (plist-get v :value) "?"))
             (if (and (numberp vref) (not (zerop vref))) " {...}" ""))))
 
@@ -98,7 +111,7 @@
          (stack-lines (kargu-dape--render-stack-frames conn frames frame))
          (var-lines (kargu-dape--render-frame-variables conn frame))
          (all-lines (cons header (append stack-lines var-lines))))
-    (string-join all-lines "\n")))
+    (kargu-dape--plain-text (string-join all-lines "\n"))))
 
 (provide 'kargu/tools/dape/render)
 
