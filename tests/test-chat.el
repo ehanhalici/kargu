@@ -466,6 +466,56 @@
                 (should-not (member "secret.el" files)))))
         (kill-buffer foreign)))))
 
+(ert-deftest kargu-chat-retries-replace-only-the-failed-request-output-test ()
+  "HTTP and loop retries keep prior logs and the draft but discard partial deltas."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (kargu-chat--ensure-idle-prompt)
+    (insert "unsent draft")
+    (let* ((run (list :state 'request :chat-buffer (current-buffer)
+                      :on-delta #'kargu-chat--on-delta))
+           (kargu--loop-run run) (kargu--generation 100) delta)
+      (kargu-chat-insert "earlier tool [ok]\n")
+      (cl-letf (((symbol-function 'kargu-api-send)
+                 (lambda (_prompt _callback on-delta) (setq delta on-delta))))
+        (kargu-loop--send-model run "prompt"))
+      (funcall delta '(("choices" . [(("delta" . (("content" . "discarded<thi"))))])))
+      (let ((before (buffer-string)))
+        (kargu-loop--on-api-retry 100 #'ignore)
+        (should (equal-including-properties (buffer-string) before)))
+      (cl-letf (((symbol-function 'kargu--api-post)
+                 (lambda (&rest _)
+                   (funcall delta '(("choices" . [(("delta" . (("content" . "replacement"))))]))))))
+        (kargu-api--retry-post 100 :on-delta delta))
+      (should (string-search "earlier tool [ok]" (buffer-string)))
+      (should (string-search "replacement" (buffer-string)))
+      (should-not (string-search "discarded" (buffer-string)))
+      (should (equal kargu-chat--thought-pending ""))
+      (cl-letf (((symbol-function 'kargu--loop-request) #'ignore))
+        (kargu-loop--retry-model run))
+      (should-not (string-search "replacement" (buffer-string)))
+      (should (equal (buffer-substring-no-properties
+                      kargu-chat--prompt-marker (point-max)) "unsent draft"))
+      (let ((before (buffer-string)))
+        (setq kargu--loop-run (list :state 'request))
+        (kargu-chat--model-stream-event run 'retry)
+        (should (equal-including-properties before (buffer-string)))))))
+
+(ert-deftest kargu-chat-loop-observers-never-edit-source-buffers-test ()
+  "Library loop calls outside chat mode never write UI text into source code."
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (insert ";; source buffer must remain untouched\n")
+    (let* ((run (list :state 'tools :chat-buffer (current-buffer)))
+           (kargu--loop-run run) (before (buffer-string)))
+      (cl-letf (((symbol-function 'kargu-api-send) #'ignore)
+                ((symbol-function 'kargu-execute-tool)
+                 (lambda (_name _arguments callback) (funcall callback "ok")))
+                ((symbol-function 'kargu--loop-after-tool) #'ignore))
+        (kargu-loop--send-model run "prompt")
+        (kargu--loop-execute-call run :id "one" :name "read_file")
+        (should (equal-including-properties before (buffer-string)))))))
+
 (ert-deftest kargu-chat-unowned-tool-calls-do-not-pollute-transcript-test ()
   "Calling the tool API outside a loop leaves an existing chat untouched."
   (with-temp-buffer

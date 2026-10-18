@@ -12,6 +12,7 @@
 
 (require 'plz)
 (require 'kargu/core)
+(require 'kargu/core/observers)
 (require 'kargu/config)
 (require 'kargu/json)
 (require 'kargu/api/response)
@@ -19,6 +20,18 @@
 
 (defvar kargu--busy)
 (defvar kargu--generation)
+
+(defvar kargu-api-retry-hook nil
+  "Observers called with GENERATION and ON-DELTA before a request is retried.
+ON-DELTA identifies the original event consumer; no request secrets are exposed.")
+
+(cl-defun kargu-api--retry-post (generation &key url headers payload callback on-delta attempt)
+  "Retry GENERATION's URL with HEADERS and PAYLOAD if it still owns the client.
+CALLBACK and ON-DELTA retain their original owner; ATTEMPT counts retries."
+  (when (= generation kargu--generation)
+    (kargu-run-observers 'kargu-api-retry-hook generation on-delta)
+    (when (= generation kargu--generation)
+      (kargu--api-post url headers payload generation callback on-delta attempt))))
 
 (declare-function kargu--api-post "kargu/api/http"
                   (url headers payload gen callback &optional on-delta attempt))
@@ -137,9 +150,9 @@ Return non-nil if a retry was scheduled."
                  reason (1+ attempt) kargu-api-retry-max delay)
       (run-at-time delay nil
                    (lambda ()
-                     (when (= gen kargu--generation)
-                       (kargu--api-post url headers payload gen
-                                        callback on-delta (1+ attempt)))))
+                     (kargu-api--retry-post
+                      gen :url url :headers headers :payload payload :callback callback
+                      :on-delta on-delta :attempt (1+ attempt))))
       t)))
 
 (defun kargu--api-on-transport-error (url headers payload gen callback
@@ -163,9 +176,9 @@ receives events, and ATTEMPT counts completed retries."
                      (1+ attempt) kargu-api-retry-max delay)
           (run-at-time delay nil
                        (lambda ()
-                         (when (= gen kargu--generation)
-                           (kargu--api-post url headers payload gen
-                                            callback on-delta (1+ attempt))))))
+                         (kargu-api--retry-post
+                          gen :url url :headers headers :payload payload :callback callback
+                          :on-delta on-delta :attempt (1+ attempt)))))
       (setq kargu--busy nil)
       (let ((msg (kargu--plz-error-message err)))
         (if (or (kargu--api-retryable-p err)

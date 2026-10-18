@@ -17,6 +17,7 @@
 (require 'rx)
 
 (require 'kargu/core)
+(require 'kargu/core/observers)
 (require 'kargu/prompt)
 (require 'kargu/history)
 (require 'kargu/history/compact)
@@ -29,6 +30,10 @@
 (defvar kargu-max-iterations)
 (defvar kargu-chat--output-marker)
 (defvar kargu-chat--prompt-marker)
+
+(defvar kargu-loop-model-stream-hook nil
+  "Observers called with RUN and EVENT at model stream boundaries.
+EVENT is `start' for a new model turn or `retry' before replaying its stream.")
 
 (declare-function kargu-chat--prompt-live-p "kargu/chat/prompt")
 (declare-function kargu--api-error-looks-retryable-p "kargu/api/retry" (message))
@@ -109,11 +114,23 @@ send path so the continue prompt runs instead of leaving the run idle."
   (let ((on-delta (and (plist-get run :on-delta)
                        (lambda (event)
                          (kargu--loop-forward-delta run event)))))
-    (kargu-api-send
-     prompt
-     (lambda (response)
-       (kargu-loop--receive-model run response))
-     on-delta)))
+    (plist-put run :api-on-delta on-delta)
+    (kargu-run-observers 'kargu-loop-model-stream-hook run 'start)
+    (when (kargu-loop--live-p run)
+      (kargu-api-send
+       prompt
+       (lambda (response)
+         (kargu-loop--receive-model run response))
+       on-delta))))
+
+(defun kargu-loop--on-api-retry (generation on-delta)
+  "Publish a retry boundary only for GENERATION's owning ON-DELTA consumer."
+  (let ((run kargu--loop-run))
+    (when (and run on-delta (= generation kargu--generation)
+               (eq on-delta (plist-get run :api-on-delta)))
+      (kargu-run-observers 'kargu-loop-model-stream-hook run 'retry))))
+
+(add-hook 'kargu-api-retry-hook #'kargu-loop--on-api-retry)
 
 (defun kargu-loop--receive-model (run response)
   "Handle RESPONSE for RUN, terminating only its owner on a continuation error."
@@ -242,12 +259,14 @@ A truncated reply that already has answer text continues once."
 (defun kargu-loop--on-overflow (run response)
   "Handle the context overflow RESPONSE by compacting RUN."
   (kargu-circuit-release-probe)
-  (if (kargu--loop-start-compact run nil)
-      (kargu-log 'warn "loop: context overflow; compacting")
-    (kargu-loop--recover-or-finish
-     run
-     (or (kargu-response-error-message response)
-         "context overflow"))))
+  (kargu-run-observers 'kargu-loop-model-stream-hook run 'retry)
+  (when (kargu-loop--live-p run)
+    (if (kargu--loop-start-compact run nil)
+        (kargu-log 'warn "loop: context overflow; compacting")
+      (kargu-loop--recover-or-finish
+       run
+       (or (kargu-response-error-message response)
+           "context overflow")))))
 
 (defun kargu-loop--retry-upstream (run err)
   "Resend RUN from current history after retryable upstream error ERR.
@@ -269,7 +288,13 @@ the circuit is open, prompt the user to retry or abort instead."
       (run-at-time delay nil
                    (lambda ()
                      (when (kargu-loop--live-p run)
-                       (kargu--loop-request run nil)))))))
+                       (kargu-loop--retry-model run)))))))
+
+(defun kargu-loop--retry-model (run)
+  "Discard RUN's failed partial stream before retrying the model request."
+  (when (kargu-loop--live-p run)
+    (kargu-run-observers 'kargu-loop-model-stream-hook run 'retry)
+    (when (kargu-loop--live-p run) (kargu--loop-request run nil))))
 
 (defconst kargu-loop--tools-unsupported-pattern
   (rx (or "no endpoints found that support tool use"
@@ -300,6 +325,7 @@ remembers the refusal and retries without tools."
         (kargu-log 'warn "loop: model does not support tool use; retrying without tools in %s mode"
                    mode)
         (plist-put run :no-tools t)
+        (kargu-run-observers 'kargu-loop-model-stream-hook run 'retry)
         (kargu--loop-request run nil)))))
 
 (defun kargu-loop--apply-recovery (run err decision)
@@ -312,7 +338,7 @@ remembers the refusal and retries without tools."
       (kargu-circuit-reset))
     (plist-put run :upstream-retries 0)
     (kargu-loop--set-state run 'request)
-    (kargu--loop-request run nil))
+    (kargu-loop--retry-model run))
    (t
     (kargu-log 'info "loop: user stopped run after error: %s" err)
     (kargu--loop-finish run :error err))))

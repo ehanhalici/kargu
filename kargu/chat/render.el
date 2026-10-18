@@ -201,6 +201,8 @@ See `kargu-loop-send' for the shape of the report."
   "Return RUN's live chat buffer only while RUN owns the active loop."
   (and (eq run kargu--loop-run)
        (buffer-live-p (plist-get run :chat-buffer))
+       (with-current-buffer (plist-get run :chat-buffer)
+         (derived-mode-p 'kargu-chat-mode))
        (plist-get run :chat-buffer)))
 
 (defun kargu-chat--finish-tool-activity (run result)

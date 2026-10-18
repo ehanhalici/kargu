@@ -12,6 +12,9 @@
 
 (require 'kargu/chat/transcript)
 
+(defvar kargu--loop-run)
+(defvar kargu-loop-model-stream-hook)
+
 (defcustom kargu-chat-drop-preamble nil
   "When non-nil, delete assistant text that preceded a tool call.
 When nil (default), pre-tool explanations are kept in the chat
@@ -36,6 +39,39 @@ instead of relying on deltas.")
 
 (defvar-local kargu-chat--thought-pending ""
   "Incomplete reasoning marker held until the next streaming fragment.")
+
+(defvar-local kargu-chat--attempt-start nil
+  "Output marker before the current model request's first streaming attempt.")
+
+(defun kargu-chat--restart-stream ()
+  "Discard only the current request's partial stream, preserving earlier output."
+  (when (and (markerp kargu-chat--attempt-start)
+             (eq (marker-buffer kargu-chat--attempt-start) (current-buffer))
+             (markerp kargu-chat--output-marker)
+             (eq (marker-buffer kargu-chat--output-marker) (current-buffer)))
+    (let ((inhibit-read-only t) (inhibit-modification-hooks t))
+      (save-excursion
+        (save-restriction
+          (widen)
+          (delete-region kargu-chat--attempt-start kargu-chat--output-marker))))
+    (setq kargu-chat--streamed-text nil kargu-chat--in-thought nil
+          kargu-chat--thought-pending "" kargu-chat--preamble-dropped nil)))
+
+(defun kargu-chat--model-stream-event (run event)
+  "Handle model stream EVENT only in the chat still owned by RUN."
+  (let ((buffer (plist-get run :chat-buffer)))
+    (when (and (eq run kargu--loop-run) (buffer-live-p buffer)
+               (with-current-buffer buffer (derived-mode-p 'kargu-chat-mode)))
+      (with-current-buffer buffer
+        (pcase event
+          ('start
+           (kargu-chat-flush-stream)
+           (when (markerp kargu-chat--output-marker)
+             (setq kargu-chat--attempt-start (copy-marker kargu-chat--output-marker nil)))
+           (setq kargu-chat--streamed-text nil kargu-chat--in-thought nil))
+          ('retry (kargu-chat--restart-stream)))))))
+
+(add-hook 'kargu-loop-model-stream-hook #'kargu-chat--model-stream-event)
 
 (defun kargu-chat--on-delta (text &optional kind)
   "Append one streamed TEXT fragment of the assistant answer.

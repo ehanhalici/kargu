@@ -24,6 +24,34 @@
 (defvar kargu-api-stall-timeout)
 (defvar kargu-api-stream-ceiling)
 
+(ert-deftest kargu-api-retry-observers-cannot-post-after-cancellation-test ()
+  "Retry observers run once, and cancellation during notification prevents POST."
+  (let* ((kargu--generation 100) (posts 0) (observations 0)
+         (kargu-api-retry-hook
+          (list (lambda (&rest _) (error "bad observer"))
+                (lambda (&rest _) (cl-incf observations) (setq kargu--generation 200)))))
+    (cl-letf (((symbol-function 'kargu--api-post) (lambda (&rest _) (cl-incf posts))))
+      (kargu-api--retry-post 100 :url "https://example.invalid" :attempt 1)
+      (should (= observations 1))
+      (should (zerop posts))
+      (kargu-api--retry-post 100)
+      (should (= observations 1)))))
+
+(ert-deftest kargu-api-scheduled-retry-publishes-boundary-only-when-starting-test ()
+  "A scheduled retry announces its original event consumer only when it starts."
+  (let* ((kargu--generation 100) (kargu-api-retry-max 2) scheduled seen
+         (consumer #'ignore)
+         (kargu-api-retry-hook (list (lambda (generation delta)
+                                       (push (cons generation delta) seen)))))
+    (cl-letf (((symbol-function 'run-at-time)
+               (lambda (_time _repeat function &rest _) (setq scheduled function)))
+              ((symbol-function 'kargu--api-post) #'ignore))
+      (should (kargu--api-schedule-retry "https://example.invalid" nil nil 100
+                                        #'ignore consumer 0 "overloaded"))
+      (should-not seen)
+      (funcall scheduled)
+      (should (equal seen (list (cons 100 consumer)))))))
+
 (ert-deftest kargu-api-overflow-does-not-confuse-token-rate-limits-test ()
   "Only explicit context or input-length errors request compaction."
   (dolist (text '("context_length_exceeded" "Maximum context length is 4096"
