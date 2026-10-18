@@ -131,9 +131,7 @@ Returns a cons cell `(BODY . TRUNCATED-P)'."
   "Resolve FILE-PATH to (PATH . TEXT).
 Prefer the full unsaved visiting buffer without changing its narrowing.
 Signal for a missing or binary target."
-  (let* ((live-buf (and (stringp file-path)
-                        (string-match-p "\\`\\*kargu-output-[0-9]+\\*\\'" file-path)
-                        (get-buffer file-path)))
+  (let* ((live-buf (kargu-tool-output-buffer file-path))
          (is-buf (and live-buf (buffer-live-p live-buf)))
          (path (if is-buf file-path (kargu-permission-resolve file-path "file")))
          (visiting (or live-buf (find-buffer-visiting path))))

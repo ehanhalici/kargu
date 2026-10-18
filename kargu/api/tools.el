@@ -17,6 +17,7 @@
 (require 'kargu/json)
 (require 'kargu/contract)
 (require 'kargu/async)
+(require 'kargu/permission/guards)
 
 ;;;; Tool registry ---------------------------------------------------------
 
@@ -274,6 +275,33 @@ JSON false, nil, \"false\", and 0 are false.  A missing value is false."
 (defvar kargu--truncated-counter 0
   "Monotonic counter for truncated output buffer names.")
 
+(defvar-local kargu--tool-output-root nil
+  "Canonical project owning this generated tool output buffer.")
+
+(defun kargu-tool-output-buffer (name)
+  "Return the generated output buffer NAME owned by the current project.
+User buffers and buffers converted into visiting files are never accepted."
+  (when (stringp name)
+    (let ((buffer (get-buffer name))
+          (root (kargu-permission-project-root)))
+      (when (and (buffer-live-p buffer)
+                 (with-current-buffer buffer
+                   (and (not buffer-file-name) (equal kargu--tool-output-root root))))
+        buffer))))
+
+(defun kargu--preserve-tool-output (string)
+  "Preserve STRING in a fresh buffer owned by the current project."
+  (let* ((root (kargu-permission-project-root))
+         (buffer (generate-new-buffer
+                  (format "*kargu-output-%d*" (cl-incf kargu--truncated-counter)))))
+    (with-current-buffer buffer
+      (insert string)
+      (setq-local kargu--tool-output-root root
+                  buffer-offer-save nil
+                  buffer-read-only t)
+      (set-buffer-modified-p nil))
+    (buffer-name buffer)))
+
 (defun kargu--truncate-for-model (string)
   "Truncate STRING to `kargu-tool-output-limit' characters.
 Preserves the complete output in a buffer named `*kargu-output-<N>*'
@@ -283,13 +311,7 @@ so the model can inspect remaining lines using `read_file'."
     (if (and (natnump kargu-tool-output-limit)
              (> (length string) kargu-tool-output-limit))
 	(let* ((omitted (- (length string) kargu-tool-output-limit))
-               (id (cl-incf kargu--truncated-counter))
-               (buf-name (format "*kargu-output-%d*" id)))
-          (with-current-buffer (get-buffer-create buf-name)
-            (let ((inhibit-read-only t))
-              (erase-buffer)
-              (insert string)
-              (setq-local buffer-offer-save nil)))
+               (buf-name (kargu--preserve-tool-output string)))
           (concat (substring string 0 kargu-tool-output-limit)
                   (format "\n... [Output truncated: omitted %d chars. Complete output (%d chars) preserved in buffer '%s'. You can read specific line ranges using read_file with path='%s' from_line=N to_line=M]"
                           omitted (length string) buf-name buf-name)))

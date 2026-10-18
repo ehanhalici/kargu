@@ -172,3 +172,8 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
    - **Öneri:** Açık olmayan dosyalar için geçici olarak `find-file-noselect` ile arabellek oluşturulup tanıların okunması veya otomatik açılma desteği eklenmelidir.
 
 ---
+
+### Yeni inceleme bulguları
+
+- **Araç çıktı arşivinde toplam bellek sınırı yok.** `kargu/api/tools.el` büyük sonuçları `*kargu-output-*` tamponlarında tutuyor. Sayı ve toplam karakter kotası, eski çıktılar için tahliye politikası ve kotayı aşan tek çıktının kısmen saklandığını doğru anlatan bir sonuç sözleşmesi gerekiyor. Kullanıcının düzenlediği veya dosyaya dönüştürdüğü tamponlar otomatik silinmemeli.
+- **Dosya yazma ve rollback yolu daraltılmış/kirli tamponları güvenli yönetmiyor.** `diff/stage.el` içindeki `kargu-diff--file-text` ve proposal snapshot'ı yalnız erişilebilir bölgeyi okuyor; tam dosya yerine eksik rollback metni saklanabilir. Otomatik yazma `erase-buffer`/`save-buffer` ile kullanıcının kaydedilmemiş değişikliklerini de kaydediyor ve save-hook dönüşümlerini başarı sonucuyla uzlaştırmıyor. Tampon daraltması/point korunmalı; kullanıcı değişiklikleri, diskte dış değişiklik, kodlama ve başarısız kaydetme için açık işlem/geri alma sözleşmesi ve testler gerekiyor.

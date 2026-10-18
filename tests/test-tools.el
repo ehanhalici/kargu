@@ -26,6 +26,36 @@
     (should (string-search "lines 1-2 of 2" (kargu-diff-read-file "two.txt")))
     (should-error (kargu-diff-read-file "one.txt" 2 2))))
 
+(ert-deftest kargu-tool-output-buffer-is-owned-and-collision-safe-test ()
+  "A buffer name alone grants neither overwrite authority nor read access."
+  (let* ((kargu--truncated-counter 81000) (kargu-tool-output-limit 3)
+         (fake (generate-new-buffer "*kargu-output-81001*"))
+         (other-root (make-temp-file "kargu-output-other-" t)) output)
+    (unwind-protect
+        (progn
+          (with-current-buffer fake (insert "user draft"))
+          (should-error (kargu-diff-read-file (buffer-name fake)))
+          (let ((text (kargu--truncate-for-model "complete tool output")))
+            (should (string-match "buffer '\\([^']+\\)'" text))
+            (setq output (get-buffer (match-string 1 text))))
+          (should-not (eq output fake))
+          (should (equal (with-current-buffer fake (buffer-string)) "user draft"))
+          (should (with-current-buffer fake (buffer-modified-p)))
+          (should (eq (kargu-tool-output-buffer (buffer-name output)) output))
+          (should (string-search "complete tool output"
+                                 (kargu-diff-read-file (buffer-name output))))
+          (let ((kargu-permission--override-root other-root))
+            (should-not (kargu-tool-output-buffer (buffer-name output)))
+            (should-error (kargu-diff-read-file (buffer-name output))))
+          (with-current-buffer output
+            (setq-local buffer-file-name (expand-file-name "converted.txt" other-root)))
+          (should-not (kargu-tool-output-buffer (buffer-name output))))
+      (dolist (buffer (list fake output))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer)))
+      (delete-directory other-root))))
+
 (ert-deftest kargu-diff-shadow-buffers-never-clobber-existing-content-test ()
   "Same-basename proposals never erase each other or user-owned buffers."
   (let* ((path (expand-file-name "src/shared.el" default-directory))
