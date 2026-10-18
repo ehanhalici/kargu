@@ -50,7 +50,7 @@
           (kargu-lsp-find-definition name callback)))))
    (list
     "read_file_symbols"
-    "Get a language-agnostic outline of symbols (functions, classes, structs, methods, enums, types) and their exact line ranges in a file using LSP documentSymbol. ALWAYS use this BEFORE reading a large file to inspect its structure and avoid wasting tokens."
+    "Get symbols and line ranges from LSP documentSymbol or native Emacs Lisp imenu. Use this before reading a large file to inspect its structure."
     '(("type" . "object")
       ("properties" . (("file_path" . (("type" . "string")
                                        ("description" . "Absolute or project-relative path of the file to inspect."))))))
@@ -137,8 +137,10 @@
   (kargu-register-tools
    kargu-lsp--tool-specs kargu-lsp--tool-aliases
    '(:available-p kargu-lsp-unavailable-reason))
+  (dolist (name '("lsp_find_symbol" "read_file_symbols" "read_symbol"))
+    (kargu-set-tool-policy name '(:available-p kargu-lsp-symbols-unavailable-reason)))
   (kargu-set-tool-policy
-   "edit_by_lsp" '(:modes (agent) :available-p kargu-lsp-unavailable-reason)))
+   "edit_by_lsp" '(:modes (agent) :available-p kargu-lsp-symbols-unavailable-reason)))
 
 (kargu-lsp-register-tools)
 

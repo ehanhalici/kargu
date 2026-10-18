@@ -12,6 +12,8 @@
 
 (require 'kargu/tools/lsp/context)
 (require 'kargu/tools/lsp/skeleton)
+(require 'xref)
+(require 'elisp-mode)
 
 ;;;; Find definition ------------------------------------------------------
 
@@ -76,20 +78,52 @@
                             (seq-take locations kargu-lsp-definition-max-hits) "\n"))))))
          buf)))))
 
+(defun kargu-lsp--elisp-definition-items (name)
+  "Resolve NAME through native xref without loading or leaving the project."
+  (save-match-data
+    (save-excursion
+      (let ((root (kargu-permission-project-root))
+            (enable-local-variables :safe) (enable-local-eval nil)
+            (enable-dir-local-variables nil) items)
+        (dolist (xref (xref-backend-definitions 'elisp name))
+          (let* ((location (xref-item-location xref))
+                 (file (xref-location-group location)))
+            (when (and (stringp file) (file-name-absolute-p file)
+                       (file-in-directory-p file root))
+              (let ((marker (xref-location-marker location)))
+                (unwind-protect
+                    (with-current-buffer (marker-buffer marker)
+                      (push (list file (line-number-at-pos marker) name "Symbol") items))
+                  (set-marker marker nil))))))
+        (nreverse items)))))
+
+(defun kargu-lsp--elisp-definition (name)
+  "Describe native xref or local imenu definitions of NAME."
+  (or (kargu-lsp--format-definitions
+       name (or (kargu-lsp--elisp-definition-items name)
+                (seq-filter (lambda (item) (equal name (nth 2 item)))
+                            (kargu-lsp--imenu-symbols
+                             (list (kargu-permission-project-root))))))
+      (format "No definition found for `%s' in this project" name)))
+
 (defun kargu-lsp-find-definition (symbol-name &optional callback)
   "Describe definition sites of SYMBOL-NAME without blocking.
 CALLBACK receives fresh results; interactive use reports them on completion."
   (interactive "sSymbol: ")
   (let ((done (or callback (and (called-interactively-p 'any)
                                 (lambda (text) (message "%s" text))))))
-    (if (null done)
-        (kargu-lsp--format-definitions symbol-name (kargu-lsp--ws-symbols symbol-name))
-      (kargu-lsp--ws-symbols
+    (cond
+     ((kargu-lsp-native-elisp-p)
+      (let ((text (kargu-lsp--elisp-definition symbol-name)))
+        (if done (funcall done text) text)))
+     ((null done)
+      (kargu-lsp--format-definitions symbol-name (kargu-lsp--ws-symbols symbol-name)))
+     (t (kargu-lsp--ws-symbols
        symbol-name
        (lambda (items _error)
          (let ((text (kargu-lsp--format-definitions symbol-name items)))
            (if text (funcall done text)
-             (kargu-lsp--definitions-via-occurrence symbol-name done))))))))
+             (kargu-lsp--definitions-via-occurrence symbol-name done)))))))))
 
 ;;;; Document symbols, outline, reading and surgical editing --------------
 
@@ -245,11 +279,12 @@ and :end-line."
 With CALLBACK, deliver (SYMBOLS ERROR) from an asynchronous request.
 Without CALLBACK, return a cached or local imenu snapshot only."
   (let* ((buf (kargu-lsp--symbol-buffer file-path))
-         (cached (kargu-lsp--cached-file-symbols buf)))
+         (native (with-current-buffer buf (derived-mode-p 'emacs-lisp-mode)))
+         (cached (unless native (kargu-lsp--cached-file-symbols buf))))
     (cond
      ((null callback) (or cached (kargu-lsp--imenu-document-symbols buf)))
      (cached (funcall callback cached nil))
-     ((not (kargu-lsp--buffer-managed-p buf))
+     ((or native (not (kargu-lsp--buffer-managed-p buf)))
       (funcall callback (kargu-lsp--imenu-document-symbols buf) nil))
      (t
       (kargu-lsp--request

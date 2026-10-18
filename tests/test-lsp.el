@@ -464,6 +464,69 @@ A kind filter does not select an unrelated symbol."
                     :name)
                    "beta"))))
 
+(ert-deftest kargu-lsp-native-elisp-navigation-needs-no-server-test ()
+  "Native xref and imenu serve Lisp tools without loading project code."
+  (kargu-test-with-git-repo
+      '(("native.el" . "(defun kargu-test-native-only ()\n  t)\n"))
+    (let* ((path (expand-file-name "native.el" repo))
+           (buffer (find-file-noselect path))
+           (kargu-context-buffer buffer)
+           (elisp-xref-find-def-functions
+            (list (lambda (symbol)
+                    (when (eq symbol 'kargu-test-native-only)
+                      (list (xref-make "native fixture"
+                                       (xref-make-elisp-location symbol nil path))))))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-eglot-connected-p) #'ignore)
+                    ((symbol-function 'kargu-lsp--request)
+                     (lambda (&rest _) (error "No external server should be called"))))
+            (kargu-test-mode 'ask)
+            (dolist (name '("lsp_find_symbol" "read_file_symbols" "read_symbol" "outline"))
+              (should (kargu-tool-visible-p name)))
+            (should-not (kargu-tool-visible-p "edit_by_lsp"))
+            (should-not (kargu-tool-visible-p "lsp_diagnostics"))
+            (should-not (fboundp 'kargu-test-native-only))
+            (let ((definition (kargu-execute-tool
+                               "lsp_find_symbol" '(("symbol_name" . "kargu-test-native-only")))))
+              (should (string-search (concat path ":1") definition)))
+            (let ((outline (kargu-test-await
+                            (lambda (callback)
+                              (kargu-execute-tool "read_file_symbols"
+                                                  '(("file_path" . "native.el")) callback)))))
+              (should (string-search "kargu-test-native-only" outline)))
+            (should-not (fboundp 'kargu-test-native-only))
+            (kargu-test-mode 'agent)
+            (should (kargu-tool-visible-p "edit_by_lsp")))
+        (kill-buffer buffer)))))
+
+(ert-deftest kargu-lsp-native-xref-filters-foreign-projects-before-opening-test ()
+  "A native xref result outside the workspace is not opened or returned."
+  (kargu-test-with-git-repo '(("native.el" . "(defun local-name () t)\n"))
+    (let ((outside (make-temp-file "kargu-foreign-xref-" nil ".el")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'xref-backend-definitions)
+                     (lambda (_backend _name)
+                       (list (xref-make "foreign" (xref-make-file-location outside 1 0))))))
+            (should-not (kargu-lsp--elisp-definition-items "foreign"))
+            (should-not (find-buffer-visiting outside)))
+        (delete-file outside)))))
+
+(defvar kargu-test-native-local-eval nil)
+
+(ert-deftest kargu-lsp-native-xref-never-evaluates-file-locals-test ()
+  "Opening a native xref target never evaluates project-controlled locals."
+  (kargu-test-with-git-repo
+      '(("target.el" . "(defun kargu-test-local-target () t)\n;; Local Variables:\n;; eval: (setq kargu-test-native-local-eval t)\n;; End:\n"))
+    (let ((path (expand-file-name "target.el" repo))
+          (enable-local-eval t) (kargu-test-native-local-eval nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'xref-backend-definitions)
+                     (lambda (_backend _name)
+                       (list (xref-make "target" (xref-make-file-location path 1 0))))))
+            (should (kargu-lsp--elisp-definition-items "target"))
+            (should-not kargu-test-native-local-eval))
+        (when-let* ((buffer (find-buffer-visiting path))) (kill-buffer buffer))))))
+
 (ert-deftest kargu-lsp-unavailable-tools-are-hidden-and-rejected-test ()
   "Unavailable LSP tools and aliases agree in prompts, schemas and execution."
   (kargu-test-mode 'agent)

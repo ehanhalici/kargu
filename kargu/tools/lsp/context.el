@@ -226,6 +226,18 @@ asked, and `default-directory' is not used in its place."
   (unless (kargu-eglot-connected-p)
     "ERROR: LSP is unavailable in this project. Use file/search tools, or Bash in agent mode."))
 
+(defun kargu-lsp-native-elisp-p ()
+  "Return non-nil for an Emacs Lisp context in the selected project."
+  (let* ((buffer (or (kargu-lsp--context-buffer-live) (current-buffer)))
+         (file (buffer-file-name buffer)))
+    (and (or (null file)
+             (kargu-permission-within-project-p file (kargu-permission-project-root)))
+         (with-current-buffer buffer (derived-mode-p 'emacs-lisp-mode)))))
+
+(defun kargu-lsp-symbols-unavailable-reason ()
+  "Return a refusal unless native Lisp navigation or Eglot is available."
+  (unless (kargu-lsp-native-elisp-p) (kargu-lsp-unavailable-reason)))
+
 ;;;; URI helpers & Symbol kinds -------------------------------------------
 
 (defun kargu-lsp--uri-to-path (uri)

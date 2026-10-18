@@ -176,11 +176,14 @@
                (eq (buffer-local-value 'major-mode buf) 'kargu-chat-mode))
       (kill-buffer buf))))
 
-(ert-deftest kargu-languages-elisp-requires-eglot-and-does-not-ask ()
-  "Emacs Lisp requires a language server and never asks for a project root."
+(ert-deftest kargu-languages-elisp-uses-native-tools-without-a-server-test ()
+  "Emacs Lisp uses built-in navigation and never requires an external server."
   (let ((spec (kargu-language-get 'emacs-lisp)))
-    (should (kargu-language-requires-lsp-p spec))
-    (should (member "ellsp" (plist-get (kargu-language-spec-lsp spec) :binaries)))
+    (should-not (kargu-language-requires-lsp-p spec))
+    (should-not (kargu-language-spec-lsp spec))
+    (cl-letf (((symbol-function 'executable-find) (lambda (_) nil))
+              ((symbol-function 'kargu-deps--active-eglot-server-p) #'ignore))
+      (should-not (kargu-deps--check-lsp-server spec)))
     (with-temp-buffer
       (emacs-lisp-mode)
       (should (eq (kargu-language-spec-id (kargu-language-for-buffer))
