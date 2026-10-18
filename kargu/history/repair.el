@@ -1,4 +1,4 @@
-;;; kargu/history/repair.el --- Protocol history repair and firewall -*- lexical-binding: t; -*-
+;;; repair.el --- Protocol history repair and firewall -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -28,7 +28,7 @@
   "Content of the synthetic user message used by the `nudge' fix.")
 
 (defun kargu--flush-pending (pending out-rev)
-  "Extend OUT-REV with synthetic tool results for unanswered calls.
+  "Extend OUT-REV with synthetic results for unanswered invocations.
 PENDING is a hash table mapping tool-call ids to (name . seq) or name.
 The table is cleared upon completion."
   (when (> (hash-table-count pending) 0)
@@ -96,20 +96,44 @@ fresh message via `kargu--get-system-prompt'."
 (declare-function kargu-prompt-system-key "kargu/prompt" ())
 (declare-function kargu--history-compaction-msg-p "kargu/history/compact" (msg))
 
+(defun kargu--history-content-present-p (content)
+  "Check CONTENT for text or structured content blocks."
+  (or (and (stringp content) (not (string-empty-p (string-trim content))))
+      (and (or (vectorp content) (consp content))
+           (seq-some (lambda (block)
+                       (if (equal (kargu-aget block "type") "text")
+                           (kargu--history-content-present-p (kargu-aget block "text"))
+                         t)) content))))
+
+(defun kargu--history-content-blocks (content)
+  "Return CONTENT as a list of blocks without discarding attachments."
+  (cond
+   ((stringp content)
+    (unless (string-empty-p content)
+      (list (list '("type" . "text") (cons "text" content)))))
+   ((or (vectorp content) (consp content)) (append content nil))))
+
+(defun kargu--history-merged-content (left right &optional trim-p)
+  "Combine LEFT and RIGHT, applying TRIM-P only to plain text."
+  (when (memq left '(nil :json-null :json-false)) (setq left ""))
+  (when (memq right '(nil :json-null :json-false)) (setq right ""))
+  (if (and (stringp left) (stringp right))
+      (let ((merged (concat left "\n\n" right)))
+        (if trim-p (string-trim merged) merged))
+    (let ((before (kargu--history-content-blocks left))
+          (after (kargu--history-content-blocks right)))
+      (vconcat before
+               (and before after '((("type" . "text") ("text" . "\n\n"))))
+               after))))
+
 (defun kargu--history-merge-consecutive-content (msg out &optional trim-p)
-  "Merge content string of MSG into head of OUT, optionally applying TRIM-P."
+  "Merge MSG content into the head of OUT, optionally applying TRIM-P."
   (let* ((prev (car out))
-         (extra (if (stringp (kargu-aget msg "content"))
-                    (kargu-aget msg "content")
-                  ""))
-         (prev-text (if (stringp (kargu-aget prev "content"))
-                        (kargu-aget prev "content")
-                      ""))
-         (merged (concat prev-text "\n\n" extra))
-         (final (if trim-p (string-trim merged) merged)))
+         (final (kargu--history-merged-content
+                 (kargu-aget prev "content") (kargu-aget msg "content") trim-p)))
     (if (assoc "content" prev)
         (setcdr (assoc "content" prev) final)
-      (setcar out (cons `("content" . ,(if trim-p (string-trim extra) extra)) prev)))
+      (setcar out (cons (cons "content" final) prev)))
     out))
 
 (defun kargu--history-merge-consecutive-user (msg out)
@@ -120,18 +144,19 @@ fresh message via `kargu--get-system-prompt'."
   "Merge consecutive assistant text MSG into head of OUT and return updated OUT."
   (kargu--history-merge-consecutive-content msg out t))
 
-(defun kargu--history-process-assistant-with-calls (msg pending out &optional next-seq-fn)
-  "Process assistant MSG containing tool calls into OUT and register in PENDING."
+(cl-defun kargu--history-process-assistant-with-calls (msg &key pending out next-seq-fn)
+  "Register assistant MSG's invocations in PENDING and extend OUT.
+NEXT-SEQ-FN supplies each invocation's stable sequence number."
   (let* ((clean (kargu--clean-assistant-message
                  (kargu--normalize-assistant-role msg)))
          (calls (kargu--calls-to-list (kargu-aget clean "tool_calls"))))
     (if (and out (kargu--assistant-role-p (kargu-aget (car out) "role"))
              (not (kargu--calls-to-list (kargu-aget (car out) "tool_calls"))))
         (let* ((prev (pop out))
-               (prev-txt (or (kargu-aget prev "content") ""))
-               (curr-txt (or (kargu-aget clean "content") ""))
-               (merged-txt (string-trim (concat prev-txt "\n\n" curr-txt))))
-          (when (not (string-empty-p merged-txt))
+               (merged-txt (kargu--history-merged-content
+                            (kargu-aget prev "content")
+                            (kargu-aget clean "content") t)))
+          (when (kargu--history-content-present-p merged-txt)
             (if (assoc "content" clean)
                 (setcdr (assoc "content" clean) merged-txt)
               (push `("content" . ,merged-txt) clean)))
@@ -160,13 +185,18 @@ fresh message via `kargu--get-system-prompt'."
               out))
     out))
 
-(defun kargu--history-process-regular-turn (msg role pending out next-seq)
-  "Process non-tool, non-system turn MSG with ROLE, flushing PENDING into OUT."
+(cl-defun kargu--history-process-regular-turn (msg role &key pending out next-seq)
+  "Process MSG with ROLE, flushing PENDING into OUT.
+NEXT-SEQ supplies each invocation's stable sequence number."
   (let ((acc (kargu--flush-pending pending out)))
     (cond
      ((and (kargu--assistant-role-p role)
            (kargu--calls-to-list (kargu-aget msg "tool_calls")))
-      (kargu--history-process-assistant-with-calls msg pending acc next-seq))
+      (kargu--history-process-assistant-with-calls
+       msg :pending pending :out acc :next-seq-fn next-seq))
+     ((and (kargu--assistant-role-p role)
+           (not (kargu--history-content-present-p (kargu-aget msg "content"))))
+      acc)
      ((and (equal role "user")
            (equal (kargu-aget (car acc) "role") "user")
            (not (kargu--history-compaction-msg-p msg)))
@@ -178,13 +208,15 @@ fresh message via `kargu--get-system-prompt'."
       (kargu--history-merge-consecutive-assistant msg acc))
      (t
       (when (kargu--assistant-role-p role)
-        (kargu--normalize-assistant-role msg)
-        (unless (or (kargu--calls-to-list (kargu-aget msg "tool_calls"))
-                    (kargu-nonempty (kargu-aget msg "content")))
-          (if (assoc "content" msg)
-              (setcdr (assoc "content" msg) "")
-            (push '("content" . "") msg))))
+        (kargu--normalize-assistant-role msg))
       (cons msg acc)))))
+
+(defun kargu--history-ensure-user (history)
+  "Insert a user nudge into HISTORY only if no user turn remains."
+  (unless (seq-some (lambda (message) (equal (kargu-aget message "role") "user")) history)
+    (setcdr history (cons (list '("role" . "user") (cons "content" kargu--continue-nudge))
+                         (cdr history))))
+  history)
 
 (defun kargu--validate-history (&optional keep-assistant-tail)
   "Enforce the protocol invariants required by chat providers.
@@ -209,11 +241,12 @@ is what makes the tail legal."
          ((equal role "system")
           nil)
          (t
-          (setq out (kargu--history-process-regular-turn msg role pending out next-seq))))))
+          (setq out (kargu--history-process-regular-turn
+                     msg role :pending pending :out out :next-seq next-seq))))))
     (setq out (kargu--flush-pending pending out))
     (unless keep-assistant-tail
       (setq out (kargu--history-fix-trailing-turn out)))
-    (setq kargu--message-history (nreverse out))
+    (setq kargu--message-history (kargu--history-ensure-user (nreverse out)))
     (kargu-log 'debug "validate: %d messages, last role %s"
                (length kargu--message-history)
                (kargu--history-last-role))
@@ -227,4 +260,4 @@ is what makes the tail legal."
 
 (provide 'kargu/history/repair)
 
-;;; kargu/history/repair.el ends here
+;;; repair.el ends here

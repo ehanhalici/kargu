@@ -95,6 +95,17 @@ exceptions, duplicate deliveries and replacement by a newer request or run.
 2. one forward scan drops orphan tool results and, when any other turn arrives, flushes the calls still open with a synthetic result, in call order;
 3. merge consecutive user turns, merge consecutive assistant text turns and fold a text turn into the assistant turn with calls after it;
 4. only then, when `fix = "strip"`, remove trailing assistant turns.
+5. when no user remains, insert `Continue.` immediately after the system turn.
+
+The forward scan drops empty assistant text turns before merging. Constant
+ingress fixtures in `MC.tla` check empty, system-only, assistant-only, orphan
+tool and empty-assistant histories. The bounded model represents text content;
+ERT additionally checks mixed text/attachment blocks and preservation of their
+order when user or assistant turns are merged.
+
+The bounded loop abstracts request size with `CompactionThreshold`. ERT checks
+the concrete short-window calculation and serialized history/schema estimate;
+the model does not implement a provider tokenizer or image token accounting.
 
 A request uses `"strip"`. A finished or stopped run and a compaction keep a trailing answer.
 
@@ -151,8 +162,8 @@ Run on 2026-10-18 with TLC 2.19, 24 workers:
 ```
 Model checking completed. No error has been found.
 731356619 states generated, 85781147 distinct states found, 0 states left on queue.
-The depth of the complete state graph search is 43.
-Finished in 10min 04s
+The depth of the complete state graph search is 44.
+Finished in 09min 43s
 ```
 
 Changing a guard breaks the check: with the `~noTools` guard removed from `ModelReceiveToolCalls`, a simulation reports `Safety_ToolsOffMeansNoToolWork` violated within a second. The numbers above are those of a real run; repeat it after every change to the specification and replace them.

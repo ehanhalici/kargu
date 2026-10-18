@@ -18,6 +18,63 @@
 (require 'ert)
 (require 'kargu/history)
 
+(ert-deftest kargu-history-firewall-always-retains-a-user-turn-test ()
+  "Empty, system-only and stripped histories still contain a user prompt."
+  (dolist (history '(nil
+                     ((("role" . "system") ("content" . "sys")))
+                     ((("role" . "assistant") ("content" . "answer")))
+                     ((("role" . "tool") ("tool_call_id" . "orphan") ("content" . "x")))))
+    (let ((kargu--message-history history) (kargu-trailing-assistant-fix 'strip))
+      (kargu--validate-history)
+      (should (equal (kargu-aget (car kargu--message-history) "role") "system"))
+      (should (seq-some (lambda (message)
+                          (and (equal (kargu-aget message "role") "user")
+                               (kargu-nonempty (kargu-aget message "content"))))
+                        kargu--message-history)))))
+
+(ert-deftest kargu-history-drops-empty-assistant-turns-before-merging-test ()
+  "Empty assistant text does not reach a payload or prevent user merging."
+  (dolist (empty '(nil "" "  \n\t" :json-null []
+                   [(("type" . "text") ("text" . ""))]
+                   [(("type" . "text") ("text" . "  \n"))]))
+    (let ((kargu--message-history
+           (list '(("role" . "user") ("content" . "first"))
+                 (list '("role" . "assistant") (cons "content" empty))
+                 '(("role" . "user") ("content" . "second")))))
+      (kargu--validate-history)
+      (should (= (length kargu--message-history) 2))
+      (should (equal (kargu-aget (cadr kargu--message-history) "content")
+                     "first\n\nsecond")))))
+
+(ert-deftest kargu-history-merging-retains-multimodal-blocks-test ()
+  "Mixed string/block turns preserve attachment contents and ordering."
+  (let ((image '(("type" . "image_url") ("image_url" . (("url" . "data:image/png;base64,AAAA"))))))
+    (dolist (role '("user" "assistant"))
+      (dolist (blocks-first '(nil t))
+        (let* ((blocks (vector image))
+               (original (list (list (cons "role" role) (cons "content" (if blocks-first blocks "text")))
+                               (list (cons "role" role) (cons "content" (if blocks-first "text" blocks)))))
+               (snapshot (copy-tree original t))
+               (kargu--message-history original))
+          (kargu--validate-history t)
+          (let* ((message (car (last kargu--message-history)))
+                 (content (kargu-aget message "content")))
+            (should (vectorp content))
+            (should (equal (aref content (if blocks-first 0 (1- (length content)))) image))
+            (should (seq-some (lambda (block) (equal (kargu-aget block "text") "text")) content)))
+          (should (equal original snapshot)))))))
+
+(ert-deftest kargu-history-multimodal-assistant-before-calls-is-retained-test ()
+  "Folding a multimodal assistant into a tool-call turn never erases blocks."
+  (let* ((block '(("type" . "text") ("text" . "prior explanation")))
+         (kargu--message-history
+          (list '(("role" . "user") ("content" . "go"))
+                (list '("role" . "assistant") (cons "content" (vector block)))
+                '(("role" . "assistant") ("tool_calls" . [(("id" . "c1") ("function" . (("name" . "read_file") ("arguments" . "{}"))))])))))
+    (kargu--validate-history)
+    (should (equal (kargu-aget (nth 2 kargu--message-history) "content") (vector block)))
+    (should (equal (kargu-aget (car (last kargu--message-history)) "role") "tool"))))
+
 (ert-deftest kargu-history-vector-tool-calls-test ()
   "Ensure kargu--validate-history handles vector tool_calls without crashing (Bug 1 regression)."
   (let ((kargu--message-history

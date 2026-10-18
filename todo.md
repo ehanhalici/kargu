@@ -81,7 +81,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 
 #### 4. Çekirdek ve Sözleşme Sorunları (`core/`, `contract/`)
 #### 5. Protokol, Geçmiş ve Devre Kesici Derin Analizi (`history/`, `circuit.el`, `loop/`, `git.el`)
-- **`history/repair.el:102-113`: Çok Modlu Eklerin Sessizce Silinmesi (Multimodal Silent Erasure) (K).** `kargu--history-merge-consecutive-content`, ardışık kullanıcı veya asistan mesajlarını birleştirirken `(stringp (kargu-aget msg "content"))` kontrolü yapar. Görsel veya dosya içeren çok modlu bloklarda `stringp` nil döndüğü için ek verisi boş string sayılır ve önceki mesajın içeriği sadece metinle ezilerek görsel kalıcı olarak geçmişten silinir.
 - **`loop/heal.el:50`: İptal Edilen Koşularda Dosya Tüketim Sızıntısı (Unconsumed Changed Files).** `kargu--loop-verify-next` içinde LSP tanıları beklenirken kullanıcı koşuyu durdurursa (`kargu-loop-stop`), callback içindeki `(when (kargu-loop--live-p run) (kargu-diff-consume-file path) ...)` bloğu atlanır. Düzenlenen dosya `kargu-diff-changed-files` listesinden silinmez ve bir sonraki koşuya bayat dosya uyarısı olarak sarkar.
 - **`loop/machine.el:207, 362-368`: Sınırsız Düşünce Döngüsü (Unbounded Reasoning Loop).** Model yalnızca düşünce (reasoning/thinking) üretip yanıt veya araç çağrısı vermediğinde `thought` olayı tetiklenir ve `kargu-loop--on-thought` çalışır. Boş yanıtlarda (`empty-retries`) ve üst akış hatalarında (`upstream-retries`) sayaç bulunmasına rağmen `thought` için hiçbir retry sayacı veya bütçe tanımlanmamıştır; model her adımda yalnızca düşünce verirse gereksiz token tüketimiyle döngüde kalır.
 - **`tools/git.el:314-322`: `git_stash` İndeks Belirtememe ve Yanlış Stash Uçurma.** `kargu-git-stash` komutunda `pop` ve `drop` eylemleri için herhangi bir stash indeksi (örn. `stash@{1}`) desteği yoktur. Sabit olarak en üstteki (`stash@{0}`) yığın öğesini siler veya açar; bu durum kullanıcının daha önce kaydettiği kendi stash'lerini kazara ezmesine veya kaybetmesine yol açar.
@@ -122,14 +121,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
   - Ayrıca `UU` (unmerged/conflict) durumundaki çakışan dosyalar `staged` ve `unstaged` listelerine dağıtılır; ayrıştırıcıda çakışma (`:conflict`) sınıflandırması bulunmadığından model merge çakışmasını fark edemez.
 
 #### 14. Formal Protokol İhlalleri ve Geçmiş Onarım Tutarsızlıkları (`history/repair.el`, `proof/KarguProtocol.tla`)
-- **`history/repair.el:151-160, 214`: Trailing Assistant Temizliği Sonrası Yalnızca Sistem Mesajı Kalması ve API 400 Hatası (K).**
-  - TLA+ formal spesifikasyonunda (`proof/KarguProtocol.tla:67-68`) `HasAtLeastOneUser(hist)` kuralı zorunlu bir invariant olarak tanımlanmıştır (`\E i \in 1..Len(hist) : IsUser(hist[i])`).
-  - Ancak `kargu/history/repair.el:152-157` içinde `kargu-trailing-assistant-fix 'strip` kipindeyken veya asistan yanıtı temizlendiğinde, geçmişte hiç kullanıcı mesajı kalmasa dahi (`(list (car head-and-rest))`), fonksiyon salt sistem mesajından oluşan bir liste döner.
-  - Anthropic (`Messages API`) ve OpenAI uç noktaları kullanıcı mesajı içermeyen (`at least one user message is required`) yükleri doğrudan `400 Bad Request` ile reddeder.
-- **`history/repair.el:184-186`: Boş İçerikli Asistan Mesajlarının `""` Olarak Gönderilmesi ve Anthropic 400 Hatası (K).**
-  - Formal kanıtta (`proof/KarguProtocol.tla:61-65`) `AssistantContentNonEmpty(hist)` kuralı uyarınca metin içeren asistan mesajlarının boş olamayacağı belirtilmiştir (`hist[i].content # ""`).
-  - Ancak `kargu--history-process-regular-turn`, araç çağrısı olmayan ve boş içerikli asistan mesajlarında `(setcdr (assoc "content" msg) "")` yaparak `content` alanına `""` yazar.
-  - Anthropic API, boş metin bloklarını (`messages.content: text content blocks must be non-empty`) kesinlikle kabul etmez ve `400 Invalid Request Error` üretir. Boş asistan mesajı ya geçmişten tamamen atılmalı (drop) ya da anlamlı bir yer tutucu ile doldurulmalıdır.
 
 #### 15. Bash Yetki ve Güvenlik Denetleyicisi Atlatma Açıkları (`permission/bash.el`, `permission/guards.el`)
 - **`permission/guards.el:74-83`: Üst Dizinlerdeki `.git` Nedeniyle Çalışma Alanı Sınırının `/tmp` veya Ev Dizinine Taşması (K).**
