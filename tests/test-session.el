@@ -23,6 +23,63 @@
 (declare-function kargu-chat--focus-selection "kargu/chat/prompt" (&optional open-company))
 (declare-function kargu-api-select--stay-on-field "kargu/api/select" (field))
 
+(ert-deftest kargu-session-storage-paths-reject-traversal-and-symlinks-test ()
+  "Session identities cannot read, delete or overwrite files outside storage."
+  (kargu-test-with-git-repo nil
+    (let* ((kargu-sessions-directory (expand-file-name "central" repo))
+           (storage (expand-file-name ".kargu/sessions" repo))
+           (victim (expand-file-name "victim.json" repo)))
+      (make-directory storage t)
+      (write-region "preserve" nil victim)
+      (dolist (id '(nil "" "../victim" "/absolute" "a/b" "a\\b" "C:target" "." ".."))
+        (should-error (kargu-session--file-path id repo)))
+      (make-symbolic-link victim (expand-file-name "safe.json" storage))
+      (should-error (kargu-session--file-path "safe" repo))
+      (should-error (kargu-session-delete "safe" repo))
+      (should-error (kargu-session--read-data "safe" repo))
+      (let ((read-file (symbol-function 'insert-file-contents)) read-link)
+        (cl-letf (((symbol-function 'insert-file-contents)
+                   (lambda (file &rest arguments)
+                     (when (equal file (expand-file-name "safe.json" storage))
+                       (setq read-link t))
+                     (apply read-file file arguments))))
+          (should-not (kargu-session-list repo))
+          (should-not read-link)))
+      (with-temp-buffer
+        (insert-file-contents victim)
+        (should (equal (buffer-string) "preserve")))
+      (should (file-symlink-p (expand-file-name "safe.json" storage))))))
+
+(ert-deftest kargu-session-load-metadata-cannot-switch-projects-test ()
+  "Caller-owned project roots win, and rejected loads leave input untouched."
+  (let* ((root (kargu-permission-project-root))
+         (data '(("id" . "safe") ("project_root" . "/unrelated/project/")
+                 ("transcript" . "") ("messages" . []))))
+    (with-temp-buffer
+      (kargu-session-load data (current-buffer) root)
+      (should (equal kargu-chat--project-root root)))
+    (with-temp-buffer
+      (insert "user draft")
+      (should-error (kargu-session-load '(("id" . "../unsafe")) (current-buffer) root))
+      (should (equal (buffer-string) "user draft"))
+      (cl-letf (((symbol-function 'kargu-loop-running-p) (lambda () t)))
+        (should-error (kargu-session-load data (current-buffer) root))
+        (should (equal (buffer-string) "user draft"))))))
+
+(ert-deftest kargu-session-external-local-storage-symlink-is-not-followed-test ()
+  "A repository symlink cannot redirect local session persistence outside it."
+  (kargu-test-with-git-repo nil
+    (let ((kargu-sessions-directory (expand-file-name "central" repo))
+          (outside (make-temp-file "kargu-session-outside-" t)))
+      (unwind-protect
+          (progn
+            (make-directory (expand-file-name ".kargu" repo))
+            (make-symbolic-link outside (expand-file-name ".kargu/sessions" repo))
+            (let ((path (kargu-session--file-path "safe" repo)))
+              (should (kargu-permission-within-project-p path kargu-sessions-directory))
+              (should-not (kargu-permission-within-project-p path outside))))
+        (delete-directory outside)))))
+
 (ert-deftest kargu-session-project-key-test ()
   "Ensure kargu-session--project-key produces deterministic and valid slugs."
   (let ((slug1 (kargu-session--project-key "/home/user/project-foo/"))
