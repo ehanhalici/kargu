@@ -78,8 +78,6 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
 :healing, :verifications, :empty-retries, :compactions,
 :length-continues, :doom-sigs.")
 
-(defvar kargu--loop-call-seq 0
-  "Counter for synthesizing tool-call ids when a provider omits them.")
 
 (defun kargu-loop--live-p (run)
   "Non-nil when RUN is still the active loop."
@@ -261,7 +259,7 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
   (let* ((no-tools (kargu-loop-preflight))
          (wrapped (kargu-prompt-wrap-user prompt))
          (run (kargu-loop--new-run prompt :no-tools no-tools
-                                  :on-delta on-delta :on-finish on-finish)))
+                                   :on-delta on-delta :on-finish on-finish)))
     (setq kargu--compaction-system nil)
     (when (fboundp 'kargu-diff-reset-run-files) (kargu-diff-reset-run-files))
     (kargu-loop--start-run run wrapped)

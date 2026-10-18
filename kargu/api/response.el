@@ -45,8 +45,7 @@ A legacy OpenAI `function_call' object is wrapped as one call."
     (or (and message (kargu-aget message "tool_calls"))
         (let ((legacy (and message (kargu-aget message "function_call"))))
           (when (and legacy (kargu--object-p legacy))
-            `((("id" . "call_legacy")
-               ("type" . "function")
+            `((("type" . "function")
                ("function" . ,legacy))))))))
 
 (defun kargu-response-finish-reason (response)

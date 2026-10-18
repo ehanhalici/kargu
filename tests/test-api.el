@@ -370,14 +370,14 @@
     (should-not (kargu--api-error-looks-retryable-p "HTTP 502: bad gateway"))))
 
 (ert-deftest kargu-stream-tool-calls-keep-name-and-get-an-id-test ()
-  "An empty later name does not erase the name; an empty id becomes call_N."
+  "An empty later name is preserved and the boundary assigns a canonical ID."
   (let* ((events (list '(("choices" . ((("delta" . (("tool_calls" . ((("index" . 0)
                                                                       ("function" . (("name" . "read_file") ("arguments" . "{\"a\":"))))))))))))
                        '(("choices" . ((("delta" . (("tool_calls" . ((("index" . 0) ("id" . "")
                                                                       ("function" . (("name" . "") ("arguments" . "1}"))))))))
                                         ("finish_reason" . "tool_calls")))))))
-         (resp (kargu--accumulate-stream-deltas events))
-         (call (car (kargu-aget (kargu-aget (car (kargu-aget resp "choices")) "message") "tool_calls"))))
+         (resp (kargu-api-normalize-response (kargu--accumulate-stream-deltas events)))
+         (call (car (kargu-seq-to-list (kargu-response-tool-calls resp)))))
     (should (equal (kargu-aget (kargu-aget call "function") "name") "read_file"))
-    (should (equal (kargu-aget call "id") "call_0"))
+    (should (string-prefix-p "call_kargu_" (kargu-aget call "id")))
     (should (equal (kargu-aget (kargu-aget call "function") "arguments") "{\"a\":1}"))))

@@ -14,6 +14,11 @@ denotes the same runtime state with `probe-inflight` set. Cancellation and
 terminal non-upstream errors release that slot without clearing the failure
 count or declaring the provider healthy. Retries retain ownership.
 
+The tool-call ingress contract rejects duplicate identities within a batch.
+Concrete ID generation and collisions with earlier conversation turns are
+covered by ERT for plain, streamed, native and legacy wire formats. The bounded
+loop model treats call IDs as opaque labels, not generated UUIDs.
+
 ## 1. Modules
 
 ```

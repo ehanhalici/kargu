@@ -18,7 +18,6 @@
 (require 'kargu/tools/diff)
 (require 'kargu/ui/confirm)
 
-(defvar kargu--loop-call-seq)
 (defvar kargu-max-healing-steps)
 (declare-function kargu-loop--live-p "kargu/loop" (run))
 (declare-function kargu-loop--set-state "kargu/loop" (run state))
@@ -51,10 +50,9 @@
          (equal (nth 1 next) (nth 2 next)))))
 
 (defun kargu--loop-call-id (call)
-  "Tool-call id of CALL, synthesizing one if the provider omitted it."
-  (if (stringp (kargu-aget call "id"))
-      (kargu-aget call "id")
-    (format "call_%d" (cl-incf kargu--loop-call-seq))))
+  "Return CALL's canonical identity; never invent one during execution."
+  (or (kargu-nonempty (kargu-aget call "id"))
+      (error "Tool call was not normalized before execution")))
 
 (defvar kargu-chat--output-marker)
 (defvar kargu-chat--prompt-marker)

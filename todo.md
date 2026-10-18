@@ -15,7 +15,6 @@ Not: Bu bölüm büyük ölçüde statik okumadan çıktı; yalnız "Test çalı
 ### Yüksek öncelik
 
 - **Bash doğrulaması gerçek bir sandbox değil; genişletme ve kod çalıştırma yüzeyleri açık.** Brace açılımı `{/etc/passwd,x}`, `-o/etc/x` gibi birleşik seçenekler, `FOO=1 python -c ...`, sürümlü yorumlayıcılar, `busybox`, `find -exec`, Git pager ayarları ve build scriptleri için tokenizer/risk denetimi eksik. `kargu-permission-confirm-bash` nil olsa bile çözümlenemeyen sözdizimi insan onayını zorunlu kılmalı. Sadece komut dizesi ayrıştırmasıyla işletim sistemi sandbox'ı garantisi verilemez; gerçek izolasyon ayrı bir süreç/sandbox tasarımı gerektiriyor.
-- **Tool-call kimlikleri: tekrar eden/eksik id.** (K+D) Akış yolunda boş id `call_<index>` oluyor (`api/stream.el:128-134`) ve her turda `call_0`'dan başlıyor; Anthropic uyumlu uçlar (OpenRouter vb.) konuşma boyunca benzersiz `tool_use` id ister. Düz (akışsız) yanıtta id eksikse `kargu--history-append-assistant` (`api/response.el:195-231`) id üretmiyor; sonuç tarafı ise `kargu--loop-call-id` ile `call_N` üretiyor (`loop/tools.el:53-57`): asistan mesajında id yok, sonuç başka id → `history/repair.el:87-93` sonucu "orphan" diye siliyor, sağlayıcı 400 verir. Çözüm: id'yi tek yerde (yanıt normalizasyonunda) benzersiz üret ve geçmişe yaz.
 - **Yarım kalan akış başarı sayılır.** (K) `kargu/api/stream.el:180` `finish_reason` yoksa `"stop"` yazıyor; `[DONE]` görülmedi mi kontrolü yok (`api/sse.el:74`). Proxy bağlantıyı düzgünce kapatırsa yarım metin veya yarım JSON tool argümanı tam yanıt gibi işlenir.
 ### Orta öncelik
 
@@ -80,26 +79,15 @@ Komut: `emacs -Q --batch --eval "(package-initialize)" -l tests/run-tests.el` �
 - **`config/key.el`:** `kargu--expand-env-refs` tanımsız `${VAR}` için nil döner ve sessizce env/auth-source'a düşer (kullanıcı yanlış yazımı fark etmez, uyarı yok). `kargu--auth-source-api-key` `auth-source-search` GPG/pinentry ile sohbet sırasında bloklayabilir ve her çağrıda yeniden sorgular (önbellek yok; her istekte). `kargu--api-key-placeholder-p` `...` ile biten gerçek anahtarı (nadir) placeholder sayar.
 - **`permission/policy.el`:** `kargu-permission--preapproved` yalnız komut dizesini eşler (dizin ve risk dikkate alınmaz): aynı dizeyle farklı dizinde/farklı riskle yeniden onay istenmez. `kargu-permission-call-async` onaydan sonra `thunk`'ı baştan çalıştırır; onaydan önce yan etkisi olan her adım iki kez çalışır (sözleşme "onaydan önce yan etki yok" ile korunuyor, yeni araçlarda kolay ihlal edilir). `callback` `condition-case` dışında, hata verirse iç içe zincir çöker. `kargu-permission--ask-user` varsayılan eylem `:reject`; sohbet tamponu kapanırsa onay sorusu sonsuza dek asılı kalabilir (D, `ui/confirm.el` okunmadı).
 
-#### Test kapsamı notu
-
-- Test paketi kırılgan ortam varsayımları taşıyor (yukarıda `/tmp`). Diğer testler bu makinede geçiyor; ancak circuit probe takılması ve eksik/tekrarlanan tool-call kimliği için halen regresyon testleri gerekiyor.
-
 ### Üçüncü okuma turu: Kod tabanının tamamı (kapsamlı tarama ve tespit edilen tüm olası sorunlar)
 
 Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`, `plan/`, `state/`, `languages/`, `tools/dape/`, `core/`, `contract/`) baştan sona taranmış ve aşağıdaki sorunlar tespit edilmiştir:
 
 #### 1. Kritik Hatalar (Çökme, Deadlock, Veri Kaybı)
-- **`api/tools.el:322-323`: Çift teslimat ve yarış durumu (Double Delivery / Race Condition).**
-  ```elisp
-  (let ((result (kargu-tools-execute tool-name input on-done on-error)))
-    (when (stringp result)
-      (funcall on-done result)))
-  ```
-  Eğer bir asenkron araç (örn. bash veya lsp) eşzamanlı olarak bir başlangıç string'i dönerken arka plan işi bitiminde de `on-done` çağırıyorsa, `on-done` iki kez tetiklenir. Bu durum ajan döngüsünün durum makinesini bozar ve LLM'e mükerrer istek gönderilmesine yol açar.
 - **`ui/confirm.el:142-156`: Eşzamanlı onay ezilmesi (Orphaned Callback Deadlock).** `kargu-confirm-render`, `(when (overlay-start ov) (delete-region ...))` ile mevcut onay butonlarını silip üzerine yazar. Birinci onay yanıtlanmadan ikinci bir onay isteği gelirse, ilk overlay ezilir; kullanıcının yanıtlayamadığı ilk callback kilitlenir ve ilgili araç çağrısı sonsuza dek askıda kalır.
 #### 2. Yüksek / Orta Öncelikli Sorunlar
 - **`providers/registry.el:286`: 160+ sağlayıcı için senkron auth-source araması (Emacs Donması).** `kargu-connected-providers`, katalogdaki 160'tan fazla sağlayıcının her biri için döngü içinde `(auth-source-search :host host :max 1)` çalıştırır. Kullanıcının `auth-sources` yapılandırmasında GPG şifreli dosya varsa Emacs UI iş parçacığı saniyelerce donar veya pinentry pencereleriyle kilitlenir.
-- **`api/wire.el:58, 143`: Çok modlu (Multimodal) veri kaybı ve sabit tool-call id çakışması.** `kargu-api--text`, `(format "%s" content)` kullanır; bu durum görsel ve dosya eklerini lisp string'ine çevirerek API'ye bozuk iletir. Ayrıca araç çağrısında ID eksikse `"call"` sabit değeri verilir; paralel araç çağrılarında birden fazla çağrı aynı `"call"` ID'sini alarak yanıtların karışmasına neden olur.
+- **Native wire biçiminde çok modlu içerik dönüşümü eksik.** `kargu-api--text-blocks` text bloklarını ve cache işaretlerini koruyor, fakat OpenAI `image_url` gibi blokları native Messages `image/source` biçimine çevirmiyor. Görsel/dosya içerik tipleri için ayrı adaptör ve round-trip testleri gerekiyor.
 - **`chat/render.el:238-241`: Global `advice` sızıntısı.** `kargu-execute-tool` fonksiyonuna global `defadvice` eklenmesi, kütüphanenin başka yerlerinden veya arka plan/test işlemlerinden yapılan tüm araç çağrılarının kullanıcının sohbet tamponunu kirletmesine yol açar.
 - **`chat/prompt.el:283-300`: Footer yenilemede imlecin zorla sona fırlaması.** `kargu-chat-refresh-footer`, altbilgiyi güncellerken bölgeyi silip yeniden ekler. Kullanıcı giriş alanında metin düzenlerken herhangi bir asenkron olayda imleç `point-max`'a fırlar ve kullanıcının yazma akışını keser.
 - **`chat/session.el:284-306`: Senkron büyük JSON okuma donması.** `kargu-session-list`, dizindeki tüm `.json` oturum dosyalarını diskten tek tek senkron okur ve `json-read` ile ayrıştırır. Çok sayıda veya büyük oturum dosyası olduğunda Emacs'i kilitler.

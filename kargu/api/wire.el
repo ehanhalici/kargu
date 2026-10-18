@@ -18,6 +18,7 @@
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/providers/catalog)
+(require 'kargu/api/tool-calls)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-format-record "kargu/providers/registry" (format))
@@ -50,12 +51,6 @@ The path comes from the format record.  A missing record uses
   (cl-find role (plist-get spec :blocks)
            :key (lambda (block) (plist-get block :as))))
 
-(defun kargu-api--text (content)
-  "String body of a message CONTENT value."
-  (cond
-   ((stringp content) content)
-   ((null content) "")
-   (t (format "%s" content))))
 
 (defun kargu-api--tool-input (raw)
   "JSON object for a tool-call argument string RAW."
@@ -70,7 +65,9 @@ The path comes from the format record.  A missing record uses
   (let* ((block (kargu-api--block-spec spec 'tool-call))
          (fn (kargu-aget call "function")))
     (list (cons "type" (plist-get block :type))
-          (cons (plist-get block :id) (or (kargu-aget call "id") "call"))
+          (cons (plist-get block :id)
+                (or (kargu-nonempty (kargu-aget call "id"))
+                    (error "Cannot send a tool call without its canonical identity")))
           (cons (plist-get block :name) (or (kargu-aget fn "name") "tool"))
           (cons (plist-get block :input)
                 (kargu-api--tool-input (kargu-aget fn "arguments"))))))
@@ -210,7 +207,7 @@ A `blocks' message shape is rewritten.  Every other shape is unchanged."
           (setq thought (concat thought
                                 (or (kargu-aget block (plist-get reason-spec :field)) ""))))
          ((and tool-spec (equal kind (plist-get tool-spec :type)))
-          (push `(("id" . ,(or (kargu-aget block (plist-get tool-spec :id)) "call"))
+          (push `(("id" . ,(kargu-aget block (plist-get tool-spec :id)))
                   ("type" . "function")
                   ("function" . (("name" . ,(or (kargu-aget block (plist-get tool-spec :name)) "tool"))
                                  ("arguments" . ,(kargu--json-encode
@@ -266,7 +263,7 @@ A `blocks' message shape is rewritten.  Every other shape is unchanged."
                     spec)))
            kargu-provider-formats))
 
-(defun kargu-api-normalize-response (response)
+(defun kargu-api--normalize-response-shape (response)
   "RESPONSE as an OpenAI chat-completions alist.
 A blocks body becomes one choice.  Bodies that already have
 `choices' or `error' pass through."
@@ -283,6 +280,10 @@ A blocks body becomes one choice.  Bodies that already have
             (append `(("choices" . (,choice)))
                     (and usage `(("usage" . ,usage)))))
         response)))))
+
+(defun kargu-api-normalize-response (response)
+  "Normalize RESPONSE's wire shape and tool identities before any consumer."
+  (kargu-api-normalize-tool-calls (kargu-api--normalize-response-shape response)))
 
 (provide 'kargu/api/wire)
 

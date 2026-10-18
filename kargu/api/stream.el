@@ -1,4 +1,4 @@
-;;; kargu/api/stream.el --- SSE parse and stream accumulation -*- lexical-binding: t; -*-
+;;; stream.el --- SSE parse and stream accumulation -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -69,7 +69,7 @@ complete objects)."
      (t (concat old-s new-s)))))
 
 (defun kargu--merge-tool-call-fragment (calls-map frag)
-  "Merge one streamed tool-call FRAGMENT into CALLS-MAP.
+  "Merge one streamed tool-call FRAG into CALLS-MAP.
 CALLS-MAP maps the fragment \"index\" to the call alist being
 assembled.  OpenAI streams tool calls in fragments: the id and
 name arrive once, the \"arguments\" JSON string in pieces.
@@ -103,15 +103,14 @@ rather than concatenate."
                         (let ((legacy (kargu-aget delta "function_call")))
                           (and legacy (kargu--object-p legacy)
                                (list `(("index" . 0)
-                                       ("id" . "call_legacy")
                                        ("function" . ,legacy))))))))
     (cond
      ((vectorp raw-frags) (append raw-frags nil))
      ((listp raw-frags) raw-frags)
      (t nil))))
 
-(defun kargu--assemble-stream-message (text reasoning calls)
-  "Assemble assistant message alist from TEXT, REASONING, and CALLS."
+(defun kargu--assemble-stream-message (text reasoning call-list)
+  "Build an assistant message from TEXT, REASONING and CALL-LIST."
   (let ((message `(("role" . "assistant")))
         (has-text (not (string-empty-p text)))
         (has-reason (not (string-empty-p reasoning))))
@@ -119,23 +118,16 @@ rather than concatenate."
       (push `("content" . ,text) message))
     (when has-reason
       (push `("reasoning_content" . ,reasoning) message))
-    (when calls
-      (push `("tool_calls" . ,calls) message))
-    (unless (or has-text calls)
+    (when call-list
+      (push `("tool_calls" . ,call-list) message))
+    (unless (or has-text call-list)
       (push `("content" . "") message))
     message))
 
-(defun kargu--stream-call-with-id (idx calls-map)
-  "The call at IDX in CALLS-MAP; an empty id becomes `call_IDX'.
-Tool results are matched to calls by id, so it must never be empty."
-  (let ((call (gethash idx calls-map)))
-    (when (string-empty-p (or (kargu-aget call "id") ""))
-      (setcdr (assoc "id" call) (format "call_%s" idx)))
-    call))
 
 (defun kargu--accumulate-stream-deltas (events)
-  "Reduce parsed SSE EVENTS into a response shaped like an
-ordinary chat-completions reply, so every consumer (loop, UI,
+  "Convert decoded SSE EVENTS to a chat-completions response.
+Every consumer (loop, UI,
 history) stays on a single code path regardless of transport.
 Content and reasoning are concatenated separately; tool-call
 fragments are merged by index.  An SSE `error' event becomes an
@@ -172,7 +164,7 @@ error alist; it does not invent an empty assistant turn."
             (setq usage u))))
       (let* ((text (if text-chunks (apply #'concat (nreverse text-chunks)) ""))
              (reasoning (if reasoning-chunks (apply #'concat (nreverse reasoning-chunks)) ""))
-             (calls (mapcar (lambda (idx) (kargu--stream-call-with-id idx calls-map))
+             (calls (mapcar (lambda (idx) (gethash idx calls-map))
                             (sort (hash-table-keys calls-map) #'<)))
              (message (kargu--assemble-stream-message text reasoning calls)))
         `(("choices" . ((("index" . 0)
@@ -182,4 +174,4 @@ error alist; it does not invent an empty assistant turn."
 
 (provide 'kargu/api/stream)
 
-;;; kargu/api/stream.el ends here
+;;; stream.el ends here

@@ -25,6 +25,7 @@
 (require 'tests/test-git)
 (require 'tests/test-history)
 (require 'tests/test-api)
+(require 'tests/test-tool-calls)
 (require 'tests/test-async)
 (require 'tests/test-cache)
 (require 'tests/test-tools)

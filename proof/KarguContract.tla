@@ -60,7 +60,8 @@ ContractToolCall(c) ==
     /\ c.name \in AllToolNames
 
 ContractToolCalls(calls) ==
-    \A k \in 1..Len(calls) : ContractToolCall(calls[k])
+    /\ \A k \in 1..Len(calls) : ContractToolCall(calls[k])
+    /\ Cardinality({calls[k].id : k \in 1..Len(calls)}) = Len(calls)
 
 ContractMessage(m) ==
     /\ ContractRole(m.role)
