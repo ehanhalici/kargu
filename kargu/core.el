@@ -23,6 +23,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
 
 (require 'kargu/contract/constants)
 (require 'kargu/contract)
@@ -54,10 +55,15 @@ Safely handles malformed alists, dotted pairs, and non-list data."
 Handles integers, floats (rounded), and integer strings."
   (cond
    ((integerp value) value)
-   ((numberp value) (round value))
+   ((floatp value)
+    (condition-case nil (round value)
+      (arith-error default)))
    ((stringp value)
-    (or (ignore-errors (cl-parse-integer (string-trim value) :junk-allowed t))
-        default))
+    (let ((trimmed (string-trim value)))
+      (if (string-match-p
+           (rx string-start (opt (any "+-")) (+ digit) string-end) trimmed)
+          (string-to-number trimmed)
+        default)))
    (t default)))
 
 (defun kargu-cap-text (text limit &optional label)

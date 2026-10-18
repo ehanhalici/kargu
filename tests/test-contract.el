@@ -97,5 +97,16 @@
   (should-not (kargu-contract-tool-schema-p '(("type" . "object") ("properties" . "not-alist"))))
   (should-not (kargu-contract-tool-schema-p "not-a-schema")))
 
+(ert-deftest kargu-core-to-int-rejects-junk-and-nonfinite-numbers-test ()
+  "Only complete integer strings and finite numeric values are converted."
+  (dolist (value '("12abc" "1.5" "" "  " "2 3" :json-null))
+    (should (eq (kargu-to-int value :fallback) :fallback)))
+  (dolist (value (list 0.0e+NaN 1.0e+INF -1.0e+INF))
+    (should (eq (kargu-to-int value :fallback) :fallback)))
+  (should (= (kargu-to-int " -12 ") -12))
+  (should (= (kargu-to-int "+12") 12))
+  (should (= (kargu-to-int 1.6) 2))
+  (should (= (kargu-to-int 42) 42)))
+
 (provide 'tests/test-contract)
 ;;; test-contract.el ends here

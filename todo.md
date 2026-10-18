@@ -40,7 +40,6 @@ Not: Bu bölüm büyük ölçüde statik okumadan çıktı; yalnız "Test çalı
 - `kargu/api/retry.el`: 429 (kota bitti/`insufficient_quota`) de yeniden deneniyor; HTTP düzeyi (`kargu-api-retry-max`) × döngü düzeyi (`kargu-loop-upstream-retries`) çarpılıyor, toplam bekleme belirsiz uzun olabilir. `Retry-After` HTTP-tarih biçimi desteklenmiyor.
 - `kargu/api/http.el`: akış stall `delete-process` sonrası `plz` `:else` yolunun nasıl tetiklendiği doğrulanmalı (`kargu-http--fail-request` bayrağa göre ayrıştırıyor, güvenli görünüyor).
 - `kargu/loop/compact.el` + `history/compact.el`: koşu başına tek sıkıştırma; ikinci taşmada kullanıcıya soruluyor. `COMPACTION_*` ile başlayan kullanıcı iletisi kuyruktan sessizce atılır.
-- `kargu/core.el`: `kargu-to-int` `"12abc"` → 12 (junk-allowed) ve NaN float'ta hata.
 - `kargu/loop.el:279`: `kargu-diff-changed-files` `fboundp` korumasız, komşu çağrılar korumalı (tutarsız).
 
 ### Ürün/iş kararı gerektirenler (koda dokunmadan not)
