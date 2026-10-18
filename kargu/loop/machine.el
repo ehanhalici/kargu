@@ -381,17 +381,13 @@ remembers the refusal and retries without tools."
     (kargu-loop--recover-or-finish run err)))
 
 (defun kargu-loop--on-tools (run response)
-  "Queue tool records from RESPONSE for RUN.
-Record success in the circuit breaker."
-  (kargu-circuit-record-success)
+  "Queue tool records from RESPONSE for RUN."
   (let ((calls (kargu--loop-tool-calls response)))
     (kargu-log 'info "loop: %d tool call(s) to execute" (length calls))
     (kargu--loop-next-call run (append calls nil))))
 
 (defun kargu-loop--on-length (run _response)
-  "Continue RUN once after truncation, or finish with an incomplete error.
-Record a circuit breaker success because the model did respond."
-  (kargu-circuit-record-success)
+  "Continue RUN once after truncation, or finish with an incomplete error."
   (if (and (< (or (plist-get run :length-continues) 0) 1)
            (kargu-loop--under-turn-cap-p run))
       (progn
@@ -406,14 +402,11 @@ Record a circuit breaker success because the model did respond."
   "Ask RUN to answer or call a tool after a reasoning-only reply.
 Does not consume the empty-response budget.  At the turn cap the
 request asks whether to continue."
-  (kargu-circuit-record-success)
   (kargu-log 'warn "loop: reasoning only; asking for an answer or a tool call")
   (kargu--loop-request run kargu--loop-thought-notice))
 
 (defun kargu-loop--on-answer (run response)
-  "Finish RUN with the assistant content of RESPONSE.
-Record success in the circuit breaker."
-  (kargu-circuit-record-success)
+  "Finish RUN with the assistant content of RESPONSE."
   (kargu--loop-finish
    run :done
    (kargu-nonempty (kargu-response-answer-text response))))

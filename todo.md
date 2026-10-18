@@ -51,13 +51,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 1. **[D - Orta] Model istek yükünde `max_tokens` ve `max_completion_tokens` çakışması.**
    - **Dosya / Satır:** `kargu/api/request.el:73-74`
    - **Sorun:** Her iki alan da aynı anda yüklenir. OpenAI'ın yeni muhakeme modelleri (o1, o3-mini) veya katı OpenAI uyumlu proxy'ler `max_tokens` alanını görünce isteği reddeder. Benzer şekilde muhakeme modellerinde `temperature` gönderilmesi `400` hatası verebilir.
-2. **[K - Düşük] Devre kesici (Circuit Breaker) çift başarı kaydı.**
-   - **Dosya / Satır:** `kargu/api/http.el` & `kargu/loop/machine.el:395, 405, 415, 422`
-   - **Sorun:** HTTP 200 yanıtı alındığında HTTP katmanı `kargu-circuit-record-success` çağırır; döngü makinesinde `on-tools`, `on-thought`, `on-answer` da tekrar çağırır. Half-open durumunda sayaçlar tutarsız ilerleyebilir.
-4. **[K - Düşük] `func-arity` kırılganlığı.**
-   - **Dosya / Satır:** `kargu/loop/machine.el:158`, `kargu/api/tools.el:323`
-   - **Sorun:** `&optional` veya `&rest` içeren lambda fonksiyonlarında `(cdr (func-arity cb))` beklenen 1 değerini vermeyebilir, delta iletimi yanlış kola sapabilir.
-
 ---
 
 ### Modül: `config/` (Yapılandırma & Anahtarlar)

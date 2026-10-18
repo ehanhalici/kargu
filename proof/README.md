@@ -15,6 +15,8 @@ terminal non-upstream errors release that slot without clearing the failure
 count or declaring the provider healthy. Retries retain ownership.
 Context-overflow responses likewise release the canary without resetting the
 upstream failure count; compaction is not evidence of a healthy provider.
+The HTTP layer owns successful-response recording; loop response handlers
+do not record it again. The abstract receive actions include that HTTP step.
 
 The tool-call ingress contract rejects duplicate identities within a batch.
 Concrete ID generation and collisions with earlier conversation turns are

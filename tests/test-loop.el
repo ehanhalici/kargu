@@ -470,6 +470,37 @@
                                  ("reasoning_content" . ,(or reasoning ""))))
                    ("finish_reason" . ,reason))))))
 
+(ert-deftest kargu-loop-success-is-recorded-only-by-http-test ()
+  "A healthy HTTP response resets the breaker once, regardless of loop event."
+  (dolist (response (list (kargu-test--reasoning-response "stop" "answer")
+                          (kargu-test--reasoning-response "length" "partial")
+                          (kargu-test--reasoning-response "stop" nil "reasoning")))
+    (let* ((run (list :state 'wait :iterations 1 :max-iterations 3 :no-tools t))
+           (kargu--loop-run run) (successes 0)
+           (kargu-circuit--state :half-open) (kargu-circuit--probe-inflight t)
+           (kargu-circuit--failure-count 3)
+           (record (symbol-function 'kargu-circuit-record-success)))
+      (cl-letf (((symbol-function 'kargu-circuit-record-success)
+                 (lambda () (cl-incf successes) (funcall record)))
+                ((symbol-function 'kargu--record-usage) #'ignore)
+                ((symbol-function 'kargu--loop-request) #'ignore)
+                ((symbol-function 'kargu--loop-finish) #'ignore))
+        (kargu--api-handle-success
+         response (lambda (value) (kargu--loop-handle-response run value)))
+        (should (= successes 1))
+        (should (eq kargu-circuit--state :closed))
+        (should-not kargu-circuit--probe-inflight)
+        (should (zerop kargu-circuit--failure-count))))))
+
+(ert-deftest kargu-loop-delta-delivery-supports-optional-and-rest-test ()
+  "The declared callback arity chooses one or two arguments without retries."
+  (let (seen)
+    (dolist (callback (list (lambda (text) (push (list text) seen))
+                            (lambda (text &optional kind) (push (list text kind) seen))
+                            (lambda (&rest arguments) (push arguments seen))))
+      (kargu-loop--deliver-delta callback "text" t))
+    (should (equal (nreverse seen) '(("text") ("text" thought) ("text" thought))))))
+
 (ert-deftest kargu-loop-truncated-reasoning-is-never-a-success-test ()
   "A truncated reply stays length and exhausted continuation fails explicitly."
   (let* ((resp (kargu-test--reasoning-response "length" "" "still thinking"))
