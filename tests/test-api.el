@@ -24,6 +24,17 @@
 (defvar kargu-api-stall-timeout)
 (defvar kargu-api-stream-ceiling)
 
+(ert-deftest kargu-api-overflow-does-not-confuse-token-rate-limits-test ()
+  "Only explicit context or input-length errors request compaction."
+  (dolist (text '("context_length_exceeded" "Maximum context length is 4096"
+                  "Prompt is too long" "Input exceeds the context window"
+                  "Context window token limit exceeded"))
+    (should (kargu--overflow-message-p text)))
+  (dolist (text '("Too many tokens per minute" "Token limit reached: TPM 10000"
+                  "Maximum tokens per minute exceeded" "max_tokens exceeds limit"
+                  "Rate limit exceeded. Try again later."))
+    (should-not (kargu--overflow-message-p text))))
+
 (ert-deftest kargu-api-continuation-errors-never-redeliver-or-clear-new-work-test ()
   "Sync and async callback failures do not redeliver or release a newer turn."
   (dolist (synchronous '(nil t))

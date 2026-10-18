@@ -13,6 +13,8 @@ For the breaker, `HALF_OPEN` denotes an unclaimed canary slot and `PROBING`
 denotes the same runtime state with `probe-inflight` set. Cancellation and
 terminal non-upstream errors release that slot without clearing the failure
 count or declaring the provider healthy. Retries retain ownership.
+Context-overflow responses likewise release the canary without resetting the
+upstream failure count; compaction is not evidence of a healthy provider.
 
 The tool-call ingress contract rejects duplicate identities within a batch.
 Concrete ID generation and collisions with earlier conversation turns are
@@ -144,13 +146,13 @@ The script needs `tlc`; without it in `PATH` it enters `nix-shell ../shell.nix`.
 
 ### Result of the last run
 
-Run on 2026-09-29 with TLC 2.19, 24 workers:
+Run on 2026-10-18 with TLC 2.19, 24 workers:
 
 ```
 Model checking completed. No error has been found.
-295099059 states generated, 62445693 distinct states found, 0 states left on queue.
+731356619 states generated, 85781147 distinct states found, 0 states left on queue.
 The depth of the complete state graph search is 43.
-Finished in 04min 46s
+Finished in 10min 04s
 ```
 
 Changing a guard breaks the check: with the `~noTools` guard removed from `ModelReceiveToolCalls`, a simulation reports `Safety_ToolsOffMeansNoToolWork` violated within a second. The numbers above are those of a real run; repeat it after every change to the specification and replace them.

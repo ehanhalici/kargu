@@ -345,13 +345,13 @@ Missing metadata leaves tool support enabled."
   "Provider/model pairs whose endpoint answered that it cannot use tools.
 This is what the endpoint said in this session; it is not catalog data.")
 
-(defun kargu--tools-refusal-key (model-id)
-  "Key of MODEL-ID at the active provider in `kargu--tools-refused'."
-  (format "%s/%s" (kargu--provider-name) (or model-id "")))
+(defun kargu--tools-refusal-key (model-id &optional provider)
+  "Key of MODEL-ID at PROVIDER, defaulting to the active provider."
+  (format "%s/%s" (or provider (kargu--provider-name)) (or model-id "")))
 
-(defun kargu-model-mark-tools-refused (&optional model-id)
-  "Remember that the active provider refused tool use for MODEL-ID."
-  (puthash (kargu--tools-refusal-key (or model-id (kargu--model) "")) t
+(defun kargu-model-mark-tools-refused (&optional model-id provider)
+  "Remember a tool refusal for MODEL-ID at PROVIDER, or the active pair."
+  (puthash (kargu--tools-refusal-key (or model-id (kargu--model) "") provider) t
            kargu--tools-refused))
 
 (defun kargu-model-forget-tools-refusals ()

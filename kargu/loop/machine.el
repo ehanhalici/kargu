@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'rx)
 
 (require 'kargu/core)
 (require 'kargu/prompt)
@@ -41,7 +42,8 @@
 (declare-function kargu--loop-start-compact "kargu/loop/compact" (run prompt))
 (declare-function kargu--loop-next-call "kargu/loop/tools" (run queue))
 (declare-function kargu-tools-enabled-p "kargu/loop" (&optional run))
-(declare-function kargu-model-mark-tools-refused "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-model-mark-tools-refused "kargu/api/catalog"
+                  (&optional model-id provider))
 (declare-function kargu--model "kargu/config/key" ())
 
 (defconst kargu-loop--length-reasons '("length" "max_tokens")
@@ -102,6 +104,8 @@ send path so the continue prompt runs instead of leaving the run idle."
 (defun kargu-loop--send-model (run prompt)
   "Post PROMPT for RUN and route the answer through the response classifier."
   (kargu-loop--set-state run 'wait)
+  (plist-put run :request-model (kargu--model))
+  (plist-put run :request-provider (kargu--provider-name))
   (let ((on-delta (and (plist-get run :on-delta)
                        (lambda (event)
                          (kargu--loop-forward-delta run event)))))
@@ -130,6 +134,16 @@ PROMPT nil means continue from the existing history."
     (unless (eq handler 'ignore)
       (funcall handler run prompt))))
 
+(defun kargu-loop--deliver-delta (callback text &optional thought)
+  "Deliver TEXT to CALLBACK once, optionally identifying a THOUGHT."
+  (condition-case err
+      (save-match-data
+        (if (and thought (not (equal (cdr (func-arity callback)) 1)))
+            (funcall callback text 'thought)
+          (funcall callback text)))
+    (error (kargu-log 'warn "Stream listener failed: %s"
+                       (error-message-string err)))))
+
 (defun kargu--loop-forward-delta (run event)
   "Forward the text or thought delta of one decoded SSE EVENT to RUN's on-delta."
   (when (kargu-loop--live-p run)
@@ -143,16 +157,9 @@ PROMPT nil means continue from the existing history."
            (text (kargu--content-text delta))
            (reason (kargu--reasoning-text delta)))
       (when (and reason on-delta)
-        (condition-case-unless-debug _err
-            (condition-case nil
-                (funcall on-delta reason 'thought)
-              (wrong-number-of-arguments
-               (funcall on-delta reason)))
-          (error nil)))
-      (when (and text on-delta)
-        (condition-case-unless-debug _err
-            (funcall on-delta text)
-          (error nil))))))
+        (kargu-loop--deliver-delta on-delta reason t))
+      (when (and text on-delta (kargu-loop--live-p run))
+        (kargu-loop--deliver-delta on-delta text)))))
 
 ;;;; Response -------------------------------------------------------------
 
@@ -234,7 +241,7 @@ A truncated reply that already has answer text continues once."
 
 (defun kargu-loop--on-overflow (run response)
   "Handle the context overflow RESPONSE by compacting RUN."
-  (kargu-circuit-record-success)
+  (kargu-circuit-release-probe)
   (if (kargu--loop-start-compact run nil)
       (kargu-log 'warn "loop: context overflow; compacting")
     (kargu-loop--recover-or-finish
@@ -264,26 +271,31 @@ the circuit is open, prompt the user to retry or abort instead."
                      (when (kargu-loop--live-p run)
                        (kargu--loop-request run nil)))))))
 
+(defconst kargu-loop--tools-unsupported-pattern
+  (rx (or "no endpoints found that support tool use"
+          "does not support tools" "tools are not supported"
+          "function calling is not supported"))
+  "Provider messages explicitly rejecting tool use.")
+
 (defun kargu--error-no-tools-support-p (err)
   "Return non-nil if ERR indicates the provider rejected tool use."
   (and (stringp err)
-       (string-match-p
-        "no endpoints found that support tool use\\|does not support tools\\|tools are not supported\\|function calling is not supported\\|try disabling"
-        (downcase err))))
+       (save-match-data
+         (string-match-p kargu-loop--tools-unsupported-pattern (downcase err)))))
 
 (defun kargu-loop--handle-tools-unsupported (run err)
   "Handle provider tool rejection ERR on RUN.
 In `agent' mode, aborts with a descriptive error.  In `ask' or `plan' mode,
 remembers the refusal and retries without tools."
-  (let ((mid (kargu--model)))
-    (kargu-model-mark-tools-refused mid)
+  (let ((mid (or (plist-get run :request-model) (kargu--model))))
+    (kargu-model-mark-tools-refused mid (plist-get run :request-provider))
     (let ((mode (kargu-loop--active-mode)))
       (if (eq mode 'agent)
           (progn
             (kargu-log 'error "loop: model '%s' does not support tools in agent mode: %s" mid err)
             (kargu--loop-finish
              run :error
-             (format "Model '%s' does not support tool use. Switch to a tool-capable model (e.g. Claude 3.5 Sonnet, GPT-4o, DeepSeek V3) or switch to Ask mode."
+             (format "Model '%s' does not support tool use. Select a tool-capable model or switch to Ask mode."
                      mid)))
         (kargu-log 'warn "loop: model does not support tool use; retrying without tools in %s mode"
                    mode)

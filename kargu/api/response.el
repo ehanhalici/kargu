@@ -13,6 +13,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/history)
@@ -87,18 +88,17 @@ synthetic error alists produced by this module.  Nested
      ((listp calls) (not (null calls)))
      (t nil))))
 
+(defconst kargu-api--context-overflow-pattern
+  (rx (or "context_length" "context length" "maximum context"
+          "context window" "prompt is too long" "input is too long"
+          (seq "exceed" (opt "s") " the context")))
+  "Explicit context-length errors, excluding token-rate and output limits.")
+
 (defun kargu--overflow-message-p (msg)
   "Return non-nil if MSG indicates context-window overflow."
   (and (stringp msg)
-       (let ((s (downcase msg)))
-         (or (string-match-p "context.length" s)
-             (string-match-p "context_length" s)
-             (string-match-p "maximum context" s)
-             (string-match-p "prompt is too long" s)
-             (string-match-p "too many tokens" s)
-             (string-match-p "max.*tokens.*exceed" s)
-             (string-match-p "exceeds? the context" s)
-             (string-match-p "token limit" s)))))
+       (save-match-data
+         (string-match-p kargu-api--context-overflow-pattern (downcase msg)))))
 
 (defun kargu-response-overflow-p (response)
   "Non-nil when RESPONSE is a context-window overflow error."

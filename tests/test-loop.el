@@ -25,6 +25,48 @@
 (declare-function kargu-notify "kargu/ui/notify" (type &optional msg))
 (declare-function kargu-loop--on-thought "kargu/loop/machine" (run response))
 
+(ert-deftest kargu-loop-tools-rejection-is-specific-and-owned-test ()
+  "Tool refusal belongs to the sent model/provider, not a newer selection."
+  (should-not (kargu--error-no-tools-support-p "Try disabling your VPN"))
+  (let* ((run (list :state 'request)) (kargu--loop-run run)
+         (kargu--tools-refused (make-hash-table :test #'equal))
+         (provider "old-provider") (model "old-model"))
+    (cl-letf (((symbol-function 'kargu--provider-name) (lambda () provider))
+              ((symbol-function 'kargu--model) (lambda () model))
+              ((symbol-function 'kargu-api-send) #'ignore)
+              ((symbol-function 'kargu-loop--active-mode) (lambda () 'ask))
+              ((symbol-function 'kargu--loop-request) #'ignore))
+      (kargu-loop--send-model run "hello")
+      (setq provider "new-provider" model "new-model")
+      (kargu-loop--handle-tools-unsupported run "Tools are not supported")
+      (should (gethash "old-provider/old-model" kargu--tools-refused))
+      (should-not (gethash "new-provider/new-model" kargu--tools-refused)))))
+
+(ert-deftest kargu-loop-thought-callback-error-never-redelivers-test ()
+  "Callback arity is inspected before delivery, not guessed from its errors."
+  (let* ((count 0)
+         (run (list :on-delta (lambda (&rest _)
+                               (cl-incf count)
+                               (signal 'wrong-number-of-arguments '(broken 2)))))
+         (kargu--loop-run run)
+         (event '(("choices" . [(("delta" . (("reasoning_content" . "think"))))]))))
+    (kargu--loop-forward-delta run event)
+    (should (= count 1))
+    (plist-put run :on-delta (lambda (_text) (cl-incf count)))
+    (kargu--loop-forward-delta run event)
+    (should (= count 2))))
+
+(ert-deftest kargu-loop-overflow-preserves-circuit-failures-test ()
+  "A context rejection releases a canary but is not an upstream success."
+  (dolist (state '(:closed :half-open))
+    (let ((kargu-circuit--state state) (kargu-circuit--failure-count 2)
+          (kargu-circuit--probe-inflight t))
+      (cl-letf (((symbol-function 'kargu--loop-start-compact) (lambda (&rest _) t)))
+        (kargu-loop--on-overflow nil nil)
+        (should (eq kargu-circuit--state state))
+        (should (= kargu-circuit--failure-count 2))
+        (should-not kargu-circuit--probe-inflight)))))
+
 (ert-deftest kargu-loop-response-continuation-failure-closes-only-its-run-test ()
   "A failing response continuation ends its run but never cancels a new owner."
   (dolist (replace-owner '(nil t))

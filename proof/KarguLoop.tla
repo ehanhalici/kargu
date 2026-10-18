@@ -330,15 +330,14 @@ ModelReceiveLengthTruncated ==
 (* overflow: compact once; if that is not possible the user decides *)
 ModelReceiveOverflow ==
     /\ state = "WAIT_MODEL"
-    /\ circuitState    ' = "CLOSED"
-    /\ circuitFailures ' = 0
+    /\ circuitState ' = CircuitReleaseProbe(circuitState)
     /\ IF ~compacting /\ compactions < 1 /\ iterations < turnCap
        THEN /\ StartCompaction
        ELSE /\ state ' = "RECOVER"
             /\ UNCHANGED <<compactions, iterations, compacting, savedNoTools, noTools>>
     /\ UNCHANGED <<history, activeMode, healing, verifications, emptyRetries,
                    upstreamRetries, lengthContinues, turnCap, ToolVars,
-                   runStatus, generation>>
+                   runStatus, generation, circuitFailures>>
 
 (* empty *)
 ModelReceiveEmpty ==
