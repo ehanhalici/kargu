@@ -611,7 +611,7 @@
                        (funcall on-ready)))
                     ((symbol-function 'kargu-chat--preflight) #'ignore)
                     ((symbol-function 'kargu-chat--submit)
-                     (lambda (text)
+                     (lambda (text &rest _options)
                        (setq submitted-text text))))
             (kargu-chat-send)
             (should ensure-called)

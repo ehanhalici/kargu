@@ -138,10 +138,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
   - Dizi içinde 2 elemanlı string alt listeleri bulunan matris veya komut parametreleri (örneğin `'(("git" "status") ("git" "diff"))` veya `'(("header1" "value1") ("header2" "value2"))`), `("git" "status")` hücresi `(cons "git" (cons "status" nil))` şeklinde olduğundan bu denetimden geçer ve bir JSON nesnesi sayılır.
   - `kargu--json-encode` bu listeyi `[["git", "status"], ["git", "diff"]]` dizisi yerine `{"git": ["status"], "git": ["diff"]}` nesnesi olarak bozuk kodlar.
 #### 11. Planlama, Oturum Durumu ve Dape Yaşam Döngüsü Detayları (`plan/dispatch.el`, `tools/dape/session.el`, `tools/dape/execution.el`, `state/hooks.el`)
-- **`plan/dispatch.el:51-70`: `kargu-plan-approve` Sırasında Kullanıcının Taslak Girdisinin Sessizce Silinmesi (K).**
-  - Kullanıcı `*kargu-plan*` tamponunda planı onaylamak için `C-c C-c` bastığında, `kargu-plan-approve` fonksiyonu `(kargu-chat-prompt prompt)` çağırır.
-  - `kargu-chat-prompt` arka planda `kargu-chat--send-given`'i çalıştırır; bu fonksiyon `(when (kargu-chat--prompt-live-p) (kargu-chat--consume-input))` ile sohbet tamponundaki mevcut kullanıcı girdisini temizler.
-  - Eğer kullanıcı plan oluşturulurken sohbet alanına bir taslak not veya sonraki adım için bir komut yazmışsa, plan onayıyla birlikte bu metin kullanıcıya sorulmadan kalıcı olarak silinir.
 - **`state/hooks.el:36-45`: Dinleyici Hatalarının State Bildirimini Kesmesi ve Durum Tutarsızlığı (K).**
   - `kargu-state-notify` fonksiyonu, `run-hook-with-args` çağrılarını koruyucu bir `condition-case` içine almaz.
   - UI veya harici bir paket `kargu-state-change-hook` veya `kargu-state-mode-hook`'a bir fonksiyon bağladığında, bu fonksiyonda oluşacak ufak bir hata (ör. kapalı tampon erişimi) state geçiş fonksiyonunun ortasında patlar; sonraki dinleyiciler ve durum senkronizasyonu yarıda kesilir.

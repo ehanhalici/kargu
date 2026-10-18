@@ -408,5 +408,43 @@
       (should (equal-including-properties (buffer-string) before))
       (should (kargu-chat--prompt-live-p)))))
 
+(ert-deftest kargu-chat-programmatic-prompt-preserves-draft-test ()
+  "A plan-style prompt keeps an unrelated draft across every terminal status."
+  (dolist (synchronous '(nil t))
+    (dolist (status '(:done :error :stopped))
+      (with-temp-buffer
+	(kargu-chat-mode)
+	(setq-local kargu-chat--session-provider "p"
+                    kargu-chat--session-model "m")
+	(kargu-chat--ensure-idle-prompt)
+	(insert (propertize "unsent notes\n  " 'kargu-test t))
+	(goto-char (+ kargu-chat--prompt-marker 4))
+	(set-mark (+ kargu-chat--prompt-marker 8))
+	(let ((chat (current-buffer)) callback sent)
+          (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+                    ((symbol-function 'kargu-chat-show) (lambda () chat))
+                    ((symbol-function 'kargu-chat--buffer) (lambda (&rest _) chat))
+                    ((symbol-function 'kargu-chat--expand-prompt) #'identity)
+                    ((symbol-function 'kargu-loop-send)
+                     (lambda (prompt _delta finish)
+                       (setq sent prompt callback finish)
+                       (when synchronous
+			 (funcall finish (list :status status :text "result"
+                                               :error "failure"))))))
+            (kargu-chat-prompt "Apply the approved plan")
+            (should (equal sent "Apply the approved plan"))
+            (unless synchronous
+              (should-not (kargu-chat--prompt-live-p))
+              (with-temp-buffer
+		(funcall callback (list :status status :text "result"
+					:error "failure"))))
+            (should (kargu-chat--prompt-live-p))
+            (should (equal (buffer-substring-no-properties
+                            kargu-chat--prompt-marker (point-max))
+                           "unsent notes\n  "))
+            (should (get-text-property kargu-chat--prompt-marker 'kargu-test))
+            (should (= (point) (+ kargu-chat--prompt-marker 4)))
+            (should (= (mark) (+ kargu-chat--prompt-marker 8)))))))))
+
 (provide 'tests/test-chat)
 ;;; test-chat.el ends here
