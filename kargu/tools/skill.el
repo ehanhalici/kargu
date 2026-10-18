@@ -1,4 +1,4 @@
-;;; kargu/tools/skill.el --- SKILL.md discovery and load -*- lexical-binding: t; -*-
+;;; skill.el --- SKILL.md discovery and load -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -14,12 +14,19 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'xml)
+(require 'rx)
 (require 'kargu/core)
 (require 'kargu/api)
 (require 'kargu/fs)
 
 (defcustom kargu-skill-max-chars 12000
   "Character cap for a loaded skill body."
+  :type 'natnum
+  :group 'kargu)
+
+(defcustom kargu-skill-max-file-bytes 262144
+  "Maximum skill file size read during discovery, in bytes."
   :type 'natnum
   :group 'kargu)
 
@@ -43,34 +50,92 @@
     (and (file-directory-p dir) dir)))
 
 (defun kargu-skill--relevant-p (path root)
-  "Non-nil when PATH looks like a skill file under ROOT or a skills dir."
+  "Check whether PATH names a skill below ROOT or a skills directory."
   (let ((rel (file-relative-name path root)))
     (or (string-match-p "\\`skills?/" rel)
         (string-match-p "/skills?/" path)
         (string-match-p "/\\.agents/skills/" path))))
 
+(defun kargu-skill--read (path)
+  "Read bounded UTF-8 skill text at PATH, rejecting oversized files."
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert-file-contents-literally path nil 0 (1+ kargu-skill-max-file-bytes))
+    (when (> (buffer-size) kargu-skill-max-file-bytes)
+      (error "Skill file exceeds %d bytes: %s" kargu-skill-max-file-bytes path))
+    (replace-regexp-in-string "\r\n" "\n"
+                              (decode-coding-string (buffer-string) 'utf-8) t t)))
+
+(defun kargu-skill--scalar (value)
+  "Read a plain or quoted YAML string VALUE without evaluating it."
+  (setq value (string-trim value))
+  (cond
+   ((and (string-prefix-p "\"" value) (string-suffix-p "\"" value))
+    (json-parse-string value))
+   ((and (string-prefix-p "'" value) (string-suffix-p "'" value))
+    (replace-regexp-in-string "''" "'" (substring value 1 -1) t t))
+   (t (string-trim (car (split-string value (rx (+ blank) "#")))))))
+
+(defun kargu-skill--fold-lines (lines)
+  "Fold ordinary LINES while preserving paragraphs and extra indentation."
+  (let (previous parts)
+    (dolist (line lines)
+      (when previous
+        (push (cond
+               ((string-empty-p line) "\n")
+               ((string-empty-p previous) "")
+               ((or (string-prefix-p " " previous) (string-prefix-p " " line)) "\n")
+               (t " ")) parts))
+      (push line parts)
+      (setq previous line))
+    (string-join (nreverse parts) "")))
+
+(defun kargu-skill--block-value (text folded)
+  "Read an indented scalar from TEXT, optionally applying FOLDED style.
+Normalize surrounding metadata whitespace; preserve literal internal lines."
+  (let (lines)
+    (catch 'kargu-skill-block-end
+      (dolist (line (split-string text "\n"))
+        (unless (or (string-empty-p line) (string-match-p (rx bos blank) line))
+          (throw 'kargu-skill-block-end nil))
+        (push line lines)))
+    (setq lines (nreverse lines))
+    (let* ((indents (delq nil (mapcar
+                              (lambda (line)
+                                (when (and (not (string-empty-p (string-trim line)))
+                                           (string-match (rx bos (+ blank)) line))
+                                  (length (match-string 0 line)))) lines)))
+           (indent (if indents (apply #'min indents) 0)))
+      (setq lines (mapcar (lambda (line) (substring line (min indent (length line)))) lines))
+      (string-trim (if folded (kargu-skill--fold-lines lines)
+                     (string-join lines "\n"))))))
+
+(defun kargu-skill--field (frontmatter key)
+  "Read string KEY from FRONTMATTER, including folded and literal scalars."
+  (save-match-data
+    (when (string-match (concat "^" (regexp-quote key) (rx ":" (* blank) (group (* nonl)) eol))
+                        frontmatter)
+      (let ((value (string-trim (match-string 1 frontmatter)))
+            (rest (substring frontmatter (min (length frontmatter) (1+ (match-end 0))))))
+        (if (string-match-p (rx bos (any "|>") (? (any "+-")) (* blank) (? "#" (* nonl)) eos) value)
+            (kargu-skill--block-value rest (string-prefix-p ">" value))
+          (kargu-skill--scalar value))))))
+
 (defun kargu-skill--parse (path)
   "Parse SKILL.md at PATH into a plist :name :description :path :body."
-  (let* ((raw (with-temp-buffer
-                (insert-file-contents path)
-                (buffer-string)))
-         (name (file-name-nondirectory
-                (directory-file-name (file-name-directory path))))
-         (description nil)
-         (body raw)
-         (end (and (string-prefix-p "---" raw)
-                   (string-match "\n---\n" raw 3))))
-    (when end
-      (let ((fm (substring raw 4 end)))
-        (setq body (substring raw (+ end (length "\n---\n"))))
-        (when (string-match "^name:[ \t]*\\(.*\\)$" fm)
-          (setq name (string-trim (match-string 1 fm))))
-        (when (string-match "^description:[ \t]*\\(.*\\)$" fm)
-          (setq description (string-trim (match-string 1 fm))))))
-    (list :name name
-          :description description
-          :path path
-          :body body)))
+  (save-match-data
+    (let* ((raw (kargu-skill--read path))
+           (name (file-name-nondirectory
+                  (directory-file-name (file-name-directory path))))
+           description (body raw))
+      (when (string-match (rx bos "---" "\n") raw)
+        (let ((start (match-end 0)))
+          (when (string-match (rx bol "---" (or "\n" eos)) raw start)
+            (let ((frontmatter (substring raw start (match-beginning 0))))
+              (setq body (substring raw (match-end 0))
+                    name (or (kargu-nonempty (kargu-skill--field frontmatter "name")) name)
+                    description (kargu-skill--field frontmatter "description"))))))
+      (list :name name :description description :path path :body body))))
 
 (defun kargu-skill--collect ()
   "Return the list of skill plists for the current workspace."
@@ -119,8 +184,8 @@
        (mapconcat
         (lambda (s)
           (format "  <skill>\n    <name>%s</name>\n    <description>%s</description>\n  </skill>"
-                  (plist-get s :name)
-                  (or (plist-get s :description) "")))
+                  (xml-escape-string (plist-get s :name))
+                  (xml-escape-string (or (plist-get s :description) ""))))
         skills
         "\n")
        "\n</available_skills>\n"))))
@@ -144,10 +209,10 @@
              (limit kargu-skill-max-chars)
              (capped (kargu-cap-text body limit "skill")))
         (format "<skill_content name=\"%s\">\n# Skill: %s\n\n%s\nBase directory: %s\n</skill_content>"
-                (plist-get hit :name)
-                (plist-get hit :name)
+                (xml-escape-string (plist-get hit :name))
+                (xml-escape-string (plist-get hit :name))
                 (string-trim capped)
-                (file-name-directory (plist-get hit :path))))))))
+                (xml-escape-string (file-name-directory (plist-get hit :path)))))))))
 
 (defun kargu-skill-register-tools ()
   "Register the skill tool."
@@ -165,4 +230,4 @@
 
 (provide 'kargu/tools/skill)
 
-;;; kargu/tools/skill.el ends here
+;;; skill.el ends here

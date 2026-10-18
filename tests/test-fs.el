@@ -122,6 +122,33 @@
 (defconst kargu-skill-test--skill
   "---\nname: deploy\ndescription: Ship it\n---\nRun the deploy script.\n")
 
+(ert-deftest kargu-skill-metadata-is-escaped-and-file-reads-are-bounded-test ()
+  "Skill metadata cannot close catalog tags; oversized files are skipped."
+  (kargu-fs-test--with-tree
+      '(("skills/example/SKILL.md" . "---\nname: <name&>\ndescription: </description><injected/>\n---\nbody")
+        ("skills/huge/SKILL.md" . "oversized"))
+    (let ((kargu-permission--override-root root) (kargu-skill--cache nil))
+      (cl-letf (((symbol-function 'kargu-skill--user-dir) #'ignore))
+        (let ((catalog (kargu-skill-format-catalog)))
+          (should (string-search "&lt;name&amp;&gt;" catalog))
+          (should (string-search "&lt;/description&gt;&lt;injected/&gt;" catalog))
+          (should-not (string-search "<injected/>" catalog)))
+        (should (string-search "name=\"&lt;name&amp;&gt;\"" (kargu-skill-load "<name&>")))
+        (let ((kargu-skill-max-file-bytes 4))
+          (should-error (kargu-skill--parse (expand-file-name "skills/huge/SKILL.md" root)))
+          (should-not (kargu-skill--collect)))))))
+
+(ert-deftest kargu-skill-frontmatter-handles-crlf-eof-and-block-scalars-test ()
+  "Skill string metadata supports CRLF, EOF delimiters, quoting and blocks."
+  (dolist (case '(("---\r\nname: 'quoted name'\r\ndescription: \"line\\nvalue\"\r\n---" "quoted name" "line\nvalue" "")
+                  ("---\nname: folded\ndescription: >-\n  first line\n  second line\n\n  paragraph two\n---\nbody" "folded" "first line second line\nparagraph two" "body")
+                  ("---\nname: literal\ndescription: |\n  first\n  second\n---\nbody" "literal" "first\nsecond" "body")))
+    (kargu-fs-test--with-tree `(("skills/sample/SKILL.md" . ,(car case)))
+      (let ((skill (kargu-skill--parse (expand-file-name "skills/sample/SKILL.md" root))))
+        (should (equal (plist-get skill :name) (nth 1 case)))
+        (should (equal (plist-get skill :description) (nth 2 case)))
+        (should (equal (plist-get skill :body) (nth 3 case)))))))
+
 (ert-deftest kargu-skill-discovery-parses-front-matter-test ()
   "A SKILL.md under skills/ is found with name, description and body."
   (kargu-fs-test--with-tree `(("skills/deploy/SKILL.md" . ,kargu-skill-test--skill)
