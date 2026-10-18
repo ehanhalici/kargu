@@ -174,6 +174,12 @@ A missing format record streams.  An explicit `:stream' nil does not."
   (let ((info (kargu-provider-get id)))
     (and info (kargu-nonempty (plist-get info :api)))))
 
+(defun kargu-provider-public-models-p (id url)
+  "Return non-nil if provider ID declares URL an unauthenticated catalog.
+Custom API overrides do not inherit public access from the default endpoint."
+  (and (eq (plist-get (kargu-provider-get id) :models-auth) 'none)
+       (equal url (kargu-provider-models-api id))))
+
 (defun kargu-provider-models-api (id)
   "Return dedicated models list URL for provider ID, or nil to use default."
   (let ((info (kargu-provider-get id)))

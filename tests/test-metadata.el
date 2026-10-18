@@ -277,6 +277,12 @@
                   ((string-match-p "effort" prompt) "medium"))))
               ((symbol-function 'kargu-api-list-models)
                (lambda (cb &optional _p)
+                 ;; The real catalog owns metadata writes, not its ID wrapper.
+                 (kargu--record-models-metadata
+                  '((("id" . "llama3.1-70b") ("context_length" . 128000)
+                     ("supports_reasoning" . t)
+                     ("reasoning" . (("supported_efforts" . ["low" "medium" "high"])))))
+                  "cerebras")
                  (funcall cb '((("id" . "llama3.1-70b")
                                 ("context_length" . 128000)
                                 ("supports_reasoning" . t)

@@ -43,6 +43,9 @@
 (defvar kargu-chat-buffer-name)
 (defvar kargu-chat--output-marker)
 
+(defvar-local kargu-api-select--catalog-generation 0
+  "Selection generation used to ignore stale catalog UI callbacks.")
+
 ;;;; List helpers ---------------------------------------------------------
 
 (defun kargu-api--fuzzy-filter (query candidates)
@@ -337,6 +340,7 @@ NOTE replaces the confirmation message."
 
 (defun kargu-api-select--apply-model (chosen pname-str)
   "Activate model CHOSEN for PNAME-STR, then ask for effort when it exists."
+  (cl-incf kargu-api-select--catalog-generation)
   (setq kargu--session-model chosen)
   (kargu-state-set-model chosen)
   (when (fboundp 'kargu-chat-note-selection)
@@ -385,20 +389,26 @@ Without any known ids the live catalog is requested first; the selector
 opens when the answer arrives, and Emacs stays usable meanwhile."
   (interactive (list nil nil nil last-input-event))
   (kargu-api-select--guard)
+  (cl-incf kargu-api-select--catalog-generation)
   (let* ((pname (or provider-name (kargu--provider-name)))
          (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname "default")))))
     (if (or (kargu-chat--models-known-p pname-str live-ids) catalog-ids)
         (kargu-chat--open-model-selector pname-str live-ids catalog-ids)
       (message "kargu: querying live model catalog from %s (%s)..."
                pname-str (kargu--api-base pname-str))
-      (let ((chat (current-buffer)))
+      (let ((chat (current-buffer))
+            (generation kargu-api-select--catalog-generation))
         (kargu-api-fetch-model-ids
          pname-str
          (lambda (ids)
-           (with-current-buffer (if (buffer-live-p chat) chat (current-buffer))
-             (condition-case err
-                 (kargu-chat--open-model-selector pname-str ids nil)
-               (user-error (message "%s" (error-message-string err)))))))))))
+           (when (buffer-live-p chat)
+             (with-current-buffer chat
+               (when (and (= generation kargu-api-select--catalog-generation)
+                          (equal pname-str (kargu--provider-name)))
+                 (condition-case err
+                     (kargu-chat--open-model-selector pname-str ids nil)
+                   (user-error (message "%s" (error-message-string err))))))))
+         (lambda (error) (message "Kargu: model catalog for %s: %s" pname-str error)))))))
 
 ;;;; Provider -------------------------------------------------------------
 
@@ -424,6 +434,7 @@ opens when the answer arrives, and Emacs stays usable meanwhile."
 (defun kargu-api-select--apply-provider (chosen)
   "Switch to provider CHOSEN, then select one of its models.
 The model stays empty until that next list confirms one."
+  (cl-incf kargu-api-select--catalog-generation)
   (kargu-set-provider chosen)
   (setq kargu--session-model nil)
   (when (fboundp 'kargu-state-clear-model)
@@ -457,6 +468,7 @@ asks with the footer Company list."
   (interactive "P")
   (if (and (stringp refresh-or-model) (not (string-empty-p refresh-or-model)))
       (progn
+        (cl-incf kargu-api-select--catalog-generation)
         (setq kargu--session-model refresh-or-model)
         (kargu-state-set-model refresh-or-model)
         (when (fboundp 'kargu-chat-note-selection)

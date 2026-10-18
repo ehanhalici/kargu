@@ -926,6 +926,7 @@ that format's `:models' map.")
      :name "OpenCode Zen"
      :api "https://opencode.ai/zen/v1"
      :models-api "https://opencode.ai/zen/v1/models"
+     :models-auth none
      :usage-api "https://opencode.ai/zen/v1/user"
      :env ("OPENCODE_API_KEY")
      :extra-headers (("x-opencode-session" . :session))
@@ -936,6 +937,7 @@ that format's `:models' map.")
      :name "OpenCode Go"
      :api "https://opencode.ai/zen/go/v1"
      :models-api "https://opencode.ai/zen/go/v1/models"
+     :models-auth none
      :env ("OPENCODE_API_KEY")
      :extra-headers (("x-opencode-session" . :session))
      :npm "@ai-sdk/openai-compatible"

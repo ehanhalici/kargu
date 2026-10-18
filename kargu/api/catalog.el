@@ -19,8 +19,10 @@
 (require 'kargu/json)
 (require 'kargu/config/key)
 (require 'kargu/api/circuit)
+(require 'kargu/async)
 
 (declare-function kargu-provider-models-api "kargu/providers/registry" (provider))
+(declare-function kargu-provider-public-models-p "kargu/providers/registry" (id url))
 (declare-function kargu-provider-native-models-path "kargu/providers/registry" (id api-base))
 (declare-function kargu-provider-keyless-p "kargu/providers/registry" (provider))
 (declare-function kargu-provider-format "kargu/providers/registry" (provider))
@@ -29,8 +31,13 @@
 (declare-function kargu--api-headers "kargu/api/request" (key &optional provider-name))
 (declare-function kargu-history-compact-threshold "kargu/history/compact")
 
-(defvar kargu--models-generation 0
-  "Separate generation counter for model-catalog requests.")
+(defvar kargu--catalog-generations (make-hash-table :test #'equal)
+  "Latest request generation per provider; gates cache writes, not delivery.")
+
+(defcustom kargu-models-timeout 30
+  "Seconds allowed for a model catalog request."
+  :type 'number
+  :group 'kargu)
 
 (defvar kargu--live-models-cache (make-hash-table :test 'equal)
   "Session cache of live model ID lists, keyed by provider name.")
@@ -480,104 +487,112 @@ An explicit true flag is sufficient even without an API effort list."
       api-base)
      (t (concat api-base "/models")))))
 
-(defun kargu--catalog-cache-live-models (pname-lower extracted)
-  "Record metadata and cache clean model IDs for PNAME-LOWER from EXTRACTED list."
-  (kargu--record-models-metadata extracted pname-lower)
-  (let ((clean-ids
-         (delq nil
-               (mapcar (lambda (m)
-                         (let ((id (if (consp m)
-                                       (or (kargu-aget m "id") (kargu-aget m "name"))
-                                     m)))
-                           (if (and (stringp id) (string-prefix-p "models/" id))
-                               (substring id 7)
-                             id)))
-                       extracted))))
-    (when clean-ids
-      (puthash pname-lower clean-ids kargu--live-models-cache))))
+(defun kargu--catalog-clean-model-ids (models)
+  "Return nonempty model ID strings from decoded catalog MODELS."
+  (delete-dups
+   (delq nil
+         (mapcar
+          (lambda (model)
+            (let ((id (if (consp model)
+                          (or (kargu-aget model "id") (kargu-aget model "name"))
+                        model)))
+              (when (and (stringp id) (not (string-empty-p (string-trim id))))
+                (if (string-prefix-p "models/" id) (substring id 7) id))))
+          (kargu-seq-to-list (kargu--extract-models-from-json models))))))
+
+(defun kargu--catalog-cache-live-models (provider models)
+  "Record metadata and ID lists for PROVIDER from MODELS, including emptiness."
+  (kargu--record-models-metadata models provider)
+  (puthash provider (kargu--catalog-clean-model-ids models) kargu--live-models-cache))
+
+(defun kargu--catalog-response (body)
+  "Return the model list in BODY, rejecting malformed and provider errors."
+  (let* ((data (kargu--json-decode-safe body))
+         (error (kargu-aget data "error"))
+         (models (kargu--extract-models-from-json data)))
+    (when (and error (not (memq error '(:json-null :json-false))))
+      (error "%s" (or (kargu-aget error "message") error)))
+    (unless (or models (vectorp data) (equal (string-trim body) "[]")
+                (seq-some (lambda (key) (assoc key data)) '("data" "models" "items")))
+      (error "Unexpected /models response: %s" (truncate-string-to-width (or body "") 200)))
+    (unless (or (null models) (listp models) (vectorp models))
+      (error "Invalid model list"))
+    (kargu-seq-to-list models)))
+
+(defun kargu--catalog-receive (task provider generation body)
+  "Complete TASK with BODY, updating PROVIDER cache only for GENERATION."
+  (let ((models (kargu--catalog-response body)))
+    (when (= generation (gethash provider kargu--catalog-generations))
+      (kargu--catalog-cache-live-models provider models))
+    (kargu-async-finish task models)))
+
+(defun kargu--catalog-request (task provider generation)
+  "Start catalog TASK for PROVIDER and cache GENERATION."
+  (let* ((url (kargu--catalog-models-url provider (kargu--api-base provider)))
+         (public (kargu-provider-public-models-p provider url))
+         (key (unless public (kargu--resolve-api-key provider))))
+    (when (and (not public) (not key) (not (kargu-provider-keyless-p provider)))
+      (error "No API key for provider %s" provider))
+    (let ((request
+           (plz 'get url :headers (kargu--api-headers key provider)
+                :as 'string :timeout kargu-models-timeout
+                :then (kargu-async-wrap
+                       task (lambda (body)
+                              (kargu--catalog-receive task provider generation body)))
+                :else (kargu-async-wrap
+                       task (lambda (error)
+                              (kargu-async-finish task nil (kargu--plz-error-message error)))))))
+      (when (kargu-async-pending-p task)
+        (setf (kargu-async-task-cancel task)
+              (lambda () (when (processp request) (delete-process request))))))))
 
 (defun kargu-api-list-models (&optional callback provider-name)
-  "Fetch catalog from active or specified PROVIDER-NAME asynchronously.
-CALLBACK receives either the list of model alists or an error alist."
+  "Fetch PROVIDER-NAME's live catalog asynchronously, delivering once.
+CALLBACK receives model alists or an error alist.  Concurrent requests do
+not suppress each other's callbacks; only the newest updates shared cache."
   (interactive)
-  (let* ((cb (or callback #'ignore))
-         (pname (or provider-name (kargu--provider-name)))
-         (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname "default"))))
-         (pname-lower (downcase (string-trim pname-str)))
-         (key (kargu--resolve-api-key pname-lower))
-         (gen (cl-incf kargu--models-generation))
-         (is-keyless (and (fboundp 'kargu-provider-keyless-p)
-                          (kargu-provider-keyless-p pname-lower)))
-         (api-base (kargu--api-base pname-lower))
-         (url (kargu--catalog-models-url pname-lower api-base))
-         (headers (kargu--api-headers key pname-lower)))
-    (if (and (null key) (not is-keyless))
-        (funcall cb
-                 `(("error" . (("message" . ,(format "no API key for provider %s" pname-str))))))
-      (plz 'get url
-           :headers headers
-           :as 'string
-           :then (lambda (body)
-                   (when (= gen kargu--models-generation)
-                     (let* ((data (kargu--json-decode-safe body))
-                            (extracted (kargu--extract-models-from-json data)))
-                       (if extracted
-                           (progn
-                             (kargu--catalog-cache-live-models pname-lower extracted)
-                             (funcall cb extracted))
-                         (funcall cb
-                                  `(("error" .
-                                     (("message" . ,(format "unexpected /models body from %s: %s"
-                                                            pname-str
-                                                            (truncate-string-to-width
-                                                             (or body "") 200)))))))))))
-           :else (lambda (err)
-                   (when (= gen kargu--models-generation)
-                     (funcall cb
-                              `(("error" .
-                                 (("message" .
-                                   ,(kargu--plz-error-message err))))))))))))
+  (let* ((provider (downcase (string-trim (format "%s" (or provider-name (kargu--provider-name))))))
+         (generation (1+ (gethash provider kargu--catalog-generations 0)))
+         ;; Catalog discovery is independent of a running agent and its Stop.
+         (kargu--loop-run nil)
+         (kargu-async--current-task nil)
+         (task (kargu-async-start
+                (lambda (models error)
+                  (funcall (or callback #'ignore)
+                           (if error `(("error" . (("message" . ,error)))) models)))
+                :timeout kargu-models-timeout)))
+    (puthash provider generation kargu--catalog-generations)
+    (funcall (kargu-async-wrap task
+                              (lambda () (kargu--catalog-request task provider generation))))
+    task))
 
 (defun kargu-api-prefetch-models (&optional provider-name)
-  "Prefetch live models asynchronously for PROVIDER-NAME into cache."
+  "Prefetch the live catalog of PROVIDER-NAME asynchronously."
   (interactive)
-  (let ((pname (or provider-name (kargu--provider-name))))
-    (kargu-api-list-models #'ignore pname)))
+  (kargu--prefetch-models-once (or provider-name (kargu--provider-name))))
 
-(defun kargu--catalog-clean-model-ids (models)
-  "Plain model id strings in the decoded /models answer MODELS."
-  (delq nil
-        (mapcar (lambda (m)
-                  (let ((id (if (consp m)
-                                (or (kargu-aget m "id") (kargu-aget m "name"))
-                              m)))
-                    (if (and (stringp id) (string-prefix-p "models/" id))
-                        (substring id 7)
-                      id)))
-                (kargu--extract-models-from-json models))))
-
-(defun kargu-api-fetch-model-ids (provider-name callback)
-  "Fetch and cache the model catalog of PROVIDER-NAME without waiting.
-CALLBACK receives the list of model ids, or nil when the fetch failed."
-  (let ((pname-lower (downcase (string-trim (format "%s" provider-name)))))
-    (kargu-api-list-models
-     (lambda (models)
-       (let ((ids (unless (kargu-aget models "error")
-                    (kargu--record-models-metadata models pname-lower)
-                    (kargu--catalog-clean-model-ids models))))
-         (when ids
-           (puthash pname-lower ids kargu--live-models-cache))
-         (funcall callback ids)))
-     pname-lower)))
+(defun kargu-api-fetch-model-ids (provider-name callback &optional on-error)
+  "Fetch PROVIDER-NAME's model IDs and deliver to CALLBACK once.
+On failure, call ON-ERROR with its message, or CALLBACK with nil for
+compatibility.  A successful empty catalog also delivers nil."
+  (kargu-api-list-models
+   (lambda (models)
+     (if-let* ((error (kargu-aget models "error")))
+         (if on-error (funcall on-error (kargu-aget error "message")) (funcall callback nil))
+       (funcall callback (kargu--catalog-clean-model-ids models))))
+   provider-name))
 
 (defvar kargu--models-prefetched (make-hash-table :test #'equal)
-  "Providers whose model catalog was already requested in the background.")
+  "Provider catalog prefetch states: :pending or :ready.")
 
 (defun kargu--prefetch-models-once (provider-name)
-  "Start a background catalog fetch for PROVIDER-NAME unless one was started."
+  "Fetch PROVIDER-NAME once, allowing another attempt after failure."
   (unless (gethash provider-name kargu--models-prefetched)
-    (puthash provider-name t kargu--models-prefetched)
-    (kargu-api-fetch-model-ids provider-name #'ignore)))
+    (puthash provider-name :pending kargu--models-prefetched)
+    (kargu-api-fetch-model-ids
+     provider-name
+     (lambda (_) (puthash provider-name :ready kargu--models-prefetched))
+     (lambda (_) (remhash provider-name kargu--models-prefetched)))))
 
 (defun kargu-model-info--efforts-label (efforts)
   "One line naming EFFORTS."

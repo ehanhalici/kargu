@@ -503,7 +503,7 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
                   ((symbol-function 'kargu-dape-ready-p) (lambda (&rest _) t))
                   ((symbol-function 'kargu-api-prefetch-models) (lambda (&rest _) nil))
                   ((symbol-function 'kargu-api-fetch-model-ids)
-                   (lambda (_provider callback) (funcall callback '("fake/model-a"))))
+                   (lambda (_provider callback &optional _on-error) (funcall callback '("fake/model-a"))))
                   ((symbol-function 'kargu-api-select--provider-candidates)
                    (lambda () '("openrouter")))
                   ((symbol-function 'kargu--completing-read-with-company)
