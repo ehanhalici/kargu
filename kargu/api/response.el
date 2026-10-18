@@ -1,4 +1,4 @@
-;;; kargu/api/response.el --- Chat-completions response accessors -*- lexical-binding: t; -*-
+;;; response.el --- Chat-completions response accessors -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -61,6 +61,7 @@ synthetic error alists produced by this module.  Nested
 `error.message' and `error.metadata' fields are flattened."
   (when-let* ((err (kargu-aget response "error")))
     (cond
+     ((memq err '(:json-null :json-false)) nil)
      ((stringp err) err)
      ((kargu--object-p err)
       (or (kargu--provider-error-text `(("error" . ,err)))
@@ -78,7 +79,7 @@ synthetic error alists produced by this module.  Nested
     (kargu--reasoning-text msg)))
 
 (defun kargu--assistant-has-tool-calls-p (msg)
-  "Non-nil when MSG carries a non-empty tool_calls array."
+  "Check MSG for nonempty structured tool invocations."
   (let ((calls (and msg (kargu-aget msg "tool_calls"))))
     (cond
      ((null calls) nil)
@@ -88,7 +89,7 @@ synthetic error alists produced by this module.  Nested
      (t nil))))
 
 (defun kargu--overflow-message-p (msg)
-  "Non-nil when MSG looks like a context-length / overflow error."
+  "Return non-nil if MSG indicates context-window overflow."
   (and (stringp msg)
        (let ((s (downcase msg)))
          (or (string-match-p "context.length" s)
@@ -149,7 +150,7 @@ synthetic error alists produced by this module.  Nested
                         (mapconcat #'identity parts "\n\n")))))
 
 (defun kargu--history-sanitize-tool-calls (msg)
-  "Rewrite each tool call's `arguments' to a valid JSON object string."
+  "Normalize each tool call in MSG to a valid JSON argument object."
   (let ((calls (and msg (kargu-aget msg "tool_calls"))))
     (dolist (call (cond
                    ((vectorp calls) (append calls nil))
@@ -219,19 +220,19 @@ so a fake empty assistant cannot poison the next POST."
        (t
         (unless content
           (kargu-log 'debug "assistant content empty (type=%s, tools=%s)"
-                           (type-of (kargu-aget message "content"))
-                           (and calls-p t)))
+                     (type-of (kargu-aget message "content"))
+                     (and calls-p t)))
         (setq kargu--message-history
               (append kargu--message-history (list msg)))
         (kargu--log-assistant-wire response)
         (kargu-log 'response "assistant turn stored: %d chars text, %d chars reasoning, %d tool call(s)"
-                         (length (or content ""))
-                         (length (or reason ""))
-                         (length (or (kargu-aget msg "tool_calls") ())))
+                   (length (or content ""))
+                   (length (or reason ""))
+                   (length (or (kargu-aget msg "tool_calls") ())))
         msg)))))
 
 (defalias 'kargu-api-store-assistant-turn #'kargu--history-append-assistant)
 
 (provide 'kargu/api/response)
 
-;;; kargu/api/response.el ends here
+;;; response.el ends here

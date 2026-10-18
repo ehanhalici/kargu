@@ -25,6 +25,16 @@
 (declare-function kargu-notify "kargu/ui/notify" (type &optional msg))
 (declare-function kargu-loop--on-thought "kargu/loop/machine" (run response))
 
+(ert-deftest kargu-loop-missing-diagnostics-never-mean-clean-test ()
+  "Nil diagnostics neither crash verification nor claim that the edit passed."
+  (cl-letf (((symbol-function 'kargu-lsp--diagnostics-data) (lambda (_) nil)))
+    (let* ((section (kargu--loop-diag-section "missing.el" nil nil))
+           (report (kargu--loop-compose-verified "Edited" (list section) 0 0)))
+      (should (= (plist-get section :errors) 0))
+      (should (string-search "diagnostics unavailable" report))
+      (should (string-search "Verification incomplete" report))
+      (should-not (string-search "Verification passed" report)))))
+
 (ert-deftest kargu-loop-doom-p-test ()
   "Ensure kargu--loop-doom-p detects 3 consecutive identical tool calls."
   (let ((run (list :doom-sigs nil))

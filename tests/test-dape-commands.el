@@ -22,6 +22,22 @@
 (require 'kargu/loop/tools)
 (require 'kargu/languages)
 
+(ert-deftest kargu-dape-delayed-frame-range-error-delivers-once-test ()
+  "An out-of-range selection after a delayed stack reply closes the task."
+  (let* ((frame '(:id 1 :name "main"))
+         (thread (list :id 1 :stackFrames (vector frame))) held results)
+    (cl-letf (((symbol-function 'kargu-dape--connection) (lambda () 'conn))
+              ((symbol-function 'dape--current-thread) (lambda (_) thread))
+              ((symbol-function 'dape--current-stack-frame) (lambda (_) frame))
+              ((symbol-function 'dape--stack-trace)
+               (lambda (_conn _thread _limit callback) (setq held callback))))
+      (kargu-dape-up 2 (lambda (text) (push text results)))
+      (should-not results)
+      (funcall held)
+      (funcall held)
+      (should (= (length results) 1))
+      (should (string-search "outside the available stack" (car results))))))
+
 (ert-deftest kargu-dape-policy-covers-all-tools-and-aliases-test ()
   "Every debugger executor and alias obeys the same mode and session policy."
   (dolist (mode '(ask plan))

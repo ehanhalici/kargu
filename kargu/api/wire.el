@@ -273,7 +273,8 @@ A blocks body becomes one choice.  Bodies that already have
   (cond
    ((or (null response) (not (listp response))) response)
    ((kargu-aget response "choices") response)
-   ((kargu-aget response "error") response)
+   ((let ((error (kargu-aget response "error")))
+      (and error (not (memq error '(:json-null :json-false))))) response)
    (t
     (let ((spec (kargu-api--blocks-spec response)))
       (if spec

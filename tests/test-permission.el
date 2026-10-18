@@ -34,6 +34,19 @@
 (require 'kargu/tools/search)
 (require 'kargu/loop)
 
+(ert-deftest kargu-permission-command-expansion-preserves-prefix-test ()
+  "Double slashes and tilde text must not discard an earlier forbidden path."
+  (let* ((root (kargu-test-scratch-root))
+         (process-environment (cons (concat "KARGU_VALIDATION_ROOT=" root) process-environment)))
+    (dolist (command (list (concat "cat /etc/passwd /" root "allowed")
+                          (concat "cat /etc/passwd " root "/allowed")
+                          (concat "cat /etc/passwd " root "/~literal")
+                          "cat /etc/passwd $KARGU_VALIDATION_ROOT/allowed"
+                          "cat /etc/passwd ${KARGU_VALIDATION_ROOT}/allowed"))
+      (should (string-prefix-p "cat /etc/passwd " (kargu-permission--expand-environment command)))
+      (should-error (kargu-permission-validate-command command root)))
+    (should (equal (kargu-permission--expand-environment "cat a//b a/~c") "cat a//b a/~c"))))
+
 (ert-deftest kargu-permission-within-project-test ()
   "Ensure kargu-permission-within-project-p correctly classifies in-tree and out-of-tree paths."
   (let ((root (kargu-permission-project-root)))

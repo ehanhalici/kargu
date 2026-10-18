@@ -1,4 +1,4 @@
-;;; kargu/loop/heal.el --- Post-edit LSP diagnostics -*- lexical-binding: t; -*-
+;;; heal.el --- Post-edit LSP diagnostics -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -20,15 +20,15 @@
 (declare-function kargu-loop--live-p "kargu/loop" (run))
 (declare-function kargu-loop--set-state "kargu/loop" (run state))
 (declare-function kargu--loop-add-result-and-continue "kargu/loop/tools"
-                 (run id name result queue))
+                  (run id name result queue))
 
 (defun kargu--loop-verify-files (run id name result queue files)
-  "Collect settling diagnostics for FILES, then finish the result."
+  "Collect FILES diagnostics for ID and NAME on RUN after RESULT, then QUEUE."
   (kargu-loop--set-state run 'verify)
   (kargu--loop-verify-next run id name result queue files nil))
 
 (defun kargu--loop-verify-next (run id name result queue pending done)
-  "Verify the next file in PENDING; DONE collects finished sections."
+  "Verify PENDING for ID and NAME on RUN after RESULT; DONE precedes QUEUE."
   (cond
    ((not (kargu-loop--live-p run)) nil)
    ((null pending)
@@ -62,7 +62,8 @@ TIMEOUT-P means the snapshot was not settled."
         :text (if timeout-p
                   (concat (or text "")
                           "\n(diagnostics did not settle before the timeout)")
-                text)
+                (or text "(diagnostics unavailable)"))
+        :unavailable (null text)
         :errors (kargu--loop-count-errors path text)
         :timeout (and timeout-p t)))
 
@@ -71,8 +72,8 @@ TIMEOUT-P means the snapshot was not settled."
   (cl-some (lambda (section) (plist-get section :timeout)) sections))
 
 (defun kargu--loop-count-errors (path text)
-  "Count error-severity diagnostics for PATH."
-  (let ((count 0))
+  "Count error-severity diagnostics for PATH using structured data or TEXT."
+  (let ((count 0) (text (or text "")))
     (dolist (diag (kargu-lsp--diagnostics-data path))
       (when (eq (plist-get diag :severity) 1)
         (setq count (1+ count))))
@@ -95,22 +96,26 @@ TIMEOUT-P means the snapshot was not settled."
   "Status word for SECTIONS given ERRORS."
   (cond
    ((> errors 0) (format "%d error(s)" errors))
+   ((seq-some (lambda (section) (plist-get section :unavailable)) sections)
+    "diagnostics unavailable")
    ((kargu--loop-sections-timed-out-p sections) "diagnostics timed out")
    (t "clean")))
 
 (defun kargu--loop-verify-footer (sections errors healing)
-  "Closing paragraph for a verification with ERRORS and HEALING."
+  "Return a closing paragraph for SECTIONS with ERRORS and HEALING."
   (cond
    ((> errors 0)
     (format "\n\nSELF-HEALING (round %d of %d): the edited file reports %d error(s) above (Flymake / LSP).  Fix them now with a corrected edit_file (unique old_string / new_string), or explain why they are pre-existing."
             (1+ healing) kargu-max-healing-steps errors))
+   ((seq-some (lambda (section) (plist-get section :unavailable)) sections)
+    "\n\nVerification incomplete: diagnostics are unavailable. Do not treat this edit as clean.")
    ((kargu--loop-sections-timed-out-p sections)
     "\n\nVerification incomplete: diagnostics timed out before a settled snapshot. Do not treat this edit as clean.")
    (t
     "\n\nVerification passed: the edited file reports no errors (Flymake & LSP clean).")))
 
 (defun kargu--loop-compose-verified (result sections errors healing)
-  "Combine the tool RESULT with diagnostics SECTIONS."
+  "Combine RESULT with SECTIONS, ERRORS and the current HEALING count."
   (concat
    result
    "\n\n--- Verification after edit ("
@@ -121,4 +126,4 @@ TIMEOUT-P means the snapshot was not settled."
 
 (provide 'kargu/loop/heal)
 
-;;; kargu/loop/heal.el ends here
+;;; heal.el ends here

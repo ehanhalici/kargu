@@ -14,6 +14,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
 (require 'kargu/permission/guards)
 
 (defun kargu-permission-allowed-binary-p (path)
@@ -145,6 +146,22 @@ sees, so it needs an explicit human approval."
           "  - Guidance: You do not have permission to access '%s'. You must restrict all script executions, file creations, and inspections to within '%s'.")
   "Refusal template for a system-path outside the workspace.")
 
+(defconst kargu-permission--environment-reference
+  (rx "$" (or (seq "{" (any alpha "_") (* (any alnum "_")) "}")
+              (seq (any alpha "_") (* (any alnum "_")))))
+  "Simple environment references understood without executing shell code.")
+
+(defun kargu-permission--expand-environment (command)
+  "Expand simple environment references in COMMAND without path rewriting."
+  (save-match-data
+    (replace-regexp-in-string
+     kargu-permission--environment-reference
+     (lambda (reference)
+       (let ((name (if (string-prefix-p "${" reference)
+                       (substring reference 2 -1) (substring reference 1))))
+         (or (getenv name) reference)))
+     command t t)))
+
 (defun kargu-permission--validate-token (tok-cons effective-cwd effective-root)
   "Validate TOK-CONS against EFFECTIVE-CWD and EFFECTIVE-ROOT."
   (let* ((type (car tok-cons))
@@ -195,9 +212,7 @@ escapes ROOT."
       ;; 1. Check working directory
       (kargu-permission--validate-cwd effective-cwd effective-root cwd)
       ;; 2. Substitute common environment variables and validate tokens
-      (let* ((expanded-cmd (condition-case _
-                               (substitute-in-file-name command)
-                             (error command)))
+      (let* ((expanded-cmd (kargu-permission--expand-environment command))
              (tokens (kargu-permission-tokenize-command expanded-cmd)))
         (dolist (tok-cons tokens)
           (kargu-permission--validate-token tok-cons effective-cwd effective-root))))))

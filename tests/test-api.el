@@ -298,6 +298,16 @@
   (cl-letf (((symbol-function 'kargu--model) (lambda () nil)))
     (should (string-search "not selected" (kargu-tune--model-desc)))))
 
+(ert-deftest kargu-api-null-error-is-not-a-provider-failure-test ()
+  "Null and false error fields are not errors; actual messages remain errors."
+  (dolist (value '(nil :json-null :json-false))
+    (should-not (kargu-response-error-message (list (cons "error" value))))
+    (should (kargu-aget (kargu-api-normalize-response
+                         (list (cons "type" "message") (cons "stop_reason" "end_turn")
+                               (cons "error" value))) "choices")))
+  (should (equal (kargu-response-error-message '(("error" . (("message" . "Rejected")))))
+                 "Rejected")))
+
 (provide 'tests/test-api)
 ;;; test-api.el ends here
 

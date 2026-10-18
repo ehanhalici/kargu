@@ -8,6 +8,17 @@
 (require 'ert)
 (require 'kargu/config)
 
+(ert-deftest kargu-setup-reports-all-mandatory-dependencies-test ()
+  "CLI and package failures appear together; optional integrations do not block."
+  (let ((problems (car (kargu--setup-problems
+                       "real-key" '((:type "CLI" :name "curl" :purpose "HTTP" :install-hint "install curl"))
+                       '((plz . "HTTP client"))))))
+    (should (= (length problems) 2))
+    (should (seq-some (lambda (text) (string-search "curl" text)) problems))
+    (should (seq-some (lambda (text) (string-search "plz" text)) problems)))
+  (should-not (assq 'eglot kargu--dependencies))
+  (should-not (assq 'dape kargu--dependencies)))
+
 (ert-deftest kargu-toml-provider-section-names-test ()
   "Digit-first and quoted provider names are sections, not skipped tables."
   (let ((file (make-temp-file "kargu-toml" nil ".toml")))

@@ -138,6 +138,11 @@ terminating the process. Stop cancels the foreground tool; background
 jobs continue until explicitly cancelled. Other bounded tools keep their
 normal timeouts. A positive `kargu-bash-timeout` opts into a deadline.
 
+Shell validation and approval are best-effort guards, not an operating-system
+sandbox. Keep shell confirmation enabled for untrusted commands; command strings
+can invoke scripts and interpreters whose filesystem effects cannot be inferred
+by the path tokenizer. Remaining parser limitations are tracked in `todo.md`.
+
 The LSP and Dape entry points load focused submodules for session access,
 data collection, formatting and tool registration. HTTP request construction,
 retry handling and SSE decoding are separate modules. Chat transcript insertion

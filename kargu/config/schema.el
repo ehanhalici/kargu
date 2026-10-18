@@ -135,8 +135,6 @@ from `kargu-provider-list'."
 (defconst kargu--dependencies
   '((plz . "asynchronous HTTP + SSE streaming (mandatory)")
     (transient . "menu interface (mandatory)")
-    (eglot . "LSP client (tools: skeleton, diagnostics, xref)")
-    (dape . "debugger client (tools: stack, variables, eval)")
     (magit . "Git interface (mandatory)")
     (ediff . "diff approval engine (built into Emacs)"))
   "Feature -> purpose map checked by `kargu-check-setup'.")
@@ -167,16 +165,15 @@ from `kargu-provider-list'."
                 "API key is empty; requests will omit Authorization"
               (format "API key looks like a placeholder (%s)" key))
             warnings)))
-    (if missing-tools
-        (dolist (tool missing-tools)
-          (push (format "missing %s %s: %s (%s)"
-                        (plist-get tool :type)
-                        (plist-get tool :name)
-                        (plist-get tool :purpose)
-                        (plist-get tool :install-hint))
-                problems))
-      (dolist (dep missing-packages)
-        (push (format "missing package %s (%s)" (car dep) (cdr dep)) problems)))
+    (dolist (tool missing-tools)
+      (push (format "missing %s %s: %s (%s)"
+                    (plist-get tool :type)
+                    (plist-get tool :name)
+                    (plist-get tool :purpose)
+                    (plist-get tool :install-hint))
+            problems))
+    (dolist (dep missing-packages)
+      (push (format "missing package %s (%s)" (car dep) (cdr dep)) problems))
     (cons problems warnings)))
 
 (defun kargu-check-setup ()
