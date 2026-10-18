@@ -1,4 +1,4 @@
-;;; kargu/fs.el --- Bounded project file walks -*- lexical-binding: t; -*-
+;;; fs.el --- Bounded project file walks -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -27,10 +27,17 @@
   :type 'natnum
   :group 'kargu)
 
-(defun kargu-fs-skipped-path-p (path)
-  "Non-nil if PATH has a skipped directory component."
+(defcustom kargu-fs-max-visited-directories 2000
+  "Maximum directories inspected by a single bounded file walk."
+  :type 'natnum
+  :group 'kargu)
+
+(defun kargu-fs-skipped-path-p (path &optional root)
+  "Return non-nil if PATH has a skipped directory below ROOT.
+ROOT defaults to `default-directory'; ancestor directory names are ignored."
   (cl-some (lambda (part) (member part kargu-fs-skip-dirs))
-           (split-string (expand-file-name path) "/" t)))
+           (split-string (or (file-name-directory
+                              (file-relative-name (expand-file-name path) (or root default-directory))) "") "/" t)))
 
 (defun kargu-fs-ignore-file-p (path)
   "Return non-nil if PATH is a compiled or backup artifact."
@@ -40,33 +47,63 @@
         (string-match-p "\\.\\(elc\\|eln\\|o\\|so\\|pyc\\|class\\|rlib\\|rmeta\\)\\'"
                         name))))
 
+(cl-defstruct (kargu-fs--walk (:constructor kargu-fs--make-walk))
+  "Traversal resources and counters owned by one bounded file walk."
+  root pending cap on-file (count 0) (directories 0) kept
+  (seen (make-hash-table :test #'equal)))
+
+(defun kargu-fs--contained-path (path root)
+  "Return PATH's canonical name only if it remains within ROOT."
+  (condition-case nil
+      (let ((real (file-truename path)))
+        (when (or (equal (directory-file-name real) (directory-file-name root))
+                  (file-in-directory-p real root))
+          real))
+    (file-error nil)))
+
+(defun kargu-fs--visit-entry (state path)
+  "Visit a contained PATH under traversal STATE without following escapes."
+  (when (and (< (kargu-fs--walk-count state) (kargu-fs--walk-cap state))
+             (kargu-fs--contained-path path (kargu-fs--walk-root state)))
+    (cond
+     ((file-directory-p path)
+      (unless (member (file-name-nondirectory path) kargu-fs-skip-dirs)
+        (push path (kargu-fs--walk-pending state))))
+     ((and (file-regular-p path) (not (kargu-fs-ignore-file-p path)))
+      (cl-incf (kargu-fs--walk-count state))
+      (when (or (null (kargu-fs--walk-on-file state))
+                (funcall (kargu-fs--walk-on-file state) path))
+        (push path (kargu-fs--walk-kept state)))))))
+
+(defun kargu-fs--visit-directory (state path)
+  "Inspect PATH once by canonical identity under traversal STATE."
+  (when-let* ((real (kargu-fs--contained-path path (kargu-fs--walk-root state)))
+              (real (directory-file-name real))
+              ((not (gethash real (kargu-fs--walk-seen state)))))
+    (puthash real t (kargu-fs--walk-seen state))
+    (cl-incf (kargu-fs--walk-directories state))
+    (dolist (entry (condition-case nil
+                       (directory-files path t directory-files-no-dot-files-regexp)
+                     (file-error nil)))
+      (kargu-fs--visit-entry state entry))))
+
 (defun kargu-fs-walk (dir &optional cap on-file)
   "Recursively visit files under DIR, at most CAP entries.
 ON-FILE, if given, is called with each absolute file path and
 should return non-nil to keep it.  Skip directories in
 `kargu-fs-skip-dirs'.  CAP counts visited files, not matches.
-Return the list of kept paths."
-  (let ((acc nil)
-        (n 0)
-        (cap (or cap kargu-fs-max-listed-files)))
-    (cl-labels
-        ((walk (d)
-           (when (< n cap)
-             (dolist (f (ignore-errors
-                          (directory-files d t directory-files-no-dot-files-regexp t)))
-               (when (< n cap)
-                 (let ((name (file-name-nondirectory f)))
-                   (cond
-                    ((and (file-directory-p f)
-                          (not (member name kargu-fs-skip-dirs)))
-                     (walk f))
-                    ((and (not (file-directory-p f))
-                          (not (kargu-fs-ignore-file-p f)))
-                     (setq n (1+ n))
-                     (when (or (null on-file) (funcall on-file f))
-                       (push (expand-file-name f) acc))))))))))
-      (walk dir))
-    acc))
+Directory visits are separately capped by `kargu-fs-max-visited-directories'.
+Resolve symlinks before entry, never leave DIR and never revisit a directory.
+Return the list of kept paths without recursive Lisp calls."
+  (let ((state (kargu-fs--make-walk
+                :root (file-name-as-directory (file-truename dir))
+                :pending (list (expand-file-name dir))
+                :cap (or cap kargu-fs-max-listed-files) :on-file on-file)))
+    (while (and (kargu-fs--walk-pending state)
+                (< (kargu-fs--walk-count state) (kargu-fs--walk-cap state))
+                (< (kargu-fs--walk-directories state) kargu-fs-max-visited-directories))
+      (kargu-fs--visit-directory state (pop (kargu-fs--walk-pending state))))
+    (nreverse (kargu-fs--walk-kept state))))
 
 (defun kargu-fs-has-file-p (root filename)
   "Return non-nil if FILENAME exists under directory ROOT."
@@ -81,10 +118,10 @@ ROOT defaults to project root or `default-directory'."
                                   (kargu-permission-project-root))
                              default-directory))
          (rel (file-relative-name (expand-file-name path) effective-root)))
-    (if (string-prefix-p ".." rel)
+    (if (or (equal rel "..") (string-prefix-p "../" rel))
         (expand-file-name path)
       rel)))
 
 (provide 'kargu/fs)
 
-;;; kargu/fs.el ends here
+;;; fs.el ends here

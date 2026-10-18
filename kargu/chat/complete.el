@@ -109,7 +109,7 @@ walk the tree.  Falls back to a bounded walk otherwise."
           (catch 'full
             (dolist (f (project-files project))
               (let ((abs (expand-file-name f)))
-                (unless (or (kargu-fs-skipped-path-p abs)
+                (unless (or (kargu-fs-skipped-path-p abs root)
                             (kargu-fs-ignore-file-p abs))
                   (push abs kept)
                   (when (>= (length kept) cap)

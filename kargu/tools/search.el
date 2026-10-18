@@ -158,7 +158,7 @@ caps the number of hits returned."
                           (if (string-match "/\\([^/]+\\)\\'" glob)
                               (match-string 1 glob)
                             glob))))
-         (args (append (list "-R" "-n" "-H" "-I")
+         (args (append (list "-r" "-n" "-H" "-I")
                        exclude include
                        (list "--" pattern target))))
     (kargu-search--run
@@ -269,9 +269,10 @@ Use ripgrep when available and otherwise a bounded directory walk."
   "Find PATTERN in TARGET under ROOT using FD-EXE; report to CALLBACK."
   (kargu-search--run
    fd-exe
-   (list "--color" "never" "--hidden"
-         "--glob" (kargu-search--normalize-glob pattern)
-         "--base-directory" target)
+   (append (list "--color" "never" "--hidden")
+           (mapcan (lambda (dir) (list "--exclude" dir)) kargu-fs-skip-dirs)
+           (list "--glob" (kargu-search--normalize-glob pattern)
+                 "--base-directory" target))
    root
    (lambda (result)
      (if (/= (car result) 0)
