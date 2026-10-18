@@ -2,15 +2,6 @@
 
 Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağlayıcı veya ölçümle doğrulanması gereken risk. Kapsamlı işler için gerekli sözleşme/test notları eklenmiştir.
 
-### Modül: `tools/process.el` & `tools/bash/`
-
-1. **[D - Düşük] Büyük çıktılarda artımlı filtre maliyeti.**
-   - **Dosya / Satır:** `kargu/tools/process.el:76`
-   - **Sorun:** Her gelen parçada `(position-bytes (point-max))` çağrılıyor; çok baytlı büyük arabelleklerde bu hesaplama parçalı akışta işlemci yükü oluşturabilir.
-   - **Doğrulama:** Bu bir ölçülmüş yavaşlık değildir. Önce çok baytlı, çok parçalı çıktıda profil/benchmark alınmalı; Emacs'in konum önbelleği hesaba katılmadan sayaç optimizasyonu eklenmemeli.
-
----
-
 ### Modül: `tools/diff.el` & `tools/diff/`
 
 1. **[K - Orta] `apply_patch` atomik değildir.**

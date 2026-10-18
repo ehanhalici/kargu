@@ -128,6 +128,14 @@ still use alists internally; their adapter is `kargu-json-encode-record` /
 `kargu-json-to-record`. New wire code must not infer objects from Lisp lists;
 represent arbitrary nested arrays with vectors.
 
+Process-filter scaling can be measured with
+`emacs --batch -Q -L . -l tests/bench-process.el -f kargu-benchmark-process`.
+On Emacs 30.2, three trials at 2/8/32 MiB took about 0.013/0.069/0.324 seconds
+through the real filter. Appending with `position-bytes` did not show an extra
+scaling penalty against appending alone in this workload, so no speculative
+byte-counter optimization was introduced. These are local measurements, not
+cross-platform performance guarantees.
+
 ### Prompt caching and low usage
 
 Enable `kargu-low-usage-mode` with `setq` or the tuning menu's `l` key.
