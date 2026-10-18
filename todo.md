@@ -22,9 +22,6 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 2. **[D - Yüksek] `webfetch` yalnız `getent ahosts` çözümleyicisine bağlı.**
    - **Dosya / Satır:** `kargu/tools/webfetch.el:91-105`
    - **Sorun:** `getent` veya `ahosts` veritabanı olmayan sistemlerde DNS çözümü yapılamaz. Platform adını sabitlemek yerine mevcut çözümleyici yetenekleri keşfedilmeli; alternatif de asenkron çalışmalı ve curl için doğrulanmış sayısal IP üretmeli.
-3. **[D - Yüksek] `webfetch` sayısal adres/CIDR politikasının kapsamı eksik.**
-   - **Dosya / Satır:** `kargu/tools/webfetch.el:40-62`
-   - **Sorun:** `kargu-webfetch--internal-host-p` IPv6'yı metin önekleriyle denetliyor; genişletilmiş loopback, IPv4-mapped, link-local aralığının diğer önekleri ve NAT64 eşdeğerleri için sayısal normalizasyon/CIDR testleri yok. `getent` bazı alternatif gösterimleri normalize edip mevcut IP sabitlemesiyle engelleyebilir; yalnız yardımcı fonksiyona bakarak uçtan uca SSRF kanıtlanmış sayılmamalı. Çözümleyici çıktısı ve her redirect adımı için çevrimdışı uçtan uca testler gerekiyor.
 
 ---
 
@@ -98,6 +95,7 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 
 ### Yeni inceleme bulguları
 
+- **Webfetch'in ara adımları koşu iptalini denetlemiyor.** DNS çözümleme ve redirect callback'leri ham süreç callback'leri; araç sonucu iptal edilse bile geç DNS yanıtı yeni curl veya redirect isteği başlatabilir. DNS/curl süreçlerini aynı iptal edilebilir görev sahibine bağlamak, her ara dönüşü korumak ve stop sonrası yeni süreç başlamadığını test etmek gerekiyor.
 - **Dosya yazma ve rollback yolu daraltılmış/kirli tamponları güvenli yönetmiyor.** `diff/stage.el` içindeki `kargu-diff--file-text` ve proposal snapshot'ı yalnız erişilebilir bölgeyi okuyor; tam dosya yerine eksik rollback metni saklanabilir. Otomatik yazma `erase-buffer`/`save-buffer` ile kullanıcının kaydedilmemiş değişikliklerini de kaydediyor ve save-hook dönüşümlerini başarı sonucuyla uzlaştırmıyor. Tampon daraltması/point korunmalı; kullanıcı değişiklikleri, diskte dış değişiklik, kodlama ve başarısız kaydetme için açık işlem/geri alma sözleşmesi ve testler gerekiyor.
 - **Tanı raporunun güncelliği ve bekleyen poll sahipliği.** `kargu-lsp-wait-diagnostics`, checker var fakat henüz yeni rapor yayımlamamışsa boş veya iki eşit snapshot'ı yerleşmiş kabul edebiliyor. Belge sürümü/report-generation bariyeri ve çalışmayı başlatan tampon/kökü yakalayan, iptal edilebilir tek-teslimli bir bekleyici gerekiyor. Backend geç yanıtı, buffer kapanması, proje değişimi ve run stop birlikte test edilmeli.
 - **Oturum JSON şemasının tümü yüklemeden önce doğrulanmıyor.** `kargu-session-load` mesaj/transkript/sayaç türlerinin tamamını, boyut ve derinlik sınırlarını doğrulamadan tamponu silip restore işlemine başlıyor. Bozuk `transcript` veya `messages` gibi alanlar yarı yüklenmiş sohbet bırakabilir. Önce tüm veriyi doğrulama, sonra atomik yayınlama ve başarısızlıkta eski taslağı/geçmişi koruma gerekiyor.

@@ -55,6 +55,7 @@
 (require 'tests/test-attach)
 (require 'tests/test-fs)
 (require 'tests/test-webfetch)
+(require 'tests/test-address)
 
 (defun kargu-run-all-tests ()
   "Run all Kargu ERT test suites."

@@ -185,6 +185,16 @@ sandbox. Keep shell confirmation enabled for untrusted commands; command strings
 can invoke scripts and interpreters whose filesystem effects cannot be inferred
 by the path tokenizer. Remaining parser limitations are tracked in `todo.md`.
 
+Webfetch validates numeric resolver results before pinning a connection and
+repeats that check for each redirect. Its conservative address policy uses the
+[IANA IPv4](https://www.iana.org/assignments/iana-ipv4-special-registry/) and
+[IPv6 special-purpose registries](https://www.iana.org/assignments/iana-ipv6-special-registry/);
+it also excludes the whole IPv6 IETF-assignment and transition ranges rather
+than allowing their individual exceptions. IPv4-mapped and well-known NAT64
+addresses inherit the embedded IPv4 restrictions; the well-known NAT64 prefix
+comes from [RFC 6052](https://www.rfc-editor.org/rfc/rfc6052.html). Arbitrary network-specific
+translation prefixes or public proxy services are not an OS-level sandbox.
+
 The LSP and Dape entry points load focused submodules for session access,
 data collection, formatting and tool registration. HTTP request construction,
 retry handling and SSE decoding are separate modules. Chat transcript insertion

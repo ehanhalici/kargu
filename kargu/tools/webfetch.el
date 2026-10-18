@@ -17,6 +17,7 @@
 (require 'kargu/contract)
 (require 'kargu/api)
 (require 'kargu/tools/process)
+(require 'kargu/net/address)
 (require 'url-parse)
 (require 'url-expand)
 
@@ -36,35 +37,21 @@ Large bodies are truncated to prevent context window exhaustion."
   :type 'natnum
   :group 'kargu)
 
-(defun kargu-webfetch--ipv4-private-p (host)
-  "Non-nil when HOST is an IPv4 literal in a loopback, private or link-local range."
-  (when (string-match "\\`\\([0-9]+\\)\\.\\([0-9]+\\)\\.\\([0-9]+\\)\\.\\([0-9]+\\)\\'" host)
-    (let ((a (string-to-number (match-string 1 host)))
-          (b (string-to-number (match-string 2 host))))
-      (or (memq a '(0 10 127))
-          (and (= a 169) (= b 254))
-          (and (= a 172) (<= 16 b 31))
-          (and (= a 192) (= b 168))
-          (and (= a 100) (<= 64 b 127))
-          (>= a 224)))))
-
 (defun kargu-webfetch--internal-host-p (host)
   "Non-nil when HOST names this machine or a private network."
-  (let ((h (downcase (string-trim host "[[]" "[]]"))))
+  (let* ((h (downcase (string-remove-suffix "]" (string-remove-prefix "[" host))))
+         (address (kargu-ip-address h)))
     (or (member h '("localhost" "0.0.0.0" "::" "::1"))
         (string-suffix-p ".localhost" h)
         (string-suffix-p ".local" h)
         (string-suffix-p ".internal" h)
-        (and (string-search ":" h)
-             (or (string-prefix-p "fe80:" h)
-                 (string-prefix-p "fc" h)
-                 (string-prefix-p "fd" h)))
-        (kargu-webfetch--ipv4-private-p h))))
+        (and address (not (kargu-ip-public-p address)))
+        (and (string-search ":" h) (not address)))))
 
 (defun kargu-webfetch--bare-host (parsed)
   "Hostname of PARSED, without brackets around an IPv6 literal."
   (let ((host (url-host parsed)))
-    (and host (replace-regexp-in-string "\\`\\[\\|\\]\\'" "" host))))
+    (and host (string-remove-suffix "]" (string-remove-prefix "[" host)))))
 
 (defun kargu-webfetch--port (parsed)
   "Port of PARSED, or the default for its scheme."
@@ -76,17 +63,19 @@ Large bodies are truncated to prevent context window exhaustion."
 (defun kargu-webfetch--first-public (output)
   "First public address in getent ahosts OUTPUT.
 The result is (public . IP), (private . IP), or (none . nil)."
-  (let (seen private)
-    (catch 'found
-      (dolist (line (split-string (or output "") "\n" t))
-        (when (string-match "\\`[ \t]*\\([^ \t]+\\)" line)
-          (let ((ip (match-string 1 line)))
-            (unless (member ip seen)
-              (push ip seen)
-              (if (kargu-webfetch--internal-host-p ip)
-                  (unless private (setq private ip))
-                (throw 'found (cons 'public ip)))))))
-      (if private (cons 'private private) (cons 'none nil)))))
+  (save-match-data
+    (let (seen private)
+      (catch 'found
+        (dolist (line (split-string (or output "") "\n" t))
+          (when (string-match (rx bos (* blank) (group (+ (not (any " \t"))))) line)
+            (when-let* ((address (kargu-ip-address (match-string 1 line))))
+              (let ((ip (kargu-ip-format address)))
+                (unless (member ip seen)
+                  (push ip seen)
+                  (if (not (kargu-ip-public-p address))
+                      (unless private (setq private ip))
+                    (throw 'found (cons 'public ip))))))))
+        (if private (cons 'private private) (cons 'none nil))))))
 
 (defun kargu-webfetch--resolve (url callback)
   "Resolve URL and pass (IP ERR) to CALLBACK.

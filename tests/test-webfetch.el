@@ -137,6 +137,39 @@
       (should (string-prefix-p "ERROR: webfetch refuses local or private address" got))
       (should-not curled))))
 
+(ert-deftest kargu-webfetch-resolver-output-must-be-numeric-and-public-test ()
+  "No curl request is made for malformed or private numeric resolver answers."
+  (dolist (address '("not-an-IP" "0:0:0:0:0:0:0:1" "::ffff:127.0.0.1"
+                     "fe90::1" "64:ff9b::a00:1" "64:ff9b:1::1"))
+    (let (result curled)
+      (cl-letf (((symbol-function 'kargu-process-run)
+                 (lambda (program _args callback &rest _)
+                   (if (equal program "getent")
+                       (funcall callback (list :code 0 :output (concat address " STREAM host\n")))
+                     (setq curled t)))))
+        (kargu-webfetch--fetch (lambda (value) (setq result value)) "https://host.example/" 1)
+        (should (string-prefix-p "ERROR:" result))
+        (should-not curled)))))
+
+(ert-deftest kargu-webfetch-checks-numeric-policy-on-every-redirect-test ()
+  "Redirect names are resolved again; a private IPv6 answer cannot reach curl."
+  (let ((resolutions 0) (requests 0) result)
+    (cl-letf (((symbol-function 'kargu-process-run)
+               (lambda (program _args callback &rest _)
+                 (if (equal program "getent")
+                     (funcall callback
+                              (list :code 0 :output
+                                    (if (= (cl-incf resolutions) 1)
+                                        "93.184.216.34 STREAM host\n"
+                                      "0:0:0:0:0:ffff:a00:1 STREAM host\n")))
+                   (cl-incf requests)
+                   (funcall callback
+                            '(:code 0 :output "HTTP/2 302 Found\r\nLocation: https://next.example/\r\n\r\n"))))))
+      (kargu-webfetch--fetch (lambda (value) (setq result value)) "https://host.example/" 3)
+      (should (= resolutions 2))
+      (should (= requests 1))
+      (should (string-prefix-p "ERROR:" result)))))
+
 (ert-deftest kargu-webfetch-refuses-when-getent-is-missing-test ()
   "Without a resolver the request is not sent."
   (let ((got nil)
