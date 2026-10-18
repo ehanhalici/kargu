@@ -25,6 +25,35 @@
 (declare-function kargu-notify "kargu/ui/notify" (type &optional msg))
 (declare-function kargu-loop--on-thought "kargu/loop/machine" (run response))
 
+(ert-deftest kargu-loop-synchronous-startup-failure-releases-run-test ()
+  "An initial request exception closes its run and permits another submission."
+  (let ((kargu--loop-run nil) (kargu--busy nil) (kargu--generation 80) reports)
+    (kargu-test-mode 'ask)
+    (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-prompt-wrap-user) #'identity)
+              ((symbol-function 'kargu--loop-request)
+               (lambda (_run _prompt)
+                 (cl-incf kargu--generation) (setq kargu--busy t)
+                 (error "Initial request failed"))))
+      (dotimes (_ 2)
+        (kargu-loop-send "Hello" nil (lambda (report) (push report reports)))
+        (should-not (kargu-loop-running-p))
+        (should-not (plist-get kargu--session :active))
+        (should-not kargu--busy)
+        (should (eq (kargu-state-status) :error)))
+      (should (= (length reports) 2))
+      (should (equal (plist-get (car reports) :error) "Initial request failed")))))
+
+(ert-deftest kargu-loop-prompt-failure-never-publishes-a-run-test ()
+  "A prompt construction failure leaves prior run state and callbacks untouched."
+  (let ((kargu--loop-run nil) (kargu--busy nil) reported)
+    (kargu-test-mode 'ask)
+    (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-prompt-wrap-user) (lambda (_) (error "Prompt failed"))))
+      (should-error (kargu-loop-send "Hello" nil (lambda (_) (setq reported t))))
+      (should-not (kargu-loop-running-p))
+      (should-not reported))))
+
 (ert-deftest kargu-loop-missing-diagnostics-never-mean-clean-test ()
   "Nil diagnostics neither crash verification nor claim that the edit passed."
   (cl-letf (((symbol-function 'kargu-lsp--diagnostics-data) (lambda (_) nil)))

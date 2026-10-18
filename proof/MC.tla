@@ -39,6 +39,7 @@ MCNext ==
     \/ RequestPause
     \/ RequestSend
     \/ RequestBlocked
+    \/ RequestStartFailure
     \/ \E txt \in {"Here is the answer."} : ModelReceiveAnswer(txt)
     \/ \E calls \in ToolCallSequences : ModelReceiveToolCalls(calls)
     \/ ModelReceiveLengthTruncated

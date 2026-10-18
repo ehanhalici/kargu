@@ -265,6 +265,14 @@ RequestSend ==
                    ToolVars, Flags, runStatus, generation, circuitFailures>>
 
 (* An open breaker turns the send into an error answer (`kargu--api-post') *)
+RequestStartFailure ==
+    /\ state = "REQUEST" \/ (state = "WAIT_MODEL" /\ iterations = 1)
+    /\ history ' = ValidateHistory(history, "keep")
+    /\ state ' = "ERROR"
+    /\ runStatus ' = "error"
+    /\ circuitState ' = CircuitReleaseProbe(circuitState)
+    /\ UNCHANGED <<activeMode, Counters, ToolVars, Flags, generation, circuitFailures>>
+
 RequestBlocked ==
     /\ state = "REQUEST"
     /\ ~CompactDue

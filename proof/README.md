@@ -58,6 +58,11 @@ Tools and healing: `ExecuteNextTool`, `DoomApprove`, `DoomStop`, `VerifyFiles`. 
 
 Also: `StartRun`, `FollowUpPrompt`, `SetMode` (only while no run is live), `ResetSession`, `CompactionFinish` (a failed or empty summary ends the run in `ERROR`), `UserStop` (from any live state; the finish repairs the history), `CircuitCooldownCanaryAction`.
 
+`RequestStartFailure` closes a run when initial request construction or startup
+raises synchronously. Prompt wrapping happens before the run is published;
+failure after publication follows the regular error cleanup and releases an
+owned canary. ERT also checks that a subsequent run can start immediately.
+
 ### The protocol wall
 
 `ValidateHistory(hist, fix)` follows `kargu--validate-history`:

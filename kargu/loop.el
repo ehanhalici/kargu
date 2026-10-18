@@ -223,6 +223,31 @@ the diff run files and the UI as they were."
   (kargu-loop-require-tools-for-agent)
   (not (kargu-model-supports-tools-p)))
 
+(cl-defun kargu-loop--new-run (prompt &key no-tools on-delta on-finish)
+  "Build a run record for PROMPT with NO-TOOLS, ON-DELTA and ON-FINISH."
+  (list :prompt prompt :state 'request :chat-buffer (current-buffer)
+        :max-iterations kargu-max-iterations :on-delta on-delta
+        :on-finish (or on-finish #'kargu-loop--message-report)
+        :iterations 0 :healing 0 :verifications 0 :empty-retries 0
+        :upstream-retries 0 :compactions 0 :length-continues 0
+        :doom-sigs nil :no-tools no-tools))
+
+(defun kargu-loop--start-run (run prompt)
+  "Publish RUN and start its first request for PROMPT, handling startup errors."
+  (let ((generation kargu--generation))
+    (setq kargu--loop-run run)
+    (condition-case err
+        (progn
+          (kargu-state-transition-status :requesting)
+          (plist-put kargu--session :active t)
+          (kargu-log 'info "run start (mode=%s, model=%s)"
+                     (kargu-loop--active-mode) (kargu--model))
+          (kargu--loop-request run prompt))
+      (error
+       (when (kargu-loop--live-p run)
+         (when (> kargu--generation generation) (kargu-api-cancel))
+         (kargu--loop-finish run :error (error-message-string err)))))))
+
 (defun kargu-loop-send (prompt &optional on-delta on-finish)
   "Start an agent run with PROMPT.
 Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
@@ -234,34 +259,12 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
   (kargu-contract-assert #'kargu-contract-callback-p on-finish
                          "kargu: on-finish must be callable or nil: %S" on-finish)
   (let* ((no-tools (kargu-loop-preflight))
-         (run (list :prompt prompt
-                    :state 'request
-                    :chat-buffer (current-buffer)
-                    :max-iterations (if (boundp 'kargu-max-iterations) kargu-max-iterations 12)
-                    :on-delta on-delta
-                    :on-finish (or on-finish
-                                   #'kargu-loop--message-report)
-                    :iterations 0
-                    :healing 0
-                    :verifications 0
-                    :empty-retries 0
-                    :upstream-retries 0
-                    :compactions 0
-                    :length-continues 0
-                    :doom-sigs nil)))
-    (when no-tools
-      (plist-put run :no-tools t)
-      (kargu-log 'info "model '%s' does not support tools; running in tool-free mode" (kargu--model)))
+         (wrapped (kargu-prompt-wrap-user prompt))
+         (run (kargu-loop--new-run prompt :no-tools no-tools
+                                  :on-delta on-delta :on-finish on-finish)))
     (setq kargu--compaction-system nil)
-    (when (fboundp 'kargu-diff-reset-run-files)
-      (kargu-diff-reset-run-files))
-    (setq kargu--loop-run run)
-    (when (fboundp 'kargu-state-transition-status)
-      (kargu-state-transition-status :requesting))
-    (plist-put kargu--session :active t)
-    (kargu-log 'info "run start (mode=%s, model=%s)"
-               (kargu-loop--active-mode) (kargu--model))
-    (kargu--loop-request run (kargu-prompt-wrap-user prompt))
+    (when (fboundp 'kargu-diff-reset-run-files) (kargu-diff-reset-run-files))
+    (kargu-loop--start-run run wrapped)
     run))
 
 (defun kargu-loop--finish-report (run status text)
