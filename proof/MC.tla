@@ -58,6 +58,7 @@ MCNext ==
     \/ CompactionFinish(TRUE)
     \/ CompactionFinish(FALSE)
     \/ UserStop
+    \/ ModelCallbackFailure
     \/ CircuitCooldownCanaryAction
     \/ PauseDecisionContinue
     \/ PauseDecisionStop

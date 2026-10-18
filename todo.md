@@ -162,10 +162,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
 - Dape oturum sahipliği proje köküne bağlanmalı; başka projede açılmış global oturum, seçilen projenin debug oturumu sayılmamalı. Kaynak tamponu seçimindeki diğer-proje fallback'i de bu sınırla birlikte ele alınmalı.
 - Kargu ön kontrolü asenkron olsa da Dape'nin bazı adapter `ensure`/`fn` adımları senkron dış komut/Eglot isteği çalıştırıyor. Tüm dillerde kilitlenmeme için adaptör başlatma katmanının ayrıca tasarlanması gerekiyor; kurulu Dape paketine geçici yama yapılmamalı.
 
-#### Yeni inceleme: API geri çağrı hatalarının sahipliği
-
-- `kargu-api--send-turn` içindeki başlangıç `condition-case` kapsamına senkron teslim edilen callback devamı da giriyor. Bu devam hata fırlatırsa aynı callback'e ikinci kez hata yanıtı verilebiliyor; asenkron teslimde ise hata başka sınırda kalıyor. İstek seviyesinde tek-teslim ve devam-hatası sözleşmesi, iptal/retry nesliyle birlikte düzenlenmeli. Regresyon: senkron başarı callback'i hata versin; teslim sayısı bir kalsın, koşu açık kalmasın ve yeni istek iptal edilmesin.
-
 #### Yeni inceleme: ertelenmiş sohbet ve plan başlangıcının sahipliği
 
 - **Geciken debug başlangıcı yanlış sohbete gönderim yapabiliyor.** `kargu-chat--send-prepared` içindeki devam, başlangıçtaki sohbeti saklamak yerine callback anında `kargu-chat--buffer` ve `kargu-chat-show` ile yeniden seçiyor. Çevrimdışı mock ile doğrulandı: A tamponundan başlatılan debug hazırlığının devamında tampon çözümleyici B'yi döndürünce `submit` B içinde çalışıyor. Başlangıç sohbeti, proje, sağlayıcı/model ve iptal nesli birlikte sahiplenilmeli; başka sohbet açılması, başlangıç tamponunun kapanması veya beklerken yeni koşu başlaması yanlış projeye gönderim yapmamalı. Global geçmiş/oturum izolasyonu maddesiyle birlikte ele alınmalı.

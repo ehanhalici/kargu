@@ -515,6 +515,21 @@ CompactionFinish(success) ==
 (* User decisions and cancellation                                         *)
 (***************************************************************************)
 
+(* A model-response continuation failed after entering a handler. *)
+ModelCallbackFailure ==
+    /\ state \in RunLive
+    /\ history            ' = ValidateHistory(history, "keep")
+    /\ state              ' = "ERROR"
+    /\ runStatus          ' = "error"
+    /\ pendingToolQueue   ' = << >>
+    /\ pendingToolCall    ' = NoCall
+    /\ pendingVerifyFiles ' = {}
+    /\ compacting         ' = FALSE
+    /\ noTools            ' = FALSE
+    /\ savedNoTools       ' = FALSE
+    /\ circuitState       ' = CircuitReleaseProbe(circuitState)
+    /\ UNCHANGED <<activeMode, Counters, doomSigs, generation, circuitFailures>>
+
 (* `kargu-loop-stop': from any live state.  The finish repairs the history, *)
 (* which answers every open tool call, and keeps a trailing answer.         *)
 UserStop ==

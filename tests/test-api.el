@@ -24,6 +24,59 @@
 (defvar kargu-api-stall-timeout)
 (defvar kargu-api-stream-ceiling)
 
+(ert-deftest kargu-api-continuation-errors-never-redeliver-or-clear-new-work-test ()
+  "Sync and async callback failures do not redeliver or release a newer turn."
+  (dolist (synchronous '(nil t))
+    (let ((kargu--generation 100) (kargu--current-process nil) (kargu--busy nil)
+          (kargu--message-history nil) (delivered 0) (stored 0) held)
+      (cl-letf (((symbol-function 'kargu--api-validate-preflight) #'ignore)
+                ((symbol-function 'kargu--build-payload) (lambda () nil))
+                ((symbol-function 'kargu--api-headers) (lambda (&rest _) nil))
+                ((symbol-function 'kargu-api-store-assistant-turn)
+                 (lambda (_) (cl-incf stored)))
+                ((symbol-function 'kargu--api-post)
+                 (lambda (_url _headers _payload _gen callback &rest _)
+                   (setq held callback)
+                   (when synchronous (funcall callback nil)))))
+        (kargu-api--send-turn
+         :prompt "keep this turn" :key "" :base "https://example.invalid"
+         :callback (lambda (_)
+                     (cl-incf delivered)
+                     (setq kargu--generation 200
+                           kargu--current-process 'new-process kargu--busy t)
+                     (error "Continuation failed")))
+        (unless synchronous (funcall held nil))
+        (funcall held nil)
+        (should (= delivered 1))
+        (should (= stored 1))
+        (should (eq kargu--current-process 'new-process))
+        (should kargu--busy)
+        (should (equal (kargu-aget (car kargu--message-history) "content")
+                       "keep this turn"))))))
+
+(ert-deftest kargu-api-reply-storage-failure-is-delivered-once-test ()
+  "Storage failures reach the caller once in both sync and async transports."
+  (dolist (synchronous '(nil t))
+    (let ((kargu--generation 100) (kargu--current-process nil) (kargu--busy nil)
+          (kargu--message-history nil) results held)
+      (cl-letf (((symbol-function 'kargu--api-validate-preflight) #'ignore)
+                ((symbol-function 'kargu--build-payload) (lambda () nil))
+                ((symbol-function 'kargu--api-headers) (lambda (&rest _) nil))
+                ((symbol-function 'kargu-api-store-assistant-turn)
+                 (lambda (_) (error "Storage failed")))
+                ((symbol-function 'kargu--api-post)
+                 (lambda (_url _headers _payload _gen callback &rest _)
+                   (setq held callback)
+                   (when synchronous (funcall callback nil)))))
+        (kargu-api--send-turn :prompt "hello" :key "" :base "https://example.invalid"
+                              :callback (lambda (response) (push response results)))
+        (unless synchronous (funcall held nil))
+        (funcall held nil)
+        (should (= (length results) 1))
+        (should (string-search "Storage failed"
+                               (kargu-response-error-message (car results))))
+        (should-not kargu--busy)))))
+
 (ert-deftest kargu-api-watch-startup-failure-never-launches-a-second-request-test ()
   "Watch failure closes the stream before delivering a single error result."
   (with-temp-buffer

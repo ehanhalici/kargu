@@ -25,6 +25,38 @@
 (declare-function kargu-notify "kargu/ui/notify" (type &optional msg))
 (declare-function kargu-loop--on-thought "kargu/loop/machine" (run response))
 
+(ert-deftest kargu-loop-response-continuation-failure-closes-only-its-run-test ()
+  "A failing response continuation ends its run but never cancels a new owner."
+  (dolist (replace-owner '(nil t))
+    (let* ((run (list :state 'request :iterations 0))
+           (new-run (list :state 'wait))
+           (kargu--loop-run run) (kargu--busy nil) (kargu--generation 100)
+           (kargu--current-process nil) held reports)
+      (plist-put run :on-finish (lambda (report) (push report reports)))
+      (cl-letf (((symbol-function 'kargu-api-send)
+                 (lambda (_prompt callback &rest _) (setq held callback)))
+                ((symbol-function 'kargu--loop-handle-response)
+                 (lambda (_run _response)
+                   (when replace-owner
+                     (setq kargu--loop-run new-run kargu--generation 200
+                           kargu--busy t kargu--current-process 'new-process))
+                   (error "Response handler failed"))))
+        (kargu-loop--send-model run "hello")
+        (funcall held nil)
+        (cond
+         (replace-owner
+          (should (eq kargu--loop-run new-run))
+          (should (= kargu--generation 200))
+          (should kargu--busy)
+          (should (eq kargu--current-process 'new-process))
+          (should-not reports))
+         (t
+          (should-not (kargu-loop-running-p))
+          (should-not kargu--busy)
+          (should (= (length reports) 1))
+          (should (eq (plist-get (car reports) :status) :error))
+          (should (equal (plist-get (car reports) :error) "Response handler failed"))))))))
+
 (ert-deftest kargu-loop-synchronous-startup-failure-releases-run-test ()
   "An initial request exception closes its run and permits another submission."
   (let ((kargu--loop-run nil) (kargu--busy nil) (kargu--generation 80) reports)

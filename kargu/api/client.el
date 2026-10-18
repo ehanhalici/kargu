@@ -90,41 +90,66 @@ RECORD-TURN permits storage of the reply in the active conversation."
       (kargu-api--send-turn :prompt prompt :callback callback :on-delta on-delta
                             :key key :base base :record-turn record-turn)))))
 
+(cl-defstruct (kargu-api--delivery (:constructor kargu-api--make-delivery))
+  "One turn's response owner, including a terminal single-delivery state."
+  callback generation record-turn (state :pending))
+
+(defun kargu-api--delivery-live-p (delivery)
+  "Return non-nil when DELIVERY still owns the current request."
+  (and (eq (kargu-api--delivery-state delivery) :pending)
+       (= (kargu-api--delivery-generation delivery) kargu--generation)))
+
+(defun kargu-api--deliver (delivery response)
+  "Claim DELIVERY and store or forward RESPONSE exactly once."
+  (when (kargu-api--delivery-live-p delivery)
+    (setf (kargu-api--delivery-state delivery) :delivered)
+    (let ((result
+           (condition-case err
+               (progn
+                 (when (and (kargu-api--delivery-record-turn delivery)
+                            (not (kargu-response-error-message response)))
+                   (kargu-api-store-assistant-turn response))
+                 response)
+             (error (kargu--api-error-alist (error-message-string err))))))
+      (when (= (kargu-api--delivery-generation delivery) kargu--generation)
+        (kargu--api-cancel-busy))
+      (condition-case err
+          (funcall (kargu-api--delivery-callback delivery) result)
+        (error (kargu-log 'error "API continuation failed: %s"
+                          (error-message-string err)))))))
+
 (cl-defun kargu-api--send-turn (&key prompt callback on-delta key base (record-turn t))
   "Append PROMPT and start a request using KEY and BASE.
 Deliver events to ON-DELTA and the response to CALLBACK.
 RECORD-TURN permits storage of the reply in the active conversation."
-  (let ((added-prompt-p (and prompt (not (string-empty-p prompt)))))
+  (let ((added-prompt-p (and prompt (not (string-empty-p prompt))))
+        (delivery (kargu-api--make-delivery :callback callback :record-turn record-turn
+                                           :generation kargu--generation)))
     (when added-prompt-p (kargu--history-add "user" prompt))
     (condition-case-unless-debug err
         (progn
           (kargu--api-validate-preflight prompt)
-          (kargu-api--start-turn :callback callback :on-delta on-delta
-                                 :key key :base base :record-turn record-turn))
+          (kargu-api--start-turn :delivery delivery :on-delta on-delta
+                                 :key key :base base))
       (error
-       (kargu--api-cancel-busy)
-       (kargu--api-rollback-prompt prompt added-prompt-p)
-       (funcall callback (kargu--api-error-alist (error-message-string err)))))))
+       (when (kargu-api--delivery-live-p delivery)
+         (kargu--api-rollback-prompt prompt added-prompt-p)
+         (kargu-api--deliver delivery (kargu--api-error-alist (error-message-string err))))))))
 
-(cl-defun kargu-api--start-turn (&key callback on-delta key base (record-turn t))
+(cl-defun kargu-api--start-turn (&key delivery on-delta key base)
   "Post the validated history using KEY and BASE.
-Deliver events to ON-DELTA and the response to CALLBACK.
-RECORD-TURN permits storage of the reply in the active conversation."
-  (let* ((gen (cl-incf kargu--generation))
-         (fmt (kargu-api-active-format))
-         (payload (kargu-api-prepare-payload (kargu--build-payload) fmt))
-         (delta (and (kargu-provider-format-stream-p fmt) on-delta)))
-    (setq kargu--busy t)
-    (kargu-state-transition-status :requesting)
-    (kargu--api-post
-     (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
-     (lambda (response)
-       (unwind-protect
-           (when (and record-turn (not (kargu-response-error-message response)))
-             (kargu-api-store-assistant-turn response))
-         (kargu--api-cancel-busy))
-       (funcall callback response))
-     delta)))
+Send events to ON-DELTA and the response through DELIVERY."
+  (let ((gen (cl-incf kargu--generation)))
+    (setf (kargu-api--delivery-generation delivery) gen)
+    (let* ((fmt (kargu-api-active-format))
+           (payload (kargu-api-prepare-payload (kargu--build-payload) fmt))
+           (delta (and (kargu-provider-format-stream-p fmt) on-delta)))
+      (setq kargu--busy t)
+      (kargu-state-transition-status :requesting)
+      (kargu--api-post
+       (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
+       (lambda (response) (kargu-api--deliver delivery response))
+       delta))))
 
 (defun kargu-test-connection ()
   "Ping the active provider with a minimal request and report the result.

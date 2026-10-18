@@ -79,6 +79,12 @@ raises synchronously. Prompt wrapping happens before the run is published;
 failure after publication follows the regular error cleanup and releases an
 owned canary. ERT also checks that a subsequent run can start immediately.
 
+`ModelCallbackFailure` closes a live run when its response continuation raises,
+even after a handler entered another live state. It cancels owned work, repairs
+open tool calls and releases the canary. API response delivery is claimed before
+history storage or user continuation; ERT checks synchronous and asynchronous
+exceptions, duplicate deliveries and replacement by a newer request or run.
+
 ### The protocol wall
 
 `ValidateHistory(hist, fix)` follows `kargu--validate-history`:
