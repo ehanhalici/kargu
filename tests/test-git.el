@@ -79,6 +79,51 @@
         (should (zerop (call-process "git" nil t nil "ls-files")))
         (should (string-empty-p (buffer-string)))))))
 
+(ert-deftest kargu-git-status-nul-records-preserve-paths-and-conflicts-test ()
+  "NUL records preserve every path byte and consume rename source records."
+  (let* ((path " leading ünicode\nfile.txt ")
+         (parsed (kargu-git--parse-porcelain-status
+                  (list (concat "?? " path) "R  renamed.txt" "original -> file.txt"
+                        "UU conflict.txt" "?? after-rename.txt"))))
+    (should (equal (kargu-git--file-status-path (cadr (plist-get parsed :untracked))) path))
+    (should (= (length (plist-get parsed :untracked)) 2))
+    (let ((renamed (car (plist-get parsed :staged))))
+      (should (equal (kargu-git--file-status-path renamed) "renamed.txt"))
+      (should (equal (kargu-git--file-status-old-path renamed) "original -> file.txt")))
+    (should (= (length (plist-get parsed :conflicts)) 1))
+    (should-not (plist-get parsed :unstaged))
+    (should (string-search "\\n" (kargu-git--display-path path)))
+    (should-not (string-search "\n" (kargu-git--display-path path)))))
+
+(ert-deftest kargu-git-status-reads-actual-unicode-and-newline-paths-test ()
+  "Real Git status never splits a filename at a newline or quotes Unicode away."
+  (kargu-test-with-git-repo kargu-git-test--files
+    (dolist (name '("a space.txt" "ünicode.txt" "line\nbreak.txt"))
+      (with-temp-file (expand-file-name name repo) (insert "new")))
+    (should (zerop (call-process "git" nil nil nil "mv" "--" "a.txt" "renamed ü.txt")))
+    (let ((status (kargu-test-await #'kargu-git-status)))
+      (should (string-search "a space.txt" status))
+      (should (string-search "ünicode.txt" status))
+      (should (string-search "line\\nbreak.txt" status))
+      (should (string-search "a.txt -> renamed ü.txt" status))
+      (should (string-search "Untracked files (3)" status)))))
+
+(ert-deftest kargu-git-status-reports-real-merge-conflicts-separately-test ()
+  "An actual unmerged path is not misrepresented as ordinary staged changes."
+  (kargu-test-with-git-repo kargu-git-test--files
+    (should (zerop (call-process "git" nil nil nil "checkout" "-b" "side")))
+    (with-temp-file (expand-file-name "a.txt" repo) (insert "side version\n"))
+    (should (zerop (call-process "git" nil nil nil "commit" "-am" "side")))
+    (should (zerop (call-process "git" nil nil nil "checkout" "main")))
+    (with-temp-file (expand-file-name "a.txt" repo) (insert "main version\n"))
+    (should (zerop (call-process "git" nil nil nil "commit" "-am" "main")))
+    (should (= (call-process "git" nil nil nil "merge" "--no-edit" "side") 1))
+    (let ((status (kargu-test-await #'kargu-git-status)))
+      (should (string-search "Merge conflicts (1)" status))
+      (should (string-search "UU a.txt" status))
+      (should (string-search "Staged changes (0)" status))
+      (should (string-search "Unstaged changes (0)" status)))))
+
 (ert-deftest kargu-git-status-test ()
   "Ensure kargu-git-status returns formatted Magit-style sections."
   (kargu-test-with-git-repo kargu-git-test--files

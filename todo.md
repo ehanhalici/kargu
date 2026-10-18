@@ -114,9 +114,6 @@ Kod tabanındaki tüm dosyalar (`ui/`, `async.el`, `api/`, `providers/`, `chat/`
   - `kargu-search--grep-rg`, çağrıya `--max-count <cap>` argümanı ekler.
   - Ripgrep spesifikasyonunda `--max-count`, arama genelinde toplam eşleşme sayısını değil, **her bir dosya içindeki** maksimum eşleşme sayısını sınırlar.
   - Yüzlerce dosyanın bulunduğu bir depoda `cap` 50 olarak verilse dahi, her dosyadan 50'şer eşleşme toplanarak binlerce satırlık çıktı üretilir ve süreç gereksiz CPU/bellek tüketir.
-- **`tools/git.el:86-103`: Git Porcelain Çıktısında Tırnaklı (Quoted) Yolların ve Çakışmaların (Conflicts) Yanlış İşlenmesi (K).**
-  - `kargu-git--parse-porcelain-status`, satırın ilk 3 karakterinden sonrasını `(substring line 3)` ile doğrudan alır. Boşluklu veya UTF-8/Unicode karakterli dosya adlarında git yolu çift tırnak (`"path with spaces"`) içine alır; tırnaklar temizlenmediği için sonraki `git_stage` veya `git_unstage` çağrıları `fatal: pathspec did not match any files` hatasıyla başarısız olur.
-  - Ayrıca `UU` (unmerged/conflict) durumundaki çakışan dosyalar `staged` ve `unstaged` listelerine dağıtılır; ayrıştırıcıda çakışma (`:conflict`) sınıflandırması bulunmadığından model merge çakışmasını fark edemez.
 
 #### 14. Formal Protokol İhlalleri ve Geçmiş Onarım Tutarsızlıkları (`history/repair.el`, `proof/KarguProtocol.tla`)
 

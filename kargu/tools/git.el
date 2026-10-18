@@ -27,6 +27,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
 
 (require 'kargu/core)
 (require 'kargu/contract)
@@ -97,23 +98,55 @@ A name that starts with a dash would be read by git as an option."
 
 ;;;; Status ---------------------------------------------------------------
 
-(defun kargu-git--parse-porcelain-status (lines)
-  "Parse porcelain status LINES into a plist (:staged :unstaged :untracked)."
-  (let (staged unstaged untracked)
-    (dolist (line lines)
-      (when (>= (length line) 3)
-        (let ((x (aref line 0))
-              (y (aref line 1))
-              (path (string-trim (substring line 3))))
-          (cond
-           ((and (= x ??) (= y ??))
-            (push path untracked))
-           (t
-            (unless (= x ?\s)
-              (push (format "%c %s" x path) staged))
-            (unless (= y ?\s)
-              (push (format "%c %s" y path) unstaged)))))))
-    (list :staged staged :unstaged unstaged :untracked untracked)))
+(cl-defstruct (kargu-git--file-status (:constructor kargu-git--make-file-status)
+                                    (:copier kargu-git--copy-file-status))
+  "One raw path and optional rename source from a porcelain status record."
+  path old-path status)
+
+(defconst kargu-git--conflict-states '("DD" "AU" "UD" "UA" "DU" "AA" "UU")
+  "Porcelain XY states representing unresolved merge conflicts.")
+
+(defun kargu-git--parse-porcelain-status (records)
+  "Parse NUL-separated porcelain RECORDS without unquoting or trimming paths."
+  (let (staged unstaged untracked conflicts)
+    (while records
+      (let* ((record (pop records))
+             (state (substring record 0 2))
+             (x (aref state 0)) (y (aref state 1))
+             (entry (kargu-git--make-file-status :path (substring record 3))))
+        (when (or (memq x '(?R ?C)) (memq y '(?R ?C)))
+          (unless records (error "Incomplete Git rename record"))
+          (setf (kargu-git--file-status-old-path entry) (pop records)))
+        (cond
+         ((equal state "??") (push entry untracked))
+         ((member state kargu-git--conflict-states)
+          (setf (kargu-git--file-status-status entry) state)
+          (push entry conflicts))
+         (t
+          (unless (= x ?\s)
+            (let ((item (kargu-git--copy-file-status entry)))
+              (setf (kargu-git--file-status-status item) (char-to-string x))
+              (push item staged)))
+          (unless (= y ?\s)
+            (setf (kargu-git--file-status-status entry) (char-to-string y))
+            (push entry unstaged))))))
+    (list :staged staged :unstaged unstaged :untracked untracked :conflicts conflicts)))
+
+(defun kargu-git--display-path (path)
+  "Render PATH on one line, quoting control characters but preserving Unicode."
+  (if (string-match-p (rx (or cntrl (any "\"\\"))) path)
+      (let ((print-escape-newlines t) (print-escape-control-characters t)
+            (print-escape-nonascii nil))
+        (prin1-to-string path))
+    path))
+
+(defun kargu-git--status-entry-text (entry)
+  "Format one parsed status ENTRY without changing its raw path."
+  (let ((status (kargu-git--file-status-status entry))
+        (old (kargu-git--file-status-old-path entry)))
+    (concat (when status (concat status " "))
+            (when old (concat (kargu-git--display-path old) " -> "))
+            (kargu-git--display-path (kargu-git--file-status-path entry)))))
 
 (defun kargu-git--insert-status-section (title items)
   "Insert formatted status section for TITLE with ITEMS into current buffer."
@@ -121,7 +154,7 @@ A name that starts with a dash would be read by git as an option."
   (if (null items)
       (insert "  (none)\n")
     (dolist (item (nreverse items))
-      (insert (format "  %s\n" item)))))
+      (insert (format "  %s\n" (kargu-git--status-entry-text item))))))
 
 ;; Every command function below validates and asks for approval first, then
 ;; starts git and passes its result string to CALLBACK.  An error after the
@@ -134,9 +167,9 @@ A name that starts with a dash would be read by git as an option."
         "HEAD (detached)"
       (car (split-string name " \\[" t)))))
 
-(defun kargu-git--format-status (root header lines)
-  "Status report for ROOT from porcelain HEADER line and file LINES."
-  (let ((parsed (kargu-git--parse-porcelain-status lines)))
+(defun kargu-git--format-status (root header records)
+  "Format ROOT's status from branch HEADER and parsed file RECORDS."
+  (let ((parsed (kargu-git--parse-porcelain-status records)))
     (with-temp-buffer
       (insert (format "Head:     %s\n" (kargu-git--first-line-branch header)))
       (when (string-match-p "\\[" header)
@@ -147,20 +180,24 @@ A name that starts with a dash would be read by git as an option."
       (kargu-git--insert-status-section "Unstaged changes" (plist-get parsed :unstaged))
       (insert "\n")
       (kargu-git--insert-status-section "Untracked files" (plist-get parsed :untracked))
+      (insert "\n")
+      (kargu-git--insert-status-section "Merge conflicts" (plist-get parsed :conflicts))
       (buffer-string))))
 
 (defun kargu-git-status (callback &optional root)
   "Pass a structured, Magit-style Git status report for ROOT to CALLBACK."
   (let ((proj-root (or root (kargu-permission-project-root))))
     (kargu-git--run
-     '("status" "--porcelain=v1" "-b") proj-root
+     '("status" "--porcelain=v1" "-b" "-z") proj-root
      (lambda (res)
        (kargu-process-deliver
         callback
         (lambda ()
           (unless (eql (car res) 0)
             (error "Git status failed: %s" (cdr res)))
-          (let ((lines (split-string (cdr res) "\n" t)))
+          (unless (string-suffix-p "\0" (cdr res))
+            (error "Git status returned incomplete records"))
+          (let ((lines (split-string (cdr res) "\0" t)))
             (kargu-git--format-status proj-root (or (car lines) "") (cdr lines)))))))))
 
 ;;;; Diff -----------------------------------------------------------------
