@@ -21,7 +21,20 @@
 (defvar kargu-permission--deferring nil
   "Non-nil while `kargu-permission-call-async' collects an approval request.")
 (defvar kargu-permission--preapproved nil
-  "Commands the user already approved during the current tool call.")
+  "Scoped approvals granted during the current tool call.")
+
+(cl-defstruct (kargu-permission--approval
+               (:constructor kargu-permission--make-approval))
+  "Immutable command, canonical directory and risk snapshot shown to the user."
+  command directory risks)
+
+(defun kargu-permission--approval-key (command directory risks)
+  "Snapshot COMMAND, DIRECTORY and RISKS for exact approval matching."
+  (kargu-permission--make-approval
+   :command (copy-sequence command)
+   :directory (file-name-as-directory
+               (file-truename (expand-file-name (or directory default-directory))))
+   :risks (sort (delete-dups (mapcar #'copy-sequence risks)) #'string<)))
 
 (defun kargu-permission--auto-decision (risks)
   "Decision that needs no human: `approve', `reject', or nil to ask.
@@ -88,12 +101,20 @@ or `kargu-permission-call-async' for that."
 (defun kargu-permission-approve (command dir &optional risks)
   "Return approval for COMMAND in DIR after evaluating optional RISKS.
 Inside asynchronous permission handling, defer an unanswered request."
-  (cond
-   ((member command kargu-permission--preapproved) t)
-   ((and kargu-permission--deferring
-         (null (kargu-permission--auto-decision risks)))
-    (throw 'kargu-permission-defer (list command dir risks)))
-   (t (kargu-permission-request-approval command dir risks))))
+  (let ((request (kargu-permission--approval-key command dir risks)))
+    (cond
+     ((member request kargu-permission--preapproved) t)
+     ((and kargu-permission--deferring
+           (null (kargu-permission--auto-decision risks)))
+      (throw 'kargu-permission-defer request))
+     (t (kargu-permission-request-approval command dir risks)))))
+
+(defun kargu-permission--deliver (callback result)
+  "Deliver RESULT once to CALLBACK, logging continuation errors."
+  (condition-case err
+      (save-match-data (funcall callback result))
+    (error (kargu-log 'warn "Permission continuation failed: %s"
+                      (error-message-string err)))))
 
 (defun kargu-permission--run-thunk (thunk done)
   "Call THUNK with DONE; a signal becomes an ERROR result passed to DONE."
@@ -107,7 +128,7 @@ THUNK takes a DONE function and must call it with the result, now or later.
 It asks for approvals with `kargu-permission-approve' before any side
 effect.  When one needs the human, the question is put through
 `kargu-ui-confirm', and THUNK runs again after the answer; a rejection
-becomes an ERROR result.  PREAPPROVED lists commands already approved."
+becomes an ERROR result.  PREAPPROVED lists scoped approval snapshots."
   (let* ((kargu-permission--preapproved preapproved)
          (in-catch t)
          (early :pending)
@@ -117,27 +138,32 @@ becomes an ERROR result.  PREAPPROVED lists commands already approved."
                    (setq delivered t)
                    (if in-catch
                        (setq early result)
-                     (funcall callback result)))))
+                     (kargu-permission--deliver callback result)))))
          (request (catch 'kargu-permission-defer
                     (let ((kargu-permission--deferring t))
                       (kargu-permission--run-thunk thunk done))
                     nil)))
     (setq in-catch nil)
     (cond
-     (request (kargu-permission--defer-to-user request thunk callback preapproved))
-     ((not (eq early :pending)) (funcall callback early)))))
+     (request (kargu-permission--defer-to-user
+               request :thunk thunk :callback callback :preapproved preapproved))
+     ((not (eq early :pending)) (kargu-permission--deliver callback early)))))
 
-(defun kargu-permission--defer-to-user (request thunk callback preapproved)
-  "Ask about REQUEST and resume THUNK with PREAPPROVED commands.
+(cl-defun kargu-permission--defer-to-user (request &key thunk callback preapproved)
+  "Ask about REQUEST and resume THUNK with PREAPPROVED snapshots.
 Report rejection or the resumed result to CALLBACK."
-  (pcase-let ((`(,command ,dir ,risks) request))
+  (let ((state :pending)
+        (command (kargu-permission--approval-command request)))
     (kargu-permission-request-approval-async
-     command dir risks
+     command (kargu-permission--approval-directory request)
+     (kargu-permission--approval-risks request)
      (lambda (ok)
-       (if ok
-           (kargu-permission-call-async thunk callback (cons command preapproved))
-         (funcall callback
-                  (format "ERROR: %s was not approved by the user" command)))))))
+       (when (eq state :pending)
+         (setq state :answered)
+         (if ok
+             (kargu-permission-call-async thunk callback (cons request preapproved))
+           (kargu-permission--deliver
+            callback (format "ERROR: %s was not approved by the user" command))))))))
 
 (provide 'kargu/permission/policy)
 

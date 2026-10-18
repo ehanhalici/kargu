@@ -192,6 +192,37 @@
         (kargu-test-permission-click (car case))
         (should (eq verdict (cdr case)))))))
 
+(ert-deftest kargu-permission-approval-is-scoped-to-directory-and-risks-test ()
+  "The same command requires distinct approvals when its context changes."
+  (let ((asked nil) (delivered 0))
+    (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
+               (lambda (command directory risks callback)
+                 (push (list command directory risks) asked)
+                 (funcall callback t)
+                 (funcall callback t)))
+              ((symbol-function 'kargu-permission--auto-decision) (lambda (_) nil)))
+      (kargu-permission-call-async
+       (lambda (done)
+         (dolist (entry '(("/tmp/project-a" ("first risk"))
+                          ("/tmp/project-b" ("first risk"))
+                          ("/tmp/project-b" ("second risk"))))
+           (should (kargu-permission-approve "same command" (car entry) (cadr entry))))
+         (funcall done "done"))
+       (lambda (_) (cl-incf delivered))))
+    (should (= (length asked) 3))
+    (should (= delivered 1))))
+
+(ert-deftest kargu-permission-callback-failure-never-redelivers-test ()
+  "A failing sync or delayed continuation is logged without another delivery."
+  (dolist (delayed '(nil t))
+    (let ((delivered 0) held)
+      (kargu-permission-call-async
+       (lambda (done) (setq held done) (unless delayed (funcall done "ok")))
+       (lambda (_) (cl-incf delivered) (error "Bad continuation")))
+      (funcall held "ok")
+      (funcall held "duplicate")
+      (should (= delivered 1)))))
+
 (ert-deftest kargu-permission-call-async-asks-then-reruns-test ()
   "A tool body that needs approval is re-run once after the human approves."
   (let ((kargu-permission--mock-decision nil)
