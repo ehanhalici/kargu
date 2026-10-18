@@ -113,6 +113,12 @@ configure provider-side routing presets in the provider dashboard instead.
 
 ## Development
 
+Wire JSON uses string-keyed hash tables for objects and vectors for arrays.
+Empty objects, arrays, null and false remain distinct. Native agent records
+still use alists internally; their adapter is `kargu-json-encode-record` /
+`kargu-json-to-record`. New wire code must not infer objects from Lisp lists;
+represent arbitrary nested arrays with vectors.
+
 ### Prompt caching and low usage
 
 Enable `kargu-low-usage-mode` with `setq` or the tuning menu's `l` key.

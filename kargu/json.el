@@ -6,8 +6,8 @@
 
 ;;; Commentary:
 
-;; Alist JSON with a depth cap of 32.  Public helpers: `kargu--json-encode', `kargu--json-decode', `kargu--coerce-text'.
-;; Requires: `kargu/core'.
+;; Wire objects are hash tables and arrays are vectors.  Native agent
+;; records use explicit adapter conversion rather than wire type guesses.
 
 ;;; Code:
 
@@ -18,54 +18,33 @@
 
 ;;;; JSON helpers ---------------------------------------------------------
 
-(defconst kargu--json-supports-key-type
-  (condition-case nil
-      (progn
-        ;; `{}` decodes to nil (empty alist); ignore the value, we
-        ;; only care whether `:key-type string' is accepted.
-        (ignore
-         (json-parse-string
-          "{}"
-          :object-type 'alist
-          :array-type 'list
-          :key-type 'string
-          :null-object :json-null
-          :false-object :json-false))
-        t)
-    (error nil))
-  "Non-nil when `json-parse-string' accepts `:key-type string'.
-Some Emacs 30 builds (notably certain Nix packages) reject that
-keyword and treat `string' as a leftover argument, which made
-every SSE chunk look like invalid JSON.")
-
 (defun kargu--object-p (object)
-  "Return non-nil if OBJECT is an alist encoding a JSON object.
-A JSON object is a list whose every element is a (KEY . VALUE)
-cons with a string or symbol KEY.  Lists of alists (parsed JSON
-arrays of objects) are deliberately NOT objects, which is what
-disambiguates arrays from objects in `kargu--json-encode'."
-  (and (consp object)
-       (cl-every (lambda (cell)
-                   (and (consp cell)
-                        (or (stringp (car cell)) (symbolp (car cell)))))
-                 object)))
+  "Return non-nil if OBJECT is a typed JSON object or native record.
+Native records use alists with string or symbol keys.  This predicate
+is not used to infer the wire type of arbitrary lists."
+  (or (hash-table-p object)
+      (and (consp object)
+           (cl-every (lambda (cell)
+                       (and (consp cell)
+                            (or (stringp (car cell)) (symbolp (car cell)))))
+                     object))))
 
-(defun kargu--json-stringify-keys (object)
-  "Return OBJECT with JSON object keys converted to strings.
-Walks alists and arrays recursively so `kargu-aget' (string
-keys) works even when the parser interned keys as symbols."
+(defun kargu-json-to-record (object)
+  "Copy typed JSON OBJECT into native agent records.
+Nonempty objects become alists; empty objects remain hash tables.
+Arrays stay vectors, so nested arrays never become ambiguous lists."
   (cond
-   ((kargu--object-p object)
-    (mapcar (lambda (cell)
-              (cons (if (symbolp (car cell))
-                        (symbol-name (car cell))
-                      (car cell))
-                    (kargu--json-stringify-keys (cdr cell))))
-            object))
+   ((hash-table-p object)
+    (if (zerop (hash-table-count object)) (copy-hash-table object)
+      (let (record)
+        (maphash (lambda (key value)
+                   (push (cons key (kargu-json-to-record value)) record)) object)
+        (nreverse record))))
    ((vectorp object)
-    (vconcat (mapcar #'kargu--json-stringify-keys object)))
-   ((listp object)
-    (mapcar #'kargu--json-stringify-keys object))
+    (vconcat (mapcar #'kargu-json-to-record object)))
+   ((consp object)
+    (cons (kargu-json-to-record (car object))
+          (kargu-json-to-record (cdr object))))
    (t object)))
 
 (defun kargu-seq-to-list (seq)
@@ -77,34 +56,12 @@ If SEQ is nil, return nil."
    (seq (list seq))
    (t nil)))
 
-(defun kargu--json-parse-raw (string)
-  "Parse JSON STRING to alists/lists with the working parser flags."
-  (if kargu--json-supports-key-type
-      (json-parse-string string
-                         :object-type 'alist
-                         :array-type 'list
-                         :key-type 'string
-                         :null-object :json-null
-                         :false-object :json-false)
-    (json-parse-string string
-                       :object-type 'alist
-                       :array-type 'list
-                       :null-object :json-null
-                       :false-object :json-false)))
-
 (defun kargu--json-decode (string)
-  "Decode JSON STRING into alists with string keys.
-Arrays become lists, booleans become :json-false / t, JSON null
-becomes :json-null.  This mirrors the conventions used by
-`json-parse-string' and keeps round-tripping through
-`kargu--json-encode' lossless.
-
-When the native parser rejects `:key-type string', keys are
-interned as symbols and then rewritten to strings."
-  (let ((raw (kargu--json-parse-raw string)))
-    (if kargu--json-supports-key-type
-        raw
-      (kargu--json-stringify-keys raw))))
+  "Decode JSON STRING into hash tables with string keys and vectors.
+JSON null and false become :json-null and :json-false respectively.
+Empty objects and empty arrays retain their distinct wire types."
+  (json-parse-string string :object-type 'hash-table :array-type 'array
+                     :null-object :json-null :false-object :json-false))
 
 (defun kargu--json-decode-safe (string)
   "Decode JSON STRING, logging failures and returning nil."
@@ -121,7 +78,7 @@ interned as symbols and then rewritten to strings."
 
 (defun kargu--json-decode-checked (string)
   "Return (ok . VALUE) when STRING is exactly one JSON value, else nil.
-VALUE may be nil: an empty JSON object `{}` decodes to nil.
+VALUE retains the explicit JSON object, array or scalar type.
 Trailing tokens after the first value (`{}{\"a\":1}`) are not
 accepted; use `kargu--json-decode-last-value-checked' for those."
   (let ((s (and (stringp string) (string-trim string))))
@@ -153,7 +110,7 @@ accepted; use `kargu--json-decode-last-value-checked' for those."
 (defun kargu--json-decode-last-value-checked (string)
   "Return (ok . VALUE) for the last JSON value in STRING, or nil.
 Concatenated values such as `{}{\"file_path\":\"x\"}` keep the last
-object.  VALUE may be nil when that last value is `{}`."
+object.  An empty object remains a hash table."
   (when (and (stringp string) (not (string-empty-p (string-trim string))))
     (condition-case nil
         (with-temp-buffer
@@ -172,7 +129,7 @@ object.  VALUE may be nil when that last value is `{}`."
 
 (defun kargu--json-decode-lenient (string)
   "Decode STRING; on concatenated JSON keep the last value.
-Return (ok . VALUE) or nil.  VALUE may be nil for `{}`."
+Return (ok . VALUE) or nil; VALUE retains its JSON type."
   (let ((trimmed (and (stringp string) (string-trim string))))
     (cond
      ((or (null trimmed) (string-empty-p trimmed)) '(ok . nil))
@@ -186,61 +143,62 @@ Return (ok . VALUE) or nil.  VALUE may be nil for `{}`."
       (kargu--log-block "bad JSON input" (or string ""))
       nil))))
 
-(defun kargu--json-encode-key (key)
-  "Encode an object KEY (string or symbol) as a JSON string."
-  (cond
-   ((stringp key) (json-encode-string key))
-   ((symbolp key) (json-encode-string (symbol-name key)))
-   (t (json-encode-string (format "%s" key)))))
-
 (defconst kargu--json-max-depth 32
   "Maximum nesting depth for JSON encode and text coerce.")
 
-(defun kargu--json-encode (object &optional depth)
-  "Encode OBJECT to a JSON string.
-Optional DEPTH tracks nesting; beyond `kargu--json-max-depth'
-the value is replaced by a short string so circular or
-pathologically nested input cannot blow the stack.
-Conventions:
-  * JSON objects are alists (string or symbol keys);
-  * JSON arrays are vectors, or proper lists that are not
-    objects (see `kargu--object-p');
-  * nil / t / :json-null / :json-false round-trip to
-    null / true / null / false.
-This encoder exists because histories mix data we built
-using alists, with data decoded from responses (list-based), and
-plain `json-encode' cannot tell a list of alists from an alist."
+(defun kargu-json--wire-value (object depth)
+  "Validate and copy typed OBJECT at DEPTH for native JSON serialization."
+  (when (>= depth kargu--json-max-depth) (error "JSON nesting exceeds depth limit"))
+  (cond
+   ((hash-table-p object)
+    (let ((copy (make-hash-table :test #'equal)))
+      (maphash (lambda (key value)
+                 (unless (stringp key) (error "JSON object keys must be strings"))
+                 (puthash key (kargu-json--wire-value value (1+ depth)) copy)) object)
+      copy))
+   ((vectorp object)
+    (vconcat (mapcar (lambda (value) (kargu-json--wire-value value (1+ depth))) object)))
+   ((null object) :json-null)
+   ((or (stringp object) (numberp object) (memq object '(t :json-null :json-false))) object)
+   (t (error "Ambiguous JSON value; use hash tables and vectors: %S" (type-of object)))))
+
+(defun kargu--json-encode (object)
+  "Encode typed JSON OBJECT with the native serializer.
+Objects must be string-keyed hash tables and arrays must be vectors.
+Lisp lists are refused, not guessed to be objects or arrays."
+  (decode-coding-string
+   (json-serialize (kargu-json--wire-value object 0)
+                   :null-object :json-null :false-object :json-false)
+   'utf-8))
+
+(defun kargu-json--record-value (object depth)
+  "Convert native record OBJECT at DEPTH to explicit wire types.
+Native records declare alists as objects and other lists as arrays.
+Arbitrary nested array data must already use vectors."
   (let ((depth (or depth 0)))
     (cond
-     ((>= depth kargu--json-max-depth) "\"[truncated]\"")
+     ((>= depth kargu--json-max-depth) (error "JSON nesting exceeds depth limit"))
      ((or (eq object :json-empty-object)
           (eq object :empty-object)
           (and (consp object) (eq (car object) :json-empty-object)))
-      "{}")
-     ((null object) "null")
-     ((eq object t) "true")
-     ((eq object :json-false) "false")
-     ((eq object :json-null) "null")
-     ((stringp object) (json-encode-string object))
-     ((numberp object) (json-encode object))
-     ((keywordp object) (json-encode-string (substring (symbol-name object) 1)))
-     ((vectorp object)
-      (concat "[" (mapconcat (lambda (elt)
-                               (kargu--json-encode elt (1+ depth)))
-                             object ",") "]"))
+      (make-hash-table :test #'equal))
+     ((hash-table-p object) (kargu-json--wire-value object depth))
      ((kargu--object-p object)
-      (concat "{"
-              (mapconcat (lambda (cell)
-                           (concat (kargu--json-encode-key (car cell))
-                                   ":"
-                                   (kargu--json-encode (cdr cell) (1+ depth))))
-                         object ",")
-              "}"))
-     ((listp object)
-      (concat "[" (mapconcat (lambda (elt)
-                               (kargu--json-encode elt (1+ depth)))
-                             object ",") "]"))
-     (t (json-encode-string (format "%s" object))))))
+      (let ((table (make-hash-table :test #'equal)))
+        (dolist (cell object)
+          (puthash (if (symbolp (car cell)) (symbol-name (car cell)) (car cell))
+                   (kargu-json--record-value (cdr cell) (1+ depth)) table))
+        table))
+     ((or (vectorp object) (consp object))
+      (vconcat (mapcar (lambda (value)
+                        (kargu-json--record-value value (1+ depth))) object)))
+     (t object))))
+
+(defun kargu-json-encode-record (record)
+  "Encode native agent RECORD through the explicit alist adapter.
+Use `kargu--json-encode' for typed wire data, not this adapter.
+Decoded arrays stay vectors, including string matrices."
+  (kargu--json-encode (kargu-json--record-value record 0)))
 
 (defun kargu--coerce-text (value &optional depth)
   "Return a non-empty string extracted from VALUE, or nil.
@@ -291,7 +249,7 @@ are ignored.  Optional DEPTH caps nesting at
       (and (stringp key) (kargu-aget obj (intern key)))))
 
 (defun kargu--json-decode-object (string)
-  "Decode JSON STRING to an alist with string keys, or nil."
+  "Decode JSON STRING to a typed object with string keys, or nil."
   (kargu--json-decode-safe string))
 
 (defun kargu--provider-error-text (obj)

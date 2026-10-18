@@ -154,7 +154,7 @@ Tools hidden by `kargu--tool-visible-p' are skipped."
 
 (defun kargu-tool-schema-char-count ()
   "Return the serialized character cost of currently advertised tool schemas."
-  (length (kargu--json-encode (kargu--build-tools-vector))))
+  (length (kargu-json-encode-record (kargu--build-tools-vector))))
 
 (defun kargu-register-tool-alias (alias name)
   "Expose registered tool NAME under ALIAS as well."
@@ -166,7 +166,7 @@ Tools hidden by `kargu--tool-visible-p' are skipped."
       alias)))
 
 (defun kargu--decode-tool-arguments (arguments)
-  "Normalize tool ARGUMENTS (JSON string, alist or nil) to an alist.
+  "Normalize tool ARGUMENTS to a typed object, native alist or nil.
 A valid empty object {} becomes nil, not a raw fallback.
 Concatenated JSON objects keep the last object."
   (cond
@@ -201,12 +201,12 @@ concatenated or empty snapshots."
   (let ((decoded (kargu--decode-tool-arguments arguments)))
     (cond
      ((null decoded) "{}")
-     ((and (kargu--object-p decoded)
+     ((and (consp decoded)
            (equal (car (car decoded)) "_raw")
            (null (cdr decoded)))
       "{}")
-     ((or (kargu--object-p decoded) (vectorp decoded))
-      (kargu--json-encode decoded))
+     ((kargu--object-p decoded)
+      (kargu-json-encode-record decoded))
      (t "{}"))))
 
 (defun kargu--json-true-p (val)
@@ -258,15 +258,16 @@ JSON false, nil, \"false\", and 0 are false.  A missing value is false."
   "Comma-separated keys present in ARGS, or none."
   (if (not (kargu--object-p args))
       "(none)"
-    (mapconcat (lambda (cell) (format "%s" (car cell))) args ", ")))
+    (mapconcat (lambda (key) (format "%s" key))
+               (if (hash-table-p args) (hash-table-keys args) (mapcar #'car args)) ", ")))
 
 (defun kargu--tool-missing-file-path (args)
   "Describe the missing file path in tool ARGS."
   (let ((keys (kargu--tool-arg-keys args)))
     (if (and (kargu--object-p args)
-             (or (assoc "pattern" args)
-                 (assoc "query" args)
-                 (assoc "regex" args)))
+             (or (kargu-aget args "pattern")
+                 (kargu-aget args "query")
+                 (kargu-aget args "regex")))
         (format "ERROR: missing file_path (also accepted: filePath, path). Got keys: %s. Note: file reading/editing tools require an exact file_path, not a search pattern. To search file contents for a pattern, use 'workspace_grep'. To find files by pattern/glob, use 'find_files'."
                 keys)
       (format "ERROR: missing file_path (also accepted: filePath, path). Got keys: %s"
@@ -329,7 +330,7 @@ so the model can inspect remaining lines using `read_file'."
    ((null res) "OK (no output)")
    ((stringp res)
     (if (string-empty-p res) "OK (no output)" res))
-   (t (kargu--json-encode res))))
+   (t (kargu-json-encode-record res))))
 
 (defun kargu--tool-raw-args (arguments)
   "Return raw string representation of ARGUMENTS for logging."
@@ -337,7 +338,7 @@ so the model can inspect remaining lines using `read_file'."
    ((stringp arguments) arguments)
    ((or (null arguments) (eq arguments :json-null)) "")
    (t (condition-case nil
-          (kargu--json-encode arguments)
+          (kargu-json-encode-record arguments)
         (error (format "%S" arguments))))))
 
 (defun kargu--executor-async-p (executor)

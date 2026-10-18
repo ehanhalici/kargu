@@ -67,7 +67,7 @@
 Preserve valid provider IDs unless they collide within this response or
 with conversation history.  Every consumer must use this same response."
   (condition-case err
-      (let ((copy (copy-tree response t)) (used (kargu-api--used-tool-call-ids)))
+      (let ((copy (kargu-json-to-record response)) (used (kargu-api--used-tool-call-ids)))
         (dolist (choice (kargu-seq-to-list (kargu-aget copy "choices")))
           (when-let* ((message (kargu-aget choice "message")))
             (setcdr (assoc "message" choice) (kargu-api--normalize-message-calls message used))))

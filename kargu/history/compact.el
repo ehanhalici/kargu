@@ -64,7 +64,7 @@ capped at 800k characters.  With no known window, use the configured
   "Estimate serialized history and advertised schema character cost.
 Include system text, structured content, attachments and list/vector tool
 invocations.  Image tokenization remains provider-dependent."
-  (+ (length (kargu--json-encode (vconcat kargu--message-history)))
+  (+ (length (kargu-json-encode-record (vconcat kargu--message-history)))
      (if (fboundp 'kargu-tool-schema-char-count)
          (kargu-tool-schema-char-count)
        0)))

@@ -281,7 +281,7 @@ ALL optionally stages modified files."
   "Project-relative PATHS for ACTION under PROJ-ROOT, in input order.
 `.` stays `.'.  Empty entries are dropped."
   (let (clean)
-    (dolist (p (if (listp paths) paths (list paths)))
+    (dolist (p (kargu-seq-to-list paths))
       (let ((trim (string-trim (format "%s" (or p "")))))
         (unless (string-empty-p trim)
           (push (if (string= trim ".")

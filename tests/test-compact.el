@@ -51,7 +51,7 @@
                    ("tool_calls" . ((("id" . "c1") ("function" . (("arguments" . "large args"))))))))))
       (cl-letf (((symbol-function 'kargu-tool-schema-char-count) (lambda () 123)))
         (should (= (kargu-history-char-count)
-                   (+ 123 (length (kargu--json-encode (vconcat kargu--message-history))))))
+                   (+ 123 (length (kargu-json-encode-record (vconcat kargu--message-history))))))
         (should (> (kargu-history-char-count) 4000))))))
 
 (ert-deftest kargu-history-compact-tail-starts-on-a-user-turn-test ()

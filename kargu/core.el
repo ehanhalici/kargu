@@ -35,13 +35,15 @@
 ;;;; Alist helpers --------------------------------------------------------
 
 (defun kargu-aget (alist key &optional default)
-  "Return the value for string KEY in ALIST, or DEFAULT.
-Safely handles malformed alists, dotted pairs, and non-list data."
-  (if (and (consp alist) (listp (cdr alist)))
+  "Return the value for string KEY in ALIST or a hash table, or DEFAULT.
+Safely handles malformed records, dotted pairs, and non-object data."
+  (cond
+   ((hash-table-p alist) (gethash key alist default))
+   ((and (consp alist) (listp (cdr alist)))
       (condition-case nil
           (alist-get key alist default nil #'equal)
-        (error default))
-    default))
+        (error default)))
+   (t default)))
 
 (defun kargu-nonempty (value)
   "VALUE if it is a non-empty string, else nil."

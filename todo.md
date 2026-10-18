@@ -37,18 +37,6 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 
 ---
 
-### Modül: `json.el`
-
-1. **[K - Yüksek] Boş JSON Nesnesi (`{}`) decode/encode döngüsünde `null`'a dönüşür.**
-   - **Dosya / Satır:** `kargu/json.el:216-223`
-   - **Sorun:** Boş bir JSON nesnesi `"{}"` decode edildiğinde Elisp `nil` döner. Ancak `kargu--json-encode`, `(null object)` gördüğünde doğrudan `"null"` üretir. OpenAI ve Anthropic API'lerinde `arguments: {}` bekleyen araç çağrılarında `null` gitmesi `400 Bad Request` hatasına neden olur.
-2. **[K - Yüksek] 2 boyutlu listeler JSON nesnesi (Alist) olarak kodlanır.**
-   - **Dosya / Satır:** `kargu/json.el:41-51, 231-238`
-   - **Sorun:** `kargu--object-p`, her elemanın `(consp cell)` ve `(car cell)`'in string/symbol olduğunu denetler. İki elemanlı string listelerinden oluşan matrisler (örn. `'(("a" "b") ("c" "d"))`), `("a" . ("b" . nil))` yapısında olduğu için nesne sanılır ve `{"a": ["b"], "c": ["d"]}` olarak hatalı kodlanır.
-   - **Gereken:** Boş nesne/boş dizi ve iç içe diziler için açık tipli temsil; mevcut alist tüketicilerinin göçü ve wire round-trip testleri. Aynı Lisp cons yapısı hem alist hem matris olabildiğinden yalnız predicate'i değiştirmek güvenli değil.
-
----
-
 ### Modül: `api/` (İstekler, Devre Kesici, Yeniden Deneme)
 
 1. **[D - Orta] Model istek yükünde `max_tokens` ve `max_completion_tokens` çakışması.**

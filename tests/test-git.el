@@ -187,6 +187,13 @@
       (should (string-search "a.txt" out))
       (should (string-search "fresh.txt" out)))))
 
+(ert-deftest kargu-git-json-path-arrays-test ()
+  "Decoded JSON path arrays are accepted without converting them to text."
+  (kargu-test-with-git-repo kargu-git-test--files
+    (should (equal (kargu-git--relative-paths
+                    (kargu--json-decode "[\"a.txt\",\"b.txt\"]") "stage" repo)
+                   '("a.txt" "b.txt")))))
+
 (ert-deftest kargu-git-diff-test ()
   "Ensure kargu-git-diff shows the working-tree change."
   (kargu-test-with-git-repo kargu-git-test--files

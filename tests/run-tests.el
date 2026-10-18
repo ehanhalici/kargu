@@ -20,6 +20,7 @@
 (require 'kargu)
 (require 'tests/test-helpers)
 (require 'tests/test-contract)
+(require 'tests/test-json)
 (require 'tests/test-state)
 (require 'tests/test-permission)
 (require 'tests/test-git)

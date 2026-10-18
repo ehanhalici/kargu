@@ -232,7 +232,7 @@ Store MODE-VAL, provider PROV, model MOD, TRANSCRIPT and MESSAGES."
 
 (defun kargu-session--write-data (file dir data sid)
   "Encode and write DATA alist to FILE in DIR, logging for SID."
-  (let ((json-str (kargu--json-encode data)))
+  (let ((json-str (kargu-json-encode-record data)))
     (unless (file-directory-p dir)
       (make-directory dir t))
     (with-temp-file file
@@ -328,7 +328,7 @@ empty strings, not the config fallback."
   (let* ((sid (kargu-aget data "id"))
          (title (kargu-aget data "title"))
          (raw-msgs (kargu-aget data "messages"))
-         (msg-list (if (vectorp raw-msgs) (append raw-msgs nil) raw-msgs))
+         (msg-list (mapcar #'kargu-json-to-record (kargu-seq-to-list raw-msgs)))
          (saved-prov (kargu-aget data "provider"))
          (saved-model (kargu-aget data "model")))
     (setq kargu-chat--session-id sid
@@ -377,7 +377,7 @@ Uses UPDATED-AT and MESSAGE-COUNT for status banner."
 
 (defun kargu-session--read-data (session-or-id root)
   "Read SESSION-OR-ID in project ROOT, or return the supplied session data."
-  (if (consp session-or-id)
+  (if (or (consp session-or-id) (hash-table-p session-or-id))
       session-or-id
     (let ((f (kargu-session--file-path session-or-id root)))
       (when (file-readable-p f)

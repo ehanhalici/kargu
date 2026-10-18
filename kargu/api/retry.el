@@ -131,7 +131,7 @@ Never below 0.5s, even when Retry-After is 0."
   "Wire-dump encoded PAYLOAD.  Never logs headers or API keys."
   (when kargu-log-wire
     (kargu--log-block "OUT request JSON"
-                      (kargu--json-encode payload)
+                      (kargu-json-encode-record payload)
                       t)))
 
 (defun kargu--api-error-looks-retryable-p (message)

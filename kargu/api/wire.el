@@ -210,7 +210,7 @@ A `blocks' message shape is rewritten.  Every other shape is unchanged."
           (push `(("id" . ,(kargu-aget block (plist-get tool-spec :id)))
                   ("type" . "function")
                   ("function" . (("name" . ,(or (kargu-aget block (plist-get tool-spec :name)) "tool"))
-                                 ("arguments" . ,(kargu--json-encode
+                                 ("arguments" . ,(kargu-json-encode-record
                                                   (or (kargu-aget block (plist-get tool-spec :input))
                                                       :json-empty-object))))))
                 calls)))))

@@ -102,7 +102,8 @@
                 (kargu--stream-filter process (substring body index (1+ index)) nil
                                       (lambda (event) (push event events))))
               (kargu--stream-flush process nil (lambda (event) (push event events)))
-              (should (equal (nreverse events) expected)))
+              (should (equal (mapcar #'kargu-json-to-record (nreverse events))
+                             (mapcar #'kargu-json-to-record expected))))
           (delete-process process))))))
 
 (ert-deftest kargu-stream-explicit-error-events-never-look-successful-test ()

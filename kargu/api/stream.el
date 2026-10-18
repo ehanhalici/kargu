@@ -100,7 +100,7 @@ Ignore comments and keep-alive pings."
    ((null new) nil)
    ((eq new :json-null) nil)
    ((or (kargu--object-p new) (vectorp new))
-    (kargu--json-encode new))
+    (kargu-json-encode-record new))
    (t (format "%s" new))))
 
 (defun kargu--merge-tool-args (old new)

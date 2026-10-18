@@ -46,7 +46,7 @@
     (should (kargu-aget (car (kargu-aget body "system")) "cache_control"))
     (should (kargu-aget (aref (kargu-aget body "tools") 0) "cache_control"))
     (should (kargu-aget (aref (kargu-aget result "content") 0) "cache_control"))
-    (should (string-search "cache_control" (kargu--json-encode body)))
+    (should (string-search "cache_control" (kargu-json-encode-record body)))
     (should-not (kargu-aget (aref tools 0) "cache_control"))))
 
 (ert-deftest kargu-cache-tools-are-canonical-and-deterministic-test ()

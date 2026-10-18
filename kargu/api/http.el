@@ -302,7 +302,7 @@ GEN identifies the request; ON-DELTA and ATTEMPT are retained for retries."
     (kargu-http--log-request request 'plain)
     (kargu-http--track-process
      request (plz 'post url
-               :headers headers :body (kargu--json-encode payload)
+               :headers headers :body (kargu-json-encode-record payload)
                :as 'string :timeout kargu-api-timeout
                :then (lambda (body) (kargu-http--finish-plain request body))
                :else (lambda (err) (kargu-http--fail-request request err))))))
@@ -327,7 +327,7 @@ ATTEMPT is the retry count."
          (process
           (plz 'post (kargu-http--request-url request)
                :headers (kargu-http--request-headers request)
-               :body (kargu--json-encode
+               :body (kargu-json-encode-record
                       (append (kargu-http--request-payload request)
                               '(("stream" . t))))
                :as 'string :timeout nil
@@ -407,7 +407,7 @@ PARSED-EVENTS avoids reparsing an already decoded stream."
            (err (and response (kargu-response-error-message response))))
       (when (and kargu-log-wire response)
         (kargu--log-block "IN reconstructed JSON"
-                          (kargu--json-encode response)
+                          (kargu-json-encode-record response)
                           t))
       (cond
        ((and err
