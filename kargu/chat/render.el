@@ -15,6 +15,9 @@
 (require 'kargu/api/tools)
 (require 'kargu/tools/diff)
 
+(defvar kargu--loop-run)
+(defvar kargu-loop-tool-start-hook)
+(defvar kargu-loop-tool-finish-hook)
 (declare-function kargu-plan-handle-response "kargu/plan/dispatch" (report))
 
 (defun kargu-chat--result-summary (result)
@@ -194,27 +197,29 @@ See `kargu-loop-send' for the shape of the report."
         (dolist (win (get-buffer-window-list buf nil t))
           (set-window-point win (point-max)))))))
 
-(defun kargu-chat--finish-tool-activity (live result)
-  "Render tool activity completion with RESULT into LIVE chat buffer."
-  (when live
-    (kargu-chat-insert
-     (format "[%s]\n" (kargu-chat--result-summary result))
-     'kargu-chat-tool)
-    (with-current-buffer live
+(defun kargu-chat--tool-event-buffer (run)
+  "Return RUN's live chat buffer only while RUN owns the active loop."
+  (and (eq run kargu--loop-run)
+       (buffer-live-p (plist-get run :chat-buffer))
+       (plist-get run :chat-buffer)))
+
+(defun kargu-chat--finish-tool-activity (run result)
+  "Render RESULT only in the chat buffer still owned by RUN."
+  (when-let* ((buffer (kargu-chat--tool-event-buffer run)))
+    (with-current-buffer buffer
+      (kargu-chat-insert
+       (format "[%s]\n" (kargu-chat--result-summary result))
+       'kargu-chat-tool)
       (setq kargu-chat--preamble-dropped nil
             kargu-chat--in-thought nil)
       (when (markerp kargu-chat--output-marker)
         (setq kargu-chat--answer-start (copy-marker kargu-chat--output-marker nil))))))
 
-(defun kargu-chat--tool-activity (fn name arguments &optional callback)
-  "Around advice on `kargu-execute-tool' for the chat timeline.
-Prints the tool NAME before it runs — visible while long tools or
-the human ediff gate block — and a one-line summary of the result
-afterwards.  FN is the original function."
-  (kargu-chat--drop-streamed-preamble)
-  (let ((live (kargu-chat-output-buffer)))
-    (when live
+(defun kargu-chat--start-tool-activity (run name arguments)
+  "Render tool NAME and ARGUMENTS only in RUN's own chat buffer."
+  (when-let* ((live (kargu-chat--tool-event-buffer run)))
       (with-current-buffer live
+        (kargu-chat--drop-streamed-preamble)
         (kargu-chat-flush-stream)
         (let ((pos (if (and (markerp kargu-chat--output-marker)
                             (eq (marker-buffer kargu-chat--output-marker) live))
@@ -222,22 +227,15 @@ afterwards.  FN is the original function."
                      (point-max))))
           (unless (or (<= pos (point-min))
                       (eq (char-before pos) ?\n))
-            (kargu-chat-insert "\n"))))
-      (kargu-chat-insert
-       (concat (kargu-chat--tool-heading name arguments) " ")
-       'kargu-chat-tool))
-    (if callback
-        (funcall fn name arguments
-                 (lambda (result)
-                   (kargu-chat--finish-tool-activity live result)
-                   (funcall callback result)))
-      (let ((result (funcall fn name arguments)))
-        (kargu-chat--finish-tool-activity live result)
-        result))))
+            (kargu-chat-insert "\n")))
+        (kargu-chat-insert
+         (concat (kargu-chat--tool-heading name arguments) " ")
+         'kargu-chat-tool))))
 
-(when (fboundp 'kargu-execute-tool)
-  (advice-add 'kargu-execute-tool :around
-              #'kargu-chat--tool-activity))
+;; Remove the old global wrapper when this module is reloaded in a live Emacs.
+(advice-remove 'kargu-execute-tool 'kargu-chat--tool-activity)
+(add-hook 'kargu-loop-tool-start-hook #'kargu-chat--start-tool-activity)
+(add-hook 'kargu-loop-tool-finish-hook #'kargu-chat--finish-tool-activity)
 
 (provide 'kargu/chat/render)
 

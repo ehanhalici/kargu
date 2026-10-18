@@ -19,6 +19,10 @@
 (require 'kargu/ui/confirm)
 
 (defvar kargu-max-healing-steps)
+(defvar kargu-loop-tool-start-hook nil
+  "Observers called with RUN, NAME and ARGS before a tool executes.")
+(defvar kargu-loop-tool-finish-hook nil
+  "Observers called with RUN and RESULT after a tool delivers its result.")
 (declare-function kargu-loop--live-p "kargu/loop" (run))
 (declare-function kargu-loop--set-state "kargu/loop" (run state))
 (declare-function kargu-loop--gate-tool "kargu/loop" (name))
@@ -157,7 +161,21 @@ on RUN, which grants three more identical calls."
     (error (kargu--loop-finish run :error
                                (format "Tool continuation failed: %s" (error-message-string err))))))
 
-(defun kargu--loop-execute-call (run id name args sig queue)
+(defun kargu-loop--notify-tool (hook &rest arguments)
+  "Notify every observer on HOOK with ARGUMENTS, isolating failures."
+  (apply #'run-hook-wrapped
+         hook
+         (lambda (function &rest args)
+           (condition-case err
+               (save-match-data
+                 (save-current-buffer (apply function args)))
+             (error
+              (kargu-log 'warn "Tool observer %S failed: %s"
+                         function (error-message-string err))))
+           nil)
+         arguments))
+
+(cl-defun kargu--loop-execute-call (run &key id name args sig queue)
   "Run tool NAME with ARGS for call ID of RUN and continue with QUEUE.
 SIG keys the read-only cache; delivery is claimed before any continuation."
   (unless (kargu-loop--tool-cacheable-p name)
@@ -167,12 +185,16 @@ SIG keys the read-only cache; delivery is claimed before any continuation."
           (lambda (result)
             (when (and (eq state :pending) (kargu-loop--live-p run))
               (setq state :delivered)
-              (kargu--loop-complete-tool run :id id :name name :result result
-                                         :queue queue :sig sig)))))
+              (kargu-loop--notify-tool 'kargu-loop-tool-finish-hook run result)
+              (when (kargu-loop--live-p run)
+                (kargu--loop-complete-tool run :id id :name name :result result
+                                           :queue queue :sig sig))))))
+    (kargu-loop--notify-tool 'kargu-loop-tool-start-hook run name args)
     (condition-case err
-        (if-let* ((gate (kargu-loop--gate-tool name)))
-            (funcall on-result gate)
-          (kargu-execute-tool name args on-result))
+        (when (kargu-loop--live-p run)
+          (if-let* ((gate (kargu-loop--gate-tool name)))
+              (funcall on-result gate)
+            (kargu-execute-tool name args on-result)))
       (error (funcall on-result (format "ERROR: executing tool %s: %s"
 					name (error-message-string err)))))))
 
@@ -198,9 +220,11 @@ SIG keys the read-only cache; delivery is claimed before any continuation."
          run name args
          (lambda (approved)
            (cond ((not (kargu-loop--live-p run)) nil)
-                 (approved (kargu--loop-execute-call run id name args sig queue))
+                 (approved (kargu--loop-execute-call
+                            run :id id :name name :args args :sig sig :queue queue))
                  (t (kargu--loop-doom-stop run id name queue))))))
-       (t (kargu--loop-execute-call run id name args sig queue))))))
+       (t (kargu--loop-execute-call
+           run :id id :name name :args args :sig sig :queue queue))))))
 
 (defun kargu-loop--classify-after-tool (run files)
   "Classify FILES after a tool result on RUN."

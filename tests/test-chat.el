@@ -446,5 +446,65 @@
             (should (= (point) (+ kargu-chat--prompt-marker 4)))
             (should (= (mark) (+ kargu-chat--prompt-marker 8)))))))))
 
+(ert-deftest kargu-chat-unowned-tool-calls-do-not-pollute-transcript-test ()
+  "Calling the tool API outside a loop leaves an existing chat untouched."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (kargu-chat--ensure-idle-prompt)
+    (let ((before (buffer-string)) (kargu--loop-run nil) result)
+      (kargu-execute-tool "nonexistent-tool" nil (lambda (text) (setq result text)))
+      (should (stringp result))
+      (should (equal-including-properties before (buffer-string))))))
+
+(ert-deftest kargu-chat-owned-tool-events-retain-each-tool-log-test ()
+  "Loop-owned tool activity retains both logs when preambles are hidden."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (kargu-chat--ensure-idle-prompt)
+    (let* ((run (list :state 'tools :chat-buffer (current-buffer)))
+           (kargu--loop-run run)
+           (kargu-chat-drop-preamble t))
+      (kargu-chat--mark-answer-start)
+      (kargu-chat--on-delta "preface to hide")
+      (cl-letf (((symbol-function 'kargu-execute-tool)
+                 (lambda (_name _args callback) (funcall callback "ok")))
+                ((symbol-function 'kargu--loop-after-tool) #'ignore))
+        (dolist (file '("first.el" "second.el"))
+          (kargu--loop-execute-call
+           run :id file :name "read_file" :args (list (cons "file_path" file)))))
+      (should (string-search "first.el" (buffer-string)))
+      (should (string-search "second.el" (buffer-string)))
+      (should-not (string-search "preface to hide" (buffer-string))))))
+
+(ert-deftest kargu-chat-stale-tool-results-and-failing-observers-test ()
+  "A stale result cannot touch a newer run; observers cannot break delivery."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (kargu-chat--ensure-idle-prompt)
+    (let* ((run (list :state 'tools :chat-buffer (current-buffer)))
+           (kargu--loop-run run)
+           (kargu-loop-tool-start-hook
+            (cons (lambda (&rest _) (error "bad observer"))
+                  kargu-loop-tool-start-hook))
+           (kargu-loop-tool-finish-hook
+            (cons (lambda (&rest _) (error "bad observer"))
+                  kargu-loop-tool-finish-hook))
+           callback (deliveries 0))
+      (cl-letf (((symbol-function 'kargu-execute-tool)
+                 (lambda (_name _args cb) (setq callback cb)))
+                ((symbol-function 'kargu--loop-after-tool)
+                 (lambda (&rest _) (cl-incf deliveries))))
+        (kargu--loop-execute-call run :id "one" :name "read_file")
+        (funcall callback "ok")
+        (funcall callback "duplicate")
+        (should (= deliveries 1))
+        (kargu--loop-execute-call run :id "two" :name "read_file")
+        (setq kargu--loop-run (list :state 'tools :chat-buffer (current-buffer)))
+        (let ((before (buffer-string)))
+          (funcall callback "late")
+          (kargu-chat--finish-tool-activity run "late observer")
+          (should (equal-including-properties before (buffer-string))))
+        (should (= deliveries 1))))))
+
 (provide 'tests/test-chat)
 ;;; test-chat.el ends here

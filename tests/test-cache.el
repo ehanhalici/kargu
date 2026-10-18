@@ -141,7 +141,7 @@
               ((symbol-function 'kargu--loop-finish)
                (lambda (_run status &optional _text)
                  (should (eq status :error)) (cl-incf finished) (setq kargu--loop-run nil))))
-      (kargu--loop-execute-call run "c1" "read_file" nil "sig" nil)
+      (kargu--loop-execute-call run :id "c1" :name "read_file" :sig "sig")
       (should (= delivered 1))
       (should (= finished 1)))))
 
