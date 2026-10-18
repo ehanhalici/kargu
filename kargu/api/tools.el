@@ -279,6 +279,48 @@ JSON false, nil, \"false\", and 0 are false.  A missing value is false."
 (defvar-local kargu--tool-output-root nil
   "Canonical project owning this generated tool output buffer.")
 
+(defcustom kargu-tool-output-archive-max-buffers 32
+  "Maximum number of unmodified generated output buffers to retain.
+Zero disables new archives.  User-edited and visiting buffers are detached
+from the archive and never killed to enforce its quota."
+  :type 'natnum :group 'kargu)
+
+(defcustom kargu-tool-output-archive-max-chars 8000000
+  "Total character budget for generated tool output archives.
+A larger single result keeps only its initial characters.  Zero disables
+new archives; detached user buffers do not count toward this budget."
+  :type 'natnum :group 'kargu)
+
+(defvar kargu--tool-output-archive nil
+  "Generated output buffers ordered from oldest to newest.")
+
+(defvar-local kargu--tool-output-tick nil
+  "Modification tick immediately after generated output was inserted.")
+
+(defun kargu--tool-output-evictable-p (buffer)
+  "Return non-nil when BUFFER remains an untouched generated archive."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (and kargu--tool-output-root (not buffer-file-name)
+              (not (buffer-modified-p))
+              (eql kargu--tool-output-tick (buffer-chars-modified-tick))))))
+
+(defun kargu--prune-tool-output (incoming)
+  "Evict oldest untouched archives to make room for INCOMING characters."
+  (setq kargu--tool-output-archive
+        (seq-filter #'kargu--tool-output-evictable-p kargu--tool-output-archive))
+  (let ((count (length kargu--tool-output-archive))
+        (chars (cl-loop for buffer in kargu--tool-output-archive
+                        sum (with-current-buffer buffer (buffer-size)))))
+    (while (and kargu--tool-output-archive
+                (or (>= count kargu-tool-output-archive-max-buffers)
+                    (> (+ chars incoming) kargu-tool-output-archive-max-chars)))
+      (let ((oldest (pop kargu--tool-output-archive)))
+        (cl-decf count)
+        (cl-decf chars (with-current-buffer oldest (buffer-size)))
+        (let ((kill-buffer-query-functions nil))
+          (kill-buffer oldest))))))
+
 (defun kargu-tool-output-buffer (name)
   "Return the generated output buffer NAME owned by the current project.
 User buffers and buffers converted into visiting files are never accepted."
@@ -291,22 +333,37 @@ User buffers and buffers converted into visiting files are never accepted."
         buffer))))
 
 (defun kargu--preserve-tool-output (string)
-  "Preserve STRING in a fresh buffer owned by the current project."
-  (let* ((root (kargu-permission-project-root))
-         (buffer (generate-new-buffer
-                  (format "*kargu-output-%d*" (cl-incf kargu--truncated-counter)))))
-    (with-current-buffer buffer
-      (insert string)
-      (setq-local kargu--tool-output-root root
-                  buffer-offer-save nil
-                  buffer-read-only t)
-      (set-buffer-modified-p nil))
-    (buffer-name buffer)))
+  "Archive STRING within the quotas; return its buffer name, or nil.
+The buffer belongs to the current project.  An oversized STRING retains
+only the initial `kargu-tool-output-archive-max-chars' characters."
+  (when (and (> kargu-tool-output-archive-max-buffers 0)
+             (> kargu-tool-output-archive-max-chars 0))
+    (let ((chars (min (length string) kargu-tool-output-archive-max-chars))
+          (root (kargu-permission-project-root)))
+      (kargu--prune-tool-output chars)
+      (let ((buffer (generate-new-buffer
+                     (format "*kargu-output-%d*" (cl-incf kargu--truncated-counter)))))
+        (with-current-buffer buffer
+          (insert (substring string 0 chars))
+          (setq-local kargu--tool-output-root root
+                      kargu--tool-output-tick (buffer-chars-modified-tick)
+                      buffer-offer-save nil
+                      buffer-read-only t)
+          (set-buffer-modified-p nil))
+        (setq kargu--tool-output-archive (nconc kargu--tool-output-archive (list buffer)))
+        (buffer-name buffer)))))
+
+(defun kargu--tool-output-archive-note (name total)
+  "Describe archived output NAME, reporting partial storage against TOTAL."
+  (if (not name) "Output not archived (archive quota is zero)."
+    (let ((stored (with-current-buffer (get-buffer name) (buffer-size))))
+      (format "%s preserved in buffer '%s'. Archives may be evicted; read ranges with read_file path='%s' from_line=N to_line=M."
+              (if (= stored total) (format "Complete output (%d chars)" total)
+                (format "Only the first %d of %d chars" stored total)) name name))))
 
 (defun kargu--truncate-for-model (string)
   "Truncate STRING to `kargu-tool-output-limit' characters.
-Preserves the complete output in a buffer named `*kargu-output-<N>*'
-so the model can inspect remaining lines using `read_file'."
+Archive storage is bounded separately and its notice describes any loss."
   (let ((kargu-tool-output-limit
          (kargu-usage-limit kargu-tool-output-limit kargu-low-usage-output-limit)))
     (if (and (natnump kargu-tool-output-limit)
@@ -314,8 +371,8 @@ so the model can inspect remaining lines using `read_file'."
 	(let* ((omitted (- (length string) kargu-tool-output-limit))
                (buf-name (kargu--preserve-tool-output string)))
           (concat (substring string 0 kargu-tool-output-limit)
-                  (format "\n... [Output truncated: omitted %d chars. Complete output (%d chars) preserved in buffer '%s'. You can read specific line ranges using read_file with path='%s' from_line=N to_line=M]"
-                          omitted (length string) buf-name buf-name)))
+                  (format "\n... [Output truncated: omitted %d chars. %s]"
+                          omitted (kargu--tool-output-archive-note buf-name (length string)))))
       string)))
 
 (defmacro kargu-safe-tool-call (&rest body)

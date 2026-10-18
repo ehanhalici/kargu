@@ -56,6 +56,62 @@
           (kill-buffer buffer)))
       (delete-directory other-root))))
 
+(ert-deftest kargu-tool-output-archive-enforces-count-and-size-test ()
+  "The oldest generated buffers are evicted to satisfy both quotas."
+  (let ((kargu--tool-output-archive nil)
+        (kargu-tool-output-archive-max-buffers 2)
+        (kargu-tool-output-archive-max-chars 8) buffers)
+    (unwind-protect
+        (progn
+          (dotimes (_ 3)
+            (push (get-buffer (kargu--preserve-tool-output "abcd")) buffers))
+          (should-not (buffer-live-p (nth 2 buffers)))
+          (should (buffer-live-p (nth 1 buffers)))
+          (should (buffer-live-p (car buffers)))
+          (let ((kargu-tool-output-archive-max-chars 4))
+            (push (get-buffer (kargu--preserve-tool-output "x")) buffers)
+            (should-not (buffer-live-p (nth 2 buffers)))
+            (should-not (buffer-live-p (nth 1 buffers)))))
+      (dolist (buffer buffers) (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest kargu-tool-output-archive-protects-user-changes-test ()
+  "Edited, saved-as and externally converted archive buffers are not killed."
+  (let ((kargu--tool-output-archive nil)
+        (kargu-tool-output-archive-max-buffers 1)
+        (kargu-tool-output-archive-max-chars 8) buffers)
+    (unwind-protect
+        (progn
+          (dolist (kind '(edited converted reset-modified))
+            (let ((buffer (get-buffer (kargu--preserve-tool-output "old"))))
+              (push buffer buffers)
+              (with-current-buffer buffer
+                (pcase kind
+                  ('converted (setq-local buffer-file-name "/not-written/output.txt"))
+                  (_ (let ((inhibit-read-only t)) (insert "user"))
+                     (when (eq kind 'reset-modified) (set-buffer-modified-p nil)))))
+              (push (get-buffer (kargu--preserve-tool-output "new")) buffers)
+              (should (buffer-live-p buffer)))))
+      (dolist (buffer buffers)
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer))))))
+
+(ert-deftest kargu-tool-output-archive-reports-partial-or-disabled-storage-test ()
+  "Model notices never claim that a quota-cut archive contains the full result."
+  (let ((kargu--tool-output-archive nil)
+        (kargu-tool-output-limit 2)
+        (kargu-tool-output-archive-max-buffers 1)
+        (kargu-tool-output-archive-max-chars 4) buffer)
+    (unwind-protect
+        (let ((notice (kargu--truncate-for-model "0123456789")))
+          (should (string-search "first 4 of 10 chars" notice))
+          (should-not (string-search "Complete output" notice))
+          (setq buffer (car kargu--tool-output-archive))
+          (should (= (with-current-buffer buffer (buffer-size)) 4))
+          (let ((kargu-tool-output-archive-max-chars 0))
+            (should (string-search "not archived" (kargu--truncate-for-model "abcdef")))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
 (ert-deftest kargu-diff-shadow-buffers-never-clobber-existing-content-test ()
   "Same-basename proposals never erase each other or user-owned buffers."
   (let* ((path (expand-file-name "src/shared.el" default-directory))

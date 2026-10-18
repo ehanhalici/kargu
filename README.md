@@ -123,8 +123,12 @@ represent arbitrary nested arrays with vectors.
 
 Enable `kargu-low-usage-mode` with `setq` or the tuning menu's `l` key.
 It caps tool-result context at 6,000 characters and project outlines at 200
-symbols (both customizable). Complete tool output remains in an Emacs buffer
-and can be read in ranges. The selected model and output-token limit stay
+symbols (both customizable). Tool output is archived in Emacs buffers and can
+be read in ranges. The archive retains at most 32 untouched buffers and
+8,000,000 characters by default (`kargu-tool-output-archive-max-buffers` and
+`kargu-tool-output-archive-max-chars`). Oldest archives are evicted; oversized
+results retain a prefix and the model is told exactly what was kept. User-edited
+or saved-as buffers are never evicted. The selected model and output-token limit stay
 unchanged; disabling the mode restores the normal context limits.
 
 Schemas contain sorted canonical tool names; compatibility aliases still
