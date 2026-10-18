@@ -21,7 +21,22 @@
   :group 'kargu-dape)
 
 (defvar kargu-dape--verified nil
-  "Verified adapter identity for the selected project and configuration.")
+  "Map canonical project roots to verified adapter fingerprints, or nil.")
+
+(cl-defstruct (kargu-dape--verification (:constructor kargu-dape--make-verification))
+  "Immutable adapter name and configuration/environment fingerprint."
+  name fingerprint)
+
+(defun kargu-dape--project-verification ()
+  "Return the current project's verified adapter identity, or nil."
+  (when (hash-table-p kargu-dape--verified)
+    (gethash (kargu-permission-project-root) kargu-dape--verified)))
+
+(defun kargu-dape--remember-verification (root identity)
+  "Store verified IDENTITY for ROOT without evicting other projects."
+  (unless (hash-table-p kargu-dape--verified)
+    (setq kargu-dape--verified (make-hash-table :test #'equal)))
+  (puthash (copy-sequence root) identity kargu-dape--verified))
 
 (defconst kargu-dape--module-probe
   "import importlib, sys; importlib.import_module(sys.argv[1])"
@@ -63,21 +78,28 @@
 
 (defun kargu-dape--config-key (config)
   "Identity used to reject stale verification of CONFIG."
-  (list (kargu-permission-project-root) (copy-tree config) (copy-sequence exec-path)))
+  (let ((print-length nil) (print-level nil) (print-circle t)
+        (command (plist-get (cdr config) 'command)))
+    (kargu-dape--make-verification
+     :name (car config)
+     :fingerprint (secure-hash 'sha256 (prin1-to-string
+                                       (list config exec-path process-environment
+                                             (and (stringp command) (executable-find command))))))))
 
 (defun kargu-dape-debug-refusal ()
   "Return the reason debug mode cannot be entered, or nil after verification."
-  (cond
+  (let ((verified (kargu-dape--project-verification)))
+    (cond
    ((not (fboundp 'dape)) "Dape is unavailable; install it with M-x package-install RET dape")
    ((kargu-dape-live-p) nil)
-   ((not kargu-dape--verified) "Debugger dependencies are not verified; select debug using M-x kargu-set-mode")
+   ((not verified) "Debugger dependencies are not verified; select debug using M-x kargu-set-mode")
    (t
-    (let ((config (assq (car (cadr kargu-dape--verified)) dape-configs)))
+    (let ((config (assq (kargu-dape--verification-name verified) dape-configs)))
       (or (kargu-dape--config-error config)
           (when (and kargu-dape-config (not (eq kargu-dape-config (car config))))
             "Debugger selection changed; verify the selected adapter again")
-          (unless (equal kargu-dape--verified (kargu-dape--config-key config))
-            "Debugger project or configuration changed; select debug again"))))))
+          (unless (equal verified (kargu-dape--config-key config))
+            "Debugger project or configuration changed; select debug again")))))))
 
 (defun kargu-dape--guard-mode (mode)
   "Reject MODE before mutating state if debugger admission failed."
@@ -109,6 +131,7 @@
       (error "Debug unavailable: %s"
              (string-join (or (nreverse errors) '("No adapter configured for this language")) "; "))
     (let* ((config (car configs))
+           (identity (kargu-dape--config-key config))
            (error (kargu-dape--config-error config)))
       (if error
           (kargu-dape--prepare-next (cdr configs) key done :errors (cons error errors))
@@ -122,8 +145,10 @@
               (kargu-dape--prepare-next (cdr configs) key done :errors (cons refusal errors)))
              ((not (equal key (kargu-permission-project-root)))
               (error "Debug selection cancelled: project changed"))
+             ((not (equal identity (kargu-dape--config-key (assq (car config) dape-configs))))
+              (error "Debug selection cancelled: configuration changed during verification"))
              (t
-              (setq kargu-dape--verified (kargu-dape--config-key config))
+              (kargu-dape--remember-verification key identity)
               (funcall done))))))))))
 
 (defun kargu-dape-prepare-debug (done &optional on-error)
@@ -153,8 +178,9 @@ Failures leave the mode and prompt unchanged and report through ON-ERROR."
 
 (defun kargu-dape-selected-config ()
   "Return the verified Dape configuration name for the current project."
-  (when (and kargu-dape--verified (not (kargu-dape-debug-refusal)))
-    (car (cadr kargu-dape--verified))))
+  (when-let* ((verified (kargu-dape--project-verification))
+              ((not (kargu-dape-debug-refusal))))
+    (kargu-dape--verification-name verified)))
 
 (defun kargu-dape-launch-config (name)
   "Launch verified configuration NAME using Dape's plist API."

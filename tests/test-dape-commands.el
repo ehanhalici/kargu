@@ -152,7 +152,7 @@
 
 (ert-deftest kargu-dape-failed-or-stale-probe-does-not-switch-mode-test ()
   "Probe failure and a newer user selection cannot switch into debug."
-  (dolist (scenario '(failure stale running))
+  (dolist (scenario '(failure stale running config-changed))
     (kargu-test-mode 'ask)
     (let ((kargu-dape-config 'configured)
           (dape-configs '((configured command "python" command-args ("-m" "debugpy.adapter"))))
@@ -164,9 +164,31 @@
         (kargu-set-mode 'debug)
         (when (eq scenario 'stale) (kargu-set-mode 'plan))
         (when (eq scenario 'running) (setq kargu--loop-run (list :state 'tools)))
+        (when (eq scenario 'config-changed)
+          (setq dape-configs '((configured command "python" command-args ("-m" "other.adapter")))))
         (funcall probe (list :code (if (eq scenario 'failure) 1 0)))
         (should (eq (kargu-state-mode) (if (eq scenario 'stale) 'plan 'ask)))
         (setq kargu--loop-run nil)))))
+
+(ert-deftest kargu-dape-verification-cache-retains-project-identities-test ()
+  "Checking a second project never discards the first project's verification."
+  (let* ((root (kargu-permission-project-root))
+         (other (file-name-as-directory (expand-file-name "other" root)))
+         (kargu-dape--verified nil) (kargu-dape-config 'demo)
+         (dape-configs '((demo port 1234))) (verified 0))
+    (cl-letf (((symbol-function 'dape) #'ignore)
+              ((symbol-function 'kargu-dape-live-p) (lambda () nil)))
+      (dolist (project (list root other))
+        (let ((kargu-permission--override-root project))
+          (kargu-dape-prepare-debug (lambda () (cl-incf verified)))
+          (should-not (kargu-dape-debug-refusal))))
+      (should (= verified 2))
+      (should (= (hash-table-count kargu-dape--verified) 2))
+      (dolist (project (list root other root))
+        (let ((kargu-permission--override-root project))
+          (should (eq (kargu-dape-selected-config) 'demo))))
+      (setq dape-configs '((demo port 4567)))
+      (should (kargu-dape-debug-refusal)))))
 
 (ert-deftest kargu-dape-start-uses-a-verified-plist-after-approval-test ()
   "Startup passes Dape its actual config plist, not an unsupported symbol."

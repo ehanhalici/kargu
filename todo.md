@@ -97,11 +97,6 @@ Not: Bulgular statik incelemeye dayanır; doğrulanamayan veya geçersiz çıkan
 1. **[K - Yüksek] Hedef tampon ve canlı bağlantı çalışma alanı sınırına kilitli değil.**
    - **Dosya / Satır:** `kargu/tools/dape/session.el:65-95, 104-112`
    - **Sorun:** `kargu-dape--target-buffer`, `buffer-list` içerisindeki herhangi bir `prog-mode` tamponunu seçer; seçilen tamponun `kargu-permission-project-root` sınırları içinde olduğunu doğrulamaz. Başka bir projeden açık kalmış bir dosya debug hedefi yapılabilir. Benzer şekilde `kargu-dape--raw-connection`, `dape--live-connections` listesinden projeye bakılmaksızın ilk veya durdurulmuş bağlantıyı alır; farklı projelerdeki hata ayıklama oturumları birbirine karışabilir.
-2. **[K - Orta] `kargu-dape--verified` küreseldir; çoklu projede doğrulama durumunu ezer.**
-   - **Dosya / Satır:** `kargu/tools/dape/preflight.el:23, 64-80, 126`
-   - **Sorun:** Dape adaptör doğrulama sonucu (`kargu-dape--verified`) tek bir global `defvar`'da saklanır ve `(list (kargu-permission-project-root) ...)` anahtarıyla kıyaslanır. Proje A'da debug kipi başarıyla doğrulandıktan sonra Proje B'de debug oturumu açılırsa veya doğrulanırsa `kargu-dape--verified` ezilir. Tekrar Proje A'ya dönüldüğünde `(equal kargu-dape--verified (kargu-dape--config-key config))` eşleşmeyerek `"Debugger project or configuration changed; select debug again"` hatası verir ve kullanıcıyı gereksiz onay döngüsüne sokar.
-   - **Öneri:** Doğrulama durumu proje kök dizinine göre indekslenen bir hash tablosunda tutulmalıdır.
-
 ---
 
 ### Modül: `languages/` (Dil Profilleri)
