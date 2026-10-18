@@ -3,7 +3,7 @@
 - [x] Başlangıç refactoring'i: LSP/DAP, HTTP ve sohbet sorumlulukları ayrıldı; süreç, oturum izolasyonu ve akış regresyonları giderildi. Doğrulama: 362/362 çevrimdışı ERT testi.
 - [x] Eglot'u isteğe bağlı yap; proje kapsamlı ortak araç yetenek kapısı. Eglot/Dape normal kullanım için zorunlu değil; LSP yoksa istem kullanılabilir. Şema, rehber, doğrudan yürütme ve alias'lar aynı politikayı kullanıyor. `edit_by_lsp` salt okunur kip kaçışı da kapatıldı. Doğrulama: 366/366 ERT testi.
 - [x] LSP isteklerini ve tüketicilerini asenkronlaştır. `jsonrpc-async-request`, tek teslimli görevler, proje/sunucu/belge sürümü anahtarlı önbellekler, Company callback'leri ve onay sonucunu bekleyen sembol düzenleme eklendi. İstemde yalnız hazır snapshot okunur; senkron ağ yolu kaldırıldı.
-- [ ] DAP callback zincirlerinde tek sonuç, hata ve iptal temizliği.
+- [x] DAP callback zincirlerinde tek sonuç, hata ve iptal temizliği. Tüm inspection zincirleri 30 saniyelik ortak görev yaşam döngüsünde; stack/scopes/variables/eval hata ve bağlantı kaybı tek ERROR üretir. Adımlama dinleyicileri iptalde temizlenir. Frame gezinmesindeki Dape senkron beklemesi kaldırıldı. Doğrulama: 373/373 ERT testi.
 - [ ] Süresiz, izlenebilir ve iptal edilebilir Bash işleri.
 - [ ] Debug ön koşulları, adapter yetenekleri ve araç kapsamı.
 - [ ] OpenCode model kataloğu ve eşzamanlı istek teslimi.
@@ -25,6 +25,7 @@ Her adım testleriyle ayrı commit olarak kaydedilir. `skills.md` yereldir ve Gi
 - Kabul: Gecikmeli sahte sunucuda başlatıcı hemen döner; sonuç tam bir kez teslim edilir; iptal edilmiş koşunun sonucu uygulanmaz; araç izinleri ve çıktı biçimleri korunur.
 
 ### Gecikmeli DAP callback hatalarında araç sonucunu mutlaka tamamla
+- Durum: tamamlandı. Gecikmeli her aşama hatası, bağlantı değişimi, deadline ve iptal sonrası geç cevap test edildi.
 
 - Konum: `kargu/tools/dape/context.el`, özellikle `kargu-dape-get-context` içindeki stack → scopes → variables zinciri; aynı desen diğer DAP komutlarında da incelenmeli.
 - Doğrulanan yeniden üretim: Sahte `dape--stack-trace` callback'ini sakla; `kargu-dape-get-context` döndükten sonra callback'i çalıştır ve `dape--scopes` içinde `adapter disconnected` hatası üret. Hata dışarı taşar; aracın sonuç callback'i çağrılmaz.

@@ -11,6 +11,42 @@
 ;;; Code:
 
 (require 'kargu/tools/dape/render)
+(require 'kargu/async)
+
+(defcustom kargu-dape-request-timeout 30
+  "Seconds allowed for an entire debugger inspection callback chain."
+  :type 'number
+  :group 'kargu-dape)
+
+(defun kargu-dape--run-chain (callback starter)
+  "Run STARTER with a guarded final CALLBACK and one overall deadline."
+  (let ((conn (kargu-dape--connection)))
+    (if (stringp conn) (funcall starter callback)
+      (let* ((task (kargu-async-start
+                    (lambda (value error)
+                      (funcall (or callback #'kargu-dape--show-report)
+                               (if error (concat "ERROR: DAP: " error) value)))
+                    :timeout kargu-dape-request-timeout
+                    :valid-p (lambda () (eq conn (kargu-dape--connection)))))
+             (finish (kargu-async-wrap
+                      task (lambda (text) (kargu-async-finish task text)))))
+        (funcall (kargu-async-wrap task (lambda () (funcall starter finish))))
+        task))))
+
+(defun kargu-dape--call (function &rest args)
+  "Call DAP FUNCTION with ARGS, guarding its final callback."
+  (let ((task kargu-async--current-task)
+        (callback (car (last args))))
+    (unless task (error "DAP request needs a task lifecycle"))
+    (apply function
+           (append (butlast args)
+                   (list (kargu-async-wrap
+                          task (lambda (&rest values)
+                                 (if (cadr values)
+                                     (kargu-async-finish task nil (format "%s" (cadr values)))
+                                   (apply callback values)))))))))
+
+(declare-function kargu-dape--show-report "kargu/tools/dape/execution" (report))
 
 ;;;; Context (stack + scopes + variables) ----------------------------------
 
@@ -30,7 +66,7 @@ INTERACTIVE also shows a short prefix in the echo area."
     (cl-labels ((next ()
                   (if (null rest)
                       (funcall callback)
-                    (dape--variables conn (pop rest) (lambda (&rest _) (next))))))
+                    (kargu-dape--call #'dape--variables conn (pop rest) (lambda (&rest _) (next))))))
       (next))))
 
 (defun kargu-dape-context-snapshot ()
@@ -53,7 +89,7 @@ INTERACTIVE also shows a short prefix in the echo area."
                (and thread (plist-get thread :id)))
     text))
 
-(defun kargu-dape-get-context (&optional callback)
+(defun kargu-dape--get-context (&optional callback)
   "Pass a text snapshot of the paused debug session to CALLBACK.
 The snapshot is the thread, the call stack and the in-scope variables.
 Stack, scope and variable requests are chained through dape callbacks.
@@ -70,7 +106,7 @@ an interactive call shows the snapshot when it arrives."
             (if (null thread)
                 (kargu-dape--deliver
                  callback (kargu-dape--context-text conn nil nil nil) interactive)
-              (dape--stack-trace
+              (kargu-dape--call #'dape--stack-trace
                conn thread kargu-dape-max-frames
                (lambda (&rest _)
                  (let* ((frames (kargu-dape--seq->list
@@ -82,7 +118,7 @@ an interactive call shows the snapshot when it arrives."
                         callback
                         (kargu-dape--context-text conn thread frames nil)
                         interactive)
-                     (dape--scopes
+                     (kargu-dape--call #'dape--scopes
                       conn frame
                       (lambda (&rest _)
                         (kargu-dape--fetch-variables
@@ -121,7 +157,7 @@ an interactive call shows the snapshot when it arrives."
     (format "%s => %s" expr (kargu-dape--trunc (plist-get body :result))))
    (t (format "%s => (evaluated, no result value)" expr))))
 
-(defun kargu-dape-eval-expression (expr &optional context callback)
+(defun kargu-dape--eval-expression (expr &optional context callback)
   "Evaluate EXPR in the paused debug session and pass the text to CALLBACK.
 CONTEXT is the DAP evaluate context (\"repl\" default, \"hover\" or \"watch\").
 Without a session the text is returned directly."
@@ -133,7 +169,7 @@ Without a session the text is returned directly."
                                (if (string-empty-p hint) conn (concat conn hint))
                                interactive))
       (condition-case-unless-debug err
-          (dape--evaluate-expression
+          (kargu-dape--call #'dape--evaluate-expression
            conn
            (plist-get (dape--current-stack-frame conn) :id)
            expr
@@ -326,6 +362,16 @@ Returns structured confirmation with file, line, and remaining count."
       (format "ERROR: %s requires 1-based positive integer 'line'. Example: {\"file_path\": \"%s\", \"line\": 42}"
               tool-name path))
      (t nil))))
+
+(defun kargu-dape-get-context (&optional callback)
+  "Collect paused context asynchronously and complete CALLBACK exactly once."
+  (interactive)
+  (kargu-dape--run-chain callback (lambda (done) (kargu-dape--get-context done))))
+
+(defun kargu-dape-eval-expression (expr &optional context callback)
+  "Evaluate EXPR in CONTEXT and deliver one guarded result to CALLBACK."
+  (kargu-dape--run-chain callback
+                         (lambda (done) (kargu-dape--eval-expression expr context done))))
 
 (provide 'kargu/tools/dape/context)
 

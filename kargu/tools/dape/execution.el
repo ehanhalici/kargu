@@ -69,7 +69,7 @@ The call stack and variables are fetched before the report is built."
   "Run ACTION-FN and report ACTION-NAME through CALLBACK.
 Wait asynchronously for a stop or TIMEOUT seconds.  When CALLBACK is nil,
 display the report in the echo area."
-  (let ((conn (kargu-dape--connection)))
+  (let ((conn (or (kargu-dape--raw-connection) (kargu-dape--connection))))
     (cond
      ((stringp conn)
       (if callback (funcall callback conn) conn))
@@ -80,37 +80,40 @@ display the report in the echo area."
       (unless callback
         (format "Action '%s' started; the result appears in the echo area." action-name))))))
 
-(defun kargu-dape--start-action (conn action-fn action-name callback timeout)
-  "Run ACTION-FN on CONN and deliver one report about ACTION-NAME to CALLBACK."
-  (let* ((done nil)
-         (timer nil)
-         (hook-stop nil)
-         (hook-exit nil)
-         (finish (lambda (text)
-                   (unless done
-                     (setq done t)
-                     (kargu-dape--cleanup-wait timer hook-stop hook-exit)
-                     (funcall callback text)))))
+(cl-defun kargu-dape--install-action-wait (task conn &key name timeout)
+  "Install stop/exit listeners for TASK on CONN, reporting NAME after TIMEOUT."
+  (let (wait-timer hook-stop hook-exit)
+    (setf (kargu-async-task-cancel task)
+          (lambda () (kargu-dape--cleanup-wait wait-timer hook-stop hook-exit)))
     (setq hook-stop
-          (lambda (&rest _)
-            (kargu-dape--format-stopped-report action-name finish)))
+          (kargu-async-wrap
+           task (lambda (&rest _)
+                  (when (eq conn (kargu-dape--raw-connection))
+                    (kargu-dape--cleanup-wait wait-timer hook-stop hook-exit)
+                    (kargu-dape--format-stopped-report
+                     name (kargu-async-wrap task (lambda (text) (kargu-async-finish task text))))))))
     (setq hook-exit
-          (lambda (&rest _)
-            (funcall finish
-                     (format "[DEBUGGER PROGRAM EXITED]\nAction '%s' completed: program finished execution / session terminated." action-name))))
-    (when (boundp 'dape-stopped-hook)
-      (add-hook 'dape-stopped-hook hook-stop))
-    (when (boundp 'dape-active-mode-off-hook)
-      (add-hook 'dape-active-mode-off-hook hook-exit))
-    (setq timer (run-at-time timeout nil
-                             (lambda ()
-                               (funcall finish
-                                        (kargu-dape--running-message action-name timeout)))))
-    (condition-case err
-        (funcall action-fn conn)
-      (error
-       (funcall finish (format "ERROR during %s: %s"
-                               action-name (error-message-string err)))))))
+          (kargu-async-wrap
+           task (lambda (&rest _)
+                  (unless (eq conn (kargu-dape--raw-connection))
+                    (kargu-async-finish
+                     task (format "[DEBUGGER PROGRAM EXITED]\nAction '%s' completed." name))))))
+    (add-hook 'dape-stopped-hook hook-stop)
+    (add-hook 'dape-active-mode-off-hook hook-exit)
+    (setq wait-timer
+          (run-at-time timeout nil
+                       (lambda ()
+                         (kargu-async-finish task
+                                             (kargu-dape--running-message name timeout)))))))
+
+(defun kargu-dape--start-action (conn action-fn action-name callback timeout)
+  "Run ACTION-FN on CONN and deliver one ACTION-NAME report to CALLBACK."
+  (let ((task (kargu-async-start
+               (lambda (value error)
+                 (funcall callback (if error (concat "ERROR: DAP: " error) value)))
+               :timeout (+ timeout kargu-dape-request-timeout))))
+    (kargu-dape--install-action-wait task conn :name action-name :timeout timeout)
+    (funcall (kargu-async-wrap task (lambda () (funcall action-fn conn))))))
 
 (defun kargu-dape-step-over (&optional callback)
   "Step over the current line and report the stop to CALLBACK."
