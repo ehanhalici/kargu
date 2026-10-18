@@ -32,11 +32,16 @@ CANCEL optionally cancels underlying work when the task is terminated."
                                  :parent kargu-async--current-task
                                  :buffer (current-buffer))))
     (push task kargu-async--pending)
-    (when timeout
-      (setf (kargu-async-task-timer task)
-            (run-at-time timeout nil #'kargu-async-finish
-                         task nil "Request timed out")))
-    task))
+    (condition-case err
+        (progn
+          (when timeout
+            (setf (kargu-async-task-timer task)
+                  (run-at-time timeout nil #'kargu-async-finish
+                               task nil "Request timed out")))
+          task)
+      (error
+       (kargu-async--close task :cancelled)
+       (signal (car err) (cdr err))))))
 
 (defun kargu-async-pending-p (task)
   "Return non-nil when TASK can still deliver a result."
@@ -56,19 +61,29 @@ CANCEL optionally cancels underlying work when the task is terminated."
       (cancel-timer timer)
       (setf (kargu-async-task-timer task) nil))
     (when-let* ((cancel (kargu-async-task-cancel task)))
-      (condition-case err (funcall cancel)
+      (condition-case err (save-match-data (funcall cancel))
 	(error (kargu-log 'warn "async cleanup: %s" (error-message-string err)))))))
+
+(defun kargu-async--deliver (task value error)
+  "Deliver TASK's VALUE or ERROR, attributing callback failures to its parent."
+  (let ((parent (kargu-async-task-parent task)))
+    (condition-case failure
+        (with-current-buffer (if (buffer-live-p (kargu-async-task-buffer task))
+                                 (kargu-async-task-buffer task) (current-buffer))
+          (let ((kargu-async--current-task parent))
+            (funcall (kargu-async-task-callback task) value error)))
+      (error
+       (kargu-log 'error "Async continuation failed: %s" (error-message-string failure))
+       (when (and parent (kargu-async-pending-p parent))
+         (kargu-async-finish parent nil (error-message-string failure)))))))
 
 (defun kargu-async-finish (task value &optional error)
   "Deliver VALUE or ERROR for TASK, provided its owner is still active."
-  (when (eq (kargu-async-task-state task) :pending)
-    (let ((live (kargu-async-pending-p task)))
-      (kargu-async--close task (if live :done :cancelled))
-      (when live
-        (with-current-buffer (if (buffer-live-p (kargu-async-task-buffer task))
-                                 (kargu-async-task-buffer task) (current-buffer))
-          (let ((kargu-async--current-task (kargu-async-task-parent task)))
-            (funcall (kargu-async-task-callback task) value error)))))))
+  (save-match-data
+    (when (eq (kargu-async-task-state task) :pending)
+      (let ((live (kargu-async-pending-p task)))
+        (kargu-async--close task (if live :done :cancelled))
+        (when live (kargu-async--deliver task value error))))))
 
 (defun kargu-async-wrap (task function)
   "Return a delayed callback that guards FUNCTION with TASK's lifetime."
@@ -85,10 +100,10 @@ CANCEL optionally cancels underlying work when the task is terminated."
                 (with-current-buffer (kargu-async-task-buffer task)
                   (apply function args))))
           (error
-           (let ((target (if (kargu-async-pending-p task) task
-                           (kargu-async-task-parent task))))
-             (when target
-               (kargu-async-finish target nil (error-message-string err))))))))))
+           (if (kargu-async-pending-p task)
+               (kargu-async-finish task nil (error-message-string err))
+             (kargu-log 'warn "Async operation failed after delivery: %s"
+                        (error-message-string err)))))))))
 
 (defun kargu-async-cancel-owner (owner)
   "Cancel all pending tasks owned by OWNER without delivering stale results."
