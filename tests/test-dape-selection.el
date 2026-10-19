@@ -234,5 +234,18 @@
       (should (string-search "selection state changed" (car results)))
       (should-not kargu-async--pending))))
 
+(ert-deftest kargu-dape-selection-context-highlight-matches-large-id-test ()
+  "Context rendering compares decoded frame IDs by value, not object identity."
+  (kargu-dape-test--with-selection
+    (let* ((id "100000000000000000000001")
+           (frame (list :id (string-to-number id) :name "refreshed"))
+           (selected (list :id (string-to-number id))))
+      (should-not (eq (plist-get frame :id) (plist-get selected :id)))
+      (let ((lines (kargu-dape--render-stack-frames 'local (list frame frame-b) selected)))
+        (should (seq-some (lambda (line) (and (string-search "refreshed" line)
+                                             (string-search "<= selected" line))) lines))
+        (should-not (seq-some (lambda (line) (and (string-search "owner-b" line)
+                                                 (string-search "<= selected" line))) lines))))))
+
 (provide 'tests/test-dape-selection)
 ;;; test-dape-selection.el ends here

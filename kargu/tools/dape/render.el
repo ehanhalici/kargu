@@ -65,7 +65,7 @@
                                   (or (plist-get f :name) "?")
                                   (kargu-dape--frame-path conn f)
                                   (or (plist-get f :line) "?")
-                                  (if (eq (plist-get f :id) selected-id)
+                                  (if (equal (plist-get f :id) selected-id)
                                       "  <= selected"
                                     ""))
                           lines)))
