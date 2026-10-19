@@ -25,15 +25,20 @@
 Only this module writes the table.  Updates replace entries, never mutate
 records retained by snapshots or another reader.")
 
-(defun kargu-model-store--key (provider id)
-  "Return the storage identity for explicit PROVIDER and model ID."
-  (unless (and provider (or (stringp provider) (symbolp provider))
-               (stringp id) (not (string-empty-p (string-trim id))))
-    (user-error "Kargu: model metadata requires a provider and model identifier"))
+(defun kargu-model-store--provider (provider)
+  "Return the canonical identity of explicit PROVIDER."
+  (unless (and provider (or (stringp provider) (symbolp provider)))
+    (user-error "Kargu: model metadata requires a provider"))
   (let ((provider (downcase (string-trim (format "%s" provider)))))
     (when (string-empty-p provider)
       (user-error "Kargu: model metadata requires a nonempty provider"))
-    (cons provider (copy-sequence (string-trim id)))))
+    provider))
+
+(defun kargu-model-store--key (provider id)
+  "Return the storage identity for explicit PROVIDER and model ID."
+  (unless (and (stringp id) (not (string-empty-p (string-trim id))))
+    (user-error "Kargu: model metadata requires a model identifier"))
+  (cons (kargu-model-store--provider provider) (copy-sequence (string-trim id))))
 
 (defun kargu-model-store--find (key exact)
   "Resolve KEY, allowing a unique short alias unless EXACT is non-nil."
@@ -79,6 +84,26 @@ EXACT refuses aliases; ambiguous short names always return nil."
                  :overrides (and old (kargu-model-entry-overrides old)))))
     (puthash key entry kargu--model-metadata-table)
     (kargu-model-store--effective entry)))
+
+(defun kargu-model-store-retain (provider ids)
+  "Retain catalog metadata only for PROVIDER's freshly advertised IDS.
+Removed models lose raw catalog data, but keep explicit local overrides.
+An empty successful catalog clears all raw data for that provider alone."
+  (let ((provider (kargu-model-store--provider provider))
+        (keep (make-hash-table :test #'equal)))
+    (dolist (id ids) (puthash id t keep))
+    (maphash
+     (lambda (key entry)
+       (when (and (kargu-model-entry-p entry)
+                  (equal (kargu-model-entry-provider entry) provider)
+                  (not (gethash (kargu-model-entry-id entry) keep)))
+         (if (kargu-model-entry-overrides entry)
+             (puthash key (kargu-model-store--entry
+                           :provider provider :id (kargu-model-entry-id entry)
+                           :overrides (kargu-model-entry-overrides entry))
+                      kargu--model-metadata-table)
+           (remhash key kargu--model-metadata-table))))
+     kargu--model-metadata-table)))
 
 (cl-defun kargu-model-store-set-property (provider id &key property value)
   "Override PROPERTY with VALUE for PROVIDER's ID across catalog refreshes.

@@ -162,6 +162,14 @@ when chats switch. Model APIs such as `kargu-model-set-metadata` accept an
 explicit provider; `kargu-model-set-prop` uses `:provider`. Restart Emacs to rebuild
 the in-memory catalog after updating from the old global cache.
 
+A successful catalog refresh removes raw metadata for models no longer
+advertised by that provider; local property overrides remain. An ID-only
+catalog replaces older capability data with unknown fields. Empty catalogs
+are authoritative, while failed or malformed requests retain the last valid
+catalog. Model selection never appends a stale active ID or merges fallback
+IDs into a known live list; delayed callbacks cannot replace a newer cache.
+Use `M-x kargu-api-list-models` to explicitly refresh an empty/stale catalog.
+
 ### Prompt caching and low usage
 
 Enable `kargu-low-usage-mode` with `setq` or the tuning menu's `l` key.

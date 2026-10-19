@@ -106,6 +106,7 @@ The override survives subsequent catalog refreshes for that identity."
   "Record raw MODELS metadata for the optional PROVIDER-NAME."
   (let ((pname (or provider-name (kargu--provider-name))))
     (dolist (m models)
+      (when (stringp m) (setq m (list (cons "id" m))))
       (when (listp m)
         (let* ((id (or (kargu-aget m "id") (kargu-aget m "name")))
                (clean-id (if (and (stringp id) (string-prefix-p "models/" id))
@@ -485,7 +486,7 @@ An explicit true flag is sufficient even without an API effort list."
      (t (concat api-base "/models")))))
 
 (defun kargu--catalog-clean-model-ids (models)
-  "Return nonempty model ID strings from decoded catalog MODELS."
+  "Return IDs from normalized catalog MODELS records or plain ID strings."
   (delete-dups
    (delq nil
          (mapcar
@@ -495,12 +496,14 @@ An explicit true flag is sufficient even without an API effort list."
                         model)))
               (when (and (stringp id) (not (string-empty-p (string-trim id))))
                 (if (string-prefix-p "models/" id) (substring id 7) id))))
-          (kargu-seq-to-list (kargu--extract-models-from-json models))))))
+          (kargu-seq-to-list models)))))
 
 (defun kargu--catalog-cache-live-models (provider models)
   "Record metadata and ID lists for PROVIDER from MODELS, including emptiness."
-  (kargu--record-models-metadata models provider)
-  (puthash provider (kargu--catalog-clean-model-ids models) kargu--live-models-cache))
+  (let ((ids (kargu--catalog-clean-model-ids models)))
+    (kargu--record-models-metadata models provider)
+    (kargu-model-store-retain provider ids)
+    (puthash provider ids kargu--live-models-cache)))
 
 (defun kargu--catalog-response (body)
   "Return the model list in BODY, rejecting malformed and provider errors."

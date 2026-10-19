@@ -329,15 +329,12 @@ NOTE replaces the confirmation message."
 ;;;; Model ----------------------------------------------------------------
 
 (defun kargu-chat--collect-model-candidates (pname-str live-ids catalog-ids)
-  "Collect model ids for PNAME-STR from LIVE-IDS, the cache, and CATALOG-IDS."
-  (let* ((cached (and (null live-ids) (gethash pname-str kargu--live-models-cache)))
-         (live (or live-ids cached))
-         (curr (kargu--model)))
-    (delete-dups
-     (delq nil
-           (append (and live (copy-sequence live))
-                   (and catalog-ids (copy-sequence catalog-ids))
-                   (and (kargu-nonempty curr) (list curr)))))))
+  "Return authoritative model ids for PNAME-STR without stale additions.
+A known cache, including emptiness, beats delayed LIVE-IDS.  Only without
+a known live catalog may the caller's CATALOG-IDS act as fallback."
+  (let* ((cached (gethash pname-str kargu--live-models-cache :unknown))
+         (models (if (eq cached :unknown) (or live-ids catalog-ids) cached)))
+    (delete-dups (copy-sequence models))))
 
 (defun kargu-api-select--apply-model (chosen pname-str)
   "Activate model CHOSEN for PNAME-STR, then ask for effort when it exists."
@@ -380,8 +377,9 @@ NOTE replaces the confirmation message."
      (lambda (chosen) (kargu-api-select--apply-model chosen pname-str)))))
 
 (defun kargu-chat--models-known-p (pname-str live-ids)
-  "Return non-nil for known model ids in LIVE-IDS or provider PNAME-STR."
-  (or live-ids (gethash pname-str kargu--live-models-cache)))
+  "Return non-nil if LIVE-IDS or PNAME-STR's cached catalog is known.
+A successful empty catalog is known, not a missing lookup."
+  (or live-ids (not (eq (gethash pname-str kargu--live-models-cache :unknown) :unknown))))
 
 (defun kargu-chat-select-model-company (&optional live-ids catalog-ids provider-name _event)
   "Select a model for PROVIDER-NAME with Company in the footer.
