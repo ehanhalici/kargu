@@ -13,6 +13,10 @@
 (require 'kargu/tools/dape/render)
 (require 'kargu/async)
 
+(declare-function kargu--tool-arg "kargu/api/tools" (args &rest keys))
+(declare-function kargu--tool-file-path "kargu/api/tools" (args))
+(declare-function kargu--tool-arg-keys "kargu/api/tools" (args))
+
 (defcustom kargu-dape-request-timeout 30
   "Seconds allowed for an entire debugger inspection callback chain."
   :type 'number
@@ -20,14 +24,21 @@
 
 (defun kargu-dape--run-chain (callback starter)
   "Run STARTER with a guarded final CALLBACK and one overall deadline."
-  (let ((conn (kargu-dape--connection)))
+  (let ((conn (kargu-dape--connection))
+        (root (kargu-permission-project-root))
+        (origin (current-buffer)))
     (if (stringp conn) (funcall starter callback)
       (let* ((task (kargu-async-start
                     (lambda (value error)
                       (funcall (or callback #'kargu-dape--show-report)
                                (if error (concat "ERROR: DAP: " error) value)))
                     :timeout kargu-dape-request-timeout
-                    :valid-p (lambda () (eq conn (kargu-dape--connection)))))
+                    :valid-p
+                    (lambda ()
+                      (and (buffer-live-p origin)
+                           (with-current-buffer origin
+                             (and (equal root (kargu-permission-project-root))
+                                  (eq conn (kargu-dape--connection))))))))
              (finish (kargu-async-wrap
                       task (lambda (text) (kargu-async-finish task text)))))
         (funcall (kargu-async-wrap task (lambda () (funcall starter finish))))

@@ -3,6 +3,12 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
+;; Exercise tool contracts inside isolated scratch projects.
+
+;;; Code:
+
 (require 'tests/test-helpers)
 (require 'ert)
 (require 'kargu/permission)
@@ -15,7 +21,7 @@
 (declare-function rust-mode "rust-mode" ())
 
 (defun kargu-test-temp-file (prefix)
-  "Create a temporary file inside the scratch project root for testing."
+  "Create a temporary file with PREFIX inside the scratch project."
   (make-temp-file (expand-file-name prefix (kargu-permission-project-root))))
 
 (ert-deftest kargu-diff-read-file-counts-logical-lines-test ()
@@ -159,7 +165,7 @@
         (kill-buffer buffer)))))
 
 (ert-deftest kargu-diff-read-file-window-test ()
-  "Ensure kargu-diff-read-file extracts line windows past 60,000 chars without error."
+  "Read numbered windows beyond the default character cap."
   (let ((temp (kargu-test-temp-file "kargu-test-diff")))
     (unwind-protect
         (progn
@@ -177,7 +183,7 @@
         (delete-file temp)))))
 
 (ert-deftest kargu-search-glob-subdirectory-test ()
-  "Ensure kargu-search--glob-elisp matches files under subdirectories."
+  "The Elisp glob fallback matches files under subdirectories."
   (kargu-test-with-git-repo '(("kargu/core.el" . "x") ("kargu/tools/a.el" . "y") ("readme.md" . "z"))
     (let* ((target (expand-file-name "kargu" repo))
            (res (kargu-search--glob-elisp "*.el" target repo)))
@@ -187,7 +193,7 @@
       (should-not (string-search "readme.md" res)))))
 
 (ert-deftest kargu-search-list-files-test ()
-  "Ensure kargu-search-list-files lists directory entries with [DIR] and [FILE] tags."
+  "Directory entries have [DIR] and [FILE] tags."
   (kargu-test-with-git-repo '(("top.el" . "x") ("sub/inner.el" . "y"))
     (let ((out (kargu-search-list-files)))
       (should (stringp out))
@@ -195,7 +201,7 @@
       (should (string-search "sub" out)))))
 
 (ert-deftest kargu-search-tool-recommendations-test ()
-  "Ensure kargu-search-tool-recommendations returns a valid string with fd/find and rg/grep."
+  "Search recommendations describe available discovery commands."
   (let ((rec (kargu-search-tool-recommendations)))
     (should (stringp rec))
     (should (or (string-search "fd" rec) (string-search "find" rec)))
@@ -207,7 +213,7 @@
   (should (eq kargu-diff-ediff-split-window-function #'split-window-horizontally)))
 
 (ert-deftest kargu-chat-show-same-window-test ()
-  "Ensure kargu-chat-show opens in the current window without creating splits."
+  "Showing the chat uses the current window without creating splits."
   (save-window-excursion
     ;; Case 1: single window in frame
     (delete-other-windows)
@@ -463,7 +469,7 @@
       (when (file-exists-p path) (delete-file path)))))
 
 (ert-deftest kargu-bash-run-async-callback-test ()
-  "Ensure kargu-bash-run executes asynchronously when callback is provided."
+  "The Bash tool executes asynchronously when a callback is provided."
   (let* ((kargu-permission-confirm-bash nil)
          (done nil)
          (result nil))
@@ -480,7 +486,7 @@
     (should (string-match-p "async_hello_world" result))))
 
 (ert-deftest kargu-execute-tool-async-bash-test ()
-  "Ensure kargu-execute-tool delegates to callback asynchronously for bash."
+  "Tool execution delegates to a callback asynchronously for Bash."
   (let* ((kargu-permission-confirm-bash nil)
          (done nil)
          (result nil))
@@ -536,7 +542,7 @@
           (kargu-bash--manage-kill id))))))
 
 (ert-deftest kargu-bash-kill-active-async-test ()
-  "Ensure kargu-bash-kill-active-async terminates running async bash process."
+  "Stopping the active Bash job terminates its asynchronous process."
   (let ((kargu-permission-confirm-bash nil))
     (kargu-bash-run "sleep 30" (kargu-permission-project-root) nil #'ignore)
     (should (processp kargu-bash--active-async-proc))
@@ -545,7 +551,7 @@
     (should-not kargu-bash--active-async-proc)))
 
 (ert-deftest kargu-tool-missing-file-path-pattern-guidance-test ()
-  "Ensure kargu--tool-missing-file-path gives helpful guidance when pattern is passed."
+  "A pattern in place of a missing file path produces helpful guidance."
   (let ((res (kargu-execute-tool "read_file" '(("pattern" . "my_search_term")))))
     (should (stringp res))
     (should (string-prefix-p "ERROR: missing file_path" res))
@@ -553,7 +559,7 @@
     (should (string-search "find_files" res))))
 
 (ert-deftest kargu-dape-breakpoint-set-clear-test ()
-  "Ensure kargu-dape-set-breakpoint and clear-breakpoint function deterministically with rich output."
+  "Setting and clearing breakpoints yields deterministic, rich output."
   (let ((temp (kargu-test-temp-file "kargu-bp-test")))
     (unwind-protect
         (progn
@@ -596,7 +602,7 @@
       (when (file-exists-p temp) (delete-file temp)))))
 
 (ert-deftest kargu-dape-source-snippet-and-line-test ()
-  "Ensure kargu-dape--source-line and kargu-dape--source-snippet return expected formats."
+  "Source line and snippet helpers return their documented formats."
   (let ((temp (kargu-test-temp-file "kargu-snippet-test")))
     (unwind-protect
         (progn
@@ -611,7 +617,7 @@
       (when (file-exists-p temp) (delete-file temp)))))
 
 (ert-deftest kargu-dape-target-buffer-and-stop-on-entry-test ()
-  "Ensure kargu-dape--target-buffer skips chat buffer and ensure-stop-on-entry works."
+  "The launch target skips chat buffers and enables stop-on-entry."
   (let ((src-buf (generate-new-buffer "my-code.rs"))
         (chat-buf (generate-new-buffer "*kargu-chat*")))
     (unwind-protect
@@ -620,7 +626,8 @@
             (if (fboundp 'rust-mode)
                 (rust-mode)
               (prog-mode))
-            (setq-local buffer-file-name "/tmp/my-code.rs"))
+            (setq-local buffer-file-name
+                        (expand-file-name "my-code.rs" (kargu-test-scratch-root))))
           (with-current-buffer chat-buf
             (kargu-chat-mode))
           ;; When kargu-context-buffer is set to src-buf
@@ -693,7 +700,7 @@
         (should (string-search "Paused at src/main.rs:10" msg))))))
 
 (ert-deftest kargu-prompt-tools-guidance-multi-tool-test ()
-  "Ensure kargu-prompt--tools-guidance-block explains multi-tool sequential execution."
+  "Tool guidance explains sequential multi-tool execution."
   (kargu-test-mode 'agent)
   (let ((block (kargu-prompt--tools-guidance-block)))
     (should (stringp block))
@@ -734,7 +741,7 @@
       (when (buffer-live-p b) (kill-buffer b)))))
 
 (ert-deftest kargu-chat-send-empty-prompt-debug-mode-test ()
-  "Ensure kargu-chat-send with empty prompt in debug mode initiates debug session."
+  "Sending an empty debug prompt initiates a debug session."
   (let ((_ (kargu-test-mode 'debug))
         (ensure-called nil)
         (submitted-text nil)

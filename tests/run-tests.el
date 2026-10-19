@@ -48,6 +48,7 @@
 (require 'tests/test-confirm)
 (require 'tests/test-languages)
 (require 'tests/test-dape-commands)
+(require 'tests/test-dape-workspace)
 (require 'tests/test-deps)
 (require 'tests/test-fake-agent)
 (require 'tests/test-security)

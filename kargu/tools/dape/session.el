@@ -16,9 +16,12 @@
 (require 'kargu/json)
 (require 'kargu/languages)
 (require 'kargu/permission)
+(require 'kargu/tools/dape/workspace)
 (require 'dape nil t)
 
 (defvar dape--watched)
+(defvar dape--connection-selected)
+(defvar kargu-context-buffer)
 
 (declare-function dape "dape" (&optional config-diff))
 (declare-function dape-stack-select-up "dape" (conn n))
@@ -63,36 +66,8 @@
 (defalias 'kargu-dape--seq->list #'kargu-seq-to-list)
 
 (defun kargu-dape--target-buffer ()
-  "Return the best source/code buffer for launching dape.
-Prefers `kargu-context-buffer' if valid and live, or a buffer in another
-visible window visiting a file, or any project file buffer."
-  (or (and (boundp 'kargu-context-buffer)
-           (bufferp kargu-context-buffer)
-           (buffer-live-p kargu-context-buffer)
-           (not (with-current-buffer kargu-context-buffer (derived-mode-p 'kargu-chat-mode)))
-           kargu-context-buffer)
-      (and (boundp 'kargu-context-buffer)
-           (stringp kargu-context-buffer)
-           (get-file-buffer kargu-context-buffer))
-      ;; Check visible windows in the current frame
-      (cl-some (lambda (w)
-                 (let ((b (window-buffer w)))
-                   (and (buffer-live-p b)
-                        (with-current-buffer b
-                          (and (buffer-file-name b)
-                               (derived-mode-p 'prog-mode)
-                               (not (derived-mode-p 'kargu-chat-mode))))
-                        b)))
-               (window-list))
-      ;; Check any buffer visiting a project file
-      (cl-find-if (lambda (b)
-                    (and (buffer-live-p b)
-                         (buffer-file-name b)
-                         (with-current-buffer b
-                           (and (derived-mode-p 'prog-mode)
-                                (not (derived-mode-p 'kargu-chat-mode))))))
-                  (buffer-list))
-      (current-buffer)))
+  "Return a source buffer inside the selected workspace, or nil."
+  (kargu-dape-source-buffer))
 
 (defun kargu-dape--ensure-stop-on-entry (config)
   "Ensure CONFIG has :stopOnEntry t so program pauses on startup."
@@ -102,14 +77,16 @@ visible window visiting a file, or any project file buffer."
       (append copy '(:stopOnEntry t)))))
 
 (defun kargu-dape--raw-connection ()
-  "Return the live dape connection object, or nil."
-  (when (fboundp 'dape--live-connections)
-    (let ((conns (ignore-errors (dape--live-connections))))
-      (when conns
-        (or (and (fboundp 'dape--live-connection)
-                 (or (ignore-errors (dape--live-connection 'stopped t))
-                     (ignore-errors (dape--live-connection 'last t))))
-            (car conns))))))
+  "Return a workspace-owned connection, preferring a paused adapter."
+  (let* ((connections (kargu-dape-project-connections))
+         (selected (and (boundp 'dape--connection-selected)
+                        (memq dape--connection-selected connections)
+                        dape--connection-selected))
+         (ordered (if selected (cons selected (remq selected connections))
+                    (reverse connections))))
+    (or (and (fboundp 'dape--stopped-threads)
+             (seq-find #'dape--stopped-threads ordered))
+        (car ordered))))
 
 (defun kargu-dape-live-p ()
   "Return non-nil if a live dape session exists."
@@ -131,6 +108,8 @@ visible window visiting a file, or any project file buffer."
   "Launch the verified adapter in TARGET-BUF with stop-on-entry enabled."
   (let ((name (kargu-dape-selected-config)))
     (unless name (user-error "Kargu: Verify an adapter by selecting debug mode first"))
+    (unless (buffer-live-p target-buf)
+      (user-error "Kargu: Open a source file in this project before launching Dape"))
     (when (buffer-live-p target-buf)
       (setq kargu-context-buffer target-buf))
     (with-current-buffer target-buf
@@ -237,20 +216,14 @@ If cancelled or start fails within timeout, calls ON-CANCEL."
 A connection with a stopped (paused) thread is preferred; when the
 session is running, the string tells the model how to proceed."
   (cond
-   ((not (fboundp 'dape--live-connection))
+   ((not (fboundp 'dape--live-connections))
     "ERROR: dape is not installed or not loaded (install dape, then \
 start a session with M-x dape)")
-   ((not (or (bound-and-true-p dape-active-mode)
-             (and (fboundp 'dape--live-connections)
-                  (dape--live-connections))))
-    "ERROR: no live dape session — start one with M-x dape (or \
-dape-attach) first")
    (t
-    (let ((conn (or (dape--live-connection 'stopped t)
-                    (dape--live-connection 'last t))))
+    (let ((conn (kargu-dape--raw-connection)))
       (cond
        ((null conn)
-        "ERROR: no live dape connection found")
+        "ERROR: no live Dape connection in this project; start its adapter first")
        ((null (dape--stopped-threads conn))
         (format "The debug session is RUNNING; there is no paused thread \
 to inspect. Set a breakpoint with debug_toggle_breakpoint and let the \

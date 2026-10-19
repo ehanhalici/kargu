@@ -261,6 +261,12 @@ data collection, formatting and tool registration. HTTP request construction,
 retry handling and SSE decoding are separate modules. Chat transcript insertion
 and streaming parsing are independent of tool activity and run reporting.
 
+Dape source selection and adapter discovery stay inside the selected workspace.
+Connections need a concrete `:cwd` / `command-cwd` (or an owned parent); unknown
+working directories and globally selected adapters from other projects are
+not adopted. This does not yet isolate Dape's global hooks, watch list or all
+lifecycle helpers; those remaining limitations are tracked in `todo.md`.
+
 Implementation plans have one authoritative record per source chat, capturing
 its project and session. Each chat has its own in-memory review buffer. Approval
 reads the full edited buffer and dispatches from the captured chat; another

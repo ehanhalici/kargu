@@ -56,6 +56,13 @@ states (535 generated), depth 9, without an error or deadlock. It abstracts
 kernel signals and stream decoding; it does not resolve the separate OS/stress
 timing question in `todo.md` or rerun the main loop proof.
 
+Debugger connection discovery is restricted to concrete adapter working
+directories within the selected workspace (including inherited parent
+configuration). Source targets are checked after symlink resolution. Offline
+ERT covers foreign global selection, unknown directories and callback origin
+reassignment. This is a resource-admission boundary, not a new loop transition;
+global Dape hook/lifecycle ownership remains tracked separately in `todo.md`.
+
 ## 1. Modules
 
 The separate plan artifact workflow (`kargu/plan/store.el` and `dispatch.el`)
