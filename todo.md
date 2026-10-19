@@ -54,10 +54,6 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 4. **[K - Orta] Senkron JSON Oturum Okuma.**
    - **Dosya / Satır:** `kargu/chat/session.el:284-306`
    - **Sorun:** `kargu-session-list`, projedeki tüm `.json` oturum dosyalarını diskten senkron okur ve ayrıştırır. Dosya sayısı arttıkça Emacs donar.
-5. **[K - Düşük] Proje İçi `.kargu/sessions/` Dizininde Git İhlali.**
-   - **Dosya / Satır:** `kargu/chat/session.el:155-158`
-   - **Sorun:** Proje kökünde `.kargu/sessions` varsa oturumlar buraya yazılır. `.kargu/` varsayılan `.gitignore` şablonlarında hariç tutulmadığı için hassas sohbet verileri yanlışlıkla git'e eklenebilir.
-   - **Karar:** Yerel depolama açık opt-in olmalı veya uygulamanın ürettiği oturum klasörü Git'ten dışlanmalı. Geçiş/eski oturumları bulma davranışı belirlenmeli; önceden izlenen kullanıcı dosyaları otomatik olarak Git'ten çıkarılmamalı.
 
 ---
 

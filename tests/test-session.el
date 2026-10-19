@@ -27,14 +27,15 @@
   "Session identities cannot read, delete or overwrite files outside storage."
   (kargu-test-with-git-repo nil
     (let* ((kargu-sessions-directory (expand-file-name "central" repo))
+           (kargu-session-storage-location 'project)
            (storage (expand-file-name ".kargu/sessions" repo))
            (victim (expand-file-name "victim.json" repo)))
       (make-directory storage t)
       (write-region "preserve" nil victim)
       (dolist (id '(nil "" "../victim" "/absolute" "a/b" "a\\b" "C:target" "." ".."))
-        (should-error (kargu-session--file-path id repo)))
+        (should-error (kargu-session-storage-file id repo)))
       (make-symbolic-link victim (expand-file-name "safe.json" storage))
-      (should-error (kargu-session--file-path "safe" repo))
+      (should-error (kargu-session-storage-file "safe" repo))
       (should-error (kargu-session-delete "safe" repo))
       (should-error (kargu-session--read-data "safe" repo))
       (let ((read-file (symbol-function 'insert-file-contents)) read-link)
@@ -75,16 +76,18 @@
           (progn
             (make-directory (expand-file-name ".kargu" repo))
             (make-symbolic-link outside (expand-file-name ".kargu/sessions" repo))
-            (let ((path (kargu-session--file-path "safe" repo)))
+            (let ((path (kargu-session-storage-file "safe" repo)))
               (should (kargu-permission-within-project-p path kargu-sessions-directory))
-              (should-not (kargu-permission-within-project-p path outside))))
+              (should-not (kargu-permission-within-project-p path outside)))
+            (let ((kargu-session-storage-location 'project))
+              (should-error (kargu-session-storage-file "safe" repo))))
         (delete-directory outside)))))
 
 (ert-deftest kargu-session-project-key-test ()
-  "Ensure kargu-session--project-key produces deterministic and valid slugs."
-  (let ((slug1 (kargu-session--project-key "/home/user/project-foo/"))
-        (slug2 (kargu-session--project-key "/home/user/project-foo"))
-        (slug3 (kargu-session--project-key "/home/user/project-bar/")))
+  "Ensure project storage keys produce deterministic and valid slugs."
+  (let ((slug1 (kargu-session-storage--project-key "/home/user/project-foo/"))
+        (slug2 (kargu-session-storage--project-key "/home/user/project-foo"))
+        (slug3 (kargu-session-storage--project-key "/home/user/project-bar/")))
     ;; Slashes should not affect canonical slug
     (should (equal slug1 slug2))
     (should (string-prefix-p "project-foo-" slug1))

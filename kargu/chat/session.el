@@ -21,6 +21,7 @@
 (require 'kargu/history)
 (require 'kargu/permission/guards)
 (require 'kargu/chat/routing)
+(require 'kargu/chat/session/storage)
 
 (declare-function kargu-state-mode "kargu/state/selectors" ())
 (declare-function kargu-state-set-provider "kargu/state/transitions" (provider))
@@ -32,21 +33,6 @@
 (declare-function kargu-chat--ensure-idle-prompt "kargu/chat/prompt" ())
 (declare-function kargu-chat-list-buffers "kargu/chat" ())
 (declare-function kargu-loop-running-p "kargu/loop" ())
-
-(defgroup kargu-session nil
-  "Persistent project-scoped chat sessions for kargu."
-  :group 'kargu
-  :prefix "kargu-session-")
-
-(defcustom kargu-sessions-directory
-  (expand-file-name "sessions"
-                    (or (and (getenv "XDG_DATA_HOME")
-                             (not (string-empty-p (getenv "XDG_DATA_HOME")))
-                             (expand-file-name "kargu" (getenv "XDG_DATA_HOME")))
-                        (locate-user-emacs-file "kargu")))
-  "Directory where chat sessions are stored across restarts."
-  :type 'directory
-  :group 'kargu-session)
 
 (defcustom kargu-session-auto-save t
   "When non-nil, chat sessions are automatically saved after each turn."
@@ -139,49 +125,6 @@ over the current workspace."
                 (t (kargu-permission-project-root buffer)))))
     (file-name-as-directory (file-truename (expand-file-name root)))))
 
-(defun kargu-session--project-key (root)
-  "Return a deterministic, safe filesystem slug for project ROOT."
-  (let* ((canonical (file-truename (directory-file-name root)))
-         (name (file-name-nondirectory canonical))
-         (clean-name (replace-regexp-in-string "[^a-zA-Z0-9._-]" "_" (if (string-empty-p name) "root" name)))
-         (hash (substring (secure-hash 'sha1 canonical) 0 8)))
-    (format "%s-%s" clean-name hash)))
-
-(defun kargu-session--project-dir (&optional root)
-  "Return directory path where sessions for project ROOT are stored.
-Prefers existing `<root>/.kargu/sessions/' if present, otherwise
-uses `<kargu-sessions-directory>/<project-key>/'."
-  (let* ((proj-root (kargu-session-project-root root))
-         (local-dir (expand-file-name ".kargu/sessions" proj-root)))
-    (if (and (file-directory-p local-dir)
-             (kargu-permission-within-project-p local-dir proj-root))
-        (file-name-as-directory local-dir)
-      (let ((central-dir (expand-file-name (kargu-session--project-key proj-root)
-                                           kargu-sessions-directory)))
-        (unless (file-directory-p central-dir)
-          (condition-case nil
-              (make-directory central-dir t)
-            (error nil)))
-        (file-name-as-directory central-dir)))))
-
-(defun kargu-session--assert-id (session-id)
-  "Return SESSION-ID if it is a safe filename component, or signal."
-  (unless (and (stringp session-id)
-               (string-match-p (rx string-start (any alnum)
-                                   (* (any alnum "_.-")) string-end)
-                               session-id))
-    (user-error "Kargu: invalid session identifier; use a plain filename without path separators"))
-  session-id)
-
-(defun kargu-session--file-path (session-id &optional root)
-  "Return a contained JSON path for safe SESSION-ID in project ROOT."
-  (kargu-session--assert-id session-id)
-  (let* ((dir (kargu-session--project-dir root))
-         (file (expand-file-name (concat session-id ".json") dir)))
-    (unless (kargu-permission-within-project-p file dir)
-      (user-error "Kargu: session file escapes its storage directory through a symlink"))
-    file))
-
 ;;;; Serialization & Storage ---------------------------------------------
 
 (defvar kargu-chat--output-marker)
@@ -230,16 +173,6 @@ Store MODE-VAL, provider PROV, model MOD, TRANSCRIPT and MESSAGES."
     ("transcript" . ,transcript)
     ("messages" . ,(vconcat (or messages '())))))
 
-(defun kargu-session--write-data (file dir data sid)
-  "Encode and write DATA alist to FILE in DIR, logging for SID."
-  (let ((json-str (kargu-json-encode-record data)))
-    (unless (file-directory-p dir)
-      (make-directory dir t))
-    (with-temp-file file
-      (insert json-str))
-    (kargu-log 'info "session saved: %s (%s)" sid file)
-    file))
-
 (defun kargu-session--messages-for-save ()
   "Messages to persist from the current buffer.
 Live history wins when this buffer is the active session, so a
@@ -278,9 +211,7 @@ empty strings, not the config fallback."
                            'agent))
                (prov (or (kargu-chat--explicit-selection kargu-chat--session-provider) ""))
                (mod (or (kargu-chat--explicit-selection kargu-chat--session-model) ""))
-               (usage (if (boundp 'kargu--session) kargu--session nil))
-               (dir (kargu-session--project-dir root))
-               (file (kargu-session--file-path sid root)))
+               (usage (if (boundp 'kargu--session) kargu--session nil)))
           ;; Avoid creating files for completely empty untouched sessions
           (when (or (and messages (> (length messages) 0))
                     (> (length (string-trim transcript)) 30))
@@ -292,11 +223,13 @@ empty strings, not the config fallback."
                   kargu-chat--messages messages)
             (let ((data (kargu-session--build-data
                          sid root title usage mode-val prov mod transcript messages)))
-              (kargu-session--write-data file dir data sid))))))))
+              (prog1 (kargu-session-storage-write sid root data)
+                (kargu-log 'info "session saved: %s" sid)))))))))
 
 (defun kargu-session-list (&optional root)
   "Return list of saved session metadata alists for project ROOT, newest first."
-  (let* ((dir (kargu-session--project-dir root))
+  (let* ((root (kargu-session-project-root root))
+         (dir (kargu-session-storage-directory root))
          (files (and (file-directory-p dir)
                      (directory-files dir t "\\.json$")))
          (sessions nil))
@@ -304,10 +237,7 @@ empty strings, not the config fallback."
       (condition-case-unless-debug err
           (when (and (file-readable-p file)
                      (kargu-permission-within-project-p file dir))
-            (let* ((content (with-temp-buffer
-                              (insert-file-contents file)
-                              (buffer-string)))
-                   (decoded (kargu--json-decode-safe content)))
+            (let ((decoded (kargu-session-storage-read (file-name-base file) root)))
               (when (and decoded (kargu-aget decoded "id"))
                 (push decoded sessions))))
         (error
@@ -379,11 +309,7 @@ Uses UPDATED-AT and MESSAGE-COUNT for status banner."
   "Read SESSION-OR-ID in project ROOT, or return the supplied session data."
   (if (or (consp session-or-id) (hash-table-p session-or-id))
       session-or-id
-    (let ((f (kargu-session--file-path session-or-id root)))
-      (when (file-readable-p f)
-        (with-temp-buffer
-          (insert-file-contents f)
-          (kargu--json-decode-safe (buffer-string)))))))
+    (kargu-session-storage-read session-or-id root)))
 
 (defun kargu-session-load (session-or-id &optional target-buffer root)
   "Restore SESSION-OR-ID into TARGET-BUFFER for project ROOT.
@@ -394,7 +320,7 @@ must finish before loading another session.  Return TARGET-BUFFER on success."
     (user-error "Kargu: stop the active run before loading another session"))
   (let* ((root (kargu-session-project-root (or root target-buffer)))
          (data (kargu-session--read-data session-or-id root))
-         (_validated (when data (kargu-session--assert-id (kargu-aget data "id"))))
+         (_validated (when data (kargu-session-storage-file (kargu-aget data "id") root)))
          (buf (or target-buffer
                   (get-buffer (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*"))
                   (get-buffer-create (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*")))))
@@ -445,7 +371,7 @@ must finish before loading another session.  Return TARGET-BUFFER on success."
           (choice (completing-read "Delete kargu session: " choices nil t)))
      (list (cdr (assoc choice choices)) proj)))
   (when (and (stringp session-id) (not (string-empty-p session-id)))
-    (let ((file (kargu-session--file-path session-id root)))
+    (let ((file (kargu-session-storage-file session-id (kargu-session-project-root root))))
       (when (file-exists-p file)
         (delete-file file)
         (message "kargu: deleted session %s" session-id)))))
@@ -492,6 +418,20 @@ must finish before loading another session.  Return TARGET-BUFFER on success."
         (when (buffer-live-p buf)
           (ignore-errors
             (kargu-session-save buf)))))))
+
+(defun kargu-session-import-local (session-id &optional root)
+  "Copy local SESSION-ID from ROOT to central storage without removing it.
+Existing central records are never overwritten.  ROOT defaults to the
+current chat's project, not any project named by session metadata."
+  (interactive
+   (let* ((root (kargu-session-project-root))
+          (ids (kargu-session-storage-local-ids root)))
+     (unless ids (user-error "Kargu: no safe local session files found"))
+     (list (completing-read "Import local session: " ids nil t) root)))
+  (let ((target (kargu-session-storage-import-local
+                 session-id (kargu-session-project-root root))))
+    (message "Kargu: imported %s; the local source was retained" session-id)
+    target))
 
 (add-hook 'kill-emacs-hook #'kargu-session-auto-save-all)
 

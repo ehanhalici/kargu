@@ -56,12 +56,14 @@ If SEQ is nil, return nil."
    (seq (list seq))
    (t nil)))
 
-(defun kargu--json-decode (string)
+(defun kargu-json-decode (string)
   "Decode JSON STRING into hash tables with string keys and vectors.
 JSON null and false become :json-null and :json-false respectively.
 Empty objects and empty arrays retain their distinct wire types."
   (json-parse-string string :object-type 'hash-table :array-type 'array
                      :null-object :json-null :false-object :json-false))
+
+(defalias 'kargu--json-decode #'kargu-json-decode)
 
 (defun kargu--json-decode-safe (string)
   "Decode JSON STRING, logging failures and returning nil."

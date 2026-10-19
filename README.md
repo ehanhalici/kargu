@@ -198,6 +198,18 @@ addresses inherit the embedded IPv4 restrictions; the well-known NAT64 prefix
 comes from [RFC 6052](https://www.rfc-editor.org/rfc/rfc6052.html). Arbitrary network-specific
 translation prefixes or public proxy services are not an OS-level sandbox.
 
+Chat sessions default to central storage under `kargu-sessions-directory`,
+even if a project already contains `.kargu/sessions/`. Set
+`kargu-session-storage-location` to `project` to explicitly opt into local
+records; keep that directory out of version control yourself. Kargu never
+changes your Git ignore rules or index. `M-x kargu-session-import-local`
+copies a selected old local record to central storage, retains the source,
+and refuses to overwrite an existing central record. Switch back to `central`
+to restore imported records. Session storage receives an explicit project root
+and does not depend on chat buffers. Records are bounded by
+`kargu-session-max-file-bytes` (16 MiB by default); saves use private temporary
+files and atomic rename so failed publication leaves the previous record intact.
+
 The LSP and Dape entry points load focused submodules for session access,
 data collection, formatting and tool registration. HTTP request construction,
 retry handling and SSE decoding are separate modules. Chat transcript insertion

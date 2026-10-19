@@ -41,6 +41,7 @@
 (require 'tests/test-dynamic-models)
 (require 'tests/test-lsp)
 (require 'tests/test-session)
+(require 'tests/test-session-storage)
 (require 'tests/test-confirm)
 (require 'tests/test-languages)
 (require 'tests/test-dape-commands)
