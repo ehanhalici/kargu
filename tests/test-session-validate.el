@@ -130,5 +130,25 @@
     (should-not (kargu-state-provider))
     (should-not (kargu-state-model))))
 
+(ert-deftest kargu-session-load-preserves-typed-content-blocks-test ()
+  "Restoring a multimodal conversation preserves text and opaque attachments."
+  (let* ((blocks [(("type" . "text") ("text" . "ğ prompt"))
+                  (("type" . "image_url")
+                   ("image_url" . (("url" . "data:image/png;base64,AAAA"))))])
+         (data `(("id" . "attachments") ("messages" .
+                  ,(vector `(("role" . "user") ("content" . ,blocks)))))))
+    (with-temp-buffer
+      (kargu-session-load data (current-buffer) default-directory)
+      (let ((restored (kargu-aget (car kargu-chat--messages) "content")))
+        (should (vectorp restored))
+        (should (equal (kargu-aget (aref restored 0) "text") "ğ prompt"))
+        (should (equal (kargu-aget (kargu-aget (aref restored 1) "image_url") "url")
+                       "data:image/png;base64,AAAA")))))
+  (dolist (blocks '([42] [(("type" . "text") ("text" . 42))] [(("type" . ""))]))
+    (should-error (kargu-session-validate
+                   `(("id" . "invalid")
+                     ("messages" . ,(vector `(("role" . "user") ("content" . ,blocks))))))
+                  :type 'user-error)))
+
 (provide 'tests/test-session-validate)
 ;;; test-session-validate.el ends here

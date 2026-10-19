@@ -78,13 +78,25 @@ Reject circular/improper lists before the native record encoder sees them."
                  (stringp (gethash "arguments" function)))
       (user-error "Kargu: invalid session tool function"))))
 
+(defun kargu-session-validate--content-p (value)
+  "Return non-nil for native text, null/false or typed content blocks VALUE.
+Preserve unknown block kinds for backend adapters rather than dropping them."
+  (or (stringp value) (memq value '(:json-null :json-false))
+      (and (vectorp value)
+           (cl-every
+            (lambda (block)
+              (and (hash-table-p block)
+                   (kargu-session-validate--nonempty-p (gethash "type" block))
+                   (or (not (equal (gethash "type" block) "text"))
+                       (stringp (gethash "text" block)))))
+            value))))
+
 (defun kargu-session-validate--message (message)
   "Check the native protocol MESSAGE without repairing its conversation."
   (kargu-session-validate--object message "message")
   (unless (member (gethash "role" message) '("system" "user" "assistant" "tool"))
     (user-error "Kargu: invalid session message role"))
-  (kargu-session-validate--optional
-   message "content" (lambda (value) (or (stringp value) (eq value :json-null))))
+  (kargu-session-validate--optional message "content" #'kargu-session-validate--content-p)
   (dolist (key '("name" "tool_call_id" "reasoning_content"))
     (kargu-session-validate--optional message key #'stringp))
   (when (equal (gethash "role" message) "tool")
