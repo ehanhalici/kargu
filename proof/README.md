@@ -40,6 +40,12 @@ duplicate. Process publication is conditional on pending state and generation,
 including when a transport callback completes synchronously; ERT covers this
 resource-ownership boundary without adding a loop transition.
 
+External tool processes install their completion sentinel at creation, before
+startup can yield to process events. The existing starting/running/closed
+barrier delays delivery until resource setup completes, even if both streams
+have already closed. ERT forces that ordering for separate and merged stderr;
+this repairs process notification ownership, not a loop transition.
+
 ## 1. Modules
 
 The separate plan artifact workflow (`kargu/plan/store.el` and `dispatch.el`)

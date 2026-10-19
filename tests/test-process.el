@@ -74,6 +74,36 @@
                    (string-prefix-p kargu-process--stderr-name (buffer-name buffer)))
                  (buffer-list)))))
 
+(ert-deftest kargu-process-exit-during-startup-is-delivered-once-test ()
+  "A command may finish before its process handle is published."
+  (dolist (stderr '(nil merge))
+    (let ((create (symbol-function 'make-process)) (deliveries 0) result)
+      (cl-letf (((symbol-function 'make-process)
+                 (lambda (&rest options)
+                   (let ((process (apply create options))
+                         (deadline (+ (float-time) 2)))
+                     (while (and (process-live-p process)
+                                 (< (float-time) deadline))
+                       (accept-process-output nil 0.01))
+                     (should-not (process-live-p process))
+                     ;; Resource setup must finish before user code runs.
+                     (should-not result)
+                     process))))
+        (kargu-process-run
+         "sh" '("-c" "printf done; printf warning >&2")
+         (lambda (value) (cl-incf deliveries) (setq result value))
+         :stderr stderr :timeout nil))
+      (let ((deadline (+ (float-time) 1)))
+        (while (and (not result) (< (float-time) deadline))
+          (accept-process-output nil 0.01)))
+      (should result)
+      (should (= deliveries 1))
+      (should (= (plist-get result :code) 0))
+      (if (eq stderr 'merge)
+          (should (string-search "warning" (plist-get result :output)))
+        (should (equal (plist-get result :output) "done"))
+        (should (equal (plist-get result :stderr) "warning"))))))
+
 (ert-deftest kargu-process-stderr-late-close-precedes-delivery-test ()
   "The main process exiting does not discard pending stderr data."
   (let ((result (kargu-test-await
@@ -265,7 +295,7 @@
       (should (equal (buffer-string) "ağ")))))
 
 (ert-deftest kargu-process-start-failure-cleans-resources-test ()
-  "A failed sentinel setup releases the process, timer and output buffer."
+  "A failed stdin setup releases the process, timer and output buffer."
   (let (process timer output results)
     (cl-letf (((symbol-function 'make-process)
                (lambda (&rest _)
@@ -274,8 +304,8 @@
                (lambda (buffer &rest _) (setq output buffer) #'ignore))
               ((symbol-function 'run-at-time)
                (lambda (&rest _) (setq timer (timer-create))))
-              ((symbol-function 'set-process-sentinel)
-               (lambda (&rest _) (error "Sentinel setup failed"))))
+              ((symbol-function 'process-send-eof)
+               (lambda (&rest _) (error "EOF setup failed"))))
       (should-not (kargu-process-run "sleep" '("30")
                                      (lambda (result) (push result results)))))
     (should (= (length results) 1))
@@ -285,7 +315,7 @@
     (should-not (memq timer timer-list))))
 
 (ert-deftest kargu-git-tool-needs-a-callback-and-answers-by-it-test ()
-  "git tools never run while Emacs waits; with a callback they answer."
+  "Git tools never run while Emacs waits; with a callback they answer."
   (kargu-test-with-git-repo '(("a.txt" . "x\n"))
                             (let ((spec (gethash "git_status" kargu--tool-registry)))
                               (should (string-prefix-p "ERROR:" (funcall (kargu-aget spec "executor") nil)))
@@ -294,7 +324,7 @@
                                 (should (string-search "Head:" out))))))
 
 (ert-deftest kargu-search-grep-runs-asynchronously-test ()
-  "workspace_grep finds a known string and answers by callback."
+  "The workspace_grep tool finds a string and answers by callback."
   (kargu-test-with-git-repo '(("kargu/tools/process.el" . "(defun kargu-process-run ())\n"))
                             (let ((out (kargu-test-await
                                         (lambda (cb) (kargu-search-grep cb "kargu-process-run" "kargu/tools/process.el")))))

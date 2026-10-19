@@ -181,13 +181,13 @@ Return the process, or nil when none started."
                 :name (file-name-nondirectory exe) :buffer nil
                 :command (cons exe args) :connection-type 'pipe :noquery t
                 :coding 'utf-8 :stderr stderr
-                :filter (kargu-process--filter buffer max-bytes state))))
+                :filter (kargu-process--filter buffer max-bytes state)
+                :sentinel (kargu-process--sentinel callback buffer state))))
     (plist-put state :process proc)
     (process-put proc 'kargu-stderr-process stderr)
     (plist-put state :timer (kargu-process--deadline proc (plist-get state :timeout) state))
-    (set-process-sentinel proc (kargu-process--sentinel callback buffer state))
-    (plist-put state :lifecycle :running)
     (when (process-live-p proc) (process-send-eof proc))
+    (plist-put state :lifecycle :running)
     (kargu-process--maybe-finish callback buffer state)
     proc))
 
