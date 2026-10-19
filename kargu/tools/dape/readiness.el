@@ -7,7 +7,7 @@
 ;;; Commentary:
 
 ;; Bind readiness to a captured origin and adapter, never global UI hooks.
-;; Cancelling a wait does not cancel Dape's deferred compilation or adapter.
+;; Cancelling a wait also invalidates its not-yet-started launch, not adapters.
 
 ;;; Code:
 
@@ -149,7 +149,8 @@ Return an owned async task; stale ownership or Stop cancels it silently."
                 (lambda (_value error)
                   (when (kargu-dape--readiness-valid-p wait)
                     (if error (when on-cancel (funcall on-cancel error))
-                      (funcall on-ready)))))))
+                      (funcall on-ready))))
+                :valid-p (lambda () (kargu-dape--readiness-valid-p wait)))))
     (setf (kargu-dape--readiness-task wait) task)
     (condition-case err
         (progn

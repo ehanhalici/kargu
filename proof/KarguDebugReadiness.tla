@@ -2,8 +2,8 @@
 EXTENDS Naturals, FiniteSets, TLC
 
 \* Candidates abstract BOTH the launch token and canonical project/root check.
-\* Distinct adapter objects cannot reappear after removal. Deferred compile
-\* may still create an adapter after cancellation; launch prevention is out of scope.
+\* Distinct adapter objects cannot reappear after removal. Deferred launch
+\* prevention is checked separately by KarguDebugStartup's compile guard.
 Adapters == {0, 1}
 None == 2
 VARIABLES phase, launching, valid, live, seen, candidates, paused, bound,

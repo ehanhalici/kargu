@@ -8,13 +8,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ## Doğrulanmış hatalar — düzeltme sırası
 
-### DAPE-03 · P1 · K — Ertelenmiş compile devamı başlangıç sahipliğinden kopuyor
-
-- **Yer/kanıt:** `kargu/tools/dape/preflight.el`, `kargu-dape-launch-config`: doğrulamadan sonra Dape çağrılıyor. Dape 0.27.1 compile callback'i bağlantıyı daha sonra Kargu sahipliğini yeniden doğrulamadan açıyor.
-- **Beklenen/gerçek:** İptal edilmiş veya kökü/oturumu değişmiş başlatma bağlantı açmamalı; eski compile devamı açabilir.
-- **Yeniden üretme/kapanış:** Compile callback'ini tut, koşuyu iptal et/kökü değiştir, callback'i bırak. İptal edilebilir başlatma kimliği ve compile sonrası doğrulama gerekli; yabancı compilation tamponu/kancası etkilenmemeli.
-- **Bağımlılık:** DAPE-02 ile ortak başlatma sahipliği.
-
 ### DAPE-04 · P1 · K — Yaşam döngüsü global temizlik ve senkron shutdown kullanıyor
 
 - **Yer/kanıt:** `kargu/tools/dape/commands.el` quit/disconnect global Dape yardımcılarını çağırıyor. Dape 0.27.1 `dape-quit` bütün kök bağlantıları, `dape-disconnect-quit` global tamponları temizliyor; `dape--shutdown` `accept-process-output nil 0.2` ve `jsonrpc-shutdown` ile bekliyor.
@@ -84,6 +77,13 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 - **Yer/kanıt:** `kargu/tools/dape/context.el` yol/metadata/sınırlı içerik okumasını çağıranın iş parçacığında yapıyor. 64 KiB disk / 65.536 canlı karakter sınırı mevcut; sınırsız büyük dosya okuma iddiası artık geçerli değil.
 - **Beklenen/gerçek:** Yavaş/askıda yerel mount UI'ı bekletmemeli; byte sınırı süre garantisi değil.
 - **Yeniden üretme/kapanış:** Kontrollü geciken yol/metadata/okuma, iptal, kaynak tampon nesli değişimi. Disk işi iptal edilebilir yardımcı süreçte; callback proje/oturum/koşu ve kaynak nesline bağlı, canlı tampon güncelliği korunmalı.
+
+### DAPE-05 · P2 · K — Port üzerinden adapter oluşturma hâlâ senkron bekliyor
+
+- **Yer/kanıt:** `kargu/tools/dape/launch.el` son sahiplik kontrolünden sonra Dape 0.27.1 `dape--create-connection` çağırıyor. Dape'nin `port` yolu `make-network-process` bağlantısını 30 denemelik döngüde `sleep-for 0.100` ile bekliyor; uzak dizin yolunda ayrıca `sleep-for 0.300` var. Bu kod yolu doğrulandı; gerçek süre/platform davranışı ölçülmedi.
+- **Beklenen/gerçek:** Adapter bağlantısı UI'ı bekletmeden, iptal/deadline ve proje/oturum/koşu sahipliğiyle kurulmalı. Derleme devamı artık bağlantı oluşturma sınırında doğrulanıyor; ancak Dape'nin oluşturucu içindeki beklemesi asenkron hâle gelmedi. Bekleme sırasında reentrant iptal/kimlik değişimi ayrıca korunmalı.
+- **Yeniden üretme/kapanış:** Kontrollü geciken veya hiç açılmayan port, server process, uzak dizin ve süreç çıkışı; bağlantı kurulurken Stop/deadline/kök değişimi. Olay tabanlı bağlantı hazırlığı, yakalanmış server/socket/stderr sahipliği ve geç/çift tamamlanmada sızıntısız temizlik gerekli; yabancı adapter veya compilation kaynağı kapatılmamalı.
+- **Bağımlılık:** DAPE-04 ile ortak asenkron adapter kaynak yaşam döngüsü; derleme devamı koruması oluşturucunun iç beklemesini çözmez.
 
 ## Doğrulama bekleyen riskler
 

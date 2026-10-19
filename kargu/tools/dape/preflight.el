@@ -13,6 +13,7 @@
 (require 'kargu/tools/dape/session)
 (require 'kargu/tools/process)
 (require 'kargu/async)
+(require 'kargu/tools/dape/launch)
 
 (defvar dape-configs)
 (declare-function kargu-session-id "kargu/core/session" ())
@@ -184,14 +185,19 @@ CONFIG-NAME optionally selects an adapter without changing user preferences."
               ((not (kargu-dape-debug-refusal))))
     (kargu-dape--verification-name verified)))
 
-(cl-defun kargu-dape-launch-config (name &key token)
+(cl-defun kargu-dape-launch-config (name &key token on-start)
   "Launch verified configuration NAME using Dape's plist API.
-TOKEN optionally identifies this launch without adding a wire argument."
-  (let ((config (assq name dape-configs)))
+TOKEN optionally identifies this launch without adding a wire argument.
+ON-START runs after the launch completes, including deferred compilation."
+  (let ((config (copy-tree (assq name dape-configs)))
+        (selection kargu-dape-config))
     (unless config (user-error "Unknown Dape configuration: %s" name))
     (let ((copy (kargu-dape--ensure-stop-on-entry (copy-tree (cdr config)))))
       (when token (setq copy (plist-put copy 'kargu--launch-token token)))
-      (dape copy))))
+      (kargu-dape-launch
+       copy :valid-p (lambda () (and (eq selection kargu-dape-config)
+                                    (equal config (assq name dape-configs))))
+       :on-start on-start))))
 
 (cl-defstruct (kargu-dape--launch (:constructor kargu-dape--make-launch))
   "Captured startup intent, independent of subsequent editor selection."
@@ -256,9 +262,11 @@ TOKEN optionally identifies this launch without adding a wire argument."
       task (lambda (approved)
              (if (not approved) (kargu-async-finish task nil "Debugger startup rejected")
                (with-current-buffer (kargu-dape--launch-buffer launch)
-                 (kargu-dape-launch-config name))
-               (kargu-async-finish task
-                                   (format "Debug session started with configuration %s" name))))))))
+                 (kargu-dape-launch-config
+                  name :on-start
+                  (lambda ()
+                    (kargu-async-finish
+                     task (format "Debug session started with configuration %s" name)))))))))))
 
 (defun kargu-dape-start (&optional config-name callback)
   "Verify CONFIG-NAME and start its adapter after approval through CALLBACK."

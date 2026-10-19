@@ -101,7 +101,7 @@
          (kargu-dape-inspection-thread conn))))
 
 (declare-function kargu-dape-selected-config "kargu/tools/dape/preflight" ())
-(declare-function kargu-dape-launch-config "kargu/tools/dape/preflight" (name &key token))
+(declare-function kargu-dape-launch-config "kargu/tools/dape/preflight" (name &rest options))
 
 (defun kargu-dape--interactive-launch-dape (target-buf token)
   "Launch the verified adapter in TARGET-BUF with the captured launch TOKEN."

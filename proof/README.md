@@ -64,18 +64,23 @@ reassignment. This is a resource-admission boundary, not a new loop transition;
 global Dape lifecycle isolation remains tracked separately in `todo.md`.
 
 `KarguDebugStartup.tla` / `DebugStartupMC.cfg` model one startup intent from
-dependency probing through approval. Run `proof/run_tlc.sh --debug-startup`
+dependency probing through approval, deferred compilation and final adapter
+creation. Run `proof/run_tlc.sh --debug-startup`
 for an exhaustive scan. Five grouped resource identities, an intervening local
 adapter, foreign adapter events, caller-buffer changes, rejection and run
 cancellation cover startup ownership and single delivery. The 2026-10-19 scan
-visited 1,032 distinct states (4,369 generated), depth 10, without an error or
+visited 1,544 distinct states (8,465 generated), depth 12, without an error or
 deadlock. Source filename/tick/mode/directory, editor-state preservation,
 actual configuration fingerprints and source-local environment checks are
 exercised by offline ERT. Invalidated identities are abstracted monotonically;
-this is not a model of arbitrary editor history or Dape's remaining global
-deferred compilation or global lifecycle cleanup. No main-loop transition
-changed or was re-proved. This approval model was rerun unchanged after the
-readiness work and retained the same exhaustive counts.
+this is not a model of arbitrary editor history, compilation subprocesses or
+Dape's global lifecycle cleanup. ERT exercises the real Dape compile/launch
+dispatch with manually released continuations, final-boundary invalidation
+by startup hooks, duplicate replies, deadlines and ownerless pre-run Stop.
+Only the owned task timer is released: no compilation buffer, process or
+finish hook is cancelled or removed. The creation boundary is atomic in this
+model; Dape's internal synchronous port retry loop is outside these bounds
+and remains tracked as DAPE-05. No main-loop transition changed or was re-proved.
 
 `KarguDebugReadiness.tla` / `DebugReadinessMC.cfg` model the separate owned
 wait after launch or while an existing adapter runs. Run
@@ -83,12 +88,12 @@ wait after launch or while an existing adapter runs. Run
 identities, token/project matching, ambiguity, removal/replacement, paused
 state, origin invalidation, deadlines and cancellation cover single delivery,
 no foreign success and cleanup. The 2026-10-19 scan visited 464 distinct states
-(1,450 generated), depth 8, without an error or deadlock. ERT additionally
+(1,450 generated), depth 9, without an error or deadlock. ERT additionally
 tests early events before launch returns, root-only token discovery, no DAP
 metadata leak, ownerless waits, source closure, reentrant consumers, timer
 startup errors, Stop before a run and editor-state preservation. This bounded
-resource model does not prevent Dape's deferred compile continuation from
-opening an adapter after cancellation; that remains DAPE-03. It is not a
+resource model covers readiness notification, not deferred adapter creation;
+the latter is now checked by the separate startup model above. It is not a
 rerun of the main-loop proof.
 
 `KarguDebugWatch.tla` / `DebugWatchMC.cfg` cover the guarded continuation of a
