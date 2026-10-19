@@ -21,7 +21,7 @@
 
 (declare-function kargu--validate-history "kargu/history/repair")
 (declare-function kargu--history-fresh-system-message "kargu/history/repair" ())
-(declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
 (declare-function kargu-tool-schema-char-count "kargu/api/tools" ())
 
 (defconst kargu-history--chars-per-token 3.5
@@ -50,9 +50,13 @@ The suffix is walked back so it does not start on an orphan `tool' result."
 Use 70% of the active model's window with 3.5 characters per token,
 capped at 800k characters.  With no known window, use the configured
 `kargu-history-compact-chars' fallback."
-  (let* ((ctx-tokens (and (fboundp 'kargu-model-context-window)
-                          (kargu-model-context-window)))
-         (fallback (or kargu-history-compact-chars 45000)))
+  (kargu-history-context-threshold
+   (and (fboundp 'kargu-model-context-window) (kargu-model-context-window))))
+
+(defun kargu-history-context-threshold (ctx-tokens)
+  "Return the compaction character budget for explicit CTX-TOKENS.
+Use the configured fallback when that context window is unknown."
+  (let ((fallback (or kargu-history-compact-chars 45000)))
     ;; Budget heuristic; actual tokenization is provider-specific.
     (if (and (numberp ctx-tokens) (> ctx-tokens 0))
         (min kargu-history--compact-ceiling

@@ -28,12 +28,12 @@
   "Declared support, not model names, controls cap aliases and sampling."
   (let ((kargu--model-metadata-table (make-hash-table :test #'equal)))
     (kargu-model-set-metadata "unexpected-id"
-                              '(("supported_parameters" . ["max_completion_tokens"])))
+                              '(("supported_parameters" . ["max_completion_tokens"])) "openrouter")
     (should (equal (kargu-api-request-parameters :model "unexpected-id" :provider "openrouter"
                                                 :temperature 0.2 :max-tokens 500)
                    '(("max_completion_tokens" . 500))))
     (kargu-model-set-metadata "unexpected-id"
-                              '(("supported_parameters" . ["max_tokens" "temperature"])))
+                              '(("supported_parameters" . ["max_tokens" "temperature"])) "openai")
     (should (equal (kargu-api-request-parameters :model "unexpected-id" :provider "openai"
                                                 :temperature 0.4 :max-tokens 600)
                    '(("temperature" . 0.4) ("max_tokens" . 600))))))
@@ -41,9 +41,10 @@
 (ert-deftest kargu-parameters-both-aliases-still-select-one-test ()
   "When both aliases are accepted, the provider's preferred field wins."
   (let ((kargu--model-metadata-table (make-hash-table :test #'equal)))
-    (kargu-model-set-metadata "both"
-                              '(("supported_parameters" . ["max_tokens" "max_completion_tokens"])))
     (dolist (provider '("openai" "openrouter" "anthropic"))
+      (kargu-model-set-metadata "both"
+                                '(("supported_parameters" . ["max_tokens" "max_completion_tokens"]))
+                                provider)
       (let ((fields (kargu-api-request-parameters :model "both" :provider provider :max-tokens 123)))
         (should (= (length fields) 1))
         (should (= (cdar fields) 123))
@@ -53,7 +54,7 @@
 (ert-deftest kargu-parameters-no-supported-cap-refuses-explicit-limit-test ()
   "An explicit cost/output cap is never silently discarded."
   (let ((kargu--model-metadata-table (make-hash-table :test #'equal)))
-    (kargu-model-set-metadata "uncapped" '(("supported_parameters" . ["temperature" "tools"])))
+    (kargu-model-set-metadata "uncapped" '(("supported_parameters" . ["temperature" "tools"])) "openrouter")
     (should-error (kargu-api-request-parameters :model "uncapped" :provider "openrouter"
                                               :max-tokens 100) :type 'user-error)
     (should (equal (kargu-api-request-parameters :model "uncapped" :provider "openrouter"
@@ -63,7 +64,7 @@
 (ert-deftest kargu-parameters-empty-metadata-remains-unknown-test ()
   "Empty advertised parameter lists preserve the existing unknown contract."
   (let ((kargu--model-metadata-table (make-hash-table :test #'equal)))
-    (kargu-model-set-metadata "empty" '(("supported_parameters" . [])))
+    (kargu-model-set-metadata "empty" '(("supported_parameters" . [])) "openai")
     (should (equal (kargu-api-request-parameters :model "empty" :provider "openai"
                                                 :temperature 0.2 :max-tokens 10)
                    '(("max_completion_tokens" . 10))))))

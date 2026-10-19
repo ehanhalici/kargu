@@ -28,6 +28,12 @@ finish reason or `[DONE]` is required. Truncation and malformed events enter
 the existing `ModelReceiveError` path, never `ModelReceiveToolCalls`. ERT covers
 this transport boundary separately from the loop's abstract response actions.
 
+Model capabilities are read from provider/model-owned metadata records.
+Provider isolation, ambiguous display aliases, exact request identities and
+captured inspector ownership are covered by offline ERT, including catalog
+responses arriving in either order. This changes metadata ownership, not the
+loop's existing tool-admission transition or its abstract capability boolean.
+
 A local stream-watch startup failure closes the attempt before delivering an
 error through the existing `ModelReceiveError` path. It never launches a plain
 duplicate. Process publication is conditional on pending state and generation,

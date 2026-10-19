@@ -30,7 +30,7 @@
 (require 'kargu/tools/deps nil t)
 (require 'kargu/ui/confirm)
 
-(declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id provider))
 (declare-function kargu-session-project-root "kargu/chat/session" (&optional buffer-or-dir))
 (declare-function kargu-deps-missing "kargu/tools/deps" (&optional root))
 

@@ -31,7 +31,7 @@
 (declare-function kargu-chat-select-effort-company "kargu/api/select")
 (declare-function kargu--provider-name "kargu/config/key")
 (declare-function kargu--model "kargu/config/key")
-(declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
 (defvar kargu-reasoning-effort)
 
 (defcustom kargu-chat-buffer-name "*kargu-chat*"

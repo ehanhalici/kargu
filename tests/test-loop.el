@@ -39,8 +39,8 @@
       (kargu-loop--send-model run "hello")
       (setq provider "new-provider" model "new-model")
       (kargu-loop--handle-tools-unsupported run "Tools are not supported")
-      (should (gethash "old-provider/old-model" kargu--tools-refused))
-      (should-not (gethash "new-provider/new-model" kargu--tools-refused)))))
+      (should (gethash '("old-provider" . "old-model") kargu--tools-refused))
+      (should-not (gethash '("new-provider" . "new-model") kargu--tools-refused)))))
 
 (ert-deftest kargu-loop-thought-callback-error-never-redelivers-test ()
   "Callback arity is inspected before delivery, not guessed from its errors."

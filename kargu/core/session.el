@@ -18,7 +18,7 @@
 (declare-function kargu-history-reset "kargu/history/protocol" ())
 (declare-function kargu-circuit-reset "kargu/api/circuit" ())
 (declare-function kargu-state-reset "kargu/state/transitions" ())
-(declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
 
 ;;;; Session state --------------------------------------------------------
 

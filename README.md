@@ -148,8 +148,19 @@ Sampling fields are omitted when a nonempty supported-parameter list excludes
 them. With unknown metadata, OpenAI conservatively omits temperature; other
 compatibility providers keep the existing temperature default. Explicit metadata
 can enable it. Format/provider `:request` records set these defaults without
-model-name heuristics. Conditional sampling/reasoning compatibility and full
-provider-scoped metadata isolation remain tracked in `todo.md`.
+model-name heuristics. Conditional sampling/reasoning compatibility remains
+tracked in `todo.md`.
+
+Model metadata now has one owner in `kargu/models/store.el`, indexed by the
+provider/model pair. Provider IDs normalize case; opaque model IDs retain it.
+Readers default to the active provider, or take an explicit provider argument.
+Short display aliases must be unique within that provider; request parameter
+policy always requires the exact model ID. Local property overrides belong to
+that same identity and survive catalog refreshes during the Emacs session.
+They are not written to disk. Metadata inspectors retain their captured provider
+when chats switch. Model APIs such as `kargu-model-set-metadata` accept an
+explicit provider; `kargu-model-set-prop` uses `:provider`. Restart Emacs to rebuild
+the in-memory catalog after updating from the old global cache.
 
 ### Prompt caching and low usage
 

@@ -22,7 +22,7 @@
 (require 'kargu/api)
 (require 'kargu/api/http)
 
-(declare-function kargu-model-read "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-model-read "kargu/api/catalog" (&optional model-id provider))
 
 (ert-deftest kargu-catalog-public-opencode-does-not-resolve-secrets-test ()
   "Only the declared public endpoint skips authentication, not custom URLs."
@@ -131,8 +131,8 @@
             ("architecture" . ((("modality" . "text+image->text"))))))))
     (kargu--record-models-metadata models-json "openrouter")
     ;; The store keeps the raw alist.  One reader extracts the fields.
-    (let ((fields (kargu-model-read "deepseek/deepseek-r1")))
-      (should (consp (kargu-model-get-metadata "deepseek/deepseek-r1")))
+    (let ((fields (kargu-model-read "deepseek/deepseek-r1" "openrouter")))
+      (should (consp (kargu-model-get-metadata "deepseek/deepseek-r1" "openrouter")))
       (should (= (plist-get fields :context-window) 131072))
       (should (= (plist-get fields :max-output) 8192))
       (should (equal (plist-get fields :reasoning-efforts) '("low" "medium" "high")))
@@ -141,7 +141,7 @@
         (should (string-match-p "max 8k" ann))
         (should (string-match-p "🧠 think: low..high" ann))
         (should (string-match-p "\\$0.55/1M" ann))))
-    (let ((fields (kargu-model-read "qwen/qwen-2.5-vl-72b-instruct:free")))
+    (let ((fields (kargu-model-read "qwen/qwen-2.5-vl-72b-instruct:free" "openrouter")))
       (should (= (plist-get fields :context-window) 32768))
       (should (plist-get fields :vision))
       (should (plist-get fields :free))
@@ -162,8 +162,8 @@
             ("details" . ((("parameter_size" . "32.8B")
                            ("quantization_level" . "Q4_K_M"))))))))
     (kargu--record-models-metadata ollama-json "ollama")
-    (let ((llama (kargu-model-read "llama3.3:70b"))
-          (r1 (kargu-model-read "deepseek-r1:32b")))
+    (let ((llama (kargu-model-read "llama3.3:70b" "ollama"))
+          (r1 (kargu-model-read "deepseek-r1:32b" "ollama")))
       (should (equal (plist-get llama :params) "70.6B Q4_K_M"))
       (should (equal (plist-get r1 :params) "32.8B Q4_K_M"))
       ;; The name "r1" is not a reasoning flag.  The record omitted one.
@@ -187,8 +187,8 @@
             ("outputTokenLimit" . 8192)
             ("description" . "Fast next-gen model")))))
     (kargu--record-models-metadata gemini-json "google")
-    (let ((pro (kargu-model-read "gemini-1.5-pro"))
-          (flash (kargu-model-read "gemini-2.0-flash")))
+    (let ((pro (kargu-model-read "gemini-1.5-pro" "google"))
+          (flash (kargu-model-read "gemini-2.0-flash" "google")))
       (should (= (plist-get pro :context-window) 2097152))
       (should (= (plist-get pro :max-output) 8192))
       (should (= (plist-get flash :context-window) 1048576))

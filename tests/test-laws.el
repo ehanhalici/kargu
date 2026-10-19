@@ -37,7 +37,7 @@
   "Agent mode with a model that cannot call tools is refused, the input stays."
   (kargu-laws--with-catalog
     (kargu-test-mode 'agent)
-    (kargu-model-set-metadata "no-tools-model" '(("supports_tools" . :json-false)))
+    (kargu-model-set-metadata "no-tools-model" '(("supports_tools" . :json-false)) "p")
     (let ((kargu--session-model "no-tools-model")
           (kargu--loop-run nil)
           (b (get-buffer-create kargu-chat-buffer-name)))
