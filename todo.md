@@ -1,71 +1,137 @@
-# Açık sorunlar
+# Açık işler
 
-Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağlayıcı veya ölçümle doğrulanması gereken risk. Kapsamlı işler için gerekli sözleşme/test notları eklenmiştir.
+Yalnız açık kayıtlar tutulur; kapanan ve yanlış pozitif kayıtlar silinir.
+2026-10-19 incelemesi: 698/698 ERT geçti. Yeşil testler kapsanmayan hataları
+çürütmez. K = kod yolu doğrulandı; Y = kontrollü yeniden üretildi;
+D = ortam/ölçüm kanıtı gerekiyor. Kimlikler yeniden numaralanmaz.
+P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
-### Modül: `tools/diff.el` & `tools/diff/`
+## Doğrulanmış hatalar — düzeltme sırası
 
-1. **[K - Orta] `apply_patch` atomik değildir.**
-   - **Dosya / Satır:** `kargu/tools/diff.el:450-456`
-   - **Sorun:** Patch planı önceden doğrulansa bile yazma aşamasında `maphash` sırayla dosyaları yazar. Dosyalardan biri yazılırken disk hatası veya kilit oluşursa önceki dosyalar diske yazılmış kalır, rollback tetiklenmez.
-   - **Gereken:** Disk/tampon/snapshot için ortak işlem kaydı; son dosyada kaydetme hatası ve insanın kısmi kabulü/reddi için açık atomiklik sözleşmesi. Geri alma, kullanıcının araya giren değişikliklerini silmemeli.
-2. **[D - Düşük] `read_file` bellek tüketimi.**
-   - **Dosya / Satır:** `kargu/tools/diff.el:147-154, 175-180`
-   - **Sorun:** `from_line`/`to_line` aralığı verilmiş olsa dahi dosya önce tamamen arabelleğe okunur ve `split-string` ile tüm satır listesi oluşturulur. Çok büyük dosyalarda (100MB+) gereksiz bellek ve GC yükü oluşturur.
+### LSP-01 · P1 · Y — Proje raporuna yabancı dosya tanıları girebiliyor
 
----
+- **Yer/kanıt:** `kargu/tools/lsp/diagnostics.el`, `kargu-lsp--collect-project-diagnostics`: native Flymake kayıtları sınır denetimi olmadan yayınlanıyor; kontrollü dış dosya kaydı raporda görüldü. Açık tampon adaylarında yalnız metinsel yol öneki var.
+- **Beklenen/gerçek:** Yalnız yakalanmış kanonik proje kökü raporlanmalı; yabancı dosya/symlink kayıtları sızabiliyor.
+- **Yeniden üretme/kapanış:** Native dış dosya, açık kaçan symlink, benzer isimli komşu kök. Yabancı adaylar içerik okunmadan/yayınlanmadan elenmeli; proje içi symlink korunmalı. Dosyalar örtük açılmamalı.
 
-### Modül: `api/` (İstekler, Devre Kesici, Yeniden Deneme)
+### LSP-02 · P1 · Y — Farklı sütun tanıları kayboluyor
 
-1. **[D - Orta] Sampling desteğinin muhakeme ayarına bağlı koşulları temsil edilmiyor.**
-   - **Dosya:** `kargu/api/parameters.el`, `kargu/api/catalog.el`
-   - **Sorun:** Statik `supported_parameters` listesi bir alanı destekli saysa bile belirli reasoning-effort/thinking ayarlarıyla birlikte desteklemeyebilir. [Resmi OpenAI uyumluluk notu](https://developers.openai.com/api/docs/guides/deployment-checklist) buna örnek veriyor. Bilinmeyen OpenAI modelleri için sampling zaten ihtiyatlı biçimde atlanıyor; ancak açık metadata ile etkinleştirildiğinde koşul denetimi yok.
-   - **Gereken:** Model/biçim capability kaydına koşullu parametre desteği eklenmeli ve etkin reasoning ayarıyla birlikte tek yerde yorumlanmalı. Model adı regex'i veya sağlayıcı adı listesi kullanılmamalı; `none`, kapalı ve belirtilmemiş effort ayrımı korunmalı.
+- **Yer/kanıt:** `kargu/tools/lsp/diagnostics.el`, `kargu-lsp--group-diagnostics-by-file`: tekrar anahtarında sütun yok. Aynı dosya/satır/önem/mesaj ve iki farklı sütun tek kayıt verdi.
+- **Beklenen/gerçek:** Ayrı konumlar ayrı kalmalı; farklı sütunlar birleştiriliyor.
+- **Yeniden üretme/kapanış:** Sütun 1 ve 8 ayrı, tam tekrar tek olmalı. Alanlar metinsel ayraç çakışması olmadan karşılaştırılmalı.
 
----
+### DAPE-01 · P1 · K — Seçili thread için durmuş/canlı olma izni eksik
 
-### Modül: `config/` (Yapılandırma & Anahtarlar)
+- **Yer/kanıt:** `kargu/tools/dape/session.el` herhangi bir durmuş thread arıyor; `selection.el` seçili thread'i durumundan bağımsız yakalıyor. Dape 0.27.1 `dape--current-thread` durum kontrol etmiyor; `events.el` thread olaylarını nesle katmıyor.
+- **Beklenen/gerçek:** İnceleme yakalanmış canlı/durmuş thread'e ait olmalı; başka thread durmuşken çalışan thread'in eski frame önbelleği kullanılabilir.
+- **Yeniden üretme/kapanış:** Çalışan seçili thread + durmuş ikinci thread, `allThreadsStopped = false`, kısmi continue/exit, thread kimliği yeniden kullanımı ve geç stack/scopes/variables cevapları. Sessizce başka thread'e geçilmemeli.
 
-1. **[K - Orta] `auth-source-search` ana iş parçacığını dondurabilir.**
-   - **Dosya / Satır:** `kargu/providers/registry.el:292`, `kargu/config/key.el:134`
-   - **Sorun:** GPG şifreli `.authinfo.gpg` kullanan sistemlerde `auth-source-search` pinentry veya disk beklemesi nedeniyle Emacs UI'ını senkron olarak kilitler. `kargu-connected-providers` fonksiyonu bu aramayı katalogdaki 160+ sağlayıcı için döngüde çalıştırır.
+### DAPE-02 · P1 · Y — Başlangıç bekleyicisi yabancı stop ile tamamlanıyor
 
----
+- **Yer/kanıt:** `kargu/tools/dape/session.el`, `kargu-dape--wait-for-session-ready`: global stop kancası koşulsuz ready yayınlıyor. Bağlantı yokken global hook ile ready callback'i üretildi.
+- **Beklenen/gerçek:** Yakalanmış proje/oturum/başlatma kimliğinin bağlantısı beklenmeli; yabancı start/stop beklemeyi etkileyebiliyor.
+- **Yeniden üretme/kapanış:** Yabancı olay, kök/oturum değişimi, adapter değiştirme, kapatılan kaynak tamponu, Stop ve timeout; callback en fazla bir kez, timer/hook temizliği her çıkışta.
 
-### Modül: `chat/`, `history/` & `core/` (Oturum İzolasyonu ve Bellek)
+### DAPE-03 · P1 · K — Ertelenmiş compile devamı başlangıç sahipliğinden kopuyor
 
-1. **[K - Yüksek] Çoklu sohbet tamponlarında Global Değişken Çakışması.**
-   - **Dosya / Satır:** `kargu/core/session.el:34-42`, `kargu/history/protocol.el:23`, `kargu/state/store.el:18-31`
-   - **Sorun:** `kargu--session`, `kargu--message-history` ve merkezi durum deposu `kargu--state-store` global `defvar` olarak tutulmaktadır. Kullanıcı iki ayrı projede iki ayrı Kargu tamponu açtığında sayaçlar, mesaj geçmişleri, `:mode`, `:status` ve `:busy` bayrakları birbirini ezer. Bir tampondaki işlem diğer tüm tamponların durumunu bozar.
-   - **Gereken:** Kip hazırlığı/restore geri çağrıları da proje, oturum ve seçim nesline bağlı olmalı; başarısız plan başlangıcında eski `debug` kipine asenkron dönüş yeni bir sohbete sızmamalı.
-2. **[K - Orta] `kargu-history-char-count` her turda tüm geçmişi JSON'a çevirerek karakter sayar.**
-   - **Dosya / Satır:** `kargu/history/compact.el:63-71`
-   - **Sorun:** `(+ (length (kargu--json-encode (vconcat kargu--message-history))) ...)` çağrısı her adımda ve her sıkıştırma eşiği kontrolünde tüm mesaj geçmişini baştan sona JSON string'e çevirir. Yüzlerce mesajlık oturumlarda yüksek CPU tüketimi ve gereksiz GC baskısı oluşturur.
-3. **[K - Orta] $O(N^2)$ Geçmiş Bellek Ayırma (Cons Allocation).**
-   - **Dosya / Satır:** `kargu/history/protocol.el:39`, `kargu/api/response.el:225`
-   - **Sorun:** Her mesaj eklendiğinde `(setq kargu--message-history (append kargu--message-history (list msg)))` ile liste baştan kopyalanır. Yüzlerce adımlı uzun oturumlarda gereksiz Garbage Collection (GC) duraksamalarına yol açar.
-   - **Gereken:** Kuyruk/karakter önbelleği; repair, compaction, reset ve restore sırasında geçersizleştirme. Doğrudan `nconc` kullanmak, diğer sohbetin paylaştığı liste/snapshot'ı değiştirebileceğinden önce sahiplik ayrılmalı.
-4. **[K - Orta] Senkron JSON Oturum Okuma.**
-   - **Dosya / Satır:** `kargu/chat/session.el:284-306`
-   - **Sorun:** `kargu-session-list`, projedeki tüm `.json` oturum dosyalarını diskten senkron okur ve ayrıştırır. Dosya sayısı arttıkça Emacs donar.
+- **Yer/kanıt:** `kargu/tools/dape/preflight.el`, `kargu-dape-launch-config`: doğrulamadan sonra Dape çağrılıyor. Dape 0.27.1 compile callback'i bağlantıyı daha sonra Kargu sahipliğini yeniden doğrulamadan açıyor.
+- **Beklenen/gerçek:** İptal edilmiş veya kökü/oturumu değişmiş başlatma bağlantı açmamalı; eski compile devamı açabilir.
+- **Yeniden üretme/kapanış:** Compile callback'ini tut, koşuyu iptal et/kökü değiştir, callback'i bırak. İptal edilebilir başlatma kimliği ve compile sonrası doğrulama gerekli; yabancı compilation tamponu/kancası etkilenmemeli.
+- **Bağımlılık:** DAPE-02 ile ortak başlatma sahipliği.
 
----
+### DAPE-04 · P1 · K — Yaşam döngüsü global temizlik ve senkron shutdown kullanıyor
 
-### Modül: `tools/dape/`
+- **Yer/kanıt:** `kargu/tools/dape/commands.el` quit/disconnect global Dape yardımcılarını çağırıyor. Dape 0.27.1 `dape-quit` bütün kök bağlantıları, `dape-disconnect-quit` global tamponları temizliyor; `dape--shutdown` `accept-process-output nil 0.2` ve `jsonrpc-shutdown` ile bekliyor.
+- **Beklenen/gerçek:** Yalnız yakalanmış bağlantı, UI'ı bekletmeden yönetilmeli; yabancı oturum/UI etkileniyor ve callback sarmalı iç beklemeyi kaldırmıyor.
+- **Yeniden üretme/kapanış:** İki proje/adapter, yabancı seçim, kaybolan bağlantı, geç/çift cevap, Stop/deadline. Sahipli olay tabanlı sonlandırma/ayrılma; yabancı kaynaklara dokunulmamalı.
 
-1. **[K - Yüksek] Dape başlangıç bekleyicisi ve global yaşam döngüsü komutları sahiplik taşımıyor.**
-   - **Dosyalar:** `kargu/tools/dape/session.el`, `commands.el`
-   - **Sorun:** Başlangıç hazır-olma bekleyicisi global start/stop kancalarını dinliyor; başka bir bağlantının olayı beklemeyi bitirebilir. `debug_quit` bütün Dape oturumlarını kapatıyor ve `debug_disconnect` global Dape tamponlarını temizliyor.
-   - **Gereken:** Başlangıç bekleyicisi ve yaşam döngüsü komutları aynı yakalanmış proje/oturum/bağlantı kimliğini kullanmalı. Yabancı start/stop olayları, bağlantı değişimi ve kökün yeniden atanması birlikte test edilmeli. Global Dape UI temizliği proje dışı oturumları etkilememeli.
+### DIFF-01 · P1 · K — Daraltılmış/kirli tampon ve rollback sözleşmesi güvenli değil
 
----
+- **Yer/kanıt:** `kargu/tools/diff/stage.el`, `kargu-diff--file-text` ve proposal erişilebilir `buffer-string` alıyor. Auto yazma `erase-buffer`/`save-buffer` kullanıyor; save-hook dönüşümleri sonuçla uzlaştırılmıyor.
+- **Beklenen/gerçek:** Snapshot tam dosya olmalı, kullanıcı değişiklikleri/point/narrowing korunmalı; eksik snapshot ve örtük kaydetme mümkün.
+- **Yeniden üretme/kapanış:** Daraltılmış/kirli tampon, dış disk değişikliği, kodlama, save-hook dönüşümü ve kaydetme hatası. Kullanıcı değişikliğini silmeyen yazma/geri alma sözleşmesi gerekli.
 
-### Yeni inceleme bulguları
+### DIFF-02 · P1 · K — Çok dosyalı patch için ortak işlem geri alma yok
 
-- **Dosya yazma ve rollback yolu daraltılmış/kirli tamponları güvenli yönetmiyor.** `diff/stage.el` içindeki `kargu-diff--file-text` ve proposal snapshot'ı yalnız erişilebilir bölgeyi okuyor; tam dosya yerine eksik rollback metni saklanabilir. Otomatik yazma `erase-buffer`/`save-buffer` ile kullanıcının kaydedilmemiş değişikliklerini de kaydediyor ve save-hook dönüşümlerini başarı sonucuyla uzlaştırmıyor. Tampon daraltması/point korunmalı; kullanıcı değişiklikleri, diskte dış değişiklik, kodlama ve başarısız kaydetme için açık işlem/geri alma sözleşmesi ve testler gerekiyor.
-- **Doğrulanmış oturumun yüklenmesi henüz atomik bir yayınlama işlemi değil.** Girdi şeması, boyut/derinlik ve kimlik artık sohbet değiştirilmeden doğrulanıyor; ancak geçerli kayıt yüklenirken UI/footer çizimi veya kip hazırlığı başarısız olursa önceki taslak, geçmiş, sayaç ve seçim için ortak geri alma yok. Özellikle daraltılmış sohbet tamponu, render hatası ve asenkron `debug` kip hazırlığı sırasında iptal/proje değişimi test edilmeli. Oturum/state sahipliği ayrıldıktan sonra önceden hazırlanmış görünüm ve tek işlem sınırı gerekiyor.
-- **[D - Orta] Süreç iptali / stderr kapanışı stres altında yeniden incelenmeli.** 2026-10-19 tam ERT ve eşzamanlı derleme turunda `kargu-process-cancel-terminates-child-process-group-test` iptal callback'ini 2 saniyede alamadı; `kargu-process-deadline-covers-stderr-drain-test` ise 50 ms deadline yerine erken başarılı sonuç gördü. Sonraki tam turla eşzamanlı 100 tekrar (300 test) geçti; ancak özellikle erken başarılı stderr kapanışının nedeni henüz ayrıştırılmadı. Ana süreç/stderr durumları ve dış sinyaller kontrollü stres testinde kaydedilmeli, `accept-process-output` ile yalnız ana süreci bekleyen test yolu da karşılaştırılmalı. Süreleri körlemesine uzatarak kapatılmamalı.
-- **Dape yaşam döngüsü yardımcısı ana iş parçacığında bekleyebiliyor.** Yerel Dape 0.27.1'de `dape-kill` / `dape-disconnect-quit` yolu `dape--shutdown` üzerinden `accept-process-output nil 0.2` ve `jsonrpc-shutdown` çağırıyor. Kargu'nun dış API'yi callback ile başlatması bu iç beklemeyi asenkron yapmıyor. Bağlantı sahipliğini koruyan, olay tabanlı sonlandırma/ayrılma sözleşmesi gerekiyor; Dape'nin bütün tamponlarını veya diğer projelerin bağlantılarını temizleyen sarmalayıcılar kullanılmamalı.
-- **Sürüm bildirmeyen Eglot sunucularında otomatik tanı doğrulaması tamamlanamıyor.** Güvenli belge/rapor bariyeri bu sunucuların push önbelleğini taze saymaz; bekleme timeout/unavailable ile biter. Capability tabanlı pull/istek-cevap doğrulaması veya eşdeğer bir backend güncellik sözleşmesi gerekiyor. Çözüm, eski ya da sürümsüz bir push'u düzenlenmiş belgenin temiz olduğuna kanıt saymamalı.
-- **Dape'nin asenkron compile devamı Kargu başlangıç sahipliğine bağlı değil.** `preflight.el` Dape'ye doğrulanmış yapılandırmayı verdiğinde, Dape 0.27.1'in `compile` yolu bağlantıyı daha sonra kendi callback'iyle açabilir. Bu arada Kargu koşusu/projesi/oturumu iptal edilse de Dape'nin compile devamı yeniden Kargu onay sınırından geçmez. Bağlantı oluşmadan önce iptal edilebilir bir başlatma kimliği ve compile sonrası yeniden doğrulama gerekiyor; başka projenin compilation tamponu/kancası iptal edilmemeli. Eski onayı doğrulamak, bu sonraki asenkron evreyi sahipli hale getirmiş sayılmaz.
-- **Dape inceleme izni seçili thread'in durmuş olduğunu doğrulamıyor.** `session.el` içindeki bağlantı/ready denetimi `dape--stopped-threads` listesinin dolu olmasına bakıyor; `dape--current-thread` ise seçili thread'i durumundan bağımsız getiriyor. Başka thread durmuşken kullanıcı çalışan thread'i seçerse context/scope/eval yolu o thread'in eski frame önbelleğini kullanabilir. Yakalanmış thread'in hâlâ aynı duraklama nesline ait ve canlı/durmuş olduğunu ortak bir sınırda doğrulamak gerekiyor. `allThreadsStopped = false`, yalnız bir thread'in devam etmesi/çıkması, thread kimliği yeniden kullanımı ve geç stack/scopes/variables cevapları birlikte test edilmeli; sessizce başka durmuş thread'e geçilmemeli.
-- **Dape kaynak okumasında yavaş yerel dosya sistemi beklemesi hâlâ senkron.** Alıntı okumaları artık 64 KiB disk / 65.536 canlı tampon karakteri bütçesine bağlı; büyüyen dosya, eksik satır ve daraltılmış/kirli tamponlar korunuyor. Ancak küçük bir dosyada bile `file-truename`, metadata sorgusu veya sınırlı okuma yavaş/askıda bir yerel mount nedeniyle UI'ı bekletebilir. Gerçek süre sınırı için bu disk işlemleri iptal edilebilir yardımcı süreçte yapılmalı; callback proje/oturum/koşu ve kaynak tampon nesline bağlı olmalı. Byte bütçesi tek başına süre garantisi sayılmamalı.
+- **Yer/kanıt:** `kargu/tools/diff.el`, `kargu-diff--commit-patch`/`--stage-patch-file`: dosyalar ayrı uygulanıyor; hata batch sonucuna yazılıyor, önceki başarılı dosyalar otomatik geri alınmıyor.
+- **Beklenen/gerçek:** Disk/tampon/snapshot ve insanın kısmi kabulü açısından işlem sınırı açık olmalı; yalnız ön doğrulama atomiklik sağlamıyor.
+- **Yeniden üretme/kapanış:** Son dosyada disk/kaydetme hatası ve kısmi insan kabulü/reddi; araya giren kullanıcı değişiklikleri korunarak geri alma/sonuç sözleşmesi test edilmeli.
+- **Bağımlılık:** DIFF-01.
+
+### CHAT-01 · P1 · K — Sohbet geçmişi ve sayaç sahipliği ayrılmamış
+
+- **Yer/kanıt:** `kargu/core/session.el` sayaçları ve `kargu/history/protocol.el` geçmişi global. `kargu-chat-new` bağımsız sohbet açıyor; seçim aktivasyonu geçmiş/sayaç sahipliğini taşımıyor. Restore global değerleri değiştiriyor.
+- **Beklenen/gerçek:** Sohbetler kendi geçmiş/sayaçlarını korumalı; ortak değerler ezilebiliyor. Global busy/aktif koşu tek-koşu sözleşmesidir, tek başına hata değildir.
+- **Yeniden üretme/kapanış:** Aynı/farklı projede iki sohbet, farklı geçmiş/sayaç, reset/restore ve geç kip hazırlığı callback'leri; eski callback yeni oturum/seçime yazmamalı, tek aktif koşu korunmalı.
+
+### CHAT-02 · P1 · K — Geçerli oturum restore işlemi atomik değil
+
+- **Yer/kanıt:** `kargu/chat/session.el`, `kargu-session-load`: doğrulamadan sonra tampon silinip değişken/sayaç/seçim değişiyor. Render hatasına ortak rollback yok; kip hatası yakalanıp yutuluyor.
+- **Beklenen/gerçek:** Başarısız restore eski taslak, geçmiş, sayaç ve seçimi bırakmalı; kısmi yeni durum yayınlanabiliyor.
+- **Yeniden üretme/kapanış:** Geçerli kayıt + daraltılmış sohbet, render/footer hatası, debug hazırlığında iptal/kök değişimi. Hazırlanmış görünüm ve tek yayınlama/geri alma sınırı gerekli.
+- **Bağımlılık:** CHAT-01.
+
+### CONFIG-01 · P2 · K — Anahtar keşfinde senkron kimlik deposu erişimi
+
+- **Yer/kanıt:** `kargu/providers/registry.el`, `kargu-connected-providers`; `kargu/config/key.el`, `kargu--auth-source-api-key` doğrudan `auth-source-search` ve secret fonksiyonunu çağırıyor. Üst öncelikli anahtar varsa bu yola girilmeyebilir; her sağlayıcıda GPG açıldığı iddiası doğru değil.
+- **Beklenen/gerçek:** Sağlayıcı keşfi UI'da pinentry/disk beklememeli; alt katman senkron bekleyebilir. Gerçek gecikme ortama bağlı.
+- **Yeniden üretme/kapanış:** Kontrollü geciken kimlik deposu/secret, iptal, öncelik/keyless ve gizli veri sızıntısı testleri; listeleme örtük toplu kilit açmamalı.
+
+### PERF-01 · P2 · K — Satır aralığında bile read_file tam dosyayı kopyalıyor
+
+- **Yer/kanıt:** `kargu/tools/diff.el`, `kargu-diff--resolve-read-target` tam metni alıyor; `kargu-diff-read-file` tüm metne `split-string` uyguluyor. Algoritma doğrulandı; belirli 100 MB eşiği/donma süresi ölçülmedi.
+- **Beklenen/gerçek:** Küçük aralık tüm satır listesini gerektirmemeli; maliyet dosya boyutuyla büyüyor.
+- **Yeniden üretme/kapanış:** Büyük dosyada dar aralık, uzun satır, büyüme, EOF, boş dosya, UTF-8 ve kirli/daraltılmış tampon; ölçümlü bellek/çıktı bütçesi ve unavailable/truncation sözleşmesi.
+
+### PERF-02 · P2 · K — Geçmiş boyutu her kontrolde tam JSON ile hesaplanıyor
+
+- **Yer/kanıt:** `kargu/history/compact.el`, `kargu-history-char-count`: bütün geçmiş `vconcat` ve `kargu-json-encode-record` üzerinden geçiyor.
+- **Beklenen/gerçek:** Değişmeyen geçmişte hesap tekrar kullanılmalı; her kontrolde tam metin ayrılıyor. UI gecikmesinin büyüklüğü ölçülmeli.
+- **Yeniden üretme/kapanış:** Sabit/büyüyen geçmişte serileştirme sayısı/bellek; repair, compaction, reset, restore ve içerik değişimlerinde önbellek doğruluğu.
+- **Bağımlılık:** CHAT-01; PERF-03 ile ortak sahipli kuyruk sınırı.
+
+### PERF-03 · P2 · K — Mesaj ekleme geçmiş listesini tekrar kopyalıyor
+
+- **Yer/kanıt:** `kargu/history/protocol.el`, `kargu--history-add`; `kargu/api/response.el` asistan ekleme yolu. Sona `append` eski cons zincirini kopyalıyor; uzun ekleme dizisi O(N²).
+- **Beklenen/gerçek:** Sahipli kuyruğa ekleme sabit maliyetli olmalı; toplam allocation karesel büyüyor.
+- **Yeniden üretme/kapanış:** Uzun oturum allocation ölçümü; sıra/protokol, snapshot paylaşımı, repair/compaction/reset/restore. Sahiplik ayrılmadan `nconc` kullanılmamalı.
+- **Bağımlılık:** CHAT-01.
+
+### PERF-04 · P2 · K — Oturum listesi bütün kayıtları senkron ayrıştırıyor
+
+- **Yer/kanıt:** `kargu/chat/session.el`, `kargu-session-list`: directory-files + döngüde `kargu-session-storage-read`. Tek dosya boyut sınırı toplam maliyeti sınırlamıyor.
+- **Beklenen/gerçek:** Çok kayıt UI'ı meşgul etmemeli; bütün JSON içerikleri çağıranın iş parçacığında okunuyor. Gecikme ölçümü gerekli.
+- **Yeniden üretme/kapanış:** Çok kayıt, bozuk/büyük kayıt, iptal, proje değişimi ve sıralama; asenkron listeleme veya metadata indeksi, eski sonuçlar yayınlanmamalı.
+
+### PERF-05 · P2 · K — Sınırlı Dape kaynak disk işlemleri hâlâ senkron
+
+- **Yer/kanıt:** `kargu/tools/dape/context.el` yol/metadata/sınırlı içerik okumasını çağıranın iş parçacığında yapıyor. 64 KiB disk / 65.536 canlı karakter sınırı mevcut; sınırsız büyük dosya okuma iddiası artık geçerli değil.
+- **Beklenen/gerçek:** Yavaş/askıda yerel mount UI'ı bekletmemeli; byte sınırı süre garantisi değil.
+- **Yeniden üretme/kapanış:** Kontrollü geciken yol/metadata/okuma, iptal, kaynak tampon nesli değişimi. Disk işi iptal edilebilir yardımcı süreçte; callback proje/oturum/koşu ve kaynak nesline bağlı, canlı tampon güncelliği korunmalı.
+
+## Doğrulama bekleyen riskler
+
+### RISK-01 · P2 · D — Süreç iptali / stderr kapanışı stres anomalisi
+
+- **Kanıt:** 2026-10-19 eşzamanlı ERT/derleme turunda child-process-group iptal callback'i 2 saniyede gelmedi; stderr-drain deadline testi erken başarı gördü. Sonraki eşzamanlı 100 tekrar (300 test) geçti; kök neden ayrıştırılmadı.
+- **Doğrulama/kapanış:** `tests/test-process.el` ilgili iki testi ana süreç/stderr durumları ve sinyallerle izle; yalnız ana süreci bekleyen `accept-process-output` test yoluyla karşılaştır. Kör timeout artışı veya yalnız yeşil tekrar kaydı kapatmaz.
+
+### RISK-02 · P2 · D — Sampling / reasoning koşullu uyumluluğu
+
+- **Kanıt:** `kargu/api/parameters.el` düz destek listesi/politikadan sampling seçiyor; etkin reasoning ayarına bağlı destek koşulu arayüzü yok. Bu incelemede somut başarısız sağlayıcı isteği yeniden üretilmedi.
+- **Doğrulama/kapanış:** Tarihi/sürümü belirli sağlayıcı sözleşmesi veya gizli veri içermeyen hata fixture'ı ile uyumsuz kombinasyonu göster. Gerekirse capability tek noktada yorumlanmalı; model adı regex'i/sağlayıcı listesi eklenmemeli. `none`, kapalı ve belirtilmemiş effort ayrımı korunmalı.
+
+## Uyumluluk / geliştirme işleri
+
+### COMPAT-01 · P2 — Sürümsüz Eglot push için alternatif doğrulama
+
+- **Yer/kanıt:** `kargu/tools/lsp/freshness.el` sürümsüz push'u güncel saymıyor; `settle.el` timeout/unavailable ile bitiyor. Bu güvenli davranış hata değildir.
+- **Hedef/kapanış:** Capability tabanlı pull veya eşdeğer istek-cevap güncellik sözleşmesi olan backend'lerde doğrulama. Sürümsüz/eski push temiz düzenleme kanıtı sayılmamalı; destek yoksa unavailable korunmalı.
+
+## Düzeltme disiplini
+
+Her mantıksal iş: yeniden üret → regresyon → düzelt → ilgili/tam ERT,
+uyarısız byte-compile/checkdoc ve diff kontrolü → kaydı sil → ayrı commit.
+FSM/protokol değişirse ilgili biçimsel model ve exhaustive TLC güncellenir.
+Yeni zor bulgular ilgili bölümün sonuna eklenir; aynı kök neden çoğaltılmaz.
+`skills.md` stage edilmez; mevcut `.gitignore` değişikliği korunur.
