@@ -59,15 +59,6 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 
 ---
 
-### Modül: `tools/lsp/` (LSP & Tanı Araçları)
-
-1. **[K - Düşük] Açık olmayan (visiting edilmemiş) dosyalar için LSP tanıları alınamaz.**
-   - **Dosya / Satır:** `kargu/tools/lsp/diagnostics.el:23-24, 95-101`
-   - **Sorun:** `kargu-lsp-get-diagnostics`, `(find-buffer-visiting path)` kontrolü yapar; Flymake tanıları yalnız ziyaret edilmiş tamponlardan alınır. Açılmamış dosya veya denetleyici yokluğu için tanılar kullanılamaz. Salt okunur `read_file` dosyayı ziyaret etmez ve bir checker başlatmaz.
-   - **Öneri:** Açık olmayan dosyalar için geçici olarak `find-file-noselect` ile arabellek oluşturulup tanıların okunması veya otomatik açılma desteği eklenmelidir.
-
----
-
 ### Yeni inceleme bulguları
 
 - **Dosya yazma ve rollback yolu daraltılmış/kirli tamponları güvenli yönetmiyor.** `diff/stage.el` içindeki `kargu-diff--file-text` ve proposal snapshot'ı yalnız erişilebilir bölgeyi okuyor; tam dosya yerine eksik rollback metni saklanabilir. Otomatik yazma `erase-buffer`/`save-buffer` ile kullanıcının kaydedilmemiş değişikliklerini de kaydediyor ve save-hook dönüşümlerini başarı sonucuyla uzlaştırmıyor. Tampon daraltması/point korunmalı; kullanıcı değişiklikleri, diskte dış değişiklik, kodlama ve başarısız kaydetme için açık işlem/geri alma sözleşmesi ve testler gerekiyor.
