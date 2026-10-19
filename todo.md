@@ -8,12 +8,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ## Doğrulanmış hatalar — düzeltme sırası
 
-### LSP-02 · P1 · Y — Farklı sütun tanıları kayboluyor
-
-- **Yer/kanıt:** `kargu/tools/lsp/diagnostics.el`, `kargu-lsp--group-diagnostics-by-file`: tekrar anahtarında sütun yok. Aynı dosya/satır/önem/mesaj ve iki farklı sütun tek kayıt verdi.
-- **Beklenen/gerçek:** Ayrı konumlar ayrı kalmalı; farklı sütunlar birleştiriliyor.
-- **Yeniden üretme/kapanış:** Sütun 1 ve 8 ayrı, tam tekrar tek olmalı. Alanlar metinsel ayraç çakışması olmadan karşılaştırılmalı.
-
 ### DAPE-01 · P1 · K — Seçili thread için durmuş/canlı olma izni eksik
 
 - **Yer/kanıt:** `kargu/tools/dape/session.el` herhangi bir durmuş thread arıyor; `selection.el` seçili thread'i durumundan bağımsız yakalıyor. Dape 0.27.1 `dape--current-thread` durum kontrol etmiyor; `events.el` thread olaylarını nesle katmıyor.

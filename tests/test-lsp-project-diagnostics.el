@@ -124,5 +124,41 @@
         (should-not (kargu-lsp--project-diagnostic-path escape repo))
         (should (equal (kargu-lsp--project-diagnostic-path alias repo) owned))))))
 
+(ert-deftest kargu-lsp-project-group-retains-distinct-columns-test ()
+  "Two occurrences on one line remain distinct while exact repeats collapse."
+  (let* ((first (list :file "/project/main.el" :line 2 :character 1
+                      :severity 1 :message "same" :source "eglot"))
+         (second (plist-put (copy-sequence first) :character 8))
+         (grouped (kargu-lsp--group-diagnostics-by-file (list first second (copy-tree first)))))
+    (should (= (car grouped) 2))
+    (should (equal (sort (mapcar (lambda (diag) (plist-get diag :character))
+                                 (gethash "/project/main.el" (cadr grouped))) #'<) '(1 8)))))
+
+(ert-deftest kargu-lsp-project-group-key-is-not-a-formatted-string-test ()
+  "Colons in distinct filenames and messages cannot collide across fields."
+  (let* ((first (list :file "/project/file:1" :line 2 :character 1
+                      :severity 3 :message "text"))
+         (second (list :file "/project/file" :line 1 :character 1
+                       :severity 2 :message "3:text"))
+         (grouped (kargu-lsp--group-diagnostics-by-file (list first second))))
+    (should (= (car grouped) 2))
+    (should (= (hash-table-count (cadr grouped)) 2))))
+
+(ert-deftest kargu-lsp-project-report-retains-distinct-columns-test ()
+  "The public project report shows each diagnostic location exactly once."
+  (kargu-lsp-test--with-project-sources
+    (cl-letf (((symbol-function 'kargu-lsp-project-root) (lambda () repo))
+              ((symbol-function 'flymake--project-diagnostics) (lambda (_) nil))
+              ((symbol-function 'project-current) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-lsp--diagnostics-data)
+               (lambda (file)
+                 (when (equal file owned)
+                   (let ((diag (list :line 1 :character 1 :severity 1 :message "same")))
+                     (list diag (plist-put (copy-sequence diag) :character 8) (copy-tree diag)))))))
+      (let ((report (kargu-lsp-get-project-diagnostics)))
+        (should (string-search "2 diagnostics across 1 file" report))
+        (should (string-search "L1:C1: same" report))
+        (should (string-search "L1:C8: same" report))))))
+
 (provide 'tests/test-lsp-project-diagnostics)
 ;;; test-lsp-project-diagnostics.el ends here

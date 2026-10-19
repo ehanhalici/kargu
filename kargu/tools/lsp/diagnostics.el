@@ -213,11 +213,8 @@ Return a list `(TOTAL-COUNT BY-FILE-HASH)'."
         (total-count 0))
     (dolist (d all-diags)
       (let* ((file (plist-get d :file))
-             (key (format "%s:%s:%s:%s"
-                          file
-                          (plist-get d :line)
-                          (plist-get d :severity)
-                          (plist-get d :message))))
+             (key (list file (plist-get d :line) (plist-get d :character)
+                        (plist-get d :severity) (plist-get d :message))))
         (unless (gethash key seen)
           (puthash key t seen)
           (cl-incf total-count)
