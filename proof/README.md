@@ -92,6 +92,19 @@ reads before content access, preserves editor state and keeps foreign frame
 location metadata without reading that source. This is a read-admission change,
 not a new loop or asynchronous-task transition.
 
+`KarguDebugExecution.tla` / `DebugExecutionMC.cfg` model an owned execution
+wait and its captured-context child. Run `proof/run_tlc.sh --debug-execution`
+for an exhaustive scan. Foreign notifications, caller switching, connection
+loss, origin reassignment, deadlines and cancellation cannot publish a foreign
+pause or exit. Three state generations include continued/restopped races while
+an old request is pending; an initially paused cache cannot trigger collection.
+The 2026-10-19 scan visited 936 distinct states (2,297 generated), depth 9,
+without an error or deadlock. Offline ERT additionally checks actual dispatcher
+advice, exact adapter requests, timer/listener cleanup, partial startup failures
+and error propagation during context collection. This is a bounded resource
+model; the main loop, startup readiness, Dape's deferred compilation and UI
+thread/frame selection are not included or claimed to be isolated.
+
 `KarguDiagnostics.tla` / `DiagnosticsMC.cfg` model the owned diagnostic wait
 after backend startup. Run `proof/run_tlc.sh --diagnostics` for an exhaustive
 scan. Two backends with old/current generations cover forced reports, edits,
@@ -142,6 +155,8 @@ proof/
 ├── DebugStartupMC.*   # Bounded debugger-startup harness
 ├── KarguDebugWatch.tla # Owned sequential watch evaluation
 ├── DebugWatchMC.*     # Bounded watch-continuation harness
+├── KarguDebugExecution.tla # Captured adapter execution and context replies
+├── DebugExecutionMC.* # Bounded execution-wait harness
 ├── run_tlc.sh          # Exhaustive loop or focused resource checks
 └── README.md           # This file
 ```

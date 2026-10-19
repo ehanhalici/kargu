@@ -12,6 +12,7 @@
 
 (require 'kargu/tools/dape/render)
 (require 'kargu/async)
+(require 'kargu/tools/dape/events)
 
 (declare-function kargu--tool-arg "kargu/api/tools" (args &rest keys))
 (declare-function kargu--tool-file-path "kargu/api/tools" (args))
@@ -23,12 +24,13 @@
   :type 'number
   :group 'kargu-dape)
 
-(defun kargu-dape--run-chain (callback starter)
-  "Run STARTER with a guarded final CALLBACK and one overall deadline."
-  (let ((conn (kargu-dape--connection))
-        (root (kargu-permission-project-root))
-        (session (copy-sequence (kargu-session-id)))
-        (origin (current-buffer)))
+(defun kargu-dape--run-chain (callback starter &optional connection)
+  "Run STARTER with a guarded CALLBACK and deadline, optionally on CONNECTION."
+  (let* ((conn (or connection (kargu-dape--connection)))
+         (generation (kargu-dape-event-generation conn))
+         (root (kargu-permission-project-root))
+         (session (copy-sequence (kargu-session-id)))
+         (origin (current-buffer)))
     (if (stringp conn) (funcall starter callback)
       (let* ((task (kargu-async-start
                     (lambda (value error)
@@ -41,7 +43,11 @@
                            (with-current-buffer origin
                              (and (equal root (kargu-permission-project-root))
                                   (equal session (kargu-session-id))
-                                  (eq conn (kargu-dape--connection))))))))
+                                  (= generation (kargu-dape-event-generation conn))
+                                  (if connection
+                                      (and (memq conn (kargu-dape-project-connections root))
+                                           (dape--stopped-threads conn))
+                                    (eq conn (kargu-dape--connection)))))))))
              (finish (kargu-async-wrap
                       task (lambda (text) (kargu-async-finish task text)))))
         (funcall (kargu-async-wrap task (lambda () (funcall starter finish))))
@@ -103,15 +109,16 @@ INTERACTIVE also shows a short prefix in the echo area."
                (and thread (plist-get thread :id)))
     text))
 
-(defun kargu-dape--get-context (&optional callback)
+(defun kargu-dape--get-context (&optional callback connection)
   "Pass a text snapshot of the paused debug session to CALLBACK.
 The snapshot is the thread, the call stack and the in-scope variables.
 Stack, scope and variable requests are chained through dape callbacks.
+CONNECTION optionally pins the request to an already owned adapter.
 Without CALLBACK the text is returned only for the no-session case;
 an interactive call shows the snapshot when it arrives."
   (interactive)
   (let ((interactive (called-interactively-p 'any))
-        (conn (kargu-dape--connection)))
+        (conn (or connection (kargu-dape--connection))))
     (if (stringp conn)
         (kargu-dape--deliver callback conn interactive)
       (condition-case-unless-debug err
@@ -121,27 +128,27 @@ an interactive call shows the snapshot when it arrives."
                 (kargu-dape--deliver
                  callback (kargu-dape--context-text conn nil nil nil) interactive)
               (kargu-dape--call #'dape--stack-trace
-               conn thread kargu-dape-max-frames
-               (lambda (&rest _)
-                 (let* ((frames (kargu-dape--seq->list
-                                 (plist-get thread :stackFrames)))
-                        (frame (or (dape--current-stack-frame conn)
-                                   (car frames))))
-                   (if (null frame)
-                       (kargu-dape--deliver
-                        callback
-                        (kargu-dape--context-text conn thread frames nil)
-                        interactive)
-                     (kargu-dape--call #'dape--scopes
-                      conn frame
-                      (lambda (&rest _)
-                        (kargu-dape--fetch-variables
-                         conn (kargu-dape--seq->list (plist-get frame :scopes))
-                         (lambda ()
-                           (kargu-dape--deliver
-                            callback
-                            (kargu-dape--context-text conn thread frames frame)
-                            interactive)))))))))))
+                conn thread kargu-dape-max-frames
+                (lambda (&rest _)
+                  (let* ((frames (kargu-dape--seq->list
+                                  (plist-get thread :stackFrames)))
+                         (frame (or (dape--current-stack-frame conn)
+                                    (car frames))))
+                    (if (null frame)
+                        (kargu-dape--deliver
+                         callback
+                         (kargu-dape--context-text conn thread frames nil)
+                         interactive)
+                      (kargu-dape--call #'dape--scopes
+                        conn frame
+                        (lambda (&rest _)
+                          (kargu-dape--fetch-variables
+                           conn (kargu-dape--seq->list (plist-get frame :scopes))
+                           (lambda ()
+                             (kargu-dape--deliver
+                              callback
+                              (kargu-dape--context-text conn thread frames frame)
+                              interactive)))))))))))
         (error
          (let ((msg (format "ERROR: dape context: %s"
                             (error-message-string err))))
@@ -184,14 +191,14 @@ Without a session the text is returned directly."
                                interactive))
       (condition-case-unless-debug err
           (kargu-dape--call #'dape--evaluate-expression
-           conn
-           (plist-get (dape--current-stack-frame conn) :id)
-           expr
-           (or context "repl")
-           (lambda (result error)
-             (kargu-dape--deliver callback
-                                  (kargu-dape--eval-text expr result error)
-                                  interactive)))
+            conn
+            (plist-get (dape--current-stack-frame conn) :id)
+            expr
+            (or context "repl")
+            (lambda (result error)
+              (kargu-dape--deliver callback
+                                   (kargu-dape--eval-text expr result error)
+                                   interactive)))
         (error
          (let ((err-str (error-message-string err)))
            (kargu-dape--deliver
@@ -395,10 +402,12 @@ Returns structured confirmation with file, line, and remaining count."
               tool-name path))
      (t nil))))
 
-(defun kargu-dape-get-context (&optional callback)
-  "Collect paused context asynchronously and complete CALLBACK exactly once."
+(defun kargu-dape-get-context (&optional callback connection)
+  "Collect paused context and complete CALLBACK once, optionally on CONNECTION.
+An explicit CONNECTION must still be paused and owned by the current project."
   (interactive)
-  (kargu-dape--run-chain callback (lambda (done) (kargu-dape--get-context done))))
+  (kargu-dape--run-chain
+   callback (lambda (done) (kargu-dape--get-context done connection)) connection))
 
 (defun kargu-dape-eval-expression (expr &optional context callback)
   "Evaluate EXPR in CONTEXT and deliver one guarded result to CALLBACK."

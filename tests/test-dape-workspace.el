@@ -174,7 +174,7 @@
     (let ((frame (list :id 1 :name "library" :line 1 :source (list :path foreign)))
           report)
       (cl-letf (((symbol-function 'kargu-dape-get-context)
-                 (lambda (callback) (funcall callback "adapter-context")))
+                 (lambda (callback &optional _connection) (funcall callback "adapter-context")))
                 ((symbol-function 'kargu-dape--raw-connection) (lambda () 'local))
                 ((symbol-function 'dape--current-thread) (lambda (_) '(:id 1)))
                 ((symbol-function 'dape--current-stack-frame) (lambda (_) frame))

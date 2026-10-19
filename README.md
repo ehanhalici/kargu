@@ -276,8 +276,12 @@ before continuing to another watch expression.
 Source excerpts and breakpoint lists are restricted to canonical paths inside
 the selected workspace. Foreign stack locations can still be shown as adapter
 metadata, but do not authorize source reads or automatic remote connections.
-This does not yet isolate Dape's global hooks or all
-lifecycle helpers; those remaining limitations are tracked in `todo.md`.
+Execution waits use connection-bearing state events, not Dape's global UI
+stop/exit hooks. Context reports remain pinned to the original adapter and
+state generation; a continue/stop cycle invalidates old replies even when
+the same adapter is paused again. Stop releases the wait's listeners and timers.
+Startup readiness, deferred compilation, same-adapter thread/frame selection
+and global lifecycle helpers still have limitations tracked in `todo.md`.
 
 Post-edit diagnostic verification captures the source buffer, document tick,
 project, server and Flymake report-function generations. Every configured
