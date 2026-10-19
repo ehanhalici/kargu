@@ -40,8 +40,9 @@ A string must contain the version prefix and no trailing slash."
   :group 'kargu)
 
 (defcustom kargu-temperature 0.2
-  "Sampling temperature sent with each request.
-Set to nil to omit the field entirely."
+  "Sampling temperature when allowed by model metadata or provider policy.
+Set to nil to omit it entirely.  Unknown OpenAI models omit sampling by
+catalog policy; explicit supported_parameters metadata can enable it."
   :type '(choice (const :tag "Omit from request" nil)
                  (number :tag "Temperature"))
   :group 'kargu)

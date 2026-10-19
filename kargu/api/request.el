@@ -15,6 +15,7 @@
 (require 'kargu/history)
 (require 'kargu/api/tools)
 (require 'kargu/api/cache)
+(require 'kargu/api/parameters)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-extra-headers "kargu/providers/registry" (id))
@@ -69,9 +70,8 @@ The shape comes from the provider's format record (`:reasoning-shape')."
 
 (defun kargu--payload-sampling-entries ()
   "Request entries for temperature and the output token cap."
-  (append (and kargu-temperature `(("temperature" . ,kargu-temperature)))
-          (and kargu-max-tokens `(("max_tokens" . ,kargu-max-tokens)
-                                  ("max_completion_tokens" . ,kargu-max-tokens)))))
+  (kargu-api-request-parameters :model (kargu--model) :provider (kargu--provider-name)
+                               :temperature kargu-temperature :max-tokens kargu-max-tokens))
 
 (defun kargu--payload-tools-entries (tools cache-marked)
   "Request entries for the TOOLS vector; none when it is empty.
@@ -100,6 +100,8 @@ at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
     (dolist (entries (list (kargu--build-reasoning-params)
                            extra))
       (setq payload (kargu--payload-merge payload entries)))
+    (when (and (assoc "max_tokens" payload) (assoc "max_completion_tokens" payload))
+      (user-error "Kargu: request cannot contain both output token-limit fields"))
     payload))
 
 (defun kargu--api-provider-format (provider-name)

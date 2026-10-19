@@ -330,6 +330,20 @@ This does not invent a context window or an effort list."
      ((consp raw) raw)
      (t nil))))
 
+(defun kargu-model-request-parameters (model-id provider)
+  "Return known supported parameters for exact MODEL-ID at PROVIDER.
+Never borrow a fuzzy alias or another provider's record for request policy.
+Explicitly installed legacy metadata without provider ownership is accepted.
+An absent or empty list means unknown, as in the tool capability contract."
+  (let* ((data (and (stringp model-id)
+                    (gethash (downcase (string-trim model-id)) kargu--model-metadata-table)))
+         (owner (kargu--record-get data "provider")))
+    (when (or (null owner)
+              (equal (downcase (format "%s" owner))
+                     (downcase (format "%s" provider))))
+      (let ((parameters (kargu--supported-parameters data)))
+        (when (cl-every #'stringp parameters) parameters)))))
+
 (defun kargu--tools-explicitly-disabled-p (data)
   "Return non-nil for an explicit tool disable in DATA.
 Missing metadata leaves tool support enabled."

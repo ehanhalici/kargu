@@ -136,6 +136,21 @@ scaling penalty against appending alone in this workload, so no speculative
 byte-counter optimization was introduced. These are local measurements, not
 cross-platform performance guarantees.
 
+### Native request parameters
+
+Native requests send at most one output-limit field. Model-declared supported
+parameters select an accepted alias; otherwise format/provider request policy
+selects it. OpenAI's catalog entry prefers `max_completion_tokens`, consistent
+with its [Chat Completions reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
+Other compatibility formats default to `max_tokens`. An explicit token cap is
+refused if known metadata offers neither field, never silently discarded.
+Sampling fields are omitted when a nonempty supported-parameter list excludes
+them. With unknown metadata, OpenAI conservatively omits temperature; other
+compatibility providers keep the existing temperature default. Explicit metadata
+can enable it. Format/provider `:request` records set these defaults without
+model-name heuristics. Conditional sampling/reasoning compatibility and full
+provider-scoped metadata isolation remain tracked in `todo.md`.
+
 ### Prompt caching and low usage
 
 Enable `kargu-low-usage-mode` with `setq` or the tuning menu's `l` key.

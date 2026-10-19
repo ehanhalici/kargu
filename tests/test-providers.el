@@ -228,7 +228,7 @@
       (should (equal (kargu-aget payload "model") "deepseek-chat"))
       (should (equal (kargu-aget payload "temperature") 0.5))
       (should (equal (kargu-aget payload "max_tokens") 8192))
-      (should (equal (kargu-aget payload "max_completion_tokens") 8192))
+      (should-not (assoc "max_completion_tokens" payload))
       (should (equal (kargu-aget payload "reasoning_effort") "medium"))
       ;; deepseek's format carries effort top-level only: no second shape.
       (should-not (assoc "reasoning" payload))

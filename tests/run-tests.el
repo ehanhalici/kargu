@@ -37,6 +37,7 @@
 (require 'tests/test-plan)
 (require 'tests/test-patch)
 (require 'tests/test-metadata)
+(require 'tests/test-parameters)
 (require 'tests/test-chat)
 (require 'tests/test-dynamic-models)
 (require 'tests/test-lsp)

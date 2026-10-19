@@ -35,12 +35,17 @@ The provider catalog defines this.  A provider's `:models' plist
 replaces that format's model-field map when the value is a field
 spec, not a list of model name strings.")
 
+(defconst kargu-provider--default-request-policy
+  '(:max-output-key "max_tokens" :sampling-parameters ("temperature"))
+  "Compatibility defaults when a format declares no request policy.")
+
 (defun kargu-register-provider (&rest plist)
   "Register a provider in the global registry.
 PLIST must contain at least `:id'.  Other supported keys:
 `:name', `:api', `:env', `:models', `:models-api',
 `:usage-api', `:extra-headers', `:npm', `:format',
-`:prompt-caching', `:prompt-for', `:keyless', `:local'."
+`:prompt-caching', `:prompt-for', `:keyless', `:local', `:request'.
+The `:request' plist overrides format request policy, preserving explicit nil."
   (let* ((id (plist-get plist :id))
          (id-str (cond ((stringp id) (downcase (string-trim id)))
                        ((symbolp id) (downcase (symbol-name id)))
@@ -107,6 +112,18 @@ A field-spec `:models' on that provider replaces the format's model map."
       (plist-put (copy-sequence base) :models override))
      (base)
      (override (list :models override)))))
+
+(defun kargu-provider-request-policy (id)
+  "Return merged request policy for provider ID, preserving explicit nil.
+`:max-output-key' names one token-limit field.  `:sampling-parameters' lists
+sampling fields allowed when the model catalog supplies no parameter list."
+  (let* ((format (kargu-provider-format-record (kargu-provider-format id)))
+         (policy (copy-sequence kargu-provider--default-request-policy)))
+    (dolist (spec (list (plist-get format :request)
+                        (plist-get (kargu-provider-get id) :request)))
+      (cl-loop for (key value) on spec by #'cddr
+               do (setq policy (plist-put policy key value))))
+    policy))
 
 (defun kargu-provider--effort-specs (models)
   "Effort path specs inside a `:models' plist MODELS, or nil.

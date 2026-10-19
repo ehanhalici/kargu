@@ -914,6 +914,7 @@ that format's `:models' map.")
      :env ("OPENAI_API_KEY")
      :npm "@ai-sdk/openai"
      :format openapi
+     :request (:max-output-key "max_completion_tokens" :sampling-parameters nil)
      :prompt-caching t)
     (:id "opencode"
      :name "OpenCode Zen"
