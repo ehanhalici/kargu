@@ -335,6 +335,7 @@
         held results)
     (cl-letf (((symbol-function 'kargu-dape--connection) (lambda () 'conn))
               ((symbol-function 'kargu-dape-project-connections) (lambda (&optional _) '(conn)))
+              ((symbol-function 'dape--current-stack-frame) (lambda (_) nil))
               ((symbol-function 'dape--current-thread) (lambda (_) '(:id 1)))
               ((symbol-function 'dape--stack-trace)
                (lambda (_conn _thread _n cb) (setq held cb))))
@@ -359,6 +360,7 @@
   "Connection replacement and overall deadline each produce one error result."
   (let ((connection 'conn) held result)
     (cl-letf (((symbol-function 'kargu-dape--connection) (lambda () connection))
+              ((symbol-function 'dape--current-stack-frame) (lambda (_) nil))
               ((symbol-function 'dape--current-thread) (lambda (_) '(:id 1)))
               ((symbol-function 'dape--stack-trace)
                (lambda (_conn _thread _n cb) (setq held cb))))

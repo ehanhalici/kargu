@@ -102,8 +102,23 @@ The 2026-10-19 scan visited 936 distinct states (2,297 generated), depth 9,
 without an error or deadlock. Offline ERT additionally checks actual dispatcher
 advice, exact adapter requests, timer/listener cleanup, partial startup failures
 and error propagation during context collection. This is a bounded resource
-model; the main loop, startup readiness, Dape's deferred compilation and UI
-thread/frame selection are not included or claimed to be isolated.
+model; the main loop, startup readiness and Dape's deferred compilation are
+not included. UI thread/frame selection is refined separately below.
+
+`KarguDebugSelection.tla` / `DebugSelectionMC.cfg` model a captured context
+read or a navigation followed by its new captured read. Run
+`proof/run_tlc.sh --debug-selection` for an exhaustive scan. Two thread/frame
+identities, UI selection changes between callbacks, missing frames, execution
+invalidation and cancellation cover pinned scope/variable requests, consistent
+report identity and navigation consent. The 2026-10-19 scan visited 179 distinct
+states (567 generated), depth 7, without an error or deadlock. ERT additionally
+covers refreshed frame objects resolved by ID, initially unspecified selection,
+exact DAP arguments, stale explicit selections, large numeric frame IDs,
+location text, editor-state preservation and successful `up/down` navigation.
+This is a bounded selection-resource refinement, not a rerun
+of the main-loop proof or a claim about unimplemented startup/lifecycle isolation.
+It assumes an admitted paused thread; partial-thread stop/liveness admission
+and thread-ID reuse remain outside this model and are tracked in `todo.md`.
 
 `KarguDiagnostics.tla` / `DiagnosticsMC.cfg` model the owned diagnostic wait
 after backend startup. Run `proof/run_tlc.sh --diagnostics` for an exhaustive
@@ -172,6 +187,8 @@ proof/
 ├── DebugWatchMC.*     # Bounded watch-continuation harness
 ├── KarguDebugExecution.tla # Captured adapter execution and context replies
 ├── DebugExecutionMC.* # Bounded execution-wait harness
+├── KarguDebugSelection.tla # Pinned thread/frame reads and guarded navigation
+├── DebugSelectionMC.* # Bounded selection-callback harness
 ├── KarguVerification.tla # Captured pending-edit records and batch cleanup
 ├── VerificationMC.*  # Bounded verification-batch harness
 ├── run_tlc.sh          # Exhaustive loop or focused resource checks

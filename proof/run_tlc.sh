@@ -9,6 +9,7 @@
 #   ./run_tlc.sh --debug-watch   exhaustive debugger-watch ownership scan
 #   ./run_tlc.sh --debug-execution exhaustive debugger-execution ownership scan
 #   ./run_tlc.sh --verification  exhaustive changed-file ownership scan
+#   ./run_tlc.sh --debug-selection exhaustive debugger-selection scan
 #   ./run_tlc.sh --simulate [N]  random simulation of N behaviors (default
 #                                100000): a quick smoke test, NOT a proof
 #   ./run_tlc.sh <tlc args...>   any other arguments go to TLC as they are
@@ -67,6 +68,10 @@ elif [[ "$1" == "--verification" ]]; then
     MODE="exhaustive changed-file ownership scan"
     SPECIFICATION="VerificationMC.tla (KarguVerification)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config VerificationMC.cfg VerificationMC.tla)
+elif [[ "$1" == "--debug-selection" ]]; then
+    MODE="exhaustive debugger-selection scan"
+    SPECIFICATION="DebugSelectionMC.tla (KarguDebugSelection)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config DebugSelectionMC.cfg DebugSelectionMC.tla)
 elif [[ "$1" == "--simulate" ]]; then
     MODE="random simulation (not a proof)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -simulate "num=${2:-100000}" MC.tla)

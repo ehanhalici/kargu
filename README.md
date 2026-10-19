@@ -280,7 +280,12 @@ Execution waits use connection-bearing state events, not Dape's global UI
 stop/exit hooks. Context reports remain pinned to the original adapter and
 state generation; a continue/stop cycle invalidates old replies even when
 the same adapter is paused again. Stop releases the wait's listeners and timers.
-Startup readiness, deferred compilation, same-adapter thread/frame selection
+Context reads also capture the original thread/frame before requesting data;
+UI selection changes cannot mix another frame's variables with that stack.
+Saved selections from an earlier execution state cannot start a fresh request.
+Missing explicit frames are unavailable, not silently replaced. Navigation
+checks the original selection before moving and captures its own new frame.
+Startup readiness, deferred compilation, per-thread paused/liveness admission
 and global lifecycle helpers still have limitations tracked in `todo.md`.
 
 Post-edit diagnostic verification captures the source buffer, document tick,

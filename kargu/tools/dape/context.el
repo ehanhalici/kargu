@@ -13,6 +13,7 @@
 (require 'kargu/tools/dape/render)
 (require 'kargu/async)
 (require 'kargu/tools/dape/events)
+(require 'kargu/tools/dape/selection)
 
 (declare-function kargu--tool-arg "kargu/api/tools" (args &rest keys))
 (declare-function kargu--tool-file-path "kargu/api/tools" (args))
@@ -109,11 +110,30 @@ INTERACTIVE also shows a short prefix in the echo area."
                (and thread (plist-get thread :id)))
     text))
 
-(defun kargu-dape--get-context (&optional callback connection)
+(defun kargu-dape--collect-selection-context (selection callback interactive)
+  "Collect SELECTION's scopes for CALLBACK, displaying when INTERACTIVE."
+  (let* ((conn (kargu-dape-selection-connection selection))
+         (thread (kargu-dape-selection-thread selection))
+         (frames (kargu-dape--seq->list (plist-get thread :stackFrames)))
+         (frame (kargu-dape-selection-frame selection)))
+    (when (and (kargu-dape-selection-frame-id selection) (null frame))
+      (error "Requested debug frame is absent from the captured thread's stack"))
+    (if (null frame)
+        (kargu-dape--deliver callback (kargu-dape--context-text conn thread frames nil) interactive)
+      (kargu-dape--call
+       #'dape--scopes conn frame
+       (lambda (&rest _)
+         (kargu-dape--fetch-variables
+          conn (kargu-dape--seq->list (plist-get frame :scopes))
+          (lambda ()
+            (kargu-dape--deliver callback (kargu-dape--context-text conn thread frames frame) interactive))))))))
+
+(defun kargu-dape--get-context (&optional callback connection selection)
   "Pass a text snapshot of the paused debug session to CALLBACK.
 The snapshot is the thread, the call stack and the in-scope variables.
 Stack, scope and variable requests are chained through dape callbacks.
 CONNECTION optionally pins the request to an already owned adapter.
+SELECTION optionally carries the caller's captured thread/frame identity.
 Without CALLBACK the text is returned only for the no-session case;
 an interactive call shows the snapshot when it arrives."
   (interactive)
@@ -122,33 +142,19 @@ an interactive call shows the snapshot when it arrives."
     (if (stringp conn)
         (kargu-dape--deliver callback conn interactive)
       (condition-case-unless-debug err
-          (let ((thread (or (dape--current-thread conn)
-                            (car (dape--stopped-threads conn)))))
+          (let* ((selection (or selection (kargu-dape-capture-selection conn)))
+                 (thread (kargu-dape-selection-thread selection)))
+            (unless (eq conn (kargu-dape-selection-connection selection))
+              (error "Captured debug selection belongs to another adapter"))
+            (unless (= (kargu-dape-selection-generation selection) (kargu-dape-event-generation conn))
+              (error "Captured debug selection state changed before inspection"))
             (if (null thread)
                 (kargu-dape--deliver
                  callback (kargu-dape--context-text conn nil nil nil) interactive)
               (kargu-dape--call #'dape--stack-trace
                 conn thread kargu-dape-max-frames
                 (lambda (&rest _)
-                  (let* ((frames (kargu-dape--seq->list
-                                  (plist-get thread :stackFrames)))
-                         (frame (or (dape--current-stack-frame conn)
-                                    (car frames))))
-                    (if (null frame)
-                        (kargu-dape--deliver
-                         callback
-                         (kargu-dape--context-text conn thread frames nil)
-                         interactive)
-                      (kargu-dape--call #'dape--scopes
-                        conn frame
-                        (lambda (&rest _)
-                          (kargu-dape--fetch-variables
-                           conn (kargu-dape--seq->list (plist-get frame :scopes))
-                           (lambda ()
-                             (kargu-dape--deliver
-                              callback
-                              (kargu-dape--context-text conn thread frames frame)
-                              interactive)))))))))))
+                  (kargu-dape--collect-selection-context selection callback interactive)))))
         (error
          (let ((msg (format "ERROR: dape context: %s"
                             (error-message-string err))))
@@ -402,12 +408,13 @@ Returns structured confirmation with file, line, and remaining count."
               tool-name path))
      (t nil))))
 
-(defun kargu-dape-get-context (&optional callback connection)
+(defun kargu-dape-get-context (&optional callback connection selection)
   "Collect paused context and complete CALLBACK once, optionally on CONNECTION.
-An explicit CONNECTION must still be paused and owned by the current project."
+An explicit CONNECTION must still be paused and owned by the current project.
+SELECTION optionally supplies a previously captured thread/frame identity."
   (interactive)
   (kargu-dape--run-chain
-   callback (lambda (done) (kargu-dape--get-context done connection)) connection))
+   callback (lambda (done) (kargu-dape--get-context done connection selection)) connection))
 
 (defun kargu-dape-eval-expression (expr &optional context callback)
   "Evaluate EXPR in CONTEXT and deliver one guarded result to CALLBACK."

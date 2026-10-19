@@ -33,18 +33,21 @@
 (defun kargu-dape--move-frame (delta callback)
   "Move by DELTA stack frames asynchronously and report to CALLBACK."
   (let* ((conn (kargu-dape--connection))
-         (thread (and (not (stringp conn)) (dape--current-thread conn))))
+         (selection (and (not (stringp conn)) (kargu-dape-capture-selection conn)))
+         (thread (and selection (kargu-dape-selection-thread selection))))
     (if (not thread) (funcall callback "ERROR: no paused thread")
       (kargu-dape--call
        #'dape--stack-trace conn thread kargu-dape-max-frames
        (lambda (&rest _)
+         (unless (kargu-dape-selection-current-p selection)
+           (error "Debug selection changed while fetching the navigation stack"))
          (let* ((frames (kargu-dape--seq->list (plist-get thread :stackFrames)))
-                (current (dape--current-stack-frame conn))
-                (index (or (cl-position (plist-get current :id) frames
-                                        :key (lambda (frame) (plist-get frame :id))
-                                        :test #'equal) 0))
-                (target (nth (max 0 (+ index delta)) frames)))
-           (when (or (< (+ index delta) 0) (null target))
+                (current (kargu-dape-selection-frame-id selection))
+                (index (if current
+                           (cl-position current frames :key (lambda (frame) (plist-get frame :id)) :test #'equal)
+                         0))
+                (target (and index (nth (max 0 (+ index delta)) frames))))
+           (when (or (null index) (< (+ index delta) 0) (null target))
              (error "Requested frame is outside the available stack"))
            (dape-select-stack conn (plist-get target :id))
            (kargu-dape--after-stack-select
@@ -87,12 +90,13 @@ The text is passed to CALLBACK when given, and returned otherwise."
               (error (format "ERROR: threads: %s" (error-message-string err)))))))
     (kargu-dape--deliver callback text interactive)))
 
-(defun kargu-dape--stack-text (conn thread frames max-lvls)
-  "Render FRAMES of THREAD on CONN, at most MAX-LVLS of them."
+(defun kargu-dape--stack-text (selection frames max-lvls)
+  "Render FRAMES for captured SELECTION, at most MAX-LVLS of them."
   (if (null frames)
       "[STACK: 0 frames]"
-    (let* ((cur (dape--current-stack-frame conn))
-           (cur-id (and cur (plist-get cur :id)))
+    (let* ((conn (kargu-dape-selection-connection selection))
+           (thread (kargu-dape-selection-thread selection))
+           (cur-id (kargu-dape-selection-frame-id selection))
            (lines (list (format "[STACK: %d frames for thread #%s]"
                                 (length frames) (plist-get thread :id)))))
       (cl-loop for f in (seq-take frames max-lvls)
@@ -102,7 +106,7 @@ The text is passed to CALLBACK when given, and returned otherwise."
                                 (or (plist-get f :name) "?")
                                 (kargu-dape--frame-path conn f)
                                 (or (plist-get f :line) "?")
-                                (if (eq (plist-get f :id) cur-id) "  <= selected" ""))
+                                (if (equal (plist-get f :id) cur-id) "  <= selected" ""))
                         lines))
       (string-join (nreverse lines) "\n"))))
 
@@ -115,8 +119,8 @@ The text is passed to CALLBACK."
     (if (null conn)
         (kargu-dape--deliver callback "ERROR: no live dape session" interactive)
       (condition-case err
-          (let ((thread (or (dape--current-thread conn)
-                            (car (dape--stopped-threads conn)))))
+          (let* ((selection (kargu-dape-capture-selection conn))
+                 (thread (kargu-dape-selection-thread selection)))
             (if (null thread)
                 (kargu-dape--deliver callback "[STACK: 0 frames]" interactive)
               (kargu-dape--call #'dape--stack-trace
@@ -125,7 +129,7 @@ The text is passed to CALLBACK."
                  (kargu-dape--deliver
                   callback
                   (kargu-dape--stack-text
-                   conn thread
+                   selection
                    (kargu-dape--seq->list (plist-get thread :stackFrames))
                    max-lvls)
                   interactive)))))

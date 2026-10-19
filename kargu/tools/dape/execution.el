@@ -15,12 +15,10 @@
 
 ;;;; Stepping & execution control ------------------------------------------
 
-(defun kargu-dape--stopped-report-text (live-conn action-name ctx)
-  "Format LIVE-CONN's paused ACTION-NAME location and collected CTX."
-  (let* ((thread (and live-conn (or (dape--current-thread live-conn)
-                                  (car (dape--stopped-threads live-conn)))))
-         (top-frame (and live-conn (or (dape--current-stack-frame live-conn)
-                                     (car (plist-get thread :stackFrames)))))
+(defun kargu-dape--stopped-report-text (selection action-name ctx)
+  "Format captured SELECTION's paused ACTION-NAME location and collected CTX."
+  (let* ((live-conn (kargu-dape-selection-connection selection))
+         (top-frame (kargu-dape-selection-frame selection))
          (file (and live-conn top-frame (kargu-dape--frame-path live-conn top-frame)))
          (line (and top-frame (plist-get top-frame :line)))
          (fn-name (and top-frame (plist-get top-frame :name)))
@@ -47,13 +45,15 @@
 (defun kargu-dape--format-stopped-report (action-name callback &optional connection)
   "Build a paused report for ACTION-NAME and pass it to CALLBACK.
 The context and location use captured CONNECTION when supplied."
-  (kargu-dape-get-context
-   (lambda (ctx)
-     (funcall callback
-              (if (string-prefix-p "ERROR:" ctx) ctx
-                (kargu-dape--stopped-report-text
-                 (or connection (kargu-dape--raw-connection)) action-name ctx))))
-   connection))
+  (let* ((conn (or connection (kargu-dape--raw-connection)))
+         (selection (and conn (kargu-dape-capture-selection conn))))
+    (kargu-dape-get-context
+     (lambda (ctx)
+       (funcall callback
+                (if (string-prefix-p "ERROR:" ctx) ctx
+                  (kargu-dape--stopped-report-text
+                   selection action-name ctx))))
+     conn selection)))
 
 (defun kargu-dape--running-message (action-name timeout)
   "Report text for ACTION-NAME still running after TIMEOUT seconds."
