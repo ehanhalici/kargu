@@ -650,18 +650,20 @@ The chat log itself is kept as a record."
 
 (defun kargu-chat-stop ()
   "Stop the agent run in progress.
+Also cancel this chat's debugger readiness wait before a run starts.
 A running banner left behind by a failed start is cleared too, so
 the editable prompt comes back."
   (interactive)
-  (if (kargu-loop-running-p)
-      (progn
-        (kargu-loop-stop "stopped by user")
-        (force-mode-line-update t)
-        (message "kargu: stopped agent run"))
-    (when (and (markerp kargu-chat--output-marker)
-               (null kargu-chat--prompt-marker))
-      (kargu-chat--ensure-idle-prompt))
-    (message "kargu: no run in progress")))
+  (let ((cancelled (kargu-dape-cancel-session-wait)))
+    (if (kargu-loop-running-p)
+        (progn
+          (kargu-loop-stop "stopped by user")
+          (force-mode-line-update t)
+          (message "kargu: stopped agent run"))
+      (when (and (markerp kargu-chat--output-marker)
+                 (null kargu-chat--prompt-marker))
+        (kargu-chat--ensure-idle-prompt))
+      (message (if cancelled "kargu: debugger wait cancelled" "kargu: no run in progress")))))
 
 (kargu-log 'info "chat module loaded")
 

@@ -51,6 +51,15 @@ ROOT defaults to the selected project.  Global Dape selection is ignored."
            (kargu-permission-within-project-p directory root)))
        (dape--live-connections)))))
 
+(defun kargu-dape-launch-connections (root token)
+  "Return live root adapters in ROOT bearing the exact launch TOKEN.
+The non-keyword metadata key is local to Dape and is never a DAP argument."
+  (when token
+    (seq-filter (lambda (connection)
+                  (and (not (dape--parent connection))
+                       (eq token (plist-get (dape--config connection) 'kargu--launch-token))))
+                (kargu-dape-project-connections root))))
+
 (defun kargu-dape--source-buffer-p (buffer root)
   "Return non-nil when BUFFER visits source code inside ROOT."
   (and (buffer-live-p buffer)

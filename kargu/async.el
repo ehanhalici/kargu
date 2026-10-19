@@ -116,6 +116,10 @@ If TASK has already ended, release the newly acquired resource immediately."
              (kargu-log 'warn "Async operation failed after delivery: %s"
                         (error-message-string err)))))))))
 
+(defun kargu-async-cancel (task)
+  "Cancel only TASK and its children, silently releasing owned resources."
+  (kargu-async--close task :cancelled))
+
 (defun kargu-async-cancel-owner (owner)
   "Cancel all pending tasks owned by OWNER without delivering stale results."
   (dolist (task (copy-sequence kargu-async--pending))

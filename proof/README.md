@@ -61,7 +61,7 @@ directories within the selected workspace (including inherited parent
 configuration). Source targets are checked after symlink resolution. Offline
 ERT covers foreign global selection, unknown directories and callback origin
 reassignment. This is a resource-admission boundary, not a new loop transition;
-global Dape hook/lifecycle ownership remains tracked separately in `todo.md`.
+global Dape lifecycle isolation remains tracked separately in `todo.md`.
 
 `KarguDebugStartup.tla` / `DebugStartupMC.cfg` model one startup intent from
 dependency probing through approval. Run `proof/run_tlc.sh --debug-startup`
@@ -73,7 +73,23 @@ deadlock. Source filename/tick/mode/directory, editor-state preservation,
 actual configuration fingerprints and source-local environment checks are
 exercised by offline ERT. Invalidated identities are abstracted monotonically;
 this is not a model of arbitrary editor history or Dape's remaining global
-stop/start/lifecycle hooks. No main-loop transition changed or was re-proved.
+deferred compilation or global lifecycle cleanup. No main-loop transition
+changed or was re-proved. This approval model was rerun unchanged after the
+readiness work and retained the same exhaustive counts.
+
+`KarguDebugReadiness.tla` / `DebugReadinessMC.cfg` model the separate owned
+wait after launch or while an existing adapter runs. Run
+`proof/run_tlc.sh --debug-readiness` for an exhaustive scan. Two adapter
+identities, token/project matching, ambiguity, removal/replacement, paused
+state, origin invalidation, deadlines and cancellation cover single delivery,
+no foreign success and cleanup. The 2026-10-19 scan visited 464 distinct states
+(1,450 generated), depth 8, without an error or deadlock. ERT additionally
+tests early events before launch returns, root-only token discovery, no DAP
+metadata leak, ownerless waits, source closure, reentrant consumers, timer
+startup errors, Stop before a run and editor-state preservation. This bounded
+resource model does not prevent Dape's deferred compile continuation from
+opening an adapter after cancellation; that remains DAPE-03. It is not a
+rerun of the main-loop proof.
 
 `KarguDebugWatch.tla` / `DebugWatchMC.cfg` cover the guarded continuation of a
 two-expression watch snapshot. Run `proof/run_tlc.sh --debug-watch` for an

@@ -18,6 +18,7 @@
 (require 'kargu/permission)
 (require 'kargu/tools/dape/workspace)
 (require 'kargu/tools/dape/selection)
+(require 'kargu/tools/dape/readiness)
 (require 'dape nil t)
 
 (defvar dape--connection-selected)
@@ -100,10 +101,10 @@
          (kargu-dape-inspection-thread conn))))
 
 (declare-function kargu-dape-selected-config "kargu/tools/dape/preflight" ())
-(declare-function kargu-dape-launch-config "kargu/tools/dape/preflight" (name))
+(declare-function kargu-dape-launch-config "kargu/tools/dape/preflight" (name &key token))
 
-(defun kargu-dape--interactive-launch-dape (target-buf)
-  "Launch the verified adapter in TARGET-BUF with stop-on-entry enabled."
+(defun kargu-dape--interactive-launch-dape (target-buf token)
+  "Launch the verified adapter in TARGET-BUF with the captured launch TOKEN."
   (let ((name (kargu-dape-selected-config)))
     (unless name (user-error "Kargu: Verify an adapter by selecting debug mode first"))
     (unless (buffer-live-p target-buf)
@@ -111,103 +112,28 @@
     (when (buffer-live-p target-buf)
       (setq kargu-context-buffer target-buf))
     (with-current-buffer target-buf
-      (kargu-dape-launch-config name))))
-
-(defconst kargu-dape--session-poll-interval 0.5
-  "Seconds between debug session readiness checks.")
-
-(defconst kargu-dape--session-launch-timeout 60.0
-  "Seconds allowed for a debug adapter to become ready.")
-
-(cl-defstruct (kargu-dape--session-wait
-               (:constructor kargu-dape--make-session-wait))
-  "Resources owned by one asynchronous debug session launch."
-  started timer deferred stop-hook start-hook on-ready on-cancel
-  (state :waiting))
-
-(defun kargu-dape--finish-session-wait (wait state &optional reason)
-  "Finish WAIT once in STATE, reporting cancellation REASON when supplied."
-  (save-match-data
-    (when (eq (kargu-dape--session-wait-state wait) :waiting)
-      (setf (kargu-dape--session-wait-state wait) state)
-      (dolist (timer (list (kargu-dape--session-wait-timer wait)
-                           (kargu-dape--session-wait-deferred wait)))
-        (when (timerp timer) (cancel-timer timer)))
-      (remove-hook 'dape-stopped-hook (kargu-dape--session-wait-stop-hook wait))
-      (remove-hook 'dape-start-hook (kargu-dape--session-wait-start-hook wait))
-      (pcase state
-        (:ready
-         (message "kargu: debug session ready!")
-         (funcall (kargu-dape--session-wait-on-ready wait)))
-        (:cancelled
-         (message "kargu: %s" reason)
-         (when-let* ((on-cancel (kargu-dape--session-wait-on-cancel wait)))
-           (funcall on-cancel reason)))))))
-
-(defun kargu-dape--poll-session-wait (wait)
-  "Check readiness or timeout of launch WAIT."
-  (when (eq (kargu-dape--session-wait-state wait) :waiting)
-    (cond
-     ((kargu-dape-ready-p)
-      (kargu-dape--finish-session-wait wait :ready))
-     ((> (- (float-time) (kargu-dape--session-wait-started wait))
-         kargu-dape--session-launch-timeout)
-      (kargu-dape--finish-session-wait wait :cancelled "dape launch timed out")))))
-
-(defun kargu-dape--session-started (wait)
-  "Schedule a readiness probe for the adapter associated with WAIT."
-  (when (eq (kargu-dape--session-wait-state wait) :waiting)
-    (when-let* ((timer (kargu-dape--session-wait-deferred wait)))
-      (cancel-timer timer))
-    (setf (kargu-dape--session-wait-deferred wait)
-          (run-at-time
-           kargu-dape--session-poll-interval nil
-           (lambda ()
-             (when (kargu-dape-ready-p)
-               (kargu-dape--finish-session-wait wait :ready)))))))
-
-(defun kargu-dape--wait-for-session-ready (on-ready &optional on-cancel)
-  "Wait asynchronously for a session, calling ON-READY or ON-CANCEL once."
-  (let* ((wait (kargu-dape--make-session-wait
-                :started (float-time) :on-ready on-ready :on-cancel on-cancel))
-         (stop (lambda (&rest _) (kargu-dape--finish-session-wait wait :ready)))
-         (start (lambda (&rest _) (kargu-dape--session-started wait))))
-    (setf (kargu-dape--session-wait-stop-hook wait) stop
-          (kargu-dape--session-wait-start-hook wait) start)
-    (when (boundp 'dape-stopped-hook) (add-hook 'dape-stopped-hook stop))
-    (when (boundp 'dape-start-hook) (add-hook 'dape-start-hook start))
-    (setf (kargu-dape--session-wait-timer wait)
-          (run-at-time kargu-dape--session-poll-interval
-                       kargu-dape--session-poll-interval
-                       #'kargu-dape--poll-session-wait wait))
-    wait))
+      (kargu-dape-launch-config name :token token))))
 
 (defun kargu-dape-ensure-session (on-ready &optional on-cancel)
-  "Ensure a dape debug session is running and ready.
-If already ready, calls ON-READY immediately.
-Otherwise, interactively invokes `dape' in the context of the project
-source buffer (so minibuffer completion works), ensures :stopOnEntry t,
-and waits asynchronously until the session connects and stops.
-If cancelled or start fails within timeout, calls ON-CANCEL."
+  "Ensure an owned Dape session is ready, calling ON-READY or ON-CANCEL.
+Call ON-READY immediately if ready.  Otherwise return an owned async task.
+Stop or changed ownership silently cancels waiting, not the adapter launch."
+  (kargu-dape-cancel-session-wait)
   (cond
    ((kargu-dape-ready-p)
     (funcall on-ready))
    ((kargu-dape-live-p)
-    (kargu-dape--wait-for-session-ready on-ready on-cancel))
+    (kargu-dape-wait-for-session on-ready :on-cancel on-cancel
+                                 :connection (kargu-dape--raw-connection)
+                                 :source (kargu-dape-source-buffer)))
    ((not (fboundp 'dape))
     (message "kargu: dape is not installed or loaded")
     (when on-cancel (funcall on-cancel "dape is not installed")))
    (t
-    (condition-case err
-        (let ((target-buf (kargu-dape--target-buffer)))
-          (kargu-dape--interactive-launch-dape target-buf)
-          (kargu-dape--wait-for-session-ready on-ready on-cancel))
-      (quit
-       (message "kargu: debug session launch cancelled.")
-       (when on-cancel (funcall on-cancel "cancelled by user")))
-      (error
-       (message "kargu: dape launch error: %s" (error-message-string err))
-       (when on-cancel (funcall on-cancel (error-message-string err))))))))
+    (let ((target (kargu-dape--target-buffer)))
+      (kargu-dape-wait-for-session
+       on-ready :on-cancel on-cancel :source target
+       :launch (lambda (token) (kargu-dape--interactive-launch-dape target token)))))))
 
 (defun kargu-dape--connection ()
   "Return a live dape connection, or an explanatory string.

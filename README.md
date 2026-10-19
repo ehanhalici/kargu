@@ -293,8 +293,13 @@ replies. Every callback rechecks the exact live thread and adapter generation.
 Any thread event on that adapter invalidates old reads; unrelated adapters do
 not. Watch expressions share the original prepared frame, despite UI changes.
 The existing positional evaluate API also accepts `:selection` for that reuse.
-Startup readiness, deferred compilation and global lifecycle helpers still
-have limitations tracked in `todo.md`.
+Startup readiness belongs to the captured chat, project, session, mode and
+source identity. Existing adapters are pinned; new launches use a unique local
+token and admit only their matching root adapter, never an unrelated or child
+connection. Stop also cancels readiness before an agent run starts, preserving
+the draft. Timeout and all terminal paths release owned listeners and timers.
+Cancellation stops waiting, not Dape's deferred compilation or its adapter;
+deferred compile ownership and global lifecycle helpers remain in `todo.md`.
 
 Debugger source quotes prefer the full unsaved visiting buffer, preserving its
 narrowing and point. Inspection is bounded to 64 KiB on disk or 65,536 live

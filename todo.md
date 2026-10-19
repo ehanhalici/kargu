@@ -8,12 +8,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ## Doğrulanmış hatalar — düzeltme sırası
 
-### DAPE-02 · P1 · Y — Başlangıç bekleyicisi yabancı stop ile tamamlanıyor
-
-- **Yer/kanıt:** `kargu/tools/dape/session.el`, `kargu-dape--wait-for-session-ready`: global stop kancası koşulsuz ready yayınlıyor. Bağlantı yokken global hook ile ready callback'i üretildi.
-- **Beklenen/gerçek:** Yakalanmış proje/oturum/başlatma kimliğinin bağlantısı beklenmeli; yabancı start/stop beklemeyi etkileyebiliyor.
-- **Yeniden üretme/kapanış:** Yabancı olay, kök/oturum değişimi, adapter değiştirme, kapatılan kaynak tamponu, Stop ve timeout; callback en fazla bir kez, timer/hook temizliği her çıkışta.
-
 ### DAPE-03 · P1 · K — Ertelenmiş compile devamı başlangıç sahipliğinden kopuyor
 
 - **Yer/kanıt:** `kargu/tools/dape/preflight.el`, `kargu-dape-launch-config`: doğrulamadan sonra Dape çağrılıyor. Dape 0.27.1 compile callback'i bağlantıyı daha sonra Kargu sahipliğini yeniden doğrulamadan açıyor.
