@@ -22,6 +22,7 @@
 (require 'kargu/permission/guards)
 (require 'kargu/chat/routing)
 (require 'kargu/chat/session/storage)
+(require 'kargu/chat/session/validate)
 
 (declare-function kargu-state-mode "kargu/state/selectors" ())
 (declare-function kargu-state-set-provider "kargu/state/transitions" (provider))
@@ -309,7 +310,10 @@ Uses UPDATED-AT and MESSAGE-COUNT for status banner."
   "Read SESSION-OR-ID in project ROOT, or return the supplied session data."
   (if (or (consp session-or-id) (hash-table-p session-or-id))
       session-or-id
-    (kargu-session-storage-read session-or-id root)))
+    (let ((data (kargu-session-storage-read session-or-id root)))
+      (when (and data (not (equal (kargu-aget data "id") session-or-id)))
+        (user-error "Kargu: session ID does not match its filename"))
+      data)))
 
 (defun kargu-session-load (session-or-id &optional target-buffer root)
   "Restore SESSION-OR-ID into TARGET-BUFFER for project ROOT.
@@ -319,7 +323,8 @@ must finish before loading another session.  Return TARGET-BUFFER on success."
   (when (kargu-loop-running-p)
     (user-error "Kargu: stop the active run before loading another session"))
   (let* ((root (kargu-session-project-root (or root target-buffer)))
-         (data (kargu-session--read-data session-or-id root))
+         (raw (kargu-session--read-data session-or-id root))
+         (data (and raw (kargu-session-validate raw)))
          (_validated (when data (kargu-session-storage-file (kargu-aget data "id") root)))
          (buf (or target-buffer
                   (get-buffer (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*"))

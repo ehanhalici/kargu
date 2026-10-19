@@ -209,6 +209,10 @@ to restore imported records. Session storage receives an explicit project root
 and does not depend on chat buffers. Records are bounded by
 `kargu-session-max-file-bytes` (16 MiB by default); saves use private temporary
 files and atomic rename so failed publication leaves the previous record intact.
+Loading validates metadata, counters, native protocol message/tool-call shapes,
+file identity, depth and size before changing a conversation. This does not yet
+make the whole UI/state restoration transactional; that separate limitation is
+tracked in `todo.md`.
 
 The LSP and Dape entry points load focused submodules for session access,
 data collection, formatting and tool registration. HTTP request construction,
