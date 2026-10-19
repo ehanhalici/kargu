@@ -86,6 +86,12 @@ separation and that Dape's global watch list and UI are untouched. The model
 abstracts individual DAP results and editor identities; the main loop and
 Dape's unrelated global lifecycle hooks are not included.
 
+Debugger source excerpts and breakpoint enumeration use a canonical workspace
+path boundary. ERT rejects external files, escaping symlinks and implicit remote
+reads before content access, preserves editor state and keeps foreign frame
+location metadata without reading that source. This is a read-admission change,
+not a new loop or asynchronous-task transition.
+
 `KarguDiagnostics.tla` / `DiagnosticsMC.cfg` model the owned diagnostic wait
 after backend startup. Run `proof/run_tlc.sh --diagnostics` for an exhaustive
 scan. Two backends with old/current generations cover forced reports, edits,

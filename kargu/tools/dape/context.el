@@ -203,55 +203,73 @@ Without a session the text is returned directly."
 
 ;;;; Breakpoints -----------------------------------------------------------
 
+(defun kargu-dape--project-source-path (file-path)
+  "Return canonical FILE-PATH inside this workspace, or nil.
+Adapter paths never authorize an implicit remote connection or external read."
+  (save-match-data
+    (when (and (stringp file-path) (not (string-empty-p file-path))
+               (not (file-remote-p file-path)))
+      (condition-case nil
+          (let* ((root (kargu-permission-project-root))
+                 (path (file-truename (expand-file-name file-path root))))
+            (when (kargu-permission-within-project-p path root) path))
+        (file-error nil)))))
+
 (defun kargu-dape--source-line (file-path line)
-  "Return trimmed source line content of FILE-PATH at 1-based LINE, or nil."
-  (when (and (stringp file-path) (file-readable-p file-path) (integerp line) (> line 0))
-    (condition-case nil
-        (with-temp-buffer
-          (insert-file-contents file-path)
-          (goto-char (point-min))
-          (forward-line (1- line))
-          (string-trim (buffer-substring-no-properties (point) (line-end-position))))
-      (error nil))))
+  "Return workspace FILE-PATH's trimmed 1-based LINE, or nil."
+  (save-match-data
+    (when (and (integerp line) (> line 0))
+      (when-let* ((path (kargu-dape--project-source-path file-path)))
+        (condition-case nil
+            (with-temp-buffer
+              (insert-file-contents path)
+              (goto-char (point-min))
+              (forward-line (1- line))
+              (string-trim (buffer-substring-no-properties (point) (line-end-position))))
+          (file-error nil))))))
 
 (defun kargu-dape--source-snippet (file-path line &optional context-lines)
-  "Return formatted source lines around LINE in FILE-PATH with `=>' marker."
-  (let ((ctx (or context-lines 4)))
-    (when (and (stringp file-path) (file-readable-p file-path) (integerp line) (> line 0))
-      (condition-case nil
-          (with-temp-buffer
-            (insert-file-contents file-path)
-            (let* ((start-line (max 1 (- line ctx)))
-                   (end-line (+ line ctx))
-                   (cur-line 1)
-                   (lines nil))
-              (goto-char (point-min))
-              (while (and (not (eobp)) (<= cur-line end-line))
-                (when (>= cur-line start-line)
-                  (let ((prefix (if (= cur-line line) "=>" "  "))
-                        (line-str (buffer-substring-no-properties
-                                   (point) (line-end-position))))
-                    (push (format "%s %4d: %s" prefix cur-line line-str) lines)))
-                (forward-line 1)
-                (setq cur-line (1+ cur-line)))
-              (when lines
-                (string-join (nreverse lines) "\n"))))
-        (error nil)))))
+  "Return workspace FILE-PATH's source around LINE with an `=>' marker.
+CONTEXT-LINES defaults to four surrounding lines; inaccessible paths return nil."
+  (save-match-data
+    (let ((ctx (or context-lines 4)))
+      (when-let* (((and (integerp line) (> line 0) (natnump ctx)))
+		  (path (kargu-dape--project-source-path file-path)))
+	(condition-case nil
+            (with-temp-buffer
+              (insert-file-contents path)
+              (let* ((start-line (max 1 (- line ctx)))
+                     (end-line (+ line ctx))
+                     (cur-line 1)
+                     (lines nil))
+		(goto-char (point-min))
+		(while (and (not (eobp)) (<= cur-line end-line))
+                  (when (>= cur-line start-line)
+                    (let ((prefix (if (= cur-line line) "=>" "  "))
+                          (line-str (buffer-substring-no-properties
+                                     (point) (line-end-position))))
+                      (push (format "%s %4d: %s" prefix cur-line line-str) lines)))
+                  (forward-line 1)
+                  (setq cur-line (1+ cur-line)))
+		(when lines
+                  (string-join (nreverse lines) "\n"))))
+          (file-error nil))))))
 
 (defun kargu-dape--breakpoints ()
-  "Return dape source breakpoints as ((PATH LINE) ...)."
+  "Return workspace-owned Dape source breakpoints as ((PATH LINE) ...)."
   (when (and (boundp 'dape--breakpoints)
              (fboundp 'dape--breakpoint-file-name)
              (fboundp 'dape--breakpoint-line))
     (delq nil
           (mapcar (lambda (bp)
-                    (let ((file (dape--breakpoint-file-name bp))
+                    (let ((file (kargu-dape--project-source-path
+                                 (dape--breakpoint-file-name bp)))
                           (line (dape--breakpoint-line bp)))
                       (when (and file line) (list file line))))
                   dape--breakpoints))))
 
 (defun kargu-dape-list-breakpoints ()
-  "Return a structured text list of all source breakpoints."
+  "Return a structured text list of this workspace's source breakpoints."
   (let ((bps (kargu-dape--breakpoints)))
     (cond
      ((null (fboundp 'dape--breakpoint-file-name))

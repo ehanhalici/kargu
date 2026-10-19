@@ -273,6 +273,9 @@ Kargu watch expressions are separate from Dape's global UI watch list and
 belong to the captured adapter, project and chat session. Replacing an adapter
 starts with an empty Kargu list. Inspection callbacks check that ownership
 before continuing to another watch expression.
+Source excerpts and breakpoint lists are restricted to canonical paths inside
+the selected workspace. Foreign stack locations can still be shown as adapter
+metadata, but do not authorize source reads or automatic remote connections.
 This does not yet isolate Dape's global hooks or all
 lifecycle helpers; those remaining limitations are tracked in `todo.md`.
 
