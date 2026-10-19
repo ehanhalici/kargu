@@ -44,6 +44,7 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 1. **[K - Yüksek] Çoklu sohbet tamponlarında Global Değişken Çakışması.**
    - **Dosya / Satır:** `kargu/core/session.el:34-42`, `kargu/history/protocol.el:23`, `kargu/state/store.el:18-31`
    - **Sorun:** `kargu--session`, `kargu--message-history` ve merkezi durum deposu `kargu--state-store` global `defvar` olarak tutulmaktadır. Kullanıcı iki ayrı projede iki ayrı Kargu tamponu açtığında sayaçlar, mesaj geçmişleri, `:mode`, `:status` ve `:busy` bayrakları birbirini ezer. Bir tampondaki işlem diğer tüm tamponların durumunu bozar.
+   - **Gereken:** Kip hazırlığı/restore geri çağrıları da proje, oturum ve seçim nesline bağlı olmalı; başarısız plan başlangıcında eski `debug` kipine asenkron dönüş yeni bir sohbete sızmamalı.
 2. **[K - Orta] `kargu-history-char-count` her turda tüm geçmişi JSON'a çevirerek karakter sayar.**
    - **Dosya / Satır:** `kargu/history/compact.el:63-71`
    - **Sorun:** `(+ (length (kargu--json-encode (vconcat kargu--message-history))) ...)` çağrısı her adımda ve her sıkıştırma eşiği kontrolünde tüm mesaj geçmişini baştan sona JSON string'e çevirir. Yüzlerce mesajlık oturumlarda yüksek CPU tüketimi ve gereksiz GC baskısı oluşturur.
@@ -62,9 +63,6 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 1. **[K - Orta] Durdurulan koşularda dosya tüketim sızıntısı.**
    - **Dosya / Satır:** `kargu/loop/heal.el:50-51`
    - **Sorun:** LSP tanıları beklenirken koşu durdurulursa (`kargu-loop-stop`), `(when (kargu-loop--live-p run) (kargu-diff-consume-file path))` atlanır. Düzenlenen dosya `kargu-diff--changed` tablosunda kalır ve sonraki koşunun bitiş raporuna `:pending-files` olarak sızar.
-2. **[K - Orta] Plan durumunun global olması.**
-   - **Dosya / Satır:** `kargu/plan/dispatch.el:45, 51`
-   - **Sorun:** `kargu-plan--decision-pending` ve `kargu-plan--current-plan` globaldir; farklı projelerdeki plan tamponları birbirinin durumunu ezer.
 
 ---
 
@@ -91,3 +89,4 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 - **Dosya yazma ve rollback yolu daraltılmış/kirli tamponları güvenli yönetmiyor.** `diff/stage.el` içindeki `kargu-diff--file-text` ve proposal snapshot'ı yalnız erişilebilir bölgeyi okuyor; tam dosya yerine eksik rollback metni saklanabilir. Otomatik yazma `erase-buffer`/`save-buffer` ile kullanıcının kaydedilmemiş değişikliklerini de kaydediyor ve save-hook dönüşümlerini başarı sonucuyla uzlaştırmıyor. Tampon daraltması/point korunmalı; kullanıcı değişiklikleri, diskte dış değişiklik, kodlama ve başarısız kaydetme için açık işlem/geri alma sözleşmesi ve testler gerekiyor.
 - **Tanı raporunun güncelliği ve bekleyen poll sahipliği.** `kargu-lsp-wait-diagnostics`, checker var fakat henüz yeni rapor yayımlamamışsa boş veya iki eşit snapshot'ı yerleşmiş kabul edebiliyor. Belge sürümü/report-generation bariyeri ve çalışmayı başlatan tampon/kökü yakalayan, iptal edilebilir tek-teslimli bir bekleyici gerekiyor. Backend geç yanıtı, buffer kapanması, proje değişimi ve run stop birlikte test edilmeli.
 - **Doğrulanmış oturumun yüklenmesi henüz atomik bir yayınlama işlemi değil.** Girdi şeması, boyut/derinlik ve kimlik artık sohbet değiştirilmeden doğrulanıyor; ancak geçerli kayıt yüklenirken UI/footer çizimi veya kip hazırlığı başarısız olursa önceki taslak, geçmiş, sayaç ve seçim için ortak geri alma yok. Özellikle daraltılmış sohbet tamponu, render hatası ve asenkron `debug` kip hazırlığı sırasında iptal/proje değişimi test edilmeli. Oturum/state sahipliği ayrıldıktan sonra önceden hazırlanmış görünüm ve tek işlem sınırı gerekiyor.
+- **[D - Orta] Süreç iptali / stderr kapanışı stres altında yeniden incelenmeli.** 2026-10-19 tam ERT ve eşzamanlı derleme turunda `kargu-process-cancel-terminates-child-process-group-test` iptal callback'ini 2 saniyede alamadı; `kargu-process-deadline-covers-stderr-drain-test` ise 50 ms deadline yerine erken başarılı sonuç gördü. Aynı iki testin ayrı 10'ar tekrarı ve sonraki tam tur geçti. Ürün hatası veya test/zamanlama varsayımı henüz ayrıştırılmadı; ana süreç/stderr durumları ve sentinel kurulum sırası kontrollü stres testinde kaydedilmeli, `accept-process-output` ile yalnız ana süreci bekleyen test yolu da karşılaştırılmalı. Süreleri körlemesine uzatarak kapatılmamalı.

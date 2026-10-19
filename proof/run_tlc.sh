@@ -2,6 +2,7 @@
 # run_tlc.sh --- Check the Kargu TLA+ specification with TLC.
 #
 #   ./run_tlc.sh                 exhaustive breadth-first scan (the proof)
+#   ./run_tlc.sh --plan          exhaustive plan-ownership scan
 #   ./run_tlc.sh --simulate [N]  random simulation of N behaviors (default
 #                                100000): a quick smoke test, NOT a proof
 #   ./run_tlc.sh <tlc args...>   any other arguments go to TLC as they are
@@ -28,9 +29,14 @@ METADIR="$(mktemp -d "${TMPDIR:-/tmp}/kargu-tlc.XXXXXX")"
 LOG="${METADIR}/tlc.log"
 trap 'rm -rf "${METADIR}"' EXIT
 
+SPECIFICATION="MC.tla (KarguLoop, KarguProtocol, KarguCircuit, KarguTools, KarguState)"
 if [[ $# -eq 0 ]]; then
     MODE="exhaustive scan"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" MC.tla)
+elif [[ "$1" == "--plan" ]]; then
+    MODE="exhaustive plan-ownership scan"
+    SPECIFICATION="PlanMC.tla (KarguPlan)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config PlanMC.cfg PlanMC.tla)
 elif [[ "$1" == "--simulate" ]]; then
     MODE="random simulation (not a proof)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -simulate "num=${2:-100000}" MC.tla)
@@ -40,7 +46,7 @@ else
 fi
 
 echo "=== TLC on Kargu: ${MODE} ==="
-echo "Specification: MC.tla (KarguLoop, KarguProtocol, KarguCircuit, KarguTools, KarguState)"
+echo "Specification: ${SPECIFICATION}"
 echo "TLC Binary:    ${TLC_BIN}"
 echo "---------------------------------------------------------------"
 

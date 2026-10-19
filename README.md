@@ -219,6 +219,16 @@ data collection, formatting and tool registration. HTTP request construction,
 retry handling and SSE decoding are separate modules. Chat transcript insertion
 and streaming parsing are independent of tool activity and run reporting.
 
+Implementation plans have one authoritative record per source chat, capturing
+its project and session. Each chat has its own in-memory review buffer. Approval
+reads the full edited buffer and dispatches from the captured chat; another
+active run refuses startup without consuming the decision. Old transcript
+buttons cannot approve replacement plans, and closing the chat/review or changing
+its project/session invalidates the artifact. Failed startup leaves a still-current
+plan pending. Plans are extracted only from their own completion report, never
+another chat's global history. The bounded ownership workflow has a separate
+exhaustive check: `proof/run_tlc.sh --plan`.
+
 With the required Emacs packages installed, run the offline ERT suite with:
 
 ```sh

@@ -36,6 +36,20 @@ resource-ownership boundary without adding a loop transition.
 
 ## 1. Modules
 
+The separate plan artifact workflow (`kargu/plan/store.el` and `dispatch.el`)
+is modeled in `KarguPlan.tla`, with `PlanMC.tla` / `PlanMC.cfg`. Run its
+exhaustive check with `proof/run_tlc.sh --plan` (or through `nix-shell shell.nix`).
+It bounds two owners and two plans per owner; an epoch change abstracts a
+project/session reassignment. It checks owned dispatch from any caller,
+single dispatch per artifact, no resurrection of replaced decisions,
+one dispatch claim per owner, and no dispatch after rejection. Closing either
+the source chat or review invalidates the artifact; failed startup only restores
+a still-current decision. The 2026-10-19 exhaustive run visited 72,313 distinct
+states (257,073 generated), depth 25, with no error or deadlock. This is an
+artifact-ownership check, not a proof that global chat/session state has already
+been isolated. The main loop transitions are unchanged by this refactoring;
+their existing bounded model and results remain separate.
+
 ```
 proof/
 ├── KarguContract.tla   # Roles, modes, message schema, contract predicates

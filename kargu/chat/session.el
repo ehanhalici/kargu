@@ -59,6 +59,10 @@
 (defvar-local kargu-chat--session-model nil
   "Model identifier associated with this chat session.")
 
+(defun kargu-chat-session-id (&optional buffer)
+  "Return the session identity belonging to BUFFER, defaulting to current."
+  (buffer-local-value 'kargu-chat--session-id (or buffer (current-buffer))))
+
 (defun kargu-chat--explicit-selection (value)
   "Return VALUE when it is a non-blank string, otherwise nil."
   (and (stringp value)

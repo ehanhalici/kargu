@@ -96,10 +96,16 @@
 Keep windows in the prompt following their input, and windows at the
 output marker following new output.  Preserve other window positions.
 Never signal from a process filter or callback."
-  (let ((buffer (kargu-chat-output-buffer)))
-    (when (and buffer (stringp text) (not (string-empty-p text)))
-      (condition-case-unless-debug err
-          (with-current-buffer buffer
+  (kargu-chat-insert-into (kargu-chat-output-buffer) text face))
+
+(defun kargu-chat-insert-into (buffer text &optional face)
+  "Insert TEXT with FACE into explicit chat BUFFER without global routing.
+Never choose a different chat or signal from a process callback."
+  (when (and (buffer-live-p buffer) (stringp text) (not (string-empty-p text)))
+    (condition-case-unless-debug err
+        (with-current-buffer buffer
+          (save-restriction
+            (widen)
             (let* ((inhibit-read-only t)
                    (inhibit-modification-hooks t)
                    (at (if (and (markerp kargu-chat--output-marker)
@@ -122,10 +128,10 @@ Never signal from a process filter or callback."
                 (goto-char (if (markerp kargu-chat--output-marker)
                                (marker-position kargu-chat--output-marker)
                              (point-max))))
-              (kargu-chat--apply-window-follow-states follow)))
-        (error
-         (kargu-log 'warn "chat insert failed: %s"
-                    (error-message-string err)))))))
+              (kargu-chat--apply-window-follow-states follow))))
+      (error
+       (kargu-log 'warn "chat insert failed: %s"
+                  (error-message-string err))))))
 
 (defun kargu-chat--render-user-turn (prompt)
   "Render PROMPT as the next user turn in the chat log."
