@@ -17,6 +17,13 @@
 
 ;;;; Diagnostics ----------------------------------------------------------
 
+(defun kargu-lsp--diagnostic-severity (type)
+  "Normalize diagnostic TYPE through its declared Flymake category."
+  (pcase (or (and (symbolp type) (get type 'flymake-category)) type)
+    ((or :error 'flymake-error 'e :flymake-error) 1)
+    ((or :warning 'flymake-warning 'w :flymake-warning) 2)
+    (_ 3)))
+
 (defun kargu-lsp--diagnostic-location (locus position)
   "Return one-based (LINE . COLUMN) for POSITION in LOCUS."
   (cond
@@ -48,10 +55,7 @@
                             (location (kargu-lsp--diagnostic-location buffer beg))
                             (type (flymake-diagnostic-type d)))
                        (when beg
-                         (list :severity (pcase type
-                                           ((or :error 'flymake-error 'e :flymake-error) 1)
-                                           ((or :warning 'flymake-warning 'w :flymake-warning) 2)
-                                           (_ 3))
+                         (list :severity (kargu-lsp--diagnostic-severity type)
                                :line (car location)
                                :character (cdr location)
                                :source source
@@ -151,10 +155,7 @@ This reads observations only; it does not establish their freshness."
                   (t "eglot"))))
     (when (and file text)
       (list :file (expand-file-name file)
-            :severity (pcase type
-                        ((or :error 'flymake-error 'e :flymake-error) 1)
-                        ((or :warning 'flymake-warning 'w :flymake-warning) 2)
-                        (_ 3))
+            :severity (kargu-lsp--diagnostic-severity type)
             :line (car location)
             :character (cdr location)
             :source source

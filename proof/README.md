@@ -75,6 +75,11 @@ publication and editor-state preservation are covered separately by ERT.
 This is a bounded resource/freshness check; the main loop is unchanged and
 its existing proof was not rerun.
 
+Diagnostic severity is normalized through Flymake's declared category before
+the loop counts errors. ERT covers Eglot and custom checker categories for both
+file and project records, including the existing self-healing counter. This
+repairs the evidence adapter, not the loop's error-count transition.
+
 ## 1. Modules
 
 The separate plan artifact workflow (`kargu/plan/store.el` and `dispatch.el`)

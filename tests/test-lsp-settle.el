@@ -270,5 +270,26 @@ Bind `buffer', `path', `poll', `deadline' and `results' for each case."
         (funcall poll)
         (should (equal results (list (list path nil nil))))))))
 
+(ert-deftest kargu-lsp-diagnostic-severity-honors-flymake-category-test ()
+  "Eglot and custom checker categories retain their error and warning levels."
+  (let ((custom (make-symbol "custom-checker-error")))
+    (put custom 'flymake-category 'flymake-error)
+    (dolist (case (list '(eglot-error . 1) '(eglot-warning . 2) '(eglot-note . 3)
+                        (cons custom 1)))
+      (let (report)
+        (kargu-lsp-test--with-checkers
+            (list (lambda (callback &rest _) (setq report callback)))
+          (let ((diag (flymake-make-diagnostic buffer 1 2 (car case) "checker message")))
+            (kargu-lsp-test--start-wait path (lambda (&rest args) (push args results)))
+            (funcall report (list diag))
+            (funcall poll)
+            (should (= (plist-get (car (kargu-lsp-diagnostics-snapshot path)) :severity)
+                       (cdr case)))
+            (should (= (plist-get (kargu-lsp--extract-flymake-diag diag) :severity)
+                       (cdr case)))
+            (when (= (cdr case) 1)
+              (should (string-search "[error]" (cadar results)))
+              (should (= (kargu--loop-count-errors path (cadar results)) 1)))))))))
+
 (provide 'tests/test-lsp-settle)
 ;;; test-lsp-settle.el ends here
