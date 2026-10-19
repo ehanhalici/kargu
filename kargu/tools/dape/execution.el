@@ -32,7 +32,7 @@
      (if src-snippet
          (format "\n### Source Context (%s:%s):\n```\n%s\n```\n\n"
                  file line src-snippet)
-       "\n")
+       "\nSource quote unavailable (outside workspace, inaccessible, missing line, or size budget exceeded).\n\n")
      ctx
      "\n\nAvailable Next Actions:\n"
      "  - Inspect Variables: Review in-scope variables above. For struct/vector fields, use `debug_scope` (or `debug_inspect_variable`).\n"

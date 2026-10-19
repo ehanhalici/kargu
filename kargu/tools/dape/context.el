@@ -228,44 +228,73 @@ Adapter paths never authorize an implicit remote connection or external read."
             (when (kargu-permission-within-project-p path root) path))
         (file-error nil)))))
 
+(defconst kargu-dape--source-budget 65536
+  "Maximum disk bytes or live buffer characters inspected for a source quote.
+Oversized sources are unavailable, never represented by a partial read.")
+
+(defun kargu-dape--source-text (path)
+  "Return bounded complete source text for canonical local PATH, or nil.
+Prefer unsaved visiting buffers.  Disk reads bypass transformation handlers
+and have a byte bound even if the file grows after its size was checked."
+  (let ((buffer (find-buffer-visiting path)))
+    (if (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (save-restriction
+            (widen)
+            (when (<= (buffer-size) kargu-dape--source-budget)
+              (buffer-substring-no-properties (point-min) (point-max)))))
+      (when (and (file-regular-p path)
+                 (<= (file-attribute-size (file-attributes path)) kargu-dape--source-budget))
+        (with-temp-buffer
+          (set-buffer-multibyte nil)
+          (let ((file-name-handler-alist nil)
+                (format-alist nil)
+                (after-insert-file-functions nil))
+            (insert-file-contents-literally path nil 0 (1+ kargu-dape--source-budget)))
+          (when (<= (buffer-size) kargu-dape--source-budget)
+            (decode-coding-string (buffer-string)
+                                  (detect-coding-region (point-min) (point-max) t))))))))
+
 (defun kargu-dape--source-line (file-path line)
-  "Return workspace FILE-PATH's trimmed 1-based LINE, or nil."
+  "Return workspace FILE-PATH's trimmed 1-based LINE, or nil if unavailable."
   (save-match-data
     (when (and (integerp line) (> line 0))
       (when-let* ((path (kargu-dape--project-source-path file-path)))
         (condition-case nil
-            (with-temp-buffer
-              (insert-file-contents path)
-              (goto-char (point-min))
-              (forward-line (1- line))
-              (string-trim (buffer-substring-no-properties (point) (line-end-position))))
+            (when-let* ((text (kargu-dape--source-text path)))
+              (with-temp-buffer
+                (insert text)
+                (goto-char (point-min))
+                (when (and (zerop (forward-line (1- line))) (not (eobp)))
+                  (string-trim (buffer-substring-no-properties (point) (line-end-position))))))
           (file-error nil))))))
 
 (defun kargu-dape--source-snippet (file-path line &optional context-lines)
   "Return workspace FILE-PATH's source around LINE with an `=>' marker.
-CONTEXT-LINES defaults to four surrounding lines; inaccessible paths return nil."
+CONTEXT-LINES defaults to four surrounding lines.
+Unavailable sources return nil."
   (save-match-data
     (let ((ctx (or context-lines 4)))
       (when-let* (((and (integerp line) (> line 0) (natnump ctx)))
-		  (path (kargu-dape--project-source-path file-path)))
-	(condition-case nil
-            (with-temp-buffer
-              (insert-file-contents path)
-              (let* ((start-line (max 1 (- line ctx)))
-                     (end-line (+ line ctx))
-                     (cur-line 1)
-                     (lines nil))
-		(goto-char (point-min))
-		(while (and (not (eobp)) (<= cur-line end-line))
-                  (when (>= cur-line start-line)
+                  (path (kargu-dape--project-source-path file-path)))
+        (condition-case nil
+            (when-let* ((text (kargu-dape--source-text path)))
+              (with-temp-buffer
+                (insert text)
+                (let* ((start-line (max 1 (- line ctx)))
+                       (end-line (+ line ctx))
+                       (cur-line start-line)
+                       (lines nil))
+                  (goto-char (point-min))
+                  (forward-line (1- start-line))
+                  (while (and (not (eobp)) (<= cur-line end-line))
                     (let ((prefix (if (= cur-line line) "=>" "  "))
-                          (line-str (buffer-substring-no-properties
-                                     (point) (line-end-position))))
-                      (push (format "%s %4d: %s" prefix cur-line line-str) lines)))
-                  (forward-line 1)
-                  (setq cur-line (1+ cur-line)))
-		(when lines
-                  (string-join (nreverse lines) "\n"))))
+                          (line-str (buffer-substring-no-properties (point) (line-end-position))))
+                      (push (format "%s %4d: %s" prefix cur-line line-str) lines))
+                    (forward-line 1)
+                    (setq cur-line (1+ cur-line)))
+                  (when (> cur-line line)
+                    (string-join (nreverse lines) "\n")))))
           (file-error nil))))))
 
 (defun kargu-dape--breakpoints ()

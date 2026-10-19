@@ -288,6 +288,12 @@ checks the original selection before moving and captures its own new frame.
 Startup readiness, deferred compilation, per-thread paused/liveness admission
 and global lifecycle helpers still have limitations tracked in `todo.md`.
 
+Debugger source quotes prefer the full unsaved visiting buffer, preserving its
+narrowing and point. Inspection is bounded to 64 KiB on disk or 65,536 live
+buffer characters. Larger sources and missing lines are unavailable, not
+truncated quotes. Disk reads have a growth sentinel and bypass transformation
+handlers; slow local filesystem I/O is still synchronous (see `todo.md`).
+
 Post-edit diagnostic verification captures the source buffer, document tick,
 project, server and Flymake report-function generations. Every configured
 checker must report; stable or empty caches do not prove a completed check.

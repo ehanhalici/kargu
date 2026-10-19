@@ -121,7 +121,9 @@
   "Foreign, escaping and remote source paths never reach file content reads."
   (kargu-dape-test--with-source-paths
     (cl-letf (((symbol-function 'insert-file-contents)
-               (lambda (&rest _) (ert-fail "Unowned source read"))))
+               (lambda (&rest _) (ert-fail "Unowned source read")))
+              ((symbol-function 'insert-file-contents-literally)
+               (lambda (&rest _) (ert-fail "Unowned literal source read"))))
       (dolist (path (list foreign escape (file-relative-name foreign repo)
                          "/ssh:unreachable.invalid:/private.el" nil ""))
         (should-not (kargu-dape--source-line path 1))
@@ -184,6 +186,82 @@
         (should (string-search "adapter-context" report))
         (should-not (string-search "Source Context" report))
         (should-not (string-search "foreign-secret" report))))))
+
+(ert-deftest kargu-dape-workspace-source-prefers-unsaved-full-buffer-test ()
+  "Quotes use full unsaved text without moving or widening the source view."
+  (kargu-dape-test--with-source-paths
+    (let ((buffer (find-file-noselect owned)))
+      (unwind-protect
+          (with-current-buffer buffer
+            (erase-buffer)
+            (insert "unsaved-first\nunsaved-target\nlast\n")
+            (narrow-to-region 2 8)
+            (goto-char 4)
+            (let ((matches (progn (string-match "saved" "unsaved") (match-data t))))
+              (should (equal (kargu-dape--source-line local-link 2) "unsaved-target"))
+              (should (string-search "=>    2: unsaved-target"
+                                     (kargu-dape--source-snippet owned 2 1)))
+              (should (equal matches (match-data t))))
+            (should (= (point) 4))
+            (should (= (point-min) 2))
+            (should (= (point-max) 8))
+            (should (buffer-modified-p)))
+        (with-current-buffer buffer (set-buffer-modified-p nil))
+        (kill-buffer buffer)))))
+
+(ert-deftest kargu-dape-workspace-source-budget-rejects-before-disk-read-test ()
+  "Oversized disk files never reach even a bounded content read."
+  (kargu-dape-test--with-source-paths
+    (let ((kargu-dape--source-budget 8))
+      (cl-letf (((symbol-function 'insert-file-contents-literally)
+                 (lambda (&rest _) (ert-fail "Oversized source read"))))
+        (should-not (kargu-dape--source-line owned 1))
+        (should-not (kargu-dape--source-snippet owned 1))))))
+
+(ert-deftest kargu-dape-workspace-source-budget-rejects-live-buffer-test ()
+  "Narrowing cannot hide an oversized unsaved buffer or trigger disk fallback."
+  (kargu-dape-test--with-source-paths
+    (let ((buffer (find-file-noselect owned))
+          (kargu-dape--source-budget 8))
+      (unwind-protect
+          (with-current-buffer buffer
+            (narrow-to-region 1 3)
+            (cl-letf (((symbol-function 'insert-file-contents-literally)
+                       (lambda (&rest _) (ert-fail "Live source fell back to disk"))))
+              (should-not (kargu-dape--source-line owned 1))
+              (should-not (kargu-dape--source-snippet owned 1))))
+        (kill-buffer buffer)))))
+
+(ert-deftest kargu-dape-workspace-source-growth-sentinel-test ()
+  "A size-check race cannot serve a partial source, including multibyte text."
+  (kargu-dape-test--with-source-paths
+    (let ((kargu-dape--source-budget 32)
+          (original (symbol-function 'insert-file-contents-literally)))
+      (cl-letf (((symbol-function 'insert-file-contents-literally)
+                 (lambda (path visit begin end &rest rest)
+                   (should (= begin 0))
+                   (should (= end 33))
+                   (with-temp-file path (insert (make-string 40 ?é)))
+                   (apply original path visit begin end rest))))
+        (should-not (kargu-dape--source-line owned 1))))))
+
+(ert-deftest kargu-dape-workspace-source-line-boundaries-test ()
+  "EOF is not a blank line and missing target lines do not yield snippets."
+  (kargu-dape-test--with-source-paths
+    (should (equal (kargu-dape--source-line owned 3) "third"))
+    (dolist (line '(4 5 1000000000))
+      (should-not (kargu-dape--source-line owned line))
+      (should-not (kargu-dape--source-snippet owned line 4)))))
+
+(ert-deftest kargu-dape-workspace-source-exact-budget-and-decoding-test ()
+  "An exact byte budget accepts complete UTF-8 source, including a long line."
+  (kargu-dape-test--with-source-paths
+    (let* ((text (concat (make-string 64 ?é) "\n"))
+           (coding-system-for-write 'utf-8-unix)
+           (kargu-dape--source-budget (string-bytes text)))
+      (with-temp-file owned (insert text))
+      (should (equal (kargu-dape--source-line owned 1) (string-trim text)))
+      (should (string-search (string-trim text) (kargu-dape--source-snippet owned 1))))))
 
 (provide 'tests/test-dape-workspace)
 ;;; test-dape-workspace.el ends here
