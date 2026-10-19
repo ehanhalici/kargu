@@ -7,8 +7,8 @@
 ;;; Commentary:
 
 ;; Reading a reply must not consult a selection made after the request.
-;; The thread object receives Dape's stack reply; the selected frame ID is
-;; immutable and resolved against that thread's refreshed stack only.
+;; Replies mutate a private working thread, never Dape's live cache.
+;; The live thread identity and adapter epoch authorize every continuation.
 
 ;;; Code:
 
@@ -16,22 +16,45 @@
 (require 'kargu/json)
 (require 'kargu/tools/dape/events)
 
-(declare-function dape--current-thread "dape" (conn))
-(declare-function dape--stopped-threads "dape" (conn))
-(declare-function dape--current-stack-frame "dape" (conn))
+(declare-function dape--thread-id "dape" (conn))
+(declare-function dape--stack-id "dape" (conn))
+(declare-function dape--threads "dape" (conn))
 
 (cl-defstruct (kargu-dape-selection (:constructor kargu-dape--make-selection))
   "Captured CONNECTION, THREAD and immutable selection/state identities."
-  connection thread thread-id frame-id generation)
+  connection thread live-thread thread-id frame-id generation prepared)
+
+(defun kargu-dape-inspection-thread (connection)
+  "Return CONNECTION's selected live paused thread, or nil.
+Only an absent selection may default to the first paused thread."
+  (let* ((threads (kargu-seq-to-list (dape--threads connection)))
+         (id (dape--thread-id connection))
+         (thread (if id
+                     (seq-find (lambda (item) (equal id (plist-get item :id))) threads)
+                   (seq-find (lambda (item) (eq (plist-get item :status) 'stopped)) threads))))
+    (when (and (integerp (plist-get thread :id)) (eq (plist-get thread :status) 'stopped))
+      thread)))
+
+(defun kargu-dape-selection-valid-p (selection)
+  "Return non-nil while SELECTION's exact live thread and state remain valid."
+  (let* ((conn (kargu-dape-selection-connection selection))
+         (thread (kargu-dape-selection-live-thread selection)))
+    (and (= (kargu-dape-selection-generation selection) (kargu-dape-event-generation conn))
+         (memq thread (kargu-seq-to-list (dape--threads conn)))
+         (equal (kargu-dape-selection-thread-id selection) (plist-get thread :id))
+         (eq (plist-get thread :status) 'stopped))))
 
 (defun kargu-dape-capture-selection (connection)
   "Capture CONNECTION's current thread and frame identity before any request."
-  (let ((thread (or (dape--current-thread connection)
-                    (car (dape--stopped-threads connection))))
-        (frame (dape--current-stack-frame connection)))
-    (kargu-dape--make-selection :connection connection :thread thread
-                               :thread-id (plist-get thread :id) :frame-id (plist-get frame :id)
-                               :generation (kargu-dape-event-generation connection))))
+  (let* ((thread (kargu-dape-inspection-thread connection))
+         (id (plist-get thread :id)))
+    (unless thread (user-error "Inspection requires a live paused selected thread"))
+    (kargu-dape--make-selection
+     :connection connection :live-thread thread :thread-id id
+     :thread (list :id id :name (plist-get thread :name) :status 'stopped
+                   :stackFrames nil :totalFrames nil)
+     :frame-id (dape--stack-id connection)
+     :generation (kargu-dape-event-generation connection))))
 
 (defun kargu-dape-selection-frame (selection)
   "Resolve SELECTION's frame only within its captured thread's refreshed stack.
@@ -45,10 +68,10 @@ explicit frame returns nil rather than adopting another thread or frame."
 (defun kargu-dape-selection-current-p (selection)
   "Return non-nil when SELECTION is still the adapter's UI selection.
 Use this before a delayed navigation command changes that selection."
-  (let ((current (kargu-dape-capture-selection (kargu-dape-selection-connection selection))))
-    (and (= (kargu-dape-selection-generation selection) (kargu-dape-selection-generation current))
-         (equal (kargu-dape-selection-thread-id selection) (kargu-dape-selection-thread-id current))
-         (equal (kargu-dape-selection-frame-id selection) (kargu-dape-selection-frame-id current)))))
+  (let ((conn (kargu-dape-selection-connection selection)))
+    (and (kargu-dape-selection-valid-p selection)
+         (eq (kargu-dape-selection-live-thread selection) (kargu-dape-inspection-thread conn))
+         (equal (kargu-dape-selection-frame-id selection) (dape--stack-id conn)))))
 
 (provide 'kargu/tools/dape/selection)
 ;;; selection.el ends here

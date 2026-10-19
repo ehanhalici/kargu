@@ -8,12 +8,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ## Doğrulanmış hatalar — düzeltme sırası
 
-### DAPE-01 · P1 · K — Seçili thread için durmuş/canlı olma izni eksik
-
-- **Yer/kanıt:** `kargu/tools/dape/session.el` herhangi bir durmuş thread arıyor; `selection.el` seçili thread'i durumundan bağımsız yakalıyor. Dape 0.27.1 `dape--current-thread` durum kontrol etmiyor; `events.el` thread olaylarını nesle katmıyor.
-- **Beklenen/gerçek:** İnceleme yakalanmış canlı/durmuş thread'e ait olmalı; başka thread durmuşken çalışan thread'in eski frame önbelleği kullanılabilir.
-- **Yeniden üretme/kapanış:** Çalışan seçili thread + durmuş ikinci thread, `allThreadsStopped = false`, kısmi continue/exit, thread kimliği yeniden kullanımı ve geç stack/scopes/variables cevapları. Sessizce başka thread'e geçilmemeli.
-
 ### DAPE-02 · P1 · Y — Başlangıç bekleyicisi yabancı stop ile tamamlanıyor
 
 - **Yer/kanıt:** `kargu/tools/dape/session.el`, `kargu-dape--wait-for-session-ready`: global stop kancası koşulsuz ready yayınlıyor. Bağlantı yokken global hook ile ready callback'i üretildi.

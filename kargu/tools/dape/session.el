@@ -17,6 +17,7 @@
 (require 'kargu/languages)
 (require 'kargu/permission)
 (require 'kargu/tools/dape/workspace)
+(require 'kargu/tools/dape/selection)
 (require 'dape nil t)
 
 (defvar dape--connection-selected)
@@ -92,12 +93,11 @@
     (and conn (not (stringp conn)))))
 
 (defun kargu-dape-ready-p ()
-  "Return non-nil only when a live Dape session has a stopped thread."
+  "Return non-nil only when a live Dape session's selected thread is paused."
   (let ((conn (kargu-dape--raw-connection)))
     (and conn
          (not (stringp conn))
-         (fboundp 'dape--stopped-threads)
-         (dape--stopped-threads conn))))
+         (kargu-dape-inspection-thread conn))))
 
 (declare-function kargu-dape-selected-config "kargu/tools/dape/preflight" ())
 (declare-function kargu-dape-launch-config "kargu/tools/dape/preflight" (name))
@@ -234,6 +234,8 @@ Threads: %s"
                            (or (plist-get thread :status) "?")))
                  (kargu-dape--seq->list (dape--threads conn))
                  ", ")))
+       ((null (kargu-dape-inspection-thread conn))
+        "ERROR: Inspection requires a live paused selected thread; select a paused thread first")
        (t conn))))))
 
 (provide 'kargu/tools/dape/session)

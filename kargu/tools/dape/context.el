@@ -25,47 +25,83 @@
   :type 'number
   :group 'kargu-dape)
 
-(defun kargu-dape--run-chain (callback starter &optional connection)
-  "Run STARTER with a guarded CALLBACK and deadline, optionally on CONNECTION."
-  (let* ((conn (or connection (kargu-dape--connection)))
-         (generation (kargu-dape-event-generation conn))
+(cl-defun kargu-dape--inspection-valid-p (selection origin &key root session implicit)
+  "Check SELECTION in ORIGIN against ROOT, SESSION and IMPLICIT adapter choice."
+  (and (buffer-live-p origin)
+       (with-current-buffer origin
+         (let ((conn (kargu-dape-selection-connection selection)))
+           (and (equal root (kargu-permission-project-root))
+                (equal session (kargu-session-id))
+                (memq conn (kargu-dape-project-connections root))
+                (or (not implicit) (eq conn (kargu-dape--raw-connection)))
+                (kargu-dape-selection-valid-p selection))))))
+
+(defun kargu-dape--admit-selection (conn selection)
+  "Resolve SELECTION on CONN, returning an explanatory error on refusal."
+  (condition-case err
+      (let ((selection (or selection (kargu-dape-capture-selection conn))))
+        (unless (eq conn (kargu-dape-selection-connection selection))
+          (error "Captured debug selection belongs to another adapter"))
+        (unless (kargu-dape-selection-valid-p selection)
+          (error "Captured debug selection state changed before inspection"))
+        selection)
+    (error (concat "ERROR: DAP: " (error-message-string err)))))
+
+(defun kargu-dape--prepare-inspection (selection continue levels)
+  "Fetch SELECTION's isolated stack before CONTINUE, requesting LEVELS frames."
+  (if (kargu-dape-selection-prepared selection)
+      (funcall continue)
+    (kargu-dape--call
+     #'dape--stack-trace (kargu-dape-selection-connection selection)
+     (kargu-dape-selection-thread selection) levels
+     (lambda (&rest _)
+       (when (and (kargu-dape-selection-frame-id selection)
+                  (not (kargu-dape-selection-frame selection)))
+         (error "Requested debug frame is absent from the captured thread's stack"))
+       (setf (kargu-dape-selection-prepared selection) t)
+       (funcall continue)))))
+
+(cl-defun kargu-dape--run-chain (callback starter &key connection selection (levels kargu-dape-max-frames))
+  "Run STARTER with guarded CALLBACK, CONNECTION, SELECTION and stack LEVELS.
+STARTER receives the completion callback and the admitted selection."
+  (let* ((conn (or connection (and selection (kargu-dape-selection-connection selection))
+                   (kargu-dape--connection)))
+         (selected (if (stringp conn) conn (kargu-dape--admit-selection conn selection)))
          (root (kargu-permission-project-root))
          (session (copy-sequence (kargu-session-id)))
          (origin (current-buffer)))
-    (if (stringp conn) (funcall starter callback)
+    (if (stringp selected) (kargu-dape--deliver callback selected nil)
       (let* ((task (kargu-async-start
                     (lambda (value error)
                       (funcall (or callback #'kargu-dape--show-report)
                                (if error (concat "ERROR: DAP: " error) value)))
                     :timeout kargu-dape-request-timeout
-                    :valid-p
-                    (lambda ()
-                      (and (buffer-live-p origin)
-                           (with-current-buffer origin
-                             (and (equal root (kargu-permission-project-root))
-                                  (equal session (kargu-session-id))
-                                  (= generation (kargu-dape-event-generation conn))
-                                  (if connection
-                                      (and (memq conn (kargu-dape-project-connections root))
-                                           (dape--stopped-threads conn))
-                                    (eq conn (kargu-dape--connection)))))))))
-             (finish (kargu-async-wrap
-                      task (lambda (text) (kargu-async-finish task text)))))
-        (funcall (kargu-async-wrap task (lambda () (funcall starter finish))))
+                    :valid-p (lambda ()
+                               (kargu-dape--inspection-valid-p
+                                selected origin :root root :session session
+                                :implicit (not (or connection selection))))))
+             (finish (kargu-async-wrap task (lambda (text) (kargu-async-finish task text)))))
+        (funcall (kargu-async-wrap
+                  task (lambda ()
+                         (kargu-dape--prepare-inspection
+                          selected (lambda () (funcall starter finish selected)) levels))))
         task))))
 
 (defun kargu-dape--call (function &rest args)
   "Call DAP FUNCTION with ARGS, guarding its final callback."
   (let ((task kargu-async--current-task)
-        (callback (car (last args))))
+        (callback (car (last args)))
+        (reply-state :pending))
     (unless task (error "DAP request needs a task lifecycle"))
-    (apply function
+    (apply (kargu-async-wrap task function)
            (append (butlast args)
                    (list (kargu-async-wrap
                           task (lambda (&rest values)
-                                 (if (cadr values)
-                                     (kargu-async-finish task nil (format "%s" (cadr values)))
-                                   (apply callback values)))))))))
+                                 (when (eq reply-state :pending)
+                                   (setq reply-state :delivered)
+                                   (if (cadr values)
+                                       (kargu-async-finish task nil (format "%s" (cadr values)))
+                                     (apply callback values))))))))))
 
 (declare-function kargu-dape--show-report "kargu/tools/dape/execution" (report))
 
@@ -95,11 +131,12 @@ INTERACTIVE also shows a short prefix in the echo area."
   (let ((conn (kargu-dape--connection)))
     (if (stringp conn)
         conn
-      (let* ((thread (or (dape--current-thread conn)
-                         (car (dape--stopped-threads conn))))
+      (let* ((thread (kargu-dape-inspection-thread conn))
              (frames (and thread
                           (kargu-dape--seq->list (plist-get thread :stackFrames))))
-             (frame (or (dape--current-stack-frame conn) (car frames))))
+             (id (dape--stack-id conn))
+             (frame (if id (seq-find (lambda (item) (equal id (plist-get item :id))) frames)
+                      (car frames))))
         (kargu-dape--render-context conn thread frames frame)))))
 
 (defun kargu-dape--context-text (conn thread frames frame)
@@ -128,39 +165,6 @@ INTERACTIVE also shows a short prefix in the echo area."
           (lambda ()
             (kargu-dape--deliver callback (kargu-dape--context-text conn thread frames frame) interactive))))))))
 
-(defun kargu-dape--get-context (&optional callback connection selection)
-  "Pass a text snapshot of the paused debug session to CALLBACK.
-The snapshot is the thread, the call stack and the in-scope variables.
-Stack, scope and variable requests are chained through dape callbacks.
-CONNECTION optionally pins the request to an already owned adapter.
-SELECTION optionally carries the caller's captured thread/frame identity.
-Without CALLBACK the text is returned only for the no-session case;
-an interactive call shows the snapshot when it arrives."
-  (interactive)
-  (let ((interactive (called-interactively-p 'any))
-        (conn (or connection (kargu-dape--connection))))
-    (if (stringp conn)
-        (kargu-dape--deliver callback conn interactive)
-      (condition-case-unless-debug err
-          (let* ((selection (or selection (kargu-dape-capture-selection conn)))
-                 (thread (kargu-dape-selection-thread selection)))
-            (unless (eq conn (kargu-dape-selection-connection selection))
-              (error "Captured debug selection belongs to another adapter"))
-            (unless (= (kargu-dape-selection-generation selection) (kargu-dape-event-generation conn))
-              (error "Captured debug selection state changed before inspection"))
-            (if (null thread)
-                (kargu-dape--deliver
-                 callback (kargu-dape--context-text conn nil nil nil) interactive)
-              (kargu-dape--call #'dape--stack-trace
-                conn thread kargu-dape-max-frames
-                (lambda (&rest _)
-                  (kargu-dape--collect-selection-context selection callback interactive)))))
-        (error
-         (let ((msg (format "ERROR: dape context: %s"
-                            (error-message-string err))))
-           (kargu-log 'warn "%s" msg)
-           (kargu-dape--deliver callback msg interactive)))))))
-
 ;;;; Expression evaluation -------------------------------------------------
 
 (defun kargu-dape--format-language-hint (expr context-or-err)
@@ -184,35 +188,16 @@ an interactive call shows the snapshot when it arrives."
     (format "%s => %s" expr (kargu-dape--trunc (plist-get body :result))))
    (t (format "%s => (evaluated, no result value)" expr))))
 
-(defun kargu-dape--eval-expression (expr &optional context callback)
-  "Evaluate EXPR in the paused debug session and pass the text to CALLBACK.
-CONTEXT is the DAP evaluate context (\"repl\" default, \"hover\" or \"watch\").
-Without a session the text is returned directly."
-  (let ((interactive (called-interactively-p 'any))
-        (conn (kargu-dape--connection)))
-    (if (stringp conn)
-        (let ((hint (kargu-dape--format-language-hint expr conn)))
-          (kargu-dape--deliver callback
-                               (if (string-empty-p hint) conn (concat conn hint))
-                               interactive))
-      (condition-case-unless-debug err
-          (kargu-dape--call #'dape--evaluate-expression
-            conn
-            (plist-get (dape--current-stack-frame conn) :id)
-            expr
-            (or context "repl")
-            (lambda (result error)
-              (kargu-dape--deliver callback
-                                   (kargu-dape--eval-text expr result error)
-                                   interactive)))
-        (error
-         (let ((err-str (error-message-string err)))
-           (kargu-dape--deliver
-            callback
-            (format "ERROR: dape eval '%s': %s%s"
-                    expr err-str
-                    (kargu-dape--format-language-hint expr err-str))
-            interactive)))))))
+(cl-defun kargu-dape--eval-expression (expr selection callback &key context)
+  "Evaluate EXPR in prepared SELECTION and deliver its text to CALLBACK.
+CONTEXT defaults to \"repl\" and also accepts \"hover\" or \"watch\"."
+  (let ((frame (kargu-dape-selection-frame selection)))
+    (unless frame (error "No stack frame available for evaluation"))
+    (kargu-dape--call
+     #'dape--evaluate-expression (kargu-dape-selection-connection selection)
+     (plist-get frame :id) expr (or context "repl")
+     (lambda (result error)
+       (kargu-dape--deliver callback (kargu-dape--eval-text expr result error) nil)))))
 
 ;;;; Breakpoints -----------------------------------------------------------
 
@@ -443,12 +428,19 @@ An explicit CONNECTION must still be paused and owned by the current project.
 SELECTION optionally supplies a previously captured thread/frame identity."
   (interactive)
   (kargu-dape--run-chain
-   callback (lambda (done) (kargu-dape--get-context done connection selection)) connection))
+   callback (lambda (done selected) (kargu-dape--collect-selection-context selected done nil))
+   :connection connection :selection selection))
 
-(defun kargu-dape-eval-expression (expr &optional context callback)
-  "Evaluate EXPR in CONTEXT and deliver one guarded result to CALLBACK."
-  (kargu-dape--run-chain callback
-                         (lambda (done) (kargu-dape--eval-expression expr context done))))
+(cl-defun kargu-dape-eval-expression (expr &optional context callback &key selection)
+  "Evaluate EXPR in CONTEXT and deliver one guarded result to CALLBACK.
+SELECTION optionally reuses an admitted inspection's prepared frame."
+  (let ((conn (if selection (kargu-dape-selection-connection selection) (kargu-dape--connection))))
+    (if (stringp conn)
+        (kargu-dape--deliver callback (concat conn (kargu-dape--format-language-hint expr conn)) nil)
+      (kargu-dape--run-chain callback
+                             (lambda (done selected)
+                               (kargu-dape--eval-expression expr selected done :context context))
+                             :selection selection))))
 
 (provide 'kargu/tools/dape/context)
 

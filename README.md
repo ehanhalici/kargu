@@ -285,8 +285,16 @@ UI selection changes cannot mix another frame's variables with that stack.
 Saved selections from an earlier execution state cannot start a fresh request.
 Missing explicit frames are unavailable, not silently replaced. Navigation
 checks the original selection before moving and captures its own new frame.
-Startup readiness, deferred compilation, per-thread paused/liveness admission
-and global lifecycle helpers still have limitations tracked in `todo.md`.
+Inspection admits only the live paused selected thread; an explicit missing or
+running selection never falls back to another thread. Only no selection may
+default to a paused thread. Each inspection refreshes its stack into private
+data, keeping Dape's shared stack/scope/variable cache untouched even by late
+replies. Every callback rechecks the exact live thread and adapter generation.
+Any thread event on that adapter invalidates old reads; unrelated adapters do
+not. Watch expressions share the original prepared frame, despite UI changes.
+The existing positional evaluate API also accepts `:selection` for that reuse.
+Startup readiness, deferred compilation and global lifecycle helpers still
+have limitations tracked in `todo.md`.
 
 Debugger source quotes prefer the full unsaved visiting buffer, preserving its
 narrowing and point. Inspection is bounded to 64 KiB on disk or 65,536 live

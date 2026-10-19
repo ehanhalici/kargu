@@ -23,7 +23,7 @@
          (line (and top-frame (plist-get top-frame :line)))
          (fn-name (and top-frame (plist-get top-frame :name)))
          (src-snippet (when (and file (not (equal file "?")) (numberp line))
-                       (kargu-dape--source-snippet file line 4))))
+			(kargu-dape--source-snippet file line 4))))
     (concat
      (format "[DEBUGGER PAUSED: Action '%s' completed]\n" action-name)
      (format "Location: %s:%s%s\n"
@@ -46,14 +46,17 @@
   "Build a paused report for ACTION-NAME and pass it to CALLBACK.
 The context and location use captured CONNECTION when supplied."
   (let* ((conn (or connection (kargu-dape--raw-connection)))
-         (selection (and conn (kargu-dape-capture-selection conn))))
-    (kargu-dape-get-context
-     (lambda (ctx)
-       (funcall callback
-                (if (string-prefix-p "ERROR:" ctx) ctx
-                  (kargu-dape--stopped-report-text
-                   selection action-name ctx))))
-     conn selection)))
+         (selection (condition-case err
+                        (kargu-dape-capture-selection conn)
+                      (error (concat "ERROR: DAP: " (error-message-string err))))))
+    (if (stringp selection) (funcall callback selection)
+      (kargu-dape-get-context
+       (lambda (ctx)
+	 (funcall callback
+                  (if (string-prefix-p "ERROR:" ctx) ctx
+                    (kargu-dape--stopped-report-text
+                     selection action-name ctx))))
+       conn selection))))
 
 (defun kargu-dape--running-message (action-name timeout)
   "Report text for ACTION-NAME still running after TIMEOUT seconds."

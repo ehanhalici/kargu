@@ -17,49 +17,42 @@
 (declare-function dape--sources "dape" (conn))
 
 
-(defun kargu-dape--after-stack-select (conn n label callback)
-  "Report frame N of CONN under LABEL, then the refreshed context, to CALLBACK."
+(cl-defun kargu-dape--after-stack-select (selection callback &key count label)
+  "Report SELECTION under LABEL after moving COUNT frames, using CALLBACK."
+  (unless (kargu-dape-selection-current-p selection)
+    (error "Debug selection changed during navigation"))
   (let* ((interactive (called-interactively-p 'any))
-         (frame (dape--current-stack-frame conn))
+         (conn (kargu-dape-selection-connection selection))
+         (frame (kargu-dape-selection-frame selection))
          (file (and frame (kargu-dape--frame-path conn frame)))
          (line (and frame (plist-get frame :line)))
          (name (and frame (plist-get frame :name)))
          (head (format "[%s %d]: Now at frame `%s` (%s:%s)\n\n"
-                       label n (or name "?") (or file "?") (or line "?"))))
+                       label count (or name "?") (or file "?") (or line "?"))))
     (kargu-dape-get-context
      (lambda (ctx)
-       (kargu-dape--deliver callback (concat head ctx) interactive)))))
+       (kargu-dape--deliver callback (if (string-prefix-p "ERROR:" ctx) ctx (concat head ctx)) interactive))
+     conn)))
 
-(defun kargu-dape--move-frame (delta callback)
-  "Move by DELTA stack frames asynchronously and report to CALLBACK."
-  (let* ((conn (kargu-dape--connection))
-         (selection (and (not (stringp conn)) (kargu-dape-capture-selection conn)))
-         (thread (and selection (kargu-dape-selection-thread selection))))
-    (if (not thread) (funcall callback "ERROR: no paused thread")
-      (kargu-dape--call
-       #'dape--stack-trace conn thread kargu-dape-max-frames
-       (lambda (&rest _)
-         (unless (kargu-dape-selection-current-p selection)
-           (error "Debug selection changed while fetching the navigation stack"))
-         (let* ((frames (kargu-dape--seq->list (plist-get thread :stackFrames)))
-                (current (kargu-dape-selection-frame-id selection))
-                (index (if current
-                           (cl-position current frames :key (lambda (frame) (plist-get frame :id)) :test #'equal)
-                         0))
-                (target (and index (nth (max 0 (+ index delta)) frames))))
-           (when (or (null index) (< (+ index delta) 0) (null target))
-             (error "Requested frame is outside the available stack"))
-           (dape-select-stack conn (plist-get target :id))
-           (kargu-dape--after-stack-select
-            conn (abs delta) (if (> delta 0) "STACK UP" "STACK DOWN") callback)))))))
-
-(defun kargu-dape--up (&optional count callback)
-  "Select COUNT caller frames and deliver context to CALLBACK."
-  (kargu-dape--move-frame (or count 1) callback))
-
-(defun kargu-dape--down (&optional count callback)
-  "Select COUNT callee frames and deliver context to CALLBACK."
-  (kargu-dape--move-frame (- (or count 1)) callback))
+(defun kargu-dape--move-frame (delta callback selection)
+  "Move by DELTA stack frames using SELECTION and report to CALLBACK."
+  (let* ((conn (kargu-dape-selection-connection selection))
+         (thread (kargu-dape-selection-thread selection)))
+    (unless (kargu-dape-selection-current-p selection)
+      (error "Debug selection changed while fetching the navigation stack"))
+    (let* ((frames (kargu-dape--seq->list (plist-get thread :stackFrames)))
+           (current (kargu-dape-selection-frame-id selection))
+           (index (if current
+                      (cl-position current frames :key (lambda (frame) (plist-get frame :id)) :test #'equal)
+                    0))
+           (target (and index (nth (max 0 (+ index delta)) frames))))
+      (when (or (null index) (< (+ index delta) 0) (null target))
+        (error "Requested frame is outside the available stack"))
+      (dape-select-stack conn (plist-get target :id))
+      (let ((moved (copy-kargu-dape-selection selection)))
+        (setf (kargu-dape-selection-frame-id moved) (plist-get target :id))
+        (kargu-dape--after-stack-select moved callback :count (abs delta)
+                                        :label (if (> delta 0) "STACK UP" "STACK DOWN"))))))
 
 (defun kargu-dape-threads (&optional callback)
   "List all threads reported by the active debug adapter.
@@ -110,33 +103,14 @@ The text is passed to CALLBACK when given, and returned otherwise."
                         lines))
       (string-join (nreverse lines) "\n"))))
 
-(defun kargu-dape--stack (&optional levels callback)
+(defun kargu-dape--stack (levels callback selection)
   "List call stack frames for the current thread up to LEVELS (default 20).
-The text is passed to CALLBACK."
-  (let ((conn (kargu-dape--raw-connection))
-        (interactive (called-interactively-p 'any))
-        (max-lvls (or levels 20)))
-    (if (null conn)
-        (kargu-dape--deliver callback "ERROR: no live dape session" interactive)
-      (condition-case err
-          (let* ((selection (kargu-dape-capture-selection conn))
-                 (thread (kargu-dape-selection-thread selection)))
-            (if (null thread)
-                (kargu-dape--deliver callback "[STACK: 0 frames]" interactive)
-              (kargu-dape--call #'dape--stack-trace
-               conn thread max-lvls
-               (lambda (&rest _)
-                 (kargu-dape--deliver
-                  callback
-                  (kargu-dape--stack-text
-                   selection
-                   (kargu-dape--seq->list (plist-get thread :stackFrames))
-                   max-lvls)
-                  interactive)))))
-        (error (kargu-dape--deliver
-                callback
-                (format "ERROR: stack: %s" (error-message-string err))
-                interactive))))))
+The text from prepared SELECTION is passed to CALLBACK."
+  (funcall callback
+           (kargu-dape--stack-text selection
+                                   (kargu-dape--seq->list
+                                    (plist-get (kargu-dape-selection-thread selection) :stackFrames))
+                                   (or levels 20))))
 
 (defun kargu-dape-modules ()
   "List loaded modules and libraries in the target process."
@@ -221,10 +195,10 @@ The text is passed to CALLBACK."
                              target-name
                              (kargu-dape--trunc (or (plist-get target-var :value) "?"))))
           (kargu-dape--call #'dape--variables
-           conn target-var
-           (lambda (&rest _)
-             (funcall callback
-                      (kargu-dape--expanded-var-text target-name target-var)))))))))
+			    conn target-var
+			    (lambda (&rest _)
+			      (funcall callback
+				       (kargu-dape--expanded-var-text target-name target-var)))))))))
 
 (defun kargu-dape--scope-inspect-index (scopes idx)
   "Inspect scope at IDX in SCOPES."
@@ -266,38 +240,35 @@ Deliver the result to CALLBACK and display it when INTERACTIVE is non-nil."
      interactive))
    (t (kargu-dape--deliver callback (kargu-dape--scope-overview scopes frame) interactive))))
 
-(defun kargu-dape--scope (&optional var-name-or-scope-idx callback)
+(defun kargu-dape--scope (var-name-or-scope-idx callback selection)
   "Inspect scopes or expand child variables of VAR-NAME-OR-SCOPE-IDX.
-The text is passed to CALLBACK."
-  (let ((conn (kargu-dape--connection))
+The text from SELECTION is passed to CALLBACK."
+  (let ((conn (kargu-dape-selection-connection selection))
         (interactive (called-interactively-p 'any)))
     (if (stringp conn)
         (kargu-dape--deliver callback conn interactive)
       (condition-case err
-          (let* ((thread (or (dape--current-thread conn)
-                             (car (dape--stopped-threads conn))))
-                 (frame (or (dape--current-stack-frame conn)
-                            (and thread (car (plist-get thread :stackFrames))))))
+          (let ((frame (kargu-dape-selection-frame selection)))
             (if (null frame)
                 (kargu-dape--deliver
                  callback "ERROR: no stack frame available to inspect scope" interactive)
               (kargu-dape--call #'dape--scopes
-               conn frame
-               (lambda (&rest _)
-                 (kargu-dape--fetch-variables
-                  conn (kargu-dape--seq->list (plist-get frame :scopes))
-                  (lambda ()
-                    (kargu-dape--scope-answer
-                     conn
-                     (kargu-dape--seq->list (plist-get frame :scopes))
-                     frame var-name-or-scope-idx callback interactive)))))))
+				conn frame
+				(lambda (&rest _)
+				  (kargu-dape--fetch-variables
+				   conn (kargu-dape--seq->list (plist-get frame :scopes))
+				   (lambda ()
+				     (kargu-dape--scope-answer
+				      conn
+				      (kargu-dape--seq->list (plist-get frame :scopes))
+				      frame var-name-or-scope-idx callback interactive)))))))
         (error (kargu-dape--deliver
                 callback
                 (format "ERROR: scope: %s" (error-message-string err))
                 interactive))))))
 
-(defun kargu-dape--watch-lines (watched callback)
-  "Evaluate WATCHED expressions in order and pass the rendered lines to CALLBACK."
+(defun kargu-dape--watch-lines (watched callback selection)
+  "Evaluate WATCHED in SELECTION and pass the rendered lines to CALLBACK."
   (let ((rest (copy-sequence watched))
         (lines (list (format "[WATCH LIST: %d expressions]" (length watched)))))
     (cl-labels ((next ()
@@ -310,22 +281,23 @@ The text is passed to CALLBACK."
                         kargu-async--current-task
                         (lambda (val)
                           (push (format "  * %s => %s" w-expr (or val "not evaluated")) lines)
-                          (next))))))))
+                          (next)))
+                       :selection selection)))))
       (next))))
 
-(defun kargu-dape--watch (&optional expr remove-p callback)
+(cl-defun kargu-dape--watch (expr remove-p callback &key selection)
   "List, add, or remove this session's watch expressions.
 If EXPR is provided and REMOVE-P is nil, adds EXPR to watch.
 If EXPR is provided and REMOVE-P is non-nil, removes EXPR from watch.
-The current watch list is passed to CALLBACK."
+The watch list for SELECTION is passed to CALLBACK."
   (let ((interactive (called-interactively-p 'any))
-        (conn (kargu-dape--connection)))
+        (conn (kargu-dape-selection-connection selection)))
     (condition-case err
         (if (stringp conn)
             (kargu-dape--deliver callback conn interactive)
           (if-let* ((watched (kargu-dape-watch-expressions conn expr remove-p)))
               (kargu-dape--watch-lines watched
-                                      (lambda (text) (kargu-dape--deliver callback text interactive)))
+                                       (lambda (text) (kargu-dape--deliver callback text interactive)) selection)
             (kargu-dape--deliver callback "[WATCH LIST: 0]\nNo watch expressions active." interactive)))
       (error (kargu-dape--deliver
               callback
@@ -370,24 +342,25 @@ The current watch list is passed to CALLBACK."
 
 (defun kargu-dape-stack (&optional levels callback)
   "Collect LEVELS stack frames and deliver one result to CALLBACK."
-  (kargu-dape--run-chain callback (lambda (done) (kargu-dape--stack levels done))))
+  (kargu-dape--run-chain callback (lambda (done selected) (kargu-dape--stack levels done selected))
+                         :levels (or levels 20)))
 
 (defun kargu-dape-scope (&optional var-name-or-scope-idx callback)
   "Inspect VAR-NAME-OR-SCOPE-IDX and deliver one result to CALLBACK."
   (kargu-dape--run-chain callback
-                         (lambda (done) (kargu-dape--scope var-name-or-scope-idx done))))
+                         (lambda (done selected) (kargu-dape--scope var-name-or-scope-idx done selected))))
 
 (defun kargu-dape-watch (&optional expr remove-p callback)
   "Update EXPR using REMOVE-P and deliver the watch list to CALLBACK."
-  (kargu-dape--run-chain callback (lambda (done) (kargu-dape--watch expr remove-p done))))
+  (kargu-dape--run-chain callback (lambda (done selected) (kargu-dape--watch expr remove-p done :selection selected))))
 
 (defun kargu-dape-up (&optional count callback)
   "Move COUNT frames toward callers and deliver context to CALLBACK."
-  (kargu-dape--run-chain callback (lambda (done) (kargu-dape--up count done))))
+  (kargu-dape--run-chain callback (lambda (done selected) (kargu-dape--move-frame (or count 1) done selected))))
 
 (defun kargu-dape-down (&optional count callback)
   "Move COUNT frames toward callees and deliver context to CALLBACK."
-  (kargu-dape--run-chain callback (lambda (done) (kargu-dape--down count done))))
+  (kargu-dape--run-chain callback (lambda (done selected) (kargu-dape--move-frame (- (or count 1)) done selected))))
 
 (provide 'kargu/tools/dape/commands)
 

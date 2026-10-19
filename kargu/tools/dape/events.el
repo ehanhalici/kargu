@@ -27,7 +27,7 @@ Consumers must check their captured adapter and asynchronous task lifetime.")
 (defun kargu-dape--observe-event (connection event _body)
   "Publish CONNECTION's state EVENT after Dape has handled its BODY."
   (save-match-data
-    (when (memq event '(initialized stopped continued exited terminated))
+    (when (memq event '(initialized stopped continued thread exited terminated))
       (puthash connection (1+ (kargu-dape-event-generation connection)) kargu-dape--event-generations)
       (run-hook-wrapped
        'kargu-dape-event-hook

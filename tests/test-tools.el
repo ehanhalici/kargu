@@ -665,7 +665,8 @@
   (let ((_ (kargu-test-mode 'debug)))
     (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'debug))
               ((symbol-function 'kargu-dape--raw-connection) (lambda () 'conn))
-              ((symbol-function 'dape--stopped-threads) (lambda (_) '(thread))))
+              ((symbol-function 'dape--stopped-threads) (lambda (_) '(thread)))
+              ((symbol-function 'kargu-dape-inspection-thread) (lambda (_) 'thread)))
       ;; Debug tools should be visible in debug mode
       (should (kargu-loop-tool-visible-p "debug_get_context"))
       (should (kargu-loop-tool-visible-p "debug_step_in"))

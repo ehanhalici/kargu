@@ -12,6 +12,7 @@
 (require 'ert)
 (require 'kargu)
 (require 'tests/test-helpers)
+(require 'tests/dape-fixtures)
 
 (defvar dape--breakpoints)
 
@@ -31,7 +32,8 @@
                     ((symbol-function 'dape--config)
                      (lambda (connection) (cdr (assq connection configs))))
                     ((symbol-function 'dape--parent) (lambda (_) nil))
-                    ((symbol-function 'dape--stopped-threads) (lambda (_) '(stopped))))
+                    ((symbol-function 'dape--stopped-threads) (lambda (_) '(stopped)))
+                    ((symbol-function 'kargu-dape-inspection-thread) (lambda (_) 'stopped)))
             (should (equal (kargu-dape-project-connections) '(local)))
             (should (eq (kargu-dape--raw-connection) 'local))
             (should (eq (kargu-dape--connection) 'local))
@@ -82,7 +84,8 @@
     (with-temp-buffer
       (setq default-directory "/tmp/kargu-origin/")
       (let ((origin (current-buffer)) held results)
-        (cl-letf (((symbol-function 'kargu-permission-project-root)
+        (kargu-test-with-debug-adapter ('local (list :id 1 :status 'stopped :stackFrames (list (list :id 1))) 1)
+          (((symbol-function 'kargu-permission-project-root)
                    (lambda (&optional _) default-directory))
                   ((symbol-function 'kargu-dape--connection) (lambda () 'local))
                   ((symbol-function 'dape--current-stack-frame) (lambda (_) '(:id 1)))
@@ -175,8 +178,11 @@
   (kargu-dape-test--with-source-paths
     (let ((frame (list :id 1 :name "library" :line 1 :source (list :path foreign)))
           report)
-      (cl-letf (((symbol-function 'kargu-dape-get-context)
-                 (lambda (callback &optional _connection _selection) (funcall callback "adapter-context")))
+      (kargu-test-with-debug-adapter ('local (list :id 1 :status 'stopped :stackFrames (list frame)) 1)
+        (((symbol-function 'kargu-dape-get-context)
+                 (lambda (callback &optional _connection selection)
+                   (setf (plist-get (kargu-dape-selection-thread selection) :stackFrames) (list frame))
+                   (funcall callback "adapter-context")))
                 ((symbol-function 'kargu-dape--raw-connection) (lambda () 'local))
                 ((symbol-function 'dape--current-thread) (lambda (_) (list :id 1 :stackFrames (vector frame))))
                 ((symbol-function 'dape--current-stack-frame) (lambda (_) frame))

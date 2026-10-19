@@ -55,6 +55,7 @@
 (require 'tests/test-dape-watch)
 (require 'tests/test-dape-execution)
 (require 'tests/test-dape-selection)
+(require 'tests/test-dape-admission)
 (require 'tests/test-deps)
 (require 'tests/test-fake-agent)
 (require 'tests/test-security)

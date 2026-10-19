@@ -36,7 +36,7 @@
            (not (dape--capable-p conn :supportsRestartRequest)))
       "ERROR: This adapter does not support restarting.")
      ((member name kargu-dape--running-tools) nil)
-     ((null (dape--stopped-threads conn))
+     ((null (kargu-dape-inspection-thread conn))
       "ERROR: Inspection requires a paused thread; pause the target first."))))
 
 (defun kargu-dape-tool-policy (name)

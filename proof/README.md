@@ -110,15 +110,19 @@ read or a navigation followed by its new captured read. Run
 `proof/run_tlc.sh --debug-selection` for an exhaustive scan. Two thread/frame
 identities, UI selection changes between callbacks, missing frames, execution
 invalidation and cancellation cover pinned scope/variable requests, consistent
-report identity and navigation consent. The 2026-10-19 scan visited 179 distinct
-states (567 generated), depth 7, without an error or deadlock. ERT additionally
+report identity and navigation consent. Paused/running/exited/replaced thread
+states and same-adapter thread events now refine admission and epoch loss;
+returning to stopped cannot restore an old read. Helper writes before guarded
+delivery affect private data, not the live cache. The 2026-10-19 scan visited
+934 distinct states (4,553 generated), depth 8, without an error or deadlock.
+ERT additionally
 covers refreshed frame objects resolved by ID, initially unspecified selection,
 exact DAP arguments, stale explicit selections, large numeric frame IDs,
 location text, editor-state preservation and successful `up/down` navigation.
 This is a bounded selection-resource refinement, not a rerun
 of the main-loop proof or a claim about unimplemented startup/lifecycle isolation.
-It assumes an admitted paused thread; partial-thread stop/liveness admission
-and thread-ID reuse remain outside this model and are tracked in `todo.md`.
+It covers partial-thread admission and conservative adapter-wide invalidation.
+Thread identity replacement and exit/start reuse cannot reauthorize old reads.
 
 `KarguDiagnostics.tla` / `DiagnosticsMC.cfg` model the owned diagnostic wait
 after backend startup. Run `proof/run_tlc.sh --diagnostics` for an exhaustive
