@@ -63,6 +63,18 @@ ERT covers foreign global selection, unknown directories and callback origin
 reassignment. This is a resource-admission boundary, not a new loop transition;
 global Dape hook/lifecycle ownership remains tracked separately in `todo.md`.
 
+`KarguDiagnostics.tla` / `DiagnosticsMC.cfg` model the owned diagnostic wait
+after backend startup. Run `proof/run_tlc.sh --diagnostics` for an exhaustive
+scan. Two backends with old/current generations cover forced reports, edits,
+root/server replacement, buffer closure, cancellation and deadline races.
+Optional Eglot pushes require matching server/document versions. Verified
+evidence is not a claim that diagnostics contain no errors. The 2026-10-19
+scan visited 74,222 distinct states (455,710 generated), depth 14, without an
+error or deadlock. Startup, actual Flymake/Eglot dispatch, manual-mode cache
+publication and editor-state preservation are covered separately by ERT.
+This is a bounded resource/freshness check; the main loop is unchanged and
+its existing proof was not rerun.
+
 ## 1. Modules
 
 The separate plan artifact workflow (`kargu/plan/store.el` and `dispatch.el`)
@@ -90,7 +102,9 @@ proof/
 ├── MC.tla / MC.cfg     # TLC harness: parameters, invariants, deadlock check
 ├── KarguProcess.tla    # One-shot process capture and completion ownership
 ├── ProcessMC.*        # Bounded process-capture harness
-├── run_tlc.sh          # Exhaustive loop, --plan, --process or --simulate
+├── KarguDiagnostics.tla # Owned diagnostic evidence and cancellation
+├── DiagnosticsMC.*    # Bounded diagnostic-wait harness
+├── run_tlc.sh          # Exhaustive loop or focused resource checks
 └── README.md           # This file
 ```
 

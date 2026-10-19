@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'kargu/tools/lsp/context)
+(require 'kargu/tools/lsp/settle)
 
 (declare-function flymake-diagnostic-point "flymake")
 
@@ -76,6 +77,11 @@ Sort records by severity and then line number."
                 (< (plist-get a :line) (plist-get b :line))
               (< (plist-get a :severity) (plist-get b :severity)))))))
 
+(defun kargu-lsp-diagnostics-snapshot (file-path)
+  "Return normalized cached diagnostic records for FILE-PATH.
+This reads observations only; it does not establish their freshness."
+  (kargu-lsp--diagnostics-data file-path))
+
 (defun kargu-lsp--severity-label (severity)
   "Return a short label for LSP diagnostic SEVERITY."
   (pcase severity
@@ -112,6 +118,8 @@ Sort records by severity and then line number."
             (format "%s: diagnostics unavailable (file is not open in Emacs; read_file does not start a checker). Open the file in Emacs or run project tests." path))
            ((and (not data) (not (kargu-lsp--buffer-has-checker-p open)))
             (format "%s: diagnostics unavailable (no active Flymake/Eglot checker); run project tests instead." path))
+           ((not data)
+            (format "%s: no observed diagnostics (cached snapshot; freshness unverified)" path))
            (t (kargu-lsp-format-diagnostics path data)))))
     (when (called-interactively-p 'any)
       (message "%s" text))
@@ -283,45 +291,6 @@ project buffers."
        (or (kargu-lsp--buffer-managed-p buf)
            (with-current-buffer buf
              (bound-and-true-p flymake-mode)))))
-
-(defun kargu-lsp--checker-busy-p (buf)
-  "Return non-nil if Flymake is currently running on BUF."
-  (and buf (buffer-live-p buf)
-       (with-current-buffer buf
-         (and (bound-and-true-p flymake-mode)
-              (fboundp 'flymake-is-running)
-              (flymake-is-running)))))
-
-(defun kargu-lsp-wait-diagnostics (file-path callback &optional timeout)
-  "Wait asynchronously for FILE-PATH diagnostics and invoke CALLBACK.
-Stop after TIMEOUT seconds, or use `kargu-lsp-diag-settle-timeout'.
-CALLBACK receives (PATH TEXT TIMED-OUT); nil TEXT means no checker is available."
-  (let* ((path (kargu-permission-resolve file-path "lsp path"))
-         (buf (find-buffer-visiting path))
-         (has-checker-p (kargu-lsp--buffer-has-checker-p buf))
-         (timeout (or timeout kargu-lsp-diag-settle-timeout))
-         (start (float-time))
-         (last-snapshot nil)
-         (polls 0))
-    (if (not has-checker-p)
-        (funcall callback path nil nil)
-      (cl-labels
-          ((tick ()
-             (let* ((busy (kargu-lsp--checker-busy-p buf))
-                    (timed-out (>= (- (float-time) start) timeout))
-                    (snapshot (kargu-lsp--diagnostics-data path)))
-               (setq polls (1+ polls))
-               (cond
-                ((not (kargu-lsp--buffer-has-checker-p buf))
-                 (funcall callback path nil nil))
-                ((or timed-out
-                       (and (not busy) (>= polls 1) (null snapshot))
-                       (and (not busy) (>= polls 2) (equal snapshot last-snapshot)))
-                 (funcall callback path (kargu-lsp-get-diagnostics path) timed-out))
-                (t
-                 (setq last-snapshot snapshot)
-                 (run-at-time 0.25 nil #'tick))))))
-        (run-at-time 0.25 nil #'tick)))))
 
 (provide 'kargu/tools/lsp/diagnostics)
 

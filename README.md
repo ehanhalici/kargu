@@ -267,6 +267,18 @@ working directories and globally selected adapters from other projects are
 not adopted. This does not yet isolate Dape's global hooks, watch list or all
 lifecycle helpers; those remaining limitations are tracked in `todo.md`.
 
+Post-edit diagnostic verification captures the source buffer, document tick,
+project, server and Flymake report-function generations. Every configured
+checker must report; stable or empty caches do not prove a completed check.
+Stop cancels the owned polling/deadline timers without adopting late reports.
+Eglot replays are additionally checked against a versioned diagnostic push;
+Kargu advertises `publishDiagnostics.versionSupport` on new Eglot connections.
+Reconnect existing servers to negotiate that capability. Because the
+[LSP diagnostic version is optional](https://raw.githubusercontent.com/microsoft/language-server-protocol/gh-pages/_specifications/lsp/3.17/language/publishDiagnostics.md),
+servers omitting it remain unverified and time out rather than certifying a
+clean edit. Ordinary diagnostic tools show cached observations, not freshness
+certificates, and unopened files are not opened or checked implicitly.
+
 Implementation plans have one authoritative record per source chat, capturing
 its project and session. Each chat has its own in-memory review buffer. Approval
 reads the full edited buffer and dispatches from the captured chat; another
