@@ -308,6 +308,8 @@
               ((symbol-function 'flymake--project-diagnostics)
                (lambda (&rest _)
                  (list 'diag-1 'diag-2 'diag-3)))
+              ((symbol-function 'kargu-lsp--flymake-diagnostic-file)
+               (lambda (diag) (if (eq diag 'diag-3) mock-file-2 mock-file-1)))
               ((symbol-function 'kargu-lsp--extract-flymake-diag)
                (lambda (d)
                  (cond

@@ -8,12 +8,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ## Doğrulanmış hatalar — düzeltme sırası
 
-### LSP-01 · P1 · Y — Proje raporuna yabancı dosya tanıları girebiliyor
-
-- **Yer/kanıt:** `kargu/tools/lsp/diagnostics.el`, `kargu-lsp--collect-project-diagnostics`: native Flymake kayıtları sınır denetimi olmadan yayınlanıyor; kontrollü dış dosya kaydı raporda görüldü. Açık tampon adaylarında yalnız metinsel yol öneki var.
-- **Beklenen/gerçek:** Yalnız yakalanmış kanonik proje kökü raporlanmalı; yabancı dosya/symlink kayıtları sızabiliyor.
-- **Yeniden üretme/kapanış:** Native dış dosya, açık kaçan symlink, benzer isimli komşu kök. Yabancı adaylar içerik okunmadan/yayınlanmadan elenmeli; proje içi symlink korunmalı. Dosyalar örtük açılmamalı.
-
 ### LSP-02 · P1 · Y — Farklı sütun tanıları kayboluyor
 
 - **Yer/kanıt:** `kargu/tools/lsp/diagnostics.el`, `kargu-lsp--group-diagnostics-by-file`: tekrar anahtarında sütun yok. Aynı dosya/satır/önem/mesaj ve iki farklı sütun tek kayıt verdi.

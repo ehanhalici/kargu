@@ -129,18 +129,22 @@ This reads observations only; it does not establish their freshness."
       (message "%s" text))
     text))
 
+(defun kargu-lsp--flymake-diagnostic-locus (diag)
+  "Return Flymake DIAG's locus without inspecting source text."
+  (or (and (fboundp 'flymake-diagnostic-buffer) (flymake-diagnostic-buffer diag))
+      (and (fboundp 'flymake--diag-locus) (flymake--diag-locus diag))))
+
+(defun kargu-lsp--flymake-diagnostic-file (diag)
+  "Return Flymake DIAG's file locus without inspecting source text."
+  (let ((locus (kargu-lsp--flymake-diagnostic-locus diag)))
+    (cond
+     ((bufferp locus) (and (buffer-live-p locus) (buffer-file-name locus)))
+     ((stringp locus) locus))))
+
 (defun kargu-lsp--extract-flymake-diag (diag)
   "Extract (:file :severity :line :character :source :message) from Flymake DIAG."
-  (let* ((locus (or (and (fboundp 'flymake-diagnostic-buffer)
-                         (flymake-diagnostic-buffer diag))
-                    (and (fboundp 'flymake--diag-locus)
-                         (flymake--diag-locus diag))))
-         (file (cond
-                ((bufferp locus)
-                 (when (buffer-live-p locus)
-                   (or (buffer-file-name locus) (buffer-name locus))))
-                ((stringp locus) locus)
-                (t nil)))
+  (let* ((locus (kargu-lsp--flymake-diagnostic-locus diag))
+         (file (kargu-lsp--flymake-diagnostic-file diag))
          (beg (if (fboundp 'flymake-diagnostic-beg)
                   (flymake-diagnostic-beg diag)
                 (and (fboundp 'flymake-diagnostic-point)
@@ -161,32 +165,45 @@ This reads observations only; it does not establish their freshness."
             :source source
             :message text))))
 
+(defun kargu-lsp--project-diagnostic-path (path root)
+  "Return canonical local PATH within ROOT, or nil before source inspection."
+  (when (and (stringp path) (not (string-empty-p path))
+             (stringp root) (not (string-empty-p root))
+             (not (file-remote-p path)) (not (file-remote-p root)))
+    (condition-case nil
+        (let ((canonical (file-truename (expand-file-name path root))))
+          (when (kargu-permission-within-project-p canonical root) canonical))
+      (file-error nil))))
+
+(defun kargu-lsp--native-project-diagnostics (root)
+  "Collect only workspace-owned native Flymake diagnostics for ROOT."
+  (when (fboundp 'flymake--project-diagnostics)
+    (let* ((default-directory root)
+           (records (condition-case nil
+                        (flymake--project-diagnostics
+                         (and (fboundp 'project-current) (project-current nil root)))
+                      (error nil)))
+           (data nil))
+      (dolist (record records)
+        (when-let* ((path (kargu-lsp--project-diagnostic-path
+                          (kargu-lsp--flymake-diagnostic-file record) root))
+                    (extracted (kargu-lsp--extract-flymake-diag record)))
+          (push (plist-put extracted :file path) data)))
+      data)))
+
 (defun kargu-lsp--collect-project-diagnostics (root)
-  "Collect raw diagnostics across the project ROOT from Flymake and open buffers.
-Nil when ROOT is not a directory string."
-  (if (not (stringp root))
-      nil
-    (let* ((all-diags nil)
-           (flymake-proj (when (fboundp 'flymake--project-diagnostics)
-                           (condition-case _err
-                               (let ((default-directory root))
-                                 (flymake--project-diagnostics
-                                  (and (fboundp 'project-current)
-                                       (project-current nil root))))
-                             (error nil))))
-           (open-proj-diags
-            (cl-loop for buf in (buffer-list)
-                     for fn = (buffer-file-name buf)
-                     when (and fn (string-prefix-p root (expand-file-name fn)))
-                     append (cl-loop for d in (kargu-lsp--diagnostics-data fn)
-                                     collect (append (list :file (expand-file-name fn)) d)))))
-      (dolist (d flymake-proj)
-        (let ((extracted (kargu-lsp--extract-flymake-diag d)))
-          (when extracted
-            (push extracted all-diags))))
-      (dolist (d open-proj-diags)
-        (push d all-diags))
-      all-diags)))
+  "Collect diagnostics for canonical local ROOT from owned files only.
+Reject foreign/remote loci before inspecting source buffers or observations."
+  (save-match-data
+    (when-let* ((canonical (kargu-lsp--project-diagnostic-path root root)))
+      (let* ((root (file-name-as-directory canonical))
+             (data (kargu-lsp--native-project-diagnostics root)))
+        (dolist (buffer (buffer-list))
+          (when-let* ((file (buffer-file-name buffer))
+                      (path (kargu-lsp--project-diagnostic-path file root)))
+            (dolist (diag (kargu-lsp--diagnostics-data file))
+              (push (append (list :file path) diag) data))))
+        data))))
 
 (defun kargu-lsp--group-diagnostics-by-file (all-diags)
   "Deduplicate and group ALL-DIAGS by file.

@@ -42,6 +42,7 @@
 (require 'tests/test-chat)
 (require 'tests/test-dynamic-models)
 (require 'tests/test-lsp)
+(require 'tests/test-lsp-project-diagnostics)
 (require 'tests/test-lsp-settle)
 (require 'tests/test-session)
 (require 'tests/test-session-storage)
