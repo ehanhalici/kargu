@@ -269,7 +269,11 @@ chat session and verified adapter/environment. Reassigned or edited sources,
 changed selections and newly opened local adapters invalidate that decision;
 late approval after run cancellation cannot launch anything. Verification uses
 the captured source's environment without changing adapter preferences.
-This does not yet isolate Dape's global hooks, watch list or all
+Kargu watch expressions are separate from Dape's global UI watch list and
+belong to the captured adapter, project and chat session. Replacing an adapter
+starts with an empty Kargu list. Inspection callbacks check that ownership
+before continuing to another watch expression.
+This does not yet isolate Dape's global hooks or all
 lifecycle helpers; those remaining limitations are tracked in `todo.md`.
 
 Post-edit diagnostic verification captures the source buffer, document tick,

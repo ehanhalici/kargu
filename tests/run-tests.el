@@ -51,6 +51,7 @@
 (require 'tests/test-dape-commands)
 (require 'tests/test-dape-workspace)
 (require 'tests/test-dape-startup)
+(require 'tests/test-dape-watch)
 (require 'tests/test-deps)
 (require 'tests/test-fake-agent)
 (require 'tests/test-security)

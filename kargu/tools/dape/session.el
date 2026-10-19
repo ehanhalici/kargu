@@ -19,7 +19,6 @@
 (require 'kargu/tools/dape/workspace)
 (require 'dape nil t)
 
-(defvar dape--watched)
 (defvar dape--connection-selected)
 (defvar kargu-context-buffer)
 
@@ -28,7 +27,6 @@
 (declare-function dape-stack-select-down "dape" (conn n))
 (declare-function dape-select-stack "dape" (conn stack-id))
 (declare-function dape-select-thread "dape" (conn thread-id))
-(declare-function dape-watch-dwim "dape" (expression &optional remove-only-p add-only-p display-p))
 (declare-function dape-kill "dape" (conn &optional cb with-disconnect))
 (declare-function dape-disconnect-quit "dape" (conn))
 (declare-function dape-quit "dape" ())

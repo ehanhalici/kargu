@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'kargu/tools/dape/execution)
+(require 'kargu/tools/dape/watch)
 
 (declare-function dape--modules "dape" (conn))
 (declare-function dape--sources "dape" (conn))
@@ -298,33 +299,30 @@ The text is passed to CALLBACK."
     (cl-labels ((next ()
                   (if (null rest)
                       (funcall callback (string-join (nreverse lines) "\n"))
-                    (let* ((w (pop rest))
-                           (w-expr (or (plist-get w :expression) (and (stringp w) w) "?")))
+                    (let ((w-expr (pop rest)))
                       (kargu-dape-eval-expression
                        w-expr "watch"
-                       (lambda (val)
-                         (push (format "  * %s => %s" w-expr (or val "not evaluated")) lines)
-                         (next)))))))
+                       (kargu-async-wrap
+                        kargu-async--current-task
+                        (lambda (val)
+                          (push (format "  * %s => %s" w-expr (or val "not evaluated")) lines)
+                          (next))))))))
       (next))))
 
 (defun kargu-dape--watch (&optional expr remove-p callback)
-  "List, add, or remove watch expressions in Dape.
+  "List, add, or remove this session's watch expressions.
 If EXPR is provided and REMOVE-P is nil, adds EXPR to watch.
 If EXPR is provided and REMOVE-P is non-nil, removes EXPR from watch.
 The current watch list is passed to CALLBACK."
-  (let ((interactive (called-interactively-p 'any)))
+  (let ((interactive (called-interactively-p 'any))
+        (conn (kargu-dape--connection)))
     (condition-case err
-        (progn
-          (when (and (stringp expr) (not (string-empty-p expr)))
-            (when (fboundp 'dape-watch-dwim)
-              (dape-watch-dwim expr remove-p (not remove-p))))
-          (if (and (boundp 'dape--watched) dape--watched)
-              (kargu-dape--watch-lines
-               dape--watched
-               (lambda (text) (kargu-dape--deliver callback text interactive)))
-            (kargu-dape--deliver callback
-                                 "[WATCH LIST: 0]\nNo watch expressions active."
-                                 interactive)))
+        (if (stringp conn)
+            (kargu-dape--deliver callback conn interactive)
+          (if-let* ((watched (kargu-dape-watch-expressions conn expr remove-p)))
+              (kargu-dape--watch-lines watched
+                                      (lambda (text) (kargu-dape--deliver callback text interactive)))
+            (kargu-dape--deliver callback "[WATCH LIST: 0]\nNo watch expressions active." interactive)))
       (error (kargu-dape--deliver
               callback
               (format "ERROR: watch: %s" (error-message-string err))

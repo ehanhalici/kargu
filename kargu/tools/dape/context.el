@@ -16,6 +16,7 @@
 (declare-function kargu--tool-arg "kargu/api/tools" (args &rest keys))
 (declare-function kargu--tool-file-path "kargu/api/tools" (args))
 (declare-function kargu--tool-arg-keys "kargu/api/tools" (args))
+(declare-function kargu-session-id "kargu/core/session" ())
 
 (defcustom kargu-dape-request-timeout 30
   "Seconds allowed for an entire debugger inspection callback chain."
@@ -26,6 +27,7 @@
   "Run STARTER with a guarded final CALLBACK and one overall deadline."
   (let ((conn (kargu-dape--connection))
         (root (kargu-permission-project-root))
+        (session (copy-sequence (kargu-session-id)))
         (origin (current-buffer)))
     (if (stringp conn) (funcall starter callback)
       (let* ((task (kargu-async-start
@@ -38,6 +40,7 @@
                       (and (buffer-live-p origin)
                            (with-current-buffer origin
                              (and (equal root (kargu-permission-project-root))
+                                  (equal session (kargu-session-id))
                                   (eq conn (kargu-dape--connection))))))))
              (finish (kargu-async-wrap
                       task (lambda (text) (kargu-async-finish task text)))))

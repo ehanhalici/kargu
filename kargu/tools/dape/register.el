@@ -184,7 +184,7 @@
         (kargu-dape-scope (or var idx) callback))))
    (list
     "debug_watch"
-    "List or update watch expressions in Dape."
+    "List or update this chat's watch expressions for the current adapter; independent of Dape's global UI list."
     '(("type" . "object")
       ("properties" . (("expression" . (("type" . "string")
                                         ("description" . "Expression to add or remove from watch list.")))

@@ -75,6 +75,17 @@ exercised by offline ERT. Invalidated identities are abstracted monotonically;
 this is not a model of arbitrary editor history or Dape's remaining global
 stop/start/lifecycle hooks. No main-loop transition changed or was re-proved.
 
+`KarguDebugWatch.tla` / `DebugWatchMC.cfg` cover the guarded continuation of a
+two-expression watch snapshot. Run `proof/run_tlc.sh --debug-watch` for an
+exhaustive scan. Root/session/connection/origin changes, caller switching,
+cancellation, late replies and deadlines cannot authorize another request
+under obsolete ownership. The 2026-10-19 scan visited 412 distinct states
+(1,053 generated), depth 11, without an error or deadlock. ERT additionally
+checks connection-keyed weak storage, copied strings/lists, session/project
+separation and that Dape's global watch list and UI are untouched. The model
+abstracts individual DAP results and editor identities; the main loop and
+Dape's unrelated global lifecycle hooks are not included.
+
 `KarguDiagnostics.tla` / `DiagnosticsMC.cfg` model the owned diagnostic wait
 after backend startup. Run `proof/run_tlc.sh --diagnostics` for an exhaustive
 scan. Two backends with old/current generations cover forced reports, edits,
@@ -123,6 +134,8 @@ proof/
 ├── DiagnosticsMC.*    # Bounded diagnostic-wait harness
 ├── KarguDebugStartup.tla # Owned adapter probing and launch approval
 ├── DebugStartupMC.*   # Bounded debugger-startup harness
+├── KarguDebugWatch.tla # Owned sequential watch evaluation
+├── DebugWatchMC.*     # Bounded watch-continuation harness
 ├── run_tlc.sh          # Exhaustive loop or focused resource checks
 └── README.md           # This file
 ```

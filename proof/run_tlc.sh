@@ -6,6 +6,7 @@
 #   ./run_tlc.sh --process       exhaustive process-capture scan
 #   ./run_tlc.sh --diagnostics   exhaustive diagnostic-ownership scan
 #   ./run_tlc.sh --debug-startup exhaustive debugger-startup ownership scan
+#   ./run_tlc.sh --debug-watch   exhaustive debugger-watch ownership scan
 #   ./run_tlc.sh --simulate [N]  random simulation of N behaviors (default
 #                                100000): a quick smoke test, NOT a proof
 #   ./run_tlc.sh <tlc args...>   any other arguments go to TLC as they are
@@ -52,6 +53,10 @@ elif [[ "$1" == "--debug-startup" ]]; then
     MODE="exhaustive debugger-startup ownership scan"
     SPECIFICATION="DebugStartupMC.tla (KarguDebugStartup)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config DebugStartupMC.cfg DebugStartupMC.tla)
+elif [[ "$1" == "--debug-watch" ]]; then
+    MODE="exhaustive debugger-watch ownership scan"
+    SPECIFICATION="DebugWatchMC.tla (KarguDebugWatch)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config DebugWatchMC.cfg DebugWatchMC.tla)
 elif [[ "$1" == "--simulate" ]]; then
     MODE="random simulation (not a proof)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -simulate "num=${2:-100000}" MC.tla)
