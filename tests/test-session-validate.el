@@ -114,5 +114,21 @@
         (should-error (kargu-session-load "safe" (current-buffer) repo) :type 'user-error)
         (should (equal (buffer-string) "keep my draft"))))))
 
+(ert-deftest kargu-session-load-clears-stale-buffer-selection-test ()
+  "Loading an unselected session clears both the footer and live selection."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (setq kargu-chat--session-provider "previous-provider"
+          kargu-chat--session-model "previous-model")
+    (kargu-session-load '(("id" . "blank") ("provider" . " ")
+                          ("model" . "") ("messages" . []))
+                        (current-buffer) default-directory)
+    (should-not kargu-chat--session-provider)
+    (should-not kargu-chat--session-model)
+    (should-not kargu--session-provider)
+    (should-not kargu--session-model)
+    (should-not (kargu-state-provider))
+    (should-not (kargu-state-model))))
+
 (provide 'tests/test-session-validate)
 ;;; test-session-validate.el ends here
