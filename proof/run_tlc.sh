@@ -3,6 +3,7 @@
 #
 #   ./run_tlc.sh                 exhaustive breadth-first scan (the proof)
 #   ./run_tlc.sh --plan          exhaustive plan-ownership scan
+#   ./run_tlc.sh --process       exhaustive process-capture scan
 #   ./run_tlc.sh --simulate [N]  random simulation of N behaviors (default
 #                                100000): a quick smoke test, NOT a proof
 #   ./run_tlc.sh <tlc args...>   any other arguments go to TLC as they are
@@ -37,6 +38,10 @@ elif [[ "$1" == "--plan" ]]; then
     MODE="exhaustive plan-ownership scan"
     SPECIFICATION="PlanMC.tla (KarguPlan)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config PlanMC.cfg PlanMC.tla)
+elif [[ "$1" == "--process" ]]; then
+    MODE="exhaustive process-capture scan"
+    SPECIFICATION="ProcessMC.tla (KarguProcess)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config ProcessMC.cfg ProcessMC.tla)
 elif [[ "$1" == "--simulate" ]]; then
     MODE="random simulation (not a proof)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -simulate "num=${2:-100000}" MC.tla)

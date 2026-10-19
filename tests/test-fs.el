@@ -3,6 +3,12 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
+;; Temporary trees exercise bounded traversal and shared search policies.
+
+;;; Code:
+
 (require 'ert)
 (require 'cl-lib)
 (require 'tests/test-helpers)
@@ -103,10 +109,70 @@
 				    (write-region "needle outside-secret\n" nil (expand-file-name "secret.txt" outside) nil 'silent)
 				    (make-symbolic-link outside (expand-file-name "external" root))
 				    (let ((result (kargu-test-await
-						   (lambda (done) (kargu-search--grep-gnu done "needle" root root nil 20)))))
+						   (lambda (done) (kargu-search--grep-gnu done "needle" :target root :root root :cap 20)))))
 				      (should (string-search "inside" result))
 				      (should-not (string-search "outside-secret" result))))
 				(delete-directory outside t)))))
+
+(ert-deftest kargu-search-grep-global-budget-stops-both-engines-test ()
+  "Ripgrep and GNU grep stop at one shared budget across many files."
+  (kargu-fs-test--with-tree
+      (cl-loop for index below 20
+               collect (cons (format "%02d.txt" index) "needle\n"))
+    (dolist (engine '("rg" "grep"))
+      (when (executable-find engine)
+        (let ((run (symbol-function 'kargu-process-run))
+              raw options args)
+          (cl-letf (((symbol-function 'kargu-process-run)
+                     (lambda (program arguments callback &rest opts)
+                       (setq args arguments options opts)
+                       (apply run program arguments
+                              (lambda (result) (setq raw result) (funcall callback result))
+                              opts))))
+            (let ((out (kargu-test-await
+                        (lambda (callback)
+                          (funcall (if (equal engine "rg")
+                                       #'kargu-search--grep-rg
+                                     #'kargu-search--grep-gnu)
+                                   callback "needle" :target root :root root :cap 3)))))
+              (should (= (length (split-string out "\n" t)) 4))
+              (should (string-search "additional hits omitted" out))
+              (should-not (string-prefix-p "ERROR:" out))))
+          (should (plist-get raw :line-limit-reached))
+          (should (= (length (split-string (plist-get raw :output) "\n" t)) 4))
+          (should (= (length (delete-dups
+                              (mapcar (lambda (line) (string-remove-suffix ":1:needle" line))
+                                      (split-string (plist-get raw :output) "\n" t))))
+                     4))
+          (should (= (plist-get options :max-lines) 4))
+          (should (member "--line-buffered" args))
+          (should-not (member "--max-count" args)))))))
+
+(ert-deftest kargu-search-grep-exact-budget-has-no-omission-test ()
+  "An exact number of hits is not reported as truncated."
+  (kargu-fs-test--with-tree '(("a.txt" . "needle\nneedle\nneedle\n"))
+    (let ((kargu-permission--override-root root))
+      (let ((out (kargu-test-await
+                  (lambda (callback) (kargu-search-grep callback "needle" nil nil 3)))))
+        (should (= (length (split-string out "\n" t)) 3))
+        (should-not (string-search "omitted" out))))))
+
+(ert-deftest kargu-search-grep-budget-preserves-empty-and-invalid-test ()
+  "No matches and invalid patterns retain their distinct outcomes."
+  (kargu-fs-test--with-tree '(("a.txt" . "needle\n"))
+    (dolist (engine '("rg" "grep"))
+      (when (executable-find engine)
+        (dolist (pattern '("absent" "["))
+          (let ((out (kargu-test-await
+                      (lambda (callback)
+                        (funcall (if (equal engine "rg")
+                                     #'kargu-search--grep-rg
+                                   #'kargu-search--grep-gnu)
+                                 callback pattern :target root :root root :cap 3)))))
+            (if (equal pattern "absent")
+                (should (string-prefix-p "No matches" out))
+              (should (string-prefix-p "ERROR:" out)))
+            (should-not (string-search "omitted" out))))))))
 
 (ert-deftest kargu-fs-skipped-path-and-relative-path-test ()
   "Skipped components are detected; paths inside the root turn relative."
@@ -120,8 +186,9 @@
   "Hidden file discovery excludes .git and the same artifact directories as rg."
   (let (seen result)
     (cl-letf (((symbol-function 'kargu-search--run)
-               (lambda (_program args _root callback)
-                 (setq seen args) (funcall callback '(0 . "visible.el\n")))))
+               (lambda (_program args &rest options)
+                 (setq seen args)
+                 (funcall (plist-get options :callback) '(0 . "visible.el\n")))))
       (kargu-search--glob-fd (lambda (text) (setq result text)) "fd" "*.el" default-directory default-directory)
       (should (member "--hidden" seen))
       (dolist (dir kargu-fs-skip-dirs)

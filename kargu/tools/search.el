@@ -44,6 +44,10 @@
   :type 'natnum
   :group 'kargu-search)
 
+(defconst kargu-search--omitted-hits-note
+  "\n... (additional hits omitted; raise max_matches or narrow the search)"
+  "Notice appended when the global hit budget stopped a search.")
+
 (defun kargu-search--root ()
   "Absolute project root used as the search cwd."
   (kargu-permission-project-root))
@@ -75,22 +79,24 @@
   (cl-loop for dir in kargu-fs-skip-dirs
            append (list "--glob" (format "!**/%s/**" dir))))
 
-(defun kargu-search--run (program args root callback)
+(cl-defun kargu-search--run (program args &key root callback max-lines)
   "Run PROGRAM with ARGS in ROOT without waiting.
 CALLBACK receives (EXIT-CODE . STDOUT); a missing program is exit 127 and a
-timeout or truncated output is exit -1."
+timeout or byte-truncated output is exit -1.  MAX-LINES optionally stops
+after that many complete stdout records and accepts the intentional stop."
   (kargu-process-run
    program args
    (lambda (result)
      (let* ((code (plist-get result :code))
             (incomplete (or (plist-get result :timed-out)
                             (plist-get result :truncated)))
-            (failed (or incomplete (not (memq code '(0 1))))))
+            (limited (and max-lines (plist-get result :line-limit-reached)))
+            (failed (or incomplete (not (or limited (memq code '(0 1)))))))
        (funcall callback
-                (cons (if incomplete -1 code)
+                (cons (cond (incomplete -1) (limited 0) (t code))
                       (if failed (kargu-process-failure program result)
                         (or (plist-get result :output) ""))))))
-   :dir root))
+   :dir root :max-lines max-lines))
 
 (defun kargu-search--truncate-lines (text max-lines)
   "Keep the first MAX-LINES lines of TEXT; note if truncated."
@@ -101,8 +107,7 @@ timeout or truncated output is exit -1."
                  lines)))
     (concat (string-join kept "\n")
             (if (> n max-lines)
-                (format "\n... (%d more hits truncated; raise max_matches or narrow the search)"
-                        (- n max-lines))
+                kargu-search--omitted-hits-note
               (if (string-empty-p (string-trim text))
                   ""
                 "\n")))))
@@ -121,14 +126,17 @@ caps the number of hits returned."
                       max-matches kargu-search-default-max-matches))))
     (cond
      ((executable-find "rg")
-      (kargu-search--grep-rg callback pattern target root glob cap))
+      (kargu-search--grep-rg callback pattern
+                             :target target :root root :glob glob :cap cap))
      ((executable-find "grep")
-      (kargu-search--grep-gnu callback pattern target root glob cap))
+      (kargu-search--grep-gnu callback pattern
+                              :target target :root root :glob glob :cap cap))
      (t
       (error "Neither rg nor grep is on PATH")))))
 
-(defun kargu-search--grep-report (callback label pattern cap result)
-  "Turn the grep RESULT of tool LABEL into the text CALLBACK receives."
+(cl-defun kargu-search--grep-report (callback result &key label pattern cap)
+  "Turn the grep RESULT of tool LABEL into the text CALLBACK receives.
+PATTERN names the search; CAP bounds its reported hits."
   (kargu-process-deliver
    callback
    (lambda ()
@@ -140,37 +148,45 @@ caps the number of hits returned."
            (format "No matches for %S" pattern)
          (kargu-search--truncate-lines out cap))))))
 
-(defun kargu-search--grep-rg (callback pattern target root glob cap)
-  "Ripgrep PATTERN in TARGET; report at most CAP hits to CALLBACK."
+(cl-defun kargu-search--grep-rg (callback pattern &key target root glob cap)
+  "Ripgrep PATTERN in TARGET; report at most CAP hits to CALLBACK.
+ROOT is the working directory; GLOB optionally restricts files."
   (let ((args (append
-               (list "-n" "-H" "--no-heading" "--color" "never"
-                     "--max-count" (number-to-string cap))
+               (list "-n" "-H" "--no-heading" "--color" "never" "--line-buffered")
                (kargu-search--rg-exclude-args)
                (when (and (stringp glob) (not (string-empty-p glob)))
                  (list "--glob" glob))
                (list "--" pattern target))))
     (kargu-search--run
-     "rg" args root
-     (lambda (result)
-       (kargu-search--grep-report callback "rg" pattern cap result)))))
+     "rg" args :root root
+     :callback (lambda (result)
+                 (kargu-search--grep-report callback result
+                                            :label "rg" :pattern pattern :cap cap))
+     :max-lines (1+ cap))))
 
-(defun kargu-search--grep-gnu (callback pattern target root glob cap)
-  "GNU grep fallback for PATTERN in TARGET; report to CALLBACK."
+(cl-defun kargu-search--grep-gnu (callback pattern &key target root glob cap)
+  "GNU grep fallback for PATTERN in TARGET; report to CALLBACK.
+ROOT is the working directory; GLOB filters files; CAP bounds reported hits."
   (let* ((exclude (apply #'append
                          (mapcar (lambda (dir) (list "--exclude-dir" dir))
                                  kargu-fs-skip-dirs)))
          (include (when (and (stringp glob) (not (string-empty-p glob)))
                     (list "--include"
-                          (if (string-match "/\\([^/]+\\)\\'" glob)
-                              (match-string 1 glob)
-                            glob))))
-         (args (append (list "-r" "-n" "-H" "-I")
+                          (save-match-data
+                            (if (string-match
+                                 (rx "/" (group (+ (not (any "/")))) string-end)
+                                 glob)
+                                (match-string 1 glob)
+                              glob)))))
+         (args (append (list "-r" "-n" "-H" "-I" "--line-buffered")
                        exclude include
                        (list "--" pattern target))))
     (kargu-search--run
-     "grep" args root
-     (lambda (result)
-       (kargu-search--grep-report callback "grep" pattern cap result)))))
+     "grep" args :root root
+     :callback (lambda (result)
+                 (kargu-search--grep-report callback result
+                                            :label "grep" :pattern pattern :cap cap))
+     :max-lines (1+ cap))))
 
 ;;;; Glob -----------------------------------------------------------------
 
@@ -286,7 +302,8 @@ Use ripgrep when available and otherwise a bounded directory walk."
            (mapcan (lambda (dir) (list "--exclude" dir)) kargu-fs-skip-dirs)
            (list "--glob" (kargu-search--normalize-glob pattern)
                  "--base-directory" target))
-   root
+   :root root
+   :callback
    (lambda (result)
      (if (/= (car result) 0)
          (kargu-search--glob-fallback callback pattern target root)
@@ -305,7 +322,8 @@ Use ripgrep when available and otherwise a bounded directory walk."
    (append (list "--files" "--color" "never")
            (kargu-search--rg-exclude-args)
            (list "--glob" (kargu-search--normalize-glob pattern) "--" target))
-   root
+   :root root
+   :callback
    (lambda (result)
      (kargu-process-deliver
       callback

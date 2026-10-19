@@ -204,6 +204,13 @@ terminating the process. Stop cancels the foreground tool; background
 jobs continue until explicitly cancelled. Other bounded tools keep their
 normal timeouts. A positive `kargu-bash-timeout` opts into a deadline.
 
+`workspace_grep` enforces `max_matches` across the whole search, not per
+file. Both ripgrep and GNU grep use line-buffered output; Kargu stops the
+producer after at most one extra captured record to detect omitted hits.
+The omission notice does not invent a total count. An intentional record
+limit is distinct from byte-quota or timeout failures, which still reject
+the result rather than presenting it as a successful search.
+
 Git commands use a separate `kargu-git-timeout` (nil by default), allowing
 hooks and signing to finish. Stop cancels Git work owned by the agent and
 prevents cancelled callbacks from launching fallback commands. An interrupted

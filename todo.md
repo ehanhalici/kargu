@@ -14,14 +14,6 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 
 ---
 
-### Modül: `tools/search.el` & `tools/webfetch.el`
-
-1. **[K - Orta] `workspace_grep` `rg --max-count` parametresi dosya başına uygulanır.**
-   - **Dosya / Satır:** `kargu/tools/search.el:142`
-   - **Sorun:** Ripgrep sözdiziminde `--max-count <cap>`, tüm arama için değil, her bir dosya içindeki maksimum eşleşme sayısıdır. 100 dosyalık bir depoda `cap=50` verildiğinde ripgrep 5000 eşleşme üretebilir; her ne kadar Elisp tarafında sonradan budansa da gereksiz disk I/O ve işlemci harcanır.
-
----
-
 ### Modül: `api/` (İstekler, Devre Kesici, Yeniden Deneme)
 
 1. **[D - Orta] Sampling desteğinin muhakeme ayarına bağlı koşulları temsil edilmiyor.**

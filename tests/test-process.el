@@ -133,8 +133,8 @@
                (lambda (_program _args callback &rest _options)
                  (funcall callback result))))
       (let (received)
-        (kargu-search--run "rg" nil default-directory
-                           (lambda (value) (setq received value)))
+        (kargu-search--run "rg" nil :root default-directory
+                           :callback (lambda (value) (setq received value)))
         (should (= (car received) -1))
         (should (string-search "output limit" (cdr received)))))))
 
@@ -293,6 +293,81 @@
       (should (<= (string-bytes (buffer-string)) 5))
       (funcall (kargu-process--filter (current-buffer) 5 state) nil "more")
       (should (equal (buffer-string) "ağ")))))
+
+(ert-deftest kargu-process-line-limit-spans-chunks-test ()
+  "A line budget counts complete records across chunks, not stderr."
+  (with-temp-buffer
+    (let* ((state (list :lifecycle :running))
+           (filter (kargu-process--filter (current-buffer) 128 state :max-lines 2))
+           cancelled)
+      (cl-letf (((symbol-function 'kargu-process-cancel)
+                 (lambda (process) (push process cancelled))))
+        (funcall filter 'owner "ağ")
+        (should-not (plist-get state :line-limit-reached))
+        (string-match "kept" "kept match data")
+        (let ((before (match-data)))
+          (funcall filter 'owner "\n🙂\nnot retained\n")
+          (should (equal before (match-data))))
+        (funcall filter 'owner "late\n")
+        (should (equal (buffer-string) "ağ\n🙂\n"))
+        (should (equal cancelled '(owner)))
+        (should (plist-get state :line-limit-reached))
+        (should-not (plist-get state :truncated))
+        (with-temp-buffer
+          (funcall (kargu-process--filter (current-buffer) 128 state) nil "warning\n")
+          (should (equal (buffer-string) "warning\n")))))))
+
+(ert-deftest kargu-process-line-limit-terminates-producer-test ()
+  "An infinite producer stops at the requested stdout record budget."
+  (let ((deliveries 0) process)
+    (let ((result
+           (kargu-test-await
+            (lambda (callback)
+              (setq process
+                    (kargu-process-run
+                     "sh" '("-c" "while :; do printf 'hit\\n'; done")
+                     (lambda (value) (cl-incf deliveries) (funcall callback value))
+                     :max-lines 3 :timeout 1))))))
+      (should (= deliveries 1))
+      (should (equal (plist-get result :output) "hit\nhit\nhit\n"))
+      (should (plist-get result :line-limit-reached))
+      (should-not (plist-get result :truncated))
+      (should-not (plist-get result :timed-out))
+      (should-not (process-live-p process)))))
+
+(ert-deftest kargu-process-line-limit-keeps-byte-failures-test ()
+  "An intentional line limit cannot hide an oversized retained record."
+  (with-temp-buffer
+    (let ((state (list :lifecycle :running)))
+      (funcall (kargu-process--filter (current-buffer) 4 state :max-lines 1)
+               nil "too long\n")
+      (should (plist-get state :line-limit-reached))
+      (should (plist-get state :truncated))
+      (should (equal (buffer-string) "too ")))))
+
+(ert-deftest kargu-process-invalid-line-limit-cleans-startup-test ()
+  "Invalid line budgets are rejected without allocating process resources."
+  (dolist (limit '(0 -1 1.5 "3"))
+    (let ((before (process-list)) result)
+      (should-not
+       (kargu-process-run "sh" nil (lambda (value) (setq result value))
+                          :max-lines limit))
+      (should (= (plist-get result :code) -1))
+      (should (string-search "Line limit" (plist-get result :output)))
+      (should-not (seq-difference (process-list) before)))))
+
+(ert-deftest kargu-search-line-limit-does-not-hide-hard-failures-test ()
+  "Only an explicitly requested record stop can normalize a signal exit."
+  (dolist (failure '((:truncated t) (:timed-out t) nil))
+    (let ((result (append failure '(:code 9 :output "partial\n"
+                                  :line-limit-reached t))) received)
+      (cl-letf (((symbol-function 'kargu-process-run)
+                 (lambda (_program _args callback &rest _options)
+                   (funcall callback result))))
+        (kargu-search--run "rg" nil :root default-directory
+                           :callback (lambda (value) (setq received value))
+                           :max-lines (and failure 2)))
+      (should-not (memq (car received) '(0 1))))))
 
 (ert-deftest kargu-process-start-failure-cleans-resources-test ()
   "A failed stdin setup releases the process, timer and output buffer."

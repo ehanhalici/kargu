@@ -54,6 +54,7 @@ STATE is the mutable plist holding the exit code and the kill reasons."
                        :stderr stderr
                        :timed-out (plist-get state :timed-out)
                        :timeout (plist-get state :timeout)
+                       :line-limit-reached (plist-get state :line-limit-reached)
                        :truncated (plist-get state :truncated)))
       (error
        (kargu-log 'error "process callback failed: %s" (error-message-string err))))))
@@ -74,10 +75,32 @@ STATE is the mutable plist holding the exit code and the kill reasons."
       (plist-put state :code (process-exit-status proc))
       (kargu-process--maybe-finish callback buffer state))))
 
-(defun kargu-process--filter (buffer max-bytes state)
-  "Return an output filter for BUFFER with cap MAX-BYTES and shared STATE."
+(defun kargu-process--limit-lines (start max-lines state)
+  "Bound output after START to MAX-LINES complete records using STATE."
+  (save-match-data
+    (goto-char start)
+    (let ((lines (or (plist-get state :stdout-lines) 0)))
+      (while (and (< lines max-lines) (search-forward "\n" nil t))
+        (cl-incf lines))
+      (plist-put state :stdout-lines lines)
+      (when (= lines max-lines)
+        (delete-region (point) (point-max))
+        (plist-put state :line-limit-reached t)))))
+
+(defun kargu-process--limit-bytes (process max-bytes state)
+  "Bound the current output buffer to MAX-BYTES for PROCESS using STATE."
+  (when (> (1- (position-bytes (point-max))) max-bytes)
+    (plist-put state :truncated t)
+    (if (eq (plist-get state :output-policy) 'tail)
+        (kargu-process--retain-tail max-bytes)
+      (kargu-process--truncate-output max-bytes)
+      (kargu-process-cancel (or (plist-get state :process) process)))))
+
+(cl-defun kargu-process--filter (buffer max-bytes state &key max-lines)
+  "Return a BUFFER filter with MAX-BYTES, STATE and optional MAX-LINES."
   (lambda (proc chunk)
     (when (and (buffer-live-p buffer)
+               (not (and max-lines (plist-get state :line-limit-reached)))
                (or (eq (plist-get state :output-policy) 'tail)
                    (not (plist-get state :truncated))))
       (with-current-buffer buffer
@@ -86,14 +109,13 @@ STATE is the mutable plist holding the exit code and the kill reasons."
             (save-restriction
               (widen)
               (goto-char (point-max))
-              (insert chunk)
-              (when (> (1- (position-bytes (point-max))) max-bytes)
-		(plist-put state :truncated t)
-		(if (eq (plist-get state :output-policy) 'tail)
-                    (kargu-process--retain-tail max-bytes)
-                  (kargu-process--truncate-output max-bytes)
-                  (kargu-process-cancel
-                   (or (plist-get state :process) proc)))))))))))
+              (let ((start (point)))
+                (insert chunk)
+                (when max-lines
+                  (kargu-process--limit-lines start max-lines state)))
+              (kargu-process--limit-bytes proc max-bytes state)
+              (when (and max-lines (plist-get state :line-limit-reached))
+                (kargu-process-cancel (or (plist-get state :process) proc))))))))))
 
 (defun kargu-process--retain-tail (max-bytes)
   "Keep at most MAX-BYTES of recent output without splitting characters."
@@ -147,6 +169,11 @@ the deadline, which otherwise also bounds stderr drainage.
 `:stderr' can be `merge' to combine both streams in :output.
 `:output-policy' can be `tail' to retain recent output without killing;
 `:buffer' and `:keep-buffer' provide a persistent live output buffer.
+`:max-lines', a positive integer, stops after that many newline-terminated
+stdout records.  The result has `:line-limit-reached' instead of treating
+that intentional stop as byte truncation; consumers must opt into partial
+results explicitly.  Stderr retains its independent byte quota.
+With merged stderr, the record limit applies to the combined stream.
 Standard input is closed immediately; interactive commands are unsupported.
 Return the process, or nil when none started."
   (let ((exe (executable-find program)))
@@ -181,7 +208,8 @@ Return the process, or nil when none started."
                 :name (file-name-nondirectory exe) :buffer nil
                 :command (cons exe args) :connection-type 'pipe :noquery t
                 :coding 'utf-8 :stderr stderr
-                :filter (kargu-process--filter buffer max-bytes state)
+                :filter (kargu-process--filter
+                         buffer max-bytes state :max-lines (plist-get opts :max-lines))
                 :sentinel (kargu-process--sentinel callback buffer state))))
     (plist-put state :process proc)
     (process-put proc 'kargu-stderr-process stderr)
@@ -217,8 +245,12 @@ Return the process, or nil when none started."
                                                    default-directory)))))
     (plist-put state :timeout timeout)
     (condition-case err
-        (kargu-process--launch exe args :callback callback :buffer buffer
-                               :state state :opts opts)
+        (progn
+          (when-let* ((max-lines (plist-get opts :max-lines)))
+            (unless (and (integerp max-lines) (> max-lines 0))
+              (error "Line limit must be a positive integer or nil")))
+          (kargu-process--launch exe args :callback callback :buffer buffer
+                                :state state :opts opts))
       (error
        (kargu-process--cleanup-start buffer state opts)
        (kargu-process--fail callback (error-message-string err))

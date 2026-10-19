@@ -46,6 +46,16 @@ barrier delays delivery until resource setup completes, even if both streams
 have already closed. ERT forces that ordering for separate and merged stderr;
 this repairs process notification ownership, not a loop transition.
 
+`KarguProcess.tla` / `ProcessMC.cfg` separately model bounded process capture.
+Run `proof/run_tlc.sh --process` for an exhaustive scan. The model allows exit,
+EOF, cancellation and deadlines before or after startup publication; a record
+limit may coincide with a byte failure. It checks single delivery, the startup
+barrier, closed-stream/timer cleanup and separation of intentional limits from
+hard failures. The 2026-10-19 run with a three-record bound visited 179 distinct
+states (535 generated), depth 9, without an error or deadlock. It abstracts
+kernel signals and stream decoding; it does not resolve the separate OS/stress
+timing question in `todo.md` or rerun the main loop proof.
+
 ## 1. Modules
 
 The separate plan artifact workflow (`kargu/plan/store.el` and `dispatch.el`)
@@ -71,7 +81,9 @@ proof/
 ├── KarguState.tla      # State store statuses; busy and run-live classes
 ├── KarguLoop.tla       # The loop: states, actions, safety invariants
 ├── MC.tla / MC.cfg     # TLC harness: parameters, invariants, deadlock check
-├── run_tlc.sh          # Exhaustive scan (default) or --simulate
+├── KarguProcess.tla    # One-shot process capture and completion ownership
+├── ProcessMC.*        # Bounded process-capture harness
+├── run_tlc.sh          # Exhaustive loop, --plan, --process or --simulate
 └── README.md           # This file
 ```
 
