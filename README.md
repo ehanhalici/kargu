@@ -287,6 +287,10 @@ Post-edit diagnostic verification captures the source buffer, document tick,
 project, server and Flymake report-function generations. Every configured
 checker must report; stable or empty caches do not prove a completed check.
 Stop cancels the owned polling/deadline timers without adopting late reports.
+Each verification batch also owns the exact pending edit records captured at
+startup. Completion or cancellation releases only those records, including
+files not yet visited; intervening edits remain pending. Releasing a change
+signal does not certify that its diagnostics were available or clean.
 Eglot replays are additionally checked against a versioned diagnostic push;
 Kargu advertises `publishDiagnostics.versionSupport` on new Eglot connections.
 Reconnect existing servers to negotiate that capability. Because the

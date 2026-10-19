@@ -50,14 +50,6 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 
 ---
 
-### Modül: `loop/` & `plan/`
-
-1. **[K - Orta] Durdurulan koşularda dosya tüketim sızıntısı.**
-   - **Dosya / Satır:** `kargu/loop/heal.el:50-51`
-   - **Sorun:** LSP tanıları beklenirken koşu durdurulursa (`kargu-loop-stop`), `(when (kargu-loop--live-p run) (kargu-diff-consume-file path))` atlanır. Düzenlenen dosya `kargu-diff--changed` tablosunda kalır ve sonraki koşunun bitiş raporuna `:pending-files` olarak sızar.
-
----
-
 ### Modül: `tools/dape/`
 
 1. **[K - Yüksek] Dape başlangıç bekleyicisi ve global yaşam döngüsü komutları sahiplik taşımıyor.**

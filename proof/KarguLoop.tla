@@ -490,7 +490,9 @@ DoomStop ==
     /\ runStatus          ' = "error"
     /\ UNCHANGED <<activeMode, Counters, doomSigs, Flags, generation, Circuit>>
 
-(* VerifyFiles: `kargu--loop-verify-files'.  Entered only with budget left. *)
+(* VerifyFiles: `kargu--loop-verify-files'.  Entered only with budget left.
+   Exact change-record ownership and cancellation cleanup are refined in
+   KarguVerification; the batch releases only its captured edit identities. *)
 VerifyFiles(diagnosticError) ==
     /\ state = "VERIFY_FILES"
     /\ pendingVerifyFiles # {}

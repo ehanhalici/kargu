@@ -1,7 +1,13 @@
-;;; tests/test-heal.el --- Tests for post-edit verification and self-healing -*- lexical-binding: t; -*-
+;;; test-heal.el --- Post-edit verification and self-healing tests -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Verify post-edit reports and cancellation ownership without a server.
+
+;;; Code:
 
 (require 'ert)
 (require 'cl-lib)
@@ -10,21 +16,24 @@
 (require 'kargu/loop)
 (require 'kargu/loop/heal)
 (require 'kargu/tools/lsp)
+(require 'tests/test-lsp-settle)
 
 (defmacro kargu-heal-test--with-verification (diagnostics text timeout &rest body)
   "Verify one file whose diagnostics are DIAGNOSTICS and TEXT, then run BODY.
+TIMEOUT determines whether the checker reports an incomplete verification.
 The finished result and the run are bound to `result' and `run'."
   (declare (indent 3))
   `(let* ((run (list :state 'tool))
           (kargu--loop-run run)
+          (kargu-diff--changed (make-hash-table :test #'equal))
           (result nil))
      (cl-letf (((symbol-function 'kargu-lsp-wait-diagnostics)
                 (lambda (file cb) (funcall cb file ,text ,timeout)))
                ((symbol-function 'kargu-lsp--diagnostics-data) (lambda (_p) ,diagnostics))
-               ((symbol-function 'kargu-diff-consume-file) #'ignore)
                ((symbol-function 'kargu--loop-add-result-and-continue)
                 (lambda (_run _id _name text _queue) (setq result text))))
-       (kargu--loop-verify-files run "id1" "edit_file" "edited ok" nil '("/tmp/a.el"))
+       (kargu--loop-verify-files run "id1" "edit_file" "edited ok" nil
+                                (list (expand-file-name "a.el" (kargu-permission-project-root))))
        ,@body)))
 
 (ert-deftest kargu-heal-clean-file-passes-verification-test ()
@@ -72,6 +81,158 @@ The finished result and the run are bound to `result' and `run'."
                (lambda (&rest _) (setq continued t))))
       (kargu--loop-verify-files run "id1" "edit_file" "ok" nil '("/tmp/a.el"))
       (should-not continued))))
+
+(defmacro kargu-heal-test--with-pending-changes (&rest body)
+  "Run BODY with two pending edit records and controlled callbacks."
+  (declare (indent 0))
+  `(kargu-test-with-git-repo '(("a.el" . "first\n") ("b.el" . "second\n"))
+     (let* ((first (expand-file-name "a.el" repo)) (second (expand-file-name "b.el" repo))
+            (kargu-diff--changed (make-hash-table :test #'equal))
+            (kargu-async--pending nil) (reports nil)
+            (run (list :state 'tool :on-finish (lambda (report) (push report reports))))
+            (kargu--loop-run run) (waiters nil) (continued nil))
+       (ignore reports waiters continued)
+       (puthash first (list :status :applied-full) kargu-diff--changed)
+       (puthash second (list :status :applied-full) kargu-diff--changed)
+       (unwind-protect
+           (cl-letf (((symbol-function 'kargu-lsp-wait-diagnostics)
+                      (lambda (file callback) (push (cons file callback) waiters)))
+                     ((symbol-function 'kargu-lsp--diagnostics-data) (lambda (_) nil))
+                     ((symbol-function 'kargu-api-cancel) #'ignore)
+                     ((symbol-function 'kargu-bash-kill-active-async) #'ignore)
+                     ((symbol-function 'kargu--loop-add-result-and-continue)
+                      (lambda (_run _id _name text _queue) (push text continued))))
+             ,@body)
+         (dolist (task (copy-sequence kargu-async--pending))
+           (kargu-async-cancel-owner (kargu-async-task-owner task)))))))
+
+(ert-deftest kargu-heal-change-identity-preserves-equal-newer-record-test ()
+  "Even a structurally equal newer edit cannot be consumed by an old token."
+  (kargu-heal-test--with-pending-changes
+    (let* ((change (kargu-diff-pending-change first))
+           (newer (copy-sequence (gethash first kargu-diff--changed))))
+      (puthash first newer kargu-diff--changed)
+      (should-not (kargu-diff-consume-change change))
+      (should (eq newer (gethash first kargu-diff--changed)))
+      (let ((current (kargu-diff-pending-change first)))
+        (should (kargu-diff-consume-change current))
+        (should-not (kargu-diff-consume-change current))))))
+
+(ert-deftest kargu-heal-stop-consumes-whole-captured-batch-test ()
+  "Stopping the real run clears both current and not-yet-visited old signals."
+  (kargu-heal-test--with-pending-changes
+    (kargu--loop-verify-files run "id" "edit_file" "applied" nil (list first second))
+    (let ((callback (cdar waiters)))
+      (kargu-loop-stop "test cancellation")
+      (funcall callback first "late" nil)
+      (should-not (kargu-diff-changed-files))
+      (should-not kargu-async--pending)
+      (should-not continued)
+      (should (eq (plist-get (car reports) :status) :stopped))
+      (should-not (plist-get (kargu-loop--finish-report (list :state 'done) :done "next") :pending-files)))))
+
+(ert-deftest kargu-heal-stop-preserves-new-edit-and-discards-old-reply-test ()
+  "Cancellation and a late old callback cannot delete a replacement change."
+  (kargu-heal-test--with-pending-changes
+    (kargu--loop-verify-files run "id" "edit_file" "applied" nil (list first second))
+    (let ((callback (cdar waiters)) (newer (list :status :applied-full :at "new")))
+      (puthash first newer kargu-diff--changed)
+      (kargu-loop-stop)
+      (funcall callback first "obsolete" nil)
+      (should (eq newer (gethash first kargu-diff--changed)))
+      (should-not (gethash second kargu-diff--changed))
+      (should-not continued)
+      (should-not kargu-async--pending))))
+
+(ert-deftest kargu-heal-completion-consumes-only-original-records-test ()
+  "A normal completion leaves any newly applied edit pending for its own check."
+  (kargu-heal-test--with-pending-changes
+    (kargu--loop-verify-files run "id" "edit_file" "applied" nil (list first second))
+    (let ((newer (list :status :applied-full :at "new")))
+      (puthash first newer kargu-diff--changed)
+      (funcall (cdar waiters) first "first checked" nil)
+      (funcall (cdar waiters) second "second checked" nil)
+      (should (eq newer (gethash first kargu-diff--changed)))
+      (should-not (gethash second kargu-diff--changed))
+      (should (= (length continued) 1))
+      (should-not kargu-async--pending))))
+
+(ert-deftest kargu-heal-duplicate-file-callback-cannot-repeat-next-wait-test ()
+  "An old per-file continuation cannot start the next checker twice."
+  (kargu-heal-test--with-pending-changes
+    (kargu--loop-verify-files run "id" "edit_file" "applied" nil (list first second))
+    (let ((first-reply (cdar waiters)))
+      (funcall first-reply first "first checked" nil)
+      (funcall first-reply first "duplicate" nil)
+      (should (= (length waiters) 2))
+      (funcall (cdar waiters) second "second checked" nil)
+      (funcall first-reply first "late" nil)
+      (should (= (length continued) 1))
+      (should-not (kargu-diff-changed-files))
+      (should-not kargu-async--pending))))
+
+(ert-deftest kargu-heal-startup-error-releases-owned-records-test ()
+  "A synchronous checker setup failure is reported as unavailable and cleaned."
+  (kargu-heal-test--with-pending-changes
+    (kargu--loop-verify-files run "id" "edit_file" "applied" nil (list first second))
+    (cl-letf (((symbol-function 'kargu-lsp-wait-diagnostics)
+               (lambda (&rest _) (error "Checker setup failed"))))
+      (funcall (cdar waiters) first "first checked" nil))
+    (should (= (length continued) 1))
+    (should (string-search "Checker setup failed" (car continued)))
+    (should (string-search "Verification incomplete" (car continued)))
+    (should-not (string-search "Verification passed" (car continued)))
+    (should-not (kargu-diff-changed-files))
+    (should-not kargu-async--pending)))
+
+(ert-deftest kargu-heal-cleanup-keeps-captured-path-after-project-switch-test ()
+  "Cleanup never resolves an old relative path in a newly selected project."
+  (kargu-heal-test--with-pending-changes
+    (kargu--loop-verify-files run "id" "edit_file" "applied" nil (list first second))
+    (with-temp-buffer
+      (setq-local kargu-permission--override-root temporary-file-directory)
+      (kargu-async-cancel-owner run))
+    (should-not (kargu-diff-changed-files))
+    (should-not kargu-async--pending)
+    (should-not continued)))
+
+(ert-deftest kargu-heal-completion-closes-batch-before-next-work-test ()
+  "Reentrant next work is not adopted or cancelled by the completed batch."
+  (kargu-heal-test--with-pending-changes
+    (let (next-task)
+      (cl-letf (((symbol-function 'kargu--loop-add-result-and-continue)
+                 (lambda (&rest _)
+                   (puthash first (list :status :applied-full :at "next") kargu-diff--changed)
+                   (setq next-task (kargu-async-start #'ignore)))))
+        (kargu--loop-verify-files run "id" "edit_file" "applied" nil (list first))
+        (funcall (cdar waiters) first "checked" nil)
+        (should (kargu-async-pending-p next-task))
+        (should-not (kargu-async-task-parent next-task))
+        (should (gethash first kargu-diff--changed))))))
+
+(ert-deftest kargu-heal-real-diagnostic-wait-cancels-with-batch-test ()
+  "A real Flymake wait is a child and cannot publish after the run stops."
+  (let (report continued)
+    (kargu-lsp-test--with-checkers
+        (list (lambda (callback &rest _) (setq report callback)))
+      (let* ((run (list :state 'tool)) (kargu--loop-run run)
+             (kargu-diff--changed (make-hash-table :test #'equal))
+             (kargu-async--pending nil))
+        (puthash path (list :status :applied-full) kargu-diff--changed)
+        (cl-letf (((symbol-function 'kargu-api-cancel) #'ignore)
+                  ((symbol-function 'kargu-bash-kill-active-async) #'ignore)
+                  ((symbol-function 'kargu--loop-add-result-and-continue)
+                   (lambda (&rest _) (setq continued t))))
+          (let ((task (kargu--loop-verify-files run "id" "edit_file" "applied" nil (list path))))
+            (should (= (length kargu-async--pending) 2))
+            (should (seq-some (lambda (child) (eq (kargu-async-task-parent child) task))
+                              kargu-async--pending))
+            (kargu-loop-stop)
+            (funcall report nil)
+            (funcall poll)
+            (should-not continued)
+            (should-not kargu-async--pending)
+            (should-not (kargu-diff-changed-files))))))))
 
 (provide 'tests/test-heal)
 ;;; test-heal.el ends here

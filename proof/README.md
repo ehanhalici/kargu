@@ -122,6 +122,21 @@ the loop counts errors. ERT covers Eglot and custom checker categories for both
 file and project records, including the existing self-healing counter. This
 repairs the evidence adapter, not the loop's error-count transition.
 
+`KarguVerification.tla` / `VerificationMC.cfg` refine verification-batch
+ownership of pending edit records. Run `proof/run_tlc.sh --verification` for
+an exhaustive scan. Two files with original/replacement record identities
+cover cancellation at either file, duplicate/late replies, setup failure,
+caller switching and reentrant next work. Cleanup releases only captured
+identities; a replacement edit is never consumed by the old batch. The
+2026-10-19 scan visited 68 distinct states (439 generated), depth 6, without
+an error or deadlock. ERT additionally uses real Flymake waits and the actual
+run-stop path to check parent/child cancellation, equal-looking replacement
+records, captured absolute keys after project switching and incomplete-result
+reporting. Collected means a batch completed, not that its diagnostics were
+clean; freshness is modeled separately in `KarguDiagnostics`. The main loop's
+existing completion/stop transitions are unchanged; their exhaustive scan
+was not rerun for this resource refinement.
+
 ## 1. Modules
 
 The separate plan artifact workflow (`kargu/plan/store.el` and `dispatch.el`)
@@ -157,6 +172,8 @@ proof/
 ├── DebugWatchMC.*     # Bounded watch-continuation harness
 ├── KarguDebugExecution.tla # Captured adapter execution and context replies
 ├── DebugExecutionMC.* # Bounded execution-wait harness
+├── KarguVerification.tla # Captured pending-edit records and batch cleanup
+├── VerificationMC.*  # Bounded verification-batch harness
 ├── run_tlc.sh          # Exhaustive loop or focused resource checks
 └── README.md           # This file
 ```

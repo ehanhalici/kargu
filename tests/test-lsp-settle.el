@@ -24,7 +24,7 @@ Bind `buffer', `path', `poll', `deadline' and `results' for each case."
             (flymake-no-changes-timeout nil)
             (warning-minimum-level :emergency)
             (warning-minimum-log-level :emergency)
-            poll deadline results)
+            (poll nil) (deadline nil) (results nil))
        (ignore poll deadline results)
        (unwind-protect
            (with-current-buffer buffer

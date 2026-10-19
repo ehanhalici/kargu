@@ -15,6 +15,7 @@
 (require 'kargu/core)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/lsp)
+(require 'kargu/async)
 
 (defvar kargu-max-healing-steps)
 (declare-function kargu-loop--live-p "kargu/loop" (run))
@@ -22,38 +23,69 @@
 (declare-function kargu--loop-add-result-and-continue "kargu/loop/tools"
                   (run id name result queue))
 
-(defun kargu--loop-verify-files (run id name result queue files)
-  "Collect FILES diagnostics for ID and NAME on RUN after RESULT, then QUEUE."
-  (kargu-loop--set-state run 'verify)
-  (kargu--loop-verify-next run id name result queue files nil))
+(cl-defstruct (kargu--verification (:constructor kargu--make-verification))
+  "One verification batch with a task owning its pending edit records."
+  run id name result queue pending done task)
 
-(defun kargu--loop-verify-next (run id name result queue pending done)
-  "Verify PENDING for ID and NAME on RUN after RESULT; DONE precedes QUEUE."
-  (cond
-   ((not (kargu-loop--live-p run)) nil)
-   ((null pending)
-    (let* ((sections (nreverse done))
-           (errors (kargu--loop-count-section-errors sections))
-           (healing (or (plist-get run :healing) 0)))
-      (when (> errors 0)
-        (plist-put run :healing (1+ healing)))
-      (kargu-log 'info "loop: verification done, %d error(s)" errors)
-      (kargu--loop-add-result-and-continue
-       run id name
-       (kargu--loop-compose-verified result sections errors healing)
-       queue)))
-   (t
-    (let ((file (car pending)))
+(defun kargu--loop-verify-files (run id name result queue files)
+  "Collect FILES diagnostics for ID and NAME on RUN after RESULT, then QUEUE.
+This entry point retains the after-tool dispatcher's positional signature."
+  (when (kargu-loop--live-p run)
+    (let* ((changes (delq nil (mapcar #'kargu-diff-pending-change files)))
+           (verification (kargu--make-verification
+                          :run run :id id :name name :result result :queue queue
+                          :pending files))
+           (task (kargu-async-start
+                  (lambda (sections error)
+                    (kargu--loop-publish-verification verification sections error))
+                  :cancel (lambda () (mapc #'kargu-diff-consume-change changes)))))
+      (setf (kargu--verification-task verification) task)
+      (funcall (kargu-async-wrap
+                task (lambda ()
+                       (kargu-loop--set-state run 'verify)
+                       (kargu--loop-verify-next verification))))
+      task)))
+
+(defun kargu--loop-publish-verification (verification sections error)
+  "Publish SECTIONS or ERROR only for VERIFICATION's still-live run."
+  (let ((run (kargu--verification-run verification)))
+    (when (kargu-loop--live-p run)
+      (when error
+        (setq sections
+              (nreverse (cons (list :text (format "(diagnostics unavailable: %s)" error)
+                                    :unavailable t :errors 0)
+                              (copy-sequence (kargu--verification-done verification))))))
+      (let ((errors (kargu--loop-count-section-errors sections))
+            (healing (or (plist-get run :healing) 0)))
+        (when (> errors 0) (plist-put run :healing (1+ healing)))
+        (kargu-log 'info "loop: verification done, %d error(s)" errors)
+        (kargu--loop-add-result-and-continue
+         run (kargu--verification-id verification) (kargu--verification-name verification)
+         (kargu--loop-compose-verified (kargu--verification-result verification) sections errors healing)
+         (kargu--verification-queue verification))))))
+
+(defun kargu--loop-verify-next (verification)
+  "Collect the next file for VERIFICATION without consuming a newer edit."
+  (let ((run (kargu--verification-run verification))
+        (task (kargu--verification-task verification))
+        (pending (kargu--verification-pending verification)))
+    (cond
+     ((not (kargu-loop--live-p run)) nil)
+     ((null pending)
+      (kargu-async-finish task (reverse (kargu--verification-done verification))))
+     (t
       (kargu-lsp-wait-diagnostics
-       file
-       (lambda (path text timeout-p)
-         (when (kargu-loop--live-p run)
-           (kargu-diff-consume-file path)
-           (kargu-log 'info "loop: diagnostics %s for %s"
-                      (if timeout-p "timed out" "settled") path)
-           (kargu--loop-verify-next
-            run id name result queue (cdr pending)
-            (cons (kargu--loop-diag-section path text timeout-p) done)))))))))
+       (car pending)
+       (kargu-async-wrap
+        task (lambda (path text timeout-p)
+               (when (and (kargu-loop--live-p run)
+                          (eq pending (kargu--verification-pending verification)))
+                 (kargu-log 'info "loop: diagnostics %s for %s"
+                            (if timeout-p "timed out" "settled") path)
+                 (push (kargu--loop-diag-section path text timeout-p)
+                       (kargu--verification-done verification))
+                 (setf (kargu--verification-pending verification) (cdr pending))
+                 (kargu--loop-verify-next verification)))))))))
 
 (defun kargu--loop-diag-section (path text timeout-p)
   "Build one diagnostics section plist for PATH and its TEXT.

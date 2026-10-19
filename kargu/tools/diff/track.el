@@ -1,4 +1,4 @@
-;;; kargu/tools/diff/track.el --- Rollback snapshots and change tracking -*- lexical-binding: t; -*-
+;;; track.el --- Rollback snapshots and change tracking -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -27,9 +27,10 @@ approval), popped by `kargu-diff-rollback'.")
 
 (defvar kargu-diff--changed (make-hash-table :test #'equal)
   "Files changed by approved proposals, awaiting diagnostics.
-Key: absolute path.  Value: plist (:status :saved :at).  The
-agent loop reads this after tool calls and removes entries via
-`kargu-diff-consume-file' once diagnostics were fetched.")
+Key: absolute path.  Value: plist (:status :saved :at).  A verification
+batch captures record identities and releases them on completion or
+cancellation, preserving newer edits.  Consuming a signal is not proof
+that diagnostics are available or clean.")
 
 (defvar kargu-diff--run-modified-files nil
   "List of absolute file paths modified during the current agent run.")
@@ -136,6 +137,25 @@ The file is also removed from the changed-file set consumed by the agent loop."
   "Return files changed by approved agent edits, not yet consumed."
   (hash-table-keys kargu-diff--changed))
 
+(cl-defstruct (kargu-diff-change (:constructor kargu-diff--make-change))
+  "Opaque identity of one pending change at its captured absolute PATH."
+  path identity)
+
+(defun kargu-diff-pending-change (path)
+  "Capture PATH's pending change identity, or nil when no change is recorded."
+  (let* ((resolved (kargu-permission-resolve path "file"))
+         (identity (gethash resolved kargu-diff--changed)))
+    (when identity (kargu-diff--make-change :path resolved :identity identity))))
+
+(defun kargu-diff-consume-change (change)
+  "Consume captured CHANGE only if no newer edit replaced its record.
+The captured absolute path is independent of later project selection."
+  (when (and change
+             (eq (kargu-diff-change-identity change)
+                 (gethash (kargu-diff-change-path change) kargu-diff--changed)))
+    (remhash (kargu-diff-change-path change) kargu-diff--changed)
+    t))
+
 (defun kargu-diff-consume-file (path)
   "Remove PATH from the changed-file set (the loop handled it)."
   (let ((resolved (kargu-permission-resolve path "file")))
@@ -217,4 +237,4 @@ exists or diff fails, return (0 . 0)."
 
 (provide 'kargu/tools/diff/track)
 
-;;; kargu/tools/diff/track.el ends here
+;;; track.el ends here
