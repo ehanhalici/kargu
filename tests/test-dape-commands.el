@@ -1,7 +1,13 @@
-;;; tests/test-dape-commands.el --- Tests for complete Dape commands suite -*- lexical-binding: t; -*-
+;;; test-dape-commands.el --- Debugger command tests -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Exercise debugger tools with fake adapters and asynchronous replies.
+
+;;; Code:
 
 ;; Ensure the package root is on `load-path` during byte/native compilation.
 (eval-and-compile
@@ -21,6 +27,8 @@
 (require 'kargu/tools/dape)
 (require 'kargu/loop/tools)
 (require 'kargu/languages)
+
+(defvar dape-active-mode-off-hook)
 
 (ert-deftest kargu-dape-render-strips-terminal-control-sequences-test ()
   "Colors and terminal hyperlinks never enter variable or context text."
@@ -192,17 +200,21 @@
 
 (ert-deftest kargu-dape-start-uses-a-verified-plist-after-approval-test ()
   "Startup passes Dape its actual config plist, not an unsupported symbol."
-  (let ((kargu-dape-config 'demo)
-        (dape-configs '((demo command "sh" :program "main")))
-        (kargu-dape--verified nil)
-        (kargu-permission--mock-decision :approve) seen result)
-    (cl-letf (((symbol-function 'kargu-dape-live-p) (lambda () nil))
-              ((symbol-function 'kargu-dape--target-buffer) #'current-buffer)
-              ((symbol-function 'dape) (lambda (config &rest _) (setq seen config))))
-      (kargu-dape-start "demo" (lambda (text) (setq result text)))
-      (should (equal (plist-get seen 'command) "sh"))
-      (should (eq (plist-get seen :stopOnEntry) t))
-      (should (string-search "started" result)))))
+  (kargu-test-with-git-repo '(("main.el" . "(message \"test\")\n"))
+    (let ((kargu-dape-config 'demo)
+          (dape-configs '((demo command "sh" :program "main")))
+          (kargu-dape--verified nil)
+          (kargu-permission--mock-decision :approve)
+          (source (find-file-noselect (expand-file-name "main.el" repo))) seen result)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-dape-project-connections) (lambda (&optional _) nil))
+                    ((symbol-function 'dape) (lambda (config &rest _) (setq seen config))))
+            (setq kargu-context-buffer source)
+            (kargu-dape-start "demo" (lambda (text) (setq result text)))
+            (should (equal (plist-get seen 'command) "sh"))
+            (should (eq (plist-get seen :stopOnEntry) t))
+            (should (string-search "started" result)))
+        (kill-buffer source)))))
 
 (ert-deftest kargu-dape-tools-registered-all-twenty-test ()
   "Ensure all 20 Dape interactive commands are registered as first-class tools."
@@ -234,7 +246,7 @@
       (should (gethash tool kargu--tool-registry)))))
 
 (ert-deftest kargu-dape-aliases-mapped-test ()
-  "Ensure the 20 Dape command names resolve via kargu-register-tool-alias."
+  "Ensure Dape command names resolve via `kargu-register-tool-alias'."
   (let ((expected-aliases '(("debug" . "debug_start")
                             ("next" . "debug_step_over")
                             ("continue" . "debug_continue")
@@ -297,18 +309,18 @@
                  (lambda (_conn _thread _n callback) (setq held callback)))
                 ((symbol-function 'dape--scopes)
                  (lambda (_conn _frame callback)
-                   (if (eq failure 'scopes) (error "adapter disconnected")
+                   (if (eq failure 'scopes) (error "Adapter disconnected")
                      (funcall callback))))
                 ((symbol-function 'dape--variables)
-                 (lambda (&rest _) (error "adapter disconnected"))))
+                 (lambda (&rest _) (error "Adapter disconnected"))))
         (kargu-dape-get-context (lambda (text) (push text results)))
         (should-not results)
-        (if (eq failure 'stack) (funcall held nil "adapter disconnected")
+        (if (eq failure 'stack) (funcall held nil "Adapter disconnected")
           (funcall held))
         (funcall held)
         (should (= (length results) 1))
         (should (string-prefix-p "ERROR:" (car results)))
-        (should (string-search "adapter disconnected" (car results)))))))
+        (should (string-search "Adapter disconnected" (car results)))))))
 
 (ert-deftest kargu-dape-cancel-cleans-chain-and-action-hooks-test ()
   "Cancellation releases inspection timers and execution hooks, ignoring late replies."
@@ -408,7 +420,7 @@
     (should (string-match-p "debug_scope" res))))
 
 (ert-deftest kargu-dape-tools-never-cached-test ()
-  "Ensure all Dape tools and aliases return nil for kargu-loop--tool-cacheable-p."
+  "Ensure Dape tools return nil for `kargu-loop--tool-cacheable-p'."
   (let ((non-cacheable-tools '("debug_start"
                                "debug_get_context"
                                "debug_eval"
@@ -434,4 +446,4 @@
 
 (provide 'tests/test-dape-commands)
 
-;;; tests/test-dape-commands.el ends here
+;;; test-dape-commands.el ends here

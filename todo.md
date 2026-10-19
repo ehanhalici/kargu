@@ -61,9 +61,9 @@ Not: Yalnız açık sorunlar tutulur. K = kodda gözlenen durum; D = ortam, sağ
 ### Modül: `tools/dape/`
 
 1. **[K - Yüksek] Asenkron Dape bekleyicileri ve global komutlar tam sahiplik taşımıyor.**
-   - **Dosyalar:** `kargu/tools/dape/session.el`, `execution.el`, `preflight.el`, `commands.el`
-   - **Sorun:** Başlatma/durma bekleyicileri global kancaları dinliyor; başka bir bağlantının olayı beklemeyi bitirebilir. Onay bekleyen başlatma, kök/hedef tampon/oturum değişimini yeniden doğrulamıyor. `debug_quit` bütün Dape oturumlarını kapatıyor, `debug_disconnect` global Dape tamponlarını temizliyor ve watch listesi projeler arasında ortak.
-   - **Gereken:** Bekleyici, komut, onay ve rapor aynı yakalanmış proje/oturum/bağlantı kimliğini kullanmalı. Yabancı stop/start/exit olayları, bağlantı değişimi, kökün yeniden atanması ve geç onay birlikte test edilmeli. Global Dape watch/UI temizliği proje dışı oturumları etkilememeli.
+   - **Dosyalar:** `kargu/tools/dape/session.el`, `execution.el`, `commands.el`
+   - **Sorun:** Başlatma/durma bekleyicileri global kancaları dinliyor; başka bir bağlantının olayı beklemeyi bitirebilir. `debug_quit` bütün Dape oturumlarını kapatıyor, `debug_disconnect` global Dape tamponlarını temizliyor ve watch listesi projeler arasında ortak.
+   - **Gereken:** Bekleyici, komut ve rapor aynı yakalanmış proje/oturum/bağlantı kimliğini kullanmalı. Yabancı stop/start/exit olayları, bağlantı değişimi ve kökün yeniden atanması birlikte test edilmeli. Global Dape watch/UI temizliği proje dışı oturumları etkilememeli.
 
 ---
 

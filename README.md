@@ -264,7 +264,12 @@ and streaming parsing are independent of tool activity and run reporting.
 Dape source selection and adapter discovery stay inside the selected workspace.
 Connections need a concrete `:cwd` / `command-cwd` (or an owned parent); unknown
 working directories and globally selected adapters from other projects are
-not adopted. This does not yet isolate Dape's global hooks, watch list or all
+not adopted. Startup approval captures the source file/version, project,
+chat session and verified adapter/environment. Reassigned or edited sources,
+changed selections and newly opened local adapters invalidate that decision;
+late approval after run cancellation cannot launch anything. Verification uses
+the captured source's environment without changing adapter preferences.
+This does not yet isolate Dape's global hooks, watch list or all
 lifecycle helpers; those remaining limitations are tracked in `todo.md`.
 
 Post-edit diagnostic verification captures the source buffer, document tick,

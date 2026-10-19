@@ -63,6 +63,18 @@ ERT covers foreign global selection, unknown directories and callback origin
 reassignment. This is a resource-admission boundary, not a new loop transition;
 global Dape hook/lifecycle ownership remains tracked separately in `todo.md`.
 
+`KarguDebugStartup.tla` / `DebugStartupMC.cfg` model one startup intent from
+dependency probing through approval. Run `proof/run_tlc.sh --debug-startup`
+for an exhaustive scan. Five grouped resource identities, an intervening local
+adapter, foreign adapter events, caller-buffer changes, rejection and run
+cancellation cover startup ownership and single delivery. The 2026-10-19 scan
+visited 1,032 distinct states (4,369 generated), depth 10, without an error or
+deadlock. Source filename/tick/mode/directory, editor-state preservation,
+actual configuration fingerprints and source-local environment checks are
+exercised by offline ERT. Invalidated identities are abstracted monotonically;
+this is not a model of arbitrary editor history or Dape's remaining global
+stop/start/lifecycle hooks. No main-loop transition changed or was re-proved.
+
 `KarguDiagnostics.tla` / `DiagnosticsMC.cfg` model the owned diagnostic wait
 after backend startup. Run `proof/run_tlc.sh --diagnostics` for an exhaustive
 scan. Two backends with old/current generations cover forced reports, edits,
@@ -109,6 +121,8 @@ proof/
 ├── ProcessMC.*        # Bounded process-capture harness
 ├── KarguDiagnostics.tla # Owned diagnostic evidence and cancellation
 ├── DiagnosticsMC.*    # Bounded diagnostic-wait harness
+├── KarguDebugStartup.tla # Owned adapter probing and launch approval
+├── DebugStartupMC.*   # Bounded debugger-startup harness
 ├── run_tlc.sh          # Exhaustive loop or focused resource checks
 └── README.md           # This file
 ```
