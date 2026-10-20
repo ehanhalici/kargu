@@ -31,7 +31,6 @@
 
 (require 'kargu/core)
 (require 'kargu/contract)
-(require 'kargu/api)
 (require 'kargu/api/tools)
 (require 'kargu/permission)
 (require 'kargu/tools/process)

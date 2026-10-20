@@ -22,6 +22,10 @@ feature optional.
   to this service, using `kargu-tool-definition` records rather than untyped
   specification alists. HTTP logging uses the facade's count operation, not
   the registry's storage representation.
+- Tool implementations depend on `kargu/api/tools`, not the broad `kargu/api`
+  facade. Loading LSP, Dape, search, diff, Bash, Git, skill or webfetch does
+  not load the model HTTP client, catalog or chat. Permission and review
+  dependencies are retained; this is not yet full UI independence.
 
 ## Tool registry contract
 
@@ -50,6 +54,8 @@ temporary project directories. These tests cannot accidentally rely on the
 full runner having loaded another feature first. One test copies only the
 foundational source files into a temporary package tree: UI, API and runtime
 sources are physically absent, not mocked as unavailable.
+Another reduced tree loads and registers tool definitions with the model API
+facade, HTTP, client and catalog source files physically absent.
 
 `tests/module-boundaries.el` records the exact remaining consumers of broad
 `core` and `api` facades. A migrated consumer must be removed from that list;

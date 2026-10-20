@@ -7,7 +7,7 @@
 ;;; Commentary:
 
 ;; Read-only workspace search.  Skip dirs and the Elisp glob walk
-;; come from `kargu/fs'.  Requires: `kargu/core', `kargu/api',
+;; come from `kargu/fs'.  Requires: `kargu/core', `kargu/api/tools',
 ;; `kargu/fs', `kargu/tools/lsp'.  Public: `kargu-search-grep',
 ;; `kargu-search-glob', `kargu-search-register-tools'.
 ;;
@@ -27,7 +27,6 @@
 (require 'rx)
 (require 'kargu/core)
 (require 'kargu/contract)
-(require 'kargu/api)
 (require 'kargu/api/tools)
 (require 'kargu/permission)
 (require 'kargu/tools/process)

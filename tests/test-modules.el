@@ -149,7 +149,7 @@ Initialize installed PACKAGES only when requested."
    t))
 
 (ert-deftest kargu-module-tool-loads-do-not-register-tools-test ()
-  "Loading a tool implementation does not mutate the application's registry."
+  "Tool implementations load without registration, HTTP or chat adapters."
   (dolist (feature '(kargu/tools/lsp kargu/tools/search kargu/tools/dape
                      kargu/tools/diff kargu/tools/bash kargu/tools/git
                      kargu/tools/skill kargu/tools/webfetch))
@@ -158,7 +158,10 @@ Initialize installed PACKAGES only when requested."
        (cl-assert (null (kargu-registered-tools)))
        (require ',feature)
        (cl-assert (null (kargu-registered-tools)))
-       (cl-assert (not (featurep 'kargu/chat))))
+       (dolist (forbidden '(kargu/api kargu/api/http kargu/api/client
+                            kargu/api/catalog kargu/chat))
+         (cl-assert (not (featurep forbidden)) nil
+                    "Tool module loaded %s" forbidden)))
      t)))
 
 (ert-deftest kargu-module-root-registers-compatible-tools-once-test ()
@@ -177,6 +180,38 @@ Initialize installed PACKAGES only when requested."
        (cl-assert (equal before (sort (kargu-registered-tools) #'string<))))
      (cl-assert (commandp 'kargu-chat-show)))
    t))
+
+(ert-deftest kargu-module-tools-work-without-model-transport-sources-test ()
+  "Tool definitions register when model HTTP/client sources are absent."
+  (let* ((root (make-temp-file "kargu-tool-package-" t))
+         (missing '("kargu/api.el" "kargu/api/http.el"
+                    "kargu/api/client.el" "kargu/api/catalog.el"))
+         (files (directory-files-recursively
+                 (expand-file-name "kargu" kargu-module-test--root) "\\.el\\'")))
+    (unwind-protect
+        (progn
+          (dolist (file files)
+            (let* ((relative (file-relative-name file kargu-module-test--root))
+                   (target (expand-file-name relative root)))
+              (unless (member relative missing)
+                (make-directory (file-name-directory target) t)
+                (copy-file file target))))
+          (kargu-module-test--evaluate
+           '((dolist (feature '(kargu/tools/lsp kargu/tools/search kargu/tools/dape
+                               kargu/tools/diff kargu/tools/bash kargu/tools/git
+                               kargu/tools/skill kargu/tools/webfetch))
+               (require feature))
+             (cl-assert (null (locate-library "kargu/api")))
+             (cl-assert (null (locate-library "kargu/api/http")))
+             (cl-assert (null (kargu-registered-tools)))
+             (kargu-search-register-tools)
+             (kargu-lsp-register-tools)
+             (kargu-dape-register-tools)
+             (cl-assert (kargu-find-tool "workspace_grep"))
+             (cl-assert (kargu-find-tool "read_file_symbols"))
+             (cl-assert (kargu-find-tool "debug_start")))
+           t root))
+      (delete-directory root t))))
 
 (defun kargu-module-test--requires (file)
   "Read FILE's literal top-level imports without executing its code."

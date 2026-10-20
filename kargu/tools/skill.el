@@ -8,7 +8,7 @@
 
 ;; Discover SKILL.md files and expose a `skill' tool that loads one
 ;; by name.  Catalog text is injected into the system prompt.
-;; Requires: `kargu/core', `kargu/api', `kargu/fs'.
+;; Requires: `kargu/core', `kargu/api/tools', `kargu/fs'.
 
 ;;; Code:
 
@@ -17,7 +17,7 @@
 (require 'xml)
 (require 'rx)
 (require 'kargu/core)
-(require 'kargu/api)
+(require 'kargu/api/tools)
 (require 'kargu/fs)
 
 (defcustom kargu-skill-max-chars 12000

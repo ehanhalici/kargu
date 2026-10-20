@@ -6,7 +6,7 @@
 
 ;;; Commentary:
 
-;; `webfetch' tool: GET a URL via curl.  Requires: `kargu/core', `kargu/api'.
+;; `webfetch' tool: GET a URL via curl, independently of the model transport.
 
 ;;; Code:
 
@@ -16,7 +16,7 @@
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/async)
-(require 'kargu/api)
+(require 'kargu/api/tools)
 (require 'kargu/tools/process)
 (require 'kargu/net/address)
 (require 'kargu/net/resolve)

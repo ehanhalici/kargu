@@ -73,12 +73,6 @@
      kargu/loop/machine
      kargu/loop/tools
      kargu/loop/ui
-     kargu/tools/bash
-     kargu/tools/diff
-     kargu/tools/git
-     kargu/tools/search
-     kargu/tools/skill
-     kargu/tools/webfetch
      kargu/ui/transient))
   "Exact consumers still allowed to require legacy facade features.")
 

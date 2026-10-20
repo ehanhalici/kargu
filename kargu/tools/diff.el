@@ -27,7 +27,7 @@
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/state/selectors)
-(require 'kargu/api)
+(require 'kargu/api/tools)
 (require 'kargu/permission)
 
 ;;;; Customization --------------------------------------------------------

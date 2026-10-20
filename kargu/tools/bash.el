@@ -8,7 +8,7 @@
 
 ;; `bash' tool: run a shell command with a timeout.  Advertised
 ;; only in agent mode (mutating-tools list).  Requires: `kargu/core',
-;; `kargu/api'.
+;; `kargu/api/tools'.
 
 ;;; Code:
 
@@ -16,7 +16,7 @@
 (require 'subr-x)
 (require 'kargu/core)
 (require 'kargu/contract)
-(require 'kargu/api)
+(require 'kargu/api/tools)
 (require 'kargu/permission)
 (require 'kargu/tools/process)
 
