@@ -1,4 +1,4 @@
-;;; kargu/api.el --- Chat send, models, connection test -*- lexical-binding: t; -*-
+;;; api.el --- Chat send, models, connection test -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -14,8 +14,8 @@
 ;;   * `kargu/api/response'  -> OpenAI chat-completion response decoding
 ;;   * `kargu/api/tools'     -> tool-call JSON encoding and schema conversion
 ;;   * `kargu/api/catalog'   -> dynamic model catalog querying, caching, metadata
-;;   * `kargu/api/select'    -> interactive Company selection popups at point
 ;;   * `kargu/api/client'    -> high-level send, cancel, and ping operations
+;; Selection commands autoload their separate chat adapter when called.
 ;;
 ;; Public API:
 ;;   `kargu-api-send', `kargu-api-cancel', `kargu-api-list-models',
@@ -30,9 +30,17 @@
 (require 'kargu/api/response)
 (require 'kargu/api/tools)
 (require 'kargu/api/catalog)
-(require 'kargu/api/select)
 (require 'kargu/api/client)
+
+(autoload 'kargu-set-model "kargu/api/select" nil t)
+(autoload 'kargu-switch-provider-and-model "kargu/api/select" nil t)
+(autoload 'kargu-chat-select-provider "kargu/api/select" nil t)
+(autoload 'kargu-chat-select-mode-company "kargu/api/select" nil t)
+(autoload 'kargu-chat-select-provider-company "kargu/api/select" nil t)
+(autoload 'kargu-chat-select-model-company "kargu/api/select" nil t)
+(autoload 'kargu-chat-select-effort-company "kargu/api/select" nil t)
+(autoload 'kargu-api-select "kargu/api/select")
 
 (provide 'kargu/api)
 
-;;; kargu/api.el ends here
+;;; api.el ends here

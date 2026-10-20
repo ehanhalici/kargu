@@ -28,6 +28,7 @@
 (require 'kargu/ui/notify)
 (require 'kargu/config)
 (require 'kargu/api)
+(require 'kargu/chat/select)
 (require 'kargu/loop)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/lsp)

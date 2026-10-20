@@ -111,5 +111,28 @@
         (cl-assert (equal results '(("value"))))
         (cl-assert (null kargu-async--pending))))))
 
+(ert-deftest kargu-module-api-does-not-load-selection-ui-test ()
+  "The API facade loads headlessly without the Company/footer adapter."
+  (kargu-module-test--evaluate
+   '((require 'kargu/api)
+     (dolist (feature '(kargu/api/select kargu/chat/select kargu/chat kargu/chat/prompt kargu/ui))
+       (cl-assert (not (featurep feature))))
+     (cl-assert (null (kargu-registered-tools)))
+     (cl-assert (autoloadp (symbol-function 'kargu-set-model))))
+   t))
+
+(ert-deftest kargu-module-selection-compatibility-entry-test ()
+  "The legacy feature still exposes the same public selection commands."
+  (kargu-module-test--evaluate
+   '((require 'kargu/api/select)
+     (cl-assert (featurep 'kargu/chat/select))
+     (cl-assert (not (featurep 'kargu/chat)))
+     (dolist (command '(kargu-set-model kargu-switch-provider-and-model
+                        kargu-chat-select-provider kargu-chat-select-mode-company
+                        kargu-chat-select-provider-company kargu-chat-select-model-company
+                        kargu-chat-select-effort-company))
+       (cl-assert (commandp command))))
+   t))
+
 (provide 'tests/test-modules)
 ;;; test-modules.el ends here
