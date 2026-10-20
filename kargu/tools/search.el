@@ -433,8 +433,6 @@ a callback is required."
   "Register the search tools and their aliases."
   (kargu-register-tools kargu-search--tool-specs kargu-search--tool-aliases))
 
-(kargu-search-register-tools)
-
 (provide 'kargu/tools/search)
 
 ;;; search.el ends here

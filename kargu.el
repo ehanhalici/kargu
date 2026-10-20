@@ -112,6 +112,17 @@
 (require 'kargu/tools/skill)
 (require 'kargu/tools/webfetch)
 (require 'kargu/tools/deps)
+
+;; Tool implementations expose definitions; only composition activates them.
+(kargu-lsp-register-tools)
+(kargu-search-register-tools)
+(kargu-dape-register-tools)
+(kargu-diff-register-tools)
+(kargu-bash-register-tools)
+(kargu-git-register-tools)
+(kargu-skill-register-tools)
+(kargu-webfetch-register-tools)
+
 (require 'kargu/loop)
 (require 'company nil t)
 (require 'kargu/chat)

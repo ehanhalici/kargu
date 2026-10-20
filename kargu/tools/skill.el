@@ -260,8 +260,6 @@ Normalize surrounding metadata whitespace; preserve literal internal lines."
    (lambda (args)
      (kargu-skill-load (kargu--tool-arg args "name")))))
 
-(kargu-skill-register-tools)
-
 (provide 'kargu/tools/skill)
 
 ;;; skill.el ends here

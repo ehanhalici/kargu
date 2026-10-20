@@ -146,8 +146,6 @@ Strictly validates that CWD and all path arguments stay within project root."
         (let ((err-msg (format "ERROR: %s" (error-message-string err))))
           (if callback (funcall callback err-msg) err-msg)))))))
 
-(kargu-bash-register-tools)
-
 (provide 'kargu/tools/bash)
 
 ;;; bash.el ends here

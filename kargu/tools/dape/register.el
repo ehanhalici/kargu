@@ -261,8 +261,6 @@
            kargu-dape--tool-specs)
    kargu-dape--tool-aliases))
 
-(kargu-dape-register-tools)
-
 (provide 'kargu/tools/dape/register)
 
 ;;; register.el ends here

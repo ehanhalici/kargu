@@ -142,8 +142,6 @@
   (kargu-set-tool-policy
    "edit_by_lsp" '(:modes (agent) :available-p kargu-lsp-symbols-unavailable-reason)))
 
-(kargu-lsp-register-tools)
-
 (provide 'kargu/tools/lsp/register)
 
 ;;; register.el ends here

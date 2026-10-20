@@ -284,8 +284,6 @@ hop repeats this after `kargu-webfetch--check-url'."
            (kargu-webfetch-url callback (kargu--tool-arg args "url"))
          (error (funcall callback (format "ERROR: %s" (error-message-string err)))))))))
 
-(kargu-webfetch-register-tools)
-
 (provide 'kargu/tools/webfetch)
 
 ;;; webfetch.el ends here

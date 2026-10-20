@@ -12,6 +12,7 @@
 
 (require 'ert)
 (require 'cl-lib)
+(require 'tests/module-boundaries)
 
 (defconst kargu-module-test--root
   (file-name-directory (locate-library "kargu"))
@@ -22,8 +23,9 @@
     kargu/config kargu/api kargu/loop kargu/chat kargu/ui)
   "Runtime and UI features forbidden in foundational module loads.")
 
-(defun kargu-module-test--evaluate (forms &optional packages)
-  "Evaluate FORMS in a fresh Emacs, optionally initializing PACKAGES."
+(defun kargu-module-test--evaluate (forms &optional packages root)
+  "Evaluate FORMS in a fresh Emacs using ROOT or the source package.
+Initialize installed PACKAGES only when requested."
   (let ((program (expand-file-name invocation-name invocation-directory))
         (expression
          `(progn
@@ -33,7 +35,7 @@
             ,@forms)))
     (with-temp-buffer
       (let ((status (call-process program nil t nil "--batch" "-Q"
-                                  "-L" kargu-module-test--root
+                                  "-L" (or root kargu-module-test--root)
                                   "--eval" (prin1-to-string expression))))
         (unless (eql status 0)
           (ert-fail (format "Isolated module test failed (%s):\n%s"
@@ -133,6 +135,87 @@
                         kargu-chat-select-effort-company))
        (cl-assert (commandp command))))
    t))
+
+(ert-deftest kargu-module-tool-loads-do-not-register-tools-test ()
+  "Loading a tool implementation does not mutate the application's registry."
+  (dolist (feature '(kargu/tools/lsp kargu/tools/search kargu/tools/dape
+                     kargu/tools/diff kargu/tools/bash kargu/tools/git
+                     kargu/tools/skill kargu/tools/webfetch))
+    (kargu-module-test--evaluate
+     `((require 'kargu/api/tools)
+       (cl-assert (null (kargu-registered-tools)))
+       (require ',feature)
+       (cl-assert (null (kargu-registered-tools)))
+       (cl-assert (not (featurep 'kargu/chat))))
+     t)))
+
+(ert-deftest kargu-module-root-registers-compatible-tools-once-test ()
+  "Composition retains core tools, aliases and repeated registration behavior."
+  (kargu-module-test--evaluate
+   '((require 'kargu)
+     (dolist (name '("read_file" "edit_file" "write_file" "apply_patch"
+                     "edit_by_lsp" "debug_start" "bash" "git_status" "skill"))
+       (cl-assert (member name (kargu-registered-tools))))
+     (cl-assert (equal (kargu-canonical-tool-name "edit_symbol") "edit_by_lsp"))
+     (cl-assert (equal (kargu-canonical-tool-name "step_over") "debug_step_over"))
+     (let ((before (sort (kargu-registered-tools) #'string<)))
+       (kargu-search-register-tools)
+       (kargu-lsp-register-tools)
+       (kargu-dape-register-tools)
+       (cl-assert (equal before (sort (kargu-registered-tools) #'string<))))
+     (cl-assert (commandp 'kargu-chat-show)))
+   t))
+
+(defun kargu-module-test--requires (file)
+  "Read FILE's literal top-level imports without executing its code."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (emacs-lisp-mode)
+    (goto-char (point-min))
+    (let (imports)
+      (while (progn (forward-comment (point-max)) (not (eobp)))
+        (let ((form (read (current-buffer))))
+          (when (and (consp form) (eq (car form) 'require)
+                     (consp (cadr form)) (eq (caadr form) 'quote))
+            (push (cadadr form) imports))))
+      imports)))
+
+(ert-deftest kargu-module-legacy-facade-debt-cannot-grow-test ()
+  "Broad facade imports must match the explicit shrinking migration budget."
+  (let ((files (directory-files-recursively
+                (expand-file-name "kargu" kargu-module-test--root) "\\.el\\'"))
+        (actual (make-hash-table :test #'eq)))
+    (dolist (file files)
+      (let ((feature (intern (file-name-sans-extension
+                              (file-relative-name file kargu-module-test--root)))))
+        (dolist (dependency (kargu-module-test--requires file))
+          (when (assq dependency kargu-module-test--legacy-dependencies)
+            (push feature (gethash dependency actual))))))
+    (dolist (entry kargu-module-test--legacy-dependencies)
+      (should (equal (sort (gethash (car entry) actual) #'string<)
+                     (sort (copy-sequence (cdr entry)) #'string<))))))
+
+(ert-deftest kargu-module-foundations-work-without-optional-source-files-test ()
+  "A reduced package tree can use foundations without runtime or UI sources."
+  (let ((root (make-temp-file "kargu-module-package-" t))
+        (files '("kargu/core/data.el" "kargu/core/group.el" "kargu/core/custom.el"
+                 "kargu/core/log.el" "kargu/json.el" "kargu/fs.el" "kargu/async.el"
+                 "kargu/permission/guards.el" "kargu/tools/process.el")))
+    (unwind-protect
+        (progn
+          (dolist (file files)
+            (let ((target (expand-file-name file root)))
+              (make-directory (file-name-directory target) t)
+              (copy-file (expand-file-name file kargu-module-test--root) target)))
+          (kargu-module-test--evaluate
+           '((dolist (feature '(kargu/json kargu/fs kargu/async
+                               kargu/permission/guards kargu/tools/process))
+               (require feature))
+             (cl-assert (null (locate-library "kargu/chat")))
+             (cl-assert (null (locate-library "kargu/api")))
+             (cl-assert (null (locate-library "kargu/state"))))
+           nil root))
+      (delete-directory root t))))
 
 (provide 'tests/test-modules)
 ;;; test-modules.el ends here

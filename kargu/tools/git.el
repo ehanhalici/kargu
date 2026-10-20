@@ -659,8 +659,6 @@ through `kargu-permission-approve', which may re-run BODY after the answer."
   "Register the git tools."
   (kargu-register-tools kargu-git--tool-specs))
 
-(kargu-git-register-tools)
-
 (provide 'kargu/tools/git)
 
 ;;; git.el ends here

@@ -639,8 +639,6 @@ Format:
   "Register the diff tools and their aliases."
   (kargu-register-tools kargu-diff--tool-specs kargu-diff--tool-aliases))
 
-(kargu-diff-register-tools)
-
 ;; Apply review_mode from TOML config if present
 (when (fboundp 'kargu--config-plist)
   (when-let* ((mode-str (plist-get (kargu--config-plist) :review-mode))
