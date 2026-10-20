@@ -101,6 +101,22 @@ families and complete a real loop run with a fake model boundary, without
 stubbing chat functions. This does not prove an end-to-end HTTP exchange or
 independent per-session contexts. Headless approval requests safely reject.
 
+## Optional tool families
+
+One ordered composition table loads and registers available tool facades.
+Search, Bash, Git, skill and webfetch can each be physically removed, or
+removed together with LSP and Dape. The remaining chat and text-file reader
+still work; absent tools and aliases are not registered. Registration order
+and existing policy gates are unchanged, and a broken installed adapter's
+load error is not swallowed.
+
+This table is not a runtime module manager. Diff is still a required engine
+dependency; its tracking, mutation and review responsibilities must be
+separated before the entire family can be removed safely. The existing
+mandatory vendor-package/executable checks are also not yet scoped to active
+capabilities. Startup source removal does not imply independent live unload
+or removal of the permission boundary.
+
 ## Regression gates
 
 `tests/test-modules.el` loads boundaries in fresh batch Emacs processes with
@@ -131,8 +147,8 @@ The common runner also works by absolute filename from another directory.
 
 ## Remaining boundaries
 
-The root still loads concrete features. Optional feature composition and
-application-owned registries have not yet been implemented: the compatibility
+The root still loads concrete features. Application-owned registries and
+complete optional feature composition have not yet been implemented: the compatibility
 facade still owns the existing `kargu--tool-registry` default reference, now
 pointing at the service record. There is no second writable registry. Loading
 Dape may still install its existing lifecycle hooks; removing tool auto-registration

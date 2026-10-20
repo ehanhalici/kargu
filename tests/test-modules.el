@@ -106,6 +106,42 @@ Initialize installed PACKAGES only when requested."
        (cl-assert (string-search "Verification incomplete"
                                  (kargu--loop-verify-footer (list section) 0 0)))))))
 
+(ert-deftest kargu-module-tool-family-removal-matrix-test ()
+  "Each independent tool family can be removed without disabling chat."
+  (dolist (entry '((kargu/tools/search "workspace_grep" "grep")
+                   (kargu/tools/bash "bash") (kargu/tools/git "git_status")
+                   (kargu/tools/skill "skill") (kargu/tools/webfetch "webfetch")))
+    (let ((source (symbol-name (car entry))))
+      (kargu-module-test--without-sources
+       (list (concat source ".el") (concat source "/"))
+       `((require 'kargu)
+         (cl-assert (not (featurep ',(car entry))))
+         (dolist (name ',(cdr entry))
+           (cl-assert (not (kargu-find-tool name))))
+         (cl-assert (kargu-find-tool "read_file"))
+         (cl-assert (commandp 'kargu-chat-show))
+         (with-temp-buffer (kargu-chat-mode) (kargu-chat-stop)))))))
+
+(ert-deftest kargu-module-text-editing-without-other-tool-families-test ()
+  "Text reading and chat survive removal of every other tool family."
+  (let ((families '("lsp" "dape" "search" "bash" "git" "skill" "webfetch")))
+    (kargu-module-test--without-sources
+     (cl-mapcan (lambda (name)
+                  (list (concat "kargu/tools/" name ".el")
+                        (concat "kargu/tools/" name "/"))) families)
+     '((require 'kargu)
+       (dolist (name '("debug_start" "lsp_diagnostics" "workspace_grep"
+                       "bash" "git_status" "skill" "webfetch"))
+         (cl-assert (not (kargu-find-tool name))))
+       (cl-assert (kargu-find-tool "edit_file"))
+       (with-temp-file "remaining.txt" (insert "Readable without adapters"))
+       (let ((kargu-permission--override-root default-directory))
+         (let ((result (kargu-execute-tool
+                        "read_file" '(("file_path" . "remaining.txt")))))
+           (cl-assert (string-search "Readable without adapters" result) nil
+                      "Reading without adapters returned: %s" result)))
+       (with-temp-buffer (kargu-chat-mode) (kargu-chat-stop))))))
+
 (ert-deftest kargu-module-contract-is-independent-test ()
   "Boundary predicates and result records need no application runtime."
   (kargu-module-test--load-foundation
