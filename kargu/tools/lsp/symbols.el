@@ -11,11 +11,7 @@
 ;;; Code:
 
 (require 'kargu/files)
-
-(declare-function kargu-diff--mutating-disabled "kargu/tools/diff" (name))
-(declare-function kargu-diff-apply-proposal "kargu/tools/diff/stage"
-                  (path contents &optional callback))
-(declare-function kargu-diff--describe "kargu/tools/diff/stage" (proposal))
+(require 'kargu/edit)
 
 (require 'kargu/tools/lsp/context)
 (require 'kargu/tools/lsp/skeleton)
@@ -491,19 +487,22 @@ REASON describes the proposal.  CALLBACK receives its final review outcome."
                     (plist-get symbol :end-line) content))
              (describe (lambda (outcome)
                          (format "Edit of %s `%s` in %s:\n%s"
-                                 (plist-get symbol :kind) name path
-                                 (kargu-diff--describe outcome)))))
+                                 (plist-get symbol :kind) name path outcome))))
         (when reason (kargu-log 'info "symbol edit: %s" reason))
         (if callback
-            (kargu-diff-apply-proposal path text
-                                      (lambda (outcome) (funcall callback (funcall describe outcome))))
-          (funcall describe (kargu-diff-apply-proposal path text)))))))
+            (kargu-edit-propose path text
+                                :callback (lambda (outcome)
+                                            (funcall callback (funcall describe outcome))))
+          (funcall describe (kargu-edit-propose path text)))))))
 
 (cl-defun kargu-lsp-edit-symbol (file-path symbol-name new-content &optional kind reason callback)
   "Replace SYMBOL-NAME in FILE-PATH with NEW-CONTENT.
 KIND narrows matches; REASON describes the proposal.  CALLBACK waits
 for asynchronous symbol collection and human review when required."
-  (let ((blocked (kargu-diff--mutating-disabled "edit_by_lsp"))
+  (let ((blocked (or (unless (eq (kargu-state-mode) 'agent)
+                       "ERROR: edit_by_lsp is disabled outside agent mode")
+                     (unless (kargu-edit-changes :available)
+                       "ERROR: editing provider unavailable; nothing was changed")))
         (path (kargu-permission-resolve file-path "lsp path")))
     (cond
      (blocked (if callback (funcall callback blocked) blocked))

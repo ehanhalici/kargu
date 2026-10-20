@@ -16,7 +16,7 @@
 (require 'kargu/core/observers)
 (require 'kargu/history)
 (require 'kargu/api)
-(require 'kargu/tools/diff)
+(require 'kargu/edit)
 (require 'kargu/confirm)
 
 (defvar kargu-max-healing-steps)
@@ -231,7 +231,7 @@ SIG keys the read-only cache; delivery is claimed before any continuation."
 (defun kargu-loop--after-budget (run id name result queue files)
   "Consume FILES for ID and NAME on RUN; extend RESULT and continue QUEUE."
   (dolist (file files)
-    (kargu-diff-consume-file file))
+    (kargu-edit-changes :consume-file file))
   (kargu-log 'warn "loop: healing budget spent; %d changed file(s) not auto-verified"
              (length files))
   (kargu--loop-add-result-and-continue
@@ -246,7 +246,7 @@ SIG keys the read-only cache; delivery is claimed before any continuation."
 (defun kargu--loop-after-tool (run id name result queue)
   "Deliver RESULT for ID and NAME on RUN with verification, then QUEUE."
   (when (kargu-loop--live-p run)
-    (let ((files (kargu-diff-changed-files)))
+    (let ((files (kargu-edit-changes :pending)))
       (funcall (alist-get (kargu-loop--classify-after-tool run files)
                           kargu-loop--on-after-tool)
                run id name result queue files))))

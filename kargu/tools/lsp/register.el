@@ -132,6 +132,12 @@
     ("read_symbol_body" . "read_symbol"))
   "Aliases for the LSP adapter tools.")
 
+(defun kargu-lsp-edit-unavailable-reason ()
+  "Return an unavailable reason when symbol editing lacks a guarded provider."
+  (or (unless (kargu-edit-changes :available)
+        "ERROR: editing provider unavailable; nothing was changed")
+      (kargu-lsp-symbols-unavailable-reason)))
+
 (defun kargu-lsp-register-tools ()
   "Register the LSP tools and their aliases."
   (kargu-register-tools
@@ -140,7 +146,7 @@
   (dolist (name '("lsp_find_symbol" "read_file_symbols" "read_symbol"))
     (kargu-set-tool-policy name '(:available-p kargu-lsp-symbols-unavailable-reason)))
   (kargu-set-tool-policy
-   "edit_by_lsp" '(:modes (agent) :available-p kargu-lsp-symbols-unavailable-reason)))
+   "edit_by_lsp" '(:modes (agent) :available-p kargu-lsp-edit-unavailable-reason)))
 
 (provide 'kargu/tools/lsp/register)
 

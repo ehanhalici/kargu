@@ -30,6 +30,7 @@
 (require 'kargu/api/tools)
 (require 'kargu/permission)
 (require 'kargu/files)
+(require 'kargu/edit)
 
 ;;;; Customization --------------------------------------------------------
 
@@ -466,34 +467,6 @@ CALLBACK receives the final summary once all file reviews have finished."
 (defconst kargu-diff--tool-specs
   (list
    (list
-    "read_file"
-    "Read a file with numbered lines (\"12 | code\"). Requires file_path. Search first, then use from_line/to_line (or limit) to read relevant sections rather than entire large files. Use structural inspection when available. NEVER pass search patterns or regex here."
-    '(("type" . "object")
-      ("properties" . (("file_path" . (("type" . "string")
-                                       ("description" . "Absolute or project-relative path of the file (or output buffer) to read. Must be a valid file path, NOT a search pattern or regex.")))
-                       ("from_line" . (("type" . "integer")
-                                       ("description" . "First 1-based line to return (inclusive).")))
-                       ("to_line" . (("type" . "integer")
-                                     ("description" . "Last 1-based line to return (inclusive).")))
-                       ("limit" . (("type" . "integer")
-                                   ("description" . "Maximum number of lines to return from from_line.")))))
-      ("required" . ["file_path"]))
-    (lambda (args)
-      (let* ((path (kargu--tool-file-path args))
-             (from (or (kargu--tool-arg args "from_line" "fromLine")
-                       (kargu--tool-arg args "offset")))
-             (limit (kargu--tool-arg args "limit"))
-             (to (or (kargu--tool-arg args "to_line" "toLine")
-                     (and from limit
-                          (let ((f (kargu-to-int from))
-                                (n (kargu-to-int limit)))
-                            (and f n (+ f n -1)))))))
-        (if (not (kargu-nonempty path))
-            (kargu--tool-missing-file-path args)
-          (condition-case-unless-debug err
-              (kargu-diff-read-file path from to)
-            (error (format "ERROR: %s" (error-message-string err))))))))
-   (list
     "edit_file"
     "Replace an exact unique block in an existing file. Read the relevant lines first, then supply old_string with enough surrounding text to be unique and new_string. Prefer structural editing when available. Changes follow the active review policy and retain rollback snapshots. Verify with available diagnostics and project tests."
     '(("type" . "object")
@@ -542,8 +515,7 @@ Format:
   "Tool schemas and executors for diff operations.")
 
 (defconst kargu-diff--tool-aliases
-  '(("read" . "read_file")
-    ("edit" . "edit_file")
+  '(("edit" . "edit_file")
     ("write" . "write_file")
     ("patch" . "apply_patch"))
   "Aliases for the diff tools.")
@@ -559,6 +531,49 @@ Format:
     (let ((m (intern (downcase (string-trim mode-str)))))
       (when (memq m '(auto blocking async))
         (setq kargu-diff-review-mode m)))))
+
+(defun kargu-diff-query-changes (query)
+  "Answer change-evidence QUERY using this adapter's existing records."
+  (let ((value (kargu-change-query-value query)))
+    (pcase (kargu-change-query-operation query)
+      (:available t)
+      (:pending (kargu-diff-changed-files))
+      (:modified (kargu-diff-run-modified-files))
+      (:capture (kargu-diff-pending-change value))
+      (:consume (kargu-diff-consume-change value))
+      (:consume-file (kargu-diff-consume-file value))
+      (:reset (kargu-diff-reset-run-files))
+      (:abort (kargu-diff-abort-all-sessions)))))
+
+(defun kargu-diff-submit-edit (request)
+  "Apply guarded edit REQUEST, preserving review and rollback semantics."
+  (let ((callback (kargu-edit-request-callback request))
+        (path (kargu-edit-request-path request))
+        (content (kargu-edit-request-content request)))
+    (if-let* ((blocked (kargu-diff--mutating-disabled "edit_by_lsp")))
+        (if callback (funcall callback blocked) blocked)
+      (if callback
+          (kargu-diff-apply-proposal
+           path content (lambda (outcome)
+                          (funcall callback (kargu-diff--describe outcome))))
+        (kargu-diff--describe (kargu-diff-apply-proposal path content))))))
+
+(defun kargu-diff-install ()
+  "Attach editing and evidence providers at application composition."
+  (advice-add 'kargu-query-changes :override #'kargu-diff-query-changes)
+  (advice-add 'kargu-edit-submit :override #'kargu-diff-submit-edit))
+
+(defun kargu/tools/diff-unload-function ()
+  "Refuse unloading an active adapter or one retaining recoverable edits."
+  (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+            (kargu-diff-snapshot-paths) (kargu-diff-changed-files)
+            (> (hash-table-count kargu-diff--sessions) 0)
+            (seq-some (lambda (spec) (kargu-find-tool (car spec)))
+                      kargu-diff--tool-specs))
+    (user-error "Kargu: stop, resolve edits/reviews and unregister diff tools before unloading"))
+  (advice-remove 'kargu-query-changes #'kargu-diff-query-changes)
+  (advice-remove 'kargu-edit-submit #'kargu-diff-submit-edit)
+  nil)
 
 (provide 'kargu/tools/diff)
 

@@ -173,6 +173,67 @@ Initialize installed PACKAGES only when requested."
    '(cl-assert (eq (kargu-to-int "broken" :missing) :missing))
    '(cl-assert (string-prefix-p "abc" (kargu-cap-text "abcdef" 3)))))
 
+(ert-deftest kargu-module-edit-port-is-independent-test ()
+  "The editing contract neither loads providers nor grants a mutation."
+  (kargu-module-test--load-foundation
+   'kargu/edit
+   '(cl-assert (not (kargu-edit-changes :available)))
+   '(cl-assert (not (kargu-edit-changes :pending)))
+   '(let (results)
+      (kargu-edit-propose "untouched.txt" "not written"
+                          :callback (lambda (value) (push value results)))
+      (cl-assert (= (length results) 1))
+      (cl-assert (string-prefix-p "ERROR:" (car results)))
+      (cl-assert (not (file-exists-p "untouched.txt"))))))
+
+(ert-deftest kargu-module-chat-and-symbol-reading-without-diff-test ()
+  "No diff sources means no mutation, not loss of chat or symbol reading."
+  (kargu-module-test--without-sources
+   '("kargu/tools/diff.el" "kargu/tools/diff/")
+   '((require 'kargu)
+     (cl-assert (not (featurep 'kargu/tools/diff)))
+     (cl-assert (kargu-find-tool "read_file"))
+     (cl-assert (kargu-find-tool "git_status"))
+     (cl-assert (not (kargu-find-tool "edit_file")))
+     (cl-assert (not (kargu-find-tool "apply_patch")))
+     (kargu-state-set-mode 'agent)
+     (let ((tool "edit_by_lsp")) (cl-assert (kargu-tool-policy-error tool)))
+     (with-temp-file "symbol.el" (insert "(defun kept () t)\n"))
+     (let ((kargu-permission--override-root default-directory))
+       (cl-letf (((symbol-function 'kargu-lsp-get-file-symbols)
+                  (lambda (_) '((:name "kept" :kind "Function"
+                                 :start-line 1 :end-line 1)))))
+         (cl-assert (string-search "defun kept"
+                                   (kargu-lsp-read-symbol "symbol.el" "kept"))))
+       (cl-assert (string-prefix-p "ERROR:"
+                                  (kargu-lsp-edit-symbol "symbol.el" "kept" "")))
+       (cl-assert (equal (kargu-file-text "symbol.el") "(defun kept () t)\n")))
+     (with-temp-buffer (kargu-chat-mode) (kargu-chat-stop)))))
+
+(ert-deftest kargu-module-edit-port-single-delivery-test ()
+  "An optional provider cannot deliver one edit result twice."
+  (kargu-module-test--load-foundation
+   'kargu/edit
+   '(let (results)
+      (cl-letf (((symbol-function 'kargu-edit-submit)
+                 (lambda (request)
+                   (funcall (kargu-edit-request-callback request) "first")
+                   (funcall (kargu-edit-request-callback request) "late"))))
+        (kargu-edit-propose "file.txt" "content"
+                            :callback (lambda (value) (push value results))))
+      (cl-assert (equal results '("first"))))))
+
+(ert-deftest kargu-module-edit-port-validates-provider-output-test ()
+  "Malformed provider evidence and descriptions fail at the port boundary."
+  (kargu-module-test--load-foundation
+   'kargu/edit
+   '(cl-letf (((symbol-function 'kargu-query-changes) (lambda (_) '(42)))
+              ((symbol-function 'kargu-edit-submit) (lambda (_) 42)))
+      (dolist (thunk (list (lambda () (kargu-edit-changes :pending))
+                           (lambda () (kargu-edit-changes :available))
+                           (lambda () (kargu-edit-propose "file.txt" "no"))))
+        (cl-assert (condition-case nil (progn (funcall thunk) nil) (error t)))))))
+
 (ert-deftest kargu-module-tool-registry-is-independent-test ()
   "An explicit registry operates without initializing a default runtime."
   (kargu-module-test--load-foundation
@@ -249,16 +310,34 @@ Initialize installed PACKAGES only when requested."
      (dolist (feature '(kargu/chat kargu/ui kargu/ui/confirm kargu/plan))
        (cl-assert (not (featurep feature))))) t))
 
+(ert-deftest kargu-module-edit-provider-unload-test ()
+  "An idle unregistered provider detaches without leaving unsafe callbacks."
+  (kargu-module-test--evaluate
+   '((require 'kargu/tools/diff)
+     (kargu-diff-install)
+     (kargu-diff-install)
+     (cl-assert (kargu-edit-changes :available))
+     (kargu-diff-register-tools)
+     (cl-assert (condition-case nil
+                    (progn (unload-feature 'kargu/tools/diff t) nil)
+                  (user-error t)))
+     (dolist (name '("edit_file" "write_file" "apply_patch"))
+       (kargu-unregister-tool name))
+     (unload-feature 'kargu/tools/diff t)
+     (cl-assert (not (kargu-edit-changes :available)))
+     (cl-assert (string-prefix-p "ERROR:" (kargu-edit-propose "new.txt" "no")))) t))
+
 (ert-deftest kargu-module-headless-run-without-ui-sources-test ()
-  "A fake model run completes with chat, plan and UI source trees absent."
+  "A fake model run completes with chat, plan, UI and diff sources absent."
   (kargu-module-test--without-sources
    '("kargu/chat.el" "kargu/chat/" "kargu/ui.el" "kargu/ui/"
-     "kargu/plan.el" "kargu/plan/")
+     "kargu/plan.el" "kargu/plan/" "kargu/tools/diff.el" "kargu/tools/diff/")
    '((setq kargu-ui-enabled nil)
      (require 'kargu)
      (dolist (feature '(kargu/chat kargu/ui/confirm kargu/ui/transient kargu/plan))
        (cl-assert (not (featurep feature))))
      (cl-assert (null (locate-library "kargu/chat")))
+     (cl-assert (null (locate-library "kargu/tools/diff")))
      (cl-assert (kargu-find-tool "read_file"))
      (let (report approved)
        (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))

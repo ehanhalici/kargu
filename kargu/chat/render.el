@@ -13,7 +13,10 @@
 (require 'kargu/chat/transcript)
 (require 'kargu/chat/stream)
 (require 'kargu/api/tools)
-(require 'kargu/tools/diff)
+
+(declare-function kargu-diff-file-stats "kargu/tools/diff/track" (path))
+(declare-function kargu-diff-review "kargu/tools/diff/review" (&optional path))
+(declare-function kargu-diff-rollback "kargu/tools/diff/track" (path &optional single-step))
 
 (defvar kargu--loop-run)
 (defvar kargu-loop-tool-start-hook)

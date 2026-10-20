@@ -112,5 +112,41 @@ an exact `old_string' without the prefix."
                 "")
               body))))
 
+(defconst kargu-file--tool-specs
+  (list
+   (list
+    "read_file"
+    "Read a file with numbered lines (\"12 | code\"). Requires file_path. Search first, then use from_line/to_line (or limit) to read relevant sections rather than entire large files. Use structural inspection when available. NEVER pass search patterns or regex here."
+    '(("type" . "object")
+      ("properties" . (("file_path" . (("type" . "string")
+                                       ("description" . "Absolute or project-relative path of the file (or output buffer) to read. Must be a valid file path, NOT a search pattern or regex.")))
+                       ("from_line" . (("type" . "integer")
+                                       ("description" . "First 1-based line to return (inclusive).")))
+                       ("to_line" . (("type" . "integer")
+                                     ("description" . "Last 1-based line to return (inclusive).")))
+                       ("limit" . (("type" . "integer")
+                                   ("description" . "Maximum number of lines to return from from_line.")))))
+      ("required" . ["file_path"]))
+    (lambda (args)
+      (let* ((path (kargu--tool-file-path args))
+             (from (or (kargu--tool-arg args "from_line" "fromLine")
+                       (kargu--tool-arg args "offset")))
+             (limit (kargu--tool-arg args "limit"))
+             (to (or (kargu--tool-arg args "to_line" "toLine")
+                     (and from limit
+                          (let ((f (kargu-to-int from))
+                                (n (kargu-to-int limit)))
+                            (and f n (+ f n -1)))))))
+        (if (not (kargu-nonempty path))
+            (kargu--tool-missing-file-path args)
+          (condition-case-unless-debug err
+              (kargu-file-read path from to)
+            (error (format "ERROR: %s" (error-message-string err)))))))))
+  "Read-only file tool schema and executor.")
+
+(defun kargu-file-register-tools ()
+  "Register file reading and its legacy alias without mutation tools."
+  (kargu-register-tools kargu-file--tool-specs '(("read" . "read_file"))))
+
 (provide 'kargu/files)
 ;;; files.el ends here

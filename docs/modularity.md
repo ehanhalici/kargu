@@ -117,12 +117,22 @@ still work; absent tools and aliases are not registered. Registration order
 and existing policy gates are unchanged, and a broken installed adapter's
 load error is not swallowed.
 
-This table is not a runtime module manager. Diff is still a required engine
-dependency; its tracking, mutation and review responsibilities must be
-separated before the entire family can be removed safely. The existing
-mandatory vendor-package/executable checks are also not yet scoped to active
-capabilities. Startup source removal does not imply independent live unload
-or removal of the permission boundary.
+Diff is optional too: the engine observes changes through `kargu/edit`, and
+LSP submits proposals through that port rather than private diff helpers.
+Typed `kargu-change-query` and `kargu-edit-request` records cross that boundary.
+Inputs and evidence/description outputs are validated there; asynchronous
+results are delivered at most once. The original diff adapter still owns
+permission, snapshot, review and identity-safe consumption. No adapter means
+no editing grant; symbol editing is unavailable in both schema and execution.
+The read-only `read_file` tool and its alias are composed independently.
+
+Adapter installation uses idempotent native advice without a second registry.
+Unloading refuses while a run, recovery snapshot, change, review or registered
+diff tool remains. Explicitly resolving those resources and unregistering its
+tools allows detachment; the fail-closed default then applies. It is not a
+runtime module manager or a complete migration of shared runtime ownership.
+Mandatory vendor-package/executable checks are not yet scoped to active
+capabilities. Source removal does not remove the permission boundary.
 
 ## Regression gates
 

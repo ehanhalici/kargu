@@ -15,7 +15,6 @@
 (require 'kargu/core)
 (require 'kargu/chat)
 (require 'kargu/api)
-(require 'kargu/tools/diff)
 (require 'kargu/loop)
 (eval-and-compile
   (require 'transient nil t))
@@ -152,6 +151,10 @@
   (kargu-ui--dispatch 'kargu-history-inspect)
   (kargu-show-log))
 
+(defun kargu-menu--lsp-unavailable-p ()
+  "Return non-nil when this project cannot offer LSP tools."
+  (not (and (fboundp 'kargu-eglot-connected-p) (kargu-eglot-connected-p))))
+
 (when (fboundp 'transient-define-prefix)
 
   (defun kargu-menu--ask ()
@@ -181,10 +184,6 @@
     (kargu-set-mode 'agent)
     (message "kargu mode: agent (autonomous, ediff-confirmed edits)")
     (call-interactively #'kargu-menu))
-
-  (defun kargu-menu--lsp-unavailable-p ()
-    "Return non-nil when this project cannot offer LSP tools."
-    (not (and (fboundp 'kargu-eglot-connected-p) (kargu-eglot-connected-p))))
 
   (defvar kargu-eglot-required-message)
 

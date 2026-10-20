@@ -74,6 +74,7 @@
 ;;; Code:
 
 (declare-function kargu-ui-confirm-install "kargu/ui/confirm" ())
+(declare-function kargu-diff-install "kargu/tools/diff" ())
 
 ;; Ensure the package root is on `load-path' during byte/native
 ;; compilation from a subdirectory (Magit-style kargu/core features).
@@ -111,6 +112,7 @@
 (dolist (adapter '((kargu/tools/lsp . kargu-lsp-register-tools)
                    (kargu/tools/search . kargu-search-register-tools)
                    (kargu/tools/dape . kargu-dape-register-tools)
+                   (kargu/files . kargu-file-register-tools)
                    (kargu/tools/diff . kargu-diff-register-tools)
                    (kargu/tools/bash . kargu-bash-register-tools)
                    (kargu/tools/git . kargu-git-register-tools)
@@ -118,6 +120,8 @@
                    (kargu/tools/webfetch . kargu-webfetch-register-tools)))
   (when (require (car adapter) nil t)
     (funcall (cdr adapter))))
+
+(when (featurep 'kargu/tools/diff) (kargu-diff-install))
 
 (when (and kargu-ui-enabled (require 'kargu/ui/confirm nil t))
   (kargu-ui-confirm-install))

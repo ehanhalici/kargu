@@ -30,7 +30,6 @@
 (require 'kargu/api)
 (require 'kargu/chat/select)
 (require 'kargu/loop)
-(require 'kargu/tools/diff)
 (require 'kargu/tools/deps)
 
 ;; Modular subcomponents of chat

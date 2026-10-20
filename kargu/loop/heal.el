@@ -13,7 +13,7 @@
 
 (require 'cl-lib)
 (require 'kargu/core)
-(require 'kargu/tools/diff)
+(require 'kargu/edit)
 (require 'kargu/async)
 
 (declare-function kargu-lsp-wait-diagnostics "kargu/tools/lsp/settle"
@@ -41,14 +41,17 @@
   "Collect FILES diagnostics for ID and NAME on RUN after RESULT, then QUEUE.
 This entry point retains the after-tool dispatcher's positional signature."
   (when (kargu-loop--live-p run)
-    (let* ((changes (delq nil (mapcar #'kargu-diff-pending-change files)))
+    (let* ((changes (delq nil (mapcar (lambda (file)
+                                      (kargu-edit-changes :capture file)) files)))
            (verification (kargu--make-verification
                           :run run :id id :name name :result result :queue queue
                           :pending files))
            (task (kargu-async-start
                   (lambda (sections error)
                     (kargu--loop-publish-verification verification sections error))
-                  :cancel (lambda () (mapc #'kargu-diff-consume-change changes)))))
+                  :cancel (lambda ()
+                            (mapc (lambda (change)
+                                    (kargu-edit-changes :consume change)) changes)))))
       (setf (kargu--verification-task verification) task)
       (funcall (kargu-async-wrap
                 task (lambda ()
