@@ -7,7 +7,7 @@
 ;;; Commentary:
 
 ;; Approval policy for commands and mutating tools.  Human answers are
-;; asked through the non-blocking `kargu-ui-confirm' and delivered by
+;; asked through the non-blocking `kargu-confirm' port and delivered by
 ;; callback; nothing here waits for the user.
 
 ;;; Code:
@@ -15,7 +15,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'kargu/permission/guards)
-(require 'kargu/ui/confirm)
+(require 'kargu/confirm)
 
 (defvar kargu--loop-run)
 (defvar kargu-permission--deferring nil
@@ -58,7 +58,7 @@ Emacs never approves on its own."
   "Ask the human whether to run COMMAND in DIR; RISKS explain the warning.
 ON-DECISION gets non-nil for approve.  It runs when a button is clicked,
 never by waiting."
-  (kargu-ui-confirm
+  (kargu-confirm
    :title "⚡ [Bash Permission Approval]"
    :details (format "Command: $ %s\nDirectory: %s"
                     (kargu-permission--shown-command command risks) dir)
@@ -127,7 +127,7 @@ Inside asynchronous permission handling, defer an unanswered request."
 THUNK takes a DONE function and must call it with the result, now or later.
 It asks for approvals with `kargu-permission-approve' before any side
 effect.  When one needs the human, the question is put through
-`kargu-ui-confirm', and THUNK runs again after the answer; a rejection
+`kargu-confirm', and THUNK runs again after the answer; a rejection
 becomes an ERROR result.  PREAPPROVED lists scoped approval snapshots."
   (let* ((kargu-permission--preapproved preapproved)
          (in-catch t)

@@ -72,7 +72,6 @@
      kargu/loop/compact
      kargu/loop/machine
      kargu/loop/tools
-     kargu/loop/ui
      kargu/ui/transient))
   "Exact consumers still allowed to require legacy facade features.")
 

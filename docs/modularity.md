@@ -79,6 +79,28 @@ the adapter facade and implementation directory from a temporary package,
 not just hide function definitions. This is startup absence support, not a
 promise of safe live module unloading or complete context isolation.
 
+## UI-independent confirmations and startup
+
+Engine and permission consumers use `kargu/confirm`, not `ui/confirm`.
+The port validates its callback and fail-closed default before presentation;
+without an adapter it delivers reject, stop or cancel immediately. A test
+mock decision cannot grant approval in that fallback. Requests are named
+`kargu-confirmation` records; their nested options are borrowed read-only.
+
+Package composition explicitly installs the existing UI adapter using Emacs
+function advice, with no additional global handler table. Installation is
+idempotent. Unloading refuses while confirmations are pending; after callers
+dismiss them, unloading detaches the adapter and restores the safe fallback.
+Closed requests remove their buffer cleanup hooks, and stale buttons remain
+inert across unload/reload. This is not yet application/session-scoped UI
+ownership: the adapter's existing pending list remains shared.
+
+Set `(setq kargu-ui-enabled nil)` before loading `kargu` to skip chat, plan
+review and UI composition. Source-absence tests remove all three source
+families and complete a real loop run with a fake model boundary, without
+stubbing chat functions. This does not prove an end-to-end HTTP exchange or
+independent per-session contexts. Headless approval requests safely reject.
+
 ## Regression gates
 
 `tests/test-modules.el` loads boundaries in fresh batch Emacs processes with

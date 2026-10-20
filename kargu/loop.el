@@ -27,7 +27,7 @@
 (require 'kargu/api)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/deps nil t)
-(require 'kargu/ui/confirm)
+(require 'kargu/confirm)
 
 (declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id provider))
 (declare-function kargu-session-project-root "kargu/chat/session" (&optional buffer-or-dir))
@@ -209,7 +209,10 @@ the diff run files and the UI as they were."
   (when (kargu-loop-running-p)
     (user-error "Kargu: a run is already in progress (M-x kargu-loop-stop)"))
   (let ((missing (and (fboundp 'kargu-deps-missing)
-                      (kargu-deps-missing (kargu-session-project-root)))))
+                      (kargu-deps-missing
+                       (if (fboundp 'kargu-session-project-root)
+                           (kargu-session-project-root)
+                         (kargu-permission-project-root))))))
     (when missing
       (user-error "Kargu: Run cannot start because mandatory tools are missing: %s"
                   (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", "))))
@@ -283,7 +286,7 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
     (let ((report (kargu-loop--finish-report run status text)))
       (kargu-async-cancel-owner run)
       (setq kargu--loop-run nil)
-      (kargu-confirm-dismiss-all)
+      (kargu-dismiss-confirmations)
       (when (and (memq status '(:stopped :error))
                  (fboundp 'kargu-diff-abort-all-sessions))
         (kargu-diff-abort-all-sessions))

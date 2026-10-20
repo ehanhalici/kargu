@@ -73,6 +73,8 @@
 
 ;;; Code:
 
+(declare-function kargu-ui-confirm-install "kargu/ui/confirm" ())
+
 ;; Ensure the package root is on `load-path' during byte/native
 ;; compilation from a subdirectory (Magit-style kargu/core features).
 (eval-and-compile
@@ -123,11 +125,13 @@
 (kargu-skill-register-tools)
 (kargu-webfetch-register-tools)
 
+(when (and kargu-ui-enabled (require 'kargu/ui/confirm nil t))
+  (kargu-ui-confirm-install))
 (require 'kargu/loop)
-(require 'company nil t)
-(require 'kargu/chat)
-(require 'kargu/plan)
-(require 'kargu/ui)
+(when (and kargu-ui-enabled (require 'kargu/chat nil t))
+  (require 'company nil t)
+  (require 'kargu/plan nil t)
+  (require 'kargu/ui nil t))
 
 (provide 'kargu)
 

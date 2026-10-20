@@ -17,7 +17,7 @@
 (require 'kargu/history)
 (require 'kargu/api)
 (require 'kargu/tools/diff)
-(require 'kargu/ui/confirm)
+(require 'kargu/confirm)
 
 (defvar kargu-max-healing-steps)
 (defvar kargu-loop-tool-start-hook nil
@@ -59,15 +59,6 @@
   (or (kargu-nonempty (kargu-aget call "id"))
       (error "Tool call was not normalized before execution")))
 
-(defvar kargu-chat--output-marker)
-(defvar kargu-chat--prompt-marker)
-(defvar kargu-chat-buffer-name)
-(declare-function kargu-loop-running-p "kargu/loop" ())
-(declare-function kargu-chat-show "kargu/chat" ())
-(declare-function kargu-chat--ensure-running-prompt "kargu/chat/prompt" ())
-(declare-function kargu-chat--ensure-idle-prompt "kargu/chat/prompt" ())
-(declare-function kargu-notify "kargu/ui/notify" (type &optional msg))
-
 (defconst kargu-loop--cacheable-tools
   '("read_file" "read_file_symbols" "read_symbol" "read_file_outline"
     "list_files" "find_files" "workspace_grep" "grep_search" "grep"
@@ -100,7 +91,7 @@ on RUN, which grants three more identical calls."
          (or (and (eq kargu-loop--mock-doom-decision :approve) :approve)
              (and (eq kargu-loop--mock-doom-decision :reject) :stop)
              kargu-confirm--mock-decision)))
-    (kargu-ui-confirm
+    (kargu-confirm
      :title "⚡ [Tool Repetition Approval]"
      :details (kargu-loop--doom-details name args)
      :notice "Notice: Identical tool call repeated 3 times consecutively."

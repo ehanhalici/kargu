@@ -22,6 +22,7 @@
 (require 'button)
 
 (require 'kargu/core)
+(require 'kargu/confirm)
 
 (defvar kargu-chat--output-marker)
 (defvar kargu-chat--prompt-marker)
@@ -32,9 +33,6 @@
 (declare-function kargu-loop-running-p "kargu/loop" ())
 (declare-function kargu-chat--ensure-running-prompt "kargu/chat/prompt" ())
 (declare-function kargu-chat--ensure-idle-prompt "kargu/chat/prompt" ())
-
-(defvar kargu-confirm--mock-decision nil
-  "Dynamically bound decision key for unit tests (e.g. `:retry', `:stop').")
 
 (cl-defstruct (kargu-confirm--req (:constructor kargu-confirm--req-create))
   "One prompt on screen: its buffer, actions and pending callback."
@@ -210,6 +208,12 @@ SET-DECISION-FN is called with the chosen action key when clicked."
   (unless (kargu-confirm--req-resolved req)
     (setf (kargu-confirm--req-resolved req) t)
     (setq kargu-confirm--pending (delq req kargu-confirm--pending))
+    (let ((buffer (kargu-confirm--req-chat-buf req)))
+      (when (and (buffer-live-p buffer)
+                 (not (cl-find buffer kargu-confirm--pending
+                               :key #'kargu-confirm--req-chat-buf)))
+        (with-current-buffer buffer
+          (remove-hook 'kill-buffer-hook #'kargu-confirm--cancel-buffer t))))
     (unless (eq decision :cancel)
       (condition-case err
           (kargu-confirm--write-audit (kargu-confirm--req-chat-buf req)
@@ -244,6 +248,23 @@ Claim each request before delivery so stale buttons remain inert."
       (or (and actions (plist-get (car actions) :key)) :ok)
     default-action))
 
+(defun kargu-confirm--enqueue (chat-buf options)
+  "Own a pending request in CHAT-BUF using presentation OPTIONS."
+  (let* ((actions (plist-get options :actions))
+         (req (kargu-confirm--req-create
+               :chat-buf chat-buf :actions actions
+               :on-decision (plist-get options :on-decision))))
+    (push req kargu-confirm--pending)
+    (with-current-buffer chat-buf
+      (add-hook 'kill-buffer-hook #'kargu-confirm--cancel-buffer nil t))
+    (kargu-confirm--render-prompt
+     chat-buf (plist-get options :title) (plist-get options :details)
+     (plist-get options :notice) actions
+     (lambda (decision)
+       (when (fboundp 'kargu-confirm--settle)
+         (kargu-confirm--settle req decision))))
+    (kargu-confirm--reveal chat-buf)))
+
 (defun kargu-ui-confirm (&rest plist)
   "Show a confirmation prompt with action buttons and return at once.
 The chosen action key is passed to the `:on-decision' function.
@@ -267,7 +288,7 @@ before this function returns; interactively it runs when a button is clicked."
          (fallback (or (plist-get plist :fallback-prompt)
                        (format "%s Proceed? " (or title "Notice:")))))
     (unless (functionp on-decision)
-      (error "kargu-ui-confirm needs an :on-decision function"))
+      (error "Kargu UI confirmation needs an :on-decision function"))
     (cond
      (kargu-confirm--mock-decision
       (when chat-buf
@@ -283,16 +304,25 @@ before this function returns; interactively it runs when a button is clicked."
       (if (not chat-buf)
           (funcall on-decision
                    (kargu-confirm--ask-in-minibuffer fallback actions default-action))
-        (let ((req (kargu-confirm--req-create
-                    :chat-buf chat-buf :actions actions :on-decision on-decision)))
-          (push req kargu-confirm--pending)
-          (with-current-buffer chat-buf
-            (add-hook 'kill-buffer-hook #'kargu-confirm--cancel-buffer nil t))
-          (kargu-confirm--render-prompt
-           chat-buf title (plist-get plist :details) (plist-get plist :notice)
-           actions (lambda (d) (kargu-confirm--settle req d)))
-          (kargu-confirm--reveal chat-buf)))))
+        (kargu-confirm--enqueue chat-buf plist))))
     nil))
+
+(defun kargu-ui-present-confirmation (request)
+  "Present REQUEST through this UI adapter, or dismiss pending requests."
+  (pcase (kargu-confirmation-operation request)
+    (:prompt (apply #'kargu-ui-confirm (kargu-confirmation-options request)))
+    (:dismiss (kargu-confirm-dismiss-all))))
+
+(defun kargu-ui-confirm-install ()
+  "Attach this adapter to the confirmation port, idempotently."
+  (advice-add 'kargu-present-confirmation :override #'kargu-ui-present-confirmation))
+
+(defun kargu/ui/confirm-unload-function ()
+  "Refuse unloading while this adapter owns unanswered requests."
+  (when kargu-confirm--pending
+    (user-error "Kargu: dismiss pending confirmations before unloading their UI"))
+  (advice-remove 'kargu-present-confirmation #'kargu-ui-present-confirmation)
+  nil)
 
 (provide 'kargu/ui/confirm)
 

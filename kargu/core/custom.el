@@ -15,6 +15,13 @@
 
 (require 'kargu/core/group)
 
+(defcustom kargu-ui-enabled t
+  "Whether package composition loads chat, plan review and UI adapters.
+Set this before loading Kargu for headless use.  This is a startup choice,
+not permission to unload active views or jobs at runtime."
+  :type 'boolean
+  :group 'kargu)
+
 (defcustom kargu-api-key nil
   "API key override for the active provider.
 

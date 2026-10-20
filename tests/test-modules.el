@@ -136,6 +136,100 @@ Initialize installed PACKAGES only when requested."
       (cl-assert (kargu-tool-registry-remove registry "read"))
       (cl-assert (zerop (kargu-tool-registry-count registry))))))
 
+(ert-deftest kargu-module-confirmation-port-is-independent-test ()
+  "The control contract requires no UI and never invents human approval."
+  (kargu-module-test--load-foundation
+   'kargu/confirm
+   '(cl-assert (not (featurep 'kargu/ui/confirm)))
+   '(let ((kargu-confirm--mock-decision :approve) decisions)
+      (kargu-confirm :default-action :reject
+                     :on-decision (lambda (decision) (push decision decisions)))
+      (kargu-confirm :on-decision (lambda (decision) (push decision decisions)))
+      (kargu-dismiss-confirmations)
+      (cl-assert (equal decisions '(:stop :reject))))))
+
+(ert-deftest kargu-module-confirmation-rejects-unsafe-options-test ()
+  "Invalid boundary input cannot reach a confirmation adapter."
+  (kargu-module-test--load-foundation
+   'kargu/confirm
+   '(cl-letf (((symbol-function 'kargu-present-confirmation)
+               (lambda (_) (error "Adapter must not be called"))))
+      (dolist (options '((:default-action :approve :on-decision ignore)
+                         (:on-decision nil) (:on-decision)))
+        (cl-assert
+         (condition-case err
+             (progn (apply #'kargu-confirm options) nil)
+           (error (not (equal (error-message-string err)
+                              "Adapter must not be called")))))))))
+
+(ert-deftest kargu-module-confirmation-adapter-unload-test ()
+  "An adapter refuses active unloading; closed prompts remain inert."
+  (kargu-module-test--evaluate
+   '((require 'kargu/ui/confirm)
+     (kargu-ui-confirm-install)
+     (kargu-ui-confirm-install)
+     (with-temp-buffer
+       (let ((noninteractive nil) decisions action)
+         (cl-letf (((symbol-function 'kargu-confirm--reveal) #'ignore))
+           (kargu-confirm :chat-buffer (current-buffer)
+                          :actions '((:key :approve :label "Approve"))
+                          :on-decision (lambda (value) (push value decisions))))
+         (setq action (button-get (next-button (point-min)) 'action))
+         (cl-assert (condition-case nil
+                        (progn (unload-feature 'kargu/ui/confirm t) nil)
+                      (user-error t)))
+         (cl-assert (featurep 'kargu/ui/confirm))
+         (kargu-dismiss-confirmations)
+         (unload-feature 'kargu/ui/confirm t)
+         (cl-assert (not (featurep 'kargu/ui/confirm)))
+         (funcall action nil)
+         (kargu-confirm :on-decision (lambda (value) (push value decisions)))
+         (cl-assert (equal decisions '(:stop :cancel)))
+         (require 'kargu/ui/confirm)
+         (kargu-ui-confirm-install)
+         (let ((kargu-confirm--mock-decision :approve))
+           (kargu-confirm :on-decision (lambda (value) (push value decisions))))
+         (funcall action nil)
+         (cl-assert (equal decisions '(:approve :stop :cancel)))))) t))
+
+(ert-deftest kargu-module-headless-startup-with-ui-installed-test ()
+  "A headless startup choice avoids loading even installed UI adapters."
+  (kargu-module-test--evaluate
+   '((setq kargu-ui-enabled nil)
+     (require 'kargu)
+     (dolist (feature '(kargu/chat kargu/ui kargu/ui/confirm kargu/plan))
+       (cl-assert (not (featurep feature))))) t))
+
+(ert-deftest kargu-module-headless-run-without-ui-sources-test ()
+  "A fake model run completes with chat, plan and UI source trees absent."
+  (kargu-module-test--without-sources
+   '("kargu/chat.el" "kargu/chat/" "kargu/ui.el" "kargu/ui/"
+     "kargu/plan.el" "kargu/plan/")
+   '((setq kargu-ui-enabled nil)
+     (require 'kargu)
+     (dolist (feature '(kargu/chat kargu/ui/confirm kargu/ui/transient kargu/plan))
+       (cl-assert (not (featurep feature))))
+     (cl-assert (null (locate-library "kargu/chat")))
+     (cl-assert (kargu-find-tool "read_file"))
+     (let (report approved)
+       (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+                 ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil))
+                 ((symbol-function 'kargu-api-send)
+                  (lambda (_prompt callback &rest _)
+                    (funcall callback
+                             '(("choices" . [(("finish_reason" . "stop")
+                                               ("message" . (("role" . "assistant")
+                                                             ("content" . "Headless answer"))))]))))))
+         (kargu-loop-send "Offline question" nil (lambda (value) (setq report value))))
+       (cl-assert (eq (plist-get report :status) :done))
+       (cl-assert (equal (plist-get report :text) "Headless answer"))
+       (cl-assert (not (kargu-loop-running-p)))
+       (let ((noninteractive nil))
+         (kargu-permission-request-approval-async
+          "dangerous command" default-directory '("risk")
+          (lambda (value) (setq approved (if value :approved :rejected)))))
+       (cl-assert (eq approved :rejected))))))
+
 (ert-deftest kargu-module-json-is-independent-test ()
   "The JSON codec keeps wire identities without initializing a session."
   (kargu-module-test--load-foundation

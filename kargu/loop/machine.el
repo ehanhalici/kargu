@@ -23,19 +23,16 @@
 (require 'kargu/history/compact)
 (require 'kargu/api)
 (require 'kargu/api/circuit)
-(require 'kargu/ui/confirm)
+(require 'kargu/confirm)
 
 (defvar kargu-loop-empty-retries)
 (defvar kargu-loop-upstream-retries)
 (defvar kargu-max-iterations)
-(defvar kargu-chat--output-marker)
-(defvar kargu-chat--prompt-marker)
 
 (defvar kargu-loop-model-stream-hook nil
   "Observers called with RUN and EVENT at model stream boundaries.
 EVENT is `start' for a new model turn or `retry' before replaying its stream.")
 
-(declare-function kargu-chat--prompt-live-p "kargu/chat/prompt")
 (declare-function kargu--api-error-looks-retryable-p "kargu/api/retry" (message))
 (declare-function kargu--api-retry-delay "kargu/api/retry" (attempt err))
 
@@ -335,7 +332,7 @@ remembers the refusal and retries without tools."
 
 (defun kargu-loop--recover-or-finish (run err)
   "Ask the user to retry or stop after ERR during RUN; the answer is a callback."
-  (kargu-ui-confirm
+  (kargu-confirm
    :title "⚠️  [Request Interrupted / Network Error]"
    :details (format "The model request failed or timed out:\n%s" err)
    :notice "Choose whether to retry the request or stop the current agent run."
