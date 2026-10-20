@@ -13,6 +13,7 @@
 (require 'gv)
 (require 'kargu/core/session)
 (require 'kargu/contract/history)
+(require 'kargu/json)
 
 (defun kargu-history-context (&optional history)
   "Validate explicit HISTORY, or resolve the current session's history."
@@ -36,7 +37,9 @@ The protocol firewall, not storage, repairs draft message semantics."
   (kargu-contract-assert #'proper-list-p messages)
   (let ((history (kargu-history-context history)) (copy (copy-tree messages t)))
     (setf (kargu-history-messages-value history) copy
-          (kargu-history-tail-value history) (last copy))
+          (kargu-history-tail-value history) (last copy)
+          (kargu-history-measured-tail-value history) nil
+          (kargu-history-char-count-value history) nil)
     copy))
 
 (gv-define-setter kargu-history-messages (value &optional history)
@@ -58,6 +61,24 @@ Snapshots remain independent when later turns are appended or repaired."
 (defun kargu-history-last-message (&optional history)
   "Borrow HISTORY's last message read-only; default to current owner."
   (car (kargu-history-tail-value (kargu-history-context history))))
+
+(defun kargu-history-message-char-count (&optional history)
+  "Measure HISTORY's serialized message array, defaulting to current owner.
+Only newly appended messages are encoded.  Replacement invalidates the
+measurement and cursor; unchanged queries allocate no full JSON string.
+This synchronous cursor belongs to the queue, not an asynchronous revision."
+  (let* ((history (kargu-history-context history))
+         (cursor (kargu-history-measured-tail-value history))
+         (pending (if cursor (cdr cursor) (kargu-history-messages-value history)))
+         (total (or (kargu-history-char-count-value history) 2))
+         (seen cursor))
+    (cl-loop for cell on pending do
+             (setq total (+ total (if seen 1 0)
+                            (length (kargu-json-encode-record (car cell))))
+                   seen t cursor cell))
+    (setf (kargu-history-measured-tail-value history) cursor
+          (kargu-history-char-count-value history) total)
+    total))
 
 (defun kargu-history-system-key (&optional history)
   "Return HISTORY's stored prompt identity, defaulting to current owner."

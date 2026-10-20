@@ -30,7 +30,7 @@
 
 (ert-deftest kargu-history-store-copies-draft-containers-test ()
   "Input and snapshot containers cannot mutate the owned queue."
-  (let* ((message '(("role" . "user") ("content" . [(("text" . "hello"))])))
+  (let* ((message (copy-tree '(("role" . "user") ("content" . [(("text" . "hello"))])) t))
          (history (kargu-history-create :messages (list message)))
          (snapshot (kargu-history-snapshot history)))
     (setcdr (assoc "text" (aref (kargu-aget message "content") 0)) "input changed")
@@ -147,6 +147,75 @@
                        '("A1" "A2")))
         (should (equal (kargu-aget (aref (kargu-aget (cadr saved) "messages") 0) "content")
                        "B1"))))))
+
+(ert-deftest kargu-history-size-counts-only-new-messages-test ()
+  "Stable queries encode nothing; appending encodes only the new suffix."
+  (let ((history (kargu-history-create))
+        (encode (symbol-function 'kargu-json-encode-record)) (encodes 0))
+    (cl-letf (((symbol-function 'kargu-json-encode-record)
+               (lambda (value) (cl-incf encodes) (funcall encode value))))
+      (should (= (kargu-history-message-char-count history) 2))
+      (should (= encodes 0))
+      (dotimes (_ 100)
+        (kargu-history-append '(("role" . "user") ("content" . "hi")) history)
+        (kargu-history-message-char-count history)
+        (kargu-history-message-char-count history))
+      (should (= encodes 100))
+      (kargu-history-replace '((("role" . "user") ("content" . "replacement"))) history)
+      (kargu-history-message-char-count history)
+      (should (= encodes 101)))))
+
+(ert-deftest kargu-history-size-matches-json-for-structured-content-test ()
+  "Incremental cost includes exact brackets, commas, escaping and blocks."
+  (let ((history (kargu-history-create)))
+    (dolist (message '((("role" . "user") ("content" . "Türkçe \"quote\"\nline"))
+                       (("role" . "user") ("content" . [(("type" . "image_url")
+                                                       ("image_url" . (("url" . "data:αβ"))))]))
+                       (("role" . "assistant") ("content" . :json-null)
+                        ("tool_calls" . [(("id" . "call") ("function" . (("arguments" . "{}"))))]))
+                       (("role" . "tool") ("tool_call_id" . "call") ("content" . "done"))))
+      (kargu-history-append message history)
+      (should (= (kargu-history-message-char-count history)
+                 (length (kargu-json-encode-record (vconcat (kargu-history-messages history)))))))
+    (kargu-history-set-overlay "system" history)
+    (kargu--validate-history t history)
+    (should (= (kargu-history-message-char-count history)
+               (length (kargu-json-encode-record (vconcat (kargu-history-messages history))))))
+    (kargu-history-replace nil history)
+    (should (= (kargu-history-message-char-count history) 2))))
+
+(ert-deftest kargu-history-size-failed-measurement-keeps-published-cursor-test ()
+  "A failed suffix scan never publishes a partial measurement."
+  (let ((history (kargu-history-create))
+        (encode (symbol-function 'kargu-json-encode-record)) (calls 0))
+    (kargu-history-append '(("content" . "first")) history)
+    (kargu-history-message-char-count history)
+    (kargu-history-append '(("content" . "second")) history)
+    (kargu-history-append '(("content" . "third")) history)
+    (cl-letf (((symbol-function 'kargu-json-encode-record)
+               (lambda (message)
+                 (when (= (cl-incf calls) 2) (error "Measurement interrupted"))
+                 (funcall encode message))))
+      (should-error (kargu-history-message-char-count history)))
+    (should (= (kargu-history-message-char-count history)
+               (length (kargu-json-encode-record (vconcat (kargu-history-messages history))))))))
+
+(ert-deftest kargu-history-size-keeps-live-schema-cost-and-owner-isolation-test ()
+  "History caching does not freeze changing tool schemas or another owner."
+  (kargu-history-test--with-owners
+    (let ((schema-cost 12))
+      (cl-letf (((symbol-function 'kargu-tool-schema-char-count) (lambda () schema-cost)))
+        (with-current-buffer a
+          (kargu-history-add "user" "A")
+          (let ((before (kargu-history-char-count)))
+            (setq schema-cost 27)
+            (should (= (kargu-history-char-count) (+ before 15)))))
+        (with-current-buffer b (should (= (kargu-history-char-count) 29)))
+        (with-current-buffer a
+          (kargu-history-apply-compaction "summary" nil)
+          (should (= (kargu-history-char-count)
+                     (+ schema-cost (length (kargu-json-encode-record
+                                             (vconcat (kargu-history-messages))))))))))))
 
 (provide 'tests/test-history-store)
 ;;; test-history-store.el ends here

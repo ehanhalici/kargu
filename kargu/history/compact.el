@@ -68,7 +68,7 @@ Use the configured fallback when that context window is unknown."
   "Estimate serialized history and advertised schema character cost.
 Include system text, structured content, attachments and list/vector tool
 invocations.  Image tokenization remains provider-dependent."
-  (+ (length (kargu-json-encode-record (vconcat (kargu-history-messages))))
+  (+ (kargu-history-message-char-count)
      (if (fboundp 'kargu-tool-schema-char-count)
          (kargu-tool-schema-char-count)
        0)))
@@ -105,7 +105,7 @@ in the compaction summary preserves user/assistant turn alternation."
     (dolist (msg (kargu-history-messages))
       (unless (or (equal (kargu-aget msg "role") "system")
                   (kargu--history-compaction-msg-p msg))
-        (push (copy-tree msg) msgs)))
+        (push (copy-tree msg t) msgs)))
     (setq msgs (nreverse msgs))
     (let* ((slice (last msgs (max 1 kargu-history-compact-keep)))
            (tail slice))

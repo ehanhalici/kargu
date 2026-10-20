@@ -15,7 +15,8 @@
 
 (cl-defstruct (kargu-history (:constructor kargu-history--create))
   "Owned protocol drafts and their derived prompt identity."
-  messages-value tail-value system-key-value overlay-value)
+  messages-value tail-value system-key-value overlay-value
+  measured-tail-value char-count-value)
 
 (cl-defun kargu-history-create (&key messages)
   "Create an isolated history from MESSAGES, copying lists and vectors.

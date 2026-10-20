@@ -52,13 +52,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 - **Beklenen/gerçek:** Küçük aralık tüm satır listesini gerektirmemeli; maliyet dosya boyutuyla büyüyor.
 - **Yeniden üretme/kapanış:** Büyük dosyada dar aralık, uzun satır, büyüme, EOF, boş dosya, UTF-8 ve kirli/daraltılmış tampon; ölçümlü bellek/çıktı bütçesi ve unavailable/truncation sözleşmesi.
 
-### PERF-02 · P2 · K — Geçmiş boyutu her kontrolde tam JSON ile hesaplanıyor
-
-- **Yer/kanıt:** `kargu/history/compact.el`, `kargu-history-char-count`: bütün geçmiş `vconcat` ve `kargu-json-encode-record` üzerinden geçiyor.
-- **Beklenen/gerçek:** Değişmeyen geçmişte hesap tekrar kullanılmalı; her kontrolde tam metin ayrılıyor. UI gecikmesinin büyüklüğü ölçülmeli.
-- **Yeniden üretme/kapanış:** Sabit/büyüyen geçmişte serileştirme sayısı/bellek; repair, compaction, reset, restore ve içerik değişimlerinde önbellek doğruluğu.
-- **Bağımlılık:** `history/store.el` sahipli kuyruk ve detached snapshot sınırı korunsun; önbellek yalnız bu sahibin yazmalarında geçersizleştirilsin.
-
 ### PERF-04 · P2 · K — Oturum listesi bütün kayıtları senkron ayrıştırıyor
 
 - **Yer/kanıt:** `kargu/chat/session.el`, `kargu-session-list`: directory-files + döngüde `kargu-session-storage-read`. Tek dosya boyut sınırı toplam maliyeti sınırlamıyor.
@@ -188,10 +181,10 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 
 ### ARCH-07 · Geçmiş: Yazma Anında Değişmezler, Her İstekte Protokol Duvarı
 
-- **Dosyalar / kalan sınır:** `history/store.el` tek sahipli kuyruk/snapshot sınırı; `history/protocol.el`, `history/repair.el`, `history/compact.el` protokol geçişleri. Sona ekleme yalnız yeni mesajı kopyalıyor; 1000/2000 ekleme ölçümünde cons tahsisi 58,076/116,076 (eski append: 502,573/2,005,082). Repair/compaction hâlâ tam geçmişi işler; boyut ölçümü PERF-02 kapsamında. Geçmiş her anda gönderilebilir değildir: asistan tool-call turunun sonuçları henüz gelmemiş olabilir.
-- **Karar:** Sahipli geçmiş API'sinde ekleme, tool-result eşleştirme, reset/restore ve compaction geçişlerini tamamla. Ölçüm önbelleği yalnız geçerli yazma nesli ve değişmez payload snapshot'ıyla tekrar kullanılabilsin. PERF-02 ölçümleriyle gereksiz kopyaları azalt; başkasının snapshot'ını `nconc` veya iç içe mutasyonla bozma.
+- **Dosyalar / kalan sınır:** `history/store.el` tek sahipli kuyruk/snapshot sınırı; `history/protocol.el`, `history/repair.el`, `history/compact.el` protokol geçişleri. Sona ekleme yalnız yeni mesajı kopyalıyor; 1000/2000 ekleme ölçümünde cons tahsisi 58,076/116,076 (eski append: 502,573/2,005,082). Boyut ölçümü senkron/sahipli cursor ile yalnız yeni mesajları kodluyor; replacement eski ölçümü/cursor'u temizliyor, şema maliyeti canlı okunuyor. Repair/compaction hâlâ tam geçmişi işler. Geçmiş her anda gönderilebilir değildir: asistan tool-call turunun sonuçları henüz gelmemiş olabilir.
+- **Karar:** Sahipli geçmiş API'sinde ekleme, tool-result eşleştirme, reset/restore ve compaction geçişlerini tamamla. Mevcut senkron kuyruk cursor'unu koru; ileride asenkron ölçüm eklenirse sahiplik/yazma nesli doğrulaması olmadan eski sonuç yayınlanmasın. Değişmez payload snapshot'ını `nconc` veya iç içe mutasyonla bozma.
 - **Sınır:** Gönderim öncesi protokol duvarını kaldırma. İptal sonrası eksik sonuçlar, dış restore, legacy kayıtlar ve farklı wire biçimleri hâlâ doğrulanmalı/normalize edilmeli. Sentetik hata sonucu gerçek araç başarısı diye raporlanmamalı. Ortak iç protokol ile sağlayıcıya özgü kodlama kısıtları ayrı sınırlarda yaşasın.
-- **Kapanış / bağımlılık:** CHAT-01, PERF-02; restore/repair/compaction, duplicate/orphan tool ID, yarım tur, iptal ve nested içerik paylaşımı testleri. İsteğin duvarı atlayamaması ve mevcut protokol/law testleri korunmalı; protokol modeli değişirse TLC güncellenmeli.
+- **Kapanış / bağımlılık:** CHAT-01, MOD-05; restore/repair/compaction, duplicate/orphan tool ID, yarım tur, iptal ve nested içerik paylaşımı testleri. İsteğin duvarı atlayamaması ve mevcut protokol/law testleri korunmalı; protokol modeli değişirse TLC güncellenmeli.
 
 ### ARCH-08 · Veri Modeli: Tek Koleksiyon Türü Değil, Tek Anlam ve Açık Sahiplik
 
