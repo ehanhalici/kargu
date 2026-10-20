@@ -163,6 +163,25 @@ without client/loop/chat/UI sources exercises raw cleanup without changing
 the application's verification state. Request globals and per-logical-request
 resource ownership still require the separate runtime-context migration.
 
+## Ordered reset coordination
+
+The session service clears only its own counters and explicit overrides.
+The autoloaded application reset coordinates cancellation, session clearing,
+history, circuit and state reset, then isolated view notifications. It does
+not delegate the critical sequence to unordered hooks. Core session code no
+longer writes chat-private variables, and loading the loop no longer advises
+the reset command. Chat notification is installed at composition and removed
+when its session adapter is unloaded.
+
+Standalone API requests are cancelled too, invalidating old deliveries before
+history is cleared. If cancellation starts replacement work, reset refuses
+to clear that work's session data. ERT covers ordered services, observer
+failure, replacement work and delayed standalone responses without UI sources.
+The bounded loop still abstracts this successful publication as its existing
+atomic `ResetSession`; these tests do not constitute a full-system proof.
+Session counters/history and selection remain shared legacy data, so explicit
+per-session context ownership and transactional reset remain open.
+
 ## Regression gates
 
 `tests/test-modules.el` loads boundaries in fresh batch Emacs processes with

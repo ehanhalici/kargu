@@ -304,13 +304,6 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
                           (error-message-string err))))
       report)))
 
-(defun kargu-loop--reset-guard (&rest _args)
-  "Stop a running agent loop before resetting the session."
-  (when (kargu-loop-running-p)
-    (kargu-loop-stop "session reset")))
-
-(advice-add 'kargu-session-reset :before #'kargu-loop--reset-guard)
-
 (require 'kargu/loop/compact)
 (require 'kargu/loop/tools)
 (require 'kargu/loop/heal)

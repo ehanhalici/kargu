@@ -116,6 +116,16 @@ A blank value clears that part of the live selection."
 (defvar-local kargu-chat--messages nil
   "Buffer-local snapshot of protocol messages for this session.")
 
+(defun kargu-chat-session-reset ()
+  "Clear the current chat's session view after application reset completes."
+  (when (derived-mode-p 'kargu-chat-mode)
+    (setq kargu-chat--messages nil kargu-chat--session-id nil)))
+
+(defun kargu/chat/session-unload-function ()
+  "Detach this adapter's reset notification before unloading it."
+  (remove-hook 'kargu-session-reset-hook #'kargu-chat-session-reset)
+  nil)
+
 ;;;; Project paths & storage helpers --------------------------------------
 
 (defun kargu-session-project-root (&optional buffer-or-dir)

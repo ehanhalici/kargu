@@ -76,6 +76,7 @@
 (declare-function kargu-ui-confirm-install "kargu/ui/confirm" ())
 (declare-function kargu-diff-install "kargu/tools/diff" ())
 (declare-function kargu-chat-plan-install "kargu/chat/plan" ())
+(declare-function kargu-chat-session-reset "kargu/chat/session" ())
 
 ;; Ensure the package root is on `load-path' during byte/native
 ;; compilation from a subdirectory (Magit-style kargu/core features).
@@ -128,6 +129,7 @@
   (kargu-ui-confirm-install))
 (require 'kargu/loop)
 (when (and kargu-ui-enabled (require 'kargu/chat nil t))
+  (add-hook 'kargu-session-reset-hook #'kargu-chat-session-reset)
   (require 'company nil t)
   (when (require 'kargu/plan nil t)
     (require 'kargu/chat/plan)

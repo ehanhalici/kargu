@@ -497,6 +497,57 @@ Initialize installed PACKAGES only when requested."
        (cl-assert (= kargu--generation (1+ generation)))
        (cl-assert (eq (kargu-state-status) :verifying))))))
 
+(ert-deftest kargu-module-reset-orders-cancellation-and-passive-notices-test ()
+  "Reset coordinates critical services before isolated optional notices."
+  (kargu-module-test--evaluate
+   '((require 'kargu/core/session)
+     (let* ((active t) trace
+           (old-id (kargu-session-id))
+           (kargu-session-reset-hook
+            (list (lambda () (error "Broken view"))
+                  (lambda () (push :view trace)))))
+       (cl-letf (((symbol-function 'kargu-loop-running-p) (lambda () active))
+                  ((symbol-function 'kargu-loop-stop)
+                   (lambda (_)
+                     (cl-assert (equal old-id (kargu-session-id)))
+                     (setq active nil) (push :cancel trace)))
+                  ((symbol-function 'kargu-history-reset) (lambda () (push :history trace)))
+                  ((symbol-function 'kargu-circuit-reset) (lambda () (push :circuit trace)))
+                  ((symbol-function 'kargu-state-reset) (lambda () (push :state trace))))
+         (kargu-session-reset))
+       (cl-assert (equal (nreverse trace) '(:cancel :history :circuit :state :view)))
+       (cl-assert (not (equal old-id (kargu-session-id)))))
+     (cl-assert (not (featurep 'kargu/chat)))
+     (cl-assert (not (featurep 'kargu/state))))))
+
+(ert-deftest kargu-module-reset-retains-data-on-reentrant-work-test ()
+  "Reset cannot clear a session after cancellation starts replacement work."
+  (kargu-module-test--evaluate
+   '((require 'kargu/core/session)
+     (let ((old-id (kargu-session-id)))
+       (cl-letf (((symbol-function 'kargu-loop-running-p) (lambda () t))
+                  ((symbol-function 'kargu-loop-stop) #'ignore))
+         (cl-assert (condition-case nil (progn (kargu-session-reset) nil)
+                      (user-error t))))
+       (cl-assert (equal old-id (kargu-session-id)))))))
+
+(ert-deftest kargu-module-headless-reset-invalidates-standalone-api-delivery-test ()
+  "A request without an agent loop cannot write into a reset conversation."
+  (kargu-module-test--without-sources
+   '("kargu/chat.el" "kargu/chat/" "kargu/ui.el" "kargu/ui/")
+   '((setq kargu-ui-enabled nil)
+     (require 'kargu)
+     (let* (called
+            (delivery (kargu-api--make-delivery
+                       :generation kargu--generation
+                       :callback (lambda (_) (setq called t)))))
+       (setq kargu--busy t)
+       (kargu-session-reset)
+       (kargu-api--deliver delivery '(("usage" . (("prompt_tokens" . 5)))))
+       (cl-assert (not called))
+       (cl-assert (not kargu--message-history))
+       (cl-assert (zerop (plist-get kargu--session :requests)))))))
+
 (ert-deftest kargu-module-api-delivery-owns-usage-once-test ()
   "The delivery facade owns usage and never calls a concrete chat footer."
   (kargu-module-test--evaluate

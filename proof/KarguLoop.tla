@@ -199,7 +199,8 @@ SetMode(newMode, debugReady) ==
     /\ UNCHANGED <<state, history, Counters, ToolVars, Flags, runStatus,
                    generation, Circuit>>
 
-(* ResetSession: `kargu-session-reset'.  The advice stops a live run first. *)
+(* ResetSession: application/reset cancels live work before publication.  *)
+(* Reentrant replacement work refuses publication, as checked by ERT.     *)
 ResetSession ==
     /\ state              ' = "IDLE"
     /\ history            ' = << >>

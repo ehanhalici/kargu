@@ -15,9 +15,7 @@
 
 (require 'kargu/core/log)
 
-(declare-function kargu-history-reset "kargu/history/protocol" ())
-(declare-function kargu-circuit-reset "kargu/api/circuit" ())
-(declare-function kargu-state-reset "kargu/state/transitions" ())
+(autoload 'kargu-session-reset "kargu/application/reset" nil t)
 (declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
 
 ;;;; Session state --------------------------------------------------------
@@ -144,9 +142,11 @@ CAP is nil when the model record has no context window."
       (message "kargu %s" report))
     report))
 
-(defun kargu-session-reset ()
-  "Reset session counters, conversation history and agent state."
-  (interactive)
+(defvar kargu-session-reset-hook nil
+  "Optional view notifications after the application finishes a session reset.")
+
+(defun kargu-session-clear ()
+  "Replace only session-owned counters and explicit selection overrides."
   (setq kargu--session-id (kargu--generate-session-id))
   (setq kargu--session
         (list :active nil
@@ -156,19 +156,8 @@ CAP is nil when the model record has no context window."
               :tokens-out 0
               :last-prompt-tokens 0
               :started (format-time-string "%Y-%m-%d %H:%M")))
-  (when (fboundp 'kargu-history-reset)
-    (kargu-history-reset))
-  (when (fboundp 'kargu-circuit-reset)
-    (kargu-circuit-reset))
-  (when (fboundp 'kargu-state-reset)
-    (kargu-state-reset))
   (setq kargu--session-provider nil
-        kargu--session-model nil)
-  (when (boundp 'kargu-chat--messages)
-    (setq kargu-chat--messages nil))
-  (when (boundp 'kargu-chat--session-id)
-    (setq kargu-chat--session-id nil))
-  (message "kargu session reset"))
+        kargu--session-model nil))
 
 (provide 'kargu/core/session)
 
