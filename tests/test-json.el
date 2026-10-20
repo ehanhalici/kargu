@@ -82,6 +82,14 @@
     (should (hash-table-p (kargu-aget (kargu--decode-tool-arguments wire) "options"))))
   (should (equal (kargu--encode-tool-arguments "[]") "{}")))
 
+(ert-deftest kargu-json-tool-raw-property-is-not-an-error-marker-test ()
+  "A legitimate property named _raw survives history argument encoding."
+  (require 'kargu/api/tools)
+  (should (equal (kargu--encode-tool-arguments "{\"_raw\":\"user value\"}")
+                 "{\"_raw\":\"user value\"}"))
+  (should (equal (kargu--encode-tool-arguments '(("_raw" . "user value")))
+                 "{\"_raw\":\"user value\"}")))
+
 (ert-deftest kargu-json-lenient-reader-parses-each-value-once-test ()
   "Validation and decoding share one native parse per JSON value."
   (let ((parse-buffer (symbol-function 'json-parse-buffer))

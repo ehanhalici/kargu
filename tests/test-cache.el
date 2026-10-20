@@ -69,6 +69,60 @@
       (should-not (kargu-tool-visible-p "alias"))
       (should (string-prefix-p "ERROR:" (kargu-execute-tool "alias" nil))))))
 
+(ert-deftest kargu-cache-tool-schema-evaluates-availability-once-test ()
+  "One schema build evaluates each canonical tool's availability once."
+  (let ((kargu--tool-registry (kargu-tool-registry-create)) (calls 0))
+    (kargu-register-tool "probe" "Probe" nil #'ignore
+                         (list :available-p (lambda () (cl-incf calls) nil)))
+    (kargu-register-tool-alias "alias" "probe")
+    (should (= (length (kargu--build-tools-vector)) 1))
+    (should (= calls 1))))
+
+(ert-deftest kargu-cache-tool-refusal-is-not-recomputed-test ()
+  "The refusal returned by availability is delivered without a second call."
+  (let ((kargu--tool-registry (kargu-tool-registry-create)) (calls 0) results)
+    (kargu-register-tool
+     "probe" "Probe" nil (lambda (_) (ert-fail "Denied tool was executed"))
+     (list :available-p (lambda () (when (= (cl-incf calls) 1) "ERROR: denied"))))
+    (kargu-execute-tool "probe" nil (lambda (text) (push text results)))
+    (should (equal results '("ERROR: denied")))
+    (should (= calls 1))))
+
+(ert-deftest kargu-cache-tool-visibility-override-cannot-bypass-policy-test ()
+  "An explicit advertisement predicate does not override availability."
+  (let ((kargu--tool-registry (kargu-tool-registry-create))
+        (kargu--tools-visible-p (lambda (_) t)) (calls 0))
+    (kargu-register-tool
+     "probe" "Probe" nil #'ignore
+     (list :available-p (lambda () (cl-incf calls) "ERROR: unavailable")))
+    (should-not (kargu-tool-visible-p "probe"))
+    (should (= calls 1))))
+
+(ert-deftest kargu-cache-tool-execution-decodes-arguments-once-test ()
+  "Tool ingress decodes once and gives the executor the same object."
+  (let ((kargu--tool-registry (kargu-tool-registry-create))
+        (decode (symbol-function 'kargu--json-decode-lenient)) (calls 0))
+    (kargu-register-tool "probe" "Probe" nil
+                         (lambda (args) (kargu-aget args "value")))
+    (cl-letf (((symbol-function 'kargu--json-decode-lenient)
+               (lambda (wire) (cl-incf calls) (funcall decode wire))))
+      (should (equal (kargu-execute-tool "probe" "{\"value\":\"Türkçe 🙂\"}")
+                     "Türkçe 🙂")))
+    (should (= calls 1))))
+
+(ert-deftest kargu-cache-tool-execution-rejects-nonobjects-test ()
+  "Decoded native scalars and arrays are refused just like JSON text."
+  (let ((kargu--tool-registry (kargu-tool-registry-create)))
+    (kargu-register-tool "probe" "Probe" nil
+                         (lambda (_) (ert-fail "Malformed arguments reached executor")))
+    (dolist (args '(7 t [] :json-false ("not-an-object")
+                     "[]" "false" "null" "\"text\"" "{not-json"))
+      (let (results)
+        (kargu-execute-tool "probe" args (lambda (text) (push text results)))
+        (should (= (length results) 1))
+        (should (string-prefix-p "ERROR: the arguments of tool probe"
+                                 (car results)))))))
+
 (ert-deftest kargu-cache-usage-preserves-unknown-and-counts-native-input-test ()
   "Cache metrics use only provider measurements and include native cached input."
   (let* ((kargu--session (list :requests 0))

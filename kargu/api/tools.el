@@ -118,35 +118,31 @@ a spec supplies its own fifth element."
               name (kargu-state-mode)))
      (available (funcall available)))))
 
-(defun kargu--tool-visible-p (name)
+(defun kargu-tool-visible-p (name)
   "Return non-nil if tool NAME is visible to the model.
 Delegates to `kargu--tools-visible-p' if set, otherwise to
 `kargu-loop-tool-visible-p' if defined, defaulting to t."
-  (and (not (kargu-tool-policy-error name))
-       (if kargu--tools-visible-p
-	   (funcall kargu--tools-visible-p name)
-	 (if (fboundp 'kargu-loop-tool-visible-p)
-             (kargu-loop-tool-visible-p name)
-	   t))))
+  (cond
+   (kargu--tools-visible-p
+    (and (not (kargu-tool-policy-error name))
+         (funcall kargu--tools-visible-p name)))
+   ((fboundp 'kargu-loop-tool-visible-p) (kargu-loop-tool-visible-p name))
+   (t (not (kargu-tool-policy-error name)))))
 
 (defun kargu--build-tools-vector ()
   "Build the OpenAI \"tools\" array (as a vector) from the registry.
-Tools hidden by `kargu--tool-visible-p' are skipped."
-  (let (tools)
-    (dolist (name (kargu-advertised-tools))
-      (let ((definition (kargu-find-tool name)))
-        (when (kargu--tool-visible-p name)
-          (push `(("type" . "function")
-                  ("function" . (("name" . ,name)
-                                 ("description" .
-                                  ,(kargu-tool-definition-description definition))
-                                 ("parameters" .
-                                  ,(kargu--sanitize-tool-parameters
-                                    (kargu-tool-definition-parameters definition))))))
-                tools))))
-    (vconcat (nreverse tools))))
-
-(defalias 'kargu-tool-visible-p #'kargu--tool-visible-p)
+Visibility is decided once by `kargu-advertised-tools'."
+  (cl-map 'vector
+          (lambda (name)
+            (let ((definition (kargu-find-tool name)))
+              `(("type" . "function")
+                ("function" . (("name" . ,name)
+                               ("description" .
+                                ,(kargu-tool-definition-description definition))
+                               ("parameters" .
+                                ,(kargu--sanitize-tool-parameters
+                                  (kargu-tool-definition-parameters definition))))))))
+          (kargu-advertised-tools)))
 
 (defun kargu-tool-schema-char-count ()
   "Return the serialized character cost of currently advertised tool schemas."
@@ -161,48 +157,28 @@ Tools hidden by `kargu--tool-visible-p' are skipped."
       alias)))
 
 (defun kargu--decode-tool-arguments (arguments)
-  "Normalize tool ARGUMENTS to a typed object, native alist or nil.
-A valid empty object {} becomes nil, not a raw fallback.
+  "Normalize tool ARGUMENTS to an object, nil, or :invalid.
+A valid empty object {} becomes nil; nonobjects are rejected.
 Concatenated JSON objects keep the last object."
   (cond
-   ((null arguments) nil)
-   ((eq arguments :json-null) nil)
+   ((memq arguments '(nil :json-null)) nil)
    ((stringp arguments)
     (let ((trimmed (string-trim arguments)))
       (if (or (string-empty-p trimmed) (equal trimmed "{}"))
           nil
         (let ((parsed (kargu--json-decode-lenient trimmed)))
-          (if parsed
+          (if (and parsed (kargu--object-p (cdr parsed)))
               (cdr parsed)
-            (list (cons "_raw" trimmed)))))))
+            :invalid)))))
    ((kargu--object-p arguments) arguments)
-   (t arguments)))
-
-(defun kargu--tool-arguments-invalid-p (arguments)
-  "Non-nil when ARGUMENTS is text that is not one JSON object.
-An empty string and `{}' are valid: they mean no arguments."
-  (and (stringp arguments)
-       (let ((trimmed (string-trim arguments)))
-         (and (not (string-empty-p trimmed))
-              (not (equal trimmed "{}"))
-              (let ((parsed (kargu--json-decode-lenient trimmed)))
-                (not (and parsed (or (null (cdr parsed))
-                                     (kargu--object-p (cdr parsed))))))))))
+   (t :invalid)))
 
 (defun kargu--encode-tool-arguments (arguments)
   "Return ARGUMENTS as a single valid JSON object string.
 Used when storing tool_calls so the next POST cannot 400 on
 concatenated or empty snapshots."
   (let ((decoded (kargu--decode-tool-arguments arguments)))
-    (cond
-     ((null decoded) "{}")
-     ((and (consp decoded)
-           (equal (car (car decoded)) "_raw")
-           (null (cdr decoded)))
-      "{}")
-     ((kargu--object-p decoded)
-      (kargu-json-encode-record decoded))
-     (t "{}"))))
+    (if (kargu--object-p decoded) (kargu-json-encode-record decoded) "{}")))
 
 (defun kargu--json-true-p (val)
   "Return t only when VAL is an explicit true.
@@ -439,7 +415,7 @@ Errors are captured and returned as \"ERROR: ...\" results so the
 agent loop can feed them back to the model for self-correction."
   (let* ((definition (kargu-find-tool name))
          (raw (kargu--tool-raw-args arguments))
-         (args (kargu--decode-tool-arguments arguments)))
+         (args (kargu--decode-tool-arguments arguments)) refusal)
     (kargu--log-block (format "tool %s arguments (raw)" name) raw
                       (kargu--log-looks-json-p raw))
     (kargu--log-block (format "tool %s arguments (parsed)" name)
@@ -450,10 +426,9 @@ agent loop can feed them back to the model for self-correction."
      ((null definition)
       (let ((out (format "ERROR: no such tool: %s" name)))
         (if callback (funcall callback out) out)))
-     ((kargu-tool-policy-error name)
-      (let ((out (kargu-tool-policy-error name)))
-        (if callback (funcall callback out) out)))
-     ((kargu--tool-arguments-invalid-p arguments)
+     ((setq refusal (kargu-tool-policy-error name))
+      (if callback (funcall callback refusal) refusal))
+     ((eq args :invalid)
       (let ((out (format "ERROR: the arguments of tool %s are not a valid JSON object; send one JSON object. Received: %s"
                          name (truncate-string-to-width raw 200))))
         (if callback (funcall callback out) out)))
