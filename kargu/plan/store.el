@@ -13,11 +13,19 @@
 
 (require 'cl-lib)
 (require 'kargu/contract/assert)
-(require 'kargu/chat/session)
+(require 'kargu/plan/context)
 
 (cl-defstruct (kargu-plan-record (:constructor kargu-plan--make-record))
   "Plan artifact owned by one captured chat, project and session."
-  origin root session buffer (state :pending))
+  origin context buffer (state :pending))
+
+(defun kargu-plan-record-root (record)
+  "Return RECORD's captured project root without a second writable copy."
+  (kargu-plan-context-root (kargu-plan-record-context record)))
+
+(defun kargu-plan-record-session (record)
+  "Return RECORD's captured session identity without a second writable copy."
+  (kargu-plan-context-session (kargu-plan-record-context record)))
 
 (defvar-local kargu-plan--record nil
   "Owned record in an origin buffer, or its reference in a review buffer.")
@@ -36,8 +44,8 @@
            (buffer-live-p (kargu-plan-record-buffer record))
            (eq record (kargu-plan-current origin))
            (eq record (kargu-plan-current (kargu-plan-record-buffer record)))
-           (equal (kargu-plan-record-root record) (kargu-session-project-root origin))
-           (equal (kargu-plan-record-session record) (kargu-chat-session-id origin))))))
+           (funcall (kargu-plan-context-current-p (kargu-plan-record-context record))
+                    record)))))
 
 (defun kargu-plan-assert-current (record)
   "Return RECORD or refuse a closed, replaced or reassigned plan owner."
@@ -49,8 +57,8 @@
   "Return non-nil if RECORD is current and awaits a decision."
   (and (kargu-plan-current-p record) (eq (kargu-plan-record-state record) :pending)))
 
-(defun kargu-plan-create (origin buffer)
-  "Replace ORIGIN's plan with a fresh record displayed in review BUFFER."
+(defun kargu-plan-create (origin buffer &optional context)
+  "Replace ORIGIN's plan in review BUFFER using explicit or default CONTEXT."
   (kargu-contract-assert #'buffer-live-p origin)
   (kargu-contract-assert #'buffer-live-p buffer)
   (when-let* ((displayed (kargu-plan-current buffer)))
@@ -58,8 +66,9 @@
       (user-error "Kargu: this review belongs to another plan owner")))
   (let ((old (kargu-plan-current origin))
         (record (kargu-plan--make-record
-                 :origin origin :root (kargu-session-project-root origin)
-                 :session (kargu-chat-session-id origin) :buffer buffer)))
+                 :origin origin :buffer buffer
+                 :context (kargu-plan-context-validate
+                           (or context (kargu-plan-context-for-buffer origin))))))
     (when old (setf (kargu-plan-record-state old) :superseded))
     (kargu-plan--attach-record origin record)
     (kargu-plan--attach-record buffer record)

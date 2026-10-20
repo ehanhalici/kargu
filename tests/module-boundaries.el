@@ -46,7 +46,6 @@
      kargu/loop/machine
      kargu/loop/tools
      kargu/loop/ui
-     kargu/plan/dispatch
      kargu/prompt
      kargu/providers/registry
      kargu/tools/bash

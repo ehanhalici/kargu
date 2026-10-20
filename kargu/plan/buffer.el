@@ -45,11 +45,14 @@ Changes are kept in memory and never written to disk.
   (setq-local header-line-format
               " [C-c C-c] Approve & Apply | [C-c C-k] Reject | [C-c C-q] Hide | ⚡ In-memory buffer (no saving needed)"))
 
-(defun kargu-plan-setup-buffer (text)
-  "Populate the in-memory plan buffer with TEXT without associating a file."
+(defun kargu-plan-setup-buffer (text &optional context)
+  "Populate the in-memory review with TEXT for explicit or default CONTEXT."
+  (kargu-contract-assert #'stringp text)
   (let* ((old (kargu-plan-current))
          (origin (if (and old (derived-mode-p 'kargu-plan-mode))
                      (kargu-plan-record-origin old) (current-buffer)))
+         (context (kargu-plan-context-validate
+                   (or context (kargu-plan-context-for-buffer origin))))
          (buf (if (and old (buffer-live-p (kargu-plan-record-buffer old)))
                   (kargu-plan-record-buffer old)
                 (generate-new-buffer kargu-plan-buffer-name))))
@@ -60,7 +63,7 @@ Changes are kept in memory and never written to disk.
       (unless (derived-mode-p 'kargu-plan-mode) (kargu-plan-mode))
       (set-buffer-modified-p nil)
       (goto-char (point-min)))
-    (kargu-plan-create origin buf)
+    (kargu-plan-create origin buf context)
     buf))
 
 (defun kargu-plan-extract-text (report)

@@ -58,10 +58,20 @@ superseded-record guard, and a reused review does not reset its major mode.
 Creating a plan cannot steal another owner's review; current-record checks
 also require the review to reference that exact record.
 
-This is an artifact-ownership migration, not the complete chat/session
-migration. Root/session validation, single claim, failed-startup handling and
-the application-wide active-run guard remain unchanged. Plan dispatch still
-depends on the chat adapter; the dispatcher port in `todo.md` remains open.
+Plan records now hold a validated `kargu-plan-context`, with captured root
+and session, current-owner validation, admission, dispatcher and optional
+presenter callbacks. The context is immutable and has no duplicate identity
+store. The plan domain loads without chat, engine or application state, and
+an explicit headless dispatcher can retry a refused start and claim the
+edited revision once. A missing dispatcher never consumes approval.
+
+`kargu/chat/plan` is the composition-installed adapter for chat identity,
+mode switching, startup and transcript buttons. Presenter errors cannot
+undo an admitted dispatch; invalidated records cannot publish approval.
+The adapter refuses unloading while plans still capture its callbacks.
+This is not the complete chat/session or asynchronous mode-preparation
+migration. The application's single-run gate and stale-owner checks remain
+in the captured admission/dispatcher contract, not in a second plan engine.
 
 ## Missing editor adapters
 

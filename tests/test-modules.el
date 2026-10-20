@@ -149,6 +149,41 @@ Initialize installed PACKAGES only when requested."
    '(cl-assert (kargu-contract-mode-p 'agent))
    '(cl-assert (kargu-ok-p (kargu-ok "value")))))
 
+(ert-deftest kargu-module-plan-domain-is-independent-test ()
+  "Owned plan records and commands load without a chat or engine runtime."
+  (kargu-module-test--load-foundation
+   'kargu/plan
+   '(cl-assert (not (featurep 'kargu/chat/session)))))
+
+(ert-deftest kargu-module-plan-dispatch-without-chat-sources-test ()
+  "An explicit headless dispatcher preserves revision, retry and single claim."
+  (kargu-module-test--without-sources
+   '("kargu/chat.el" "kargu/chat/" "kargu/ui.el" "kargu/ui/")
+   '((require 'kargu/plan)
+     (with-temp-buffer
+       (let* ((attempts 0) text
+              (context (kargu-plan-context-create
+                        :root default-directory :session "headless"
+                        :current-p (lambda (_) t)
+                        :dispatch (lambda (_record revision)
+                                    (setq text revision)
+                                    (> (cl-incf attempts) 1))
+                        :publish (lambda (&rest _) (error "Broken view"))))
+              (view (kargu-plan-setup-buffer "draft" context))
+              (record (kargu-plan-current)))
+         (unwind-protect
+             (progn
+               (cl-assert (condition-case nil (progn (kargu-plan-approve record) nil)
+                            (user-error t)))
+               (cl-assert (kargu-plan-pending-p record))
+               (with-current-buffer view (erase-buffer) (insert "approved revision"))
+               (kargu-plan-approve record)
+               (kargu-plan-approve record)
+               (cl-assert (= attempts 2))
+               (cl-assert (equal text "approved revision"))
+               (cl-assert (eq (kargu-plan-record-state record) :approved)))
+           (kill-buffer view)))))))
+
 (ert-deftest kargu-module-file-service-without-editing-sources-test ()
   "File context does not load the optional mutation or review adapter."
   (kargu-module-test--without-sources
@@ -161,6 +196,24 @@ Initialize installed PACKAGES only when requested."
        (cl-assert (equal (kargu-file-text "read-only.txt") "Read-only service"))
        (cl-assert (string-search "1 | Read-only service"
                                  (kargu-file-read "read-only.txt")))))))
+
+(ert-deftest kargu-module-plan-invalidated-dispatch-does-not-announce-approval-test ()
+  "An invalidated owner cannot receive a false approval presentation."
+  (kargu-module-test--evaluate
+   '((require 'kargu/plan)
+     (with-temp-buffer
+       (let* ((valid t) events
+              (context (kargu-plan-context-create
+                        :root default-directory :current-p (lambda (_) valid)
+                        :dispatch (lambda (&rest _) (setq valid nil) t)
+                        :publish (lambda (_record event) (push event events))))
+              (view (kargu-plan-setup-buffer "captured revision" context))
+              (record (kargu-plan-current)))
+         (unwind-protect
+             (progn (kargu-plan-approve record)
+                    (cl-assert (eq (kargu-plan-record-state record) :cancelled))
+                    (cl-assert (null events)))
+           (kill-buffer view)))))))
 
 (ert-deftest kargu-module-data-is-independent-test ()
   "Legacy scalar helpers retain behavior without loading application state."
