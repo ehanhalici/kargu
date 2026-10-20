@@ -16,7 +16,8 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'kargu/core)
+(require 'kargu/core/data)
+(require 'kargu/core/log)
 
 (defcustom kargu-process-timeout 30
   "Seconds an external command may run before it is killed."

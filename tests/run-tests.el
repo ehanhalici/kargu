@@ -19,6 +19,7 @@
 (require 'ert)
 (require 'kargu)
 (require 'tests/test-helpers)
+(require 'tests/test-modules)
 (require 'tests/test-contract)
 (require 'tests/test-json)
 (require 'tests/test-state)

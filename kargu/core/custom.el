@@ -13,10 +13,7 @@
 
 ;;; Code:
 
-(defgroup kargu nil
-  "Agentic AI development assistant for Emacs."
-  :group 'tools
-  :prefix "kargu-")
+(require 'kargu/core/group)
 
 (defcustom kargu-api-key nil
   "API key override for the active provider.

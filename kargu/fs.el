@@ -8,14 +8,14 @@
 
 ;; Shared skip-directory table and a capped recursive file walk
 ;; used by `@' completion and the Elisp glob fallback.
-;; Requires: `kargu/core'.
+;; Requires: `kargu/core/group'.
 ;; Public: `kargu-fs-walk', `kargu-fs-skipped-path-p'.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'kargu/core)
+(require 'kargu/core/group)
 
 (defcustom kargu-fs-skip-dirs
   '(".git" "node_modules" ".venv" "__pycache__" ".direnv" "dist"

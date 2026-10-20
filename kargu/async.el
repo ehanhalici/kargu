@@ -11,7 +11,7 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'kargu/core)
+(require 'kargu/core/log)
 
 (defvar kargu-async--pending nil
   "Pending asynchronous tasks, including their run owners.")

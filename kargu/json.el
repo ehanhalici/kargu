@@ -14,7 +14,8 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'json)
-(require 'kargu/core)
+(require 'kargu/core/data)
+(require 'kargu/core/log)
 
 ;;;; JSON helpers ---------------------------------------------------------
 

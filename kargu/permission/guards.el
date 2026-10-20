@@ -13,7 +13,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'kargu/core)
+(require 'kargu/core/group)
 
 (defgroup kargu-permission nil
   "Permission and sandbox rules for Kargu tools."
