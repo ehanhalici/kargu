@@ -18,8 +18,11 @@
 (require 'company nil t)
 (require 'kargu/core)
 (require 'kargu/fs)
-(require 'kargu/tools/lsp)
 (require 'kargu/permission/guards)
+
+(declare-function kargu-lsp-all-symbols "kargu/tools/lsp/skeleton"
+                  (&optional query roots callback))
+(defvar kargu-lsp-request-timeout)
 
 (defvar kargu-context-buffer nil)
 (defvar kargu-chat-max-listed-files 2000)
@@ -323,11 +326,15 @@ QUERY can match the symbol name, the file path, or both if QUERY contains `::'."
 
 (defun kargu-chat--symbol-candidates (query)
   "Return cached/local symbol candidates for QUERY without network waits."
-  (kargu-chat--symbol-candidates-from
-   query (kargu-lsp-all-symbols query (kargu-chat--completion-roots))))
+  (when (fboundp 'kargu-lsp-all-symbols)
+    (kargu-chat--symbol-candidates-from
+     query (kargu-lsp-all-symbols query (kargu-chat--completion-roots)))))
 
-(defun kargu-chat--async-candidates (prefix callback)
+(cl-defun kargu-chat--async-candidates (prefix callback)
   "Fetch symbol candidates for PREFIX and deliver them to CALLBACK."
+  (unless (fboundp 'kargu-lsp-all-symbols)
+    (funcall callback (kargu-chat--at-candidates prefix))
+    (cl-return-from kargu-chat--async-candidates))
   (let* ((query (string-remove-prefix "@" prefix))
          (roots (kargu-chat--completion-roots))
          (symbol-query (if (string-search "::" query)

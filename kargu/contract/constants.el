@@ -1,4 +1,4 @@
-;;; kargu/contract/constants.el --- Domain constants and enums -*- lexical-binding: t; -*-
+;;; constants.el --- Domain constants and enums -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -17,6 +17,10 @@
   "Name of the in-memory plan review buffer.")
 
 ;;;; Interaction modes ----------------------------------------------------
+
+(defconst kargu-eglot-required-message
+  "Kargu: Eglot bu projede aktif değil. LSP araçları modele verilmeyecek; dosya/arama araçları ve agent kipinde Bash kullanılabilir."
+  "Notice shown when this project has no live Eglot connection.")
 
 (defconst kargu-mode-ask 'ask
   "Read-only query mode: answers questions without changing files.")
@@ -78,4 +82,4 @@
 
 (provide 'kargu/contract/constants)
 
-;;; kargu/contract/constants.el ends here
+;;; constants.el ends here

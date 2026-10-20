@@ -8,7 +8,7 @@
 
 ;; `@path' mentions become one `insert-file-contents' and a Read-tool
 ;; transcript (or a compact reference for long files).
-;; Requires: `kargu/core', `kargu/tools/diff', `kargu/tools/lsp'.
+;; Requires: `kargu/core', `kargu/tools/diff'.
 ;; Public internal: `kargu-chat--expand-prompt'.
 
 ;;; Code:
@@ -20,7 +20,6 @@
 (require 'kargu/core)
 (require 'kargu/permission)
 (require 'kargu/tools/diff)
-(require 'kargu/tools/lsp)
 
 (defvar kargu-chat-attach-max-lines 150)
 (declare-function kargu-chat--completion-roots "kargu/chat/complete")

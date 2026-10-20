@@ -14,8 +14,18 @@
 (require 'cl-lib)
 (require 'kargu/core)
 (require 'kargu/tools/diff)
-(require 'kargu/tools/lsp)
 (require 'kargu/async)
+
+(declare-function kargu-lsp-wait-diagnostics "kargu/tools/lsp/settle"
+                  (file-path callback &optional timeout))
+(declare-function kargu-lsp-diagnostics-snapshot "kargu/tools/lsp/diagnostics"
+                  (file-path))
+
+(defun kargu-loop--wait-diagnostics (path callback)
+  "Ask the diagnostic adapter about PATH, or deliver unavailable to CALLBACK."
+  (if (fboundp 'kargu-lsp-wait-diagnostics)
+      (kargu-lsp-wait-diagnostics path callback)
+    (funcall callback path nil nil)))
 
 (defvar kargu-max-healing-steps)
 (declare-function kargu-loop--live-p "kargu/loop" (run))
@@ -74,7 +84,7 @@ This entry point retains the after-tool dispatcher's positional signature."
      ((null pending)
       (kargu-async-finish task (reverse (kargu--verification-done verification))))
      (t
-      (kargu-lsp-wait-diagnostics
+      (kargu-loop--wait-diagnostics
        (car pending)
        (kargu-async-wrap
         task (lambda (path text timeout-p)
@@ -106,7 +116,8 @@ TIMEOUT-P means the snapshot was not settled."
 (defun kargu--loop-count-errors (path text)
   "Count error-severity diagnostics for PATH using structured data or TEXT."
   (let ((count 0) (text (or text "")))
-    (dolist (diag (kargu-lsp--diagnostics-data path))
+    (dolist (diag (and (fboundp 'kargu-lsp-diagnostics-snapshot)
+                      (kargu-lsp-diagnostics-snapshot path)))
       (when (eq (plist-get diag :severity) 1)
         (setq count (1+ count))))
     (if (> count 0)

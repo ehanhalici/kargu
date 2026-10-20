@@ -8,7 +8,7 @@
 
 ;; Read-only workspace search.  Skip dirs and the Elisp glob walk
 ;; come from `kargu/fs'.  Requires: `kargu/core', `kargu/api/tools',
-;; `kargu/fs', `kargu/tools/lsp'.  Public: `kargu-search-grep',
+;; `kargu/fs'.  Public: `kargu-search-grep',
 ;; `kargu-search-glob', `kargu-search-register-tools'.
 ;;
 ;; Read-only workspace search tools, modeled on OpenCode's grep/glob:
@@ -30,7 +30,6 @@
 (require 'kargu/api/tools)
 (require 'kargu/permission)
 (require 'kargu/tools/process)
-(require 'kargu/tools/lsp)
 (require 'kargu/fs)
 
 (defgroup kargu-search nil

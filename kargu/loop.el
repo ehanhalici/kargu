@@ -26,7 +26,6 @@
 (require 'kargu/history/compact)
 (require 'kargu/api)
 (require 'kargu/tools/diff)
-(require 'kargu/tools/lsp)
 (require 'kargu/tools/deps nil t)
 (require 'kargu/ui/confirm)
 

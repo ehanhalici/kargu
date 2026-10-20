@@ -191,10 +191,6 @@ Used to route LSP requests to the right workspace and default file arguments.")
              (file-exists-p kargu-context-buffer)
              kargu-context-buffer))))
 
-(defconst kargu-eglot-required-message
-  "Kargu: Eglot bu projede aktif değil. LSP araçları modele verilmeyecek; dosya/arama araçları ve agent kipinde Bash kullanılabilir."
-  "Notice shown when this project has no live Eglot connection.")
-
 (defun kargu--eglot-workspace-buffer ()
   "Return the Eglot-managed buffer naming the workspace.
 Prefer the current managed buffer, then the most recent managed file

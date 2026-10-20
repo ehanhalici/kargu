@@ -63,6 +63,22 @@ migration. Root/session validation, single claim, failed-startup handling and
 the application-wide active-run guard remain unchanged. Plan dispatch still
 depends on the chat adapter; the dispatcher port in `todo.md` remains open.
 
+## Missing editor adapters
+
+The package root treats LSP and Dape source families as optional. Search,
+chat completion, attachment parsing and the menu no longer load those
+adapters themselves. Without them, textual tools and chat remain available;
+symbol completion returns no symbols and asynchronous completion still
+returns file candidates. Debug-session preparation reports unavailable and
+Stop does not call a missing debugger adapter.
+
+Post-edit verification uses the diagnostic adapter's public snapshot API.
+Without that adapter it delivers unavailable evidence through the existing
+verification path; it must not publish a clean/verified result. Tests remove
+the adapter facade and implementation directory from a temporary package,
+not just hide function definitions. This is startup absence support, not a
+promise of safe live module unloading or complete context isolation.
+
 ## Regression gates
 
 `tests/test-modules.el` loads boundaries in fresh batch Emacs processes with

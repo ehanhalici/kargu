@@ -31,8 +31,6 @@
 (require 'kargu/chat/select)
 (require 'kargu/loop)
 (require 'kargu/tools/diff)
-(require 'kargu/tools/lsp)
-(require 'kargu/tools/dape nil t)
 (require 'kargu/tools/deps)
 
 ;; Modular subcomponents of chat
@@ -50,6 +48,10 @@
 (declare-function kargu-chat--shown-model "kargu/chat/prompt" ())
 (declare-function kargu-chat--focus-selection "kargu/chat/prompt" (&optional open-company))
 (declare-function kargu-eglot-connected-p "kargu/tools/lsp/context" ())
+(declare-function kargu-dape-ready-p "kargu/tools/dape/session" ())
+(declare-function kargu-dape-ensure-session "kargu/tools/dape/session"
+                  (on-ready &optional on-cancel))
+(declare-function kargu-dape-cancel-session-wait "kargu/tools/dape/readiness" ())
 (defvar kargu-eglot-required-message)
 
 (defvar-local kargu-chat--eglot-notice-p nil
@@ -57,7 +59,7 @@
 
 (defun kargu-chat--notice-without-eglot ()
   "Warn once about unavailable LSP without withholding the prompt."
-  (if (kargu-eglot-connected-p)
+  (if (and (fboundp 'kargu-eglot-connected-p) (kargu-eglot-connected-p))
       (setq-local kargu-chat--eglot-notice-p nil)
     (unless kargu-chat--eglot-notice-p
       (setq-local kargu-chat--eglot-notice-p t)
@@ -503,15 +505,15 @@ When PRESERVE-DRAFT is non-nil, keep unsent input after completion too."
 (defun kargu-chat--debug-session-needed-p ()
   "Non-nil when debug mode has no ready debugger session."
   (and (eq (kargu-state-mode) 'debug)
-       (fboundp 'kargu-dape-ready-p)
-       (not (kargu-dape-ready-p))))
+       (not (and (fboundp 'kargu-dape-ready-p) (kargu-dape-ready-p)))))
 
 (defun kargu-chat--after-debug-session (continue cancel)
   "Start a debug session, then call CONTINUE.  CANCEL reports failure."
-  (kargu-dape-ensure-session
-   continue
-   (lambda (&optional reason)
-     (funcall cancel (or reason "user abort")))))
+  (if (fboundp 'kargu-dape-ensure-session)
+      (kargu-dape-ensure-session
+       continue (lambda (&optional reason)
+                  (funcall cancel (or reason "user abort"))))
+    (funcall cancel "debugger module unavailable")))
 
 (cl-defstruct (kargu-chat--debug-prompt (:constructor kargu-chat--make-debug-prompt))
   "Captured chat and input awaiting debugger readiness."
@@ -655,7 +657,8 @@ Also cancel this chat's debugger readiness wait before a run starts.
 A running banner left behind by a failed start is cleared too, so
 the editable prompt comes back."
   (interactive)
-  (let ((cancelled (kargu-dape-cancel-session-wait)))
+  (let ((cancelled (and (fboundp 'kargu-dape-cancel-session-wait)
+                        (kargu-dape-cancel-session-wait))))
     (if (kargu-loop-running-p)
         (progn
           (kargu-loop-stop "stopped by user")

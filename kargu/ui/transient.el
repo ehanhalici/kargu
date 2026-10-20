@@ -15,8 +15,6 @@
 (require 'kargu/core)
 (require 'kargu/chat)
 (require 'kargu/api)
-(require 'kargu/tools/lsp)
-(require 'kargu/tools/dape)
 (require 'kargu/tools/diff)
 (require 'kargu/loop)
 (eval-and-compile
@@ -28,6 +26,7 @@
 (declare-function kargu-chat-send "kargu/chat")
 (declare-function kargu-chat-reset "kargu/chat")
 (declare-function kargu-tune-menu "kargu/chat/tune")
+(declare-function kargu-eglot-connected-p "kargu/tools/lsp/context" ())
 
 (defun kargu-ui--show-text (name text)
   "Display TEXT in a read-only buffer identified by NAME."
@@ -185,7 +184,7 @@
 
   (defun kargu-menu--lsp-unavailable-p ()
     "Return non-nil when this project cannot offer LSP tools."
-    (not (kargu-eglot-connected-p)))
+    (not (and (fboundp 'kargu-eglot-connected-p) (kargu-eglot-connected-p))))
 
   (defvar kargu-eglot-required-message)
 

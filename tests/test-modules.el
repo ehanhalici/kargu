@@ -12,6 +12,7 @@
 
 (require 'ert)
 (require 'cl-lib)
+(require 'seq)
 (require 'tests/module-boundaries)
 
 (defconst kargu-module-test--root
@@ -51,6 +52,59 @@ Initialize installed PACKAGES only when requested."
      (when (boundp 'kargu--session) (error "Session was initialized"))
      (when (boundp 'kargu--tool-registry) (error "Tool registry was initialized"))
      ,@assertions)))
+
+(defun kargu-module-test--without-sources (prefixes forms)
+  "Evaluate FORMS in a package physically missing source PREFIXES."
+  (let* ((root (make-temp-file "kargu-module-matrix-" t))
+         (files (cons (expand-file-name "kargu.el" kargu-module-test--root)
+                      (directory-files-recursively
+                       (expand-file-name "kargu" kargu-module-test--root)
+                       "\\.\\(?:el\\|txt\\)\\'"))))
+    (unwind-protect
+        (progn
+          (dolist (file files)
+            (let* ((relative (file-relative-name file kargu-module-test--root))
+                   (target (expand-file-name relative root)))
+              (unless (seq-some (lambda (prefix) (string-prefix-p prefix relative)) prefixes)
+                (make-directory (file-name-directory target) t)
+                (copy-file file target))))
+          (kargu-module-test--evaluate forms t root))
+      (delete-directory root t))))
+
+(ert-deftest kargu-module-chat-and-text-tools-without-debugger-or-lsp-test ()
+  "Removing both editor adapters leaves chat and textual tools available."
+  (kargu-module-test--without-sources
+   '("kargu/tools/lsp.el" "kargu/tools/lsp/"
+     "kargu/tools/dape.el" "kargu/tools/dape/")
+   '((require 'kargu)
+     (cl-assert (null (locate-library "kargu/tools/lsp")))
+     (cl-assert (null (locate-library "kargu/tools/dape")))
+     (cl-assert (kargu-find-tool "read_file"))
+     (cl-assert (kargu-find-tool "workspace_grep"))
+     (cl-assert (kargu-find-tool "git_status"))
+     (cl-assert (not (kargu-find-tool "debug_start")))
+     (cl-assert (not (kargu-find-tool "edit_by_lsp")))
+     (with-temp-buffer
+       (kargu-chat-mode)
+       (kargu-chat--notice-without-eglot)
+       (cl-assert (null (kargu-chat--symbol-candidates "missing")))
+       (let (answered)
+         (kargu-chat--async-candidates "@missing" (lambda (_) (setq answered t)))
+         (cl-assert answered))
+       (kargu-chat-stop)))))
+
+(ert-deftest kargu-module-missing-diagnostics-is-not-clean-test ()
+  "An absent diagnostic adapter reports unavailable, never clean evidence."
+  (kargu-module-test--without-sources
+   '("kargu/tools/lsp.el" "kargu/tools/lsp/")
+   '((require 'kargu)
+     (let (section)
+       (kargu-loop--wait-diagnostics
+        "missing.el" (lambda (path text timed-out)
+                       (setq section (kargu--loop-diag-section path text timed-out))))
+       (cl-assert (plist-get section :unavailable))
+       (cl-assert (string-search "Verification incomplete"
+                                 (kargu--loop-verify-footer (list section) 0 0)))))))
 
 (ert-deftest kargu-module-contract-is-independent-test ()
   "Boundary predicates and result records need no application runtime."

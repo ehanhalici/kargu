@@ -103,9 +103,9 @@
 (require 'kargu/fs)
 (require 'kargu/api/circuit)
 (require 'kargu/api)
-(require 'kargu/tools/lsp)
+(require 'kargu/tools/lsp nil t)
 (require 'kargu/tools/search)
-(require 'kargu/tools/dape)
+(require 'kargu/tools/dape nil t)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/bash)
 (require 'kargu/tools/git)
@@ -114,9 +114,9 @@
 (require 'kargu/tools/deps)
 
 ;; Tool implementations expose definitions; only composition activates them.
-(kargu-lsp-register-tools)
+(when (featurep 'kargu/tools/lsp) (kargu-lsp-register-tools))
 (kargu-search-register-tools)
-(kargu-dape-register-tools)
+(when (featurep 'kargu/tools/dape) (kargu-dape-register-tools))
 (kargu-diff-register-tools)
 (kargu-bash-register-tools)
 (kargu-git-register-tools)
