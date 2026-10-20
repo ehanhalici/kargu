@@ -24,12 +24,24 @@
 (require 'kargu/api/wire)
 
 (declare-function kargu-busy-p "kargu/api/http" ())
-(declare-function kargu-api-cancel "kargu/api/http" ())
-(declare-function kargu-api-clear-busy "kargu/api/http" ())
 (declare-function kargu-loop-running-p "kargu/loop" ())
 (declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
 
 (defalias 'kargu--api-cancel-busy #'kargu-api-clear-busy)
+
+(defun kargu-api-clear-busy ()
+  "Release the request and update application status when no loop is active."
+  (kargu-http-clear-busy)
+  (unless (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+    (kargu-state-transition-status :idle)))
+
+(defun kargu-api-cancel ()
+  "Cancel the current request and update application status when appropriate."
+  (interactive)
+  (kargu-http-cancel)
+  (unless (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+    (kargu-state-transition-status :idle "user cancelled"))
+  (message "kargu: cancelled in-flight request"))
 
 (defun kargu--api-validate-preflight (prompt)
   "Validate preflight conditions before sending conversation turn with PROMPT."
@@ -106,6 +118,8 @@ RECORD-TURN permits storage of the reply in the active conversation."
     (let ((result
            (condition-case err
                (progn
+                 (unless (kargu-response-error-message response)
+                   (kargu--record-usage response))
                  (when (and (kargu-api--delivery-record-turn delivery)
                             (not (kargu-response-error-message response)))
                    (kargu-api-store-assistant-turn response))
@@ -184,6 +198,23 @@ Build the payload in a temporary history binding; never store the reply."
       (message "kargu: OK — model replied: %s"
                (truncate-string-to-width
                 (or (kargu-response-text response) "") 60)))))
+
+(defun kargu--record-usage (response)
+  "Accumulate the token usage of RESPONSE in `kargu--session'."
+  (when-let* ((usage (kargu-aget response "usage")))
+    (let ((in (kargu-aget usage "prompt_tokens"))
+          (out (kargu-aget usage "completion_tokens")))
+      (kargu-session-record-usage in out)
+      (let ((details (kargu-aget usage "prompt_tokens_details")))
+        (kargu-session-record-cache-usage in (kargu-aget details "cached_tokens")
+                                           (kargu-aget details "cache_write_tokens")))
+      (when (fboundp 'kargu-state-record-tokens)
+        (kargu-state-record-tokens (and (numberp in) in)
+                                   (and (numberp out) out)))
+      (force-mode-line-update t)
+      (kargu-log 'info "usage: %s in / %s out (session: %s)"
+                 in out (kargu-session-usage))))
+  kargu--session)
 
 (provide 'kargu/api/client)
 

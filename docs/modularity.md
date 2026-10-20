@@ -147,6 +147,22 @@ to the mandatory lists still apply. Package metadata likewise does not force
 installation of the optional Transient/Magit integrations. Source removal
 does not remove the permission boundary or make the model transport optional.
 
+## Transport/application boundary
+
+Raw `kargu-http-clear-busy` and `kargu-http-cancel` release only transport
+ownership, timers, generation and process resources. They neither query the
+agent loop nor transition application status. Legacy `kargu-api-*` cleanup
+commands remain autoloaded compatibility entry points in the client facade,
+which retains application status policy and the active-run guard.
+
+Usage accounting also belongs to the facade's single-delivery claim, not
+HTTP success callbacks. A duplicate or obsolete response cannot count usage
+again through that path. Footer updates remain a view responsibility; the
+HTTP layer no longer calls chat functions. A physically reduced package
+without client/loop/chat/UI sources exercises raw cleanup without changing
+the application's verification state. Request globals and per-logical-request
+resource ownership still require the separate runtime-context migration.
+
 ## Regression gates
 
 `tests/test-modules.el` loads boundaries in fresh batch Emacs processes with

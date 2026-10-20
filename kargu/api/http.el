@@ -53,19 +53,17 @@ cancelled the counter is bumped and the stale process callbacks
 become no-ops.  This gives clean cancellation semantics without
 touching plz internals.")
 
-(declare-function kargu-loop-running-p "kargu/loop" ())
+(autoload 'kargu-api-cancel "kargu/api/client" nil t)
+(autoload 'kargu-api-clear-busy "kargu/api/client")
 
 (defun kargu-busy-p ()
   "Return non-nil while a chat request is in flight."
   kargu--busy)
 
-(defun kargu-api-clear-busy ()
-  "Clear the in-flight busy flag and update status when no loop is active."
+(defun kargu-http-clear-busy ()
+  "Release transport busy/probe ownership without changing application state."
   (setq kargu--busy nil)
-  (kargu-circuit-release-probe)
-  (unless (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
-    (when (fboundp 'kargu-state-transition-status)
-      (kargu-state-transition-status :idle))))
+  (kargu-circuit-release-probe))
 
 (defun kargu--api-positive-seconds (value)
   "VALUE when it is a positive number of seconds, otherwise nil."
@@ -125,12 +123,9 @@ touching plz internals.")
       (kargu-log 'error "request failed: %s" msg)
       (funcall callback (kargu--api-error-alist msg)))))
 
-(defun kargu-api-cancel ()
-  "Cancel the current request or in-flight agent call.
-Stale response callbacks are turned into no-ops via the
-generation counter; the active curl process is terminated and
-the UI and central state are left in a consistent state."
-  (interactive)
+(defun kargu-http-cancel ()
+  "Cancel transport resources and invalidate stale request generations.
+Application status, loop ownership and UI belong to the caller."
   (cl-incf kargu--generation)
   (kargu-circuit-release-probe)
   (kargu--api-cancel-stream-watch kargu--current-process)
@@ -139,11 +134,7 @@ the UI and central state are left in a consistent state."
     (ignore-errors (delete-process kargu--current-process)))
   (setq kargu--current-process nil)
   (setq kargu--busy nil)
-  (unless (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
-    (when (fboundp 'kargu-state-transition-status)
-      (kargu-state-transition-status :idle "user cancelled")))
-  (kargu-log 'warn "request cancelled")
-  (message "kargu: cancelled in-flight request"))
+  (kargu-log 'warn "request cancelled"))
 
 (defun kargu--api-post (url headers payload gen callback &optional on-delta attempt)
   "POST PAYLOAD to URL with HEADERS and dispatch the result to CALLBACK.
@@ -215,7 +206,7 @@ ATTEMPT is the zero-based retry count."
         (setf (kargu-http--request-state request) :finished)
         (kargu-http--release-process request)
         (when deliver
-          (kargu-api-clear-busy)
+          (kargu-http-clear-busy)
           (funcall (kargu-http--request-callback request)
                    (kargu--api-error-alist
                     (format "Stream watchdog startup failed: %s"
@@ -358,7 +349,6 @@ ATTEMPT is the retry count."
   "Record success metrics and dispatch CALLBACK with valid RESPONSE."
   (setq kargu--busy nil)
   (kargu-circuit-record-success)
-  (kargu--record-usage response)
   (funcall callback response))
 
 (defun kargu--api-dispatch-error (callback msg)
@@ -431,24 +421,6 @@ PARSED-EVENTS avoids reparsing an already decoded stream."
        (t
         (kargu--api-handle-success response callback))))))
 
-(defun kargu--record-usage (response)
-  "Accumulate the token usage of RESPONSE in `kargu--session'."
-  (when-let* ((usage (kargu-aget response "usage")))
-    (let ((in (kargu-aget usage "prompt_tokens"))
-          (out (kargu-aget usage "completion_tokens")))
-      (kargu-session-record-usage in out)
-      (let ((details (kargu-aget usage "prompt_tokens_details")))
-        (kargu-session-record-cache-usage in (kargu-aget details "cached_tokens")
-                                           (kargu-aget details "cache_write_tokens")))
-      (when (fboundp 'kargu-state-record-tokens)
-        (kargu-state-record-tokens (and (numberp in) in)
-                                   (and (numberp out) out)))
-      (when (fboundp 'kargu-chat-refresh-footer)
-        (ignore-errors (kargu-chat-refresh-footer)))
-      (force-mode-line-update t)
-      (kargu-log 'info "usage: %s in / %s out (session: %s)"
-                 in out (kargu-session-usage))))
-  kargu--session)
 
 (provide 'kargu/api/http)
 

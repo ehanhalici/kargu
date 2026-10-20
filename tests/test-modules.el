@@ -481,6 +481,38 @@ Initialize installed PACKAGES only when requested."
      (cl-assert (autoloadp (symbol-function 'kargu-set-model))))
    t))
 
+(ert-deftest kargu-module-http-cleanup-without-client-or-loop-sources-test ()
+  "Raw transport cleanup cannot change app status or require loop/UI code."
+  (kargu-module-test--without-sources
+   '("kargu/api/client.el" "kargu/loop.el" "kargu/loop/"
+     "kargu/chat.el" "kargu/chat/" "kargu/ui.el" "kargu/ui/")
+   '((require 'kargu/api/http)
+     (cl-assert (not (featurep 'kargu/api/client)))
+     (cl-assert (not (featurep 'kargu/loop)))
+     (kargu-state-transition-status :verifying)
+     (let ((generation kargu--generation))
+       (kargu-http-clear-busy)
+       (cl-assert (eq (kargu-state-status) :verifying))
+       (kargu-http-cancel)
+       (cl-assert (= kargu--generation (1+ generation)))
+       (cl-assert (eq (kargu-state-status) :verifying))))))
+
+(ert-deftest kargu-module-api-delivery-owns-usage-once-test ()
+  "The delivery facade owns usage and never calls a concrete chat footer."
+  (kargu-module-test--evaluate
+   '((require 'kargu/api/client)
+     (let ((kargu--session (list :requests 0)) (footer-calls 0)
+           (delivery (kargu-api--make-delivery
+                      :callback #'ignore :generation kargu--generation :record-turn nil))
+           (response '(("usage" . (("prompt_tokens" . 5) ("completion_tokens" . 2))))))
+       (cl-letf (((symbol-function 'kargu-chat-refresh-footer)
+                  (lambda () (cl-incf footer-calls))))
+         (kargu-api--deliver delivery response)
+         (kargu-api--deliver delivery response))
+       (cl-assert (zerop footer-calls))
+       (cl-assert (= (plist-get kargu--session :requests) 1))
+       (cl-assert (= (plist-get kargu--session :tokens-in) 5)))) t))
+
 (ert-deftest kargu-module-selection-compatibility-entry-test ()
   "The legacy feature still exposes the same public selection commands."
   (kargu-module-test--evaluate
