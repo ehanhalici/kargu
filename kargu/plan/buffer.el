@@ -57,7 +57,7 @@ Changes are kept in memory and never written to disk.
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert text))
-      (kargu-plan-mode)
+      (unless (derived-mode-p 'kargu-plan-mode) (kargu-plan-mode))
       (set-buffer-modified-p nil)
       (goto-char (point-min)))
     (kargu-plan-create origin buf)

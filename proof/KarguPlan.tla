@@ -3,6 +3,14 @@ EXTENDS Naturals, FiniteSets, TLC
 
 \* kargu/plan/store.el and dispatch.el.  An epoch abstracts a captured
 \* project/session pair; changing either invalidates the same owner guard.
+\* current[o] represents o's buffer-local authoritative record reference;
+\* the review holds a reference to the same record, not another state store.
+\* CloseChat/CloseView also abstract change-major-mode-hook cleanup before
+\* either buffer loses its local ownership/reference.  Reusing a plan view
+\* does not reset its major mode, and remains the Create replacement action.
+\* view[p] means a live review referencing p, not just a live buffer.  Create
+\* assumes distinct per-owner views; cross-owner reuse is rejected at ingress
+\* in Elisp and covered by ERT, rather than modeled as an admitted action.
 CONSTANTS Owners, MaxPlans
 PlanIds == Owners \X (1..MaxPlans)
 States == {"absent", "pending", "dispatching", "approved", "rejected",

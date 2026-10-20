@@ -47,6 +47,22 @@ The existing `core`, `api` and `api/select` features remain compatibility
 entry points. New internal consumers should use the narrow feature they need.
 Existing public commands and scalar helper semantics have not changed.
 
+## Plan artifact ownership
+
+The plan store no longer keeps a global chat-to-plan hash table. The source
+buffer owns its `kargu-plan-record`; its review holds a reference to that same
+record. Closing either buffer, or changing its major mode, cancels the owned
+record and detaches both references. Cleanup hooks are buffer-local, not
+installed on every buffer in Emacs. A replacement retains the existing
+superseded-record guard, and a reused review does not reset its major mode.
+Creating a plan cannot steal another owner's review; current-record checks
+also require the review to reference that exact record.
+
+This is an artifact-ownership migration, not the complete chat/session
+migration. Root/session validation, single claim, failed-startup handling and
+the application-wide active-run guard remain unchanged. Plan dispatch still
+depends on the chat adapter; the dispatcher port in `todo.md` remains open.
+
 ## Regression gates
 
 `tests/test-modules.el` loads boundaries in fresh batch Emacs processes with
@@ -76,8 +92,8 @@ emacs --batch -Q -L . \
 The root still loads concrete features. Optional feature composition and
 application-owned registries have not yet been implemented: the compatibility
 facade still owns the existing `kargu--tool-registry` default reference, now
-pointing at the service record. There is no second writable registry. Loading Dape may
-still install its existing lifecycle hooks; removing tool auto-registration
+pointing at the service record. There is no second writable registry. Loading
+Dape may still install its existing lifecycle hooks; removing tool auto-registration
 is not a promise that every module is entirely side-effect-free.
 
 The next slice must introduce explicit application/session ownership and

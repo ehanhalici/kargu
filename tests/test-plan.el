@@ -28,6 +28,11 @@
 (require 'kargu/core)
 (require 'kargu/plan)
 
+(defvar kargu--loop-run)
+(defvar kargu--message-history)
+
+(declare-function kargu-chat-mode "kargu/chat" ())
+
 (defmacro kargu-test-with-plan-chats (&rest body)
   "Run BODY with independent `chat-a' and `chat-b' in temporary projects."
   (declare (indent 0))
@@ -171,10 +176,6 @@
       (when (buffer-live-p chat-buf)
         (kill-buffer chat-buf)))))
 
-(provide 'tests/test-plan)
-
-;;; test-plan.el ends here
-
 (ert-deftest kargu-plan-decision-is-taken-once-test ()
   "A button that stays in the transcript cannot approve or reject a plan twice."
   (let ((buf (kargu-plan-setup-buffer "Plan"))
@@ -203,6 +204,84 @@
       (should (eq (kargu-plan-record-state a) :approved))
       (with-current-buffer chat-a (should (string-search "Plan Approved" (buffer-string))))
       (with-current-buffer chat-b (should-not (string-search "Plan Approved" (buffer-string)))))))
+
+(ert-deftest kargu-plan-record-is-owned-by-origin-buffer-test ()
+  "The origin and review reference the same record without a global table."
+  (kargu-test-with-plan-chats
+    (let ((a (kargu-test-plan-record chat-a "A's plan"))
+          (b (kargu-test-plan-record chat-b "B's plan")))
+      (should (eq (buffer-local-value 'kargu-plan--record chat-a) a))
+      (should (eq (buffer-local-value 'kargu-plan--record chat-b) b))
+      (should (eq (buffer-local-value 'kargu-plan--record
+                                      (kargu-plan-record-buffer a)) a))
+      (should-not (boundp 'kargu-plan--records))
+      (should-not (memq #'kargu-plan--forget-buffer
+                        (default-value 'kill-buffer-hook))))))
+
+(ert-deftest kargu-plan-closing-view-clears-only-its-owner-test ()
+  "Closing A's review cancels A and leaves B's ownership intact."
+  (kargu-test-with-plan-chats
+    (let ((a (kargu-test-plan-record chat-a "A's plan"))
+          (b (kargu-test-plan-record chat-b "B's plan")))
+      (kill-buffer (kargu-plan-record-buffer a))
+      (should (eq (kargu-plan-record-state a) :cancelled))
+      (should-not (kargu-plan-current chat-a))
+      (with-current-buffer chat-a
+        (should-not (memq #'kargu-plan--forget-buffer kill-buffer-hook))
+        (should-not (memq #'kargu-plan--forget-buffer change-major-mode-hook)))
+      (should (kargu-plan-pending-p b)))))
+
+(ert-deftest kargu-plan-changing-owner-mode-cancels-record-test ()
+  "Losing buffer-local ownership cancels the plan before a major mode reset."
+  (kargu-test-with-plan-chats
+    (let* ((a (kargu-test-plan-record chat-a "A's plan"))
+           (view (kargu-plan-record-buffer a)))
+      (unwind-protect
+          (progn
+            (with-current-buffer chat-a (fundamental-mode))
+            (should (eq (kargu-plan-record-state a) :cancelled))
+            (should-not (kargu-plan-current chat-a))
+            (should-not (kargu-plan-current view))
+            (should-error (kargu-plan-assert-current a) :type 'user-error))
+        (when (buffer-live-p view) (kill-buffer view))))))
+
+(ert-deftest kargu-plan-closing-origin-detaches-surviving-view-test ()
+  "Closing the source chat leaves no current plan in its surviving review."
+  (kargu-test-with-plan-chats
+    (let* ((a (kargu-test-plan-record chat-a "A's plan"))
+           (view (kargu-plan-record-buffer a)))
+      (unwind-protect
+          (progn
+            (kill-buffer chat-a)
+            (should (eq (kargu-plan-record-state a) :cancelled))
+            (should-not (kargu-plan-current view))
+            (should-error (kargu-plan-assert-current a) :type 'user-error))
+        (when (buffer-live-p view) (kill-buffer view))))))
+
+(ert-deftest kargu-plan-changing-review-mode-clears-owner-test ()
+  "Converting the review into another major mode releases both references."
+  (kargu-test-with-plan-chats
+    (let* ((a (kargu-test-plan-record chat-a "A's plan"))
+           (view (kargu-plan-record-buffer a)))
+      (unwind-protect
+          (progn
+            (with-current-buffer view (fundamental-mode))
+            (should (eq (kargu-plan-record-state a) :cancelled))
+            (should-not (kargu-plan-current chat-a))
+            (should-not (kargu-plan-current view)))
+        (when (buffer-live-p view) (kill-buffer view))))))
+
+(ert-deftest kargu-plan-create-cannot-steal-another-review-test ()
+  "A rejected cross-owner review reuse cannot supersede either owner's plan."
+  (kargu-test-with-plan-chats
+    (let ((a (kargu-test-plan-record chat-a "A's plan"))
+          (b (kargu-test-plan-record chat-b "B's plan")))
+      (should-error (kargu-plan-create chat-b (kargu-plan-record-buffer a))
+                    :type 'user-error)
+      (should (kargu-plan-pending-p a))
+      (should (kargu-plan-pending-p b))
+      (should (eq (kargu-plan-current chat-a) a))
+      (should (eq (kargu-plan-current chat-b) b)))))
 
 (ert-deftest kargu-plan-stale-transcript-button-cannot-approve-new-plan-test ()
   "A historical button retains the old record, never a lookup of the new one."
@@ -308,3 +387,6 @@
           (widen)
           (should (string-prefix-p "prefix middle suffix" (buffer-string)))
           (should (string-search "Plan Rejected" (buffer-string))))))))
+
+(provide 'tests/test-plan)
+;;; test-plan.el ends here
