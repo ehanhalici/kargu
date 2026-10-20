@@ -79,16 +79,6 @@ Empty objects and empty arrays retain their distinct wire types."
      (kargu--log-block "bad JSON input" (or string ""))
      nil)))
 
-(defun kargu--json-decode-checked (string)
-  "Return (ok . VALUE) when STRING is exactly one JSON value, else nil.
-VALUE retains the explicit JSON object, array or scalar type.
-Trailing tokens after the first value (`{}{\"a\":1}`) are not
-accepted; use `kargu--json-decode-last-value-checked' for those."
-  (let ((s (and (stringp string) (string-trim string))))
-    (and s (not (string-empty-p s))
-         (kargu--json-whole-string-p s)
-         (cons 'ok (kargu--json-decode s)))))
-
 (defun kargu--json-whole-string-p (string)
   "Non-nil when STRING is exactly one JSON value (no trailing tokens)."
   (and (stringp string)
@@ -119,15 +109,13 @@ object.  An empty object remains a hash table."
         (with-temp-buffer
           (insert string)
           (goto-char (point-min))
-          (let (last-start last-end)
+          (let (last-value)
             (while (progn (skip-chars-forward " \t\n\r") (not (eobp)))
-              (setq last-start (point))
-              (json-parse-buffer)
-              (setq last-end (point)))
-            (when last-start
-              (cons 'ok
-                    (kargu--json-decode
-                     (buffer-substring-no-properties last-start last-end))))))
+              (setq last-value
+                    (cons 'ok (json-parse-buffer
+                               :object-type 'hash-table :array-type 'array
+                               :null-object :json-null :false-object :json-false))))
+            last-value))
       (error nil))))
 
 (defun kargu--json-decode-lenient (string)
@@ -136,7 +124,6 @@ Return (ok . VALUE) or nil; VALUE retains its JSON type."
   (let ((trimmed (and (stringp string) (string-trim string))))
     (cond
      ((or (null trimmed) (string-empty-p trimmed)) '(ok . nil))
-     ((kargu--json-decode-checked trimmed))
      ((kargu--json-decode-last-value-checked trimmed))
      (t
       (kargu-log 'warn "bad JSON: %s"

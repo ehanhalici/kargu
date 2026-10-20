@@ -12,6 +12,10 @@
 (require 'ert)
 (require 'kargu/json)
 
+(declare-function kargu--encode-tool-arguments "kargu/api/tools" (arguments))
+(declare-function kargu--decode-tool-arguments "kargu/api/tools" (arguments))
+(declare-function kargu-api-normalize-tool-calls "kargu/api/tool-calls" (response))
+
 (ert-deftest kargu-json-empty-values-retain-wire-types-test ()
   "Empty containers, null and false have distinct representations."
   (dolist (wire '("{}" "[]" "null" "false" "true"))
@@ -77,6 +81,32 @@
     (should (equal (kargu--encode-tool-arguments wire) wire))
     (should (hash-table-p (kargu-aget (kargu--decode-tool-arguments wire) "options"))))
   (should (equal (kargu--encode-tool-arguments "[]") "{}")))
+
+(ert-deftest kargu-json-lenient-reader-parses-each-value-once-test ()
+  "Validation and decoding share one native parse per JSON value."
+  (let ((parse-buffer (symbol-function 'json-parse-buffer))
+        (parse-string (symbol-function 'json-parse-string)))
+    (dolist (case '(("{\"value\":1}" 1 "{\"value\":1}")
+                    ("{} {\"value\":2}" 2 "{\"value\":2}")
+                    ("[[],{},null,false,\"Türkçe 🙂\"]" 1
+                     "[[],{},null,false,\"Türkçe 🙂\"]")
+                    ("null" 1 "null") ("false" 1 "false") ("  " 0 "null")))
+      (let ((calls 0) result)
+        (cl-letf (((symbol-function 'json-parse-buffer)
+                   (lambda (&rest arguments)
+                     (cl-incf calls) (apply parse-buffer arguments)))
+                  ((symbol-function 'json-parse-string)
+                   (lambda (&rest arguments)
+                     (cl-incf calls) (apply parse-string arguments))))
+          (setq result (kargu--json-decode-lenient (car case))))
+        (should (eq (car result) 'ok))
+        (should (= calls (nth 1 case)))
+        (should (equal (kargu--json-encode (cdr result)) (nth 2 case)))))))
+
+(ert-deftest kargu-json-lenient-reader-rejects-incomplete-tail-test ()
+  "A valid prefix cannot hide an invalid suffix or trailing partial object."
+  (dolist (wire '("{} garbage" "{} {\"value\":" "{not-json"))
+    (should-not (kargu--json-decode-lenient wire))))
 
 (ert-deftest kargu-json-native-response-conversion-does-not-mutate-wire-test ()
   "Tool-call normalization owns its native record, not the decoded reply."
