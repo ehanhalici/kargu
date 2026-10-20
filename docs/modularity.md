@@ -17,6 +17,27 @@ feature optional.
 - Loading a tool implementation exposes its registration function without
   registering tools. `kargu.el` explicitly registers built-ins in the existing
   order, preserving public tool names, aliases and policy declarations.
+- `kargu/tools/registry` is an explicit, headless service. Loading it creates
+  no default registry. The existing registration/execution facade delegates
+  to this service, using `kargu-tool-definition` records rather than untyped
+  specification alists. HTTP logging uses the facade's count operation, not
+  the registry's storage representation.
+
+## Tool registry contract
+
+Every service operation receives a `kargu-tool-registry` handle. Registration
+validates name, description, schema, executor and supported policy before
+mutation. Definitions and nested schema/policy values are borrowed read-only
+data; this is not yet the deep-copy/untrusted-extension boundary required by
+the broader validation work. Runtime mode and availability gates remain in
+the execution facade and still apply to direct and alias calls.
+
+An alias stores a canonical name, not an old definition snapshot. Replacing
+a tool therefore updates its aliases. Alias chains are flattened on entry;
+aliases may be redirected but cannot overwrite a canonical definition.
+Removing a canonical tool also removes its aliases; removing one alias does
+not remove the tool. Registration, lookup and count use hash-table operations;
+canonical removal scans the registered names once.
 
 The existing `core`, `api` and `api/select` features remain compatibility
 entry points. New internal consumers should use the narrow feature they need.
@@ -47,7 +68,9 @@ emacs --batch -Q -L . \
 ## Remaining boundaries
 
 The root still loads concrete features. Optional feature composition and
-application-owned registries have not yet been implemented. Loading Dape may
+application-owned registries have not yet been implemented: the compatibility
+facade still owns the existing `kargu--tool-registry` default reference, now
+pointing at the service record. There is no second writable registry. Loading Dape may
 still install its existing lifecycle hooks; removing tool auto-registration
 is not a promise that every module is entirely side-effect-free.
 

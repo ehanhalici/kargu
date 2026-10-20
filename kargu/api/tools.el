@@ -18,16 +18,12 @@
 (require 'kargu/contract)
 (require 'kargu/async)
 (require 'kargu/permission/guards)
+(require 'kargu/tools/registry)
 
 ;;;; Tool registry ---------------------------------------------------------
 
-(defvar kargu--tool-registry (make-hash-table :test #'equal)
-  "Map tool NAME (string) to spec alist with keys:
-\"description\"  one-line description shown to the model
-  \"parameters\"   JSON schema as an alist (arrays as vectors)
-  \"executor\"     function of one argument: the decoded
-                  arguments alist.  Returns a string, an alist to
-                  JSON-encode, or nil for \"OK\".")
+(defvar kargu--tool-registry (kargu-tool-registry-create)
+  "Legacy default registry awaiting explicit application ownership.")
 
 (defvar kargu--tools-visible-p nil
   "Optional gate on which registered tools are advertised to the model.
@@ -45,35 +41,33 @@ alist) whose return value becomes the tool result.  POLICY optionally
 declares :modes and an :available-p function returning a refusal or nil.
 Long results
 are truncated to `kargu-tool-output-limit'."
-  (kargu-contract-assert #'kargu-contract-non-empty-string-p name
-                         "NAME must be a non-empty string: %S" name)
-  (kargu-contract-assert #'stringp description
-                         "DESCRIPTION must be a string: %S" description)
-  (kargu-contract-assert #'kargu-contract-tool-schema-p parameters
-                         "PARAMETERS must be a JSON schema data structure or nil: %S" parameters)
-  (kargu-contract-assert #'kargu-contract-tool-executor-p executor
-                         "EXECUTOR must be callable: %S" executor)
-  (puthash name
-           `(("name" . ,name)
-             ("description" . ,description)
-             ("parameters" . ,parameters)
-             ("executor" . ,executor)
-             ("policy" . ,policy))
-           kargu--tool-registry)
+  (kargu-tool-registry-register kargu--tool-registry
+                                :name name :description description
+                                :parameters parameters :executor executor
+                                :policy policy)
   (kargu-log 'debug "tool registered: %s" name)
   name)
 
 (defun kargu-registered-tools ()
   "Return the names of all registered tools."
-  (hash-table-keys kargu--tool-registry))
+  (kargu-tool-registry-names kargu--tool-registry))
+
+(defun kargu-registered-tool-count ()
+  "Return the number of registered tools, including compatibility aliases."
+  (kargu-tool-registry-count kargu--tool-registry))
+
+(defun kargu-find-tool (name)
+  "Return the typed canonical definition of tool NAME, or nil.
+Consumers must treat definition fields and nested values as read-only."
+  (kargu-tool-registry-find kargu--tool-registry name))
+
+(defun kargu-unregister-tool (name)
+  "Remove tool NAME and its aliases, or just NAME when it is an alias."
+  (kargu-tool-registry-remove kargu--tool-registry name))
 
 (defun kargu-canonical-tool-name (name)
   "Return the canonical tool name for NAME, resolving compatibility aliases."
-  (or (kargu-aget (gethash name kargu--tool-registry) "name") name))
-
-(defun kargu--tool-spec (name)
-  "Return the current canonical specification of tool NAME."
-  (gethash (kargu-canonical-tool-name name) kargu--tool-registry))
+  (kargu-tool-registry-canonical-name kargu--tool-registry name))
 
 (defun kargu-advertised-tools ()
   "List visible canonical tool names in deterministic order."
@@ -84,11 +78,12 @@ are truncated to `kargu-tool-output-limit'."
 
 (defun kargu-tool-description (name)
   "Return the registered description of tool NAME."
-  (kargu-aget (kargu--tool-spec name) "description"))
+  (when-let* ((definition (kargu-find-tool name)))
+    (kargu-tool-definition-description definition)))
 
 (defun kargu-set-tool-policy (name policy)
   "Set POLICY for registered tool NAME and its aliases."
-  (setcdr (assoc "policy" (kargu--tool-spec name)) policy))
+  (kargu-tool-registry-set-policy kargu--tool-registry name policy))
 
 (defun kargu-register-tools (specs &optional aliases policy)
   "Register tool SPECS and their optional ALIASES.
@@ -113,7 +108,8 @@ a spec supplies its own fifth element."
 
 (defun kargu-tool-policy-error (name)
   "Return a refusal for unavailable tool NAME, or nil when allowed."
-  (let* ((policy (kargu-aget (kargu--tool-spec name) "policy"))
+  (let* ((definition (kargu-find-tool name))
+         (policy (and definition (kargu-tool-definition-policy definition)))
          (modes (plist-get policy :modes))
          (available (plist-get policy :available-p)))
     (cond
@@ -138,15 +134,15 @@ Delegates to `kargu--tools-visible-p' if set, otherwise to
 Tools hidden by `kargu--tool-visible-p' are skipped."
   (let (tools)
     (dolist (name (kargu-advertised-tools))
-      (let ((spec (gethash name kargu--tool-registry)))
+      (let ((definition (kargu-find-tool name)))
         (when (kargu--tool-visible-p name)
           (push `(("type" . "function")
                   ("function" . (("name" . ,name)
                                  ("description" .
-                                  ,(kargu-aget spec "description"))
+                                  ,(kargu-tool-definition-description definition))
                                  ("parameters" .
                                   ,(kargu--sanitize-tool-parameters
-                                    (kargu-aget spec "parameters"))))))
+                                    (kargu-tool-definition-parameters definition))))))
                 tools))))
     (vconcat (nreverse tools))))
 
@@ -158,10 +154,9 @@ Tools hidden by `kargu--tool-visible-p' are skipped."
 
 (defun kargu-register-tool-alias (alias name)
   "Expose registered tool NAME under ALIAS as well."
-  (let ((spec (gethash name kargu--tool-registry)))
-    (if (null spec)
+  (let ((registered (kargu-tool-registry-alias kargu--tool-registry alias name)))
+    (if (null registered)
         (kargu-log 'warn "tool alias %s: no such tool %s" alias name)
-      (puthash alias spec kargu--tool-registry)
       (kargu-log 'debug "tool alias %s -> %s" alias name)
       alias)))
 
@@ -442,7 +437,7 @@ Archive storage is bounded separately and its notice describes any loss."
 When CALLBACK is provided, run asynchronously if the tool supports it.
 Errors are captured and returned as \"ERROR: ...\" results so the
 agent loop can feed them back to the model for self-correction."
-  (let* ((spec (kargu--tool-spec name))
+  (let* ((definition (kargu-find-tool name))
          (raw (kargu--tool-raw-args arguments))
          (args (kargu--decode-tool-arguments arguments)))
     (kargu--log-block (format "tool %s arguments (raw)" name) raw
@@ -452,7 +447,7 @@ agent loop can feed them back to the model for self-correction."
     (kargu-log 'debug "execute-tool %s args=%s" name
                (truncate-string-to-width (format "%s" args) 200))
     (cond
-     ((null spec)
+     ((null definition)
       (let ((out (format "ERROR: no such tool: %s" name)))
         (if callback (funcall callback out) out)))
      ((kargu-tool-policy-error name)
@@ -463,9 +458,11 @@ agent loop can feed them back to the model for self-correction."
                          name (truncate-string-to-width raw 200))))
         (if callback (funcall callback out) out)))
      (callback
-      (kargu--execute-tool-async (kargu-aget spec "executor") args name callback))
+      (kargu--execute-tool-async
+       (kargu-tool-definition-executor definition) args name callback))
      (t
-      (kargu--execute-tool-sync (kargu-aget spec "executor") args name)))))
+      (kargu--execute-tool-sync
+       (kargu-tool-definition-executor definition) args name)))))
 
 (provide 'kargu/api/tools)
 

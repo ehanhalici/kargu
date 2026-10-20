@@ -70,6 +70,18 @@ Initialize installed PACKAGES only when requested."
    '(cl-assert (eq (kargu-to-int "broken" :missing) :missing))
    '(cl-assert (string-prefix-p "abc" (kargu-cap-text "abcdef" 3)))))
 
+(ert-deftest kargu-module-tool-registry-is-independent-test ()
+  "An explicit registry operates without initializing a default runtime."
+  (kargu-module-test--load-foundation
+   'kargu/tools/registry
+   '(let ((registry (kargu-tool-registry-create)))
+      (kargu-tool-registry-register registry :name "read" :description "Read"
+                                    :executor #'ignore)
+      (cl-assert (kargu-tool-registry-find registry "read"))
+      (cl-assert (= (kargu-tool-registry-count registry) 1))
+      (cl-assert (kargu-tool-registry-remove registry "read"))
+      (cl-assert (zerop (kargu-tool-registry-count registry))))))
+
 (ert-deftest kargu-module-json-is-independent-test ()
   "The JSON codec keeps wire identities without initializing a session."
   (kargu-module-test--load-foundation
@@ -200,6 +212,9 @@ Initialize installed PACKAGES only when requested."
   (let ((root (make-temp-file "kargu-module-package-" t))
         (files '("kargu/core/data.el" "kargu/core/group.el" "kargu/core/custom.el"
                  "kargu/core/log.el" "kargu/json.el" "kargu/fs.el" "kargu/async.el"
+                 "kargu/contract/constants.el" "kargu/contract/types.el"
+                 "kargu/contract/result.el" "kargu/contract/assert.el"
+                 "kargu/tools/registry.el"
                  "kargu/permission/guards.el" "kargu/tools/process.el")))
     (unwind-protect
         (progn
@@ -209,7 +224,8 @@ Initialize installed PACKAGES only when requested."
               (copy-file (expand-file-name file kargu-module-test--root) target)))
           (kargu-module-test--evaluate
            '((dolist (feature '(kargu/json kargu/fs kargu/async
-                               kargu/permission/guards kargu/tools/process))
+                               kargu/permission/guards kargu/tools/process
+                               kargu/tools/registry))
                (require feature))
              (cl-assert (null (locate-library "kargu/chat")))
              (cl-assert (null (locate-library "kargu/api")))

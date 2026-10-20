@@ -51,7 +51,7 @@
 
 (ert-deftest kargu-cache-tools-are-canonical-and-deterministic-test ()
   "Aliases remain executable without duplicate schemas or guidance."
-  (let ((kargu--tool-registry (make-hash-table :test #'equal)))
+  (let ((kargu--tool-registry (kargu-tool-registry-create)))
     (kargu-test-mode 'agent)
     (kargu-register-tool "z" "Last" nil (lambda (_) "z"))
     (kargu-register-tool "a" "First" nil (lambda (_) "a"))
@@ -85,6 +85,20 @@
     (should (= (plist-get kargu--session :cache-measured-input) 200))
     (should (= (plist-get kargu--session :cache-read) 80))))
 
+(ert-deftest kargu-cache-unregistered-tool-and-alias-cannot-execute-test ()
+  "Unregistration reaches the same gate used for direct and alias execution."
+  (let ((kargu--tool-registry (kargu-tool-registry-create)) (calls 0))
+    (kargu-register-tool "read" "Read" nil (lambda (_) (cl-incf calls) "Read"))
+    (kargu-register-tool-alias "r" "read")
+    (should (= (kargu-registered-tool-count) 2))
+    (should (kargu-unregister-tool "read"))
+    (should (zerop (kargu-registered-tool-count)))
+    (dolist (name '("read" "r"))
+      (should-not (kargu-find-tool name))
+      (should (string-prefix-p "ERROR: no such tool:"
+                               (kargu-execute-tool name nil))))
+    (should (zerop calls))))
+
 (ert-deftest kargu-cache-low-usage-preserves-model-and-full-output-test ()
   "Low usage bounds model context, retaining the full output locally."
   (let ((kargu-low-usage-mode t) (kargu-low-usage-output-limit 5)
@@ -100,7 +114,7 @@
 
 (ert-deftest kargu-cache-async-startup-text-is-not-a-result-test ()
   "An async startup message must not finish the tool before its callback."
-  (let ((kargu--tool-registry (make-hash-table :test #'equal)) held results)
+  (let ((kargu--tool-registry (kargu-tool-registry-create)) held results)
     (kargu-register-tool "delayed" "Wait" nil
                          (lambda (_args callback) (setq held callback) "Started"))
     (kargu-execute-tool "delayed" nil (lambda (text) (push text results)))

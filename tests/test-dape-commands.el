@@ -224,7 +224,7 @@
                           "debug_disconnect"
                           "debug_quit")))
     (dolist (tool expected-tools)
-      (should (gethash tool kargu--tool-registry)))))
+      (should (kargu-find-tool tool)))))
 
 (ert-deftest kargu-dape-aliases-mapped-test ()
   "Ensure Dape command names resolve via `kargu-register-tool-alias'."
@@ -251,9 +251,9 @@
     (dolist (pair expected-aliases)
       (let ((alias-name (car pair))
             (target-name (cdr pair)))
-        (should (gethash alias-name kargu--tool-registry))
-        (should (equal (kargu-aget (gethash alias-name kargu--tool-registry) "description")
-                       (kargu-aget (gethash target-name kargu--tool-registry) "description")))))))
+        (should (kargu-find-tool alias-name))
+        (should (eq (kargu-find-tool alias-name)
+                    (kargu-find-tool target-name)))))))
 
 (ert-deftest kargu-dape-validate-breakpoint-args-empty-test ()
   "Ensure empty args to debug_set_breakpoint return clear parameter guidance."
@@ -272,9 +272,10 @@
 
 (ert-deftest kargu-dape-eval-expression-validation-test ()
   "Ensure debug_eval rejects empty expression."
-  (let ((spec (gethash "debug_eval" kargu--tool-registry)))
-    (should spec)
-    (let ((res (funcall (kargu-aget spec "executor") '(("expression" . "")))))
+  (let ((definition (kargu-find-tool "debug_eval")))
+    (should definition)
+    (let ((res (funcall (kargu-tool-definition-executor definition)
+                        '(("expression" . "")))))
       (should (equal res "ERROR: expression is required")))))
 
 (ert-deftest kargu-dape-delayed-errors-complete-once-test ()

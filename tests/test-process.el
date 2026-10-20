@@ -392,10 +392,11 @@
 (ert-deftest kargu-git-tool-needs-a-callback-and-answers-by-it-test ()
   "Git tools never run while Emacs waits; with a callback they answer."
   (kargu-test-with-git-repo '(("a.txt" . "x\n"))
-                            (let ((spec (gethash "git_status" kargu--tool-registry)))
-                              (should (string-prefix-p "ERROR:" (funcall (kargu-aget spec "executor") nil)))
+                            (let ((executor (kargu-tool-definition-executor
+                                             (kargu-find-tool "git_status"))))
+                              (should (string-prefix-p "ERROR:" (funcall executor nil)))
                               (let ((out (kargu-test-await
-                                          (lambda (cb) (funcall (kargu-aget spec "executor") nil cb)))))
+                                          (lambda (cb) (funcall executor nil cb)))))
                                 (should (string-search "Head:" out))))))
 
 (ert-deftest kargu-search-grep-runs-asynchronously-test ()

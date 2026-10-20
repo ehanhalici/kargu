@@ -226,7 +226,7 @@ ATTEMPT is the zero-based retry count."
   (kargu-log 'request "POST %s (model=%s, %d messages, %d tools, %s%s)"
              (kargu-http--request-url request) (kargu--model)
              (length kargu--message-history)
-             (hash-table-count kargu--tool-registry)
+             (kargu-registered-tool-count)
              transport
              (if (> (kargu-http--request-attempt request) 0)
                  (format ", retry %d" (kargu-http--request-attempt request))
