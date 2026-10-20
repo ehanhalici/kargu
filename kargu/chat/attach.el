@@ -19,7 +19,7 @@
 (require 'json)
 (require 'kargu/core)
 (require 'kargu/permission)
-(require 'kargu/tools/diff)
+(require 'kargu/files)
 
 (defvar kargu-chat-attach-max-lines 150)
 (declare-function kargu-chat--completion-roots "kargu/chat/complete")

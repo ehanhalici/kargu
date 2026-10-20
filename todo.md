@@ -48,7 +48,7 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ### PERF-01 · P2 · K — Satır aralığında bile read_file tam dosyayı kopyalıyor
 
-- **Yer/kanıt:** `kargu/tools/diff.el`, `kargu-diff--resolve-read-target` tam metni alıyor; `kargu-diff-read-file` tüm metne `split-string` uyguluyor. Algoritma doğrulandı; belirli 100 MB eşiği/donma süresi ölçülmedi.
+- **Yer/kanıt:** `kargu/files.el`, `kargu-file--resolve-read-target` tam metni alıyor; `kargu-file-read` tüm metne `split-string` uyguluyor. Algoritma doğrulandı; belirli 100 MB eşiği/donma süresi ölçülmedi. Okuma modülünün diff'ten ayrılması bu performans işini kapatmaz.
 - **Beklenen/gerçek:** Küçük aralık tüm satır listesini gerektirmemeli; maliyet dosya boyutuyla büyüyor.
 - **Yeniden üretme/kapanış:** Büyük dosyada dar aralık, uzun satır, büyüme, EOF, boş dosya, UTF-8 ve kirli/daraltılmış tampon; ölçümlü bellek/çıktı bütçesi ve unavailable/truncation sözleşmesi.
 
@@ -93,7 +93,7 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ### TOOL-01 · P2 · Y — `read_file` aralık argümanları yanlış yorumlanıyor / sessizce yok sayılıyor
 
-- **Yer/kanıt:** `kargu/tools/diff.el`, `read_file` yürütücüsü ve `kargu-diff-read-file`. 3000 satırlık dosyayla yeniden üretildi: (a) yalnız `limit=3` → `lines 1-3000` (limit `from` olmadan yok sayılıyor: `(and from limit ...)`); (b) `offset=0, limit=2` → `lines 1-1`, yani 1 satır (`to = f + n - 1` hesabı `from` 1'e sıkıştırılınca kayıyor); (c) `from_line="abc"` → 1'den başlıyor, `to_line="abc"` → dosya sonuna kadar (`kargu-diff--to-int` nil dönünce varsayılana düşülüyor), hata verilmiyor.
+- **Yer/kanıt:** `kargu/tools/diff.el` içindeki `read_file` yürütücüsü ve `kargu/files.el` içindeki `kargu-file-read` (`kargu-diff-read-file` uyumluluk alias'ı). 3000 satırlık dosyayla yeniden üretildi: (a) yalnız `limit=3` → `lines 1-3000` (limit `from` olmadan yok sayılıyor: `(and from limit ...)`); (b) `offset=0, limit=2` → `lines 1-1`, yani 1 satır (`to = f + n - 1` hesabı `from` 1'e sıkıştırılınca kayıyor); (c) `from_line="abc"` → 1'den başlıyor, `to_line="abc"` → dosya sonuna kadar (`kargu-to-int` nil dönünce varsayılana düşülüyor), hata verilmiyor.
 - **Beklenen/gerçek:** Şema `limit`'i "from_line'dan itibaren en fazla satır" olarak tanımlıyor; yalnız `limit` ilk N satırı, `offset=0` ile `limit=N` tam N satırı döndürmeli; bozuk tam sayı reddedilmeli. Gerçekte model yanlış/çok geniş aralık alıyor (çıktı yalnız global `kargu-tool-output-limit` ile kısılıyor) ve girdi hatasını fark etmiyor.
 - **Yeniden üretme/kapanış:** limit tek başına, offset 0/1 + limit, `from_line` 0/negatif/ondalık/sayısal olmayan, `to_line` sayısal olmayan/0/dosya sonunu aşan, `limit` 0/negatif, boş dosya. Beklenen aralık ve hata metinleri test edilmeli; alias (`offset`) sözleşmesi tek yerde belgelenmeli.
 - **Bağımlılık:** PERF-01 ile aynı fonksiyon; aralık normalizasyonu ayrı çözülmeli.

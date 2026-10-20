@@ -42,12 +42,6 @@
 (declare-function flymake--project-diagnostics "flymake")
 (declare-function flymake-is-running "flymake")
 
-(declare-function kargu-diff--mutating-disabled "kargu/tools/diff" (name))
-(declare-function kargu-diff-apply-proposal "kargu/tools/diff/stage" (path contents &optional callback))
-(declare-function kargu-diff--describe "kargu/tools/diff/stage" (proposal))
-(declare-function kargu-diff--file-text "kargu/tools/diff/stage" (path))
-(declare-function kargu-diff-read-file "kargu/tools/diff" (file-path &optional from-line to-line))
-
 ;;;; Customization --------------------------------------------------------
 
 (defgroup kargu-lsp nil

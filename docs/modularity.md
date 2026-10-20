@@ -103,6 +103,13 @@ independent per-session contexts. Headless approval requests safely reject.
 
 ## Optional tool families
 
+Text reading is in `kargu/files`, separate from the diff tool and review
+adapter. LSP symbol reading and chat attachments use that service directly;
+`kargu-diff-read-file` remains a compatibility alias. Permission checks,
+owned tool-output buffers, unsaved/widened text and numbered ranges retain
+their existing contract. Removing the diff source family does not remove
+the read service. Editing still requires its separate guarded provider.
+
 One ordered composition table loads and registers available tool facades.
 Search, Bash, Git, skill and webfetch can each be physically removed, or
 removed together with LSP and Dape. The remaining chat and text-file reader

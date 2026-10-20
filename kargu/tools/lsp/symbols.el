@@ -10,6 +10,13 @@
 
 ;;; Code:
 
+(require 'kargu/files)
+
+(declare-function kargu-diff--mutating-disabled "kargu/tools/diff" (name))
+(declare-function kargu-diff-apply-proposal "kargu/tools/diff/stage"
+                  (path contents &optional callback))
+(declare-function kargu-diff--describe "kargu/tools/diff/stage" (proposal))
+
 (require 'kargu/tools/lsp/context)
 (require 'kargu/tools/lsp/skeleton)
 (require 'xref)
@@ -402,7 +409,7 @@ A kind does not widen the search to every symbol of that kind."
     (if (null matches)
         (kargu-lsp--format-missing-symbol-error name path flat kind)
       (let ((sym (car matches)))
-        (kargu-diff-read-file path (plist-get sym :start-line)
+        (kargu-file-read path (plist-get sym :start-line)
                               (plist-get sym :end-line))))))
 
 (defun kargu-lsp-read-symbol (file-path symbol-name &optional kind callback)
@@ -480,7 +487,7 @@ REASON describes the proposal.  CALLBACK receives its final review outcome."
         (if callback (funcall callback error) error)
       (let* ((symbol (car matches))
              (text (kargu-lsp--splice-symbol-content
-                    (kargu-diff--file-text path) (plist-get symbol :start-line)
+                    (kargu-file-text path) (plist-get symbol :start-line)
                     (plist-get symbol :end-line) content))
              (describe (lambda (outcome)
                          (format "Edit of %s `%s` in %s:\n%s"

@@ -149,6 +149,19 @@ Initialize installed PACKAGES only when requested."
    '(cl-assert (kargu-contract-mode-p 'agent))
    '(cl-assert (kargu-ok-p (kargu-ok "value")))))
 
+(ert-deftest kargu-module-file-service-without-editing-sources-test ()
+  "File context does not load the optional mutation or review adapter."
+  (kargu-module-test--without-sources
+   '("kargu/tools/diff.el" "kargu/tools/diff/")
+   '((require 'kargu/files)
+     (cl-assert (not (featurep 'kargu/tools/diff)))
+     (cl-assert (not (featurep 'ediff)))
+     (with-temp-file "read-only.txt" (insert "Read-only service"))
+     (let ((kargu-permission--override-root default-directory))
+       (cl-assert (equal (kargu-file-text "read-only.txt") "Read-only service"))
+       (cl-assert (string-search "1 | Read-only service"
+                                 (kargu-file-read "read-only.txt")))))))
+
 (ert-deftest kargu-module-data-is-independent-test ()
   "Legacy scalar helpers retain behavior without loading application state."
   (kargu-module-test--load-foundation
