@@ -22,6 +22,25 @@
 (declare-function kargu-chat-stop "kargu/chat")
 (declare-function kargu-chat-select-mode-company "kargu/api/select" (&optional _event))
 (declare-function kargu-deps-missing-p "kargu/tools/deps" (&optional root))
+(declare-function kargu-chat-list-buffers "kargu/chat" ())
+(declare-function kargu-chat-refresh-footer "kargu/chat/prompt" ())
+
+(defun kargu-chat-refresh-mode (_mode)
+  "Refresh each chat's mode view after a committed state notification."
+  (dolist (buffer (kargu-chat-list-buffers))
+    (condition-case err
+        (with-current-buffer buffer
+          (save-excursion
+            (save-restriction
+              (widen)
+              (kargu-chat-refresh-footer))))
+      (error (kargu-log 'warn "Mode view %s failed: %s"
+                        (buffer-name buffer) (error-message-string err))))))
+
+(defun kargu/chat/header-unload-function ()
+  "Remove the optional mode view subscription before unloading it."
+  (remove-hook 'kargu-state-mode-hook #'kargu-chat-refresh-mode)
+  nil)
 
 (defun kargu-chat--header-action-map (command)
   "Return a header and mouse keymap invoking COMMAND."

@@ -43,6 +43,7 @@
 (require 'tests/test-model-store)
 (require 'tests/test-parameters)
 (require 'tests/test-chat)
+(require 'tests/test-chat-state)
 (require 'tests/test-dynamic-models)
 (require 'tests/test-lsp)
 (require 'tests/test-lsp-project-diagnostics)

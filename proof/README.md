@@ -34,7 +34,9 @@ owner exit during request publication. A run's owner-exit hook invokes the
 existing Stop path, rejects startup in the closing owner and detaches before
 completion. The post-notification startup barrier admits no HTTP effect after
 Stop. These refine the existing abstract transitions rather than adding a
-new loop state; the full bounded loop scan was not rerun for this extraction.
+new loop state. The full bounded loop/protocol/circuit/state scan was rerun
+after the owned session/history extraction: 729,094,900 generated states,
+85,318,093 distinct states, depth 43, no error (2026-10-20).
 The process ownership scan is a regression gate, not a proof of all session
 or buffer lifetimes. History now belongs to the same captured session; detached
 payload/persistence snapshots and queue container ownership are checked by ERT.

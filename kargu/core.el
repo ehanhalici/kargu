@@ -39,14 +39,8 @@
   "Generation used to discard an obsolete asynchronous mode selection.")
 
 (defun kargu--publish-mode (mode)
-  "Publish MODE to chat footers and the mode line."
+  "Report the committed MODE; optional views observe state notifications."
   (kargu-log 'info "mode set to `%s'" mode)
-  (dolist (buf (buffer-list))
-    (when (and (buffer-live-p buf)
-               (with-current-buffer buf (derived-mode-p 'kargu-chat-mode)))
-      (with-current-buffer buf
-        (when (fboundp 'kargu-chat-refresh-footer)
-          (kargu-chat-refresh-footer)))))
   (force-mode-line-update t)
   (message "kargu mode: %s" mode))
 

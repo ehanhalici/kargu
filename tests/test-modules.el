@@ -729,6 +729,20 @@ Initialize installed PACKAGES only when requested."
        (cl-assert (commandp command))))
    t))
 
+(ert-deftest kargu-module-mode-view-subscription-belongs-to-composition-test ()
+  "Core mode commands work alone; optional composition owns view lifetime."
+  (kargu-module-test--evaluate
+   '((require 'kargu/core)
+     (kargu-set-mode 'plan)
+     (cl-assert (eq (kargu-state-mode) 'plan))
+     (cl-assert (not (featurep 'kargu/chat)))
+     (require 'kargu)
+     (cl-assert (= (cl-count #'kargu-chat-refresh-mode kargu-state-mode-hook) 1))
+     (kargu/chat-unload-function)
+     (cl-assert (not (memq #'kargu-chat-refresh-mode kargu-state-mode-hook)))
+     (cl-assert (not (memq #'kargu-chat-session-reset kargu-session-reset-hook))))
+   t))
+
 (ert-deftest kargu-module-tool-loads-do-not-register-tools-test ()
   "Tool implementations load without registration, HTTP or chat adapters."
   (dolist (feature '(kargu/tools/lsp kargu/tools/search kargu/tools/dape

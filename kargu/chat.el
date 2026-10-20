@@ -142,18 +142,20 @@ or insert newline if editing prompt."
      (t
       (newline)))))
 
-(defvar kargu-chat-buffers nil
-  "List of live kargu chat buffers.")
-
 (defun kargu-chat-list-buffers ()
   "Return a list of live buffers running `kargu-chat-mode'."
-  (setq kargu-chat-buffers
-        (cl-remove-if-not (lambda (b)
-                            (and (bufferp b)
-                                 (buffer-live-p b)
-                                 (with-current-buffer b (derived-mode-p 'kargu-chat-mode))))
-                          (buffer-list)))
-  kargu-chat-buffers)
+  (cl-remove-if-not
+   (lambda (buffer)
+     (with-current-buffer buffer (derived-mode-p 'kargu-chat-mode)))
+   (buffer-list)))
+
+(defun kargu/chat-unload-function ()
+  "Refuse live views and detach composition subscriptions before unloading."
+  (when (kargu-chat-list-buffers)
+    (user-error "Kargu: close chat buffers before unloading their UI"))
+  (remove-hook 'kargu-state-mode-hook #'kargu-chat-refresh-mode)
+  (remove-hook 'kargu-session-reset-hook #'kargu-chat-session-reset)
+  nil)
 
 (define-derived-mode kargu-chat-mode text-mode "kargu"
   "Major mode for the kargu chat transcript.
@@ -174,12 +176,10 @@ The header line shows the active mode, model, and context usage.
     (setq-local kargu-chat--project-root (kargu-session-project-root)))
   (unless kargu-chat--session-id
     (setq-local kargu-chat--session-id (kargu-session-id)))
-  (add-to-list 'kargu-chat-buffers (current-buffer))
   (add-hook 'kill-buffer-hook
             (lambda ()
               (when (bound-and-true-p kargu-session-auto-save)
-                (ignore-errors (kargu-session-save (current-buffer))))
-              (setq kargu-chat-buffers (delq (current-buffer) kargu-chat-buffers)))
+                (ignore-errors (kargu-session-save (current-buffer)))))
             nil t)
   (when (or (featurep 'company) (require 'company nil t))
     (setq-local company-backends '(kargu-chat-company))
@@ -224,7 +224,6 @@ Otherwise generates `*kargu-chat*<N>'."
     (kargu-chat-activate-selection buf)
     (with-current-buffer buf
       (kargu-chat--focus-selection (called-interactively-p 'any)))
-    (kargu-chat-list-buffers)
     buf))
 
 (defun kargu-chat-switch ()
