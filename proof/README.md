@@ -28,6 +28,16 @@ finish reason or `[DONE]` is required. Truncation and malformed events enter
 the existing `ModelReceiveError` path, never `ModelReceiveToolCalls`. ERT covers
 this transport boundary separately from the loop's abstract response actions.
 
+Usage and response delivery now capture a buffer-owned session handle. ERT
+checks two owners, replacement/closure, late and duplicate responses, and
+owner exit during request publication. A run's owner-exit hook invokes the
+existing Stop path, rejects startup in the closing owner and detaches before
+completion. The post-notification startup barrier admits no HTTP effect after
+Stop. These refine the existing abstract transitions rather than adding a
+new loop state; the full bounded loop scan was not rerun for this extraction.
+The process ownership scan is a regression gate, not a proof of all session
+or buffer lifetimes. Shared history/selection ownership remains in `todo.md`.
+
 Model capabilities are read from provider/model-owned metadata records.
 Provider isolation, ambiguous display aliases, exact request identities and
 captured inspector ownership are covered by offline ERT, including catalog

@@ -49,7 +49,7 @@ Initialize installed PACKAGES only when requested."
      (dolist (forbidden ',kargu-module-test--runtime-features)
        (when (featurep forbidden) (error "Unexpected dependency: %s" forbidden)))
      (when (boundp 'kargu--state-store) (error "State store was initialized"))
-     (when (boundp 'kargu--session) (error "Session was initialized"))
+     (when (bound-and-true-p kargu-session--context) (error "Session was initialized"))
      (when (boundp 'kargu--tool-registry) (error "Tool registry was initialized"))
      ,@assertions)))
 
@@ -546,13 +546,16 @@ Initialize installed PACKAGES only when requested."
        (kargu-api--deliver delivery '(("usage" . (("prompt_tokens" . 5)))))
        (cl-assert (not called))
        (cl-assert (not kargu--message-history))
-       (cl-assert (zerop (plist-get kargu--session :requests)))))))
+       (cl-assert (zerop (plist-get (kargu-session-snapshot) :requests)))))))
 
 (ert-deftest kargu-module-api-delivery-owns-usage-once-test ()
   "The delivery facade owns usage and never calls a concrete chat footer."
   (kargu-module-test--evaluate
    '((require 'kargu/api/client)
-     (let ((kargu--session (list :requests 0)) (footer-calls 0)
+     (let* ((kargu-session--context
+            (kargu-session-create :id-value (kargu-session-id)
+                                  :usage-value (list :requests 0)))
+           (footer-calls 0)
            (delivery (kargu-api--make-delivery
                       :callback #'ignore :generation kargu--generation :record-turn nil))
            (response '(("usage" . (("prompt_tokens" . 5) ("completion_tokens" . 2))))))
@@ -561,8 +564,157 @@ Initialize installed PACKAGES only when requested."
          (kargu-api--deliver delivery response)
          (kargu-api--deliver delivery response))
        (cl-assert (zerop footer-calls))
-       (cl-assert (= (plist-get kargu--session :requests) 1))
-       (cl-assert (= (plist-get kargu--session :tokens-in) 5)))) t))
+       (cl-assert (= (plist-get (kargu-session-snapshot) :requests) 1))
+       (cl-assert (= (plist-get (kargu-session-snapshot) :tokens-in) 5)))) t))
+
+(ert-deftest kargu-module-session-counters-belong-to-delivery-origin-test ()
+  "A response delivered while B is current updates only captured owner A."
+  (kargu-module-test--evaluate
+   '((require 'kargu/api/client)
+     (let ((a (generate-new-buffer " *owner-a*"))
+           (b (generate-new-buffer " *owner-b*")) delivery callback-buffer)
+       (unwind-protect
+           (progn
+             (with-current-buffer a
+               (kargu-session-record-usage 10 1)
+               (setq delivery (kargu-api--make-delivery
+                               :generation kargu--generation
+                               :callback (lambda (_) (setq callback-buffer (current-buffer))))))
+             (with-current-buffer b
+               (kargu-session-record-usage 3 1)
+               (kargu-api--deliver delivery
+                                   '(("usage" . (("prompt_tokens" . 5)
+                                                 ("completion_tokens" . 2)))))
+               (cl-assert (= (plist-get (kargu-session-snapshot) :tokens-in) 3)))
+             (cl-assert (eq callback-buffer a))
+             (cl-assert (= (plist-get (kargu-session-snapshot (kargu-session-context a))
+                                      :tokens-in) 15))
+             (cl-assert (not (equal (kargu-session-id (kargu-session-context a))
+                                    (kargu-session-id (kargu-session-context b))))))
+         (kill-buffer a) (kill-buffer b)))) t))
+
+(ert-deftest kargu-module-session-replacement-discards-old-delivery-test ()
+  "A closed or replaced session cannot receive an old response or usage."
+  (kargu-module-test--evaluate
+   '((require 'kargu/api/client)
+     (dolist (case '(replaced closed))
+       (let ((origin (generate-new-buffer " *old-owner*")) delivery called)
+         (unwind-protect
+             (progn
+               (with-current-buffer origin
+                 (setq delivery (kargu-api--make-delivery
+                                 :generation kargu--generation
+                                 :callback (lambda (_) (setq called t))))
+                 (if (eq case 'closed) (kill-buffer origin)
+                   (kargu-session-replace-usage '(:active nil :requests 0))))
+               (setq kargu--busy t)
+               (kargu-api--deliver delivery '(("usage" . (("prompt_tokens" . 5)))))
+               (kargu-api--deliver delivery '(("usage" . (("prompt_tokens" . 5)))))
+               (cl-assert (not called))
+               (cl-assert (not kargu--busy))
+               (when (buffer-live-p origin)
+                 (cl-assert (zerop (plist-get (kargu-session-snapshot
+                                               (kargu-session-context origin)) :requests)))))
+           (when (buffer-live-p origin) (kill-buffer origin)))))) t))
+
+(ert-deftest kargu-module-session-input-validation-is-atomic-test ()
+  "Invalid usage counts fail before mutating any owned counter."
+  (kargu-module-test--evaluate
+   '((require 'kargu/core/session)
+     (cl-assert (not (bound-and-true-p kargu-session--context)))
+     (let ((before (kargu-session-snapshot)))
+       (dolist (counts '((-1 2) (1 -1) (1.5 2) ("5" 2)))
+         (cl-assert (condition-case nil
+                        (progn (apply #'kargu-session-record-usage counts) nil)
+                      (error t)))
+         (cl-assert (equal before (kargu-session-snapshot))))))))
+
+(ert-deftest kargu-module-closing-run-owner-cancels-and-rejects-reentry-test ()
+  "Owner closure cancels the run, rejects reentry and ignores late model data."
+  (kargu-module-test--evaluate
+   '((setq kargu-ui-enabled nil)
+     (require 'kargu)
+     (dolist (case '(close mode-change))
+       (let ((origin (generate-new-buffer " *run-owner*")) session callback report rejected)
+         (unwind-protect
+             (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+                       ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil))
+                       ((symbol-function 'kargu--provider-name) (lambda (&rest _) "openai"))
+                       ((symbol-function 'kargu--model) (lambda (&rest _) "fake-model"))
+                       ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) "fake-key"))
+                       ((symbol-function 'kargu--api-base) (lambda (&rest _) "https://example.invalid"))
+                       ((symbol-function 'kargu--api-post)
+                        (lambda (_url _headers _payload _gen done &rest _) (setq callback done))))
+               (with-current-buffer origin
+                 (setq session (kargu-session-context))
+                 (kargu-loop-send
+                  "offline" nil
+                  (lambda (value)
+                    (setq report value rejected
+                          (condition-case nil (progn (kargu-loop-send "reentry") nil)
+                            (user-error t)))))
+                 (if (eq case 'close) (kill-buffer origin) (fundamental-mode)))
+               (cl-assert callback)
+               (cl-assert rejected)
+               (cl-assert (eq (plist-get report :status) :stopped))
+               (cl-assert (not (kargu-loop-running-p)))
+               (cl-assert (not (plist-get (kargu-session-snapshot session) :active)))
+               (funcall callback '(("error" . (("message" . "Late reply")))))
+               (cl-assert (not (kargu-loop-running-p))))
+           (when (buffer-live-p origin) (kill-buffer origin)))))) t))
+
+(ert-deftest kargu-module-closing-owner-during-request-start-never-posts-test ()
+  "A reentrant close at request publication cannot launch a late HTTP effect."
+  (kargu-module-test--evaluate
+   '((setq kargu-ui-enabled nil)
+     (require 'kargu)
+     (let* ((origin (generate-new-buffer " *starting-owner*")) (posted 0) report
+            (kargu-state-status-hook
+             (list (lambda (status _detail)
+                     (when (and (eq status :requesting) (kargu-busy-p)
+                                (buffer-live-p origin))
+                       (kill-buffer origin))))))
+       (unwind-protect
+           (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+                     ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil))
+                     ((symbol-function 'kargu--provider-name) (lambda (&rest _) "openai"))
+                     ((symbol-function 'kargu--model) (lambda (&rest _) "fake-model"))
+                     ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) "fake-key"))
+                     ((symbol-function 'kargu--api-base) (lambda (&rest _) "https://example.invalid"))
+                     ((symbol-function 'kargu--api-post) (lambda (&rest _) (cl-incf posted))))
+             (with-current-buffer origin
+               (kargu-loop-send "offline" nil (lambda (value) (setq report value))))
+             (cl-assert (eq (plist-get report :status) :stopped))
+             (cl-assert (zerop posted))
+             (cl-assert (not (kargu-busy-p)))
+             (cl-assert (not (kargu-loop-running-p))))
+         (when (buffer-live-p origin) (kill-buffer origin))))) t))
+
+(ert-deftest kargu-module-reset-retains-captured-counter-owner-test ()
+  "Cancellation cannot redirect reset or clear a newly replaced owner."
+  (kargu-module-test--evaluate
+   '((require 'kargu/core/session)
+     (dolist (case '(redirected replaced))
+       (let ((a (generate-new-buffer " *reset-a*"))
+             (b (generate-new-buffer " *reset-b*")) (active t))
+         (unwind-protect
+             (let ((b-id (kargu-session-id (kargu-session-context b))))
+               (cl-letf (((symbol-function 'kargu-loop-running-p) (lambda () active))
+                          ((symbol-function 'kargu-loop-stop)
+                           (lambda (_)
+                             (setq active nil)
+                             (if (eq case 'redirected) (set-buffer b)
+                               (kargu-session-replace-usage '(:requests 9))))))
+                 (with-current-buffer a
+                   (if (eq case 'replaced)
+                       (cl-assert (condition-case nil (progn (kargu-session-reset) nil)
+                                    (user-error t)))
+                     (kargu-session-reset))
+                   (cl-assert (eq (current-buffer) a))
+                   (cl-assert (= (plist-get (kargu-session-snapshot) :requests)
+                                  (if (eq case 'replaced) 9 0)))))
+               (cl-assert (equal b-id (kargu-session-id (kargu-session-context b)))))
+           (kill-buffer a) (kill-buffer b))))) t))
 
 (ert-deftest kargu-module-selection-compatibility-entry-test ()
   "The legacy feature still exposes the same public selection commands."

@@ -125,7 +125,9 @@
 
 (ert-deftest kargu-cache-usage-preserves-unknown-and-counts-native-input-test ()
   "Cache metrics use only provider measurements and include native cached input."
-  (let* ((kargu--session (list :requests 0))
+  (let* ((kargu-session--context
+          (kargu-session-create :id-value (kargu-session-id)
+                                :usage-value (list :requests 0)))
          (response (kargu-api-normalize-response
                     '(("type" . "message") ("stop_reason" . "end_turn")
                       ("content" . [(("type" . "text") ("text" . "Done"))])
@@ -133,11 +135,11 @@
                                   ("cache_read_input_tokens" . 80) ("cache_creation_input_tokens" . 20)))))))
     (should (string-search "cache-read: unknown" (kargu-session-usage)))
     (kargu--record-usage response)
-    (should (= (plist-get kargu--session :tokens-in) 200))
+    (should (= (plist-get (kargu-session-snapshot) :tokens-in) 200))
     (should (string-search "measured-hit: 40.0%" (kargu-session-usage)))
     (kargu--record-usage '(("usage" . (("prompt_tokens" . 50) ("completion_tokens" . 2)))))
-    (should (= (plist-get kargu--session :cache-measured-input) 200))
-    (should (= (plist-get kargu--session :cache-read) 80))))
+    (should (= (plist-get (kargu-session-snapshot) :cache-measured-input) 200))
+    (should (= (plist-get (kargu-session-snapshot) :cache-read) 80))))
 
 (ert-deftest kargu-cache-unregistered-tool-and-alias-cannot-execute-test ()
   "Unregistration reaches the same gate used for direct and alias execution."

@@ -104,7 +104,15 @@ RECORD-TURN permits storage of the reply in the active conversation."
 
 (cl-defstruct (kargu-api--delivery (:constructor kargu-api--make-delivery))
   "One turn's response owner, including a terminal single-delivery state."
-  callback generation record-turn (state :pending))
+  callback generation record-turn (state :pending)
+  (origin (current-buffer)) (session (kargu-session-context)))
+
+(defun kargu-api--delivery-owner-live-p (delivery)
+  "Return non-nil if DELIVERY still owns its buffer and captured session."
+  (let ((origin (kargu-api--delivery-origin delivery)))
+    (and (= (kargu-api--delivery-generation delivery) kargu--generation)
+         (buffer-live-p origin)
+         (eq (kargu-api--delivery-session delivery) (kargu-session-context origin)))))
 
 (defun kargu-api--delivery-live-p (delivery)
   "Return non-nil when DELIVERY still owns the current request."
@@ -115,22 +123,28 @@ RECORD-TURN permits storage of the reply in the active conversation."
   "Claim DELIVERY and store or forward RESPONSE exactly once."
   (when (kargu-api--delivery-live-p delivery)
     (setf (kargu-api--delivery-state delivery) :delivered)
-    (let ((result
-           (condition-case err
-               (progn
-                 (unless (kargu-response-error-message response)
-                   (kargu--record-usage response))
-                 (when (and (kargu-api--delivery-record-turn delivery)
-                            (not (kargu-response-error-message response)))
-                   (kargu-api-store-assistant-turn response))
-                 response)
-             (error (kargu--api-error-alist (error-message-string err))))))
+    (let ((result (when (kargu-api--delivery-owner-live-p delivery)
+                    (with-current-buffer (kargu-api--delivery-origin delivery)
+                      (condition-case err
+                          (kargu-api--receive-owned delivery response)
+                        (error (kargu--api-error-alist (error-message-string err))))))))
       (when (= (kargu-api--delivery-generation delivery) kargu--generation)
         (kargu--api-cancel-busy))
-      (condition-case err
-          (funcall (kargu-api--delivery-callback delivery) result)
-        (error (kargu-log 'error "API continuation failed: %s"
-                          (error-message-string err)))))))
+      (when (kargu-api--delivery-owner-live-p delivery)
+        (with-current-buffer (kargu-api--delivery-origin delivery)
+          (condition-case err
+              (funcall (kargu-api--delivery-callback delivery) result)
+            (error (kargu-log 'error "API continuation failed: %s"
+                              (error-message-string err)))))))))
+
+(defun kargu-api--receive-owned (delivery response)
+  "Record RESPONSE only in DELIVERY's captured, still-live owner."
+  (unless (kargu-response-error-message response)
+    (kargu--record-usage response (kargu-api--delivery-session delivery))
+    (when (and (kargu-api--delivery-record-turn delivery)
+               (kargu-api--delivery-owner-live-p delivery))
+      (kargu-api-store-assistant-turn response)))
+  response)
 
 (cl-defun kargu-api--send-turn (&key prompt callback on-delta key base (record-turn t))
   "Append PROMPT and start a request using KEY and BASE.
@@ -160,10 +174,15 @@ Send events to ON-DELTA and the response through DELIVERY."
            (delta (and (kargu-provider-format-stream-p fmt) on-delta)))
       (setq kargu--busy t)
       (kargu-state-transition-status :requesting)
-      (kargu--api-post
-       (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
-       (lambda (response) (kargu-api--deliver delivery response))
-       delta))))
+      (cond
+       ((and (kargu-api--delivery-live-p delivery)
+             (kargu-api--delivery-owner-live-p delivery))
+        (kargu--api-post
+         (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
+         (lambda (response) (kargu-api--deliver delivery response)) delta))
+       ((= gen kargu--generation)
+        (kargu-api--deliver delivery
+                            (kargu--api-error-alist "Request owner was invalidated")))))))
 
 (defun kargu-test-connection ()
   "Ping the active provider with a minimal request and report the result.
@@ -199,22 +218,24 @@ Build the payload in a temporary history binding; never store the reply."
                (truncate-string-to-width
                 (or (kargu-response-text response) "") 60)))))
 
-(defun kargu--record-usage (response)
-  "Accumulate the token usage of RESPONSE in `kargu--session'."
+(defun kargu--record-usage (response &optional session)
+  "Accumulate RESPONSE usage in captured SESSION or the current owner."
+  (setq session (or session (kargu-session-context)))
   (when-let* ((usage (kargu-aget response "usage")))
     (let ((in (kargu-aget usage "prompt_tokens"))
           (out (kargu-aget usage "completion_tokens")))
-      (kargu-session-record-usage in out)
+      (kargu-session-record-usage (and (numberp in) in) (and (numberp out) out) session)
       (let ((details (kargu-aget usage "prompt_tokens_details")))
         (kargu-session-record-cache-usage in (kargu-aget details "cached_tokens")
-                                           (kargu-aget details "cache_write_tokens")))
+                                           (kargu-aget details "cache_write_tokens")
+                                           :session session))
       (when (fboundp 'kargu-state-record-tokens)
         (kargu-state-record-tokens (and (numberp in) in)
                                    (and (numberp out) out)))
       (force-mode-line-update t)
       (kargu-log 'info "usage: %s in / %s out (session: %s)"
-                 in out (kargu-session-usage))))
-  kargu--session)
+                 in out (kargu-session-usage session))))
+  (kargu-session-snapshot session))
 
 (provide 'kargu/api/client)
 

@@ -20,7 +20,7 @@ when it never arrives."
                 (< (float-time) deadline))
       (accept-process-output nil 0.02))
     (when (eq result :kargu-test-pending)
-      (error "kargu-test-await: no result within %ss" (or timeout 10)))
+      (error "Kargu test await: no result within %ss" (or timeout 10)))
     result))
 
 ;;;; Temporary repositories ----------------------------------------------------
@@ -28,7 +28,7 @@ when it never arrives."
 (defvar kargu-permission--override-root)
 
 (defmacro kargu-test-with-git-repo (files &rest body)
-  "Run BODY inside a fresh git repository whose one commit holds FILES.
+  "Run BODY in a fresh git repository containing FILES in one commit.
 FILES is an alist of (NAME . TEXT).  `repo' is bound to the directory,
 which is also the project root and `default-directory'.  The repository
 is deleted afterwards, so no test depends on the working tree of Kargu."
@@ -66,7 +66,7 @@ is deleted afterwards, so no test depends on the working tree of Kargu."
 (defvar kargu--tools-refused)
 (defvar kargu--model-metadata-table)
 (defvar kargu--state-store)
-(defvar kargu--session)
+(defvar kargu-session--context)
 (defvar kargu--session-id)
 (defvar kargu-context-buffer)
 
@@ -91,12 +91,15 @@ the previous mode when the test ends."
   kargu-test--scratch-root)
 
 (defun kargu-test--isolate (run-test &rest args)
-  "Run RUN-TEST with ARGS in a scratch root and an isolated state store.
+  "Run RUN-TEST with ARGS in a scratch root and isolated session/state data.
 Tests never see the working tree of Kargu as their project."
   (let ((default-directory (kargu-test-scratch-root))
         (kargu-permission--override-root (kargu-test-scratch-root))
         (kargu--state-store (copy-tree kargu--state-store))
-        (kargu--session (copy-tree kargu--session))
+        (kargu-session--context
+         (kargu-session-create :id-value (kargu-session-id)
+                               :usage-value (copy-tree (kargu-session-usage-value
+                                                       (kargu-session-context)))))
         (kargu--session-id kargu--session-id)
         (kargu-context-buffer kargu-context-buffer)
         ;; Global state a test may touch; each test starts from and leaves it as found.

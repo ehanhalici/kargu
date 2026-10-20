@@ -106,7 +106,7 @@
       (dotimes (_ 2)
         (kargu-loop-send "Hello" nil (lambda (report) (push report reports)))
         (should-not (kargu-loop-running-p))
-        (should-not (plist-get kargu--session :active))
+        (should-not (plist-get (kargu-session-snapshot) :active))
         (should-not kargu--busy)
         (should (eq (kargu-state-status) :error)))
       (should (= (length reports) 2))

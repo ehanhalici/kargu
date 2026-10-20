@@ -13,10 +13,12 @@
 (require 'kargu/chat/session)
 (require 'tests/test-helpers)
 
+(declare-function kargu-chat-mode "kargu/chat" ())
+
 (ert-deftest kargu-session-validate-rejections-preserve-draft-and-state-test ()
   "Reject malformed fields without touching any existing conversation state."
   (let ((history (copy-tree kargu--message-history))
-        (counters (copy-tree kargu--session))
+        (counters (kargu-session-snapshot))
         (state (copy-tree kargu--state-store))
         (provider kargu--session-provider)
         (model kargu--session-model))
@@ -47,7 +49,7 @@
           (widen)
           (should (equal (buffer-string) "existing transcript and unsent draft")))))
     (should (equal kargu--message-history history))
-    (should (equal kargu--session counters))
+    (should (equal (kargu-session-snapshot) counters))
     (should (equal kargu--state-store state))
     (should (equal kargu--session-provider provider))
     (should (equal kargu--session-model model))))

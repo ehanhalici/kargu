@@ -3,6 +3,12 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
+;; Exercise chat lifecycle, completion and rendering contracts.
+
+;;; Code:
+
 (require 'ert)
 (require 'cl-lib)
 (require 'tests/test-helpers)
@@ -104,7 +110,9 @@
   "Test that context usage is accurately calculated and rendered."
   (kargu-model-set-metadata "gemini-2.5-flash" '(("context_length" . 1000000)))
   (let ((kargu--session-model "gemini-2.5-flash")
-        (kargu--session (list :tokens 0 :turns 0 :last-prompt-tokens 32000)))
+        (kargu-session--context
+         (kargu-session-create :id-value (kargu-session-id)
+                               :usage-value (list :last-prompt-tokens 32000))))
     (let ((info (kargu-session-context-info)))
       (should (= (plist-get info :used) 32000))
       (should (> (plist-get info :capacity) 0))
@@ -364,7 +372,7 @@
   (let (opened)
     (cl-letf (((symbol-function 'kargu-eglot-connected-p) (lambda () nil))
               ((symbol-function 'transient-setup) (lambda (prefix &rest _) (setq opened prefix))))
-      (kargu-menu)
+      (call-interactively #'kargu-menu)
       (should (eq opened 'kargu-menu))
       (should (kargu-menu--lsp-unavailable-p)))))
 
@@ -413,7 +421,7 @@
           (should (kargu-chat--prompt-live-p)))))))
 
 (ert-deftest kargu-chat-beginning-of-line-respects-input-lines-test ()
-  "C-a visits each input line start without entering the prompt prefix."
+  "Visit each input line start without entering the prompt prefix."
   (with-temp-buffer
     (kargu-chat-mode)
     (kargu-chat--ensure-idle-prompt)

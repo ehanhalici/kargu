@@ -77,6 +77,31 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
 :healing, :verifications, :empty-retries, :compactions,
 :length-continues, :doom-sigs.")
 
+(defvar-local kargu-loop--owner-state :open
+  "Lifecycle of this buffer as a run owner: :open or :closing.")
+
+(defun kargu-loop--attach-origin (run)
+  "Attach RUN's cancellation to the lifetime of its originating buffer."
+  (let ((origin (plist-get run :chat-buffer))
+        (cleanup (lambda ()
+                   (setq kargu-loop--owner-state :closing)
+                   (when (kargu-loop--live-p run)
+                     (kargu-loop-stop "run owner closed or changed mode")))))
+    (plist-put run :owner-cleanup cleanup)
+    (with-current-buffer origin
+      (add-hook 'kill-buffer-hook cleanup nil t)
+      (add-hook 'change-major-mode-hook cleanup nil t))))
+
+(defun kargu-loop--detach-origin (run)
+  "Release RUN's owner lifecycle hooks before delivering completion."
+  (when-let* ((cleanup (plist-get run :owner-cleanup))
+              (origin (plist-get run :chat-buffer))
+              ((buffer-live-p origin)))
+    (with-current-buffer origin
+      (remove-hook 'kill-buffer-hook cleanup t)
+      (remove-hook 'change-major-mode-hook cleanup t))
+    (plist-put run :owner-cleanup nil)))
+
 
 (defun kargu-loop--live-p (run)
   "Non-nil when RUN is still the active loop."
@@ -206,6 +231,8 @@ switched tools off (for example while compacting)."
 Return non-nil when the run must be tool-free (the model cannot call tools
 and the mode is not agent).  Touches no state, so a refused start leaves
 the diff run files and the UI as they were."
+  (when (eq kargu-loop--owner-state :closing)
+    (user-error "Kargu: cannot start work in a closing owner buffer"))
   (when (kargu-loop-running-p)
     (user-error "Kargu: a run is already in progress (M-x kargu-loop-stop)"))
   (let ((missing (and (fboundp 'kargu-deps-missing)
@@ -222,6 +249,7 @@ the diff run files and the UI as they were."
 (cl-defun kargu-loop--new-run (prompt &key no-tools on-delta on-finish)
   "Build a run record for PROMPT with NO-TOOLS, ON-DELTA and ON-FINISH."
   (list :prompt prompt :state 'request :chat-buffer (current-buffer)
+        :session (kargu-session-context)
         :max-iterations kargu-max-iterations :on-delta on-delta
         :on-finish (or on-finish #'kargu-loop--message-report)
         :iterations 0 :healing 0 :verifications 0 :empty-retries 0
@@ -234,11 +262,13 @@ the diff run files and the UI as they were."
     (setq kargu--loop-run run)
     (condition-case err
         (progn
+          (kargu-loop--attach-origin run)
           (kargu-state-transition-status :requesting)
-          (plist-put kargu--session :active t)
-          (kargu-log 'info "run start (mode=%s, model=%s)"
-                     (kargu-state-mode) (kargu--model))
-          (kargu--loop-request run prompt))
+          (when (kargu-loop--live-p run)
+            (kargu-session-mark-active t (plist-get run :session))
+            (kargu-log 'info "run start (mode=%s, model=%s)"
+                       (kargu-state-mode) (kargu--model))
+            (kargu--loop-request run prompt)))
       (error
        (when (kargu-loop--live-p run)
          (when (> kargu--generation generation) (kargu-api-cancel))
@@ -283,13 +313,14 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
   "End RUN with STATUS and TEXT; deliver the report to on-finish."
   (when (kargu-loop--live-p run)
     (let ((report (kargu-loop--finish-report run status text)))
+      (kargu-loop--detach-origin run)
       (kargu-async-cancel-owner run)
       (setq kargu--loop-run nil)
       (kargu-dismiss-confirmations)
       (when (memq status '(:stopped :error))
         (kargu-edit-changes :abort))
       (setq kargu--compaction-system nil)
-      (plist-put kargu--session :active nil)
+      (kargu-session-mark-active nil (plist-get run :session))
       (when (fboundp 'kargu-state-transition-status)
         (let ((final-st (if (memq status '(:done :limit :stopped :error))
                             status :idle)))

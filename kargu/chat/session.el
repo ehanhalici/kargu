@@ -226,7 +226,7 @@ empty strings, not the config fallback."
                            'agent))
                (prov (or (kargu-chat--explicit-selection kargu-chat--session-provider) ""))
                (mod (or (kargu-chat--explicit-selection kargu-chat--session-model) ""))
-               (usage (if (boundp 'kargu--session) kargu--session nil)))
+               (usage (kargu-session-snapshot)))
           ;; Avoid creating files for completely empty untouched sessions
           (when (or (and messages (> (length messages) 0))
                     (> (length (string-trim transcript)) 30))
@@ -288,16 +288,14 @@ empty strings, not the config fallback."
       (setq kargu--message-history (copy-sequence msg-list)))))
 
 (defun kargu-session--restore-counters (data updated-at)
-  "Restore global session counters from DATA, fallback to UPDATED-AT."
-  (when (boundp 'kargu--session)
-    (setq kargu--session
+  "Restore the target owner's counters from DATA, falling back to UPDATED-AT."
+  (kargu-session-replace-usage
           (list :active nil
-                :id (kargu-aget data "id")
                 :requests (or (kargu-aget data "requests") 0)
                 :tokens-in (or (kargu-aget data "tokens_in") 0)
                 :tokens-out (or (kargu-aget data "tokens_out") 0)
                 :last-prompt-tokens 0
-                :started (or (kargu-aget data "created_at") updated-at)))))
+                :started (or (kargu-aget data "created_at") updated-at))))
 
 (defun kargu-session--render-restored-transcript (transcript updated-at message-count)
   "Render TRANSCRIPT or banner into current buffer.

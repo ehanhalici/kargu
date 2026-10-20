@@ -34,16 +34,21 @@
 (defun kargu-session-reset ()
   "Cancel active work, reset the session and notify optional views in order."
   (interactive)
-  (kargu-application--cancel-session-work)
-  (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
-            (and (fboundp 'kargu-busy-p) (kargu-busy-p)))
-    (user-error "Kargu: reset superseded by active work; session data was retained"))
-  (kargu-session-clear)
-  (when (fboundp 'kargu-history-reset) (kargu-history-reset))
-  (when (fboundp 'kargu-circuit-reset) (kargu-circuit-reset))
-  (when (fboundp 'kargu-state-reset) (kargu-state-reset))
-  (kargu-run-observers 'kargu-session-reset-hook)
-  (message "Kargu session reset"))
+  (let ((origin (current-buffer)) (owner (kargu-session-context)))
+    (save-current-buffer
+      (kargu-application--cancel-session-work)
+      (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+                (and (fboundp 'kargu-busy-p) (kargu-busy-p)))
+        (user-error "Kargu: reset superseded by active work; session data was retained"))
+      (unless (and (buffer-live-p origin) (eq owner (kargu-session-context origin)))
+        (user-error "Kargu: reset owner changed; replacement data was retained"))
+      (with-current-buffer origin
+        (kargu-session-clear)
+        (when (fboundp 'kargu-history-reset) (kargu-history-reset))
+        (when (fboundp 'kargu-circuit-reset) (kargu-circuit-reset))
+        (when (fboundp 'kargu-state-reset) (kargu-state-reset))
+        (kargu-run-observers 'kargu-session-reset-hook))
+      (message "Kargu session reset"))))
 
 (provide 'kargu/application/reset)
 ;;; reset.el ends here

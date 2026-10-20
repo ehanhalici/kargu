@@ -179,8 +179,31 @@ to clear that work's session data. ERT covers ordered services, observer
 failure, replacement work and delayed standalone responses without UI sources.
 The bounded loop still abstracts this successful publication as its existing
 atomic `ResetSession`; these tests do not constitute a full-system proof.
-Session counters/history and selection remain shared legacy data, so explicit
-per-session context ownership and transactional reset remain open.
+Session counter ownership is isolated below. History, live selection and
+application coordination remain shared, so transactional scoped reset is open.
+
+## Session counters and captured delivery ownership
+
+`kargu--session` is removed. Each originating buffer lazily owns a validated
+`kargu-session` record; loading the service allocates no runtime session.
+Its captured identity and counter storage have no second writable global
+copy. Public usage snapshots copy the plist; nested strings are borrowed
+read-only. Counter restoration replaces the owned handle, not another chat's
+data. Active-run data cannot be cleared or replaced without stopping first.
+
+Runs and API deliveries capture that explicit handle. Response accounting
+and callbacks execute in the original live owner, not the currently selected
+buffer. Closed or replaced owners reject old deliveries; same-generation
+cleanup still releases request busy state. Reset also captures and revalidates
+its target after cancellation, so a continuation cannot redirect the clear.
+
+A run owns its buffer-close/major-mode hooks and removes them before finish.
+Owner exit cancels the run and blocks reentrant startup in the closing buffer.
+Request publication rechecks ownership after status listeners before any HTTP
+effect. These are refinements of existing Stop/startup barriers, not permission
+for simultaneous runs. History, global state totals/provider/model overrides,
+request globals, tool registration and model caches still need their separate
+ownership migrations; this is not the completed application/session context.
 
 ## Regression gates
 
