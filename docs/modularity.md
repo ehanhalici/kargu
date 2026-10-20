@@ -87,6 +87,10 @@ emacs --batch -Q -L . \
   -l tests/run-tests.el
 ```
 
+Only `tests/run-tests.el` bootstraps the test load path. Individual test
+files use the supplied load path; load them with `-L <package-root>`.
+The common runner also works by absolute filename from another directory.
+
 ## Remaining boundaries
 
 The root still loads concrete features. Optional feature composition and

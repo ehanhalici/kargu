@@ -6,17 +6,6 @@
 ;; The chat commands, history firewall, loop, and payload builder stay
 ;; real.  Only `kargu--api-post' is replaced, by a synchronous queue.
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu)
