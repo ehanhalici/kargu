@@ -340,7 +340,10 @@ Initialize installed PACKAGES only when requested."
      (cl-assert (null (locate-library "kargu/tools/diff")))
      (cl-assert (kargu-find-tool "read_file"))
      (let (report approved)
-       (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+       (cl-letf (((symbol-function 'kargu-deps-package-installed-p)
+                  (lambda (package) (eq package 'plz)))
+                 ((symbol-function 'kargu-deps-executable-installed-p)
+                  (lambda (executable) (equal executable "curl")))
                  ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil))
                  ((symbol-function 'kargu-api-send)
                   (lambda (_prompt callback &rest _)
@@ -357,6 +360,20 @@ Initialize installed PACKAGES only when requested."
           "dangerous command" default-directory '("risk")
           (lambda (value) (setq approved (if value :approved :rejected)))))
        (cl-assert (eq approved :rejected))))))
+
+(ert-deftest kargu-module-dependency-policy-respects-explicit-requirements-test ()
+  "Optional UI/Git dependencies do not block, but user requirements still do."
+  (kargu-module-test--evaluate
+   '((require 'kargu/tools/deps)
+     (cl-letf (((symbol-function 'kargu-deps-package-installed-p)
+                (lambda (package) (eq package 'plz)))
+               ((symbol-function 'kargu-deps-executable-installed-p)
+                (lambda (executable) (equal executable "curl"))))
+       (cl-assert (null (kargu-deps-missing)))
+       (let ((kargu-deps-mandatory-packages '(plz magit))
+             (kargu-deps-mandatory-executables '("curl" "git")))
+         (cl-assert (equal (mapcar (lambda (item) (plist-get item :id))
+                                   (kargu-deps-missing)) '(magit "git"))))))))
 
 (ert-deftest kargu-module-json-is-independent-test ()
   "The JSON codec keeps wire identities without initializing a session."

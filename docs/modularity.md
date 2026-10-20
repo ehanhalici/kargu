@@ -131,8 +131,11 @@ Unloading refuses while a run, recovery snapshot, change, review or registered
 diff tool remains. Explicitly resolving those resources and unregistering its
 tools allows detachment; the fail-closed default then applies. It is not a
 runtime module manager or a complete migration of shared runtime ownership.
-Mandatory vendor-package/executable checks are not yet scoped to active
-capabilities. Source removal does not remove the permission boundary.
+Native run admission requires only plz/curl by default. Optional UI packages,
+Git and language servers do not gate unrelated work. Explicit user additions
+to the mandatory lists still apply. Package metadata likewise does not force
+installation of the optional Transient/Magit integrations. Source removal
+does not remove the permission boundary or make the model transport optional.
 
 ## Regression gates
 

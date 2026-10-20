@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (plz "0.9") (transient "0.7") (magit "3.3"))
+;; Package-Requires: ((emacs "29.1") (plz "0.9"))
 ;; Keywords: tools, convenience, ai, lsp, debug
 ;; URL: https://github.com/kargu/kargu
 

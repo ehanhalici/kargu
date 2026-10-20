@@ -6,10 +6,10 @@
 
 ;;; Commentary:
 
-;; Validates presence of mandatory tools before Kargu can run:
-;;   * Emacs packages: plz, transient, eglot, dape, magit
-;;   * System executables: git, curl
-;;   * Project LSP server: rust-analyzer, gopls, pyright, clangd, etc.
+;; Validates the native model transport prerequisites: plz and curl.
+;; Optional UI, Git and editor adapters do not block unrelated runs.
+;; User-configured extra mandatory requirements are still enforced.
+;; Project LSP servers are checked only in optional setup diagnostics.
 ;;
 ;; If mandatory tools are missing:
 ;;   * Renders a clear and sensible error banner in the chat / prompt screen
@@ -38,8 +38,10 @@
   :prefix "kargu-deps-")
 
 (defcustom kargu-deps-mandatory-packages
-  '(plz transient magit)
-  "List of mandatory Emacs packages required for Kargu operation."
+  '(plz)
+  "Packages required before starting a native model run.
+UI and editor integrations are optional.  Explicit additions still block
+run admission when absent; existing user customization is not rewritten."
   :type '(repeat symbol)
   :group 'kargu-deps)
 
@@ -69,8 +71,10 @@
   :group 'kargu-deps)
 
 (defcustom kargu-deps-mandatory-executables
-  '("git" "curl")
-  "List of mandatory CLI executables required for Kargu operation."
+  '("curl")
+  "Executables required before starting a native model run.
+Curl is the native HTTP transport.  Feature-specific tools such as Git
+are checked when used, unless explicitly added as a global requirement."
   :type '(repeat string)
   :group 'kargu-deps)
 
@@ -81,14 +85,14 @@
      :hint "Install git via your system package manager (e.g. apt install git / brew install git)")
     ("curl"
      :name "curl"
-     :purpose "HTTP client for documentation fetching tool (webfetch)"
+     :purpose "HTTP client for the native model transport and webfetch"
      :hint "Install curl via your system package manager (e.g. apt install curl / brew install curl)"))
   "Metadata for mandatory CLI executables."
   :type 'alist
   :group 'kargu-deps)
 
 (defcustom kargu-deps-check-lsp-server t
-  "Whether to require an LSP server for the detected project language."
+  "Whether optional setup diagnostics check the project's LSP server."
   :type 'boolean
   :group 'kargu-deps)
 

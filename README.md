@@ -36,9 +36,16 @@ Rather than running heavy external daemons or separate browser windows, Kargu tu
 
 ### Prerequisites
 - GNU Emacs 29.1 or newer
-- Required packages: `plz`, `transient`, `company`, `magit`
+- Required for the native model transport: `plz` and the `curl` executable.
+- Optional interface packages: `transient` (menu), `company` (completion),
+  `magit` (Git interface).
 - Optional integrations: `eglot` and a language server for LSP tools; `dape` and a configured debug adapter for debug mode. Kargu works without LSP.
-- Command-line utilities: `rg` (ripgrep) or `grep`, `curl`, `git`
+- Feature-specific utilities: `rg` (ripgrep) or `grep` for search, `git` for
+  version control. Their absence does not block unrelated model runs.
+
+Set `(setq kargu-ui-enabled nil)` before `(require 'kargu)` for headless use.
+Explicit custom additions to `kargu-deps-mandatory-packages` or
+`kargu-deps-mandatory-executables` remain mandatory.
 
 ### Setup
 
