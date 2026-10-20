@@ -290,10 +290,10 @@ each row starts with that record cleared so it cannot leak."
           ('select-provider
            (when (hash-table-p kargu--live-models-cache)
              (clrhash kargu--live-models-cache))
-           (setq kargu-fake--reads '("openrouter" "fake/model-a"))
+           (setf kargu-fake--reads '("openrouter" "fake/model-a"))
            (kargu-chat-select-provider-company))
           ('cancel-select
-           (setq kargu-fake--reads '(quit))
+           (setf kargu-fake--reads '(quit))
            (kargu-chat-select-mode-company))
           ('reset
            (kargu-chat-reset)))
@@ -313,7 +313,7 @@ each row starts with that record cleared so it cannot leak."
 (defun kargu-fake--tool-count ()
   "Number of tool-result messages in the history."
   (cl-count-if (lambda (msg) (equal (kargu-aget msg "role") "tool"))
-               kargu--message-history))
+               (kargu-history-messages)))
 
 (defun kargu-fake--history-closed-p ()
   "Non-nil when no tool call is left unanswered.
@@ -322,7 +322,7 @@ the system prompt is not an orphan."
   (let ((open nil)
         (ok t)
         (before (kargu-fake--tool-count)))
-    (dolist (msg kargu--message-history)
+    (dolist (msg (kargu-history-messages))
       (let ((role (kargu-aget msg "role")))
         (cond
          ((equal role "assistant")
@@ -339,7 +339,7 @@ the system prompt is not an orphan."
      (and (equal (kargu-aget msg "role") "tool")
           (stringp (kargu-aget msg "content"))
           (string-match-p "fake tool result" (kargu-aget msg "content"))))
-   kargu--message-history))
+   (kargu-history-messages)))
 
 (defun kargu-fake--check (mode tools action response err)
   "Return a failure string for this row, or nil."
@@ -466,7 +466,7 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
          (saved-model kargu--session-model)
          (saved-mode (kargu-state-mode))
          (saved-key (and (boundp 'kargu-api-key) kargu-api-key))
-         (saved-history (copy-tree kargu--message-history t))
+         (saved-history (copy-tree (kargu-history-messages) t))
          (saved-meta (copy-hash-table kargu--model-metadata-table))
          (saved-models (and (hash-table-p kargu--live-models-cache)
                             (copy-hash-table kargu--live-models-cache)))
@@ -510,10 +510,10 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
                                   saved-provider saved-model)))
                     (when failure
                       (push failure failures))))))))
-      (setq kargu--session-provider saved-provider
+      (setf kargu--session-provider saved-provider
             kargu--session-model saved-model
             kargu-api-key saved-key
-            kargu--message-history saved-history
+            (kargu-history-messages) saved-history
             kargu--loop-run nil
             kargu--busy nil)
       (ignore-errors (kargu-set-mode saved-mode))

@@ -211,7 +211,9 @@
         (kargu-temperature 0.5)
         (kargu--session-provider "deepseek")
         (kargu--session-model "deepseek-chat")
-        (kargu--message-history '((("role" . "user") ("content" . "hello")))))
+        (kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "hello"))))))
     (let ((payload (kargu--build-payload)))
       (should (equal (kargu-aget payload "model") "deepseek-chat"))
       (should (equal (kargu-aget payload "temperature") 0.5))
@@ -287,7 +289,9 @@
   (let ((_ (kargu-test-mode 'agent))
         (kargu--session-provider "openrouter")
         (kargu--session-model "anthropic/claude-3.5-sonnet")
-        (kargu--message-history '((("role" . "user") ("content" . "hello")))))
+        (kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "hello"))))))
     (let* ((payload (kargu--build-payload))
            (tools (kargu-aget payload "tools")))
       (should (vectorp tools))
@@ -304,7 +308,9 @@
   (let ((_ (kargu-test-mode 'agent))
         (kargu--session-provider "ollama")
         (kargu--session-model "llama3")
-        (kargu--message-history '((("role" . "user") ("content" . "hello")))))
+        (kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "hello"))))))
     (let* ((payload (kargu--build-payload))
            (tools (kargu-aget payload "tools")))
       (should (vectorp tools))
@@ -318,10 +324,12 @@
   (require 'kargu/api/tools)
   (let ((kargu--session-provider "openrouter")
         (kargu--session-model "anthropic/claude-3.5-sonnet")
-        (kargu--message-history '((("role" . "system") ("content" . "You are a coding assistant."))
-                                  (("role" . "user") ("content" . "Hello 1"))
-                                  (("role" . "assistant") ("content" . "Hi there 1"))
-                                  (("role" . "user") ("content" . "Hello 2")))))
+        (kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "system") ("content" . "You are a coding assistant."))
+                      (("role" . "user") ("content" . "Hello 1"))
+                      (("role" . "assistant") ("content" . "Hi there 1"))
+                      (("role" . "user") ("content" . "Hello 2"))))))
     (let* ((payload (kargu--build-payload))
            (msgs (kargu-aget payload "messages")))
       (should (vectorp msgs))
@@ -344,8 +352,10 @@
   (cl-letf (((symbol-function 'kargu--build-tools-vector) (lambda () [])))
     (let ((kargu--session-provider "anthropic")
           (kargu--session-model "claude-3-5-sonnet-20241022")
-          (kargu--message-history '((("role" . "system") ("content" . "System instructions"))
-                                    (("role" . "user") ("content" . "Hello")))))
+          (kargu-session--context
+           (kargu-test-session-with-history
+            :messages '((("role" . "system") ("content" . "System instructions"))
+                        (("role" . "user") ("content" . "Hello"))))))
       (let* ((payload (kargu--build-payload))
              (msgs (kargu-aget payload "messages")))
         (should (vectorp msgs))

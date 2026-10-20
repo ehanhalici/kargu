@@ -83,27 +83,28 @@
 
 (ert-deftest kargu-law-d-wall-repairs-orphan-and-half-tool-calls-test ()
   "An orphan result is dropped; a call without its result gets a synthetic one."
-  (let ((kargu--message-history
-         `((("role" . "system") ("content" . "sys"))
-           (("role" . "user") ("content" . "hi"))
-           (("role" . "tool") ("tool_call_id" . "orphan") ("name" . "bash")
-            ("content" . "no call before me"))
-           (("role" . "assistant") ("content" . "")
-            ("tool_calls" . [(("id" . "c1") ("type" . "function")
-                              ("function" . (("name" . "bash") ("arguments" . "{}"))))
-                             (("id" . "c2") ("type" . "function")
-                              ("function" . (("name" . "bash") ("arguments" . "{}"))))]))
-           (("role" . "tool") ("tool_call_id" . "c1") ("name" . "bash")
-            ("content" . "one result only")))))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages `((("role" . "system") ("content" . "sys"))
+		      (("role" . "user") ("content" . "hi"))
+		      (("role" . "tool") ("tool_call_id" . "orphan") ("name" . "bash")
+		       ("content" . "no call before me"))
+		      (("role" . "assistant") ("content" . "")
+		       ("tool_calls" . [(("id" . "c1") ("type" . "function")
+					 ("function" . (("name" . "bash") ("arguments" . "{}"))))
+					(("id" . "c2") ("type" . "function")
+					 ("function" . (("name" . "bash") ("arguments" . "{}"))))]))
+		      (("role" . "tool") ("tool_call_id" . "c1") ("name" . "bash")
+		       ("content" . "one result only"))))))
     (kargu--validate-history)
-    (let* ((tool-ids (cl-loop for m in kargu--message-history
+    (let* ((tool-ids (cl-loop for m in (kargu-history-messages)
                               when (equal (kargu-aget m "role") "tool")
                               collect (kargu-aget m "tool_call_id"))))
       (should-not (member "orphan" tool-ids))
       (should (member "c1" tool-ids))
       (should (member "c2" tool-ids)))
     ;; The user's own text is untouched.
-    (should (equal (kargu-aget (nth 1 kargu--message-history) "content") "hi"))))
+    (should (equal (kargu-aget (nth 1 (kargu-history-messages)) "content") "hi"))))
 
 (ert-deftest kargu-law-e-selection-rejects-text-outside-the-list-test ()
   "Only a member of the candidate list is accepted."
@@ -133,7 +134,7 @@
             (setq-local kargu-chat--session-id "law-f-001")
             (setq-local kargu-chat--session-provider "opencode")
             (setq-local kargu-chat--session-model "stale-model")
-            (setq-local kargu-chat--messages
+            (setf (kargu-history-messages)
                         '((("role" . "user") ("content" . "remember me"))))
             (let ((inhibit-read-only t)) (insert "## you · 12:00\nremember me\n"))
             (kargu-session-save buf))

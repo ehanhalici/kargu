@@ -263,7 +263,7 @@ A `blocks' message shape is rewritten.  Every other shape is unchanged."
                     spec)))
            kargu-provider-formats))
 
-(defun kargu-api--normalize-response-shape (response)
+(defun kargu-api-response-shape (response)
   "RESPONSE as an OpenAI chat-completions alist.
 A blocks body becomes one choice.  Bodies that already have
 `choices' or `error' pass through."
@@ -283,7 +283,7 @@ A blocks body becomes one choice.  Bodies that already have
 
 (defun kargu-api-normalize-response (response)
   "Normalize RESPONSE's wire shape and tool identities before any consumer."
-  (kargu-api-normalize-tool-calls (kargu-api--normalize-response-shape response)))
+  (kargu-api-normalize-tool-calls (kargu-api-response-shape response)))
 
 (provide 'kargu/api/wire)
 

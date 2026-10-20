@@ -36,7 +36,13 @@ completion. The post-notification startup barrier admits no HTTP effect after
 Stop. These refine the existing abstract transitions rather than adding a
 new loop state; the full bounded loop scan was not rerun for this extraction.
 The process ownership scan is a regression gate, not a proof of all session
-or buffer lifetimes. Shared history/selection ownership remains in `todo.md`.
+or buffer lifetimes. History now belongs to the same captured session; detached
+payload/persistence snapshots and queue container ownership are checked by ERT.
+Tool identities are canonicalized at the owned client ingress, after transport
+shape decoding. Foreign-buffer Stop and obsolete compaction callbacks cannot
+repair or clear another owner's history. These preserve the protocol wall's
+existing abstract transitions. Selection/application ownership remains in
+`todo.md`.
 
 Model capabilities are read from provider/model-owned metadata records.
 Provider isolation, ambiguous display aliases, exact request identities and

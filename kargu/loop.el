@@ -172,13 +172,14 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
   (interactive)
   (if (null kargu--loop-run)
       (message "kargu: no run in progress")
-    (kargu-async-cancel-owner kargu--loop-run)
-    (when (fboundp 'kargu-bash-kill-active-async)
-      (kargu-bash-kill-active-async))
-    (kargu-api-cancel)
-    (kargu--loop-finish kargu--loop-run
-                        :stopped
-                        (or reason "stopped by the user"))))
+    (let* ((run kargu--loop-run)
+           (origin (plist-get run :chat-buffer)))
+      (with-current-buffer (if (buffer-live-p origin) origin (current-buffer))
+        (kargu-async-cancel-owner run)
+        (when (fboundp 'kargu-bash-kill-active-async)
+          (kargu-bash-kill-active-async))
+        (kargu-api-cancel)
+        (kargu--loop-finish run :stopped (or reason "stopped by the user"))))))
 
 (defun kargu-loop-status ()
   "Return a short loop state string; message it when interactive."
@@ -250,6 +251,7 @@ the diff run files and the UI as they were."
   "Build a run record for PROMPT with NO-TOOLS, ON-DELTA and ON-FINISH."
   (list :prompt prompt :state 'request :chat-buffer (current-buffer)
         :session (kargu-session-context)
+        :history (kargu-history-context)
         :max-iterations kargu-max-iterations :on-delta on-delta
         :on-finish (or on-finish #'kargu-loop--message-report)
         :iterations 0 :healing 0 :verifications 0 :empty-retries 0
@@ -288,7 +290,7 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
          (wrapped (kargu-prompt-wrap-user prompt))
          (run (kargu-loop--new-run prompt :no-tools no-tools
                                    :on-delta on-delta :on-finish on-finish)))
-    (setq kargu--compaction-system nil)
+    (setf (kargu-history-overlay) nil)
     (kargu-edit-changes :reset)
     (kargu-loop--start-run run wrapped)
     run))
@@ -311,21 +313,28 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
 
 (defun kargu--loop-finish (run status &optional text)
   "End RUN with STATUS and TEXT; deliver the report to on-finish."
+  (let ((origin (plist-get run :chat-buffer)))
+    (with-current-buffer (if (buffer-live-p origin) origin (current-buffer))
+      (kargu-loop--finish-owned run status text))))
+
+(defun kargu-loop--finish-owned (run status text)
+  "Finish RUN in its owner buffer with STATUS and TEXT."
   (when (kargu-loop--live-p run)
-    (let ((report (kargu-loop--finish-report run status text)))
+    (let ((report (kargu-loop--finish-report run status text))
+          (history (or (plist-get run :history) (kargu-history-context))))
       (kargu-loop--detach-origin run)
       (kargu-async-cancel-owner run)
       (setq kargu--loop-run nil)
       (kargu-dismiss-confirmations)
       (when (memq status '(:stopped :error))
         (kargu-edit-changes :abort))
-      (setq kargu--compaction-system nil)
+      (setf (kargu-history-overlay history) nil)
       (kargu-session-mark-active nil (plist-get run :session))
       (when (fboundp 'kargu-state-transition-status)
         (let ((final-st (if (memq status '(:done :limit :stopped :error))
                             status :idle)))
           (kargu-state-transition-status final-st (or text (symbol-name status)))))
-      (kargu--validate-history 'keep-assistant-tail)
+      (kargu--validate-history 'keep-assistant-tail history)
       (kargu-log 'info "run end: %s (iterations=%d, healing=%d)"
                  status (plist-get report :iterations) (plist-get report :healing))
       (condition-case-unless-debug err

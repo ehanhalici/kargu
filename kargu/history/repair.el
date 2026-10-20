@@ -54,33 +54,33 @@ The table is cleared upon completion."
   (clrhash pending)
   out-rev)
 
-(defun kargu--history-fresh-system-message ()
-  "A new system message; records the key it was built for."
-  (setq kargu--system-key (kargu-prompt-system-key))
+(defun kargu--history-fresh-system-message (&optional history)
+  "Build HISTORY's system message and record its current prompt identity."
+  (setf (kargu-history-system-key history) (kargu-prompt-system-key history))
   `(("role" . "system")
-    ("content" . ,(kargu--get-system-prompt))))
+    ("content" . ,(kargu--get-system-prompt history))))
 
-(defun kargu--history-system-current-p (sys)
+(defun kargu--history-system-current-p (sys &optional history)
   "Non-nil when the stored system message SYS still matches the session.
 An unchanged prompt is kept byte for byte so the provider prompt cache hits;
-a changed mode, tool support, model or compaction overlay rebuilds it."
+a changed mode, tool support, model or HISTORY overlay rebuilds it."
   (let ((content (kargu-aget sys "content")))
     (and (stringp content)
          (not (string-empty-p (string-trim content)))
-         (equal kargu--system-key (kargu-prompt-system-key)))))
+         (equal (kargu-history-system-key history) (kargu-prompt-system-key history)))))
 
-(defun kargu--history-refresh-system-head (history &optional force-refresh)
-  "Return cons of (HEAD-MSG . REMAINING-MSGS) for HISTORY.
+(defun kargu--history-refresh-system-head (messages &optional force-refresh history)
+  "Return cons of (HEAD-MSG . REMAINING-MSGS) for draft MESSAGES.
 The existing system message is preserved while `kargu-prompt-system-key'
 is unchanged.  A missing, empty or stale one, or FORCE-REFRESH, builds a
-fresh message via `kargu--get-system-prompt'."
-  (let* ((rest (copy-tree history t))
+fresh message for explicit HISTORY or the current owner."
+  (let* ((rest (copy-tree messages t))
          (sys (and rest
                    (equal (kargu-aget (car rest) "role") "system")
                    (copy-tree (pop rest) t))))
-    (if (and sys (not force-refresh) (kargu--history-system-current-p sys))
+    (if (and sys (not force-refresh) (kargu--history-system-current-p sys history))
         (cons sys rest)
-      (cons (kargu--history-fresh-system-message) rest))))
+      (cons (kargu--history-fresh-system-message history) rest))))
 
 (defun kargu--history-process-tool-result (msg pending out)
   "Validate tool result MSG against PENDING table and return updated OUT."
@@ -92,8 +92,7 @@ fresh message via `kargu--get-system-prompt'."
       (kargu-log 'warn "validate: dropping orphan tool result %s" (or id "(no id)"))
       out)))
 
-(defvar kargu--system-key)
-(declare-function kargu-prompt-system-key "kargu/prompt" ())
+(declare-function kargu-prompt-system-key "kargu/prompt" (&optional history))
 (declare-function kargu--history-compaction-msg-p "kargu/history/compact" (msg))
 
 (defun kargu--history-content-present-p (content)
@@ -225,9 +224,10 @@ NEXT-SEQ supplies each invocation's stable sequence number."
           (progn (setcdr history (cons nudge (cdr history))) history)
         (list nudge)))))
 
-(defun kargu--validate-history (&optional keep-assistant-tail)
+(defun kargu--validate-history (&optional keep-assistant-tail history)
   "Enforce the protocol invariants required by chat providers.
-Mutates `kargu--message-history' in place and returns it.
+Replace HISTORY's drafts with repaired messages and return them.
+Default to the current owner's history.
 The send path leaves KEEP-ASSISTANT-TAIL nil so a payload does
 not end on an assistant turn.  A finished run and a compaction
 pass non-nil: the stored answer stays, and the next user turn
@@ -235,7 +235,9 @@ is what makes the tail legal."
   (let* ((pending (make-hash-table :test #'equal))
          (seq 0)
          (next-seq (lambda () (cl-incf seq)))
-         (head-and-rest (kargu--history-refresh-system-head kargu--message-history))
+         (history (kargu-history-context history))
+         (head-and-rest (kargu--history-refresh-system-head
+                         (kargu-history-messages history) nil history))
          (out (list (car head-and-rest)))
          (rest (cdr head-and-rest)))
     ;; Walk each turn in the rest of history
@@ -253,15 +255,15 @@ is what makes the tail legal."
     (setq out (kargu--flush-pending pending out))
     (unless keep-assistant-tail
       (setq out (kargu--history-fix-trailing-turn out)))
-    (setq kargu--message-history (kargu--history-ensure-user (nreverse out)))
+    (setf (kargu-history-messages history) (kargu--history-ensure-user (nreverse out)))
     (kargu-log 'debug "validate: %d messages, last role %s"
-               (length kargu--message-history)
-               (kargu--history-last-role))
+               (length (kargu-history-messages history))
+               (kargu--history-last-role history))
     (when (called-interactively-p 'any)
       (message "kargu history: %d messages, last role %s"
-               (length kargu--message-history)
-               (kargu--history-last-role)))
-    kargu--message-history))
+               (length (kargu-history-messages history))
+               (kargu--history-last-role history)))
+    (kargu-history-messages history)))
 
 (defalias 'kargu-history-validate #'kargu--validate-history)
 

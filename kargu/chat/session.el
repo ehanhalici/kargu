@@ -113,13 +113,10 @@ A blank value clears that part of the live selection."
            kargu-chat--session-provider
            kargu-chat--session-model))))))
 
-(defvar-local kargu-chat--messages nil
-  "Buffer-local snapshot of protocol messages for this session.")
-
 (defun kargu-chat-session-reset ()
   "Clear the current chat's session view after application reset completes."
   (when (derived-mode-p 'kargu-chat-mode)
-    (setq kargu-chat--messages nil kargu-chat--session-id nil)))
+    (setq kargu-chat--session-id nil)))
 
 (defun kargu/chat/session-unload-function ()
   "Detach this adapter's reset notification before unloading it."
@@ -188,20 +185,6 @@ Store MODE-VAL, provider PROV, model MOD, TRANSCRIPT and MESSAGES."
     ("transcript" . ,transcript)
     ("messages" . ,(vconcat (or messages '())))))
 
-(defun kargu-session--messages-for-save ()
-  "Messages to persist from the current buffer.
-Live history wins when this buffer is the active session, so a
-snapshot taken on the first save cannot freeze later turns.
-Another buffer keeps its own snapshot."
-  (let ((live (and (boundp 'kargu--message-history) kargu--message-history))
-        (same (or (null kargu-chat--session-id)
-                  (and (boundp 'kargu--session-id)
-                       (equal kargu-chat--session-id kargu--session-id)))))
-    (cond
-     ((and same live) live)
-     (kargu-chat--messages kargu-chat--messages)
-     (t live))))
-
 (defun kargu-session-save (&optional buffer)
   "Save chat session from BUFFER (defaults to current buffer) to JSON.
 Returns the file path written, or nil if no content to save.
@@ -217,7 +200,7 @@ empty strings, not the config fallback."
                (sid (or kargu-chat--session-id
                         (and (fboundp 'kargu-session-id) (kargu-session-id))
                         (format "kargu-%s" (format-time-string "%Y%m%d%H%M%S"))))
-               (messages (kargu-session--messages-for-save))
+               (messages (kargu-history-snapshot))
                (transcript (kargu-session--extract-transcript buf))
                (title (or kargu-chat--session-title
                           (kargu-session--derive-title messages (buffer-name buf))))
@@ -234,8 +217,7 @@ empty strings, not the config fallback."
                   kargu-chat--project-root root
                   kargu-chat--session-title title
                   kargu-chat--session-provider prov
-                  kargu-chat--session-model mod
-                  kargu-chat--messages messages)
+                  kargu-chat--session-model mod)
             (let ((data (kargu-session--build-data
                          sid root title usage mode-val prov mod transcript messages)))
               (prog1 (kargu-session-storage-write sid root data)
@@ -278,14 +260,12 @@ empty strings, not the config fallback."
          (saved-model (kargu-aget data "model")))
     (setq kargu-chat--session-id sid
           kargu-chat--session-title title
-          kargu-chat--project-root (kargu-session-project-root root)
-          kargu-chat--messages msg-list)
+          kargu-chat--project-root (kargu-session-project-root root))
     (setq-local kargu--session-id sid)
     (setq kargu-chat--session-provider (kargu-chat--explicit-selection saved-prov)
           kargu-chat--session-model (kargu-chat--explicit-selection saved-model))
     (kargu-chat--apply-saved-selection saved-prov saved-model)
-    (when (boundp 'kargu--message-history)
-      (setq kargu--message-history (copy-sequence msg-list)))))
+    (kargu-history-replace msg-list)))
 
 (defun kargu-session--restore-counters (data updated-at)
   "Restore the target owner's counters from DATA, falling back to UPDATED-AT."
@@ -363,7 +343,7 @@ must finish before loading another session.  Return TARGET-BUFFER on success."
               (error nil)))
           ;; Insert transcript
           (kargu-session--render-restored-transcript
-           transcript updated-at (length (or kargu-chat--messages '())))
+           transcript updated-at (length (kargu-history-messages)))
           ;; Ensure idle prompt
           (when (fboundp 'kargu-chat--ensure-idle-prompt)
             (kargu-chat--ensure-idle-prompt))

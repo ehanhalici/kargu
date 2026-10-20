@@ -43,29 +43,28 @@
     (kargu-state-transition-status :idle "user cancelled"))
   (message "kargu: cancelled in-flight request"))
 
-(defun kargu--api-validate-preflight (prompt)
-  "Validate preflight conditions before sending conversation turn with PROMPT."
+(defun kargu--api-validate-preflight (prompt &optional history)
+  "Check PROMPT and repair HISTORY before sending; default to current owner."
   ;; Guard Clause 3: Completed assistant turn cannot continue without prompt
   (when (and (or (null prompt) (string-empty-p prompt))
-             (kargu--history-completed-assistant-tail-p))
+             (kargu--history-completed-assistant-tail-p history))
     (user-error "Nothing to continue; send a user message"))
-  (kargu--validate-history)
+  (kargu--validate-history nil history)
   ;; Guard Clause 4: History must contain at least one user message
   (unless (cl-some (lambda (m)
                      (equal (kargu-aget m "role") "user"))
-                   kargu--message-history)
+                   (kargu-history-messages history))
     (user-error "Nothing to send: history has no user message"))
   ;; Guard Clause 5: History must not end on model turn
-  (when (kargu--assistant-role-p (kargu--history-last-role))
+  (when (kargu--assistant-role-p (kargu--history-last-role history))
     (user-error "Refusing to send: history still ends on a model turn")))
 
-(defun kargu--api-rollback-prompt (prompt added-prompt-p)
-  "Roll back PROMPT from history if ADDED-PROMPT-P is non-nil."
+(defun kargu--api-rollback-prompt (prompt added-prompt-p &optional history)
+  "Remove PROMPT from HISTORY if ADDED-PROMPT-P and it is still the tail."
   (when (and added-prompt-p
-             kargu--message-history
-             (equal (kargu-aget (car (last kargu--message-history)) "role") "user")
-             (equal (kargu-aget (car (last kargu--message-history)) "content") prompt))
-    (setq kargu--message-history (butlast kargu--message-history))))
+             (equal (kargu-aget (kargu-history-last-message history) "role") "user")
+             (equal (kargu-aget (kargu-history-last-message history) "content") prompt))
+    (kargu-history-replace (butlast (kargu-history-messages history)) history)))
 
 (defun kargu--api-refuse (callback message)
   "Tell CALLBACK the request is refused for MESSAGE.  Return nil."
@@ -86,9 +85,9 @@ A busy client, a missing key, or a missing endpoint is refused first."
                          "ON-DELTA must be callable or nil: %S" on-delta)
   (kargu-api--send :prompt prompt :callback callback :on-delta on-delta))
 
-(cl-defun kargu-api--send (&key prompt callback on-delta (record-turn t))
+(cl-defun kargu-api--send (&key prompt callback on-delta (record-turn t) history)
   "Validate connection settings and send PROMPT to CALLBACK and ON-DELTA.
-RECORD-TURN permits storage of the reply in the active conversation."
+RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
   (let ((key (and (not kargu--busy) (kargu--resolve-api-key)))
         (base (and (not kargu--busy) (kargu--api-base))))
     (cond
@@ -100,12 +99,13 @@ RECORD-TURN permits storage of the reply in the active conversation."
       (kargu--api-refuse callback "no API endpoint: set api on the active provider"))
      (t
       (kargu-api--send-turn :prompt prompt :callback callback :on-delta on-delta
-                            :key key :base base :record-turn record-turn)))))
+                            :key key :base base :record-turn record-turn :history history)))))
 
 (cl-defstruct (kargu-api--delivery (:constructor kargu-api--make-delivery))
   "One turn's response owner, including a terminal single-delivery state."
   callback generation record-turn (state :pending)
-  (origin (current-buffer)) (session (kargu-session-context)))
+  (origin (current-buffer)) (session (kargu-session-context))
+  (history (kargu-history-context)))
 
 (defun kargu-api--delivery-owner-live-p (delivery)
   "Return non-nil if DELIVERY still owns its buffer and captured session."
@@ -139,29 +139,34 @@ RECORD-TURN permits storage of the reply in the active conversation."
 
 (defun kargu-api--receive-owned (delivery response)
   "Record RESPONSE only in DELIVERY's captured, still-live owner."
+  (setq response (kargu-api-normalize-tool-calls
+                  response (kargu-api--delivery-history delivery)))
   (unless (kargu-response-error-message response)
     (kargu--record-usage response (kargu-api--delivery-session delivery))
     (when (and (kargu-api--delivery-record-turn delivery)
                (kargu-api--delivery-owner-live-p delivery))
-      (kargu-api-store-assistant-turn response)))
+      (kargu-api-store-assistant-turn response (kargu-api--delivery-history delivery))))
   response)
 
-(cl-defun kargu-api--send-turn (&key prompt callback on-delta key base (record-turn t))
+(cl-defun kargu-api--send-turn (&key prompt callback on-delta key base (record-turn t) history)
   "Append PROMPT and start a request using KEY and BASE.
 Deliver events to ON-DELTA and the response to CALLBACK.
-RECORD-TURN permits storage of the reply in the active conversation."
-  (let ((added-prompt-p (and prompt (not (string-empty-p prompt))))
+RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
+  (let* ((history (kargu-history-context history))
+         (added-prompt-p (and prompt (not (string-empty-p prompt))))
         (delivery (kargu-api--make-delivery :callback callback :record-turn record-turn
+                                           :history history
                                            :generation kargu--generation)))
-    (when added-prompt-p (kargu--history-add "user" prompt))
+    (when added-prompt-p
+      (kargu-history-append `(("role" . "user") ("content" . ,prompt)) history))
     (condition-case-unless-debug err
         (progn
-          (kargu--api-validate-preflight prompt)
+          (kargu--api-validate-preflight prompt history)
           (kargu-api--start-turn :delivery delivery :on-delta on-delta
                                  :key key :base base))
       (error
        (when (kargu-api--delivery-live-p delivery)
-         (kargu--api-rollback-prompt prompt added-prompt-p)
+         (kargu--api-rollback-prompt prompt added-prompt-p history)
          (kargu-api--deliver delivery (kargu--api-error-alist (error-message-string err))))))))
 
 (cl-defun kargu-api--start-turn (&key delivery on-delta key base)
@@ -170,7 +175,8 @@ Send events to ON-DELTA and the response through DELIVERY."
   (let ((gen (cl-incf kargu--generation)))
     (setf (kargu-api--delivery-generation delivery) gen)
     (let* ((fmt (kargu-api-active-format))
-           (payload (kargu-api-prepare-payload (kargu--build-payload) fmt))
+           (payload (kargu-api-prepare-payload
+                     (kargu-api-build-payload (kargu-api--delivery-history delivery)) fmt))
            (delta (and (kargu-provider-format-stream-p fmt) on-delta)))
       (setq kargu--busy t)
       (kargu-state-transition-status :requesting)
@@ -186,7 +192,7 @@ Send events to ON-DELTA and the response through DELIVERY."
 
 (defun kargu-test-connection ()
   "Ping the active provider with a minimal request and report the result.
-Build the payload in a temporary history binding; never store the reply."
+Build the payload in an isolated history; never store the reply."
   (interactive)
   ;; Guard Clause 1: Loop active
   (when (and (fboundp 'kargu-loop-running-p)
@@ -197,15 +203,14 @@ Build the payload in a temporary history binding; never store the reply."
   (when (kargu-circuit-open-p)
     (user-error "Circuit breaker is %s; cannot ping until cooldown"
                 (kargu-circuit-status-string)))
-  (let ((kargu--message-history nil)
-        (kargu--system-key nil)
-        (kargu--compaction-system "Reply briefly to the connectivity test.")
+  (let ((history (kargu-history-create))
         (kargu--tools-visible-p #'ignore)
         (kargu-temperature nil)
         (kargu-max-tokens 32))
+    (kargu-history-set-overlay "Reply briefly to the connectivity test." history)
     (message "kargu: pinging %s (%s)..." (kargu--provider-name) (kargu--model))
     (kargu-api--send :prompt "Reply with the single word: pong"
-                     :callback #'kargu--report-ping :record-turn nil)))
+                     :callback #'kargu--report-ping :record-turn nil :history history)))
 
 (defun kargu--report-ping (response)
   "Tell the user how the connection test RESPONSE went."

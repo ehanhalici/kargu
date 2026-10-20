@@ -809,7 +809,10 @@
   "Pending, cancelled and completed pings never modify real conversation turns."
   (dolist (outcome '(success error cancel))
     (let* ((original (list '(("role" . "user") ("content" . "real"))))
-           (kargu--message-history original)
+           (kargu-session--context
+            (kargu-test-session-with-history
+             :messages original))
+           (stored-original (kargu-history-messages))
            (kargu--loop-run nil) (kargu--busy nil)
            (kargu-circuit--state :closed)
            (kargu-circuit--probe-inflight nil)
@@ -821,16 +824,16 @@
                    (setq held (plist-get options :then)
                          payload (kargu--json-decode (plist-get options :body))) nil)))
         (kargu-test-connection)
-        (should (eq kargu--message-history original))
+        (should (eq (kargu-history-messages) stored-original))
         (should-not (kargu-aget payload "tools"))
         (should (= (length (kargu-aget payload "messages")) 2))
         (should (< (length (kargu--json-encode payload)) 1000))
-        (setq kargu--message-history (append original '( (("role" . "user") ("content" . "new")))))
-        (let ((new-history kargu--message-history))
+        (setf (kargu-history-messages) (append original '( (("role" . "user") ("content" . "new")))))
+        (let ((new-history (kargu-history-messages)))
           (when (eq outcome 'cancel) (kargu-api-cancel))
           (funcall held (if (eq outcome 'error) "{\"error\":{\"message\":\"Rejected\"}}"
                           "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"pong\"},\"finish_reason\":\"stop\"}]}"))
-          (should (eq kargu--message-history new-history)))))))
+          (should (eq (kargu-history-messages) new-history)))))))
 
 (ert-deftest kargu-loop-refused-start-leaves-run-state-alone-test ()
   "A start refused by the preflight does not reset the run's diff files."

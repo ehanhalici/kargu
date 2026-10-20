@@ -158,6 +158,14 @@ can enable it. Format/provider `:request` records set these defaults without
 model-name heuristics. Conditional sampling/reasoning compatibility remains
 tracked in `todo.md`.
 
+Each buffer-owned session has one protocol history and usage record. Async
+delivery captures that owner; changing the current buffer cannot redirect a
+reply or Stop cleanup into another conversation. Connectivity tests use an
+isolated history. Queue append copies only the new message, while request and
+persistence snapshots detach message lists and vectors. Scalar strings are
+borrowed read-only. Provider/model selection and application coordination are
+still shared; this is not yet complete runtime isolation.
+
 Model metadata now has one owner in `kargu/models/store.el`, indexed by the
 provider/model pair. Provider IDs normalize case; opaque model IDs retain it.
 Readers default to the active provider, or take an explicit provider argument.

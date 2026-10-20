@@ -4,6 +4,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'kargu/api/response)
 (require 'kargu/api/stream)
 (require 'kargu/api/circuit)
@@ -73,12 +74,14 @@
   "Sync and async callback failures do not redeliver or release a newer turn."
   (dolist (synchronous '(nil t))
     (let ((kargu--generation 100) (kargu--current-process nil) (kargu--busy nil)
-          (kargu--message-history nil) (delivered 0) (stored 0) held)
+          (kargu-session--context
+           (kargu-test-session-with-history
+            :messages nil)) (delivered 0) (stored 0) held)
       (cl-letf (((symbol-function 'kargu--api-validate-preflight) #'ignore)
-                ((symbol-function 'kargu--build-payload) (lambda () nil))
+                ((symbol-function 'kargu-api-build-payload) (lambda (&rest _) nil))
                 ((symbol-function 'kargu--api-headers) (lambda (&rest _) nil))
                 ((symbol-function 'kargu-api-store-assistant-turn)
-                 (lambda (_) (cl-incf stored)))
+                 (lambda (_ &optional _) (cl-incf stored)))
                 ((symbol-function 'kargu--api-post)
                  (lambda (_url _headers _payload _gen callback &rest _)
                    (setq held callback)
@@ -96,19 +99,21 @@
         (should (= stored 1))
         (should (eq kargu--current-process 'new-process))
         (should kargu--busy)
-        (should (equal (kargu-aget (car kargu--message-history) "content")
+        (should (equal (kargu-aget (car (kargu-history-messages)) "content")
                        "keep this turn"))))))
 
 (ert-deftest kargu-api-reply-storage-failure-is-delivered-once-test ()
   "Storage failures reach the caller once in both sync and async transports."
   (dolist (synchronous '(nil t))
     (let ((kargu--generation 100) (kargu--current-process nil) (kargu--busy nil)
-          (kargu--message-history nil) results held)
+          (kargu-session--context
+           (kargu-test-session-with-history
+            :messages nil)) results held)
       (cl-letf (((symbol-function 'kargu--api-validate-preflight) #'ignore)
-                ((symbol-function 'kargu--build-payload) (lambda () nil))
+                ((symbol-function 'kargu-api-build-payload) (lambda (&rest _) nil))
                 ((symbol-function 'kargu--api-headers) (lambda (&rest _) nil))
                 ((symbol-function 'kargu-api-store-assistant-turn)
-                 (lambda (_) (error "Storage failed")))
+                 (lambda (_ &optional _) (error "Storage failed")))
                 ((symbol-function 'kargu--api-post)
                  (lambda (_url _headers _payload _gen callback &rest _)
                    (setq held callback)
@@ -500,8 +505,10 @@
   "Legacy custom JSON settings cannot override the supported core settings."
   (let ((kargu-temperature 0.2) (kargu-max-tokens 1234)
         (kargu-reasoning-effort nil) (kargu-thinking-budget nil)
-        (kargu--message-history '((("role" . "system") ("content" . "System"))
-                                  (("role" . "user") ("content" . "Hi")))))
+        (kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "system") ("content" . "System"))
+                      (("role" . "user") ("content" . "Hi"))))))
     (let ((payload (kargu--build-payload)))
       (should (equal (kargu-aget payload "temperature") 0.2))
       (should (= (kargu-aget payload "max_tokens") 1234))

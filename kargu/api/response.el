@@ -192,8 +192,8 @@ Returns the updated message alist."
         (cl-remove-if (lambda (c) (equal (car c) "reasoning_content")) cleaned))
        (t cleaned)))))
 
-(defun kargu--history-append-assistant (response)
-  "Append RESPONSE's assistant message to the history; return it.
+(defun kargu--history-append-assistant (response &optional history)
+  "Append RESPONSE's assistant message to HISTORY or current owner; return it.
 The message is deep-copied so later history repairs can never
 corrupt the payload.  Gemini `model' roles are rewritten to
 `assistant'.  `content' is normalized to a string so the next
@@ -221,8 +221,7 @@ so a fake empty assistant cannot poison the next POST."
           (kargu-log 'debug "assistant content empty (type=%s, tools=%s)"
                      (type-of (kargu-aget message "content"))
                      (and calls-p t)))
-        (setq kargu--message-history
-              (append kargu--message-history (list msg)))
+        (setq msg (kargu-history-append msg history))
         (kargu--log-assistant-wire response)
         (kargu-log 'response "assistant turn stored: %d chars text, %d chars reasoning, %d tool call(s)"
                    (length (or content ""))

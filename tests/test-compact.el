@@ -31,9 +31,13 @@
   "Both the size and the message count must be over their limits."
   (let ((kargu-history-compact-chars 50))
     (cl-letf (((symbol-function 'kargu-model-context-window) (lambda (&rest _) nil)))
-      (let ((kargu--message-history (kargu-compact-test--history 1)))
+	     (let ((kargu-session--context
+		    (kargu-test-session-with-history
+		     :messages (kargu-compact-test--history 1))))
         (should-not (kargu-history-needs-compact-p)))
-      (let ((kargu--message-history (kargu-compact-test--history 6)))
+	     (let ((kargu-session--context
+		    (kargu-test-session-with-history
+		     :messages (kargu-compact-test--history 6))))
         (should (> (kargu-history-char-count) 50))
         (should (kargu-history-needs-compact-p))))))
 
@@ -43,21 +47,24 @@
         (image (make-string 4000 ?a)))
     (cl-letf (((symbol-function 'kargu-model-context-window) (lambda (&rest _) 1024)))
       (should (= (kargu-history-compact-threshold) (round (* 1024 3.5 0.70)))))
-    (let ((kargu--message-history
-           (list (list '("role" . "user")
-                       (cons "content" (vector (list '("type" . "image_url")
-                                                      (cons "image_url" image)))))
-                 '(("role" . "assistant")
-                   ("tool_calls" . ((("id" . "c1") ("function" . (("arguments" . "large args"))))))))))
+    (let ((kargu-session--context
+           (kargu-test-session-with-history
+            :messages (list (list '("role" . "user")
+				  (cons "content" (vector (list '("type" . "image_url")
+								(cons "image_url" image)))))
+			    '(("role" . "assistant")
+			      ("tool_calls" . ((("id" . "c1") ("function" . (("arguments" . "large args")))))))))))
       (cl-letf (((symbol-function 'kargu-tool-schema-char-count) (lambda () 123)))
         (should (= (kargu-history-char-count)
-                   (+ 123 (length (kargu-json-encode-record (vconcat kargu--message-history))))))
+                   (+ 123 (length (kargu-json-encode-record (vconcat (kargu-history-messages)))))))
         (should (> (kargu-history-char-count) 4000))))))
 
 (ert-deftest kargu-history-compact-tail-starts-on-a-user-turn-test ()
   "The kept tail never starts on an assistant or a tool result."
   (let ((kargu-history-compact-keep 3)
-        (kargu--message-history (kargu-compact-test--history 5)))
+        (kargu-session--context
+         (kargu-test-session-with-history
+          :messages (kargu-compact-test--history 5))))
     (let ((tail (kargu-history-compact-tail)))
       (should tail)
       (should (equal (kargu-aget (car tail) "role") "user"))
@@ -65,31 +72,36 @@
 
 (ert-deftest kargu-history-apply-compaction-keeps-summary-and-tail-test ()
   "The summary becomes an ack turn and the tail follows it."
-  (let ((kargu--message-history (kargu-compact-test--history 5))
-        (kargu--compaction-system "overlay"))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages (kargu-compact-test--history 5)
+          :overlay "overlay")))
     (kargu-history-apply-compaction
      "the summary"
      (list '(("role" . "user") ("content" . "recent question"))))
-    (should-not kargu--compaction-system)
-    (should (equal (kargu-aget (nth 0 kargu--message-history) "role") "system"))
-    (should (string-prefix-p "COMPACTION_ACK:" (kargu-aget (nth 1 kargu--message-history) "content")))
-    (should (string-search "the summary" (kargu-aget (nth 1 kargu--message-history) "content")))
-    (should (equal (kargu-aget (nth 2 kargu--message-history) "role") "assistant"))
-    (should (equal (kargu-aget (car (last kargu--message-history)) "content") "recent question"))))
+    (should-not (kargu-history-overlay))
+    (should (equal (kargu-aget (nth 0 (kargu-history-messages)) "role") "system"))
+    (should (string-prefix-p "COMPACTION_ACK:" (kargu-aget (nth 1 (kargu-history-messages)) "content")))
+    (should (string-search "the summary" (kargu-aget (nth 1 (kargu-history-messages)) "content")))
+    (should (equal (kargu-aget (nth 2 (kargu-history-messages)) "role") "assistant"))
+    (should (equal (kargu-aget (car (last (kargu-history-messages))) "content") "recent question"))))
 
 (ert-deftest kargu-history-drop-trailing-compaction-test ()
   "A failed compaction request does not stay in the history."
-  (let ((kargu--message-history
-         (append (kargu-compact-test--history 1)
-                 (list '(("role" . "user") ("content" . "COMPACTION_REQUEST: summarize"))))))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages (append (kargu-compact-test--history 1)
+			    (list '(("role" . "user") ("content" . "COMPACTION_REQUEST: summarize")))))))
     (kargu--history-drop-trailing-compaction)
-    (should (equal (kargu-aget (car (last kargu--message-history)) "content") "answer 1"))))
+    (should (equal (kargu-aget (car (last (kargu-history-messages))) "content") "answer 1"))))
 
 (ert-deftest kargu-loop-compaction-runs-once-and-is-tool-free-test ()
   "One compaction turn per run; the run is tool-free while it waits."
   (let* ((run (list :state 'request :iterations 1 :max-iterations 10))
          (kargu--loop-run run)
-         (kargu--message-history (kargu-compact-test--history 3))
+         (kargu-session--context
+          (kargu-test-session-with-history
+           :messages (kargu-compact-test--history 3)))
          (sent nil))
     (cl-letf (((symbol-function 'kargu-api-send)
                (lambda (prompt _cb &optional _d) (setq sent prompt)))
@@ -107,7 +119,9 @@
                     :resume-prompt "go on"
                     :compact-tail (list '(("role" . "user") ("content" . "tail")))))
          (kargu--loop-run run)
-         (kargu--message-history (kargu-compact-test--history 3))
+         (kargu-session--context
+          (kargu-test-session-with-history
+           :messages (kargu-compact-test--history 3)))
          (resumed nil))
     (cl-letf (((symbol-function 'kargu--loop-request)
                (lambda (_run prompt) (setq resumed prompt))))
@@ -117,15 +131,16 @@
       (should-not (plist-get run :no-tools))
       (should-not (plist-get run :compacting))
       (should (string-search "SUMMARY"
-                             (kargu-aget (nth 1 kargu--message-history) "content"))))))
+                             (kargu-aget (nth 1 (kargu-history-messages)) "content"))))))
 
 (ert-deftest kargu-loop-compaction-failure-finishes-the-run-test ()
   "An empty summary or an error ends the run with an error and cleans the history."
   (let* ((run (list :state 'compact :compacting t))
          (kargu--loop-run run)
-         (kargu--message-history
-          (append (kargu-compact-test--history 1)
-                  (list '(("role" . "user") ("content" . "COMPACTION_REQUEST: x")))))
+         (kargu-session--context
+          (kargu-test-session-with-history
+           :messages (append (kargu-compact-test--history 1)
+			     (list '(("role" . "user") ("content" . "COMPACTION_REQUEST: x"))))))
          (finished nil))
     (cl-letf (((symbol-function 'kargu--loop-finish)
                (lambda (_run status text) (setq finished (cons status text)))))
@@ -133,7 +148,7 @@
        run '(("choices" . ((("message" . (("content" . ""))))))))
       (should (eq (car finished) :error))
       (should (string-search "empty summary" (cdr finished)))
-      (should (equal (kargu-aget (car (last kargu--message-history)) "content") "answer 1")))))
+      (should (equal (kargu-aget (car (last (kargu-history-messages))) "content") "answer 1")))))
 
 (ert-deftest kargu-loop-compaction-timeout-asks-to-retry-test ()
   "A compaction curl timeout asks to retry, and retry sends compaction again."
@@ -142,10 +157,11 @@
                       :chat-buffer (current-buffer)
                       :saved-no-tools nil :no-tools t))
            (kargu--loop-run run)
-           (kargu--message-history
-            (append (kargu-compact-test--history 1)
-                    (list '(("role" . "user")
-                            ("content" . "COMPACTION_REQUEST: x")))))
+           (kargu-session--context
+            (kargu-test-session-with-history
+             :messages (append (kargu-compact-test--history 1)
+			       (list '(("role" . "user")
+				       ("content" . "COMPACTION_REQUEST: x"))))))
            (kargu-confirm--mock-decision :retry)
            (sent nil)
            (finished nil)
@@ -168,10 +184,11 @@
     (let* ((run (list :state 'compact :compacting t :compactions 1
                       :chat-buffer (current-buffer)))
            (kargu--loop-run run)
-           (kargu--message-history
-            (append (kargu-compact-test--history 1)
-                    (list '(("role" . "user")
-                            ("content" . "COMPACTION_REQUEST: x")))))
+           (kargu-session--context
+            (kargu-test-session-with-history
+             :messages (append (kargu-compact-test--history 1)
+			       (list '(("role" . "user")
+				       ("content" . "COMPACTION_REQUEST: x"))))))
            (kargu-confirm--mock-decision :stop)
            (finished nil))
       (cl-letf (((symbol-function 'kargu--loop-finish)
@@ -180,14 +197,16 @@
          run '(("error" . (("message" . "plz error: curl 28: Operation timeout.")))))
         (should (eq (car finished) :error))
         (should (string-search "curl 28" (cdr finished)))
-        (should (equal (kargu-aget (car (last kargu--message-history)) "content")
+        (should (equal (kargu-aget (car (last (kargu-history-messages))) "content")
                        "answer 1"))))))
 
 (ert-deftest kargu-loop-compaction-other-error-finishes-without-asking-test ()
   "A compaction error that is not a timeout still ends the run at once."
   (let* ((run (list :state 'compact :compacting t :compactions 1))
          (kargu--loop-run run)
-         (kargu--message-history (kargu-compact-test--history 1))
+         (kargu-session--context
+          (kargu-test-session-with-history
+           :messages (kargu-compact-test--history 1)))
          (finished nil)
          (asked nil))
     (cl-letf (((symbol-function 'kargu--loop-finish)

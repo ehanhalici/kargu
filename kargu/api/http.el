@@ -216,7 +216,7 @@ ATTEMPT is the zero-based retry count."
   "Log REQUEST metadata and its TRANSPORT without credentials."
   (kargu-log 'request "POST %s (model=%s, %d messages, %d tools, %s%s)"
              (kargu-http--request-url request) (kargu--model)
-             (length kargu--message-history)
+             (length (kargu-aget (kargu-http--request-payload request) "messages"))
              (kargu-registered-tool-count)
              transport
              (if (> (kargu-http--request-attempt request) 0)
@@ -392,7 +392,7 @@ PARSED-EVENTS avoids reparsing an already decoded stream."
          (attempt (or attempt 0)))
     (kargu--log-block "IN HTTP body" (or body "")
                       (kargu--log-looks-json-p trimmed))
-    (let* ((response (kargu-api-normalize-response
+    (let* ((response (kargu-api-response-shape
                       (kargu--api-decode-body-response body trimmed parsed-events)))
            (err (and response (kargu-response-error-message response))))
       (when (and kargu-log-wire response)

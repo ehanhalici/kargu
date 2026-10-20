@@ -10,6 +10,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'kargu/loop)
 (require 'kargu/loop/tools)
 (require 'kargu/loop/machine)
@@ -313,51 +314,59 @@
 
 (ert-deftest kargu-loop-compaction-request-never-merges-into-user-turn-test ()
   "The compaction request stays a separate turn so it can be dropped on failure."
-  (let ((kargu--message-history
-         (list '(("role" . "system") ("content" . "sys"))
-               '(("role" . "user") ("content" . "earlier question"))))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages (list '(("role" . "system") ("content" . "sys"))
+			  '(("role" . "user") ("content" . "earlier question")))))
         (kargu--busy nil))
     (kargu--history-add "assistant" "Understood.")
     (kargu--history-add "user" "COMPACTION_REQUEST: summarize")
     (kargu--validate-history)
-    (should (= (length kargu--message-history) 4))
+    (should (= (length (kargu-history-messages)) 4))
     (kargu--history-drop-trailing-compaction)
-    (should (= (length kargu--message-history) 3))
+    (should (= (length (kargu-history-messages)) 3))
     (should (equal (kargu--history-last-role) "assistant"))))
 
 (ert-deftest kargu-system-message-follows-mode-and-compaction-test ()
   "The stored system message is rebuilt when the mode or the compaction overlay changes."
-  (let ((kargu--message-history (list '(("role" . "user") ("content" . "hi"))))
-        (kargu--system-key nil)
-        (kargu--compaction-system nil)
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages (list '(("role" . "user") ("content" . "hi")))
+          :system-key nil
+          :overlay nil))
+
+
         (mode 'ask))
     (cl-letf (((symbol-function 'kargu-state-mode) (lambda () mode))
               ((symbol-function 'kargu--get-system-prompt)
-               (lambda () (format "SYS %s %s" mode (and kargu--compaction-system t)))))
+               (lambda (&optional _) (format "SYS %s %s" mode (and (kargu-history-overlay) t)))))
       (kargu--validate-history)
-      (should (equal (kargu-aget (car kargu--message-history) "content") "SYS ask nil"))
+      (should (equal (kargu-aget (car (kargu-history-messages)) "content") "SYS ask nil"))
       (setq mode 'agent)
       (kargu--validate-history)
-      (should (equal (kargu-aget (car kargu--message-history) "content") "SYS agent nil"))
-      (setq kargu--compaction-system "compact")
+      (should (equal (kargu-aget (car (kargu-history-messages)) "content") "SYS agent nil"))
+      (setf (kargu-history-overlay) "compact")
       (kargu--validate-history)
-      (should (equal (kargu-aget (car kargu--message-history) "content") "SYS agent t"))
-      (setq kargu--compaction-system nil)
+      (should (equal (kargu-aget (car (kargu-history-messages)) "content") "SYS agent t"))
+      (setf (kargu-history-overlay) nil)
       (kargu--validate-history)
-      (should (equal (kargu-aget (car kargu--message-history) "content") "SYS agent nil")))))
+      (should (equal (kargu-aget (car (kargu-history-messages)) "content") "SYS agent nil")))))
 
 (ert-deftest kargu-system-message-is-kept-while-nothing-changes-test ()
   "An unchanged prompt input keeps the stored system message untouched."
-  (let ((kargu--message-history (list '(("role" . "user") ("content" . "hi"))))
-        (kargu--system-key nil)
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages (list '(("role" . "user") ("content" . "hi")))
+          :system-key nil))
+
         (n 0))
     (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'ask))
               ((symbol-function 'kargu--get-system-prompt)
-               (lambda () (format "SYS %d" (cl-incf n)))))
+               (lambda (&optional _) (format "SYS %d" (cl-incf n)))))
       (kargu--validate-history)
       (kargu--validate-history)
       (kargu--validate-history)
-      (should (equal (kargu-aget (car kargu--message-history) "content") "SYS 1")))))
+      (should (equal (kargu-aget (car (kargu-history-messages)) "content") "SYS 1")))))
 
 (ert-deftest kargu-loop-continue-prompt-test ()
   "Test loop limit prompt structure and continuation mechanism."

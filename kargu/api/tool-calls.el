@@ -13,17 +13,14 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'kargu/core)
+(require 'kargu/history/store)
 (require 'kargu/json)
 
-(defvar kargu-api--tool-call-sequence 0
-  "Monotonic sequence used for synthesized tool-call identities.")
 
-(defvar kargu--message-history)
-
-(defun kargu-api--used-tool-call-ids ()
-  "Return a set of tool-call identities already present in the conversation."
+(defun kargu-api--used-tool-call-ids (&optional history)
+  "Return a set of tool-call identities already present in HISTORY."
   (let ((used (make-hash-table :test #'equal)))
-    (dolist (message (bound-and-true-p kargu--message-history))
+    (dolist (message (kargu-history-messages history))
       (when-let* ((result-id (kargu-aget message "tool_call_id")))
         (puthash result-id t used))
       (dolist (call (kargu-seq-to-list (kargu-aget message "tool_calls")))
@@ -32,9 +29,10 @@
 
 (defun kargu-api--fresh-tool-call-id (used)
   "Generate an identity not already in USED."
-  (let ((prefix (substring (secure-hash 'sha1 (kargu-session-id)) 0 12)) id)
+  (let ((prefix (substring (secure-hash 'sha1 (kargu-session-id)) 0 12))
+        (sequence (hash-table-count used)) id)
     (while (or (null id) (gethash id used))
-      (setq id (format "call_kargu_%s_%d" prefix (cl-incf kargu-api--tool-call-sequence))))
+      (setq id (format "call_kargu_%s_%d" prefix (cl-incf sequence))))
     id))
 
 (defun kargu-api--normalize-tool-call (call used)
@@ -62,12 +60,12 @@
       (when legacy (setq message (assoc-delete-all "function_call" message))))
     message))
 
-(defun kargu-api-normalize-tool-calls (response)
+(defun kargu-api-normalize-tool-calls (response &optional history)
   "Return a canonical copy of RESPONSE with unique tool-call identities.
 Preserve valid provider IDs unless they collide within this response or
-with conversation history.  Every consumer must use this same response."
+with HISTORY or the current owner.  Every consumer uses this same response."
   (condition-case err
-      (let ((copy (kargu-json-to-record response)) (used (kargu-api--used-tool-call-ids)))
+      (let ((copy (kargu-json-to-record response)) (used (kargu-api--used-tool-call-ids history)))
         (dolist (choice (kargu-seq-to-list (kargu-aget copy "choices")))
           (when-let* ((message (kargu-aget choice "message")))
             (setcdr (assoc "message" choice) (kargu-api--normalize-message-calls message used))))

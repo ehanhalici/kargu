@@ -85,10 +85,14 @@ CACHE-MARKED puts a cache marker on the last tool."
 EXTRA is a list of additional (KEY . VALUE) conses that replace or add
 entries (e.g. (\"stream\" . t)).  The \"tools\" array is only included when
 at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
+  (kargu-api-build-payload (kargu-history-context) extra))
+
+(defun kargu-api-build-payload (history &optional extra)
+  "Build a payload snapshot from HISTORY and optional EXTRA entries."
   (let* ((tools (kargu--build-tools-vector))
          (cache-marked (kargu-provider-cache-marker-p
                         (downcase (string-trim (format "%s" (kargu--provider-name))))))
-         (messages (copy-tree kargu--message-history t))
+         (messages (kargu-history-snapshot history))
          (payload
           (append
            `(("model" . ,(kargu--model))

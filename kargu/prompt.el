@@ -18,6 +18,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'kargu/core)
+(require 'kargu/history/store)
 (require 'kargu/config)
 (require 'kargu/state/selectors)
 (require 'kargu/tools/toolchain)
@@ -30,8 +31,6 @@
 (declare-function kargu-dape-live-p "kargu/tools/dape/session")
 (declare-function kargu-dape-context-snapshot "kargu/tools/dape/context")
 
-(defvar kargu--compaction-system nil
-  "When non-nil, `kargu--get-system-prompt' returns this string.")
 
 (defgroup kargu-prompt nil
   "System prompt and instruction-file injection."
@@ -315,17 +314,14 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
     kargu-prompt--tools-guidance-block)
   "Ordered functions whose non-empty strings form the system prompt.")
 
-(defvar kargu--system-key nil
-  "Value of `kargu-prompt-system-key' the stored system message was built for.")
 
-(defun kargu-prompt-system-key ()
-  "Everything the system prompt text depends on that can change mid-session.
-When this differs from `kargu--system-key' the stored system message is stale."
+(defun kargu-prompt-system-key (&optional history)
+  "Return the current prompt identity for HISTORY or the current owner."
   (list (kargu-state-mode)
         (and (kargu-prompt--tools-off-p) t)
         (kargu--model)
         (and (kargu-eglot-connected-p) t)
-        (and kargu--compaction-system t)
+        (kargu-history-overlay history)
         (kargu-prompt--workspace)
         (kargu-prompt--context-file-name)
         (format-time-string "%Y-%m-%d")
@@ -333,10 +329,9 @@ When this differs from `kargu--system-key' the stored system message is stale."
         (kargu-advertised-tools)
         kargu-low-usage-mode))
 
-(defun kargu--get-system-prompt ()
-  "Return the system prompt for the active mode.
-During compaction, `kargu--compaction-system' replaces this."
-  (or kargu--compaction-system
+(defun kargu--get-system-prompt (&optional history)
+  "Return the active system prompt, honoring HISTORY's temporary overlay."
+  (or (kargu-history-overlay history)
       (string-join
        (append
         (delq nil (mapcar (lambda (fn)

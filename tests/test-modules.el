@@ -545,7 +545,7 @@ Initialize installed PACKAGES only when requested."
        (kargu-session-reset)
        (kargu-api--deliver delivery '(("usage" . (("prompt_tokens" . 5)))))
        (cl-assert (not called))
-       (cl-assert (not kargu--message-history))
+       (cl-assert (not (kargu-history-messages)))
        (cl-assert (zerop (plist-get (kargu-session-snapshot) :requests)))))))
 
 (ert-deftest kargu-module-api-delivery-owns-usage-once-test ()
@@ -827,7 +827,9 @@ Initialize installed PACKAGES only when requested."
   "A reduced package tree can use foundations without runtime or UI sources."
   (let ((root (make-temp-file "kargu-module-package-" t))
         (files '("kargu/core/data.el" "kargu/core/group.el" "kargu/core/custom.el"
-                 "kargu/core/log.el" "kargu/json.el" "kargu/fs.el" "kargu/async.el"
+                 "kargu/core/log.el" "kargu/core/session.el"
+                 "kargu/contract/history.el"
+                 "kargu/json.el" "kargu/fs.el" "kargu/async.el"
                  "kargu/contract/constants.el" "kargu/contract/types.el"
                  "kargu/contract/result.el" "kargu/contract/assert.el"
                  "kargu/tools/registry.el"
@@ -839,13 +841,16 @@ Initialize installed PACKAGES only when requested."
               (make-directory (file-name-directory target) t)
               (copy-file (expand-file-name file kargu-module-test--root) target)))
           (kargu-module-test--evaluate
-           '((dolist (feature '(kargu/json kargu/fs kargu/async
+           '((dolist (feature '(kargu/core/session kargu/json kargu/fs kargu/async
                                kargu/permission/guards kargu/tools/process
                                kargu/tools/registry))
                (require feature))
              (cl-assert (null (locate-library "kargu/chat")))
              (cl-assert (null (locate-library "kargu/api")))
-             (cl-assert (null (locate-library "kargu/state"))))
+             (cl-assert (null (locate-library "kargu/state")))
+             (cl-assert (null (locate-library "kargu/history")))
+             (cl-assert (kargu-history-p
+                         (kargu-session-history-value (kargu-session-context)))))
            nil root))
       (delete-directory root t))))
 

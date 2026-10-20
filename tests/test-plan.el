@@ -17,7 +17,6 @@
 (require 'kargu/plan)
 
 (defvar kargu--loop-run)
-(defvar kargu--message-history)
 
 (declare-function kargu-chat-mode "kargu/chat" ())
 
@@ -357,7 +356,9 @@
 
 (ert-deftest kargu-plan-empty-report-does-not-read-other-history-test ()
   "An empty owned report cannot synthesize a plan from global chat history."
-  (let ((kargu--message-history '((("role" . "assistant") ("content" . "other project")))))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "assistant") ("content" . "other project"))))))
     (should-not (kargu-plan-extract-text '(:text "")))
     (should-not (kargu-plan-extract-text '(:status :done)))))
 

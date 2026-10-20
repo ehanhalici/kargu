@@ -27,6 +27,7 @@
 (require 'tests/test-permission)
 (require 'tests/test-git)
 (require 'tests/test-history)
+(require 'tests/test-history-store)
 (require 'tests/test-api)
 (require 'tests/test-stream)
 (require 'tests/test-tool-calls)

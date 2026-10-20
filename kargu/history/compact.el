@@ -68,7 +68,7 @@ Use the configured fallback when that context window is unknown."
   "Estimate serialized history and advertised schema character cost.
 Include system text, structured content, attachments and list/vector tool
 invocations.  Image tokenization remains provider-dependent."
-  (+ (length (kargu-json-encode-record (vconcat kargu--message-history)))
+  (+ (length (kargu-json-encode-record (vconcat (kargu-history-messages))))
      (if (fboundp 'kargu-tool-schema-char-count)
          (kargu-tool-schema-char-count)
        0)))
@@ -76,7 +76,7 @@ invocations.  Image tokenization remains provider-dependent."
 (defun kargu-history-non-system-count ()
   "Number of non-system messages in the history."
   (let ((n 0))
-    (dolist (msg kargu--message-history)
+    (dolist (msg (kargu-history-messages))
       (unless (equal (kargu-aget msg "role") "system")
         (setq n (1+ n))))
     n))
@@ -102,7 +102,7 @@ System messages and compaction notices are dropped.  The suffix
 starts on a `user' role so the preceding assistant acknowledgment
 in the compaction summary preserves user/assistant turn alternation."
   (let (msgs)
-    (dolist (msg kargu--message-history)
+    (dolist (msg (kargu-history-messages))
       (unless (or (equal (kargu-aget msg "role") "system")
                   (kargu--history-compaction-msg-p msg))
         (push (copy-tree msg) msgs)))
@@ -122,19 +122,19 @@ in the compaction summary preserves user/assistant turn alternation."
 
 (defun kargu--history-drop-trailing-compaction ()
   "Remove a trailing compaction user turn if the request failed."
-  (when-let* ((last (car (last kargu--message-history))))
+  (when-let* ((last (car (last (kargu-history-messages)))))
     (when (and (equal (kargu-aget last "role") "user")
                (kargu--history-compaction-msg-p last))
-      (setq kargu--message-history (butlast kargu--message-history)))))
+      (setf (kargu-history-messages) (butlast (kargu-history-messages))))))
 
 (defun kargu-history-apply-compaction (summary tail)
   "Replace the history with SUMMARY plus preserved TAIL.
 The usual system prompt is restored (compaction overlay cleared)."
-  (setq kargu--compaction-system nil)
+  (setf (kargu-history-overlay) nil)
   (let* ((sys-msg (kargu--history-fresh-system-message))
          (kept (cl-remove-if #'kargu--history-compaction-msg-p tail))
          (first-kept-role (and kept (kargu-aget (car kept) "role"))))
-    (setq kargu--message-history
+    (setf (kargu-history-messages)
           (append
            (list sys-msg
                  `(("role" . "user")
@@ -148,7 +148,7 @@ The usual system prompt is restored (compaction overlay cleared)."
                      ("content" . "Please proceed with the task."))))
            kept))
     (kargu-log 'info "history compacted to %d messages (%d chars)"
-               (length kargu--message-history)
+               (length (kargu-history-messages))
                (kargu-history-char-count))
     (kargu--validate-history 'keep-assistant-tail)))
 

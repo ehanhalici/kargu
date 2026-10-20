@@ -17,7 +17,7 @@
 
 (ert-deftest kargu-session-validate-rejections-preserve-draft-and-state-test ()
   "Reject malformed fields without touching any existing conversation state."
-  (let ((history (copy-tree kargu--message-history))
+  (let ((history (copy-tree (kargu-history-messages)))
         (counters (kargu-session-snapshot))
         (state (copy-tree kargu--state-store))
         (provider kargu--session-provider)
@@ -48,7 +48,7 @@
         (save-restriction
           (widen)
           (should (equal (buffer-string) "existing transcript and unsent draft")))))
-    (should (equal kargu--message-history history))
+    (should (equal (kargu-history-messages) history))
     (should (equal (kargu-session-snapshot) counters))
     (should (equal kargu--state-store state))
     (should (equal kargu--session-provider provider))
@@ -141,7 +141,7 @@
                   ,(vector `(("role" . "user") ("content" . ,blocks)))))))
     (with-temp-buffer
       (kargu-session-load data (current-buffer) default-directory)
-      (let ((restored (kargu-aget (car kargu-chat--messages) "content")))
+      (let ((restored (kargu-aget (car (kargu-history-messages)) "content")))
         (should (vectorp restored))
         (should (equal (kargu-aget (aref restored 0) "text") "ğ prompt"))
         (should (equal (kargu-aget (kargu-aget (aref restored 1) "image_url") "url")

@@ -130,14 +130,17 @@ send path so the continue prompt runs instead of leaving the run idle."
 
 (defun kargu-loop--receive-model (run response)
   "Handle RESPONSE for RUN, terminating only its owner on a continuation error."
-  (condition-case err
-      (kargu--loop-handle-response run response)
-    (error
-     (kargu-log 'error "Model response continuation failed: %s"
-                (error-message-string err))
-     (when (kargu-loop--live-p run)
-       (kargu-api-cancel)
-       (kargu--loop-finish run :error (error-message-string err))))))
+  (when (kargu-loop--live-p run)
+    (let ((origin (plist-get run :chat-buffer)))
+      (with-current-buffer (if (buffer-live-p origin) origin (current-buffer))
+        (condition-case err
+            (kargu--loop-handle-response run response)
+          (error
+           (kargu-log 'error "Model response continuation failed: %s"
+                      (error-message-string err))
+           (when (kargu-loop--live-p run)
+             (kargu-api-cancel)
+             (kargu--loop-finish run :error (error-message-string err)))))))))
 
 (defun kargu--loop-request (run prompt)
   "Send one model request for RUN.

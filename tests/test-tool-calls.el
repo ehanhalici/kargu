@@ -10,11 +10,14 @@
 ;;; Code:
 
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'kargu)
 
 (ert-deftest kargu-tool-call-identities-cover-all-wire-paths-test ()
   "Plain, streamed, native and legacy calls share one identity normalizer."
-  (let ((kargu--message-history nil) ids)
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages nil)) ids)
     (dolist (response
              (list
               '(("choices" . [(("message" . (("tool_calls" . [(("function" . (("name" . "read_file") ("arguments" . "{}"))))]))))]))
@@ -32,12 +35,14 @@
         (push id ids)
         (kargu-api-store-assistant-turn normalized)
         (should (equal id (kargu-aget (car (kargu-seq-to-list
-                                            (kargu-aget (car (last kargu--message-history)) "tool_calls"))) "id")))))))
+                                            (kargu-aget (car (last (kargu-history-messages))) "tool_calls"))) "id")))))))
 
 (ert-deftest kargu-tool-call-collisions-and-results-stay-consistent-test ()
   "Duplicate provider IDs and missing IDs cannot create orphan results."
-  (let* ((kargu--message-history '((("role" . "user") ("content" . "Inspect files")))))
-    (dotimes (_ 2)
+  (let* ((kargu-session--context
+          (kargu-test-session-with-history
+           :messages '((("role" . "user") ("content" . "Inspect files"))))))
+    (dotimes (turn 2)
       (let* ((raw '(("choices" . [(("message" . (("role" . "assistant")
                                                  ("tool_calls" . [(("id" . "provider-id") ("function" . (("name" . "read_file") ("arguments" . "{}"))))
                                                                   (("id" . "provider-id") ("function" . (("name" . "read_file") ("arguments" . "{}"))))
@@ -48,15 +53,15 @@
              (ids (mapcar #'kargu--loop-call-id calls)))
         (should (equal raw snapshot))
         (should (= (length (delete-dups (copy-sequence ids))) 3))
-        (when (= _ 0) (should (equal (car ids) "provider-id")))
-        (when (= _ 1) (should-not (member "provider-id" ids)))
+        (when (= turn 0) (should (equal (car ids) "provider-id")))
+        (when (= turn 1) (should-not (member "provider-id" ids)))
         (kargu-api-store-assistant-turn normalized)
         (dolist (call calls)
           (kargu-history-add-tool-result (kargu--loop-call-id call) "read_file" "Result"))))
     (kargu--validate-history 'keep-assistant-tail)
-    (let* ((assistants (seq-filter (lambda (msg) (kargu-aget msg "tool_calls")) kargu--message-history))
+    (let* ((assistants (seq-filter (lambda (msg) (kargu-aget msg "tool_calls")) (kargu-history-messages)))
            (calls (apply #'append (mapcar (lambda (msg) (kargu-seq-to-list (kargu-aget msg "tool_calls"))) assistants)))
-           (results (seq-filter (lambda (msg) (equal (kargu-aget msg "role") "tool")) kargu--message-history)))
+           (results (seq-filter (lambda (msg) (equal (kargu-aget msg "role") "tool")) (kargu-history-messages))))
       (should (= (length calls) 6))
       (should (= (length results) 6))
       (should (= (length (delete-dups (mapcar #'kargu--loop-call-id calls))) 6))

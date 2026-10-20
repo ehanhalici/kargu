@@ -19,7 +19,6 @@
 (require 'kargu/confirm)
 
 (defvar kargu-max-iterations)
-(defvar kargu--compaction-system)
 (declare-function kargu-loop--live-p "kargu/loop" (run))
 (declare-function kargu-loop--set-state "kargu/loop" (run state))
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
@@ -55,7 +54,7 @@ Count one iteration and return non-nil if started."
     (plist-put run :saved-no-tools (plist-get run :no-tools))
     (plist-put run :no-tools t)
     (plist-put run :compact-tail (kargu-history-compact-tail))
-    (setq kargu--compaction-system kargu-prompt-compaction-system)
+    (setf (kargu-history-overlay) kargu-prompt-compaction-system)
     ;; The request is its own user turn; it must never merge into a previous one.
     (when (equal (kargu--history-last-role) "user")
       (kargu--history-add "assistant" "Understood."))
@@ -158,14 +157,16 @@ A timeout asks whether to retry the compaction.  Other errors end the run."
 
 (defun kargu--loop-handle-compaction (run response)
   "Apply the compaction RESPONSE of RUN and continue the original work."
-  (setq kargu--compaction-system nil)
   (when (kargu-loop--live-p run)
-    (plist-put run :compacting nil)
-    (plist-put run :no-tools (plist-get run :saved-no-tools))
-    (plist-put run :saved-no-tools nil)
-    (funcall (alist-get (kargu-loop--classify-compaction response)
-                        kargu-loop--on-compaction)
-             run response)))
+    (let ((origin (plist-get run :chat-buffer)))
+      (with-current-buffer (if (buffer-live-p origin) origin (current-buffer))
+        (setf (kargu-history-overlay (plist-get run :history)) nil)
+        (plist-put run :compacting nil)
+        (plist-put run :no-tools (plist-get run :saved-no-tools))
+        (plist-put run :saved-no-tools nil)
+        (funcall (alist-get (kargu-loop--classify-compaction response)
+                            kargu-loop--on-compaction)
+                 run response)))))
 
 (provide 'kargu/loop/compact)
 

@@ -16,6 +16,7 @@
 (require 'cl-lib)
 (require 'kargu/core/log)
 (require 'kargu/contract/assert)
+(require 'kargu/contract/history)
 
 (autoload 'kargu-session-reset "kargu/application/reset" nil t)
 (declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
@@ -33,7 +34,8 @@
 
 (cl-defstruct (kargu-session (:constructor kargu-session--create))
   "One captured session ID owning its usage counters, not a runtime singleton."
-  (id-value nil :read-only t) usage-value)
+  (id-value nil :read-only t) usage-value
+  (history-value (kargu-history-create) :read-only t))
 
 (defvar-local kargu-session--context nil
   "The current buffer's owned session handle; callbacks capture it explicitly.")
@@ -111,7 +113,9 @@ Nested scalar strings are borrowed read-only values."
   (when (plist-get (kargu-session-usage-value (kargu-session-context)) :active)
     (user-error "Kargu: stop the session's active run before replacing its counters"))
   (setq kargu-session--context
-        (kargu-session--create :id-value (kargu-session-id) :usage-value (copy-tree usage))))
+        (kargu-session--create
+         :id-value (kargu-session-id) :usage-value (copy-tree usage)
+         :history-value (kargu-session-history-value (kargu-session-context)))))
 
 (defun kargu-session-record-usage (tokens-in tokens-out &optional session)
   "Add TOKENS-IN and TOKENS-OUT to SESSION, or the current boundary owner."
