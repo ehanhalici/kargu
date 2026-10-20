@@ -47,7 +47,6 @@
 (declare-function kargu-diff--describe "kargu/tools/diff/stage" (proposal))
 (declare-function kargu-diff--file-text "kargu/tools/diff/stage" (path))
 (declare-function kargu-diff-read-file "kargu/tools/diff" (file-path &optional from-line to-line))
-(declare-function kargu-seq-to-list "kargu/json" (seq))
 
 ;;;; Customization --------------------------------------------------------
 
@@ -117,8 +116,6 @@ Handles plists, hash tables, and alists.  Return DEFAULT if absent."
   (cl-reduce (lambda (acc field)
                (and acc (kargu-lsp--field acc field)))
              fields :initial-value object))
-
-(defalias 'kargu-lsp--seq->list #'kargu-seq-to-list)
 
 ;;;; Session & context routing --------------------------------------------
 

@@ -30,12 +30,9 @@ Dynamically bound while the hook runs.")
 (declare-function kargu-diff--sessions "kargu/tools/diff/review" ())
 (declare-function kargu-diff--session-live-p "kargu/tools/diff/review" (session))
 (declare-function kargu-diff--reap-stale "kargu/tools/diff/review" (path))
-(declare-function kargu-to-int "kargu/core" (value &optional default))
 (defvar kargu-diff--sessions)
 
 ;;;; Helpers --------------------------------------------------------------
-
-(defalias 'kargu-diff--to-int #'kargu-to-int)
 
 (defun kargu-diff--count-literal (haystack needle)
   "Count non-overlapping occurrences of NEEDLE in HAYSTACK."

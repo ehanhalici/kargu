@@ -25,14 +25,6 @@
 (defvar kargu-context-buffer)
 
 (declare-function dape "dape" (&optional config-diff))
-(declare-function dape-stack-select-up "dape" (conn n))
-(declare-function dape-stack-select-down "dape" (conn n))
-(declare-function dape-select-stack "dape" (conn stack-id))
-(declare-function dape-select-thread "dape" (conn thread-id))
-(declare-function dape-kill "dape" (conn &optional cb with-disconnect))
-(declare-function dape-disconnect-quit "dape" (conn))
-(declare-function dape-quit "dape" ())
-(declare-function kargu-seq-to-list "kargu/json" (seq))
 
 ;;;; Customization --------------------------------------------------------
 
@@ -63,18 +55,9 @@
 
 ;;;; Session access --------------------------------------------------------
 
-(defalias 'kargu-dape--seq->list #'kargu-seq-to-list)
-
-(defun kargu-dape--target-buffer ()
-  "Return a source buffer inside the selected workspace, or nil."
-  (kargu-dape-source-buffer))
-
 (defun kargu-dape--ensure-stop-on-entry (config)
   "Ensure CONFIG has :stopOnEntry t so program pauses on startup."
-  (let ((copy (copy-sequence config)))
-    (if (plist-member copy :stopOnEntry)
-        (plist-put copy :stopOnEntry t)
-      (append copy '(:stopOnEntry t)))))
+  (plist-put (copy-sequence config) :stopOnEntry t))
 
 (defun kargu-dape--raw-connection ()
   "Return a workspace-owned connection, preferring a paused adapter."
@@ -130,7 +113,7 @@ Stop or changed ownership silently cancels waiting, not the adapter launch."
     (message "kargu: dape is not installed or loaded")
     (when on-cancel (funcall on-cancel "dape is not installed")))
    (t
-    (let ((target (kargu-dape--target-buffer)))
+    (let ((target (kargu-dape-source-buffer)))
       (kargu-dape-wait-for-session
        on-ready :on-cancel on-cancel :source target
        :launch (lambda (token) (kargu-dape--interactive-launch-dape target token)))))))
@@ -158,7 +141,7 @@ Threads: %s"
                    (format "#%s (%s)"
                            (or (plist-get thread :id) "?")
                            (or (plist-get thread :status) "?")))
-                 (kargu-dape--seq->list (dape--threads conn))
+                 (kargu-seq-to-list (dape--threads conn))
                  ", ")))
        ((null (kargu-dape-inspection-thread conn))
         "ERROR: Inspection requires a live paused selected thread; select a paused thread first")

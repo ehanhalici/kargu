@@ -68,7 +68,7 @@ Without CALLBACK return only an already collected snapshot."
            (lambda (raw error)
              (let ((items (unless error
                             (delq nil (mapcar #'kargu-lsp--symbol-information-item
-                                               (kargu-lsp--seq->list raw))))))
+                                               (kargu-seq-to-list raw))))))
                (unless error
                  (clrhash kargu-lsp--workspace-cache)
                  (puthash key items kargu-lsp--workspace-cache))

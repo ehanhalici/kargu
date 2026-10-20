@@ -40,7 +40,7 @@
          (thread (kargu-dape-selection-thread selection)))
     (unless (kargu-dape-selection-current-p selection)
       (error "Debug selection changed while fetching the navigation stack"))
-    (let* ((frames (kargu-dape--seq->list (plist-get thread :stackFrames)))
+    (let* ((frames (kargu-seq-to-list (plist-get thread :stackFrames)))
            (current (kargu-dape-selection-frame-id selection))
            (index (if current
                       (cl-position current frames :key (lambda (frame) (plist-get frame :id)) :test #'equal)
@@ -63,7 +63,7 @@ The text is passed to CALLBACK when given, and returned otherwise."
           (if (null conn)
               "ERROR: no live dape session"
             (condition-case err
-                (let* ((threads (kargu-dape--seq->list (dape--threads conn)))
+                (let* ((threads (kargu-seq-to-list (dape--threads conn)))
                        (cur (dape--current-thread conn))
                        (cur-id (and cur (plist-get cur :id))))
                   (if (null threads)
@@ -108,7 +108,7 @@ The text is passed to CALLBACK when given, and returned otherwise."
 The text from prepared SELECTION is passed to CALLBACK."
   (funcall callback
            (kargu-dape--stack-text selection
-                                   (kargu-dape--seq->list
+                                   (kargu-seq-to-list
                                     (plist-get (kargu-dape-selection-thread selection) :stackFrames))
                                    (or levels 20))))
 
@@ -118,7 +118,7 @@ The text from prepared SELECTION is passed to CALLBACK."
     (if (null conn)
         "ERROR: no live dape session"
       (condition-case err
-          (let* ((modules (kargu-dape--seq->list (dape--modules conn))))
+          (let* ((modules (kargu-seq-to-list (dape--modules conn))))
             (if (null modules)
                 "[MODULES: 0 loaded or not reported by adapter]"
               (let ((lines (list (format "[MODULES: %d loaded]" (length modules)))))
@@ -138,7 +138,7 @@ The text from prepared SELECTION is passed to CALLBACK."
     (if (null conn)
         "ERROR: no live dape session"
       (condition-case err
-          (let* ((sources (kargu-dape--seq->list (dape--sources conn))))
+          (let* ((sources (kargu-seq-to-list (dape--sources conn))))
             (if (null sources)
                 "[SOURCES: not available from adapter]"
               (let ((lines (list (format "[SOURCES: %d loaded]" (length sources)))))
@@ -156,7 +156,7 @@ The text from prepared SELECTION is passed to CALLBACK."
   "Comma-separated variable names available in SCOPES."
   (mapconcat (lambda (sc)
                (mapconcat (lambda (v) (or (plist-get v :name) "?"))
-                          (kargu-dape--seq->list (plist-get sc :variables))
+                          (kargu-seq-to-list (plist-get sc :variables))
                           ", "))
              scopes "; "))
 
@@ -164,14 +164,14 @@ The text from prepared SELECTION is passed to CALLBACK."
   "Variable named TARGET-NAME in SCOPES, or nil."
   (catch 'found
     (dolist (sc scopes)
-      (dolist (v (kargu-dape--seq->list (plist-get sc :variables)))
+      (dolist (v (kargu-seq-to-list (plist-get sc :variables)))
         (when (equal (plist-get v :name) target-name)
           (throw 'found v))))
     nil))
 
 (defun kargu-dape--expanded-var-text (target-name target-var)
   "Text of TARGET-VAR named TARGET-NAME after its children have been fetched."
-  (let ((children (kargu-dape--seq->list (plist-get target-var :variables)))
+  (let ((children (kargu-seq-to-list (plist-get target-var :variables)))
         (lines (list (format "Variable '%s' = %s (expanded child fields):"
                              target-name
                              (kargu-dape--trunc (or (plist-get target-var :value) "?"))))))
@@ -207,7 +207,7 @@ The text from prepared SELECTION is passed to CALLBACK."
         (format "ERROR: scope index %d out of range (available: 0 to %d)"
                 idx (1- (length scopes)))
       (let ((lines (list (format "Scope #%d (%s):" idx (or (plist-get sc :name) "?")))))
-        (dolist (v (seq-take (kargu-dape--seq->list (plist-get sc :variables)) 60))
+        (dolist (v (seq-take (kargu-seq-to-list (plist-get sc :variables)) 60))
           (push (kargu-dape--format-var-line v "  ") lines))
         (string-join (nreverse lines) "\n")))))
 
@@ -218,7 +218,7 @@ The text from prepared SELECTION is passed to CALLBACK."
     (cl-loop for sc in scopes
              for i from 0
              do (push (format "Scope #%d: %s" i (or (plist-get sc :name) "?")) lines)
-             (dolist (v (seq-take (kargu-dape--seq->list (plist-get sc :variables)) 30))
+             (dolist (v (seq-take (kargu-seq-to-list (plist-get sc :variables)) 30))
                (push (kargu-dape--format-var-line v "    ") lines)))
     (string-join (nreverse lines) "\n")))
 
@@ -256,11 +256,11 @@ The text from SELECTION is passed to CALLBACK."
 				conn frame
 				(lambda (&rest _)
 				  (kargu-dape--fetch-variables
-				   conn (kargu-dape--seq->list (plist-get frame :scopes))
+				   conn (kargu-seq-to-list (plist-get frame :scopes))
 				   (lambda ()
 				     (kargu-dape--scope-answer
 				      conn
-				      (kargu-dape--seq->list (plist-get frame :scopes))
+				      (kargu-seq-to-list (plist-get frame :scopes))
 				      frame var-name-or-scope-idx callback interactive)))))))
         (error (kargu-dape--deliver
                 callback

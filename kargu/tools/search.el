@@ -51,10 +51,6 @@
   "Absolute project root used as the search cwd."
   (kargu-permission-project-root))
 
-(defun kargu-search--to-int (value default)
-  "Coerce VALUE to an integer, or DEFAULT."
-  (or (kargu-to-int value default) default))
-
 (defalias 'kargu-search--rel #'kargu-rel-path)
 
 (defun kargu-search--resolve (path root)
@@ -121,7 +117,7 @@ caps the number of hits returned."
                          "pattern is required: %S" pattern)
   (let* ((root (kargu-search--root))
          (target (kargu-search--resolve path root))
-         (cap (max 1 (kargu-search--to-int
+         (cap (max 1 (kargu-to-int
                       max-matches kargu-search-default-max-matches))))
     (cond
      ((executable-find "rg")

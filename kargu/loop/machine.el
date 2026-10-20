@@ -40,7 +40,6 @@ EVENT is `start' for a new model turn or `retry' before replaying its stream.")
 (declare-function kargu--api-retry-delay "kargu/api/retry" (attempt err))
 
 (declare-function kargu-loop--live-p "kargu/loop" (run))
-(declare-function kargu-loop--active-mode "kargu/loop" ())
 (declare-function kargu-loop--set-state "kargu/loop" (run state))
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
 (declare-function kargu--loop-compact-allowed-p "kargu/loop/compact" (run))
@@ -305,7 +304,7 @@ In `agent' mode, aborts with a descriptive error.  In `ask' or `plan' mode,
 remembers the refusal and retries without tools."
   (let ((mid (or (plist-get run :request-model) (kargu--model))))
     (kargu-model-mark-tools-refused mid (plist-get run :request-provider))
-    (let ((mode (kargu-loop--active-mode)))
+    (let ((mode (kargu-state-mode)))
       (if (eq mode 'agent)
           (progn
             (kargu-log 'error "loop: model '%s' does not support tools in agent mode: %s" mid err)

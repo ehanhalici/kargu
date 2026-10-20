@@ -3,6 +3,12 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
+;; Exercise loop ownership, cancellation and protocol behavior.
+
+;;; Code:
+
 ;; Ensure the package root is on `load-path` during byte/native compilation.
 (eval-and-compile
   (let ((root (locate-dominating-file
@@ -34,7 +40,7 @@
     (cl-letf (((symbol-function 'kargu--provider-name) (lambda () provider))
               ((symbol-function 'kargu--model) (lambda () model))
               ((symbol-function 'kargu-api-send) #'ignore)
-              ((symbol-function 'kargu-loop--active-mode) (lambda () 'ask))
+              ((symbol-function 'kargu-state-mode) (lambda () 'ask))
               ((symbol-function 'kargu--loop-request) #'ignore))
       (kargu-loop--send-model run "hello")
       (setq provider "new-provider" model "new-model")
@@ -139,7 +145,7 @@
       (should-not (string-search "Verification passed" report)))))
 
 (ert-deftest kargu-loop-doom-p-test ()
-  "Ensure kargu--loop-doom-p detects 3 consecutive identical tool calls."
+  "Ensure `kargu--loop-doom-p' detects 3 consecutive identical tool calls."
   (let ((run (list :doom-sigs nil))
         (sig "bash\0ls -la"))
     (should-not (kargu--loop-doom-p run sig))
@@ -147,7 +153,7 @@
     (should (kargu--loop-doom-p run sig))))
 
 (ert-deftest kargu-loop-classify-response-test ()
-  "Ensure kargu-loop--classify-response identifies tools, answers, and errors correctly."
+  "Ensure response classification identifies tools, answers and errors."
   (let* ((run (list :state 'wait))
          (kargu--loop-run run)
         (tool-resp '(("choices" . ((("index" . 0)
@@ -236,7 +242,7 @@
         (should (string-match-p "Stop Run" content))))))
 
 (ert-deftest kargu-loop-run-call-doom-flow-test ()
-  "Ensure kargu--loop-run-call respects doom approval and rejection."
+  "Ensure `kargu--loop-run-call' respects doom approval and rejection."
   (let* ((sig (kargu--loop-tool-sig "debug_step_over" nil))
          (call '(("id" . "call_1")
                  ("function" . (("name" . "debug_step_over")

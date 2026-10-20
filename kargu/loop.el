@@ -103,13 +103,9 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
         (kargu-state-transition-status st))))
   state)
 
-(defun kargu-loop--active-mode ()
-  "Return the active mode symbol."
-  (kargu-state-mode))
-
 (defun kargu-loop-tool-visible-p (name)
   "Return non-nil when tool NAME may be advertised to the model."
-  (let ((mode (kargu-loop--active-mode)))
+  (let ((mode (kargu-state-mode)))
     (and (kargu-tools-enabled-p)
          (not (kargu-tool-policy-error name))
          (cond
@@ -121,7 +117,7 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
 
 (defun kargu-loop--gate-tool (name)
   "Return an error string when NAME may not run in the active mode."
-  (let ((mode (kargu-loop--active-mode)))
+  (let ((mode (kargu-state-mode)))
     (cond
      ((kargu-tool-policy-error name))
      ((and (member name kargu-loop-debug-tools)
@@ -201,7 +197,7 @@ switched tools off (for example while compacting)."
 
 (defun kargu-loop-require-tools-for-agent ()
   "Signal `user-error' when agent mode is on and the model cannot call tools."
-  (when (and (eq (kargu-loop--active-mode) 'agent)
+  (when (and (eq (kargu-state-mode) 'agent)
              (not (kargu-model-supports-tools-p)))
     (user-error "Model '%s' does not support tool calling; switch to a tool-capable model or ask mode"
                 (or (kargu--model) "unknown"))))
@@ -239,7 +235,7 @@ the diff run files and the UI as they were."
           (kargu-state-transition-status :requesting)
           (plist-put kargu--session :active t)
           (kargu-log 'info "run start (mode=%s, model=%s)"
-                     (kargu-loop--active-mode) (kargu--model))
+                     (kargu-state-mode) (kargu--model))
           (kargu--loop-request run prompt))
       (error
        (when (kargu-loop--live-p run)

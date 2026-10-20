@@ -632,12 +632,14 @@
             (kargu-chat-mode))
           ;; When kargu-context-buffer is set to src-buf
           (let ((kargu-context-buffer src-buf))
-            (should (eq (kargu-dape--target-buffer) src-buf)))
+            (should (eq (kargu-dape-source-buffer) src-buf)))
           ;; Test ensure-stop-on-entry
           (let ((cfg1 '(:program "test"))
                 (cfg2 '(:program "test" :stopOnEntry nil)))
             (should (equal (plist-get (kargu-dape--ensure-stop-on-entry cfg1) :stopOnEntry) t))
-            (should (equal (plist-get (kargu-dape--ensure-stop-on-entry cfg2) :stopOnEntry) t))))
+            (should (equal (plist-get (kargu-dape--ensure-stop-on-entry cfg2) :stopOnEntry) t))
+            (should (equal cfg1 '(:program "test")))
+            (should (equal cfg2 '(:program "test" :stopOnEntry nil)))))
       (when (buffer-live-p src-buf) (kill-buffer src-buf))
       (when (buffer-live-p chat-buf) (kill-buffer chat-buf)))))
 
@@ -835,7 +837,6 @@
   (let ((kargu--loop-run nil)
         (reset nil))
     (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'agent))
-              ((symbol-function 'kargu-loop--active-mode) (lambda () 'agent))
               ((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
               ((symbol-function 'kargu-model-supports-tools-p) (lambda (&optional _) nil))
               ((symbol-function 'kargu-diff-reset-run-files) (lambda () (setq reset t))))

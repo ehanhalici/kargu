@@ -69,7 +69,7 @@
             callback
             (if error (concat "ERROR: " error)
               (let ((locations (if (kargu-lsp--loc-uri raw) (list raw)
-                                 (kargu-lsp--seq->list raw))))
+                                 (kargu-seq-to-list raw))))
                 (concat
                  (format "Definition(s) of `%s':\n" name)
                  (mapconcat (lambda (loc)
@@ -166,7 +166,7 @@ CALLBACK receives fresh results; interactive use reports them on completion."
   "Parse LSP documentSymbol RAW (vector or list) into normalized symbol plists.
 Each plist has keys :name, :kind, :start-line, :end-line, :detail, :children."
   (let (acc)
-    (dolist (item (kargu-lsp--seq->list raw))
+    (dolist (item (kargu-seq-to-list raw))
       (when-let* ((plist (kargu-lsp--symbol-plist item)))
         (push plist acc)))
     (nreverse acc)))

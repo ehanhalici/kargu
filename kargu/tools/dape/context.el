@@ -133,7 +133,7 @@ INTERACTIVE also shows a short prefix in the echo area."
         conn
       (let* ((thread (kargu-dape-inspection-thread conn))
              (frames (and thread
-                          (kargu-dape--seq->list (plist-get thread :stackFrames))))
+                          (kargu-seq-to-list (plist-get thread :stackFrames))))
              (id (dape--stack-id conn))
              (frame (if id (seq-find (lambda (item) (equal id (plist-get item :id))) frames)
                       (car frames))))
@@ -151,7 +151,7 @@ INTERACTIVE also shows a short prefix in the echo area."
   "Collect SELECTION's scopes for CALLBACK, displaying when INTERACTIVE."
   (let* ((conn (kargu-dape-selection-connection selection))
          (thread (kargu-dape-selection-thread selection))
-         (frames (kargu-dape--seq->list (plist-get thread :stackFrames)))
+         (frames (kargu-seq-to-list (plist-get thread :stackFrames)))
          (frame (kargu-dape-selection-frame selection)))
     (when (and (kargu-dape-selection-frame-id selection) (null frame))
       (error "Requested debug frame is absent from the captured thread's stack"))
@@ -161,7 +161,7 @@ INTERACTIVE also shows a short prefix in the echo area."
        #'dape--scopes conn frame
        (lambda (&rest _)
          (kargu-dape--fetch-variables
-          conn (kargu-dape--seq->list (plist-get frame :scopes))
+          conn (kargu-seq-to-list (plist-get frame :scopes))
           (lambda ()
             (kargu-dape--deliver callback (kargu-dape--context-text conn thread frames frame) interactive))))))))
 
