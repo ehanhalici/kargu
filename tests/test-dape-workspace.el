@@ -269,5 +269,97 @@
       (should (equal (kargu-dape--source-line owned 1) (string-trim text)))
       (should (string-search (string-trim text) (kargu-dape--source-snippet owned 1))))))
 
+(ert-deftest kargu-dape-workspace-async-source-read-and-buffer-reconcile-test ()
+  "Async source reads reconcile against live buffer ticks and reject mid-read edits."
+  (kargu-dape-test--with-source-paths
+    (let ((buffer (find-file-noselect owned))
+          held-callback result)
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (erase-buffer)
+              (insert "live-one\nlive-two\nlive-three\n")
+              (set-buffer-modified-p t))
+            (cl-letf (((symbol-function 'kargu-process-run)
+                       (lambda (_program _args callback &rest _)
+                         (setq held-callback callback)
+                         'mock-proc)))
+              ;; Unmodified since read start: prefers live buffer via symlink resolution.
+              (let ((ticks (kargu-dape--capture-buffer-ticks)))
+                (kargu-dape--source-line-async
+                 local-link 2
+                 (lambda (line) (setq result line))
+                 :buffer-ticks ticks)
+                (should held-callback)
+                (funcall held-callback
+                         (list :code 0
+                               :output (json-serialize
+                                        (list :status "ok"
+                                              :path (file-truename owned)
+                                              :text "disk-one\ndisk-two\n"))))
+                (should (equal result "live-two")))
+              ;; Modified during worker read: stale disk text is rejected (`nil`).
+              (setq result :unset held-callback nil)
+              (let ((ticks (kargu-dape--capture-buffer-ticks)))
+                (kargu-dape--source-line-async
+                 local-link 2
+                 (lambda (line) (setq result line))
+                 :buffer-ticks ticks)
+                (with-current-buffer buffer
+                  (goto-char (point-max))
+                  (insert "live-four\n"))
+                (funcall held-callback
+                         (list :code 0
+                               :output (json-serialize
+                                        (list :status "ok"
+                                              :path (file-truename owned)
+                                              :text "disk-one\ndisk-two\n"))))
+                (should-not result))))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer))))))
+
+(ert-deftest kargu-dape-workspace-async-source-cancel-and-breakpoint-callbacks-test ()
+  "Async source reads cancel cleanly and breakpoint tools support async callbacks."
+  (kargu-dape-test--with-source-paths
+    (let (cancelled held-callback results)
+      (let ((mock-proc (make-process :name "kargu-mock-worker"
+                                     :command (list (executable-find "cat"))
+                                     :connection-type 'pipe
+                                     :noquery t)))
+        (unwind-protect
+            (cl-letf (((symbol-function 'kargu-process-run)
+                       (lambda (_program _args callback &rest _)
+                         (setq held-callback callback)
+                         mock-proc))
+                      ((symbol-function 'kargu-process-cancel)
+                       (lambda (proc) (push proc cancelled))))
+              (let ((task (kargu-dape--source-entry-async
+                           local-link
+                           (lambda (entry) (push entry results)))))
+                (should (kargu-async-pending-p task))
+                (kargu-async-cancel task)
+                (should (equal cancelled (list mock-proc)))
+                (funcall held-callback
+                         (list :code 0
+                               :output (json-serialize
+                                        (list :status "ok"
+                                              :path (file-truename owned)
+                                              :text "first\nowned-source\n"))))
+                (should-not results)))
+          (when (process-live-p mock-proc)
+            (delete-process mock-proc))))
+      (let* ((breakpoints (list (list owned 2) (list foreign 1)))
+             (dape--breakpoints breakpoints)
+             bp-list-out)
+        (cl-letf (((symbol-function 'dape--breakpoint-file-name) #'car)
+                  ((symbol-function 'dape--breakpoint-line) #'cadr))
+          (kargu-dape-list-breakpoints (lambda (text) (setq bp-list-out text)))
+          (while (null bp-list-out)
+            (accept-process-output nil 0.01))
+          (should (string-search "ACTIVE BREAKPOINTS: 1" bp-list-out))
+          (should (string-search "owned-source" bp-list-out))
+          (should-not (string-search "foreign-secret" bp-list-out)))))))
+
 (provide 'tests/test-dape-workspace)
 ;;; test-dape-workspace.el ends here

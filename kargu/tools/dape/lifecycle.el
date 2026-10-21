@@ -22,14 +22,31 @@
 (defvar dape--connection-selected)
 (defvar dape--request-blocking)
 (defvar dape-request-timeout)
+(defvar dape-active-mode)
+(defvar dape-update-ui-hook)
+(defvar dape-stopped-hook)
+(defvar dape--breakpoints)
 
 (declare-function dape-request "dape" (conn command arguments &optional cb))
 (declare-function dape--capable-p "dape" (conn thing))
 (declare-function dape--children "dape" (conn))
 (declare-function dape--parent "dape" (conn))
+(declare-function dape--root-of "dape" (conn))
 (declare-function dape--server-process "dape" (conn))
 (declare-function dape--stderr-buffer "dape" (conn))
 (declare-function dape--state "dape" (conn))
+(declare-function dape--thread-id "dape" (conn))
+(declare-function dape--threads "dape" (conn))
+(declare-function dape--current-thread "dape" (conn))
+(declare-function dape--current-stack-frame "dape" (conn))
+(declare-function dape--stack-trace "dape" (conn thread nof cb))
+(declare-function dape--scopes "dape" (conn stack-frame cb))
+(declare-function dape--threads-set-status "dape"
+                  (conn thread-id all-threads status &optional update-handle))
+(declare-function dape--source-buffers "dape" (conn))
+(declare-function dape--initialize "dape" (conn))
+(declare-function dape--breakpoint-id "dape" (breakpoint))
+(declare-function dape--breakpoint-verified "dape" (breakpoint))
 (declare-function dape--stack-frame-cleanup "dape" ())
 (declare-function dape-active-mode "dape" (&optional arg))
 
@@ -44,7 +61,7 @@
   (server nil :read-only t) (buffers nil :read-only t) (pipes nil :read-only t)
   (parent nil :read-only t) children
   (event-handler nil :read-only t) (request-handler nil :read-only t)
-  close-operation (phase :open))
+  preserve-selected close-operation (phase :open))
 
 (cl-defstruct (kargu-dape-close-operation (:constructor kargu-dape-close--create))
   "The exact connection set admitted to one asynchronous close."
@@ -84,8 +101,37 @@
                (eq connection (process-get (jsonrpc--process connection) 'jsonrpc-connection)))
     (user-error "Kargu: this Dape/JSONRPC lifecycle capability is unsupported")))
 
+(defun kargu-dape--foreign-selected-p (connection)
+  "Return non-nil when another live adapter tree owns Dape's UI selection."
+  (let ((selected (or (and (boundp 'dape--connection-selected) dape--connection-selected)
+                      (and (kargu-dape-resource connection)
+                           (kargu-dape-resource-preserve-selected (kargu-dape-resource connection))))))
+    (and selected
+         (not (eq selected connection))
+         (or (not (and (fboundp 'dape--root-of)
+                       (eieio-object-p selected)
+                       (eieio-object-p connection)))
+             (not (eq (dape--root-of selected) (dape--root-of connection))))
+         (or (not (eieio-object-p selected))
+             (jsonrpc-running-p selected)))))
+
+(defun kargu-dape-resource--handle-continued (connection body)
+  "Update CONNECTION's running state from BODY without touching foreign UI."
+  (let ((thread-id (plist-get body :threadId))
+        (all-continued (if (plist-member body :allThreadsContinued)
+                           (eq (plist-get body :allThreadsContinued) t)
+                         t)))
+    (setf (dape--state connection) 'running)
+    (when (and (eieio-object-p connection) (slot-exists-p connection 'state-reason))
+      (oset connection state-reason nil))
+    (when (and thread-id (not (dape--thread-id connection)))
+      (setf (dape--thread-id connection) thread-id))
+    (when (fboundp 'dape--threads-set-status)
+      (dape--threads-set-status connection thread-id all-continued "running"))
+    (kargu-dape-publish-event connection 'continued)))
+
 (defun kargu-dape-resource--event (resource event body)
-  "Route RESOURCE's EVENT/BODY without Dape's global shutdown path."
+  "Route RESOURCE's EVENT/BODY without Dape's global shutdown or foreign UI paths."
   (let ((connection (kargu-dape-resource-connection resource)))
     (cond
      ((memq (kargu-dape-resource-phase resource) '(:closing :releasing :closed)) nil)
@@ -93,6 +139,17 @@
      ((and (eq event 'exited) (eq (kargu-dape-resource-phase resource) :open))
       (setf (dape--state connection) 'exited)
       (kargu-dape-publish-event connection event))
+     ((and (eq event 'continued) (eq (kargu-dape-resource-phase resource) :open)
+           (kargu-dape--foreign-selected-p connection))
+      (kargu-dape-resource--handle-continued connection body))
+     ((and (eq (kargu-dape-resource-phase resource) :open)
+           (kargu-dape--foreign-selected-p connection))
+      (let ((selected dape--connection-selected)
+            (dape-update-ui-hook nil)
+            (dape-stopped-hook nil))
+        (unwind-protect
+            (funcall (kargu-dape-resource-event-handler resource) connection event body)
+          (setq dape--connection-selected selected))))
      ((eq (kargu-dape-resource-phase resource) :open)
       (funcall (kargu-dape-resource-event-handler resource) connection event body)))))
 
@@ -100,8 +157,9 @@
   "Route COMMAND/BODY only while RESOURCE is open."
   (unless (eq (kargu-dape-resource-phase resource) :open)
     (jsonrpc-error "Kargu: captured debug adapter is closing"))
-  (funcall (kargu-dape-resource-request-handler resource)
-           (kargu-dape-resource-connection resource) command body))
+  (catch 'kargu-dape--async-connecting
+    (funcall (kargu-dape-resource-request-handler resource)
+             (kargu-dape-resource-connection resource) command body)))
 
 (defun kargu-dape-resource--snapshot (connection)
   "Capture only CONNECTION's declared transport resources and callbacks."
@@ -122,7 +180,9 @@
                          (mapcar #'get-buffer-process stderr))
      :parent (and parent (kargu-dape-resource parent))
      :event-handler (jsonrpc--notification-dispatcher connection)
-     :request-handler (jsonrpc--request-dispatcher connection))))
+     :request-handler (jsonrpc--request-dispatcher connection)
+     :preserve-selected (and (kargu-dape--foreign-selected-p connection)
+                             dape--connection-selected))))
 
 (defun kargu-dape-adopt (connection)
   "Adopt CONNECTION's exact transport resources and nonblocking shutdown."
@@ -208,6 +268,79 @@
   (if-let* ((resource (kargu-dape-resource connection)))
       (kargu-dape-resource-stop resource)
     (funcall original connection)))
+
+(defun kargu-dape--maybe-select-thread-owned (original conn thread-id &optional force)
+  "Update CONN's thread without stealing selection from a foreign adapter."
+  (if (and (kargu-dape-resource conn) (kargu-dape--foreign-selected-p conn))
+      (let ((selected dape--connection-selected))
+        (unwind-protect
+            (funcall original conn thread-id force)
+          (setq dape--connection-selected selected)))
+    (funcall original conn thread-id force)))
+
+(defun kargu-dape--update-owned (original conn &optional invalidate display-source-p)
+  "Hydrate CONN without moving the source overlay if a foreign adapter is active.
+Delegate to ORIGINAL with INVALIDATE and DISPLAY-SOURCE-P otherwise."
+  (if (and (kargu-dape-resource conn) (kargu-dape--foreign-selected-p conn))
+      (progn
+        (when invalidate
+          (dolist (thread (dape--threads conn))
+            (pcase invalidate
+              ('stack-frames
+               (setf (plist-get thread :stackFrames) nil
+                     (plist-get thread :totalFrames) nil))
+              ('variables
+               (dolist (frame (plist-get thread :stackFrames))
+                 (setf (plist-get frame :scopes) nil))))))
+        (when (and (fboundp 'dape--stack-trace) (fboundp 'dape--current-thread))
+          (dape--stack-trace
+           conn (dape--current-thread conn) 1
+           (lambda (&rest _)
+             (when (and (fboundp 'dape--scopes) (fboundp 'dape--current-stack-frame))
+               (dape--scopes conn (dape--current-stack-frame conn) #'ignore))))))
+    (funcall original conn invalidate display-source-p)))
+
+(defun kargu-dape--reset-connection-breakpoints (conn)
+  "Clear breakpoint IDs and verification entries only for CONN."
+  (when (and (boundp 'dape--breakpoints)
+             (fboundp 'dape--breakpoint-id)
+             (fboundp 'dape--breakpoint-verified))
+    (dolist (breakpoint dape--breakpoints)
+      (when (plist-member (dape--breakpoint-id breakpoint) conn)
+        (setf (dape--breakpoint-id breakpoint)
+              (plist-put (dape--breakpoint-id breakpoint) conn nil)))
+      (when (plist-member (dape--breakpoint-verified breakpoint) conn)
+        (setf (dape--breakpoint-verified breakpoint)
+              (plist-put (dape--breakpoint-verified breakpoint) conn nil))))))
+
+(defun kargu-dape--start-debugging-owned (original conn)
+  "Start CONN without clearing foreign UI overlays or foreign breakpoints."
+  (let ((resource (kargu-dape-resource conn)))
+    (when (and resource (kargu-dape-resource-preserve-selected resource))
+      (let ((preserved (kargu-dape-resource-preserve-selected resource)))
+        (setf (kargu-dape-resource-preserve-selected resource) nil)
+        (when (or (not (eieio-object-p preserved)) (jsonrpc-running-p preserved))
+          (setq dape--connection-selected preserved))))
+    (if (and resource (kargu-dape--foreign-selected-p conn))
+        (let ((selected dape--connection-selected)
+              (dape-update-ui-hook nil))
+          (unwind-protect
+              (progn
+                (unless (dape--parent conn)
+                  (kargu-dape--reset-connection-breakpoints conn)
+                  (when (fboundp 'dape--source-buffers)
+                    (cl-loop for (_ buffer) on (dape--source-buffers conn) by #'cddr
+                             when (buffer-live-p buffer)
+                             do (kill-buffer buffer))
+                    (setf (dape--source-buffers conn) nil))
+                  (unless dape-active-mode
+                    (dape-active-mode +1))
+                  (setf (dape--state conn) 'starting)
+                  (when (and (eieio-object-p conn) (slot-exists-p conn 'state-reason))
+                    (oset conn state-reason nil)))
+                (dape--initialize conn))
+            (setq dape--connection-selected selected)))
+      (funcall original conn))))
 
 (defun kargu-dape-close--resources (connection admitted)
   "Capture CONNECTION's child graph within ADMITTED workspace connections."
@@ -324,11 +457,17 @@ only this operation's adapter and child resources, never a foreign session."
   (when (seq-some (lambda (process) (process-get process 'kargu-dape-resource)) (process-list))
     (user-error "Kargu: close owned debug adapters before unloading their lifecycle"))
   (advice-remove 'dape--shutdown #'kargu-dape-resource--shutdown-owned)
+  (advice-remove 'dape--maybe-select-thread #'kargu-dape--maybe-select-thread-owned)
+  (advice-remove 'dape--update #'kargu-dape--update-owned)
+  (advice-remove 'dape--start-debugging #'kargu-dape--start-debugging-owned)
   nil)
 
 (with-eval-after-load 'dape
   (when (fboundp 'kargu-dape-resource--shutdown-owned)
-    (advice-add 'dape--shutdown :around #'kargu-dape-resource--shutdown-owned)))
+    (advice-add 'dape--shutdown :around #'kargu-dape-resource--shutdown-owned)
+    (advice-add 'dape--maybe-select-thread :around #'kargu-dape--maybe-select-thread-owned)
+    (advice-add 'dape--update :around #'kargu-dape--update-owned)
+    (advice-add 'dape--start-debugging :around #'kargu-dape--start-debugging-owned)))
 
 (provide 'kargu/tools/dape/lifecycle)
 ;;; lifecycle.el ends here

@@ -52,7 +52,7 @@
     "List all source breakpoints (file and line) known to the debugger."
     '(("type" . "object")
       ("properties" . :json-empty-object))
-    (lambda (_args) (kargu-dape-list-breakpoints)))
+    (lambda (_args &optional callback) (kargu-dape-list-breakpoints callback)))
    (list
     "debug_set_breakpoint"
     "Set a source breakpoint at a file_path and 1-based line number. Requires both parameters."
@@ -62,12 +62,14 @@
                        ("line" . (("type" . "integer")
                                   ("description" . "1-based line number to set breakpoint on.")))))
       ("required" . ["file_path" "line"]))
-    (lambda (args)
+    (lambda (args &optional callback)
       (let ((err (kargu-dape--validate-bp-args args "debug_set_breakpoint")))
-        (if err err
+        (if err
+            (kargu-dape--deliver callback err nil)
           (kargu-dape-set-breakpoint
            (kargu--tool-file-path args)
-           (kargu--tool-arg args "line"))))))
+           (kargu--tool-arg args "line")
+           callback)))))
    (list
     "debug_clear_breakpoint"
     "Remove a source breakpoint at a specific file_path and line number."

@@ -21,28 +21,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 - **Yeniden üretme/kapanış:** Son dosyada disk/kaydetme hatası ve kısmi insan kabulü/reddi; araya giren kullanıcı değişiklikleri korunarak geri alma/sonuç sözleşmesi test edilmeli.
 - **Bağımlılık:** DIFF-01.
 
-### PERF-05 · P2 · K — Sınırlı Dape kaynak disk işlemleri hâlâ senkron
-
-- **Yer/kanıt:** `kargu/tools/dape/context.el` yol/metadata/sınırlı içerik okumasını çağıranın iş parçacığında yapıyor. 64 KiB disk / 65.536 canlı karakter sınırı mevcut; sınırsız büyük dosya okuma iddiası artık geçerli değil.
-- **Beklenen/gerçek:** Yavaş/askıda yerel mount UI'ı bekletmemeli; byte sınırı süre garantisi değil.
-- **Yeniden üretme/kapanış:** Kontrollü geciken yol/metadata/okuma, iptal, kaynak tampon nesli değişimi. Disk işi iptal edilebilir yardımcı süreçte; callback proje/oturum/koşu ve kaynak nesline bağlı, canlı tampon güncelliği korunmalı.
-
-
-
-
-### DAPE-05 · P2 · K — Port üzerinden adapter oluşturma hâlâ senkron bekliyor
-
-- **Yer/kanıt:** `kargu/tools/dape/launch.el` son sahiplik kontrolünden sonra Dape 0.27.1 `dape--create-connection` çağırıyor. Dape'nin `port` yolu `make-network-process` bağlantısını 30 denemelik döngüde `sleep-for 0.100` ile bekliyor; uzak dizin yolunda ayrıca `sleep-for 0.300` var. Bu kod yolu doğrulandı; gerçek süre/platform davranışı ölçülmedi.
-- **Beklenen/gerçek:** Adapter bağlantısı UI'ı bekletmeden, iptal/deadline ve proje/oturum/koşu sahipliğiyle kurulmalı. Derleme devamı artık bağlantı oluşturma sınırında doğrulanıyor; ancak Dape'nin oluşturucu içindeki beklemesi asenkron hâle gelmedi. Bekleme sırasında reentrant iptal/kimlik değişimi ayrıca korunmalı.
-- **Yeniden üretme/kapanış:** Kontrollü geciken veya hiç açılmayan port, server process, uzak dizin ve süreç çıkışı; bağlantı kurulurken Stop/deadline/kök değişimi. Olay tabanlı bağlantı hazırlığı, yakalanmış server/socket/stderr sahipliği ve geç/çift tamamlanmada sızıntısız temizlik gerekli; yabancı adapter veya compilation kaynağı kapatılmamalı.
-- **Bağımlılık:** Sahipli asenkron close/resource katmanı artık `tools/dape/lifecycle.el` içinde; port/socket oluşturucu aynı kaynağı devralmalı. Derleme devamı koruması oluşturucunun iç beklemesini çözmez.
-
-### DAPE-06 · P2 · K — Terminal olmayan Dape olayları yabancı UI'ı temizleyebiliyor
-
-- **Yer/kanıt:** Dape 0.27.1 `dape-handle-event` içindeki `continued` dalı, bağlantıdan bağımsız `dape--stack-frame-cleanup` ve global `dape-update-ui-hook` çalıştırıyor. Sahipli lifecycle artık exited/terminated/kapanış yollarını ayırıyor; açık bağlantının diğer olayları hâlâ Dape yorumlayıcısına gidiyor. Başlatma da native `dape--start-debugging` içinde global breakpoint/source-view temizliği kullanıyor.
-- **Beklenen/gerçek:** Bir projedeki devam/başlatma, başka adapter seçiliyken onun kaynak oku/overlay/eldoc veya görünümünü değiştirmemeli. Protokol durumunu yorumlamak ile global Dape UI sunumu aynı callback'te.
-- **Kapanış:** İki gerçek bağlantı ve yabancı seçili kaynak/overlay ile continued/stopped/start olaylarını kapsa; protokol/stack/children davranışını yeniden yazmadan sunumu adaptör sınırında ayır. Global geçici `fset` veya bütün Dape UI'ını kapatma ile diğer oturumların davranışını bozma. ARCH-05'in kalan port/sunum işi olarak sıraya alındı.
-
 ## Doğrulama bekleyen riskler
 
 ### RISK-01 · P2 · D — Süreç iptali / stderr kapanışı stres anomalisi
@@ -119,10 +97,10 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 
 ### ARCH-05 · Debugger Sınırı: Dape Adaptörü Arkasında Sahipli Bağlantı Yaşam Döngüsü
 
-- **Dosyalar / kod bulgusu:** `tools/dape/`; sahipli transport/server/stderr ve çocuk kaynakları artık `lifecycle.el` kapatıyor; native global quit/buffer sweep ve bekleyen shutdown callback'i kullanılmıyor. Kalan somut işler DAPE-05 port oluşturma, PERF-05 disk kaynak okumaları ve DAPE-06 terminal olmayan olayların foreign UI izolasyonu. Önceki readiness/deferred compile/single-delivery korumaları mevcut.
+- **Dosyalar / kod bulgusu:** `tools/dape/`; sahipli transport/server/stderr ve çocuk kaynakları `lifecycle.el` kapatıyor; `launch.el` port/uzak dizin bağlantılarını `sleep-for` olmadan nonblocking socket/sentinel/timer FSM ile kurup `kargu-dape-resource` altında devralıyor; `context.el` + `files/worker.el` disk kaynak/yol okumalarını iptal edilebilir yardımcı süreçte yürütüp canlı tampon nesliyle uzlaştırıyor; açık bağlantının `continued`/`stopped`/`start-debugging` olayları yabancı seçili adapter'ın UI/overlay/eldoc durumunu bozmuyor. Kalan kapsam gelecekte doğrudan DAP istemcisi prototipinin ayrıca değerlendirilmesidir.
 - **Karar:** Uygulamanın kullandığı küçük debugger portunu tanımla: capability/context, inspect, control, start ve close. Dape'ye özel private API/advice/metadata erişimi portun adaptör tarafında kalsın. Bağlantı kimliği ve olay nesli ortak kaynak katmanında tutulup araçlarca tüketilsin; denetimler silinmek yerine tekrarları azaltılsın.
 - **Sınır:** Tek dev adapter dosyası veya sıfırdan DAP istemcisi zorunlu hedef değildir. Doğrudan DAP; taşıma, initialization, child session, source mapping, breakpoint, shutdown ve UI entegrasyonunu yeniden üstlenir; ancak somut gereksinim ve karşılaştırmalı prototiple ayrı karar olabilir. Dape global quit/selection temizliği yabancı oturumları etkilememeli; süreç/port/shutdown beklemeleri asenkron olmalı.
-- **Kapanış / bağımlılık:** İki proje/adapter, foreign selection, kaybolan bağlantı, thread/frame yeniden kullanımı, geç/çift cevap, Stop/deadline, compile devamı ve child session testleri. Mevcut debugger proof/regresyonları korunarak DAPE-05/06 ve PERF-05 çözülmeli; daha önce kapanan sahiplik hataları yeniden açılmamalı.
+- **Kapanış / bağımlılık:** İki proje/adapter, foreign selection, kaybolan bağlantı, thread/frame yeniden kullanımı, geç/çift cevap, Stop/deadline, compile devamı ve child session testleri. Mevcut debugger proof/regresyonları korunmalı; daha önce kapanan sahiplik hataları yeniden açılmamalı.
 
 ### ARCH-06 · Sohbet Görünümü: Veri Sahipliğini Yerleşimden Ayır, UI Değişimini Ölç
 

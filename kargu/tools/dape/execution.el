@@ -15,15 +15,19 @@
 
 ;;;; Stepping & execution control ------------------------------------------
 
-(defun kargu-dape--stopped-report-text (selection action-name ctx)
-  "Format captured SELECTION's paused ACTION-NAME location and collected CTX."
+(defun kargu-dape--stopped-report-text (selection action-name ctx &optional resolved-snippet)
+  "Format captured SELECTION's paused ACTION-NAME location and collected CTX.
+RESOLVED-SNIPPET, when a (:resolved . TEXT) cell, supplies the async quote."
   (let* ((live-conn (kargu-dape-selection-connection selection))
          (top-frame (kargu-dape-selection-frame selection))
          (file (and live-conn top-frame (kargu-dape--frame-path live-conn top-frame)))
          (line (and top-frame (plist-get top-frame :line)))
          (fn-name (and top-frame (plist-get top-frame :name)))
-         (src-snippet (when (and file (not (equal file "?")) (numberp line))
-			(kargu-dape--source-snippet file line 4))))
+         (src-snippet
+          (if (and (consp resolved-snippet) (eq (car resolved-snippet) :resolved))
+              (cdr resolved-snippet)
+            (when (and file (not (equal file "?")) (numberp line))
+              (kargu-dape--source-snippet file line 4)))))
     (concat
      (format "[DEBUGGER PAUSED: Action '%s' completed]\n" action-name)
      (format "Location: %s:%s%s\n"
@@ -46,16 +50,30 @@
   "Build a paused report for ACTION-NAME and pass it to CALLBACK.
 The context and location use captured CONNECTION when supplied."
   (let* ((conn (or connection (kargu-dape--raw-connection)))
+         (ticks (kargu-dape--capture-buffer-ticks))
          (selection (condition-case err
                         (kargu-dape-capture-selection conn)
                       (error (concat "ERROR: DAP: " (error-message-string err))))))
     (if (stringp selection) (funcall callback selection)
       (kargu-dape-get-context
        (lambda (ctx)
-	 (funcall callback
-                  (if (string-prefix-p "ERROR:" ctx) ctx
-                    (kargu-dape--stopped-report-text
-                     selection action-name ctx))))
+         (if (string-prefix-p "ERROR:" ctx)
+             (funcall callback ctx)
+           (let* ((live-conn (kargu-dape-selection-connection selection))
+                  (top-frame (kargu-dape-selection-frame selection))
+                  (file (and live-conn top-frame (kargu-dape--frame-path live-conn top-frame)))
+                  (line (and top-frame (plist-get top-frame :line))))
+             (if (and file (not (equal file "?")) (numberp line))
+                 (kargu-dape--source-snippet-async
+                  file line
+                  (lambda (snippet)
+                    (funcall callback
+                             (kargu-dape--stopped-report-text
+                              selection action-name ctx (cons :resolved snippet))))
+                  :context-lines 4 :selection selection :buffer-ticks ticks)
+               (funcall callback
+                        (kargu-dape--stopped-report-text
+                         selection action-name ctx '(:resolved . nil)))))))
        conn selection))))
 
 (defun kargu-dape--running-message (action-name timeout)

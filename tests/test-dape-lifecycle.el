@@ -272,5 +272,47 @@
       (should-not (process-live-p (jsonrpc--process owned)))
       (should (process-live-p (jsonrpc--process foreign))))))
 
+(ert-deftest kargu-dape-foreign-selected-ui-isolation-test ()
+  "Owned `continued', `stopped' and `start-debugging' never clobber foreign UI."
+  (kargu-dape-lifecycle-test--with-adapters
+    (kargu-dape-adopt owned)
+    (setf (dape--threads owned)
+          (list (list :id 1 :name "main" :status 'stopped
+                      :stackFrames (list (list :id 10 :name "fn")))))
+    (setf (dape--thread-id owned) 1)
+    (let* ((dape--overlay-arrow-position (point-min-marker))
+           (arrow-before dape--overlay-arrow-position)
+           (ui-hook-calls 0)
+           (stopped-hook-calls 0)
+           (dape-update-ui-hook (list (lambda () (cl-incf ui-hook-calls))))
+           (dape-stopped-hook (list (lambda () (cl-incf stopped-hook-calls))))
+           (dispatcher (jsonrpc--notification-dispatcher owned)))
+      ;; 1. `continued' event on owned connection updates owned state without clearing foreign stack UI.
+      (funcall dispatcher owned 'continued '(:threadId 1 :allThreadsContinued t))
+      (should (eq dape--connection-selected foreign))
+      (should (eq dape--overlay-arrow-position arrow-before))
+      (should (equal (plist-get (car (dape--threads owned)) :status) "running"))
+      (should (= ui-hook-calls 0))
+      ;; 2. `stopped' event on owned connection selects thread & fetches stack on owned without clobbering foreign.
+      (cl-letf (((symbol-function 'dape--update-threads)
+                 (lambda (conn _stopped-id cb)
+                   (should (eq conn owned))
+                   (funcall cb)))
+                ((symbol-function 'dape--with-current-stack-frame)
+                 (lambda (conn cb)
+                   (should (eq conn owned))
+                   (funcall cb))))
+        (funcall dispatcher owned 'stopped '(:threadId 1 :reason "breakpoint")))
+      (should (eq dape--connection-selected foreign))
+      (should (eq dape--overlay-arrow-position arrow-before))
+      (should (= ui-hook-calls 0))
+      (should (= stopped-hook-calls 0))
+      ;; 3. `dape--start-debugging' on owned connection leaves foreign selected and skips global stack cleanup.
+      (cl-letf (((symbol-function 'dape--initialize)
+                 (lambda (conn) (should (eq conn owned)))))
+        (dape--start-debugging owned))
+      (should (eq dape--connection-selected foreign))
+      (should (eq dape--overlay-arrow-position arrow-before)))))
+
 (provide 'tests/test-dape-lifecycle)
 ;;; test-dape-lifecycle.el ends here
