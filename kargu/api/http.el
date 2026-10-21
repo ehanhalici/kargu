@@ -16,6 +16,7 @@
 (require 'subr-x)
 (require 'plz)
 (require 'kargu/core)
+(require 'kargu/application/coordinator)
 (require 'kargu/contract/constants)
 (require 'kargu/config)
 (require 'kargu/json)
@@ -58,10 +59,32 @@ touching plz internals.")
 
 (defun kargu-busy-p ()
   "Return non-nil while a chat request is in flight."
-  kargu--busy)
+  (or kargu--busy
+      (kargu-logical-request-live-p
+       (kargu-application-current-request) kargu--generation)))
+
+(defun kargu-http--ensure-logical-request (gen &optional session origin)
+  "Return or create the owned `kargu-logical-request' for GEN.
+SESSION and ORIGIN identify the request owner when starting a turn."
+  (let ((current (kargu-application-current-request)))
+    (if (and (kargu-logical-request-p current)
+             (= (kargu-logical-request-generation current) gen)
+             (not (eq (kargu-logical-request-state current) :cancelled)))
+        current
+      (let ((created (kargu-logical-request-create
+                      :generation gen
+                      :session (or session (kargu-session-context))
+                      :origin (or origin (current-buffer))
+                      :state :in-flight)))
+        (kargu-application-set-active-request created)
+        created))))
 
 (defun kargu-http-clear-busy ()
   "Release transport busy/probe ownership without changing application state."
+  (when-let* ((req (kargu-application-current-request)))
+    (when (= (kargu-logical-request-generation req) kargu--generation)
+      (kargu-logical-request-finish req)
+      (kargu-application-set-active-request nil)))
   (setq kargu--busy nil)
   (kargu-circuit-release-probe))
 
@@ -106,18 +129,22 @@ touching plz internals.")
 (defun kargu--api-arm-stream-watch (process)
   "Start the stall and ceiling watch for streaming PROCESS."
   (when (processp process)
-    (let ((now (float-time)))
+    (let ((now (float-time))
+          timer)
       (process-put process :kargu-stream-started now)
       (process-put process :kargu-last-byte now)
       (process-put process :kargu-stream-abort nil)
       (kargu--api-cancel-stream-watch process)
-      (process-put process :kargu-stream-timer
-                   (run-at-time 1 1 #'kargu--api-stream-watch-tick process)))))
+      (setq timer (run-at-time 1 1 #'kargu--api-stream-watch-tick process))
+      (process-put process :kargu-stream-timer timer)
+      (when-let* ((req (kargu-application-current-request)))
+        (when (eq (kargu-logical-request-process req) process)
+          (setf (kargu-logical-request-stream-timer req) timer))))))
 
 (defun kargu--api-fail-stream (gen reason callback)
   "Fail generation GEN with stream REASON and invoke CALLBACK."
   (when (and callback (= gen kargu--generation))
-    (setq kargu--busy nil)
+    (kargu-http-clear-busy)
     (let ((msg (kargu--api-stream-abort-message reason)))
       (kargu-circuit-record-failure msg)
       (kargu-log 'error "request failed: %s" msg)
@@ -126,15 +153,20 @@ touching plz internals.")
 (defun kargu-http-cancel ()
   "Cancel transport resources and invalidate stale request generations.
 Application status, loop ownership and UI belong to the caller."
-  (cl-incf kargu--generation)
-  (kargu-circuit-release-probe)
-  (kargu--api-cancel-stream-watch kargu--current-process)
-  (when (and (processp kargu--current-process)
-             (process-live-p kargu--current-process))
-    (ignore-errors (delete-process kargu--current-process)))
-  (setq kargu--current-process nil)
-  (setq kargu--busy nil)
-  (kargu-log 'warn "request cancelled"))
+  (let ((req (kargu-application-current-request)))
+    (kargu-application-next-generation)
+    (kargu-circuit-release-probe)
+    (when req
+      (kargu-logical-request-cancel req)
+      (when (eq (kargu-application-current-request) req)
+        (kargu-application-set-active-request nil)))
+    (kargu--api-cancel-stream-watch kargu--current-process)
+    (when (and (processp kargu--current-process)
+               (process-live-p kargu--current-process))
+      (ignore-errors (delete-process kargu--current-process)))
+    (setq kargu--current-process nil)
+    (setq kargu--busy nil)
+    (kargu-log 'warn "request cancelled")))
 
 (defun kargu--api-post (url headers payload gen callback &optional on-delta attempt)
   "POST PAYLOAD to URL with HEADERS and dispatch the result to CALLBACK.
@@ -143,12 +175,13 @@ ATTEMPT is the zero-based retry count."
   (cl-block kargu--api-post
     (unless (or (and attempt (> attempt 0))
                 (kargu-circuit-allow-request-p))
-      (setq kargu--busy nil)
+      (kargu-http-clear-busy)
       (let ((err-msg (format "Circuit breaker OPEN: upstream provider degraded; %s"
                              (kargu-circuit-status-string))))
         (kargu-log 'warn "%s" err-msg)
         (funcall callback (kargu--api-error-alist err-msg)))
       (cl-return-from kargu--api-post nil))
+    (kargu-http--ensure-logical-request gen)
     (let ((attempt (or attempt 0)))
       (if (and on-delta kargu-stream)
           (kargu--api-post-streaming url headers payload gen callback
@@ -163,14 +196,24 @@ ATTEMPT is the zero-based retry count."
 
 (defun kargu-http--live-request-p (request)
   "Return non-nil when REQUEST is pending in the current generation."
-  (and (eq (kargu-http--request-state request) :pending)
-       (= (kargu-http--request-generation request) kargu--generation)))
+  (let ((logical (kargu-application-current-request)))
+    (and (eq (kargu-http--request-state request) :pending)
+         (= (kargu-http--request-generation request) kargu--generation)
+         (or (null logical)
+             (not (= (kargu-logical-request-generation logical)
+                     (kargu-http--request-generation request)))
+             (not (eq (kargu-logical-request-state logical) :cancelled))))))
 
 (defun kargu-http--claim-response (request)
   "Claim REQUEST once if its generation is still current."
   (when (kargu-http--live-request-p request)
     (setf (kargu-http--request-state request) :finished)
     (setq kargu--current-process nil)
+    (when-let* ((logical (kargu-application-current-request)))
+      (when (eq (kargu-logical-request-process logical)
+                (kargu-http--request-process request))
+        (setf (kargu-logical-request-process logical) nil
+              (kargu-logical-request-stream-timer logical) nil)))
     t))
 
 (defun kargu-http--release-process (request)
@@ -179,6 +222,10 @@ ATTEMPT is the zero-based retry count."
     (kargu--api-cancel-stream-watch process)
     (when (eq kargu--current-process process)
       (setq kargu--current-process nil))
+    (when-let* ((logical (kargu-application-current-request)))
+      (when (eq (kargu-logical-request-process logical) process)
+        (setf (kargu-logical-request-process logical) nil
+              (kargu-logical-request-stream-timer logical) nil)))
     (when (and (processp process) (process-live-p process))
       (delete-process process))))
 
@@ -187,6 +234,10 @@ ATTEMPT is the zero-based retry count."
   (setf (kargu-http--request-process request) process)
   (cond
    ((kargu-http--live-request-p request)
+    (let ((logical (kargu-http--ensure-logical-request
+                    (kargu-http--request-generation request))))
+      (setf (kargu-logical-request-process logical) process
+            (kargu-logical-request-state logical) :in-flight))
     (setq kargu--current-process process))
    (t
     (setf (kargu-http--request-state request) :finished)
@@ -347,7 +398,7 @@ ATTEMPT is the retry count."
 
 (defun kargu--api-handle-success (response callback)
   "Record success metrics and dispatch CALLBACK with valid RESPONSE."
-  (setq kargu--busy nil)
+  (kargu-http-clear-busy)
   (kargu-circuit-record-success)
   (funcall callback response))
 
@@ -355,7 +406,7 @@ ATTEMPT is the retry count."
   "Mark kargu as not busy and invoke CALLBACK with an error alist for MSG.
 An upstream-unavailable MSG counts against the circuit breaker here, so
 the loop never has to record it again."
-  (setq kargu--busy nil)
+  (kargu-http-clear-busy)
   (if (kargu--api-error-looks-retryable-p msg)
       (kargu-circuit-record-failure msg)
     (kargu-circuit-release-probe))

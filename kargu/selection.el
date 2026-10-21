@@ -14,6 +14,7 @@
 (require 'subr-x)
 (require 'gv)
 (require 'kargu/core/session)
+(require 'kargu/application/coordinator)
 (require 'kargu/contract/selection)
 (require 'kargu/state/hooks)
 
@@ -27,8 +28,8 @@
 (defconst kargu-selection-modes '("ask" "plan" "debug" "agent")
   "Canonical execution mode names selectable by sessions.")
 
-(defvar kargu-selection-busy-predicate nil
-  "Optional zero-arg predicate returning non-nil when active work owns selection.")
+(defvar kargu-selection-busy-predicate #'kargu-application-work-active-p
+  "Zero-arg predicate returning non-nil when active work owns selection.")
 
 (defun kargu-selection-busy-p ()
   "Return non-nil when application work currently locks the selection."

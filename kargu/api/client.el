@@ -13,6 +13,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'kargu/core)
+(require 'kargu/application/coordinator)
 (require 'kargu/contract)
 (require 'kargu/state)
 (require 'kargu/history)
@@ -172,12 +173,16 @@ RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
 (cl-defun kargu-api--start-turn (&key delivery on-delta key base)
   "Post the validated history using KEY and BASE.
 Send events to ON-DELTA and the response through DELIVERY."
-  (let ((gen (cl-incf kargu--generation)))
+  (let ((gen (kargu-application-next-generation)))
     (setf (kargu-api--delivery-generation delivery) gen)
     (let* ((fmt (kargu-api-active-format))
            (payload (kargu-api-prepare-payload
                      (kargu-api-build-payload (kargu-api--delivery-history delivery)) fmt))
            (delta (and (kargu-provider-format-stream-p fmt) on-delta)))
+      (kargu-http--ensure-logical-request
+       gen
+       (kargu-api--delivery-session delivery)
+       (kargu-api--delivery-origin delivery))
       (setq kargu--busy t)
       (kargu-state-transition-status :requesting)
       (cond
@@ -187,6 +192,7 @@ Send events to ON-DELTA and the response through DELIVERY."
          (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
          (lambda (response) (kargu-api--deliver delivery response)) delta))
        ((= gen kargu--generation)
+        (kargu-http-clear-busy)
         (kargu-api--deliver delivery
                             (kargu--api-error-alist "Request owner was invalidated")))))))
 
@@ -234,9 +240,8 @@ Build the payload in an isolated history; never store the reply."
         (kargu-session-record-cache-usage in (kargu-aget details "cached_tokens")
                                            (kargu-aget details "cache_write_tokens")
                                            :session session))
-      (when (fboundp 'kargu-state-record-tokens)
-        (kargu-state-record-tokens (and (numberp in) in)
-                                   (and (numberp out) out)))
+      (when (fboundp 'kargu-state-notify-tokens)
+        (kargu-state-notify-tokens session))
       (force-mode-line-update t)
       (kargu-log 'info "usage: %s in / %s out (session: %s)"
                  in out (kargu-session-usage session))))

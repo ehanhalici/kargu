@@ -36,8 +36,7 @@ Each function receives the mode and may signal a refusal.")
   (kargu-contract-assert #'kargu-contract-mode-p mode
                          "Invalid kargu mode: %S (expected one of %s)"
                          mode kargu-all-modes)
-  (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
-            (and (fboundp 'kargu-busy-p) (kargu-busy-p)))
+  (when (kargu-application-work-active-p)
     (user-error "Kargu: cannot change mode while an agent run is in progress (M-x kargu-loop-stop)"))
   (let ((origin (current-buffer)) (owner (kargu-session-context))
         (previous (kargu-session-mode-revision (kargu-session-context)))
@@ -47,8 +46,7 @@ Each function receives the mode and may signal a refusal.")
                  (eq owner (kargu-session-context origin))
                  (= previous (kargu-session-mode-revision owner))
                  (eq intent (kargu-session-mode-request owner))
-                 (not (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p)))
-                 (not (and (fboundp 'kargu-busy-p) (kargu-busy-p))))
+                 (not (kargu-application-work-active-p)))
       (user-error "Kargu: mode preparation was superseded")))
   mode)
 
@@ -86,34 +84,39 @@ Each function receives the mode and may signal a refusal.")
 
 (defun kargu-state-transition-status (new-status &optional detail)
   "Transition the state machine to NEW-STATUS with optional DETAIL.
-Validates that NEW-STATUS is a known status and updates `:busy'."
+Validates that NEW-STATUS is a known status and derives `:busy'."
   (unless (memq new-status kargu-state--valid-statuses)
     (error "Invalid lifecycle status: %S (expected one of %s)"
            new-status kargu-state--valid-statuses))
   (kargu-state--set :status new-status)
-  (let ((busy (if (memq new-status '(:idle :stopped :error :done :limit :pause)) nil t)))
-    (kargu-state--set :busy busy))
   (kargu-state-notify :status new-status detail)
   new-status)
 
-(defun kargu-state-record-tokens (prompt-tokens completion-tokens)
-  "Accumulate PROMPT-TOKENS and COMPLETION-TOKENS into cumulative usage."
+(defun kargu-state-notify-tokens (&optional session)
+  "Synchronize and notify token totals derived from SESSION's usage record."
+  (let* ((resolved (kargu-session--resolve session))
+         (tokens (kargu-state-tokens resolved)))
+    (when (eq resolved (kargu-session-context))
+      (kargu-state--sync-snapshot))
+    (kargu-state-notify :prompt-tokens (plist-get tokens :prompt))
+    (kargu-state-notify :completion-tokens (plist-get tokens :completion))
+    (kargu-state-notify :total-tokens (plist-get tokens :total))
+    tokens))
+
+(defun kargu-state-record-tokens (prompt-tokens completion-tokens &optional session)
+  "Accumulate PROMPT-TOKENS and COMPLETION-TOKENS into SESSION's usage record."
   (kargu-contract-assert (lambda (p) (or (null p) (natnump p))) prompt-tokens
                          "PROMPT-TOKENS must be a non-negative integer or nil: %S" prompt-tokens)
   (kargu-contract-assert (lambda (c) (or (null c) (natnump c))) completion-tokens
                          "COMPLETION-TOKENS must be a non-negative integer or nil: %S" completion-tokens)
-  (let* ((p (or prompt-tokens 0))
-         (c (or completion-tokens 0))
-         (tot (+ p c))
-         (cur-p (or (kargu-state-get :prompt-tokens) 0))
-         (cur-c (or (kargu-state-get :completion-tokens) 0))
-         (cur-tot (or (kargu-state-get :total-tokens) 0)))
-    (kargu-state--set :prompt-tokens (+ cur-p p))
-    (kargu-state--set :completion-tokens (+ cur-c c))
-    (kargu-state--set :total-tokens (+ cur-tot tot))
-    (dolist (key '(:prompt-tokens :completion-tokens :total-tokens))
-      (kargu-state-notify key (kargu-state-get key)))
-    (kargu-state-tokens)))
+  (let* ((resolved (kargu-session--resolve session))
+         (usage (copy-sequence (kargu-session-usage-value resolved)))
+         (p (or prompt-tokens 0))
+         (c (or completion-tokens 0)))
+    (setq usage (plist-put usage :tokens-in (+ (or (plist-get usage :tokens-in) 0) p)))
+    (setq usage (plist-put usage :tokens-out (+ (or (plist-get usage :tokens-out) 0) c)))
+    (setf (kargu-session-usage-value resolved) usage)
+    (kargu-state-notify-tokens resolved)))
 
 (defun kargu-state-reset ()
   "Reset state store back to clean initial state."

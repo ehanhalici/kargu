@@ -14,6 +14,7 @@
 (require 'time-date)
 (require 'kargu/core)
 (require 'kargu/core/observers)
+(require 'kargu/application/coordinator)
 (require 'kargu/config)
 (require 'kargu/json)
 (require 'kargu/api/response)
@@ -26,16 +27,29 @@
   "Observers called with GENERATION and ON-DELTA before a request is retried.
 ON-DELTA identifies the original event consumer; no request secrets are exposed.")
 
+(declare-function kargu--api-post "kargu/api/http"
+                  (url headers payload gen callback &optional on-delta attempt))
+(declare-function kargu-http--ensure-logical-request "kargu/api/http"
+                  (gen &optional session origin))
+(declare-function kargu-http-clear-busy "kargu/api/http" ())
+
 (cl-defun kargu-api--retry-post (generation &key url headers payload callback on-delta attempt)
   "Retry GENERATION's URL with HEADERS and PAYLOAD if it still owns the client.
 CALLBACK and ON-DELTA retain their original owner; ATTEMPT counts retries."
-  (when (= generation kargu--generation)
-    (kargu-run-observers 'kargu-api-retry-hook generation on-delta)
-    (when (= generation kargu--generation)
-      (kargu--api-post url headers payload generation callback on-delta attempt))))
-
-(declare-function kargu--api-post "kargu/api/http"
-                  (url headers payload gen callback &optional on-delta attempt))
+  (let ((req (kargu-application-current-request)))
+    (when (and (= generation kargu--generation)
+               (or (null req)
+                   (and (= (kargu-logical-request-generation req) generation)
+                        (not (eq (kargu-logical-request-state req) :cancelled)))))
+      (when req
+        (setf (kargu-logical-request-retry-timer req) nil))
+      (kargu-run-observers 'kargu-api-retry-hook generation on-delta)
+      (let ((req-after (kargu-application-current-request)))
+        (when (and (= generation kargu--generation)
+                   (or (null req-after)
+                       (and (= (kargu-logical-request-generation req-after) generation)
+                            (not (eq (kargu-logical-request-state req-after) :cancelled)))))
+          (kargu--api-post url headers payload generation callback on-delta attempt))))))
 
 (defun kargu--summarize-http-body (body &optional status)
   "Human-readable summary of HTTP BODY, prefixed with STATUS when given.
@@ -154,14 +168,17 @@ Return non-nil if a retry was scheduled."
   (when (and url
              (natnump kargu-api-retry-max)
              (< attempt kargu-api-retry-max))
-    (let ((delay (kargu--api-retry-delay attempt nil)))
+    (let* ((delay (kargu--api-retry-delay attempt nil))
+           (req (kargu-http--ensure-logical-request gen)))
       (kargu-log 'warn "%s; retry %d/%d in %.1fs"
                  reason (1+ attempt) kargu-api-retry-max delay)
-      (run-at-time delay nil
-                   (lambda ()
-                     (kargu-api--retry-post
-                      gen :url url :headers headers :payload payload :callback callback
-                      :on-delta on-delta :attempt (1+ attempt))))
+      (kargu-logical-request-set-retry-timer
+       req
+       (run-at-time delay nil
+                    (lambda ()
+                      (kargu-api--retry-post
+                       gen :url url :headers headers :payload payload :callback callback
+                       :on-delta on-delta :attempt (1+ attempt)))))
       t)))
 
 (defun kargu--api-on-transport-error (url headers payload gen callback
@@ -179,16 +196,19 @@ receives events, and ATTEMPT counts completed retries."
     (if (and (natnump kargu-api-retry-max)
              (< attempt kargu-api-retry-max)
              (kargu--api-retryable-p err))
-        (let ((delay (kargu--api-retry-delay attempt err)))
+        (let* ((delay (kargu--api-retry-delay attempt err))
+               (req (kargu-http--ensure-logical-request gen)))
           (kargu-log 'warn "HTTP %s; retry %d/%d in %.1fs"
                      (or (kargu--plz-http-status err) "?")
                      (1+ attempt) kargu-api-retry-max delay)
-          (run-at-time delay nil
-                       (lambda ()
-                         (kargu-api--retry-post
-                          gen :url url :headers headers :payload payload :callback callback
-                          :on-delta on-delta :attempt (1+ attempt)))))
-      (setq kargu--busy nil)
+          (kargu-logical-request-set-retry-timer
+           req
+           (run-at-time delay nil
+                        (lambda ()
+                          (kargu-api--retry-post
+                           gen :url url :headers headers :payload payload :callback callback
+                           :on-delta on-delta :attempt (1+ attempt))))))
+      (kargu-http-clear-busy)
       (let ((msg (kargu--plz-error-message err)))
         (if (or (kargu--api-retryable-p err)
                 (null (kargu--plz-http-status err)))

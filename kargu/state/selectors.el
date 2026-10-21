@@ -34,15 +34,18 @@
 
 (defun kargu-state-busy-p ()
   "Return non-nil if an API request or agent loop is currently active."
-  (or (kargu-state-get :busy nil)
-      (not (memq (kargu-state-status) '(:idle :stopped :error :done :limit :pause)))))
+  (kargu-application-busy-p))
 
-(defun kargu-state-tokens ()
-  "Return a plist of cumulative session tokens.
+(defun kargu-state-tokens (&optional session)
+  "Return a plist of cumulative tokens derived from SESSION's usage record.
 Shape: `(:prompt P :completion C :total T)'."
-  (list :prompt (or (kargu-state-get :prompt-tokens) 0)
-        :completion (or (kargu-state-get :completion-tokens) 0)
-        :total (or (kargu-state-get :total-tokens) 0)))
+  (let* ((resolved (kargu-session--resolve session))
+         (usage (kargu-session-usage-value resolved))
+         (prompt (or (plist-get usage :tokens-in) 0))
+         (completion (or (plist-get usage :tokens-out) 0)))
+    (list :prompt prompt
+          :completion completion
+          :total (+ prompt completion))))
 
 (provide 'kargu/state/selectors)
 

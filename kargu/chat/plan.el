@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'kargu/plan)
+(require 'kargu/application/coordinator)
 (require 'kargu/chat/session)
 (require 'kargu/chat/transcript)
 (require 'kargu/state/selectors)
@@ -29,7 +30,7 @@
   "Refuse unavailable dispatch or another active run before claiming a RECORD."
   (unless (fboundp 'kargu-chat-prompt)
     (user-error "Kargu: chat dispatch is unavailable; the plan is still pending"))
-  (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+  (when (kargu-application-work-active-p)
     (user-error "Kargu: stop the active run before applying a plan")))
 
 (cl-defstruct (kargu-chat-plan-start (:constructor kargu-chat-plan--start))

@@ -144,27 +144,30 @@ Nested scalar strings are borrowed read-only values."
   (dolist (count (list tokens-in tokens-out))
     (kargu-contract-assert (lambda (value) (or (null value) (natnump value))) count))
   (let* ((session (kargu-session--resolve session))
-         (usage (kargu-session-usage-value session)))
-    (plist-put usage :requests (1+ (or (plist-get usage :requests) 0)))
+         (usage (copy-sequence (kargu-session-usage-value session))))
+    (setq usage (plist-put usage :requests (1+ (or (plist-get usage :requests) 0))))
     (when tokens-in
-      (plist-put usage :last-prompt-tokens tokens-in)
-      (plist-put usage :tokens-in (+ (or (plist-get usage :tokens-in) 0) tokens-in)))
+      (setq usage (plist-put usage :last-prompt-tokens tokens-in))
+      (setq usage (plist-put usage :tokens-in (+ (or (plist-get usage :tokens-in) 0) tokens-in))))
     (when tokens-out
-      (plist-put usage :tokens-out (+ (or (plist-get usage :tokens-out) 0) tokens-out)))
+      (setq usage (plist-put usage :tokens-out (+ (or (plist-get usage :tokens-out) 0) tokens-out))))
+    (setf (kargu-session-usage-value session) usage)
     (kargu-session-snapshot session)))
 
 (cl-defun kargu-session-record-cache-usage (input read write &key session)
   "Accumulate known cache INPUT, READ and WRITE counters for explicit SESSION."
-  (let ((usage (kargu-session-usage-value (kargu-session--resolve session))))
+  (let* ((resolved (kargu-session--resolve session))
+         (usage (copy-sequence (kargu-session-usage-value resolved))))
     (dolist (entry (list (cons :cache-read read) (cons :cache-write write)))
       (when (natnump (cdr entry))
-        (plist-put usage (car entry)
-                   (+ (or (plist-get usage (car entry)) 0) (cdr entry)))))
+        (setq usage (plist-put usage (car entry)
+                               (+ (or (plist-get usage (car entry)) 0) (cdr entry))))))
     (when (and (natnump read) (natnump input))
-      (plist-put usage :cache-measured-read
-                 (+ (or (plist-get usage :cache-measured-read) 0) read))
-      (plist-put usage :cache-measured-input
-                 (+ (or (plist-get usage :cache-measured-input) 0) input)))))
+      (setq usage (plist-put usage :cache-measured-read
+                             (+ (or (plist-get usage :cache-measured-read) 0) read)))
+      (setq usage (plist-put usage :cache-measured-input
+                             (+ (or (plist-get usage :cache-measured-input) 0) input))))
+    (setf (kargu-session-usage-value resolved) usage)))
 
 (defun kargu-session--cache-report (session)
   "Return SESSION cache counters, distinguishing missing data from zero."

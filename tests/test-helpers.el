@@ -81,12 +81,17 @@ PROVIDER, MODEL and EFFORT default to the current owner's explicit values."
 
 (defvar kargu--loop-run)
 (defvar kargu--busy)
+(defvar kargu--generation)
+(defvar kargu-application--context)
 (defvar kargu--tools-refused)
 (defvar kargu--model-metadata-table)
 (defvar kargu--state-store)
 (defvar kargu-session--context)
 (defvar kargu--session-id)
 (defvar kargu-context-buffer)
+
+(declare-function kargu-application-create "kargu/application/coordinator")
+(declare-function kargu-application-context "kargu/application/coordinator")
 
 (defun kargu-test-mode (mode)
   "Make MODE the active mode for the running test and return it.
@@ -120,6 +125,14 @@ Tests never see the working tree of Kargu as their project."
         ;; Global state a test may touch; each test starts from and leaves it as found.
         (kargu--loop-run kargu--loop-run)
         (kargu--busy kargu--busy)
+        (kargu--generation (bound-and-true-p kargu--generation))
+        (kargu-application--context
+         (if (fboundp 'kargu-application-create)
+             (kargu-application-create
+              :status (or (plist-get kargu--state-store :status) :idle)
+              :active-run kargu--loop-run
+              :generation (or (bound-and-true-p kargu--generation) 0))
+           (bound-and-true-p kargu-application--context)))
         (kargu--tools-refused (copy-hash-table kargu--tools-refused))
         (kargu--model-metadata-table (copy-hash-table kargu--model-metadata-table)))
     (apply run-test args)))

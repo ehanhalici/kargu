@@ -11,11 +11,9 @@
 ;;; Code:
 
 (require 'kargu/core/session)
+(require 'kargu/application/coordinator)
 (require 'kargu/async)
 (require 'kargu/contract/types)
-
-(declare-function kargu-loop-running-p "kargu/loop" ())
-(declare-function kargu-busy-p "kargu/api/http" ())
 
 (defvar kargu-mode-prepare-functions nil
   "Mode preparation extensions accepting ready and optional error callbacks.
@@ -78,8 +76,7 @@ Return the owned task.  A new intent supersedes the previous one; closing,
 resetting or stopping the owner cancels its preparation and children."
   (kargu-contract-assert #'kargu-contract-mode-p mode)
   (kargu-contract-assert #'functionp callback)
-  (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
-            (and (fboundp 'kargu-busy-p) (kargu-busy-p)))
+  (when (kargu-application-work-active-p)
     (user-error "Kargu: stop active work before preparing a mode"))
   (let* ((session (kargu-session-context))
          (request (kargu-mode--create :origin (current-buffer) :session session

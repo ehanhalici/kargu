@@ -146,6 +146,33 @@
     (should (kargu-state-busy-p))
     (should (eq (kargu-state-status) :requesting))))
 
+(ert-deftest kargu-state-tokens-derived-per-session-without-duplicate-store-test ()
+  "Token counts derive from the active session usage record without leaking across buffers."
+  (let ((buf-a (generate-new-buffer " *kargu-tokens-a*"))
+        (buf-b (generate-new-buffer " *kargu-tokens-b*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf-a
+            (setq-local kargu-session--context (kargu-session--create))
+            (kargu-state-record-tokens 120 30)
+            (should (equal (kargu-state-tokens)
+                           '(:prompt 120 :completion 30 :total 150))))
+          (with-current-buffer buf-b
+            (setq-local kargu-session--context (kargu-session--create))
+            (should (equal (kargu-state-tokens)
+                           '(:prompt 0 :completion 0 :total 0)))
+            (kargu-state-record-tokens 10 20)
+            (should (equal (kargu-state-tokens)
+                           '(:prompt 10 :completion 20 :total 30))))
+          (with-current-buffer buf-a
+            (should (equal (kargu-state-tokens)
+                           '(:prompt 120 :completion 30 :total 150)))
+            (kargu-session-clear)
+            (should (equal (kargu-state-tokens)
+                           '(:prompt 0 :completion 0 :total 0)))))
+      (when (buffer-live-p buf-a) (kill-buffer buf-a))
+      (when (buffer-live-p buf-b) (kill-buffer buf-b)))))
+
 (provide 'tests/test-state)
 
 ;;; test-state.el ends here

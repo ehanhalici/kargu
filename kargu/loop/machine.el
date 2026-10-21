@@ -105,8 +105,8 @@ send path so the continue prompt runs instead of leaving the run idle."
 (defun kargu-loop--send-model (run prompt)
   "Post PROMPT for RUN and route the answer through the response classifier."
   (kargu-loop--set-state run 'wait)
-  (plist-put run :request-model (kargu--model))
-  (plist-put run :request-provider (kargu--provider-name))
+  (plist-put run :request-model (or (plist-get run :model) (kargu--model)))
+  (plist-put run :request-provider (or (plist-get run :provider) (kargu--provider-name)))
   (let ((on-delta (and (plist-get run :on-delta)
                        (lambda (event)
                          (kargu--loop-forward-delta run event)))))
@@ -275,10 +275,15 @@ the circuit is open, prompt the user to retry or abort instead."
            (format "circuit breaker tripped (upstream: %s)" err)))
       (kargu-log 'warn "loop: upstream error; retry %d/%d in %.1fs: %s"
                  n cap delay err)
-      (run-at-time delay nil
-                   (lambda ()
-                     (when (kargu-loop--live-p run)
-                       (kargu-loop--retry-model run)))))))
+      (when-let* ((old (plist-get run :retry-timer)))
+        (when (timerp old)
+          (cancel-timer old)))
+      (plist-put run :retry-timer
+                 (run-at-time delay nil
+                              (lambda ()
+                                (plist-put run :retry-timer nil)
+                                (when (kargu-loop--live-p run)
+                                  (kargu-loop--retry-model run))))))))
 
 (defun kargu-loop--retry-model (run)
   "Discard RUN's failed partial stream before retrying the model request."
@@ -302,9 +307,10 @@ the circuit is open, prompt the user to retry or abort instead."
   "Handle provider tool rejection ERR on RUN.
 In `agent' mode, aborts with a descriptive error.  In `ask' or `plan' mode,
 remembers the refusal and retries without tools."
-  (let ((mid (or (plist-get run :request-model) (kargu--model))))
-    (kargu-model-mark-tools-refused mid (plist-get run :request-provider))
-    (let ((mode (kargu-state-mode)))
+  (let ((mid (or (plist-get run :request-model) (plist-get run :model) (kargu--model))))
+    (kargu-model-mark-tools-refused mid (or (plist-get run :request-provider)
+                                            (plist-get run :provider)))
+    (let ((mode (or (plist-get run :mode) (kargu-state-mode))))
       (if (eq mode 'agent)
           (progn
             (kargu-log 'error "loop: model '%s' does not support tools in agent mode: %s" mid err)

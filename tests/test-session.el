@@ -576,5 +576,52 @@
       (delete-directory proj t)
       (delete-directory other t))))
 
+(ert-deftest kargu-session-reset-is-scoped-to-target-session-test ()
+  "Resetting an idle chat buffer does not stop or reset a foreign active chat run."
+  (let ((buf-a (get-buffer-create "*kargu-reset-scope-a*"))
+        (buf-b (get-buffer-create "*kargu-reset-scope-b*"))
+        (stop-called nil)
+        (circuit-reset-called nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf-a
+            (kargu-chat-mode)
+            (kargu-history-append '(("role" . "user") ("content" . "keep me")))
+            (kargu-session-record-usage 50 25))
+          (with-current-buffer buf-b
+            (kargu-chat-mode)
+            (kargu-history-append '(("role" . "user") ("content" . "discard me")))
+            (kargu-session-record-usage 10 5))
+          (let ((run-a (with-current-buffer buf-a
+                         (list :id "run-a"
+                               :chat-buffer buf-a
+                               :session (kargu-session-context buf-a)
+                               :state 'wait))))
+            (kargu-application-set-active-run run-a)
+            (kargu-state-transition-status :waiting-model)
+            (cl-letf (((symbol-function 'kargu-loop-stop)
+                       (lambda (&rest _) (setq stop-called t)))
+                      ((symbol-function 'kargu-circuit-reset)
+                       (lambda () (setq circuit-reset-called t))))
+              (with-current-buffer buf-b
+                (kargu-session-reset)))
+            ;; Chat A's run, history, usage and status are untouched
+            (should-not stop-called)
+            (should-not circuit-reset-called)
+            (should (eq (kargu-application-current-run) run-a))
+            (should (eq (kargu-state-status) :waiting-model))
+            (with-current-buffer buf-a
+              (should (= (length (kargu-history-messages)) 1))
+              (should (equal (kargu-state-tokens)
+                             '(:prompt 50 :completion 25 :total 75))))
+            ;; Chat B's history and usage were reset
+            (with-current-buffer buf-b
+              (should (null (kargu-history-messages)))
+              (should (equal (kargu-state-tokens)
+                             '(:prompt 0 :completion 0 :total 0))))))
+      (kargu-application-set-active-run nil)
+      (when (buffer-live-p buf-a) (kill-buffer buf-a))
+      (when (buffer-live-p buf-b) (kill-buffer buf-b)))))
+
 (provide 'tests/test-session)
 ;;; test-session.el ends here

@@ -620,3 +620,33 @@
   (let ((kargu--loop-run (list :state 'wait :iterations 3 :max-iterations 24))
         (kargu-max-iterations 12))
     (should (string-match-p "iteration 3/24" (kargu-loop-status)))))
+
+(ert-deftest kargu-loop-run-captures-immutable-snapshot-and-report-metadata-test ()
+  "A run captures mode, session-id, project-root and provider/model at start."
+  (let ((buf-a (generate-new-buffer " *kargu-run-snap-a*"))
+        (buf-b (generate-new-buffer " *kargu-run-snap-b*")))
+    (unwind-protect
+        (with-current-buffer buf-a
+          (setq-local kargu-session--context
+                      (kargu-test-session-with-history :provider "openai" :model "gpt-4o"))
+          (kargu-state-set-mode 'agent)
+          (let* ((run (kargu-loop--new-run "Fix it"))
+                 (kargu--loop-run run))
+            (should (stringp (plist-get run :id)))
+            (should (equal (plist-get run :session-id) (kargu-session-id)))
+            (should (eq (plist-get run :mode) 'agent))
+            (should (equal (plist-get run :provider) "openai"))
+            (should (equal (plist-get run :model) "gpt-4o"))
+            ;; Switching to another buffer in ask mode does not alter the active run's tool gate
+            (with-current-buffer buf-b
+              (setq-local kargu-session--context
+                          (kargu-test-session-with-history :provider "groq" :model "llama"))
+              (setf (kargu-session-mode-value (kargu-session-context)) 'ask)
+              (should (eq (kargu-state-mode) 'ask))
+              (should-not (kargu-loop--gate-tool "edit_file")))
+            (let ((report (kargu-loop--finish-report run :done "done")))
+              (should (equal (plist-get report :run-id) (plist-get run :id)))
+              (should (equal (plist-get report :session-id) (plist-get run :session-id)))
+              (should (eq (plist-get report :mode) 'agent)))))
+      (when (buffer-live-p buf-a) (kill-buffer buf-a))
+      (when (buffer-live-p buf-b) (kill-buffer buf-b)))))

@@ -568,3 +568,34 @@
     (should (equal (kargu-aget (kargu-aget call "function") "name") "read_file"))
     (should (string-prefix-p "call_kargu_" (kargu-aget call "id")))
     (should (equal (kargu-aget (kargu-aget call "function") "arguments") "{\"a\":1}"))))
+
+(ert-deftest kargu-logical-request-cancel-clears-scheduled-retry-timer-test ()
+  "Cancelling a logical request cancels its pending retry timer and blocks repost."
+  (let ((kargu--generation 100)
+        (kargu-api-retry-max 2)
+        (reposted nil)
+        (cancelled-timers nil))
+    (kargu-http--ensure-logical-request 100)
+    (cl-letf (((symbol-function 'kargu--plz-http-status) (lambda (_) 503))
+              ((symbol-function 'cancel-timer)
+               (lambda (timer)
+                 (push timer cancelled-timers)))
+              ((symbol-function 'kargu--api-post)
+               (lambda (&rest _) (setq reposted t))))
+      (kargu--api-on-transport-error
+       "https://example.invalid/v1/chat/completions" nil '(("model" . "m"))
+       100 #'ignore nil 0 'mock-error)
+      (let* ((req (kargu-application-current-request))
+             (timer (and req (kargu-logical-request-retry-timer req))))
+        (should (kargu-logical-request-p req))
+        (should (eq (kargu-logical-request-state req) :retrying))
+        (should (timerp timer))
+        (kargu-http-cancel)
+        (should (memq timer cancelled-timers))
+        (should (eq (kargu-logical-request-state req) :cancelled))
+        (should-not (kargu-logical-request-retry-timer req))
+        ;; Even if the timer callback runs late, it is a no-op
+        (kargu-api--retry-post
+         100 :url "https://example.invalid/v1/chat/completions"
+         :headers nil :payload '(("model" . "m")) :callback #'ignore :attempt 1)
+        (should-not reposted)))))
