@@ -26,16 +26,12 @@
 (declare-function kargu-chat-refresh-footer "kargu/chat/prompt" ())
 
 (defun kargu-chat-refresh-mode (_mode)
-  "Refresh each chat's mode view after a committed state notification."
-  (dolist (buffer (kargu-chat-list-buffers))
-    (condition-case err
-        (with-current-buffer buffer
-          (save-excursion
-            (save-restriction
-              (widen)
-              (kargu-chat-refresh-footer))))
-      (error (kargu-log 'warn "Mode view %s failed: %s"
-                        (buffer-name buffer) (error-message-string err))))))
+  "Refresh only the notifying session's chat view."
+  (when (derived-mode-p 'kargu-chat-mode)
+    (save-excursion
+      (save-restriction
+        (widen)
+        (kargu-chat-refresh-footer)))))
 
 (defun kargu/chat/header-unload-function ()
   "Remove the optional mode view subscription before unloading it."

@@ -58,6 +58,14 @@ does not prove catalog authenticity or focus/draft UX. ERT additionally checks
 atomic tuple publication, inherited versus disabled effort, and suppression of
 UI continuations when a notification replaces the owner or selection.
 
+`KarguMode.tla` / `ModeMC.cfg` refine per-session mode preparation. Run
+`proof/run_tlc.sh --mode`. The exhaustive 2026-10-21 scan explored 20,179
+generated states, 5,958 distinct states and depth 15 without error. It checks
+single delivery, intent supersession and mode freezing during one active run,
+with two owners and two intents each. ERT additionally covers actual child
+resource cancellation, close/reset, directory changes, foreign callback buffers
+and reentrant admission hooks. This is not a proof of atomic session restore.
+
 `KarguApproval.tla` / `ApprovalMC.cfg` refine one captured permission operation.
 Run `proof/run_tlc.sh --approval` for an exhaustive scan. Eight independent
 authority checks can become stale before or after approval; approval is claimed

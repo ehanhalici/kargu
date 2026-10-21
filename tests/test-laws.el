@@ -45,6 +45,7 @@
       (unwind-protect
           (with-current-buffer b
             (kargu-chat-mode)
+            (kargu-test-mode 'agent)
             (setf (kargu-selection-provider) "p")
             (setf (kargu-selection-model) "no-tools-model")
             (kargu-chat--ensure-prompt)

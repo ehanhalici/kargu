@@ -72,6 +72,7 @@ PROVIDER, MODEL and EFFORT default to the current owner's explicit values."
                            :usage-value (copy-tree (kargu-session-usage-value
                                                    (kargu-session-context)))
                            :history-value history
+                           :mode-value (kargu-session-mode-value (kargu-session-context))
                            :selection-value (kargu-selection-create
                                              :provider provider :model model :effort effort))))
 

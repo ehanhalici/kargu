@@ -12,6 +12,7 @@
 
 (require 'kargu/core/session)
 (require 'kargu/core/observers)
+(require 'kargu/application/mode)
 
 (declare-function kargu-loop-running-p "kargu/loop" ())
 (declare-function kargu-loop-stop "kargu/loop" (&optional reason))
@@ -35,6 +36,7 @@
   "Cancel active work, reset the session and notify optional views in order."
   (interactive)
   (let ((origin (current-buffer)) (owner (kargu-session-context)))
+    (kargu-mode-cancel owner)
     (save-current-buffer
       (kargu-application--cancel-session-work)
       (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))

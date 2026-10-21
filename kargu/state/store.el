@@ -21,8 +21,7 @@
 
 (defun kargu-state-initial ()
   "Return a fresh initial state plist."
-  (list :mode kargu-mode-ask
-        :status :idle
+  (list :status :idle
         :busy nil
         :prompt-tokens 0
         :completion-tokens 0
@@ -31,6 +30,7 @@
 (defun kargu-state-init ()
   "Initialize or re-initialize the state store."
   (kargu-selection-reset)
+  (setf (kargu-session-mode-value (kargu-session-context)) 'ask)
   (setq kargu--state-store (kargu-state-initial))
   kargu--state-store)
 
@@ -41,6 +41,7 @@
 (defun kargu-state-get (key &optional default)
   "Retrieve the value of KEY from the central state store, or DEFAULT."
   (pcase key
+    (:mode (kargu-session-mode-value (kargu-session-context)))
     (:provider (when-let* ((provider (kargu-selection-provider))) (intern provider)))
     (:model (kargu-selection-model))
     (:reasoning-effort (kargu-selection-effort))
@@ -54,8 +55,12 @@
 Callers outside `kargu/state/transitions' do not write the store."
   (when (memq key '(:provider :model :reasoning-effort))
     (error "Selection writes must use the owned selection API"))
-  (setq kargu--state-store
-        (plist-put (copy-sequence kargu--state-store) key value))
+  (if (eq key :mode)
+      (let ((session (kargu-session-context)))
+        (setf (kargu-session-mode-value session) value)
+        (cl-incf (kargu-session-mode-revision session)))
+    (setq kargu--state-store
+          (plist-put (copy-sequence kargu--state-store) key value)))
   value)
 
 (provide 'kargu/state/store)

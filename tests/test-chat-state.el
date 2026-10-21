@@ -36,7 +36,7 @@
        (when (buffer-live-p b) (kill-buffer b)))))
 
 (ert-deftest kargu-chat-state-mode-notification-preserves-editing-test ()
-  "Both views update without changing current buffer, point or narrowing."
+  "Only the owner's view updates, preserving point, draft and narrowing."
   (kargu-chat-state-test--with-views
     (dolist (view (list a b))
       (with-current-buffer view (goto-char 2) (narrow-to-region 1 3)))
@@ -49,7 +49,8 @@
         (should (= (point-min) 1))
         (should (= (point-max) 3))
         (widen)
-        (should (string-search "mode: [PLAN]" (buffer-string)))
+        (should (string-search (if (eq view b) "mode: [PLAN]" "mode: [ASK]")
+                               (buffer-string)))
         (should (equal (kargu-chat--input-text) "draft"))))))
 
 (ert-deftest kargu-chat-state-broken-view-does-not-block-another-test ()
@@ -61,9 +62,11 @@
                  (lambda ()
                    (if (eq (current-buffer) a) (error "Broken view")
                      (funcall refresh)))))
-        (kargu-state-set-mode 'plan)
-        (should (eq (kargu-state-mode) 'plan))
+        (with-current-buffer a
+          (kargu-state-set-mode 'plan)
+          (should (eq (kargu-state-mode) 'plan)))
         (with-current-buffer b
+          (kargu-state-set-mode 'plan)
           (should (string-search "mode: [PLAN]" (buffer-string)))
           (should (equal (kargu-chat--input-text) "draft")))))))
 

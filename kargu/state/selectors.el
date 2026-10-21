@@ -1,4 +1,4 @@
-;;; kargu/state/selectors.el --- Pure state query selectors -*- lexical-binding: t; -*-
+;;; selectors.el --- Pure state query selectors -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -13,8 +13,7 @@
 (require 'kargu/state/store)
 
 (defun kargu-state-mode ()
-  "Return the currently active operating mode symbol (`ask', `plan', etc.).
-The state store is the only place the mode lives."
+  "Return the current session's operating mode (`ask', `plan', etc.)."
   (kargu-state-get :mode 'ask))
 
 (defun kargu-state-status ()
@@ -47,4 +46,4 @@ Shape: `(:prompt P :completion C :total T)'."
 
 (provide 'kargu/state/selectors)
 
-;;; kargu/state/selectors.el ends here
+;;; selectors.el ends here

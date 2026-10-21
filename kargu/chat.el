@@ -647,6 +647,7 @@ Also cancel this chat's debugger readiness wait before a run starts.
 A running banner left behind by a failed start is cleared too, so
 the editable prompt comes back."
   (interactive)
+  (kargu-mode-cancel)
   (let ((cancelled (and (fboundp 'kargu-dape-cancel-session-wait)
                         (kargu-dape-cancel-session-wait))))
     (if (kargu-loop-running-p)

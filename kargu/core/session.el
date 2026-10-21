@@ -16,6 +16,7 @@
 (require 'cl-lib)
 (require 'kargu/core/log)
 (require 'kargu/contract/assert)
+(require 'kargu/contract/types)
 (require 'kargu/contract/history)
 (require 'kargu/contract/selection)
 
@@ -36,11 +37,21 @@
 (cl-defstruct (kargu-session (:constructor kargu-session--create))
   "One captured session ID owning its usage counters, not a runtime singleton."
   (id-value nil :read-only t) usage-value
+  (mode-value 'ask) (mode-revision 0) mode-request
   (history-value (kargu-history-create) :read-only t)
   (selection-value (kargu-selection-create)))
 
 (defvar-local kargu-session--context nil
   "The current buffer's owned session handle; callbacks capture it explicitly.")
+
+(defvar kargu-session-before-replace-hook nil
+  "Critical resource cleanup functions taking the retiring session handle.")
+
+(defun kargu-session-retire (session)
+  "Release SESSION's resources, refusing a reentrant replacement."
+  (run-hook-with-args 'kargu-session-before-replace-hook session)
+  (unless (eq session (kargu-session-context))
+    (user-error "Kargu: session replacement was superseded")))
 
 (defun kargu-session--validate-usage (usage)
   "Return validated USAGE before adopting it into a session owner."
@@ -56,13 +67,16 @@
   usage)
 
 (cl-defun kargu-session-create (&key id-value usage-value
+                                    (mode-value 'ask)
                                     (selection-value (kargu-selection-create)))
-  "Create ID-VALUE's owner with copied USAGE-VALUE and SELECTION-VALUE."
+  "Create ID-VALUE's owner with USAGE-VALUE, SELECTION-VALUE and MODE-VALUE."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p id-value)
   (kargu-session--validate-usage usage-value)
   (kargu-contract-assert #'kargu-selection-p selection-value)
+  (kargu-contract-assert #'kargu-contract-mode-p mode-value)
   (kargu-session--create :id-value (copy-sequence id-value)
                          :usage-value (copy-tree usage-value)
+                         :mode-value mode-value
                          :selection-value selection-value))
 
 (defun kargu-session--initial-usage ()
@@ -117,9 +131,11 @@ Nested scalar strings are borrowed read-only values."
   (kargu-session--validate-usage usage)
   (when (plist-get (kargu-session-usage-value (kargu-session-context)) :active)
     (user-error "Kargu: stop the session's active run before replacing its counters"))
+  (kargu-session-retire (kargu-session-context))
   (setq kargu-session--context
         (kargu-session--create
          :id-value (kargu-session-id) :usage-value (copy-tree usage)
+         :mode-value (kargu-session-mode-value (kargu-session-context))
          :history-value (kargu-session-history-value (kargu-session-context))
          :selection-value (kargu-session-selection-value (kargu-session-context)))))
 
@@ -222,6 +238,7 @@ CAP is nil when the model record has no context window."
   "Replace the current owner's counters and clear explicit selection overrides."
   (when (plist-get (kargu-session-usage-value (kargu-session-context)) :active)
     (user-error "Kargu: stop the session's active run before clearing it"))
+  (kargu-session-retire (kargu-session-context))
   (setq kargu--session-id (kargu--generate-session-id)
         kargu-session--context
         (kargu-session--create :id-value kargu--session-id

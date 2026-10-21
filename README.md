@@ -166,7 +166,10 @@ persistence snapshots detach message lists and vectors. Scalar strings are
 borrowed read-only. Provider/model/effort choices form one validated immutable
 value per session; UI changes do not overwrite configured defaults. Selection
 callbacks capture their session and selection identity, so obsolete lists cannot
-change a replacement owner. Mode, lifecycle, token totals and application
+change a replacement owner. Each session starts in `ask` and owns its mode.
+Asynchronous mode preparation has an owned, cancellable completion; callbacks
+cannot switch a different chat or a replacement session. Stop, replacement and
+close cancel its resources. Lifecycle, duplicated token totals and application
 coordination remain shared; this is not yet complete runtime isolation.
 
 Model metadata now has one owner in `kargu/models/store.el`, indexed by the

@@ -30,13 +30,9 @@
 (require 'kargu/core/custom)
 (require 'kargu/core/log)
 (require 'kargu/core/session)
+(require 'kargu/application/mode)
 
 ;;;; Mode state -----------------------------------------------------------
-
-(defvar kargu-mode-prepare-functions nil
-  "Alist of modes to asynchronous preparation functions taking a continuation.")
-(defvar kargu--mode-selection-generation 0
-  "Generation used to discard an obsolete asynchronous mode selection.")
 
 (defun kargu--publish-mode (mode)
   "Report the committed MODE; optional views observe state notifications."
@@ -44,26 +40,23 @@
   (force-mode-line-update t)
   (message "kargu mode: %s" mode))
 
-(defun kargu-set-mode (mode)
-  "Set the active mode to MODE (`ask', `plan', `debug' or `agent')."
+(defun kargu-set-mode (mode &optional callback)
+  "Set the owning session's MODE after asynchronous preparation.
+Optional CALLBACK receives (MODE ERROR), including cancellation."
   (interactive
    (list (intern (completing-read "kargu mode: "
                                   '("ask" "plan" "debug" "agent")
                                   nil t))))
-  (kargu-contract-assert #'kargu-contract-mode-p mode
-                         "Unknown kargu mode: %s (expected one of %s)"
-                         mode kargu-all-modes)
-  (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
-    (user-error "Kargu: Stop the active run before changing mode"))
-  (let* ((generation (cl-incf kargu--mode-selection-generation))
-         (prepare (alist-get mode kargu-mode-prepare-functions))
-         (apply-mode
-          (lambda ()
-            (when (= generation kargu--mode-selection-generation)
-              (kargu-state-set-mode mode)
-              (kargu--publish-mode mode)
-              mode))))
-    (if prepare (funcall prepare apply-mode) (funcall apply-mode))))
+  (kargu-mode-prepare
+   mode (lambda (ready error)
+          (let ((failure error))
+            (unless failure
+              (condition-case err
+                  (progn (kargu-state-set-mode ready) (kargu--publish-mode ready))
+                (error (setq failure (error-message-string err)))))
+            (cond
+             (callback (funcall callback (unless failure ready) failure))
+             (failure (message "Kargu: %s" failure)))))))
 
 (defun kargu-mode-ask ()
   "Switch kargu to ask mode (read-only answers)."

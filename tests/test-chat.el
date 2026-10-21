@@ -40,9 +40,9 @@
                     ((symbol-function 'message)
                      (lambda (format &rest arguments)
                        (push (apply #'format format arguments) notices))))
-            (kargu-test-mode 'debug)
             (with-current-buffer origin
               (setq major-mode 'kargu-chat-mode kargu-chat--session-id "original")
+              (kargu-test-mode 'debug)
               (insert "original prompt")
               (kargu-chat--await-debug-prompt "original prompt" (eq case 'preserved))
               (pcase case

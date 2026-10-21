@@ -24,21 +24,37 @@
   "List of valid lifecycle statuses for the Kargu state machine.")
 
 (declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-busy-p "kargu/api/http" ())
 (declare-function kargu-state--set "kargu/state/store" (key value))
 
 (defvar kargu-state-before-mode-change-hook nil
   "Functions validating a requested mode before the state is changed.
 Each function receives the mode and may signal a refusal.")
 
-(defun kargu-state-set-mode (mode)
-  "Set the active operating mode to MODE (`ask', `plan', `debug', or `agent').
-Validates MODE and ensures an agent run is not currently active."
+(defun kargu-state-check-mode (mode)
+  "Validate MODE and admission, including reentrant preparation hooks."
   (kargu-contract-assert #'kargu-contract-mode-p mode
                          "Invalid kargu mode: %S (expected one of %s)"
                          mode kargu-all-modes)
-  (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+  (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+            (and (fboundp 'kargu-busy-p) (kargu-busy-p)))
     (user-error "Kargu: cannot change mode while an agent run is in progress (M-x kargu-loop-stop)"))
-  (run-hook-with-args 'kargu-state-before-mode-change-hook mode)
+  (let ((origin (current-buffer)) (owner (kargu-session-context))
+        (previous (kargu-session-mode-revision (kargu-session-context)))
+        (intent (kargu-session-mode-request (kargu-session-context))))
+    (run-hook-with-args 'kargu-state-before-mode-change-hook mode)
+    (unless (and (eq origin (current-buffer))
+                 (eq owner (kargu-session-context origin))
+                 (= previous (kargu-session-mode-revision owner))
+                 (eq intent (kargu-session-mode-request owner))
+                 (not (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p)))
+                 (not (and (fboundp 'kargu-busy-p) (kargu-busy-p))))
+      (user-error "Kargu: mode preparation was superseded")))
+  mode)
+
+(defun kargu-state-set-mode (mode)
+  "Commit validated MODE to the current session and notify observers."
+  (kargu-state-check-mode mode)
   (kargu-state--set :mode mode)
   (kargu-state-notify :mode mode)
   mode)

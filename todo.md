@@ -29,7 +29,7 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ### CHAT-01 · P1 · K — Uygulama durumu ve asenkron kip hazırlığının sahipliği ayrılmamış
 
-- **Yer/kanıt:** `state/store.el` kip/yaşam döngüsü/busy/belirteç toplamları ve uygulama koordinasyonu hâlâ ortak. `core.el` asenkron kip hazırlığının tamamlanma/iptal sahipliği ayrılmalı. Kimlik, sayaç, tek geçmiş kuyruğu ve değişmez provider/model/effort seçimi artık buffer-owned `kargu-session` kaydında; global seçim override'ları ve chat seçim kopyaları kaldırıldı. Restore hedefi artık projeye göre seçiliyor; hedef yönlendirmesinin düzelmesi atomik restore anlamına gelmez.
+- **Yer/kanıt:** `state/store.el` yaşam döngüsü/busy/belirteç toplamları ve uygulama koordinasyonu hâlâ ortak. Kip artık `kargu-session` içinde; her yeni oturum `ask` başlar. `application/mode.el` hazır/hata/iptal sonucunu tek sahipli görevle verir; yeni seçim, Stop/reset/close eski hazırlığı ve çocuklarını iptal eder. Reentrant before-mode hook sonrasında sahiplik/meşguliyet tekrar doğrulanır. Kimlik, sayaç, tek geçmiş kuyruğu ve değişmez provider/model/effort seçimi de buffer-owned; global seçim override'ları ve chat seçim kopyaları kaldırıldı. Restore hedefi projeye göre seçiliyor; hedef yönlendirmesinin düzelmesi atomik restore anlamına gelmez.
 - **Beklenen/gerçek:** Uygulama koordinasyonu ile oturuma ait görünüm/veri açık kapsamla ayrılmalı; restore/reset ve geç kip hazırlığı ortak durumu etkileyebiliyor. Global busy/aktif koşu tek-koşu sözleşmesidir, tek başına hata değildir.
 - **Yeniden üretme/kapanış:** Aynı/farklı projede iki sohbet, farklı geçmiş/sayaç, reset/restore ve geç kip hazırlığı callback'leri; eski callback yeni oturum/seçime yazmamalı, tek aktif koşu korunmalı.
 
