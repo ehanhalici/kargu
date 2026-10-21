@@ -222,6 +222,22 @@ terminating the process. Stop cancels the foreground tool; background
 jobs continue until explicitly cancelled. Other bounded tools keep their
 normal timeouts. A positive `kargu-bash-timeout` opts into a deadline.
 
+`read_file` normalizes its line window once. `from_line`/`to_line` are positive
+1-based inclusive integers; `limit` alone reads the first N lines. The legacy
+`offset` is a 1-based start alias, with zero also meaning the first line.
+Malformed, null and conflicting bounds are rejected. Explicit windows still
+obey `kargu-diff-read-max-chars`; totals remain `unknown` when counting the
+unrequested tail would require more scanning.
+
+After project context is resolved, native reads delegate target path lookup and
+disk reads to an owned helper process. Input is bounded cumulatively by
+`kargu-file-read-max-bytes`; decoded snapshots also respect
+`kargu-file-read-max-scan-chars`. Narrow live-buffer ranges are sliced in place,
+including unsaved text, without copying or splitting the whole buffer. Batch
+callers retain the synchronous `kargu-file-read` compatibility entrypoint;
+native tool calls use callbacks. Remote reads require a separate adapter and
+currently return unavailable. The helper ignores file transformation handlers.
+
 `workspace_grep` enforces `max_matches` across the whole search, not per
 file. Both ripgrep and GNU grep use line-buffered output; Kargu stops the
 producer after at most one extra captured record to detect omitted hits.

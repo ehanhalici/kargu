@@ -80,6 +80,14 @@ duplicate. Process publication is conditional on pending state and generation,
 including when a transport callback completes synchronously; ERT covers this
 resource-ownership boundary without adding a loop transition.
 
+The bounded file reader uses the existing tool-process runner and asynchronous task
+lifetime, without adding a process state. Its 2026-10-21 regression scan
+(`proof/run_tlc.sh --process`) explored 535 generated states, 179 distinct
+states, depth 9, with no error. ERT separately checks read-owner replacement,
+helper cancellation/drainage, bounded prefix growth, worker JSON/UTF-8 decoding,
+and preferring a newly edited live buffer over a delayed disk snapshot. The
+process model does not prove filesystem atomicity or all read-owner lifetimes.
+
 External tool processes install their completion sentinel at creation, before
 startup can yield to process events. The existing starting/running/closed
 barrier delays delivery until resource setup completes, even if both streams

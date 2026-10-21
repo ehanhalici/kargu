@@ -1,7 +1,7 @@
 # Açık işler
 
 Yalnız açık kayıtlar tutulur; kapanan ve yanlış pozitif kayıtlar silinir.
-2026-10-21 doğrulaması: 858/858 ERT geçti. Yeşil testler kapsanmayan hataları
+2026-10-21 doğrulaması: 875/875 ERT geçti. Yeşil testler kapsanmayan hataları
 çürütmez. K = kod yolu doğrulandı; Y = kontrollü yeniden üretildi;
 D = ortam/ölçüm kanıtı gerekiyor. Kimlikler yeniden numaralanmaz.
 P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
@@ -46,11 +46,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 - **Beklenen/gerçek:** Sağlayıcı keşfi UI'da pinentry/disk beklememeli; alt katman senkron bekleyebilir. Gerçek gecikme ortama bağlı.
 - **Yeniden üretme/kapanış:** Kontrollü geciken kimlik deposu/secret, iptal, öncelik/keyless ve gizli veri sızıntısı testleri; listeleme örtük toplu kilit açmamalı.
 
-### PERF-01 · P2 · K — Satır aralığında bile read_file tam dosyayı kopyalıyor
-
-- **Yer/kanıt:** `kargu/files.el`, `kargu-file--resolve-read-target` tam metni alıyor; `kargu-file-read` tüm metne `split-string` uyguluyor. Algoritma doğrulandı; belirli 100 MB eşiği/donma süresi ölçülmedi. Okuma modülünün diff'ten ayrılması bu performans işini kapatmaz.
-- **Beklenen/gerçek:** Küçük aralık tüm satır listesini gerektirmemeli; maliyet dosya boyutuyla büyüyor.
-- **Yeniden üretme/kapanış:** Büyük dosyada dar aralık, uzun satır, büyüme, EOF, boş dosya, UTF-8 ve kirli/daraltılmış tampon; ölçümlü bellek/çıktı bütçesi ve unavailable/truncation sözleşmesi.
 
 ### PERF-04 · P2 · K — Oturum listesi bütün kayıtları senkron ayrıştırıyor
 
@@ -66,12 +61,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 
 
-### TOOL-01 · P2 · Y — `read_file` aralık argümanları yanlış yorumlanıyor / sessizce yok sayılıyor
-
-- **Yer/kanıt:** `kargu/tools/diff.el` içindeki `read_file` yürütücüsü ve `kargu/files.el` içindeki `kargu-file-read` (`kargu-diff-read-file` uyumluluk alias'ı). 3000 satırlık dosyayla yeniden üretildi: (a) yalnız `limit=3` → `lines 1-3000` (limit `from` olmadan yok sayılıyor: `(and from limit ...)`); (b) `offset=0, limit=2` → `lines 1-1`, yani 1 satır (`to = f + n - 1` hesabı `from` 1'e sıkıştırılınca kayıyor); (c) `from_line="abc"` → 1'den başlıyor, `to_line="abc"` → dosya sonuna kadar (`kargu-to-int` nil dönünce varsayılana düşülüyor), hata verilmiyor.
-- **Beklenen/gerçek:** Şema `limit`'i "from_line'dan itibaren en fazla satır" olarak tanımlıyor; yalnız `limit` ilk N satırı, `offset=0` ile `limit=N` tam N satırı döndürmeli; bozuk tam sayı reddedilmeli. Gerçekte model yanlış/çok geniş aralık alıyor (çıktı yalnız global `kargu-tool-output-limit` ile kısılıyor) ve girdi hatasını fark etmiyor.
-- **Yeniden üretme/kapanış:** limit tek başına, offset 0/1 + limit, `from_line` 0/negatif/ondalık/sayısal olmayan, `to_line` sayısal olmayan/0/dosya sonunu aşan, `limit` 0/negatif, boş dosya. Beklenen aralık ve hata metinleri test edilmeli; alias (`offset`) sözleşmesi tek yerde belgelenmeli.
-- **Bağımlılık:** PERF-01 ile aynı fonksiyon; aralık normalizasyonu ayrı çözülmeli.
 
 ### DAPE-05 · P2 · K — Port üzerinden adapter oluşturma hâlâ senkron bekliyor
 
@@ -120,7 +109,7 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 - **Dosyalar / kalan sınır:** `core/session.el` kimlik/sayaçları, tek geçmiş kuyruğunu ve değişmez provider/model/effort seçimini lazy/buffer-owned `kargu-session` kaydında tutuyor; API delivery/run bu handle'ları yakalıyor. Geçici ping geçmişi ayrı, history snapshot'ları detached; foreign-buffer Stop/HTTP cevabı sahibine dönüyor. `state/store.el` ortak kip/yaşam döngüsü/toplamları ve global `kargu--loop-run` koordinasyonu hâlâ application/session sahipliğine ayrılmalı; run'ın proje/kip/yapılandırma snapshot sınırı tamamlanmalı.
 - **Karar:** Kimlik, geçmiş, sayaç ve sohbet seçimini sahipli bir oturum kaydında topla; sohbet tamponu bu kayda referans versin. Headless kullanımda da açık oturum referansı sağlanabilsin. Global varsayılan ayarlar ile oturuma ait canlı seçim ayrışsın; aktif koşu, başlarken yakaladığı oturum/proje/kip/seçim snapshot'ına bağlansın.
 - **Sınır:** Buffer-local değişken tek başına gecikmiş callback'i doğru tampona yönlendirmez. Açık sahiplik ve oturum nesli kontrolü korunsun. Proje bazlı sohbet bulma/oluşturma hâlâ gereklidir; routing tamamen kaldırılmasın. Tek aktif koşu ve aktif koşunun kip kilidi korunsun; çoklu sohbet, eşzamanlı çoklu ajan çalıştırma yetkisi değildir. Mevcut global koordinatör geçiş hedefi değil, taşınacak mevcut durumdur; yeni mutable singleton kurulmasın (ARCH-12).
-- **Kapanış / bağımlılık:** Aynı/farklı projede iki sohbet, headless oturum, seçim aktivasyonu, reset/restore, kapatılan tampon ve eski callback testleri; CHAT-01/02/03. İkinci bir durum deposu kurmak yerine mevcut seçici/geçiş API'sini sahipli kayda taşı.
+- **Kapanış / bağımlılık:** Aynı/farklı projede iki sohbet, headless oturum, seçim aktivasyonu, reset/restore, kapatılan tampon ve eski callback testleri; CHAT-01/02. İkinci bir durum deposu kurmak yerine mevcut seçici/geçiş API'sini sahipli kayda taşı.
 
 ### ARCH-02 · Komut Güvenliği: Argv, Politika ve Gerçek İzolasyonu Birbirine Karıştırma
 
@@ -164,7 +153,7 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 ### ARCH-06 · Sohbet Görünümü: Veri Sahipliğini Yerleşimden Ayır, UI Değişimini Ölç
 
 - **Dosyalar / kod bulgusu:** `chat/prompt.el`, `chat/transcript.el`, `chat/render.el`; tek tampondaki transcript, taslak ve footer marker gerektiriyor. Marker kullanımı tek başına hata değildir; split UI da odak, pencere ve yaşam döngüsü yönetimi gerektirir.
-- **Karar:** Oturum/draft modelini görünümden ayır. Footer'ın header-line/mode-line'a, çok satırlı girdinin ayrı tampona taşınmasını bağımsız prototip olarak değerlendir; minibuffer'ı zorunlu tek giriş yapma. Önce CHAT-01/02/03 ve mevcut prompt sınırları güvenli hâle gelsin.
+- **Karar:** Oturum/draft modelini görünümden ayır. Footer'ın header-line/mode-line'a, çok satırlı girdinin ayrı tampona taşınmasını bağımsız prototip olarak değerlendir; minibuffer'ı zorunlu tek giriş yapma. Önce CHAT-01/02 ve mevcut prompt sınırları güvenli hâle gelsin.
 - **Sınır:** Akış sırasında yazılan taslak, geçmişe gitme, Company seçimi, IME/Unicode, klavye/fare erişimi, read-only transcript, erişilebilir Stop ve point/narrowing/pencere konumu korunsun. Yeni yerleşim veri kaybını çözmüş kabul edilmesin; eski ve yeni görünüm ortak oturum API'sini kullansın.
 - **Kapanış:** Aynı stream/approval/draft senaryolarını iki görünümde karşılaştır; kullanılabilirlik ve bakım yükü kanıtıyla yerleşim seç. Kullanıcıya dönük davranış değişimini belgeleyerek geç; bu deney güvenlik düzeltmelerini veya headless sınırı bloke etmesin.
 
@@ -228,7 +217,7 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 - **Tercih kuralı:** Küçük ve açık bir standart algoritma yeterliyse onu kullan. Cache ancak sahiplik, anahtar, invalidation, boyut/ömür ve eşdeğerlik testleriyle eklenebilir; aksi hâlde karmaşıklığı artırır. Asenkron yürütme O(N²) algoritmayı düzeltmez; lineer algoritma da yavaş disk/ağ çağrısını UI thread'inde güvenli yapmaz. Doğruluk için gerçekten gerekli maliyet belgelenir; evrensel “her şey O(N)” hedefi konmaz.
 - **Dış değişiklik ve cache:** Invalidation yalnız Kargu'nun kendi yazma araçlarına bağlanmasın; kullanıcı düzenlemesi, başka süreç/Emacs, Git checkout, LSP server restart ve config değişimi de ilgili revision'ı etkiler. Geçersizleştirme olayı güvenilir değilse yeniden doğrula veya sonucu açıkça eski snapshot/unknown olarak etiketle. Salt TTL, aynı tool adı/argümanı veya read-only sınıfı güncellik kanıtı değildir; cache aynı işlevin farklı veri neslini karıştırmasın.
 - **Doğrulama:** Küçük/normal/büyük girdi, uzun satır/mesaj, boş/bozuk veri, bounded çıktı ve iptal senaryolarında süre, allocation, tepe bellek ve çıktı miktarını karşılaştır. Flaky süre eşiği yerine mümkün olduğunda taranan byte, traversal/encode sayısı ve nesne paylaşımı gibi deterministik sayaçları test et. Özel karmaşık algoritmayı ancak basit seçeneğin yetersizliği ölçülmüşse seç.
-- **Kapanış / bağımlılık:** ARCH-04/07/13, PERF-01..05 ve DEEP-07/09. “Problem tamamen çözüldü” iddiası kabul ölçütleri, başarısızlık yolları ve mevcut law/protokol testleriyle desteklensin; başarı yalnız happy-path testi veya düşük satır sayısıyla ilan edilmesin. Her yeni katman için hangi zorunlu problemi çözdüğü ve neden mevcut mekanizmanın yetmediği açıklansın.
+- **Kapanış / bağımlılık:** ARCH-04/07/13, PERF-04/05 ve DEEP-07/09. “Problem tamamen çözüldü” iddiası kabul ölçütleri, başarısızlık yolları ve mevcut law/protokol testleriyle desteklensin; başarı yalnız happy-path testi veya düşük satır sayısıyla ilan edilmesin. Her yeni katman için hangi zorunlu problemi çözdüğü ve neden mevcut mekanizmanın yetmediği açıklansın.
 
 ### ARCH-15 · Defensive Programming: Sınırda Doğrula, İçeride Kanonik Veriyle Çalış
 
@@ -336,10 +325,10 @@ Amaç her dosyayı ayrı paket yapmak değil; UI, ajan motoru, taşıma ve Emacs
 ### Modüler Dönüşüm Yol Haritası (Bağımlılık ve Kapanış Kapıları)
 
 1. **Sözleşme ve kanıt:** Mevcut law/FSM, public API, olaylar, kaynak sahipleri ve headless yolları envanterle. ARCH-09..19 kurallarını değişen modüller için review/kapanış kapısı yap: bağımlılık matrisi, domain tip envanteri, giriş/çıkış validation sınırı, hata/uyumluluk sözleşmesi, geçiş tablosu, kaynak ömrü, global mutation whitelist'i, nesting ve algoritmik maliyet kaydı birlikte tutulsun. Contract suite ve hata enjeksiyonu bu kayıtların kabul ölçütü olsun. Kod bulgusu, yeniden üretilmiş hata ve ölçüm isteyen hipotezi ayır; kapalı DAPE işlerini yeniden hata listesine alma.
-2. **Sahiplik ve güvenlik temeli:** ARCH-01/MOD-07 ile CHAT-01/02/03; ARCH-02/03 ile PERM-01; ARCH-05 ile DAPE-04/05. Önce veri kaybı/yetki ve stale callback riskleri; davranış koruyan küçük adımlar, tek-koşu sözleşmesi sabit.
+2. **Sahiplik ve güvenlik temeli:** ARCH-01/MOD-07 ile CHAT-01/02; ARCH-02/03 ile PERM-01; ARCH-05 ile DAPE-04/05. Önce veri kaybı/yetki ve stale callback riskleri; davranış koruyan küçük adımlar, tek-koşu sözleşmesi sabit.
 3. **Portları tamamla:** MOD-01/03/04/05/06 ile mevcut hook/callback'leri tutarlı hâle getir; MOD-02 ile araç kayıt/yürütme kapısını ayır. Yapılandırma ve discovery disk/kimlik deposu beklemeleri CONFIG-01 ve PERF-04/05 kapsamında asenkron/iptal edilebilir olsun.
 4. **Düzenleme işlemi:** DIFF-01/02 ve ARCH-04; üç girişi tek sahipli uygulama/inceleme/geri alma katmanında birleştir. DEEP-03 ikinci checkpoint motoru kurmaz. DEEP-01 baseline'ı aynı düzenleme planına bağlansın.
-5. **Ölçümlü iyileştirmeler:** ARCH-07/08, PERF-01/02/03, TOOL-01 ve DEEP-04/07; süre/allocation/çıktı bütçesi ölç, hedefli değiştir. DEEP-02/05/09 yeni davranışlarını sınırlı politika ve FSM değişiklikleriyle ayrı uygula; ARCH-06 yerleşim deneyi zorunlu altyapı işi değildir.
+5. **Ölçümlü iyileştirmeler:** ARCH-07/08 ve DEEP-04/07; süre/allocation/çıktı bütçesi ölç, hedefli değiştir. DEEP-02/05/09 yeni davranışlarını sınırlı politika ve FSM değişiklikleriyle ayrı uygula; ARCH-06 yerleşim deneyi zorunlu altyapı işi değildir.
 6. **Merge ve sonraki entegrasyon:** Zorunlu güvenlik, sahiplik ve ortak port kapılarının açık engelleri kalmadığı; ilgili/tam ERT, byte-compile/checkdoc ve değişen modellerin exhaustive TLC sonucu ile belgelenmeli. Performans hipotezleri/opsiyonel UI deneyleri ayrı izlenebilir; kapanmamış güvenlik işini “opsiyonel” diye saklama. Kullanıcı onayıyla refactoring → master merge sonrasında MOD-08'in gerçek dış ajan adapter'ları ayrı planlanır; bu belge merge/push işlemini kendi başına başlatmaz.
 
 DEEP-10..16, bu kapıların sistem düzeyindeki kabul senaryolarını tamamlar: çoklu yazıcı, çökme, kuyruk baskısı, koordinat dönüşümü, bağlantı güveni, veri ömrü ve modüllerin birlikte çalışması. Bunlar varsayımsal bir dağıtık sistem framework'ü kurma gerekçesi değildir. Önce desteklenen platform/özellik için garanti düzeyini seç; doğrulanmış veri kaybı/yetki risklerini zorunlu kapı, isteğe bağlı dayanıklılık yeteneklerini açık kapsam kararı olarak izle.

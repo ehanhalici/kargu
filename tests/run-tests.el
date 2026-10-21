@@ -28,6 +28,7 @@
 (require 'tests/test-permission)
 (require 'tests/test-permission-operation)
 (require 'tests/test-session-routing)
+(require 'tests/test-file-window)
 (require 'tests/test-git)
 (require 'tests/test-history)
 (require 'tests/test-history-store)
