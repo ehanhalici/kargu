@@ -1,7 +1,7 @@
 # Açık işler
 
 Yalnız açık kayıtlar tutulur; kapanan ve yanlış pozitif kayıtlar silinir.
-2026-10-21 doğrulaması: 853/853 ERT geçti. Yeşil testler kapsanmayan hataları
+2026-10-21 doğrulaması: 858/858 ERT geçti. Yeşil testler kapsanmayan hataları
 çürütmez. K = kod yolu doğrulandı; Y = kontrollü yeniden üretildi;
 D = ortam/ölçüm kanıtı gerekiyor. Kimlikler yeniden numaralanmaz.
 P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
@@ -29,7 +29,7 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ### CHAT-01 · P1 · K — Uygulama durumu ve asenkron kip hazırlığının sahipliği ayrılmamış
 
-- **Yer/kanıt:** `state/store.el` kip/yaşam döngüsü/busy/belirteç toplamları ve uygulama koordinasyonu hâlâ ortak. `chat/mode.el` asenkron kip hazırlığının tamamlanma/iptal sahipliği ayrılmalı. Kimlik, sayaç, tek geçmiş kuyruğu ve değişmez provider/model/effort seçimi artık buffer-owned `kargu-session` kaydında; global seçim override'ları ve chat seçim kopyaları kaldırıldı.
+- **Yer/kanıt:** `state/store.el` kip/yaşam döngüsü/busy/belirteç toplamları ve uygulama koordinasyonu hâlâ ortak. `core.el` asenkron kip hazırlığının tamamlanma/iptal sahipliği ayrılmalı. Kimlik, sayaç, tek geçmiş kuyruğu ve değişmez provider/model/effort seçimi artık buffer-owned `kargu-session` kaydında; global seçim override'ları ve chat seçim kopyaları kaldırıldı. Restore hedefi artık projeye göre seçiliyor; hedef yönlendirmesinin düzelmesi atomik restore anlamına gelmez.
 - **Beklenen/gerçek:** Uygulama koordinasyonu ile oturuma ait görünüm/veri açık kapsamla ayrılmalı; restore/reset ve geç kip hazırlığı ortak durumu etkileyebiliyor. Global busy/aktif koşu tek-koşu sözleşmesidir, tek başına hata değildir.
 - **Yeniden üretme/kapanış:** Aynı/farklı projede iki sohbet, farklı geçmiş/sayaç, reset/restore ve geç kip hazırlığı callback'leri; eski callback yeni oturum/seçime yazmamalı, tek aktif koşu korunmalı.
 
@@ -64,12 +64,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 - **Beklenen/gerçek:** Yavaş/askıda yerel mount UI'ı bekletmemeli; byte sınırı süre garantisi değil.
 - **Yeniden üretme/kapanış:** Kontrollü geciken yol/metadata/okuma, iptal, kaynak tampon nesli değişimi. Disk işi iptal edilebilir yardımcı süreçte; callback proje/oturum/koşu ve kaynak nesline bağlı, canlı tampon güncelliği korunmalı.
 
-### CHAT-03 · P1 · Y — Oturum seçimi/restore başka projenin varsayılan adlı sohbetini eziyor
-
-- **Yer/kanıt:** `kargu/chat/session.el`, `kargu-chat-sessions` ve `kargu-session-load`: hedef tampon sohbet kipinde değilse veya verilmediyse sabit `kargu-chat-buffer-name` (`*kargu-chat*`) aranıyor/oluşturuluyor; tamponun hangi projeye ait olduğu (`kargu-chat--project-root`) karşılaştırılmıyor. Yeniden üretildi: proje A `*kargu-chat*` tamponunda `A-PRIVATE-TRANSCRIPT` varken B proje kod tamponundan `kargu-chat-sessions` çalıştırıldı; sonuçta A tamponu `kargu-chat--project-root` olarak B'yi aldı, A metni silindi, B oturumu yazıldı. Yönlendirme için `kargu-chat-find-buffer` (`chat/routing.el`) zaten var ama bu yolda kullanılmıyor.
-- **Beklenen/gerçek:** Restore, çağıran projenin kendi sohbetine (yoksa yeni tampona) yazmalı; başka projenin sohbet metni/taslağı/oturum kimliği silinmemeli. Gerçekte kullanıcı çıktısı kayboluyor ve tampon yanlış projeye bağlanıyor.
-- **Yeniden üretme/kapanış:** İki proje, A varsayılan adlı sohbeti tutarken B'den seçim/restore; `kargu-session-load` hedefsiz çağrısı; ilgili sohbet yoksa yeni tampon, varsa yalnız eşleşen kök. A'nın transcript/geçmiş/session-id değerleri değişmemeli (regresyon testi: yukarıdaki senaryo).
-- **Bağımlılık:** CHAT-01/CHAT-02 ile ortak sohbet sahipliği; CHAT-02'nin atomik restore sınırı bu düzeltmeden önce hedef tamponu seçmeli.
 
 
 ### TOOL-01 · P2 · Y — `read_file` aralık argümanları yanlış yorumlanıyor / sessizce yok sayılıyor

@@ -262,9 +262,7 @@ must finish before loading another session.  Return TARGET-BUFFER on success."
          (raw (kargu-session--read-data session-or-id root))
          (data (and raw (kargu-session-validate raw)))
          (_validated (when data (kargu-session-storage-file (kargu-aget data "id") root)))
-         (buf (or target-buffer
-                  (get-buffer (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*"))
-                  (get-buffer-create (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*")))))
+         (buf (and data (kargu-chat-restore-target root target-buffer))))
     (when data
       (with-current-buffer buf
         (let ((inhibit-read-only t)
@@ -273,9 +271,8 @@ must finish before loading another session.  Return TARGET-BUFFER on success."
               (mode-str (kargu-aget data "mode"))
               (updated-at (or (kargu-aget data "updated_at") "earlier")))
           (unless (derived-mode-p 'kargu-chat-mode)
-            (if (fboundp 'kargu-chat-mode)
-                (kargu-chat-mode)
-              (text-mode)))
+            (let ((default-directory root))
+              (if (fboundp 'kargu-chat-mode) (kargu-chat-mode) (text-mode))))
           ;; Erase buffer cleanly
           (delete-region (point-min) (point-max))
           ;; Restore message history and local variables
@@ -342,12 +339,10 @@ must finish before loading another session.  Return TARGET-BUFFER on success."
              (selected (cdr (assoc choice choices))))
         (when selected
           ;; Save current buffer before loading another session
-          (when (derived-mode-p 'kargu-chat-mode)
+          (when (and (derived-mode-p 'kargu-chat-mode)
+                     (equal proj-root (kargu-session-project-root (current-buffer))))
             (kargu-session-save (current-buffer)))
-          (let ((buf (or (and (derived-mode-p 'kargu-chat-mode) (current-buffer))
-                         (get-buffer (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*"))
-                         (get-buffer-create (or (bound-and-true-p kargu-chat-buffer-name) "*kargu-chat*")))))
-            (kargu-session-load selected buf proj-root)
+          (let ((buf (kargu-session-load selected nil proj-root)))
             (pop-to-buffer-same-window buf)
             (message "kargu: loaded session '%s'" (kargu-aget selected "title"))))))))
 

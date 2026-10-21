@@ -244,6 +244,11 @@ environment and executable search path. A delayed answer cannot start a changed
 request; duplicated decisions enter the continuation only once, without replaying
 tool preparation. Cancelling its task dismisses only that task's prompt.
 
+Session restore resolves its destination by project, never by a shared buffer
+name. An explicit target belonging to another project is refused; an implicit
+target reuses a matching chat or gets a new unique buffer. A missing record does
+not allocate a chat. Transactional restore remains tracked in `todo.md`.
+
 Shell validation and approval are best-effort guards, not an operating-system
 sandbox. Keep shell confirmation enabled for untrusted commands; command strings
 can invoke scripts and interpreters whose filesystem effects cannot be inferred

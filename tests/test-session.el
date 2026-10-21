@@ -131,6 +131,7 @@
           ;; Restore into buf2
           (with-current-buffer buf2
             (kargu-chat-mode)
+            (setq-local kargu-chat--project-root (file-name-as-directory proj-dir))
             (kargu-session-load "session-test-001" buf2 proj-dir)
             ;; Verify properties restored in buf2
             (should (equal kargu-chat--session-id "session-test-001"))
@@ -176,6 +177,7 @@
                 (kargu-selection-model) nil)
           (with-current-buffer buf2
             (kargu-chat-mode)
+            (setq-local kargu-chat--project-root (file-name-as-directory proj-dir))
             (kargu-session-load "session-prov-001" buf2 proj-dir)
             (should (equal (kargu-selection-provider) "openrouter"))
             (should (equal (kargu-selection-model) "kept-model"))
