@@ -193,6 +193,31 @@ No file is opened, checker enabled or disabled backend forced."
               (or (not (kargu-lsp-diagnostic-barrier-server barrier))
                   (kargu-lsp--publication-matches-p barrier))))))
 
+(defun kargu-lsp-current-diagnostics-p (buffer)
+  "Return non-nil when BUFFER has reports for its current document version.
+Observe existing evidence without starting a backend or waiting for I/O."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (let* ((backends (kargu-lsp--diagnostic-backends))
+             (server (and (bound-and-true-p eglot--managed-mode)
+                          (eglot-current-server)))
+             (barrier (kargu-lsp--make-diagnostic-barrier
+                       :buffer buffer :file buffer-file-name
+                       :tick (buffer-chars-modified-tick) :server server
+                       :version (and server eglot--versioned-identifier)
+                       :backends backends
+                       :reports (mapcar
+                                 (lambda (backend)
+                                   (and kargu-lsp--backend-reports
+                                        (gethash backend kargu-lsp--backend-reports)))
+                                 backends))))
+        (and backends (kargu-lsp-diagnostic-barrier-ready-p barrier)
+             (seq-every-p
+              (lambda (report)
+                (= (kargu-lsp--backend-report-tick report)
+                   (buffer-chars-modified-tick)))
+              (kargu-lsp-diagnostic-barrier-reports barrier)))))))
+
 (defun kargu-lsp-sync-diagnostic-barrier (barrier)
   "Publish BARRIER's verified Eglot cache to Flymake, returning readiness.
 Eglot may otherwise defer that cache in manual Flymake mode.  No server

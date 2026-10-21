@@ -45,6 +45,7 @@
 (require 'tests/test-plan)
 (require 'tests/test-plan-async)
 (require 'tests/test-patch)
+(require 'tests/test-edit-transaction)
 (require 'tests/test-metadata)
 (require 'tests/test-model-store)
 (require 'tests/test-parameters)

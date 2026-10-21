@@ -32,8 +32,10 @@ The finished result and the run are bound to `result' and `run'."
                ((symbol-function 'kargu-lsp--diagnostics-data) (lambda (_p) ,diagnostics))
                ((symbol-function 'kargu--loop-add-result-and-continue)
                 (lambda (_run _id _name text _queue) (setq result text))))
-       (kargu--loop-verify-files run "id1" "edit_file" "edited ok" nil
-                                (list (expand-file-name "a.el" (kargu-permission-project-root))))
+       (let ((path (expand-file-name "a.el" (kargu-permission-project-root))))
+         (puthash path (list :baseline (list :available t :diagnostics nil))
+                  kargu-diff--changed)
+         (kargu--loop-verify-files run "id1" "edit_file" "edited ok" nil (list path)))
        ,@body)))
 
 (ert-deftest kargu-heal-clean-file-passes-verification-test ()
@@ -233,6 +235,57 @@ The finished result and the run are bound to `result' and `run'."
             (should-not continued)
             (should-not kargu-async--pending)
             (should-not (kargu-diff-changed-files))))))))
+
+(ert-deftest kargu-heal-compares-baseline-diagnostics-across-line-shifts-test ()
+  "Pre-existing errors shifted in line numbers do not trigger self-healing,
+whereas a genuinely new error (even when an old error was fixed) triggers healing."
+  (kargu-test-with-git-repo '(("a.el" . "(defun a ()\n  (bad-call))\n"))
+    (let* ((path (expand-file-name "a.el" repo))
+           (run (list :state 'tool))
+           (kargu--loop-run run)
+           (kargu-diff--changed (make-hash-table :test #'equal))
+           (result nil))
+      ;; Case 1: Pre-existing error at line 2 shifts to line 10 after edit -> no new errors
+      (puthash path
+               (list :status :applied-full
+                     :baseline (list :available t
+                                     :diagnostics
+                                     (list (list :file path :severity 1 :line 2 :character 2
+                                                 :source "elisp" :message "Unbound: bad-call"))))
+               kargu-diff--changed)
+      (cl-letf (((symbol-function 'kargu-lsp-wait-diagnostics)
+                 (lambda (file cb) (funcall cb file "[error] L10:C2: Unbound: bad-call" nil)))
+                ((symbol-function 'kargu-lsp--diagnostics-data)
+                 (lambda (_p)
+                   (list (list :file path :severity 1 :line 10 :character 2
+                               :source "elisp" :message "Unbound: bad-call"))))
+                ((symbol-function 'kargu--loop-add-result-and-continue)
+                 (lambda (_run _id _name text _queue) (setq result text))))
+        (kargu--loop-verify-files run "id1" "edit_file" "edited ok" nil (list path))
+        (should (string-search "1 pre-existing error(s)" result))
+        (should (string-search "No new regressions observed" result))
+        (should-not (plist-get run :healing)))
+      ;; Case 2: Old error resolved, but a different new error is introduced (same total count 1 -> 1)
+      (setq result nil)
+      (puthash path
+               (list :status :applied-full
+                     :baseline (list :available t
+                                     :diagnostics
+                                     (list (list :file path :severity 1 :line 2 :character 2
+                                                 :source "elisp" :message "Unbound: old-error"))))
+               kargu-diff--changed)
+      (cl-letf (((symbol-function 'kargu-lsp-wait-diagnostics)
+                 (lambda (file cb) (funcall cb file "[error] L5:C0: Unbound: brand-new-error" nil)))
+                ((symbol-function 'kargu-lsp--diagnostics-data)
+                 (lambda (_p)
+                   (list (list :file path :severity 1 :line 5 :character 0
+                               :source "elisp" :message "Unbound: brand-new-error"))))
+                ((symbol-function 'kargu--loop-add-result-and-continue)
+                 (lambda (_run _id _name text _queue) (setq result text))))
+        (kargu--loop-verify-files run "id2" "edit_file" "edited ok" nil (list path))
+        (should (string-search "Baseline delta: 1 new, 0 pre-existing, 1 resolved error(s)" result))
+        (should (string-search "SELF-HEALING (round 1 of" result))
+        (should (= (plist-get run :healing) 1))))))
 
 (provide 'tests/test-heal)
 ;;; test-heal.el ends here

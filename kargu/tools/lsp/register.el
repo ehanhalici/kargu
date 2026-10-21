@@ -120,7 +120,8 @@
   "Tool schemas and executors exposed by the LSP adapter.")
 
 (defconst kargu-lsp--tool-aliases
-  '(("edit_symbol" . "edit_by_lsp")
+  '(("replace_symbol" . "edit_by_lsp")
+    ("edit_symbol" . "edit_by_lsp")
     ("edit_with_lsp" . "edit_by_lsp")
     ("edit_by_symbol" . "edit_by_lsp")
     ("read_file_outline" . "read_file_symbols")

@@ -1,25 +1,17 @@
 # Açık işler
 
 Yalnız açık kayıtlar tutulur; kapanan ve yanlış pozitif kayıtlar silinir.
-2026-10-21 doğrulaması: 906/906 ERT geçti. Yeşil testler kapsanmayan hataları
+2026-10-21 doğrulaması: 942/942 ERT geçti. Yeşil testler kapsanmayan hataları
 çürütmez. K = kod yolu doğrulandı; Y = kontrollü yeniden üretildi;
 D = ortam/ölçüm kanıtı gerekiyor. Kimlikler yeniden numaralanmaz.
 P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ## Doğrulanmış hatalar — düzeltme sırası
 
-### DIFF-01 · P1 · K — Daraltılmış/kirli tampon ve rollback sözleşmesi güvenli değil
+### CONFIG-01 · P2 · K — Asenkron credential sınırında senkron auth-source işi
 
-- **Yer/kanıt:** `kargu/tools/diff/stage.el`, `kargu-diff--file-text` ve proposal erişilebilir `buffer-string` alıyor. Auto yazma `erase-buffer`/`save-buffer` kullanıyor; save-hook dönüşümleri sonuçla uzlaştırılmıyor.
-- **Beklenen/gerçek:** Snapshot tam dosya olmalı, kullanıcı değişiklikleri/point/narrowing korunmalı; eksik snapshot ve örtük kaydetme mümkün.
-- **Yeniden üretme/kapanış:** Daraltılmış/kirli tampon, dış disk değişikliği, kodlama, save-hook dönüşümü ve kaydetme hatası. Kullanıcı değişikliğini silmeyen yazma/geri alma sözleşmesi gerekli.
-
-### DIFF-02 · P1 · K — Çok dosyalı patch için ortak işlem geri alma yok
-
-- **Yer/kanıt:** `kargu/tools/diff.el`, `kargu-diff--commit-patch`/`--stage-patch-file`: dosyalar ayrı uygulanıyor; hata batch sonucuna yazılıyor, önceki başarılı dosyalar otomatik geri alınmıyor.
-- **Beklenen/gerçek:** Disk/tampon/snapshot ve insanın kısmi kabulü açısından işlem sınırı açık olmalı; yalnız ön doğrulama atomiklik sağlamıyor.
-- **Yeniden üretme/kapanış:** Son dosyada disk/kaydetme hatası ve kısmi insan kabulü/reddi; araya giren kullanıcı değişiklikleri korunarak geri alma/sonuç sözleşmesi test edilmeli.
-- **Bağımlılık:** DIFF-01.
+- **Yer/kanıt:** `config/key.el`, `kargu-config-resolve-api-key-async` adapter yokken doğrudan `kargu-config-resolve-api-key-result` çağırıyor; bu yol `auth-source-search` ve callable `:secret` fonksiyonunu Emacs iş parçacığında çalıştırıyor. Plain-file sınıflaması TRAMP/yavaş dosyayı da dışlamıyor. Kontrollü sentetik secret fixture'ı, secret fonksiyonunun async API dönmeden çağrıldığını gösterdi; gerçek credential kullanılmadı.
+- **Beklenen/kapanış:** UI/discovery saf ve bellekteki snapshot'ı okusun; disk/secret çözümü gerçek iptal edilebilir adapter/worker sınırında çalışsın veya destek yoksa açık unavailable dönsün. Timer içine senkron işi taşımak düzeltme değildir. Endpoint/config revision'ı ve oturum değişiminde geç cevap elensin (DEEP-14); test, callable secret'ın UI yolunda çalışmadığını ve timeout/Stop'un uygulanabildiğini göstersin.
 
 ## Doğrulama bekleyen riskler
 
@@ -79,8 +71,7 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 
 ### ARCH-04 · Düzenleme Motoru: Üç Standart Giriş, Tek Güvenli İşlem Hattı
 
-- **Dosyalar:** `kargu/tools/diff.el`, `kargu/tools/diff/stage.el`, `kargu/tools/diff/review.el`, `kargu/tools/diff/track.el`, `kargu/tools/lsp/symbols.el`, `kargu/tools/lsp/register.el`.
-- **Mevcut durum / gerekçe:** Özel `*** Add/Update/Delete File` sözdizimi ve hunk ayrıştırıcısı bakım yükü oluşturuyor. Ancak benzersiz `old_string` → `new_string` değişimi (`kargu-diff-apply-replace`) ve sembol tabanlı düzenleme (`edit_by_lsp` / `kargu-lsp-edit-symbol`) zaten var; bunlar sıfırdan yeniden yazılmamalı. DIFF-01 ve DIFF-02'nin snapshot, tampon sahipliği ve çok dosyalı işlem sorunları parser kaynaklı olmak zorunda değil; format değişimi bu sorunları kendiliğinden çözmez.
+- **Dosyalar / kalan sınır:** `kargu/tools/diff.el`, `kargu/tools/diff/stage.el`, `kargu/tools/diff/review.el`, `kargu/tools/diff/track.el`, `kargu/tools/lsp/symbols.el`, `kargu/tools/lsp/register.el`. Özel `*** Begin Patch` ayrıştırıcısı kaldırıldı; blok değiştirme (`edit_file`), sembol değiştirme (`edit_by_lsp` / `replace_symbol`) ve standart Unified Diff (`apply_patch`) ortak `pre-state` snapshot (`:original`, `:coding`, `:tick`, `:disk-revision`, `:baseline-diagnostics`), izole `*kargu-base:...*`/`*kargu-shadow:...*` Ediff incelemesi, `kargu-diff--commit-file-content` save-hook uzlaştırması ve kullanıcı değişikliğini koruyan çok dosyalı batch rollback hattında birleşti. Açık kapsam: paylaşılan snapshot/review/change tablolarını açık düzenleme servisine taşıma, onayda review/config revision'ını dondurma, kaynak edinimi/aktif unload sözleşmesi ve scratch/source I/O bütçeleridir. Çökme/yeniden başlatma dayanıklılığı (DEEP-11) ve çoklu süreç yazıcı koruması (DEEP-10) süreç içi rollback'ten ayrı kalır.
 - **Karar:** Girdi biçimini, değişikliği güvenle uygulama sorumluluğundan ayır. Bütün girişler aynı sahipli düzenleme planına dönüşsün ve ortak snapshot → güncellik doğrulama → inceleme/onay → uygulama → sonuç/geri alma hattını kullansın. Hiçbir giriş doğrudan bu hattı atlayarak dosyaya veya kullanıcı Git index'ine yazmasın.
 - **Üç düzenleme girişi:**
   1. **Yapısal düzenleme:** Fonksiyon, metot, sınıf ve struct için ayrı araçlar çoğaltmak yerine tek bir `replace_symbol` sözleşmesi ve isteğe bağlı `kind` filtresi kullan; mevcut `edit_by_lsp` bunun temeli olsun. LSP/Eglot capability'si veya doğrulanabilir yerel sembol desteği yoksa bu girişi unavailable olarak bildir. Belirsiz hedefte tahmin etme; nitelikli ad veya yeniden seçim iste. Tam karakter aralığını belge sürümü/modification tick ve kaynak kimliğiyle bağla; yalnız satır numarasına güvenme. Tanım/gövde, yorum ve decorator sınırları açık olsun. Eski metni modelin yeniden üretmesi gerekmez; fakat küçük değişiklik için bütün tanımı yeniden üretmenin token maliyeti ayrıca değerlendirilir.
@@ -283,7 +274,7 @@ Aşağıdaki kayıtlar üstteki işleri yok sayan yeni bir hata listesi değildi
 
 ### DEEP-01 · Düzenleme Sonrası Doğrulama: Güncel Baseline ve Proje Etkisi
 
-- **Dosyalar / kod bulgusu:** `loop/heal.el` error sayımı düzenlenen dosyanın bütün hatalarını sayıyor; footer modelden bunları düzeltmesini veya pre-existing olduğunu açıklamasını istiyor. Eski hata ile yeni regresyonun ayrı bir baseline karşılaştırması yok.
+- **Dosyalar / kalan sınır:** `loop/heal.el`, `tools/diff/track.el`, `edit.el`. Düzenleme öncesi `:baseline` tanı snapshot'ı dosya `pre-state` kaydında yakalanıp işlem sonrası yerleşmiş tanılarla konuma duyarsız `(severity source code message)` multiset anahtarı üzerinden karşılaştırılıyor; `:new-errors`, `:pre-existing-errors` ve `:resolved-errors` ayrı raporlanıyor ve self-healing yalnız yeni hata oluştuğunda tetikleniyor. Kalan kapsam düzenlenen dosya dışındaki çapraz dosya tanı etkisinin (project-wide freshness) isteğe bağlı değerlendirilmesidir.
 - **Karar:** Düzenleme öncesi güncel tanı snapshot'ını ve sonraki yerleşmiş snapshot'ı kaynak/sürüm/proje/oturum kimliğiyle bağla. Yeni/artan, önceden var olan, giderilen ve doğrulanamayan tanıları ayrı raporla. Baseline yoksa veya eskiyse “yeni hata yok/temiz” sonucuna düşme.
 - **Sınır:** Yalnız düzenlenen satırlardaki hatalarla sınırlama: bir imza/import değişimi başka dosyalarda veya satırlarda hata yaratabilir. Konum kaymasını, duplicate tanıları ve source/code/message kimliğini hesaba kat; delta tek başına kesin nedensellik kanıtı değildir. Mevcut hataları gizleme veya kullanıcı kapsamını otomatik genişletme; healing adım/bütçe sınırı korunsun.
 - **Kapanış / bağımlılık:** ARCH-04 ve diagnostic freshness; eski hatalı dosyada yorum değişimi, taşınan tanı, aynı sayıda ama farklı hata, çapraz dosya regresyonu, sürümsüz/eski push, unavailable ve iptal testleri. Baseline edinimi UI'ı bekletmesin; güvenilir kanıt yoksa unknown raporlansın.
@@ -294,12 +285,6 @@ Aşağıdaki kayıtlar üstteki işleri yok sayan yeni bir hata listesi değildi
 - **Karar:** Önce ikinci eşik/overflow davranışını test et. Çok aşamalı sıkıştırma istenirse açık, sınırlı bir politika olarak ekle: compaction adedi, token/zaman/istek bütçesi, minimum küçülme ve yeniden deneme histerezisi birlikte tanımlansın. Mevcut tek-compaction varsayılanı, yeni politika ve model onaylanmadan sessizce kaldırılmasın.
 - **Sınır:** Sonsuz özetleme yok; küçülmeyen/boş/hatalı özet güvenli sonlansın. Kullanıcının amacı, açık tool-call/result çiftleri ve gerekli kanıtlar korunsun; özet talimat yetkisi kazanmasın. Retry, compaction ve devam sayaçları tek run bütçesini paylaşsın; Stop her aşamada çalışsın.
 - **Kapanış:** İki ayrı bağlam taşması, bilinmeyen context kapasitesi, tek mesajın pencereyi aşması, compaction'ın kendisinin overflow olması, başarısız özet, geç cevap ve bütçe tükenmesi. Bu davranış değişiminde loop/compaction TLA+ ve exhaustive TLC güncellenmeli; salt limit silmek yeterli değildir.
-
-### DEEP-03 · Çok Dosyalı İşlem: ARCH-04 ile Tek Kayıt, Yıkıcı Global Geri Dönüş Yok
-
-- **Dosyalar / kod bulgusu:** `tools/diff/stage.el` inceleme politikasına bağlı çalışıyor, `diff/track.el` dosya snapshot'ları tutuyor; “her çağrı hemen yazar, hiç rollback yok” ifadesi yanlış. Eksik ortak batch sözleşmesi DIFF-01/02 ve ARCH-04'te izleniyor.
-- **Karar:** Bu kayıt bağımsız bir Git stash/checkpoint motoru oluşturmaz; aynı düzenleme transaction'ına referanstır. Dosya/batch/koşu sınırları ayrı tanımlansın; başarısız koşu, daha önce insanın kabul ettiği bütün işleri otomatik geri alma yetkisi değildir.
-- **Sınır / kapanış:** Otomatik `git reset --hard`, `git clean` veya kullanıcının index/stash alanını geri sarma yok. Git dışı dosyalar, untracked/kirli tamponlar ve araya giren kullanıcı değişiklikleri korunmalı. Git checkpoint'i ancak isteğe bağlı, kapsamı açık bir kolaylık olabilir; ARCH-04'ün snapshot/güvenli rollback testlerini geçmeden bu iş kapanmaz.
 
 ### DEEP-04 · İstem Boyutu ve Cache: Mevcut Sabit Öneki Koru, Tasarrufu Ölç
 
@@ -366,7 +351,7 @@ Aşağıdaki kayıtlar üstteki işleri yok sayan yeni bir hata listesi değildi
 
 ### DEEP-13 · Koordinat Sistemleri: Doğru Tip, Doğru Metin Konumu Demek Değildir
 
-- **Durum / kapsam:** Mimari doğruluk gereksinimi; bu turda yeni konum hatası yeniden üretilmedi. ARCH-04 tam karakter aralığı ister, ARCH-10 birimleri adlandırır; Emacs point/karakter, dosya byte offset'i, LSP position encoding'i, DAP satır/sütunu ve diff satırı arasındaki dönüşüm de tek ve açık sözleşme gerektirir.
+- **Durum / kalan sınır:** `tools/lsp/symbols.el` içinde `kargu-lsp--lsp-pos-to-point` ve `kargu-lsp--point-to-lsp-pos` daraltılmamış (`widen`) tampon üzerinde `utf-16`, `utf-8` ve `utf-32` kod birimi dönüşümü yapıyor, surrogate ortası veya sınır dışı konumları sıkıştırmadan (`nil` ile) reddediyor ve sembol aralıklarını `:tick` (`buffer-chars-modified-tick`) ile bağlıyor. Kalan kapsam DAP/diff koordinat sınırlarının gelecekteki adapter genişlemelerinde aynı kuralla korunmasıdır.
 - **Karar:** Her adapter, koordinatın başlangıç tabanını, end-exclusive/inclusive sınırını, encoding/birimini ve ait olduğu belge revision'ını belirtip ortak kanonik aralığa dönüştürsün. Dönüşüm aynı snapshot üzerinde yapılsın; narrowing, satır sonu normalizasyonu veya disk/live buffer farkı gizlice ikinci metin oluşturmasın. Byte/karakter, UTF-16/diğer negotiated encoding ve satır/sütun dönüşümü domain işleminin içine dağıtılmasın.
 - **Sınır:** Sembol adı ve satır numarası tek başına kimlik değildir. Range doğru göründüğü hâlde başka belge nesline ait olabilir; revision guard'ı kalsın. İmkânsız/sınır dışı koordinatı sessizce en yakın konuma sıkıştırarak başka kodu düzenleme; unsupported encoding açık unavailable/validation hatası versin. Sadece tanı göstermek ile o aralıkta yazma yapmak farklı güven gerektirir.
 - **Kapanış / bağımlılık:** ARCH-04/10/15, LSP/Dape adapter'ları ve DEEP-01. Emoji/non-BMP karakter, combining işaretler, Türkçe karakter, tab, CRLF/LF, son newline yokluğu, boş dosya, çok uzun satır, daraltılmış/kirli tampon ve değişmiş revision fixture'ları. İleri/geri dönüşüm ve tam hedef metin testleri yapılsın; yanlış konumda sıfır yazma kanıtlansın.

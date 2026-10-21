@@ -425,8 +425,11 @@
     (unwind-protect
         (cl-letf (((symbol-function 'kargu-lsp-get-file-symbols)
                    (lambda (_path)
-                     (list (list :name "first" :kind "Function" :start-line 1 :end-line 2 :detail nil :children nil)
-                           (list :name "second" :kind "Function" :start-line 4 :end-line 5 :detail nil :children nil))))
+                     (let ((buffer (find-file-noselect tmp)))
+                       (list (list :name "second" :kind "Function" :start-line 4 :end-line 5
+                                   :start-pos (1+ (string-match "def second" orig))
+                                   :end-pos (length orig)
+                                   :tick (buffer-chars-modified-tick buffer))))))
                   ((symbol-function 'kargu-diff-apply-proposal)
                    (lambda (path content)
                      (with-temp-file path (insert content))
@@ -634,8 +637,12 @@ A kind filter does not select an unrelated symbol."
     (unwind-protect
         (cl-letf (((symbol-function 'kargu-lsp-get-file-symbols)
                    (lambda (_path callback)
-                     (funcall callback '((:name "main" :kind "Function"
-                                                :start-line 1 :end-line 1)) nil)))
+                     (let ((buffer (find-file-noselect path)))
+                       (funcall callback
+                                (list (list :name "main" :kind "Function"
+                                            :start-line 1 :end-line 1
+                                            :start-pos 1 :end-pos 1
+                                            :tick (buffer-chars-modified-tick buffer))) nil))))
                   ((symbol-function 'kargu-eglot-connected-p) (lambda () t))
                   ((symbol-function 'kargu-diff-apply-proposal)
                    (lambda (_path _text callback) (setq review callback) '(:status :staged))))
@@ -665,6 +672,93 @@ A kind filter does not select an unrelated symbol."
           (should-not result)
           (funcall deliver nil)
           (should (equal result '("@a.el"))))))))
+
+(ert-deftest kargu-lsp-position-utf16-utf8-utf32-roundtrip-and-narrowing-test ()
+  "LSP position conversion handles UTF-16 surrogate pairs, Turkish chars, and narrowing."
+  (with-temp-buffer
+    ;; Line 0: "ğüşı 😀 a\u0308 end\n"
+    ;; 'ğ' 'ü' 'ş' 'ı' ' ' -> 5 BMP chars (5 UTF-16 code units)
+    ;; '😀' (U+1F600) -> 1 char, 2 UTF-16 code units, 4 UTF-8 bytes
+    ;; ' ' 'a' '\u0308' ' ' 'e' 'n' 'd'
+    (insert "ğüşı 😀 a\u0308 end\nikinci satır\n")
+    (narrow-to-region 15 (point-max))
+    (goto-char 16)
+    ;; After '😀' at char pos 7 (1-based: 1=ğ,2=ü,3=ş,4=ı,5= ,6=😀,7= )
+    ;; UTF-16 column of char pos 7 is 5 + 2 = 7
+    (let ((pos-utf16 (kargu-lsp--point-to-lsp-pos 7 'utf-16))
+          (pos-utf32 (kargu-lsp--point-to-lsp-pos 7 'utf-32))
+          (pos-utf8  (kargu-lsp--point-to-lsp-pos 7 'utf-8)))
+      (should (equal pos-utf16 '(:line 0 :character 7)))
+      (should (equal pos-utf32 '(:line 0 :character 6)))
+      (should (equal pos-utf8  '(:line 0 :character 13)))
+      (should (= (kargu-lsp--lsp-pos-to-point pos-utf16 'utf-16) 7))
+      (should (= (kargu-lsp--lsp-pos-to-point pos-utf32 'utf-32) 7))
+      (should (= (kargu-lsp--lsp-pos-to-point pos-utf8  'utf-8)  7))
+      ;; Mid-surrogate offset (column 6 in UTF-16, inside 😀) must be rejected
+      (should-not (kargu-lsp--lsp-pos-to-point '(:line 0 :character 6) 'utf-16))
+      ;; Out-of-bounds line or column must be rejected
+      (should-not (kargu-lsp--lsp-pos-to-point '(:line 99 :character 0) 'utf-16))
+      (should-not (kargu-lsp--lsp-pos-to-point '(:line 0 :character 999) 'utf-16))
+      ;; Narrowing and point are preserved
+      (should (= (point-min) 15))
+      (should (= (point) 16)))))
+
+(ert-deftest kargu-lsp-edit-symbol-exact-range-and-tick-guard-test ()
+  "Symbol edit splices exact character range and rejects stale ticks or dirty buffers."
+  (kargu-test-with-git-repo '(("sym.py" . "prefix = 1; def target(): return 1\nsuffix = 2\n"))
+    (let* ((_ (kargu-test-mode 'agent))
+           (kargu-diff-review-mode 'auto)
+           (path (expand-file-name "sym.py" repo))
+           (buf (find-file-noselect path)))
+      (unwind-protect
+          (with-current-buffer buf
+            (kargu-test-mode 'agent)
+            ;; Exact character range on line 1 covering only `def target(): return 1`
+            (let ((tick (buffer-chars-modified-tick)))
+              (cl-letf (((symbol-function 'kargu-lsp-get-file-symbols)
+                         (lambda (_p)
+                           (list (list :name "target" :kind "Function"
+                                       :start-line 1 :end-line 1
+                                       :start-pos 13 :end-pos 35
+                                       :range-valid t :tick tick)))))
+                (let ((res (kargu-lsp-edit-symbol path "target" "def target(): return 42")))
+                  (should (string-search "Edit of Function `target`" res))
+                  (should (equal (buffer-string)
+                                 "prefix = 1; def target(): return 42\nsuffix = 2\n")))))
+            ;; Stale tick is rejected without touching buffer
+            (let ((stale-tick (1- (buffer-chars-modified-tick))))
+              (cl-letf (((symbol-function 'kargu-lsp-get-file-symbols)
+                         (lambda (_p)
+                           (list (list :name "target" :kind "Function"
+                                       :start-line 1 :end-line 1
+                                       :start-pos 13 :end-pos 36
+                                       :range-valid t :tick stale-tick)))))
+                (let ((res (kargu-lsp-edit-symbol path "target" "def target(): return 99")))
+                  (should (string-prefix-p "ERROR:" res))
+                  (should (string-search "modified since symbol lookup" res)))))
+            ;; Out-of-bounds range is rejected without clamping
+            (let ((tick (buffer-chars-modified-tick)))
+              (cl-letf (((symbol-function 'kargu-lsp-get-file-symbols)
+                         (lambda (_p)
+                           (list (list :name "target" :kind "Function"
+                                       :start-line 1 :end-line 99
+                                       :range-valid nil :tick tick)))))
+                (let ((res (kargu-lsp-edit-symbol path "target" "def target(): return 0")))
+                  (should (string-prefix-p "ERROR:" res)))))
+            ;; replace_symbol alias is routed to edit_by_lsp
+            (cl-letf (((symbol-function 'kargu-eglot-connected-p) (lambda () t))
+                      ((symbol-function 'kargu-lsp-edit-symbol)
+                       (lambda (p sym content &rest _)
+                         (format "REPLACED:%s:%s:%s" (file-name-nondirectory p) sym content))))
+              (should (equal (kargu-execute-tool
+                              "replace_symbol"
+                              `(("file_path" . ,path)
+                                ("symbol" . "target")
+                                ("new_content" . "def target(): return 7")))
+                             "REPLACED:sym.py:target:def target(): return 7"))))
+        (when (buffer-live-p buf)
+          (with-current-buffer buf (set-buffer-modified-p nil))
+          (kill-buffer buf))))))
 
 (provide 'tests/test-lsp)
 ;;; test-lsp.el ends here

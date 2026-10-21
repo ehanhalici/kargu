@@ -130,6 +130,9 @@ CALLBACK receives fresh results; interactive use reports them on completion."
 
 ;;;; Document symbols, outline, reading and surgical editing --------------
 
+(defvar kargu-lsp--symbol-parse-buffer nil
+  "Buffer whose text and tick bind document symbol ranges during parsing.")
+
 (defun kargu-lsp--kind-label (kind-num)
   "Symbol kind name for a numeric or string KIND-NUM."
   (cond
@@ -145,25 +148,93 @@ CALLBACK receives fresh results; interactive use reports them on completion."
     (max start-line end-0))
    (t (max start-line (1+ end-0)))))
 
+(defun kargu-lsp--char-code-units (ch encoding)
+  "Return code unit width of character CH in LSP position ENCODING."
+  (pcase (or encoding 'utf-16)
+    ('utf-16 (if (> ch #xFFFF) 2 1))
+    ('utf-8 (string-bytes (char-to-string ch)))
+    ('utf-32 1)
+    (other (error "Unsupported LSP position encoding: %S" other))))
+
+(defun kargu-lsp--lsp-pos-to-point (line &optional character encoding)
+  "Convert 0-based LSP (LINE, CHARACTER) in ENCODING to widened point.
+Return nil when LINE or CHARACTER is out of bounds or splits a code unit."
+  (when (and (listp line) (plist-member line :line))
+    (setq encoding character
+          character (plist-get line :character)
+          line (plist-get line :line)))
+  (when (and (integerp line) (>= line 0)
+             (integerp character) (>= character 0))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (let ((rem (forward-line line)))
+          (when (and (= rem 0)
+                     (or (= line 0) (bolp)))
+            (let ((line-end (line-end-position))
+                  (units 0)
+                  (valid t))
+              (while (and valid (< units character) (< (point) line-end))
+                (let ((step (kargu-lsp--char-code-units (char-after) encoding)))
+                  (if (> (+ units step) character)
+                      (setq valid nil)
+                    (setq units (+ units step))
+                    (forward-char 1))))
+              (and valid (= units character) (point)))))))))
+
+(defun kargu-lsp--point-to-lsp-pos (pos &optional encoding)
+  "Convert widened buffer POS to 0-based LSP (:line L :character C) in ENCODING.
+Return nil when POS is outside the widened buffer bounds."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (when (and (integerp pos) (>= pos (point-min)) (<= pos (point-max)))
+        (goto-char pos)
+        (let ((line (1- (line-number-at-pos pos t)))
+              (line-start (line-beginning-position))
+              (units 0))
+          (goto-char line-start)
+          (while (< (point) pos)
+            (setq units (+ units (kargu-lsp--char-code-units (char-after) encoding)))
+            (forward-char 1))
+          (list :line line :character units))))))
+
 (defun kargu-lsp--symbol-plist (item)
   "Normalized plist for one LSP document symbol ITEM, or nil."
   (let* ((name (kargu-lsp--field item :name))
          (start-0 (or (kargu-lsp--path item :range :start :line)
                       (kargu-lsp--path item :location :range :start :line)))
+         (start-char (or (kargu-lsp--path item :range :start :character)
+                         (kargu-lsp--path item :location :range :start :character)
+                         0))
          (end-0 (or (kargu-lsp--path item :range :end :line)
                     (kargu-lsp--path item :location :range :end :line)))
          (end-char (or (kargu-lsp--path item :range :end :character)
                        (kargu-lsp--path item :location :range :end :character)))
          (start-line (if start-0 (1+ start-0) 1))
-         (children-raw (kargu-lsp--field item :children)))
+         (children-raw (kargu-lsp--field item :children))
+         (buf (and (buffer-live-p kargu-lsp--symbol-parse-buffer)
+                   kargu-lsp--symbol-parse-buffer))
+         (range-info
+          (when (and buf (numberp start-0) (numberp end-0))
+            (with-current-buffer buf
+              (let ((s-pos (kargu-lsp--lsp-pos-to-point start-0 start-char))
+                    (e-pos (kargu-lsp--lsp-pos-to-point end-0 (or end-char 0))))
+                (list :start-pos (and s-pos e-pos (<= s-pos e-pos) s-pos)
+                      :end-pos (and s-pos e-pos (<= s-pos e-pos) e-pos)
+                      :range-valid (and s-pos e-pos (<= s-pos e-pos) t)
+                      :tick (buffer-chars-modified-tick)))))))
     (when name
-      (list :name name
-            :kind (kargu-lsp--kind-label (kargu-lsp--field item :kind))
-            :start-line start-line
-            :end-line (kargu-lsp--inclusive-end start-line end-0 end-char)
-            :detail (kargu-lsp--field item :detail)
-            :children (and children-raw
-                           (kargu-lsp--parse-document-symbols children-raw))))))
+      (append
+       (list :name name
+             :kind (kargu-lsp--kind-label (kargu-lsp--field item :kind))
+             :start-line start-line
+             :end-line (kargu-lsp--inclusive-end start-line end-0 end-char)
+             :detail (kargu-lsp--field item :detail)
+             :children (and children-raw
+                            (kargu-lsp--parse-document-symbols children-raw)))
+       range-info))))
 
 (defun kargu-lsp--parse-document-symbols (raw)
   "Parse LSP documentSymbol RAW (vector or list) into normalized symbol plists.
@@ -198,47 +269,51 @@ If RAW-KIND is nil and POS is non-nil, inspects buffer text at POS."
    ((string-match-p "\\`\\(?:Macros?\\)\\'" raw-kind) "Function")
    (t raw-kind)))
 
+(defun kargu-lsp--imenu-position (value)
+  "Return the character position represented by imenu VALUE, or nil."
+  (when (consp value) (setq value (car value)))
+  (cond
+   ((markerp value) (marker-position value))
+   ((integerp value) value)))
+
+(defun kargu-lsp--imenu-end (position)
+  "Find the native definition end from POSITION, or nil if unsupported."
+  (goto-char position)
+  (condition-case nil
+      (progn (end-of-defun)
+             (when (> (point) position)
+               (if (and (bolp) (eq (char-before) ?\n)) (1- (point)) (point))))
+    (error nil)))
+
+(defun kargu-lsp--imenu-symbol (item category)
+  "Build one revision-bound local symbol from imenu ITEM and CATEGORY."
+  (let ((position (kargu-lsp--imenu-position (cdr item))))
+    (when (and position (<= (point-min) position (point-max)))
+      (goto-char position)
+      (let* ((start position)
+             (line (line-number-at-pos position t))
+             (end (kargu-lsp--imenu-end position)))
+        (list :name (car item) :kind (kargu-lsp--imenu-kind category position)
+              :start-line line :end-line (if end (line-number-at-pos end t) line)
+              :start-pos start :end-pos end :range-valid (and end t)
+              :tick (buffer-chars-modified-tick) :detail nil :children nil)))))
+
 (defun kargu-lsp--imenu-walk (items &optional cat)
-  "Recursively walk imenu ITEMS under category CAT to produce symbol plists."
-  (let (acc)
-    (dolist (it items)
-      (when (consp it)
-        (let ((name (car it))
-              (val (cdr it)))
-          (unless (or (not (stringp name)) (string= name "*Rescan*"))
-            (if (and (listp val) (consp (car-safe val)))
-                (setq acc (nconc acc (kargu-lsp--imenu-walk val name)))
-              (let* ((pos (cond
-                           ((markerp val) (marker-position val))
-                           ((integerp val) val)
-                           ((and (consp val) (integerp (car val))) (car val))
-                           ((and (consp val) (markerp (car val))) (marker-position (car val)))
-                           (t nil)))
-                     (line (and pos (numberp pos) (line-number-at-pos pos)))
-                     (kind (kargu-lsp--imenu-kind cat pos)))
-                (when (and line (> line 0))
-                  (let ((end-line
-                         (save-excursion
-                           (goto-char pos)
-                           (condition-case nil
-                               (progn
-                                 (end-of-defun)
-                                 (let* ((raw-end (line-number-at-pos (point)))
-                                        (e (if (and (bolp) (> raw-end line))
-                                               (1- raw-end)
-                                             raw-end)))
-                                   (if (and (>= e line) (<= e (count-lines (point-min) (point-max))))
-                                       e
-                                     line)))
-                             (error line)))))
-                    (push (list :name name
-                                :kind kind
-                                :start-line line
-                                :end-line (max line end-line)
-                                :detail nil
-                                :children nil)
-                          acc)))))))))
-    acc))
+  "Walk imenu ITEMS under CAT using an explicit stack, without recursion."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (let ((stack (mapcar (lambda (item) (cons item cat)) items)) symbols)
+        (while stack
+          (pcase-let* ((`(,item . ,category) (pop stack))
+                       (name (car-safe item))
+                       (value (cdr-safe item)))
+            (when (and (stringp name) (not (equal name "*Rescan*")))
+              (if (and (listp value) (consp (car-safe value)))
+                  (dolist (child (reverse value)) (push (cons child name) stack))
+                (when-let* ((symbol (kargu-lsp--imenu-symbol item category)))
+                  (push symbol symbols))))))
+        (nreverse symbols)))))
 
 (defun kargu-lsp--imenu-document-symbols (buffer)
   "Extract document symbols from BUFFER using `imenu'.
@@ -277,6 +352,29 @@ and :end-line."
                  (equal (plist-get entry :tick) (buffer-chars-modified-tick)))
         (plist-get entry :symbols)))))
 
+(defun kargu-lsp--request-file-symbols (buffer callback)
+  "Request BUFFER's symbols and deliver its captured revision to CALLBACK."
+  (let ((tick (buffer-chars-modified-tick buffer))
+        (server (with-current-buffer buffer (eglot-current-server))))
+    (kargu-lsp--request
+     :textDocument/documentSymbol
+     `(:textDocument (:uri ,(kargu-lsp--buffer-uri buffer)))
+     (lambda (raw error)
+       (cond
+        (error (funcall callback nil error))
+        ((or (not (buffer-live-p buffer))
+             (not (eql tick (buffer-chars-modified-tick buffer)))
+             (not (eq server (with-current-buffer buffer (eglot-current-server)))))
+         (funcall callback nil "Symbol document or server changed during lookup"))
+        (t
+         (let* ((kargu-lsp--symbol-parse-buffer buffer)
+                (symbols (or (kargu-lsp--parse-document-symbols raw)
+                             (kargu-lsp--imenu-document-symbols buffer))))
+           (puthash buffer (list :server server :tick tick :symbols symbols)
+                    kargu-lsp--file-symbol-cache)
+           (funcall callback symbols nil)))))
+     buffer)))
+
 (defun kargu-lsp-get-file-symbols (file-path &optional callback)
   "Get document symbols for FILE-PATH without waiting for a server.
 With CALLBACK, deliver (SYMBOLS ERROR) from an asynchronous request.
@@ -290,20 +388,7 @@ Without CALLBACK, return a cached or local imenu snapshot only."
      ((or native (not (kargu-lsp--buffer-managed-p buf)))
       (funcall callback (kargu-lsp--imenu-document-symbols buf) nil))
      (t
-      (kargu-lsp--request
-       :textDocument/documentSymbol
-       `(:textDocument (:uri ,(kargu-lsp--buffer-uri buf)))
-       (lambda (raw error)
-         (if error
-             (funcall callback nil error)
-           (let ((symbols (or (kargu-lsp--parse-document-symbols raw)
-                              (kargu-lsp--imenu-document-symbols buf))))
-             (puthash buf (list :server (with-current-buffer buf (eglot-current-server))
-                                :tick (with-current-buffer buf (buffer-chars-modified-tick))
-                                :symbols symbols)
-                      kargu-lsp--file-symbol-cache)
-             (funcall callback symbols nil))))
-       buf)))))
+      (kargu-lsp--request-file-symbols buf callback)))))
 
 (defun kargu-lsp-format-symbols-outline (file-path symbols)
   "Render SYMBOLS tree as a compact outline string for FILE-PATH."
@@ -450,41 +535,52 @@ With CALLBACK, fetch symbols asynchronously and deliver the text once."
                      (plist-get s :start-line) (plist-get s :end-line)))
            matches "\n")))
 
-(defun kargu-lsp--splice-symbol-content (raw-text s-line e-line new-content)
-  "Replace lines S-LINE to E-LINE in RAW-TEXT with NEW-CONTENT."
-  (let* ((file-lines (split-string raw-text "\n"))
-         (total (length file-lines))
-         (s-idx (1- s-line))
-         (e-idx (1- e-line)))
-    (when (or (< s-idx 0) (> s-idx total))
-      (error "Symbol start line %d out of range (total lines %d)" s-line total))
-    (let* ((before-lines (seq-take file-lines s-idx))
-           (after-lines (nthcdr (min total (1+ e-idx)) file-lines))
-           (clean-content (and new-content (string-trim-right new-content "[\r\n]+")))
-           (new-lines (if (or (null clean-content) (string-empty-p clean-content))
-                          nil
-                        (split-string clean-content "\n")))
-           (combined (append before-lines new-lines after-lines))
-           (new-full-text (string-join combined "\n")))
-      (when (and (string-suffix-p "\n" raw-text)
-                 (not (string-suffix-p "\n" new-full-text)))
-        (setq new-full-text (concat new-full-text "\n")))
-      new-full-text)))
+(defun kargu-lsp--splice-symbol-range (raw-text start-pos end-pos new-content)
+  "Replace exact [START-POS, END-POS) in RAW-TEXT with NEW-CONTENT."
+  (unless (and (integerp start-pos) (integerp end-pos)
+               (<= 1 start-pos end-pos (1+ (length raw-text))))
+    (error "Invalid symbol character range: %S..%S" start-pos end-pos))
+  (concat (substring raw-text 0 (1- start-pos))
+          new-content (substring raw-text (1- end-pos))))
+
+(defun kargu-lsp--validate-symbol-target (path symbol name)
+  "Return an error string if SYMBOL in PATH is stale, dirty, or out of bounds."
+  (let ((buf (find-buffer-visiting path))
+        (expected-tick (plist-get symbol :tick)))
+    (cond
+     ((and (buffer-live-p buf) (buffer-modified-p buf))
+      (format "ERROR: Buffer %s has unsaved modifications; save or revert it before agent edits"
+              (buffer-name buf)))
+     ((and (buffer-live-p buf) expected-tick
+           (not (eql expected-tick (buffer-chars-modified-tick buf))))
+      (format "ERROR: Symbol snapshot for '%s' in %s is stale (buffer was modified since symbol lookup); re-read symbols and retry."
+              name path))
+     ((and (plist-member symbol :range-valid)
+           (null (plist-get symbol :range-valid)))
+      (format "ERROR: Symbol '%s' range in %s is out of bounds for the current document."
+              name path))
+     ((or (not (buffer-live-p buf)) (not (integerp expected-tick))
+          (not (integerp (plist-get symbol :start-pos)))
+          (not (integerp (plist-get symbol :end-pos))))
+      (format "ERROR: Symbol '%s' has no revision-bound character range in %s."
+              name path)))))
 
 (cl-defun kargu-lsp--replace-symbol (path symbols &key name content kind reason callback)
   "Replace NAME of KIND from SYMBOLS in PATH with CONTENT.
 REASON describes the proposal.  CALLBACK receives its final review outcome."
   (let* ((flat (kargu-lsp--flatten-symbols symbols))
          (matches (kargu-lsp--find-symbol-in-list flat name kind))
+         (symbol (and (null (cdr matches)) (car matches)))
          (error (cond
                  ((null matches) (kargu-lsp--format-missing-symbol-error name path flat kind))
-                 ((cdr matches) (kargu-lsp--format-ambiguous-symbol-error name matches)))))
+                 ((cdr matches) (kargu-lsp--format-ambiguous-symbol-error name matches))
+                 (t (kargu-lsp--validate-symbol-target path symbol name)))))
     (if error
         (if callback (funcall callback error) error)
-      (let* ((symbol (car matches))
-             (text (kargu-lsp--splice-symbol-content
-                    (kargu-file-text path) (plist-get symbol :start-line)
-                    (plist-get symbol :end-line) content))
+      (let* ((raw-text (kargu-file-text path))
+             (s-pos (plist-get symbol :start-pos))
+             (e-pos (plist-get symbol :end-pos))
+             (text (kargu-lsp--splice-symbol-range raw-text s-pos e-pos content))
              (describe (lambda (outcome)
                          (format "Edit of %s `%s` in %s:\n%s"
                                  (plist-get symbol :kind) name path outcome))))

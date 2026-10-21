@@ -14,6 +14,7 @@
 #   ./run_tlc.sh --debug-watch   exhaustive debugger-watch ownership scan
 #   ./run_tlc.sh --debug-execution exhaustive debugger-execution ownership scan
 #   ./run_tlc.sh --verification  exhaustive changed-file ownership scan
+#   ./run_tlc.sh --edit-transaction exhaustive reviewed edit transaction scan
 #   ./run_tlc.sh --debug-selection exhaustive debugger-selection scan
 #   ./run_tlc.sh --debug-readiness exhaustive debugger-readiness scan
 #   ./run_tlc.sh --simulate [N]  random simulation of N behaviors (default
@@ -90,6 +91,10 @@ elif [[ "$1" == "--debug-execution" ]]; then
     MODE="exhaustive debugger-execution ownership scan"
     SPECIFICATION="DebugExecutionMC.tla (KarguDebugExecution)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config DebugExecutionMC.cfg DebugExecutionMC.tla)
+elif [[ "$1" == "--edit-transaction" ]]; then
+    MODE="exhaustive reviewed edit transaction scan"
+    SPECIFICATION="EditMC.tla (KarguEdit)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config EditMC.cfg EditMC.tla)
 elif [[ "$1" == "--verification" ]]; then
     MODE="exhaustive changed-file ownership scan"
     SPECIFICATION="VerificationMC.tla (KarguVerification)"

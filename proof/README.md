@@ -4,6 +4,18 @@ This directory holds the TLA+ specification of Kargu's agent loop and protocol w
 
 The check is exhaustive over a bounded model. It is a proof for those bounds, not for every parameter value.
 
+`KarguEdit.tla` / `EditMC.cfg` refine the process-local reviewed batch boundary.
+Run `proof/run_tlc.sh --edit-transaction`. The exhaustive 2026-10-21 scan
+explored 425 generated states, 160 distinct states and depth 10 without error.
+Two files, one foreign replacement per file and owner retirement cover review
+before write, single delivery and rollback that preserves foreign content.
+Git's actual hunk matching, save-hook reconciliation and source coordinates
+are ERT obligations, not consequences of this model. Filesystem CAS, crash
+recovery and power-loss durability are explicitly outside its bounds.
+The existing `--verification` ownership model was also rerun exhaustively:
+439 generated states, 68 distinct states, depth 6, no error. It does not prove
+the semantic identity or freshness of diagnostic messages.
+
 Debug mode admission requires a successful adapter preflight. The model
 abstracts external probes as a boolean result passed to `SetMode`; failed
 or obsolete probes never publish a mode transition. Probe callbacks and

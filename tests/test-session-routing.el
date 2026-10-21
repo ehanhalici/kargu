@@ -18,7 +18,10 @@
   "Restore DATA in ROOT through the direct or INTERACTIVE entry."
   (if (not interactive) (kargu-session-load data nil root)
     (let (target)
-      (cl-letf (((symbol-function 'kargu-session-list) (lambda (&rest _) (list data)))
+      (cl-letf (((symbol-function 'kargu-session-list-async)
+                 (lambda (_root callback) (funcall callback (list data) nil)))
+                ((symbol-function 'kargu-session--read-by-id)
+                 (lambda (_id _root) data))
                 ((symbol-function 'completing-read) (lambda (_prompt choices &rest _) (caar choices)))
                 ((symbol-function 'pop-to-buffer-same-window) (lambda (buffer &rest _) (setq target buffer))))
         (kargu-chat-sessions root))

@@ -212,7 +212,7 @@
           (kill-buffer origin)
           (let ((deadline (+ (float-time) 2)))
             (while (and (not settled) (< (float-time) deadline))
-              (accept-process-output process 0.02)))
+              (accept-process-output (and (process-live-p process) process) 0.02)))
           (should settled)
           (should-not (process-live-p process))
           (should-not result)

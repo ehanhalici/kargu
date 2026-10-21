@@ -30,7 +30,7 @@
 (defun kargu-edit-changes (operation &optional value)
   "Query change-evidence OPERATION with its optional VALUE.
 Absence of evidence is not a successful diagnostic verification."
-  (unless (memq operation '(:available :pending :modified :capture :consume
+  (unless (memq operation '(:available :pending :modified :capture :baseline :consume
                             :consume-file :reset :abort))
     (error "Unknown change-evidence operation: %S" operation))
   (when (memq operation '(:capture :consume-file))
