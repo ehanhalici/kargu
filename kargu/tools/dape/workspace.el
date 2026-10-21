@@ -21,6 +21,7 @@
 (declare-function dape--config "dape" (conn))
 (declare-function dape--parent "dape" (conn))
 (declare-function dape--live-connections "dape" ())
+(declare-function kargu-dape-closing-p "kargu/tools/dape/lifecycle" (connection))
 
 (defun kargu-dape--connection-directory (connection &optional seen)
   "Return CONNECTION's concrete working directory, avoiding parents in SEEN."
@@ -47,7 +48,9 @@ ROOT defaults to the selected project.  Global Dape selection is ignored."
     (when (fboundp 'dape--live-connections)
       (seq-filter
        (lambda (connection)
-         (when-let* ((directory (kargu-dape--connection-directory connection)))
+         (when-let* (((not (and (fboundp 'kargu-dape-closing-p)
+                               (kargu-dape-closing-p connection))))
+                     (directory (kargu-dape--connection-directory connection)))
            (kargu-permission-within-project-p directory root)))
        (dape--live-connections)))))
 

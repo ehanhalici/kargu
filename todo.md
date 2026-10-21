@@ -1,18 +1,12 @@
 # Açık işler
 
 Yalnız açık kayıtlar tutulur; kapanan ve yanlış pozitif kayıtlar silinir.
-2026-10-21 doğrulaması: 875/875 ERT geçti. Yeşil testler kapsanmayan hataları
+2026-10-21 doğrulaması: 906/906 ERT geçti. Yeşil testler kapsanmayan hataları
 çürütmez. K = kod yolu doğrulandı; Y = kontrollü yeniden üretildi;
 D = ortam/ölçüm kanıtı gerekiyor. Kimlikler yeniden numaralanmaz.
 P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ## Doğrulanmış hatalar — düzeltme sırası
-
-### DAPE-04 · P1 · K — Yaşam döngüsü global temizlik ve senkron shutdown kullanıyor
-
-- **Yer/kanıt:** `kargu/tools/dape/commands.el` quit/disconnect global Dape yardımcılarını çağırıyor. Dape 0.27.1 `dape-quit` bütün kök bağlantıları, `dape-disconnect-quit` global tamponları temizliyor; `dape--shutdown` `accept-process-output nil 0.2` ve `jsonrpc-shutdown` ile bekliyor.
-- **Beklenen/gerçek:** Yalnız yakalanmış bağlantı, UI'ı bekletmeden yönetilmeli; yabancı oturum/UI etkileniyor ve callback sarmalı iç beklemeyi kaldırmıyor.
-- **Yeniden üretme/kapanış:** İki proje/adapter, yabancı seçim, kaybolan bağlantı, geç/çift cevap, Stop/deadline. Sahipli olay tabanlı sonlandırma/ayrılma; yabancı kaynaklara dokunulmamalı.
 
 ### DIFF-01 · P1 · K — Daraltılmış/kirli tampon ve rollback sözleşmesi güvenli değil
 
@@ -60,7 +54,13 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 - **Yer/kanıt:** `kargu/tools/dape/launch.el` son sahiplik kontrolünden sonra Dape 0.27.1 `dape--create-connection` çağırıyor. Dape'nin `port` yolu `make-network-process` bağlantısını 30 denemelik döngüde `sleep-for 0.100` ile bekliyor; uzak dizin yolunda ayrıca `sleep-for 0.300` var. Bu kod yolu doğrulandı; gerçek süre/platform davranışı ölçülmedi.
 - **Beklenen/gerçek:** Adapter bağlantısı UI'ı bekletmeden, iptal/deadline ve proje/oturum/koşu sahipliğiyle kurulmalı. Derleme devamı artık bağlantı oluşturma sınırında doğrulanıyor; ancak Dape'nin oluşturucu içindeki beklemesi asenkron hâle gelmedi. Bekleme sırasında reentrant iptal/kimlik değişimi ayrıca korunmalı.
 - **Yeniden üretme/kapanış:** Kontrollü geciken veya hiç açılmayan port, server process, uzak dizin ve süreç çıkışı; bağlantı kurulurken Stop/deadline/kök değişimi. Olay tabanlı bağlantı hazırlığı, yakalanmış server/socket/stderr sahipliği ve geç/çift tamamlanmada sızıntısız temizlik gerekli; yabancı adapter veya compilation kaynağı kapatılmamalı.
-- **Bağımlılık:** DAPE-04 ile ortak asenkron adapter kaynak yaşam döngüsü; derleme devamı koruması oluşturucunun iç beklemesini çözmez.
+- **Bağımlılık:** Sahipli asenkron close/resource katmanı artık `tools/dape/lifecycle.el` içinde; port/socket oluşturucu aynı kaynağı devralmalı. Derleme devamı koruması oluşturucunun iç beklemesini çözmez.
+
+### DAPE-06 · P2 · K — Terminal olmayan Dape olayları yabancı UI'ı temizleyebiliyor
+
+- **Yer/kanıt:** Dape 0.27.1 `dape-handle-event` içindeki `continued` dalı, bağlantıdan bağımsız `dape--stack-frame-cleanup` ve global `dape-update-ui-hook` çalıştırıyor. Sahipli lifecycle artık exited/terminated/kapanış yollarını ayırıyor; açık bağlantının diğer olayları hâlâ Dape yorumlayıcısına gidiyor. Başlatma da native `dape--start-debugging` içinde global breakpoint/source-view temizliği kullanıyor.
+- **Beklenen/gerçek:** Bir projedeki devam/başlatma, başka adapter seçiliyken onun kaynak oku/overlay/eldoc veya görünümünü değiştirmemeli. Protokol durumunu yorumlamak ile global Dape UI sunumu aynı callback'te.
+- **Kapanış:** İki gerçek bağlantı ve yabancı seçili kaynak/overlay ile continued/stopped/start olaylarını kapsa; protokol/stack/children davranışını yeniden yazmadan sunumu adaptör sınırında ayır. Global geçici `fset` veya bütün Dape UI'ını kapatma ile diğer oturumların davranışını bozma. ARCH-05'in kalan port/sunum işi olarak sıraya alındı.
 
 ## Doğrulama bekleyen riskler
 
@@ -102,7 +102,7 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 - **Dosyalar / kalan sınır:** `core/session.el` kip, kimlik/sayaçları, tek geçmiş kuyruğunu ve değişmez provider/model/effort seçimini lazy/buffer-owned `kargu-session` kaydında tutuyor; API delivery/run bu handle'ları yakalıyor. Geçici ping geçmişi ayrı, history snapshot'ları detached; foreign-buffer Stop/HTTP cevabı sahibine dönüyor. `state/store.el` ortak yaşam döngüsü/toplamları ve global `kargu--loop-run` koordinasyonu hâlâ application/session sahipliğine ayrılmalı; run'ın proje/kip/yapılandırma snapshot sınırı tamamlanmalı.
 - **Karar:** Kimlik, geçmiş, sayaç ve sohbet seçimini sahipli bir oturum kaydında topla; sohbet tamponu bu kayda referans versin. Headless kullanımda da açık oturum referansı sağlanabilsin. Global varsayılan ayarlar ile oturuma ait canlı seçim ayrışsın; aktif koşu, başlarken yakaladığı oturum/proje/kip/seçim snapshot'ına bağlansın.
 - **Sınır:** Buffer-local değişken tek başına gecikmiş callback'i doğru tampona yönlendirmez. Açık sahiplik ve oturum nesli kontrolü korunsun. Proje bazlı sohbet bulma/oluşturma hâlâ gereklidir; routing tamamen kaldırılmasın. Tek aktif koşu ve aktif koşunun kip kilidi korunsun; çoklu sohbet, eşzamanlı çoklu ajan çalıştırma yetkisi değildir. Mevcut global koordinatör geçiş hedefi değil, taşınacak mevcut durumdur; yeni mutable singleton kurulmasın (ARCH-12).
-- **Kapanış / bağımlılık:** Aynı/farklı projede iki sohbet, headless oturum, seçim aktivasyonu, reset/restore, kapatılan tampon ve eski callback testleri; CHAT-01/02. İkinci bir durum deposu kurmak yerine mevcut seçici/geçiş API'sini sahipli kayda taşı.
+- **Kapanış / bağımlılık:** Aynı/farklı projede iki sohbet, headless oturum, seçim aktivasyonu, reset/restore, kapatılan tampon ve eski callback testleri; CHAT-01. İkinci bir durum deposu kurmak yerine mevcut seçici/geçiş API'sini sahipli kayda taşı.
 
 ### ARCH-02 · Komut Güvenliği: Argv, Politika ve Gerçek İzolasyonu Birbirine Karıştırma
 
@@ -138,10 +138,10 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 
 ### ARCH-05 · Debugger Sınırı: Dape Adaptörü Arkasında Sahipli Bağlantı Yaşam Döngüsü
 
-- **Dosyalar / kod bulgusu:** `tools/dape/`; Dape'nin global seçimi/UI yardımcıları ile Kargu'nun proje/koşu sahipliği farklı sözleşmelerdir. DAPE-04 ve DAPE-05 açık; önceki readiness ve deferred compile korumaları mevcut. Çok dosya veya nesil kontrolü bulunması tek başına gereksiz karmaşıklık değildir.
+- **Dosyalar / kod bulgusu:** `tools/dape/`; sahipli transport/server/stderr ve çocuk kaynakları artık `lifecycle.el` kapatıyor; native global quit/buffer sweep ve bekleyen shutdown callback'i kullanılmıyor. Kalan somut işler DAPE-05 port oluşturma, PERF-05 disk kaynak okumaları ve DAPE-06 terminal olmayan olayların foreign UI izolasyonu. Önceki readiness/deferred compile/single-delivery korumaları mevcut.
 - **Karar:** Uygulamanın kullandığı küçük debugger portunu tanımla: capability/context, inspect, control, start ve close. Dape'ye özel private API/advice/metadata erişimi portun adaptör tarafında kalsın. Bağlantı kimliği ve olay nesli ortak kaynak katmanında tutulup araçlarca tüketilsin; denetimler silinmek yerine tekrarları azaltılsın.
 - **Sınır:** Tek dev adapter dosyası veya sıfırdan DAP istemcisi zorunlu hedef değildir. Doğrudan DAP; taşıma, initialization, child session, source mapping, breakpoint, shutdown ve UI entegrasyonunu yeniden üstlenir; ancak somut gereksinim ve karşılaştırmalı prototiple ayrı karar olabilir. Dape global quit/selection temizliği yabancı oturumları etkilememeli; süreç/port/shutdown beklemeleri asenkron olmalı.
-- **Kapanış / bağımlılık:** İki proje/adapter, foreign selection, kaybolan bağlantı, thread/frame yeniden kullanımı, geç/çift cevap, Stop/deadline, compile devamı ve child session testleri. Mevcut debugger proof/regresyonları korunarak DAPE-04/05 ve PERF-05 çözülmeli; daha önce kapanan sahiplik hataları yeniden açılmamalı.
+- **Kapanış / bağımlılık:** İki proje/adapter, foreign selection, kaybolan bağlantı, thread/frame yeniden kullanımı, geç/çift cevap, Stop/deadline, compile devamı ve child session testleri. Mevcut debugger proof/regresyonları korunarak DAPE-05/06 ve PERF-05 çözülmeli; daha önce kapanan sahiplik hataları yeniden açılmamalı.
 
 ### ARCH-06 · Sohbet Görünümü: Veri Sahipliğini Yerleşimden Ayır, UI Değişimini Ölç
 

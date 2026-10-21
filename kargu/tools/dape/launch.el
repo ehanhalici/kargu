@@ -14,6 +14,7 @@
 (require 'kargu/async)
 (require 'kargu/state)
 (require 'kargu/permission)
+(require 'kargu/tools/dape/lifecycle)
 
 (declare-function kargu-session-id "kargu/core/session" ())
 (declare-function dape "dape" (config &optional skip-compile))
@@ -97,12 +98,20 @@
           (kargu-async-finish (kargu-dape--operation-task operation)
                               nil kargu-dape--obsolete-launch-error)
           (error "%s" kargu-dape--obsolete-launch-error))
+        (unless (kargu-dape-lifecycle-supported-p)
+          (user-error "Kargu: this Dape/JSONRPC lifecycle capability is unsupported"))
         (setf (kargu-dape--operation-phase operation) :creating)
         ;; Child adapters must not inherit an already consumed launch guard.
         (let ((clean (copy-sequence config)))
           (cl-remf clean 'kargu--launch-operation)
-          (funcall original clean parent)))
-    (funcall original config parent)))
+          (let ((connection (funcall original clean parent)))
+            (kargu-dape-adopt connection)
+            connection)))
+    (when (and parent (kargu-dape-closing-p parent))
+      (user-error "Kargu: parent debug adapter is closing"))
+    (let ((connection (funcall original config parent)))
+      (when (and parent (kargu-dape-resource parent)) (kargu-dape-adopt connection))
+      connection)))
 
 (cl-defun kargu-dape-launch (config &key valid-p on-start)
   "Launch CONFIG with owned deferred compilation and final VALID-P checking.

@@ -10,6 +10,7 @@
 #   ./run_tlc.sh --process       exhaustive process-capture scan
 #   ./run_tlc.sh --diagnostics   exhaustive diagnostic-ownership scan
 #   ./run_tlc.sh --debug-startup exhaustive debugger-startup ownership scan
+#   ./run_tlc.sh --debug-close   exhaustive scoped-debugger shutdown scan
 #   ./run_tlc.sh --debug-watch   exhaustive debugger-watch ownership scan
 #   ./run_tlc.sh --debug-execution exhaustive debugger-execution ownership scan
 #   ./run_tlc.sh --verification  exhaustive changed-file ownership scan
@@ -73,6 +74,10 @@ elif [[ "$1" == "--diagnostics" ]]; then
     MODE="exhaustive diagnostic-ownership scan"
     SPECIFICATION="DiagnosticsMC.tla (KarguDiagnostics)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config DiagnosticsMC.cfg DiagnosticsMC.tla)
+elif [[ "$1" == "--debug-close" ]]; then
+    MODE="exhaustive scoped-debugger shutdown scan"
+    SPECIFICATION="DebugCloseMC.tla (KarguDebugClose)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config DebugCloseMC.cfg DebugCloseMC.tla)
 elif [[ "$1" == "--debug-startup" ]]; then
     MODE="exhaustive debugger-startup ownership scan"
     SPECIFICATION="DebugStartupMC.tla (KarguDebugStartup)"

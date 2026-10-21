@@ -61,6 +61,7 @@
 (require 'tests/test-confirm)
 (require 'tests/test-languages)
 (require 'tests/test-dape-commands)
+(require 'tests/test-dape-lifecycle)
 (require 'tests/test-dape-workspace)
 (require 'tests/test-dape-startup)
 (require 'tests/test-dape-watch)

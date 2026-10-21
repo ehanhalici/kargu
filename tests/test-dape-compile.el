@@ -34,6 +34,8 @@
         (setq dape-configs `((demo command "sh" command-cwd ,repo compile "true")))
         (unwind-protect
             (cl-letf (((symbol-function 'dape) native-dape)
+                      ;; This fixture substitutes connection creation, not its lifecycle.
+                      ((symbol-function 'kargu-dape-adopt) #'identity)
                       ((symbol-function 'dape--config-ensure) #'ignore)
                       ((symbol-function 'dape--guess-root) (lambda (_) repo))
                       ((symbol-function 'compilation-find-buffer) (lambda (&rest _) compilation))

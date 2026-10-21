@@ -309,9 +309,9 @@ and does not depend on chat buffers. Records are bounded by
 files and atomic rename so failed publication leaves the previous record intact.
 Loading validates metadata, counters, native protocol message/tool-call shapes,
 file identity, depth and size before changing a conversation. Typed multipart
-content retains text and opaque attachment blocks across restoration. This does not yet
-make the whole UI/state restoration transactional; that separate limitation is
-tracked in `todo.md`.
+content retains text and opaque attachment blocks across restoration. Restore
+prepares its complete session and view before the guarded publication described
+above; failed publication restores the old local editing state.
 
 The LSP and Dape entry points load focused submodules for session access,
 data collection, formatting and tool registration. HTTP request construction,
@@ -355,8 +355,19 @@ source identity. Existing adapters are pinned; new launches use a unique local
 token and admit only their matching root adapter, never an unrelated or child
 connection. Stop also cancels readiness before an agent run starts, preserving
 the draft. Timeout and all terminal paths release owned listeners and timers.
-Cancellation stops waiting, not Dape's deferred compilation or its adapter;
-deferred compile ownership and global lifecycle helpers remain in `todo.md`.
+Cancellation invalidates the deferred launch continuation without killing
+unrelated compilation resources. Adapter port establishment remains synchronous
+and is tracked separately in `todo.md`.
+
+Kill, disconnect and quit now close only the captured adapter and its owned
+children, with asynchronous requests and a bounded forced-close deadline.
+Managed connections also replace Dape's blocking shutdown callback and private
+shutdown path, including protocol-triggered shutdown. No global buffer sweep or
+foreign selection cleanup runs. Transport/server/stderr resources are captured
+before waiting, released once, and completion follows all cleanup. Unsupported
+Dape/JSONRPC ownership shapes refuse startup before creating a process. This
+adapter boundary is tested with Dape 0.27.1 and Emacs 30.2; nonterminal Dape UI
+event isolation and asynchronous port startup remain separate open work.
 
 Debugger source quotes prefer the full unsaved visiting buffer, preserving its
 narrowing and point. Inspection is bounded to 64 KiB on disk or 65,536 live

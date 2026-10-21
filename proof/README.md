@@ -75,6 +75,17 @@ rollback with render/footer and post-install faults, draft/root/selection
 changes, close/Stop, and foreign or duplicate completion. External mode-hook
 effects and disk crash recovery are not proved.
 
+`KarguDebugClose.tla` / `DebugCloseMC.cfg` refine scoped adapter shutdown.
+Run `proof/run_tlc.sh --debug-close`. The exhaustive 2026-10-21 scan generated
+71 states, 20 distinct states, depth 7 without error, with an owned parent/child
+and a foreign adapter. It checks one release/delivery, terminate fallback,
+deadline/cancellation, and completion only after resource release. ERT uses
+actual JSONRPC process connections with controlled DAP callbacks, server/stderr
+resources, foreign selection, duplicate sentinels, owner replacement and an
+unrelated process attached to an old output buffer. This does not prove adapter
+OS process trees or all Dape UI event isolation. The startup model was also
+rerun exhaustively: 8,465 generated, 1,544 distinct, depth 12 without error.
+
 The 2026-10-21 `--plan` exhaustive rerun explored 257,073 generated states,
 72,313 distinct states and depth 25 without error. Its existing separate claim,
 dispatch and failure transitions now also cover a held asynchronous preparer.

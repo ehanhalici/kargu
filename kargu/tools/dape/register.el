@@ -205,19 +205,19 @@
     "Terminate the debuggee process."
     '(("type" . "object")
       ("properties" . :json-empty-object))
-    (lambda (_args) (kargu-dape-kill)))
+    (lambda (_args callback) (kargu-dape-kill callback)))
    (list
     "debug_disconnect"
     "Disconnect from the debug adapter."
     '(("type" . "object")
       ("properties" . :json-empty-object))
-    (lambda (_args) (kargu-dape-disconnect)))
+    (lambda (_args callback) (kargu-dape-disconnect callback)))
    (list
     "debug_quit"
-    "Quit debug session and clean up dape buffers."
+    "Close only the captured adapter and its owned children, not other Dape sessions."
     '(("type" . "object")
       ("properties" . :json-empty-object))
-    (lambda (_args) (kargu-dape-quit))))
+    (lambda (_args callback) (kargu-dape-quit callback))))
   "Tool schemas and executors exposed by the DAPE adapter.")
 
 (defconst kargu-dape--tool-aliases

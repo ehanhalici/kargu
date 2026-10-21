@@ -304,41 +304,29 @@ The watch list for SELECTION is passed to CALLBACK."
               (format "ERROR: watch: %s" (error-message-string err))
               interactive)))))
 
-(defun kargu-dape-kill ()
-  "Terminate the active debuggee process."
+(defun kargu-dape--close-current (action callback)
+  "Close the captured project adapter using ACTION and asynchronous CALLBACK."
   (let ((conn (kargu-dape--raw-connection)))
     (if (null conn)
-        "No live dape session to kill."
-      (condition-case err
-          (progn
-            (if (fboundp 'dape-kill)
-                (dape-kill conn)
-              (user-error "Dape-kill not available"))
-            "Debuggee process killed.")
-        (error (format "ERROR: kill failed: %s" (error-message-string err)))))))
+        (kargu-dape--deliver callback "No live debug adapter in this project." nil)
+      (kargu-dape-close :connection conn :action action
+                        :root (kargu-permission-project-root)
+                        :callback (or callback #'kargu-dape--show-report)))))
 
-(defun kargu-dape-disconnect ()
-  "Disconnect from the active debug adapter."
-  (let ((conn (kargu-dape--raw-connection)))
-    (if (null conn)
-        "No live dape session to disconnect."
-      (condition-case err
-          (progn
-            (if (fboundp 'dape-disconnect-quit)
-                (dape-disconnect-quit conn)
-              (user-error "Dape-disconnect-quit not available"))
-            "Disconnected from debug adapter.")
-        (error (format "ERROR: disconnect failed: %s" (error-message-string err)))))))
+(defun kargu-dape-kill (&optional callback)
+  "Terminate the captured debuggee asynchronously through CALLBACK."
+  (interactive)
+  (kargu-dape--close-current :kill callback))
 
-(defun kargu-dape-quit ()
-  "Quit the debugging session and cleanup dape buffers."
-  (condition-case err
-      (progn
-        (if (fboundp 'dape-quit)
-            (dape-quit)
-          (user-error "Dape-quit not available"))
-        "Debug session quit and cleaned up.")
-    (error (format "ERROR: quit failed: %s" (error-message-string err)))))
+(defun kargu-dape-disconnect (&optional callback)
+  "Detach the captured adapter asynchronously through CALLBACK."
+  (interactive)
+  (kargu-dape--close-current :disconnect callback))
+
+(defun kargu-dape-quit (&optional callback)
+  "Close only the captured session asynchronously through CALLBACK."
+  (interactive)
+  (kargu-dape--close-current :quit callback))
 
 (defun kargu-dape-stack (&optional levels callback)
   "Collect LEVELS stack frames and deliver one result to CALLBACK."

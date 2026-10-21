@@ -24,8 +24,8 @@
   "Hook receiving (CONNECTION EVENT) after a Dape state notification.
 Consumers must check their captured adapter and asynchronous task lifetime.")
 
-(defun kargu-dape--observe-event (connection event _body)
-  "Publish CONNECTION's state EVENT after Dape has handled its BODY."
+(defun kargu-dape-publish-event (connection event)
+  "Publish CONNECTION's committed state EVENT to captured consumers."
   (save-match-data
     (when (memq event '(initialized stopped continued thread exited terminated))
       (puthash connection (1+ (kargu-dape-event-generation connection)) kargu-dape--event-generations)
@@ -36,6 +36,10 @@ Consumers must check their captured adapter and asynchronous task lifetime.")
              (funcall listener connection event)
            (error (kargu-log 'warn "Debugger event listener: %s" (error-message-string err))))
          nil)))))
+
+(defun kargu-dape--observe-event (connection event _body)
+  "Publish CONNECTION's state EVENT after Dape has handled its BODY."
+  (kargu-dape-publish-event connection event))
 
 (with-eval-after-load 'dape
   (when (fboundp 'kargu-dape--observe-event)

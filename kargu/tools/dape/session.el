@@ -19,6 +19,7 @@
 (require 'kargu/tools/dape/workspace)
 (require 'kargu/tools/dape/selection)
 (require 'kargu/tools/dape/readiness)
+(require 'kargu/tools/dape/lifecycle)
 (require 'dape nil t)
 
 (defvar dape--connection-selected)
