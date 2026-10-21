@@ -116,7 +116,7 @@ Preserve unknown block kinds for backend adapters rather than dropping them."
   (dolist (key '("title" "transcript" "provider" "model" "project_root"
                  "project_name" "created_at" "updated_at"))
     (kargu-session-validate--optional record key #'stringp))
-  (dolist (key '("requests" "tokens_in" "tokens_out"))
+  (dolist (key '("requests" "tokens_in" "tokens_out" "message_count"))
     (kargu-session-validate--optional record key #'natnump))
   (kargu-session-validate--optional
    record "mode" (lambda (mode) (member mode (mapcar #'symbol-name kargu-all-modes))))

@@ -27,19 +27,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 - **Beklenen/gerçek:** Uygulama koordinasyonu ile oturuma ait görünüm/veri açık kapsamla ayrılmalı; restore/reset ve geç kip hazırlığı ortak durumu etkileyebiliyor. Global busy/aktif koşu tek-koşu sözleşmesidir, tek başına hata değildir.
 - **Yeniden üretme/kapanış:** Aynı/farklı projede iki sohbet, farklı geçmiş/sayaç, reset/restore ve geç kip hazırlığı callback'leri; eski callback yeni oturum/seçime yazmamalı, tek aktif koşu korunmalı.
 
-### CONFIG-01 · P2 · K — Anahtar keşfinde senkron kimlik deposu erişimi
-
-- **Yer/kanıt:** `kargu/providers/registry.el`, `kargu-connected-providers`; `kargu/config/key.el`, `kargu--auth-source-api-key` doğrudan `auth-source-search` ve secret fonksiyonunu çağırıyor. Üst öncelikli anahtar varsa bu yola girilmeyebilir; her sağlayıcıda GPG açıldığı iddiası doğru değil.
-- **Beklenen/gerçek:** Sağlayıcı keşfi UI'da pinentry/disk beklememeli; alt katman senkron bekleyebilir. Gerçek gecikme ortama bağlı.
-- **Yeniden üretme/kapanış:** Kontrollü geciken kimlik deposu/secret, iptal, öncelik/keyless ve gizli veri sızıntısı testleri; listeleme örtük toplu kilit açmamalı.
-
-
-### PERF-04 · P2 · K — Oturum listesi bütün kayıtları senkron ayrıştırıyor
-
-- **Yer/kanıt:** `kargu/chat/session.el`, `kargu-session-list`: directory-files + döngüde `kargu-session-storage-read`. Tek dosya boyut sınırı toplam maliyeti sınırlamıyor.
-- **Beklenen/gerçek:** Çok kayıt UI'ı meşgul etmemeli; bütün JSON içerikleri çağıranın iş parçacığında okunuyor. Gecikme ölçümü gerekli.
-- **Yeniden üretme/kapanış:** Çok kayıt, bozuk/büyük kayıt, iptal, proje değişimi ve sıralama; asenkron listeleme veya metadata indeksi, eski sonuçlar yayınlanmamalı.
-
 ### PERF-05 · P2 · K — Sınırlı Dape kaynak disk işlemleri hâlâ senkron
 
 - **Yer/kanıt:** `kargu/tools/dape/context.el` yol/metadata/sınırlı içerik okumasını çağıranın iş parçacığında yapıyor. 64 KiB disk / 65.536 canlı karakter sınırı mevcut; sınırsız büyük dosya okuma iddiası artık geçerli değil.
@@ -274,11 +261,10 @@ Amaç her dosyayı ayrı paket yapmak değil; UI, ajan motoru, taşıma ve Emacs
 
 ### MOD-03 · Seçim UI'si ile Sağlayıcı/Model Durum Geçişini Ayır
 
-- **Dosyalar / kalan sınır:** `contract/selection.el` değişmez seçim değerini doğruluyor; `selection.el` sahipli provider/model/effort üçlüsünü tek geçişle yayımlayıp mevcut `state/hooks.el` bildirimlerini kullanıyor. UI, geç katalog/liste/zamanlayıcı cevaplarını oturum ve seçim kimliğiyle eliyor; bildirim sırasında sahip değişirse devam zinciri duruyor. Kalan iş `chat/select.el` içindeki aday keşfi/üyelik politikası ve özel katalog cache yorumunu UI'dan ayırmak; seçim kabulünün somut loop/busy sorgularını dar uygulama portuna taşımak.
+- **Dosyalar / kalan sınır:** `contract/selection.el` değişmez seçim değerini doğruluyor; `selection.el` sahipli provider/model/effort üçlüsünü, aday keşfi/üyelik doğrulamasını, katalog cache yorumunu ve `kargu-selection-busy-predicate` kabul portunu tutuyor. UI, geç katalog/liste/zamanlayıcı cevaplarını oturum, seçim, keşif nesli, pencere odağı, point ve taslak (`buffer-chars-modified-tick`) ile eliyor; bildirim sırasında sahip değişirse devam zinciri duruyor. Kalan iş `kargu-selection-busy-predicate` portunu ARCH-01/CHAT-01 uygulama koordinatörüne bağlamak.
 - **Karar:** Aday keşfi ve seçim doğrulaması UI'dan bağımsız servis olsun; chat/UI adapter'ı yalnız etkileşim ve görünümü yönetsin. Sağlayıcı/model/effort'un tutarlı seçimi tek doğrulanmış geçişle yayımlansın; oturum kaydı aynı seçimi görsün.
-- **Sınır:** Aday listesi dışı değer reddi, effort yokluğu ile açık kapatma ayrımı, metadata capability'leri ve stale katalog nesli korunsun. Yapılandırılmış keşif örtük auth-source/pinentry beklemesine dönüşmesin (CONFIG-01). Arka plan keşfi başka sohbetin seçimini veya kullanıcının point'ini değiştirmesin.
-- **Kalan politika:** Seçim kimliği değişmese de gecikmiş keşif, kullanıcının değiştirdiği odak/taslağı izinsiz taşımamalı. Restore tek yayınlama sınırına taşındı; şema v2 effort için inherit/off/API-value ayrımını koruyor, eski kayıtlar yalnız bellekte inherit'e migrate ediliyor.
-- **Kapanış / bağımlılık:** ARCH-01, CHAT-01/02, CONFIG-01; headless seçim, iki sohbet, başarısız discovery/restore ve geç cevap testleri. İmleç taşıma yalnız açık kullanıcı etkileşimine ait UI adapter'ında kalsın.
+- **Sınır:** Aday listesi dışı değer reddi, effort yokluğu ile açık kapatma ayrımı, metadata capability'leri ve stale katalog nesli korunsun. Yapılandırılmış keşif örtük auth-source/pinentry beklemesine dönüşmesin. Arka plan keşfi başka sohbetin seçimini veya kullanıcının point'ini değiştirmesin.
+- **Kapanış / bağımlılık:** ARCH-01, CHAT-01; headless seçim, iki sohbet, başarısız discovery/restore ve geç cevap testleri. İmleç taşıma yalnız açık kullanıcı etkileşimine ait UI adapter'ında kalsın.
 
 ### MOD-04 · Taşıma Portu: Döngüden Bağımsız İstek Ömrü
 

@@ -168,5 +168,57 @@
       (should-not (kargu-provider-authenticated-p "beta"))
       (should-not (kargu--resolve-api-key "beta")))))
 
+(ert-deftest kargu-provider-discovery-never-invokes-secret-function-or-gpg-test ()
+  "Provider discovery never calls auth-source `:secret' functions or unlocks GPG."
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider "alpha"))
+        (kargu-api-key nil)
+        (auth-sources '("~/.authinfo.gpg" "secrets:Login" macos-keychain-internet))
+        (secret-called nil)
+        (searched-sources nil))
+    (cl-letf (((symbol-function 'kargu--config-providers)
+               (lambda () '(("alpha" :apikey "configured-key")
+                            ("beta" :api "https://beta.example/v1"))))
+              ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
+              ((symbol-function 'kargu-provider-env) (lambda (_) nil))
+              ((symbol-function 'auth-source-search)
+               (lambda (&rest _)
+                 (setq searched-sources auth-sources)
+                 (list (list :host "beta.example"
+                             :secret (lambda ()
+                                       (setq secret-called t)
+                                       "unlocked-secret"))))))
+      (should (kargu-provider-authenticated-p "alpha"))
+      (should-not (kargu-provider-authenticated-p "beta"))
+      (should-not secret-called)
+      (should-not searched-sources))))
+
+(ert-deftest kargu-config-resolve-api-key-async-cancel-and-unavailable-backend-test ()
+  "Explicit key resolution reports unavailable backends and supports async cancel."
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider "beta"))
+        (kargu-api-key nil)
+        (auth-sources '("~/.authinfo.gpg" macos-keychain-internet)))
+    (cl-letf (((symbol-function 'kargu--config-providers)
+               (lambda () '(("beta" :api "https://beta.example/v1"))))
+              ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
+              ((symbol-function 'kargu-provider-env) (lambda (_) nil)))
+      (let ((res (kargu-config-resolve-api-key-result "beta")))
+        (should (kargu-err-p res))
+        (should (eq (kargu-result-err-code res) 'unavailable)))
+      ;; Async adapter cancellation and owner validation
+      (let* (pending-task delivered canceled-adapter
+             (kargu-config-credential-adapter
+              (lambda (_provider _host task)
+                (setq pending-task task)
+                (kargu-async-add-cleanup
+                 task (lambda () (setq canceled-adapter t))))))
+        (let ((task (kargu-config-resolve-api-key-async
+                     "beta" (lambda (r) (setq delivered r)))))
+          (kargu-async-cancel task)
+          (should canceled-adapter)
+          (kargu-async-finish pending-task (kargu-ok "late-secret"))
+          (should-not delivered))))))
+
 (provide 'tests/test-config)
 ;;; test-config.el ends here

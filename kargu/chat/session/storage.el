@@ -43,6 +43,14 @@ change the default.  No Git ignore or index files are modified."
   "Maximum serialized session file size accepted for reading and writing."
   :type 'natnum :group 'kargu-session)
 
+(defcustom kargu-session-list-max-files 500
+  "Maximum number of session files inspected when listing a project."
+  :type 'natnum :group 'kargu-session)
+
+(defcustom kargu-session-list-max-total-bytes (* 64 1024 1024)
+  "Maximum cumulative bytes read across session files during one listing."
+  :type 'natnum :group 'kargu-session)
+
 (defconst kargu-session-storage--temporary-prefix ".kargu-session-"
   "Prefix for private temporary files published by atomic rename.")
 
@@ -151,6 +159,113 @@ The original remains untouched.  Refuse unsafe paths and mismatched IDs."
     (unless (equal (kargu-aget data "id") id)
       (user-error "Kargu: local session ID does not match its filename"))
     (kargu-session-storage-write id root data :exclusive t)))
+
+(defun kargu-session-metadata-p (record)
+  "Return non-nil when RECORD is a metadata summary without conversation."
+  (and (or (consp record) (hash-table-p record))
+       (stringp (kargu-aget record "id"))
+       (natnump (kargu-aget record "message_count"))
+       (null (kargu-aget record "messages"))
+       (null (kargu-aget record "transcript"))))
+
+(defun kargu-session-storage--string-field (decoded key fallback)
+  "Return DECODED's string value at KEY, or FALLBACK when absent."
+  (let ((val (gethash key decoded)))
+    (if (stringp val) val fallback)))
+
+(defun kargu-session-storage--natnum-field (decoded key)
+  "Return DECODED's non-negative integer at KEY, or 0."
+  (let ((val (gethash key decoded)))
+    (if (natnump val) val 0)))
+
+(defun kargu-session-storage--message-count (decoded)
+  "Return message count from DECODED without retaining message bodies."
+  (let ((cnt (gethash "message_count" decoded))
+        (msgs (gethash "messages" decoded)))
+    (cond ((natnump cnt) cnt)
+          ((or (vectorp msgs) (listp msgs)) (length msgs))
+          (t 0))))
+
+(defun kargu-session-storage--extract-metadata (decoded expected-id root)
+  "Extract metadata alist from DECODED when its id matches EXPECTED-ID in ROOT."
+  (when (and (hash-table-p decoded)
+             (equal (gethash "id" decoded) expected-id))
+    (let ((effort (gethash "effort" decoded)))
+      `(("schema_version" . ,(or (gethash "schema_version" decoded) 1))
+        ("id" . ,expected-id)
+        ("project_root" . ,(kargu-session-storage--string-field decoded "project_root" root))
+        ("project_name" . ,(kargu-session-storage--string-field
+                            decoded "project_name"
+                            (file-name-nondirectory (directory-file-name root))))
+        ("title" . ,(kargu-session-storage--string-field decoded "title" "Untitled"))
+        ("created_at" . ,(kargu-session-storage--string-field decoded "created_at" ""))
+        ("updated_at" . ,(kargu-session-storage--string-field decoded "updated_at" ""))
+        ("mode" . ,(kargu-session-storage--string-field decoded "mode" "agent"))
+        ("provider" . ,(kargu-session-storage--string-field decoded "provider" ""))
+        ("model" . ,(kargu-session-storage--string-field decoded "model" ""))
+        ("effort" . ,(and effort (kargu-json-to-record effort)))
+        ("requests" . ,(kargu-session-storage--natnum-field decoded "requests"))
+        ("tokens_in" . ,(kargu-session-storage--natnum-field decoded "tokens_in"))
+        ("tokens_out" . ,(kargu-session-storage--natnum-field decoded "tokens_out"))
+        ("message_count" . ,(kargu-session-storage--message-count decoded))))))
+
+(defun kargu-session-storage-newer-p (a b)
+  "Return non-nil when session metadata A precedes B deterministically."
+  (let ((time-a (or (kargu-aget a "updated_at") ""))
+        (time-b (or (kargu-aget b "updated_at") "")))
+    (if (equal time-a time-b)
+        (string> (or (kargu-aget a "id") "") (or (kargu-aget b "id") ""))
+      (string> time-a time-b))))
+
+(defun kargu-session-storage--candidate-entry (file directory)
+  "Return (FILE ID SIZE MTIME) when FILE is a safe bounded session in DIRECTORY."
+  (condition-case nil
+      (when (and (file-regular-p file)
+                 (file-readable-p file)
+                 (kargu-permission-within-project-p file directory))
+        (let* ((id (kargu-session-storage--assert-id (file-name-base file)))
+               (attrs (file-attributes file))
+               (size (and attrs (file-attribute-size attrs)))
+               (mtime (and attrs (file-attribute-modification-time attrs))))
+          (when (and (natnump size) (<= size kargu-session-max-file-bytes))
+            (list file id size (float-time mtime)))))
+    (error nil)))
+
+(defun kargu-session-storage--candidate-files (directory)
+  "Return bounded candidate session file entries in DIRECTORY, newest mtime first."
+  (when (file-directory-p directory)
+    (let (entries)
+      (dolist (file (directory-files directory t (rx ".json" eos)))
+        (when-let* ((entry (kargu-session-storage--candidate-entry file directory)))
+          (push entry entries)))
+      (seq-take
+       (sort entries
+             (lambda (a b)
+               (if (= (nth 3 a) (nth 3 b))
+                   (string> (nth 1 a) (nth 1 b))
+                 (> (nth 3 a) (nth 3 b)))))
+       kargu-session-list-max-files))))
+
+(defun kargu-session-storage-list-metadata (root)
+  "Return deterministic list of session metadata alists for canonical ROOT."
+  (let* ((canonical (file-name-as-directory (file-truename (expand-file-name root))))
+         (directory (kargu-session-storage-directory canonical))
+         (candidates (kargu-session-storage--candidate-files directory))
+         (remaining kargu-session-list-max-total-bytes)
+         sessions)
+    (dolist (entry candidates)
+      (pcase-let ((`(,file ,id ,size ,_mtime) entry))
+        (when (<= size remaining)
+          (setq remaining (- remaining size))
+          (condition-case err
+              (when-let* ((decoded (kargu-session-storage--read file))
+                          (meta (kargu-session-storage--extract-metadata
+                                 decoded id canonical)))
+                (push meta sessions))
+            (error
+             (kargu-log 'warn "failed to read session file %s: %s"
+                        file (error-message-string err)))))))
+    (sort sessions #'kargu-session-storage-newer-p)))
 
 (provide 'kargu/chat/session/storage)
 ;;; storage.el ends here

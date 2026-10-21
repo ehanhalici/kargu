@@ -13,8 +13,19 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
 (require 'kargu/core)
+(require 'kargu/async)
+(require 'kargu/contract/result)
 (require 'kargu/providers)
+
+(defvar auth-sources)
+
+(defvar kargu-config-credential-adapter nil
+  "Optional function (PROVIDER HOST TASK) for cancellable secret resolution.")
+
+(defvar kargu-config--nonblocking-auth-p nil
+  "Non-nil while provider discovery checks auth-source without secret unlock.")
 
 (declare-function kargu--config-providers "kargu/config/schema" ())
 (declare-function kargu--config-plist "kargu/config/schema" ())
@@ -123,17 +134,44 @@ Return nil for non-strings or unset/empty references; log only missing names."
                    (throw 'unset nil)))))
          value t t)))))
 
+(defun kargu-config-auth-source-supported-p (source)
+  "Return non-nil when auth-source entry SOURCE is a plain non-blocking file."
+  (let ((path (cond ((stringp source) source)
+                    ((and (consp source) (plist-member source :source))
+                     (plist-get source :source)))))
+    (and (stringp path)
+         (not (string-prefix-p "secrets:" path))
+         (not (string-match-p (rx "." (or "gpg" "asc") eos) path)))))
+
+(defun kargu-config--unsupported-auth-sources-p ()
+  "Return non-nil when `auth-sources' declares an interactive/encrypted store."
+  (and (boundp 'auth-sources)
+       (listp auth-sources)
+       (cl-some (lambda (src) (not (kargu-config-auth-source-supported-p src)))
+                auth-sources)))
+
+(defun kargu--auth-source-search-safe (host)
+  "Search supported `auth-sources' for HOST without unlocking encrypted files."
+  (require 'auth-source)
+  (let ((auth-sources
+         (if (and (boundp 'auth-sources) (listp auth-sources))
+             (cl-remove-if-not #'kargu-config-auth-source-supported-p auth-sources)
+           auth-sources)))
+    (when (or (not (listp auth-sources)) auth-sources)
+      (auth-source-search :host host :max 1))))
+
 (defun kargu--auth-source-api-key (api)
-  "Return the auth-source secret for URL API's host, or nil."
+  "Return the auth-source secret for URL API's host, or nil.
+When `kargu-config--nonblocking-auth-p' is non-nil, skip `:secret' functions."
   (let* ((host (and api (kargu--url-host api)))
-         (found (and host (progn (require 'auth-source)
-                                 (auth-source-search :host host :max 1)))))
+         (found (and host (kargu--auth-source-search-safe host))))
     (when found
       (let ((secret (plist-get (car found) :secret)))
         (kargu-nonempty
          (cond
-          ((functionp secret) (funcall secret))
-          ((stringp secret) secret)))))))
+          ((stringp secret) secret)
+          ((and (not kargu-config--nonblocking-auth-p) (functionp secret))
+           (funcall secret))))))))
 
 (defun kargu--provider-toml-plist (pname-lower provider-name)
   "TOML plist of PNAME-LOWER; the active provider's when PROVIDER-NAME is nil."
@@ -143,15 +181,15 @@ Return nil for non-strings or unset/empty references; log only missing names."
     (and (null provider-name) (fboundp 'kargu--provider-plist)
          (kargu--provider-plist))))
 
-(defun kargu--resolve-api-key (&optional provider-name)
-  "Resolve the API key for the active or specified PROVIDER-NAME.
-In order:
-1. `kargu-api-key', for the active provider only, so another provider's
-   key is never sent to it.
-2. The provider's TOML `apikey', with ${VAR} references expanded.  An
-   explicit empty string means keyless and stops the search.
-3. Environment variables the catalog declares for the provider (`:env').
-4. Auth-source credentials for the provider endpoint host."
+(defun kargu--provider-auth-api (pname-lower provider-name toml-plist)
+  "Return endpoint URL for PNAME-LOWER, PROVIDER-NAME and TOML-PLIST."
+  (or (and toml-plist (plist-get toml-plist :api))
+      (and (fboundp 'kargu-provider-api) (kargu-provider-api pname-lower))
+      (and (null provider-name) (kargu--api-base))
+      kargu-api-base))
+
+(defun kargu--resolve-direct-api-key (&optional provider-name)
+  "Resolve PROVIDER-NAME's credential from memory, TOML or env without auth-source."
   (let* ((pname (or provider-name (kargu--provider-name)))
          (pname-lower (downcase (string-trim (format "%s" pname))))
          (active (or (null provider-name)
@@ -164,18 +202,106 @@ In order:
      ((and active (boundp 'kargu-api-key) (kargu-nonempty kargu-api-key)))
      (toml-key)
      ((and toml-plist (equal raw-key "")) "")
-     ((kargu-nonempty (kargu--provider-env-api-key pname-lower)))
-     ((kargu--auth-source-api-key
-       (or (and toml-plist (plist-get toml-plist :api))
-           (and (fboundp 'kargu-provider-api) (kargu-provider-api pname-lower))
-           (and (null provider-name) (kargu--api-base))
-           kargu-api-base))))))
+     ((kargu-nonempty (kargu--provider-env-api-key pname-lower))))))
+
+(defun kargu--resolve-api-key (&optional provider-name)
+  "Resolve the API key for the active or specified PROVIDER-NAME.
+In order:
+1. `kargu-api-key', for the active provider only, so another provider's
+   key is never sent to it.
+2. The provider's TOML `apikey', with ${VAR} references expanded.  An
+   explicit empty string means keyless and stops the search.
+3. Environment variables the catalog declares for the provider (`:env').
+4. Auth-source credentials for the provider endpoint host."
+  (let* ((pname (or provider-name (kargu--provider-name)))
+         (pname-lower (downcase (string-trim (format "%s" pname))))
+         (toml-plist (kargu--provider-toml-plist pname-lower provider-name)))
+    (or (kargu--resolve-direct-api-key provider-name)
+        (kargu--auth-source-api-key
+         (kargu--provider-auth-api pname-lower provider-name toml-plist)))))
+
+(defun kargu-config-api-key-fast (&optional provider-name)
+  "Return PROVIDER-NAME's key without invoking secret functions or pinentry."
+  (let ((kargu-config--nonblocking-auth-p t))
+    (kargu--resolve-api-key provider-name)))
 
 (defun kargu-config-api-key (&optional provider-name)
   "Resolve PROVIDER-NAME's credential using the configuration precedence.
 The global override belongs to the active provider only.  An explicit
 empty TOML key denotes keyless access; missing references fall through."
-  (kargu--resolve-api-key provider-name))
+  (let ((kargu-config--nonblocking-auth-p nil))
+    (kargu--resolve-api-key provider-name)))
+
+(defun kargu-config-resolve-api-key-result (&optional provider-name)
+  "Resolve PROVIDER-NAME's credential as a typed `kargu-result'.
+Unsupported interactive auth backends return code `unavailable'."
+  (let* ((pname (or provider-name (kargu--provider-name)))
+         (pname-lower (downcase (string-trim (format "%s" pname))))
+         (direct (kargu--resolve-direct-api-key provider-name)))
+    (cond
+     (direct (kargu-ok direct))
+     ((and (fboundp 'kargu-provider-keyless-p)
+           (kargu-provider-keyless-p pname-lower))
+      (kargu-ok ""))
+     (t
+      (let* ((toml-plist (kargu--provider-toml-plist pname-lower provider-name))
+             (api (kargu--provider-auth-api pname-lower provider-name toml-plist))
+             (kargu-config--nonblocking-auth-p nil)
+             (auth-key (kargu--auth-source-api-key api)))
+        (cond
+         (auth-key (kargu-ok auth-key))
+         ((kargu-config--unsupported-auth-sources-p)
+          (kargu-err (format "Credential backend for %s is unavailable" pname-lower)
+                     'unavailable))
+         (t (kargu-err (format "No API key configured for %s" pname-lower)
+                       'missing))))))))
+
+(defun kargu-config--deliver-key-result (callback value error)
+  "Deliver resolved credential VALUE or ERROR to CALLBACK as a `kargu-result'."
+  (cond
+   ((or (kargu-ok-p value) (kargu-err-p value)) (funcall callback value))
+   (error (funcall callback (kargu-err error 'failed)))
+   ((stringp value) (funcall callback (kargu-ok value)))
+   (t (funcall callback (kargu-err "Credential resolution failed" 'failed)))))
+
+(cl-defun kargu-config-resolve-api-key-async
+    (provider-name callback &key timeout origin)
+  "Resolve PROVIDER-NAME's key within TIMEOUT and invoke CALLBACK.
+CALLBACK receives a `kargu-result' while ORIGIN owns the same session."
+  (kargu-contract-assert #'functionp callback)
+  (let* ((origin (or origin (current-buffer)))
+         (session (with-current-buffer origin (kargu-session-context)))
+         (pname (or provider-name (with-current-buffer origin (kargu--provider-name))))
+         (pname-lower (downcase (string-trim (format "%s" pname))))
+         (valid-p (lambda ()
+                    (and (buffer-live-p origin)
+                         (with-current-buffer origin
+                           (eq session (kargu-session-context))))))
+         (kargu--loop-run nil)
+         (kargu-async--current-task nil)
+         (task (kargu-async-start
+                (lambda (val err)
+                  (when (funcall valid-p)
+                    (kargu-config--deliver-key-result callback val err)))
+                :timeout timeout :valid-p valid-p)))
+    (funcall
+     (kargu-async-wrap
+      task
+      (lambda ()
+        (let ((direct (kargu--resolve-direct-api-key provider-name)))
+          (cond
+           (direct (kargu-async-finish task (kargu-ok direct)))
+           ((and (fboundp 'kargu-provider-keyless-p)
+                 (kargu-provider-keyless-p pname-lower))
+            (kargu-async-finish task (kargu-ok "")))
+           ((functionp kargu-config-credential-adapter)
+            (let* ((toml (kargu--provider-toml-plist pname-lower provider-name))
+                   (api (kargu--provider-auth-api pname-lower provider-name toml)))
+              (funcall kargu-config-credential-adapter
+                       pname-lower (kargu--url-host api) task)))
+           (t (kargu-async-finish
+               task (kargu-config-resolve-api-key-result provider-name))))))))
+    task))
 
 (provide 'kargu/config/key)
 

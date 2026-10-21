@@ -162,5 +162,46 @@
           (should-not (kargu-selection-provider))
           (should-not (kargu-selection-model)))))))
 
+(ert-deftest kargu-selection-service-candidate-and-membership-validation-test ()
+  "Candidate normalization and membership checks work without the chat UI."
+  (should (equal (kargu-selection-normalize-candidates '("a" "" b)) '("a" "b")))
+  (should (equal (kargu-selection-validate-member "  a " '("a" "b") 'model) "a"))
+  (should-error (kargu-selection-validate-member "c" '("a" "b") 'model)
+                :type 'user-error)
+  (should (equal (kargu-selection-effort-candidates '("low" "off" "high" "low"))
+                 '("off" "low" "high")))
+  (let ((table (make-hash-table :test #'equal)))
+    (should-not (kargu-selection-models-known-p "p" nil table))
+    (should (equal (kargu-selection-model-candidates "p" nil '("fallback") table)
+                   '("fallback")))
+    (puthash "p" '() table)
+    (should (kargu-selection-models-known-p "p" nil table))
+    (should-not (kargu-selection-model-candidates "p" '("stale") '("fallback") table))))
+
+(ert-deftest kargu-selection-late-catalog-respects-focus-and-draft-changes-test ()
+  "Delayed catalog results do not open a popup if draft, point or focus changed."
+  (dolist (change '(draft point window-buffer))
+    (with-temp-buffer
+      (insert "prompt: ")
+      (let ((kargu--live-models-cache (make-hash-table :test #'equal))
+            (orig-win-buf (window-buffer (selected-window)))
+            held opened)
+        (kargu-selection-update :provider "p" :model "before")
+        (unwind-protect
+            (cl-letf (((symbol-function 'kargu-api-fetch-model-ids)
+                       (lambda (_provider callback &optional _) (setq held callback)))
+                      ((symbol-function 'kargu-chat--open-model-selector)
+                       (lambda (&rest _) (setq opened t))))
+              (kargu-chat-select-model-company)
+              (pcase change
+                ('draft (save-excursion (insert "user typing")))
+                ('point (goto-char (point-min)))
+                ('window-buffer (set-window-buffer (selected-window) (current-buffer))))
+              (funcall held '("m1"))
+              (should-not opened)
+              (should (equal (kargu-selection-model) "before")))
+          (when (buffer-live-p orig-win-buf)
+            (set-window-buffer (selected-window) orig-win-buf)))))))
+
 (provide 'tests/test-selection)
 ;;; test-selection.el ends here

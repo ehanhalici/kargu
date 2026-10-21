@@ -64,19 +64,8 @@ An empty QUERY returns CANDIDATES unchanged."
             (push (car all) res))
           (nreverse res))))))
 
-(defun kargu-api-select--strings (candidates)
-  "Return CANDIDATES as a list of non-empty strings."
-  (delq nil
-        (mapcar (lambda (c)
-                  (let ((s (if (stringp c) c (format "%s" c))))
-                    (unless (string-empty-p s) s)))
-                candidates)))
-
-(defun kargu-api-select--plain (value)
-  "Return VALUE without text properties, or nil when it is blank."
-  (and (stringp value)
-       (let ((s (string-trim (substring-no-properties value))))
-         (unless (string-empty-p s) s))))
+(defalias 'kargu-api-select--strings #'kargu-selection-normalize-candidates)
+(defalias 'kargu-api-select--plain #'kargu-selection-plain-choice)
 
 ;;;; Company backend ------------------------------------------------------
 
@@ -152,12 +141,23 @@ interactive UI is footer Company and does not use this function."
 
 (defun kargu-api-select--accept (chosen candidates apply field)
   "Call APPLY with CHOSEN when it is an exact member of CANDIDATES."
-  (let ((plain (kargu-api-select--plain chosen)))
-    (if (member plain candidates)
-        (funcall apply plain)
-      (when (fboundp 'kargu-chat-refresh-footer)
-        (kargu-chat-refresh-footer))
-      (user-error "Kargu: %s is not a valid %s" (or plain "") field))))
+  (condition-case err
+      (funcall apply (kargu-selection-validate-member chosen candidates field))
+    (user-error
+     (when (fboundp 'kargu-chat-refresh-footer)
+       (kargu-chat-refresh-footer))
+     (signal (car err) (cdr err)))))
+
+(defun kargu-api-select--focus-unchanged-p
+    (chat focused-window focused-buffer initial-point mod-tick)
+  "Return non-nil when CHAT's focus, point and draft remain unchanged.
+Compare FOCUSED-WINDOW, FOCUSED-BUFFER, INITIAL-POINT and MOD-TICK."
+  (and (buffer-live-p chat)
+       (eq (selected-window) focused-window)
+       (eq (window-buffer (selected-window)) focused-buffer)
+       (with-current-buffer chat
+         (and (= mod-tick (buffer-chars-modified-tick))
+              (= initial-point (point))))))
 
 (defun kargu-api-select--continue (fn)
   "Run FN after completing the current selection.
@@ -166,11 +166,16 @@ Use a timer for footer Company selection and run immediately in batch."
            (featurep 'company)
            (kargu-api-select--chat-buffer))
       (let* ((buf (kargu-api-select--chat-buffer))
-             (owner (kargu-session-context buf)) (selection (kargu-selection-context owner)))
+             (owner (kargu-session-context buf))
+             (selection (kargu-selection-context owner))
+             (win (selected-window))
+             (win-buf (window-buffer win))
+             (pt (with-current-buffer buf (point)))
+             (tick (buffer-chars-modified-tick buf)))
         (run-with-timer
          0 nil
          (lambda ()
-           (when (buffer-live-p buf)
+           (when (kargu-api-select--focus-unchanged-p buf win win-buf pt tick)
              (with-current-buffer buf
                (when (and (eq owner (kargu-session-context))
                           (eq selection (kargu-selection-context)))
@@ -270,13 +275,12 @@ that is a member of CANDIDATES.  Without a display, read in the minibuffer."
 
 (defun kargu-api-select--guard ()
   "Signal an error when the agent is running or thinking."
-  (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
-            (and (fboundp 'kargu-busy-p) (kargu-busy-p)))
+  (when (kargu-selection-busy-p)
     (user-error "Kargu: cannot change this while the agent is running or thinking (stop with C-c C-k first)")))
 
 ;;;; Mode -----------------------------------------------------------------
 
-(defconst kargu-api-select--modes '("ask" "plan" "debug" "agent")
+(defconst kargu-api-select--modes kargu-selection-modes
   "Execution modes the footer can select.")
 
 (defconst kargu-api-select--mode-notes
@@ -299,22 +303,7 @@ that is a member of CANDIDATES.  Without a display, read in the minibuffer."
 
 ;;;; Reasoning effort -----------------------------------------------------
 
-(defun kargu-api-select--effort-candidates (supported)
-  "Return effort choices.  SUPPORTED is the model's API list, or nil.
-\"off\" is the local choice that clears reasoning.  Names from the API,
-including \"none\", stay in the list."
-  (if (null supported)
-      '("off")
-    (cons "off"
-          (delete-dups
-           (delq nil
-                 (mapcar (lambda (e)
-                           (let ((s (and e (format "%s" e))))
-                             (when (and (stringp s)
-                                        (not (string-empty-p s))
-                                        (not (equal (downcase s) "off")))
-                               s)))
-                         supported))))))
+(defalias 'kargu-api-select--effort-candidates #'kargu-selection-effort-candidates)
 
 (defun kargu-api-select--apply-effort (chosen &optional note)
   "Set reasoning effort to CHOSEN.  \"off\" clears it.
@@ -346,13 +335,7 @@ NOTE replaces the confirmation message."
 
 ;;;; Model ----------------------------------------------------------------
 
-(defun kargu-chat--collect-model-candidates (pname-str live-ids catalog-ids)
-  "Return authoritative model ids for PNAME-STR without stale additions.
-A known cache, including emptiness, beats delayed LIVE-IDS.  Only without
-a known live catalog may the caller's CATALOG-IDS act as fallback."
-  (let* ((cached (gethash pname-str kargu--live-models-cache :unknown))
-         (models (if (eq cached :unknown) (or live-ids catalog-ids) cached)))
-    (delete-dups (copy-sequence models))))
+(defalias 'kargu-chat--collect-model-candidates #'kargu-selection-model-candidates)
 
 (defun kargu-api-select--apply-model (chosen pname-str)
   "Activate model CHOSEN for PNAME-STR, then ask for effort when it exists."
@@ -394,10 +377,7 @@ a known live catalog may the caller's CATALOG-IDS act as fallback."
              models)
      (lambda (chosen) (kargu-api-select--apply-model chosen pname-str)))))
 
-(defun kargu-chat--models-known-p (pname-str live-ids)
-  "Return non-nil if LIVE-IDS or PNAME-STR's cached catalog is known.
-A successful empty catalog is known, not a missing lookup."
-  (or live-ids (not (eq (gethash pname-str kargu--live-models-cache :unknown) :unknown))))
+(defalias 'kargu-chat--models-known-p #'kargu-selection-models-known-p)
 
 (defun kargu-chat-select-model-company (&optional live-ids catalog-ids provider-name _event)
   "Select a model for PROVIDER-NAME with Company in the footer.
@@ -418,13 +398,18 @@ opens when the answer arrives, and Emacs stays usable meanwhile."
         (kargu-chat--open-model-selector pname-str live-ids catalog-ids)
       (message "kargu: querying live model catalog from %s (%s)..."
                pname-str (kargu--api-base pname-str))
-      (let ((chat (current-buffer)) (owner (kargu-session-context))
-            (selection (kargu-selection-context))
-            (generation kargu-api-select--catalog-generation))
+      (let* ((chat (current-buffer))
+             (owner (kargu-session-context))
+             (selection (kargu-selection-context))
+             (generation kargu-api-select--catalog-generation)
+             (win (selected-window))
+             (win-buf (window-buffer win))
+             (pt (point))
+             (tick (buffer-chars-modified-tick)))
         (kargu-api-fetch-model-ids
          pname-str
          (lambda (ids)
-           (when (buffer-live-p chat)
+           (when (kargu-api-select--focus-unchanged-p chat win win-buf pt tick)
              (with-current-buffer chat
                (when (and (eq owner (kargu-session-context))
                           (eq selection (kargu-selection-context))
@@ -439,11 +424,7 @@ opens when the answer arrives, and Emacs stays usable meanwhile."
 
 (defun kargu-api-select--provider-candidates ()
   "Return authenticated provider ids the footer can select."
-  (let* ((all (kargu-connected-providers))
-         (cfg (and (fboundp 'kargu--config-providers)
-                   (mapcar #'car (kargu--config-providers))))
-         (in-config (and cfg (cl-remove-if-not (lambda (p) (member p cfg)) all))))
-    (or (and (not noninteractive) in-config) all)))
+  (kargu-selection-provider-candidates (not noninteractive)))
 
 (defun kargu-api-select--provider-note (provider)
   "Return the Company note for PROVIDER."

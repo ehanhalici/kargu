@@ -25,6 +25,7 @@
 (declare-function kargu--url-host "kargu/config/key")
 (declare-function kargu--config-providers "kargu/config/schema")
 (declare-function kargu-config-api-key "kargu/config/key" (&optional provider-name))
+(declare-function kargu-config-api-key-fast "kargu/config/key" (&optional provider-name))
 
 (defvar kargu-providers--table (make-hash-table :test 'equal)
   "Hash table mapping provider ID strings to provider metadata plists.")
@@ -280,11 +281,11 @@ Checks provider metadata in registry and TOML config."
               (not (string-suffix-p "..." trimmed))))))
 
 (defun kargu-provider-authenticated-p (id)
-  "Non-nil if provider ID has an API key available or is a keyless runner.
-Use the same credential owner and precedence as actual requests."
+  "Non-nil if provider ID has a nonblocking API key available or is keyless.
+Discovery never invokes secret functions or interactive pinentry."
   (require 'kargu/config)
   (or (kargu-provider-keyless-p id)
-      (kargu-provider-valid-key-p (kargu-config-api-key id))))
+      (kargu-provider-valid-key-p (kargu-config-api-key-fast id))))
 
 (defun kargu-connected-providers ()
   "Return list of all registered provider IDs that are authenticated or keyless."

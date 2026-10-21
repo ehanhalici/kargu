@@ -471,5 +471,110 @@
                                       (error-message-string err))))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
+(ert-deftest kargu-session-list-metadata-and-deterministic-tie-break-test ()
+  "Listing returns metadata without conversation and breaks timestamp ties by id."
+  (let* ((temp-dir (make-temp-file "kargu-test-sessions-meta-" t))
+         (kargu-sessions-directory temp-dir)
+         (proj (make-temp-file "kargu-proj-meta-" t))
+         (proj-root (file-name-as-directory proj))
+         (dir (kargu-session-storage-directory proj-root)))
+    (unwind-protect
+        (progn
+          (make-directory dir t)
+          (dolist (sid '("session-a" "session-c" "session-b"))
+            (kargu-session-storage-write
+             sid proj-root
+             `(("schema_version" . 2)
+               ("effort" . (("kind" . "inherit")))
+               ("id" . ,sid)
+               ("project_root" . ,proj-root)
+               ("title" . ,(concat "Title " sid))
+               ("updated_at" . "2026-10-21 12:00:00")
+               ("mode" . "ask")
+               ("provider" . "openai")
+               ("model" . "gpt-4o")
+               ("message_count" . 2)
+               ("transcript" . "large transcript body")
+               ("messages" . [(("role" . "user") ("content" . "hello"))
+                              (("role" . "assistant") ("content" . "world"))]))))
+          ;; Write corrupted and mismatched-id files that must be skipped
+          (write-region "{corrupt" nil (expand-file-name "broken.json" dir))
+          (kargu-session-storage-write
+           "mismatch" proj-root '(("id" . "other-id") ("updated_at" . "2026-10-21 13:00:00")))
+          (let ((sessions (kargu-session-list proj-root)))
+            (should (equal (mapcar (lambda (s) (kargu-aget s "id")) sessions)
+                           '("session-c" "session-b" "session-a")))
+            (dolist (s sessions)
+              (should (kargu-session-metadata-p s))
+              (should (= (kargu-aget s "message_count") 2))
+              (should-not (kargu-aget s "messages"))
+              (should-not (kargu-aget s "transcript")))
+            ;; Restoring from a metadata entry loads the full conversation on demand
+            (let ((buf (get-buffer-create "*kargu-meta-restore*")))
+              (unwind-protect
+                  (with-current-buffer buf
+                    (kargu-chat-mode)
+                    (setq-local kargu-chat--project-root proj-root)
+                    (kargu-session-load (car sessions) buf proj-root)
+                    (should (equal kargu-chat--session-id "session-c"))
+                    (should (= (length (kargu-history-messages)) 2))
+                    (should (string-match-p "large transcript body" (buffer-string))))
+                (when (buffer-live-p buf) (kill-buffer buf))))))
+      (delete-directory temp-dir t)
+      (delete-directory proj t))))
+
+(ert-deftest kargu-session-list-async-worker-cancel-and-stale-owner-test ()
+  "Async session listing runs in the worker, supports cancel and drops stale owners."
+  (let* ((temp-dir (make-temp-file "kargu-test-sessions-async-" t))
+         (kargu-sessions-directory temp-dir)
+         (proj (make-temp-file "kargu-proj-async-" t))
+         (proj-root (file-name-as-directory proj))
+         (other (make-temp-file "kargu-proj-other-" t))
+         (other-root (file-name-as-directory other))
+         (buf (get-buffer-create "*kargu-async-list*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (kargu-chat-mode)
+          (setq-local kargu-chat--project-root proj-root)
+          (kargu-session-storage-write
+           "s-1" proj-root
+           `(("schema_version" . 2) ("effort" . (("kind" . "inherit"))) ("id" . "s-1")
+             ("title" . "Async 1") ("updated_at" . "2026-10-21 10:00:00")
+             ("messages" . [(("role" . "user") ("content" . "hi"))])))
+          ;; 1. Successful async worker listing
+          (let (done-sessions done-err finished)
+            (kargu-session-list-async
+             proj-root
+             (lambda (sessions err)
+               (setq done-sessions sessions done-err err finished t))
+             buf)
+            (let ((deadline (+ (float-time) 10.0)))
+              (while (and (not finished) (< (float-time) deadline))
+                (accept-process-output nil 0.05)))
+            (should finished)
+            (should-not done-err)
+            (should (= (length done-sessions) 1))
+            (should (equal (kargu-aget (car done-sessions) "id") "s-1"))
+            (should (= (kargu-aget (car done-sessions) "message_count") 1))
+            (should-not (kargu-aget (car done-sessions) "messages")))
+          ;; 2. Cancellation suppresses delivery
+          (let (called)
+            (let ((task (kargu-session-list-async
+                         proj-root (lambda (&rest _) (setq called t)) buf)))
+              (kargu-async-cancel task)
+              (accept-process-output nil 0.1)
+              (should-not called)))
+          ;; 3. Project root change before completion suppresses stale callback
+          (let (called)
+            (kargu-session-list-async
+             proj-root (lambda (&rest _) (setq called t)) buf)
+            (setq-local kargu-chat--project-root other-root)
+            (accept-process-output nil 0.2)
+            (should-not called)))
+      (when (buffer-live-p buf) (kill-buffer buf))
+      (delete-directory temp-dir t)
+      (delete-directory proj t)
+      (delete-directory other t))))
+
 (provide 'tests/test-session)
 ;;; test-session.el ends here
