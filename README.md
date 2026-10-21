@@ -163,8 +163,11 @@ delivery captures that owner; changing the current buffer cannot redirect a
 reply or Stop cleanup into another conversation. Connectivity tests use an
 isolated history. Queue append copies only the new message, while request and
 persistence snapshots detach message lists and vectors. Scalar strings are
-borrowed read-only. Provider/model selection and application coordination are
-still shared; this is not yet complete runtime isolation.
+borrowed read-only. Provider/model/effort choices form one validated immutable
+value per session; UI changes do not overwrite configured defaults. Selection
+callbacks capture their session and selection identity, so obsolete lists cannot
+change a replacement owner. Mode, lifecycle, token totals and application
+coordination remain shared; this is not yet complete runtime isolation.
 
 Model metadata now has one owner in `kargu/models/store.el`, indexed by the
 provider/model pair. Provider IDs normalize case; opaque model IDs retain it.

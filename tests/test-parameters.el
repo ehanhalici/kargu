@@ -10,6 +10,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'kargu/api/parameters)
 (require 'kargu/api/request)
 
@@ -109,7 +110,8 @@
 
 (ert-deftest kargu-parameters-extra-fields-cannot-reintroduce-cap-conflict-test ()
   "Even explicit payload extras cannot cause both cap aliases to be posted."
-  (let ((kargu-max-tokens 100) (kargu--session-provider "openai")
+  (let ((kargu-max-tokens 100) (kargu-session--context
+                                (kargu-test-session-with-history :provider "openai"))
         (kargu--model-metadata-table (make-hash-table :test #'equal)))
     (should-error (kargu--build-payload '("max_tokens" . 200)) :type 'user-error)))
 

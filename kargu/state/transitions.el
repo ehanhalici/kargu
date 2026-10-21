@@ -46,30 +46,26 @@ Validates MODE and ensures an agent run is not currently active."
 (defun kargu-state-set-provider (provider)
   "Set the active PROVIDER symbol."
   (kargu-contract-assert #'symbolp provider "PROVIDER must be a symbol: %S" provider)
-  (kargu-state--set :provider provider)
-  (kargu-state-notify :provider provider)
+  (kargu-selection-update :provider (and provider (symbol-name provider)))
   provider)
 
 (defun kargu-state-set-model (model)
   "Set the active MODEL string identifier."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p model
                          "MODEL must be a non-empty string: %S" model)
-  (kargu-state--set :model model)
-  (kargu-state-notify :model model)
+  (kargu-selection-update :model model)
   model)
 
 (defun kargu-state-clear-model ()
   "Clear the active model."
-  (kargu-state--set :model nil)
-  (kargu-state-notify :model nil)
+  (kargu-selection-update :model nil)
   nil)
 
 (defun kargu-state-set-reasoning-effort (effort)
   "Set the active reasoning EFFORT to a symbol from the model API, or nil."
   (unless (or (null effort) (symbolp effort))
     (error "Invalid reasoning effort: %S (expected a symbol or nil)" effort))
-  (kargu-state--set :reasoning-effort effort)
-  (kargu-state-notify :reasoning-effort effort)
+  (kargu-selection-update :effort effort)
   effort)
 
 (defun kargu-state-transition-status (new-status &optional detail)

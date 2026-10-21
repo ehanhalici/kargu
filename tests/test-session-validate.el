@@ -20,8 +20,8 @@
   (let ((history (copy-tree (kargu-history-messages)))
         (counters (kargu-session-snapshot))
         (state (copy-tree kargu--state-store))
-        (provider kargu--session-provider)
-        (model kargu--session-model))
+        (provider (kargu-selection-provider))
+        (model (kargu-selection-model)))
     (with-temp-buffer
       (insert "existing transcript and unsent draft")
       (setq-local kargu-chat--session-id "existing")
@@ -51,8 +51,8 @@
     (should (equal (kargu-history-messages) history))
     (should (equal (kargu-session-snapshot) counters))
     (should (equal kargu--state-store state))
-    (should (equal kargu--session-provider provider))
-    (should (equal kargu--session-model model))))
+    (should (equal (kargu-selection-provider) provider))
+    (should (equal (kargu-selection-model) model))))
 
 (ert-deftest kargu-session-validate-copies-native-and-wire-records-test ()
   "Legacy records and typed JSON retain Unicode, nulls and tool-call arrays."
@@ -120,15 +120,15 @@
   "Loading an unselected session clears both the footer and live selection."
   (with-temp-buffer
     (kargu-chat-mode)
-    (setq kargu-chat--session-provider "previous-provider"
-          kargu-chat--session-model "previous-model")
+    (setf (kargu-selection-provider) "previous-provider"
+          (kargu-selection-model) "previous-model")
     (kargu-session-load '(("id" . "blank") ("provider" . " ")
                           ("model" . "") ("messages" . []))
                         (current-buffer) default-directory)
-    (should-not kargu-chat--session-provider)
-    (should-not kargu-chat--session-model)
-    (should-not kargu--session-provider)
-    (should-not kargu--session-model)
+    (should-not (kargu-selection-provider))
+    (should-not (kargu-selection-model))
+    (should-not (kargu-selection-provider))
+    (should-not (kargu-selection-model))
     (should-not (kargu-state-provider))
     (should-not (kargu-state-model))))
 

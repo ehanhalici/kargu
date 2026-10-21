@@ -24,6 +24,7 @@
 (require 'tests/test-contract)
 (require 'tests/test-json)
 (require 'tests/test-state)
+(require 'tests/test-selection)
 (require 'tests/test-permission)
 (require 'tests/test-git)
 (require 'tests/test-history)

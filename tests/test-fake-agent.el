@@ -7,6 +7,7 @@
 ;; real.  Only `kargu--api-post' is replaced, by a synchronous queue.
 
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'cl-lib)
 (require 'kargu)
 (require 'kargu/chat)
@@ -419,18 +420,15 @@ the system prompt is not an orphan."
 (defun kargu-fake--run-row (mode tools action response saved-provider saved-model)
   "Run one matrix row.  Return a failure string or nil."
   (kargu-fake--fresh-chat)
-  (setq kargu--session-provider saved-provider
-        kargu--session-model saved-model)
+  (setf (kargu-selection-provider) saved-provider
+        (kargu-selection-model) saved-model)
   (when (and (stringp saved-model) (not (string-empty-p saved-model)))
     (ignore-errors (kargu-state-set-model saved-model)))
-  (unless (and (stringp kargu--session-provider) (not (string-empty-p kargu--session-provider)))
-    (setq kargu--session-provider "openrouter"))
-  (unless (and (stringp kargu--session-model) (not (string-empty-p kargu--session-model)))
-    (setq kargu--session-model "fake/model-a")
+  (unless (and (stringp (kargu-selection-provider)) (not (string-empty-p (kargu-selection-provider))))
+    (setf (kargu-selection-provider) "openrouter"))
+  (unless (and (stringp (kargu-selection-model)) (not (string-empty-p (kargu-selection-model))))
+    (setf (kargu-selection-model) "fake/model-a")
     (kargu-state-set-model "fake/model-a"))
-  (with-current-buffer (get-buffer kargu-chat-buffer-name)
-    (setq-local kargu-chat--session-provider kargu--session-provider
-                kargu-chat--session-model kargu--session-model))
   (let ((failure
          (condition-case err
              (let ((signaled (kargu-fake--drive mode tools action response)))
@@ -462,8 +460,8 @@ the system prompt is not an orphan."
 (ert-deftest kargu-fake-agent-matrix ()
   "Drive every mode, tool, user action, and response through the real loop.
 No Emacs window, no network, no Company popup, no `y-or-n-p'."
-  (let* ((saved-provider kargu--session-provider)
-         (saved-model kargu--session-model)
+  (let* ((saved-provider (kargu-selection-provider))
+         (saved-model (kargu-selection-model))
          (saved-mode (kargu-state-mode))
          (saved-key (and (boundp 'kargu-api-key) kargu-api-key))
          (saved-history (copy-tree (kargu-history-messages) t))
@@ -496,11 +494,7 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
                    #'kargu-fake--read)
                   ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
                   ((symbol-function 'company-manual-begin)
-                   (lambda (&rest _) (error "Company opened")))
-                  ((symbol-function 'kargu-chat-activate-selection)
-                   (lambda (&rest _) nil))
-                  ((symbol-function 'kargu-chat-note-selection)
-                   (lambda (&rest _) nil)))
+                   (lambda (&rest _) (error "Company opened"))))
           (dolist (mode kargu-fake--modes)
             (dolist (tools kargu-fake--tool-states)
               (dolist (action kargu-fake--actions)
@@ -510,8 +504,8 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
                                   saved-provider saved-model)))
                     (when failure
                       (push failure failures))))))))
-      (setf kargu--session-provider saved-provider
-            kargu--session-model saved-model
+      (setf (kargu-selection-provider) saved-provider
+            (kargu-selection-model) saved-model
             kargu-api-key saved-key
             (kargu-history-messages) saved-history
             kargu--loop-run nil

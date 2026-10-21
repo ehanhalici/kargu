@@ -726,8 +726,8 @@
     (unwind-protect
         (with-current-buffer b
           (kargu-chat-mode)
-          (setq-local kargu-chat--session-provider "nvidia")
-          (setq-local kargu-chat--session-model "nvidia/nemotron-3.5-content-safety:free")
+          (setf (kargu-selection-provider) "nvidia")
+          (setf (kargu-selection-model) "nvidia/nemotron-3.5-content-safety:free")
           (kargu-chat--ensure-prompt)
           (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'agent))
                     ((symbol-function 'kargu-model-supports-tools-p) (lambda (&optional _id) nil))
@@ -775,8 +775,8 @@
     (unwind-protect
         (with-current-buffer b
           (kargu-chat-mode)
-          (setq-local kargu-chat--session-provider "p")
-          (setq-local kargu-chat--session-model "m")
+          (setf (kargu-selection-provider) "p")
+          (setf (kargu-selection-model) "m")
           (kargu-chat--ensure-prompt)
           (goto-char (point-max))
           (let ((inhibit-read-only t)) (insert "my precious prompt"))

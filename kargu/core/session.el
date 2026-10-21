@@ -17,6 +17,7 @@
 (require 'kargu/core/log)
 (require 'kargu/contract/assert)
 (require 'kargu/contract/history)
+(require 'kargu/contract/selection)
 
 (autoload 'kargu-session-reset "kargu/application/reset" nil t)
 (declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
@@ -35,7 +36,8 @@
 (cl-defstruct (kargu-session (:constructor kargu-session--create))
   "One captured session ID owning its usage counters, not a runtime singleton."
   (id-value nil :read-only t) usage-value
-  (history-value (kargu-history-create) :read-only t))
+  (history-value (kargu-history-create) :read-only t)
+  (selection-value (kargu-selection-create)))
 
 (defvar-local kargu-session--context nil
   "The current buffer's owned session handle; callbacks capture it explicitly.")
@@ -53,12 +55,15 @@
                          (plist-get usage :started))
   usage)
 
-(cl-defun kargu-session-create (&key id-value usage-value)
-  "Create an owner for ID-VALUE after validating and copying USAGE-VALUE."
+(cl-defun kargu-session-create (&key id-value usage-value
+                                    (selection-value (kargu-selection-create)))
+  "Create ID-VALUE's owner with copied USAGE-VALUE and SELECTION-VALUE."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p id-value)
   (kargu-session--validate-usage usage-value)
+  (kargu-contract-assert #'kargu-selection-p selection-value)
   (kargu-session--create :id-value (copy-sequence id-value)
-                         :usage-value (copy-tree usage-value)))
+                         :usage-value (copy-tree usage-value)
+                         :selection-value selection-value))
 
 (defun kargu-session--initial-usage ()
   "Return fresh usage fields without duplicating the session identity."
@@ -115,7 +120,8 @@ Nested scalar strings are borrowed read-only values."
   (setq kargu-session--context
         (kargu-session--create
          :id-value (kargu-session-id) :usage-value (copy-tree usage)
-         :history-value (kargu-session-history-value (kargu-session-context)))))
+         :history-value (kargu-session-history-value (kargu-session-context))
+         :selection-value (kargu-session-selection-value (kargu-session-context)))))
 
 (defun kargu-session-record-usage (tokens-in tokens-out &optional session)
   "Add TOKENS-IN and TOKENS-OUT to SESSION, or the current boundary owner."
@@ -193,12 +199,6 @@ CAP is nil when the model record has no context window."
                                  pct)
                        in-str))))
 
-(defvar kargu--session-provider nil
-  "Session override for the active TOML provider name, or nil.")
-
-(defvar kargu--session-model nil
-  "Session override for the model id, or nil.")
-
 (defun kargu-session-usage (&optional session)
   "Return a short usage report for SESSION, defaulting to the current owner."
   (interactive)
@@ -225,8 +225,7 @@ CAP is nil when the model record has no context window."
   (setq kargu--session-id (kargu--generate-session-id)
         kargu-session--context
         (kargu-session--create :id-value kargu--session-id
-                              :usage-value (kargu-session--initial-usage)))
-  (setq kargu--session-provider nil kargu--session-model nil))
+                              :usage-value (kargu-session--initial-usage))))
 
 (provide 'kargu/core/session)
 

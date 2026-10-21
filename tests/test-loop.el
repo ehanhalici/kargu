@@ -387,6 +387,7 @@
               (should (string-match-p "Turn limit reached" (buffer-string)))
               (should (string-match-p "Continue" (buffer-string)))
               (should (string-match-p "Stop" (buffer-string))))))
+      (kargu-loop-stop "test cleanup")
       (setq kargu--busy nil)
       (when (fboundp 'kargu-state-reset) (kargu-state-reset))
       (kill-buffer chat-buf))))
@@ -419,8 +420,9 @@
     (let* ((_ (kargu-test-mode 'ask))
            (kargu--model-metadata-table (make-hash-table :test 'equal))
            (kargu--tools-refused (make-hash-table :test 'equal))
-           (kargu--session-model "openrouter/free-model")
-           (kargu--session-provider "openrouter")
+           (kargu-session--context
+            (kargu-test-session-with-history :model "openrouter/free-model" :provider "openrouter"))
+
            (retry-called nil)
            (finish-called nil)
            (run (list :state 'wait :no-tools nil)))
@@ -439,8 +441,9 @@
     (let* ((_ (kargu-test-mode 'agent))
            (kargu--model-metadata-table (make-hash-table :test 'equal))
            (kargu--tools-refused (make-hash-table :test 'equal))
-           (kargu--session-model "openrouter/free-model")
-           (kargu--session-provider "openrouter")
+           (kargu-session--context
+            (kargu-test-session-with-history :model "openrouter/free-model" :provider "openrouter"))
+
            (finish-err nil)
            (run (list :state 'wait :no-tools nil)))
       (cl-letf (((symbol-function 'kargu--loop-finish)
@@ -602,8 +605,8 @@
   "One function answers whether tools are usable; a refusal is per provider/model."
   (let ((kargu--tools-refused (make-hash-table :test #'equal))
         (kargu--model-metadata-table (make-hash-table :test #'equal))
-        (kargu--session-provider "openrouter")
-        (kargu--session-model "m/one"))
+        (kargu-session--context
+         (kargu-test-session-with-history :provider "openrouter" :model "m/one")))
     (should (kargu-tools-enabled-p))
     (should-not (kargu-tools-enabled-p (list :no-tools t)))
     (kargu-model-mark-tools-refused "m/one")

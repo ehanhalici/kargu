@@ -618,7 +618,7 @@ compatibility.  A successful empty catalog also delivers nil."
          (efforts (or (kargu-model-reasoning-efforts mid pname)
                       (and (listp data) (plist-get data :reasoning-efforts))))
          (active (and (equal pname (kargu--provider-name)) (equal mid (kargu--model))))
-         (effort (if active (or kargu-reasoning-effort "off") "not active")))
+         (effort (if active (or (kargu-selection-effort) "off") "not active")))
     (list :id mid
           :provider pname
           :props props

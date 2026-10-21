@@ -4,6 +4,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'kargu)
 (require 'kargu/chat/session)
 (require 'kargu/chat)
@@ -152,33 +153,36 @@
          (proj-dir (make-temp-file "kargu-test-project-prov-" t))
          (buf1 (get-buffer-create "*kargu-test-chat-prov-1*"))
          (buf2 (get-buffer-create "*kargu-test-chat-prov-2*"))
-         (kargu--session-provider "openrouter")
-         (kargu--session-model "kept-model"))
+         (kargu-session--context
+          (kargu-test-session-with-history :provider "openrouter" :model "kept-model")))
     (unwind-protect
         (progn
           (with-current-buffer buf1
             (kargu-chat-mode)
             (setq-local kargu-chat--project-root (file-name-as-directory proj-dir))
             (setq-local kargu-chat--session-id "session-prov-001")
-            (setq-local kargu-chat--session-provider "opencode")
-            (setq-local kargu-chat--session-model "stale-model")
+            (setf (kargu-selection-provider) "opencode")
+            (setf (kargu-selection-model) "stale-model")
             (setf (kargu-history-messages)
                         '((("role" . "user") ("content" . "Remember the provider"))))
             (let ((inhibit-read-only t))
               (insert "## you · 12:00\nRemember the provider\n"))
+            (kargu-selection-update :provider "openrouter" :model "kept-model")
             (kargu-session-save buf1))
           (let ((sessions (kargu-session-list proj-dir)))
             (should (equal (kargu-aget (car sessions) "provider") "openrouter"))
             (should (equal (kargu-aget (car sessions) "model") "kept-model")))
-          (setq kargu--session-provider nil
-                kargu--session-model nil)
+          (setf (kargu-selection-provider) nil
+                (kargu-selection-model) nil)
           (with-current-buffer buf2
             (kargu-chat-mode)
-            (kargu-session-load "session-prov-001" buf2 proj-dir))
-          (should (equal kargu--session-provider "openrouter"))
-          (should (equal kargu--session-model "kept-model"))
-          (should (eq (kargu-state-provider) 'openrouter))
-          (should (equal (kargu-state-model) "kept-model")))
+            (kargu-session-load "session-prov-001" buf2 proj-dir)
+            (should (equal (kargu-selection-provider) "openrouter"))
+            (should (equal (kargu-selection-model) "kept-model"))
+            (should (eq (kargu-state-provider) 'openrouter))
+            (should (equal (kargu-state-model) "kept-model")))
+          (should-not (kargu-selection-provider))
+          (should-not (kargu-selection-model)))
       (when (buffer-live-p buf1) (kill-buffer buf1))
       (when (buffer-live-p buf2) (kill-buffer buf2))
       (delete-directory temp-dir t)
@@ -295,8 +299,9 @@
 
 (ert-deftest kargu-chat-fresh-footer-ignores-live-selection-test ()
   "An unsaved chat shows empty provider and model slots."
-  (let ((kargu--session-provider "cerebras")
-        (kargu--session-model "llama3.1-70b")
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider "cerebras" :model "llama3.1-70b"))
+
         (buf (get-buffer-create "*kargu-fresh-footer*")))
     (unwind-protect
         (with-current-buffer buf
@@ -309,10 +314,11 @@
             (should-not (string-match-p "llama3.1-70b" text))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest kargu-chat-activate-clears-unset-selection-test ()
-  "Showing a chat with no saved choice clears the previous live selection."
-  (let ((kargu--session-provider "cerebras")
-        (kargu--session-model "llama3.1-70b")
+(ert-deftest kargu-chat-fresh-selection-does-not-clear-another-owner-test ()
+  "Showing an unselected chat cannot clear another owner's explicit choice."
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider "cerebras" :model "llama3.1-70b"))
+
         (buf (get-buffer-create "*kargu-activate-clear*")))
     (unwind-protect
         (progn
@@ -320,29 +326,30 @@
           (kargu-state-set-model "llama3.1-70b")
           (with-current-buffer buf
             (kargu-chat-mode)
-            (kargu-chat-activate-selection buf))
-          (should-not kargu--session-provider)
-          (should-not kargu--session-model)
-          (should-not (kargu-state-provider))
-          (should-not (kargu-state-model)))
+            (should-not (kargu-selection-provider))
+            (should-not (kargu-selection-model)))
+          (should (equal (kargu-selection-provider) "cerebras"))
+          (should (equal (kargu-selection-model) "llama3.1-70b")))
       (when (buffer-live-p buf) (kill-buffer buf))
-      (setq kargu--session-provider nil
-            kargu--session-model nil)
+      (setf (kargu-selection-provider) nil
+            (kargu-selection-model) nil)
       (kargu-state-reset))))
 
-(ert-deftest kargu-chat-note-selection-ignores-config-fallback-test ()
-  "Noting a selection does not copy the resolved config provider."
-  (let ((kargu--session-provider nil)
-        (kargu--session-model nil)
+(ert-deftest kargu-chat-fresh-selection-ignores-config-fallback-test ()
+  "A fresh session's explicit choice never copies resolved configuration."
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider nil :model nil))
+
         (buf (get-buffer-create "*kargu-note-empty*")))
     (unwind-protect
         (with-current-buffer buf
           (kargu-chat-mode)
-          (setq-local kargu-chat--session-provider "stale")
-          (setq-local kargu-chat--session-model "stale-model")
-          (kargu-chat-note-selection buf)
-          (should-not kargu-chat--session-provider)
-          (should-not kargu-chat--session-model))
+          (cl-letf (((symbol-function 'kargu--config-plist)
+                     (lambda () '(:provider "fallback" :model "fallback-model"))))
+            (should (equal (kargu--provider-name) "fallback"))
+            (should (equal (kargu--model) "fallback-model")))
+          (should-not (kargu-selection-provider))
+          (should-not (kargu-selection-model)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest kargu-session-save-omits-unselected-provider-test ()
@@ -351,8 +358,9 @@
          (kargu-sessions-directory temp-dir)
          (proj (make-temp-file "kargu-proj-empty-" t))
          (proj-root (file-name-as-directory proj))
-         (kargu--session-provider "cerebras")
-         (kargu--session-model "llama3.1-70b")
+         (kargu-session--context
+          (kargu-test-session-with-history :provider "cerebras" :model "llama3.1-70b"))
+
          (buf (get-buffer-create "*kargu-save-empty*")))
     (unwind-protect
         (progn
@@ -360,8 +368,8 @@
             (kargu-chat-mode)
             (setq-local kargu-chat--project-root proj-root)
             (setq-local kargu-chat--session-id "empty-selection")
-            (setq-local kargu-chat--session-provider nil)
-            (setq-local kargu-chat--session-model nil)
+            (setf (kargu-selection-provider) nil)
+            (setf (kargu-selection-model) nil)
             (setf (kargu-history-messages)
                         '((("role" . "user") ("content" . "unsaved choice"))))
             ;; Save from another buffer so note-selection does not copy the live fallback.
@@ -376,8 +384,9 @@
 
 (ert-deftest kargu-chat-selection-chain-ends-at-prompt-test ()
   "Provider selection leaves the model empty, then a model choice lands in the prompt."
-  (let ((kargu--session-provider nil)
-        (kargu--session-model "llama3.1-70b")
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider nil :model "llama3.1-70b"))
+
         (kargu-reasoning-effort 'low)
         (opened nil)
         (buf (get-buffer-create "*kargu-chain-prompt*")))
@@ -387,9 +396,9 @@
           (kargu-chat--ensure-idle-prompt)
           (goto-char (point-min))
           (cl-letf (((symbol-function 'kargu-set-provider)
-                     (lambda (name)
-                       (setq kargu--session-provider name
-                             kargu--session-model "from-provider")))
+                     (lambda (name &optional no-model)
+                       (setf (kargu-selection-provider) name
+                             (kargu-selection-model) (unless no-model "from-provider"))))
                     ((symbol-function 'kargu-chat-select-model-company)
                      (lambda (&rest _) (setq opened t)))
                     ((symbol-function 'kargu-model-reasoning-efforts)
@@ -400,18 +409,18 @@
                      (lambda (&rest _) nil)))
             (kargu-api-select--apply-provider "groq")
             (should opened)
-            (should (equal kargu--session-provider "groq"))
-            (should-not kargu--session-model)
-            (should (equal kargu-chat--session-provider "groq"))
-            (should-not kargu-chat--session-model)
+            (should (equal (kargu-selection-provider) "groq"))
+            (should-not (kargu-selection-model))
+            (should (equal (kargu-selection-provider) "groq"))
+            (should-not (kargu-selection-model))
             (kargu-api-select--apply-model "chosen-model" "groq")
             (should (kargu-chat--in-input-p))
             (should (= (point) (marker-position kargu-chat--prompt-marker)))
             (kargu-api-select--apply-effort "off")
             (should (kargu-chat--in-input-p))))
       (when (buffer-live-p buf) (kill-buffer buf))
-      (setq kargu--session-provider nil
-            kargu--session-model nil)
+      (setf (kargu-selection-provider) nil
+            (kargu-selection-model) nil)
       (kargu-state-reset))))
 
 (ert-deftest kargu-chat-cancel-stays-on-field-test ()
@@ -438,8 +447,8 @@
           (goto-char (point-max))
           (kargu-chat--focus-selection nil)
           (should (looking-back "provider: \\[" (line-beginning-position)))
-          (setq-local kargu-chat--session-provider "opencode")
-          (setq-local kargu-chat--session-model "chosen-model")
+          (setf (kargu-selection-provider) "opencode")
+          (setf (kargu-selection-model) "chosen-model")
           (kargu-chat-refresh-footer)
           (kargu-chat--focus-selection t)
           (should (kargu-chat--in-input-p)))

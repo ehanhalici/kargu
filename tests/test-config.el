@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'kargu/config)
 
 (defvar kargu-diff-review-mode)
@@ -128,7 +129,8 @@
 
 (ert-deftest kargu-api-key-resolution-order-test ()
   "An empty TOML key means keyless, ${VAR} expands, and the global key stays with the active provider."
-  (let ((kargu--session-provider "alpha")
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider "alpha"))
         (kargu-api-key nil))
     (cl-letf (((symbol-function 'kargu--config-providers)
                (lambda () '(("alpha" :apikey "${KARGU_TEST_KEY}")
@@ -152,7 +154,8 @@
 
 (ert-deftest kargu-provider-detection-respects-credential-owner-test ()
   "Only the active provider can use the global credential override."
-  (let ((kargu--session-provider "alpha")
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider "alpha"))
         (kargu-api-key "active-only")
         (process-environment (copy-sequence process-environment)))
     (setenv "KARGU_ABSENT_PROVIDER_KEY" nil)

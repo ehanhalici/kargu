@@ -62,8 +62,8 @@
          (kargu--config-cache nil)
          (kargu--config-cache-path nil)
          (kargu--config-mtime nil)
-         (kargu--session-provider nil)
-         (kargu--session-model nil))
+         (kargu-session--context
+          (kargu-test-session-with-history :provider nil :model nil)))
     (unwind-protect
         (progn
           (with-temp-file temp-config
@@ -87,8 +87,8 @@
          (kargu--config-cache nil)
          (kargu--config-cache-path nil)
          (kargu--config-mtime nil)
-         (kargu--session-provider nil)
-         (kargu--session-model nil))
+         (kargu-session--context
+          (kargu-test-session-with-history :provider nil :model nil)))
     (unwind-protect
         (progn
           (with-temp-file temp-config
@@ -109,7 +109,8 @@
          (kargu--config-cache nil)
          (kargu--config-cache-path nil)
          (kargu--config-mtime nil)
-         (kargu--session-provider "groq")
+         (kargu-session--context
+          (kargu-test-session-with-history :provider "groq"))
          (kargu-api-key nil))
     (unwind-protect
         (progn
@@ -140,13 +141,13 @@
 
 (ert-deftest kargu-providers-session-switch-test ()
   "`kargu-set-provider' sets session provider, model from live cache, and resolves correct API base."
-  (let ((kargu--session-provider nil)
-        (kargu--session-model nil))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider nil :model nil)))
     (puthash "cerebras" '("llama3.1-70b") kargu--live-models-cache)
     (kargu-set-provider "cerebras")
-    (should (equal kargu--session-provider "cerebras"))
+    (should (equal (kargu-selection-provider) "cerebras"))
     (should (equal (kargu--api-base) "https://api.cerebras.ai/v1"))
-    (should (equal kargu--session-model "llama3.1-70b"))))
+    (should (equal (kargu-selection-model) "llama3.1-70b"))))
 
 (ert-deftest kargu-providers-generic-catalog-test ()
   "Keyless and local properties are driven by catalog.el and lookup is exact."
@@ -209,11 +210,9 @@
         (kargu-thinking-budget 4096)
         (kargu-max-tokens 8192)
         (kargu-temperature 0.5)
-        (kargu--session-provider "deepseek")
-        (kargu--session-model "deepseek-chat")
         (kargu-session--context
          (kargu-test-session-with-history
-          :messages '((("role" . "user") ("content" . "hello"))))))
+          :messages '((("role" . "user") ("content" . "hello"))) :provider "deepseek" :model "deepseek-chat")))
     (let ((payload (kargu--build-payload)))
       (should (equal (kargu-aget payload "model") "deepseek-chat"))
       (should (equal (kargu-aget payload "temperature") 0.5))
@@ -241,18 +240,19 @@
   (require 'kargu/chat/tune)
   (require 'kargu/api/catalog)
   (let ((kargu-reasoning-effort nil)
-        (kargu--session-model "test/cycle-model"))
+        (kargu-session--context
+         (kargu-test-session-with-history :model "test/cycle-model")))
     (kargu-model-set-metadata "test/cycle-model"
                               '(:id "cycle-model"
                                     :reasoning-efforts ("low" "medium" "high")))
     (kargu-tune-cycle-reasoning-effort)
-    (should (eq kargu-reasoning-effort 'low))
+    (should (eq (kargu-selection-effort) 'low))
     (kargu-tune-cycle-reasoning-effort)
-    (should (eq kargu-reasoning-effort 'medium))
+    (should (eq (kargu-selection-effort) 'medium))
     (kargu-tune-cycle-reasoning-effort)
-    (should (eq kargu-reasoning-effort 'high))
+    (should (eq (kargu-selection-effort) 'high))
     (kargu-tune-cycle-reasoning-effort)
-    (should (null kargu-reasoning-effort))))
+    (should (null (kargu-selection-effort)))))
 
 (ert-deftest kargu-providers-catalog-prompt-caching-completeness-test ()
   "Ensure every provider in `kargu-providers-builtin-catalog' defines `:prompt-caching'."
@@ -287,11 +287,9 @@
   (require 'kargu/api/tools)
   (kargu-register-tool "mock_tool" "A mock tool for testing" nil #'ignore)
   (let ((_ (kargu-test-mode 'agent))
-        (kargu--session-provider "openrouter")
-        (kargu--session-model "anthropic/claude-3.5-sonnet")
         (kargu-session--context
          (kargu-test-session-with-history
-          :messages '((("role" . "user") ("content" . "hello"))))))
+          :messages '((("role" . "user") ("content" . "hello"))) :provider "openrouter" :model "anthropic/claude-3.5-sonnet")))
     (let* ((payload (kargu--build-payload))
            (tools (kargu-aget payload "tools")))
       (should (vectorp tools))
@@ -306,11 +304,9 @@
   (require 'kargu/api/tools)
   (kargu-register-tool "mock_tool" "A mock tool for testing" nil #'ignore)
   (let ((_ (kargu-test-mode 'agent))
-        (kargu--session-provider "ollama")
-        (kargu--session-model "llama3")
         (kargu-session--context
          (kargu-test-session-with-history
-          :messages '((("role" . "user") ("content" . "hello"))))))
+          :messages '((("role" . "user") ("content" . "hello"))) :provider "ollama" :model "llama3")))
     (let* ((payload (kargu--build-payload))
            (tools (kargu-aget payload "tools")))
       (should (vectorp tools))
@@ -322,14 +318,14 @@
   "Ensure `kargu--build-payload' attaches `cache_control' to last completed turn for caching providers."
   (require 'kargu/api/http)
   (require 'kargu/api/tools)
-  (let ((kargu--session-provider "openrouter")
-        (kargu--session-model "anthropic/claude-3.5-sonnet")
+  (let (
+
         (kargu-session--context
          (kargu-test-session-with-history
           :messages '((("role" . "system") ("content" . "You are a coding assistant."))
                       (("role" . "user") ("content" . "Hello 1"))
                       (("role" . "assistant") ("content" . "Hi there 1"))
-                      (("role" . "user") ("content" . "Hello 2"))))))
+                      (("role" . "user") ("content" . "Hello 2"))) :provider "openrouter" :model "anthropic/claude-3.5-sonnet")))
     (let* ((payload (kargu--build-payload))
            (msgs (kargu-aget payload "messages")))
       (should (vectorp msgs))
@@ -350,12 +346,12 @@
   (require 'kargu/api/http)
   (require 'kargu/api/tools)
   (cl-letf (((symbol-function 'kargu--build-tools-vector) (lambda () [])))
-    (let ((kargu--session-provider "anthropic")
-          (kargu--session-model "claude-3-5-sonnet-20241022")
+    (let (
+
           (kargu-session--context
            (kargu-test-session-with-history
             :messages '((("role" . "system") ("content" . "System instructions"))
-                        (("role" . "user") ("content" . "Hello"))))))
+                        (("role" . "user") ("content" . "Hello"))) :provider "anthropic" :model "claude-3-5-sonnet-20241022")))
       (let* ((payload (kargu--build-payload))
              (msgs (kargu-aget payload "messages")))
         (should (vectorp msgs))

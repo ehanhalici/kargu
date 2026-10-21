@@ -43,8 +43,20 @@ payload/persistence snapshots and queue container ownership are checked by ERT.
 Tool identities are canonicalized at the owned client ingress, after transport
 shape decoding. Foreign-buffer Stop and obsolete compaction callbacks cannot
 repair or clear another owner's history. These preserve the protocol wall's
-existing abstract transitions. Selection/application ownership remains in
-`todo.md`.
+existing abstract transitions. Application coordination ownership remains in
+`todo.md`; owned selection is refined separately below.
+
+`KarguSelection.tla` / `SelectionMC.cfg` model immutable owned selections and
+captured picker callbacks. Run `proof/run_tlc.sh --selection` for an exhaustive
+scan. Session epoch, selection identity and catalog generation must still match
+before a picker applies; active native work locks selection updates. Replacing
+an owner invalidates its old callbacks without changing a frozen request's
+settings. With two owners, two pickers per owner, two session epochs and one
+selection revision per epoch, TLC explored 3,690,151 generated states, 640,440
+distinct states, depth 19, with no error (2026-10-21). This bounded refinement
+does not prove catalog authenticity or focus/draft UX. ERT additionally checks
+atomic tuple publication, inherited versus disabled effort, and suppression of
+UI continuations when a notification replaces the owner or selection.
 
 Model capabilities are read from provider/model-owned metadata records.
 Provider isolation, ambiguous display aliases, exact request identities and
@@ -220,6 +232,8 @@ proof/
 ├── KarguState.tla      # State store statuses; busy and run-live classes
 ├── KarguLoop.tla       # The loop: states, actions, safety invariants
 ├── MC.tla / MC.cfg     # TLC harness: parameters, invariants, deadlock check
+├── KarguSelection.tla  # Owned immutable selection and stale picker admission
+├── SelectionMC.*      # Bounded session-selection harness
 ├── KarguProcess.tla    # One-shot process capture and completion ownership
 ├── ProcessMC.*        # Bounded process-capture harness
 ├── KarguDiagnostics.tla # Owned diagnostic evidence and cancellation

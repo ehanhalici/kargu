@@ -34,7 +34,6 @@
                      (lambda (success failure) (setq ready success cancel failure)))
                     ((symbol-function 'kargu-chat--input-text) #'buffer-string)
                     ((symbol-function 'kargu-loop-preflight) #'ignore)
-                    ((symbol-function 'kargu-chat-activate-selection) #'ignore)
                     ((symbol-function 'kargu-chat--submit)
                      (lambda (text &rest options)
                        (push (list (current-buffer) text (plist-get options :preserve-draft)) sent)))
@@ -109,10 +108,11 @@
 (ert-deftest kargu-chat-context-usage-footer-test ()
   "Test that context usage is accurately calculated and rendered."
   (kargu-model-set-metadata "gemini-2.5-flash" '(("context_length" . 1000000)))
-  (let ((kargu--session-model "gemini-2.5-flash")
-        (kargu-session--context
+  (let ((kargu-session--context
          (kargu-session-create :id-value (kargu-session-id)
-                               :usage-value (list :last-prompt-tokens 32000))))
+                               :usage-value (list :last-prompt-tokens 32000)
+                               :selection-value
+                               (kargu-selection-create :model "gemini-2.5-flash"))))
     (let ((info (kargu-session-context-info)))
       (should (= (plist-get info :used) 32000))
       (should (> (plist-get info :capacity) 0))
@@ -324,25 +324,25 @@
   "A request from a chat carries that chat's model, and the other chat keeps its own."
   (let ((buf1 (get-buffer-create "*kargu-chat-sel-1*"))
         (buf2 (get-buffer-create "*kargu-chat-sel-2*"))
-        (kargu--session-provider "openrouter")
-        (kargu--session-model "model-shared"))
+        (kargu-session--context
+         (kargu-test-session-with-history :provider "openrouter" :model "model-shared")))
     (unwind-protect
         (progn
           (with-current-buffer buf1
             (kargu-chat-mode)
-            (kargu-chat-note-selection))
+            (kargu-selection-update :provider "openrouter" :model "model-shared"))
           (with-current-buffer buf2
             (kargu-chat-mode)
-            (kargu-chat-note-selection))
+            (kargu-selection-update :provider "openrouter" :model "model-shared"))
           (with-current-buffer buf1
             (kargu-set-model "model-one"))
           (with-current-buffer buf1
             (should (equal (kargu--model) "model-one"))
             (should (equal (kargu-aget (kargu--build-payload) "model") "model-one"))
-            (should (equal kargu-chat--session-model "model-one")))
+            (should (equal (kargu-selection-model) "model-one")))
           (with-current-buffer buf2
             (should (equal (kargu--model) "model-shared"))
-            (should (equal kargu-chat--session-model "model-shared"))
+            (should (equal (kargu-selection-model) "model-shared"))
             (should (equal (kargu-aget (kargu--build-payload) "model") "model-shared"))))
       (when (buffer-live-p buf1) (kill-buffer buf1))
       (when (buffer-live-p buf2) (kill-buffer buf2)))))
@@ -437,8 +437,8 @@
   "A late startup refusal restores the complete prompt without orphan turns."
   (with-temp-buffer
     (kargu-chat-mode)
-    (setq-local kargu-chat--session-provider "p"
-                kargu-chat--session-model "m")
+    (setf (kargu-selection-provider) "p"
+                (kargu-selection-model) "m")
     (kargu-chat--ensure-idle-prompt)
     (insert (propertize "  keep my draft  \n" 'kargu-test t))
     (goto-char (+ kargu-chat--prompt-marker 4))
@@ -464,8 +464,8 @@
   "Attachment expansion failure happens before draft or transcript mutation."
   (with-temp-buffer
     (kargu-chat-mode)
-    (setq-local kargu-chat--session-provider "p"
-                kargu-chat--session-model "m")
+    (setf (kargu-selection-provider) "p"
+                (kargu-selection-model) "m")
     (kargu-chat--ensure-idle-prompt)
     (insert "@file.md")
     (let ((before (buffer-string)))
@@ -482,8 +482,8 @@
     (dolist (status '(:done :error :stopped))
       (with-temp-buffer
 	(kargu-chat-mode)
-	(setq-local kargu-chat--session-provider "p"
-                    kargu-chat--session-model "m")
+	(setf (kargu-selection-provider) "p"
+                    (kargu-selection-model) "m")
 	(kargu-chat--ensure-idle-prompt)
 	(insert (propertize "unsent notes\n  " 'kargu-test t))
 	(goto-char (+ kargu-chat--prompt-marker 4))

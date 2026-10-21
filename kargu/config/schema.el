@@ -17,8 +17,6 @@
 (require 'kargu/config/toml)
 (require 'kargu/config/key)
 
-(declare-function kargu-chat-note-selection "kargu/chat/session" (&optional buffer))
-
 (defvar kargu--config-cache nil
   "Cached TOML config plist (:provider :model :providers), or nil.")
 
@@ -67,37 +65,36 @@ Prefer an existing XDG file, then kargu.toml in the Emacs directory."
   "Alist of (NAME . PLIST) for `[providers.*]' tables."
   (plist-get (kargu--config-plist) :providers))
 
-(defun kargu-set-provider (name)
-  "Use provider NAME for this Emacs session.
+(defun kargu-set-provider (name &optional no-model)
+  "Use provider NAME for the current owned session.
 NAME can be any configured provider from TOML or any known provider
-from `kargu-provider-list'."
+from `kargu-provider-list'.  NO-MODEL leaves the model choice empty for
+the native UI's separate model-selection step."
   (interactive
    (let* ((cfg-names (mapcar #'car (kargu--config-providers)))
           (all-names (kargu-provider-list))
           (choices (delete-dups (append cfg-names all-names))))
      (unless choices
        (user-error "Kargu: no providers available"))
-     (list (completing-read "kargu provider: " choices nil nil
+     (list (completing-read "kargu provider: " choices nil t
                             nil nil (kargu--provider-name)))))
-  (setq kargu--session-provider name)
-  (kargu-state-set-provider (if (symbolp name) name (intern name)))
-  (let* ((prov-plist (kargu--provider-plist))
+  (let* ((name (if (symbolp name) (symbol-name name) name))
+         (prov-plist (kargu--provider-plist name))
          (explicit-model (plist-get prov-plist :model))
          (cached-model (and (boundp 'kargu--live-models-cache)
                             (car-safe (gethash name kargu--live-models-cache)))))
-    (setq kargu--session-model (or (kargu-nonempty explicit-model)
-                                   (and noninteractive cached-model)))
-    (when kargu--session-model
-      (kargu-state-set-model kargu--session-model)))
-  (when (fboundp 'kargu-chat-note-selection)
-    (kargu-chat-note-selection))
-  (when (fboundp 'kargu-api-prefetch-models)
-    (kargu-api-prefetch-models name))
-  (kargu-log 'info "provider set to %s (model %s, api %s)"
-             name (or (kargu--model) "none") (kargu--api-base))
-  (message "kargu provider: %s (model %s, api %s)"
-           name (or (kargu--model) "none") (kargu--api-base))
-  name)
+    (when (kargu-selection-update :provider name
+				  :model (unless no-model
+					   (or (kargu-nonempty explicit-model)
+                                               (and noninteractive cached-model)))
+				  :effort nil)
+      (when (fboundp 'kargu-api-prefetch-models)
+	(kargu-api-prefetch-models name))
+      (kargu-log 'info "provider set to %s (model %s, api %s)"
+		 name (or (kargu--model) "none") (kargu--api-base))
+      (message "kargu provider: %s (model %s, api %s)"
+               name (or (kargu--model) "none") (kargu--api-base))
+      name)))
 
 (defun kargu--example-config-path ()
   "Path of the shipped config.toml.example, or nil."

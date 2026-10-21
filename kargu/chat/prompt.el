@@ -32,7 +32,6 @@
 (declare-function kargu--provider-name "kargu/config/key")
 (declare-function kargu--model "kargu/config/key")
 (declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
-(defvar kargu-reasoning-effort)
 
 (defcustom kargu-chat-buffer-name "*kargu-chat*"
   "Name of the default kargu chat log buffer."
@@ -76,17 +75,16 @@ ACTION-FN is called on RET or click.  MOUSE-FN receives mouse events."
                 'button t
                 'action (lambda (_) (funcall action-fn)))))
 
-(declare-function kargu-chat--explicit-selection "kargu/chat/session" (value))
 
 (defun kargu-chat--shown-provider ()
   "Provider chosen for this chat buffer, or nil.
 A chat shows its own choice, never the live or configured fallback, so a
 fresh chat asks for a selection."
-  (kargu-chat--explicit-selection (bound-and-true-p kargu-chat--session-provider)))
+  (kargu-selection-provider))
 
 (defun kargu-chat--shown-model ()
   "Model chosen for this chat buffer, or nil."
-  (kargu-chat--explicit-selection (bound-and-true-p kargu-chat--session-model)))
+  (kargu-selection-model))
 
 (defun kargu-chat--footer-model-label (raw-m)
   "Return cons (LABEL . FACE) for RAW-M model in footer."
@@ -149,7 +147,7 @@ fresh chat asks for a selection."
 
 (defun kargu-chat--footer-effort-button ()
   "Build the reasoning effort button for the footer."
-  (let ((effort (if (boundp 'kargu-reasoning-effort) (or kargu-reasoning-effort "off") "off")))
+  (let ((effort (or (kargu-selection-effort) "off")))
     (kargu-chat--footer-button
      (format "[%s]" effort) 'font-lock-keyword-face
      "mouse-1 or RET: select reasoning effort (company list)"

@@ -29,13 +29,12 @@
 (declare-function kargu-connected-providers "kargu/providers/registry" ())
 (declare-function kargu-provider-env "kargu/providers/registry" (provider))
 (declare-function kargu-provider-local-p "kargu/providers/registry" (provider))
-(declare-function kargu-set-provider "kargu/config/schema" (provider))
+(declare-function kargu-set-provider "kargu/config/schema" (provider &optional no-model))
 (declare-function kargu--config-providers "kargu/config/schema" ())
 (declare-function kargu-chat-goto-footer-field "kargu/chat/prompt" (field))
 (declare-function kargu-chat--goto-prompt "kargu/chat/prompt" ())
 (declare-function kargu-state-clear-model "kargu/state/transitions" ())
 (declare-function kargu-history-compact-threshold "kargu/history/compact" ())
-(declare-function kargu-chat-note-selection "kargu/chat/session" (&optional buffer))
 
 (defvar company-backends)
 (defvar company-minimum-prefix-length)
@@ -166,13 +165,16 @@ Use a timer for footer Company selection and run immediately in batch."
   (if (and (not noninteractive)
            (featurep 'company)
            (kargu-api-select--chat-buffer))
-      (let ((buf (kargu-api-select--chat-buffer)))
+      (let* ((buf (kargu-api-select--chat-buffer))
+             (owner (kargu-session-context buf)) (selection (kargu-selection-context owner)))
         (run-with-timer
          0 nil
          (lambda ()
            (when (buffer-live-p buf)
              (with-current-buffer buf
-               (funcall fn))))))
+               (when (and (eq owner (kargu-session-context))
+                          (eq selection (kargu-selection-context)))
+                 (funcall fn)))))))
     (funcall fn)))
 
 (defun kargu-api-select--stay-on-field (field)
@@ -214,6 +216,12 @@ Invoke APPLY with the accepted candidate."
            (current-buffer))
       (kargu-chat-find-buffer)))
 
+(defun kargu-api-select--owner-buffer ()
+  "Resolve the explicit UI entry's owner; batch selection stays headless."
+  (if (and (not noninteractive) (featurep 'company))
+      (or (kargu-api-select--chat-buffer) (current-buffer))
+    (current-buffer)))
+
 (defun kargu-api-select--in-footer (field candidates annotations apply)
   "Start Company for CANDIDATES inside footer FIELD, then call APPLY."
   (let ((chat-buf (kargu-api-select--chat-buffer)))
@@ -236,7 +244,17 @@ Invoke APPLY with the accepted candidate."
   "Select one of CANDIDATES for footer FIELD and call APPLY with it.
 ANNOTATIONS is an alist of (CANDIDATE . NOTE).  APPLY receives a string
 that is a member of CANDIDATES.  Without a display, read in the minibuffer."
-  (let ((cands (kargu-api-select--strings candidates)))
+  (kargu-selection-require-idle)
+  (let* ((cands (kargu-api-select--strings candidates))
+         (origin (kargu-api-select--owner-buffer)) (owner (kargu-session-context origin))
+         (selection (kargu-selection-context owner))
+         (callback apply)
+         (apply (lambda (chosen)
+                  (unless (and (buffer-live-p origin) (eq (current-buffer) origin)
+                               (eq owner (kargu-session-context))
+                               (eq selection (kargu-selection-context)))
+                    (user-error "Kargu: selection is obsolete; reopen the selector"))
+                  (funcall callback chosen))))
     (unless cands
       (user-error "Kargu: no %s choices" field))
     (if (and (not noninteractive)
@@ -302,29 +320,29 @@ including \"none\", stay in the list."
   "Set reasoning effort to CHOSEN.  \"off\" clears it.
 NOTE replaces the confirmation message."
   (let ((eff (if (equal (downcase chosen) "off") nil (intern chosen))))
-    (setq kargu-reasoning-effort eff)
-    (kargu-state-set-reasoning-effort eff)
-    (when (fboundp 'kargu-chat-refresh-footer)
-      (kargu-chat-refresh-footer))
-    (force-mode-line-update t)
-    (message "%s"
-             (or note
-                 (format "kargu: reasoning effort set to '%s'."
-                         (if eff chosen "off"))))
-    (kargu-api-select--continue #'kargu-chat--goto-prompt)))
+    (when (kargu-selection-update :effort eff)
+      (when (fboundp 'kargu-chat-refresh-footer)
+	(kargu-chat-refresh-footer))
+      (force-mode-line-update t)
+      (message "%s"
+               (or note
+                   (format "kargu: reasoning effort set to '%s'."
+                           (if eff chosen "off"))))
+      (kargu-api-select--continue #'kargu-chat--goto-prompt))))
 
 (defun kargu-chat-select-effort-company (&optional _event)
   "Select a reasoning effort with Company in the footer."
   (interactive (list last-input-event))
-  (let* ((mid (kargu--model))
-         (supported (kargu-model-reasoning-efforts mid (kargu--provider-name)))
-         (efforts (kargu-api-select--effort-candidates supported))
-         (note (unless supported
-                 (format "kargu: model '%s' does not support reasoning effort."
-                         (or mid "current")))))
-    (kargu-api-select 'effort efforts nil
-                      (lambda (chosen)
-                        (kargu-api-select--apply-effort chosen note)))))
+  (with-current-buffer (kargu-api-select--owner-buffer)
+    (let* ((mid (kargu--model))
+           (supported (kargu-model-reasoning-efforts mid (kargu--provider-name)))
+           (efforts (kargu-api-select--effort-candidates supported))
+           (note (unless supported
+                   (format "kargu: model '%s' does not support reasoning effort."
+                           (or mid "current")))))
+      (kargu-api-select 'effort efforts nil
+			(lambda (chosen)
+                          (kargu-api-select--apply-effort chosen note))))))
 
 ;;;; Model ----------------------------------------------------------------
 
@@ -339,10 +357,11 @@ a known live catalog may the caller's CATALOG-IDS act as fallback."
 (defun kargu-api-select--apply-model (chosen pname-str)
   "Activate model CHOSEN for PNAME-STR, then ask for effort when it exists."
   (cl-incf kargu-api-select--catalog-generation)
-  (setq kargu--session-model chosen)
-  (kargu-state-set-model chosen)
-  (when (fboundp 'kargu-chat-note-selection)
-    (kargu-chat-note-selection))
+  (when (kargu-selection-update :provider pname-str :model chosen :effort nil)
+    (kargu-api-select--after-model chosen pname-str)))
+
+(defun kargu-api-select--after-model (chosen pname-str)
+  "Present CHOSEN for PNAME-STR after its still-current owned commit."
   (let* ((ctx (kargu-model-context-window chosen))
          (thresh (and (fboundp 'kargu-history-compact-threshold)
                       (kargu-history-compact-threshold)))
@@ -358,7 +377,6 @@ a known live catalog may the caller's CATALOG-IDS act as fallback."
              (if desc (format " · %s" desc) "")))
   (if (kargu-model-reasoning-efforts chosen pname-str)
       (kargu-api-select--continue #'kargu-chat-select-effort-company)
-    (setq kargu-reasoning-effort nil)
     (kargu-state-set-reasoning-effort nil)
     (when (fboundp 'kargu-chat-refresh-footer)
       (kargu-chat-refresh-footer))
@@ -387,6 +405,11 @@ LIVE-IDS and CATALOG-IDS are optional id lists already fetched by the caller.
 Without any known ids the live catalog is requested first; the selector
 opens when the answer arrives, and Emacs stays usable meanwhile."
   (interactive (list nil nil nil last-input-event))
+  (with-current-buffer (kargu-api-select--owner-buffer)
+    (kargu-api-select--model-list live-ids catalog-ids provider-name)))
+
+(defun kargu-api-select--model-list (live-ids catalog-ids provider-name)
+  "Discover or select PROVIDER-NAME's model using LIVE-IDS and CATALOG-IDS."
   (kargu-api-select--guard)
   (cl-incf kargu-api-select--catalog-generation)
   (let* ((pname (or provider-name (kargu--provider-name)))
@@ -395,14 +418,17 @@ opens when the answer arrives, and Emacs stays usable meanwhile."
         (kargu-chat--open-model-selector pname-str live-ids catalog-ids)
       (message "kargu: querying live model catalog from %s (%s)..."
                pname-str (kargu--api-base pname-str))
-      (let ((chat (current-buffer))
+      (let ((chat (current-buffer)) (owner (kargu-session-context))
+            (selection (kargu-selection-context))
             (generation kargu-api-select--catalog-generation))
         (kargu-api-fetch-model-ids
          pname-str
          (lambda (ids)
            (when (buffer-live-p chat)
              (with-current-buffer chat
-               (when (and (= generation kargu-api-select--catalog-generation)
+               (when (and (eq owner (kargu-session-context))
+                          (eq selection (kargu-selection-context))
+                          (= generation kargu-api-select--catalog-generation)
                           (equal pname-str (kargu--provider-name)))
                  (condition-case err
                      (kargu-chat--open-model-selector pname-str ids nil)
@@ -434,17 +460,12 @@ opens when the answer arrives, and Emacs stays usable meanwhile."
   "Switch to provider CHOSEN, then select one of its models.
 The model stays empty until that next list confirms one."
   (cl-incf kargu-api-select--catalog-generation)
-  (kargu-set-provider chosen)
-  (setq kargu--session-model nil)
-  (when (fboundp 'kargu-state-clear-model)
-    (kargu-state-clear-model))
-  (when (fboundp 'kargu-chat-note-selection)
-    (kargu-chat-note-selection))
-  (when (fboundp 'kargu-chat-refresh-footer)
-    (kargu-chat-refresh-footer))
-  (kargu-api-select--continue
-   (lambda ()
-     (kargu-chat-select-model-company nil nil chosen))))
+  (when (kargu-set-provider chosen t)
+    (when (fboundp 'kargu-chat-refresh-footer)
+      (kargu-chat-refresh-footer))
+    (kargu-api-select--continue
+     (lambda ()
+       (kargu-chat-select-model-company nil nil chosen)))))
 
 (defun kargu-chat-select-provider-company (&optional _event)
   "Select an authenticated provider with Company in the footer."
@@ -468,15 +489,12 @@ asks with the footer Company list."
   (if (and (stringp refresh-or-model) (not (string-empty-p refresh-or-model)))
       (progn
         (cl-incf kargu-api-select--catalog-generation)
-        (setq kargu--session-model refresh-or-model)
-        (kargu-state-set-model refresh-or-model)
-        (when (fboundp 'kargu-chat-note-selection)
-          (kargu-chat-note-selection))
-        (when (fboundp 'kargu-chat-refresh-footer)
-          (kargu-chat-refresh-footer))
-        (force-mode-line-update t)
-        (message "kargu: model set to %s" refresh-or-model)
-        refresh-or-model)
+        (when (kargu-selection-update :model refresh-or-model :effort nil)
+          (when (fboundp 'kargu-chat-refresh-footer)
+            (kargu-chat-refresh-footer))
+          (force-mode-line-update t)
+          (message "kargu: model set to %s" refresh-or-model)
+          refresh-or-model))
     (kargu-chat-select-model-company nil nil (kargu--provider-name))))
 
 (defun kargu-switch-provider-and-model ()

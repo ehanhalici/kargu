@@ -553,8 +553,8 @@ Initialize installed PACKAGES only when requested."
   (kargu-module-test--evaluate
    '((require 'kargu/api/client)
      (let* ((kargu-session--context
-            (kargu-session-create :id-value (kargu-session-id)
-                                  :usage-value (list :requests 0)))
+             (kargu-session-create :id-value (kargu-session-id)
+                                   :usage-value (list :requests 0)))
            (footer-calls 0)
            (delivery (kargu-api--make-delivery
                       :callback #'ignore :generation kargu--generation :record-turn nil))
@@ -843,6 +843,7 @@ Initialize installed PACKAGES only when requested."
         (files '("kargu/core/data.el" "kargu/core/group.el" "kargu/core/custom.el"
                  "kargu/core/log.el" "kargu/core/session.el"
                  "kargu/contract/history.el"
+                 "kargu/contract/selection.el"
                  "kargu/json.el" "kargu/fs.el" "kargu/async.el"
                  "kargu/contract/constants.el" "kargu/contract/types.el"
                  "kargu/contract/result.el" "kargu/contract/assert.el"

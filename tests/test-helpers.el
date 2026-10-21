@@ -56,26 +56,30 @@ is deleted afterwards, so no test depends on the working tree of Kargu."
 ;;;; Mode and state isolation ----------------------------------------------
 
 (require 'kargu/history/store)
+(require 'kargu/selection)
 
 (cl-defun kargu-test-session-with-history
     (&key (messages (kargu-history-snapshot))
-          (system-key (kargu-history-system-key)) (overlay (kargu-history-overlay)))
-  "Create an isolated session fixture with MESSAGES, SYSTEM-KEY and OVERLAY."
+          (system-key (kargu-history-system-key)) (overlay (kargu-history-overlay))
+          (provider (kargu-selection-provider)) (model (kargu-selection-model))
+          (effort (kargu-selection-effort-value (kargu-selection-context))))
+  "Create a session fixture from MESSAGES, SYSTEM-KEY, OVERLAY and choices.
+PROVIDER, MODEL and EFFORT default to the current owner's explicit values."
   (let ((history (kargu-history-create :messages messages)))
     (setf (kargu-history-system-key history) (copy-tree system-key t)
           (kargu-history-overlay history) overlay)
     (kargu-session--create :id-value (kargu-session-id)
                            :usage-value (copy-tree (kargu-session-usage-value
                                                    (kargu-session-context)))
-                           :history-value history)))
+                           :history-value history
+                           :selection-value (kargu-selection-create
+                                             :provider provider :model model :effort effort))))
 
 (declare-function kargu-state--set "kargu/state/store" (key value))
 (declare-function kargu-state-mode "kargu/state/selectors" ())
 
 (defvar kargu--loop-run)
 (defvar kargu--busy)
-(defvar kargu--session-provider)
-(defvar kargu--session-model)
 (defvar kargu--tools-refused)
 (defvar kargu--model-metadata-table)
 (defvar kargu--state-store)
@@ -115,8 +119,6 @@ Tests never see the working tree of Kargu as their project."
         ;; Global state a test may touch; each test starts from and leaves it as found.
         (kargu--loop-run kargu--loop-run)
         (kargu--busy kargu--busy)
-        (kargu--session-provider kargu--session-provider)
-        (kargu--session-model kargu--session-model)
         (kargu--tools-refused (copy-hash-table kargu--tools-refused))
         (kargu--model-metadata-table (copy-hash-table kargu--model-metadata-table)))
     (apply run-test args)))

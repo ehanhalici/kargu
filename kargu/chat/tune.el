@@ -63,8 +63,8 @@
 (defun kargu-tune--reasoning-effort-desc ()
   "Formatted description for thinking / reasoning effort."
   (format "Thinking Effort:  %s"
-          (if kargu-reasoning-effort
-              (propertize (upcase (format "%s" kargu-reasoning-effort))
+          (if (kargu-selection-effort)
+              (propertize (upcase (format "%s" (kargu-selection-effort)))
                           'face 'font-lock-keyword-face)
             (propertize "OFF" 'face 'font-lock-comment-face))))
 
@@ -143,27 +143,25 @@
                                             supported)))))
     (if (null levels)
         (progn
-          (setq kargu-reasoning-effort nil)
           (kargu-state-set-reasoning-effort nil)
           (when (fboundp 'kargu-chat-refresh-footer)
             (kargu-chat-refresh-footer))
           (force-mode-line-update t)
           (message "kargu thinking effort: OFF (reasoning effort is not supported by this model)"))
-      (let* ((curr (and (boundp 'kargu-reasoning-effort) kargu-reasoning-effort))
+      (let* ((curr (kargu-selection-effort))
              (next (cond
                     ((null curr) (car levels))
                     ((member curr levels)
                      (let ((tail (cdr (member curr levels))))
                        (if tail (car tail) nil)))
                     (t (car levels)))))
-        (setq kargu-reasoning-effort next)
         (kargu-state-set-reasoning-effort next)
         (when (fboundp 'kargu-chat-refresh-footer)
           (kargu-chat-refresh-footer))
         (force-mode-line-update t)
         (message "kargu thinking effort: %s"
-                 (if kargu-reasoning-effort
-                     (upcase (symbol-name kargu-reasoning-effort))
+                 (if (kargu-selection-effort)
+                     (upcase (symbol-name (kargu-selection-effort)))
                    "OFF"))))))
 
 (defun kargu-tune-set-thinking-budget ()
@@ -198,11 +196,12 @@
 (defun kargu-tune-reset-defaults ()
   "Reset model and session tuning parameters to defaults."
   (interactive)
+  (kargu-selection-require-idle)
   (setq kargu-temperature 0.2
         kargu-max-tokens nil
-        kargu-reasoning-effort nil
         kargu-thinking-budget nil
         kargu-stream t)
+  (kargu-state-set-reasoning-effort nil)
   (message "kargu tuning parameters reset to defaults"))
 
 ;;;; Transient Prefix Definition ------------------------------------------

@@ -28,11 +28,12 @@
 
 (defun kargu-reasoning-effort-level ()
   "The reasoning effort to send as a string, or nil to send none.
-The one place that reads `kargu-reasoning-effort': nil, \"off\" and the
+The effective owned choice inherits `kargu-reasoning-effort' by default.
+Values nil, \"off\" and the
 empty string mean the user chose no effort.  \"none\" is a real level
 that some models accept, so it is sent."
-  (let ((effort (and kargu-reasoning-effort
-                     (string-trim (format "%s" kargu-reasoning-effort)))))
+  (let* ((selected (kargu-selection-effort))
+         (effort (and selected (string-trim (format "%s" selected)))))
     (and effort
          (not (member (downcase effort) '("" "nil" "off")))
          effort)))

@@ -475,7 +475,8 @@
 
 (ert-deftest kargu-api-opencode-session-header-test ()
   "Test that x-opencode-session header is generated and passed for OpenCode."
-  (let ((kargu--session-provider "opencode")
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider "opencode"))
         (kargu--session-id nil))
     (let ((headers (kargu--api-headers "test-key")))
       (should (assoc "x-opencode-session" headers))

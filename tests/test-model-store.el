@@ -150,7 +150,8 @@
     (let ((kargu--model-metadata-table (make-hash-table :test #'equal))
           (kargu--catalog-generations (make-hash-table :test #'equal))
           (kargu--live-models-cache (make-hash-table :test #'equal))
-          (kargu--session-provider "openrouter") pending)
+          (kargu-session--context
+           (kargu-test-session-with-history :provider "openrouter")) pending)
       (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) "fake-key"))
                 ((symbol-function 'plz)
                  (lambda (_method url &rest options)
@@ -158,7 +159,7 @@
                                (plist-get options :then)) pending))))
         (kargu-api-list-models #'ignore "openrouter")
         (kargu-api-list-models #'ignore "cerebras")
-        (setq kargu--session-provider "cerebras")
+        (setf (kargu-selection-provider) "cerebras")
         (dolist (provider order)
           (funcall (cdr (assoc provider pending))
                    (format "{\"data\":[{\"id\":\"shared\",\"context_length\":%d}]}"
@@ -169,7 +170,8 @@
 (ert-deftest kargu-model-store-inspector-edit-keeps-captured-provider-test ()
   "Editing an old inspector after switching provider changes only its owner."
   (let ((kargu--model-metadata-table (make-hash-table :test #'equal))
-        (kargu--session-provider "a") (kargu--session-model "shared") view)
+        (kargu-session--context
+         (kargu-test-session-with-history :provider "a" :model "shared"))  view)
     (unwind-protect
         (progn
           (kargu-model-set-metadata "shared" '(("context_length" . 10)) "a")
@@ -178,7 +180,7 @@
             (kargu-model-info "shared" "a"))
           (setq view (get-buffer "*kargu model: a / shared*"))
           (should (buffer-live-p view))
-          (setq kargu--session-provider "b")
+          (setf (kargu-selection-provider) "b")
           (with-current-buffer view
             (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "context-window"))
                       ((symbol-function 'read-string) (lambda (&rest _) "777")))
@@ -268,7 +270,8 @@
 (ert-deftest kargu-model-store-selection-respects-authoritative-catalog-test ()
   "Candidate lists never append the active model or merge stale fallbacks."
   (let ((kargu--live-models-cache (make-hash-table :test #'equal))
-        (kargu--session-model "stale"))
+        (kargu-session--context
+         (kargu-test-session-with-history :model "stale")))
     (puthash "a" '("current") kargu--live-models-cache)
     (should (equal (kargu-chat--collect-model-candidates "a" '("late") '("fallback")) '("current")))
     (puthash "a" nil kargu--live-models-cache)

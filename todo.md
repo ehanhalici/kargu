@@ -27,10 +27,10 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 - **Yeniden üretme/kapanış:** Son dosyada disk/kaydetme hatası ve kısmi insan kabulü/reddi; araya giren kullanıcı değişiklikleri korunarak geri alma/sonuç sözleşmesi test edilmeli.
 - **Bağımlılık:** DIFF-01.
 
-### CHAT-01 · P1 · K — Canlı seçim ve uygulama durumu oturumlara ayrılmamış
+### CHAT-01 · P1 · K — Uygulama durumu ve asenkron kip hazırlığının sahipliği ayrılmamış
 
-- **Yer/kanıt:** `state/store.el` seçim/toplamları ve canlı provider/model override'ları hâlâ global. `kargu-chat-new` bağımsız sohbet açıyor; restore ortak seçimi değiştiriyor. Kimlik, sayaç ve tek geçmiş kuyruğu artık buffer-owned `kargu-session` kaydında; ikinci chat message kopyası kaldırıldı.
-- **Beklenen/gerçek:** Sohbetler kendi seçim verisini korumalı; ortak değerler ezilebiliyor. Geçmiş/sayaç ayrımı seçim izolasyonunu tamamlamaz. Global busy/aktif koşu tek-koşu sözleşmesidir, tek başına hata değildir.
+- **Yer/kanıt:** `state/store.el` kip/yaşam döngüsü/busy/belirteç toplamları ve uygulama koordinasyonu hâlâ ortak. `chat/mode.el` asenkron kip hazırlığının tamamlanma/iptal sahipliği ayrılmalı. Kimlik, sayaç, tek geçmiş kuyruğu ve değişmez provider/model/effort seçimi artık buffer-owned `kargu-session` kaydında; global seçim override'ları ve chat seçim kopyaları kaldırıldı.
+- **Beklenen/gerçek:** Uygulama koordinasyonu ile oturuma ait görünüm/veri açık kapsamla ayrılmalı; restore/reset ve geç kip hazırlığı ortak durumu etkileyebiliyor. Global busy/aktif koşu tek-koşu sözleşmesidir, tek başına hata değildir.
 - **Yeniden üretme/kapanış:** Aynı/farklı projede iki sohbet, farklı geçmiş/sayaç, reset/restore ve geç kip hazırlığı callback'leri; eski callback yeni oturum/seçime yazmamalı, tek aktif koşu korunmalı.
 
 ### CHAT-02 · P1 · K — Geçerli oturum restore işlemi atomik değil
@@ -128,7 +128,7 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 
 ### ARCH-01 · Oturum Sahipliği: Sohbet Verisi ile Global Koşu Koordinasyonunu Ayır
 
-- **Dosyalar / kalan sınır:** `core/session.el` kimlik/sayaçları ve `history/store.el` tek mesaj kuyruğunu lazy/buffer-owned `kargu-session` kaydında tutuyor; API delivery/run bu handle'ları yakalıyor. Geçici ping geçmişi ayrı, history snapshot'ları detached; foreign-buffer Stop/HTTP cevabı sahibine dönüyor. Canlı seçim, `state/store.el` merkezi durum deposu ve global `kargu--loop-run` koordinasyonu hâlâ application/session sahipliğine ayrılmalı. Buffer-local kimlik/proje kökü tek başına bu aktarımı tamamlamaz.
+- **Dosyalar / kalan sınır:** `core/session.el` kimlik/sayaçları, tek geçmiş kuyruğunu ve değişmez provider/model/effort seçimini lazy/buffer-owned `kargu-session` kaydında tutuyor; API delivery/run bu handle'ları yakalıyor. Geçici ping geçmişi ayrı, history snapshot'ları detached; foreign-buffer Stop/HTTP cevabı sahibine dönüyor. `state/store.el` ortak kip/yaşam döngüsü/toplamları ve global `kargu--loop-run` koordinasyonu hâlâ application/session sahipliğine ayrılmalı; run'ın proje/kip/yapılandırma snapshot sınırı tamamlanmalı.
 - **Karar:** Kimlik, geçmiş, sayaç ve sohbet seçimini sahipli bir oturum kaydında topla; sohbet tamponu bu kayda referans versin. Headless kullanımda da açık oturum referansı sağlanabilsin. Global varsayılan ayarlar ile oturuma ait canlı seçim ayrışsın; aktif koşu, başlarken yakaladığı oturum/proje/kip/seçim snapshot'ına bağlansın.
 - **Sınır:** Buffer-local değişken tek başına gecikmiş callback'i doğru tampona yönlendirmez. Açık sahiplik ve oturum nesli kontrolü korunsun. Proje bazlı sohbet bulma/oluşturma hâlâ gereklidir; routing tamamen kaldırılmasın. Tek aktif koşu ve aktif koşunun kip kilidi korunsun; çoklu sohbet, eşzamanlı çoklu ajan çalıştırma yetkisi değildir. Mevcut global koordinatör geçiş hedefi değil, taşınacak mevcut durumdur; yeni mutable singleton kurulmasın (ARCH-12).
 - **Kapanış / bağımlılık:** Aynı/farklı projede iki sohbet, headless oturum, seçim aktivasyonu, reset/restore, kapatılan tampon ve eski callback testleri; CHAT-01/02/03. İkinci bir durum deposu kurmak yerine mevcut seçici/geçiş API'sini sahipli kayda taşı.
@@ -303,9 +303,10 @@ Amaç her dosyayı ayrı paket yapmak değil; UI, ajan motoru, taşıma ve Emacs
 
 ### MOD-03 · Seçim UI'si ile Sağlayıcı/Model Durum Geçişini Ayır
 
-- **Dosyalar / kod bulgusu:** `chat/select.el` Company/footer UI'si ile seçim uygulama mantığını birlikte içeriyor; `api/select.el` yalnız compatibility girişidir. `state/hooks.el` model/provider bildirimleri zaten var. Yeni paralel bir `model-changed-hook` yaratmak yerine bunlar değerlendirilmeli.
+- **Dosyalar / kalan sınır:** `contract/selection.el` değişmez seçim değerini doğruluyor; `selection.el` sahipli provider/model/effort üçlüsünü tek geçişle yayımlayıp mevcut `state/hooks.el` bildirimlerini kullanıyor. UI, geç katalog/liste/zamanlayıcı cevaplarını oturum ve seçim kimliğiyle eliyor; bildirim sırasında sahip değişirse devam zinciri duruyor. Kalan iş `chat/select.el` içindeki aday keşfi/üyelik politikası ve özel katalog cache yorumunu UI'dan ayırmak; seçim kabulünün somut loop/busy sorgularını dar uygulama portuna taşımak.
 - **Karar:** Aday keşfi ve seçim doğrulaması UI'dan bağımsız servis olsun; chat/UI adapter'ı yalnız etkileşim ve görünümü yönetsin. Sağlayıcı/model/effort'un tutarlı seçimi tek doğrulanmış geçişle yayımlansın; oturum kaydı aynı seçimi görsün.
 - **Sınır:** Aday listesi dışı değer reddi, effort yokluğu ile açık kapatma ayrımı, metadata capability'leri ve stale katalog nesli korunsun. Yapılandırılmış keşif örtük auth-source/pinentry beklemesine dönüşmesin (CONFIG-01). Arka plan keşfi başka sohbetin seçimini veya kullanıcının point'ini değiştirmesin.
+- **Kalan politika:** Seçim kimliği değişmese de gecikmiş keşif, kullanıcının değiştirdiği odak/taslağı izinsiz taşımamalı. Restore atomikliği CHAT-02'de; kayıtta effort override'ı saklanmıyor, restore yapılandırma varsayılanını devralıyor. Bu kalıcılık politikası açıkça kararlaştırılmalı.
 - **Kapanış / bağımlılık:** ARCH-01, CHAT-01/02, CONFIG-01; headless seçim, iki sohbet, başarısız discovery/restore ve geç cevap testleri. İmleç taşıma yalnız açık kullanıcı etkileşimine ait UI adapter'ında kalsın.
 
 ### MOD-04 · Taşıma Portu: Döngüden Bağımsız İstek Ömrü
@@ -317,7 +318,7 @@ Amaç her dosyayı ayrı paket yapmak değil; UI, ajan motoru, taşıma ve Emacs
 
 ### MOD-05 · Reset: Sıralı Koordinasyon ile Bildirim Kancalarını Ayır
 
-- **Dosyalar / kalan sınır:** Resetin kritik sırası `application/reset.el` içinde: aktif loop/API iptali → yakalanmış hedef oturum temizliği → history/circuit/state → izole view bildirimi. `core/session.el` başka modülün verisine yazmıyor; chat reset listener'ını composition ile alıyor. İptal yeni iş/oturum başlatırsa reset eski hedefi yeniden doğrulayıp veri temizliğini reddediyor; bağımsız API cevabı nesille geçersizleşiyor. Geçmiş artık oturuma ait; kalan iş paylaşılan seçim/coordinator verisini açık context'e taşımak. History domain'indeki legacy cancel/prompt-cache etkisi, kritik ara adım hatasında atomik yayın/rollback ve provider/oturum kapsamında reset hâlâ tamamlanmadı.
+- **Dosyalar / kalan sınır:** Resetin kritik sırası `application/reset.el` içinde: aktif loop/API iptali → yakalanmış hedef oturum temizliği → history/circuit/state → izole view bildirimi. `core/session.el` başka modülün verisine yazmıyor; chat reset listener'ını composition ile alıyor. İptal yeni iş/oturum başlatırsa reset eski hedefi yeniden doğrulayıp veri temizliğini reddediyor; bağımsız API cevabı nesille geçersizleşiyor. Geçmiş ve seçim artık oturuma ait; kalan iş ortak kip/yaşam döngüsü/toplamlar ve coordinator verisini açık context'e taşımak. History domain'indeki legacy cancel/prompt-cache etkisi, kritik ara adım hatasında atomik yayın/rollback ve provider/oturum kapsamında reset hâlâ tamamlanmadı.
 - **Karar:** Uygulama composition katmanı resetin kritik sırasını koordine etsin: hedefi doğrula → sahipli işleri iptal/geçersiz kıl → yeni oturum neslini ve tutarlı başlangıç verisini yayımla → görünümü bilgilendir. Çekirdek genel reset API'si sunsun; opsiyonel modüller kapsamı belirli lifecycle bildirimleri dinleyebilsin.
 - **Sınır:** Bütün reseti sırasız hook listesine taşımak atomiklik sağlamaz. Kritik geçiş hatası ile best-effort bildirim hatası ayrılmalı. Başka oturumun history/job/diff incelemesi ve sağlayıcı kapsamlı circuit verisi körlemesine sıfırlanmasın; politika kapsamı açık olsun.
 - **Kapanış:** Aktif request/tool/approval/plan/compile varken reset; hook hatası, reentrancy, iki sohbet ve eski callback testleri. Headless reset chat oluşturmasın; başarısızlıkta yarım yayımlanmış durum kalmasın.

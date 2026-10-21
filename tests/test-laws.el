@@ -38,14 +38,15 @@
   (kargu-laws--with-catalog
     (kargu-test-mode 'agent)
     (kargu-model-set-metadata "no-tools-model" '(("supports_tools" . :json-false)) "p")
-    (let ((kargu--session-model "no-tools-model")
+    (let ((kargu-session--context
+           (kargu-test-session-with-history :model "no-tools-model"))
           (kargu--loop-run nil)
           (b (get-buffer-create kargu-chat-buffer-name)))
       (unwind-protect
           (with-current-buffer b
             (kargu-chat-mode)
-            (setq-local kargu-chat--session-provider "p")
-            (setq-local kargu-chat--session-model "no-tools-model")
+            (setf (kargu-selection-provider) "p")
+            (setf (kargu-selection-model) "no-tools-model")
             (kargu-chat--ensure-prompt)
             (goto-char (point-max))
             (let ((inhibit-read-only t)) (insert "keep this text"))
@@ -64,7 +65,8 @@
       (should (kargu-model-supports-tools-p "never-seen"))
       (kargu-model-set-metadata "bare" '(("id" . "bare")))
       (should (kargu-model-supports-tools-p "bare"))
-      (let ((kargu--session-model "never-seen"))
+      (let ((kargu-session--context
+             (kargu-test-session-with-history :model "never-seen")))
         (should (kargu-tools-enabled-p))))))
 
 (ert-deftest kargu-law-c-explicit-off-closes-tools-test ()
@@ -73,11 +75,13 @@
     (let ((kargu--loop-run nil))
       (kargu-model-set-metadata "off" '(("supports_tools" . :json-false)))
       (should-not (kargu-model-supports-tools-p "off"))
-      (let ((kargu--session-model "refused-later"))
+      (let ((kargu-session--context
+             (kargu-test-session-with-history :model "refused-later")))
         (should (kargu-tools-enabled-p))
         (kargu-model-mark-tools-refused "refused-later")
         (should-not (kargu-tools-enabled-p)))
-      (let ((kargu--session-model "plain"))
+      (let ((kargu-session--context
+             (kargu-test-session-with-history :model "plain")))
         (should (kargu-tools-enabled-p))
         (should-not (kargu-tools-enabled-p (list :no-tools t)))))))
 
@@ -108,7 +112,8 @@
 
 (ert-deftest kargu-law-e-selection-rejects-text-outside-the-list-test ()
   "Only a member of the candidate list is accepted."
-  (let ((kargu--session-model "gpt-4o"))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :model "gpt-4o")))
     (dolist (typed '("not-in-the-list" "flash" ""))
       (cl-letf (((symbol-function 'kargu--completing-read-with-company)
                  (lambda (&rest _) typed))
@@ -116,7 +121,7 @@
         (should-error (kargu-chat-select-model-company
                        '("gpt-4o" "gemini-2.5-flash") nil "mock")
                       :type 'user-error)
-        (should (equal kargu--session-model "gpt-4o"))))))
+        (should (equal (kargu-selection-model) "gpt-4o"))))))
 
 (ert-deftest kargu-law-f-session-brings-back-the-last-provider-test ()
   "A saved session restores the provider and model that were live at save time."
@@ -124,26 +129,29 @@
          (proj (make-temp-file "kargu-law-project-" t))
          (kargu-sessions-directory dir)
          (buf (get-buffer-create "*kargu-law-f*"))
-         (kargu--session-provider "openrouter")
-         (kargu--session-model "last-model"))
+         (kargu-session--context
+          (kargu-test-session-with-history :provider "openrouter" :model "last-model")))
     (unwind-protect
         (progn
           (with-current-buffer buf
             (kargu-chat-mode)
             (setq-local kargu-chat--project-root (file-name-as-directory proj))
             (setq-local kargu-chat--session-id "law-f-001")
-            (setq-local kargu-chat--session-provider "opencode")
-            (setq-local kargu-chat--session-model "stale-model")
+            (setf (kargu-selection-provider) "opencode")
+            (setf (kargu-selection-model) "stale-model")
             (setf (kargu-history-messages)
                         '((("role" . "user") ("content" . "remember me"))))
             (let ((inhibit-read-only t)) (insert "## you · 12:00\nremember me\n"))
+            (kargu-selection-update :provider "openrouter" :model "last-model")
             (kargu-session-save buf))
-          (setq kargu--session-provider nil
-                kargu--session-model nil)
+          (setf (kargu-selection-provider) nil
+                (kargu-selection-model) nil)
           (with-current-buffer buf
-            (kargu-session-load "law-f-001" buf proj))
-          (should (equal kargu--session-provider "openrouter"))
-          (should (equal kargu--session-model "last-model")))
+            (kargu-session-load "law-f-001" buf proj)
+            (should (equal (kargu-selection-provider) "openrouter"))
+            (should (equal (kargu-selection-model) "last-model")))
+          (should-not (kargu-selection-provider))
+          (should-not (kargu-selection-model)))
       (when (buffer-live-p buf) (kill-buffer buf))
       (delete-directory dir t)
       (delete-directory proj t)

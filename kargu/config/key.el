@@ -22,23 +22,16 @@
 (declare-function url-generic-parse-url "url-parse")
 (declare-function auth-source-search "auth-source")
 
-(defun kargu--chat-buffer-selection (variable)
-  "Non-empty buffer-local VARIABLE when the current buffer is a kargu chat."
-  (when (and (derived-mode-p 'kargu-chat-mode) (boundp variable))
-    (kargu-nonempty (symbol-value variable))))
-
 (defun kargu--provider-name ()
-  "Name of the active provider.
-An open chat contributes its own remembered provider."
-  (or (kargu--chat-buffer-selection 'kargu-chat--session-provider)
-      (kargu-nonempty kargu--session-provider)
+  "Return the owning session's provider, or an explicit config fallback."
+  (or (kargu-selection-provider)
       (kargu-nonempty (plist-get (kargu--config-plist) :provider))
       (caar (kargu--config-providers))
       "default"))
 
-(defun kargu--provider-plist ()
-  "Plist for the active provider (`:api', `:apikey', `:models')."
-  (let* ((name (kargu--provider-name))
+(defun kargu--provider-plist (&optional provider)
+  "Return PROVIDER's settings, defaulting to the current session's provider."
+  (let* ((name (or provider (kargu--provider-name)))
          (entry (assoc name (kargu--config-providers)))
          (default-info (kargu-provider-get name))
          (toml-plist (cond
@@ -83,10 +76,9 @@ otherwise provider's catalog default URL, else `kargu-api-base'."
          kargu-api-base))))
 
 (defun kargu--model ()
-  "Model id: the open chat's model, else the session, else an explicit TOML model."
-  (or (kargu--chat-buffer-selection 'kargu-chat--session-model)
-      (kargu-nonempty kargu--session-model)
-      (and (null kargu--session-provider)
+  "Return the owning session's model, or an explicit provider/config fallback."
+  (or (kargu-selection-model)
+      (and (null (kargu-selection-provider))
            (kargu-nonempty (plist-get (kargu--config-plist) :model)))
       (kargu-nonempty (plist-get (kargu--provider-plist) :model))))
 

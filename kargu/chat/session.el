@@ -25,9 +25,6 @@
 (require 'kargu/chat/session/validate)
 
 (declare-function kargu-state-mode "kargu/state/selectors" ())
-(declare-function kargu-state-set-provider "kargu/state/transitions" (provider))
-(declare-function kargu-state-set-model "kargu/state/transitions" (model))
-(declare-function kargu-state-clear-model "kargu/state/transitions" ())
 (declare-function kargu-set-mode "kargu/core" (mode))
 (declare-function kargu--provider-name "kargu/config/key" ())
 (declare-function kargu--model "kargu/config/key" ())
@@ -53,12 +50,6 @@
 (defvar-local kargu-chat--session-title nil
   "Human-readable title of this chat session.")
 
-(defvar-local kargu-chat--session-provider nil
-  "Provider name associated with this chat session.")
-
-(defvar-local kargu-chat--session-model nil
-  "Model identifier associated with this chat session.")
-
 (defun kargu-chat-session-id (&optional buffer)
   "Return the session identity belonging to BUFFER, defaulting to current."
   (buffer-local-value 'kargu-chat--session-id (or buffer (current-buffer))))
@@ -69,49 +60,11 @@
        (let ((s (string-trim value)))
          (unless (string-empty-p s) s))))
 
-(defun kargu-chat-note-selection (&optional buffer)
-  "Remember the explicit provider and model on chat BUFFER.
-Only `kargu--session-provider' and `kargu--session-model' are copied.
-Config fallbacks are not.  A nil live value clears that buffer-local slot.
-The session file reads this buffer-local copy when the chat closes."
-  (let ((buf (or buffer (current-buffer)))
-        (prov (and (boundp 'kargu--session-provider)
-                   (kargu-chat--explicit-selection kargu--session-provider)))
-        (mod (and (boundp 'kargu--session-model)
-                  (kargu-chat--explicit-selection kargu--session-model))))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (when (derived-mode-p 'kargu-chat-mode)
-          (setq kargu-chat--session-provider prov
-                kargu-chat--session-model mod))))))
-
 (defun kargu-chat--apply-saved-selection (provider model)
-  "Make PROVIDER and MODEL the live selection.
-A blank value clears that part of the live selection."
-  (let ((prov (kargu-chat--explicit-selection provider))
-        (mod (kargu-chat--explicit-selection model)))
-    (setq kargu--session-provider prov
-          kargu--session-model mod)
-    (if prov
-        (when (fboundp 'kargu-state-set-provider)
-          (kargu-state-set-provider (intern prov)))
-      (when (fboundp 'kargu-state-set-provider)
-        (kargu-state-set-provider nil)))
-    (if mod
-        (when (fboundp 'kargu-state-set-model)
-          (kargu-state-set-model mod))
-      (when (fboundp 'kargu-state-clear-model)
-        (kargu-state-clear-model)))))
-
-(defun kargu-chat-activate-selection (&optional buffer)
-  "Apply BUFFER's saved provider and model to the live selection."
-  (let ((buf (or buffer (current-buffer))))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (when (derived-mode-p 'kargu-chat-mode)
-          (kargu-chat--apply-saved-selection
-           kargu-chat--session-provider
-           kargu-chat--session-model))))))
+  "Restore PROVIDER and MODEL together into the current session."
+  (kargu-selection-update :provider (kargu-chat--explicit-selection provider)
+                          :model (kargu-chat--explicit-selection model)
+                          :effort kargu-selection-default-effort))
 
 (defun kargu-chat-session-reset ()
   "Clear the current chat's session view after application reset completes."
@@ -188,12 +141,9 @@ Store MODE-VAL, provider PROV, model MOD, TRANSCRIPT and MESSAGES."
 (defun kargu-session-save (&optional buffer)
   "Save chat session from BUFFER (defaults to current buffer) to JSON.
 Returns the file path written, or nil if no content to save.
-Saving the current chat first copies the explicit live provider and
-model onto that buffer.  A chat that has not chosen either stores
-empty strings, not the config fallback."
+Read provider and model directly from BUFFER's owned selection.  A chat
+that has not chosen either stores empty strings, not the config fallback."
   (let ((buf (or buffer (current-buffer))))
-    (when (and (bufferp buf) (buffer-live-p buf) (eq buf (current-buffer)))
-      (kargu-chat-note-selection buf))
     (when (and (bufferp buf) (buffer-live-p buf))
       (with-current-buffer buf
         (let* ((root (kargu-session-project-root buf))
@@ -207,17 +157,15 @@ empty strings, not the config fallback."
                (mode-val (if (fboundp 'kargu-state-mode)
                              (kargu-state-mode)
                            'agent))
-               (prov (or (kargu-chat--explicit-selection kargu-chat--session-provider) ""))
-               (mod (or (kargu-chat--explicit-selection kargu-chat--session-model) ""))
+               (prov (or (kargu-selection-provider) ""))
+               (mod (or (kargu-selection-model) ""))
                (usage (kargu-session-snapshot)))
           ;; Avoid creating files for completely empty untouched sessions
           (when (or (and messages (> (length messages) 0))
                     (> (length (string-trim transcript)) 30))
             (setq kargu-chat--session-id sid
                   kargu-chat--project-root root
-                  kargu-chat--session-title title
-                  kargu-chat--session-provider prov
-                  kargu-chat--session-model mod)
+                  kargu-chat--session-title title)
             (let ((data (kargu-session--build-data
                          sid root title usage mode-val prov mod transcript messages)))
               (prog1 (kargu-session-storage-write sid root data)
@@ -262,8 +210,6 @@ empty strings, not the config fallback."
           kargu-chat--session-title title
           kargu-chat--project-root (kargu-session-project-root root))
     (setq-local kargu--session-id sid)
-    (setq kargu-chat--session-provider (kargu-chat--explicit-selection saved-prov)
-          kargu-chat--session-model (kargu-chat--explicit-selection saved-model))
     (kargu-chat--apply-saved-selection saved-prov saved-model)
     (kargu-history-replace msg-list)))
 

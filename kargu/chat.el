@@ -41,8 +41,6 @@
 (require 'kargu/chat/tune)
 (require 'kargu/chat/session)
 
-(declare-function kargu-chat-note-selection "kargu/chat/session" (&optional buffer))
-(declare-function kargu-chat-activate-selection "kargu/chat/session" (&optional buffer))
 (declare-function kargu-chat--shown-provider "kargu/chat/prompt" ())
 (declare-function kargu-chat--shown-model "kargu/chat/prompt" ())
 (declare-function kargu-chat--focus-selection "kargu/chat/prompt" (&optional open-company))
@@ -221,7 +219,6 @@ Otherwise generates `*kargu-chat*<N>'."
       (when (fboundp 'kargu-chat-check-and-display-missing-tools)
         (kargu-chat-check-and-display-missing-tools proj)))
     (pop-to-buffer-same-window buf)
-    (kargu-chat-activate-selection buf)
     (with-current-buffer buf
       (kargu-chat--focus-selection (called-interactively-p 'any)))
     buf))
@@ -234,8 +231,7 @@ Otherwise generates `*kargu-chat*<N>'."
      ((null live)
       (kargu-chat-show))
      ((= (length live) 1)
-      (pop-to-buffer-same-window (car live))
-      (kargu-chat-activate-selection (car live)))
+      (pop-to-buffer-same-window (car live)))
      (t
       (let* ((names (mapcar #'buffer-name live))
              (default-name (buffer-name (if (derived-mode-p 'kargu-chat-mode)
@@ -244,8 +240,7 @@ Otherwise generates `*kargu-chat*<N>'."
              (chosen (completing-read "Switch to kargu chat: " names nil t nil nil default-name))
              (target (get-buffer chosen)))
         (when (and target (buffer-live-p target))
-          (pop-to-buffer-same-window target)
-          (kargu-chat-activate-selection target)))))))
+          (pop-to-buffer-same-window target)))))))
 
 (defun kargu-chat--buffer (&optional target-root)
   "Return the chat buffer for TARGET-ROOT, creating or restoring it.
@@ -304,7 +299,6 @@ LSP is optional; a missing connection is reported without blocking chat."
          (proj (kargu-session-project-root))
          (buffer (kargu-chat--buffer proj)))
     (pop-to-buffer-same-window buffer)
-    (kargu-chat-activate-selection buffer)
     (with-current-buffer buffer
       (kargu-chat--notice-without-eglot)
       (kargu-chat--ensure-prompt)
@@ -417,7 +411,6 @@ Nothing is consumed or rendered, so a refusal keeps the typed input."
   "Render PROMPT and its running banner before callbacks can arrive."
   (kargu-chat--consume-input)
   (kargu-chat--reset-stream-state)
-  (kargu-chat-note-selection)
   (kargu-chat--render-user-turn prompt)
   (kargu-chat--render-agent-heading)
   (kargu-chat--ensure-running-prompt)
@@ -538,7 +531,6 @@ When PRESERVE-DRAFT is non-nil, keep unsent input after completion too."
             (condition-case err
                 (let ((kargu-permission--override-root (kargu-chat--debug-prompt-root pending)))
                   (kargu-loop-preflight)
-                  (kargu-chat-activate-selection buffer)
                   (kargu-chat--submit
                    (kargu-chat--debug-prompt-text pending)
                    :preserve-draft (kargu-chat--debug-prompt-preserve-draft pending)))

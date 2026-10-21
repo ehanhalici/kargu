@@ -4,6 +4,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'cl-lib)
 (require 'kargu)
 (require 'kargu/tools/deps)
@@ -160,8 +161,8 @@
       (let ((buf (kargu-chat--buffer)))
         (unwind-protect
             (with-current-buffer buf
-              (setq-local kargu-chat--session-provider "opencode")
-              (setq-local kargu-chat--session-model "nemotron-3-ultra-free")
+              (setf (kargu-selection-provider) "opencode")
+              (setf (kargu-selection-model) "nemotron-3-ultra-free")
               (kargu-chat--ensure-prompt)
               (goto-char (point-max))
               (insert "My prompt")
