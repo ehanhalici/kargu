@@ -43,7 +43,7 @@
         (funcall publish record event)
       (error (kargu-log 'warn "Plan presentation failed: %s" (error-message-string err))))))
 
-(defun kargu-plan--dispatch-approved (record plan-text)
+(defun kargu-plan--dispatch-synchronous (record plan-text)
   "Send RECORD's PLAN-TEXT through its captured dispatcher, claiming it once."
   (let* ((context (kargu-plan-record-context record))
          (preflight (kargu-plan-context-preflight context))
@@ -64,6 +64,51 @@
     (when (eq (kargu-plan-record-state record) :approved)
       (kargu-plan--close-window record)
       (kargu-plan-publish record :approved))))
+
+(defun kargu-plan--finish-dispatch (record success error)
+  "Settle RECORD's claimed startup with validated SUCCESS or ERROR."
+  (setf (kargu-plan-record-dispatch-task record) nil)
+  (kargu-plan-complete record (and success (null error)))
+  (cond
+   ((eq (kargu-plan-record-state record) :approved)
+    (kargu-plan--close-window record)
+    (kargu-plan-publish record :approved))
+   (error (message "Kargu: %s; the plan remains pending when its owner is current" error))))
+
+(defun kargu-plan--dispatch-asynchronous (record plan-text)
+  "Claim RECORD and await asynchronous PLAN-TEXT startup exactly once."
+  (let* ((context (kargu-plan-record-context record))
+         (preflight (kargu-plan-context-preflight context)))
+    (when preflight (funcall preflight record))
+    (unless (kargu-plan-claim record)
+      (user-error "Kargu: this plan was already decided"))
+    (with-current-buffer (kargu-plan-record-origin record)
+      (let ((task (kargu-async-start
+                   (lambda (success error) (kargu-plan--finish-dispatch record success error)))))
+        (setf (kargu-plan-record-dispatch-task record) task)
+        (condition-case failure
+            (let ((kargu-async--current-task task))
+              (funcall
+               (kargu-plan-context-dispatch context) record plan-text
+               (kargu-async-wrap
+                task (lambda (success &optional error)
+                       (kargu-contract-assert #'booleanp success)
+                       (kargu-contract-assert
+                        (lambda (value) (or (null value) (stringp value))) error)
+                       (kargu-async-finish task success error)))))
+          (error
+           (kargu-async-finish task nil (error-message-string failure))
+           (signal (car failure) (cdr failure))))))))
+
+(defun kargu-plan--dispatch-approved (record plan-text)
+  "Dispatch RECORD's PLAN-TEXT through its captured completion contract."
+  (let* ((context (kargu-plan-record-context record))
+         (dispatch (kargu-plan-context-dispatch context)))
+    (cond
+     ((null dispatch) (user-error "Kargu: plan dispatcher unavailable; the plan is still pending"))
+     ((eq (kargu-plan-context-dispatch-style context) :synchronous)
+      (kargu-plan--dispatch-synchronous record plan-text))
+     (t (kargu-plan--dispatch-asynchronous record plan-text)))))
 
 (defun kargu-plan-approve (&optional record)
   "Approve RECORD, defaulting to the current chat or review buffer's plan."

@@ -75,6 +75,13 @@ rollback with render/footer and post-install faults, draft/root/selection
 changes, close/Stop, and foreign or duplicate completion. External mode-hook
 effects and disk crash recovery are not proved.
 
+The 2026-10-21 `--plan` exhaustive rerun explored 257,073 generated states,
+72,313 distinct states and depth 25 without error. Its existing separate claim,
+dispatch and failure transitions now also cover a held asynchronous preparer.
+ERT checks real preparation failure/retry, view/owner cancellation, approved
+revision and draft changes, foreign completion, duplicate decisions and
+reentrant mode observers. The model does not prove UI draft equivalence itself.
+
 `KarguApproval.tla` / `ApprovalMC.cfg` refine one captured permission operation.
 Run `proof/run_tlc.sh --approval` for an exhaustive scan. Eight independent
 authority checks can become stale before or after approval; approval is claimed

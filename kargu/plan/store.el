@@ -14,10 +14,11 @@
 (require 'cl-lib)
 (require 'kargu/contract/assert)
 (require 'kargu/plan/context)
+(require 'kargu/async)
 
 (cl-defstruct (kargu-plan-record (:constructor kargu-plan--make-record))
   "Plan artifact owned by one captured chat, project and session."
-  origin context buffer (state :pending))
+  origin context buffer dispatch-task (state :pending))
 
 (defun kargu-plan-record-root (record)
   "Return RECORD's captured project root without a second writable copy."
@@ -69,7 +70,9 @@
                  :origin origin :buffer buffer
                  :context (kargu-plan-context-validate
                            (or context (kargu-plan-context-for-buffer origin))))))
-    (when old (setf (kargu-plan-record-state old) :superseded))
+    (when old
+      (setf (kargu-plan-record-state old) :superseded)
+      (kargu-plan-cancel-dispatch old))
     (kargu-plan--attach-record origin record)
     (kargu-plan--attach-record buffer record)
     (with-current-buffer buffer
@@ -107,6 +110,12 @@ Never restore a decision belonging to a replaced or invalid owner."
                 (success :approved)
                 (t :pending)))))
 
+(defun kargu-plan-cancel-dispatch (record)
+  "Cancel RECORD's pending dispatch and its owned preparation resources."
+  (when-let* ((task (kargu-plan-record-dispatch-task record)))
+    (setf (kargu-plan-record-dispatch-task record) nil)
+    (kargu-async-cancel task)))
+
 (defun kargu-plan-decline (record)
   "Reject pending RECORD once; return non-nil if a decision was taken."
   (kargu-plan-assert-current record)
@@ -121,6 +130,7 @@ Never restore a decision belonging to a replaced or invalid owner."
           (view (kargu-plan-record-buffer record)))
       (when (eq record (kargu-plan-current origin))
         (setf (kargu-plan-record-state record) :cancelled)
+        (kargu-plan-cancel-dispatch record)
         (kargu-plan--detach-record origin record)
         (kargu-plan--detach-record view record))
       (kargu-plan--detach-record (current-buffer) record))))

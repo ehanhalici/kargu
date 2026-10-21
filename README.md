@@ -390,6 +390,13 @@ plan pending. Plans are extracted only from their own completion report, never
 another chat's global history. The bounded ownership workflow has a separate
 exhaustive check: `proof/run_tlc.sh --plan`.
 
+Plan approval stays claimed while mode preparation is pending. Only actual
+successful startup approves it. Stop or closing/replacing its review cancels
+owned preparation; changed drafts, plan revisions, selections or owners refuse
+late dispatch. Startup refusal restores the previous mode only if the plan's
+own mode revision is still current. The dispatcher accepts an asynchronous
+completion callback; legacy synchronous headless dispatchers remain supported.
+
 With the required Emacs packages installed, run the offline ERT suite with:
 
 ```sh

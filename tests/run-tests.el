@@ -43,6 +43,7 @@
 (require 'tests/test-integration)
 (require 'tests/test-providers)
 (require 'tests/test-plan)
+(require 'tests/test-plan-async)
 (require 'tests/test-patch)
 (require 'tests/test-metadata)
 (require 'tests/test-model-store)

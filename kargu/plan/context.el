@@ -18,9 +18,12 @@
 (declare-function kargu-plan-record-root "kargu/plan/store" (record))
 
 (cl-defstruct (kargu-plan-context (:constructor kargu-plan-context-create))
-  "Captured ROOT/SESSION with validation, admission, dispatch and presentation."
+  "Captured ROOT/SESSION with validation, admission, dispatch and presentation.
+Dispatch accepts (RECORD TEXT COMPLETE); COMPLETE receives (SUCCESS ERROR).
+Legacy two-argument dispatchers return a synchronous boolean at this boundary."
   (root nil :read-only t) (session nil :read-only t)
   (current-p nil :read-only t) (preflight nil :read-only t)
+  (dispatch-style :synchronous :read-only t)
   (dispatch nil :read-only t) (publish nil :read-only t))
 
 (defun kargu-plan-context-for-buffer (origin)
@@ -41,6 +44,9 @@
    (lambda (root) (and (kargu-contract-filepath-p root) (file-name-absolute-p root)))
    (kargu-plan-context-root context))
   (kargu-contract-assert #'functionp (kargu-plan-context-current-p context))
+  (kargu-contract-assert
+   (lambda (style) (memq style '(:synchronous :asynchronous)))
+   (kargu-plan-context-dispatch-style context))
   (dolist (callback (list (kargu-plan-context-preflight context)
                           (kargu-plan-context-dispatch context)
                           (kargu-plan-context-publish context)))

@@ -17,7 +17,7 @@
 
 (declare-function kargu-chat-prompt "kargu/chat" (&optional prompt))
 (declare-function kargu-loop-running-p "kargu/loop" ())
-(declare-function kargu-set-mode "kargu/core" (mode))
+(declare-function kargu-chat--input-text "kargu/chat/prompt" ())
 
 (defun kargu-chat-plan--current-p (record)
   "Return non-nil when RECORD still belongs to the same chat identity."
@@ -32,30 +32,85 @@
   (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
     (user-error "Kargu: stop the active run before applying a plan")))
 
-(defun kargu-chat-plan--dispatch (record plan-text)
-  "Dispatch RECORD's PLAN-TEXT, restoring mode on a refused startup."
-  (let ((mode (kargu-state-mode)) dispatched)
-    (unwind-protect
-        (with-current-buffer (kargu-plan-record-origin record)
-          (kargu-set-mode 'agent)
-          (kargu-plan-assert-current record)
-          (kargu-chat-prompt
-           (format "Apply the following approved plan step-by-step:\n\n%s" plan-text))
-          (setq dispatched t))
-      (unless dispatched
-        (when (and (buffer-live-p (kargu-plan-record-origin record))
-                   (not (kargu-loop-running-p))
-                   (eq (kargu-state-mode) 'agent) (not (eq mode 'agent)))
-          (with-current-buffer (kargu-plan-record-origin record)
-            (kargu-set-mode mode)))))
-    dispatched))
+(cl-defstruct (kargu-chat-plan-start (:constructor kargu-chat-plan--start))
+  "Captured plan revision, draft and mode for one approved dispatch."
+  record session selection view-tick draft mode revision text complete)
+
+(defun kargu-chat-plan--draft ()
+  "Read the full prompt without narrowing; preserve any unsent draft."
+  (save-restriction (widen) (kargu-chat--input-text)))
+
+(defun kargu-chat-plan--check-start (start)
+  "Refuse START when its owner, approved revision or unsent draft changed."
+  (let ((record (kargu-chat-plan-start-record start)))
+    (kargu-plan-assert-current record)
+    (unless (and (eq (kargu-chat-plan-start-session start) (kargu-session-context))
+                 (eq (kargu-chat-plan-start-selection start) (kargu-selection-context))
+                 (= (kargu-chat-plan-start-view-tick start)
+                    (with-current-buffer (kargu-plan-record-buffer record)
+                      (buffer-chars-modified-tick)))
+                 (equal (kargu-chat-plan-start-draft start) (kargu-chat-plan--draft)))
+      (user-error "Kargu: approved plan or chat draft changed; approve it again"))))
+
+(defun kargu-chat-plan--restore-mode (start)
+  "Restore START's previous mode only while its own mode revision remains."
+  (when (and (eq (kargu-chat-plan-start-session start) (kargu-session-context))
+             (= (kargu-session-mode-revision (kargu-session-context))
+                (1+ (kargu-chat-plan-start-revision start)))
+             (eq (kargu-state-mode) 'agent) (not (kargu-loop-running-p)))
+    (kargu-state-set-mode (kargu-chat-plan-start-mode start))))
+
+(defun kargu-chat-plan--start-ready (start mode error)
+  "Continue START only after MODE preparation, delivering ERROR on refusal."
+  (let ((failure error))
+    (unless failure
+      (condition-case err
+          (progn
+            (kargu-chat-plan--check-start start)
+            (unless (= (kargu-chat-plan-start-revision start)
+                       (kargu-session-mode-revision (kargu-session-context)))
+              (user-error "Kargu: plan mode selection was superseded"))
+            (kargu-state-set-mode mode)
+            (kargu-chat-plan--check-start start)
+            (unless (and (eq (kargu-state-mode) mode)
+                         (= (kargu-session-mode-revision (kargu-session-context))
+                            (1+ (kargu-chat-plan-start-revision start))))
+              (user-error "Kargu: plan mode publication was superseded"))
+            (kargu-chat-prompt
+             (format "Apply the following approved plan step-by-step:\n\n%s"
+                     (kargu-chat-plan-start-text start))))
+        (error (setq failure (error-message-string err)))))
+    (when failure
+      (condition-case err (kargu-chat-plan--restore-mode start)
+        (error (kargu-log 'warn "Plan mode rollback refused: %s" (error-message-string err)))))
+    (funcall (kargu-chat-plan-start-complete start) (null failure) failure)
+    failure))
+
+(defun kargu-chat-plan--dispatch (record plan-text complete)
+  "Prepare RECORD's PLAN-TEXT, then report actual startup to COMPLETE."
+  (with-current-buffer (kargu-plan-record-origin record)
+    (let ((start (kargu-chat-plan--start
+                  :record record :session (kargu-session-context)
+                  :selection (kargu-selection-context) :mode (kargu-state-mode)
+                  :revision (kargu-session-mode-revision (kargu-session-context))
+                  :view-tick (with-current-buffer (kargu-plan-record-buffer record)
+                               (buffer-chars-modified-tick))
+                  :draft (kargu-chat-plan--draft) :text plan-text :complete complete)) failure)
+      (kargu-mode-prepare
+       'agent (lambda (mode error) (setq failure (kargu-chat-plan--start-ready start mode error))))
+      (when failure (user-error "%s" failure)))))
 
 (defun kargu-chat-plan--context (origin)
   "Capture chat ORIGIN's identity and its application adapter callbacks."
-  (kargu-plan-context-create
-   :root (kargu-session-project-root origin) :session (kargu-chat-session-id origin)
-   :current-p #'kargu-chat-plan--current-p :preflight #'kargu-chat-plan--preflight
-   :dispatch #'kargu-chat-plan--dispatch :publish #'kargu-chat-plan--publish))
+  (let ((session (kargu-session-context origin)))
+    (kargu-plan-context-create
+     :root (kargu-session-project-root origin) :session (kargu-chat-session-id origin)
+     :current-p (lambda (record)
+                  (and (eq session (kargu-session-context origin))
+                       (kargu-chat-plan--current-p record)))
+     :preflight #'kargu-chat-plan--preflight
+     :dispatch-style :asynchronous
+     :dispatch #'kargu-chat-plan--dispatch :publish #'kargu-chat-plan--publish)))
 
 (defun kargu-chat-plan-install ()
   "Install this context adapter idempotently at application composition."
