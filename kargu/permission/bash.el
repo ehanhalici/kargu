@@ -118,6 +118,8 @@ A non-nil result means the command may touch paths the tokenizer never
 sees, so it needs an explicit human approval."
   (save-match-data
     (let (risks)
+      (when (kargu-permission--unverified-environment-p command)
+        (push "unresolved or shell-local variables can change paths at run time" risks))
       (when (string-match-p (rx (any "{}\\")) command)
 	(push "braces or escapes can change paths after validation" risks))
       (when (cl-some (lambda (token)
@@ -180,6 +182,20 @@ sees, so it needs an explicit human approval."
   (rx "$" (or (seq "{" (any alpha "_") (* (any alnum "_")) "}")
               (seq (any alpha "_") (* (any alnum "_")))))
   "Simple environment references understood without executing shell code.")
+
+(defun kargu-permission--unverified-environment-p (command)
+  "Return non-nil if COMMAND references missing or shell-local variables."
+  (save-match-data
+    (let ((position 0))
+      (catch 'unverified
+        (while (string-match kargu-permission--environment-reference command position)
+          (let* ((reference (match-string 0 command))
+                 (name (if (string-prefix-p "${" reference)
+                           (substring reference 2 -1) (substring reference 1))))
+            (setq position (match-end 0))
+            (when (or (member name '("PWD" "OLDPWD")) (null (getenv name)))
+              (throw 'unverified t))))
+        nil))))
 
 (defun kargu-permission--expand-environment (command)
   "Expand simple environment references in COMMAND without path rewriting."

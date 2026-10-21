@@ -158,11 +158,11 @@
 (ert-deftest kargu-git-changes-need-approval-test ()
   "commit, stage, stash and branch changes are rejected when not approved."
   (let ((kargu-permission--mock-decision :reject))
-    (should-error (kargu-git-commit #'ignore "msg"))
-    (should-error (kargu-git-stage #'ignore "kargu.el"))
+    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-commit done "msg")))))
+    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-stage done "kargu.el")))))
     (should-error (kargu-git-stash #'ignore "drop"))
-    (should-error (kargu-git-stash #'ignore "push"))
-    (should-error (kargu-git-branch #'ignore "create" "kargu-test-branch"))))
+    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-stash done "push")))))
+    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-branch done "create" "kargu-test-branch")))))))
 
 (ert-deftest kargu-webfetch-refuses-local-addresses-test ()
   "Loopback, private and link-local hosts are refused; public hosts pass."

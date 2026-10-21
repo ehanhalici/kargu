@@ -58,6 +58,16 @@ does not prove catalog authenticity or focus/draft UX. ERT additionally checks
 atomic tuple publication, inherited versus disabled effort, and suppression of
 UI continuations when a notification replaces the owner or selection.
 
+`KarguApproval.tla` / `ApprovalMC.cfg` refine one captured permission operation.
+Run `proof/run_tlc.sh --approval` for an exhaustive scan. Eight independent
+authority checks can become stale before or after approval; approval is claimed
+before entering its continuation, and cancellation prevents later starts.
+The 2026-10-21 scan explored 8,194 generated states, 1,536 distinct states,
+depth 11, with no error. ERT covers directory replacement, owner closure,
+environment/policy changes, reentrant and duplicate decisions, and cancellation
+of only the owned UI prompt. This is not a proof of shell analysis, OS isolation,
+exactly-once external effects or filesystem compare-and-swap.
+
 Model capabilities are read from provider/model-owned metadata records.
 Provider isolation, ambiguous display aliases, exact request identities and
 captured inspector ownership are covered by offline ERT, including catalog

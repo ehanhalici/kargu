@@ -18,6 +18,7 @@
 (require 'kargu/contract)
 (require 'kargu/api/tools)
 (require 'kargu/permission)
+(require 'kargu/permission/execute)
 (require 'kargu/tools/process)
 
 (defgroup kargu-bash nil
@@ -83,20 +84,24 @@ Return a persistent process identifier when BACKGROUND is non-nil."
       (let ((res (kargu-bash--run-background command dir shell)))
         (if callback (funcall callback res) res)))
      (callback
-      (kargu-bash--run-async command dir shell callback))
+      (let ((process (kargu-bash--run-async command dir shell callback))
+            (task kargu-async--current-task))
+        (when (and task (processp process))
+          (kargu-async-add-cleanup task (lambda () (kargu-process-cancel process))))
+        process))
      (t
       (error "Bash commands never run synchronously: pass a CALLBACK")))))
 
 (defun kargu-bash--run-async-approved (command dir root background callback)
   "Approve COMMAND in DIR within ROOT and deliver output to CALLBACK.
 Start a persistent process when BACKGROUND is non-nil."
-  (kargu-permission-request-approval-async
-   command dir (kargu-permission-command-risks command)
-   (lambda (approved)
-     (if approved
-         (kargu-bash--start command dir background callback)
-       (funcall callback
-                (format "ERROR: %s" (kargu-bash--rejection-text command dir root)))))))
+  (let ((command (copy-sequence command)) (dir (copy-sequence dir))
+        (root (copy-sequence root)))
+    (kargu-permission-execute
+     :command command :directory dir :risks (kargu-permission-command-risks command)
+     :valid-p (lambda () (kargu-permission-validate-command command root dir) t)
+     :start (lambda (done) (kargu-bash--start command dir background done))
+     :callback callback)))
 
 (defun kargu-bash-run (command &optional cwd background callback)
   "Run COMMAND in CWD, capturing stdout and stderr.

@@ -1,7 +1,7 @@
 # Açık işler
 
 Yalnız açık kayıtlar tutulur; kapanan ve yanlış pozitif kayıtlar silinir.
-2026-10-19 incelemesi: 698/698 ERT geçti. Yeşil testler kapsanmayan hataları
+2026-10-21 doğrulaması: 853/853 ERT geçti. Yeşil testler kapsanmayan hataları
 çürütmez. K = kod yolu doğrulandı; Y = kontrollü yeniden üretildi;
 D = ortam/ölçüm kanıtı gerekiyor. Kimlikler yeniden numaralanmaz.
 P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
@@ -71,11 +71,6 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 - **Yeniden üretme/kapanış:** İki proje, A varsayılan adlı sohbeti tutarken B'den seçim/restore; `kargu-session-load` hedefsiz çağrısı; ilgili sohbet yoksa yeni tampon, varsa yalnız eşleşen kök. A'nın transcript/geçmiş/session-id değerleri değişmemeli (regresyon testi: yukarıdaki senaryo).
 - **Bağımlılık:** CHAT-01/CHAT-02 ile ortak sohbet sahipliği; CHAT-02'nin atomik restore sınırı bu düzeltmeden önce hedef tamponu seçmeli.
 
-### PERM-01 · P1 · Y — Tanımsız kabuk değişkeni proje sınırı doğrulamasını ve risk uyarısını atlatıyor
-
-- **Yer/kanıt:** `kargu/permission/bash.el`, `kargu-permission--expand-environment` ve `kargu-permission-command-risks`: `getenv` nil dönen `$ADI` olduğu gibi bırakılıyor; doğrulayıcı `$ADI/etc/passwd` belirtecini `/` ile başlamadığı için göreli sayıyor. Risk düzenli ifadesi yalnız `$(`, `${`, `` ` ``, `$'`, `$"` yakalıyor; düz `$ADI` yakalanmıyor. Yeniden üretildi (güçlü kip, proje kökü geçici dizin): `cat $NOPE_VAR/etc/passwd` → `validate-command` hatasız geçti, `command-risks` = nil. Karşılaştırma: `cat /etc/passwd` reddedildi, `${NOPE_VAR}` biçimi risk uyarısı verdi. Komut `bash -c` ile çalıştığı için (`tools/bash/jobs.el`) tanımsız değişken boş genişler ve `cat /etc/passwd` olur.
-- **Beklenen/gerçek:** Emacs ortamında bulunmayan/çalışma anında kabukta farklı olabilecek değişken, doğrulamada sınır dışı yol olarak reddedilmeli veya risk olarak onay metnine yazılmalı. Gerçekte uyarısız geçiyor; `kargu-permission-confirm-bash` nil iken (belgelenmiş vazgeçme) komut hiç sorulmadan çalışıyor, varsayılanda ise onay iletişiminde WARNING görünmüyor.
-- **Yeniden üretme/kapanış:** `$VAR`, `"$VAR"`, `$VAR$VAR2`, kök dışı yola ekleme, `$PWD`/`$OLDPWD` (kabuk-yerel), tanımlı ve tanımsız değişken ayrımı, `confirm-bash` t/nil. Regresyon: tanımsız değişken içeren yol ya reddedilir ya risk listesine girer; tanımlı basit değişken davranışı ve `${...}` uyarısı korunur.
 
 ### TOOL-01 · P2 · Y — `read_file` aralık argümanları yanlış yorumlanıyor / sessizce yok sayılıyor
 
@@ -135,14 +130,14 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 
 ### ARCH-02 · Komut Güvenliği: Argv, Politika ve Gerçek İzolasyonu Birbirine Karıştırma
 
-- **Dosyalar / kod bulgusu:** `permission/bash.el` kabuk metnini sınırlı analiz ediyor; PERM-01 somut açık kayıt. `tools/process.el` argv tabanlı runner zaten var; Git/arama gibi yapılandırılmış araçlarda mevcut doğrudan süreç yolları yeniden icat edilmesin.
+- **Dosyalar / kalan sınır:** `permission/bash.el` tanımsız ve kabuk-yerel değişkenleri risk sayıyor; onay opt-out'u bu riskleri geçirmiyor. `tools/process.el` argv tabanlı runner zaten var. Kalan kapsam sınırlı kabuk analizi ile gerçek OS izolasyonunun ayrılması; Git/arama gibi yapılandırılmış araçlarda mevcut doğrudan süreç yolları yeniden icat edilmesin.
 - **Karar:** Yapılandırılmış araçlar program + argv kullansın; izin verilen işlemler, seçenekler, kanonik yollar ve ortam ayrıca doğrulansın. Program destekliyorsa kullanıcı yollarından önce `--` kullan; option injection, symlink, programın hook/config çalıştırması ve alt süreç davranışını tehdit modeline kat.
 - **Sınır:** Argv kabuk açılımını önler; path traversal veya keyfi program davranışını imkânsız kılmaz. `cwd` proje sınırı değildir; insan onayı da sandbox değildir. Serbest kabukta mevcut analiz sınırlı bir risk/ret katmanı olarak kalsın; tam güvenlik kanıtı gibi sunulmasın. OS izolasyonu ayrıca capability/platform bazlı tasarlansın: dosya yazma, ağ, ortam sırları, süreçler ve izin verilen mount'lar açık olsun. İzolasyon yoksa sessizce eşdeğer güvenlik iddiasıyla devam edilmesin.
 - **Kapanış / bağımlılık:** PERM-01 regresyonları; argv seçenekleri, mutlak/göreli yol, symlink ve kontrol-sonrası yol değişimi, kabuk açılımları, ağ/ortam erişimi, sandbox yokluğu ve onay reddi. Politika kullanıcıya gerçek koruma düzeyini bildirsin; mevcut izin varsayılanları zayıflatılmasın.
 
 ### ARCH-03 · İnsan Onayı: Replay Yerine Yakalanmış İşleme Bağlı Devam
 
-- **Dosyalar / kod bulgusu:** `permission/policy.el`, `ui/confirm.el`; `kargu-permission-call-async` ertelenmiş onaydan sonra thunk'ı tekrar çalıştırıyor. Mevcut sözleşme onayın yan etkiden önce alınmasını şart koşuyor; replay varlığı bütün çağıranlarda çift yan etki üretildiğini kanıtlamaz.
+- **Dosyalar / kalan sınır:** `permission/execute.el` Git/Bash için yakalanmış oturum/koşu/proje/dizin kimliği, ortam, exec-path ve politika ile tek kullanımlık devamı yürütüyor. Defer/replay ve preapproved deposu son çağıranlarıyla kaldırıldı; iptal yalnız ilgili confirmation handle'ını kapatıyor. Kalan iş düzenleme/onay kimliğini ARCH-04'ün belge/config revision'larına bağlamak ve uygulama context'ine taşınan sahipliği tüketmek; yeni bir replay katmanı kurulmasın.
 - **Karar:** Hazırlık → değişmez onay isteği → sahiplik/güncellik doğrulama → tek kullanımlık yürütme devamı şeklinde açık akışa geç. Komut, kanonik dizin, yollar, riskler ve ilgili belge/config nesilleri onaylanan işin kimliğine bağlansın; değişen iş için eski onay yeniden kullanılmasın.
 - **Sınır:** Replay kaldırılırken preapproved eşleştirmesi, erken/senkron cevap bariyeri, ret, Stop/deadline ve callback tek teslim garantileri kaybolmasın. Sonradan gelen onay, iptal edilmiş/yeni oturuma taşınmış işi başlatmasın. Geçiş tamamlanana kadar replay çağıranlarında onay öncesi yan etkisizlik denetlensin.
 - **Kapanış:** Çok aşamalı onay, erken/geç/çift cevap, reentrant consumer, onay sırasında dosya/kök/koşu değişimi ve kaynak temizliği testleri. Her çağıranı taşıdıktan sonra defer/replay uyumluluk yolu kaldırılabilir.

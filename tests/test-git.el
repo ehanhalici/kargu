@@ -36,12 +36,13 @@
           (cl-letf (((symbol-function 'kargu-process-run)
                      (lambda (_program _args callback &rest opts)
                        (cl-incf starts)
+                                               (setq process
                        (apply runner "sleep" '("30")
-                              (lambda (value) (setq settled t) (funcall callback value)) opts))))
+                                                            (lambda (value) (setq settled t) (funcall callback value)) opts)))))
             (funcall (kargu-async-wrap
                       task (lambda ()
-                             (setq process (kargu-git-unstage
-                                            (lambda (text) (setq result text)) "a.txt")))))
+                                                     (kargu-git-unstage
+                                                      (lambda (text) (setq result text)) "a.txt"))))
             (should (process-live-p process))
             (kargu-async-cancel-owner run)
             (let ((deadline (+ (float-time) 2)))

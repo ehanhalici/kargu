@@ -239,10 +239,17 @@ ID is resolved before approval, and applying never deletes the stash. `pop`
 and `drop` are refused because an index may change while approval is pending.
 Delete entries manually through Git/Magit after reviewing the applied result.
 
+Git and Bash approvals capture their session, run, project, directory identity,
+environment and executable search path. A delayed answer cannot start a changed
+request; duplicated decisions enter the continuation only once, without replaying
+tool preparation. Cancelling its task dismisses only that task's prompt.
+
 Shell validation and approval are best-effort guards, not an operating-system
 sandbox. Keep shell confirmation enabled for untrusted commands; command strings
 can invoke scripts and interpreters whose filesystem effects cannot be inferred
-by the path tokenizer. Remaining parser limitations are tracked in `todo.md`.
+by the path tokenizer. Missing variables and shell-local `PWD`/`OLDPWD` expansions
+require explicit approval even when ordinary shell confirmation is disabled.
+Remaining parser limitations are tracked in `todo.md`.
 
 Webfetch validates numeric resolver results before pinning a connection and
 repeats that check for each redirect. Numeric URLs need no DNS; missing or

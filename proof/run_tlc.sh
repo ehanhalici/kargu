@@ -4,6 +4,7 @@
 #   ./run_tlc.sh                 exhaustive breadth-first scan (the proof)
 #   ./run_tlc.sh --plan          exhaustive plan-ownership scan
 #   ./run_tlc.sh --selection     exhaustive owned-selection scan
+#   ./run_tlc.sh --approval      exhaustive captured-approval scan
 #   ./run_tlc.sh --process       exhaustive process-capture scan
 #   ./run_tlc.sh --diagnostics   exhaustive diagnostic-ownership scan
 #   ./run_tlc.sh --debug-startup exhaustive debugger-startup ownership scan
@@ -46,6 +47,10 @@ elif [[ "$1" == "--plan" ]]; then
     MODE="exhaustive plan-ownership scan"
     SPECIFICATION="PlanMC.tla (KarguPlan)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config PlanMC.cfg PlanMC.tla)
+elif [[ "$1" == "--approval" ]]; then
+    MODE="exhaustive captured-approval scan"
+    SPECIFICATION="ApprovalMC.tla (KarguApproval)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config ApprovalMC.cfg ApprovalMC.tla)
 elif [[ "$1" == "--selection" ]]; then
     MODE="exhaustive owned-selection scan"
     SPECIFICATION="SelectionMC.tla (KarguSelection)"

@@ -26,6 +26,7 @@
 (require 'tests/test-state)
 (require 'tests/test-selection)
 (require 'tests/test-permission)
+(require 'tests/test-permission-operation)
 (require 'tests/test-git)
 (require 'tests/test-history)
 (require 'tests/test-history-store)

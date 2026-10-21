@@ -50,8 +50,8 @@
     (add-text-properties
      start end
      '(read-only t
-       front-sticky t
-       rear-nonsticky (read-only face front-sticky)))))
+                 front-sticky t
+                 rear-nonsticky (read-only face front-sticky)))))
 
 (defun kargu-confirm--note-focus (pos)
   "Remember POS as the first option button in the current buffer."
@@ -217,7 +217,7 @@ SET-DECISION-FN is called with the chosen action key when clicked."
     (unless (eq decision :cancel)
       (condition-case err
           (kargu-confirm--write-audit (kargu-confirm--req-chat-buf req)
-                                     (kargu-confirm--req-actions req) decision)
+                                      (kargu-confirm--req-actions req) decision)
         (error (kargu-log 'warn "Confirmation audit failed: %s"
                           (error-message-string err)))))
     (kargu-confirm--deliver req decision)))
@@ -263,11 +263,13 @@ Claim each request before delivery so stale buttons remain inert."
      (lambda (decision)
        (when (fboundp 'kargu-confirm--settle)
          (kargu-confirm--settle req decision))))
-    (kargu-confirm--reveal chat-buf)))
+    (kargu-confirm--reveal chat-buf)
+    req))
 
 (defun kargu-ui-confirm (&rest plist)
   "Show a confirmation prompt with action buttons and return at once.
 The chosen action key is passed to the `:on-decision' function.
+Return an opaque handle for an unanswered prompt, otherwise nil.
 PLIST keys:
   `:on-decision'     - Required function of one argument (the action key)
   `:title'           - Banner title string
@@ -304,13 +306,15 @@ before this function returns; interactively it runs when a button is clicked."
       (if (not chat-buf)
           (funcall on-decision
                    (kargu-confirm--ask-in-minibuffer fallback actions default-action))
-        (kargu-confirm--enqueue chat-buf plist))))
-    nil))
+        (kargu-confirm--enqueue chat-buf plist))))))
 
 (defun kargu-ui-present-confirmation (request)
   "Present REQUEST through this UI adapter, or dismiss pending requests."
   (pcase (kargu-confirmation-operation request)
     (:prompt (apply #'kargu-ui-confirm (kargu-confirmation-options request)))
+    (:cancel
+     (let ((handle (plist-get (kargu-confirmation-options request) :handle)))
+       (when (kargu-confirm--req-p handle) (kargu-confirm--settle handle :cancel))))
     (:dismiss (kargu-confirm-dismiss-all))))
 
 (defun kargu-ui-confirm-install ()

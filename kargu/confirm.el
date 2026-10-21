@@ -45,5 +45,10 @@ The default action must be :reject, :stop or :cancel, never approval."
   "Dismiss pending confirmations through the active presentation adapter."
   (kargu-present-confirmation (kargu-confirm--request :operation :dismiss)))
 
+(defun kargu-cancel-confirmation (handle)
+  "Cancel only the pending confirmation owned by opaque HANDLE."
+  (kargu-present-confirmation
+   (kargu-confirm--request :operation :cancel :options (list :handle handle))))
+
 (provide 'kargu/confirm)
 ;;; confirm.el ends here

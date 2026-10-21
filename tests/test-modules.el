@@ -311,6 +311,21 @@ Initialize installed PACKAGES only when requested."
       (kargu-dismiss-confirmations)
       (cl-assert (equal decisions '(:stop :reject))))))
 
+(ert-deftest kargu-module-permission-execution-without-runtime-or-ui-sources-test ()
+  "Owned permission continuations need neither chat nor a concrete engine."
+  (kargu-module-test--without-sources
+   '("kargu/chat" "kargu/loop" "kargu/api" "kargu/ui")
+   '((require 'kargu/permission/execute)
+     (let ((kargu-permission--override-root default-directory) result effect)
+       (kargu-permission-execute
+        :command "git status" :directory default-directory
+        :start (lambda (_) (setq effect t))
+        :callback (lambda (value) (setq result value)))
+       (cl-assert (not effect))
+       (cl-assert (string-prefix-p "ERROR:" result)))
+     (dolist (feature '(kargu/core kargu/state kargu/chat kargu/loop kargu/api kargu/ui))
+       (cl-assert (not (featurep feature)))))))
+
 (ert-deftest kargu-module-confirmation-rejects-unsafe-options-test ()
   "Invalid boundary input cannot reach a confirmation adapter."
   (kargu-module-test--load-foundation

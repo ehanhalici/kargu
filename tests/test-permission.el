@@ -9,10 +9,11 @@
 
 (ert-deftest kargu-permission-async-result-is-delivered-once-test ()
   "A tool completing twice can deliver only its first asynchronous result."
-  (let (done results)
-    (kargu-permission-call-async
-     (lambda (callback) (setq done callback))
-     (lambda (result) (push result results)))
+  (let ((kargu-permission--mock-decision :approve) done results)
+    (kargu-permission-execute
+     :command "git status" :directory default-directory
+     :start (lambda (callback) (setq done callback))
+     :callback (lambda (result) (push result results)))
     (funcall done "first")
     (funcall done "second")
     (should (equal results '("first")))))
@@ -181,66 +182,60 @@
         (should (eq verdict (cdr case)))))))
 
 (ert-deftest kargu-permission-approval-is-scoped-to-directory-and-risks-test ()
-  "The same command requires distinct approvals when its context changes."
-  (let ((asked nil) (delivered 0))
+  "The same command needs its own approval for every prepared context."
+  (let* ((root (kargu-permission-project-root))
+         (a (make-temp-file (expand-file-name "approval-a-" root) t))
+         (b (make-temp-file (expand-file-name "approval-b-" root) t))
+         asked (delivered 0))
     (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
                (lambda (command directory risks callback)
                  (push (list command directory risks) asked)
-                 (funcall callback t)
-                 (funcall callback t)))
-              ((symbol-function 'kargu-permission--auto-decision) (lambda (_) nil)))
-      (kargu-permission-call-async
-       (lambda (done)
-         (dolist (entry '(("/tmp/project-a" ("first risk"))
-                          ("/tmp/project-b" ("first risk"))
-                          ("/tmp/project-b" ("second risk"))))
-           (should (kargu-permission-approve "same command" (car entry) (cadr entry))))
-         (funcall done "done"))
-       (lambda (_) (cl-incf delivered))))
+                 (funcall callback t) (funcall callback t))))
+      (dolist (entry (list (list a '("first risk")) (list b '("first risk"))
+                           (list b '("second risk"))))
+        (kargu-permission-execute
+         :command "same command" :directory (car entry) :risks (cadr entry)
+         :start (lambda (done) (funcall done "done"))
+         :callback (lambda (_) (cl-incf delivered)))))
     (should (= (length asked) 3))
-    (should (= delivered 1))))
+    (should (= delivered 3))
+    (should-not (equal (car asked) (cadr asked)))))
 
 (ert-deftest kargu-permission-callback-failure-never-redelivers-test ()
   "A failing sync or delayed continuation is logged without another delivery."
   (dolist (delayed '(nil t))
-    (let ((delivered 0) held)
-      (kargu-permission-call-async
-       (lambda (done) (setq held done) (unless delayed (funcall done "ok")))
-       (lambda (_) (cl-incf delivered) (error "Bad continuation")))
+    (let ((kargu-permission--mock-decision :approve) (delivered 0) held)
+      (kargu-permission-execute
+       :command "git status" :directory default-directory
+       :start (lambda (done) (setq held done) (unless delayed (funcall done "ok")))
+       :callback (lambda (_) (cl-incf delivered) (error "Bad continuation")))
       (funcall held "ok")
       (funcall held "duplicate")
       (should (= delivered 1)))))
 
-(ert-deftest kargu-permission-call-async-asks-then-reruns-test ()
-  "A tool body that needs approval is re-run once after the human approves."
-  (let ((kargu-permission--mock-decision nil)
-        (kargu-permission-confirm-bash t)
-        (asked nil) (runs 0) (result nil))
+(ert-deftest kargu-permission-execute-asks-then-starts-once-test ()
+  "A prepared tool starts only once after the human approves, without replay."
+  (let ((asked nil) (runs 0) result)
     (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
-               (lambda (cmd _dir _risks cb) (push cmd asked) (funcall cb t)))
-              ((symbol-function 'kargu-permission--auto-decision) (lambda (_) nil)))
-      (kargu-permission-call-async
-       (lambda (done)
-         (cl-incf runs)
-         (unless (kargu-permission-approve "git commit" "/tmp") (error "no"))
-         (funcall done "committed"))
-       (lambda (r) (setq result r))))
+               (lambda (cmd _dir _risks cb)
+                 (push cmd asked) (funcall cb t) (funcall cb t))))
+      (kargu-permission-execute
+       :command "git commit" :directory default-directory
+       :start (lambda (done) (cl-incf runs) (funcall done "committed"))
+       :callback (lambda (value) (setq result value))))
     (should (equal result "committed"))
     (should (equal asked '("git commit")))
-    (should (= runs 2))))
+    (should (= runs 1))))
 
-(ert-deftest kargu-permission-call-async-rejection-is-an-error-result-test ()
+(ert-deftest kargu-permission-execute-rejection-is-an-error-result-test ()
   "A refused approval becomes an ERROR result and the side effect never runs."
-  (let ((effect nil) (result nil))
+  (let ((effect nil) result)
     (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
-               (lambda (_c _d _r cb) (funcall cb nil)))
-              ((symbol-function 'kargu-permission--auto-decision) (lambda (_) nil)))
-      (kargu-permission-call-async
-       (lambda (done)
-         (unless (kargu-permission-approve "git commit" "/tmp") (error "no"))
-         (setq effect t)
-         (funcall done "ok"))
-       (lambda (r) (setq result r))))
+               (lambda (_c _d _r callback) (funcall callback nil))))
+      (kargu-permission-execute
+       :command "git commit" :directory default-directory
+       :start (lambda (done) (setq effect t) (funcall done "ok"))
+       :callback (lambda (value) (setq result value))))
     (should-not effect)
     (should (string-prefix-p "ERROR:" result))))
 

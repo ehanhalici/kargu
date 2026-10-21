@@ -33,6 +33,7 @@
 (require 'kargu/contract)
 (require 'kargu/api/tools)
 (require 'kargu/permission)
+(require 'kargu/permission/execute)
 (require 'kargu/tools/process)
 (require 'kargu/async)
 (require 'magit nil t)
@@ -91,15 +92,10 @@ A name that starts with a dash would be read by git as an option."
       (error "%s `%s' is not a plain reference (no leading dash, no whitespace)" what v))
      (t v))))
 
-(defun kargu-git--approve (description root)
-  "Ask the human to approve the git change DESCRIPTION in ROOT, or signal."
-  (unless (kargu-permission-approve (concat "git " description) root)
-    (error "Git %s was not approved by the user" description)))
-
 ;;;; Status ---------------------------------------------------------------
 
 (cl-defstruct (kargu-git--file-status (:constructor kargu-git--make-file-status)
-                                    (:copier kargu-git--copy-file-status))
+                                      (:copier kargu-git--copy-file-status))
   "One raw path and optional rename source from a porcelain status record."
   path old-path status)
 
@@ -247,6 +243,16 @@ PATH optionally filters by file path."
 ;;;; Changing commands ----------------------------------------------------
 
 (defun kargu-git--change (args root callback ok-text fail-what)
+  "Approve changing git ARGS in ROOT and deliver the result to CALLBACK.
+OK-TEXT formats successful output; FAIL-WHAT names failure."
+  (let ((args (copy-tree args)))
+    (kargu-permission-execute
+     :command (mapconcat #'shell-quote-argument (cons "git" args) " ")
+     :directory root :callback callback
+     :start (lambda (done)
+              (kargu-git--commit-change args root done ok-text fail-what)))))
+
+(defun kargu-git--commit-change (args root callback ok-text fail-what)
   "Run the changing git ARGS in ROOT and pass the outcome to CALLBACK.
 OK-TEXT is a function of the output giving the success text.  FAIL-WHAT
 names the operation in the error."
@@ -269,7 +275,6 @@ ALL optionally stages modified files."
   (let* ((root (kargu-permission-project-root))
          (args (append (list "commit" "-m" (string-trim message))
                        (and all (list "-a")))))
-    (kargu-git--approve (string-join (cons "commit" (cdr args)) " ") root)
     (kargu-git--change args root callback
                        (lambda (out) (format "Commit successful:\n%s" out))
                        "commit")))
@@ -302,7 +307,6 @@ ALL optionally stages modified files."
          (clean (kargu-git--require-paths
                  (kargu-git--relative-paths paths "stage path" root)
                  "stage")))
-    (kargu-git--approve (concat "add -- " (string-join clean " ")) root)
     (kargu-git--change (append '("add" "--") clean) root callback
                        (lambda (_) (format "Staged: %s" (string-join clean ", ")))
                        "add")))
@@ -313,13 +317,19 @@ ALL optionally stages modified files."
          (clean (kargu-git--require-paths
                  (kargu-git--relative-paths paths "unstage path" root)
                  "unstage")))
-    (kargu-git--approve (concat "restore --staged -- " (string-join clean " ")) root)
-    (kargu-git--run
-     (append '("restore" "--staged" "--") clean) root
-     (lambda (res)
-       (if (eql (car res) 0)
-           (kargu-git--refresh-and-deliver callback (format "Unstaged: %s" (string-join clean ", ")))
-         (kargu-git--unstage-fallback clean :root root :callback callback))))))
+    (kargu-permission-execute
+     :command (mapconcat #'shell-quote-argument (append '("git" "restore" "--staged" "--") clean) " ")
+     :directory root :callback callback
+     :start (lambda (done) (kargu-git--unstage-approved clean root done)))))
+
+(defun kargu-git--unstage-approved (paths root callback)
+  "Unstage approved PATHS in ROOT and deliver the result to CALLBACK."
+  (kargu-git--run
+   (append '("restore" "--staged" "--") paths) root
+   (lambda (res)
+     (if (eql (car res) 0)
+         (kargu-git--refresh-and-deliver callback (format "Unstaged: %s" (string-join paths ", ")))
+       (kargu-git--unstage-fallback paths :root root :callback callback)))))
 
 (cl-defun kargu-git--unstage-fallback (paths &key root callback)
   "Unstage PATHS in ROOT even before the first commit; report to CALLBACK."
@@ -330,7 +340,7 @@ ALL optionally stages modified files."
                       (0 '("reset" "HEAD" "--"))
                       (128 '("rm" "--cached" "-r" "--ignore-unmatch" "--")))))
        (if command
-           (kargu-git--change
+           (kargu-git--commit-change
             (append command paths) root callback
             (lambda (_) (format "Unstaged: %s" (string-join paths ", "))) "unstage")
          (funcall callback (format "ERROR: Cannot inspect Git HEAD: %s" (cdr result))))))))
@@ -353,7 +363,6 @@ ALL optionally stages modified files."
   (let* ((spec (cdr (assoc act kargu-git--branch-actions)))
          (branch (kargu-git--check-ref name "branch name"))
          (args (append (nth 0 spec) (list branch))))
-    (kargu-git--approve (string-join args " ") root)
     (kargu-git--change args root callback
                        (lambda (_) (format (nth 1 spec) branch))
                        (format "branch %s" act))))
@@ -381,7 +390,6 @@ Only push is accepted; applying a stash has a separate identity-bound path."
                            (stringp message)
                            (not (string-empty-p (string-trim message)))
                            (list "-m" (string-trim message))))))
-    (kargu-git--approve (string-join args " ") root)
     (kargu-git--change args root callback #'identity (format "stash %s" act))))
 
 (defconst kargu-git--object-id-regexp
@@ -390,22 +398,12 @@ Only push is accepted; applying a stash has a separate identity-bound path."
 
 (defun kargu-git--apply-stash-object (task root object)
   "Ask to apply immutable stash OBJECT under ROOT, owned by TASK."
-  (let ((decision-state :pending))
-    (kargu-permission-request-approval-async
-     (format "git stash apply %s" object) root nil
-     (kargu-async-wrap
-      task
-      (lambda (approved)
-        (when (eq decision-state :pending)
-          (setq decision-state :answered)
-          (if (not approved)
-              (kargu-async-finish task nil "Stash apply was not approved")
-            (kargu-git--change
-             (list "stash" "apply" object) root
-             (lambda (result) (kargu-async-finish task result))
-             (lambda (output) (format "%s\nStash %s retained; delete manually with Git/Magit if desired."
-                                      output object))
-             "stash apply"))))))))
+  (kargu-git--change
+   (list "stash" "apply" object) root
+   (lambda (result) (kargu-async-finish task result))
+   (lambda (output)
+     (format "%s\nStash %s retained; delete manually with Git/Magit if desired." output object))
+   "stash apply"))
 
 (defun kargu-git--stash-apply (stash root callback)
   "Resolve STASH in ROOT before approval; deliver its application to CALLBACK."
@@ -503,14 +501,18 @@ An omitted start defaults to the first line; an omitted end means EOF."
 (defun kargu-git--executor (body)
   "Tool executor for a git tool.
 BODY takes the decoded arguments and a DONE function, and starts the git
-work; DONE receives the result string.  The executor needs a callback:
-git never runs while Emacs waits.  A changing command asks for approval
-through `kargu-permission-approve', which may re-run BODY after the answer."
+work; DONE receives the result string.  Changing commands approve their
+prepared arguments without replaying BODY."
   (lambda (args &optional callback)
     (if callback
-        (kargu-permission-call-async
-         (lambda (done) (funcall body args done))
-         callback)
+        (let* ((state :pending)
+               (done (lambda (result)
+                       (when (eq state :pending)
+                         (setq state :done)
+                         (funcall callback result)))))
+          (condition-case-unless-debug error
+              (funcall body args done)
+            (error (funcall done (format "ERROR: %s" (error-message-string error))))))
       "ERROR: git tools run asynchronously; call them with a callback")))
 
 (defconst kargu-git--tool-specs
