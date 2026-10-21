@@ -56,6 +56,7 @@
 (require 'tests/test-session)
 (require 'tests/test-session-storage)
 (require 'tests/test-session-validate)
+(require 'tests/test-session-restore)
 (require 'tests/test-confirm)
 (require 'tests/test-languages)
 (require 'tests/test-dape-commands)

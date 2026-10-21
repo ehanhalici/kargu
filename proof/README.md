@@ -66,6 +66,15 @@ with two owners and two intents each. ERT additionally covers actual child
 resource cancellation, close/reset, directory changes, foreign callback buffers
 and reentrant admission hooks. This is not a proof of atomic session restore.
 
+`KarguRestore.tla` / `RestoreMC.cfg` refine prepared session/view publication.
+Run `proof/run_tlc.sh --restore`. The exhaustive 2026-10-21 scan explored 115
+generated states, 54 distinct states, depth 6 without error. This small model
+checks paired publication, failure preservation, revision and busy admission;
+it abstracts the local commit as one non-yielding action. ERT tests the actual
+rollback with render/footer and post-install faults, draft/root/selection
+changes, close/Stop, and foreign or duplicate completion. External mode-hook
+effects and disk crash recovery are not proved.
+
 `KarguApproval.tla` / `ApprovalMC.cfg` refine one captured permission operation.
 Run `proof/run_tlc.sh --approval` for an exhaustive scan. Eight independent
 authority checks can become stale before or after approval; approval is claimed

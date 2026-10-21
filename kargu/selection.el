@@ -87,6 +87,14 @@ Return its immutable receipt only while still current after notification."
                (eq after (kargu-selection-context session)))
       after)))
 
+(defun kargu-selection-publish (session before)
+  "Publish SESSION's already committed selection relative to BEFORE.
+This is the notification half of a coordinated session/view transaction."
+  (kargu-contract-assert #'kargu-session-p session)
+  (kargu-contract-assert #'kargu-selection-p before)
+  (when (eq session (kargu-session-context))
+    (kargu-selection--notify session before (kargu-selection-context session))))
+
 (defun kargu-selection-reset (&optional session)
   "Clear SESSION's choices during an admitted reset; default to current owner."
   (let ((session (or session (kargu-session-context))))

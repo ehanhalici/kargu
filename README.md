@@ -172,6 +172,14 @@ cannot switch a different chat or a replacement session. Stop, replacement and
 close cancel its resources. Lifecycle, duplicated token totals and application
 coordination remain shared; this is not yet complete runtime isolation.
 
+Session restore prepares a detached owner and complete transcript/footer before
+publishing either. Failed rendering or publication keeps the old draft, history,
+selection, usage, markers, undo and narrowing. A changed target or cancelled mode
+preparation refuses publication. Notifications follow the commit. This local
+transaction cannot undo arbitrary external effects of user mode hooks. Schema
+version 2 stores effort as inherited, explicitly off, or an API value; legacy
+records migrate in memory without rewriting storage. Unknown versions refuse.
+
 Model metadata now has one owner in `kargu/models/store.el`, indexed by the
 provider/model pair. Provider IDs normalize case; opaque model IDs retain it.
 Readers default to the active provider, or take an explicit provider argument.

@@ -4,6 +4,7 @@
 #   ./run_tlc.sh                 exhaustive breadth-first scan (the proof)
 #   ./run_tlc.sh --plan          exhaustive plan-ownership scan
 #   ./run_tlc.sh --mode          exhaustive session-mode preparation scan
+#   ./run_tlc.sh --restore       exhaustive prepared-restoration scan
 #   ./run_tlc.sh --selection     exhaustive owned-selection scan
 #   ./run_tlc.sh --approval      exhaustive captured-approval scan
 #   ./run_tlc.sh --process       exhaustive process-capture scan
@@ -44,6 +45,10 @@ SPECIFICATION="MC.tla (KarguLoop, KarguProtocol, KarguCircuit, KarguTools, Kargu
 if [[ $# -eq 0 ]]; then
     MODE="exhaustive scan"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" MC.tla)
+elif [[ "$1" == "--restore" ]]; then
+    MODE="exhaustive prepared-restoration scan"
+    SPECIFICATION="RestoreMC.tla (KarguRestore)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config RestoreMC.cfg RestoreMC.tla)
 elif [[ "$1" == "--mode" ]]; then
     MODE="exhaustive session-mode preparation scan"
     SPECIFICATION="ModeMC.tla (KarguMode)"

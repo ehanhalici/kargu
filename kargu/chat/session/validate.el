@@ -16,6 +16,7 @@
 (require 'kargu/json)
 (require 'kargu/contract/constants)
 (require 'kargu/chat/session/storage)
+(require 'kargu/chat/session/schema)
 
 (defconst kargu-session-validate--max-depth 32
   "Maximum accepted session value nesting, including native record cells.")
@@ -132,7 +133,7 @@ any chat buffer, history, counters or selection is changed."
                  (error (user-error "Kargu: session contains unsupported JSON values")))))
     (when (> (string-bytes (encode-coding-string text 'utf-8)) kargu-session-max-file-bytes)
       (user-error "Kargu: session data exceeds kargu-session-max-file-bytes"))
-    (let ((record (kargu-json-decode text)))
+    (let ((record (kargu-session-migrate (kargu-json-decode text))))
       (kargu-session-validate--fields record)
       record)))
 

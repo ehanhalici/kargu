@@ -29,16 +29,9 @@ P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ### CHAT-01 · P1 · K — Uygulama durumu ve asenkron kip hazırlığının sahipliği ayrılmamış
 
-- **Yer/kanıt:** `state/store.el` yaşam döngüsü/busy/belirteç toplamları ve uygulama koordinasyonu hâlâ ortak. Kip artık `kargu-session` içinde; her yeni oturum `ask` başlar. `application/mode.el` hazır/hata/iptal sonucunu tek sahipli görevle verir; yeni seçim, Stop/reset/close eski hazırlığı ve çocuklarını iptal eder. Reentrant before-mode hook sonrasında sahiplik/meşguliyet tekrar doğrulanır. Kimlik, sayaç, tek geçmiş kuyruğu ve değişmez provider/model/effort seçimi de buffer-owned; global seçim override'ları ve chat seçim kopyaları kaldırıldı. Restore hedefi projeye göre seçiliyor; hedef yönlendirmesinin düzelmesi atomik restore anlamına gelmez.
+- **Yer/kanıt:** `state/store.el` yaşam döngüsü/busy/belirteç toplamları ve uygulama koordinasyonu hâlâ ortak. Kip, kimlik, sayaç, tek geçmiş kuyruğu ve değişmez provider/model/effort seçimi buffer-owned; global seçim override'ları ve chat seçim kopyaları kaldırıldı. Kip hazırlığı sahipli ve iptal edilebilir; reentrant before-mode hook sonrasında kabul tekrar doğrulanıyor. Restore artık ayrı owner/görünüm hazırlar, hedef revision'ını kontrol eder ve tek yayınlama/rollback sınırı kullanır. Kalan iş uygulama/istek koordinatörü, run snapshot'ı ve hedefe özgü reset kapsamıdır.
 - **Beklenen/gerçek:** Uygulama koordinasyonu ile oturuma ait görünüm/veri açık kapsamla ayrılmalı; restore/reset ve geç kip hazırlığı ortak durumu etkileyebiliyor. Global busy/aktif koşu tek-koşu sözleşmesidir, tek başına hata değildir.
 - **Yeniden üretme/kapanış:** Aynı/farklı projede iki sohbet, farklı geçmiş/sayaç, reset/restore ve geç kip hazırlığı callback'leri; eski callback yeni oturum/seçime yazmamalı, tek aktif koşu korunmalı.
-
-### CHAT-02 · P1 · K — Geçerli oturum restore işlemi atomik değil
-
-- **Yer/kanıt:** `kargu/chat/session.el`, `kargu-session-load`: doğrulamadan sonra tampon silinip değişken/sayaç/seçim değişiyor. Render hatasına ortak rollback yok; kip hatası yakalanıp yutuluyor.
-- **Beklenen/gerçek:** Başarısız restore eski taslak, geçmiş, sayaç ve seçimi bırakmalı; kısmi yeni durum yayınlanabiliyor.
-- **Yeniden üretme/kapanış:** Geçerli kayıt + daraltılmış sohbet, render/footer hatası, debug hazırlığında iptal/kök değişimi. Hazırlanmış görünüm ve tek yayınlama/geri alma sınırı gerekli.
-- **Bağımlılık:** CHAT-01.
 
 ### CONFIG-01 · P2 · K — Anahtar keşfinde senkron kimlik deposu erişimi
 
@@ -106,7 +99,7 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 
 ### ARCH-01 · Oturum Sahipliği: Sohbet Verisi ile Global Koşu Koordinasyonunu Ayır
 
-- **Dosyalar / kalan sınır:** `core/session.el` kimlik/sayaçları, tek geçmiş kuyruğunu ve değişmez provider/model/effort seçimini lazy/buffer-owned `kargu-session` kaydında tutuyor; API delivery/run bu handle'ları yakalıyor. Geçici ping geçmişi ayrı, history snapshot'ları detached; foreign-buffer Stop/HTTP cevabı sahibine dönüyor. `state/store.el` ortak kip/yaşam döngüsü/toplamları ve global `kargu--loop-run` koordinasyonu hâlâ application/session sahipliğine ayrılmalı; run'ın proje/kip/yapılandırma snapshot sınırı tamamlanmalı.
+- **Dosyalar / kalan sınır:** `core/session.el` kip, kimlik/sayaçları, tek geçmiş kuyruğunu ve değişmez provider/model/effort seçimini lazy/buffer-owned `kargu-session` kaydında tutuyor; API delivery/run bu handle'ları yakalıyor. Geçici ping geçmişi ayrı, history snapshot'ları detached; foreign-buffer Stop/HTTP cevabı sahibine dönüyor. `state/store.el` ortak yaşam döngüsü/toplamları ve global `kargu--loop-run` koordinasyonu hâlâ application/session sahipliğine ayrılmalı; run'ın proje/kip/yapılandırma snapshot sınırı tamamlanmalı.
 - **Karar:** Kimlik, geçmiş, sayaç ve sohbet seçimini sahipli bir oturum kaydında topla; sohbet tamponu bu kayda referans versin. Headless kullanımda da açık oturum referansı sağlanabilsin. Global varsayılan ayarlar ile oturuma ait canlı seçim ayrışsın; aktif koşu, başlarken yakaladığı oturum/proje/kip/seçim snapshot'ına bağlansın.
 - **Sınır:** Buffer-local değişken tek başına gecikmiş callback'i doğru tampona yönlendirmez. Açık sahiplik ve oturum nesli kontrolü korunsun. Proje bazlı sohbet bulma/oluşturma hâlâ gereklidir; routing tamamen kaldırılmasın. Tek aktif koşu ve aktif koşunun kip kilidi korunsun; çoklu sohbet, eşzamanlı çoklu ajan çalıştırma yetkisi değildir. Mevcut global koordinatör geçiş hedefi değil, taşınacak mevcut durumdur; yeni mutable singleton kurulmasın (ARCH-12).
 - **Kapanış / bağımlılık:** Aynı/farklı projede iki sohbet, headless oturum, seçim aktivasyonu, reset/restore, kapatılan tampon ve eski callback testleri; CHAT-01/02. İkinci bir durum deposu kurmak yerine mevcut seçici/geçiş API'sini sahipli kayda taşı.
@@ -284,7 +277,7 @@ Amaç her dosyayı ayrı paket yapmak değil; UI, ajan motoru, taşıma ve Emacs
 - **Dosyalar / kalan sınır:** `contract/selection.el` değişmez seçim değerini doğruluyor; `selection.el` sahipli provider/model/effort üçlüsünü tek geçişle yayımlayıp mevcut `state/hooks.el` bildirimlerini kullanıyor. UI, geç katalog/liste/zamanlayıcı cevaplarını oturum ve seçim kimliğiyle eliyor; bildirim sırasında sahip değişirse devam zinciri duruyor. Kalan iş `chat/select.el` içindeki aday keşfi/üyelik politikası ve özel katalog cache yorumunu UI'dan ayırmak; seçim kabulünün somut loop/busy sorgularını dar uygulama portuna taşımak.
 - **Karar:** Aday keşfi ve seçim doğrulaması UI'dan bağımsız servis olsun; chat/UI adapter'ı yalnız etkileşim ve görünümü yönetsin. Sağlayıcı/model/effort'un tutarlı seçimi tek doğrulanmış geçişle yayımlansın; oturum kaydı aynı seçimi görsün.
 - **Sınır:** Aday listesi dışı değer reddi, effort yokluğu ile açık kapatma ayrımı, metadata capability'leri ve stale katalog nesli korunsun. Yapılandırılmış keşif örtük auth-source/pinentry beklemesine dönüşmesin (CONFIG-01). Arka plan keşfi başka sohbetin seçimini veya kullanıcının point'ini değiştirmesin.
-- **Kalan politika:** Seçim kimliği değişmese de gecikmiş keşif, kullanıcının değiştirdiği odak/taslağı izinsiz taşımamalı. Restore atomikliği CHAT-02'de; kayıtta effort override'ı saklanmıyor, restore yapılandırma varsayılanını devralıyor. Bu kalıcılık politikası açıkça kararlaştırılmalı.
+- **Kalan politika:** Seçim kimliği değişmese de gecikmiş keşif, kullanıcının değiştirdiği odak/taslağı izinsiz taşımamalı. Restore tek yayınlama sınırına taşındı; şema v2 effort için inherit/off/API-value ayrımını koruyor, eski kayıtlar yalnız bellekte inherit'e migrate ediliyor.
 - **Kapanış / bağımlılık:** ARCH-01, CHAT-01/02, CONFIG-01; headless seçim, iki sohbet, başarısız discovery/restore ve geç cevap testleri. İmleç taşıma yalnız açık kullanıcı etkileşimine ait UI adapter'ında kalsın.
 
 ### MOD-04 · Taşıma Portu: Döngüden Bağımsız İstek Ömrü
