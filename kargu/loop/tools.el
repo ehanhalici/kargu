@@ -12,6 +12,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(declare-function kargu-loop--wrap "kargu/loop" (run function))
 (require 'kargu/core)
 (require 'kargu/core/observers)
 (require 'kargu/history)
@@ -161,13 +162,13 @@ SIG keys the read-only cache; delivery is claimed before any continuation."
     (plist-put run :batch-cache nil))
   (let* ((state :pending)
          (on-result
-          (lambda (result)
-            (when (and (eq state :pending) (kargu-loop--live-p run))
-              (setq state :delivered)
-              (kargu-run-observers 'kargu-loop-tool-finish-hook run result)
-              (when (kargu-loop--live-p run)
-                (kargu--loop-complete-tool run :id id :name name :result result
-                                           :queue queue :sig sig))))))
+          (kargu-loop--wrap run (lambda (result)
+                                  (when (and (eq state :pending) (kargu-loop--live-p run))
+                                    (setq state :delivered)
+                                    (kargu-run-observers 'kargu-loop-tool-finish-hook run result)
+                                    (when (kargu-loop--live-p run)
+                                      (kargu--loop-complete-tool run :id id :name name :result result
+                                                                 :queue queue :sig sig)))))))
     (kargu-run-observers 'kargu-loop-tool-start-hook run name args)
     (condition-case err
         (when (kargu-loop--live-p run)

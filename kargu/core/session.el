@@ -51,7 +51,9 @@
   "Release SESSION's resources, refusing a reentrant replacement."
   (run-hook-with-args 'kargu-session-before-replace-hook session)
   (unless (eq session (kargu-session-context))
-    (user-error "Kargu: session replacement was superseded")))
+    (user-error "Kargu: session replacement was superseded"))
+  (when (plist-get (kargu-session-usage-value session) :active)
+    (user-error "Kargu: session retirement was superseded by active work")))
 
 (defun kargu-session--validate-usage (usage)
   "Return validated USAGE before adopting it into a session owner."

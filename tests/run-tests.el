@@ -21,6 +21,7 @@
 (require 'tests/test-helpers)
 (require 'tests/test-modules)
 (require 'tests/test-application-context)
+(require 'tests/test-native-ownership)
 (require 'tests/test-run-budget)
 (require 'tests/test-wave1-empirical-challenge)
 (require 'tests/test-tool-execution-contract)

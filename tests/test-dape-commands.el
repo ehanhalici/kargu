@@ -140,12 +140,13 @@
                  (lambda (_program _args callback &rest _opts) (setq probe callback) nil)))
         (kargu-set-mode 'debug)
         (when (eq scenario 'stale) (kargu-set-mode 'plan))
-        (when (eq scenario 'running) (setq kargu--loop-run (list :state 'tools)))
+        (when (eq scenario 'running)
+          (kargu-application-set-active-run (list :state 'tools)))
         (when (eq scenario 'config-changed)
           (setq dape-configs '((configured command "python" command-args ("-m" "other.adapter")))))
         (funcall probe (list :code (if (eq scenario 'failure) 1 0)))
         (should (eq (kargu-state-mode) (if (eq scenario 'stale) 'plan 'ask)))
-        (setq kargu--loop-run nil)))))
+        (kargu-application-set-active-run nil)))))
 
 (ert-deftest kargu-dape-verification-cache-retains-project-identities-test ()
   "Checking a second project never discards the first project's verification."

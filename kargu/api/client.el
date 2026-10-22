@@ -90,10 +90,10 @@ A busy client, a missing key, or a missing endpoint is refused first."
 (cl-defun kargu-api--send (&key prompt callback on-delta (record-turn t) history)
   "Validate connection settings and send PROMPT to CALLBACK and ON-DELTA.
 RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
-  (let ((key (and (not kargu--busy) (kargu--resolve-api-key)))
-        (base (and (not kargu--busy) (kargu--api-base))))
+  (let ((key (and (not (kargu-busy-p)) (kargu--resolve-api-key)))
+        (base (and (not (kargu-busy-p)) (kargu--api-base))))
     (cond
-     (kargu--busy
+     ((kargu-busy-p)
       (kargu--api-refuse callback "request already in flight; cancel first"))
      ((null key)
       (kargu--api-refuse callback "no API key: M-x kargu-edit-config, or set `kargu-api-key', or a host env/auth-source entry"))
@@ -105,21 +105,27 @@ RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
 
 (cl-defstruct (kargu-api--delivery (:constructor kargu-api--make-delivery))
   "One turn's response owner, including a terminal single-delivery state."
-  callback generation record-turn (state :pending)
+  callback generation record-turn request (app (kargu-application-context)) (state :pending)
   (origin (current-buffer)) (session (kargu-session-context))
   (history (kargu-history-context)))
 
 (defun kargu-api--delivery-owner-live-p (delivery)
   "Return non-nil if DELIVERY still owns its buffer and captured session."
   (let ((origin (kargu-api--delivery-origin delivery)))
-    (and (= (kargu-api--delivery-generation delivery) kargu--generation)
+    (and (= (kargu-api--delivery-generation delivery)
+            (kargu-application-current-generation (kargu-api--delivery-app delivery)))
+         (or (null (kargu-api--delivery-request delivery))
+             (kargu-logical-request-current-p (kargu-api--delivery-request delivery) t))
          (buffer-live-p origin)
          (eq (kargu-api--delivery-session delivery) (kargu-session-context origin)))))
 
 (defun kargu-api--delivery-live-p (delivery)
   "Return non-nil when DELIVERY still owns the current request."
   (and (eq (kargu-api--delivery-state delivery) :pending)
-       (= (kargu-api--delivery-generation delivery) kargu--generation)))
+       (= (kargu-api--delivery-generation delivery)
+          (kargu-application-current-generation (kargu-api--delivery-app delivery)))
+       (or (null (kargu-api--delivery-request delivery))
+           (kargu-logical-request-current-p (kargu-api--delivery-request delivery) t))))
 
 (defun kargu-api--deliver (delivery response)
   "Claim DELIVERY and store or forward RESPONSE exactly once."
@@ -130,7 +136,8 @@ RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
                       (condition-case err
                           (kargu-api--receive-owned delivery response)
                         (error (kargu--api-error-alist (error-message-string err))))))))
-      (when (= (kargu-api--delivery-generation delivery) kargu--generation)
+      (when (= (kargu-api--delivery-generation delivery)
+               (kargu-application-current-generation (kargu-api--delivery-app delivery)))
         (kargu--api-cancel-busy))
       (when (kargu-api--delivery-owner-live-p delivery)
         (with-current-buffer (kargu-api--delivery-origin delivery)
@@ -156,9 +163,9 @@ Deliver events to ON-DELTA and the response to CALLBACK.
 RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
   (let* ((history (kargu-history-context history))
          (added-prompt-p (and prompt (not (string-empty-p prompt))))
-        (delivery (kargu-api--make-delivery :callback callback :record-turn record-turn
-                                           :history history
-                                           :generation kargu--generation)))
+         (delivery (kargu-api--make-delivery :callback callback :record-turn record-turn
+                                             :history history
+                                             :generation (kargu-application-current-generation))))
     (when added-prompt-p
       (kargu-history-append `(("role" . "user") ("content" . ,prompt)) history))
     (condition-case-unless-debug err
@@ -180,11 +187,12 @@ Send events to ON-DELTA and the response through DELIVERY."
            (payload (kargu-api-prepare-payload
                      (kargu-api-build-payload (kargu-api--delivery-history delivery)) fmt))
            (delta (and (kargu-provider-format-stream-p fmt) on-delta)))
-      (kargu-http--ensure-logical-request
-       gen
-       (kargu-api--delivery-session delivery)
-       (kargu-api--delivery-origin delivery))
-      (setq kargu--busy t)
+      (setf (kargu-api--delivery-request delivery)
+            (kargu-http--ensure-logical-request
+             gen
+             (kargu-api--delivery-session delivery)
+             (kargu-api--delivery-origin delivery)))
+      (unless kargu-application-owner (setq kargu--busy t))
       (kargu-state-transition-status :requesting)
       (cond
        ((and (kargu-api--delivery-live-p delivery)
@@ -192,7 +200,7 @@ Send events to ON-DELTA and the response through DELIVERY."
         (kargu--api-post
          (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
          (lambda (response) (kargu-api--deliver delivery response)) delta))
-       ((= gen kargu--generation)
+       ((= gen (kargu-application-current-generation))
         (kargu-http-clear-busy)
         (kargu-api--deliver delivery
                             (kargu--api-error-alist "Request owner was invalidated")))))))

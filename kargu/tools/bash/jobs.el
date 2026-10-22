@@ -14,6 +14,7 @@
 (require 'subr-x)
 (require 'kargu/tools/process)
 (require 'kargu/permission)
+(require 'kargu/async)
 
 (defvar kargu-bash-timeout)
 (defcustom kargu-bash-completed-jobs 20
@@ -211,6 +212,11 @@ BACKGROUND jobs return a status message; CALLBACK receives foreground results."
                  :stderr 'merge
                  :buffer buffer :keep-buffer t)))
       (setf (kargu-bash--job-process job) proc)
+      (when (and kargu-execution--current kargu-async--current-task (not background))
+        (kargu-async-add-cleanup kargu-async--current-task
+                                 (lambda ()
+                                   (when (memq (kargu-bash--job-state job) '(:starting :running))
+                                     (kargu-job-cancel job)))))
       (when (process-live-p proc)
         (setf (kargu-bash--job-pgid job) (process-id proc))
         (set-process-buffer proc buffer)

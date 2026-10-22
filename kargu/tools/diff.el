@@ -23,6 +23,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'rx)
+(require 'kargu/application/execution)
 (require 'ediff)
 
 (require 'kargu/core)
@@ -927,11 +928,41 @@ Format:
                           (funcall callback (kargu-diff--describe outcome))))
         (kargu-diff--describe (kargu-diff-apply-proposal path content))))))
 
+(defun kargu-diff-prepare-execution (context)
+  "Attach only CONTEXT's session edit service, retaining its undo snapshots."
+  (with-current-buffer (kargu-execution-origin context)
+    (let ((session (kargu-execution-session context)))
+      (unless (and (eq (car kargu-diff--execution-service) session)
+                   (not (kargu-edit-service-closed-p (cdr kargu-diff--execution-service))))
+        (when (cdr kargu-diff--execution-service)
+          (kargu-edit-service-close (cdr kargu-diff--execution-service)))
+        (setq kargu-diff--execution-service
+              (cons session (kargu-edit-service-create
+                             :root (kargu-execution-root context)
+                             :review-mode kargu-diff-review-mode :auto-save kargu-diff-auto-save))))
+      (let ((service (cdr kargu-diff--execution-service))
+            (previous (kargu-execution-enter context)))
+        (setf (kargu-execution-enter context)
+              (lambda (function args)
+                (kargu-diff-with-service service
+                                         (if previous (funcall previous function args)
+                                           (apply function args)))))))))
+
 (defun kargu-diff-install ()
   "Attach editing and evidence providers at application composition."
   (advice-add 'kargu-query-changes :override #'kargu-diff-query-changes)
   (advice-add 'kargu-edit-submit :override #'kargu-diff-submit-edit)
+  (advice-add 'kargu-execution-prepare :after #'kargu-diff-prepare-execution)
+  (add-hook 'kargu-session-before-replace-hook #'kargu-diff-retire-session)
   (advice-add 'kargu-edit-submit-plan :override #'kargu-diff-submit-plan))
+
+(defun kargu-diff-retire-session (session)
+  "Close only the edit service captured by retiring SESSION in this buffer."
+  (when (eq (car kargu-diff--execution-service) session)
+    (when-let* ((service (cdr kargu-diff--execution-service)))
+      (kargu-diff-with-service service (kargu-diff-abort-all-sessions service))
+      (kargu-edit-service-close service)
+      (setq kargu-diff--execution-service nil))))
 
 (defun kargu/tools/diff-unload-function ()
   "Refuse unloading an active adapter or one retaining recoverable edits."
@@ -943,6 +974,8 @@ Format:
     (user-error "Kargu: stop, resolve edits/reviews and unregister diff tools before unloading"))
   (advice-remove 'kargu-query-changes #'kargu-diff-query-changes)
   (advice-remove 'kargu-edit-submit #'kargu-diff-submit-edit)
+  (advice-remove 'kargu-execution-prepare #'kargu-diff-prepare-execution)
+  (remove-hook 'kargu-session-before-replace-hook #'kargu-diff-retire-session)
   (advice-remove 'kargu-edit-submit-plan #'kargu-diff-submit-plan)
   nil)
 

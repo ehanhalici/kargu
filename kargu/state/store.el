@@ -44,7 +44,8 @@
 (defun kargu-state-init ()
   "Initialize or re-initialize the application status and current session state."
   (kargu-application-reset)
-  (kargu-selection-reset)
+  (unless (eq (kargu-application-current-status) :resetting)
+    (kargu-selection-reset))
   (let* ((session (kargu-session-context))
          (usage (copy-sequence (kargu-session-usage-value session))))
     (setf (kargu-session-mode-value session) 'ask)

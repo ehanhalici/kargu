@@ -287,6 +287,9 @@ WRITE-EFFECTS contains write effect properties."
 (defvar kargu-diff--active-service nil
   "Dynamically bound active `kargu-edit-service', or nil for default.")
 
+(defvar-local kargu-diff--execution-service nil
+  "Session and edit service attached by native composition, or nil.")
+
 (defvar kargu-diff--default-service
   (kargu-edit-service--create
    :service-id "edit-default"
@@ -322,7 +325,10 @@ WRITE-EFFECTS contains write effect properties."
 (defun kargu-diff--current-service ()
   "Return the explicitly active edit service or the compatibility default.
 An explicitly closed service never silently acquires another owner's state."
-  (let ((service (or kargu-diff--active-service (kargu-diff--get-default-service))))
+  (let ((service (or kargu-diff--active-service
+                     (and (eq (car kargu-diff--execution-service) (kargu-session-context))
+                          (cdr kargu-diff--execution-service))
+                     (kargu-diff--get-default-service))))
     (when (kargu-edit-service-closed-p service) (error "Edit service is closed"))
     service))
 

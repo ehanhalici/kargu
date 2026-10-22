@@ -6,6 +6,26 @@ The check is exhaustive over a bounded model. It is a proof for those bounds, no
 
 ## Interrupted-package integration checks (2026-10-22)
 
+### Native execution ownership (G01)
+
+`proof/run_tlc.sh --application` exhaustively checks two applications, two
+distinct claims per application (run labels may be reused), request ownership,
+drain-before-release and the closing/resetting admission barrier. Callbacks may
+arrive from either application's caller. The bounded model has one logical
+request per claim; actual multiple model turns, resource identity, startup
+reentry and late timer/process publication are ERT obligations.
+
+G01 scans completed without errors: application 5,017 generated / 1,444 distinct
+states, depth 21; mode 20,179 / 5,958, depth 17; transport 1,810 / 693, depth 12.
+The unchanged main loop abstraction treats terminal cleanup atomically; the new
+application model refines that cleanup into revoke/drain/release. The full main
+scan also completed: 729,094,900 generated / 85,318,093 distinct states, depth 42.
+These are exhaustive bounded scans, not proofs for arbitrary bounds or concrete
+OS resources. Offline native tests cover cross-application HTTP, same-generation
+request replacement, origin closure, reset/reentry, scoped job/edit/confirmation
+cleanup, timer inheritance and exactly-once delivery. Remaining adapter/registry
+and view migrations are tracked in `todo.md`, not claimed by this model.
+
 The following exhaustive bounded scans completed without errors. Run each
 with `proof/run_tlc.sh` and its flag:
 
@@ -30,8 +50,9 @@ native run composition. Read-only record slots do not prove deep immutability
 or secure erasure of all secret copies. The request keeps its captured budget
 and breaker scope across retries; ERT checks provider switching, stale claims,
 delayed approval, actual plaintext credential workers, and asynchronous Git
-patch ownership. The full main loop model was not rerun for this integration;
-native loop/history/backend/egress work remains in `todo.md`.
+patch ownership. The main model was not rerun at that integration baseline;
+the subsequent G01 scan is recorded above. History/backend/egress consumer
+work remains in `todo.md`.
 
 ## Earlier model checks
 

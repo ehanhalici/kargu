@@ -566,7 +566,7 @@ Initialize installed PACKAGES only when requested."
                   ((symbol-function 'kargu-circuit-reset) (lambda () (push :circuit trace)))
                   ((symbol-function 'kargu-state-reset) (lambda () (push :state trace))))
          (kargu-session-reset))
-       (cl-assert (equal (nreverse trace) '(:cancel :history :circuit :state :view)))
+       (cl-assert (equal (nreverse trace) '(:cancel :history :state :view)))
        (cl-assert (not (equal old-id (kargu-session-id)))))
      (cl-assert (not (featurep 'kargu/chat)))
      (cl-assert (not (featurep 'kargu/state))))))

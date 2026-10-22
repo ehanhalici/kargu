@@ -17,6 +17,7 @@
 (require 'kargu/history/compact)
 (require 'kargu/api)
 (require 'kargu/confirm)
+(declare-function kargu-loop--wrap "kargu/loop" (run function))
 
 (defvar kargu-max-iterations)
 (declare-function kargu-loop--live-p "kargu/loop" (run))
@@ -60,8 +61,8 @@ Count one iteration and return non-nil if started."
       (kargu--history-add "assistant" "Understood."))
     (kargu-api-send
      kargu-prompt-compaction-user
-     (lambda (response)
-       (kargu--loop-handle-compaction run response)))))
+     (kargu-loop--wrap run (lambda (response)
+                             (kargu--loop-handle-compaction run response))))))
 
 (defconst kargu-loop--on-compaction
   '((error . kargu-loop--compaction-fail)

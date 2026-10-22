@@ -22,7 +22,8 @@ Legacy single-continuation preparers remain supported at this boundary.")
 (cl-defstruct (kargu-mode-preparation (:constructor kargu-mode--create))
   "A mode intent bound to a captured origin, session and workspace."
   (origin nil :read-only t) (session nil :read-only t)
-  (directory nil :read-only t) (mode nil :read-only t) task)
+  (directory nil :read-only t) (mode nil :read-only t)
+  (app nil :read-only t) task)
 
 (defun kargu-mode-cancel (&optional session)
   "Cancel SESSION's pending preparation and deliver its cancellation once."
@@ -80,13 +81,17 @@ resetting or stopping the owner cancels its preparation and children."
     (user-error "Kargu: stop active work before preparing a mode"))
   (let* ((session (kargu-session-context))
          (request (kargu-mode--create :origin (current-buffer) :session session
-                                     :directory default-directory :mode mode))
+                                      :app (kargu-application-context)
+                                      :directory default-directory :mode mode))
          (close (lambda () (kargu-mode-cancel session))))
     (kargu-mode-cancel session)
     (unless (and (eq session (kargu-session-context))
                  (null (kargu-session-mode-request session)))
       (user-error "Kargu: mode preparation owner changed"))
-    (setf (kargu-mode-preparation-task request) (kargu-async-start callback)
+    (setf (kargu-mode-preparation-task request)
+          (kargu-async-start (kargu-application-wrap
+                              (kargu-mode-preparation-app request) callback)
+                             :owner nil :parent nil)
           (kargu-session-mode-request session) request)
     (add-hook 'kill-buffer-hook close nil t)
     (kargu-async-add-cleanup (kargu-mode-preparation-task request)

@@ -24,6 +24,7 @@
 (require 'kargu/api)
 (require 'kargu/api/circuit)
 (require 'kargu/confirm)
+(declare-function kargu-loop--wrap "kargu/loop" (run function))
 
 (defvar kargu-loop-empty-retries)
 (defvar kargu-loop-upstream-retries)
@@ -108,21 +109,21 @@ send path so the continue prompt runs instead of leaving the run idle."
   (plist-put run :request-model (or (plist-get run :model) (kargu--model)))
   (plist-put run :request-provider (or (plist-get run :provider) (kargu--provider-name)))
   (let ((on-delta (and (plist-get run :on-delta)
-                       (lambda (event)
-                         (kargu--loop-forward-delta run event)))))
+                       (kargu-loop--wrap run (lambda (event)
+                                               (kargu--loop-forward-delta run event))))))
     (plist-put run :api-on-delta on-delta)
     (kargu-run-observers 'kargu-loop-model-stream-hook run 'start)
     (when (kargu-loop--live-p run)
       (kargu-api-send
        prompt
-       (lambda (response)
-         (kargu-loop--receive-model run response))
+       (kargu-loop--wrap run (lambda (response)
+                               (kargu-loop--receive-model run response)))
        on-delta))))
 
 (defun kargu-loop--on-api-retry (generation on-delta)
   "Publish a retry boundary only for GENERATION's owning ON-DELTA consumer."
-  (let ((run kargu--loop-run))
-    (when (and run on-delta (= generation kargu--generation)
+  (let ((run (kargu-application-current-run)))
+    (when (and run on-delta (= generation (kargu-application-current-generation))
                (eq on-delta (plist-get run :api-on-delta)))
       (kargu-run-observers 'kargu-loop-model-stream-hook run 'retry))))
 
@@ -280,10 +281,10 @@ the circuit is open, prompt the user to retry or abort instead."
           (cancel-timer old)))
       (plist-put run :retry-timer
                  (run-at-time delay nil
-                              (lambda ()
-                                (plist-put run :retry-timer nil)
-                                (when (kargu-loop--live-p run)
-                                  (kargu-loop--retry-model run))))))))
+                              (kargu-loop--wrap run (lambda ()
+                                                      (plist-put run :retry-timer nil)
+                                                      (when (kargu-loop--live-p run)
+                                                        (kargu-loop--retry-model run)))))))))
 
 (defun kargu-loop--retry-model (run)
   "Discard RUN's failed partial stream before retrying the model request."

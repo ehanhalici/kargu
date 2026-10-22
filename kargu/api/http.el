@@ -65,9 +65,9 @@ touching plz internals.")
 
 (defun kargu-busy-p ()
   "Return non-nil while a chat request is in flight."
-  (or kargu--busy
+  (or (and (null (or kargu-application--bound kargu-application-owner)) kargu--busy)
       (kargu-logical-request-live-p
-       (kargu-application-current-request) kargu--generation)))
+       (kargu-application-current-request) (kargu-application-current-generation))))
 
 (defun kargu-http--same-origin-p (url1 url2)
   "Return non-nil if URL1 and URL2 share protocol, host, and port."
@@ -120,19 +120,38 @@ SESSION and ORIGIN identify the request owner when starting a turn."
                       :origin (or origin (current-buffer))
                       :circuit-scope (kargu--provider-name)
                       :budget (kargu-application-budget-get)
+                      :app (kargu-application-context)
+                      :claim (kargu-application-active-claim-token (kargu-application-context))
                       :state :in-flight)))
         (kargu-application-set-active-request created)
+        (when (or session origin) (kargu-http--attach-owner created))
         created))))
+
+(defun kargu-http--attach-owner (request)
+  "Attach REQUEST's cancellation to its captured origin, not a global request."
+  (let ((app (kargu-logical-request-app request))
+        (origin (kargu-logical-request-origin request)))
+    (when (buffer-live-p origin)
+      (let ((cleanup (kargu-application-wrap
+                      app (lambda ()
+                            (when (eq request (kargu-application-current-request app))
+                              (kargu-http-cancel))))))
+        (setf (kargu-logical-request-owner-cleanup request) cleanup)
+        (with-current-buffer origin
+          (add-hook 'kill-buffer-hook cleanup nil t)
+          (add-hook 'change-major-mode-hook cleanup nil t))))))
 
 (defun kargu-http-clear-busy ()
   "Release transport busy/probe ownership without changing application state."
-  (let ((scope (kargu-http-request-scope)))
+  (let ((scope (kargu-http-request-scope))
+        (owned (kargu-application-current-request)))
     (when-let* ((req (kargu-application-current-request)))
-      (when (= (kargu-logical-request-generation req) kargu--generation)
+      (when (= (kargu-logical-request-generation req) (kargu-application-current-generation))
         (kargu-logical-request-finish req)
         (kargu-application-set-active-request nil)))
     (setq kargu--busy nil)
-    (kargu-circuit-release-probe scope)))
+    (when (or owned (null kargu-application--bound))
+      (kargu-circuit-release-probe scope))))
 
 (defun kargu--api-positive-seconds (value)
   "VALUE when it is a positive number of seconds, otherwise nil."
@@ -179,6 +198,7 @@ SESSION and ORIGIN identify the request owner when starting a turn."
   "Start the stall and ceiling watch for streaming PROCESS."
   (when (processp process)
     (let ((now (float-time))
+          (owner (kargu-application-current-request))
           timer)
       (process-put process :kargu-stream-started now)
       (process-put process :kargu-last-byte now)
@@ -186,13 +206,14 @@ SESSION and ORIGIN identify the request owner when starting a turn."
       (kargu--api-cancel-stream-watch process)
       (setq timer (run-at-time 1 1 #'kargu--api-stream-watch-tick process))
       (process-put process :kargu-stream-timer timer)
-      (when-let* ((req (kargu-application-current-request)))
-        (when (eq (kargu-logical-request-process req) process)
-          (setf (kargu-logical-request-stream-timer req) timer))))))
+      (if (and owner (not (kargu-logical-request-current-p owner)))
+          (kargu--api-cancel-stream-watch process)
+        (when (and owner (eq (kargu-logical-request-process owner) process))
+          (setf (kargu-logical-request-stream-timer owner) timer))))))
 
 (defun kargu--api-fail-stream (gen reason callback)
   "Fail generation GEN with stream REASON and invoke CALLBACK."
-  (when (and callback (= gen kargu--generation))
+  (when (and callback (= gen (kargu-application-current-generation)))
     (let ((scope (kargu-http-request-scope)))
       (kargu-http-clear-busy)
       (let ((msg (kargu--api-stream-abort-message reason)))
@@ -205,20 +226,22 @@ SESSION and ORIGIN identify the request owner when starting a turn."
 Application status, loop ownership and UI belong to the caller."
   (let ((req (kargu-application-current-request))
         (scope (kargu-http-request-scope)))
-    (kargu-application-next-generation)
-    (kargu-circuit-release-probe scope)
+    (when (or req (null kargu-application--bound))
+      (kargu-application-next-generation)
+      (kargu-circuit-release-probe scope)
 
-    (when req
-      (kargu-logical-request-cancel req)
-      (when (eq (kargu-application-current-request) req)
-        (kargu-application-set-active-request nil)))
-    (kargu--api-cancel-stream-watch kargu--current-process)
-    (when (and (processp kargu--current-process)
-               (process-live-p kargu--current-process))
-      (ignore-errors (delete-process kargu--current-process)))
-    (setq kargu--current-process nil)
-    (setq kargu--busy nil)
-    (kargu-log 'warn "request cancelled")))
+      (when req
+        (kargu-logical-request-cancel req)
+        (when (eq (kargu-application-current-request) req)
+          (kargu-application-set-active-request nil)))
+      (unless (or kargu-application--bound kargu-application-owner)
+        (kargu--api-cancel-stream-watch kargu--current-process)
+        (when (and (processp kargu--current-process)
+                   (process-live-p kargu--current-process))
+          (ignore-errors (delete-process kargu--current-process))))
+      (setq kargu--current-process nil)
+      (setq kargu--busy nil)
+      (kargu-log 'warn "request cancelled"))))
 
 (defun kargu--api-post (url headers payload gen callback &optional on-delta attempt)
   "POST PAYLOAD to URL with HEADERS and dispatch the result to CALLBACK.
@@ -261,24 +284,33 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
 (cl-defstruct (kargu-http--request (:constructor kargu-http--make-request))
   "One HTTP attempt and its asynchronous resources."
   url headers payload generation callback on-delta attempt process events
+  (app (and (kargu-application-current-request) (kargu-application-context)))
+  (logical (kargu-application-current-request))
   (state :pending))
+
+(defun kargu-http--wrap (request function)
+  "Capture REQUEST's application for FUNCTION; retain bare legacy fixtures."
+  (if-let* ((app (kargu-http--request-app request)))
+      (kargu-application-wrap app function)
+    function))
 
 (defun kargu-http--live-request-p (request)
   "Return non-nil when REQUEST is pending in the current generation."
-  (let ((logical (kargu-application-current-request)))
+  (let ((logical (kargu-http--request-logical request))
+        (app (kargu-http--request-app request)))
     (and (eq (kargu-http--request-state request) :pending)
-         (= (kargu-http--request-generation request) kargu--generation)
+         (= (kargu-http--request-generation request) (kargu-application-current-generation app))
          (or (null logical)
-             (not (= (kargu-logical-request-generation logical)
-                     (kargu-http--request-generation request)))
-             (not (eq (kargu-logical-request-state logical) :cancelled))))))
+             (and (eq logical (kargu-application-current-request app))
+                  (kargu-logical-request-current-p logical))))))
 
 (defun kargu-http--claim-response (request)
   "Claim REQUEST once if its generation is still current."
   (when (kargu-http--live-request-p request)
     (setf (kargu-http--request-state request) :finished)
-    (setq kargu--current-process nil)
-    (when-let* ((logical (kargu-application-current-request)))
+    (when (eq kargu--current-process (kargu-http--request-process request))
+      (setq kargu--current-process nil))
+    (when-let* ((logical (kargu-http--request-logical request)))
       (when (eq (kargu-logical-request-process logical)
                 (kargu-http--request-process request))
         (setf (kargu-logical-request-process logical) nil
@@ -291,7 +323,7 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
     (kargu--api-cancel-stream-watch process)
     (when (eq kargu--current-process process)
       (setq kargu--current-process nil))
-    (when-let* ((logical (kargu-application-current-request)))
+    (when-let* ((logical (kargu-http--request-logical request)))
       (when (eq (kargu-logical-request-process logical) process)
         (setf (kargu-logical-request-process logical) nil
               (kargu-logical-request-stream-timer logical) nil)))
@@ -303,8 +335,9 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
   (setf (kargu-http--request-process request) process)
   (cond
    ((kargu-http--live-request-p request)
-    (let ((logical (kargu-http--ensure-logical-request
-                    (kargu-http--request-generation request))))
+    (let ((logical (or (kargu-http--request-logical request)
+                       (kargu-http--ensure-logical-request
+                        (kargu-http--request-generation request)))))
       (setf (kargu-logical-request-process logical) process
             (kargu-logical-request-state logical) :in-flight))
     (setq kargu--current-process process))
@@ -413,10 +446,12 @@ GEN identifies the request; ON-DELTA and ATTEMPT are retained for retries."
     (kargu-http--log-request request 'plain)
     (kargu-http--track-process
      request (plz 'post url
-               :headers headers :body (kargu-json-encode-record payload)
-               :as 'string :timeout kargu-api-timeout
-               :then (lambda (body) (kargu-http--finish-plain request body))
-               :else (lambda (err) (kargu-http--fail-request request err))))))
+                  :headers headers :body (kargu-json-encode-record payload)
+                  :as 'string :timeout kargu-api-timeout
+                  :then (kargu-http--wrap request
+                                          (lambda (body) (kargu-http--finish-plain request body)))
+                  :else (kargu-http--wrap request
+                                          (lambda (err) (kargu-http--fail-request request err)))))))
 
 (defun kargu--api-post-streaming (url headers payload gen callback on-delta
                                       &optional attempt)
@@ -442,10 +477,14 @@ ATTEMPT is the retry count."
                       (append (kargu-http--request-payload request)
                               '(("stream" . t))))
                :as 'string :timeout nil
-               :filter (lambda (proc string)
-                         (kargu--stream-filter proc string on-delta on-event))
-               :then (lambda (body) (kargu-http--finish-stream request body))
-               :else (lambda (err) (kargu-http--fail-request request err)))))
+               :filter (kargu-http--wrap request
+                                         (lambda (proc string)
+                                           (when (kargu-http--live-request-p request)
+                                             (kargu--stream-filter proc string on-delta on-event))))
+               :then (kargu-http--wrap request
+                                       (lambda (body) (kargu-http--finish-stream request body)))
+               :else (kargu-http--wrap request
+                                       (lambda (err) (kargu-http--fail-request request err))))))
     (when (kargu-http--track-process request process)
       (kargu-http--watch-stream request))))
 

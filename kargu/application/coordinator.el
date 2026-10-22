@@ -36,18 +36,30 @@
   (origin nil)
   (circuit-scope nil :read-only t)
   (budget nil :read-only t)
+  (app nil :read-only t)
+  (claim nil :read-only t)
   (state :pending)
   (process nil)
   (retry-timer nil)
-  (stream-timer nil))
+  (stream-timer nil)
+  owner-cleanup)
+
+(defun kargu-logical-request-detach-owner (request)
+  "Remove only REQUEST's captured origin lifecycle hooks."
+  (when-let* ((cleanup (kargu-logical-request-owner-cleanup request)))
+    (setf (kargu-logical-request-owner-cleanup request) nil)
+    (when (buffer-live-p (kargu-logical-request-origin request))
+      (with-current-buffer (kargu-logical-request-origin request)
+        (remove-hook 'kill-buffer-hook cleanup t)
+        (remove-hook 'change-major-mode-hook cleanup t)))))
 
 (cl-defun kargu-logical-request-create (&key id (generation 0) session origin
                                              (state :pending) process
-                                             retry-timer stream-timer circuit-scope budget)
+                                             retry-timer stream-timer circuit-scope budget app claim)
   "Create a validated `kargu-logical-request' record.
 ID, GENERATION, SESSION, ORIGIN, STATE, PROCESS, RETRY-TIMER and
 STREAM-TIMER initialize the owned fields.
-CIRCUIT-SCOPE and BUDGET retain the initial request's accounting owners."
+CIRCUIT-SCOPE and BUDGET retain accounting owners; APP and CLAIM own delivery."
   (kargu-contract-assert #'integerp generation
                          "GENERATION must be an integer: %S" generation)
   (kargu-contract-assert (lambda (s)
@@ -58,7 +70,7 @@ CIRCUIT-SCOPE and BUDGET retain the initial request's accounting owners."
    :generation generation
    :session session
    :origin origin
-   :circuit-scope circuit-scope :budget budget
+   :circuit-scope circuit-scope :budget budget :app app :claim claim
    :state state
    :process process
    :retry-timer retry-timer
@@ -81,11 +93,14 @@ CIRCUIT-SCOPE and BUDGET retain the initial request's accounting owners."
 
 (defun kargu-logical-request-set-retry-timer (request timer)
   "Attach retry TIMER to REQUEST after cancelling any previous retry timer."
-  (when (kargu-logical-request-p request)
-    (kargu-logical-request-cancel-retry-timer request)
-    (setf (kargu-logical-request-retry-timer request) timer
-          (kargu-logical-request-state request) :retrying)
-    timer))
+  (if (kargu-logical-request-live-p request)
+      (progn
+        (kargu-logical-request-cancel-retry-timer request)
+        (setf (kargu-logical-request-retry-timer request) timer
+              (kargu-logical-request-state request) :retrying)
+        timer)
+    (when (timerp timer) (cancel-timer timer))
+    nil))
 
 (defun kargu-logical-request-cancel-stream-timer (request)
   "Cancel and clear REQUEST's stream watchdog timer, if any."
@@ -105,6 +120,7 @@ CIRCUIT-SCOPE and BUDGET retain the initial request's accounting owners."
   "Idempotently cancel REQUEST and release its timers and transport process."
   (when (kargu-logical-request-p request)
     (setf (kargu-logical-request-state request) :cancelled)
+    (kargu-logical-request-detach-owner request)
     (kargu-logical-request-cancel-retry-timer request)
     (kargu-logical-request-cancel-stream-timer request)
     (let ((process (kargu-logical-request-process request)))
@@ -115,6 +131,7 @@ CIRCUIT-SCOPE and BUDGET retain the initial request's accounting owners."
 (defun kargu-logical-request-finish (request)
   "Mark REQUEST finished and release any remaining timers."
   (when (kargu-logical-request-p request)
+    (kargu-logical-request-detach-owner request)
     (unless (eq (kargu-logical-request-state request) :cancelled)
       (setf (kargu-logical-request-state request) :finished))
     (kargu-logical-request-cancel-retry-timer request)
@@ -137,6 +154,12 @@ CIRCUIT-SCOPE and BUDGET retain the initial request's accounting owners."
   (session-id nil)
   (run-id nil)
   (budget nil))
+
+(defvar-local kargu-application-owner nil
+  "Application explicitly attached to this boundary buffer, or nil for default.")
+
+(defvar kargu-application--bound nil
+  "Dynamically captured application during a continuation, never retained.")
 
 (defconst kargu-application--transition-table
   '((:idle
@@ -177,6 +200,8 @@ CIRCUIT-SCOPE and BUDGET retain the initial request's accounting owners."
      :limit :idle :starting :running)
     (:pause
      :pause :idle :running :requesting :starting :waiting-model :stopped :error)
+    (:closing :closing :resetting :idle :done :stopped :error :limit)
+    (:resetting :resetting :closing :idle)
     (:busy
      :busy :idle :running :requesting :waiting-model :stopped :error :done))
   "Alist mapping each lifecycle status to its permitted next statuses.")
@@ -184,7 +209,8 @@ CIRCUIT-SCOPE and BUDGET retain the initial request's accounting owners."
 (defun kargu-application-valid-transition-p (from-status to-status)
   "Return non-nil when transitioning from FROM-STATUS to TO-STATUS is permitted."
   (let ((allowed (alist-get from-status kargu-application--transition-table)))
-    (memq to-status allowed)))
+    (or (and allowed (memq to-status '(:closing :resetting)))
+        (memq to-status allowed))))
 
 (defun kargu-application-transition (app new-status &optional _reason)
   "Transition APP's status to NEW-STATUS using the transition table.
@@ -229,10 +255,11 @@ SESSION-ID, RUN-ID and BUDGET initialize the fields."
 
 (defun kargu-application-context (&optional app)
   "Return explicit APP, or the lazily initialized application coordinator."
-  (if app
+  (if (or app kargu-application--bound kargu-application-owner)
       (progn
-        (kargu-contract-assert #'kargu-application-p app)
-        app)
+        (kargu-contract-assert #'kargu-application-p
+                               (or app kargu-application--bound kargu-application-owner))
+        (or app kargu-application--bound kargu-application-owner))
     (unless (kargu-application-p kargu-application--context)
       (setq kargu-application--context (kargu-application-create)))
     kargu-application--context))
@@ -248,7 +275,7 @@ SESSION-ID, RUN-ID and BUDGET initialize the fields."
 
 (defun kargu-application-current-run (&optional app)
   "Return the active run record for APP or the active coordinator."
-  (if app
+  (if (or app kargu-application--bound kargu-application-owner)
       (kargu-application-active-run (kargu-application-context app))
     (or (kargu-application-active-run (kargu-application-context))
         kargu--loop-run)))
@@ -262,7 +289,7 @@ Signals an error if APP already has an active run and RUN is non-nil."
       (error "Kargu: application already has an active run (ARCH-01): %S"
              (kargu-application-active-run target)))
     (setf (kargu-application-active-run target) run)
-    (unless app
+    (unless (or app kargu-application--bound kargu-application-owner)
       (setq kargu--loop-run run))
     run))
 
@@ -280,14 +307,15 @@ Signals an error if APP already has an active run and RUN is non-nil."
 
 (defun kargu-application-claim (app &rest plist)
   "Claim execution on APP for arguments in PLIST.
-PLIST accepts `:run-id', `:session-id', `:mode' and optional `:no-error'.
+PLIST accepts `:run-id', `:run', `:session-id', `:mode' and `:no-error'.
 Signals an error if APP already has an active run or active claim (ARCH-01).
 Returns a `kargu-application-claim' token on success."
   (let* ((target (kargu-application-context app))
          (session-id (plist-get plist :session-id))
          (mode (plist-get plist :mode))
          (no-error (plist-get plist :no-error)))
-    (if (or (kargu-application-active-run target)
+    (if (or (memq (kargu-application-status target) '(:closing :resetting))
+            (kargu-application-active-run target)
             (kargu-application-active-claim-token target)
             (kargu-application-work-active-p target))
         (if no-error
@@ -306,7 +334,7 @@ Returns a `kargu-application-claim' token on success."
                      :session-id session-id
                      :mode mode
                      :created-at (float-time))))
-        (setf (kargu-application-active-run target) run-id)
+        (setf (kargu-application-active-run target) (or (plist-get plist :run) run-id))
         (setf (kargu-application-active-claim-token target) claim)
         (setf (kargu-application-status target) :running)
         claim))))
@@ -316,18 +344,47 @@ Returns a `kargu-application-claim' token on success."
   (let* ((target (kargu-application-context app))
          (current (kargu-application-active-claim-token target)))
     (when (and current (eq current claim))
-      ;; Revoke authority before cleanup can run reentrant callbacks.
-      (setf (kargu-application-active-run target) nil
-            (kargu-application-active-claim-token target) nil
-            (kargu-application-status target) :idle)
-      (when-let* ((request (kargu-application-active-request target)))
-        (setf (kargu-application-active-request target) nil)
-        (kargu-logical-request-cancel request))
+      ;; Keep admission closed until resource cleanup has finished.
+      (let ((status (kargu-application-status target)))
+        (setf (kargu-application-status target) :closing)
+        (when-let* ((request (kargu-application-active-request target)))
+          (setf (kargu-application-active-request target) nil)
+          (kargu-logical-request-cancel request))
+        (setf (kargu-application-active-run target) nil
+              (kargu-application-active-claim-token target) nil
+              (kargu-application-status target) (if (eq status :resetting) :resetting :idle)))
       t)))
 
 (defun kargu-application-current-request (&optional app)
   "Return the active `kargu-logical-request' on APP, or nil."
   (kargu-application-active-request (kargu-application-context app)))
+
+(defun kargu-logical-request-current-p (request &optional finished)
+  "Check REQUEST's exact authority; FINISHED permits its detached delivery."
+  (when (kargu-logical-request-p request)
+    (let* ((app (kargu-logical-request-app request))
+           (current (kargu-application-current-request app)))
+      (and (= (kargu-logical-request-generation request)
+              (kargu-application-current-generation app))
+           (eq (kargu-logical-request-claim request)
+               (kargu-application-active-claim-token (kargu-application-context app)))
+           (or (and (eq request current) (kargu-logical-request-live-p request))
+               (and finished (null current)
+                    (eq (kargu-logical-request-state request) :finished)))))))
+
+(defun kargu-application-wrap (app function)
+  "Capture APP for asynchronous FUNCTION without consulting the current owner."
+  (let ((legacy (null (or kargu-application--bound kargu-application-owner)))
+        (origin (current-buffer)))
+    (lambda (&rest args)
+      (with-current-buffer (if (buffer-live-p origin) origin (current-buffer))
+        (if legacy
+            (let ((kargu-application--bound app) (kargu-application--context app))
+              (save-match-data (apply function args)))
+          (let ((kargu-application--bound app)
+                (kargu-application--context app)
+                (kargu--busy nil) (kargu--current-process nil))
+            (save-match-data (apply function args))))))))
 
 (defun kargu-application-set-active-request (request &optional app)
   "Set REQUEST as the active `kargu-logical-request' on APP."
@@ -344,28 +401,33 @@ Returns a `kargu-application-claim' token on success."
 
 (defun kargu-application-current-generation (&optional app)
   "Return the current request generation integer for APP."
-  (if app
+  (if (or app kargu-application--bound kargu-application-owner)
       (kargu-application-generation (kargu-application-context app))
-    kargu--generation))
+    (max kargu--generation (kargu-application-generation (kargu-application-context)))))
 
 (defun kargu-application-next-generation (&optional app)
   "Advance and return the request generation integer for APP."
   (let ((target (kargu-application-context app)))
-    (if app
-        (cl-incf (kargu-application-generation target))
-      (let ((next (cl-incf kargu--generation)))
+    (if (or app kargu-application--bound kargu-application-owner)
+        (let ((next (cl-incf (kargu-application-generation target))))
+          (when kargu-application--bound (setq kargu--generation next))
+          next)
+      (let ((next (1+ (max kargu--generation (kargu-application-generation target)))))
+        (setq kargu--generation next)
         (setf (kargu-application-generation target) next)
         next))))
 
 (defun kargu-application-work-active-p (&optional app)
   "Return non-nil when APP has an active agent run or transport request."
-  (if app
+  (if (or app kargu-application--bound kargu-application-owner)
       (let ((target (kargu-application-context app)))
-        (or (not (null (kargu-application-active-run target)))
+        (or (memq (kargu-application-status target) '(:closing :resetting))
+            (not (null (kargu-application-active-run target)))
             (kargu-logical-request-live-p
              (kargu-application-active-request target)
              (kargu-application-generation target))))
     (or (not (null (kargu-application-current-run)))
+        (memq (kargu-application-current-status) '(:closing :resetting))
         (and (boundp 'kargu--busy) kargu--busy)
         (kargu-logical-request-live-p
          (kargu-application-current-request) kargu--generation)
@@ -381,7 +443,8 @@ Returns a `kargu-application-claim' token on success."
 (defun kargu-application-reset (&optional app)
   "Reset APP's lifecycle status to `:idle' and clear stale references."
   (let ((target (kargu-application-context app)))
-    (setf (kargu-application-status target) :idle)
+    (unless (memq (kargu-application-status target) '(:resetting :closing))
+      (setf (kargu-application-status target) :idle))
     (setf (kargu-application-active-claim-token target) nil)
     (when (null (and (not app) kargu--loop-run))
       (setf (kargu-application-active-run target) nil))

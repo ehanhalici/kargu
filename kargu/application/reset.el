@@ -25,6 +25,7 @@
 (declare-function kargu-history-reset "kargu/history/protocol" ())
 (declare-function kargu-circuit-reset "kargu/api/circuit" ())
 (declare-function kargu-state-reset "kargu/state/transitions" ())
+(declare-function kargu-prompt-clear-cache "kargu/prompt" ())
 
 (defun kargu-application--foreign-run-p (owner origin)
   "Return non-nil when the active loop run does not belong to OWNER or ORIGIN."
@@ -80,29 +81,46 @@
 (defun kargu-session-reset ()
   "Cancel active work, reset the session and notify optional views in order."
   (interactive)
-  (let ((origin (current-buffer)) (owner (kargu-session-context)))
-    (kargu-mode-cancel owner)
-    (save-current-buffer
-      (kargu-application--cancel-session-work owner origin)
-      (when (kargu-application--owned-work-active-p owner origin)
-        (user-error "Kargu: reset superseded by active work; session data was retained"))
-      (unless (and (buffer-live-p origin) (eq owner (kargu-session-context origin)))
-        (user-error "Kargu: reset owner changed; replacement data was retained"))
-      (let ((foreign-work (or (kargu-application--foreign-run-p owner origin)
-                              (kargu-application--foreign-request-p owner origin))))
-        (with-current-buffer origin
-          (kargu-session-clear)
-          (when (fboundp 'kargu-history-reset) (kargu-history-reset))
-          (unless foreign-work
-            (when-let* ((app (kargu-application-context))
-                        (claim (kargu-application-active-claim-token app)))
-              (when (or (null (kargu-application-claim-session-id claim))
-                        (equal (kargu-application-claim-session-id claim) (kargu-session-id owner)))
-                (kargu-application-release app claim)))
-            (when (fboundp 'kargu-circuit-reset) (kargu-circuit-reset))
-            (when (fboundp 'kargu-state-reset) (kargu-state-reset)))
-          (kargu-run-observers 'kargu-session-reset-hook)))
-      (message "Kargu session reset"))))
+  (let* ((origin (current-buffer)) (owner (kargu-session-context))
+         (app (kargu-application-context))
+         (previous (kargu-application-status app))
+         (foreign-work (or (kargu-application--foreign-run-p owner origin)
+                           (kargu-application--foreign-request-p owner origin))))
+    (when (memq previous '(:resetting :closing))
+      (user-error "Kargu: application is already closing or resetting"))
+    (unless foreign-work (kargu-application-transition app :resetting))
+    (unwind-protect
+        (let ((kargu-application--bound app))
+          (kargu-mode-cancel owner)
+          (save-current-buffer
+            (kargu-application--cancel-session-work owner origin)
+            (kargu-application--reset-data owner origin foreign-work)))
+      (unless foreign-work
+        (when (eq (kargu-application-status app) :resetting)
+          (setf (kargu-application-status app)
+                (if (or (kargu-application-active-run app)
+                        (kargu-logical-request-live-p (kargu-application-active-request app)))
+                    previous :idle)))))))
+
+(defun kargu-application--reset-data (owner origin foreign-work)
+  "Reset captured OWNER in ORIGIN, preserving FOREIGN-WORK and replacements."
+  (when (kargu-application--owned-work-active-p owner origin)
+    (user-error "Kargu: reset superseded by active work; session data was retained"))
+  (unless (and (buffer-live-p origin) (eq owner (kargu-session-context origin)))
+    (user-error "Kargu: reset owner changed; replacement data was retained"))
+  (with-current-buffer origin
+    (kargu-session-clear)
+    (when (fboundp 'kargu-history-reset) (kargu-history-reset))
+    (when (fboundp 'kargu-prompt-clear-cache) (kargu-prompt-clear-cache))
+    (unless foreign-work
+      (when-let* ((app (kargu-application-context))
+                  (claim (kargu-application-active-claim-token app)))
+        (when (or (null (kargu-application-claim-session-id claim))
+                  (equal (kargu-application-claim-session-id claim) (kargu-session-id owner)))
+          (kargu-application-release app claim)))
+      (when (fboundp 'kargu-state-reset) (kargu-state-reset)))
+    (kargu-run-observers 'kargu-session-reset-hook))
+  (message "Kargu session reset"))
 
 (provide 'kargu/application/reset)
 ;;; reset.el ends here

@@ -102,7 +102,7 @@ The symbol `quit' cancels the read.")
   "Give ITEM to CALLBACK when GEN is still current.
 A cancelled generation drops the reply.  Deltas go out first.
 The client, not this transport stub, stores the assistant turn."
-  (when (= gen kargu--generation)
+  (when (= gen (kargu-application-current-generation))
     (setq kargu-fake--delivered t)
     (dolist (piece (plist-get item :deltas))
       (when (functionp on-delta)
@@ -118,6 +118,7 @@ The client, not this transport stub, stores the assistant turn."
     (if (eq (plist-get item :kind) 'hold)
         (setq kargu-fake--held
               (list :gen gen :callback callback :on-delta on-delta
+                    :request (kargu-application-current-request)
                     :item '(:kind text :text "late reply")))
       (kargu-fake--deliver gen callback on-delta item))))
 
@@ -126,10 +127,12 @@ The client, not this transport stub, stores the assistant turn."
   (when kargu-fake--held
     (let ((held kargu-fake--held))
       (setq kargu-fake--held nil)
-      (kargu-fake--deliver (plist-get held :gen)
-                           (plist-get held :callback)
-                           (plist-get held :on-delta)
-                           (plist-get held :item)))))
+      (when (or (null (plist-get held :request))
+                (kargu-logical-request-current-p (plist-get held :request)))
+        (kargu-fake--deliver (plist-get held :gen)
+                             (plist-get held :callback)
+                             (plist-get held :on-delta)
+                             (plist-get held :item))))))
 
 (defun kargu-fake--read (_prompt candidates &optional default _annotations)
   "Return the next scripted candidate, or signal `quit'."

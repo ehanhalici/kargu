@@ -17,7 +17,7 @@
 (require 'kargu/contract)
 (require 'kargu/prompt)
 
-(declare-function kargu-api-cancel "kargu/api/http" ())
+(declare-function kargu-session-reset "kargu/application/reset" ())
 
 
 (defun kargu--history-add (role content &rest fields)
@@ -45,17 +45,16 @@ NAME is the tool name, OUTPUT the result string."
 
 (defalias 'kargu-history-add-tool-result #'kargu--history-add-tool-result)
 
-(defun kargu-history-reset ()
-  "Clear the conversation history and cancel in-flight requests."
+(defun kargu-history-reset (&optional history)
+  "Clear owned HISTORY without cancelling unrelated transport resources.
+Interactive reset delegates cancellation and cache effects to the application."
   (interactive)
-  (when (fboundp 'kargu-api-cancel)
-    (kargu-api-cancel))
-  (setf (kargu-history-messages) nil)
-  (setf (kargu-history-overlay) nil)
-  (kargu-prompt-clear-cache)
-  (kargu-log 'info "history cleared")
-  (when (called-interactively-p 'any)
-    (message "kargu history cleared")))
+  (if (called-interactively-p 'any)
+      (kargu-session-reset)
+    (setf (kargu-history-messages history) nil
+          (kargu-history-overlay history) nil
+          (kargu-history-system-key history) nil)
+    (kargu-log 'info "history cleared")))
 
 (defun kargu--history-last-role (&optional history)
   "Return HISTORY's last role, or nil when empty; default to current owner."

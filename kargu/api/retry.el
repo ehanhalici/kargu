@@ -47,7 +47,7 @@ ON-DELTA identifies the original event consumer; no request secrets are exposed.
   "Retry GENERATION's URL with HEADERS and PAYLOAD if it still owns the client.
 CALLBACK and ON-DELTA retain their original owner; ATTEMPT counts retries."
   (let ((req (kargu-application-current-request)))
-    (when (and (= generation kargu--generation)
+    (when (and (= generation (kargu-application-current-generation))
                (or (null req)
                    (and (= (kargu-logical-request-generation req) generation)
                         (not (eq (kargu-logical-request-state req) :cancelled)))))
@@ -55,7 +55,8 @@ CALLBACK and ON-DELTA retain their original owner; ATTEMPT counts retries."
         (setf (kargu-logical-request-retry-timer req) nil))
       (kargu-run-observers 'kargu-api-retry-hook generation on-delta)
       (let ((req-after (kargu-application-current-request)))
-        (when (and (= generation kargu--generation)
+        (when (and (eq req req-after)
+                   (= generation (kargu-application-current-generation))
                    (or (null req-after)
                        (and (= (kargu-logical-request-generation req-after) generation)
                             (not (eq (kargu-logical-request-state req-after) :cancelled)))))
@@ -249,10 +250,12 @@ Return non-nil if retry or terminal budget refusal handled the response."
           (kargu-logical-request-set-retry-timer
            req
            (run-at-time delay nil
-                        (lambda ()
-                          (kargu-api--retry-post
-                           gen :url url :headers headers :payload payload :callback callback
-                           :on-delta on-delta :attempt (1+ attempt)))))
+                        (kargu-application-wrap (kargu-application-context)
+                                                (lambda ()
+                                                  (when (kargu-logical-request-current-p req)
+                                                    (kargu-api--retry-post
+                                                     gen :url url :headers headers :payload payload :callback callback
+                                                     :on-delta on-delta :attempt (1+ attempt)))))))
           t)))))
 
 (defun kargu--api-on-transport-error (url headers payload gen callback
@@ -260,7 +263,7 @@ Return non-nil if retry or terminal budget refusal handled the response."
   "Retry URL or report transport error ERR to CALLBACK.
 HEADERS and PAYLOAD retain the request; GEN identifies it, ON-DELTA
 receives events, and ATTEMPT counts completed retries."
-  (when (= gen kargu--generation)
+  (when (= gen (kargu-application-current-generation))
     (when kargu-log-wire
       (let* ((resp (ignore-errors (plz-error-response err)))
              (body (and resp (plz-response-body resp))))
@@ -284,10 +287,12 @@ receives events, and ATTEMPT counts completed retries."
             (kargu-logical-request-set-retry-timer
              req
              (run-at-time delay nil
-                          (lambda ()
-                            (kargu-api--retry-post
-                             gen :url url :headers headers :payload payload :callback callback
-                             :on-delta on-delta :attempt (1+ attempt))))))
+                          (kargu-application-wrap (kargu-application-context)
+                                                  (lambda ()
+                                                    (when (kargu-logical-request-current-p req)
+                                                      (kargu-api--retry-post
+                                                       gen :url url :headers headers :payload payload :callback callback
+                                                       :on-delta on-delta :attempt (1+ attempt))))))))
         (kargu-http-clear-busy)
         (let* ((code (kargu-api-classify-error-code err status))
                (msg (kargu--plz-error-message err)))

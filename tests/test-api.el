@@ -224,6 +224,7 @@
                                        (lambda (_) (setq delivered t)) #'ignore)
           (kargu--api-post-plain "https://example.invalid" nil nil 10
                                  (lambda (_) (setq delivered t))))
+        (kargu-http-cancel)
         (setq kargu--generation 11 kargu--current-process 'new-process)
         (funcall then "{}")
         (should (eq kargu--current-process 'new-process))
@@ -361,6 +362,7 @@
           (kargu-circuit--failure-count 4)
           (kargu--current-process nil)
           (kargu--generation 50)
+          (kargu-application--context (kargu-application-create :generation 50))
           (kargu--busy t) responses)
       (should (kargu-circuit-allow-request-p))
       (should-not (kargu-circuit-allow-request-p))
