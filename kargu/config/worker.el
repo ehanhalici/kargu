@@ -109,8 +109,9 @@
             (goto-char (point-max))
             (insert chunk)))))))
 
-(defun kargu-config-worker--spawn (provider host sources task)
-  "Start PROVIDER's worker for HOST and SOURCES, owned by TASK."
+(cl-defun kargu-config-worker-start (task script args &key decode (name "credential"))
+  "Start TASK's bounded child running fixed SCRIPT with ARGS.
+DECODE reads a finished child response; NAME identifies the operation."
   (let ((buffer (generate-new-buffer " *kargu-credential-worker*")) process)
     (with-current-buffer buffer (buffer-disable-undo))
     (kargu-async-add-cleanup
@@ -122,22 +123,28 @@
           (progn
             (setq process
                   (make-process
-                   :name (concat "kargu-credential-" provider) :buffer buffer
-                   :command (list (expand-file-name invocation-name invocation-directory)
-                                  "-Q" "--batch" "--eval" (kargu-config-worker--script)
-                                  "--" host (json-serialize (vconcat sources)))
+                   :name (concat "kargu-" name "-worker") :buffer buffer
+                   :command (append (list (expand-file-name invocation-name invocation-directory)
+                                          "-Q" "--batch" "--eval" script "--") args)
                    :connection-type 'pipe :coding 'utf-8-unix :noquery t
                    :filter (kargu-config-worker--filter task buffer)
                    :sentinel (lambda (child _event)
                                (unless (process-live-p child)
                                  (kargu-async-finish
-                                  task (kargu-config-worker--result child buffer))))))
+                                  task (funcall (or decode #'kargu-config-worker--result)
+                                                child buffer))))))
             ;; A synchronous test adapter or early callback may have closed TASK.
             (unless (kargu-async-pending-p task)
               (when (process-live-p process) (delete-process process))))
         (error
          (kargu-async-finish
-          task (kargu-err "Could not start credential worker" :auth-unavailable)))))))
+          task (kargu-err "Could not start configuration worker" :auth-unavailable)))))))
+
+(defun kargu-config-worker--spawn (provider host sources task)
+  "Start PROVIDER's worker for HOST and SOURCES, owned by TASK."
+  (kargu-config-worker-start
+   task (kargu-config-worker--script)
+   (list host (json-serialize (vconcat sources))) :name provider))
 
 (cl-defun kargu-config-worker-resolve (provider host task &key timeout)
   "Resolve PROVIDER's credential for HOST into TASK within TIMEOUT seconds.

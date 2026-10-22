@@ -153,7 +153,14 @@ CIRCUIT-SCOPE and BUDGET retain accounting owners; APP and CLAIM own delivery."
   (generation 0)
   (session-id nil)
   (run-id nil)
-  (budget nil))
+  (budget nil)
+  (services (make-hash-table :test #'eq) :read-only t))
+
+(defun kargu-application-service (name factory &optional app)
+  "Return NAME's service on APP, creating it once through FACTORY."
+  (let ((services (kargu-application-services (kargu-application-context app))))
+    (or (gethash name services)
+        (puthash name (funcall factory) services))))
 
 (defvar-local kargu-application-owner nil
   "Application explicitly attached to this boundary buffer, or nil for default.")

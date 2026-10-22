@@ -59,9 +59,7 @@
 (ert-deftest kargu-providers-zero-url-toml-config-test ()
   "When TOML specifies only `apikey', URL is automatically resolved."
   (let* ((temp-config (make-temp-file "kargu-test-config-" nil ".toml"))
-         (kargu--config-cache nil)
-         (kargu--config-cache-path nil)
-         (kargu--config-mtime nil)
+         (kargu-application--bound (kargu-application-create))
          (kargu-session--context
           (kargu-test-session-with-history :provider nil :model nil)))
     (unwind-protect
@@ -72,6 +70,8 @@
                     "apikey = \"sk-test-deepseek-12345\"\n"
                     "model = \"deepseek-chat\"\n"))
           (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
+            (should (kargu-ok-p (kargu-test-await
+                                (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
             (should (equal (kargu--provider-name) "deepseek"))
             ;; API base should resolve to DeepSeek's default URL automatically:
             (should (equal (kargu--api-base) "https://api.deepseek.com/v1"))
@@ -84,9 +84,7 @@
 (ert-deftest kargu-providers-custom-url-override-test ()
   "When user specifies custom `api' in TOML, it overrides the built-in default."
   (let* ((temp-config (make-temp-file "kargu-test-config-" nil ".toml"))
-         (kargu--config-cache nil)
-         (kargu--config-cache-path nil)
-         (kargu--config-mtime nil)
+         (kargu-application--bound (kargu-application-create))
          (kargu-session--context
           (kargu-test-session-with-history :provider nil :model nil)))
     (unwind-protect
@@ -97,6 +95,8 @@
                     "api = \"https://my-custom-proxy.internal/v1\"\n"
                     "apikey = \"sk-test-custom-key\"\n"))
           (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
+            (should (kargu-ok-p (kargu-test-await
+                                (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
             (should (equal (kargu--provider-name) "deepseek"))
             ;; User-provided API base must take precedence:
             (should (equal (kargu--api-base) "https://my-custom-proxy.internal/v1"))
@@ -106,9 +106,7 @@
 (ert-deftest kargu-providers-env-key-resolution-test ()
   "Environment variable specific to active provider is used if TOML omits apikey."
   (let* ((temp-config (make-temp-file "kargu-test-config-" nil ".toml"))
-         (kargu--config-cache nil)
-         (kargu--config-cache-path nil)
-         (kargu--config-mtime nil)
+         (kargu-application--bound (kargu-application-create))
          (kargu-session--context
           (kargu-test-session-with-history :provider "groq"))
          (kargu-api-key nil))
@@ -117,6 +115,8 @@
           (with-temp-file temp-config
             (insert "provider = \"groq\"\n"))
           (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
+            (should (kargu-ok-p (kargu-test-await
+                                (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
             (setenv "GROQ_API_KEY" "gsk_test_groq_env_key")
             (unwind-protect
                 (progn
@@ -190,8 +190,7 @@
   (should (member "llama_cpp" (kargu-connected-providers)))
   ;; Without key, a cloud provider is not authenticated
   (let* ((empty-cfg (make-temp-file "kargu-empty-" nil ".toml"))
-         (kargu--config-cache nil)
-         (kargu--config-cache-path nil)
+         (kargu-application--bound (kargu-application-create))
          (kargu-api-key nil))
     (unwind-protect
         (cl-letf (((symbol-function 'kargu-config-file) (lambda () empty-cfg)))

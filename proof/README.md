@@ -6,6 +6,15 @@ The check is exhaustive over a bounded model. It is a proof for those bounds, no
 
 ## Interrupted-package integration checks (2026-10-22)
 
+### Configuration preparation (G02)
+
+The connection model separates `config-reading` from credential resolution.
+Cancellation in either phase stops the owned worker; a stale completion cannot
+publish a connection. Its exhaustive scan visited 602,836 generated / 101,708
+distinct states, depth 22, without errors. Worker responsiveness, byte limits,
+same-mtime file replacement, nested string isolation and actual child cleanup
+are concrete ERT obligations, not properties proved by the bounded abstraction.
+
 ### Native execution ownership (G01)
 
 `proof/run_tlc.sh --application` exhaustively checks two applications, two

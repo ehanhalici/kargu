@@ -258,8 +258,9 @@
                 :credential-scope scope)))
     (should (= (kargu-connection-snapshot-config-revision snap) 1))
     ;; Bump global configuration
-    (kargu-config-bump-revision)
-    (should (> (kargu-config-revision) 1))
+    (let ((before (kargu-config-revision)))
+      (kargu-config-bump-revision)
+      (should (> (kargu-config-revision) before)))
     ;; Snapshot retained its bound revision and target
     (should (= (kargu-connection-snapshot-config-revision snap) 1))
     (should (equal (kargu-connection-snapshot-endpoint snap) "https://api.openai.com/v1"))

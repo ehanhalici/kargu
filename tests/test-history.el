@@ -211,7 +211,7 @@
   "Test that tool continuation after assistant tool call preserves user message."
   (let ((kargu-session--context
          (kargu-test-session-with-history
-          :messages nil))
+          :messages nil :provider "ollama" :model "test-model"))
         (kargu--busy nil))
     (unwind-protect
         (progn

@@ -16,26 +16,15 @@
 (require 'kargu/state)
 (require 'kargu/config/toml)
 (require 'kargu/config/key)
-
-(defvar kargu-config-revision 0
-  "Monotonic integer revision of the active configuration.")
+(require 'kargu/config/service)
 
 (defun kargu-config-revision ()
   "Return current monotonic integer revision of the configuration."
-  kargu-config-revision)
+  (kargu-config-service-revision (kargu-config-service-context)))
 
 (defun kargu-config-bump-revision ()
-  "Increment and return the variable `kargu-config-revision'."
-  (setq kargu-config-revision (1+ kargu-config-revision)))
-
-(defvar kargu--config-cache nil
-  "Cached TOML config plist (:provider :model :providers), or nil.")
-
-(defvar kargu--config-mtime nil
-  "Modification time of the TOML file last read into `kargu--config-cache'.")
-
-(defvar kargu--config-cache-path nil
-  "Path of the TOML file last read into `kargu--config-cache'.")
+  "Invalidate pending configuration consumers on this owner."
+  (cl-incf (kargu-config-service-revision (kargu-config-service-context))))
 
 (defun kargu--xdg-config-file ()
   "Return `$XDG_CONFIG_HOME/kargu/config.toml' (default ~/.config/...)."
@@ -47,31 +36,14 @@
        (expand-file-name ".config" (or (getenv "HOME") "~")))))
 
 (defun kargu-config-file ()
-  "Return the existing TOML configuration path or the default XDG path.
-Prefer an existing XDG file, then kargu.toml in the Emacs directory."
-  (let ((xdg (kargu--xdg-config-file))
-        (emacs (locate-user-emacs-file "kargu.toml")))
-    (cond
-     ((file-exists-p xdg) xdg)
-     ((file-exists-p emacs) emacs)
-     (t xdg))))
+  "Return the published TOML path, or the default XDG candidate, without I/O."
+  (or (when-let* ((snapshot (kargu-config-service-snapshot (kargu-config-service-context))))
+        (kargu-config-snapshot-path snapshot))
+      (kargu--xdg-config-file)))
 
 (defun kargu--config-plist ()
-  "Return the cached configuration plist, refreshing modified files."
-  (let ((path (kargu-config-file)))
-    (if (not (file-readable-p path))
-        (setq kargu--config-cache nil
-              kargu--config-mtime nil
-              kargu--config-cache-path path)
-      (let ((mtime (file-attribute-modification-time (file-attributes path))))
-        (unless (and (equal path kargu--config-cache-path)
-                     (equal mtime kargu--config-mtime))
-          (let ((parsed (kargu--read-toml-config path)))
-            (setq kargu--config-cache-path path
-                  kargu--config-mtime mtime
-                  kargu--config-cache parsed)
-            (kargu-config-bump-revision)))
-        kargu--config-cache))))
+  "Return borrowed read-only configuration data without filesystem access."
+  (kargu-config-current-data))
 
 (defun kargu--config-providers ()
   "Alist of (NAME . PLIST) for `[providers.*]' tables."
@@ -100,7 +72,6 @@ the native UI's separate model-selection step."
 					   (or (kargu-nonempty explicit-model)
                                                (and noninteractive cached-model)))
 				  :effort nil)
-      (kargu-config-bump-revision)
       (when (fboundp 'kargu-api-prefetch-models)
 	(kargu-api-prefetch-models name))
       (kargu-log 'info "provider set to %s (model %s, api %s)"

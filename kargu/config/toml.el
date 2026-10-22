@@ -152,11 +152,11 @@
       (* (any " \t")) "=" (* (any " \t")))
   "Configuration key and the raw value assigned to it.")
 
-(defun kargu--toml-read-entries (path top-fn provider-fn)
-  "Read PATH, sending entries to TOP-FN and PROVIDER-FN."
+(defun kargu--toml-read-entries (path top-fn provider-fn &optional text)
+  "Read PATH or supplied TEXT, passing entries to TOP-FN and PROVIDER-FN."
   (save-match-data
     (with-temp-buffer
-      (insert-file-contents path)
+      (if text (insert text) (insert-file-contents path))
       (goto-char (point-min))
       (let ((kargu--toml-source-path path)
             (case-fold-search nil)
@@ -188,8 +188,8 @@
              (t (kargu--toml-error "Unsupported configuration syntax"))))
           (forward-line 1))))))
 
-(defun kargu--read-toml-config (path)
-  "Read PATH as kargu TOML; return (:provider :model :providers)."
+(defun kargu--read-toml-config (path &optional text)
+  "Parse PATH or supplied TEXT as TOML without changing runtime settings."
   (let (top-provider top-model top-name top-api top-key top-review-mode providers)
     (kargu--toml-read-entries
      path
@@ -202,11 +202,11 @@
          ("apikey" (setq top-key value))
          ("review_mode" (setq top-review-mode value))))
      (lambda (section key value)
-       (setq providers (kargu--provider-plist-put providers section key value))))
+       (setq providers (kargu--provider-plist-put providers section key value)))
+     text)
     (setq providers
           (or (nreverse providers)
               (kargu--toml-fallback-default-provider top-api top-key top-name top-model)))
-    (kargu--toml-apply-review-mode top-review-mode)
     (list :provider (kargu--toml-nonempty top-provider)
           :model (or (kargu--toml-nonempty top-model) (kargu--toml-nonempty top-name))
           :review-mode (kargu--toml-nonempty top-review-mode)

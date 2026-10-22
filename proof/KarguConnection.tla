@@ -66,7 +66,7 @@ ChangeEndpoint(ep) ==
 
 StartResolve ==
     /\ phase \in {"idle", "ready", "cancelled"}
-    /\ phase' = "resolving"
+    /\ phase' = "config-reading"
     /\ worker_alive' = TRUE
     /\ worker_session' = session
     /\ worker_endpoint' = endpoint
@@ -74,8 +74,15 @@ StartResolve ==
     /\ UNCHANGED <<session, endpoint, config_rev, snapshot,
                    request_active, request_snapshot, retry_count>>
 
+ConfigReady ==
+    /\ phase = "config-reading"
+    /\ phase' = "resolving"
+    /\ UNCHANGED <<session, endpoint, config_rev, worker_alive,
+                   worker_session, worker_endpoint, worker_rev, snapshot,
+                   request_active, request_snapshot, retry_count>>
+
 CancelResolve ==
-    /\ phase = "resolving"
+    /\ phase \in {"config-reading", "resolving"}
     /\ phase' = "cancelled"
     /\ worker_alive' = FALSE
     /\ UNCHANGED <<session, endpoint, config_rev, worker_session,
@@ -145,6 +152,7 @@ Next ==
     \/ (\E s \in Sessions : SwitchSession(s))
     \/ (\E ep \in Endpoints : ChangeEndpoint(ep))
     \/ StartResolve
+    \/ ConfigReady
     \/ CancelResolve
     \/ WorkerDeliver
     \/ StartRequest
@@ -159,7 +167,7 @@ TypeOK ==
     /\ session \in Sessions
     /\ endpoint \in Endpoints
     /\ config_rev \in 0..MaxRev
-    /\ phase \in {"idle", "resolving", "ready", "cancelled"}
+    /\ phase \in {"idle", "config-reading", "resolving", "ready", "cancelled"}
     /\ worker_alive \in BOOLEAN
     /\ worker_session \in Sessions \cup {"none"}
     /\ worker_endpoint \in Endpoints \cup {"none"}
@@ -185,7 +193,7 @@ Safety_RetryPreservesSnapshot ==
     request_active => request_snapshot.valid
 
 Safety_NoOrphanWorker ==
-    worker_alive <=> (phase = "resolving")
+    worker_alive <=> (phase \in {"config-reading", "resolving"})
 
 Safety_WipedCannotLeak ==
     request_active => ~request_snapshot.wiped

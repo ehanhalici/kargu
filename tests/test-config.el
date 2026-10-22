@@ -12,14 +12,15 @@
 (defvar kargu-diff-review-mode)
 
 (ert-deftest kargu-config-review-mode-applies-on-reload-test ()
-  "TOML parsing refreshes review mode even after the diff module was loaded."
+  "Only validated publication changes review mode; parsing stays pure."
   (let ((file (make-temp-file "kargu-review-config-" nil ".toml"))
         (kargu-diff-review-mode 'auto))
     (unwind-protect
         (progn
           (dolist (mode '("blocking" "async" "auto"))
             (write-region (format "review_mode = %S\n" mode) nil file)
-            (kargu--read-toml-config file)
+            (let ((data (kargu--read-toml-config file)))
+              (kargu-config-publish (kargu-config-service-create) data file mode))
             (should (eq kargu-diff-review-mode (intern mode))))
           (cl-letf (((symbol-function 'kargu--config-plist)
                      (lambda () '(:review-mode 42))))
@@ -110,22 +111,111 @@
       (delete-file file))))
 
 (ert-deftest kargu-config-invalid-reload-keeps-cache-unpublished-test ()
-  "A malformed reload raises instead of publishing a partial cache or mode."
+  "A malformed async reload retains the last publication and mode."
   (let ((file (make-temp-file "kargu-atomic-config-" nil ".toml"))
-        (kargu--config-cache nil) (kargu--config-cache-path nil)
-        (kargu--config-mtime nil) (kargu-diff-review-mode 'auto))
+        (kargu-application--bound (kargu-application-create))
+        (kargu-diff-review-mode 'auto))
     (unwind-protect
-        (cl-letf (((symbol-function 'kargu-config-file) (lambda () file)))
+        (progn
           (write-region "provider = \"stable\"\nreview_mode = \"auto\"\n" nil file)
-          (let ((before (kargu--config-plist)) (mtime kargu--config-mtime))
+          (should (kargu-ok-p (kargu-test-await
+                              (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
+          (let ((before (kargu--config-plist)))
             (write-region "review_mode = \"blocking\"\nmodel = 42\n" nil file)
-            (set-file-times file (time-add mtime 2))
-            (should-error (kargu--config-plist))
-            (should (eq kargu--config-cache before))
-            (should (equal kargu--config-mtime mtime))
-            (should (eq kargu-diff-review-mode 'auto))
-            (should-error (kargu--config-plist))))
+            (should (kargu-err-p (kargu-test-await
+                                 (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
+            (should (eq (kargu--config-plist) before))
+            (should (eq kargu-diff-review-mode 'auto))))
       (delete-file file))))
+
+(ert-deftest kargu-config-refresh-detects-content-deletion-and-owner-test ()
+  "Refresh detects same-mtime changes and deletion without mixing owners."
+  (let ((file (make-temp-file "kargu-config-owner-" nil ".toml"))
+        (kargu-application--bound (kargu-application-create)))
+    (unwind-protect
+        (progn
+          (write-region "provider = \"alpha\"\n" nil file)
+          (let* ((stamp (file-attribute-modification-time (file-attributes file)))
+                 (refresh (lambda () (kargu-test-await
+                                      (lambda (done)
+                                        (kargu-config-refresh-async done :paths (list file)))))))
+            (should (kargu-ok-p (funcall refresh)))
+            (let ((revision (kargu-config-revision)))
+              (write-region "provider = \"bravo\"\n" nil file)
+              (set-file-times file stamp)
+              (should (kargu-ok-p (funcall refresh)))
+              (should (> (kargu-config-revision) revision))
+              (should (equal (plist-get (kargu--config-plist) :provider) "bravo")))
+            (let ((kargu-application--bound (kargu-application-create)))
+              (should-not (kargu--config-plist)))
+            (delete-file file)
+            (should (kargu-ok-p (funcall refresh)))
+            (should-not (kargu--config-plist))))
+      (when (file-exists-p file) (delete-file file)))))
+
+(ert-deftest kargu-config-hot-readers-never-touch-files-test ()
+  "Config, endpoint and fast credential readers only consume memory."
+  (let ((kargu-application--bound (kargu-application-create))
+        (native-comp-enable-subr-trampolines nil)
+        (kargu-api-key nil))
+    (kargu-config-publish (kargu-config-service-context)
+                         '(:provider "alpha" :providers (("alpha" :apikey "" :api "http://a/v1")))
+                         "/nonexistent/config" "digest")
+    (cl-letf (((symbol-function 'file-readable-p) (lambda (&rest _) (ert-fail "UI file read")))
+              ((symbol-function 'file-attributes) (lambda (&rest _) (ert-fail "UI stat")))
+              ((symbol-function 'file-exists-p) (lambda (&rest _) (ert-fail "UI exists"))))
+      (should (kargu--config-plist))
+      (should (equal (kargu--api-base "alpha") "http://a/v1"))
+      (should (equal (kargu-config-api-key-fast "alpha") "")))))
+
+(ert-deftest kargu-config-refresh-reverse-completion-and-cancel-test ()
+  "Only the newest refresh publishes; cancellation closes its worker task."
+  (let ((kargu-application--bound (kargu-application-create)) tasks results cleaned)
+    (cl-letf (((symbol-function 'kargu-config-worker-start)
+               (lambda (task &rest _)
+                 (push task tasks)
+                 (kargu-async-add-cleanup task (lambda () (push task cleaned))))))
+      (let* ((first (kargu-config-refresh-async (lambda (result) (push result results))))
+             (second (kargu-config-refresh-async (lambda (result) (push result results))))
+             (value (kargu-ok '(:data (:provider "new") :path "/fake" :digest "new"))))
+        (kargu-async-finish second value)
+        (kargu-async-finish first (kargu-ok '(:data (:provider "old") :path "/fake" :digest "old")))
+        (should (kargu-err-p (car results)))
+        (should (equal (plist-get (kargu--config-plist) :provider) "new"))
+        (let ((third (kargu-config-refresh-async #'ignore)))
+          (kargu-async-cancel third)
+          (should (memq third cleaned)))))))
+
+(ert-deftest kargu-config-snapshot-detaches-and-hides-credentials-test ()
+  "Published data cannot be mutated through input or public snapshot reads."
+  (let* ((key (copy-sequence "synthetic-config-secret"))
+         (data (list :providers (list (list "alpha" :apikey key))))
+         (snapshot (kargu-config-snapshot-create :data data)))
+    (should-not (string-search key (prin1-to-string snapshot)))
+    (aset key 0 ?X)
+    (let ((copy (kargu-config-snapshot-data snapshot)))
+      (aset (plist-get (cdar (plist-get copy :providers)) :apikey) 0 ?Y))
+    (should (equal (plist-get (cdar (plist-get (kargu-config-snapshot-data snapshot)
+                                             :providers)) :apikey)
+                   "synthetic-config-secret"))))
+
+(ert-deftest kargu-config-worker-yields-and-cancellation-kills-child-test ()
+  "A genuinely slow child leaves timers responsive and dies on cancellation."
+  (let* ((ticks 0) (task (kargu-async-start #'ignore :owner nil :parent nil))
+         (timer (run-at-time 0.01 0.01 (lambda () (cl-incf ticks)))) process)
+    (unwind-protect
+        (progn
+          (kargu-config-worker-start task "(sleep-for 10)" nil :name "test-slow")
+          (setq process (get-process "kargu-test-slow-worker"))
+          (should (process-live-p process))
+          (let ((deadline (+ (float-time) 0.1)))
+            (while (< (float-time) deadline) (accept-process-output nil 0.01)))
+          (should (> ticks 1))
+          (kargu-async-cancel task)
+          (should-not (process-live-p process))
+          (should-not (buffer-live-p (process-buffer process))))
+      (cancel-timer timer)
+      (kargu-async-cancel task))))
 
 (ert-deftest kargu-api-key-resolution-order-test ()
   "An empty TOML key means keyless, ${VAR} expands, and the global key stays with the active provider."

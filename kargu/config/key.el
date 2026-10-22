@@ -47,10 +47,7 @@
   (let* ((name (or provider (kargu--provider-name)))
          (entry (assoc name (kargu--config-providers)))
          (default-info (kargu-provider-get name))
-         (toml-plist (cond
-                      (entry (cdr entry))
-                      (default-info nil)
-                      (t (cdr (car (kargu--config-providers)))))))
+         (toml-plist (cdr entry)))
     (append toml-plist
             (when (and default-info (null (plist-get toml-plist :api)))
               (let ((default-api (plist-get default-info :api)))
