@@ -1,17 +1,14 @@
 # Açık işler
 
 Yalnız açık kayıtlar tutulur; kapanan ve yanlış pozitif kayıtlar silinir.
-2026-10-21 doğrulaması: 942/942 ERT geçti. Yeşil testler kapsanmayan hataları
+2026-10-22 doğrulaması: 1086/1086 ERT geçti. Yeşil testler kapsanmayan hataları
 çürütmez. K = kod yolu doğrulandı; Y = kontrollü yeniden üretildi;
 D = ortam/ölçüm kanıtı gerekiyor. Kimlikler yeniden numaralanmaz.
 P1 güvenlik/doğruluk, P2 yanıt verebilirlik/performans önceliğidir.
 
 ## Doğrulanmış hatalar — düzeltme sırası
 
-### CONFIG-01 · P2 · K — Asenkron credential sınırında senkron auth-source işi
-
-- **Yer/kanıt:** `config/key.el`, `kargu-config-resolve-api-key-async` adapter yokken doğrudan `kargu-config-resolve-api-key-result` çağırıyor; bu yol `auth-source-search` ve callable `:secret` fonksiyonunu Emacs iş parçacığında çalıştırıyor. Plain-file sınıflaması TRAMP/yavaş dosyayı da dışlamıyor. Kontrollü sentetik secret fixture'ı, secret fonksiyonunun async API dönmeden çağrıldığını gösterdi; gerçek credential kullanılmadı.
-- **Beklenen/kapanış:** UI/discovery saf ve bellekteki snapshot'ı okusun; disk/secret çözümü gerçek iptal edilebilir adapter/worker sınırında çalışsın veya destek yoksa açık unavailable dönsün. Timer içine senkron işi taşımak düzeltme değildir. Endpoint/config revision'ı ve oturum değişiminde geç cevap elensin (DEEP-14); test, callable secret'ın UI yolunda çalışmadığını ve timeout/Stop'un uygulanabildiğini göstersin.
+Kalan native bağlantı/config I/O işi aşağıdaki CONFIG-02 kaydındadır.
 
 ## Doğrulama bekleyen riskler
 
@@ -174,6 +171,8 @@ Korunacak sözleşmeler: uygulama genelinde tek aktif koşu, koşu kaydı yayım
 
 ### ARCH-16 · Hata Modeli: String Yorumlama Yerine Adlandırılmış Sonuçlar
 
+- **Somut kalan sınır:** `tools/diff/context.el` typed Unified Diff wrapper'ı, legacy batch API yalnız özet metni verdiği için etkiyi `:unknown` taşıyor; özet önekinden başarı/çatışma çıkarmıyor. Batch'in gerçek dosya sonuçlarını public typed sonuca geçir; `applied/staged/partial/rejected/conflict/unknown` ayrımı ve pending plan temizliği aynı kaynaktan gelsin. Metadata alanlarının bulunması tek başına app/run/frozen-policy doğrulaması değildir; bu bağlantı gerçek native consumer'larla tamamlanmalı.
+
 - **Hedef:** İç modül API'leri `ERROR:` öneki, nil/boş metin veya exception mesajını parse ederek kontrol akışı kurmasın. Domain'e uygun adlandırılmış sonuç kaydı; durum, değer veya hata, işlem kimliği ve gerekiyorsa kısmi etki bilgisini taşısın. Başarı, ret, unavailable, iptal, timeout, doğrulanamayan durum ve iç invariant ihlali birbirine karıştırılmasın.
 - **Sorumluluk:** Beklenen domain hatası typed sonuçla, programlama/invariant hatası açık tanıyla iletilsin; public asenkron adapter bu ayrımı tek terminal sonuca dönüştürsün. Hataya köken ve güvenli neden zinciri eklenebilsin; credential/ham payload tanıya sızmasın. Kullanıcı/model metni en dış adapter'da üretilsin; mevcut string tabanlı araç API'si kademeli uyumluluk facade'ıyla taşınsın.
 - **Retry sınırı:** Retry kararı hata mesajı kelimelerine değil doğrulanmış hata sınıfına, işlem güvenliğine ve kalan bütçeye dayansın. Onay reddi veya validation hatası retry edilmesin. Yan etkili istekte cevap kaybı “iş başarısız oldu” kanıtı değildir; idempotency veya uzlaştırma yoksa kör tekrar yerine belirsiz sonucu bildir. Duplicate/late sonuç terminal durumu değiştirmesin.
@@ -217,7 +216,7 @@ Amaç her dosyayı ayrı paket yapmak değil; UI, ajan motoru, taşıma ve Emacs
 
 ### MOD-02 · Araç Sözleşmesi: Asenkron SPI ve Tek Yürütme Kapısı
 
-- **Dosyalar / kalan sınır:** `tools/registry.el` açık handle alan typed kayıt servisi; `api/tools.el` public register/execute/policy uyumluluk kapısıdır. Araç modülleri geniş `api` facade'ını artık yüklemiyor; ancak varsayılan kayıt referansı hâlâ global, yürütme context'i ve modül close/unload sahipliği tamamlanmadı. Süreç, LSP ve onay callback gerektiriyor; yalnız senkron handler varsayımı geçerli değil.
+- **Dosyalar / kalan sınır:** `tools/execution.el` sync/async/alias girişlerini aynı izin/kip kapısında topluyor; bekleyen işler registry'ye ait ve drain başka registry'yi iptal etmiyor. Kalan iş varsayılan global registry'nin son tüketicilerle kaldırılması, executor'lara context'in açık aktarılması ve bütün özellik adapter'larının aktif unregister/close bağlantısıdır. JSON nesne biçimi kapıda, domain alanları handler'da doğrulanır; genel JSON Schema doğrulaması uygulanmış sayılmaz.
 - **Karar:** Mevcut kayıt API'sini dar bir tool portuna taşı; tanım (ad, şema, capability/etki politikası) ile kayıt/çalıştırma işlemini ayır. Yürütücü açık context ve tamamlanma callback'i alsın; iptal tanıtıcısı ile erken/geç sonuç davranışı tanımlansın. Eski senkron araçlar sınır adaptörüyle uyumlu kalabilir.
 - **Sınır:** Ortak kapı availability/mode/schema, onay, log maskeleme, çıktı bütçesi, hata ve tek teslimi uygulasın. Aracın kendine özgü yol/argv/domain doğrulamasını “middleware var” diye kaldırma. Görünürlük yürütme yetkisi değildir; gizli/alias/doğrudan çağrı da kapıdan geçsin. Üçüncü taraf handler ve şema yüklemek güvenilmeyen kod için sandbox sağlamaz.
 - **Kapanış:** Bağımsız handler testleri ve gerçek executor sözleşme testleri; sync/async/erken/çift cevap, eksik araç, alias, readonly kip, unavailable, iptal, kayıt çakışması ve unload. Top-level kayıt etkilerini composition noktasında idempotent register/unregister ile yönet; her aracı ayrı kütüphane yapmak şart değil.
@@ -231,7 +230,7 @@ Amaç her dosyayı ayrı paket yapmak değil; UI, ajan motoru, taşıma ve Emacs
 
 ### MOD-05 · Reset: Sıralı Koordinasyon ile Bildirim Kancalarını Ayır
 
-- **Dosyalar / kalan sınır:** Resetin kritik sırası `application/reset.el` içinde: aktif loop/API iptali → yakalanmış hedef oturum temizliği → history/circuit/state → izole view bildirimi. Yabancı bir oturum aktifken başka bir sohbetin sıfırlanması yalnız hedef oturumun kip hazırlığını, kullanım sayaçlarını ve geçmişini temizliyor; yabancı koşuyu, HTTP isteğini veya circuit durumunu bozmuyor. Kalan iş history domain'indeki legacy prompt-cache etkisi ve sağlayıcı kapsamlı circuit ayrımı.
+- **Dosyalar / kalan sınır:** Resetin kritik sırası `application/reset.el` içinde; circuit kayıtları sağlayıcı kapsamlıdır. Kalan iş history domain'indeki legacy prompt-cache etkisi, native tüketicilerin explicit application handle'ına taşınması ve job/edit servislerinin reset/close sırasında yalnız hedef sahibine bağlanmasıdır. Application kaydı eklemek bütün consumer'ların taşındığını kanıtlamaz.
 - **Karar:** Uygulama composition katmanı resetin kritik sırasını koordine etsin: hedefi doğrula → sahipli işleri iptal/geçersiz kıl → yeni oturum neslini ve tutarlı başlangıç verisini yayımla → görünümü bilgilendir. Çekirdek genel reset API'si sunsun; opsiyonel modüller kapsamı belirli lifecycle bildirimleri dinleyebilsin.
 - **Sınır:** Bütün reseti sırasız hook listesine taşımak atomiklik sağlamaz. Kritik geçiş hatası ile best-effort bildirim hatası ayrılmalı. Başka oturumun history/job/diff incelemesi ve sağlayıcı kapsamlı circuit verisi körlemesine sıfırlanmasın; politika kapsamı açık olsun.
 - **Kapanış:** Aktif request/tool/approval/plan/compile varken reset; hook hatası, reentrancy, iki sohbet ve eski callback testleri. Headless reset chat oluşturmasın; başarısızlıkta yarım yayımlanmış durum kalmasın.
@@ -296,7 +295,8 @@ Aşağıdaki kayıtlar üstteki işleri yok sayan yeni bir hata listesi değildi
 ### DEEP-05 · Süreçler: Mevcut Job Yönetimini İnteraktif Oturum Sözleşmesiyle Tamamla
 
 - **Dosyalar / kod bulgusu:** `tools/process.el` varsayılan timeout'u override etmeyi ve açık nil ile kapatmayı destekliyor; stdin normal batch süreçlerinde EOF ile kapanıyor. `tools/bash/jobs.el` zaten job ID/tablosu, foreground/background, bounded tail log ve cancel sunuyor. “Arka plan yönetimi hiç yok, her süreç katı 30 saniye” teşhisi çıkarıldı.
-- **Karar:** Batch runner'ı bozmadan uzun yaşayan agent/CLI servisleri için ayrı session transport portu tanımla: start, bounded stream/read, isteğe bağlı send-input, graceful close ve kill. PTY yalnız gerçek ihtiyaç/capability varsa kullanılsın; EOF, idle süresi ve toplam deadline batch işinden farklı açık politikalar olsun.
+- **Kalan iş:** `tools/process/session.el` pipe/stdin, send/EOF, idle timeout, byte-bounded tail ve tek terminal teslim sunuyor. Native application/backend bileşimine açık owner/parent handle'ıyla bağla; toplam oturum/close deadline'ını ve detach/Emacs çıkış politikasını belirle. EOF, sürecin gerçekten çıktığı anlamına gelmez. PTY ancak somut capability gereksinimiyle eklenir; mevcut runner terminal emülatörüne dönüştürülmez.
+- **Graceful process-tree sınırı:** Varsayılan Stop/kill hard cancel'dır. Açık graceful iptalde ebeveyn, INT'yi yok sayan çocuğundan önce çıkabilir; geç force timer sayısal PID/PGID'yi yeniden kullanılmış olabileceği için bilerek hedeflemez. Bütün çocukların sonlandığını garanti etmek için ömrü korunan grup/wrapper veya desteklenen OS handle'ı gerekir; yalnız parent exit'i başarı sayma. Bu garanti seçilecek platform ve gerçek child fixture'ıyla tamamlanmalı.
 - **Sınır:** Child PID'leri ve süreç grupları, stderr drainage, saklanan çıktı, başlatma bariyeri ve tek terminal sonuç korunmalı. Stop/reset/Emacs çıkışı/detach sonrası hangi sahipli işlerin yaşayacağı açık olsun; yabancı süreç öldürülmesin. Ham girişte parola/secret echo ve kaçış dizileri log/UI için güvenli işlenmeli.
 - **Kapanış / bağımlılık:** Mevcut job API'siyle uzun test, sessiz daemon, stdin bekleyen CLI, başarısız spawn, çıktı taşması, child exit ve geç cancel; kontrollü fake/yerel süreç testleri. RISK-01 ayrı stres kanıtı ister; bu kayıt onu çözülmüş saymaz. MOD-08 gerçek entegrasyonundan önce session transport sözleşmesi test edilmeli.
 
@@ -322,6 +322,8 @@ Aşağıdaki kayıtlar üstteki işleri yok sayan yeni bir hata listesi değildi
 - **Kapanış:** Sentetik prompt-injection içerikli dosya/tool sonucu, güvenilmeyen proje talimatı, dış köke yönlendirme, secret bağlamı ve backend değişimi fixture'ları. Testler modelin itaatini güvenlik garantisi saymasın; yetkisiz yürütme/veri aktarımı kapıda reddedilebilsin.
 
 ### DEEP-09 · Birleşik Bütçe: İç İçe Retry, Healing ve Compaction Çarpanını Sınırla
+
+- **Somut kalan bağlantı:** `application/budget.el` debit çekirdeği ve transport'un yakalanmış request bütçesi var; `loop.el` henüz her native run için bütçe kurmuyor, heal/compaction/continue aynı handle'a bağlanmış değil. Yerel bütçe testleri uçtan uca toplam maliyet sınırı kanıtı sayılmamalı.
 
 - **Dosyalar / kod bulgusu:** `api/retry.el`, `loop/machine.el`, `loop/compact.el` ve `loop/heal.el` farklı limitler tutuyor. Her biri sınırlı olsa da birleşik istek/zaman/token maliyeti ayrıca tanımlanmalı; somut “maliyet patlaması” bu turda ölçülmedi.
 - **Karar:** Run'a ait toplam istek sayısı, geçen süre, çıktı/context ve biliniyorsa token bütçesi tanımla. Normal istek, transport retry, loop retry, healing, compaction ve devam aynı muhasebeye girsin; bir alt katmanın sayacı sıfırlaması üst bütçeyi yenilemesin.
@@ -358,6 +360,8 @@ Aşağıdaki kayıtlar üstteki işleri yok sayan yeni bir hata listesi değildi
 
 ### DEEP-14 · Bağlantı Güveni: Endpoint, Credential ve Capability Aynı Snapshot'a Bağlansın
 
+- **Somut kalan bağlantı:** `config/connection.el` resolver/scope vardır; native `api/client.el` hâlâ eski key/base yoluyla gönderiyor. Request formatı/capability/credential için snapshot tüketimi composition'da bağlanmalı. Read-only struct slotları iç içe listeleri/stringleri derin immutable yapmaz; consumer mutasyonu ve public snapshot kopya sınırı ayrıca doğrulanmalı.
+
 - **Dosyalar / kapsam:** `config/key.el`, `api/client.el`, provider registry ve gelecekteki MOD-08 agent/MCP bağlantıları. Key/endpoint keşfi ve capability sahipliği ayrı ayrı ele alınıyor; bunların aynı güvenilen hedefe ait değişmez bağlantı sözleşmesiyle birlikte doğrulanması tamamlayıcı gereksinimdir. Credential sızıntısı veya endpoint saldırısı bu turda yeniden üretilmedi.
 - **Karar:** Provider/model, protokol sürümü, endpoint veya yerel executable kimliği, credential kapsamı ve capability revision'ı request/connection snapshot'ında birlikte yakalansın. Retry aynı yetkili hedefi kullansın; config değişiminde eski onay/key yeni host'a veya farklı executable'a otomatik taşınmasın. Bağlantı yeniden kurulunca endpoint kimliği ve yetki kapsamı yeniden doğrulansın; oturum ID'sinin eşitliği tek başına eski güveni devralmasın.
 - **Sınır:** TLS doğrulamasını kapatma, cross-origin redirect'te credential iletme veya hata üzerine başka sağlayıcıya sessiz fallback güvenli varsayılan değildir. Localhost adresi yerel servisin kimlik doğrulaması yerine geçmez; IPC/stdio/HTTP için kimlik ve erişim politikası ayrı belirlensin. Executable/PATH veya yerel config başka program çalıştırabiliyorsa açık güven sınırı olsun. Bu gereksinim webfetch SSRF doğrulamasını veya OS sandbox'ını kaldırmaz; aynı problem diye birleştirilmesin.
@@ -381,3 +385,30 @@ Aşağıdaki kayıtlar üstteki işleri yok sayan yeni bir hata listesi değildi
 
 - **Kanıt:** 2026-10-20 bootstrap temizliğinde taranan 22 test dosyası, değişiklikten önce ve sonra aynı 73 checkdoc uyarısını verdi; yeni uyarı oluşmadı. `test-contract.el` gibi dosyalarda eksik `;;; Code:` bölümü, `test-fake-agent.el` yardımcılarında docstring'de anılmayan argümanlar ve tırnaksız fonksiyon referansları var. Bu sayı 73 çalışma zamanı hatası demek değildir; sentetik hata mesajlarına ilişkin linter yanlış pozitifleri de içerir. Byte-compile uyarılarıyla karıştırılmamalı.
 - **İş / kapanış:** Gerçek başlık/docstring sorunlarını düzelt; fixture metinlerine ilişkin yanlış pozitifleri ayrıca sınıflandır. Test girdilerini, beklenen hata metinlerini veya test gövdelerini yalnız linter'ı susturmak için değiştirme; paket genelinde checkdoc kapatma. Gerçek uyarılar temizlensin, zorunlu istisnalar dar ve gerekçeli olsun; aynı ERT kapsamı ve uyarısız byte-compile korunsun.
+
+### CONFIG-02 · P2 · K — Native bağlantı ve config yenilemede kalan senkron I/O
+
+- **Kanıt:** `api/client.el:kargu-api--send` hâlâ `kargu--resolve-api-key` çağırıyor; bu legacy yol auth-source araması/callable secret çalıştırabiliyor. Ayrıca `config/schema.el:kargu--config-plist` dosya seçimi, stat ve değişmiş TOML okumasını çağıran iş parçacığında yapıyor. Yeni async resolver'ın worker kullanması bu iki consumer'ı kendiliğinden taşımıyor.
+- **İş:** Native startup/connection testini cancellable credential/connection hazırlığına bağla; config I/O'sunu worker sınırına al, doğrulanan config snapshot'ını bellekte yayımla. Hazırlık sürerken tek-run/busy kabulü, prompt geri alma, Stop, timeout, session/config/endpoint değişimi ve geç cevap kontrollerini koru. UI/keşif yolunda auth-source/callable/disk I/O çalışmadığını yavaş/uzak kaynak fixture'larıyla doğrula. Timer içine senkron iş taşıma.
+
+## Kalan entegrasyon sırası — eski paralel planın açık işleri
+
+Bu liste bir tamamlanma raporu değildir. Eski A–F paketlerinin yeni portları,
+native tüketiciler ve bütün adapter'lar bağlanmadan tam modülerlik sağlamaz.
+Eski dosya/görev dağılımı git geçmişindeki `262850b:parallel-plan.md` içinde
+korunur; iş takibinin güncel kaynağı bu belgedir. Gerçek üçüncü taraf CLI
+entegrasyonu, master merge ve push bu sıranın uygulama yetkisi değildir.
+
+1. **Native motor / bütçe (G):** `loop.el`, `loop/{machine,tools,ui,heal,compact}.el`, `history/`, `prompt.el`. Application/claim + tek tool gate + connection snapshot + bütçe aynı run'a bağlansın; retry/heal/compaction/continue ortak debit kullansın. Her outbound istekte protokol duvarı, tek finish, headless/eksik-UI ve unknown-baseline testleri korunsun. Varsayılan tek compaction değişmez.
+2. **View / seçim / metadata (H):** `chat/`, `selection.el`, `api/{select,catalog}.el`, `models/store.el`, `providers/`, `plan/`, `ui/`. Önce sahipli metadata/seçim, sonra bounded stream/draft, sonra plan/confirmation. Off/none/inherit ve boş başarılı katalog ayrımı; view close/reentrant Stop, iki owner ve picker/session revision testleri.
+3. **Log gizliliği / retention (I):** `core/log.el`; gerekirse küçük `core/redact.el`. Metadata-only varsayılan, açık wire opt-in, bilinen sentetik sır/nested hata/URL/export maskelemesi; hata halinde ham fallback yok. Kesin byte/öğe sınırı, sıfır retention, Unicode/narrowing/undo ve iki logger sahibi testleri. Benchmark kazancı yoksa ring-buffer ekleme.
+4. **LSP (J):** `tools/lsp/`; typed diagnostic/range + service/owner/server/source revision sınırı. Encoding bilinmiyorsa guess/clamp yok; capability varsa fresh pull, yoksa unavailable. Unicode/CRLF/narrowing, stale callback, server restart ve aktif unregister testleri; COMPAT-01 ve DEEP-13.
+5. **Dape (K):** `tools/dape/`; mevcut Dape üstünde küçük capability/private-API adapter sınırı ve açık owner. Yeni DAP istemcisi yok. Foreign UI/adapter, frame/thread ID reuse, launch/compile/watch/child/server/stderr ve deadline'lı aktif unload regresyonları korunur.
+6. **Writer / persistence / veri ömrü (L):** `files/`, `chat/session/`, edit/archive/job kaynakları. Beklenen revision/commit noktası, iki writer ve foreign replacement; private storage, quota ve yalnız sahipli cleanup. Süreç içi rollback'i crash/power-loss garantisi diye sunma; journal/otomatik replay ekleme. Desteklenen restart/unknown garantisini açık seç.
+7. **Fake backend portu (M):** Dar `application/backend.el` ve native adapter; `tests/fixtures/fake-agent.el`. LLM completion transport'u ile kendi loop'u olan agent backend'i ayrı olsun. Tek execution owner; native/fake ortak start/event/approval/cancel/session sözleşmesi; unsupported resume unavailable. Gerçek CLI/MCP kurulumu veya entegrasyonu bu adımda yok.
+8. **Egress / adapter güveni (N):** `permission/`, `fs.el`, search/git/skill/webfetch/net/deps adapter'ları. Proje/tool metni yetki değildir; context provider/backend/project scope'unda programatik izin kapısından geçsin. Symlink/option injection, redirect, credential/config/PATH değişimi fixture'ları. Salt shell onayı OS sandbox sayılmaz; platform matrisi ayrıca karar ister.
+9. **Eski lint ve son bileşim kapısı (O):** TEST-01; gerçek header/doc sorunlarını fixture false-positive'lerinden ayır. Testleri silerek/sentetik hata metnini değiştirerek uyarı kapatma. Son consumer taşınınca application/diff/job/circuit/archive legacy global köprülerini sil; yeni singleton ile değiştirme. Fiziksel eksik-modül + aktif unload + tüm ERT/derleme/checkdoc ve etkilenen exhaustive TLC geçsin. Ana loop/protocol/state semantiği değişirse ana model de taranmalı; yerel modeller bütün sistemin kanıtı değildir.
+
+Opsiyonel split UI, sıfırdan DAP, çoklu compaction, gerçek OS sandbox ve
+power-loss journal ayrı ürün kararlarıdır. Açık güvenlik/veri kaybı veya
+yanlış başarı riski bu başlıklarla opsiyonel ilan edilmez.

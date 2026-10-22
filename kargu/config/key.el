@@ -18,6 +18,7 @@
 (require 'kargu/async)
 (require 'kargu/contract/result)
 (require 'kargu/providers)
+(require 'kargu/config/worker)
 
 (defvar auth-sources)
 
@@ -32,6 +33,7 @@
 (declare-function url-host "url-parse")
 (declare-function url-generic-parse-url "url-parse")
 (declare-function auth-source-search "auth-source")
+(declare-function kargu-config-revision "kargu/config/schema" ())
 
 (defun kargu--provider-name ()
   "Return the owning session's provider, or an explicit config fallback."
@@ -135,13 +137,8 @@ Return nil for non-strings or unset/empty references; log only missing names."
          value t t)))))
 
 (defun kargu-config-auth-source-supported-p (source)
-  "Return non-nil when auth-source entry SOURCE is a plain non-blocking file."
-  (let ((path (cond ((stringp source) source)
-                    ((and (consp source) (plist-member source :source))
-                     (plist-get source :source)))))
-    (and (stringp path)
-         (not (string-prefix-p "secrets:" path))
-         (not (string-match-p (rx "." (or "gpg" "asc") eos) path)))))
+  "Return non-nil when SOURCE names a supported local plaintext auth file."
+  (not (null (kargu-config-worker-source-path source))))
 
 (defun kargu-config--unsupported-auth-sources-p ()
   "Return non-nil when `auth-sources' declares an interactive/encrypted store."
@@ -221,9 +218,9 @@ In order:
          (kargu--provider-auth-api pname-lower provider-name toml-plist)))))
 
 (defun kargu-config-api-key-fast (&optional provider-name)
-  "Return PROVIDER-NAME's key without invoking secret functions or pinentry."
-  (let ((kargu-config--nonblocking-auth-p t))
-    (kargu--resolve-api-key provider-name)))
+  "Return PROVIDER-NAME's key without invoking secret functions or pinentry.
+Reads purely from in-memory configuration without triggering auth-source search."
+  (kargu--resolve-direct-api-key provider-name))
 
 (defun kargu-config-api-key (&optional provider-name)
   "Resolve PROVIDER-NAME's credential using the configuration precedence.
@@ -234,7 +231,8 @@ empty TOML key denotes keyless access; missing references fall through."
 
 (defun kargu-config-resolve-api-key-result (&optional provider-name)
   "Resolve PROVIDER-NAME's credential as a typed `kargu-result'.
-Unsupported interactive auth backends return code `unavailable'."
+Unsupported interactive auth backends return code `unavailable'.
+Callable secret functions require async resolution and return `unavailable'."
   (let* ((pname (or provider-name (kargu--provider-name)))
          (pname-lower (downcase (string-trim (format "%s" pname))))
          (direct (kargu--resolve-direct-api-key provider-name)))
@@ -243,18 +241,26 @@ Unsupported interactive auth backends return code `unavailable'."
      ((and (fboundp 'kargu-provider-keyless-p)
            (kargu-provider-keyless-p pname-lower))
       (kargu-ok ""))
+     ((kargu-config--unsupported-auth-sources-p)
+      (kargu-err (format "Credential backend for %s is unavailable" pname-lower)
+                 'unavailable))
      (t
       (let* ((toml-plist (kargu--provider-toml-plist pname-lower provider-name))
              (api (kargu--provider-auth-api pname-lower provider-name toml-plist))
-             (kargu-config--nonblocking-auth-p nil)
-             (auth-key (kargu--auth-source-api-key api)))
-        (cond
-         (auth-key (kargu-ok auth-key))
-         ((kargu-config--unsupported-auth-sources-p)
-          (kargu-err (format "Credential backend for %s is unavailable" pname-lower)
-                     'unavailable))
-         (t (kargu-err (format "No API key configured for %s" pname-lower)
-                       'missing))))))))
+             (host (and api (kargu--url-host api)))
+             (found (and host (kargu--auth-source-search-safe host))))
+        (if found
+            (let ((secret (plist-get (car found) :secret)))
+              (cond
+               ((stringp secret) (kargu-ok secret))
+               ((functionp secret)
+                ;; Callable secret functions must never be executed synchronously on the UI thread!
+                (kargu-err (format "Callable secret for %s requires async resolution" pname-lower)
+                           'unavailable))
+               (t (kargu-err (format "No API key configured for %s" pname-lower)
+                             'missing))))
+          (kargu-err (format "No API key configured for %s" pname-lower)
+                     'missing)))))))
 
 (defun kargu-config--deliver-key-result (callback value error)
   "Deliver resolved credential VALUE or ERROR to CALLBACK as a `kargu-result'."
@@ -264,43 +270,40 @@ Unsupported interactive auth backends return code `unavailable'."
    ((stringp value) (funcall callback (kargu-ok value)))
    (t (funcall callback (kargu-err "Credential resolution failed" 'failed)))))
 
+(defun kargu-config--dispatch-key (provider endpoint task)
+  "Resolve PROVIDER's key into TASK using only its captured ENDPOINT."
+  (let ((direct (kargu--resolve-direct-api-key provider)))
+    (cond
+     (direct (kargu-async-finish task (kargu-ok direct)))
+     ((kargu-provider-keyless-p provider) (kargu-async-finish task (kargu-ok "")))
+     ((functionp kargu-config-credential-adapter)
+      (funcall kargu-config-credential-adapter provider (kargu--url-host endpoint) task))
+     (t (kargu-config-worker-resolve provider (kargu--url-host endpoint) task)))))
+
 (cl-defun kargu-config-resolve-api-key-async
     (provider-name callback &key timeout origin)
-  "Resolve PROVIDER-NAME's key within TIMEOUT and invoke CALLBACK.
-CALLBACK receives a `kargu-result' while ORIGIN owns the same session."
+  "Resolve PROVIDER-NAME's credential into CALLBACK within TIMEOUT seconds.
+ORIGIN, endpoint and configuration revision must still match on delivery."
   (kargu-contract-assert #'functionp callback)
   (let* ((origin (or origin (current-buffer)))
-         (session (with-current-buffer origin (kargu-session-context)))
-         (pname (or provider-name (with-current-buffer origin (kargu--provider-name))))
-         (pname-lower (downcase (string-trim (format "%s" pname))))
+         (session (kargu-session-context origin))
+         (provider (downcase (string-trim (format "%s" (or provider-name (kargu--provider-name))))))
+         (endpoint (kargu--api-base provider))
+         (revision (kargu-config-revision))
          (valid-p (lambda ()
                     (and (buffer-live-p origin)
                          (with-current-buffer origin
-                           (eq session (kargu-session-context))))))
-         (kargu--loop-run nil)
-         (kargu-async--current-task nil)
+                           (and (eq session (kargu-session-context))
+                                (= revision (kargu-config-revision))
+                                (equal endpoint (kargu--api-base provider)))))))
          (task (kargu-async-start
-                (lambda (val err)
+                (lambda (value error)
                   (when (funcall valid-p)
-                    (kargu-config--deliver-key-result callback val err)))
-                :timeout timeout :valid-p valid-p)))
-    (funcall
-     (kargu-async-wrap
-      task
-      (lambda ()
-        (let ((direct (kargu--resolve-direct-api-key provider-name)))
-          (cond
-           (direct (kargu-async-finish task (kargu-ok direct)))
-           ((and (fboundp 'kargu-provider-keyless-p)
-                 (kargu-provider-keyless-p pname-lower))
-            (kargu-async-finish task (kargu-ok "")))
-           ((functionp kargu-config-credential-adapter)
-            (let* ((toml (kargu--provider-toml-plist pname-lower provider-name))
-                   (api (kargu--provider-auth-api pname-lower provider-name toml)))
-              (funcall kargu-config-credential-adapter
-                       pname-lower (kargu--url-host api) task)))
-           (t (kargu-async-finish
-               task (kargu-config-resolve-api-key-result provider-name))))))))
+                    (kargu-config--deliver-key-result callback value error)))
+                :owner nil :parent nil :buffer origin
+                :timeout (or timeout kargu-config-worker-default-timeout) :valid-p valid-p)))
+    (funcall (kargu-async-wrap task
+                              (lambda () (kargu-config--dispatch-key provider endpoint task))))
     task))
 
 (provide 'kargu/config/key)

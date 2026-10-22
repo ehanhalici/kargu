@@ -27,7 +27,29 @@
 
 (cl-defstruct (kargu-tool-registry (:constructor kargu-tool-registry-create ()))
   "Owned registry of canonical definitions and flattened alias names."
-  (entries (make-hash-table :test #'equal) :read-only t))
+  (entries (make-hash-table :test #'equal) :read-only t)
+  (revision 0)
+  (tasks (make-hash-table :test #'equal) :read-only t)
+  (draining (make-hash-table :test #'equal) :read-only t))
+
+(defun kargu-tool-registry-mark-draining (registry name)
+  "Mark NAME as draining in REGISTRY."
+  (kargu-tool-registry--assert registry)
+  (kargu-contract-assert #'kargu-contract-non-empty-string-p name)
+  (let ((canonical (kargu-tool-registry-canonical-name registry name)))
+    (puthash canonical t (kargu-tool-registry-draining registry))))
+
+(defun kargu-tool-registry-draining-p (registry name)
+  "Return non-nil if NAME or its canonical tool is marked draining in REGISTRY."
+  (kargu-tool-registry--assert registry)
+  (let ((canonical (kargu-tool-registry-canonical-name registry name)))
+    (gethash canonical (kargu-tool-registry-draining registry))))
+
+(defun kargu-tool-registry-clear-draining (registry name)
+  "Clear draining mark for NAME in REGISTRY."
+  (kargu-tool-registry--assert registry)
+  (let ((canonical (kargu-tool-registry-canonical-name registry name)))
+    (remhash canonical (kargu-tool-registry-draining registry))))
 
 (defun kargu-tool-registry--assert (registry)
   "Validate REGISTRY at entry."
@@ -38,10 +60,11 @@
   (and (proper-list-p policy)
        (cl-evenp (length policy))
        (cl-loop for (key _value) on policy by #'cddr
-                always (memq key '(:modes :available-p)))
+                always (memq key '(:modes :available-p :needs-approval-p)))
        (proper-list-p (plist-get policy :modes))
        (seq-every-p #'kargu-contract-mode-p (plist-get policy :modes))
-       (kargu-contract-callback-p (plist-get policy :available-p))))
+       (kargu-contract-callback-p (plist-get policy :available-p))
+       (booleanp (plist-get policy :needs-approval-p))))
 
 (cl-defun kargu-tool-registry-register
     (registry &key name description parameters executor policy)
@@ -55,10 +78,14 @@ schema and policy data remain borrowed, read-only values."
   (kargu-contract-assert #'kargu-contract-tool-schema-p parameters)
   (kargu-contract-assert #'kargu-contract-tool-executor-p executor)
   (kargu-contract-assert #'kargu-tool-registry--policy-p policy)
+  (when (kargu-tool-registry-draining-p registry name)
+    (error "Tool %s is still draining" name))
   (puthash name (kargu-tool-registry--definition-create
-                 :name name :description description :parameters parameters
-                 :executor executor :policy policy)
+                 :name name :description description
+                 :parameters (copy-tree parameters t)
+                 :executor executor :policy (copy-tree policy t))
            (kargu-tool-registry-entries registry))
+  (cl-incf (kargu-tool-registry-revision registry))
   name)
 
 (defun kargu-tool-registry-names (registry)
@@ -103,7 +130,9 @@ overwrite a canonical definition.  Alias chains are flattened on entry."
         (when (and (kargu-tool-definition-p existing)
                    (not (equal alias canonical)))
           (error "Tool alias %s would replace a canonical definition" alias))
-        (unless (equal alias canonical) (puthash alias canonical entries))
+        (unless (equal alias canonical)
+          (puthash alias canonical entries)
+          (cl-incf (kargu-tool-registry-revision registry)))
         alias))))
 
 (defun kargu-tool-registry-set-policy (registry name policy)
@@ -120,8 +149,9 @@ Unknown names are rejected before any registry mutation."
               :description (kargu-tool-definition-description definition)
               :parameters (kargu-tool-definition-parameters definition)
               :executor (kargu-tool-definition-executor definition)
-              :policy policy)
-             (kargu-tool-registry-entries registry)))
+              :policy (copy-tree policy t))
+             (kargu-tool-registry-entries registry))
+    (cl-incf (kargu-tool-registry-revision registry)))
   policy)
 
 (defun kargu-tool-registry-remove (registry name)
@@ -133,12 +163,15 @@ Lookup and registration are constant time; canonical removal scans names."
   (let* ((entries (kargu-tool-registry-entries registry))
          (entry (gethash name entries)))
     (when entry
-      (when (kargu-tool-definition-p entry)
-        (let (aliases)
-          (maphash (lambda (key value)
-                     (when (equal value name) (push key aliases))) entries)
-          (dolist (alias aliases) (remhash alias entries))))
+      (if (kargu-tool-definition-p entry)
+          (let (aliases)
+            (maphash (lambda (key value)
+                       (when (equal value name) (push key aliases))) entries)
+            (dolist (alias aliases) (remhash alias entries))
+            (remhash (kargu-tool-definition-name entry) (kargu-tool-registry-draining registry)))
+        (remhash name (kargu-tool-registry-draining registry)))
       (remhash name entries)
+      (cl-incf (kargu-tool-registry-revision registry))
       t)))
 
 (provide 'kargu/tools/registry)

@@ -15,6 +15,9 @@
 (require 'kargu/application/coordinator)
 (require 'kargu/application/mode)
 
+(declare-function kargu-application-active-claim-token "kargu/application/coordinator" (&optional app))
+(declare-function kargu-application-claim-session-id "kargu/application/coordinator" (claim))
+(declare-function kargu-application-release "kargu/application/coordinator" (app claim))
 (declare-function kargu-loop-running-p "kargu/loop" ())
 (declare-function kargu-loop-stop "kargu/loop" (&optional reason))
 (declare-function kargu-busy-p "kargu/api/http" ())
@@ -25,11 +28,22 @@
 
 (defun kargu-application--foreign-run-p (owner origin)
   "Return non-nil when the active loop run does not belong to OWNER or ORIGIN."
-  (when-let* ((run (kargu-application-current-run))
-              (has-owner (or (plist-get run :session)
-                             (plist-get run :chat-buffer))))
-    (not (or (eq (plist-get run :session) owner)
-             (eq (plist-get run :chat-buffer) origin)))))
+  (when-let* ((run (kargu-application-current-run)))
+    (cond
+     ((and (listp run) (consp run))
+      (when-let* ((has-owner (or (plist-get run :session)
+                                 (plist-get run :chat-buffer))))
+        (not (or (eq (plist-get run :session) owner)
+                 (eq (plist-get run :chat-buffer) origin)))))
+     ((stringp run)
+      (let* ((app (kargu-application-context))
+             (claim (kargu-application-active-claim-token app)))
+        (if claim
+            (when-let* ((sess (kargu-application-claim-session-id claim)))
+              (not (or (equal sess (kargu-session-id owner))
+                       (eq sess owner))))
+          nil)))
+     (t nil))))
 
 (defun kargu-application--foreign-request-p (owner origin)
   "Return non-nil when the active request does not belong to OWNER or ORIGIN."
@@ -80,6 +94,11 @@
           (kargu-session-clear)
           (when (fboundp 'kargu-history-reset) (kargu-history-reset))
           (unless foreign-work
+            (when-let* ((app (kargu-application-context))
+                        (claim (kargu-application-active-claim-token app)))
+              (when (or (null (kargu-application-claim-session-id claim))
+                        (equal (kargu-application-claim-session-id claim) (kargu-session-id owner)))
+                (kargu-application-release app claim)))
             (when (fboundp 'kargu-circuit-reset) (kargu-circuit-reset))
             (when (fboundp 'kargu-state-reset) (kargu-state-reset)))
           (kargu-run-observers 'kargu-session-reset-hook)))

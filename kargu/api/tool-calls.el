@@ -13,6 +13,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'kargu/core)
+(require 'kargu/contract/result)
 (require 'kargu/history/store)
 (require 'kargu/json)
 
@@ -64,13 +65,15 @@
   "Return a canonical copy of RESPONSE with unique tool-call identities.
 Preserve valid provider IDs unless they collide within this response or
 with HISTORY or the current owner.  Every consumer uses this same response."
-  (condition-case err
-      (let ((copy (kargu-json-to-record response)) (used (kargu-api--used-tool-call-ids history)))
-        (dolist (choice (kargu-seq-to-list (kargu-aget copy "choices")))
-          (when-let* ((message (kargu-aget choice "message")))
-            (setcdr (assoc "message" choice) (kargu-api--normalize-message-calls message used))))
-        copy)
-    (error `(("error" . (("message" . ,(format "Invalid tool calls: %s" (error-message-string err)))))))))
+  (if (kargu-err-p response)
+      response
+    (condition-case err
+        (let ((copy (kargu-json-to-record response)) (used (kargu-api--used-tool-call-ids history)))
+          (dolist (choice (kargu-seq-to-list (kargu-aget copy "choices")))
+            (when-let* ((message (kargu-aget choice "message")))
+              (setcdr (assoc "message" choice) (kargu-api--normalize-message-calls message used))))
+          copy)
+      (error `(("error" . (("message" . ,(format "Invalid tool calls: %s" (error-message-string err))))))))))
 
 (provide 'kargu/api/tool-calls)
 ;;; tool-calls.el ends here

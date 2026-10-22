@@ -149,6 +149,42 @@ Initialize installed PACKAGES only when requested."
    '(cl-assert (kargu-contract-mode-p 'agent))
    '(cl-assert (kargu-ok-p (kargu-ok "value")))))
 
+(ert-deftest kargu-module-all-contracts-independent-test ()
+  "All public contract modules load cleanly without runtime or adapter modules."
+  (dolist (feature '(kargu/contract
+                     kargu/contract/constants
+                     kargu/contract/types
+                     kargu/contract/result
+                     kargu/contract/assert
+                     kargu/contract/file-window
+                     kargu/contract/history
+                     kargu/contract/selection))
+    (kargu-module-test--load-foundation
+     feature
+     `(cl-assert (featurep ',feature)))))
+
+(ert-deftest kargu-module-dual-application-isolation-test ()
+  "In a clean subprocess, dual application instances are strictly isolated."
+  (kargu-module-test--evaluate
+   '((require 'kargu/application/coordinator)
+     (let ((app-a (kargu-application-create :status :idle :generation 0))
+           (app-b (kargu-application-create :status :idle :generation 100)))
+       (kargu-application-set-status :busy app-a)
+       (cl-assert (eq (kargu-application-current-status app-a) :busy))
+       (cl-assert (eq (kargu-application-current-status app-b) :idle))
+       (kargu-application-set-active-run "run-a" app-a)
+       (cl-assert (equal (kargu-application-current-run app-a) "run-a"))
+       (cl-assert (null (kargu-application-current-run app-b)))
+       ;; Reject second run
+       (cl-assert (condition-case nil
+                      (progn (kargu-application-set-active-run "run-a2" app-a) nil)
+                    (error t)))
+       (cl-assert (equal (kargu-application-current-run app-a) "run-a"))
+       ;; App B can set its run independently
+       (kargu-application-set-active-run "run-b" app-b)
+       (cl-assert (equal (kargu-application-current-run app-b) "run-b"))
+       (cl-assert (equal (kargu-application-current-run app-a) "run-a"))))))
+
 (ert-deftest kargu-module-plan-domain-is-independent-test ()
   "Owned plan records and commands load without a chat or engine runtime."
   (kargu-module-test--load-foundation

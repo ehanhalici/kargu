@@ -20,7 +20,9 @@
 (require 'kargu/state/hooks)
 
 (defconst kargu-state--valid-statuses
-  '(:idle :requesting :waiting-model :executing-tools :verifying :compacting :pause :done :limit :stopped :error)
+  '(:idle :starting :running :requesting :streaming :waiting-model
+    :executing-tool :executing-tools :waiting-approval :verifying
+    :compacting :pause :done :limit :stopped :error)
   "List of valid lifecycle statuses for the Kargu state machine.")
 
 (declare-function kargu-loop-running-p "kargu/loop" ())

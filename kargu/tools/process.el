@@ -126,14 +126,57 @@ STATE is the mutable plist holding the exit code and the kill reasons."
                    (if (< (position-bytes position) byte-start)
                        (1+ position) position))))
 
-(defun kargu-process-cancel (process)
-  "Terminate PROCESS and close its owned stderr pipe.
-The process group is signaled on supported platforms.  A separate stderr
-pipe is closed even when the main process has already exited."
+(defun kargu-process--cancel-timer (process)
+  "Release PROCESS's pending graceful cancellation timer."
+  (when-let* ((timer (process-get process 'kargu-cancel-timer)))
+    (process-put process 'kargu-cancel-timer nil)
+    (cancel-timer timer)))
+
+(defun kargu-process--signal-owned (process signal)
+  "Send SIGNAL only while PROCESS still identifies its original process group."
+  (when (process-live-p process)
+    (let ((pid (process-get process 'kargu-pgid)))
+      (if (and (integerp pid) (> pid 0) (equal pid (process-id process))
+               (not (memq system-type '(windows-nt ms-dos))))
+          (signal-process (- pid) signal)
+        (if (eq signal 'SIGINT) (interrupt-process process)
+          (kill-process process))))))
+
+(defun kargu-process--force-cancel (process)
+  "Force-cancel PROCESS without signaling a reaped or reused group identifier."
+  (kargu-process--cancel-timer process)
+  (when (process-live-p process)
+    (process-put process 'kargu-cancel-state :killed)
+    (kargu-process--signal-owned process 'SIGKILL)
+    (when (process-live-p process) (delete-process process))))
+
+(defun kargu-process--graceful-cancel (process seconds)
+  "Interrupt PROCESS and force termination after SECONDS while still owned."
+  (let ((previous (process-sentinel process)))
+    (set-process-sentinel
+     process
+     (lambda (child event)
+       (unless (process-live-p child) (kargu-process--cancel-timer child))
+       (when previous (funcall previous child event)))))
+  (kargu-process--signal-owned process 'SIGINT)
+  (when (process-live-p process)
+    (process-put process 'kargu-cancel-timer
+                 (run-at-time seconds nil #'kargu-process--force-cancel process))))
+
+(defun kargu-process-cancel (process &optional grace-seconds)
+  "Cancel PROCESS once and close its owned stderr pipe.
+GRACE-SECONDS optionally allows an interrupt before forced termination.
+A delayed force operation never signals a reaped process's numeric group."
   (when (processp process)
-    (when (process-live-p process) (kill-process process))
-    (when-let* ((stderr (process-get process 'kargu-stderr-process)))
-      (when (process-live-p stderr) (delete-process stderr)))))
+    (when (and (process-live-p process)
+               (null (process-get process 'kargu-cancel-state)))
+      (process-put process 'kargu-cancel-state :interrupting)
+      (if (and (numberp grace-seconds) (> grace-seconds 0))
+          (kargu-process--graceful-cancel process grace-seconds)
+        (kargu-process--force-cancel process)))
+    (when-let* ((stderr (process-get process 'kargu-stderr-process))
+                ((process-live-p stderr)))
+      (delete-process stderr))))
 
 (defun kargu-process--deadline (process timeout state)
   "Schedule PROCESS termination after TIMEOUT seconds, recording STATE."
@@ -214,6 +257,8 @@ Return the process, or nil when none started."
                 :sentinel (kargu-process--sentinel callback buffer state))))
     (plist-put state :process proc)
     (process-put proc 'kargu-stderr-process stderr)
+    (when (process-live-p proc)
+      (process-put proc 'kargu-pgid (process-id proc)))
     (plist-put state :timer (kargu-process--deadline proc (plist-get state :timeout) state))
     (when (process-live-p proc) (process-send-eof proc))
     (plist-put state :lifecycle :running)

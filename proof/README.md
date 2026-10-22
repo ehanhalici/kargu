@@ -4,6 +4,37 @@ This directory holds the TLA+ specification of Kargu's agent loop and protocol w
 
 The check is exhaustive over a bounded model. It is a proof for those bounds, not for every parameter value.
 
+## Interrupted-package integration checks (2026-10-22)
+
+The following exhaustive bounded scans completed without errors. Run each
+with `proof/run_tlc.sh` and its flag:
+
+| Flag | Generated | Distinct | Depth |
+|---|---:|---:|---:|
+| `--budget` | 1,591 | 432 | 12 |
+| `--connection` | 446,212 | 77,292 | 20 |
+| `--transport` | 1,810 | 693 | 12 |
+| `--edit-transaction` | 1,849 | 560 | 11 |
+| `--approval` | 8,194 | 1,536 | 11 |
+| `--process` | 535 | 179 | 9 |
+| `--process-session` | 129 | 42 | 8 |
+| `--mode` | 20,179 | 5,958 | 15 |
+
+`KarguProcessSession.tla` covers the interactive startup barrier, EOF/exit,
+cancel/force ordering, bounded retained output and terminal resource cleanup.
+Actual OS group ownership, PID reuse, byte slicing and foreign-job cancellation
+are ERT obligations, not proofs from the abstract process model.
+
+Budget/connection/transport models cover their local kernels, not yet-unwired
+native run composition. Read-only record slots do not prove deep immutability
+or secure erasure of all secret copies. The request keeps its captured budget
+and breaker scope across retries; ERT checks provider switching, stale claims,
+delayed approval, actual plaintext credential workers, and asynchronous Git
+patch ownership. The full main loop model was not rerun for this integration;
+native loop/history/backend/egress work remains in `todo.md`.
+
+## Earlier model checks
+
 `KarguEdit.tla` / `EditMC.cfg` refine the process-local reviewed batch boundary.
 Run `proof/run_tlc.sh --edit-transaction`. The exhaustive 2026-10-21 scan
 explored 425 generated states, 160 distinct states and depth 10 without error.

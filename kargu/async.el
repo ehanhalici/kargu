@@ -13,6 +13,11 @@
 (require 'cl-lib)
 (require 'kargu/core/log)
 
+(declare-function kargu-application-p "kargu/application/coordinator" (object))
+(declare-function kargu-application-current-run "kargu/application/coordinator" (&optional app))
+(declare-function kargu-application-work-active-p "kargu/application/coordinator" (&optional app))
+(declare-function kargu-application-active-claim-token "kargu/application/coordinator" (app))
+
 (defvar kargu-async--pending nil
   "Pending asynchronous tasks, including their run owners.")
 (defvar kargu--loop-run nil)
@@ -20,23 +25,48 @@
   "Dynamically bound parent while an asynchronous operation starts or resumes.")
 
 (cl-defstruct (kargu-async-task (:constructor kargu-async--make))
-  "One task with a terminal state and a single completion callback."
-  (state :pending) callback timer owner valid-p cancel parent buffer)
+  "One task with a terminal state, resource cleanup stack, and single completion callback."
+  (id (format "task-%s-%06x"
+              (format-time-string "%Y%m%d%H%M%S")
+              (random #xffffff)) :read-only t)
+  (state :pending) callback timer owner valid-p cancel parent buffer deadline owner-run owner-claim)
 
-(cl-defun kargu-async-start (callback &key timeout valid-p cancel)
+(cl-defun kargu-async-start
+    (callback &key timeout valid-p cancel (owner kargu--loop-run)
+              (parent kargu-async--current-task) (buffer (current-buffer)) deadline)
   "Start a task delivering (VALUE ERROR) to CALLBACK once.
-TIMEOUT bounds the whole task.  VALID-P checks captured resources;
-CANCEL optionally cancels underlying work when the task is terminated."
-  (let ((task (kargu-async--make :callback callback :valid-p valid-p
-                                 :cancel cancel :owner kargu--loop-run
-                                 :parent kargu-async--current-task
-                                 :buffer (current-buffer))))
+TIMEOUT bounds the whole task in seconds.  DEADLINE sets an absolute timestamp.
+VALID-P checks captured resources;
+CANCEL optionally cancels underlying work when the task is terminated.
+OWNER binds the task to an execution owner (defaults to current run).
+PARENT links to a parent task (defaults to `kargu-async--current-task').
+BUFFER captures the origin buffer (defaults to `current-buffer')."
+  (let* ((effective-owner owner)
+         (effective-parent parent)
+         (effective-buffer buffer)
+         (effective-deadline (or deadline
+                                 (when (and timeout (> timeout 0))
+                                   (+ (float-time) timeout))))
+         (effective-timeout (or timeout
+                                (when effective-deadline
+                                  (max 0.001 (- effective-deadline (float-time))))))
+         (task (kargu-async--make :callback callback :valid-p valid-p
+                                  :cancel cancel :owner effective-owner
+                                  :parent effective-parent
+                                  :buffer effective-buffer
+                                  :owner-run (and (fboundp 'kargu-application-p)
+                                                  (kargu-application-p effective-owner)
+                                                  (kargu-application-current-run effective-owner))
+                                  :owner-claim (and (fboundp 'kargu-application-p)
+                                                    (kargu-application-p effective-owner)
+                                                    (kargu-application-active-claim-token effective-owner))
+                                  :deadline effective-deadline)))
     (push task kargu-async--pending)
     (condition-case err
         (progn
-          (when timeout
+          (when effective-timeout
             (setf (kargu-async-task-timer task)
-                  (run-at-time timeout nil #'kargu-async-finish
+                  (run-at-time effective-timeout nil #'kargu-async-finish
                                task nil "Request timed out")))
           task)
       (error
@@ -46,8 +76,22 @@ CANCEL optionally cancels underlying work when the task is terminated."
 (defun kargu-async-pending-p (task)
   "Return non-nil when TASK can still deliver a result."
   (and (eq (kargu-async-task-state task) :pending)
-       (or (null (kargu-async-task-owner task))
-           (eq (kargu-async-task-owner task) kargu--loop-run))))
+       (let ((owner (kargu-async-task-owner task)))
+         (cond
+          ((null owner) t)
+          ((consp owner) (eq owner kargu--loop-run))
+          ((and (fboundp 'kargu-application-p) (kargu-application-p owner))
+           (and (kargu-application-work-active-p owner)
+                (eq (kargu-async-task-owner-claim task)
+                    (kargu-application-active-claim-token owner))
+                (eq (kargu-async-task-owner-run task)
+                    (kargu-application-current-run owner))))
+          ((and (stringp owner)
+                (string-prefix-p "run-" owner))
+           (and (fboundp 'kargu-application-current-run)
+                (equal owner (kargu-application-current-run))))
+          ((eq owner kargu--loop-run) t)
+          (t t)))))
 
 (defun kargu-async-add-cleanup (task function)
   "Register resource cleanup FUNCTION for TASK without replacing earlier cleanup.
@@ -123,7 +167,8 @@ If TASK has already ended, release the newly acquired resource immediately."
 (defun kargu-async-cancel-owner (owner)
   "Cancel all pending tasks owned by OWNER without delivering stale results."
   (dolist (task (copy-sequence kargu-async--pending))
-    (when (eq owner (kargu-async-task-owner task))
+    (when (or (eq owner (kargu-async-task-owner task))
+              (equal owner (kargu-async-task-owner task)))
       (kargu-async--close task :cancelled))))
 
 (provide 'kargu/async)

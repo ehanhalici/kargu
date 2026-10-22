@@ -7,53 +7,81 @@
 ;;; Commentary:
 
 ;; Decode complete UTF-8 event lines while preserving plz's raw response.
+;; Enforces hard byte limits on raw buffer accumulation and incomplete SSE lines
+;; to guarantee fail-fast abort on misbehaving streams (DEEP-12, MOD-04).
 
 ;;; Code:
 
+(require 'cl-lib)
+(require 'subr-x)
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/api/stream)
+
+(defcustom kargu-stream-max-incomplete-line-bytes (* 64 1024)
+  "Maximum allowable bytes in an incomplete SSE line buffer before a newline."
+  :type 'natnum
+  :group 'kargu)
+
+(defcustom kargu-stream-max-raw-bytes (* 4 1024 1024)
+  "Maximum allowable total raw bytes in a stream buffer."
+  :type 'natnum
+  :group 'kargu)
 
 (defun kargu--api-note-stream-byte (process)
   "Record that PROCESS just received streaming output."
   (when (processp process)
     (process-put process :kargu-last-byte (float-time))))
 
+(defun kargu-sse--abort (process reason)
+  "Terminate PROCESS for REASON, retaining no partial parser payload."
+  (unless (process-get process :kargu-stream-abort)
+    (process-put process :kargu-stream-abort reason))
+  (process-put process :kargu-raw nil)
+  (process-put process :kargu-sse-parser nil)
+  (when (process-live-p process) (delete-process process)))
+
+(defun kargu-sse--feed-bytes (process string on-delta on-event)
+  "Feed bounded STRING bytes from PROCESS to ON-DELTA and ON-EVENT."
+  (let* ((raw (concat (or (process-get process :kargu-raw) "") string))
+         (position (cl-position ?\n raw :from-end t))
+         (tail (if position (substring raw (1+ position)) raw)))
+    (when (> (string-bytes tail) kargu-stream-max-incomplete-line-bytes)
+      (kargu-sse--abort process 'line-buffer-overflow)
+      (error "SSE incomplete line exceeded its byte bound"))
+    (process-put process :kargu-raw tail)
+    (when position
+      (let ((complete (decode-coding-string (substring raw 0 (1+ position)) 'utf-8)))
+        (dolist (line (split-string (string-remove-suffix "\n" complete) "\n" nil))
+          (kargu--stream-line process line on-delta on-event))))))
+
 (defun kargu--stream-filter (process string on-delta &optional on-event)
-  "Decode SSE bytes in STRING from PROCESS without blocking.
-Preserve the raw process buffer for plz.  Deliver decoded events to
-ON-DELTA and ON-EVENT while retaining incomplete UTF-8 lines."
+  "Feed STRING from PROCESS to ON-DELTA and ON-EVENT under hard byte bounds.
+Any protocol failure aborts this stream; partial data never becomes success."
   (save-match-data
-    (kargu--api-note-stream-byte process)
-    (condition-case-unless-debug err
-        (let ((buffer (process-buffer process)))
-          (when (buffer-live-p buffer)
-            ;; (1) keep plz's view of the response intact
-            (with-current-buffer buffer
-              (save-excursion
-                (save-restriction
-                  (widen)
-                  (goto-char (point-max))
-                  (insert string))))
-            ;; (2) side-channel SSE parsing on raw bytes
-            (let* ((raw (concat (or (process-get process :kargu-raw)
-                                    "")
-                                string))
-                   (pos (cl-position ?\n raw :from-end t)))
-              (if (null pos)
-                  (process-put process :kargu-raw raw)
-                (let ((complete (decode-coding-string
-                                 (substring raw 0 (1+ pos)) 'utf-8)))
-                  (process-put process :kargu-raw (substring raw (1+ pos)))
-                  (dolist (line (split-string (string-remove-suffix "\n" complete) "\n" nil))
-                    (kargu--stream-line process line on-delta on-event)))))))
-      (error
-       (kargu-log 'error "stream filter error: %s"
-                  (error-message-string err))))))
+    (unless (process-get process :kargu-stream-abort)
+      (kargu--api-note-stream-byte process)
+      (condition-case nil
+          (let ((total (+ (or (process-get process :kargu-total-bytes) 0)
+                          (string-bytes string)))
+                (buffer (process-buffer process)))
+            (when (> total kargu-stream-max-raw-bytes)
+              (kargu-sse--abort process 'raw-buffer-overflow)
+              (error "Stream raw byte bound exceeded"))
+            (process-put process :kargu-total-bytes total)
+            (when (buffer-live-p buffer)
+              (with-current-buffer buffer
+                (save-excursion
+                  (save-restriction
+                    (widen)
+                    (goto-char (point-max))
+                    (insert string)))))
+            (kargu-sse--feed-bytes process string on-delta on-event))
+        (error (kargu-sse--abort process 'protocol-failure))))))
 
 (defun kargu--stream-flush (process on-delta on-event)
   "Flush PROCESS's last SSE line to ON-DELTA and ON-EVENT."
-  (when (processp process)
+  (when (and (processp process) (not (process-get process :kargu-stream-abort)))
     (let ((rest (process-get process :kargu-raw)))
       (process-put process :kargu-raw nil)
       (when (and (stringp rest) (not (string-empty-p (string-trim rest))))

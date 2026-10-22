@@ -1,4 +1,4 @@
-;;; kargu/permission.el --- LSP project root permission and sandboxing -*- lexical-binding: t; -*-
+;;; permission.el --- LSP project root permission and sandboxing -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -22,7 +22,8 @@
 (require 'kargu/permission/guards)
 (require 'kargu/permission/bash)
 (require 'kargu/permission/policy)
+(require 'kargu/permission/execute)
 
 (provide 'kargu/permission)
 
-;;; kargu/permission.el ends here
+;;; permission.el ends here

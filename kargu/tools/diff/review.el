@@ -17,6 +17,7 @@
 
 (require 'kargu/core)
 (require 'kargu/permission)
+(require 'kargu/tools/diff/context)
 (require 'kargu/tools/diff/track)
 (require 'kargu/tools/diff/stage)
 
@@ -32,11 +33,11 @@
 
 ;;;; Review sessions ------------------------------------------------------
 
-(defvar kargu-diff--sessions (make-hash-table :test #'equal)
+(defvar kargu-diff--sessions (kargu-edit-service-reviews (kargu-diff--get-default-service))
   "Pending review sessions:  absolute path -> session plist.
 Keys of a session plist:  :path, :buffer-a, :shadow-buffer,
 :original, :proposal, :created-new, :callback,
-:ediff-control, :outcome.")
+:ediff-control, :outcome.  Owned by `kargu-edit-service'.")
 
 (defun kargu-diff--session-live-p (session)
   "Return non-nil when SESSION's ediff review may still be running.
@@ -47,18 +48,18 @@ falls back to the shadow buffer's liveness."
         (buffer-live-p control)
       (buffer-live-p (plist-get session :shadow-buffer)))))
 
-(defun kargu-diff--maybe-drop-hook ()
-  "Remove our ediff quit hook when no review sessions are pending."
-  (when (= 0 (hash-table-count kargu-diff--sessions))
+(defun kargu-diff--maybe-drop-hook (&optional service)
+  "Remove ediff quit hook when no reviews are pending on optional SERVICE."
+  (when (= 0 (hash-table-count (kargu-diff--service-reviews service)))
     (remove-hook 'ediff-quit-hook #'kargu-diff--ediff-quit)))
 
-(defun kargu-diff--reap-stale (path)
-  "Clean up an abandoned (never finalized) review for PATH.
+(defun kargu-diff--reap-stale (path &optional service)
+  "Clean up an abandoned (never finalized) review for PATH on optional SERVICE.
 Abandonment means the ediff control buffer died without running
 our quit hook, e.g. it was killed directly."
-  (let ((session (gethash path kargu-diff--sessions)))
+  (let ((session (gethash path (kargu-diff--service-reviews service))))
     (when session
-      (kargu-diff--abort-session session t)
+      (kargu-diff--abort-session session t service)
       (kargu-log 'warn "diff: dropped abandoned review for %s" path))))
 
 (defun kargu-diff--close-review-control (control)
@@ -78,20 +79,23 @@ our quit hook, e.g. it was killed directly."
          (when (buffer-live-p control)
            (kill-buffer control)))))))
 
-(defun kargu-diff--abort-session (session &optional silent)
-  "Cancel review SESSION without notification when SILENT is non-nil."
-  (let ((path (plist-get session :path))
-        (base (plist-get session :base-buffer))
-        (shadow (plist-get session :shadow-buffer))
-        (control (plist-get session :ediff-control))
-        (callback (plist-get session :callback)))
-    (when (and path (eq session (gethash path kargu-diff--sessions)))
-      (remhash path kargu-diff--sessions))
+(defun kargu-diff--abort-session (session &optional silent service)
+  "Cancel review SESSION on SERVICE; omit notification when SILENT is non-nil."
+  (let* ((path (plist-get session :path))
+         (base (plist-get session :base-buffer))
+         (shadow (plist-get session :shadow-buffer))
+         (control (plist-get session :ediff-control))
+         (callback (plist-get session :callback))
+         (reviews (kargu-diff--service-reviews service))
+         (svc (or service (kargu-diff--current-service))))
+    (when (and path (eq session (gethash path reviews)))
+      (remhash path reviews))
     (kargu-diff--close-review-control control)
     (dolist (buf (list base shadow))
       (when (buffer-live-p buf)
         (with-current-buffer buf (set-buffer-modified-p nil))
-        (kill-buffer buf)))
+        (kill-buffer buf)
+        (when svc (kargu-edit-service-unregister-buffer svc buf))))
     (when-let* ((wconfig (plist-get session :window-config)))
       (kargu-diff--restore-wconfig wconfig))
     (let ((outcome (list :status :interrupted :file path :saved nil)))
@@ -102,22 +106,23 @@ our quit hook, e.g. it was killed directly."
         (kargu-log 'warn "diff: review interrupted for %s" path))
       outcome)))
 
-(defun kargu-diff-abort-all-sessions ()
-  "Silently cancel every open review and restore the reviewed files.
+(defun kargu-diff-abort-all-sessions (&optional service)
+  "Silently cancel every open review on optional SERVICE and restore files.
 Called when a run ends without its answer, so no ediff outlives its run."
   (let (sessions)
-    (maphash (lambda (_path session) (push session sessions)) kargu-diff--sessions)
+    (maphash (lambda (_path session) (push session sessions))
+             (kargu-diff--service-reviews service))
     (dolist (session sessions)
-      (kargu-diff--abort-session session t))))
+      (kargu-diff--abort-session session t service))))
 
-(defun kargu-diff-pending-reviews ()
-  "Message the agent reviews that are still open in ediff."
+(defun kargu-diff-pending-reviews (&optional service)
+  "Message the agent reviews that are still open in ediff on optional SERVICE."
   (interactive)
   (let ((paths nil))
     (maphash (lambda (path session)
                (when (kargu-diff--session-live-p session)
                  (push path paths)))
-             kargu-diff--sessions)
+             (kargu-diff--service-reviews service))
     (if (null paths)
         (message "kargu: no pending reviews")
       (message "kargu pending reviews: %s"
@@ -201,17 +206,21 @@ Use the Ediff command `ediff-copy-A-to-B' to revert individual hunks."
 
 (defun kargu-diff--setup-ediff-control (control path wconfig)
   "Configure review CONTROL for PATH, restoring WCONFIG after completion."
-  (let ((ctrl-buf (if (bufferp control)
+  (let ((service (kargu-diff--current-service))
+        (ctrl-buf (if (bufferp control)
                       control
                     (and (stringp control) (get-buffer control)))))
     (when (bufferp ctrl-buf)
       (with-current-buffer ctrl-buf
+        (setq-local kargu-diff--active-service service)
+        (add-hook 'ediff-quit-hook #'kargu-diff--ediff-quit nil t)
         (add-hook 'ediff-after-quit-hook-internal
                   (lambda () (kargu-diff--restore-wconfig wconfig))
                   nil t)
         (add-hook 'kill-buffer-hook
                   (lambda ()
-                    (when (gethash path kargu-diff--sessions)
+                    (when (and (not (kargu-edit-service-closed-p service))
+                               (gethash path (kargu-edit-service-reviews service)))
                       (kargu-diff--ediff-quit))
                     (kargu-diff--restore-wconfig wconfig))
                   nil t)))
@@ -266,10 +275,9 @@ finalizing the review returns `:decided-content' without writing to disk."
                         :callback callback
                         :window-config wconfig
                         :outcome nil)))
-    (puthash path session kargu-diff--sessions)
+    (puthash path session (kargu-diff--service-reviews))
     (kargu-log 'info "diff: proposal staged for %s (%d -> %d bytes)"
                path (length original) (length new-content))
-    (add-hook 'ediff-quit-hook #'kargu-diff--ediff-quit)
     (when (fboundp 'kargu-notify)
       (kargu-notify 'permission))
     (let ((control (kargu-diff--open-review-control path base shadow)))
@@ -292,7 +300,7 @@ associated session by looking at ediff's buffer A and B."
                               (eq (plist-get session :buffer-a) buf-a)
                               (eq (plist-get session :shadow-buffer) buf-b)))
                  (setq match session)))
-             kargu-diff--sessions)
+             (kargu-diff--service-reviews))
     (when match
       (kargu-diff--finalize match))
     (kargu-diff--maybe-drop-hook)))
@@ -312,29 +320,44 @@ Return (STATUS . DECIDED-CONTENT)."
 
 (defun kargu-diff--schedule-post-review-cleanup (base shadow wconfig)
   "Schedule deferred cleanup of BASE and SHADOW buffers and restore WCONFIG."
-  (when (buffer-live-p base)
-    (run-at-time 0 nil
-                 (lambda (buf)
-                   (when (buffer-live-p buf)
-                     (with-current-buffer buf (set-buffer-modified-p nil))
-                     (kill-buffer buf)))
-                 base))
-  (unless (or (and (boundp 'kargu-diff-keep-shadow) kargu-diff-keep-shadow)
-              (not (buffer-live-p shadow)))
-    (run-at-time 0 nil
-                 (lambda (buf)
-                   (when (buffer-live-p buf)
-                     (with-current-buffer buf (set-buffer-modified-p nil))
-                     (kill-buffer buf)))
-                 shadow))
-  (when-let* ((cfg wconfig))
-    (run-at-time 0 nil
-                 (lambda (c)
-                   (when (window-configuration-p c)
-                     (set-window-configuration c)))
-                 cfg)))
+  (let ((svc (kargu-diff--current-service)))
+    (when (buffer-live-p base)
+      (let ((timer (run-at-time 0 nil
+                                (lambda (buf)
+                                  (when (buffer-live-p buf)
+                                    (with-current-buffer buf (set-buffer-modified-p nil))
+                                    (kill-buffer buf)))
+                                base)))
+        (when (and svc timer)
+          (kargu-edit-service-register-timer svc timer))))
+    (unless (or (and (boundp 'kargu-diff-keep-shadow) kargu-diff-keep-shadow)
+                (not (buffer-live-p shadow)))
+      (let ((timer (run-at-time 0 nil
+                                (lambda (buf)
+                                  (when (buffer-live-p buf)
+                                    (with-current-buffer buf (set-buffer-modified-p nil))
+                                    (kill-buffer buf)))
+                                shadow)))
+        (when (and svc timer)
+          (kargu-edit-service-register-timer svc timer))))
+    (when-let* ((cfg wconfig))
+      (let ((timer (run-at-time 0 nil
+                                (lambda (c)
+                                  (when (window-configuration-p c)
+                                    (set-window-configuration c)))
+                                cfg)))
+        (when (and svc timer)
+          (kargu-edit-service-register-timer svc timer))))))
 
 (defun kargu-diff--finalize (session)
+  "Finalize SESSION only in the service captured before its review."
+  (let* ((state (plist-get session :pre-state))
+         (origin (plist-get state :owner))
+         (service (and origin (kargu-diff--origin-service origin))))
+    (kargu-diff-with-service (or service (kargu-diff--current-service))
+      (kargu-diff--finalize-owned session))))
+
+(defun kargu-diff--finalize-owned (session)
   "Finish the review of SESSION and return the outcome plist.
 When `:defer-commit' is nil and hunks were accepted, commits the decided
 content after revalidating `:pre-state'.  Notifies the session callback
@@ -350,8 +373,9 @@ and schedules base/shadow cleanup."
          (decision (kargu-diff--evaluate-base-decision base original proposal))
          (status (car decision))
          (decided-content (cdr decision))
+         (reviews (kargu-diff--service-reviews))
          (outcome nil))
-    (remhash path kargu-diff--sessions)
+    (remhash path reviews)
     (kargu-diff--maybe-drop-hook)
     (cond
      ((or defer-commit (not (memq status '(:applied-full :applied-partial))))

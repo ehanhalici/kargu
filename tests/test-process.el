@@ -6,7 +6,16 @@
 ;;; Code:
 
 (require 'ert)
-(require 'kargu)
+(require 'kargu/state/store)
+(require 'kargu/api/catalog)
+(require 'kargu/models/store)
+(require 'kargu/tools/process)
+(require 'kargu/tools/bash)
+(require 'kargu/tools/search)
+(require 'kargu/tools/git)
+(require 'kargu/tools/diff)
+(require 'kargu/prompt)
+(defvar kargu-context-buffer nil)
 (require 'tests/test-helpers)
 
 (ert-deftest kargu-process-separates-and-drains-stderr-test ()
@@ -225,7 +234,7 @@
           (kargu-bash-cancel-process (kargu-bash--job-id job))
           (let ((deadline (+ (float-time) 2)))
             (while (and (not result) (< (float-time) deadline))
-              (accept-process-output process 0.02)))
+              (accept-process-output nil 0.02)))
           (should result)
           (should-not (process-live-p process))
           (should (eq (kargu-bash--job-state job) :cancelled)))
@@ -252,7 +261,7 @@
           (kargu-process-cancel process)
           (let ((deadline (+ (float-time) 2)))
             (while (and (not result) (< (float-time) deadline))
-              (accept-process-output process 0.02)))
+              (accept-process-output nil 0.02)))
           (should result)
           ;; The parent sentinel may run before the kernel reaps its child.
           (let ((deadline (+ (float-time) 2)) attributes)
@@ -381,6 +390,7 @@
 
 (ert-deftest kargu-git-tool-needs-a-callback-and-answers-by-it-test ()
   "Git tools never run while Emacs waits; with a callback they answer."
+  (kargu-git-register-tools)
   (kargu-test-with-git-repo '(("a.txt" . "x\n"))
                             (let ((executor (kargu-tool-definition-executor
                                              (kargu-find-tool "git_status"))))

@@ -17,6 +17,7 @@
 (require 'kargu/core)
 (require 'kargu/core/observers)
 (require 'kargu/permission)
+(require 'kargu/tools/diff/context)
 (require 'kargu/tools/diff/track)
 
 (defvar kargu-diff-review-mode)
@@ -46,25 +47,45 @@ Dynamically bound while the hook runs.")
   "Immutable lifetime and canonical target identity captured before review."
   (buffer nil :read-only t) (session nil :read-only t)
   (directory nil :read-only t) (canonical nil :read-only t)
-  (run nil :read-only t))
+  (run nil :read-only t)
+  (service nil :read-only t)
+  (review-mode nil :read-only t) (auto-save nil :read-only t)
+  (policy-revision 0 :read-only t))
 
 (defun kargu-diff--capture-origin (path)
   "Capture the current edit owner's lifetime and canonical PATH."
-  (kargu-diff--make-origin
-   :buffer (current-buffer) :session (kargu-session-context)
-   :directory default-directory :canonical (file-truename path)
-   :run kargu--loop-run))
+  (let ((svc (kargu-diff--current-service)))
+    (kargu-diff--make-origin
+     :buffer (current-buffer)
+     :session (and (fboundp 'kargu-session-context) (kargu-session-context))
+     :directory default-directory
+     :canonical (file-truename path)
+     :run (and (boundp 'kargu--loop-run) kargu--loop-run)
+     :service svc
+     :review-mode kargu-diff-review-mode :auto-save kargu-diff-auto-save
+     :policy-revision (and svc (kargu-edit-service-policy-revision svc)))))
 
 (defun kargu-diff--validate-origin (state)
   "Reject STATE when its review owner or canonical target was replaced."
   (when-let* ((origin (plist-get state :owner)))
-    (let ((buffer (kargu-diff--origin-buffer origin)))
+    (let ((buffer (kargu-diff--origin-buffer origin))
+          (svc (kargu-diff--origin-service origin))
+          (pol-rev (kargu-diff--origin-policy-revision origin)))
+      (when (and svc (kargu-edit-service-closed-p svc))
+        (error "Conflict: edit service was closed before commit"))
+      (when (and svc pol-rev (/= pol-rev (kargu-edit-service-policy-revision svc)))
+        (error "Conflict: policy revision changed before commit"))
+      (unless (and (eq (kargu-diff--origin-review-mode origin) kargu-diff-review-mode)
+                   (eq (kargu-diff--origin-auto-save origin) kargu-diff-auto-save))
+        (error "Conflict: review or save policy changed before commit"))
       (unless (and (buffer-live-p buffer)
                    (with-current-buffer buffer
-                     (and (eq (kargu-diff--origin-session origin) (kargu-session-context))
+                     (and (eq (kargu-diff--origin-session origin)
+                              (and (fboundp 'kargu-session-context) (kargu-session-context)))
                           (equal (kargu-diff--origin-directory origin) default-directory)))
                    (or (null (kargu-diff--origin-run origin))
-                       (eq (kargu-diff--origin-run origin) kargu--loop-run))
+                       (eq (kargu-diff--origin-run origin)
+                           (and (boundp 'kargu--loop-run) kargu--loop-run)))
                    (equal (kargu-diff--origin-canonical origin)
                           (file-truename (plist-get state :path))))
         (error "Conflict: edit owner or target changed before commit")))))
@@ -286,6 +307,7 @@ The new buffer is unfiled, has undo disabled and starts unmodified."
       (buffer-disable-undo buffer)
       (insert content)
       (set-buffer-modified-p nil))
+    (kargu-edit-service-register-buffer (kargu-diff--current-service) buffer)
     buffer))
 
 (defun kargu-diff--make-base (path content)
@@ -296,6 +318,7 @@ The new buffer is unfiled, has undo disabled and starts unmodified."
       (buffer-disable-undo buffer)
       (insert content)
       (set-buffer-modified-p nil))
+    (kargu-edit-service-register-buffer (kargu-diff--current-service) buffer)
     buffer))
 
 ;;;; Core: staging and the ediff review -----------------------------------
@@ -319,8 +342,7 @@ blocking review), plus :file, :saved and a model-facing :message."
   (unless (stringp new-content)
     (error "New-content must be a string"))
   (let* ((path (kargu-permission-resolve file-path "file"))
-         (prior (and (boundp 'kargu-diff--sessions)
-                     (gethash path kargu-diff--sessions))))
+         (prior (gethash path (kargu-diff--service-reviews))))
     (when (and prior (fboundp 'kargu-diff--session-live-p) (kargu-diff--session-live-p prior))
       (error "A review is already pending for %s; finish it in ediff (q) first" path))
     (when prior
@@ -343,7 +365,7 @@ blocking review), plus :file, :saved and a model-facing :message."
               (kargu-diff--apply-auto path buf-a original new-content exists callback pre-state)
             (if (fboundp 'kargu-diff--apply-interactive)
                 (kargu-diff--apply-interactive path buf-a original new-content exists callback)
-              (error "kargu-diff--apply-interactive is unavailable"))))))))
+              (error "Kargu-diff--apply-interactive is unavailable"))))))))
 
 (defun kargu-diff--open-proposal-buffer (path)
   "Open or find buffer visiting PATH and verify it is writable and clean."
@@ -410,6 +432,9 @@ blocking review), plus :file, :saved and a model-facing :message."
   "Record committed RESULT of STATUS for STATE in BUFFER before notification."
   (let* ((path (plist-get state :path))
          (actual (plist-get result :content))
+         (svc (kargu-diff--current-service))
+         (snapshots (kargu-diff--service-snapshots svc))
+         (changes (kargu-diff--service-changes svc))
          (snapshot
           (list :content (plist-get state :original)
                 :created-new (not (plist-get state :exists)) :at (current-time)
@@ -421,13 +446,15 @@ blocking review), plus :file, :saved and a model-facing :message."
                 :baseline-available (plist-get state :baseline-available)
                 :baseline-diagnostics (plist-get state :baseline-diagnostics)))
          (outcome (append (list :status status :file path :snapshot snapshot) result)))
-    (puthash path (cons snapshot (gethash path kargu-diff--snapshots))
-             kargu-diff--snapshots)
+    (puthash path (cons snapshot (gethash path snapshots)) snapshots)
     (puthash path
              (append outcome (list :baseline-available (plist-get state :baseline-available)
                                    :baseline-diagnostics (plist-get state :baseline-diagnostics)))
-             kargu-diff--changed)
-    (cl-pushnew path kargu-diff--run-modified-files :test #'equal)
+             changes)
+    (when svc
+      (cl-pushnew path (kargu-edit-service-run-modified-files svc) :test #'equal))
+    (when (boundp 'kargu-diff--run-modified-files)
+      (cl-pushnew path kargu-diff--run-modified-files :test #'equal))
     (plist-put outcome :message (kargu-diff--describe outcome))))
 
 (defun kargu-diff--commit-file-content (pre-state final-content &optional status)

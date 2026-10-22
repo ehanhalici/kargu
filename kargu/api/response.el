@@ -6,8 +6,10 @@
 
 ;;; Commentary:
 
-;; Read text, tool_calls, finish_reason, overflow from a decoded response.  Also stores the assistant turn in history.
-;; Requires: `kargu/core', `kargu/json', `kargu/history'.
+;; Read text, tool_calls, finish_reason, overflow from a decoded response.
+;; Also stores the assistant turn in history.  Supports both canonical
+;; `kargu-result-err' structures and wire response alists (ARCH-16).
+;; Requires: `kargu/core', `kargu/json', `kargu/history', `kargu/contract/result'.
 
 ;;; Code:
 
@@ -15,6 +17,7 @@
 (require 'subr-x)
 (require 'rx)
 (require 'kargu/core)
+(require 'kargu/contract/result)
 (require 'kargu/json)
 (require 'kargu/history)
 (require 'kargu/api/tools)
@@ -56,18 +59,22 @@ A legacy OpenAI `function_call' object is wrapped as one call."
 
 (defun kargu-response-error-message (response)
   "Return the error message inside RESPONSE, or nil.
-RESPONSE may be a decoded OpenRouter error body or one of the
-synthetic error alists produced by this module.  Nested
-`error.message' and `error.metadata' fields are flattened."
-  (when-let* ((err (kargu-aget response "error")))
-    (cond
-     ((memq err '(:json-null :json-false)) nil)
-     ((stringp err) err)
-     ((kargu--object-p err)
-      (or (kargu--provider-error-text `(("error" . ,err)))
-          (kargu-aget err "message")
-          (format "%S" err)))
-     (t (format "%S" err)))))
+RESPONSE may be a decoded OpenRouter error body, a `kargu-result-err'
+struct, or one of the synthetic error alists produced by this module.
+Nested `error.message' and `error.metadata' fields are flattened."
+  (cond
+   ((kargu-err-p response)
+    (kargu-result-err-message response))
+   (t
+    (when-let* ((err (kargu-aget response "error")))
+      (cond
+       ((memq err '(:json-null :json-false)) nil)
+       ((stringp err) err)
+       ((kargu--object-p err)
+        (or (kargu--provider-error-text `(("error" . ,err)))
+            (kargu-aget err "message")
+            (format "%S" err)))
+       (t (format "%S" err)))))))
 
 (defun kargu-response-answer-text (response)
   "Assistant `content' of RESPONSE, ignoring reasoning fields."
@@ -102,13 +109,23 @@ synthetic error alists produced by this module.  Nested
 
 (defun kargu-response-overflow-p (response)
   "Non-nil when RESPONSE is a context-window overflow error."
-  (or (kargu-aget response "overflow")
-      (kargu--overflow-message-p (kargu-response-error-message response))))
+  (cond
+   ((kargu-err-p response)
+    (or (eq (kargu-result-err-code response) :context-overflow)
+        (plist-get (kargu-result-err-data response) :overflow)
+        (kargu--overflow-message-p (kargu-result-err-message response))))
+   (t
+    (or (kargu-aget response "overflow")
+        (kargu--overflow-message-p (kargu-response-error-message response))))))
 
-(defun kargu--api-error-alist (msg)
-  "Build a callback error alist from MSG, marking overflow when detected."
-  (let ((err `(("error" . (("message" . ,msg))))))
-    (when (kargu--overflow-message-p msg)
+(defun kargu--api-error-alist (msg &optional code data)
+  "Build a callback error alist from MSG, marking overflow when detected.
+CODE and DATA are optional canonical error properties (ARCH-16)."
+  (let ((err `(("error" . (("message" . ,msg)
+                           ,@(when code `(("code" . ,code)))
+                           ,@(when data `(("data" . ,data))))))))
+    (when (or (eq code :context-overflow)
+              (kargu--overflow-message-p msg))
       (setq err (append err '(("overflow" . t)))))
     err))
 

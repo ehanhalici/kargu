@@ -130,5 +130,49 @@
     (should (equal (kargu-tool-definition-name
                     (kargu-tool-registry-find registry "read")) "read"))))
 
+(ert-deftest kargu-tool-registry-revision-increments-monotonically-test ()
+  "Registry revision counter increments monotonically on every mutation."
+  (let ((registry (kargu-tool-registry-create)))
+    (should (= (kargu-tool-registry-revision registry) 0))
+    ;; Register tool -> revision 1
+    (kargu-tool-registry-register registry :name "foo" :description "Foo"
+                                  :executor #'ignore)
+    (should (= (kargu-tool-registry-revision registry) 1))
+    ;; Add alias -> revision 2
+    (kargu-tool-registry-alias registry "f" "foo")
+    (should (= (kargu-tool-registry-revision registry) 2))
+    ;; Set policy -> revision 3
+    (kargu-tool-registry-set-policy registry "foo" '(:modes (agent)))
+    (should (= (kargu-tool-registry-revision registry) 3))
+    ;; Remove tool -> revision 4
+    (kargu-tool-registry-remove registry "foo")
+    (should (= (kargu-tool-registry-revision registry) 4))
+    ;; Invalid registration attempts do not bump revision
+    (should-error (kargu-tool-registry-register registry :name "" :description "Bad"
+                                                :executor #'ignore))
+    (should (= (kargu-tool-registry-revision registry) 4))))
+
+(ert-deftest kargu-tool-registry-draining-state-management-test ()
+  "Registry manages draining state for tools during teardown."
+  (let ((registry (kargu-tool-registry-create)))
+    (kargu-tool-registry-register registry :name "task_tool" :description "Task"
+                                  :executor #'ignore)
+    (kargu-tool-registry-alias registry "tt" "task_tool")
+    (should-not (kargu-tool-registry-draining-p registry "task_tool"))
+    (should-not (kargu-tool-registry-draining-p registry "tt"))
+    ;; Mark draining
+    (kargu-tool-registry-mark-draining registry "task_tool")
+    (should (kargu-tool-registry-draining-p registry "task_tool"))
+    (should (kargu-tool-registry-draining-p registry "tt"))
+    ;; Clear draining
+    (kargu-tool-registry-clear-draining registry "task_tool")
+    (should-not (kargu-tool-registry-draining-p registry "task_tool"))
+    (should-not (kargu-tool-registry-draining-p registry "tt"))
+    ;; Re-mark and remove
+    (kargu-tool-registry-mark-draining registry "tt")
+    (should (kargu-tool-registry-draining-p registry "task_tool"))
+    (kargu-tool-registry-remove registry "task_tool")
+    (should-not (kargu-tool-registry-draining-p registry "task_tool"))))
+
 (provide 'tests/test-tool-registry)
 ;;; test-tool-registry.el ends here

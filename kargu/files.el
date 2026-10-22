@@ -139,15 +139,45 @@ Signal for a missing or binary target."
   "Return the complete permission-checked text at PATH, including unsaved edits."
   (cdr (kargu-file--resolve-read-target path)))
 
+(defun kargu-file-current-revision (path)
+  "Return `kargu-file-revision' for PATH on disk or in buffer, or nil.
+PATH may be a file path string or a buffer.  Return nil if PATH is absent,
+not visiting a file on disk, or unreadable."
+  (let ((target (cond
+                 ((bufferp path)
+                  (and (buffer-live-p path) (buffer-file-name path)))
+                 ((and (stringp path)
+                       (not (string-empty-p (string-trim path)))
+                       (not (file-remote-p path)))
+                  (cond
+                   ((file-exists-p path)
+                    path)
+                   ((and (get-buffer path)
+                         (buffer-live-p (get-buffer path)))
+                    (buffer-file-name (get-buffer path)))
+                   (t path)))
+                 (t nil))))
+    (when (and (stringp target)
+               (not (string-empty-p (string-trim target)))
+               (not (file-remote-p target)))
+      (condition-case nil
+          (let ((truename (file-truename target)))
+            (when (and (stringp truename)
+                       (not (file-remote-p truename))
+                       (file-exists-p truename))
+              (let ((attrs (file-attributes truename)))
+                (when attrs
+                  (kargu-file--make-revision
+                   :inode (file-attribute-inode-number attrs)
+                   :device (file-attribute-device-number attrs)
+                   :bytes (file-attribute-size attrs)
+                   :mtime (file-attribute-modification-time attrs))))))
+        (error nil)))))
+
 (defun kargu-file--file-revision (path)
   "Capture PATH's filesystem identity, size and content modification time."
-  (let ((attributes (file-attributes path)))
-    (unless attributes (error "File disappeared while reading its snapshot"))
-    (kargu-file--make-revision
-     :inode (file-attribute-inode-number attributes)
-     :device (file-attribute-device-number attributes)
-     :bytes (file-attribute-size attributes)
-     :mtime (file-attribute-modification-time attributes))))
+  (or (kargu-file-current-revision path)
+      (error "File disappeared while reading its snapshot")))
 
 (defun kargu-file--checked-excerpt (window complete)
   "Read text WINDOW from the current snapshot described by COMPLETE."

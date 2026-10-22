@@ -9,6 +9,8 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+
 (defun kargu-test-await (start &optional timeout)
   "Call START with a callback and return what the callback receives.
 Waits up to TIMEOUT seconds (default 10) for the callback; signals an error
@@ -95,6 +97,30 @@ PROVIDER, MODEL and EFFORT default to the current owner's explicit values."
 
 (declare-function kargu-application-create "kargu/application/coordinator")
 (declare-function kargu-application-context "kargu/application/coordinator")
+(declare-function kargu-application-reset "kargu/application/coordinator")
+
+;;;; Dual-application isolation fixtures ------------------------------------
+
+(cl-defun kargu-test-make-dual-applications (&key (gen-a 0) (gen-b 100))
+  "Create and return a cons cell of two distinct `kargu-application' instances.
+GEN-A and GEN-B initialize the generation counters of the two instances."
+  (cons (kargu-application-create :status :idle :generation gen-a)
+        (kargu-application-create :status :idle :generation gen-b)))
+
+(defmacro kargu-test-with-dual-applications (bindings &rest body)
+  "Bind BINDINGS to two independent `kargu-application' instances and run BODY.
+BINDINGS is a two-element list (APP-A-VAR APP-B-VAR).
+Ensures neither application instance shares mutable state or affects the other."
+  (declare (indent 1))
+  (let ((app-a (car bindings))
+        (app-b (cadr bindings)))
+    `(let ((,app-a (kargu-application-create :status :idle :generation 0))
+           (,app-b (kargu-application-create :status :idle :generation 100)))
+       (unwind-protect
+           (progn ,@body)
+         (when (fboundp 'kargu-application-reset)
+           (ignore-errors (kargu-application-reset ,app-a))
+           (ignore-errors (kargu-application-reset ,app-b)))))))
 
 (defun kargu-test-mode (mode)
   "Make MODE the active mode for the running test and return it.

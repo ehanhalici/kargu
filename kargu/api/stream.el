@@ -7,6 +7,8 @@
 ;;; Commentary:
 
 ;; Turn an SSE body into a normal chat-completions alist.
+;; Enforces upper bounds on single SSE event sizes, tool-call counts,
+;; and tool argument lengths (DEEP-12).
 ;; Requires: `kargu/core', `kargu/json'.
 
 ;;; Code:
@@ -16,6 +18,21 @@
 (require 'rx)
 (require 'kargu/core)
 (require 'kargu/json)
+
+(defcustom kargu-sse-max-event-bytes (* 1024 1024)
+  "Maximum bytes in a single SSE event payload."
+  :type 'natnum
+  :group 'kargu)
+
+(defcustom kargu-stream-max-tool-calls 64
+  "Maximum number of tool calls permitted in a single streamed response."
+  :type 'natnum
+  :group 'kargu)
+
+(defcustom kargu-stream-max-tool-args-bytes (* 512 1024)
+  "Maximum argument string length for any single tool call."
+  :type 'natnum
+  :group 'kargu)
 
 ;;;; SSE stream parsing ---------------------------------------------------
 
@@ -27,16 +44,21 @@
 
 (cl-defstruct (kargu-sse-parser (:constructor kargu-sse-parser-create))
   "Pending fields of one SSE event, shared by both transport paths."
-  data event)
+  data event (bytes 0))
 
 (defun kargu-sse--dispatch (parser)
-  "Take and decode PARSER's pending event, if it has data fields."
+  "Take and decode PARSER's pending event, if it has data fields.
+Enforces `kargu-sse-max-event-bytes' on the combined data payload."
   (let ((lines (nreverse (kargu-sse-parser-data parser)))
         (type (kargu-sse-parser-event parser)))
     (setf (kargu-sse-parser-data parser) nil
-          (kargu-sse-parser-event parser) nil)
+          (kargu-sse-parser-event parser) nil
+          (kargu-sse-parser-bytes parser) 0)
     (when lines
       (let ((data (mapconcat #'identity lines "\n")))
+        (when (> (string-bytes data) kargu-sse-max-event-bytes)
+          (error "SSE event data exceeded maximum allowed size (%d > %d)"
+                 (string-bytes data) kargu-sse-max-event-bytes))
         (kargu--log-block "SSE data" data t)
         (if (equal (string-trim data) "[DONE]")
             :done
@@ -63,7 +85,13 @@ HTTP headers and unknown fields are ignored."
              (field (if colon (substring line 0 colon) line))
              (value (if colon (string-remove-prefix " " (substring line (1+ colon))) "")))
         (pcase field
-          ("data" (push value (kargu-sse-parser-data parser)))
+          ("data"
+           (let ((size (+ (kargu-sse-parser-bytes parser) (string-bytes value)
+                          (if (kargu-sse-parser-data parser) 1 0))))
+             (when (> size kargu-sse-max-event-bytes)
+               (error "SSE event data exceeded maximum allowed size"))
+             (setf (kargu-sse-parser-bytes parser) size)
+             (push value (kargu-sse-parser-data parser))))
           ("event" (setf (kargu-sse-parser-event parser) value)))
         nil)))))
 
@@ -107,20 +135,25 @@ Ignore comments and keep-alive pings."
   "Merge streamed argument fragments OLD and NEW.
 Concatenates true deltas; replaces when the provider sends
 complete JSON snapshots (empty/`{}` then a full object, or two
-complete objects)."
-  (let ((new-s (kargu--tool-args-fragment-string new))
-        (old-s (or old "")))
-    (cond
-     ((null new-s) old-s)
-     ((string-empty-p old-s) new-s)
-     ((and (or (equal (string-trim old-s) "{}")
-               (equal (string-trim old-s) "[]"))
-           (kargu--json-complete-value-string-p new-s))
-      new-s)
-     ((and (kargu--json-complete-value-string-p old-s)
-           (kargu--json-complete-value-string-p new-s))
-      new-s)
-     (t (concat old-s new-s)))))
+complete objects).  Enforces `kargu-stream-max-tool-args-bytes'."
+  (let* ((new-s (kargu--tool-args-fragment-string new))
+         (old-s (or old ""))
+         (merged
+          (cond
+           ((null new-s) old-s)
+           ((string-empty-p old-s) new-s)
+           ((and (or (equal (string-trim old-s) "{}")
+                     (equal (string-trim old-s) "[]"))
+                 (kargu--json-complete-value-string-p new-s))
+            new-s)
+           ((and (kargu--json-complete-value-string-p old-s)
+                 (kargu--json-complete-value-string-p new-s))
+            new-s)
+           (t (concat old-s new-s)))))
+    (when (> (string-bytes merged) kargu-stream-max-tool-args-bytes)
+      (error "Tool call arguments exceeded maximum allowed size (%d > %d)"
+             (string-bytes merged) kargu-stream-max-tool-args-bytes))
+    merged))
 
 (defun kargu--merge-tool-call-fragment (calls-map frag)
   "Merge one streamed tool-call FRAG into CALLS-MAP.
@@ -128,31 +161,36 @@ CALLS-MAP maps the fragment \"index\" to the call alist being
 assembled.  OpenAI streams tool calls in fragments: the id and
 name arrive once, the \"arguments\" JSON string in pieces.
 Some providers send complete argument snapshots; those replace
-rather than concatenate."
+rather than concatenate.  Enforces `kargu-stream-max-tool-calls'."
   (let* ((idx (kargu--stream-fragment-index frag))
-         (fn (kargu-aget frag "function"))
-         (call (or (gethash idx calls-map)
-                   (puthash idx
-                            (list (cons "id" (or (kargu-aget frag "id") ""))
-                                  (cons "type" "function")
-                                  (cons "function"
-                                        (list (cons "name" (or (and fn (kargu-aget fn "name")) ""))
-                                              (cons "arguments" ""))))
-                            calls-map)))
-         (cfn (kargu-aget call "function")))
-    (when-let* ((id (kargu-nonempty (kargu-aget frag "id"))))
-      (when (and (kargu-nonempty (kargu-aget call "id"))
-                 (not (equal id (kargu-aget call "id"))))
-        (error "Conflicting tool-call identities at stream index %s" idx))
-      (setcdr (assoc "id" call) id))
-    (when fn
-      (when-let* ((name (kargu-nonempty (kargu-aget fn "name"))))
-        (setcdr (assoc "name" cfn) name))
-      (let ((args (kargu-aget fn "arguments")))
-        (unless (memq args '(nil :json-null))
-          (setcdr (assoc "arguments" cfn)
-                  (kargu--merge-tool-args
-                   (kargu-aget cfn "arguments") args)))))))
+         (exists (gethash idx calls-map)))
+    (unless exists
+      (when (>= (hash-table-count calls-map) kargu-stream-max-tool-calls)
+        (error "Exceeded maximum allowed streamed tool calls count (%d)"
+               kargu-stream-max-tool-calls)))
+    (let* ((fn (kargu-aget frag "function"))
+           (call (or exists
+                     (puthash idx
+                              (list (cons "id" (or (kargu-aget frag "id") ""))
+                                    (cons "type" "function")
+                                    (cons "function"
+                                          (list (cons "name" (or (and fn (kargu-aget fn "name")) ""))
+                                                (cons "arguments" ""))))
+                              calls-map)))
+           (cfn (kargu-aget call "function")))
+      (when-let* ((id (kargu-nonempty (kargu-aget frag "id"))))
+        (when (and (kargu-nonempty (kargu-aget call "id"))
+                   (not (equal id (kargu-aget call "id"))))
+          (error "Conflicting tool-call identities at stream index %s" idx))
+        (setcdr (assoc "id" call) id))
+      (when fn
+        (when-let* ((name (kargu-nonempty (kargu-aget fn "name"))))
+          (setcdr (assoc "name" cfn) name))
+        (let ((args (kargu-aget fn "arguments")))
+          (unless (memq args '(nil :json-null))
+            (setcdr (assoc "arguments" cfn)
+                    (kargu--merge-tool-args
+                     (kargu-aget cfn "arguments") args))))))))
 
 (defun kargu--extract-stream-tool-frags (delta)
   "Extract normalized list of tool call fragments from DELTA."
@@ -201,10 +239,17 @@ rather than concatenate."
             (kargu-stream--state-status state) :finished))))
 
 (defun kargu-stream--accept-event (state event)
-  "Accumulate decoded EVENT or the internal terminal marker into STATE."
+  "Accumulate decoded EVENT or the internal terminal marker into STATE.
+Events and choices arriving after completion (:finished) or error are ignored."
   (unless (eq (kargu-stream--state-status state) :error)
     (cond
-     ((eq event :done) (setf (kargu-stream--state-status state) :finished))
+     ((eq event :done)
+      (setf (kargu-stream--state-status state) :finished))
+     ((eq (kargu-stream--state-status state) :finished)
+      (when-let* ((usage (and (not (memq event '(:done nil)))
+                              (kargu-aget event "usage"))))
+        (unless (eq usage :json-null)
+          (setf (kargu-stream--state-usage state) usage))))
      ((kargu--sse-event-error-message event)
       (setf (kargu-stream--state-status state) :error
             (kargu-stream--state-error state) (kargu--sse-event-error-message event)))
@@ -212,7 +257,8 @@ rather than concatenate."
       (when-let* ((choice (car (kargu-seq-to-list (kargu-aget event "choices")))))
         (kargu-stream--accept-choice state choice))
       (when-let* ((usage (kargu-aget event "usage")))
-        (unless (eq usage :json-null) (setf (kargu-stream--state-usage state) usage)))))))
+        (unless (eq usage :json-null)
+          (setf (kargu-stream--state-usage state) usage)))))))
 
 (defun kargu-stream--render-response (state)
   "Build a canonical response from completed STATE, never from partial data."

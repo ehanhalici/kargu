@@ -11,6 +11,8 @@
 ;;; Code:
 
 (require 'kargu/core)
+(require 'kargu/contract/result)
+(require 'kargu/application/budget)
 (require 'kargu/config)
 (require 'kargu/history)
 (require 'kargu/api/tools)

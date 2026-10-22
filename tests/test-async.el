@@ -77,5 +77,41 @@
       (kargu-async-add-cleanup task (lambda () (push 'late cleaned)))
       (should (equal cleaned '(late first second))))))
 
+(ert-deftest kargu-async-explicit-scope-and-hierarchy-test ()
+  "Async tasks track explicit owner, parent, deadline and buffer (Contract 2)."
+  (let ((kargu-async--pending nil))
+    (with-temp-buffer
+      (let* ((orig-buf (current-buffer))
+             (deadline (+ (float-time) 5.0))
+             (parent (kargu-async-start #'ignore :owner "owner-a" :buffer orig-buf :deadline deadline))
+             (child1 (kargu-async-start #'ignore :owner "owner-a" :parent parent :buffer orig-buf))
+             (child2 (kargu-async-start #'ignore :owner "owner-a" :parent parent :buffer orig-buf))
+             (sibling (kargu-async-start #'ignore :owner "owner-b" :buffer orig-buf)))
+        (should (stringp (kargu-async-task-id parent)))
+        (should (string-prefix-p "task-" (kargu-async-task-id parent)))
+        (should (equal (kargu-async-task-owner parent) "owner-a"))
+        (should (eq (kargu-async-task-parent child1) parent))
+        (should (eq (kargu-async-task-parent child2) parent))
+        (should-not (kargu-async-task-parent parent))
+        (should (= (length kargu-async--pending) 4))
+
+        ;; Cancelling child1 cancels only child1
+        (kargu-async-cancel child1)
+        (should (eq (kargu-async-task-state child1) :cancelled))
+        (should (eq (kargu-async-task-state child2) :pending))
+        (should (eq (kargu-async-task-state parent) :pending))
+        (should (eq (kargu-async-task-state sibling) :pending))
+
+        ;; Cancelling parent cancels parent and remaining child2, but leaves sibling untouched
+        (kargu-async-cancel parent)
+        (should (eq (kargu-async-task-state parent) :cancelled))
+        (should (eq (kargu-async-task-state child2) :cancelled))
+        (should (eq (kargu-async-task-state sibling) :pending))
+
+        ;; Cancelling owner-b cancels sibling
+        (kargu-async-cancel-owner "owner-b")
+        (should (eq (kargu-async-task-state sibling) :cancelled))
+        (should-not kargu-async--pending)))))
+
 (provide 'tests/test-async)
 ;;; test-async.el ends here

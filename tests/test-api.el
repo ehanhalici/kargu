@@ -136,7 +136,7 @@
            (kargu--busy t) (kargu-stream t)
            (requests 0) options results)
       (unwind-protect
-          (cl-letf (((symbol-function 'kargu-circuit-allow-request-p) (lambda () t))
+          (cl-letf (((symbol-function 'kargu-circuit-allow-request-p) (lambda (&optional _scope) t))
                     ((symbol-function 'plz)
                      (lambda (_method _url &rest args)
                        (cl-incf requests) (setq options args) old))
@@ -193,7 +193,7 @@
   (dolist (completed '(nil t))
     (let ((kargu--generation 70) (kargu--current-process nil)
           (kargu-stream t) (requests 0) (delivered 0))
-      (cl-letf (((symbol-function 'kargu-circuit-allow-request-p) (lambda () t))
+      (cl-letf (((symbol-function 'kargu-circuit-allow-request-p) (lambda (&optional _scope) t))
                 ((symbol-function 'plz)
                  (lambda (_method _url &rest options)
                    (cl-incf requests)

@@ -15,6 +15,7 @@
 
 (require 'cl-lib)
 (require 'kargu/contract/assert)
+(require 'kargu/application/budget)
 
 (defvar kargu--loop-run nil)
 (defvar kargu--busy nil)
@@ -33,6 +34,8 @@
   (generation 0)
   (session nil)
   (origin nil)
+  (circuit-scope nil :read-only t)
+  (budget nil :read-only t)
   (state :pending)
   (process nil)
   (retry-timer nil)
@@ -40,10 +43,11 @@
 
 (cl-defun kargu-logical-request-create (&key id (generation 0) session origin
                                              (state :pending) process
-                                             retry-timer stream-timer)
+                                             retry-timer stream-timer circuit-scope budget)
   "Create a validated `kargu-logical-request' record.
 ID, GENERATION, SESSION, ORIGIN, STATE, PROCESS, RETRY-TIMER and
-STREAM-TIMER initialize the owned fields."
+STREAM-TIMER initialize the owned fields.
+CIRCUIT-SCOPE and BUDGET retain the initial request's accounting owners."
   (kargu-contract-assert #'integerp generation
                          "GENERATION must be an integer: %S" generation)
   (kargu-contract-assert (lambda (s)
@@ -54,6 +58,7 @@ STREAM-TIMER initialize the owned fields."
    :generation generation
    :session session
    :origin origin
+   :circuit-scope circuit-scope :budget budget
    :state state
    :process process
    :retry-timer retry-timer
@@ -121,23 +126,103 @@ STREAM-TIMER initialize the owned fields."
 (cl-defstruct (kargu-application
                (:constructor kargu-application--create))
   "Owned application coordinator for single-run and lifecycle state."
+  (id (format "app-%s-%06x"
+              (format-time-string "%Y%m%d%H%M%S")
+              (random #xffffff)) :read-only t)
   (status :idle)
   (active-run nil)
+  (active-claim-token nil)
   (active-request nil)
-  (generation 0))
+  (generation 0)
+  (session-id nil)
+  (run-id nil)
+  (budget nil))
 
-(cl-defun kargu-application-create (&key (status :idle) active-run
-                                         active-request (generation 0))
+(defconst kargu-application--transition-table
+  '((:idle
+     :idle :starting :running :requesting :waiting-model :busy
+     :executing-tools :verifying :compacting :stopped :pause)
+    (:starting
+     :starting :running :requesting :waiting-model :executing-tool :executing-tools :idle :stopped :error)
+    (:running
+     :running :requesting :streaming :waiting-model :executing-tool :executing-tools
+     :waiting-approval :compacting :verifying :done :stopped :error :limit :pause :idle :busy)
+    (:requesting
+     :requesting :streaming :waiting-model :executing-tool :executing-tools
+     :waiting-approval :compacting :verifying :done :stopped :error :limit :pause :running :idle :busy)
+    (:streaming
+     :streaming :executing-tool :executing-tools :waiting-approval :compacting :verifying
+     :done :stopped :error :limit :pause :running :idle)
+    (:waiting-model
+     :waiting-model :streaming :requesting :executing-tool :executing-tools :done :stopped :error :idle :running :busy :pause)
+    (:executing-tool
+     :executing-tool :executing-tools :requesting :waiting-model :waiting-approval :verifying
+     :done :stopped :error :limit :pause :running :idle)
+    (:executing-tools
+     :executing-tools :executing-tool :requesting :waiting-model :waiting-approval :verifying
+     :done :stopped :error :limit :pause :running :idle)
+    (:waiting-approval
+     :waiting-approval :executing-tool :executing-tools :requesting :done :stopped :error :idle :running)
+    (:compacting
+     :compacting :requesting :waiting-model :executing-tools :executing-tool :done :stopped :error :idle :running)
+    (:verifying
+     :verifying :requesting :executing-tools :executing-tool :done :stopped :error :idle :running)
+    (:done
+     :done :idle :starting :running)
+    (:stopped
+     :stopped :idle :starting :running :error :requesting)
+    (:error
+     :error :idle :starting :running :requesting :waiting-model)
+    (:limit
+     :limit :idle :starting :running)
+    (:pause
+     :pause :idle :running :requesting :starting :waiting-model :stopped :error)
+    (:busy
+     :busy :idle :running :requesting :waiting-model :stopped :error :done))
+  "Alist mapping each lifecycle status to its permitted next statuses.")
+
+(defun kargu-application-valid-transition-p (from-status to-status)
+  "Return non-nil when transitioning from FROM-STATUS to TO-STATUS is permitted."
+  (let ((allowed (alist-get from-status kargu-application--transition-table)))
+    (memq to-status allowed)))
+
+(defun kargu-application-transition (app new-status &optional _reason)
+  "Transition APP's status to NEW-STATUS using the transition table.
+Signals an error if the transition from current status is disallowed.
+Returns NEW-STATUS."
+  (let* ((target (kargu-application-context app))
+         (current (kargu-application-status target)))
+    (unless (or (kargu-application-valid-transition-p current new-status)
+                ;; Accommodate unmigrated legacy modules when no owned claim is active on default coordinator
+                (and (null app)
+                     (null (kargu-application-active-claim-token target))
+                     (assq new-status kargu-application--transition-table)))
+      (error "Kargu: invalid application status transition from %S to %S"
+             current new-status))
+    (setf (kargu-application-status target) new-status)
+    new-status))
+
+(cl-defun kargu-application-create (&key id (status :idle) active-run
+                                         active-claim-token active-request
+                                         (generation 0) session-id run-id budget)
   "Create a validated `kargu-application' coordinator record.
-STATUS, ACTIVE-RUN, ACTIVE-REQUEST and GENERATION initialize the fields."
+ID, STATUS, ACTIVE-RUN, ACTIVE-CLAIM-TOKEN, ACTIVE-REQUEST, GENERATION,
+SESSION-ID, RUN-ID and BUDGET initialize the fields."
   (kargu-contract-assert #'keywordp status "STATUS must be a keyword: %S" status)
   (kargu-contract-assert #'integerp generation
                          "GENERATION must be an integer: %S" generation)
   (kargu-application--create
+   :id (or id (format "app-%s-%06x"
+                      (format-time-string "%Y%m%d%H%M%S")
+                      (random #xffffff)))
    :status status
    :active-run active-run
+   :active-claim-token active-claim-token
    :active-request active-request
-   :generation generation))
+   :generation generation
+   :session-id session-id
+   :run-id run-id
+   :budget budget))
 
 (defvar kargu-application--context nil
   "Owned default application coordinator instance, initialized on demand.")
@@ -159,24 +244,86 @@ STATUS, ACTIVE-RUN, ACTIVE-REQUEST and GENERATION initialize the fields."
 (defun kargu-application-set-status (status &optional app)
   "Set the lifecycle STATUS keyword on APP or the active coordinator."
   (kargu-contract-assert #'keywordp status "STATUS must be a keyword: %S" status)
-  (let ((target (kargu-application-context app)))
-    (setf (kargu-application-status target) status)
-    status))
+  (kargu-application-transition app status))
 
 (defun kargu-application-current-run (&optional app)
   "Return the active run record for APP or the active coordinator."
   (if app
       (kargu-application-active-run (kargu-application-context app))
-    (or kargu--loop-run
-        (kargu-application-active-run (kargu-application-context)))))
+    (or (kargu-application-active-run (kargu-application-context))
+        kargu--loop-run)))
 
 (defun kargu-application-set-active-run (run &optional app)
-  "Set RUN as the active run on APP or the active coordinator."
+  "Set RUN as the active run on APP or the active coordinator.
+Signals an error if APP already has an active run and RUN is non-nil."
   (let ((target (kargu-application-context app)))
+    (when (and run (kargu-application-active-run target)
+               (not (equal (kargu-application-active-run target) run)))
+      (error "Kargu: application already has an active run (ARCH-01): %S"
+             (kargu-application-active-run target)))
     (setf (kargu-application-active-run target) run)
     (unless app
       (setq kargu--loop-run run))
     run))
+
+(cl-defstruct (kargu-application-claim
+               (:constructor kargu-application-claim--create))
+  "Active claim token for single-run execution on an application instance."
+  (id nil :read-only t)
+  (token nil :read-only t)
+  (app nil :read-only t)
+  (app-id nil :read-only t)
+  (run-id nil :read-only t)
+  (session-id nil :read-only t)
+  (mode nil :read-only t)
+  (created-at (float-time) :read-only t))
+
+(defun kargu-application-claim (app &rest plist)
+  "Claim execution on APP for arguments in PLIST.
+PLIST accepts `:run-id', `:session-id', `:mode' and optional `:no-error'.
+Signals an error if APP already has an active run or active claim (ARCH-01).
+Returns a `kargu-application-claim' token on success."
+  (let* ((target (kargu-application-context app))
+         (session-id (plist-get plist :session-id))
+         (mode (plist-get plist :mode))
+         (no-error (plist-get plist :no-error)))
+    (if (or (kargu-application-active-run target)
+            (kargu-application-active-claim-token target)
+            (kargu-application-work-active-p target))
+        (if no-error
+            nil
+          (error "Kargu: application already has an active run (ARCH-01): %S"
+                 (or (kargu-application-active-run target) "busy")))
+      (let* ((generation (cl-incf (kargu-application-generation target)))
+             (run-id (or (plist-get plist :run-id) (format "run-%d" generation)))
+             (claim-id (format "claim-%d" generation))
+             (claim (kargu-application-claim--create
+                     :id claim-id
+                     :token claim-id
+                     :app target
+                     :app-id (kargu-application-id target)
+                     :run-id run-id
+                     :session-id session-id
+                     :mode mode
+                     :created-at (float-time))))
+        (setf (kargu-application-active-run target) run-id)
+        (setf (kargu-application-active-claim-token target) claim)
+        (setf (kargu-application-status target) :running)
+        claim))))
+
+(defun kargu-application-release (app claim)
+  "Release APP only when CLAIM is its exact active capability, not a run label."
+  (let* ((target (kargu-application-context app))
+         (current (kargu-application-active-claim-token target)))
+    (when (and current (eq current claim))
+      ;; Revoke authority before cleanup can run reentrant callbacks.
+      (setf (kargu-application-active-run target) nil
+            (kargu-application-active-claim-token target) nil
+            (kargu-application-status target) :idle)
+      (when-let* ((request (kargu-application-active-request target)))
+        (setf (kargu-application-active-request target) nil)
+        (kargu-logical-request-cancel request))
+      t)))
 
 (defun kargu-application-current-request (&optional app)
   "Return the active `kargu-logical-request' on APP, or nil."
@@ -189,6 +336,10 @@ STATUS, ACTIVE-RUN, ACTIVE-REQUEST and GENERATION initialize the fields."
    request "REQUEST must be a kargu-logical-request or nil: %S" request)
   (let ((target (kargu-application-context app)))
     (setf (kargu-application-active-request target) request)
+    (when (and request (kargu-logical-request-p request))
+      (setf (kargu-application-generation target)
+            (max (kargu-application-generation target)
+                 (kargu-logical-request-generation request))))
     request))
 
 (defun kargu-application-current-generation (&optional app)
@@ -231,11 +382,23 @@ STATUS, ACTIVE-RUN, ACTIVE-REQUEST and GENERATION initialize the fields."
   "Reset APP's lifecycle status to `:idle' and clear stale references."
   (let ((target (kargu-application-context app)))
     (setf (kargu-application-status target) :idle)
+    (setf (kargu-application-active-claim-token target) nil)
     (when (null (and (not app) kargu--loop-run))
       (setf (kargu-application-active-run target) nil))
     (when (null (and (not app) kargu--busy))
       (setf (kargu-application-active-request target) nil))
+    (setf (kargu-application-budget target) nil)
     target))
+
+(defun kargu-application-budget-get (&optional app)
+  "Return the active run budget record of APP, or nil."
+  (kargu-application-budget (kargu-application-context app)))
+
+(defun kargu-application-set-budget (budget &optional app)
+  "Set BUDGET as the active run budget on APP."
+  (let ((target (kargu-application-context app)))
+    (setf (kargu-application-budget target) budget)
+    budget))
 
 (provide 'kargu/application/coordinator)
 

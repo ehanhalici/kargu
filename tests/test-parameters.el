@@ -10,6 +10,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'kargu)
 (require 'tests/test-helpers)
 (require 'kargu/api/parameters)
 (require 'kargu/api/request)

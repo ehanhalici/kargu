@@ -14,6 +14,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'kargu/contract/assert)
+(require 'kargu/contract/result)
 
 (cl-defstruct (kargu-change-query (:constructor kargu-change-query-create))
   "A change-evidence OPERATION and its borrowed path or opaque VALUE."
@@ -70,6 +71,15 @@ Absence of evidence is not a successful diagnostic verification."
                             (funcall callback result))))))))
     (unless callback (kargu-contract-assert #'stringp result))
     result))
+
+(cl-defun kargu-edit-submit-plan (service plan &key callback)
+  "Submit transaction PLAN to edit SERVICE with optional CALLBACK.
+When no editing provider is installed, reject with unavailable error."
+  (ignore service plan)
+  (let ((result (kargu-err "ERROR: editing provider unavailable; nothing was changed" :unavailable)))
+    (if callback
+        (funcall callback result)
+      result)))
 
 (provide 'kargu/edit)
 ;;; edit.el ends here

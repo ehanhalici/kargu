@@ -17,6 +17,17 @@
 (require 'kargu/config/toml)
 (require 'kargu/config/key)
 
+(defvar kargu-config-revision 0
+  "Monotonic integer revision of the active configuration.")
+
+(defun kargu-config-revision ()
+  "Return current monotonic integer revision of the configuration."
+  kargu-config-revision)
+
+(defun kargu-config-bump-revision ()
+  "Increment and return the variable `kargu-config-revision'."
+  (setq kargu-config-revision (1+ kargu-config-revision)))
+
 (defvar kargu--config-cache nil
   "Cached TOML config plist (:provider :model :providers), or nil.")
 
@@ -58,7 +69,8 @@ Prefer an existing XDG file, then kargu.toml in the Emacs directory."
           (let ((parsed (kargu--read-toml-config path)))
             (setq kargu--config-cache-path path
                   kargu--config-mtime mtime
-                  kargu--config-cache parsed)))
+                  kargu--config-cache parsed)
+            (kargu-config-bump-revision)))
         kargu--config-cache))))
 
 (defun kargu--config-providers ()
@@ -88,6 +100,7 @@ the native UI's separate model-selection step."
 					   (or (kargu-nonempty explicit-model)
                                                (and noninteractive cached-model)))
 				  :effort nil)
+      (kargu-config-bump-revision)
       (when (fboundp 'kargu-api-prefetch-models)
 	(kargu-api-prefetch-models name))
       (kargu-log 'info "provider set to %s (model %s, api %s)"
@@ -171,7 +184,7 @@ the native UI's separate model-selection step."
 (defun kargu-check-setup ()
   "Check API key and dependencies; report in the echo area and log."
   (interactive)
-  (let* ((key (kargu--resolve-api-key))
+  (let* ((key (or (kargu-config-api-key-fast) (kargu--resolve-direct-api-key)))
          (report (kargu--setup-problems
                   key (and (fboundp 'kargu-deps-missing) (kargu-deps-missing))
                   (kargu--missing-dependencies)))

@@ -50,12 +50,14 @@
 
 (ert-deftest kargu-permission-owned-operation-invalidates-obsolete-authority-test ()
   "A delayed decision cannot use a changed session, root or environment."
-  (dolist (change '(session root environment path strict run))
+  (dolist (change '(session root environment path strict run revision))
     (with-temp-buffer
       (let ((process-environment (copy-sequence process-environment))
             (exec-path (copy-sequence exec-path))
             (kargu-permission-strict-mode t)
             (kargu-permission--override-root (kargu-permission-project-root))
+            (kargu--tool-registry (or (and (boundp 'kargu--tool-registry) kargu--tool-registry)
+                                      (kargu-tool-registry-create)))
             (kargu--loop-run nil) held result effect)
         (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
                    (lambda (_command _directory _risks callback) (setq held callback))))
@@ -69,7 +71,8 @@
             ('environment (setenv "KARGU_APPROVAL_TEST" "changed"))
             ('path (push "/untrusted" exec-path))
             ('strict (setq kargu-permission-strict-mode nil))
-            ('run (setq kargu--loop-run (list :state 'tools))))
+            ('run (setq kargu--loop-run (list :state 'tools)))
+            ('revision (cl-incf (kargu-tool-registry-revision kargu--tool-registry))))
           (funcall held t)
           (funcall held t)
           (should-not effect)

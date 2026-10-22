@@ -104,6 +104,7 @@ diagnostics verification."
   :type 'hook
   :group 'kargu-diff)
 
+(require 'kargu/tools/diff/context)
 (require 'kargu/tools/diff/track)
 (require 'kargu/tools/diff/stage)
 (require 'kargu/tools/diff/review)
@@ -448,10 +449,12 @@ Return an ordered list of target plists."
 
 (defun kargu-diff--setup-isolated-patch-workspace (targets patch-string)
   "Create isolated temp directory with TARGETS snapshots and PATCH-STRING."
-  (let ((tmp-dir (make-temp-file "kargu-patch-" t)))
+  (let ((tmp-dir (make-temp-file "kargu-patch-" t))
+        (service (kargu-diff--current-service)))
     (condition-case err
         (let ((git-dir (expand-file-name ".git" tmp-dir))
               (coding-system-for-write 'utf-8-unix))
+          (kargu-edit-service-register-temp-dir service tmp-dir)
           (make-directory (expand-file-name "objects" git-dir) t)
           (make-directory (expand-file-name "refs" git-dir) t)
           (write-region "ref: refs/heads/main\n" nil (expand-file-name "HEAD" git-dir) nil 'silent)
@@ -465,6 +468,7 @@ Return an ordered list of target plists."
           (write-region patch-string nil (expand-file-name ".kargu.patch" tmp-dir) nil 'silent)
           tmp-dir)
       (error
+       (kargu-edit-service-unregister-temp-dir service tmp-dir)
        (ignore-errors (delete-directory tmp-dir t))
        (signal (car err) (cdr err))))))
 
@@ -587,7 +591,7 @@ Return an ordered list of target plists."
                      outcomes)
           (condition-case err
               (progn
-                (when (gethash file kargu-diff--snapshots)
+                (when (gethash file (kargu-diff--service-snapshots))
                   (kargu-diff-rollback file t))
                 (puthash file
                          (list :status :rolled-back
@@ -742,18 +746,23 @@ Return an ordered list of target plists."
 
 (defun kargu-diff--apply-patch-async (tmp-dir targets callback)
   "Run `git apply' asynchronously in TMP-DIR for TARGETS and call CALLBACK."
-  (let* ((proc nil)
+  (let* ((service (kargu-diff--current-service))
+         (proc nil)
          (cleaned nil)
          (cleanup (lambda ()
                     (unless cleaned
                       (setq cleaned t)
-                      (when (processp proc) (kargu-process-cancel proc))
+                      (when (processp proc)
+                        (kargu-edit-service-unregister-process service proc)
+                        (kargu-process-cancel proc))
+                      (kargu-edit-service-unregister-temp-dir service tmp-dir)
                       (ignore-errors (delete-directory tmp-dir t)))))
          (task (kargu-async-start
                 (lambda (plan error)
                   (if error
                       (funcall callback (format "ERROR: %s" error))
-                    (kargu-diff--commit-patch plan callback)))
+                    (kargu-diff-with-service service
+                      (kargu-diff--commit-patch plan callback))))
                 :cancel cleanup)))
     (setq proc
           (kargu-process-run
@@ -773,7 +782,8 @@ Return an ordered list of target plists."
                      (kargu-async-finish task nil (kargu-process-failure "git apply" res))))
                (funcall cleanup)))
            :dir tmp-dir))
-    (unless proc
+    (if proc
+        (kargu-edit-service-register-process service proc)
       (funcall cleanup))
     nil))
 
@@ -794,9 +804,11 @@ receives the final summary once all file reviews have finished."
          (tmp-dir (kargu-diff--setup-isolated-patch-workspace targets norm-patch)))
     (if callback
         (kargu-diff--apply-patch-async tmp-dir targets callback)
-      (let ((plan (unwind-protect
-                      (kargu-diff--run-git-apply-sync tmp-dir targets)
-                    (ignore-errors (delete-directory tmp-dir t)))))
+      (let* ((service (kargu-diff--current-service))
+             (plan (unwind-protect
+                       (kargu-diff--run-git-apply-sync tmp-dir targets)
+                     (kargu-edit-service-unregister-temp-dir service tmp-dir)
+                     (ignore-errors (delete-directory tmp-dir t)))))
         (kargu-diff--commit-patch plan nil)))))
 
 (defun kargu-diff--apply-patch-tool (args &optional callback)
@@ -918,18 +930,20 @@ Format:
 (defun kargu-diff-install ()
   "Attach editing and evidence providers at application composition."
   (advice-add 'kargu-query-changes :override #'kargu-diff-query-changes)
-  (advice-add 'kargu-edit-submit :override #'kargu-diff-submit-edit))
+  (advice-add 'kargu-edit-submit :override #'kargu-diff-submit-edit)
+  (advice-add 'kargu-edit-submit-plan :override #'kargu-diff-submit-plan))
 
 (defun kargu/tools/diff-unload-function ()
   "Refuse unloading an active adapter or one retaining recoverable edits."
   (when (or (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
             (kargu-diff-snapshot-paths) (kargu-diff-changed-files)
-            (> (hash-table-count kargu-diff--sessions) 0)
+            (> (hash-table-count (kargu-diff--service-reviews)) 0)
             (seq-some (lambda (spec) (kargu-find-tool (car spec)))
                       kargu-diff--tool-specs))
     (user-error "Kargu: stop, resolve edits/reviews and unregister diff tools before unloading"))
   (advice-remove 'kargu-query-changes #'kargu-diff-query-changes)
   (advice-remove 'kargu-edit-submit #'kargu-diff-submit-edit)
+  (advice-remove 'kargu-edit-submit-plan #'kargu-diff-submit-plan)
   nil)
 
 (provide 'kargu/tools/diff)

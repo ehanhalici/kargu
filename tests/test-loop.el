@@ -487,7 +487,7 @@
            (kargu-circuit--failure-count 3)
            (record (symbol-function 'kargu-circuit-record-success)))
       (cl-letf (((symbol-function 'kargu-circuit-record-success)
-                 (lambda () (cl-incf successes) (funcall record)))
+                 (lambda (&optional scope) (cl-incf successes) (funcall record scope)))
                 ((symbol-function 'kargu--record-usage) #'ignore)
                 ((symbol-function 'kargu--loop-request) #'ignore)
                 ((symbol-function 'kargu--loop-finish) #'ignore))

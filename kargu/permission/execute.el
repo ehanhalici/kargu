@@ -15,6 +15,10 @@
 (require 'kargu/core/session)
 (require 'kargu/async)
 
+(require 'kargu/tools/registry)
+
+(defvar kargu--tool-registry)
+
 (cl-defstruct (kargu-permission-operation
                (:constructor kargu-permission--make-operation))
   "One approval's captured authority and single-use execution phase."
@@ -24,7 +28,8 @@
   (session nil :read-only t) (owner nil :read-only t)
   (environment nil :read-only t) (path nil :read-only t)
   (strict nil :read-only t) (validator nil :read-only t)
-  (start nil :read-only t) task (phase :approval))
+  (start nil :read-only t) (policy-revision nil :read-only t)
+  task (phase :approval))
 
 (defun kargu-permission--directory-identity (directory)
   "Return DIRECTORY's canonical name and filesystem identity, or signal."
@@ -50,6 +55,11 @@
                        (mapcar #'kargu-permission--directory-identity
                                (list (kargu-permission-operation-root operation)
                                      (kargu-permission-operation-directory operation))))
+                (or (null (kargu-permission-operation-policy-revision operation))
+                    (and (boundp 'kargu--tool-registry)
+                         (kargu-tool-registry-p kargu--tool-registry)
+                         (eql (kargu-permission-operation-policy-revision operation)
+                              (kargu-tool-registry-revision kargu--tool-registry))))
                 (or (null (kargu-permission-operation-validator operation))
                     (funcall (kargu-permission-operation-validator operation))))))))
 
@@ -80,10 +90,11 @@
     (when handle
       (kargu-async-add-cleanup task (lambda () (kargu-cancel-confirmation handle))))))
 
-(cl-defun kargu-permission-execute (&key command directory risks start callback valid-p)
+(cl-defun kargu-permission-execute (&key command directory risks start callback valid-p policy-revision)
   "Approve COMMAND in DIRECTORY with RISKS, then invoke START once.
 START receives a result continuation.  CALLBACK receives its result string
 or an ERROR description once.  VALID-P optionally checks domain freshness.
+POLICY-REVISION optionally binds tool registry policy revision.
 Return a task; cancellation or owner replacement suppresses stale effects."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p command)
   (kargu-contract-assert #'kargu-contract-non-empty-string-p directory)
@@ -95,6 +106,10 @@ Return a task; cancellation or owner replacement suppresses stale effects."
   (let* ((root (kargu-permission-project-root))
          (directory (file-name-as-directory (file-truename directory)))
          (_contained (kargu-permission-assert-within-project directory root "approval directory"))
+         (eff-rev (or policy-revision
+                      (and (boundp 'kargu--tool-registry)
+                           (kargu-tool-registry-p kargu--tool-registry)
+                           (kargu-tool-registry-revision kargu--tool-registry))))
          (operation (kargu-permission--make-operation
                      :command (copy-sequence command) :directory directory
                      :risks (mapcar #'copy-sequence risks) :root root
@@ -103,7 +118,7 @@ Return a task; cancellation or owner replacement suppresses stale effects."
                      :origin (current-buffer) :session (kargu-session-context)
                      :owner kargu--loop-run :environment (copy-sequence process-environment)
                      :path (copy-sequence exec-path) :strict kargu-permission-strict-mode
-                     :validator valid-p :start start))
+                     :validator valid-p :policy-revision eff-rev :start start))
          (task (kargu-async-start
                 (lambda (value error)
                   (funcall callback (if error (concat "ERROR: " error) value)))

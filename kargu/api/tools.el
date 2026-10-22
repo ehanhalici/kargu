@@ -19,6 +19,7 @@
 (require 'kargu/async)
 (require 'kargu/permission/guards)
 (require 'kargu/tools/registry)
+(require 'kargu/tools/execution)
 
 ;;;; Tool registry ---------------------------------------------------------
 
@@ -62,8 +63,9 @@ Consumers must treat definition fields and nested values as read-only."
   (kargu-tool-registry-find kargu--tool-registry name))
 
 (defun kargu-unregister-tool (name)
-  "Remove tool NAME and its aliases, or just NAME when it is an alias."
-  (kargu-tool-registry-remove kargu--tool-registry name))
+  "Remove tool NAME and its aliases, or just NAME when it is an alias.
+Drains and cancels active tasks before unregistering."
+  (kargu-tool-execution-drain kargu--tool-registry name :cancel-p t))
 
 (defun kargu-canonical-tool-name (name)
   "Return the canonical tool name for NAME, resolving compatibility aliases."
@@ -244,107 +246,9 @@ JSON false, nil, \"false\", and 0 are false.  A missing value is false."
       (format "ERROR: missing file_path (also accepted: filePath, path). Got keys: %s"
               keys))))
 
-(defvar kargu--truncated-counter 0
-  "Monotonic counter for truncated output buffer names.")
-
-(defvar-local kargu--tool-output-root nil
-  "Canonical project owning this generated tool output buffer.")
-
-(defcustom kargu-tool-output-archive-max-buffers 32
-  "Maximum number of unmodified generated output buffers to retain.
-Zero disables new archives.  User-edited and visiting buffers are detached
-from the archive and never killed to enforce its quota."
-  :type 'natnum :group 'kargu)
-
-(defcustom kargu-tool-output-archive-max-chars 8000000
-  "Total character budget for generated tool output archives.
-A larger single result keeps only its initial characters.  Zero disables
-new archives; detached user buffers do not count toward this budget."
-  :type 'natnum :group 'kargu)
-
-(defvar kargu--tool-output-archive nil
-  "Generated output buffers ordered from oldest to newest.")
-
-(defvar-local kargu--tool-output-tick nil
-  "Modification tick immediately after generated output was inserted.")
-
-(defun kargu--tool-output-evictable-p (buffer)
-  "Return non-nil when BUFFER remains an untouched generated archive."
-  (and (buffer-live-p buffer)
-       (with-current-buffer buffer
-         (and kargu--tool-output-root (not buffer-file-name)
-              (not (buffer-modified-p))
-              (eql kargu--tool-output-tick (buffer-chars-modified-tick))))))
-
-(defun kargu--prune-tool-output (incoming)
-  "Evict oldest untouched archives to make room for INCOMING characters."
-  (setq kargu--tool-output-archive
-        (seq-filter #'kargu--tool-output-evictable-p kargu--tool-output-archive))
-  (let ((count (length kargu--tool-output-archive))
-        (chars (cl-loop for buffer in kargu--tool-output-archive
-                        sum (with-current-buffer buffer (buffer-size)))))
-    (while (and kargu--tool-output-archive
-                (or (>= count kargu-tool-output-archive-max-buffers)
-                    (> (+ chars incoming) kargu-tool-output-archive-max-chars)))
-      (let ((oldest (pop kargu--tool-output-archive)))
-        (cl-decf count)
-        (cl-decf chars (with-current-buffer oldest (buffer-size)))
-        (let ((kill-buffer-query-functions nil))
-          (kill-buffer oldest))))))
-
-(defun kargu-tool-output-buffer (name)
-  "Return the generated output buffer NAME owned by the current project.
-User buffers and buffers converted into visiting files are never accepted."
-  (when (stringp name)
-    (let ((buffer (get-buffer name))
-          (root (kargu-permission-project-root)))
-      (when (and (buffer-live-p buffer)
-                 (with-current-buffer buffer
-                   (and (not buffer-file-name) (equal kargu--tool-output-root root))))
-        buffer))))
-
-(defun kargu--preserve-tool-output (string)
-  "Archive STRING within the quotas; return its buffer name, or nil.
-The buffer belongs to the current project.  An oversized STRING retains
-only the initial `kargu-tool-output-archive-max-chars' characters."
-  (when (and (> kargu-tool-output-archive-max-buffers 0)
-             (> kargu-tool-output-archive-max-chars 0))
-    (let ((chars (min (length string) kargu-tool-output-archive-max-chars))
-          (root (kargu-permission-project-root)))
-      (kargu--prune-tool-output chars)
-      (let ((buffer (generate-new-buffer
-                     (format "*kargu-output-%d*" (cl-incf kargu--truncated-counter)))))
-        (with-current-buffer buffer
-          (insert (substring string 0 chars))
-          (setq-local kargu--tool-output-root root
-                      kargu--tool-output-tick (buffer-chars-modified-tick)
-                      buffer-offer-save nil
-                      buffer-read-only t)
-          (set-buffer-modified-p nil))
-        (setq kargu--tool-output-archive (nconc kargu--tool-output-archive (list buffer)))
-        (buffer-name buffer)))))
-
-(defun kargu--tool-output-archive-note (name total)
-  "Describe archived output NAME, reporting partial storage against TOTAL."
-  (if (not name) "Output not archived (archive quota is zero)."
-    (let ((stored (with-current-buffer (get-buffer name) (buffer-size))))
-      (format "%s preserved in buffer '%s'. Archives may be evicted; read ranges with read_file path='%s' from_line=N to_line=M."
-              (if (= stored total) (format "Complete output (%d chars)" total)
-                (format "Only the first %d of %d chars" stored total)) name name))))
-
 (defun kargu--truncate-for-model (string)
-  "Truncate STRING to `kargu-tool-output-limit' characters.
-Archive storage is bounded separately and its notice describes any loss."
-  (let ((kargu-tool-output-limit
-         (kargu-usage-limit kargu-tool-output-limit kargu-low-usage-output-limit)))
-    (if (and (natnump kargu-tool-output-limit)
-             (> (length string) kargu-tool-output-limit))
-	(let* ((omitted (- (length string) kargu-tool-output-limit))
-               (buf-name (kargu--preserve-tool-output string)))
-          (concat (substring string 0 kargu-tool-output-limit)
-                  (format "\n... [Output truncated: omitted %d chars. %s]"
-                          omitted (kargu--tool-output-archive-note buf-name (length string)))))
-      string)))
+  "Bound STRING through the shared tool output boundary."
+  (kargu-tool-execution-truncate-for-model string))
 
 (defmacro kargu-safe-tool-call (&rest body)
   "Execute BODY, catching errors and formatting as an ERROR string."
@@ -352,92 +256,21 @@ Archive storage is bounded separately and its notice describes any loss."
        (progn ,@body)
      (error (format "ERROR: %s" (error-message-string err)))))
 
-(defun kargu--format-tool-result (res)
-  "Format tool execution result RES as a string for consumption."
-  (cond
-   ((null res) "OK (no output)")
-   ((stringp res)
-    (if (string-empty-p res) "OK (no output)" res))
-   (t (kargu-json-encode-record res))))
-
-(defun kargu--tool-raw-args (arguments)
-  "Return raw string representation of ARGUMENTS for logging."
-  (cond
-   ((stringp arguments) arguments)
-   ((or (null arguments) (eq arguments :json-null)) "")
-   (t (condition-case nil
-          (kargu-json-encode-record arguments)
-        (error (format "%S" arguments))))))
-
-(defun kargu--executor-async-p (executor)
-  "Non-nil when EXECUTOR accepts a completion callback as second argument."
-  (let ((arity (func-arity executor)))
-    (or (eq (cdr arity) 'many)
-        (>= (cdr arity) 2))))
-
-(defun kargu--execute-tool-async (executor args name callback)
-  "Run tool NAME's EXECUTOR with ARGS and deliver once to CALLBACK."
-  (let* ((task (kargu-async-start
-                (lambda (value error)
-                  (funcall callback (if error (format "ERROR: tool %s failed: %s" name error)
-                                      value)))))
-         (on-done
-          (kargu-async-wrap
-           task (lambda (res)
-                  (let* ((formatted (kargu--format-tool-result res))
-                         (final (kargu--truncate-for-model formatted)))
-                    (kargu--log-block (format "tool %s result" name) formatted)
-                    (kargu-async-finish task final))))))
-    (funcall
-     (kargu-async-wrap
-      task (lambda ()
-             (if (kargu--executor-async-p executor)
-                 (let ((result (funcall executor args on-done)))
-                   (when (and (stringp result) (string-prefix-p "ERROR:" result))
-                     (funcall on-done result)))
-               (funcall on-done (funcall executor args))))))))
-
-(defun kargu--execute-tool-sync (executor args name)
-  "Run tool NAME's EXECUTOR with ARGS and return the truncated result."
-  (let ((out
-         (condition-case-unless-debug err
-             (kargu--format-tool-result (funcall executor args))
-           (error
-            (format "ERROR: tool %s failed: %s"
-                    name (error-message-string err))))))
-    (kargu--log-block (format "tool %s result" name) out)
-    (kargu--truncate-for-model out)))
-
 (defun kargu-execute-tool (name arguments &optional callback)
-  "Run tool NAME with ARGUMENTS; ALWAYS return a result string or invoke CALLBACK.
-When CALLBACK is provided, run asynchronously if the tool supports it.
-Errors are captured and returned as \"ERROR: ...\" results so the
-agent loop can feed them back to the model for self-correction."
-  (let* ((definition (kargu-find-tool name))
-         (raw (kargu--tool-raw-args arguments))
-         (args (kargu--decode-tool-arguments arguments)) refusal)
-    (kargu--log-block (format "tool %s arguments (raw)" name) raw
-                      (kargu--log-looks-json-p raw))
-    (kargu--log-block (format "tool %s arguments (parsed)" name)
-                      (format "%S" args))
-    (kargu-log 'debug "execute-tool %s args=%s" name
-               (truncate-string-to-width (format "%s" args) 200))
-    (cond
-     ((null definition)
-      (let ((out (format "ERROR: no such tool: %s" name)))
-        (if callback (funcall callback out) out)))
-     ((setq refusal (kargu-tool-policy-error name))
-      (if callback (funcall callback refusal) refusal))
-     ((eq args :invalid)
-      (let ((out (format "ERROR: the arguments of tool %s are not a valid JSON object; send one JSON object. Received: %s"
-                         name (truncate-string-to-width raw 200))))
-        (if callback (funcall callback out) out)))
-     (callback
-      (kargu--execute-tool-async
-       (kargu-tool-definition-executor definition) args name callback))
-     (t
-      (kargu--execute-tool-sync
-       (kargu-tool-definition-executor definition) args name)))))
+  "Execute NAME with ARGUMENTS through the shared gate once.
+CALLBACK receives the asynchronous result; without it, no waiting occurs."
+  (let* ((run (bound-and-true-p kargu--loop-run))
+         (context (kargu-tool-execution-context-create
+                   :root (or (plist-get run :project-root) (kargu-permission-project-root))
+                   :mode (or (plist-get run :mode) (kargu-state-mode))
+                   :budget-scope (plist-get run :budget)
+                   :policy-revision (kargu-tool-registry-revision kargu--tool-registry))))
+    (if callback
+        (progn
+          (kargu-tool-gate-execute kargu--tool-registry context name arguments
+                                 :callback callback)
+          nil)
+      (kargu-tool-gate-execute-sync kargu--tool-registry context name arguments))))
 
 (provide 'kargu/api/tools)
 

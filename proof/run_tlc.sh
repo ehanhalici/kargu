@@ -4,10 +4,12 @@
 #   ./run_tlc.sh                 exhaustive breadth-first scan (the proof)
 #   ./run_tlc.sh --plan          exhaustive plan-ownership scan
 #   ./run_tlc.sh --mode          exhaustive session-mode preparation scan
+#   ./run_tlc.sh --budget        exhaustive run-budget scan
 #   ./run_tlc.sh --restore       exhaustive prepared-restoration scan
 #   ./run_tlc.sh --selection     exhaustive owned-selection scan
 #   ./run_tlc.sh --approval      exhaustive captured-approval scan
 #   ./run_tlc.sh --process       exhaustive process-capture scan
+#   ./run_tlc.sh --process-session exhaustive interactive session scan
 #   ./run_tlc.sh --diagnostics   exhaustive diagnostic-ownership scan
 #   ./run_tlc.sh --debug-startup exhaustive debugger-startup ownership scan
 #   ./run_tlc.sh --debug-close   exhaustive scoped-debugger shutdown scan
@@ -17,6 +19,8 @@
 #   ./run_tlc.sh --edit-transaction exhaustive reviewed edit transaction scan
 #   ./run_tlc.sh --debug-selection exhaustive debugger-selection scan
 #   ./run_tlc.sh --debug-readiness exhaustive debugger-readiness scan
+#   ./run_tlc.sh --connection    exhaustive connection-snapshot scan
+#   ./run_tlc.sh --transport     exhaustive transport-contract scan
 #   ./run_tlc.sh --simulate [N]  random simulation of N behaviors (default
 #                                100000): a quick smoke test, NOT a proof
 #   ./run_tlc.sh <tlc args...>   any other arguments go to TLC as they are
@@ -55,6 +59,10 @@ elif [[ "$1" == "--mode" ]]; then
     MODE="exhaustive session-mode preparation scan"
     SPECIFICATION="ModeMC.tla (KarguMode)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config ModeMC.cfg ModeMC.tla)
+elif [[ "$1" == "--budget" ]]; then
+    MODE="exhaustive run-budget scan"
+    SPECIFICATION="BudgetMC.tla (KarguBudget)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config BudgetMC.cfg BudgetMC.tla)
 elif [[ "$1" == "--plan" ]]; then
     MODE="exhaustive plan-ownership scan"
     SPECIFICATION="PlanMC.tla (KarguPlan)"
@@ -71,6 +79,10 @@ elif [[ "$1" == "--process" ]]; then
     MODE="exhaustive process-capture scan"
     SPECIFICATION="ProcessMC.tla (KarguProcess)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config ProcessMC.cfg ProcessMC.tla)
+elif [[ "$1" == "--process-session" ]]; then
+    MODE="exhaustive interactive process-session scan"
+    SPECIFICATION="ProcessSessionMC.tla (KarguProcessSession)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config ProcessSessionMC.cfg ProcessSessionMC.tla)
 elif [[ "$1" == "--diagnostics" ]]; then
     MODE="exhaustive diagnostic-ownership scan"
     SPECIFICATION="DiagnosticsMC.tla (KarguDiagnostics)"
@@ -107,6 +119,14 @@ elif [[ "$1" == "--debug-readiness" ]]; then
     MODE="exhaustive debugger-readiness scan"
     SPECIFICATION="DebugReadinessMC.tla (KarguDebugReadiness)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config DebugReadinessMC.cfg DebugReadinessMC.tla)
+elif [[ "$1" == "--connection" ]]; then
+    MODE="exhaustive connection-snapshot scan"
+    SPECIFICATION="ConnectionMC.tla (KarguConnection)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config ConnectionMC.cfg ConnectionMC.tla)
+elif [[ "$1" == "--transport" ]]; then
+    MODE="exhaustive transport-contract scan"
+    SPECIFICATION="TransportMC.tla (KarguTransport)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config TransportMC.cfg TransportMC.tla)
 elif [[ "$1" == "--simulate" ]]; then
     MODE="random simulation (not a proof)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -simulate "num=${2:-100000}" MC.tla)

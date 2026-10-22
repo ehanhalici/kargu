@@ -487,7 +487,8 @@
 
 (ert-deftest kargu-execute-tool-async-bash-test ()
   "Tool execution delegates to a callback asynchronously for Bash."
-  (let* ((kargu-permission-confirm-bash nil)
+  (let* ((_ (kargu-test-mode 'agent))
+         (kargu-permission-confirm-bash nil)
          (done nil)
          (result nil))
     (kargu-execute-tool "bash" '(("command" . "echo tool_exec_async_test"))

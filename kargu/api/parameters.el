@@ -7,13 +7,17 @@
 ;;; Commentary:
 
 ;; Select one output cap and supported sampling fields without model-name
-;; heuristics.  Metadata is interpreted by the catalog, defaults by providers.
+;; heuristics (RISK-02).  Metadata is interpreted by the catalog, defaults by providers.
+;; Evaluates reasoning effort compatibility without ad-hoc model regexes.
 
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 (require 'kargu/api/catalog)
 (require 'kargu/providers/catalog)
+
+(declare-function kargu-reasoning-effort-level "kargu/api/request" ())
 
 (defconst kargu-api-parameters--token-keys '("max_tokens" "max_completion_tokens")
   "Output-limit fields supported by the native chat-completions adapter.")
@@ -28,10 +32,12 @@
      ((member preferred parameters) preferred)
      (t (cl-find-if (lambda (key) (member key parameters)) kargu-api-parameters--token-keys)))))
 
-(cl-defun kargu-api-request-parameters (&key model provider temperature max-tokens)
+(cl-defun kargu-api-request-parameters (&key model provider temperature max-tokens
+                                             reasoning-effort)
   "Return native request entries for MODEL at PROVIDER.
-TEMPERATURE is included only when declared supported.  MAX-TOKENS uses one
-accepted cap field; refuse an explicit cap that cannot be represented.
+TEMPERATURE is included only when declared supported and not disallowed
+by REASONING-EFFORT capability.  MAX-TOKENS uses one accepted cap field;
+refuse an explicit cap that cannot be represented.
 Unknown model parameters use the catalog's format/provider policy."
   (unless (or (null temperature) (numberp temperature))
     (user-error "Kargu: temperature must be a number or nil"))
@@ -40,12 +46,23 @@ Unknown model parameters use the catalog's format/provider policy."
   (let* ((policy (kargu-provider-request-policy provider))
          (parameters (kargu-model-request-parameters model provider))
          (token-key (kargu-api-parameters--token-key policy parameters))
-         (sampling (if parameters parameters (plist-get policy :sampling-parameters))))
+         (sampling (if parameters parameters (plist-get policy :sampling-parameters)))
+         (effort (or reasoning-effort
+                     (and (fboundp 'kargu-reasoning-effort-level)
+                          (kargu-reasoning-effort-level))))
+         (reasoning-active-p (and effort
+                                  (not (member (downcase (format "%s" effort))
+                                               '("" "nil" "off")))))
+         (disallow-temp (and reasoning-active-p
+                             (plist-get policy :reasoning-disallows-temperature))))
     (when (and max-tokens (null token-key))
       (user-error "Kargu: this model has no supported output-limit field; unset the cap or correct its metadata"))
-    (append (and temperature (member "temperature" sampling)
+    (append (and temperature
+                 (not disallow-temp)
+                 (member "temperature" sampling)
                  `(("temperature" . ,temperature)))
             (and max-tokens (list (cons token-key max-tokens))))))
 
 (provide 'kargu/api/parameters)
+
 ;;; parameters.el ends here

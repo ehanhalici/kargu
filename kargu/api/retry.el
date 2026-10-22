@@ -7,14 +7,21 @@
 ;;; Commentary:
 
 ;; Classify transport failures and schedule bounded asynchronous retries.
+;; Eliminates string matching for control decisions (ARCH-16) by inspecting
+;; canonical `kargu-result-err' symbols and status codes.
+;; Connects retries to the unified run budget (Contract 6 & DEEP-09).
 
 ;;; Code:
 
+(require 'cl-lib)
+(require 'subr-x)
 (require 'plz)
 (require 'time-date)
 (require 'kargu/core)
 (require 'kargu/core/observers)
+(require 'kargu/contract/result)
 (require 'kargu/application/coordinator)
+(require 'kargu/application/budget)
 (require 'kargu/config)
 (require 'kargu/json)
 (require 'kargu/api/response)
@@ -32,6 +39,9 @@ ON-DELTA identifies the original event consumer; no request secrets are exposed.
 (declare-function kargu-http--ensure-logical-request "kargu/api/http"
                   (gen &optional session origin))
 (declare-function kargu-http-clear-busy "kargu/api/http" ())
+(declare-function kargu-http-request-budget "kargu/api/http" (&optional generation))
+(declare-function kargu-http-request-scope "kargu/api/http" (&optional generation))
+(declare-function kargu--provider-name "kargu/config/key" ())
 
 (cl-defun kargu-api--retry-post (generation &key url headers payload callback on-delta attempt)
   "Retry GENERATION's URL with HEADERS and PAYLOAD if it still owns the client.
@@ -102,6 +112,37 @@ available, instead of dumping raw JSON."
        ((stringp status) (string-to-number status))
        (t nil)))))
 
+(defun kargu-api-classify-error-code (err &optional status)
+  "Classify ERR into a canonical domain error symbol.
+STATUS is the numeric HTTP status code, if already extracted."
+  (let ((status (cond
+                 ((integerp status) status)
+                 ((integerp err) err)
+                 (t (kargu--plz-http-status err)))))
+    (cond
+     ((eq status 400) :bad-request)
+     ((eq status 401) :authentication-failed)
+     ((eq status 403) :permission-denied)
+     ((eq status 404) :not-found)
+     ((eq status 429) :rate-limit-exceeded)
+     ((eq status 500) :server-error)
+     ((eq status 502) :bad-gateway)
+     ((eq status 503) :server-error)
+     ((eq status 504) :gateway-timeout)
+     ((eq status 529) :overloaded)
+     ((and (integerp status) (>= status 400))
+      (intern (format ":http-status-%d" status)))
+     ((let ((curl-err (ignore-errors (plz-error-curl-error err))))
+        (and curl-err
+             (pcase (car curl-err)
+               ((or 28 35) :timeout)
+               ((or 51 58 60 77 82 83) :tls-error)
+               ((or 6 7) :connection-failed)
+               (_ :connection-failed)))))
+     ((and (stringp err) (string-match-p "timed? ?out" (downcase err))) :timeout)
+     ((and (stringp err) (string-match-p "tls\\|ssl\\|certificate" (downcase err))) :tls-error)
+     (t :connection-failed))))
+
 (defun kargu--plz-header (err name)
   "Value of response header NAME on plz error ERR, or nil."
   (ignore-errors
@@ -121,17 +162,49 @@ available, instead of dumping raw JSON."
     (when-let* ((raw (and err (kargu--plz-header err "retry-after")))
                 ((stringp raw)))
       (let* ((value (string-trim raw))
-             (seconds
-              (if (string-match-p (rx string-start (+ digit) string-end) value)
-                  (string-to-number value)
-                (condition-case nil
-                    (float-time (time-subtract (date-to-time value) (current-time)))
-                  (error nil)))))
+              (seconds
+               (if (string-match-p (rx string-start (+ digit) string-end) value)
+                   (string-to-number value)
+                 (condition-case nil
+                     (float-time (time-subtract (date-to-time value) (current-time)))
+                   (error nil)))))
         (when seconds (max 0 (min kargu-api-retry-after-max seconds)))))))
 
+(defun kargu--api-error-looks-retryable-p (error-or-code)
+  "Return non-nil when ERROR-OR-CODE indicates a retryable upstream failure.
+Inspects canonical `kargu-result-err' codes, status integers, or symbols,
+retaining fallback string matching only for unclassified error strings."
+  (cond
+   ((kargu-err-p error-or-code)
+    (let ((code (kargu-result-err-code error-or-code)))
+      (or (memq code '(:rate-limit-exceeded :server-error :bad-gateway
+                       :gateway-timeout :overloaded :timeout
+                       :http-status-429 :http-status-500 :http-status-502
+                       :http-status-503 :http-status-504 :http-status-529))
+          (memq code kargu-http-retry-statuses))))
+   ((integerp error-or-code)
+    (memq error-or-code kargu-http-retry-statuses))
+   ((symbolp error-or-code)
+    (memq error-or-code '(:rate-limit-exceeded :server-error :bad-gateway
+                          :gateway-timeout :overloaded :timeout
+                          :http-status-429 :http-status-500 :http-status-502
+                          :http-status-503 :http-status-504 :http-status-529)))
+   ((stringp error-or-code)
+    (let ((s (downcase error-or-code))
+          (retry-alt (mapconcat #'number-to-string kargu-http-retry-statuses "\\|")))
+      (or (string-match-p (format "\\[\\(%s\\)\\]" retry-alt) error-or-code)
+          (string-match-p (format "HTTP \\(%s\\)\\>" retry-alt) error-or-code)
+          (string-match-p "\\<overloaded\\>" s)
+          (string-match-p "temporarily unavailable" s)
+          (string-match-p "upstream error" s))))
+   (t nil)))
+
 (defun kargu--api-retryable-p (err)
-  "Non-nil when ERR is an HTTP status we retry."
-  (memq (kargu--plz-http-status err) kargu-http-retry-statuses))
+  "Non-nil when ERR indicates an HTTP status we retry."
+  (or (and (kargu-err-p err)
+           (kargu--api-error-looks-retryable-p err))
+      (let ((status (kargu--plz-http-status err)))
+        (and status (memq status kargu-http-retry-statuses)))))
 
 (defun kargu--api-retry-delay (attempt err)
   "Seconds to wait before retry ATTEMPT (0-based) after ERR.
@@ -148,38 +221,39 @@ Never below 0.5s, even when Retry-After is 0."
                       (kargu-json-encode-record payload)
                       t)))
 
-(defun kargu--api-error-looks-retryable-p (message)
-  "Return non-nil when MESSAGE indicates a retryable upstream failure."
-  (and (stringp message)
-       (let ((s (downcase message))
-             (retry-alt (mapconcat #'number-to-string kargu-http-retry-statuses "\\|")))
-         (or (string-match-p (format "\\[\\(%s\\)\\]" retry-alt) message)
-             (string-match-p (format "HTTP \\(%s\\)\\>" retry-alt) message)
-             (string-match-p "\\<overloaded\\>" s)
-             (string-match-p "temporarily unavailable" s)
-             (string-match-p "upstream error" s)))))
-
 (defun kargu--api-schedule-retry (url headers payload gen callback on-delta
                                       attempt reason)
   "Schedule another POST to URL with HEADERS and PAYLOAD.
 GEN identifies the request.  CALLBACK receives the result and ON-DELTA
 receives events.  ATTEMPT counts retries and REASON explains this retry.
-Return non-nil if a retry was scheduled."
-  (when (and url
-             (natnump kargu-api-retry-max)
-             (< attempt kargu-api-retry-max))
-    (let* ((delay (kargu--api-retry-delay attempt nil))
-           (req (kargu-http--ensure-logical-request gen)))
-      (kargu-log 'warn "%s; retry %d/%d in %.1fs"
-                 reason (1+ attempt) kargu-api-retry-max delay)
-      (kargu-logical-request-set-retry-timer
-       req
-       (run-at-time delay nil
-                    (lambda ()
-                      (kargu-api--retry-post
-                       gen :url url :headers headers :payload payload :callback callback
-                       :on-delta on-delta :attempt (1+ attempt)))))
-      t)))
+Checks budget before scheduling and halts retry if exhausted (Contract 6).
+Return non-nil if retry or terminal budget refusal handled the response."
+  (let ((budget (kargu-http-request-budget gen)))
+    (if (and budget (not (kargu-budget-live-p budget)))
+        (progn
+          (kargu-http-clear-busy)
+          (kargu-log 'warn "Run budget exhausted; cannot schedule retry: %s"
+                     (kargu-run-budget-status budget))
+          (funcall callback
+                   (kargu-err "Run budget exhausted; cannot retry" :budget-exhausted
+                              (list :reason (kargu-run-budget-status budget)
+                                    :run-id (kargu-run-budget-run-id budget))))
+          t)
+      (when (and url
+                 (natnump kargu-api-retry-max)
+                 (< attempt kargu-api-retry-max))
+        (let* ((delay (kargu--api-retry-delay attempt nil))
+               (req (kargu-http--ensure-logical-request gen)))
+          (kargu-log 'warn "%s; retry %d/%d in %.1fs"
+                     reason (1+ attempt) kargu-api-retry-max delay)
+          (kargu-logical-request-set-retry-timer
+           req
+           (run-at-time delay nil
+                        (lambda ()
+                          (kargu-api--retry-post
+                           gen :url url :headers headers :payload payload :callback callback
+                           :on-delta on-delta :attempt (1+ attempt)))))
+          t)))))
 
 (defun kargu--api-on-transport-error (url headers payload gen callback
                                           on-delta attempt err)
@@ -193,29 +267,42 @@ receives events, and ATTEMPT counts completed retries."
         (when (kargu-nonempty body)
           (kargu--log-block "IN HTTP error body" body
                             (kargu--log-looks-json-p body)))))
-    (if (and (natnump kargu-api-retry-max)
-             (< attempt kargu-api-retry-max)
-             (kargu--api-retryable-p err))
-        (let* ((delay (kargu--api-retry-delay attempt err))
-               (req (kargu-http--ensure-logical-request gen)))
-          (kargu-log 'warn "HTTP %s; retry %d/%d in %.1fs"
-                     (or (kargu--plz-http-status err) "?")
-                     (1+ attempt) kargu-api-retry-max delay)
-          (kargu-logical-request-set-retry-timer
-           req
-           (run-at-time delay nil
-                        (lambda ()
-                          (kargu-api--retry-post
-                           gen :url url :headers headers :payload payload :callback callback
-                           :on-delta on-delta :attempt (1+ attempt))))))
-      (kargu-http-clear-busy)
-      (let ((msg (kargu--plz-error-message err)))
-        (if (or (kargu--api-retryable-p err)
-                (null (kargu--plz-http-status err)))
-            (kargu-circuit-record-failure msg)
-          (kargu-circuit-release-probe))
-        (kargu-log 'error "request failed: %s" msg)
-        (funcall callback (kargu--api-error-alist msg))))))
+    (let* ((scope (kargu-http-request-scope gen))
+           (budget (kargu-http-request-budget gen))
+           (budget-ok (or (null budget) (kargu-budget-live-p budget)))
+           (status (kargu--plz-http-status err))
+           (retryable (kargu--api-retryable-p err)))
+      (if (and (natnump kargu-api-retry-max)
+               (< attempt kargu-api-retry-max)
+               retryable
+               budget-ok)
+          (let* ((delay (kargu--api-retry-delay attempt err))
+                 (req (kargu-http--ensure-logical-request gen)))
+            (kargu-log 'warn "HTTP %s; retry %d/%d in %.1fs"
+                       (or status "?")
+                       (1+ attempt) kargu-api-retry-max delay)
+            (kargu-logical-request-set-retry-timer
+             req
+             (run-at-time delay nil
+                          (lambda ()
+                            (kargu-api--retry-post
+                             gen :url url :headers headers :payload payload :callback callback
+                             :on-delta on-delta :attempt (1+ attempt))))))
+        (kargu-http-clear-busy)
+        (let* ((code (kargu-api-classify-error-code err status))
+               (msg (kargu--plz-error-message err)))
+          (if (or retryable (null status))
+              (kargu-circuit-record-failure msg scope)
+            (kargu-circuit-release-probe scope))
+          (kargu-log 'error "request failed: %s" msg)
+          (cond
+           ((and budget (not budget-ok))
+            (funcall callback
+                     (kargu-err "Run budget exhausted; cannot retry" :budget-exhausted
+                                (list :reason (kargu-run-budget-status budget)
+                                      :run-id (kargu-run-budget-run-id budget)))))
+           (t
+            (funcall callback (kargu--api-error-alist msg code (list :scope scope :status status))))))))))
 
 (provide 'kargu/api/retry)
 

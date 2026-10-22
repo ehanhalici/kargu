@@ -14,6 +14,7 @@
 (require 'subr-x)
 (require 'kargu/core)
 (require 'kargu/application/coordinator)
+(require 'kargu/application/budget)
 (require 'kargu/contract)
 (require 'kargu/state)
 (require 'kargu/history)
@@ -230,11 +231,15 @@ Build the payload in an isolated history; never store the reply."
                 (or (kargu-response-text response) "") 60)))))
 
 (defun kargu--record-usage (response &optional session)
-  "Accumulate RESPONSE usage in captured SESSION or the current owner."
+  "Accumulate RESPONSE usage in captured SESSION or the current owner.
+Also records usage into the active run budget (Contract 6 & DEEP-09)."
   (setq session (or session (kargu-session-context)))
   (when-let* ((usage (kargu-aget response "usage")))
     (let ((in (kargu-aget usage "prompt_tokens"))
           (out (kargu-aget usage "completion_tokens")))
+      (when-let* ((app (ignore-errors (kargu-application-context)))
+                  (budget (and (kargu-application-p app) (kargu-application-budget app))))
+        (kargu-budget-record-tokens budget (and (numberp in) in) (and (numberp out) out)))
       (kargu-session-record-usage (and (numberp in) in) (and (numberp out) out) session)
       (let ((details (kargu-aget usage "prompt_tokens_details")))
         (kargu-session-record-cache-usage in (kargu-aget details "cached_tokens")
