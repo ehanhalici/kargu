@@ -1,4 +1,4 @@
-;;; kargu/languages/core.el --- Multi-language support architecture -*- lexical-binding: t; -*-
+;;; core.el --- Multi-language support architecture -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -39,12 +39,12 @@
   extensions                    ; List of file extensions without dot: ("rs")
   detectors                     ; List of filenames or functions taking ROOT -> non-nil
   toolchain                     ; Plist :build-cmd :test-cmd :lint-cmd :notes, or a
-                                ;   function of ROOT that returns such a plist
+                                        ;   function of ROOT that returns such a plist
   debugger                      ; Plist: :adapter, :supports-eval, :supports-method-calls,
-                                ;        :eval-guidance, :common-eval-pitfalls,
-                                ;        :variable-inspection-advice
+                                        ;        :eval-guidance, :common-eval-pitfalls,
+                                        ;        :variable-inspection-advice
   lsp                           ; Plist :name :binaries :purpose :hint of the
-                                ;   language server, checked by `kargu-deps'
+                                        ;   language server, checked by `kargu-deps'
   lsp-notes                     ; String: notes about symbols, outlines, and edits
   (requires-lsp t)              ; Nil when this language has no language server
   modes)                        ; Major modes that identify this language
@@ -131,7 +131,7 @@ Does not look at the project root."
   "Return the language spec for this buffer or its directory.
 Uses the major mode or file extension first.  Otherwise detects
 from `default-directory' or this chat's project root.  Does not
-call `kargu--project-root'."
+call `kargu-lsp-project-root'."
   (or (kargu-language-for-buffer)
       (and (stringp default-directory)
            (kargu-language-detect default-directory))
@@ -171,7 +171,7 @@ or defaults to nil."
          (format "  Toolchain Notes: %s\n" (plist-get tc :notes)))
        (format "  Debug Adapter:   %s\n" (or (plist-get dbg :adapter) "dape default"))
        (if (plist-get dbg :supports-method-calls)
-         "  Debug Evaluation: Full expression evaluation supported (variables, attributes/fields, function & method calls).\n"
+           "  Debug Evaluation: Full expression evaluation supported (variables, attributes/fields, function & method calls).\n"
          "  Debug Evaluation: Static data access ONLY (variables, direct fields `x.field`, indexing `x[i]`, pointer dereference). Do NOT call functions or methods with parentheses `()`.\n")
        (when var-guide
          (format "  Variable Inspection: %s\n" var-guide))
@@ -201,4 +201,4 @@ or defaults to nil."
 
 (provide 'kargu/languages/core)
 
-;;; kargu/languages/core.el ends here
+;;; core.el ends here

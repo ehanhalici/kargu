@@ -1,4 +1,4 @@
-;;; kargu/core/log.el --- Logging engine -*- lexical-binding: t; -*-
+;;; log.el --- Logging engine -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -14,11 +14,24 @@
 ;;; Code:
 
 (require 'kargu/core/custom)
+(require 'subr-x)
 
 (declare-function kargu-state-mode "kargu/state/selectors" ())
 
 (defconst kargu--log-buffer "*kargu-log*"
   "Name of the kargu log buffer.")
+
+(defcustom kargu-log-buffer-max-chars 1000000
+  "Maximum retained log characters; zero disables retention.
+Oldest text is discarded, including when one wire dump exceeds the cap."
+  :type 'natnum
+  :group 'kargu)
+
+(defun kargu--log-trim-buffer ()
+  "Discard the oldest log text beyond `kargu-log-buffer-max-chars'."
+  (let ((excess (- (buffer-size) kargu-log-buffer-max-chars)))
+    (when (> excess 0)
+      (delete-region (point-min) (+ (point-min) excess)))))
 
 (defun kargu--log-mode-name ()
   "Mode symbol recorded on each log line."
@@ -36,7 +49,7 @@
     (_ 'font-lock-comment-face)))
 
 (defun kargu--ensure-log-buffer ()
-  "Return `*kargu-log*', creating it read-only with wrapping enabled."
+  "Return the log buffer, creating it read-only with wrapping enabled."
   (let ((buf (get-buffer-create kargu--log-buffer)))
     (with-current-buffer buf
       (setq-local truncate-lines nil)
@@ -44,7 +57,7 @@
     buf))
 
 (defun kargu-log (level format-string &rest args)
-  "Append a log entry to the `*kargu-log*' buffer.
+  "Append a log entry to the buffer named by `kargu--log-buffer'.
 LEVEL is one of `debug', `info', `warn', `error', `request',
 `response', `wire'.  FORMAT-STRING and ARGS are as in `format'.
 The function never signals, so it is safe to call from curl
@@ -57,7 +70,8 @@ process filters and sentinels."
                   (propertize (format "[%s/%s] " level (kargu--log-mode-name))
                               'face (kargu--log-level-face level))
                   (apply #'format format-string args)
-                  "\n")))
+                  "\n")
+          (kargu--log-trim-buffer)))
     (error nil)))
 
 (defun kargu--log-limit (text)
@@ -71,13 +85,12 @@ process filters and sentinels."
       s)))
 
 (defun kargu--log-looks-json-p (text)
-  "Non-nil when TEXT looks like a JSON object or array."
+  "Return non-nil for JSON object or array TEXT."
   (and (stringp text)
        (let ((s (string-trim text)))
          (or (string-prefix-p "{" s) (string-prefix-p "[" s)))))
 
 (declare-function json-pretty-print "json" (begin end &optional minimize))
-(declare-function json-read "json" ())
 
 (defun kargu--log-pretty (text)
   "Pretty-print TEXT when it is a single JSON value; otherwise TEXT."
@@ -89,18 +102,17 @@ process filters and sentinels."
           (with-temp-buffer
             (insert text)
             (goto-char (point-min))
-            (json-read)
+            (json-parse-buffer)
             (skip-chars-forward " \t\n\r")
             (unless (eobp)
-              (error "trailing json"))
+              (error "Trailing json"))
             (json-pretty-print (point-min) (point-max))
             (buffer-string)))
       (error text))))
 
 (defun kargu--log-block (title text &optional pretty)
-  "Append a titled dump of TEXT to the log when `kargu-log-wire' is on.
-When PRETTY is non-nil, try to JSON-pretty-print TEXT first.
-Never signals.  Does not log API keys."
+  "Append TEXT under TITLE when wire logging is enabled.
+Try JSON formatting when PRETTY is non-nil.  Never signal."
   (when (and (boundp 'kargu-log-wire) kargu-log-wire)
     (condition-case _err
         (let* ((raw (if (stringp text) text (format "%s" (or text ""))))
@@ -114,16 +126,17 @@ Never signals.  Does not log API keys."
                       (format "---- %s ----\n" title)
                       body
                       (if (string-suffix-p "\n" body) "" "\n")
-                      (format "---- end %s ----\n" title)))))
+                      (format "---- end %s ----\n" title))
+              (kargu--log-trim-buffer))))
       (error nil))))
 
 (defun kargu--log-wire (format-string &rest args)
-  "Like `kargu-log' at `wire', only when `kargu-log-wire' is on."
+  "Log FORMAT-STRING with ARGS only when wire logging is enabled."
   (when (and (boundp 'kargu-log-wire) kargu-log-wire)
     (apply #'kargu-log 'wire format-string args)))
 
 (defun kargu-toggle-wire-log ()
-  "Toggle full request/response dumps in `*kargu-log*'."
+  "Toggle full request/response dumps in the log buffer."
   (interactive)
   (setq kargu-log-wire (not kargu-log-wire))
   (kargu-log 'info "wire log %s" (if kargu-log-wire "on" "off"))
@@ -137,4 +150,4 @@ Never signals.  Does not log API keys."
 
 (provide 'kargu/core/log)
 
-;;; kargu/core/log.el ends here
+;;; log.el ends here

@@ -1,4 +1,4 @@
-;;; kargu/core/custom.el --- All defcustom declarations -*- lexical-binding: t; -*-
+;;; custom.el --- All defcustom declarations -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -13,10 +13,14 @@
 
 ;;; Code:
 
-(defgroup kargu nil
-  "Agentic AI development assistant for Emacs."
-  :group 'tools
-  :prefix "kargu-")
+(require 'kargu/core/group)
+
+(defcustom kargu-ui-enabled t
+  "Whether package composition loads chat, plan review and UI adapters.
+Set this before loading Kargu for headless use.  This is a startup choice,
+not permission to unload active views or jobs at runtime."
+  :type 'boolean
+  :group 'kargu)
 
 (defcustom kargu-api-key nil
   "API key override for the active provider.
@@ -40,8 +44,9 @@ A string must contain the version prefix and no trailing slash."
   :group 'kargu)
 
 (defcustom kargu-temperature 0.2
-  "Sampling temperature sent with each request.
-Set to nil to omit the field entirely."
+  "Sampling temperature when allowed by model metadata or provider policy.
+Set to nil to omit it entirely.  Unknown OpenAI models omit sampling by
+catalog policy; explicit supported_parameters metadata can enable it."
   :type '(choice (const :tag "Omit from request" nil)
                  (number :tag "Temperature"))
   :group 'kargu)
@@ -68,18 +73,9 @@ Set to an integer (e.g. 2048, 4096) or nil for model default."
                  (integer :tag "Thinking token budget"))
   :group 'kargu)
 
-(defcustom kargu-provider-parameters nil
-  "Alist mapping provider ID strings to custom parameter alists.
-For example:
-  \\='((\"example\" . ((\"sort\" . \"price\")
-                    (\"allow_fallbacks\" . :json-false)
-                    (\"zdr\" . t))))"
-  :type '(alist :key-type string :value-type (alist :key-type string :value-type sexp))
-  :group 'kargu)
 
 (defcustom kargu-stream t
-  "When non-nil, stream responses incrementally (SSE) over a plz
-process filter."
+  "When non-nil, stream responses incrementally using SSE."
   :type 'boolean
   :group 'kargu)
 
@@ -105,10 +101,28 @@ Error text from a 200 response that names one of these is treated the same."
   :group 'kargu)
 
 (defcustom kargu-max-healing-steps 3
-  "Maximum self-correction rounds after an edit introduces new
-LSP diagnostics (used by the loop module)."
+  "Maximum self-correction rounds after edits introduce diagnostics."
   :type 'natnum
   :group 'kargu)
+
+(defcustom kargu-low-usage-mode nil
+  "Use smaller tool results and project outlines without changing the model."
+  :type 'boolean
+  :group 'kargu)
+
+(defcustom kargu-low-usage-output-limit 6000
+  "Maximum tool-result characters when low usage mode is enabled."
+  :type 'natnum
+  :group 'kargu)
+
+(defcustom kargu-low-usage-symbol-limit 200
+  "Maximum project-outline symbols when low usage mode is enabled."
+  :type 'natnum
+  :group 'kargu)
+
+(defun kargu-usage-limit (normal reduced)
+  "Return NORMAL, limited to REDUCED when low usage mode is enabled."
+  (if kargu-low-usage-mode (min normal reduced) normal))
 
 (defcustom kargu-tool-output-limit 24000
   "Maximum characters of a tool result fed back to the model."
@@ -142,7 +156,7 @@ nil disables the ceiling.  The abort message is \"stream exceeded ceiling\"."
   :group 'kargu)
 
 (defcustom kargu-log-wire nil
-  "When non-nil, dump full request and response bodies into `*kargu-log*'."
+  "When non-nil, dump request and response bodies into the log buffer."
   :type 'boolean
   :group 'kargu)
 
@@ -155,7 +169,7 @@ nil disables the ceiling.  The abort message is \"stream exceeded ceiling\"."
   '((ask   . "Mode: ASK (read-only). Analyze and explain. Do not edit files.")
     (plan  . "Mode: PLAN (read-only). Explore, then output a markdown implementation checklist. Do not edit files.")
     (debug . "Mode: DEBUG. Ground answers in DAP/runtime evidence and diagnostics. Do not edit unless asked.")
-    (agent . "Mode: AGENT. Inspect, surgical edit, verify with Flymake/LSP diagnostics, and run compiler/tests via bash."))
+    (agent . "Mode: AGENT. Inspect, edit surgically, verify with available diagnostics, and run project compiler/tests."))
   "Alist mapping mode symbol to the system prompt injected as the first message."
   :type '(alist :key-type symbol :value-type string)
   :group 'kargu)
@@ -167,4 +181,4 @@ nil disables the ceiling.  The abort message is \"stream exceeded ceiling\"."
 
 (provide 'kargu/core/custom)
 
-;;; kargu/core/custom.el ends here
+;;; custom.el ends here

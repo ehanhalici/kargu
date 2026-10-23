@@ -1,8 +1,12 @@
-;;; kargu/languages/cpp.el --- C++ language profile for Kargu -*- lexical-binding: t; -*-
+;;; cpp.el --- C++ language profile for Kargu -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Part of kargu.
+
+;;; Commentary:
+
+;; Register C++ modes, project detection and toolchain metadata.
 
 ;;; Code:
 
@@ -14,14 +18,13 @@
    :name "C++"
    :priority 65
    :extensions '("cpp" "cc" "cxx" "hpp" "hxx" "h")
+   :modes '(c++-mode c++-ts-mode)
    :detectors
    (list (lambda (root)
            (and (or (kargu-languages--has-file-p root "Makefile")
                     (kargu-languages--has-file-p root "CMakeLists.txt")
                     (kargu-languages--has-file-p root "compile_commands.json"))
-                (ignore-errors
-                  (cl-some (lambda (f) (string-match-p "\\.\\(cpp\\|cc\\|cxx\\|hpp\\)\\'" f))
-                           (directory-files root nil "\\.\\(cpp\\|cc\\|cxx\\|hpp\\)$" t))))))
+                (kargu-fs-has-extension-p root '("cpp" "cc" "cxx" "hpp")))))
    :toolchain
    '(:build-cmd "cmake -B build && cmake --build build || make"
      :test-cmd "ctest --test-dir build || make test"
@@ -46,10 +49,11 @@
      :purpose "Language Server for C++ (code analysis and definitions)"
      :hint "apt install clangd (or brew install llvm)")
    :lsp-notes
-   "C++ symbols: classes, structs, namespaces, template specializations, methods. Clangd provides accurate type hierarchy and hover documentation."))
+   "C++ symbols: classes, structs, namespaces, template specializations, methods. Clangd provides accurate type hierarchy and hover documentation.")
+  "Language profile for C++ buffers and projects.")
 
 (kargu-language-register kargu-language-cpp-spec)
 
 (provide 'kargu/languages/cpp)
 
-;;; kargu/languages/cpp.el ends here
+;;; cpp.el ends here

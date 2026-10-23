@@ -1,4 +1,4 @@
-;;; kargu/chat/header.el --- Dynamic header line for chat buffer -*- lexical-binding: t; -*-
+;;; header.el --- Dynamic header line for chat buffer -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -20,56 +20,61 @@
 
 (declare-function kargu-loop-running-p "kargu/loop")
 (declare-function kargu-chat-stop "kargu/chat")
-(declare-function kargu-chat-select-mode-company "kargu/api" (&optional _event))
+(declare-function kargu-chat-select-mode-company "kargu/api/select" (&optional _event))
 (declare-function kargu-deps-missing-p "kargu/tools/deps" (&optional root))
+(declare-function kargu-chat-list-buffers "kargu/chat" ())
+(declare-function kargu-chat-refresh-footer "kargu/chat/prompt" ())
+
+(defun kargu-chat-refresh-mode (_mode)
+  "Refresh only the notifying session's chat view."
+  (when (derived-mode-p 'kargu-chat-mode)
+    (save-excursion
+      (save-restriction
+        (widen)
+        (kargu-chat-refresh-footer)))))
+
+(defun kargu/chat/header-unload-function ()
+  "Remove the optional mode view subscription before unloading it."
+  (remove-hook 'kargu-state-mode-hook #'kargu-chat-refresh-mode)
+  nil)
+
+(defun kargu-chat--header-action-map (command)
+  "Return a header and mouse keymap invoking COMMAND."
+  (let ((map (make-sparse-keymap)))
+    (dolist (key '("<header-line> <mouse-1>" "<header-line> <mouse-2>"
+                   "<mouse-1>" "<mouse-2>"))
+      (keymap-set map key command))
+    map))
+
+(defun kargu-chat--header-stop-button ()
+  "Return the stop button while an agent run is active."
+  (when (and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+    (let ((map (kargu-chat--header-action-map #'kargu-chat-stop)))
+      (concat " " (propertize "[STOP]"
+                              'face '(:foreground "red" :weight bold)
+                              'mouse-face 'highlight
+                              'help-echo "mouse-1: stop the agent run"
+                              'keymap map 'local-map map)))))
 
 (defun kargu-chat--header-string ()
-  "Build the chat buffer's dynamic header line.
-Displays the kargu title, active mode, missing tools status, and stop button."
-  (let* ((mode-name (upcase (symbol-name (kargu-state-mode))))
-         (running (and (fboundp 'kargu-loop-running-p)
-                       (kargu-loop-running-p)))
-         (missing (and (fboundp 'kargu-deps-missing-p)
-                       (kargu-deps-missing-p (bound-and-true-p kargu-chat--project-root))))
-         (blocked-indicator
-          (when missing
-            (concat
-             " · "
-             (propertize "[TOOLS MISSING]"
-                         'face '(:foreground "red" :weight bold)
-                         'help-echo "Mandatory tools are missing; prompt submission is blocked."))))
-         (mode-map (make-sparse-keymap))
-         (stop-btn
-          (when running
-            (let ((map (make-sparse-keymap)))
-              (define-key map [header-line mouse-1] (lambda () (interactive) (kargu-chat-stop)))
-              (define-key map [header-line mouse-2] (lambda () (interactive) (kargu-chat-stop)))
-              (define-key map [mouse-1] (lambda () (interactive) (kargu-chat-stop)))
-              (define-key map [mouse-2] (lambda () (interactive) (kargu-chat-stop)))
-              (concat
-               " "
-               (propertize "[STOP]"
-                           'face '(:foreground "red" :weight bold)
-                           'mouse-face 'highlight
-                           'help-echo "mouse-1: stop the agent run"
-                           'keymap map
-                           'local-map map))))))
-    (define-key mode-map [header-line mouse-1] (lambda (e) (interactive "e") (kargu-chat-select-mode-company e)))
-    (define-key mode-map [header-line mouse-2] (lambda (e) (interactive "e") (kargu-chat-select-mode-company e)))
-    (define-key mode-map [mouse-1] (lambda (e) (interactive "e") (kargu-chat-select-mode-company e)))
-    (define-key mode-map [mouse-2] (lambda (e) (interactive "e") (kargu-chat-select-mode-company e)))
+  "Build the chat header with mode, missing tools and stop controls."
+  (let ((mode-map (kargu-chat--header-action-map #'kargu-chat-select-mode-company))
+        (missing (and (fboundp 'kargu-deps-missing-p)
+                      (kargu-deps-missing-p
+                       (bound-and-true-p kargu-chat--project-root)))))
     (concat
-     (propertize "kargu" 'face 'bold)
-     " · "
-     (propertize (format "[%s]" mode-name)
-                 'face 'bold
-                 'mouse-face 'highlight
+     (propertize "kargu" 'face 'bold) " · "
+     (propertize (format "[%s]" (upcase (symbol-name (kargu-state-mode))))
+                 'face 'bold 'mouse-face 'highlight
                  'help-echo "mouse-1: select mode with company (C-c C-x)"
-                 'keymap mode-map
-                 'local-map mode-map)
-     (or blocked-indicator "")
-     (or stop-btn ""))))
+                 'keymap mode-map 'local-map mode-map)
+     (when missing
+       (concat " · "
+               (propertize "[TOOLS MISSING]"
+                           'face '(:foreground "red" :weight bold)
+                           'help-echo "Mandatory tools are missing; prompt submission is blocked.")))
+     (kargu-chat--header-stop-button))))
 
 (provide 'kargu/chat/header)
 
-;;; kargu/chat/header.el ends here
+;;; header.el ends here

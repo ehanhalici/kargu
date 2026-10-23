@@ -1,4 +1,4 @@
-;;; kargu/chat/tune.el --- Transient menu for model and session parameters -*- lexical-binding: t; -*-
+;;; tune.el --- Transient menu for model and session parameters -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -19,15 +19,14 @@
 (require 'kargu/config)
 (require 'kargu/api)
 (require 'kargu/providers)
-(require 'kargu/chat/tune-params)
 
 (eval-and-compile
   (require 'transient nil t))
 
-(declare-function kargu-test-connection "kargu/api")
-(declare-function kargu-chat-select-provider "kargu/api")
-(declare-function kargu-set-model "kargu/api")
-(declare-function kargu-state-set-reasoning-effort "kargu/state" (effort))
+(declare-function kargu-test-connection "kargu/api/client")
+(declare-function kargu-chat-select-provider "kargu/api/select")
+(declare-function kargu-set-model "kargu/api/select")
+(declare-function kargu-state-set-reasoning-effort "kargu/state/transitions" (effort))
 
 ;;;; Dynamic descriptions for transient -----------------------------------
 
@@ -43,7 +42,7 @@
 
 (defun kargu-tune--model-desc ()
   "Formatted description for active model."
-  (format "Model:    %s" (propertize (kargu--model) 'face 'bold)))
+  (format "Model:    %s" (propertize (or (kargu--model) "not selected") 'face 'bold)))
 
 (defun kargu-tune--temperature-desc ()
   "Formatted description for temperature."
@@ -54,8 +53,8 @@
                       'face 'bold)))
 
 (defun kargu-tune--max-tokens-desc ()
-  "Formatted description for max tokens / context length."
-  (format "Max Tokens (ctx): %s"
+  "Formatted description for the output token limit."
+  (format "Output Tokens:    %s"
           (propertize (if kargu-max-tokens
                           (format "%d" kargu-max-tokens)
                         "nil (provider default)")
@@ -64,8 +63,8 @@
 (defun kargu-tune--reasoning-effort-desc ()
   "Formatted description for thinking / reasoning effort."
   (format "Thinking Effort:  %s"
-          (if kargu-reasoning-effort
-              (propertize (upcase (format "%s" kargu-reasoning-effort))
+          (if (kargu-selection-effort)
+              (propertize (upcase (format "%s" (kargu-selection-effort)))
                           'face 'font-lock-keyword-face)
             (propertize "OFF" 'face 'font-lock-comment-face))))
 
@@ -93,6 +92,12 @@
                       'face 'bold)))
 
 ;;;; Interactive setters --------------------------------------------------
+
+(defun kargu-tune-toggle-low-usage ()
+  "Toggle bounded tool context without changing the selected model."
+  (interactive)
+  (setq kargu-low-usage-mode (not kargu-low-usage-mode))
+  (message "Kargu: low usage mode %s" (if kargu-low-usage-mode "on" "off")))
 
 (defun kargu-tune-set-temperature ()
   "Prompt for sampling temperature (0.0 to 2.0 or nil)."
@@ -124,7 +129,7 @@
             (string-to-number val)))
     (message "kargu max-tokens set to: %S" kargu-max-tokens)))
 
-(declare-function kargu-model-reasoning-efforts "kargu/api")
+(declare-function kargu-model-reasoning-efforts "kargu/api/catalog")
 (declare-function kargu-chat-refresh-footer "kargu/chat/prompt")
 
 (defun kargu-tune-cycle-reasoning-effort ()
@@ -138,27 +143,25 @@
                                             supported)))))
     (if (null levels)
         (progn
-          (setq kargu-reasoning-effort nil)
           (kargu-state-set-reasoning-effort nil)
           (when (fboundp 'kargu-chat-refresh-footer)
             (kargu-chat-refresh-footer))
           (force-mode-line-update t)
           (message "kargu thinking effort: OFF (reasoning effort is not supported by this model)"))
-      (let* ((curr (and (boundp 'kargu-reasoning-effort) kargu-reasoning-effort))
+      (let* ((curr (kargu-selection-effort))
              (next (cond
                     ((null curr) (car levels))
                     ((member curr levels)
                      (let ((tail (cdr (member curr levels))))
                        (if tail (car tail) nil)))
                     (t (car levels)))))
-        (setq kargu-reasoning-effort next)
         (kargu-state-set-reasoning-effort next)
         (when (fboundp 'kargu-chat-refresh-footer)
           (kargu-chat-refresh-footer))
         (force-mode-line-update t)
         (message "kargu thinking effort: %s"
-                 (if kargu-reasoning-effort
-                     (upcase (symbol-name kargu-reasoning-effort))
+                 (if (kargu-selection-effort)
+                     (upcase (symbol-name (kargu-selection-effort)))
                    "OFF"))))))
 
 (defun kargu-tune-set-thinking-budget ()
@@ -193,11 +196,12 @@
 (defun kargu-tune-reset-defaults ()
   "Reset model and session tuning parameters to defaults."
   (interactive)
+  (kargu-selection-require-idle)
   (setq kargu-temperature 0.2
         kargu-max-tokens nil
-        kargu-reasoning-effort nil
         kargu-thinking-budget nil
         kargu-stream t)
+  (kargu-state-set-reasoning-effort nil)
   (message "kargu tuning parameters reset to defaults"))
 
 ;;;; Transient Prefix Definition ------------------------------------------
@@ -205,25 +209,25 @@
 (when (fboundp 'transient-define-prefix)
 
   (transient-define-prefix kargu-tune-menu ()
-    "Transient control panel for LLM provider, live models, and parameters."
-    [:description "Provider & Live Models"
-     ("p" kargu-chat-select-provider :description kargu-tune--provider-desc :transient t)
-     ("m" kargu-set-model :description kargu-tune--model-desc :transient t)
-     ("f" "Fetch / Refresh live models from provider"
-      (lambda () (interactive) (kargu-set-model t)) :transient t)]
-    [:description "Model Parameters"
-     ("t" kargu-tune-set-temperature :description kargu-tune--temperature-desc :transient t)
-     ("c" kargu-tune-set-max-tokens :description kargu-tune--max-tokens-desc :transient t)
-     ("e" kargu-tune-cycle-reasoning-effort :description kargu-tune--reasoning-effort-desc :transient t)
-     ("b" kargu-tune-set-thinking-budget :description kargu-tune--thinking-budget-desc :transient t)
-     (">" kargu-tune-provider-params-menu :description kargu-tune--provider-params-summary-desc)]
-    [:description "Session Flags & Toggles"
-     ("s" kargu-tune-toggle-stream :description kargu-tune--stream-desc :transient t)
-     ("r" kargu-tune-toggle-review-mode :description kargu-tune--review-mode-desc :transient t)]
-    [:description "Actions"
-     ("T" "Test Connection (Ping active provider)" kargu-test-connection :transient t)
-     ("R" "Reset parameters to defaults" kargu-tune-reset-defaults :transient t)
-     ("q" "Quit menu" transient-quit-one)]))
+                           "Transient control panel for LLM provider, live models, and parameters."
+                           [:description "Provider & Live Models"
+                                         ("p" kargu-chat-select-provider :description kargu-tune--provider-desc :transient t)
+                                         ("m" kargu-set-model :description kargu-tune--model-desc :transient t)
+                                         ("f" "Fetch / Refresh live models from provider"
+                                          (lambda () (interactive) (kargu-set-model t)) :transient t)]
+                           [:description "Model Parameters"
+                                         ("t" kargu-tune-set-temperature :description kargu-tune--temperature-desc :transient t)
+                                         ("c" kargu-tune-set-max-tokens :description kargu-tune--max-tokens-desc :transient t)
+                                         ("e" kargu-tune-cycle-reasoning-effort :description kargu-tune--reasoning-effort-desc :transient t)
+                                         ("b" kargu-tune-set-thinking-budget :description kargu-tune--thinking-budget-desc :transient t)]
+                           [:description "Session Flags & Toggles"
+                                         ("l" "Toggle low usage mode" kargu-tune-toggle-low-usage :transient t)
+                                         ("s" kargu-tune-toggle-stream :description kargu-tune--stream-desc :transient t)
+                                         ("r" kargu-tune-toggle-review-mode :description kargu-tune--review-mode-desc :transient t)]
+                           [:description "Actions"
+                                         ("T" "Test Connection (Ping active provider)" kargu-test-connection :transient t)
+                                         ("R" "Reset parameters to defaults" kargu-tune-reset-defaults :transient t)
+                                         ("q" "Quit menu" transient-quit-one)]))
 
 (provide 'kargu/chat/tune)
 

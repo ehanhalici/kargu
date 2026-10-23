@@ -29,6 +29,9 @@ StateStatuses == {
 
 StateModes == {"ask", "plan", "debug", "agent"}
 
+(* The adapter probe completes before a mode transition is published. *)
+ModeAdmitted(mode, debugReady) == mode # "debug" \/ debugReady
+
 StateEfforts == {"none", "low", "medium", "high", "off"}
 
 (***************************************************************************)

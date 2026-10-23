@@ -1,4 +1,4 @@
-;;; kargu/chat/attach.el --- Synthetic Read for @ file mentions -*- lexical-binding: t; -*-
+;;; attach.el --- Synthetic Read for @ file mentions -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -8,29 +8,29 @@
 
 ;; `@path' mentions become one `insert-file-contents' and a Read-tool
 ;; transcript (or a compact reference for long files).
-;; Requires: `kargu/core', `kargu/tools/diff', `kargu/tools/lsp'.
+;; Requires: `kargu/core', `kargu/tools/diff'.
 ;; Public internal: `kargu-chat--expand-prompt'.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
 (require 'json)
 (require 'kargu/core)
 (require 'kargu/permission)
-(require 'kargu/tools/diff)
-(require 'kargu/tools/lsp)
+(require 'kargu/files)
 
 (defvar kargu-chat-attach-max-lines 150)
 (declare-function kargu-chat--completion-roots "kargu/chat/complete")
 
 
 (defun kargu-chat--symbol-mention-p (token)
-  "Return non-nil if TOKEN looks like a symbol mention ('file::symbol')."
+  "Return non-nil for a symbol mention TOKEN such as file::symbol."
   (string-match-p "::" token))
 
 (defun kargu-chat--file-mention-p (token)
-  "Return non-nil if TOKEN looks like a file path, not a symbol or bare name."
+  "Return non-nil for a file path TOKEN."
   (and (not (kargu-chat--symbol-mention-p token))
        (or (string-match-p "/" token)
            (string-match-p "\\.[A-Za-z0-9]+\\'" token))))
@@ -74,22 +74,29 @@
           (setq changed t))))
     (string-trim s)))
 
+(defconst kargu-chat--at-mention-regexp
+  (rx (or string-start space (any "([<{\"'`"))
+      "@" (group (+ (not space))))
+  "Explicit mention boundary and body, excluding embedded email addresses.")
+
 (defun kargu-chat--at-tokens (prompt)
   "Return @mention bodies in PROMPT, without the leading `@'."
   (let (acc)
-    (with-temp-buffer
-      (insert (or prompt ""))
-      (goto-char (point-min))
-      (while (re-search-forward "@\\([^[:space:]]+\\)" nil t)
-        (let ((cleaned (kargu-chat--clean-at-token (match-string-no-properties 1))))
-          (when (not (string-empty-p cleaned))
-            (push cleaned acc)))))
+    (save-match-data
+      (with-temp-buffer
+        (insert (or prompt ""))
+        (goto-char (point-min))
+        (while (re-search-forward kargu-chat--at-mention-regexp nil t)
+          (let ((cleaned (kargu-chat--clean-at-token
+                          (match-string-no-properties 1))))
+            (unless (string-empty-p cleaned)
+              (push cleaned acc))))))
     (nreverse acc)))
 
-(defun kargu-chat--resolve-mention-file (mention)
-  "Resolve file MENTION (no leading `@') to an absolute path, or nil."
-  (let ((roots (kargu-chat--completion-roots))
-        found)
+(cl-defun kargu-chat--resolve-mention-file
+    (mention &key (roots (kargu-chat--completion-roots)))
+  "Resolve file MENTION (no leading `@') under ROOTS to a path, or nil."
+  (let (found)
     (cl-labels
         ((try (rel root)
            (let ((abs (expand-file-name rel root)))
@@ -154,73 +161,81 @@ If FROM or TO is nil, processes entire buffer."
     (insert-file-contents abs)
     (kargu-chat--dump-buffer-lines from to)))
 
+(defconst kargu-chat--symbol-search-patterns
+  (list
+   (rx (or "defun" "defmacro" "defvar" "defcustom" "defconst"
+           "defclass" "cl-defun" "cl-defmethod")
+       (+ (any " \t\n")) (opt "'") "%s" word-boundary)
+   (rx (or "func" "function" "fn" "def" "class" "struct" "interface"
+           "type" "var" "const" "let" "val")
+       (+ (any " \t\n")) (opt (+ (any alnum "_.*&")) (+ (any " \t\n")))
+       "%s" word-boundary)
+   (rx word-boundary "%s" word-boundary (* (any " \t")) (any ":=("))
+   (rx word-boundary "%s" word-boundary))
+  "Definition-first search templates for a quoted symbol name.")
+
 (defun kargu-chat--find-symbol-pos (sym-name)
-  "Locate definition or occurrence position of SYM-NAME in current buffer."
-  (goto-char (point-min))
-  (let ((case-fold-search nil))
-    (when (or (re-search-forward
-               (format "\\(?:defun\\|defmacro\\|defvar\\|defcustom\\|defconst\\|defclass\\|cl-defun\\|cl-defmethod\\)[ \t\n]+\\(?:'\\)?%s\\b"
-                       (regexp-quote sym-name))
-               nil t)
-              (re-search-forward
-               (format "\\(?:func\\|function\\|fn\\|def\\|class\\|struct\\|interface\\|type\\|var\\|const\\|let\\|val\\)[ \t\n]+\\(?:[A-Za-z0-9_.*&]+[ \t\n]+\\)?%s\\b"
-                       (regexp-quote sym-name))
-               nil t)
-              (re-search-forward
-               (format "\\b%s\\b[ \t]*[:=(]" (regexp-quote sym-name))
-               nil t)
-              (re-search-forward
-               (format "\\b%s\\b" (regexp-quote sym-name))
-               nil t))
-      (match-beginning 0))))
+  "Locate SYM-NAME without changing point or the caller's match data."
+  (save-match-data
+    (save-excursion
+      (let ((case-fold-search nil)
+            (quoted (regexp-quote sym-name)))
+        (cl-loop for pattern in kargu-chat--symbol-search-patterns
+                 do (goto-char (point-min))
+                 thereis (and (re-search-forward (format pattern quoted) nil t)
+                              (match-beginning 0)))))))
+
+(defconst kargu-chat--symbol-fallback-lines 35
+  "Maximum extra lines attached when structural symbol bounds are unavailable.")
+
+(defun kargu-chat--python-symbol-end (found-pos)
+  "Return the last nonblank body line of the Python symbol at FOUND-POS."
+  (save-excursion
+    (goto-char found-pos)
+    (beginning-of-line)
+    (let ((indent (current-indentation))
+          (last-line (line-number-at-pos)))
+      (forward-line 1)
+      (while (and (not (eobp))
+                  (or (save-excursion (skip-chars-forward " \t") (eolp))
+                      (> (current-indentation) indent)))
+        (unless (save-excursion (skip-chars-forward " \t") (eolp))
+          (setq last-line (line-number-at-pos)))
+        (forward-line 1))
+      last-line)))
 
 (defun kargu-chat--compute-symbol-bounds (found-pos)
-  "Compute `(START-LINE . END-LINE)' starting at FOUND-POS based on major mode."
-  (goto-char found-pos)
-  (beginning-of-line)
-  (let ((def-line (line-number-at-pos (point)))
-        (start-line (line-number-at-pos (point)))
-        end-line)
-    (cond
-     ;; Lisp-like: try forward-sexp
-     ((derived-mode-p 'emacs-lisp-mode 'lisp-mode 'scheme-mode 'clojure-mode)
-      (condition-case nil
-          (save-excursion
-            (goto-char found-pos)
-            (beginning-of-defun)
-            (setq start-line (line-number-at-pos))
-            (forward-sexp 1)
-            (setq end-line (line-number-at-pos)))
-        (error nil)))
-     ;; Brace languages (C, C++, Go, Rust, Java, JS, TS, etc.)
-     ((save-excursion
-        (goto-char found-pos)
-        (search-forward "{" (line-end-position 3) t))
-      (condition-case nil
-          (save-excursion
-            (goto-char found-pos)
-            (search-forward "{" nil t)
-            (backward-char 1)
-            (forward-list 1)
-            (setq end-line (line-number-at-pos)))
-        (error nil)))
-     ;; Python / indentation-based
-     ((derived-mode-p 'python-mode 'python-ts-mode)
-      (save-excursion
-        (goto-char found-pos)
-        (forward-line 1)
-        (let ((last-line def-line))
-          (while (and (not (eobp))
-                      (or (looking-at "^[ \t]*$")
-                          (> (current-indentation) 0)))
-            (unless (looking-at "^[ \t]*$")
-              (setq last-line (line-number-at-pos)))
-            (forward-line 1))
-          (setq end-line last-line)))))
-    (unless (and end-line (>= end-line start-line))
-      (setq end-line (min (count-lines (point-min) (point-max))
-                          (+ start-line 35))))
-    (cons start-line end-line)))
+  "Return (START-LINE . END-LINE) of the symbol at FOUND-POS."
+  (save-excursion
+    (goto-char found-pos)
+    (beginning-of-line)
+    (let ((start-line (line-number-at-pos)) end-line)
+      (cond
+       ((derived-mode-p 'emacs-lisp-mode 'lisp-mode 'scheme-mode 'clojure-mode)
+        (condition-case nil
+            (progn
+              (beginning-of-defun)
+              (setq start-line (line-number-at-pos))
+              (forward-sexp 1)
+              (setq end-line (line-number-at-pos)))
+          (scan-error nil)))
+       ((derived-mode-p 'python-mode 'python-ts-mode)
+        (setq end-line (kargu-chat--python-symbol-end found-pos)))
+       ((save-excursion
+          (goto-char found-pos)
+          (search-forward "{" (line-end-position 3) t))
+        (condition-case nil
+            (progn
+              (goto-char found-pos)
+              (search-forward "{" nil t)
+              (backward-char 1)
+              (forward-list 1)
+              (setq end-line (line-number-at-pos)))
+          (scan-error nil))))
+      (unless (and end-line (>= end-line start-line))
+        (setq end-line (min (count-lines (point-min) (point-max))
+                            (+ start-line kargu-chat--symbol-fallback-lines))))
+      (cons start-line end-line))))
 
 (defun kargu-chat--extract-symbol-range (abs sym-name)
   "Return (START-LINE . END-LINE) for SYM-NAME in file ABS."
@@ -235,12 +250,13 @@ If FROM or TO is nil, processes entire buffer."
       (when found-pos
         (kargu-chat--compute-symbol-bounds found-pos)))))
 
-(defun kargu-chat--attach-symbol-block (mention)
-  "Attachment for symbol MENTION ('file::symbol') with line-numbered snippet."
+(cl-defun kargu-chat--attach-symbol-block
+    (mention &key (roots (kargu-chat--completion-roots)))
+  "Attach symbol MENTION ('file::symbol') from ROOTS with line numbers."
   (let* ((parts (split-string mention "::"))
          (file-part (car parts))
          (sym-part (cadr parts))
-         (abs (kargu-chat--resolve-mention-file file-part)))
+         (abs (kargu-chat--resolve-mention-file file-part :roots roots)))
     (cond
      ((null abs)
       (format "<attached_symbol path=\"%s\" symbol=\"%s\">\n(file not found)\n</attached_symbol>\n"
@@ -260,12 +276,13 @@ If FROM or TO is nil, processes entire buffer."
                     (kargu-chat--called-read abs)
                     abs sym-part from to dump))))))))
 
-(defun kargu-chat--attach-block (mention cap)
+(cl-defun kargu-chat--attach-block
+    (mention cap &key (roots (kargu-chat--completion-roots)))
   "Attachment for MENTION as a synthetic `read_file' transcript.
 The file is read at most once.  Files longer than
 `kargu-chat-attach-max-lines' (or larger than CAP) are
-referenced rather than inlined."
-  (let ((abs (kargu-chat--resolve-mention-file mention)))
+referenced rather than inlined.  Resolve paths under ROOTS."
+  (let ((abs (kargu-chat--resolve-mention-file mention :roots roots)))
     (cond
      ((null abs)
       (format "<code_selection path=\"%s\">\n(not found)\n</code_selection>\n"
@@ -301,14 +318,17 @@ stay a compact reference.  The chat buffer still shows the unwrapped prompt."
          (query (format "<user_query>\n%s\n</user_query>" prompt)))
     (if (and (null sym-mentions) (null file-mentions))
         query
-      (concat query "\n\n<attached_files>\n"
-              (mapconcat #'kargu-chat--attach-symbol-block
-                         sym-mentions "")
-              (mapconcat (lambda (m) (kargu-chat--attach-block m cap))
-                         file-mentions "")
-              "</attached_files>\n"))))
+      (let ((roots (kargu-chat--completion-roots)))
+        (concat query "\n\n<attached_files>\n"
+                (mapconcat (lambda (m)
+                             (kargu-chat--attach-symbol-block m :roots roots))
+                           sym-mentions "")
+                (mapconcat (lambda (m)
+                             (kargu-chat--attach-block m cap :roots roots))
+                           file-mentions "")
+                "</attached_files>\n")))))
 
 
 (provide 'kargu/chat/attach)
 
-;;; kargu/chat/attach.el ends here
+;;; attach.el ends here

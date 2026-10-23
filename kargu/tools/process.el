@@ -1,4 +1,4 @@
-;;; kargu/tools/process.el --- Non-blocking external commands -*- lexical-binding: t; -*-
+;;; process.el --- Non-blocking external commands -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -16,7 +16,8 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'kargu/core)
+(require 'kargu/core/data)
+(require 'kargu/core/log)
 
 (defcustom kargu-process-timeout 30
   "Seconds an external command may run before it is killed."
@@ -28,103 +29,281 @@
   :type 'natnum
   :group 'kargu)
 
+(defconst kargu-process--buffer-name " *kargu-process*"
+  "Name used for temporary command output buffers.")
+
+(defconst kargu-process--stderr-name " *kargu-stderr*"
+  "Name used for private standard-error buffers and pipes.")
+
 (defun kargu-process--finish (callback buffer state)
   "Deliver the result of a finished process in BUFFER to CALLBACK.
 STATE is the mutable plist holding the exit code and the kill reasons."
-  (let ((output (if (buffer-live-p buffer)
+  (let ((stderr (plist-get state :stderr-buffer))
+        (output (if (buffer-live-p buffer)
                     (with-current-buffer buffer (buffer-string))
                   "")))
-    (when (buffer-live-p buffer)
+    (setq stderr (if (buffer-live-p stderr)
+                     (prog1 (with-current-buffer stderr (buffer-string))
+                       (kill-buffer stderr))
+                   ""))
+    (when (and (buffer-live-p buffer) (not (plist-get state :keep-buffer)))
       (kill-buffer buffer))
     (condition-case-unless-debug err
         (funcall callback
                  (list :code (plist-get state :code)
                        :output output
+                       :stderr stderr
                        :timed-out (plist-get state :timed-out)
+                       :timeout (plist-get state :timeout)
+                       :line-limit-reached (plist-get state :line-limit-reached)
                        :truncated (plist-get state :truncated)))
       (error
        (kargu-log 'error "process callback failed: %s" (error-message-string err))))))
 
-(defun kargu-process--sentinel (callback buffer state timer)
-  "Process sentinel delivering to CALLBACK once, then cancelling TIMER.
-BUFFER holds the output; STATE records how the process ended."
+(defun kargu-process--maybe-finish (callback buffer state)
+  "Deliver CALLBACK from BUFFER when both streams in STATE have closed."
+  (when (and (eq (plist-get state :lifecycle) :running)
+             (plist-get state :main-exited) (plist-get state :stderr-closed))
+    (plist-put state :lifecycle :closed)
+    (when-let* ((timer (plist-get state :timer))) (cancel-timer timer))
+    (kargu-process--finish callback buffer state)))
+
+(defun kargu-process--sentinel (callback buffer state)
+  "Record the exit in STATE and deliver CALLBACK after BUFFER is drained."
   (lambda (proc _event)
     (unless (process-live-p proc)
-      (unless (plist-get state :done)
-        (plist-put state :done t)
-        (when (timerp timer) (cancel-timer timer))
-        (plist-put state :code (process-exit-status proc))
-        (kargu-process--finish callback buffer state)))))
+      (plist-put state :main-exited t)
+      (plist-put state :code (process-exit-status proc))
+      (kargu-process--maybe-finish callback buffer state))))
 
-(defun kargu-process--filter (buffer max-bytes state)
-  "Process filter appending to BUFFER; kills the process past MAX-BYTES.
-STATE records that the output was cut."
+(defun kargu-process--limit-lines (start max-lines state)
+  "Bound output after START to MAX-LINES complete records using STATE."
+  (save-match-data
+    (goto-char start)
+    (let ((lines (or (plist-get state :stdout-lines) 0)))
+      (while (and (< lines max-lines) (search-forward "\n" nil t))
+        (cl-incf lines))
+      (plist-put state :stdout-lines lines)
+      (when (= lines max-lines)
+        (delete-region (point) (point-max))
+        (plist-put state :line-limit-reached t)))))
+
+(defun kargu-process--limit-bytes (process max-bytes state)
+  "Bound the current output buffer to MAX-BYTES for PROCESS using STATE."
+  (when (> (1- (position-bytes (point-max))) max-bytes)
+    (plist-put state :truncated t)
+    (if (eq (plist-get state :output-policy) 'tail)
+        (kargu-process--retain-tail max-bytes)
+      (kargu-process--truncate-output max-bytes)
+      (kargu-process-cancel (or (plist-get state :process) process)))))
+
+(cl-defun kargu-process--filter (buffer max-bytes state &key max-lines)
+  "Return a BUFFER filter with MAX-BYTES, STATE and optional MAX-LINES."
   (lambda (proc chunk)
-    (when (and (buffer-live-p buffer) (not (plist-get state :truncated)))
+    (when (and (buffer-live-p buffer)
+               (not (and max-lines (plist-get state :line-limit-reached)))
+               (or (eq (plist-get state :output-policy) 'tail)
+                   (not (plist-get state :truncated))))
       (with-current-buffer buffer
-        (goto-char (point-max))
-        (insert chunk)
-        (when (> (buffer-size) max-bytes)
-          (delete-region (1+ max-bytes) (point-max))
-          (plist-put state :truncated t)
-          (when (process-live-p proc)
-            (kill-process proc)))))))
+        (let ((inhibit-read-only t))
+          (save-excursion
+            (save-restriction
+              (widen)
+              (goto-char (point-max))
+              (let ((start (point)))
+                (insert chunk)
+                (when max-lines
+                  (kargu-process--limit-lines start max-lines state)))
+              (kargu-process--limit-bytes proc max-bytes state)
+              (when (and max-lines (plist-get state :line-limit-reached))
+                (kargu-process-cancel (or (plist-get state :process) proc))))))))))
+
+(defun kargu-process--retain-tail (max-bytes)
+  "Keep at most MAX-BYTES of recent output without splitting characters."
+  (let* ((byte-start (max 1 (- (position-bytes (point-max)) max-bytes)))
+         (position (byte-to-position byte-start)))
+    (delete-region (point-min)
+                   (if (< (position-bytes position) byte-start)
+                       (1+ position) position))))
+
+(defun kargu-process--cancel-timer (process)
+  "Release PROCESS's pending graceful cancellation timer."
+  (when-let* ((timer (process-get process 'kargu-cancel-timer)))
+    (process-put process 'kargu-cancel-timer nil)
+    (cancel-timer timer)))
+
+(defun kargu-process--signal-owned (process signal)
+  "Send SIGNAL only while PROCESS still identifies its original process group."
+  (when (process-live-p process)
+    (let ((pid (process-get process 'kargu-pgid)))
+      (if (and (integerp pid) (> pid 0) (equal pid (process-id process))
+               (not (memq system-type '(windows-nt ms-dos))))
+          (signal-process (- pid) signal)
+        (if (eq signal 'SIGINT) (interrupt-process process)
+          (kill-process process))))))
+
+(defun kargu-process--force-cancel (process)
+  "Force-cancel PROCESS without signaling a reaped or reused group identifier."
+  (kargu-process--cancel-timer process)
+  (when (process-live-p process)
+    (process-put process 'kargu-cancel-state :killed)
+    (kargu-process--signal-owned process 'SIGKILL)
+    (when (process-live-p process) (delete-process process))))
+
+(defun kargu-process--graceful-cancel (process seconds)
+  "Interrupt PROCESS and force termination after SECONDS while still owned."
+  (let ((previous (process-sentinel process)))
+    (set-process-sentinel
+     process
+     (lambda (child event)
+       (unless (process-live-p child) (kargu-process--cancel-timer child))
+       (when previous (funcall previous child event)))))
+  (kargu-process--signal-owned process 'SIGINT)
+  (when (process-live-p process)
+    (process-put process 'kargu-cancel-timer
+                 (run-at-time seconds nil #'kargu-process--force-cancel process))))
+
+(defun kargu-process-cancel (process &optional grace-seconds)
+  "Cancel PROCESS once and close its owned stderr pipe.
+GRACE-SECONDS optionally allows an interrupt before forced termination.
+A delayed force operation never signals a reaped process's numeric group."
+  (when (processp process)
+    (when (and (process-live-p process)
+               (null (process-get process 'kargu-cancel-state)))
+      (process-put process 'kargu-cancel-state :interrupting)
+      (if (and (numberp grace-seconds) (> grace-seconds 0))
+          (kargu-process--graceful-cancel process grace-seconds)
+        (kargu-process--force-cancel process)))
+    (when-let* ((stderr (process-get process 'kargu-stderr-process))
+                ((process-live-p stderr)))
+      (delete-process stderr))))
+
+(defun kargu-process--deadline (process timeout state)
+  "Schedule PROCESS termination after TIMEOUT seconds, recording STATE."
+  (when timeout
+    (unless (and (numberp timeout) (> timeout 0))
+      (error "Timeout must be positive or nil"))
+    (run-at-time timeout nil
+                 (lambda ()
+                   (unless (eq (plist-get state :lifecycle) :closed)
+                     (plist-put state :timed-out t)
+                     (kargu-process-cancel process))))))
+
+(defun kargu-process--truncate-output (max-bytes)
+  "Limit the current buffer to MAX-BYTES without splitting a character."
+  (let ((byte-end (1+ max-bytes)))
+    (while (not (byte-to-position byte-end))
+      (setq byte-end (1- byte-end)))
+    (delete-region (byte-to-position byte-end) (point-max))))
 
 (defun kargu-process--fail (callback message)
   "Deliver a failed start with MESSAGE to CALLBACK."
-  (funcall callback (list :code -1 :output message :timed-out nil :truncated nil)))
+  (funcall callback (list :code -1 :output message :stderr ""
+                          :timed-out nil :truncated nil)))
 
 (defun kargu-process-run (program args callback &rest opts)
   "Run PROGRAM with ARGS without waiting; pass the result to CALLBACK.
-CALLBACK gets a plist (:code :output :timed-out :truncated).  :code is 127
-when PROGRAM is not on PATH, and -1 when it could not be started.  stdout
-and stderr arrive interleaved in :output.
+CALLBACK gets a plist (:code :output :stderr :timed-out :truncated).
+:code is 127 when PROGRAM is not on PATH, and -1 on startup failure.
+By default :output is stdout only and :stderr is captured separately.
 OPTS: `:dir' working directory, `:timeout' seconds (default
 `kargu-process-timeout'), `:max-bytes' output cap (default
-`kargu-process-max-bytes').  Return the process, or nil when none started."
+`kargu-process-max-bytes') per stream.  An explicit nil timeout disables
+the deadline, which otherwise also bounds stderr drainage.
+`:stderr' can be `merge' to combine both streams in :output.
+`:output-policy' can be `tail' to retain recent output without killing;
+`:buffer' and `:keep-buffer' provide a persistent live output buffer.
+`:max-lines', a positive integer, stops after that many newline-terminated
+stdout records.  The result has `:line-limit-reached' instead of treating
+that intentional stop as byte truncation; consumers must opt into partial
+results explicitly.  Stderr retains its independent byte quota.
+With merged stderr, the record limit applies to the combined stream.
+Standard input is closed immediately; interactive commands are unsupported.
+Return the process, or nil when none started."
   (let ((exe (executable-find program)))
     (if (not exe)
-        (progn (funcall callback (list :code 127 :output "" :timed-out nil :truncated nil))
+        (progn (funcall callback (list :code 127 :output "" :stderr ""
+                                      :timed-out nil :truncated nil))
                nil)
-      (kargu-process--start exe args callback opts))))
+      (kargu-process--start exe args :callback callback :opts opts))))
 
-(defun kargu-process--start (exe args callback opts)
+(cl-defun kargu-process--make-stderr (callback &key buffer state max-bytes)
+  "Create a bounded stderr pipe for CALLBACK, BUFFER, STATE and MAX-BYTES."
+  (let ((stderr-buffer (generate-new-buffer kargu-process--stderr-name)))
+    (plist-put state :stderr-buffer stderr-buffer)
+    (plist-put
+     state :stderr-process
+     (make-pipe-process
+      :name kargu-process--stderr-name :buffer nil :noquery t :coding 'utf-8
+      :filter (kargu-process--filter stderr-buffer max-bytes state)
+      :sentinel (lambda (pipe _event)
+                  (unless (process-live-p pipe)
+                    (plist-put state :stderr-closed t)
+                    (kargu-process--maybe-finish callback buffer state)))))
+    (plist-get state :stderr-process)))
+
+(cl-defun kargu-process--launch (exe args &key callback buffer state opts)
+  "Launch EXE with ARGS, delivering CALLBACK from BUFFER using STATE and OPTS."
+  (let* ((max-bytes (or (plist-get opts :max-bytes) kargu-process-max-bytes))
+         (stderr (unless (eq (plist-get opts :stderr) 'merge)
+                   (kargu-process--make-stderr
+                    callback :buffer buffer :state state :max-bytes max-bytes)))
+         (proc (make-process
+                :name (file-name-nondirectory exe) :buffer nil
+                :command (cons exe args) :connection-type 'pipe :noquery t
+                :coding 'utf-8 :stderr stderr
+                :filter (kargu-process--filter
+                         buffer max-bytes state :max-lines (plist-get opts :max-lines))
+                :sentinel (kargu-process--sentinel callback buffer state))))
+    (plist-put state :process proc)
+    (process-put proc 'kargu-stderr-process stderr)
+    (when (process-live-p proc)
+      (process-put proc 'kargu-pgid (process-id proc)))
+    (plist-put state :timer (kargu-process--deadline proc (plist-get state :timeout) state))
+    (when (process-live-p proc) (process-send-eof proc))
+    (plist-put state :lifecycle :running)
+    (kargu-process--maybe-finish callback buffer state)
+    proc))
+
+(defun kargu-process--cleanup-start (buffer state opts)
+  "Release BUFFER and resources in STATE after startup with OPTS fails."
+  (plist-put state :lifecycle :closed)
+  (when-let* ((timer (plist-get state :timer))) (cancel-timer timer))
+  (when-let* ((proc (plist-get state :process))) (kargu-process-cancel proc))
+  (when-let* ((stderr (plist-get state :stderr-process)))
+    (when (process-live-p stderr) (delete-process stderr)))
+  (when-let* ((stderr-buffer (plist-get state :stderr-buffer)))
+    (when (buffer-live-p stderr-buffer) (kill-buffer stderr-buffer)))
+  (when (and (buffer-live-p buffer) (not (plist-get opts :buffer)))
+    (kill-buffer buffer)))
+
+(cl-defun kargu-process--start (exe args &key callback opts)
   "Start EXE with ARGS per OPTS and wire timeout, cap and CALLBACK."
-  (let* ((buffer (generate-new-buffer " *kargu-process*"))
-         (state (list :done nil :timed-out nil :truncated nil :code nil))
-         (timeout (or (plist-get opts :timeout) kargu-process-timeout))
-         (max-bytes (or (plist-get opts :max-bytes) kargu-process-max-bytes))
+  (let* ((buffer (or (plist-get opts :buffer)
+                     (generate-new-buffer kargu-process--buffer-name)))
+         (state (list :lifecycle :starting :keep-buffer (plist-get opts :keep-buffer)
+                      :stderr-closed (eq (plist-get opts :stderr) 'merge)
+                      :output-policy (plist-get opts :output-policy)))
+         (timeout (if (plist-member opts :timeout) (plist-get opts :timeout)
+                    kargu-process-timeout))
          (default-directory (file-name-as-directory
                              (expand-file-name (or (plist-get opts :dir)
-                                                   default-directory))))
-         (timer nil)
-         (proc nil))
+                                                   default-directory)))))
+    (plist-put state :timeout timeout)
     (condition-case err
         (progn
-          (setq proc (make-process
-                      :name (file-name-nondirectory exe)
-                      :buffer nil
-                      :command (cons exe args)
-                      :connection-type 'pipe
-                      :noquery t
-                      :coding 'utf-8
-                      :filter (kargu-process--filter buffer max-bytes state)))
-          (setq timer (run-at-time
-                       timeout nil
-                       (lambda ()
-                         (when (process-live-p proc)
-                           (plist-put state :timed-out t)
-                           (kill-process proc)))))
-          (set-process-sentinel
-           proc (kargu-process--sentinel callback buffer state timer))
-          proc)
+          (when-let* ((max-lines (plist-get opts :max-lines)))
+            (unless (and (integerp max-lines) (> max-lines 0))
+              (error "Line limit must be a positive integer or nil")))
+          (kargu-process--launch exe args :callback callback :buffer buffer
+                                :state state :opts opts))
       (error
-       (kill-buffer buffer)
+       (kargu-process--cleanup-start buffer state opts)
        (kargu-process--fail callback (error-message-string err))
        nil))))
 
 (defun kargu-process-deliver (callback thunk)
-  "Call CALLBACK with the string THUNK returns, or with an ERROR string."
+  "Deliver THUNK's result to CALLBACK, converting failures to error text."
   (funcall callback
            (condition-case-unless-debug err
                (funcall thunk)
@@ -134,13 +313,18 @@ OPTS: `:dir' working directory, `:timeout' seconds (default
   "Error text for a failed RESULT of the command named LABEL."
   (cond
    ((plist-get result :timed-out)
-    (format "%s timed out after %ss" label kargu-process-timeout))
+    (format "%s timed out after %ss" label
+            (if (plist-member result :timeout) (plist-get result :timeout)
+              kargu-process-timeout)))
+   ((plist-get result :truncated)
+    (format "%s exceeded its output limit; result is incomplete" label))
    ((eql (plist-get result :code) 127)
     (format "%s is not installed" label))
    (t
     (format "%s failed (exit %s): %s" label (plist-get result :code)
-            (string-trim (or (plist-get result :output) ""))))))
+            (string-trim (or (kargu-nonempty (plist-get result :stderr))
+                             (plist-get result :output) ""))))))
 
 (provide 'kargu/tools/process)
 
-;;; kargu/tools/process.el ends here
+;;; process.el ends here

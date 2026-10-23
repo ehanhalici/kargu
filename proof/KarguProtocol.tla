@@ -67,6 +67,9 @@ AssistantContentNonEmpty(hist) ==
 HasAtLeastOneUser(hist) ==
     \E i \in 1..Len(hist) : IsUser(hist[i])
 
+UserContentNonEmpty(hist) ==
+    \A i \in 1..Len(hist) : IsUser(hist[i]) => hist[i].content # ""
+
 (* Combined Protocol Firewall Invariant *)
 ProtocolFirewallValid(hist) ==
     /\ FirstMessageIsSystem(hist)
@@ -76,6 +79,7 @@ ProtocolFirewallValid(hist) ==
     /\ NoConsecutiveUser(hist)
     /\ AssistantContentNonEmpty(hist)
     /\ HasAtLeastOneUser(hist)
+    /\ UserContentNonEmpty(hist)
 
 (***************************************************************************)
 (* `kargu--validate-history' (kargu/history/repair.el)                     *)
@@ -92,6 +96,7 @@ ProtocolFirewallValid(hist) ==
 (*   4. Only then, in `strip' mode, trailing assistant turns are removed.  *)
 (*      A trailing assistant turn with calls was answered in step 2, so it *)
 (*      is no longer trailing.                                             *)
+(*   5. Insert a minimal user turn after the system when none remains.      *)
 (***************************************************************************)
 
 \* Strips trailing assistant messages
@@ -143,11 +148,15 @@ Pass1(inSeq, outSeq, pendingIds, idToName) ==
                        FlushPending(outSeq, pendingIds, idToName) \o <<m>>,
                        newIds,
                        combined)
-         ELSE \* user turn or assistant text turn
-              Pass1(rest,
-                    FlushPending(outSeq, pendingIds, idToName) \o <<m>>,
-                    << >>,
-                    idToName)
+         ELSE IF IsAssistant(m) /\ m.content = ""
+         THEN Pass1(rest, FlushPending(outSeq, pendingIds, idToName), << >>, idToName)
+         ELSE \* user turn or nonempty assistant text turn
+              LET normalized == IF IsUser(m) /\ m.content = ""
+                                THEN [m EXCEPT !.content = "Continue."] ELSE m
+              IN Pass1(rest,
+                       FlushPending(outSeq, pendingIds, idToName) \o <<normalized>>,
+                       << >>,
+                       idToName)
 
 \* Step 3a: merge consecutive user turns
 RECURSIVE MergeConsecutiveUsers(_)
@@ -185,7 +194,9 @@ DefaultSystemMsg == MakeMsg("system", "SYSTEM_PROMPT", << >>, "", "")
 \* Complete history repair.  FIX is "strip" for a request; any other value
 \* (a finished or interrupted run) keeps a trailing assistant answer.
 ValidateHistory(hist, fix) ==
-    IF Assert(ContractHistory(hist), "Ingress contract violation in ValidateHistory")
+    (* A missing system head is repairable; role and call contracts still hold. *)
+    IF Assert(\A i \in 1..Len(hist) : ContractMessage(hist[i]),
+              "Ingress contract violation in ValidateHistory")
     THEN
         LET hasSys   == Len(hist) > 0 /\ IsSystem(hist[1])
             sysMsg   == IF hasSys THEN hist[1] ELSE DefaultSystemMsg
@@ -194,7 +205,9 @@ ValidateHistory(hist, fix) ==
             flushed  == FlushPending(p1.out, p1.pending, p1.names)
             merged   == MergeConsecutiveAssistants(MergeConsecutiveUsers(flushed))
             trimmed  == IF fix = "strip" THEN DropTrailingAssistants(merged) ELSE merged
-        IN <<sysMsg>> \o trimmed
+            withUser == IF HasAtLeastOneUser(trimmed) THEN trimmed
+                        ELSE <<MakeMsg("user", "Continue.", << >>, "", "")>> \o trimmed
+        IN <<sysMsg>> \o withUser
     ELSE hist
 
 (***************************************************************************)

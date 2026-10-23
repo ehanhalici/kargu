@@ -3,21 +3,15 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
 ;; The chat commands, history firewall, loop, and payload builder stay
 ;; real.  Only `kargu--api-post' is replaced, by a synchronous queue.
 
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
+;;; Code:
 
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'cl-lib)
 (require 'kargu)
 (require 'kargu/chat)
@@ -111,26 +105,24 @@ The symbol `quit' cancels the read.")
 (defun kargu-fake--deliver (gen callback on-delta item)
   "Give ITEM to CALLBACK when GEN is still current.
 A cancelled generation drops the reply.  Deltas go out first.
-A successful body is stored in history, as the real transport does
-inside `kargu--api-handle-success'."
-  (when (= gen kargu--generation)
+The client, not this transport stub, stores the assistant turn."
+  (when (= gen (kargu-application-current-generation))
     (setq kargu-fake--delivered t)
     (dolist (piece (plist-get item :deltas))
       (when (functionp on-delta)
         (funcall on-delta (kargu-fake--delta piece))))
     (let ((response (kargu-fake--body item)))
-      (unless (kargu-response-error-message response)
-        (kargu--history-append-assistant response))
       (funcall callback response))))
 
 (defun kargu-fake--post (_url _headers payload gen callback &optional on-delta _attempt)
-  "Synchronous stand-in for `kargu--api-post'."
+  "Deliver PAYLOAD at GEN to CALLBACK and ON-DELTA synchronously."
   (setq kargu-fake--seen (nconc kargu-fake--seen (list payload)))
   (let ((item (or (pop kargu-fake--queue)
                   '(:kind text :text "unscripted"))))
     (if (eq (plist-get item :kind) 'hold)
         (setq kargu-fake--held
               (list :gen gen :callback callback :on-delta on-delta
+                    :request (kargu-application-current-request)
                     :item '(:kind text :text "late reply")))
       (kargu-fake--deliver gen callback on-delta item))))
 
@@ -139,13 +131,15 @@ inside `kargu--api-handle-success'."
   (when kargu-fake--held
     (let ((held kargu-fake--held))
       (setq kargu-fake--held nil)
-      (kargu-fake--deliver (plist-get held :gen)
-                           (plist-get held :callback)
-                           (plist-get held :on-delta)
-                           (plist-get held :item)))))
+      (when (or (null (plist-get held :request))
+                (kargu-logical-request-current-p (plist-get held :request)))
+        (kargu-fake--deliver (plist-get held :gen)
+                             (plist-get held :callback)
+                             (plist-get held :on-delta)
+                             (plist-get held :item))))))
 
 (defun kargu-fake--read (_prompt candidates &optional default _annotations)
-  "Return the next scripted candidate, or signal `quit'."
+  "Return a scripted choice from CANDIDATES or DEFAULT, or signal `quit'."
   (let ((next (pop kargu-fake--reads)))
     (cond
      ((eq next 'quit) (signal 'quit nil))
@@ -202,7 +196,7 @@ An action that never posts runs once."
    (t '(none))))
 
 (defun kargu-fake--needle (mode tools action response)
-  "Transcript text ACTION/RESPONSE must leave, or nil."
+  "Return expected transcript text for MODE, TOOLS, ACTION and RESPONSE."
   (cond
    ((and (eq mode 'agent) (eq tools 'off)
          (memq action '(send stop-during)))
@@ -254,9 +248,9 @@ An action that never posts runs once."
 
 (defun kargu-fake--arm-tools (tools)
   "Apply TOOLS (`on' or `off') to the active model's metadata.
-An earlier tool rejection is remembered in `kargu--tools-refused';
+An earlier tool rejection is remembered by the metadata service;
 each row starts with that record cleared so it cannot leak."
-  (clrhash kargu--tools-refused)
+  (kargu-model-forget-tools-refusals)
   (let ((id (kargu--model)))
     (when (and (stringp id) (not (string-empty-p id)))
       (kargu-model-set-metadata
@@ -274,7 +268,7 @@ each row starts with that record cleared so it cannot leak."
     (cadr (memq mode kargu-fake--modes))))
 
 (defun kargu-fake--drive (mode tools action response)
-  "Perform ACTION.  Return nil, or the error message it signaled."
+  "Perform ACTION with MODE, TOOLS and RESPONSE; return any error message."
   (kargu-set-mode mode)
   (kargu-fake--arm-tools tools)
   (when (kargu-fake--posts-p mode tools action)
@@ -304,10 +298,10 @@ each row starts with that record cleared so it cannot leak."
           ('select-provider
            (when (hash-table-p kargu--live-models-cache)
              (clrhash kargu--live-models-cache))
-           (setq kargu-fake--reads '("openrouter" "fake/model-a"))
+           (setf kargu-fake--reads '("openrouter" "fake/model-a"))
            (kargu-chat-select-provider-company))
           ('cancel-select
-           (setq kargu-fake--reads '(quit))
+           (setf kargu-fake--reads '(quit))
            (kargu-chat-select-mode-company))
           ('reset
            (kargu-chat-reset)))
@@ -327,7 +321,7 @@ each row starts with that record cleared so it cannot leak."
 (defun kargu-fake--tool-count ()
   "Number of tool-result messages in the history."
   (cl-count-if (lambda (msg) (equal (kargu-aget msg "role") "tool"))
-               kargu--message-history))
+               (kargu-history-messages)))
 
 (defun kargu-fake--history-closed-p ()
   "Non-nil when no tool call is left unanswered.
@@ -336,7 +330,7 @@ the system prompt is not an orphan."
   (let ((open nil)
         (ok t)
         (before (kargu-fake--tool-count)))
-    (dolist (msg kargu--message-history)
+    (dolist (msg (kargu-history-messages))
       (let ((role (kargu-aget msg "role")))
         (cond
          ((equal role "assistant")
@@ -347,16 +341,16 @@ the system prompt is not an orphan."
     (and ok (not open) (= before (kargu-fake--tool-count)))))
 
 (defun kargu-fake--tool-result-p ()
-  "Non-nil when history holds the canned tool result."
+  "Test for the canned tool result in history."
   (cl-some
    (lambda (msg)
      (and (equal (kargu-aget msg "role") "tool")
           (stringp (kargu-aget msg "content"))
           (string-match-p "fake tool result" (kargu-aget msg "content"))))
-   kargu--message-history))
+   (kargu-history-messages)))
 
 (defun kargu-fake--check (mode tools action response err)
-  "Return a failure string for this row, or nil."
+  "Check MODE, TOOLS, ACTION, RESPONSE and ERR; return a failure or nil."
   (let ((problems nil)
         (needle (kargu-fake--needle mode tools action response))
         (text (ignore-errors (kargu-fake--transcript)))
@@ -431,20 +425,18 @@ the system prompt is not an orphan."
         kargu-fake--held nil))
 
 (defun kargu-fake--run-row (mode tools action response saved-provider saved-model)
-  "Run one matrix row.  Return a failure string or nil."
+  "Run MODE, TOOLS, ACTION and RESPONSE; return a failure string or nil.
+SAVED-PROVIDER and SAVED-MODEL restore the row's initial selection."
   (kargu-fake--fresh-chat)
-  (setq kargu--session-provider saved-provider
-        kargu--session-model saved-model)
+  (setf (kargu-selection-provider) saved-provider
+        (kargu-selection-model) saved-model)
   (when (and (stringp saved-model) (not (string-empty-p saved-model)))
     (ignore-errors (kargu-state-set-model saved-model)))
-  (unless (and (stringp kargu--session-provider) (not (string-empty-p kargu--session-provider)))
-    (setq kargu--session-provider "openrouter"))
-  (unless (and (stringp kargu--session-model) (not (string-empty-p kargu--session-model)))
-    (setq kargu--session-model "fake/model-a")
+  (unless (and (stringp (kargu-selection-provider)) (not (string-empty-p (kargu-selection-provider))))
+    (setf (kargu-selection-provider) "openrouter"))
+  (unless (and (stringp (kargu-selection-model)) (not (string-empty-p (kargu-selection-model))))
+    (setf (kargu-selection-model) "fake/model-a")
     (kargu-state-set-model "fake/model-a"))
-  (with-current-buffer (get-buffer kargu-chat-buffer-name)
-    (setq-local kargu-chat--session-provider kargu--session-provider
-                kargu-chat--session-model kargu--session-model))
   (let ((failure
          (condition-case err
              (let ((signaled (kargu-fake--drive mode tools action response)))
@@ -476,11 +468,11 @@ the system prompt is not an orphan."
 (ert-deftest kargu-fake-agent-matrix ()
   "Drive every mode, tool, user action, and response through the real loop.
 No Emacs window, no network, no Company popup, no `y-or-n-p'."
-  (let* ((saved-provider kargu--session-provider)
-         (saved-model kargu--session-model)
+  (let* ((saved-provider (kargu-selection-provider))
+         (saved-model (kargu-selection-model))
          (saved-mode (kargu-state-mode))
          (saved-key (and (boundp 'kargu-api-key) kargu-api-key))
-         (saved-history (copy-tree kargu--message-history t))
+         (saved-history (copy-tree (kargu-history-messages) t))
          (saved-meta (copy-hash-table kargu--model-metadata-table))
          (saved-models (and (hash-table-p kargu--live-models-cache)
                             (copy-hash-table kargu--live-models-cache)))
@@ -490,6 +482,8 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
          (kargu-loop-upstream-retries 0)
          (kargu-confirm--mock-decision :stop)
          (kargu-session-auto-save nil)
+         (kargu-mode-prepare-functions nil)
+         (kargu-state-before-mode-change-hook nil)
          (failures nil))
     (unwind-protect
         (cl-letf (((symbol-function 'kargu--api-post) #'kargu-fake--post)
@@ -501,18 +495,14 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
                   ((symbol-function 'kargu-dape-ready-p) (lambda (&rest _) t))
                   ((symbol-function 'kargu-api-prefetch-models) (lambda (&rest _) nil))
                   ((symbol-function 'kargu-api-fetch-model-ids)
-                   (lambda (_provider callback) (funcall callback '("fake/model-a"))))
+                   (lambda (_provider callback &optional _on-error) (funcall callback '("fake/model-a"))))
                   ((symbol-function 'kargu-api-select--provider-candidates)
                    (lambda () '("openrouter")))
                   ((symbol-function 'kargu--completing-read-with-company)
                    #'kargu-fake--read)
                   ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
                   ((symbol-function 'company-manual-begin)
-                   (lambda (&rest _) (error "Company opened")))
-                  ((symbol-function 'kargu-chat-activate-selection)
-                   (lambda (&rest _) nil))
-                  ((symbol-function 'kargu-chat-note-selection)
-                   (lambda (&rest _) nil)))
+                   (lambda (&rest _) (error "Company opened"))))
           (dolist (mode kargu-fake--modes)
             (dolist (tools kargu-fake--tool-states)
               (dolist (action kargu-fake--actions)
@@ -522,10 +512,10 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
                                   saved-provider saved-model)))
                     (when failure
                       (push failure failures))))))))
-      (setq kargu--session-provider saved-provider
-            kargu--session-model saved-model
+      (setf (kargu-selection-provider) saved-provider
+            (kargu-selection-model) saved-model
             kargu-api-key saved-key
-            kargu--message-history saved-history
+            (kargu-history-messages) saved-history
             kargu--loop-run nil
             kargu--busy nil)
       (ignore-errors (kargu-set-mode saved-mode))

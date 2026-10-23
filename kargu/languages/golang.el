@@ -1,8 +1,12 @@
-;;; kargu/languages/golang.el --- Go language profile for Kargu -*- lexical-binding: t; -*-
+;;; golang.el --- Go language profile for Kargu -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Part of kargu.
+
+;;; Commentary:
+
+;; Register Go modes, project detection and toolchain metadata.
 
 ;;; Code:
 
@@ -14,12 +18,11 @@
    :name "Go"
    :priority 90
    :extensions '("go")
+   :modes '(go-mode go-ts-mode)
    :detectors
    (list "go.mod" "go.sum"
          (lambda (root)
-           (ignore-errors
-             (cl-some (lambda (f) (string-match-p "\\.go\\'" f))
-                      (directory-files root nil "\\.go$" t)))))
+           (kargu-fs-has-extension-p root '("go"))))
    :toolchain
    '(:build-cmd "go build ./..."
      :test-cmd "go test -v ./..."
@@ -44,10 +47,11 @@
      :purpose "Language Server for Go (code completion and symbol navigation)"
      :hint "go install golang.org/x/tools/gopls@latest")
    :lsp-notes
-   "Go symbols: functions, methods, structs, interfaces, types. Use gopls with `read_file_symbols` and `edit_by_lsp` for refactoring."))
+   "Go symbols: functions, methods, structs, interfaces, types. Use gopls with `read_file_symbols` and `edit_by_lsp` for refactoring.")
+  "Language profile for Go buffers and projects.")
 
 (kargu-language-register kargu-language-golang-spec)
 
 (provide 'kargu/languages/golang)
 
-;;; kargu/languages/golang.el ends here
+;;; golang.el ends here

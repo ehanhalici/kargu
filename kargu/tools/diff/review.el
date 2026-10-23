@@ -1,4 +1,4 @@
-;;; kargu/tools/diff/review.el --- Ediff review sessions and interactive interaction -*- lexical-binding: t; -*-
+;;; review.el --- Ediff review sessions and interactive interaction -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -17,6 +17,7 @@
 
 (require 'kargu/core)
 (require 'kargu/permission)
+(require 'kargu/tools/diff/context)
 (require 'kargu/tools/diff/track)
 (require 'kargu/tools/diff/stage)
 
@@ -32,11 +33,11 @@
 
 ;;;; Review sessions ------------------------------------------------------
 
-(defvar kargu-diff--sessions (make-hash-table :test #'equal)
+(defvar kargu-diff--sessions (kargu-edit-service-reviews (kargu-diff--get-default-service))
   "Pending review sessions:  absolute path -> session plist.
 Keys of a session plist:  :path, :buffer-a, :shadow-buffer,
 :original, :proposal, :created-new, :callback,
-:ediff-control, :outcome.")
+:ediff-control, :outcome.  Owned by `kargu-edit-service'.")
 
 (defun kargu-diff--session-live-p (session)
   "Return non-nil when SESSION's ediff review may still be running.
@@ -47,53 +48,54 @@ falls back to the shadow buffer's liveness."
         (buffer-live-p control)
       (buffer-live-p (plist-get session :shadow-buffer)))))
 
-(defun kargu-diff--maybe-drop-hook ()
-  "Remove our ediff quit hook when no review sessions are pending."
-  (when (= 0 (hash-table-count kargu-diff--sessions))
+(defun kargu-diff--maybe-drop-hook (&optional service)
+  "Remove ediff quit hook when no reviews are pending on optional SERVICE."
+  (when (= 0 (hash-table-count (kargu-diff--service-reviews service)))
     (remove-hook 'ediff-quit-hook #'kargu-diff--ediff-quit)))
 
-(defun kargu-diff--reap-stale (path)
-  "Clean up an abandoned (never finalized) review for PATH.
+(defun kargu-diff--reap-stale (path &optional service)
+  "Clean up an abandoned (never finalized) review for PATH on optional SERVICE.
 Abandonment means the ediff control buffer died without running
 our quit hook, e.g. it was killed directly."
-  (let ((session (gethash path kargu-diff--sessions)))
+  (let ((session (gethash path (kargu-diff--service-reviews service))))
     (when session
-      (kargu-diff--abort-session session t)
+      (kargu-diff--abort-session session t service)
       (kargu-log 'warn "diff: dropped abandoned review for %s" path))))
 
-(defun kargu-diff--abort-session (session &optional silent)
-  "Cancel the active review for SESSION."
-  (let ((path (plist-get session :path))
-        (buf-a (plist-get session :buffer-a))
-        (shadow (plist-get session :shadow-buffer))
-        (original (plist-get session :original))
-        (control (plist-get session :ediff-control))
-        (callback (plist-get session :callback)))
-    (when (and path (eq session (gethash path kargu-diff--sessions)))
-      (remhash path kargu-diff--sessions))
-    (when (buffer-live-p buf-a)
-      (with-current-buffer buf-a
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert original)
-          (set-buffer-modified-p nil))))
-    (when (buffer-live-p control)
-      (with-current-buffer control
-        (remove-hook 'ediff-quit-hook #'kargu-diff--ediff-quit t)
-        (when (boundp 'ediff-quit-hook)
-          (setq ediff-quit-hook
-                (remq #'kargu-diff--ediff-quit ediff-quit-hook)))
-        (condition-case-unless-debug _err
-            (with-current-buffer control
-              (if (fboundp 'ediff-really-quit)
-                  (ediff-really-quit nil)
-                (kill-buffer control)))
-          (error
-           (when (buffer-live-p control)
-             (kill-buffer control))))))
-    (when (buffer-live-p shadow)
-      (with-current-buffer shadow (set-buffer-modified-p nil))
-      (kill-buffer shadow))
+(defun kargu-diff--close-review-control (control)
+  "Close review CONTROL without running its completion hook."
+  (when (buffer-live-p control)
+    (with-current-buffer control
+      (remove-hook 'ediff-quit-hook #'kargu-diff--ediff-quit t)
+      (when (boundp 'ediff-quit-hook)
+        (setq ediff-quit-hook
+              (remq #'kargu-diff--ediff-quit ediff-quit-hook)))
+      (condition-case-unless-debug _err
+          (with-current-buffer control
+            (if (fboundp 'ediff-really-quit)
+                (ediff-really-quit nil)
+              (kill-buffer control)))
+        (error
+         (when (buffer-live-p control)
+           (kill-buffer control)))))))
+
+(defun kargu-diff--abort-session (session &optional silent service)
+  "Cancel review SESSION on SERVICE; omit notification when SILENT is non-nil."
+  (let* ((path (plist-get session :path))
+         (base (plist-get session :base-buffer))
+         (shadow (plist-get session :shadow-buffer))
+         (control (plist-get session :ediff-control))
+         (callback (plist-get session :callback))
+         (reviews (kargu-diff--service-reviews service))
+         (svc (or service (kargu-diff--current-service))))
+    (when (and path (eq session (gethash path reviews)))
+      (remhash path reviews))
+    (kargu-diff--close-review-control control)
+    (dolist (buf (list base shadow))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf (set-buffer-modified-p nil))
+        (kill-buffer buf)
+        (when svc (kargu-edit-service-unregister-buffer svc buf))))
     (when-let* ((wconfig (plist-get session :window-config)))
       (kargu-diff--restore-wconfig wconfig))
     (let ((outcome (list :status :interrupted :file path :saved nil)))
@@ -104,22 +106,23 @@ our quit hook, e.g. it was killed directly."
         (kargu-log 'warn "diff: review interrupted for %s" path))
       outcome)))
 
-(defun kargu-diff-abort-all-sessions ()
-  "Silently cancel every open review and restore the reviewed files.
+(defun kargu-diff-abort-all-sessions (&optional service)
+  "Silently cancel every open review on optional SERVICE and restore files.
 Called when a run ends without its answer, so no ediff outlives its run."
   (let (sessions)
-    (maphash (lambda (_path session) (push session sessions)) kargu-diff--sessions)
+    (maphash (lambda (_path session) (push session sessions))
+             (kargu-diff--service-reviews service))
     (dolist (session sessions)
-      (kargu-diff--abort-session session t))))
+      (kargu-diff--abort-session session t service))))
 
-(defun kargu-diff-pending-reviews ()
-  "Message the agent reviews that are still open in ediff."
+(defun kargu-diff-pending-reviews (&optional service)
+  "Message the agent reviews that are still open in ediff on optional SERVICE."
   (interactive)
   (let ((paths nil))
     (maphash (lambda (path session)
                (when (kargu-diff--session-live-p session)
                  (push path paths)))
-             kargu-diff--sessions)
+             (kargu-diff--service-reviews service))
     (if (null paths)
         (message "kargu: no pending reviews")
       (message "kargu pending reviews: %s"
@@ -162,8 +165,8 @@ Called when a run ends without its answer, so no ediff outlives its run."
                       (kargu-diff--restore-wconfig wconfig)
                       (run-at-time 0 nil
                                    (lambda (buf)
-                                      (when (buffer-live-p buf)
-                                        (kill-buffer buf)))
+                                     (when (buffer-live-p buf)
+                                       (kill-buffer buf)))
                                    buf-orig))
                     nil t)
           (add-hook 'kill-buffer-hook
@@ -171,17 +174,16 @@ Called when a run ends without its answer, so no ediff outlives its run."
                       (kargu-diff--restore-wconfig wconfig)
                       (run-at-time 0 nil
                                    (lambda (buf)
-                                      (when (buffer-live-p buf)
-                                        (kill-buffer buf)))
+                                     (when (buffer-live-p buf)
+                                       (kill-buffer buf)))
                                    buf-orig))
                     nil t)))
       ctl)))
 
 (defun kargu-diff-review (&optional file-path)
-  "Review changes made to FILE-PATH in ediff against the pre-agent snapshot.
-Buffer A (left) displays the original pre-agent snapshot, and Buffer B
-(right) displays the current file buffer.  Ediff's native `a' key can
-selectively revert individual hunks back to the original version."
+  "Review FILE-PATH against its pre-agent snapshot in Ediff.
+Buffer A holds the original text and buffer B the current file.
+Use the Ediff command `ediff-copy-A-to-B' to revert individual hunks."
   (interactive
    (list (let ((paths (or (and (boundp 'kargu-diff--run-modified-files)
                                kargu-diff--run-modified-files)
@@ -191,10 +193,10 @@ selectively revert individual hunks back to the original version."
                                 nil nil (car paths))
              (user-error "No modified files or rollback snapshots available")))))
   (let* ((path (kargu-permission-resolve (or file-path
-                                        (car (or (and (boundp 'kargu-diff--run-modified-files)
-                                                      kargu-diff--run-modified-files)
-                                                 (kargu-diff-snapshot-paths))))
-                                        "file"))
+                                             (car (or (and (boundp 'kargu-diff--run-modified-files)
+                                                           kargu-diff--run-modified-files)
+                                                      (kargu-diff-snapshot-paths))))
+                                         "file"))
          (stack (gethash path kargu-diff--snapshots)))
     (unless stack
       (user-error "No rollback snapshot recorded for %s" path))
@@ -203,61 +205,82 @@ selectively revert individual hunks back to the original version."
       (kargu-diff--rollback-review path original))))
 
 (defun kargu-diff--setup-ediff-control (control path wconfig)
-  "Configure hooks on ediff CONTROL buffer for PATH."
-  (let ((ctrl-buf (if (bufferp control)
+  "Configure review CONTROL for PATH, restoring WCONFIG after completion."
+  (let ((service (kargu-diff--current-service))
+        (ctrl-buf (if (bufferp control)
                       control
                     (and (stringp control) (get-buffer control)))))
     (when (bufferp ctrl-buf)
       (with-current-buffer ctrl-buf
+        (setq-local kargu-diff--active-service service)
+        (add-hook 'ediff-quit-hook #'kargu-diff--ediff-quit nil t)
         (add-hook 'ediff-after-quit-hook-internal
                   (lambda () (kargu-diff--restore-wconfig wconfig))
                   nil t)
         (add-hook 'kill-buffer-hook
                   (lambda ()
-                    (when (gethash path kargu-diff--sessions)
+                    (when (and (not (kargu-edit-service-closed-p service))
+                               (gethash path (kargu-edit-service-reviews service)))
                       (kargu-diff--ediff-quit))
                     (kargu-diff--restore-wconfig wconfig))
                   nil t)))
     ctrl-buf))
 
-(defun kargu-diff--apply-interactive (path buf-a original new-content exists callback)
-  "Stage NEW-CONTENT in a shadow buffer and launch interactive ediff review."
+(defun kargu-diff--open-review-control (path base shadow)
+  "Start an Ediff review for PATH using isolated BASE and SHADOW buffers."
+  (condition-case-unless-debug err
+      (let ((ediff-window-setup-function (if (boundp 'kargu-diff-ediff-window-setup-function)
+                                             (or kargu-diff-ediff-window-setup-function #'ediff-setup-windows-plain)
+                                           #'ediff-setup-windows-plain))
+            (ediff-split-window-function (if (boundp 'kargu-diff-ediff-split-window-function)
+                                             (or kargu-diff-ediff-split-window-function #'split-window-horizontally)
+                                           #'split-window-horizontally)))
+        (ediff-buffers base shadow))
+    (error
+     (remhash path kargu-diff--sessions)
+     (dolist (buf (list base shadow))
+       (when (buffer-live-p buf) (kill-buffer buf)))
+     (kargu-diff--maybe-drop-hook)
+     (error "Could not start ediff review: %s"
+            (error-message-string err)))))
+
+(cl-defun kargu-diff--apply-interactive
+    (path buf-a original new-content exists callback &optional pre-state defer-commit)
+  "Review NEW-CONTENT for PATH using isolated base and shadow snapshot buffers.
+BUF-A is the optional live visiting buffer; ORIGINAL is the initial content;
+EXISTS indicates whether PATH exists on disk; CALLBACK receives the outcome.
+PRE-STATE holds the pre-edit snapshot state; when DEFER-COMMIT is non-nil,
+finalizing the review returns `:decided-content' without writing to disk."
   (let* ((wconfig (current-window-configuration))
+         (base (kargu-diff--make-base path original))
          (shadow (kargu-diff--make-shadow path new-content))
-         (snap (list :content original
-                     :created-new (not exists)
-                     :at (current-time)))
+         (defer (or defer-commit
+                    (and (boundp 'kargu-diff--batch-defer-commit)
+                         kargu-diff--batch-defer-commit)))
+         (state (or pre-state
+                    (and (boundp 'kargu-diff--active-pre-state)
+                         (equal (plist-get kargu-diff--active-pre-state :path) path)
+                         kargu-diff--active-pre-state)
+                    (kargu-diff--capture-pre-state path)))
          (session (list :path path
-                        :buffer-a buf-a
+                        :buffer-a base
+                        :base-buffer base
+                        :target-buffer buf-a
                         :shadow-buffer shadow
                         :original original
                         :proposal new-content
                         :created-new (not exists)
+                        :pre-state state
+                        :defer-commit defer
                         :callback callback
                         :window-config wconfig
                         :outcome nil)))
-    (puthash path (cons snap (gethash path kargu-diff--snapshots))
-             kargu-diff--snapshots)
-    (puthash path session kargu-diff--sessions)
+    (puthash path session (kargu-diff--service-reviews))
     (kargu-log 'info "diff: proposal staged for %s (%d -> %d bytes)"
                path (length original) (length new-content))
-    (add-hook 'ediff-quit-hook #'kargu-diff--ediff-quit)
     (when (fboundp 'kargu-notify)
       (kargu-notify 'permission))
-    (let ((control (condition-case-unless-debug err
-                       (let ((ediff-window-setup-function (if (boundp 'kargu-diff-ediff-window-setup-function)
-                                                             (or kargu-diff-ediff-window-setup-function #'ediff-setup-windows-plain)
-                                                           #'ediff-setup-windows-plain))
-                             (ediff-split-window-function (if (boundp 'kargu-diff-ediff-split-window-function)
-                                                             (or kargu-diff-ediff-split-window-function #'split-window-horizontally)
-                                                           #'split-window-horizontally)))
-                         (ediff-buffers buf-a shadow))
-                     (error
-                      (remhash path kargu-diff--sessions)
-                      (when (buffer-live-p shadow) (kill-buffer shadow))
-                      (kargu-diff--maybe-drop-hook)
-                      (error "Could not start ediff review: %s"
-                             (error-message-string err))))))
+    (let ((control (kargu-diff--open-review-control path base shadow)))
       (plist-put session :ediff-control (kargu-diff--setup-ediff-control control path wconfig)))
     (let ((outcome (list :status :staged :file path :saved nil)))
       (plist-put outcome :message (kargu-diff--describe outcome))
@@ -273,95 +296,111 @@ associated session by looking at ediff's buffer A and B."
          (match nil))
     (maphash (lambda (_path session)
                (when (and (not match)
-                          (or (eq (plist-get session :buffer-a) buf-a)
+                          (or (eq (plist-get session :base-buffer) buf-a)
+                              (eq (plist-get session :buffer-a) buf-a)
                               (eq (plist-get session :shadow-buffer) buf-b)))
                  (setq match session)))
-             kargu-diff--sessions)
+             (kargu-diff--service-reviews))
     (when match
       (kargu-diff--finalize match))
     (kargu-diff--maybe-drop-hook)))
 
-(defun kargu-diff--evaluate-buffer-status (buf-a original proposal created-new)
-  "Evaluate review status in BUF-A compared to ORIGINAL and PROPOSAL.
-Returns `(STATUS . SAVED)'."
-  (if (not (buffer-live-p buf-a))
-      (cons :rejected nil)
-    (with-current-buffer buf-a
-      (let* ((final (buffer-string))
+(defun kargu-diff--evaluate-base-decision (base original proposal)
+  "Compare isolated BASE buffer to ORIGINAL and PROPOSAL.
+Return (STATUS . DECIDED-CONTENT)."
+  (if (not (buffer-live-p base))
+      (cons :rejected original)
+    (with-current-buffer base
+      (let* ((final (save-restriction (widen) (buffer-string)))
              (status (cond
                       ((string= final original) :rejected)
                       ((string= final proposal) :applied-full)
-                      (t :applied-partial)))
-             (saved nil))
-        (when (and (memq status '(:applied-full :applied-partial))
-                   (boundp 'kargu-diff-auto-save)
-                   kargu-diff-auto-save
-                   (buffer-modified-p))
-          (save-buffer)
-          (setq saved t))
-        (when (and created-new (eq status :rejected)
-                   (not (buffer-modified-p)))
-          (kill-buffer))
-        (cons status saved)))))
+                      (t :applied-partial))))
+        (cons status final)))))
 
-(defun kargu-diff--record-review-success (path status saved buf-a)
-  "Record successful review of PATH with STATUS and SAVED in BUF-A."
-  (puthash path (list :status status :saved (and saved t)
-                      :at (format-time-string "%H:%M:%S"))
-           kargu-diff--changed)
-  (when (boundp 'kargu-diff--run-modified-files)
-    (cl-pushnew path kargu-diff--run-modified-files :test #'equal))
-  (kargu-log 'info "diff: %s %s" status path)
-  (when (buffer-live-p buf-a)
-    (let ((kargu-diff--current-file path))
-      (with-current-buffer buf-a
-        (when (boundp 'kargu-diff-after-apply-hook)
-          (run-hooks 'kargu-diff-after-apply-hook))))))
-
-(defun kargu-diff--schedule-post-review-cleanup (shadow wconfig)
-  "Schedule deferred cleanup of SHADOW buffer and restoration of WCONFIG."
-  (unless (or (and (boundp 'kargu-diff-keep-shadow) kargu-diff-keep-shadow)
-              (not (buffer-live-p shadow)))
-    (run-at-time 0 nil
-                 (lambda (buf)
-                   (when (buffer-live-p buf)
-                     (with-current-buffer buf (set-buffer-modified-p nil))
-                     (kill-buffer buf)))
-                 shadow))
-  (when-let* ((cfg wconfig))
-    (run-at-time 0 nil
-                 (lambda (c)
-                   (when (window-configuration-p c)
-                     (set-window-configuration c)))
-                 cfg)))
+(defun kargu-diff--schedule-post-review-cleanup (base shadow wconfig)
+  "Schedule deferred cleanup of BASE and SHADOW buffers and restore WCONFIG."
+  (let ((svc (kargu-diff--current-service)))
+    (when (buffer-live-p base)
+      (let ((timer (run-at-time 0 nil
+                                (lambda (buf)
+                                  (when (buffer-live-p buf)
+                                    (with-current-buffer buf (set-buffer-modified-p nil))
+                                    (kill-buffer buf)))
+                                base)))
+        (when (and svc timer)
+          (kargu-edit-service-register-timer svc timer))))
+    (unless (or (and (boundp 'kargu-diff-keep-shadow) kargu-diff-keep-shadow)
+                (not (buffer-live-p shadow)))
+      (let ((timer (run-at-time 0 nil
+                                (lambda (buf)
+                                  (when (buffer-live-p buf)
+                                    (with-current-buffer buf (set-buffer-modified-p nil))
+                                    (kill-buffer buf)))
+                                shadow)))
+        (when (and svc timer)
+          (kargu-edit-service-register-timer svc timer))))
+    (when-let* ((cfg wconfig))
+      (let ((timer (run-at-time 0 nil
+                                (lambda (c)
+                                  (when (window-configuration-p c)
+                                    (set-window-configuration c)))
+                                cfg)))
+        (when (and svc timer)
+          (kargu-edit-service-register-timer svc timer))))))
 
 (defun kargu-diff--finalize (session)
+  "Finalize SESSION only in the service captured before its review."
+  (let* ((state (plist-get session :pre-state))
+         (origin (plist-get state :owner))
+         (service (and origin (kargu-diff--origin-service origin))))
+    (kargu-diff-with-service (or service (kargu-diff--current-service))
+      (kargu-diff--finalize-owned session))))
+
+(defun kargu-diff--finalize-owned (session)
   "Finish the review of SESSION and return the outcome plist.
-Saves the file buffer when hunks were accepted, records the
-change signal, runs `kargu-diff-after-apply-hook', notifies
-the session callback and schedules shadow cleanup."
+When `:defer-commit' is nil and hunks were accepted, commits the decided
+content after revalidating `:pre-state'.  Notifies the session callback
+and schedules base/shadow cleanup."
   (let* ((path (plist-get session :path))
-         (buf-a (plist-get session :buffer-a))
+         (base (or (plist-get session :base-buffer) (plist-get session :buffer-a)))
          (shadow (plist-get session :shadow-buffer))
          (original (plist-get session :original))
          (proposal (plist-get session :proposal))
-         (created-new (plist-get session :created-new))
+         (pre-state (plist-get session :pre-state))
+         (defer-commit (plist-get session :defer-commit))
          (callback (plist-get session :callback))
-         (eval-res (kargu-diff--evaluate-buffer-status buf-a original proposal created-new))
-         (status (car eval-res))
-         (saved (cdr eval-res))
-         (outcome (list :status status :file path :saved (and saved t))))
-    (remhash path kargu-diff--sessions)
+         (decision (kargu-diff--evaluate-base-decision base original proposal))
+         (status (car decision))
+         (decided-content (cdr decision))
+         (reviews (kargu-diff--service-reviews))
+         (outcome nil))
+    (remhash path reviews)
     (kargu-diff--maybe-drop-hook)
-    (plist-put outcome :message (kargu-diff--describe outcome))
+    (cond
+     ((or defer-commit (not (memq status '(:applied-full :applied-partial))))
+      (setq outcome (list :status status
+                          :file path
+                          :saved nil
+                          :deferred (and defer-commit t)
+                          :decided-content decided-content
+                          :pre-state pre-state))
+      (plist-put outcome :message (kargu-diff--describe outcome)))
+     (t
+      (condition-case err
+          (setq outcome (kargu-diff--commit-file-content pre-state decided-content status))
+        (error
+         (setq outcome
+               (list :status :conflict
+                     :file path
+                     :saved nil
+                     :message (format "ERROR: %s" (error-message-string err))))))))
     (plist-put session :outcome outcome)
-    (when (memq status '(:applied-full :applied-partial))
-      (kargu-diff--record-review-success path status saved buf-a))
     (kargu-diff--schedule-post-review-cleanup
-     shadow (plist-get session :window-config))
+     base shadow (plist-get session :window-config))
     (kargu-diff--notify callback outcome path)
     outcome))
 
 (provide 'kargu/tools/diff/review)
 
-;;; kargu/tools/diff/review.el ends here
+;;; review.el ends here

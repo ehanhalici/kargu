@@ -41,6 +41,7 @@ CONSTANTS
 
 States == {
     "IDLE",         \* No run yet
+    "PREPARING",    \* Claimed config/credential work; history is untouched
     "REQUEST",      \* Classifying the next request
     "WAIT_MODEL",   \* HTTP/SSE request in flight
     "EXEC_TOOLS",   \* Working through the tool queue
@@ -61,6 +62,7 @@ RunLive == States \ RunOver
 \* The status the state store shows for each loop state (`kargu-loop--set-state')
 StatusOf(s) ==
     CASE s = "IDLE"         -> ":idle"
+      [] s = "PREPARING"    -> ":requesting"
       [] s = "REQUEST"      -> ":requesting"
       [] s = "WAIT_MODEL"   -> ":waiting-model"
       [] s = "RECOVER"      -> ":waiting-model"
@@ -172,33 +174,46 @@ FreshRun ==
 StartRun(prompt) ==
     /\ AssertIngress(ContractPrompt(prompt), "StartRun: Prompt must be non-empty")
     /\ state = "IDLE"
-    /\ LET sysMsg == MakeMsg("system", "system-prompt-" \o activeMode, << >>, "none", "none")
-           usrMsg == MakeMsg("user", prompt, << >>, "none", "none")
-       IN history ' = IF Len(history) = 0 THEN <<sysMsg, usrMsg>> ELSE Append(history, usrMsg)
-    /\ state     ' = "REQUEST"
+    /\ state     ' = "PREPARING"
     /\ runStatus ' = "none"
     /\ FreshRun
-    /\ UNCHANGED <<activeMode, Circuit>>
+    /\ UNCHANGED <<history, activeMode, Circuit>>
 
 FollowUpPrompt(prompt) ==
     /\ AssertIngress(ContractPrompt(prompt), "FollowUpPrompt: Prompt must be non-empty")
     /\ state \in {"DONE", "STOPPED", "ERROR", "LIMIT"}
-    /\ history   ' = Append(history, MakeMsg("user", prompt, << >>, "none", "none"))
-    /\ state     ' = "REQUEST"
+    /\ state     ' = "PREPARING"
     /\ runStatus ' = "none"
     /\ FreshRun
-    /\ UNCHANGED <<activeMode, Circuit>>
+    /\ UNCHANGED <<history, activeMode, Circuit>>
+
+(* Prompt contents are abstract inputs at admission, not an extra store. *)
+PreparationReady(prompt) ==
+    /\ state = "PREPARING"
+    /\ AssertIngress(ContractPrompt(prompt), "PreparationReady: non-empty prompt")
+    /\ LET sysMsg == MakeMsg("system", "system-prompt-" \o activeMode, << >>, "none", "none")
+           usrMsg == MakeMsg("user", prompt, << >>, "none", "none")
+       IN history' = IF Len(history) = 0 THEN <<sysMsg, usrMsg>> ELSE Append(history, usrMsg)
+    /\ state' = "REQUEST"
+    /\ UNCHANGED <<activeMode, Counters, ToolVars, Flags, runStatus, generation, Circuit>>
+
+PreparationFailed ==
+    /\ state = "PREPARING"
+    /\ state' = "ERROR" /\ runStatus' = "error"
+    /\ UNCHANGED <<history, activeMode, Counters, ToolVars, Flags, generation, Circuit>>
 
 (* SetMode: `kargu-state-set-mode' refuses while a run is live (law 3) *)
-SetMode(newMode) ==
+SetMode(newMode, debugReady) ==
     /\ AssertIngress(ContractMode(newMode), "SetMode: Mode must satisfy ContractMode")
     /\ state \in RunOver
+    /\ ModeAdmitted(newMode, debugReady)
     /\ newMode # activeMode
     /\ activeMode ' = newMode
     /\ UNCHANGED <<state, history, Counters, ToolVars, Flags, runStatus,
                    generation, Circuit>>
 
-(* ResetSession: `kargu-session-reset'.  The advice stops a live run first. *)
+(* ResetSession: application/reset cancels live work before publication.  *)
+(* Reentrant replacement work refuses publication, as checked by ERT.     *)
 ResetSession ==
     /\ state              ' = "IDLE"
     /\ history            ' = << >>
@@ -258,11 +273,20 @@ RequestSend ==
           /\ history ' = cleanHist
     /\ state      ' = "WAIT_MODEL"
     /\ iterations ' = iterations + 1
+    /\ circuitState ' = CircuitClaimProbe(circuitState)
     /\ UNCHANGED <<activeMode, healing, verifications, emptyRetries,
                    upstreamRetries, compactions, lengthContinues, turnCap,
-                   ToolVars, Flags, runStatus, generation, Circuit>>
+                   ToolVars, Flags, runStatus, generation, circuitFailures>>
 
 (* An open breaker turns the send into an error answer (`kargu--api-post') *)
+RequestStartFailure ==
+    /\ state = "REQUEST" \/ (state = "WAIT_MODEL" /\ iterations = 1)
+    /\ history ' = ValidateHistory(history, "keep")
+    /\ state ' = "ERROR"
+    /\ runStatus ' = "error"
+    /\ circuitState ' = CircuitReleaseProbe(circuitState)
+    /\ UNCHANGED <<activeMode, Counters, ToolVars, Flags, generation, circuitFailures>>
+
 RequestBlocked ==
     /\ state = "REQUEST"
     /\ ~CompactDue
@@ -303,46 +327,60 @@ ModelReceiveToolCalls(calls) ==
     /\ UNCHANGED <<activeMode, Counters, doomSigs, pendingToolCall,
                    pendingVerifyFiles, Flags, runStatus, generation>>
 
-(* length: one `Continue.' per run, and only below the cap.  Otherwise a    *)
-(* truncated reply is judged as an answer or as empty.                      *)
+(* length: one `Continue.' per run below the cap, otherwise explicit error. *)
 ModelReceiveLengthTruncated ==
     /\ state = "WAIT_MODEL"
-    /\ lengthContinues < 1
-    /\ iterations < turnCap
-    /\ lengthContinues ' = lengthContinues + 1
-    /\ state           ' = "REQUEST"
+    /\ IF lengthContinues < 1 /\ iterations < turnCap
+       THEN /\ lengthContinues ' = lengthContinues + 1
+            /\ state ' = "REQUEST"
+            /\ UNCHANGED <<history, runStatus>>
+       ELSE /\ state ' = "ERROR"
+            /\ runStatus ' = "error"
+            /\ history ' = ValidateHistory(history, "keep")
+            /\ UNCHANGED lengthContinues
     /\ circuitState    ' = "CLOSED"
+    /\ circuitFailures ' = 0
+    /\ UNCHANGED <<activeMode, iterations, turnCap, healing,
+                   verifications, emptyRetries, upstreamRetries, compactions,
+                   ToolVars, Flags, generation>>
+
+(* Reasoning-only replies consume the same global turn budget.             *)
+ModelReceiveThought ==
+    /\ state = "WAIT_MODEL"
+    /\ state ' = "REQUEST"
+    /\ circuitState ' = "CLOSED"
     /\ circuitFailures ' = 0
     /\ UNCHANGED <<history, activeMode, iterations, turnCap, healing,
                    verifications, emptyRetries, upstreamRetries, compactions,
-                   ToolVars, Flags, runStatus, generation>>
+                   lengthContinues, ToolVars, Flags, runStatus, generation>>
 
 (* overflow: compact once; if that is not possible the user decides *)
 ModelReceiveOverflow ==
     /\ state = "WAIT_MODEL"
-    /\ circuitState    ' = "CLOSED"
-    /\ circuitFailures ' = 0
+    /\ circuitState ' = CircuitReleaseProbe(circuitState)
     /\ IF ~compacting /\ compactions < 1 /\ iterations < turnCap
        THEN /\ StartCompaction
        ELSE /\ state ' = "RECOVER"
             /\ UNCHANGED <<compactions, iterations, compacting, savedNoTools, noTools>>
     /\ UNCHANGED <<history, activeMode, healing, verifications, emptyRetries,
                    upstreamRetries, lengthContinues, turnCap, ToolVars,
-                   runStatus, generation>>
+                   runStatus, generation, circuitFailures>>
 
 (* empty *)
 ModelReceiveEmpty ==
     /\ state = "WAIT_MODEL"
+    /\ circuitState ' = "CLOSED"
+    /\ circuitFailures ' = 0
     /\ IF emptyRetries < MaxEmptyRetries
        THEN /\ emptyRetries ' = emptyRetries + 1
             /\ state        ' = "REQUEST"
             /\ runStatus    ' = "none"
-       ELSE /\ state        ' = "DONE"
-            /\ runStatus    ' = "done"
+       ELSE /\ state        ' = "ERROR"
+            /\ runStatus    ' = "error"
             /\ UNCHANGED emptyRetries
     /\ UNCHANGED <<history, activeMode, iterations, turnCap, healing,
                    verifications, upstreamRetries, compactions, lengthContinues,
-                   ToolVars, Flags, generation, Circuit>>
+                   ToolVars, Flags, generation>>
 
 (* upstream-retry / retryable error: the HTTP layer has already recorded the *)
 (* failure in the breaker.  With retries left the run retries unless the     *)
@@ -361,17 +399,19 @@ ModelReceiveUpstreamError ==
                    verifications, emptyRetries, compactions, lengthContinues,
                    ToolVars, Flags, runStatus, generation>>
 
-(* error / content-filter: any other failure.  The breaker is not touched. *)
+(* Other failures release the canary without declaring upstream healthy. *)
 ModelReceiveError ==
     /\ state = "WAIT_MODEL"
     /\ state ' = "RECOVER"
+    /\ circuitState ' = CircuitReleaseProbe(circuitState)
     /\ UNCHANGED <<history, activeMode, Counters, ToolVars, Flags, runStatus,
-                   generation, Circuit>>
+                   generation, circuitFailures>>
 
 (* tools-unsupported: the provider refused tool use.  Agent mode cannot work *)
 (* without tools and ends; other modes retry tool-free.                      *)
 ModelReceiveToolsUnsupported ==
     /\ state = "WAIT_MODEL"
+    /\ circuitState ' = CircuitReleaseProbe(circuitState)
     /\ ~noTools
     /\ IF activeMode = "agent"
        THEN /\ state     ' = "ERROR"
@@ -381,7 +421,7 @@ ModelReceiveToolsUnsupported ==
             /\ noTools   ' = TRUE
             /\ UNCHANGED runStatus
     /\ UNCHANGED <<history, activeMode, Counters, ToolVars, savedNoTools,
-                   compacting, generation, Circuit>>
+                   compacting, generation, circuitFailures>>
 
 (***************************************************************************)
 (* RECOVER: the user's answer to `kargu-loop--recover-or-finish'           *)
@@ -464,7 +504,9 @@ DoomStop ==
     /\ runStatus          ' = "error"
     /\ UNCHANGED <<activeMode, Counters, doomSigs, Flags, generation, Circuit>>
 
-(* VerifyFiles: `kargu--loop-verify-files'.  Entered only with budget left. *)
+(* VerifyFiles: `kargu--loop-verify-files'.  Entered only with budget left.
+   Exact change-record ownership and cancellation cleanup are refined in
+   KarguVerification; the batch releases only its captured edit identities. *)
 VerifyFiles(diagnosticError) ==
     /\ state = "VERIFY_FILES"
     /\ pendingVerifyFiles # {}
@@ -501,11 +543,26 @@ CompactionFinish(success) ==
 (* User decisions and cancellation                                         *)
 (***************************************************************************)
 
+(* A model-response continuation failed after entering a handler. *)
+ModelCallbackFailure ==
+    /\ state \in RunLive
+    /\ history            ' = IF state = "PREPARING" THEN history ELSE ValidateHistory(history, "keep")
+    /\ state              ' = "ERROR"
+    /\ runStatus          ' = "error"
+    /\ pendingToolQueue   ' = << >>
+    /\ pendingToolCall    ' = NoCall
+    /\ pendingVerifyFiles ' = {}
+    /\ compacting         ' = FALSE
+    /\ noTools            ' = FALSE
+    /\ savedNoTools       ' = FALSE
+    /\ circuitState       ' = CircuitReleaseProbe(circuitState)
+    /\ UNCHANGED <<activeMode, Counters, doomSigs, generation, circuitFailures>>
+
 (* `kargu-loop-stop': from any live state.  The finish repairs the history, *)
 (* which answers every open tool call, and keeps a trailing answer.         *)
 UserStop ==
     /\ state \in RunLive
-    /\ history            ' = ValidateHistory(history, "keep")
+    /\ history            ' = IF state = "PREPARING" THEN history ELSE ValidateHistory(history, "keep")
     /\ state              ' = "STOPPED"
     /\ runStatus          ' = "stopped"
     /\ pendingToolQueue   ' = << >>
@@ -514,7 +571,8 @@ UserStop ==
     /\ compacting         ' = FALSE
     /\ noTools            ' = FALSE
     /\ savedNoTools       ' = FALSE
-    /\ UNCHANGED <<activeMode, Counters, doomSigs, generation, Circuit>>
+    /\ circuitState       ' = CircuitReleaseProbe(circuitState)
+    /\ UNCHANGED <<activeMode, Counters, doomSigs, generation, circuitFailures>>
 
 (* `kargu-loop--apply-continue-decision' :continue: one more batch *)
 PauseDecisionContinue ==
@@ -599,6 +657,9 @@ Safety_NoPendingVerifyOutsideVerify ==
 \* A model request is never sent through an open breaker
 Safety_CircuitBreakerSoundness ==
     state = "WAIT_MODEL" => circuitState # "OPEN"
+
+Safety_NoAbandonedCanary ==
+    circuitState = "PROBING" => state = "WAIT_MODEL"
 
 \* Law 5: with tools off, no tool work is in progress
 Safety_ToolsOffMeansNoToolWork ==

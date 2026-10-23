@@ -1,4 +1,4 @@
-;;; kargu/chat/complete.el --- @ company for files and LSP symbols -*- lexical-binding: t; -*-
+;;; complete.el --- @ company for files and LSP symbols -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -18,7 +18,11 @@
 (require 'company nil t)
 (require 'kargu/core)
 (require 'kargu/fs)
-(require 'kargu/tools/lsp)
+(require 'kargu/permission/guards)
+
+(declare-function kargu-lsp-all-symbols "kargu/tools/lsp/skeleton"
+                  (&optional query roots callback))
+(defvar kargu-lsp-request-timeout)
 
 (defvar kargu-context-buffer nil)
 (defvar kargu-chat-max-listed-files 2000)
@@ -26,7 +30,7 @@
   "Cache of project files for `@' completion.
 Format: (:roots ROOTS :time TIME :files FILES).")
 (defvar kargu-chat--prompt-marker nil)
-(declare-function kargu-chat--in-input-p "kargu/chat")
+(declare-function kargu-chat--in-input-p "kargu/chat/prompt")
 (declare-function company-begin-backend "company")
 (declare-function company-manual-begin "company")
 
@@ -56,40 +60,13 @@ Format: (:roots ROOTS :time TIME :files FILES).")
 
 (defun kargu-chat--completion-root ()
   "Project root used for `@' file completion."
-  (or (and (fboundp 'kargu--project-root)
-           (ignore-errors (kargu--project-root)))
-      (let ((buf (cond
-                  ((and (boundp 'kargu-context-buffer)
-                        (bufferp kargu-context-buffer)
-                        (buffer-live-p kargu-context-buffer))
-                   kargu-context-buffer)
-                  ((and (boundp 'kargu-context-buffer)
-                        (stringp kargu-context-buffer))
-                   (or (get-file-buffer kargu-context-buffer)
-                       (get-buffer kargu-context-buffer))))))
-        (and (buffer-live-p buf)
-             (with-current-buffer buf
-               (when (fboundp 'project-current)
-                 (let ((project (project-current)))
-                   (and project (project-root project)))))))
-      default-directory))
+  (kargu-permission-project-root))
 
 (defun kargu-chat--completion-roots ()
-  "Project roots to search: context, visiting buffers, known projects."
-  (let (roots)
-    (cl-labels ((add (dir)
-                  (when (and (stringp dir) (file-directory-p dir))
-                    (push (file-name-as-directory (expand-file-name dir))
-                          roots))))
-      (add (kargu-chat--completion-root))
-      (dolist (buf (buffer-list))
-        (let ((file (buffer-file-name buf)))
-          (when file
-            (with-current-buffer buf
-              (if (and (fboundp 'project-current) (project-current))
-                  (add (project-root (project-current)))
-                (add (file-name-directory file)))))))
-      (delete-dups roots))))
+  "Return only the selected project's canonical completion root."
+  (let ((root (kargu-chat--completion-root)))
+    (when (and (stringp root) (file-directory-p root))
+      (list (file-name-as-directory (file-truename root))))))
 
 (defun kargu-chat--walk-files (dir)
   "Recursively list up to `kargu-chat-max-listed-files' under DIR."
@@ -104,18 +81,22 @@ walk the tree.  Falls back to a bounded walk otherwise."
         (project (and (fboundp 'project-current)
                       (fboundp 'project-files)
                       (project-current nil root))))
-    (if project
-        (let (kept)
-          (catch 'full
-            (dolist (f (project-files project))
-              (let ((abs (expand-file-name f)))
-                (unless (or (kargu-fs-skipped-path-p abs)
-                            (kargu-fs-ignore-file-p abs))
-                  (push abs kept)
-                  (when (>= (length kept) cap)
-                    (throw 'full t))))))
-          (nreverse kept))
-      (kargu-chat--walk-files root))))
+    (when (> cap 0)
+      (if (and project
+               (equal (file-name-as-directory (file-truename (project-root project)))
+                      (file-name-as-directory (file-truename root))))
+          (let ((count 0) kept)
+            (catch 'full
+              (dolist (f (project-files project))
+		(let ((abs (expand-file-name f)))
+                  (unless (or (not (file-in-directory-p abs root))
+                              (kargu-fs-skipped-path-p abs root)
+                              (kargu-fs-ignore-file-p abs))
+                    (push abs kept)
+                    (when (>= (cl-incf count) cap)
+                      (throw 'full t))))))
+            (nreverse kept))
+	(kargu-chat--walk-files root)))))
 
 (defun kargu-chat--collect-files (roots)
   "Relative display paths for files under ROOTS.
@@ -138,7 +119,8 @@ root directory name so `@rust/src/lib.rs' is findable."
                       acc)))))))
     (dolist (buf (buffer-list))
       (let ((file (buffer-file-name buf)))
-        (when file
+        (when (and file (not (kargu-fs-ignore-file-p file))
+                   (seq-some (lambda (root) (file-in-directory-p file root)) roots))
           (let ((key (expand-file-name file)))
             (unless (gethash key seen)
               (puthash key t seen)
@@ -273,7 +255,7 @@ QUERY and STRING should already be downcased."
          (sym (intern str)))
     (cond
      ((memq sym '(function method variable struct class interface module
-                  constant field property enum enum-member file folder snippet text))
+                           constant field property enum enum-member file folder snippet text))
       sym)
      ((string-prefix-p "func" str) 'function)
      ((string-prefix-p "var" str) 'variable)
@@ -283,7 +265,8 @@ QUERY and STRING should already be downcased."
      (t 'variable))))
 
 (defun kargu-chat--score-symbol-item (item root has-delim file-q sym-q q)
-  "Calculate scoring record for symbol ITEM, or nil if unmatched."
+  "Score symbol ITEM under ROOT for query Q.
+HAS-DELIM distinguishes qualified FILE-Q and SYM-Q fragments."
   (let* ((path (nth 0 item))
          (line (nth 1 item))
          (name (nth 2 item))
@@ -319,21 +302,17 @@ QUERY and STRING should already be downcased."
      'kargu-ann (format "%s :%s" kind (or line "?"))
      'kargu-match (kargu-chat--match-property match-q cand-str))))
 
-(defun kargu-chat--symbol-candidates (query)
-  "Symbol mention candidates matching QUERY (without the leading `@').
+(defun kargu-chat--symbol-candidates-from (query all-symbols)
+  "Format ALL-SYMBOLS matching QUERY (without the leading `@').
 Formatted as `@file::symbol' (e.g., `@main.go::CalcTotal').
 QUERY can match the symbol name, the file path, or both if QUERY contains `::'."
   (condition-case nil
       (let* ((root (kargu-chat--completion-root))
-             (roots (kargu-chat--completion-roots))
              (q (or query ""))
              (has-delim (string-match-p "::" q))
              (file-q (and has-delim (car (split-string q "::"))))
              (sym-q (and has-delim (or (cadr (split-string q "::")) "")))
              (match-q (if has-delim sym-q q))
-             (all-symbols (if (fboundp 'kargu-lsp-all-symbols)
-                              (kargu-lsp-all-symbols match-q roots)
-                            nil))
              scored)
         (dolist (item all-symbols)
           (when-let* ((rec (kargu-chat--score-symbol-item item root has-delim file-q sym-q q)))
@@ -345,6 +324,36 @@ QUERY can match the symbol name, the file path, or both if QUERY contains `::'."
                  collect (kargu-chat--format-symbol-candidate rec match-q)))
     (error nil)))
 
+(defun kargu-chat--symbol-candidates (query)
+  "Return cached/local symbol candidates for QUERY without network waits."
+  (when (fboundp 'kargu-lsp-all-symbols)
+    (kargu-chat--symbol-candidates-from
+     query (kargu-lsp-all-symbols query (kargu-chat--completion-roots)))))
+
+(cl-defun kargu-chat--async-candidates (prefix callback)
+  "Fetch symbol candidates for PREFIX and deliver them to CALLBACK."
+  (unless (fboundp 'kargu-lsp-all-symbols)
+    (funcall callback (kargu-chat--at-candidates prefix))
+    (cl-return-from kargu-chat--async-candidates))
+  (let* ((query (string-remove-prefix "@" prefix))
+         (roots (kargu-chat--completion-roots))
+         (symbol-query (if (string-search "::" query)
+                           (car (last (split-string query "::"))) query))
+         (task (kargu-async-start
+                (lambda (values _error) (funcall callback values))
+                :timeout kargu-lsp-request-timeout)))
+    (funcall
+     (kargu-async-wrap
+      task (lambda ()
+             (kargu-lsp-all-symbols
+              symbol-query roots
+              (kargu-async-wrap
+               task (lambda (items)
+                      (kargu-async-finish
+                       task (append (unless (string-search "::" query)
+                                      (kargu-chat--file-candidates query))
+                                    (kargu-chat--symbol-candidates-from query items)))))))))))
+
 (defun kargu-chat--at-candidates (prefix)
   "Company candidates for PREFIX, a string beginning with `@'."
   (let ((q (if (string-prefix-p "@" prefix) (substring prefix 1) prefix)))
@@ -354,13 +363,17 @@ QUERY can match the symbol name, the file path, or both if QUERY contains `::'."
               (or (kargu-chat--symbol-candidates q) nil)))))
 
 (defun kargu-chat-company (command &optional arg &rest _ignored)
-  "Company backend for `@' file and LSP symbol mentions in the chat prompt.
-Matching is fuzzy (flex): `@lib.rs' completes `rust/src/lib.rs'."
+  "Handle Company COMMAND and optional ARG for chat mentions.
+Ignore extra arguments in _IGNORED.  Match files and LSP symbols fuzzily."
   (interactive (list 'interactive))
   (cl-case command
     (interactive (company-begin-backend 'kargu-chat-company))
     (prefix (kargu-chat--at-prefix))
-    (candidates (kargu-chat--at-candidates arg))
+    (candidates
+     (if (kargu-eglot-connected-p)
+         (cons :async (lambda (callback)
+                        (kargu-chat--async-candidates arg callback)))
+       (kargu-chat--at-candidates arg)))
     (annotation (or (get-text-property 0 'kargu-ann arg) ""))
     (kind (or (get-text-property 0 'kargu-kind arg) 'file))
     (meta
@@ -379,4 +392,4 @@ Matching is fuzzy (flex): `@lib.rs' completes `rust/src/lib.rs'."
 
 (provide 'kargu/chat/complete)
 
-;;; kargu/chat/complete.el ends here
+;;; complete.el ends here

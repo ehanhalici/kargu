@@ -1,4 +1,4 @@
-;;; kargu/config/toml.el --- TOML parser for Kargu configurations -*- lexical-binding: t; -*-
+;;; toml.el --- TOML parser for Kargu configurations -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -12,59 +12,92 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
+
+(defvar kargu--toml-source-path nil
+  "Configuration path dynamically bound while parsing TOML.")
+
+(defconst kargu--toml-top-keys
+  '("provider" "model" "name" "api" "apikey" "review_mode")
+  "Supported top-level configuration keys.")
+
+(defconst kargu--toml-provider-keys '("api" "apikey" "model" "models")
+  "Supported keys in each provider table.")
+
+(defun kargu--toml-error (message)
+  "Signal a source-located TOML error with MESSAGE, never including values."
+  (error "TOML %s:%d: %s" kargu--toml-source-path (line-number-at-pos) message))
 
 (defun kargu--toml-unescape (string)
   "Undo basic TOML escapes in STRING (the inside of a quoted value)."
-  (replace-regexp-in-string
-   "\\\\\\(.\\)"
+  (let ((case-fold-search nil))
+    (replace-regexp-in-string
+   (rx "\\" (group (or (seq "u" (= 4 xdigit)) (seq "U" (= 8 xdigit)) anything)))
    (lambda (m)
      (pcase (aref m 1)
-       (?n "\n") (?t "\t") (?r "\r")
+       (?b "\b") (?f "\f") (?n "\n") (?t "\t") (?r "\r")
        (?\" "\"") (?\\ "\\")
-       (_ (substring m 1))))
-   string t t))
+       ((or ?u ?U)
+        (let ((code (string-to-number (substring m 2) 16)))
+          (unless (and (<= code #x10ffff) (not (<= #xd800 code #xdfff)))
+            (kargu--toml-error "Invalid Unicode escape"))
+          (char-to-string code)))
+       (_ (kargu--toml-error "Unsupported string escape"))))
+     string t t)))
 
-(defun kargu--toml-array-closed-p (raw)
-  "Non-nil when RAW contains a `[' later closed by a `]'."
-  (let ((open (cl-position ?\[ raw))
-        (close (cl-position ?\] raw :from-end t)))
-    (and open close (> close open))))
+(defconst kargu--toml-basic-string-regexp
+  (rx "\"" (group (* (or (not (any "\"\\\n\r")) (seq "\\" nonl)))) "\"")
+  "Single-line basic TOML string including escaped quotes.")
 
-(defun kargu--toml-parse-string-array (raw)
-  "Parse a TOML string array RAW like [\"a\", \"b\"] or [`a', `b']."
-  (setq raw (or raw ""))
-  (let ((open (cl-position ?\[ raw))
-        (close (cl-position ?\] raw :from-end t)))
-    (when (and open close (> close open))
-      (let (items)
-        (with-temp-buffer
-          (insert (substring raw (1+ open) close))
-          (goto-char (point-min))
-          (while (re-search-forward
-                  "\\(?:\"\\(\\(?:\\\\.\\|[^\"\\\\]\\)*\\)\"\\|'\\([^']*\\)'\\)" nil t)
-            (if (match-string 1)
-                (push (kargu--toml-unescape (match-string 1)) items)
-              (push (match-string 2) items))))
-        (nreverse items)))))
+(defconst kargu--toml-literal-string-regexp
+  (rx "'" (group (* (not (any "'\n\r")))) "'")
+  "Single-line literal TOML string.")
 
-(defun kargu--toml-parse-value (raw)
-  "Parse a TOML value RAW.
-RAW may be a quoted string, single-quoted string, array, or bare token."
-  (setq raw (string-trim (or raw "")))
-  (cond
-   ((string-prefix-p "[" raw)
-    (kargu--toml-parse-string-array raw))
-   ((string-prefix-p "\"" raw)
-    (if (string-match "\\`\"\\(\\(?:\\\\.\\|[^\"\\\\]\\)*\\)\"" raw)
-        (kargu--toml-unescape (match-string 1 raw))
-      (string-trim raw "\"" "\"")))
-   ((string-prefix-p "'" raw)
-    (if (string-match "\\`'\\([^']*\\)'" raw)
-        (match-string 1 raw)
-      (string-trim raw "'" "'")))
-   (t
-    (let ((bare (car (split-string raw "#" t "[ \t]+"))))
-      (and bare (string-trim bare))))))
+(defun kargu--toml-read-string ()
+  "Read a supported TOML string at point and advance past it."
+  (when (or (looking-at-p (rx "\"\"\"")) (looking-at-p (rx "'''")))
+    (kargu--toml-error "Multiline strings are not supported"))
+  (let ((basic (eq (char-after) ?\")))
+    (unless (looking-at (if basic kargu--toml-basic-string-regexp
+                         kargu--toml-literal-string-regexp))
+      (kargu--toml-error "Expected a complete quoted string"))
+    (let ((raw (match-string-no-properties 1)) (end (match-end 0)))
+      (when (seq-some (lambda (char) (or (< char 9) (<= 10 char 31) (= char 127))) raw)
+        (kargu--toml-error "Unescaped control character in string"))
+      (let ((value (if basic (kargu--toml-unescape raw) raw)))
+        (goto-char end)
+        value))))
+
+(defun kargu--toml-array-whitespace ()
+  "Skip whitespace and comments between array elements."
+  (while (progn
+           (skip-chars-forward " \t\r\n")
+           (when (eq (char-after) ?#) (forward-line 1) t))))
+
+(defun kargu--toml-read-string-array ()
+  "Read a string array at point, enforcing separators and closing brackets."
+  (forward-char 1)
+  (let ((state :value) items)
+    (catch 'finished
+      (while t
+        (kargu--toml-array-whitespace)
+        (pcase (char-after)
+          (?\] (forward-char 1) (throw 'finished (nreverse items)))
+          (?, (unless (eq state :separator) (kargu--toml-error "Unexpected comma"))
+              (forward-char 1) (setq state :value))
+          ((or ?\" ?')
+           (unless (eq state :value) (kargu--toml-error "Missing array comma"))
+           (push (kargu--toml-read-string) items)
+           (setq state :separator))
+          (_ (kargu--toml-error "Expected a string element or closing bracket")))))))
+
+(defun kargu--toml-read-value ()
+  "Read one supported configuration value at point."
+  (skip-chars-forward " \t")
+  (pcase (char-after)
+    ((or ?\" ?') (kargu--toml-read-string))
+    (?\[ (kargu--toml-read-string-array))
+    (_ (kargu--toml-error "Expected a quoted string or string array"))))
 
 (defun kargu--provider-plist-put (providers name key value)
   "Set KEY to VALUE on provider NAME in PROVIDERS (alist of name . plist)."
@@ -73,8 +106,15 @@ RAW may be a quoted string, single-quoted string, array, or bare token."
         (progn (setcdr cell (plist-put (cdr cell) key value)) providers)
       (cons (cons name (list key value)) providers))))
 
-(defun kargu--read-toml-assign (section key val top-fn provider-fn)
+(cl-defun kargu--read-toml-assign (section key val &key top-fn provider-fn)
   "Apply KEY=VAL from SECTION via TOP-FN or PROVIDER-FN."
+  (unless (member key (if section kargu--toml-provider-keys kargu--toml-top-keys))
+    (kargu--toml-error "Unsupported configuration key"))
+  (unless (if (equal key "models") (and (listp val) (cl-every #'stringp val))
+            (stringp val))
+    (kargu--toml-error "Incorrect configuration value type"))
+  (when (and (equal key "review_mode") (not (member val '("auto" "async" "blocking"))))
+    (kargu--toml-error "Invalid review_mode"))
   (if (null section)
       (funcall top-fn key val)
     (pcase key
@@ -84,25 +124,6 @@ RAW may be a quoted string, single-quoted string, array, or bare token."
       ("models" (when (listp val)
                   (funcall provider-fn section :models val))))))
 
-(defun kargu--toml-read-multiline-array (raw)
-  "If RAW starts an unclosed array, read subsequent lines until closed."
-  (if (and (string-prefix-p "[" (string-trim raw))
-           (not (kargu--toml-array-closed-p raw)))
-      (catch 'kargu--toml-array-end
-        (while (not (kargu--toml-array-closed-p raw))
-          (let ((here (point)))
-            (forward-line 1)
-            (when (or (eobp) (= (point) here))
-              (throw 'kargu--toml-array-end raw))
-            (setq raw
-                  (concat raw " "
-                          (string-trim
-                           (buffer-substring
-                            (line-beginning-position)
-                            (line-end-position)))))))
-        raw)
-    raw))
-
 (defun kargu--toml-apply-review-mode (top-review-mode)
   "Apply TOP-REVIEW-MODE to `kargu-diff-review-mode' if valid."
   (when (and (stringp top-review-mode) (boundp 'kargu-diff-review-mode))
@@ -111,7 +132,7 @@ RAW may be a quoted string, single-quoted string, array, or bare token."
         (setq kargu-diff-review-mode m)))))
 
 (defun kargu--toml-fallback-default-provider (top-api top-key top-name top-model)
-  "Build default provider alist from top-level config fields if present."
+  "Build a default provider from TOP-API, TOP-KEY, TOP-NAME and TOP-MODEL."
   (when (or top-api top-key top-name top-model)
     (list (cons "default"
                 (append (and top-api (list :api top-api))
@@ -119,59 +140,82 @@ RAW may be a quoted string, single-quoted string, array, or bare token."
                         (let ((id (or top-model top-name)))
                           (and id (list :models (list id)))))))))
 
-(defun kargu--read-toml-config (path)
-  "Read PATH as kargu TOML; return (:provider :model :providers)."
-  (let (top-provider top-model top-name top-api top-key top-review-mode
-        providers
-        (section nil))
+(defconst kargu--toml-provider-section-regexp
+  (rx string-start "[provider" (? "s") "."
+      (or (group (any "A-Za-z0-9") (* (any "A-Za-z0-9_-")))
+          (seq "\"" (group (+ (not (any "\"")))) "\""))
+      "]" (* (any " \t")) (? "#" (* nonl)) string-end)
+  "Provider section header with an unquoted or quoted name.")
+
+(defconst kargu--toml-assignment-regexp
+  (rx string-start (group (any "A-Za-z") (* (any "A-Za-z0-9_")))
+      (* (any " \t")) "=" (* (any " \t")))
+  "Configuration key and the raw value assigned to it.")
+
+(defun kargu--toml-read-entries (path top-fn provider-fn &optional text)
+  "Read PATH or supplied TEXT, passing entries to TOP-FN and PROVIDER-FN."
+  (save-match-data
     (with-temp-buffer
-      (insert-file-contents path)
+      (if text (insert text) (insert-file-contents path))
       (goto-char (point-min))
-      (while (not (eobp))
-        (let ((line (string-trim
-                     (buffer-substring (line-beginning-position)
-                                       (line-end-position)))))
-          (cond
-           ((or (string-empty-p line) (eq (aref line 0) ?#))
-            nil)
-           ((string-match
-             "\\`\\[providers?\\.\\(?:\\([A-Za-z0-9][A-Za-z0-9_-]*\\)\\|\"\\([^\"]+\\)\"\\)\\][ \t]*\\(?:#.*\\)?\\'" line)
-            (setq section (or (match-string 1 line) (match-string 2 line))))
-           ((eq (aref line 0) ?\[)
-            (setq section 'skip))
-           ((eq section 'skip)
-            nil)
-           ((string-match
-             "\\`\\([A-Za-z][A-Za-z0-9_]*\\)[ \t]*=[ \t]*\\(.*\\)\\'"
-             line)
-            (let* ((key (match-string 1 line))
-                   (raw (kargu--toml-read-multiline-array (match-string 2 line))))
-              (kargu--read-toml-assign
-               section key
-               (kargu--toml-parse-value raw)
-               (lambda (k v)
-                 (pcase k
-                   ("provider" (setq top-provider v))
-                   ("model" (setq top-model v))
-                   ("name" (setq top-name v))
-                   ("api" (setq top-api v))
-                   ("apikey" (setq top-key v))
-                   ("review_mode" (setq top-review-mode v))))
-               (lambda (s k v)
-                 (setq providers
-                       (kargu--provider-plist-put providers s k v))))))))
-        (forward-line 1)))
-    (setq providers (nreverse providers))
-    (unless providers
-      (setq providers (kargu--toml-fallback-default-provider
-                       top-api top-key top-name top-model)))
-    (kargu--toml-apply-review-mode top-review-mode)
-    (list :provider (and (stringp top-provider) (not (string-empty-p top-provider)) top-provider)
-          :model (or (and (stringp top-model) (not (string-empty-p top-model)) top-model)
-                     (and (stringp top-name) (not (string-empty-p top-name)) top-name))
-          :review-mode (and (stringp top-review-mode) (not (string-empty-p top-review-mode)) top-review-mode)
+      (let ((kargu--toml-source-path path)
+            (case-fold-search nil)
+            (seen (make-hash-table :test #'equal)) section)
+        (while (not (eobp))
+          (skip-chars-forward " \t")
+          (let ((line (string-trim
+                       (buffer-substring (line-beginning-position)
+                                         (line-end-position)))))
+            (cond
+             ((or (string-empty-p line) (eq (aref line 0) ?#)))
+             ((string-match kargu--toml-provider-section-regexp line)
+              (setq section (or (match-string 1 line) (match-string 2 line)))
+              (when (gethash (list :table section) seen)
+                (kargu--toml-error "Duplicate provider table"))
+              (puthash (list :table section) t seen))
+             ((eq (aref line 0) ?\[) (kargu--toml-error "Unsupported table"))
+             ((string-match kargu--toml-assignment-regexp line)
+              (let ((key (match-string 1 line)) (offset (match-end 0)))
+                (when (gethash (cons section key) seen)
+                  (kargu--toml-error "Duplicate configuration key"))
+                (puthash (cons section key) t seen)
+                (forward-char offset)
+                (kargu--read-toml-assign
+                 section key (kargu--toml-read-value) :top-fn top-fn :provider-fn provider-fn)
+                (skip-chars-forward " \t\r")
+                (unless (or (eolp) (eq (char-after) ?#))
+                  (kargu--toml-error "Trailing content after value"))))
+             (t (kargu--toml-error "Unsupported configuration syntax"))))
+          (forward-line 1))))))
+
+(defun kargu--read-toml-config (path &optional text)
+  "Parse PATH or supplied TEXT as TOML without changing runtime settings."
+  (let (top-provider top-model top-name top-api top-key top-review-mode providers)
+    (kargu--toml-read-entries
+     path
+     (lambda (key value)
+       (pcase key
+         ("provider" (setq top-provider value))
+         ("model" (setq top-model value))
+         ("name" (setq top-name value))
+         ("api" (setq top-api value))
+         ("apikey" (setq top-key value))
+         ("review_mode" (setq top-review-mode value))))
+     (lambda (section key value)
+       (setq providers (kargu--provider-plist-put providers section key value)))
+     text)
+    (setq providers
+          (or (nreverse providers)
+              (kargu--toml-fallback-default-provider top-api top-key top-name top-model)))
+    (list :provider (kargu--toml-nonempty top-provider)
+          :model (or (kargu--toml-nonempty top-model) (kargu--toml-nonempty top-name))
+          :review-mode (kargu--toml-nonempty top-review-mode)
           :providers providers)))
+
+(defun kargu--toml-nonempty (value)
+  "Return VALUE when it is a nonempty string."
+  (and (stringp value) (not (string-empty-p value)) value))
 
 (provide 'kargu/config/toml)
 
-;;; kargu/config/toml.el ends here
+;;; toml.el ends here

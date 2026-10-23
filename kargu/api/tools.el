@@ -1,4 +1,4 @@
-;;; kargu/api/tools.el --- Tool registry and execution -*- lexical-binding: t; -*-
+;;; tools.el --- Tool registry and execution -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -16,16 +16,15 @@
 (require 'kargu/core)
 (require 'kargu/json)
 (require 'kargu/contract)
+(require 'kargu/async)
+(require 'kargu/permission/guards)
+(require 'kargu/tools/registry)
+(require 'kargu/tools/execution)
 
 ;;;; Tool registry ---------------------------------------------------------
 
-(defvar kargu--tool-registry (make-hash-table :test #'equal)
-  "Map tool NAME (string) to spec alist with keys:
-  \"description\"  one-line description shown to the model
-  \"parameters\"   JSON schema as an alist (arrays as vectors)
-  \"executor\"     function of one argument: the decoded
-                  arguments alist.  Returns a string, an alist to
-                  JSON-encode, or nil for \"OK\".")
+(defvar kargu--tool-registry (kargu-tool-registry-create)
+  "Legacy default registry awaiting explicit application ownership.")
 
 (defvar kargu--tools-visible-p nil
   "Optional gate on which registered tools are advertised to the model.
@@ -35,31 +34,69 @@ kargu-loop to implement mode-aware gating (mutating tools
 are only advertised in agent mode).  Tool EXECUTION is unaffected
 by this gate; it only shapes what the model is told about.")
 
-(defun kargu-register-tool (name description parameters executor)
+(defun kargu-register-tool (name description parameters executor &optional policy)
   "Register (or replace) the tool NAME for the model.
 DESCRIPTION is a string, PARAMETERS a JSON-schema alist, and
 EXECUTOR a function of one argument (the decoded arguments
-alist) whose return value becomes the tool result.  Long results
+alist) whose return value becomes the tool result.  POLICY optionally
+declares :modes and an :available-p function returning a refusal or nil.
+Long results
 are truncated to `kargu-tool-output-limit'."
-  (kargu-contract-assert #'kargu-contract-non-empty-string-p name
-                         "NAME must be a non-empty string: %S" name)
-  (kargu-contract-assert #'stringp description
-                         "DESCRIPTION must be a string: %S" description)
-  (kargu-contract-assert #'kargu-contract-tool-schema-p parameters
-                         "PARAMETERS must be a JSON schema data structure or nil: %S" parameters)
-  (kargu-contract-assert #'kargu-contract-tool-executor-p executor
-                         "EXECUTOR must be callable: %S" executor)
-  (puthash name
-           `(("description" . ,description)
-             ("parameters" . ,parameters)
-             ("executor" . ,executor))
-           kargu--tool-registry)
+  (kargu-tool-registry-register kargu--tool-registry
+                                :name name :description description
+                                :parameters parameters :executor executor
+                                :policy policy)
   (kargu-log 'debug "tool registered: %s" name)
   name)
 
 (defun kargu-registered-tools ()
   "Return the names of all registered tools."
-  (hash-table-keys kargu--tool-registry))
+  (kargu-tool-registry-names kargu--tool-registry))
+
+(defun kargu-registered-tool-count ()
+  "Return the number of registered tools, including compatibility aliases."
+  (kargu-tool-registry-count kargu--tool-registry))
+
+(defun kargu-find-tool (name)
+  "Return the typed canonical definition of tool NAME, or nil.
+Consumers must treat definition fields and nested values as read-only."
+  (kargu-tool-registry-find kargu--tool-registry name))
+
+(defun kargu-unregister-tool (name)
+  "Remove tool NAME and its aliases, or just NAME when it is an alias.
+Drains and cancels active tasks before unregistering."
+  (kargu-tool-execution-drain kargu--tool-registry name :cancel-p t))
+
+(defun kargu-canonical-tool-name (name)
+  "Return the canonical tool name for NAME, resolving compatibility aliases."
+  (kargu-tool-registry-canonical-name kargu--tool-registry name))
+
+(defun kargu-advertised-tools ()
+  "List visible canonical tool names in deterministic order."
+  (sort (seq-filter (lambda (name)
+                      (and (equal name (kargu-canonical-tool-name name))
+                           (kargu-tool-visible-p name)))
+                    (kargu-registered-tools)) #'string<))
+
+(defun kargu-tool-description (name)
+  "Return the registered description of tool NAME."
+  (when-let* ((definition (kargu-find-tool name)))
+    (kargu-tool-definition-description definition)))
+
+(defun kargu-set-tool-policy (name policy)
+  "Set POLICY for registered tool NAME and its aliases."
+  (kargu-tool-registry-set-policy kargu--tool-registry name policy))
+
+(defun kargu-register-tools (specs &optional aliases policy)
+  "Register tool SPECS and their optional ALIASES.
+Each spec is (NAME DESCRIPTION PARAMETERS EXECUTOR).
+Each alias is (ALIAS . NAME).  POLICY is shared by the group unless
+a spec supplies its own fifth element."
+  (dolist (spec specs)
+    (apply #'kargu-register-tool
+           (append (seq-take spec 4) (list (or (nth 4 spec) policy)))))
+  (dolist (alias aliases)
+    (kargu-register-tool-alias (car alias) (cdr alias))))
 
 (defun kargu--sanitize-tool-parameters (parameters)
   "Ensure PARAMETERS has a valid properties object when type is object."
@@ -71,85 +108,79 @@ are truncated to `kargu-tool-output-limit'."
           (append filtered '(("properties" . :json-empty-object))))
       params)))
 
-(defun kargu--tool-visible-p (name)
+(defun kargu-tool-policy-error (name)
+  "Return a refusal for unavailable tool NAME, or nil when allowed."
+  (let* ((definition (kargu-find-tool name))
+         (policy (and definition (kargu-tool-definition-policy definition)))
+         (modes (plist-get policy :modes))
+         (available (plist-get policy :available-p)))
+    (cond
+     ((and modes (not (memq (kargu-state-mode) modes)))
+      (format "ERROR: Tool %s is unavailable in %s mode."
+              name (kargu-state-mode)))
+     (available (funcall available)))))
+
+(defun kargu-tool-visible-p (name)
   "Return non-nil if tool NAME is visible to the model.
 Delegates to `kargu--tools-visible-p' if set, otherwise to
 `kargu-loop-tool-visible-p' if defined, defaulting to t."
-  (if kargu--tools-visible-p
-      (funcall kargu--tools-visible-p name)
-    (if (fboundp 'kargu-loop-tool-visible-p)
-        (kargu-loop-tool-visible-p name)
-      t)))
+  (cond
+   (kargu--tools-visible-p
+    (and (not (kargu-tool-policy-error name))
+         (funcall kargu--tools-visible-p name)))
+   ((fboundp 'kargu-loop-tool-visible-p) (kargu-loop-tool-visible-p name))
+   (t (not (kargu-tool-policy-error name)))))
 
 (defun kargu--build-tools-vector ()
   "Build the OpenAI \"tools\" array (as a vector) from the registry.
-Tools hidden by `kargu--tool-visible-p' are skipped."
-  (let (tools)
-    (maphash (lambda (name spec)
-               (when (kargu--tool-visible-p name)
-                 (push `(("type" . "function")
-                         ("function" . (("name" . ,name)
-                                        ("description" .
-                                         ,(kargu-aget spec "description"))
-                                        ("parameters" .
-                                         ,(kargu--sanitize-tool-parameters
-                                           (kargu-aget spec "parameters"))))))
-                       tools)))
-             kargu--tool-registry)
-    (vconcat (nreverse tools))))
+Visibility is decided once by `kargu-advertised-tools'."
+  (cl-map 'vector
+          (lambda (name)
+            (let ((definition (kargu-find-tool name)))
+              `(("type" . "function")
+                ("function" . (("name" . ,name)
+                               ("description" .
+                                ,(kargu-tool-definition-description definition))
+                               ("parameters" .
+                                ,(kargu--sanitize-tool-parameters
+                                  (kargu-tool-definition-parameters definition))))))))
+          (kargu-advertised-tools)))
+
+(defun kargu-tool-schema-char-count ()
+  "Return the serialized character cost of currently advertised tool schemas."
+  (length (kargu-json-encode-record (kargu--build-tools-vector))))
 
 (defun kargu-register-tool-alias (alias name)
   "Expose registered tool NAME under ALIAS as well."
-  (let ((spec (gethash name kargu--tool-registry)))
-    (if (null spec)
+  (let ((registered (kargu-tool-registry-alias kargu--tool-registry alias name)))
+    (if (null registered)
         (kargu-log 'warn "tool alias %s: no such tool %s" alias name)
-      (puthash alias spec kargu--tool-registry)
       (kargu-log 'debug "tool alias %s -> %s" alias name)
       alias)))
 
 (defun kargu--decode-tool-arguments (arguments)
-  "Normalize tool ARGUMENTS (JSON string, alist or nil) to an alist.
-A valid empty object {} becomes nil, not a raw fallback.
+  "Normalize tool ARGUMENTS to an object, nil, or :invalid.
+A valid empty object {} becomes nil; nonobjects are rejected.
 Concatenated JSON objects keep the last object."
   (cond
-   ((null arguments) nil)
-   ((eq arguments :json-null) nil)
+   ((memq arguments '(nil :json-null)) nil)
    ((stringp arguments)
     (let ((trimmed (string-trim arguments)))
       (if (or (string-empty-p trimmed) (equal trimmed "{}"))
           nil
         (let ((parsed (kargu--json-decode-lenient trimmed)))
-          (if parsed
+          (if (and parsed (kargu--object-p (cdr parsed)))
               (cdr parsed)
-            (list (cons "_raw" trimmed)))))))
+            :invalid)))))
    ((kargu--object-p arguments) arguments)
-   (t arguments)))
-
-(defun kargu--tool-arguments-invalid-p (arguments)
-  "Non-nil when ARGUMENTS is text that is not one JSON object.
-An empty string and `{}' are valid: they mean no arguments."
-  (and (stringp arguments)
-       (let ((trimmed (string-trim arguments)))
-         (and (not (string-empty-p trimmed))
-              (not (equal trimmed "{}"))
-              (let ((parsed (kargu--json-decode-lenient trimmed)))
-                (not (and parsed (or (null (cdr parsed))
-                                     (kargu--object-p (cdr parsed))))))))))
+   (t :invalid)))
 
 (defun kargu--encode-tool-arguments (arguments)
   "Return ARGUMENTS as a single valid JSON object string.
 Used when storing tool_calls so the next POST cannot 400 on
 concatenated or empty snapshots."
   (let ((decoded (kargu--decode-tool-arguments arguments)))
-    (cond
-     ((null decoded) "{}")
-     ((and (kargu--object-p decoded)
-           (equal (car (car decoded)) "_raw")
-           (null (cdr decoded)))
-      "{}")
-     ((or (kargu--object-p decoded) (vectorp decoded))
-      (kargu--json-encode decoded))
-     (t "{}"))))
+    (if (kargu--object-p decoded) (kargu-json-encode-record decoded) "{}")))
 
 (defun kargu--json-true-p (val)
   "Return t only when VAL is an explicit true.
@@ -200,41 +231,24 @@ JSON false, nil, \"false\", and 0 are false.  A missing value is false."
   "Comma-separated keys present in ARGS, or none."
   (if (not (kargu--object-p args))
       "(none)"
-    (mapconcat (lambda (cell) (format "%s" (car cell))) args ", ")))
+    (mapconcat (lambda (key) (format "%s" key))
+               (if (hash-table-p args) (hash-table-keys args) (mapcar #'car args)) ", ")))
 
 (defun kargu--tool-missing-file-path (args)
-  "Error string when a file path argument was missing."
+  "Describe the missing file path in tool ARGS."
   (let ((keys (kargu--tool-arg-keys args)))
     (if (and (kargu--object-p args)
-             (or (assoc "pattern" args)
-                 (assoc "query" args)
-                 (assoc "regex" args)))
+             (or (kargu-aget args "pattern")
+                 (kargu-aget args "query")
+                 (kargu-aget args "regex")))
         (format "ERROR: missing file_path (also accepted: filePath, path). Got keys: %s. Note: file reading/editing tools require an exact file_path, not a search pattern. To search file contents for a pattern, use 'workspace_grep'. To find files by pattern/glob, use 'find_files'."
                 keys)
       (format "ERROR: missing file_path (also accepted: filePath, path). Got keys: %s"
               keys))))
 
-(defvar kargu--truncated-counter 0
-  "Monotonic counter for truncated output buffer names.")
-
 (defun kargu--truncate-for-model (string)
-  "Truncate STRING to `kargu-tool-output-limit' characters.
-Preserves the complete output in a buffer named `*kargu-output-<N>*'
-so the model can inspect remaining lines using `read_file'."
-  (if (and (natnump kargu-tool-output-limit)
-           (> (length string) kargu-tool-output-limit))
-      (let* ((omitted (- (length string) kargu-tool-output-limit))
-             (id (cl-incf kargu--truncated-counter))
-             (buf-name (format "*kargu-output-%d*" id)))
-        (with-current-buffer (get-buffer-create buf-name)
-          (let ((inhibit-read-only t))
-            (erase-buffer)
-            (insert string)
-            (setq-local buffer-offer-save nil)))
-        (concat (substring string 0 kargu-tool-output-limit)
-                (format "\n... [Output truncated: omitted %d chars. Complete output (%d chars) preserved in buffer '%s'. You can read specific line ranges using read_file with path='%s' from_line=N to_line=M]"
-                        omitted (length string) buf-name buf-name)))
-    string))
+  "Bound STRING through the shared tool output boundary."
+  (kargu-tool-execution-truncate-for-model string))
 
 (defmacro kargu-safe-tool-call (&rest body)
   "Execute BODY, catching errors and formatting as an ERROR string."
@@ -242,84 +256,22 @@ so the model can inspect remaining lines using `read_file'."
        (progn ,@body)
      (error (format "ERROR: %s" (error-message-string err)))))
 
-(defun kargu--format-tool-result (res)
-  "Format tool execution result RES as a string for consumption."
-  (cond
-   ((null res) "OK (no output)")
-   ((stringp res)
-    (if (string-empty-p res) "OK (no output)" res))
-   (t (kargu--json-encode res))))
-
-(defun kargu--tool-raw-args (arguments)
-  "Return raw string representation of ARGUMENTS for logging."
-  (cond
-   ((stringp arguments) arguments)
-   ((or (null arguments) (eq arguments :json-null)) "")
-   (t (condition-case nil
-          (kargu--json-encode arguments)
-        (error (format "%S" arguments))))))
-
-(defun kargu--executor-async-p (executor)
-  "Non-nil when EXECUTOR accepts a completion callback as second argument."
-  (let ((arity (func-arity executor)))
-    (or (eq (cdr arity) 'many)
-        (>= (cdr arity) 2))))
-
-(defun kargu--execute-tool-async (executor args name callback)
-  "Execute EXECUTOR with ARGS, invoking CALLBACK exactly once with the result.
-An executor taking (ARGS CALLBACK) reports through the callback itself; one
-taking only ARGS returns the result."
-  (let ((on-done (lambda (res)
-                   (let* ((formatted (kargu--format-tool-result res))
-                          (final (kargu--truncate-for-model formatted)))
-                     (kargu--log-block (format "tool %s result" name) formatted)
-                     (funcall callback final)))))
-    (condition-case-unless-debug err
-        (if (kargu--executor-async-p executor)
-            (funcall executor args on-done)
-          (funcall on-done (funcall executor args)))
-      (error
-       (funcall callback (format "ERROR: tool %s failed: %s"
-                                 name (error-message-string err)))))))
-
-(defun kargu--execute-tool-sync (executor args name)
-  "Execute EXECUTOR with ARGS synchronously and return truncated result."
-  (let ((out
-         (condition-case-unless-debug err
-             (kargu--format-tool-result (funcall executor args))
-           (error
-            (format "ERROR: tool %s failed: %s"
-                    name (error-message-string err))))))
-    (kargu--log-block (format "tool %s result" name) out)
-    (kargu--truncate-for-model out)))
-
 (defun kargu-execute-tool (name arguments &optional callback)
-  "Run tool NAME with ARGUMENTS; ALWAYS return a result string or invoke CALLBACK.
-When CALLBACK is provided, run asynchronously if the tool supports it.
-Errors are captured and returned as \"ERROR: ...\" results so the
-agent loop can feed them back to the model for self-correction."
-  (let* ((spec (gethash name kargu--tool-registry))
-         (raw (kargu--tool-raw-args arguments))
-         (args (kargu--decode-tool-arguments arguments)))
-    (kargu--log-block (format "tool %s arguments (raw)" name) raw
-                      (kargu--log-looks-json-p raw))
-    (kargu--log-block (format "tool %s arguments (parsed)" name)
-                      (format "%S" args))
-    (kargu-log 'debug "execute-tool %s args=%s" name
-               (truncate-string-to-width (format "%s" args) 200))
-    (cond
-     ((null spec)
-      (let ((out (format "ERROR: no such tool: %s" name)))
-        (if callback (funcall callback out) out)))
-     ((kargu--tool-arguments-invalid-p arguments)
-      (let ((out (format "ERROR: the arguments of tool %s are not a valid JSON object; send one JSON object. Received: %s"
-                         name (truncate-string-to-width raw 200))))
-        (if callback (funcall callback out) out)))
-     (callback
-      (kargu--execute-tool-async (kargu-aget spec "executor") args name callback))
-     (t
-      (kargu--execute-tool-sync (kargu-aget spec "executor") args name)))))
+  "Execute NAME with ARGUMENTS through the shared gate once.
+CALLBACK receives the asynchronous result; without it, no waiting occurs."
+  (let* ((run (bound-and-true-p kargu--loop-run))
+         (context (kargu-tool-execution-context-create
+                   :root (or (plist-get run :project-root) (kargu-permission-project-root))
+                   :mode (or (plist-get run :mode) (kargu-state-mode))
+                   :budget-scope (plist-get run :budget)
+                   :policy-revision (kargu-tool-registry-revision kargu--tool-registry))))
+    (if callback
+        (progn
+          (kargu-tool-gate-execute kargu--tool-registry context name arguments
+                                 :callback callback)
+          nil)
+      (kargu-tool-gate-execute-sync kargu--tool-registry context name arguments))))
 
 (provide 'kargu/api/tools)
 
-;;; kargu/api/tools.el ends here
+;;; tools.el ends here

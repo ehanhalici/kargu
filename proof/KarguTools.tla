@@ -19,7 +19,8 @@ IsMutatingTool(name) ==
     name \in MutatingToolNames
 
 GateToolAllowed(name, mode) ==
-    IsMutatingTool(name) => (mode \in MutatingModes)
+    /\ IsMutatingTool(name) => (mode \in MutatingModes)
+    /\ (name \in DebugToolNames) => (mode \in {"debug", "agent"})
 
 GateToolError(name, mode) ==
     IF GateToolAllowed(name, mode)

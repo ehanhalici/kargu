@@ -1,8 +1,12 @@
-;;; kargu/languages/haskell.el --- Haskell language profile for Kargu -*- lexical-binding: t; -*-
+;;; haskell.el --- Haskell language profile for Kargu -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Part of kargu.
+
+;;; Commentary:
+
+;; Register Haskell modes, project detection and toolchain metadata.
 
 ;;; Code:
 
@@ -14,6 +18,7 @@
    :name "Haskell"
    :priority 70
    :extensions '("hs" "lhs")
+   :modes '(haskell-mode literate-haskell-mode haskell-ts-mode)
    :detectors
    (list "stack.yaml"
          (lambda (root)
@@ -44,10 +49,11 @@
      :purpose "Language Server for Haskell"
      :hint "ghcup install hls")
    :lsp-notes
-   "Haskell symbols: functions, data types, typeclasses, type synonyms. HLS (Haskell Language Server) provides type signatures and code actions."))
+   "Haskell symbols: functions, data types, typeclasses, type synonyms. HLS (Haskell Language Server) provides type signatures and code actions.")
+  "Language profile for Haskell buffers and projects.")
 
 (kargu-language-register kargu-language-haskell-spec)
 
 (provide 'kargu/languages/haskell)
 
-;;; kargu/languages/haskell.el ends here
+;;; haskell.el ends here

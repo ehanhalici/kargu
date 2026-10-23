@@ -1,4 +1,4 @@
-;;; kargu/chat.el --- Shell-like chat sidebar -*- lexical-binding: t; -*-
+;;; chat.el --- Shell-like chat sidebar -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -28,10 +28,8 @@
 (require 'kargu/ui/notify)
 (require 'kargu/config)
 (require 'kargu/api)
+(require 'kargu/chat/select)
 (require 'kargu/loop)
-(require 'kargu/tools/diff)
-(require 'kargu/tools/lsp)
-(require 'kargu/tools/dape nil t)
 (require 'kargu/tools/deps)
 
 ;; Modular subcomponents of chat
@@ -43,34 +41,27 @@
 (require 'kargu/chat/tune)
 (require 'kargu/chat/session)
 
-(declare-function kargu-chat-note-selection "kargu/chat/session" (&optional buffer))
-(declare-function kargu-chat-activate-selection "kargu/chat/session" (&optional buffer))
 (declare-function kargu-chat--shown-provider "kargu/chat/prompt" ())
 (declare-function kargu-chat--shown-model "kargu/chat/prompt" ())
 (declare-function kargu-chat--focus-selection "kargu/chat/prompt" (&optional open-company))
-(declare-function kargu-eglot-connected-p "kargu/tools/lsp" ())
+(declare-function kargu-eglot-connected-p "kargu/tools/lsp/context" ())
+(declare-function kargu-dape-ready-p "kargu/tools/dape/session" ())
+(declare-function kargu-dape-ensure-session "kargu/tools/dape/session"
+                  (on-ready &optional on-cancel))
+(declare-function kargu-dape-cancel-session-wait "kargu/tools/dape/readiness" ())
 (defvar kargu-eglot-required-message)
 
-(defvar-local kargu-chat--awaiting-eglot nil
-  "Non-nil when this chat must not accept a prompt until Eglot connects.")
-
 (defvar-local kargu-chat--eglot-notice-p nil
-  "Non-nil when the missing-Eglot notice is already in this chat.")
+  "Non-nil when this chat has shown its missing-Eglot notice.")
 
-(defun kargu-chat--workspace-blocked-p ()
-  "Return non-nil when an interactive session must wait for Eglot.
-Every language, including Emacs Lisp, needs a live connection.
-Batch Emacs is never blocked."
-  (and (not noninteractive)
-       (not (kargu-eglot-connected-p))))
-
-(defun kargu-chat--refuse-without-eglot ()
-  "Remove the prompt and say that Eglot is not connected."
-  (kargu-chat--clear-idle-prompt)
-  (unless kargu-chat--eglot-notice-p
-    (setq-local kargu-chat--eglot-notice-p t)
-    (kargu-chat-insert (concat kargu-eglot-required-message "\n\n") 'error))
-  (message "%s" kargu-eglot-required-message))
+(defun kargu-chat--notice-without-eglot ()
+  "Warn once about unavailable LSP without withholding the prompt."
+  (if (and (fboundp 'kargu-eglot-connected-p) (kargu-eglot-connected-p))
+      (setq-local kargu-chat--eglot-notice-p nil)
+    (unless kargu-chat--eglot-notice-p
+      (setq-local kargu-chat--eglot-notice-p t)
+      (kargu-chat-insert (concat kargu-eglot-required-message "\n\n")
+                         'font-lock-warning-face))))
 
 (defvar company-backends)
 (defvar company-minimum-prefix-length)
@@ -97,11 +88,11 @@ the model must call `read_file' instead of drowning the prompt."
 
 ;;;; Chat major mode ------------------------------------------------------
 
-(declare-function kargu-chat-select-mode-company "kargu/api" (&optional _event))
-(declare-function kargu-chat-select-provider-company "kargu/api")
-(declare-function kargu-chat-select-model-company "kargu/api")
-(declare-function kargu-chat-select-effort-company "kargu/api")
-(declare-function kargu-switch-provider-and-model "kargu/api")
+(declare-function kargu-chat-select-mode-company "kargu/api/select" (&optional _event))
+(declare-function kargu-chat-select-provider-company "kargu/api/select")
+(declare-function kargu-chat-select-model-company "kargu/api/select")
+(declare-function kargu-chat-select-effort-company "kargu/api/select")
+(declare-function kargu-switch-provider-and-model "kargu/api/select")
 
 (defvar-keymap kargu-chat-mode-map
   :doc "Keymap for `kargu-chat-mode'."
@@ -149,29 +140,28 @@ or insert newline if editing prompt."
      (t
       (newline)))))
 
-(defvar kargu-chat-buffers nil
-  "List of live kargu chat buffers.")
-
 (defun kargu-chat-list-buffers ()
   "Return a list of live buffers running `kargu-chat-mode'."
-  (setq kargu-chat-buffers
-        (cl-remove-if-not (lambda (b)
-                            (and (bufferp b)
-                                 (buffer-live-p b)
-                                 (with-current-buffer b (derived-mode-p 'kargu-chat-mode))))
-                          (buffer-list)))
-  kargu-chat-buffers)
+  (cl-remove-if-not
+   (lambda (buffer)
+     (with-current-buffer buffer (derived-mode-p 'kargu-chat-mode)))
+   (buffer-list)))
+
+(defun kargu/chat-unload-function ()
+  "Refuse live views and detach composition subscriptions before unloading."
+  (when (kargu-chat-list-buffers)
+    (user-error "Kargu: close chat buffers before unloading their UI"))
+  (remove-hook 'kargu-state-mode-hook #'kargu-chat-refresh-mode)
+  (remove-hook 'kargu-session-reset-hook #'kargu-chat-session-reset)
+  nil)
 
 (define-derived-mode kargu-chat-mode text-mode "kargu"
   "Major mode for the kargu chat transcript.
 
-Past turns are read-only.  Type at the `kargu> ' prompt at the
-end of the buffer; move the cursor up to select and copy.  C-c
-C-c sends the prompt, RET inserts a newline, C-c C-k stops a
-run, C-c C-q hides the sidebar.  `@' completes project files and
-LSP symbols when company-mode is available.  C-c C-n starts a new
-chat session, C-c C-b switches between open chat sessions,
-C-c C-h switches between saved past project sessions.
+Past turns are read-only.  Type at the prompt and use the command
+`kargu-chat-send' to submit or `kargu-chat-stop' to stop a run.
+Move up to select and copy transcript text.  Mentions beginning with
+`@' complete project files and LSP symbols when Company is available.
 The header line shows the active mode, model, and context usage.
 
 \\{kargu-chat-mode-map}"
@@ -184,12 +174,10 @@ The header line shows the active mode, model, and context usage.
     (setq-local kargu-chat--project-root (kargu-session-project-root)))
   (unless kargu-chat--session-id
     (setq-local kargu-chat--session-id (kargu-session-id)))
-  (add-to-list 'kargu-chat-buffers (current-buffer))
   (add-hook 'kill-buffer-hook
             (lambda ()
               (when (bound-and-true-p kargu-session-auto-save)
-                (ignore-errors (kargu-session-save (current-buffer))))
-              (setq kargu-chat-buffers (delq (current-buffer) kargu-chat-buffers)))
+                (ignore-errors (kargu-session-save (current-buffer)))))
             nil t)
   (when (or (featurep 'company) (require 'company nil t))
     (setq-local company-backends '(kargu-chat-company))
@@ -212,8 +200,7 @@ Otherwise generates `*kargu-chat*<N>'."
            (read-string "Session name (optional): "))))
   (when (and (derived-mode-p 'kargu-chat-mode) (bound-and-true-p kargu-session-auto-save))
     (ignore-errors (kargu-session-save (current-buffer))))
-  (let* ((blocked (kargu-chat--workspace-blocked-p))
-         (proj (kargu-session-project-root))
+  (let* ((proj (kargu-session-project-root))
          (base-name (if (and (stringp name) (not (string-empty-p (string-trim name))))
                         (format "*kargu-chat: %s*" (string-trim name))
                       kargu-chat-buffer-name))
@@ -221,23 +208,19 @@ Otherwise generates `*kargu-chat*<N>'."
     (with-current-buffer buf
       (kargu-chat-mode)
       (setq-local kargu-chat--project-root proj)
-      (setq-local kargu-chat--awaiting-eglot blocked)
       (setq-local kargu-chat--session-id (and (fboundp 'kargu-session-id) (kargu-session-id)))
       (when (and (stringp name) (not (string-empty-p (string-trim name))))
         (setq-local kargu-chat--session-title (string-trim name)))
       (kargu-chat-insert
        (concat "kargu chat — type at the prompt; "
                "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-h switch session.\n\n"))
-      (if blocked
-          (kargu-chat--refuse-without-eglot)
-        (kargu-chat--ensure-prompt)
-        (when (fboundp 'kargu-chat-check-and-display-missing-tools)
-          (kargu-chat-check-and-display-missing-tools proj))))
+      (kargu-chat--notice-without-eglot)
+      (kargu-chat--ensure-prompt)
+      (when (fboundp 'kargu-chat-check-and-display-missing-tools)
+        (kargu-chat-check-and-display-missing-tools proj)))
     (pop-to-buffer-same-window buf)
-    (kargu-chat-activate-selection buf)
     (with-current-buffer buf
       (kargu-chat--focus-selection (called-interactively-p 'any)))
-    (kargu-chat-list-buffers)
     buf))
 
 (defun kargu-chat-switch ()
@@ -248,8 +231,7 @@ Otherwise generates `*kargu-chat*<N>'."
      ((null live)
       (kargu-chat-show))
      ((= (length live) 1)
-      (pop-to-buffer-same-window (car live))
-      (kargu-chat-activate-selection (car live)))
+      (pop-to-buffer-same-window (car live)))
      (t
       (let* ((names (mapcar #'buffer-name live))
              (default-name (buffer-name (if (derived-mode-p 'kargu-chat-mode)
@@ -258,80 +240,71 @@ Otherwise generates `*kargu-chat*<N>'."
              (chosen (completing-read "Switch to kargu chat: " names nil t nil nil default-name))
              (target (get-buffer chosen)))
         (when (and target (buffer-live-p target))
-          (pop-to-buffer-same-window target)
-          (kargu-chat-activate-selection target)))))))
+          (pop-to-buffer-same-window target)))))))
 
 (defun kargu-chat--buffer (&optional target-root)
-  "Return the chat buffer for TARGET-ROOT, creating or restoring it if needed.
-Reuses the current buffer if it is already in `kargu-chat-mode'."
-  (let ((root (or target-root (kargu-session-project-root))))
-    (cond
-     ;; Current buffer is already a matching chat buffer
-     ((and (derived-mode-p 'kargu-chat-mode)
-           (or (null kargu-chat--project-root)
-               (equal kargu-chat--project-root root)))
-      (current-buffer))
-     ;; Look for an already live chat buffer matching this project
-     ((cl-find-if (lambda (b)
-                    (and (buffer-live-p b)
-                         (equal (buffer-local-value 'kargu-chat--project-root b) root)))
-                  (kargu-chat-list-buffers)))
-     ;; If existing default buffer matches or is empty, use it; otherwise create or restore
-     (t
-      (let* ((sessions (and (bound-and-true-p kargu-session-auto-restore)
-                            (fboundp 'kargu-session-list)
-                            (kargu-session-list root)))
-             (buf (get-buffer-create kargu-chat-buffer-name)))
-        (if (and sessions (> (length sessions) 0))
-            (progn
-              (kargu-session-load (car sessions) buf root)
-              (with-current-buffer buf
-                (when (fboundp 'kargu-chat-check-and-display-missing-tools)
-                  (kargu-chat-check-and-display-missing-tools root)))
-              buf)
-          (with-current-buffer buf
-            (unless (eq major-mode 'kargu-chat-mode)
-              (kargu-chat-mode))
-            (setq-local kargu-chat--project-root root)
-            (setq-local kargu-chat--session-id (and (fboundp 'kargu-session-id) (kargu-session-id)))
-            (let ((inhibit-read-only t)
-                  (end (point-max)))
-              (when (> end (point-min))
-                (add-text-properties
-                 (point-min) end
-                 '(read-only t front-sticky t
-                   rear-nonsticky (read-only face front-sticky)))))
-            (unless (kargu-chat--prompt-live-p)
-              (kargu-chat-insert
-               (concat "kargu chat — type at the prompt; "
-                       "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-h switch session.\n\n"))
-              (kargu-chat--ensure-prompt))
-            (when (fboundp 'kargu-chat-check-and-display-missing-tools)
-              (kargu-chat-check-and-display-missing-tools root))
-            (current-buffer))))))))
+  "Return the chat buffer for TARGET-ROOT, creating or restoring it.
+Reuse the current buffer when it already belongs to the project."
+  (let ((root (kargu-session-project-root
+               (or target-root (kargu-session-project-root)))))
+    (or (and (derived-mode-p 'kargu-chat-mode)
+             (or (null kargu-chat--project-root)
+                 (equal kargu-chat--project-root root))
+             (current-buffer))
+        (cl-find-if
+         (lambda (buffer)
+           (equal (buffer-local-value 'kargu-chat--project-root buffer) root))
+         (kargu-chat-list-buffers))
+        (kargu-chat--create-project-buffer root))))
+
+(defun kargu-chat--create-project-buffer (root)
+  "Create or restore a chat buffer for project ROOT."
+  (let* ((sessions (and kargu-session-auto-restore (kargu-session-list root)))
+         (existing (get-buffer kargu-chat-buffer-name))
+         (other-root (and existing
+                          (buffer-local-value 'kargu-chat--project-root existing)))
+         (buffer (if (and other-root (not (equal other-root root)))
+                     (generate-new-buffer kargu-chat-buffer-name)
+                   (get-buffer-create kargu-chat-buffer-name))))
+    (with-current-buffer buffer
+      (if sessions
+          (kargu-session-load (car sessions) buffer root)
+        (kargu-chat--initialize-project-buffer root))
+      (kargu-chat-check-and-display-missing-tools root))
+    buffer))
+
+(defun kargu-chat--initialize-project-buffer (root)
+  "Initialize the current chat buffer for project ROOT."
+  (unless (eq major-mode 'kargu-chat-mode) (kargu-chat-mode))
+  (setq-local kargu-chat--project-root root)
+  (setq-local kargu-chat--session-id (kargu-session-id))
+  (let ((inhibit-read-only t))
+    (add-text-properties
+     (point-min) (point-max)
+     '(read-only t front-sticky t
+                 rear-nonsticky (read-only face front-sticky))))
+  (unless (kargu-chat--prompt-live-p)
+    (kargu-chat-insert
+     (concat "kargu chat — type at the prompt; "
+             "C-c C-c sends, C-c C-k stops, C-c C-n new chat, C-c C-h switch session.\n\n"))
+    (kargu-chat--ensure-prompt)))
 
 (defun kargu-chat-show ()
   "Display the chat buffer directly in the current window without splitting.
 If the frame has 1 window, opens over that buffer.  If multiple windows exist,
 opens in whichever window is currently selected (left or right).
-Without a live Eglot connection the prompt is withheld.  The project
-root comes from that connection."
+LSP is optional; a missing connection is reported without blocking chat."
   (interactive)
   (let* ((open-company (called-interactively-p 'any))
-         (blocked (kargu-chat--workspace-blocked-p))
          (proj (kargu-session-project-root))
          (buffer (kargu-chat--buffer proj)))
     (pop-to-buffer-same-window buffer)
-    (kargu-chat-activate-selection buffer)
     (with-current-buffer buffer
-      (setq-local kargu-chat--awaiting-eglot blocked)
-      (if blocked
-          (kargu-chat--refuse-without-eglot)
-        (setq-local kargu-chat--eglot-notice-p nil)
-        (kargu-chat--ensure-prompt)
-        (when (fboundp 'kargu-chat-check-and-display-missing-tools)
-          (kargu-chat-check-and-display-missing-tools proj))
-        (kargu-chat--focus-selection open-company)))
+      (kargu-chat--notice-without-eglot)
+      (kargu-chat--ensure-prompt)
+      (when (fboundp 'kargu-chat-check-and-display-missing-tools)
+        (kargu-chat-check-and-display-missing-tools proj))
+      (kargu-chat--focus-selection open-company))
     buffer))
 
 (defun kargu-chat--hide (window)
@@ -357,7 +330,7 @@ root comes from that connection."
 (defun kargu-chat--require-selection ()
   "Signal when this chat has not chosen a provider and a model."
   (unless (and (kargu-chat--shown-provider) (kargu-chat--shown-model))
-    (user-error "kargu: select a provider and model before sending")))
+    (user-error "Kargu: select a provider and model before sending")))
 
 (declare-function kargu-loop-require-tools-for-agent "kargu/loop" ())
 (declare-function kargu-model-forget-tools-refusals "kargu/api/catalog" ())
@@ -373,7 +346,7 @@ so the typed text stays in the input."
 Nothing is consumed or rendered, so a refusal keeps the typed input."
   (unless (and (stringp prompt)
                (not (string-empty-p (string-trim prompt))))
-    (user-error "kargu: empty prompt"))
+    (user-error "Kargu: empty prompt"))
   (kargu-chat--require-selection)
   (kargu-chat--refuse-agent-without-tools)
   (kargu-loop-preflight))
@@ -401,25 +374,110 @@ Nothing is consumed or rendered, so a refusal keeps the typed input."
     (dolist (win (get-buffer-window-list buffer nil t))
       (set-window-point win (point-max)))))
 
-(defun kargu-chat--submit (prompt)
-  "Start an agent run for PROMPT in the chat buffer."
-  (kargu-chat--preflight prompt)
-  (add-to-history 'kargu-chat-input-history prompt)
+(cl-defstruct (kargu-chat--submission
+               (:constructor kargu-chat--make-submission))
+  "Prompt region and cursor positions before publishing a user turn."
+  start footer prompt-offset point mark windows)
+
+(defun kargu-chat--capture-submission ()
+  "Capture the live prompt and cursors for a rejected submission."
+  (let ((start (marker-position kargu-chat--output-marker)))
+    (kargu-chat--make-submission
+     :start start :footer (buffer-substring start (point-max))
+     :prompt-offset (- kargu-chat--prompt-marker start)
+     :point (point) :mark (mark t)
+     :windows (mapcar (lambda (win) (cons win (window-point win)))
+                      (get-buffer-window-list (current-buffer) nil t)))))
+
+(defun kargu-chat--rollback-submission (saved)
+  "Restore prompt and cursors from SAVED after startup rejection."
+  (let ((inhibit-read-only t)
+        (start (kargu-chat--submission-start saved)))
+    (delete-region start (point-max))
+    (goto-char start)
+    (insert (kargu-chat--submission-footer saved))
+    (setq kargu-chat--output-marker (copy-marker start t)
+          kargu-chat--prompt-marker
+          (copy-marker (+ start (kargu-chat--submission-prompt-offset saved)))
+          kargu-chat--answer-start nil)
+    (goto-char (kargu-chat--submission-point saved))
+    (set-marker (mark-marker) (kargu-chat--submission-mark saved))
+    (dolist (pair (kargu-chat--submission-windows saved))
+      (when (and (window-live-p (car pair))
+                 (eq (window-buffer (car pair)) (current-buffer)))
+        (set-window-point (car pair) (cdr pair))))))
+
+(defun kargu-chat--publish-submission (prompt)
+  "Render PROMPT and its running banner before callbacks can arrive."
+  (kargu-chat--consume-input)
   (kargu-chat--reset-stream-state)
-  (kargu-chat-note-selection)
   (kargu-chat--render-user-turn prompt)
   (kargu-chat--render-agent-heading)
   (kargu-chat--ensure-running-prompt)
-  (kargu-chat--mark-answer-start)
-  (condition-case err
-      (kargu-loop-send (kargu-chat--expand-prompt prompt)
-                       #'kargu-chat--on-delta
-                       #'kargu-chat--on-finish)
-    (error
-     (kargu-chat--ensure-idle-prompt)
-     (signal (car err) (cdr err))))
-  (force-mode-line-update t)
-  (kargu-chat--follow-end (current-buffer)))
+  (kargu-chat--mark-answer-start))
+
+(defun kargu-chat--restore-draft (saved)
+  "Restore the unsent draft from SAVED without removing the new transcript."
+  (kargu-chat--ensure-idle-prompt)
+  (let* ((offset (kargu-chat--submission-prompt-offset saved))
+         (old-start (+ (kargu-chat--submission-start saved) offset))
+         (text (substring (kargu-chat--submission-footer saved) offset))
+         (start (marker-position kargu-chat--prompt-marker))
+         (inhibit-read-only t))
+    (save-excursion
+      (goto-char start)
+      (insert text)
+      (when (and (not (string-empty-p text)) (< (point) (point-max)))
+        (insert "\n")))
+    (when (>= (kargu-chat--submission-point saved) old-start)
+      (goto-char (+ start (- (kargu-chat--submission-point saved) old-start))))
+    (when-let* ((mark (kargu-chat--submission-mark saved)))
+      (when (>= mark old-start)
+        (set-mark (+ start (- mark old-start)))))
+    (dolist (pair (kargu-chat--submission-windows saved))
+      (when (and (window-live-p (car pair))
+                 (eq (window-buffer (car pair)) (current-buffer))
+                 (>= (cdr pair) old-start))
+        (set-window-point (car pair) (+ start (- (cdr pair) old-start)))))))
+
+(cl-defun kargu-chat--complete-submission (report &key buffer draft preserve-draft session)
+  "Render REPORT in BUFFER and restore DRAFT for SESSION when still safe.
+PRESERVE-DRAFT also restores input following a successfully admitted request."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (or (null session) (eq session (kargu-session-context)))
+      (unwind-protect
+          (kargu-chat--on-finish report)
+        (when (and draft (or preserve-draft
+                             (and (plist-member report :request-started)
+                                  (not (plist-get report :request-started))))
+                   (string-empty-p (string-trim (kargu-chat--input-text))))
+          (kargu-chat--restore-draft draft)))))))
+
+(cl-defun kargu-chat--submit (prompt &key preserve-draft on-ready)
+  "Start a run for PROMPT, restoring the draft if startup is rejected.
+PRESERVE-DRAFT keeps unsent input after completion; ON-READY reports admission."
+  (kargu-chat--preflight prompt)
+  (let ((expanded (kargu-chat--expand-prompt prompt))
+        (saved (kargu-chat--capture-submission))
+        (buffer (current-buffer))
+        (session (kargu-session-context)))
+    (condition-case err
+        (progn
+          (kargu-chat--publish-submission prompt)
+          (kargu-chat--follow-end buffer)
+          (apply #'kargu-loop-send
+                 expanded #'kargu-chat--on-delta
+                 (lambda (report)
+                   (kargu-chat--complete-submission
+                    report :buffer buffer :draft saved :preserve-draft preserve-draft :session session))
+                 (and on-ready (list :on-ready on-ready))))
+      (error
+       (unless (kargu-loop-running-p)
+         (kargu-chat--rollback-submission saved))
+       (signal (car err) (cdr err)))))
+  (add-to-history 'kargu-chat-input-history prompt)
+  (force-mode-line-update t))
 
 (defun kargu-chat--project ()
   "Project root of the current chat, or the session root."
@@ -436,7 +494,7 @@ Nothing is consumed or rendered, so a refusal keeps the typed input."
   "Show MISSING tools for PROJ and signal `user-error'."
   (when (fboundp 'kargu-chat-check-and-display-missing-tools)
     (kargu-chat-check-and-display-missing-tools proj t))
-  (user-error "kargu: cannot send prompt: mandatory tools are missing: %s (please install them first)"
+  (user-error "Kargu: cannot send prompt: mandatory tools are missing: %s (please install them first)"
               (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", ")))
 
 (defun kargu-chat--debug-fallback-text ()
@@ -446,43 +504,72 @@ Nothing is consumed or rendered, so a refusal keeps the typed input."
 (defun kargu-chat--debug-session-needed-p ()
   "Non-nil when debug mode has no ready debugger session."
   (and (eq (kargu-state-mode) 'debug)
-       (fboundp 'kargu-dape-ready-p)
-       (not (kargu-dape-ready-p))))
+       (not (and (fboundp 'kargu-dape-ready-p) (kargu-dape-ready-p)))))
 
 (defun kargu-chat--after-debug-session (continue cancel)
   "Start a debug session, then call CONTINUE.  CANCEL reports failure."
-  (kargu-dape-ensure-session
-   continue
-   (lambda (&optional reason)
-     (funcall cancel (or reason "user abort")))))
+  (if (fboundp 'kargu-dape-ensure-session)
+      (kargu-dape-ensure-session
+       continue (lambda (&optional reason)
+                  (funcall cancel (or reason "user abort"))))
+    (funcall cancel "debugger module unavailable")))
 
-(defun kargu-chat--send-prepared (text consume)
-  "Submit TEXT.  CONSUME non-nil deletes the matching prompt first.
+(cl-defstruct (kargu-chat--debug-prompt (:constructor kargu-chat--make-debug-prompt))
+  "Captured chat and input awaiting debugger readiness."
+  buffer session root text input preserve-draft (state :pending))
+
+(defun kargu-chat--resume-debug-prompt (pending)
+  "Submit PENDING only in its unchanged originating chat."
+  (when (eq (kargu-chat--debug-prompt-state pending) :pending)
+    (setf (kargu-chat--debug-prompt-state pending) :done)
+    (let ((buffer (kargu-chat--debug-prompt-buffer pending)))
+      (if (not (buffer-live-p buffer))
+          (message "kargu: debug prompt not sent: its chat was closed")
+        (with-current-buffer buffer
+          (cond
+           ((or (not (derived-mode-p 'kargu-chat-mode))
+                (not (equal kargu-chat--session-id (kargu-chat--debug-prompt-session pending)))
+                (not (equal kargu-chat--project-root (kargu-chat--debug-prompt-root pending)))
+                (not (eq (kargu-state-mode) 'debug)))
+            (message "kargu: debug prompt not sent: chat, session or mode changed; send it again"))
+           ((and (not (kargu-chat--debug-prompt-preserve-draft pending))
+                 (not (equal (kargu-chat--input-text) (kargu-chat--debug-prompt-input pending))))
+            (message "kargu: input changed while starting the debugger; nothing was sent, review and send again"))
+           (t
+            (condition-case err
+                (let ((kargu-permission--override-root (kargu-chat--debug-prompt-root pending)))
+                  (kargu-loop-preflight)
+                  (kargu-chat--submit
+                   (kargu-chat--debug-prompt-text pending)
+                   :preserve-draft (kargu-chat--debug-prompt-preserve-draft pending)))
+              (error (message "kargu: debug prompt not sent: %s" (error-message-string err)))))))))))
+
+(defun kargu-chat--await-debug-prompt (text preserve-draft)
+  "Wait for debug startup before submitting TEXT with PRESERVE-DRAFT policy."
+  (let ((pending (kargu-chat--make-debug-prompt
+                  :buffer (current-buffer) :session kargu-chat--session-id
+                  :root kargu-chat--project-root :text (copy-sequence text)
+                  :input (kargu-chat--input-text) :preserve-draft preserve-draft)))
+    (kargu-chat--after-debug-session
+     (lambda () (kargu-chat--resume-debug-prompt pending))
+     (lambda (reason)
+       (when (eq (kargu-chat--debug-prompt-state pending) :pending)
+         (setf (kargu-chat--debug-prompt-state pending) :done)
+         (message "kargu: debug session cancelled or failed: %s" reason))))))
+
+(cl-defun kargu-chat--send-prepared (text &key preserve-draft on-ready)
+  "Submit TEXT, keeping an unrelated input when PRESERVE-DRAFT is non-nil.
 A debug session that is not ready is started before the submit.
-Every refusal happens before the input is consumed."
+ON-READY reports asynchronous admission; refusals retain the original draft."
   (kargu-chat--preflight text)
   (cond
    ((kargu-chat--debug-session-needed-p)
-    (kargu-chat--after-debug-session
-     (lambda ()
-       (let ((chat-buf (kargu-chat--buffer)))
-         (kargu-chat-show)
-         (with-current-buffer chat-buf
-           (when (and consume
-                      (string= (string-trim (kargu-chat--input-text)) text))
-             (kargu-chat--consume-input))
-           (kargu-chat--submit text))))
-     (lambda (reason)
-       (message "kargu: debug session cancelled or failed: %s" reason))))
+    (kargu-chat--await-debug-prompt text preserve-draft))
    (t
-    (when consume
-      (kargu-chat--consume-input))
-    (kargu-chat--submit text))))
+    (kargu-chat--submit text :preserve-draft preserve-draft :on-ready on-ready))))
 
 (defun kargu-chat--send-input ()
   "Read, check, and send the current chat prompt."
-  (when kargu-chat--awaiting-eglot
-    (user-error "%s" kargu-eglot-required-message))
   (let ((missing (kargu-chat--missing-tools (kargu-chat--project))))
     (when missing
       (kargu-chat--signal-missing-tools (kargu-chat--project) missing)))
@@ -496,7 +583,7 @@ Every refusal happens before the input is consumed."
       (goto-char (point-max))
       (message "kargu: type a prompt, then C-c C-c to send"))
      (t
-      (kargu-chat--send-prepared text t)))))
+      (kargu-chat--send-prepared text)))))
 
 (defun kargu-chat-send ()
   "Send the chat prompt input, or focus the prompt if it is empty.
@@ -521,8 +608,8 @@ from the menu with an empty prompt, this just opens the chat."
     (kargu-chat--debug-fallback-text))
    (t nil)))
 
-(defun kargu-chat--send-given (prompt)
-  "Send PROMPT from the chat buffer, discarding a live input first."
+(defun kargu-chat--send-given (prompt &optional on-ready)
+  "Send PROMPT from the chat buffer and report admission through ON-READY."
   (let ((missing (kargu-chat--missing-tools (kargu-chat--project))))
     (when missing
       (kargu-chat-show)
@@ -530,30 +617,14 @@ from the menu with an empty prompt, this just opens the chat."
   (kargu-chat-show)
   (let ((text (kargu-chat--prompt-text prompt)))
     (with-current-buffer (kargu-chat--buffer)
-      (when kargu-chat--awaiting-eglot
-        (user-error "%s" kargu-eglot-required-message))
-      (kargu-chat--preflight text)
-      (when (kargu-chat--prompt-live-p)
-        (kargu-chat--consume-input)))
-    (cond
-     ((kargu-chat--debug-session-needed-p)
-      (kargu-chat--after-debug-session
-       (lambda ()
-         (let ((chat-buf (kargu-chat--buffer)))
-           (kargu-chat-show)
-           (with-current-buffer chat-buf
-             (kargu-chat--submit text))))
-       (lambda (reason)
-         (message "kargu: debug session cancelled or failed: %s" reason))))
-     (t
-      (kargu-chat--submit text)))))
+      (kargu-chat--send-prepared text :preserve-draft t :on-ready on-ready))))
 
-(defun kargu-chat-prompt (&optional prompt)
-  "Send PROMPT, or the chat input when called interactively."
+(cl-defun kargu-chat-prompt (&optional prompt &key on-ready)
+  "Send PROMPT, reporting first-request admission through optional ON-READY."
   (interactive)
   (if (called-interactively-p 'interactive)
       (kargu-chat-send)
-    (kargu-chat--send-given prompt)))
+    (kargu-chat--send-given prompt on-ready)))
 
 (defun kargu-chat-reset ()
   "Reset the kargu session: stop the run, clear history and counters.
@@ -563,13 +634,13 @@ The chat log itself is kept as a record."
     (kargu-session-reset)
     (kargu-model-forget-tools-refusals)
     (kargu-chat-insert "\n— session reset —\n"
-                        'kargu-chat-meta)
+                       'kargu-chat-meta)
     (kargu-chat--ensure-prompt)))
 
 (defun kargu-chat-clear ()
-  "Clear all previous turns in the chat log, keeping only the prompt."
+  "Clear the chat transcript while keeping the prompt."
   (interactive)
-  (when-let* ((buffer (kargu-chat--target-buffer)))
+  (when-let* ((buffer (kargu-chat-output-buffer)))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (delete-region (point-min) (point-max))
@@ -580,21 +651,25 @@ The chat log itself is kept as a record."
 
 (defun kargu-chat-stop ()
   "Stop the agent run in progress.
+Also cancel this chat's debugger readiness wait before a run starts.
 A running banner left behind by a failed start is cleared too, so
 the editable prompt comes back."
   (interactive)
-  (if (kargu-loop-running-p)
-      (progn
-        (kargu-loop-stop "stopped by user")
-        (force-mode-line-update t)
-        (message "kargu: stopped agent run"))
-    (when (and (markerp kargu-chat--output-marker)
-               (null kargu-chat--prompt-marker))
-      (kargu-chat--ensure-idle-prompt))
-    (message "kargu: no run in progress")))
+  (kargu-mode-cancel)
+  (let ((cancelled (and (fboundp 'kargu-dape-cancel-session-wait)
+                        (kargu-dape-cancel-session-wait))))
+    (if (kargu-loop-running-p)
+        (progn
+          (kargu-loop-stop "stopped by user")
+          (force-mode-line-update t)
+          (message "kargu: stopped agent run"))
+      (when (and (markerp kargu-chat--output-marker)
+                 (null kargu-chat--prompt-marker))
+        (kargu-chat--ensure-idle-prompt))
+      (message (if cancelled "kargu: debugger wait cancelled" "kargu: no run in progress")))))
 
 (kargu-log 'info "chat module loaded")
 
 (provide 'kargu/chat)
 
-;;; kargu/chat.el ends here
+;;; chat.el ends here

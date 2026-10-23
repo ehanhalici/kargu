@@ -1,4 +1,4 @@
-;;; kargu/api/response.el --- Chat-completions response accessors -*- lexical-binding: t; -*-
+;;; response.el --- Chat-completions response accessors -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -6,14 +6,18 @@
 
 ;;; Commentary:
 
-;; Read text, tool_calls, finish_reason, overflow from a decoded response.  Also stores the assistant turn in history.
-;; Requires: `kargu/core', `kargu/json', `kargu/history'.
+;; Read text, tool_calls, finish_reason, overflow from a decoded response.
+;; Also stores the assistant turn in history.  Supports both canonical
+;; `kargu-result-err' structures and wire response alists (ARCH-16).
+;; Requires: `kargu/core', `kargu/json', `kargu/history', `kargu/contract/result'.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'rx)
 (require 'kargu/core)
+(require 'kargu/contract/result)
 (require 'kargu/json)
 (require 'kargu/history)
 (require 'kargu/api/tools)
@@ -45,8 +49,7 @@ A legacy OpenAI `function_call' object is wrapped as one call."
     (or (and message (kargu-aget message "tool_calls"))
         (let ((legacy (and message (kargu-aget message "function_call"))))
           (when (and legacy (kargu--object-p legacy))
-            `((("id" . "call_legacy")
-               ("type" . "function")
+            `((("type" . "function")
                ("function" . ,legacy))))))))
 
 (defun kargu-response-finish-reason (response)
@@ -56,17 +59,22 @@ A legacy OpenAI `function_call' object is wrapped as one call."
 
 (defun kargu-response-error-message (response)
   "Return the error message inside RESPONSE, or nil.
-RESPONSE may be a decoded OpenRouter error body or one of the
-synthetic error alists produced by this module.  Nested
-`error.message' and `error.metadata' fields are flattened."
-  (when-let* ((err (kargu-aget response "error")))
-    (cond
-     ((stringp err) err)
-     ((kargu--object-p err)
-      (or (kargu--provider-error-text `(("error" . ,err)))
-          (kargu-aget err "message")
-          (format "%S" err)))
-     (t (format "%S" err)))))
+RESPONSE may be a decoded OpenRouter error body, a `kargu-result-err'
+struct, or one of the synthetic error alists produced by this module.
+Nested `error.message' and `error.metadata' fields are flattened."
+  (cond
+   ((kargu-err-p response)
+    (kargu-result-err-message response))
+   (t
+    (when-let* ((err (kargu-aget response "error")))
+      (cond
+       ((memq err '(:json-null :json-false)) nil)
+       ((stringp err) err)
+       ((kargu--object-p err)
+        (or (kargu--provider-error-text `(("error" . ,err)))
+            (kargu-aget err "message")
+            (format "%S" err)))
+       (t (format "%S" err)))))))
 
 (defun kargu-response-answer-text (response)
   "Assistant `content' of RESPONSE, ignoring reasoning fields."
@@ -78,7 +86,7 @@ synthetic error alists produced by this module.  Nested
     (kargu--reasoning-text msg)))
 
 (defun kargu--assistant-has-tool-calls-p (msg)
-  "Non-nil when MSG carries a non-empty tool_calls array."
+  "Check MSG for nonempty structured tool invocations."
   (let ((calls (and msg (kargu-aget msg "tool_calls"))))
     (cond
      ((null calls) nil)
@@ -87,28 +95,37 @@ synthetic error alists produced by this module.  Nested
      ((listp calls) (not (null calls)))
      (t nil))))
 
+(defconst kargu-api--context-overflow-pattern
+  (rx (or "context_length" "context length" "maximum context"
+          "context window" "prompt is too long" "input is too long"
+          (seq "exceed" (opt "s") " the context")))
+  "Explicit context-length errors, excluding token-rate and output limits.")
+
 (defun kargu--overflow-message-p (msg)
-  "Non-nil when MSG looks like a context-length / overflow error."
+  "Return non-nil if MSG indicates context-window overflow."
   (and (stringp msg)
-       (let ((s (downcase msg)))
-         (or (string-match-p "context.length" s)
-             (string-match-p "context_length" s)
-             (string-match-p "maximum context" s)
-             (string-match-p "prompt is too long" s)
-             (string-match-p "too many tokens" s)
-             (string-match-p "max.*tokens.*exceed" s)
-             (string-match-p "exceeds? the context" s)
-             (string-match-p "token limit" s)))))
+       (save-match-data
+         (string-match-p kargu-api--context-overflow-pattern (downcase msg)))))
 
 (defun kargu-response-overflow-p (response)
   "Non-nil when RESPONSE is a context-window overflow error."
-  (or (kargu-aget response "overflow")
-      (kargu--overflow-message-p (kargu-response-error-message response))))
+  (cond
+   ((kargu-err-p response)
+    (or (eq (kargu-result-err-code response) :context-overflow)
+        (plist-get (kargu-result-err-data response) :overflow)
+        (kargu--overflow-message-p (kargu-result-err-message response))))
+   (t
+    (or (kargu-aget response "overflow")
+        (kargu--overflow-message-p (kargu-response-error-message response))))))
 
-(defun kargu--api-error-alist (msg)
-  "Build a callback error alist from MSG, marking overflow when detected."
-  (let ((err `(("error" . (("message" . ,msg))))))
-    (when (kargu--overflow-message-p msg)
+(defun kargu--api-error-alist (msg &optional code data)
+  "Build a callback error alist from MSG, marking overflow when detected.
+CODE and DATA are optional canonical error properties (ARCH-16)."
+  (let ((err `(("error" . (("message" . ,msg)
+                           ,@(when code `(("code" . ,code)))
+                           ,@(when data `(("data" . ,data))))))))
+    (when (or (eq code :context-overflow)
+              (kargu--overflow-message-p msg))
       (setq err (append err '(("overflow" . t)))))
     err))
 
@@ -149,7 +166,7 @@ synthetic error alists produced by this module.  Nested
                         (mapconcat #'identity parts "\n\n")))))
 
 (defun kargu--history-sanitize-tool-calls (msg)
-  "Rewrite each tool call's `arguments' to a valid JSON object string."
+  "Normalize each tool call in MSG to a valid JSON argument object."
   (let ((calls (and msg (kargu-aget msg "tool_calls"))))
     (dolist (call (cond
                    ((vectorp calls) (append calls nil))
@@ -192,8 +209,8 @@ Returns the updated message alist."
         (cl-remove-if (lambda (c) (equal (car c) "reasoning_content")) cleaned))
        (t cleaned)))))
 
-(defun kargu--history-append-assistant (response)
-  "Append RESPONSE's assistant message to the history; return it.
+(defun kargu--history-append-assistant (response &optional history)
+  "Append RESPONSE's assistant message to HISTORY or current owner; return it.
 The message is deep-copied so later history repairs can never
 corrupt the payload.  Gemini `model' roles are rewritten to
 `assistant'.  `content' is normalized to a string so the next
@@ -219,19 +236,18 @@ so a fake empty assistant cannot poison the next POST."
        (t
         (unless content
           (kargu-log 'debug "assistant content empty (type=%s, tools=%s)"
-                           (type-of (kargu-aget message "content"))
-                           (and calls-p t)))
-        (setq kargu--message-history
-              (append kargu--message-history (list msg)))
+                     (type-of (kargu-aget message "content"))
+                     (and calls-p t)))
+        (setq msg (kargu-history-append msg history))
         (kargu--log-assistant-wire response)
         (kargu-log 'response "assistant turn stored: %d chars text, %d chars reasoning, %d tool call(s)"
-                         (length (or content ""))
-                         (length (or reason ""))
-                         (length (or (kargu-aget msg "tool_calls") ())))
+                   (length (or content ""))
+                   (length (or reason ""))
+                   (length (or (kargu-aget msg "tool_calls") ())))
         msg)))))
 
 (defalias 'kargu-api-store-assistant-turn #'kargu--history-append-assistant)
 
 (provide 'kargu/api/response)
 
-;;; kargu/api/response.el ends here
+;;; response.el ends here

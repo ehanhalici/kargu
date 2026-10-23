@@ -1,4 +1,4 @@
-;;; kargu/providers/registry.el --- LLM Provider Registry -*- lexical-binding: t; -*-
+;;; registry.el --- LLM Provider Registry -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -22,8 +22,10 @@
 (require 'kargu/core)
 (require 'auth-source)
 
-(declare-function kargu--url-host "kargu/config")
-(declare-function kargu--config-providers "kargu/config")
+(declare-function kargu--url-host "kargu/config/key")
+(declare-function kargu--config-providers "kargu/config/schema")
+(declare-function kargu-config-api-key "kargu/config/key" (&optional provider-name))
+(declare-function kargu-config-api-key-fast "kargu/config/key" (&optional provider-name))
 
 (defvar kargu-providers--table (make-hash-table :test 'equal)
   "Hash table mapping provider ID strings to provider metadata plists.")
@@ -34,12 +36,17 @@ The provider catalog defines this.  A provider's `:models' plist
 replaces that format's model-field map when the value is a field
 spec, not a list of model name strings.")
 
+(defconst kargu-provider--default-request-policy
+  '(:max-output-key "max_tokens" :sampling-parameters ("temperature"))
+  "Compatibility defaults when a format declares no request policy.")
+
 (defun kargu-register-provider (&rest plist)
   "Register a provider in the global registry.
 PLIST must contain at least `:id'.  Other supported keys:
 `:name', `:api', `:env', `:models', `:models-api',
 `:usage-api', `:extra-headers', `:npm', `:format',
-`:prompt-caching', `:prompt-for', `:keyless', `:local'."
+`:prompt-caching', `:prompt-for', `:keyless', `:local', `:request'.
+The `:request' plist overrides format request policy, preserving explicit nil."
   (let* ((id (plist-get plist :id))
          (id-str (cond ((stringp id) (downcase (string-trim id)))
                        ((symbolp id) (downcase (symbol-name id)))
@@ -106,6 +113,18 @@ A field-spec `:models' on that provider replaces the format's model map."
       (plist-put (copy-sequence base) :models override))
      (base)
      (override (list :models override)))))
+
+(defun kargu-provider-request-policy (id)
+  "Return merged request policy for provider ID, preserving explicit nil.
+`:max-output-key' names one token-limit field.  `:sampling-parameters' lists
+sampling fields allowed when the model catalog supplies no parameter list."
+  (let* ((format (kargu-provider-format-record (kargu-provider-format id)))
+         (policy (copy-sequence kargu-provider--default-request-policy)))
+    (dolist (spec (list (plist-get format :request)
+                        (plist-get (kargu-provider-get id) :request)))
+      (cl-loop for (key value) on spec by #'cddr
+               do (setq policy (plist-put policy key value))))
+    policy))
 
 (defun kargu-provider--effort-specs (models)
   "Effort path specs inside a `:models' plist MODELS, or nil.
@@ -174,17 +193,23 @@ A missing format record streams.  An explicit `:stream' nil does not."
   (let ((info (kargu-provider-get id)))
     (and info (kargu-nonempty (plist-get info :api)))))
 
+(defun kargu-provider-public-models-p (id url)
+  "Return non-nil if provider ID declares URL an unauthenticated catalog.
+Custom API overrides do not inherit public access from the default endpoint."
+  (and (eq (plist-get (kargu-provider-get id) :models-auth) 'none)
+       (equal url (kargu-provider-models-api id))))
+
 (defun kargu-provider-models-api (id)
   "Return dedicated models list URL for provider ID, or nil to use default."
   (let ((info (kargu-provider-get id)))
     (and info (kargu-nonempty (or (plist-get info :models-api)
-                                   (plist-get info :models-endpoint))))))
+                                  (plist-get info :models-endpoint))))))
 
 (defun kargu-provider-usage-api (id)
   "Return usage / quota endpoint URL for provider ID, or nil."
   (let ((info (kargu-provider-get id)))
     (and info (kargu-nonempty (or (plist-get info :usage-api)
-                                   (plist-get info :account-api))))))
+                                  (plist-get info :account-api))))))
 
 (defun kargu-provider--literal (value)
   "Return VALUE, unwrapping a quoted catalog form."
@@ -256,35 +281,11 @@ Checks provider metadata in registry and TOML config."
               (not (string-suffix-p "..." trimmed))))))
 
 (defun kargu-provider-authenticated-p (id)
-  "Non-nil if provider ID has an API key available or is a keyless runner.
-Checks TOML configuration, environment variables, and auth-source."
-  (let* ((id-str (if (symbolp id) (symbol-name id) (format "%s" id)))
-         (id-lower (downcase (string-trim id-str))))
-    (cond
-     ;; Global override
-     ((and (boundp 'kargu-api-key) (kargu-provider-valid-key-p kargu-api-key)) t)
-     ;; Keyless runner (catalog or config)
-     ((kargu-provider-keyless-p id-lower) t)
-     ;; Check TOML configured providers table
-     ((let* ((providers (and (fboundp 'kargu--config-providers)
-                             (kargu--config-providers)))
-             (entry (assoc id-lower providers)))
-        (and entry
-             (or (plist-get (cdr entry) :keyless)
-                 (kargu-provider-valid-key-p (plist-get (cdr entry) :apikey))))))
-     ;; Check provider-specific environment variables
-     ((let ((envs (kargu-provider-env id-lower)))
-        (cl-some (lambda (var)
-                   (let ((val (getenv var)))
-                     (and (kargu-provider-valid-key-p val) val)))
-                 envs)))
-     ;; Check auth-source for provider host
-     ((let* ((api (kargu-provider-api id-lower))
-             (host (and api (fboundp 'kargu--url-host) (kargu--url-host api))))
-        (when host
-          (ignore-errors
-            (car (auth-source-search :host host :max 1))))))
-     (t nil))))
+  "Non-nil if provider ID has a nonblocking API key available or is keyless.
+Discovery never invokes secret functions or interactive pinentry."
+  (require 'kargu/config)
+  (or (kargu-provider-keyless-p id)
+      (kargu-provider-valid-key-p (kargu-config-api-key-fast id))))
 
 (defun kargu-connected-providers ()
   "Return list of all registered provider IDs that are authenticated or keyless."

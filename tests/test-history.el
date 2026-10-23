@@ -3,84 +3,157 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Ensure the package root is on `load-path` during byte/native compilation.
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'kargu/history)
+
+(ert-deftest kargu-history-ensure-user-accepts-empty-history-test ()
+  "A user nudge can be created before the system head is installed."
+  (let ((history (kargu--history-ensure-user nil)))
+    (should (= (length history) 1))
+    (should (equal (kargu-aget (car history) "role") "user"))
+    (should (equal (kargu-aget (car history) "content") "Continue."))))
+(ert-deftest kargu-history-firewall-always-retains-a-user-turn-test ()
+  "Empty, system-only and stripped histories still contain a user prompt."
+  (dolist (history '(nil
+                     ((("role" . "system") ("content" . "sys")))
+                     ((("role" . "assistant") ("content" . "answer")))
+                     ((("role" . "tool") ("tool_call_id" . "orphan") ("content" . "x")))))
+    (let ((kargu-session--context
+           (kargu-test-session-with-history
+            :messages history)) (kargu-trailing-assistant-fix 'strip))
+      (kargu--validate-history)
+      (should (equal (kargu-aget (car (kargu-history-messages)) "role") "system"))
+      (should (seq-some (lambda (message)
+                          (and (equal (kargu-aget message "role") "user")
+                               (kargu-nonempty (kargu-aget message "content"))))
+                        (kargu-history-messages))))))
+
+(ert-deftest kargu-history-empty-user-content-becomes-a-minimal-nudge-test ()
+  "Corrupt empty user content cannot survive the protocol wall."
+  (dolist (content '(nil "" " \n" :json-null [] [(("type" . "text") ("text" . ""))]))
+    (let ((kargu-session--context
+           (kargu-test-session-with-history
+            :messages (list (list '("role" . "user") (cons "content" content))))))
+      (kargu--validate-history)
+      (should (= (length (kargu-history-messages)) 2))
+      (should (equal (kargu-aget (cadr (kargu-history-messages)) "content") "Continue.")))))
+
+(ert-deftest kargu-history-drops-empty-assistant-turns-before-merging-test ()
+  "Empty assistant text does not reach a payload or prevent user merging."
+  (dolist (empty '(nil "" "  \n\t" :json-null []
+                   [(("type" . "text") ("text" . ""))]
+                   [(("type" . "text") ("text" . "  \n"))]))
+    (let ((kargu-session--context
+           (kargu-test-session-with-history
+            :messages (list '(("role" . "user") ("content" . "first"))
+			    (list '("role" . "assistant") (cons "content" empty))
+			    '(("role" . "user") ("content" . "second"))))))
+      (kargu--validate-history)
+      (should (= (length (kargu-history-messages)) 2))
+      (should (equal (kargu-aget (cadr (kargu-history-messages)) "content")
+                     "first\n\nsecond")))))
+
+(ert-deftest kargu-history-merging-retains-multimodal-blocks-test ()
+  "Mixed string/block turns preserve attachment contents and ordering."
+  (let ((image '(("type" . "image_url") ("image_url" . (("url" . "data:image/png;base64,AAAA"))))))
+    (dolist (role '("user" "assistant"))
+      (dolist (blocks-first '(nil t))
+        (let* ((blocks (vector image))
+               (original (list (list (cons "role" role) (cons "content" (if blocks-first blocks "text")))
+                               (list (cons "role" role) (cons "content" (if blocks-first "text" blocks)))))
+               (snapshot (copy-tree original t))
+               (kargu-session--context
+		(kargu-test-session-with-history
+		 :messages original)))
+          (kargu--validate-history t)
+          (let* ((message (car (last (kargu-history-messages))))
+                 (content (kargu-aget message "content")))
+            (should (vectorp content))
+            (should (equal (aref content (if blocks-first 0 (1- (length content)))) image))
+            (should (seq-some (lambda (block) (equal (kargu-aget block "text") "text")) content)))
+          (should (equal original snapshot)))))))
+
+(ert-deftest kargu-history-multimodal-assistant-before-calls-is-retained-test ()
+  "Folding a multimodal assistant into a tool-call turn never erases blocks."
+  (let* ((block '(("type" . "text") ("text" . "prior explanation")))
+         (kargu-session--context
+          (kargu-test-session-with-history
+           :messages (list '(("role" . "user") ("content" . "go"))
+			   (list '("role" . "assistant") (cons "content" (vector block)))
+			   '(("role" . "assistant") ("tool_calls" . [(("id" . "c1") ("function" . (("name" . "read_file") ("arguments" . "{}"))))]))))))
+    (kargu--validate-history)
+    (should (equal (kargu-aget (nth 2 (kargu-history-messages)) "content") (vector block)))
+    (should (equal (kargu-aget (car (last (kargu-history-messages))) "role") "tool"))))
 
 (ert-deftest kargu-history-vector-tool-calls-test ()
   "Ensure kargu--validate-history handles vector tool_calls without crashing (Bug 1 regression)."
-  (let ((kargu--message-history
-         `((("role" . "system") ("content" . "sys"))
-           (("role" . "user") ("content" . "hi"))
-           (("role" . "assistant")
-            ("content" . "calling tool")
-            ("tool_calls" . [(("id" . "call_vec1")
-                              ("type" . "function")
-                              ("function" . (("name" . "bash") ("arguments" . "ls"))))]))
-           (("role" . "tool")
-            ("tool_call_id" . "call_vec1")
-            ("name" . "bash")
-            ("content" . "file1.txt\nfile2.txt")))))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages `((("role" . "system") ("content" . "sys"))
+		      (("role" . "user") ("content" . "hi"))
+		      (("role" . "assistant")
+		       ("content" . "calling tool")
+		       ("tool_calls" . [(("id" . "call_vec1")
+					 ("type" . "function")
+					 ("function" . (("name" . "bash") ("arguments" . "ls"))))]))
+		      (("role" . "tool")
+		       ("tool_call_id" . "call_vec1")
+		       ("name" . "bash")
+		       ("content" . "file1.txt\nfile2.txt"))))))
     ;; Must not signal wrong-type-argument listp
     (should (listp (kargu--validate-history)))
-    (should (= (length kargu--message-history) 4))))
+    (should (= (length (kargu-history-messages)) 4))))
 
 (ert-deftest kargu-history-empty-vector-tool-calls-test ()
   "Ensure empty vector tool_calls [] does not trigger false tool branch or crash."
-  (let ((kargu--message-history
-         `((("role" . "system") ("content" . "sys"))
-           (("role" . "user") ("content" . "hello"))
-           (("role" . "assistant")
-            ("content" . "done")
-            ("tool_calls" . [])))))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages `((("role" . "system") ("content" . "sys"))
+		      (("role" . "user") ("content" . "hello"))
+		      (("role" . "assistant")
+		       ("content" . "done")
+		       ("tool_calls" . []))))))
     ;; If trailing assistant is stripped (default)
     (let ((kargu-trailing-assistant-fix 'strip))
       (kargu--validate-history)
-      (should (= (length kargu--message-history) 2)))))
+      (should (= (length (kargu-history-messages)) 2)))))
 
 (ert-deftest kargu-history-completed-tail-alias-test ()
   "Ensure kargu--history-completed-assistant-tail-p alias is defined and functional."
   (should (fboundp 'kargu--history-completed-assistant-tail-p))
-  (let ((kargu--message-history
-         `((("role" . "system") ("content" . "sys"))
-           (("role" . "user") ("content" . "hello"))
-           (("role" . "assistant") ("content" . "finished")))))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages `((("role" . "system") ("content" . "sys"))
+		      (("role" . "user") ("content" . "hello"))
+		      (("role" . "assistant") ("content" . "finished"))))))
     (should (kargu--history-completed-assistant-tail-p))))
 
 (ert-deftest kargu-history-orphan-tool-dropping-test ()
   "Ensure orphan tool results with no prior tool call are dropped."
-  (let ((kargu--message-history
-         `((("role" . "system") ("content" . "sys"))
-           (("role" . "user") ("content" . "hello"))
-           (("role" . "tool")
-            ("tool_call_id" . "orphan_call")
-            ("name" . "bash")
-            ("content" . "orphan output")))))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages `((("role" . "system") ("content" . "sys"))
+		      (("role" . "user") ("content" . "hello"))
+		      (("role" . "tool")
+		       ("tool_call_id" . "orphan_call")
+		       ("name" . "bash")
+		       ("content" . "orphan output"))))))
     (kargu--validate-history)
     ;; Orphan tool message should be dropped
-    (should (= (length kargu--message-history) 2))))
+    (should (= (length (kargu-history-messages)) 2))))
 
 (ert-deftest kargu-history-consecutive-user-merge-test ()
   "Ensure consecutive user messages are merged."
-  (let ((kargu--message-history
-         `((("role" . "system") ("content" . "sys"))
-           (("role" . "user") ("content" . "part 1"))
-           (("role" . "user") ("content" . "part 2")))))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages `((("role" . "system") ("content" . "sys"))
+		      (("role" . "user") ("content" . "part 1"))
+		      (("role" . "user") ("content" . "part 2"))))))
     (kargu--validate-history)
-    (should (= (length kargu--message-history) 2))
+    (should (= (length (kargu-history-messages)) 2))
     (should (string-search "part 1\n\npart 2"
-                           (alist-get "content" (nth 1 kargu--message-history) nil nil #'equal)))))
+                           (alist-get "content" (nth 1 (kargu-history-messages)) nil nil #'equal)))))
 
 (ert-deftest kargu-history-flush-pending-deterministic-test ()
   "Ensure kargu--flush-pending produces synthetic tool results in deterministic call order."
@@ -108,6 +181,7 @@
   "Ensure existing system prompt is preserved to maintain exact KV cache prefix."
   (let* ((orig-msg '(("role" . "system") ("content" . "custom session system prompt from yesterday")))
          (history (list orig-msg '(("role" . "user") ("content" . "hello"))))
+         (_key (setf (kargu-history-system-key) (kargu-prompt-system-key)))
          (res (kargu--history-refresh-system-head history)))
     ;; The head system prompt should retain its exact saved content
     (should (equal (alist-get "content" (car res) nil nil #'equal)
@@ -123,18 +197,21 @@
 
 (ert-deftest kargu-history-keep-assistant-tail-test ()
   "A finished turn may keep its assistant answer."
-  (let ((kargu--message-history
-         `((("role" . "system") ("content" . "sys"))
-           (("role" . "user") ("content" . "hello"))
-           (("role" . "assistant") ("content" . "done"))))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages `((("role" . "system") ("content" . "sys"))
+		      (("role" . "user") ("content" . "hello"))
+		      (("role" . "assistant") ("content" . "done")))))
         (kargu-trailing-assistant-fix 'strip))
     (kargu--validate-history 'keep-assistant-tail)
-    (should (= (length kargu--message-history) 3))
+    (should (= (length (kargu-history-messages)) 3))
     (should (equal (kargu--history-last-role) "assistant"))))
 
 (ert-deftest kargu-history-tool-continuation-test ()
   "Test that tool continuation after assistant tool call preserves user message."
-  (let ((kargu--message-history nil)
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages nil :provider "ollama" :model "test-model"))
         (kargu--busy nil))
     (unwind-protect
         (progn
@@ -147,12 +224,12 @@
                                          ("type" . "function")
                                          ("function" . (("name" . "lsp_project_skeleton")
                                                         ("arguments" . "{}"))))]))))
-            (setq kargu--message-history (append kargu--message-history (list msg))))
+            (setf (kargu-history-messages) (append (kargu-history-messages) (list msg))))
           ;; 3. Tool result added
           (kargu--history-add-tool-result "call_123" "lsp_project_skeleton" "# Project skeleton (702 chars)")
           ;; 4. Verify history invariants: has user, has assistant tool call, has tool response
-          (should (cl-some (lambda (m) (equal (kargu-aget m "role") "user")) kargu--message-history))
-          (should (cl-some (lambda (m) (equal (kargu-aget m "role") "tool")) kargu--message-history))
+          (should (cl-some (lambda (m) (equal (kargu-aget m "role") "user")) (kargu-history-messages)))
+          (should (cl-some (lambda (m) (equal (kargu-aget m "role") "tool")) (kargu-history-messages)))
           ;; 5. Next continuation turn (prompt nil) must pass history validation without error
           (let ((posted nil) (err-msg nil))
             (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda () "mock-key"))

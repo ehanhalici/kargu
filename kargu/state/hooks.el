@@ -1,4 +1,4 @@
-;;; kargu/state/hooks.el --- State change hooks and subscriptions -*- lexical-binding: t; -*-
+;;; hooks.el --- State change hooks and subscriptions -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -10,6 +10,8 @@
 ;; Allows UI components to update reactively without hardcoded circular dependencies.
 
 ;;; Code:
+
+(require 'kargu/core/observers)
 
 (defvar kargu-state-change-hook nil
   "Hook run whenever any state key changes.
@@ -32,17 +34,17 @@ Functions are called with one argument: (NEW-MODEL).")
 Functions are called with two arguments: (NEW-STATUS DETAIL).")
 
 (defun kargu-state-notify (key value &optional detail)
-  "Notify all registered listeners that KEY changed to VALUE."
-  (run-hook-with-args 'kargu-state-change-hook key value)
+  "Notify every listener that KEY changed to VALUE, with optional DETAIL."
+  (kargu-run-observers 'kargu-state-change-hook key value)
   (pcase key
     (:mode
-     (run-hook-with-args 'kargu-state-mode-hook value))
+     (kargu-run-observers 'kargu-state-mode-hook value))
     (:provider
-     (run-hook-with-args 'kargu-state-provider-hook value))
+     (kargu-run-observers 'kargu-state-provider-hook value))
     (:model
-     (run-hook-with-args 'kargu-state-model-hook value))
+     (kargu-run-observers 'kargu-state-model-hook value))
     (:status
-     (run-hook-with-args 'kargu-state-status-hook value detail))))
+     (kargu-run-observers 'kargu-state-status-hook value detail))))
 
 (defun kargu-state-subscribe (event fn)
   "Subscribe function FN to state EVENT.
@@ -67,4 +69,4 @@ EVENT can be `:all', `:mode', `:provider', `:model', or `:status'."
 
 (provide 'kargu/state/hooks)
 
-;;; kargu/state/hooks.el ends here
+;;; hooks.el ends here

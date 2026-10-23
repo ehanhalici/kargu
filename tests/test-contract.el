@@ -3,18 +3,6 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Ensure the package root is on `load-path` during byte/native compilation.
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'ert)
 (require 'kargu/contract)
 (require 'kargu/contract/result)
@@ -96,6 +84,37 @@
   (should-not (kargu-contract-tool-schema-p '(("type" . "string"))))
   (should-not (kargu-contract-tool-schema-p '(("type" . "object") ("properties" . "not-alist"))))
   (should-not (kargu-contract-tool-schema-p "not-a-schema")))
+
+(ert-deftest kargu-core-to-int-rejects-junk-and-nonfinite-numbers-test ()
+  "Only complete integer strings and finite numeric values are converted."
+  (dolist (value '("12abc" "1.5" "" "  " "2 3" :json-null))
+    (should (eq (kargu-to-int value :fallback) :fallback)))
+  (dolist (value (list 0.0e+NaN 1.0e+INF -1.0e+INF))
+    (should (eq (kargu-to-int value :fallback) :fallback)))
+  (should (= (kargu-to-int " -12 ") -12))
+  (should (= (kargu-to-int "+12") 12))
+  (should (= (kargu-to-int 1.6) 2))
+  (should (= (kargu-to-int 42) 42)))
+
+(ert-deftest kargu-log-retention-caps-lines-and-wire-dumps-test ()
+  "Both logging paths retain only a bounded newest suffix."
+  (let ((kargu--log-buffer " *kargu-test-bounded-log*")
+        (kargu-log-buffer-max-chars 128) (kargu-log-wire t))
+    (unwind-protect
+        (progn
+          (dotimes (_ 30) (kargu-log 'info "%s" (make-string 100 ?x)))
+          (with-current-buffer (get-buffer kargu--log-buffer)
+            (should (<= (buffer-size) 128)))
+          (kargu--log-block "large" (make-string 2000 ?w))
+          (with-current-buffer (get-buffer kargu--log-buffer)
+            (should (<= (buffer-size) 128))
+            (should (string-suffix-p "---- end large ----\n" (buffer-string))))
+          (let ((kargu-log-buffer-max-chars 0))
+            (kargu-log 'info "discard")
+            (with-current-buffer (get-buffer kargu--log-buffer)
+              (should (zerop (buffer-size))))))
+      (when-let* ((buffer (get-buffer kargu--log-buffer)))
+        (kill-buffer buffer)))))
 
 (provide 'tests/test-contract)
 ;;; test-contract.el ends here

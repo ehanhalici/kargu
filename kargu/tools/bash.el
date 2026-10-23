@@ -1,4 +1,4 @@
-;;; kargu/tools/bash.el --- Shell command tool -*- lexical-binding: t; -*-
+;;; bash.el --- Shell command tool -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -8,7 +8,7 @@
 
 ;; `bash' tool: run a shell command with a timeout.  Advertised
 ;; only in agent mode (mutating-tools list).  Requires: `kargu/core',
-;; `kargu/api'.
+;; `kargu/api/tools'.
 
 ;;; Code:
 
@@ -16,8 +16,9 @@
 (require 'subr-x)
 (require 'kargu/core)
 (require 'kargu/contract)
-(require 'kargu/api)
+(require 'kargu/api/tools)
 (require 'kargu/permission)
+(require 'kargu/permission/execute)
 (require 'kargu/tools/process)
 
 (defgroup kargu-bash nil
@@ -25,9 +26,9 @@
   :group 'kargu
   :prefix "kargu-bash-")
 
-(defcustom kargu-bash-timeout 30
-  "Seconds after which a bash tool command is killed."
-  :type 'natnum
+(defcustom kargu-bash-timeout nil
+  "Optional positive Bash deadline in seconds; nil allows unlimited duration."
+  :type '(choice (const :tag "Unlimited duration" nil) number)
   :group 'kargu-bash)
 
 (defun kargu-bash--cwd (path)
@@ -41,234 +42,29 @@
                    (expand-file-name raw root))))
         (kargu-permission-assert-within-project abs root "cwd")))))
 
-(defvar kargu-bash--processes (make-hash-table :test 'equal)
-  "Active background processes keyed by ID string (e.g. `p1\').")
-
-(defvar kargu-bash--counter 0
-  "Monotonic counter for background process IDs.")
-
-(defun kargu-bash--clean-buffer-processes (buf)
-  "Delete all processes associated with BUF and prevent exit queries."
-  (when (and buf (buffer-live-p buf))
-    (dolist (p (process-list))
-      (when (eq (process-buffer p) buf)
-        (set-process-query-on-exit-flag p nil)
-        (set-process-buffer p nil)
-        (ignore-errors (delete-process p))))))
-
-(defun kargu-bash--format-result (code dir out)
-  "Format process execution result string from CODE, DIR, and OUT."
-  (format "exit %s\ncwd: %s\n%s"
-          code dir
-          (if (string-empty-p out) "(no output)" out)))
-
-(defun kargu-bash--log-finished (command code start-time)
-  "Log finish message for COMMAND with exit CODE and elapsed START-TIME."
-  (message "kargu: [bash] '%s' finished (exit %s, %.1fs)"
-           (truncate-string-to-width command 30)
-           code (- (float-time) start-time)))
-
-(defun kargu-bash--manage-list ()
-  "List active background processes."
-  (let (lines)
-    (maphash
-     (lambda (id plist)
-       (let* ((proc (plist-get plist :proc))
-              (alive (and proc (process-live-p proc)))
-              (pid (plist-get plist :pid))
-              (orig-cmd (plist-get plist :command)))
-         (push (format "  [%s] PID %s (%s) - %s"
-                       id (or pid "?") (if alive "RUNNING" "EXITED")
-                       (truncate-string-to-width orig-cmd 60))
-               lines)))
-     kargu-bash--processes)
-    (if lines
-        (concat "Background processes:\n" (string-join (nreverse lines) "\n"))
-      "No active background processes.")))
-
-(defun kargu-bash--manage-kill (target-id)
-  "Terminate background process matching TARGET-ID."
-  (let ((plist (gethash target-id kargu-bash--processes)))
-    (if (null plist)
-        (format "ERROR: no background process found with ID '%s'" target-id)
-      (let ((buf (plist-get plist :buf)))
-        (kargu-bash--clean-buffer-processes buf)
-        (when (and buf (buffer-live-p buf))
-          (ignore-errors (kill-buffer buf)))
-        (remhash target-id kargu-bash--processes)
-        (format "Background process [%s] (PID %s) terminated."
-                target-id (plist-get plist :pid))))))
-
-(defun kargu-bash--manage-status (target-id)
-  "Report status and recent output for background process matching TARGET-ID."
-  (let ((plist (gethash target-id kargu-bash--processes)))
-    (if (null plist)
-        (format "ERROR: no background process found with ID '%s'" target-id)
-      (let* ((proc (plist-get plist :proc))
-             (alive (and proc (process-live-p proc)))
-             (buf (plist-get plist :buf))
-             (out (if (and buf (buffer-live-p buf))
-                      (with-current-buffer buf
-                        (let* ((lines (split-string (buffer-string) "\n"))
-                               (tail (last lines 25)))
-                          (string-join tail "\n")))
-                    "(buffer closed)")))
-        (format "Background process [%s] (PID %s, %s):\nCommand: %s\nRecent output:\n%s"
-                target-id (plist-get plist :pid)
-                (if alive "RUNNING" (format "EXITED code %s" (process-exit-status proc)))
-                (plist-get plist :command)
-                (if (string-empty-p (string-trim out)) "(no output yet)" out))))))
+(require 'kargu/tools/bash/jobs)
 
 (defun kargu-bash--manage-process (command)
-  "Handle background process management commands (list, status, kill).
-Return a result string if COMMAND matches a management command, or nil."
-  (let ((cmd (string-trim command)))
-    (cond
-     ((equal cmd "list")
-      (kargu-bash--manage-list))
-     ((string-match "\\`kill \\(p[0-9]+\\)\\'" cmd)
-      (kargu-bash--manage-kill (match-string 1 cmd)))
-     ((string-match "\\`status \\(p[0-9]+\\)\\'" cmd)
-      (kargu-bash--manage-status (match-string 1 cmd)))
-     (t nil))))
+  "Handle shell job management COMMAND without starting a new process."
+  (kargu-bash-manage-job command))
 
 (defun kargu-bash--resolve-shell ()
-  "Find an executable shell binary."
-  (let ((s (or (getenv "SHELL")
-               (and (boundp 'shell-file-name) shell-file-name)
-               "/bin/sh")))
-    (if (and (stringp s) (executable-find s))
-        s
-      (or (executable-find "bash") (executable-find "sh") "/bin/sh"))))
-
-(defun kargu-bash--note-truncation (out state)
-  "OUT, plus a note when STATE says the byte cap was hit."
-  (if (plist-get state :truncated)
-      (concat out (format "\n[output truncated at %d bytes]\n" kargu-process-max-bytes))
-    out))
-
-(defun kargu-bash--spawn (name command dir shell buf state sentinel)
-  "Start SHELL -c COMMAND in DIR, capturing output into BUF.
-Output stops at the byte cap.  STATE records truncation.  SENTINEL is
-the process sentinel.  Return the process."
-  (let ((proc (let ((default-directory (file-name-as-directory dir)))
-                (make-process
-                 :name name
-                 :buffer buf
-                 :command (list shell "-c" command)
-                 :connection-type 'pipe
-                 :filter (kargu-process--filter buf kargu-process-max-bytes state)
-                 :sentinel sentinel))))
-    (set-process-query-on-exit-flag proc nil)
-    proc))
+  "Find Bash, falling back to POSIX sh without using the login shell."
+  (or (executable-find "bash")
+      (executable-find "sh")
+      (error "Bash tool requires an executable bash or sh")))
 
 (defun kargu-bash--run-background (command dir shell)
-  "Execute COMMAND in DIR asynchronously under SHELL and return status string."
-  (let* ((id (format "p%d" (cl-incf kargu-bash--counter)))
-         (buf (get-buffer-create (format "*kargu-proc-%s*" id)))
-         (state (list :truncated nil))
-         proc)
-    (with-current-buffer buf
-      (erase-buffer)
-      (setq-local buffer-offer-save nil))
-    (setq proc
-          (kargu-bash--spawn
-           (format "kargu-bg-%s" id) command dir shell buf state
-           (lambda (p _event)
-             (when (and (not (process-live-p p))
-                        (plist-get state :truncated)
-                        (buffer-live-p buf))
-               (with-current-buffer buf
-                 (goto-char (point-max))
-                 (unless (string-search "output truncated" (buffer-string))
-                   (insert (kargu-bash--note-truncation "" state))))))))
-    (puthash id
-             (list :id id
-                   :pid (process-id proc)
-                   :command command
-                   :proc proc
-                   :buf buf
-                   :start (float-time))
-             kargu-bash--processes)
-    (format "Process started in background: ID=[%s], PID=%d. Output directed to buffer '*kargu-proc-%s*'.\nManage with bash command='status %s' or command='kill %s'."
-            id (process-id proc) id id id)))
-
-(defvar kargu-bash--active-async-proc nil
-  "Process object of the currently running async bash tool command, or nil.")
-
-(defun kargu-bash-kill-active-async ()
-  "Kill active asynchronous bash process if one is currently running."
-  (when (and kargu-bash--active-async-proc
-             (process-live-p kargu-bash--active-async-proc))
-    (ignore-errors (kill-process kargu-bash--active-async-proc))
-    (setq kargu-bash--active-async-proc nil)))
-
-(defun kargu-bash--cleanup-async (buf timer timeout-timer)
-  "Cancel TIMERS and clean up BUF after async bash run."
-  (setq kargu-bash--active-async-proc nil)
-  (when timer (cancel-timer timer))
-  (when timeout-timer (cancel-timer timeout-timer))
-  (kargu-bash--clean-buffer-processes buf)
-  (when (buffer-live-p buf) (kill-buffer buf)))
+  "Start persistent COMMAND in DIR using SHELL and return its job ID."
+  (kargu-bash-start-job command dir shell :background t))
 
 (defun kargu-bash--run-async (command dir shell callback)
-  "Execute COMMAND asynchronously in DIR under SHELL.
-Calls CALLBACK with the formatted output string upon exit or timeout.
-Output past `kargu-process-max-bytes' kills the process and says so.
-Emacs UI remains completely responsive and interactive for the user."
-  (let* ((buf (generate-new-buffer " *kargu-bash*"))
-         (state (list :truncated nil))
-         (start (float-time))
-         (completed nil)
-         (timer nil)
-         (timeout-timer nil)
-         proc)
-    (setq proc
-          (kargu-bash--spawn
-           "kargu-bash" command dir shell buf state
-           (lambda (p _event)
-             (when (and (not completed) (not (process-live-p p)))
-               (setq completed t)
-               (let* ((code (process-exit-status p))
-                      (out (if (buffer-live-p buf)
-                               (with-current-buffer buf (buffer-string))
-                             ""))
-                      (res (kargu-bash--format-result
-                            code dir (kargu-bash--note-truncation out state))))
-                 (kargu-bash--log-finished command code start)
-                 (kargu-bash--cleanup-async buf timer timeout-timer)
-                 (funcall callback res))))))
-    (setq kargu-bash--active-async-proc proc)
-    ;; Timeout timer: kill process and return error when kargu-bash-timeout expires
-    (setq timeout-timer
-          (run-at-time
-           kargu-bash-timeout nil
-           (lambda ()
-             (unless completed
-               (setq completed t)
-               (when (process-live-p proc)
-                 (ignore-errors (kill-process proc)))
-               (let ((err-msg (format "ERROR: bash timed out after %ds: %s"
-                                      kargu-bash-timeout
-                                      (truncate-string-to-width command 80))))
-                 (message "kargu: [bash] '%s' timed out (%ds)"
-                          (truncate-string-to-width command 30)
-                          kargu-bash-timeout)
-                 (kargu-bash--cleanup-async buf timer timeout-timer)
-                 (funcall callback err-msg))))))
-    ;; Periodic status ticker in minibuffer so user sees elapsed time
-    (setq timer
-          (run-at-time
-           1.0 1.0
-           (lambda ()
-             (unless completed
-               (when (process-live-p proc)
-                 (let ((elapsed (- (float-time) start)))
-                   (message "kargu: running '%s' (%.1fs / %ds) [waiting in background]..."
-                            (truncate-string-to-width command 40)
-                            elapsed kargu-bash-timeout)))))))
-    (message "kargu: started '%s' asynchronously in background (timeout %ds)..."
-             (truncate-string-to-width command 40) kargu-bash-timeout)))
+  "Run COMMAND in DIR using SHELL, delivering output to CALLBACK."
+  (kargu-bash-start-job command dir shell :callback callback))
+
+(defun kargu-bash--manage-kill (id)
+  "Cancel and forget shell job ID."
+  (kargu-bash-manage-job (concat "kill " id)))
 
 (defun kargu-bash--rejection-text (command dir root)
   "Model-facing text for a COMMAND in DIR the user refused (ROOT is the project)."
@@ -280,26 +76,32 @@ Emacs UI remains completely responsive and interactive for the user."
           "  - Guidance: Do not repeatedly execute the identical command without user clarification. Consider an alternative approach that works strictly within '" root "' or ask the user for guidance."))
 
 (defun kargu-bash--start (command dir background callback)
-  "Start approved COMMAND in DIR; deliver the result to CALLBACK when non-nil."
+  "Start approved COMMAND in DIR and deliver output to CALLBACK.
+Return a persistent process identifier when BACKGROUND is non-nil."
   (let ((shell (kargu-bash--resolve-shell)))
     (cond
      (background
       (let ((res (kargu-bash--run-background command dir shell)))
         (if callback (funcall callback res) res)))
      (callback
-      (kargu-bash--run-async command dir shell callback))
+      (let ((process (kargu-bash--run-async command dir shell callback))
+            (task kargu-async--current-task))
+        (when (and task (processp process))
+          (kargu-async-add-cleanup task (lambda () (kargu-process-cancel process))))
+        process))
      (t
-      (error "bash commands never run synchronously: pass a CALLBACK")))))
+      (error "Bash commands never run synchronously: pass a CALLBACK")))))
 
 (defun kargu-bash--run-async-approved (command dir root background callback)
-  "Ask for approval of COMMAND, then start it; CALLBACK gets the result."
-  (kargu-permission-request-approval-async
-   command dir (kargu-permission-command-risks command)
-   (lambda (approved)
-     (if approved
-         (kargu-bash--start command dir background callback)
-       (funcall callback
-                (format "ERROR: %s" (kargu-bash--rejection-text command dir root)))))))
+  "Approve COMMAND in DIR within ROOT and deliver output to CALLBACK.
+Start a persistent process when BACKGROUND is non-nil."
+  (let ((command (copy-sequence command)) (dir (copy-sequence dir))
+        (root (copy-sequence root)))
+    (kargu-permission-execute
+     :command command :directory dir :risks (kargu-permission-command-risks command)
+     :valid-p (lambda () (kargu-permission-validate-command command root dir) t)
+     :start (lambda (done) (kargu-bash--start command dir background done))
+     :callback callback)))
 
 (defun kargu-bash-run (command &optional cwd background callback)
   "Run COMMAND in CWD, capturing stdout and stderr.
@@ -329,7 +131,7 @@ Strictly validates that CWD and all path arguments stay within project root."
   "Register the bash tool."
   (kargu-register-tool
    "bash"
-   "Run a shell command in the project (stdout+stderr, timeout, background support). Agent mode only. Use for builds, tests, dev servers, git. Set background=true for long-running servers."
+   "Run a project shell command asynchronously with no default duration limit. Agent mode only. Output is bounded without terminating the job. Use list/status <id>/kill <id> for monitoring and cancellation. Set background=true for persistent servers or watchers; ordinary long builds can remain foreground jobs."
    '(("type" . "object")
      ("properties" . (("command" . (("type" . "string")
                                     ("description" . "Shell command to run, or 'status <id>', 'kill <id>', 'list'.")))
@@ -349,8 +151,6 @@ Strictly validates that CWD and all path arguments stay within project root."
         (let ((err-msg (format "ERROR: %s" (error-message-string err))))
           (if callback (funcall callback err-msg) err-msg)))))))
 
-(kargu-bash-register-tools)
-
 (provide 'kargu/tools/bash)
 
-;;; kargu/tools/bash.el ends here
+;;; bash.el ends here

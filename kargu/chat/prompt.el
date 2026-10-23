@@ -1,4 +1,4 @@
-;;; kargu/chat/prompt.el --- Chat prompt lifecycle and input handling -*- lexical-binding: t; -*-
+;;; prompt.el --- Chat prompt lifecycle and input handling -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -22,19 +22,16 @@
 (require 'kargu/languages)
 (require 'kargu/tools/deps)
 
-(declare-function kargu-chat--target-buffer "kargu/chat/render" ())
+(declare-function kargu-chat-output-buffer "kargu/chat/transcript" ())
 
 (declare-function kargu-chat-stop "kargu/chat")
-(declare-function kargu-chat-select-mode-company "kargu/api" (&optional _event))
-(declare-function kargu-chat-select-provider-company "kargu/api")
-(declare-function kargu-chat-select-model-company "kargu/api")
-(declare-function kargu-chat-select-effort-company "kargu/api")
-(declare-function kargu--provider-name "kargu/api")
-(declare-function kargu--model "kargu/api")
-(declare-function kargu-model-context-window "kargu/api" (&optional model-id))
-(declare-function kargu-provider-params-get-all "kargu/providers/params" (&optional provider))
-(declare-function kargu-tune-provider-params-menu "kargu/chat/tune-params")
-(defvar kargu-reasoning-effort)
+(declare-function kargu-chat-select-mode-company "kargu/api/select" (&optional _event))
+(declare-function kargu-chat-select-provider-company "kargu/api/select")
+(declare-function kargu-chat-select-model-company "kargu/api/select")
+(declare-function kargu-chat-select-effort-company "kargu/api/select")
+(declare-function kargu--provider-name "kargu/config/key")
+(declare-function kargu--model "kargu/config/key")
+(declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
 
 (defcustom kargu-chat-buffer-name "*kargu-chat*"
   "Name of the default kargu chat log buffer."
@@ -61,8 +58,8 @@ Insertion type is t so streamed output stays above the prompt.")
 
 (defun kargu-chat--footer-button (label face help action-fn &optional mouse-fn)
   "Create an interactive button text string for footer.
-LABEL is the displayed text. FACE is the font face. HELP is tooltip text.
-ACTION-FN is called on RET or click. MOUSE-FN is called with event if supplied."
+LABEL is the displayed text.  FACE is the font face.  HELP is tooltip text.
+ACTION-FN is called on RET or click.  MOUSE-FN receives mouse events."
   (let ((map (make-sparse-keymap)))
     (when (boundp 'kargu-chat-mode-map)
       (set-keymap-parent map kargu-chat-mode-map))
@@ -78,17 +75,16 @@ ACTION-FN is called on RET or click. MOUSE-FN is called with event if supplied."
                 'button t
                 'action (lambda (_) (funcall action-fn)))))
 
-(declare-function kargu-chat--explicit-selection "kargu/chat/session" (value))
 
 (defun kargu-chat--shown-provider ()
   "Provider chosen for this chat buffer, or nil.
 A chat shows its own choice, never the live or configured fallback, so a
 fresh chat asks for a selection."
-  (kargu-chat--explicit-selection (bound-and-true-p kargu-chat--session-provider)))
+  (kargu-selection-provider))
 
 (defun kargu-chat--shown-model ()
   "Model chosen for this chat buffer, or nil."
-  (kargu-chat--explicit-selection (bound-and-true-p kargu-chat--session-model)))
+  (kargu-selection-model))
 
 (defun kargu-chat--footer-model-label (raw-m)
   "Return cons (LABEL . FACE) for RAW-M model in footer."
@@ -151,32 +147,13 @@ fresh chat asks for a selection."
 
 (defun kargu-chat--footer-effort-button ()
   "Build the reasoning effort button for the footer."
-  (let ((effort (if (boundp 'kargu-reasoning-effort) (or kargu-reasoning-effort "off") "off")))
+  (let ((effort (or (kargu-selection-effort) "off")))
     (kargu-chat--footer-button
      (format "[%s]" effort) 'font-lock-keyword-face
      "mouse-1 or RET: select reasoning effort (company list)"
      #'kargu-chat-select-effort-company
      (lambda (e) (interactive "e") (kargu-chat-select-effort-company e)))))
 
-(defun kargu-chat--footer-params-button (pname)
-  "Build the provider parameters button for PNAME for the footer."
-  (let* ((active-params (and pname
-                             (fboundp 'kargu-provider-params-get-all)
-                             (kargu-provider-params-get-all pname)))
-         (params-count (length active-params))
-         (params-label (if (> params-count 0) (format "[params: %d]" params-count) "[params]"))
-         (params-face (if (> params-count 0) 'font-lock-keyword-face 'font-lock-comment-face)))
-    (kargu-chat--footer-button
-     params-label params-face
-     "mouse-1 or RET: configure provider routing & parameters"
-     (lambda () (interactive)
-       (if (fboundp 'kargu-tune-provider-params-menu)
-           (call-interactively #'kargu-tune-provider-params-menu)
-         (message "kargu: provider parameters menu not available")))
-     (lambda (_e) (interactive "e")
-       (if (fboundp 'kargu-tune-provider-params-menu)
-           (call-interactively #'kargu-tune-provider-params-menu)
-         (message "kargu: provider parameters menu not available"))))))
 
 (defvar-local kargu-chat--missing-tools-state nil
   "List of missing tool IDs currently displayed as an error banner in this buffer.")
@@ -221,28 +198,27 @@ Returns list of missing tools."
         (kargu-chat-refresh-footer))))
     missing))
 
+(defun kargu-chat--blocked-badge ()
+  "Return the missing-tool badge for the current chat project."
+  (let* ((root (or (bound-and-true-p kargu-chat--project-root)
+                   (and (fboundp 'kargu-session-project-root)
+                        (kargu-session-project-root))))
+         (missing (and (fboundp 'kargu-deps-missing) (kargu-deps-missing root))))
+    (when missing
+      (propertize (format "  [⚠️ BLOCKED: %d missing tool%s]"
+                          (length missing) (if (= (length missing) 1) "" "s"))
+                  'face '(:foreground "red" :weight bold)
+                  'help-echo "Mandatory tools are missing; prompt submission is blocked."))))
+
 (defun kargu-chat--footer-string ()
   "Build the interactive footer line shown at the bottom of the chat buffer.
 Contains clickable mode, provider, model, context usage, and effort buttons."
-  (let* ((pname (kargu-chat--shown-provider))
-         (mode-btn (kargu-chat--footer-mode-button))
+  (let* ((mode-btn (kargu-chat--footer-mode-button))
          (p-btn (kargu-chat--footer-provider-button))
          (m-btn (kargu-chat--footer-model-button))
          (ctx-btn (kargu-chat--footer-context-button))
          (e-btn (kargu-chat--footer-effort-button))
-         (params-btn (kargu-chat--footer-params-button pname))
-         (root (or (bound-and-true-p kargu-chat--project-root)
-                   (and (fboundp 'kargu-session-project-root)
-                        (kargu-session-project-root))))
-         (missing (and (fboundp 'kargu-deps-missing)
-                       (kargu-deps-missing root)))
-         (blocked-badge
-          (when missing
-            (propertize (format "  [⚠️ BLOCKED: %d missing tool%s]"
-                                (length missing)
-                                (if (= (length missing) 1) "" "s"))
-                        'face '(:foreground "red" :weight bold)
-                        'help-echo "Mandatory tools are missing; prompt submission is blocked."))))
+         (blocked-badge (kargu-chat--blocked-badge)))
     (propertize
      (concat "\n\n"
              (propertize "mode: " 'face 'font-lock-comment-face)
@@ -258,8 +234,6 @@ Contains clickable mode, provider, model, context usage, and effort buttons."
              "  "
              (propertize "effort: " 'face 'font-lock-comment-face)
              e-btn
-             "  "
-             params-btn
              (or blocked-badge "")
              "\n")
      'field 'prompt
@@ -267,35 +241,30 @@ Contains clickable mode, provider, model, context usage, and effort buttons."
      'front-sticky t
      'rear-nonsticky '(read-only face field front-sticky))))
 
+(defun kargu-chat--refresh-idle-footer ()
+  "Replace only the footer, leaving the prompt and draft untouched."
+  (save-excursion
+    (let ((start (marker-position kargu-chat--output-marker))
+          (end (- kargu-chat--prompt-marker
+                  (length kargu-chat--prompt-string))))
+      (delete-region start end)
+      (goto-char start)
+      (insert (kargu-chat--footer-string))
+      (set-marker kargu-chat--output-marker start))))
+
 (defun kargu-chat-refresh-footer ()
   "Refresh the footer line at the bottom of the chat buffer in-place."
   (let ((buf (or (and (markerp kargu-chat--output-marker)
                       (marker-position kargu-chat--output-marker)
                       (current-buffer))
-                 (kargu-chat--target-buffer))))
+                 (kargu-chat-output-buffer))))
     (when (and buf (buffer-live-p buf))
       (with-current-buffer buf
         (when (and (markerp kargu-chat--output-marker)
                    (marker-position kargu-chat--output-marker))
           (let ((inhibit-read-only t))
             (if (kargu-chat--prompt-live-p)
-                (let* ((input (buffer-substring-no-properties
-                               kargu-chat--prompt-marker (point-max))))
-                  (delete-region kargu-chat--output-marker (point-max))
-                  (goto-char (point-max))
-                  (let ((start (point)))
-                    (insert (kargu-chat--footer-string))
-                    (insert (propertize
-                             kargu-chat--prompt-string
-                             'face 'kargu-chat-prompt
-                             'field 'prompt
-                             'read-only t
-                             'front-sticky t
-                             'rear-nonsticky '(read-only face field front-sticky)))
-                    (setq kargu-chat--prompt-marker (point-marker))
-                    (set-marker-insertion-type kargu-chat--prompt-marker nil)
-                    (setq kargu-chat--output-marker (copy-marker start t))
-                    (insert input)))
+                (kargu-chat--refresh-idle-footer)
               (delete-region kargu-chat--output-marker (point-max))
               (kargu-chat--ensure-running-prompt))))
         (force-mode-line-update t)))))
@@ -307,7 +276,7 @@ Return point if found, or nil."
   (let ((buf (or (and (markerp kargu-chat--output-marker)
                       (marker-position kargu-chat--output-marker)
                       (current-buffer))
-                 (kargu-chat--target-buffer))))
+                 (kargu-chat-output-buffer))))
     (when buf
       (with-current-buffer buf
         (let ((win (get-buffer-window buf)))
@@ -330,7 +299,7 @@ Return point if found, or nil."
   "Move point to the editable prompt input.
 Return that position, or nil when the prompt is not live."
   (let ((buf (or (and (derived-mode-p 'kargu-chat-mode) (current-buffer))
-                 (kargu-chat--target-buffer))))
+                 (kargu-chat-output-buffer))))
     (when (and buf (buffer-live-p buf))
       (with-current-buffer buf
         (when (and (markerp kargu-chat--prompt-marker)
@@ -366,8 +335,8 @@ Return nil when this buffer has no live prompt."
      0 (length copy)
      (append (and face (list 'face face))
              '(read-only t
-               front-sticky t
-               rear-nonsticky (read-only face front-sticky)))
+                         front-sticky t
+                         rear-nonsticky (read-only face front-sticky)))
      copy)
     copy))
 
@@ -391,7 +360,7 @@ Return nil when this buffer has no live prompt."
 (defun kargu-chat--ensure-idle-prompt ()
   "Make sure the chat buffer ends with an editable `kargu> ' prompt.
 No prompt is inserted while this chat is waiting for an Eglot connection."
-  (let ((buffer (kargu-chat--target-buffer)))
+  (let ((buffer (kargu-chat-output-buffer)))
     (when buffer
       (with-current-buffer buffer
         (cond
@@ -421,56 +390,43 @@ No prompt is inserted while this chat is waiting for an Eglot connection."
                 (set-marker-insertion-type kargu-chat--prompt-marker nil)
                 (setq kargu-chat--output-marker (copy-marker start t)))))))))))
 
+(defun kargu-chat--running-stop-button ()
+  "Return the clickable stop button for the running prompt."
+  (let ((map (make-sparse-keymap)))
+    (when (boundp 'kargu-chat-mode-map)
+      (set-keymap-parent map kargu-chat-mode-map))
+    (dolist (key '("<mouse-1>" "<mouse-2>" "RET"))
+      (keymap-set map key #'kargu-chat-stop))
+    (propertize "[Stop]"
+                'face '(:foreground "red" :weight bold)
+                'mouse-face 'highlight
+                'help-echo "mouse-1 or RET: stop the agent run"
+                'keymap map 'local-map map 'button t
+                'action (lambda (_) (kargu-chat-stop)))))
+
 (defun kargu-chat--ensure-running-prompt ()
-  "Render a read-only running banner with a clickable [Stop] button."
-  (let ((buffer (kargu-chat--target-buffer)))
-    (when buffer
-      (with-current-buffer buffer
-        (let ((inhibit-read-only t))
-          (when (and (markerp kargu-chat--output-marker)
-                     (eq (marker-buffer kargu-chat--output-marker) buffer))
-            (delete-region kargu-chat--output-marker (point-max)))
-          (goto-char (point-max))
-          (unless (or (bobp) (eq (char-before) ?\n))
-            (insert (kargu-chat--propertize-log "\n")))
-          (let* ((start (point))
-                 (map (make-sparse-keymap)))
-            (when (boundp 'kargu-chat-mode-map)
-              (set-keymap-parent map kargu-chat-mode-map))
-            (define-key map [mouse-1] (lambda () (interactive) (kargu-chat-stop)))
-            (define-key map [mouse-2] (lambda () (interactive) (kargu-chat-stop)))
-            (define-key map (kbd "RET") (lambda () (interactive) (kargu-chat-stop)))
-            (let ((stop-btn (propertize "[Stop]"
-                                        'face '(:foreground "red" :weight bold)
-                                        'mouse-face 'highlight
-                                        'help-echo "mouse-1 or RET: stop the agent run"
-                                        'keymap map
-                                        'local-map map
-                                        'button t
-                                        'action (lambda (_) (kargu-chat-stop)))))
-              (insert (kargu-chat--footer-string))
-              (insert (propertize
-                       "kargu running... "
-                       'face 'font-lock-comment-face
-                       'field 'prompt
-                       'read-only t
-                       'front-sticky t
-                       'rear-nonsticky '(read-only face field front-sticky)))
-              (insert (propertize
-                       stop-btn
-                       'field 'prompt
-                       'read-only t
-                       'front-sticky t
-                       'rear-nonsticky '(read-only face field front-sticky)))
-              (insert (propertize
-                       " (press C-c C-k or click to stop)\n"
-                       'face 'font-lock-comment-face
-                       'field 'prompt
-                       'read-only t
-                       'front-sticky t
-                       'rear-nonsticky '(read-only face field front-sticky)))
-              (setq kargu-chat--prompt-marker nil)
-              (setq kargu-chat--output-marker (copy-marker start t)))))))))
+  "Render a read-only running banner with a clickable stop button."
+  (when-let* ((buffer (kargu-chat-output-buffer)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (when (and (markerp kargu-chat--output-marker)
+                   (eq (marker-buffer kargu-chat--output-marker) buffer))
+          (delete-region kargu-chat--output-marker (point-max)))
+        (goto-char (point-max))
+        (unless (or (bobp) (eq (char-before) ?\n))
+          (insert (kargu-chat--propertize-log "\n")))
+        (let ((start (point)))
+          (insert (kargu-chat--footer-string))
+          (insert
+           (propertize
+            (concat (propertize "kargu running... " 'face 'font-lock-comment-face)
+                    (kargu-chat--running-stop-button)
+                    (propertize " (press C-c C-k or click to stop)\n"
+                                'face 'font-lock-comment-face))
+            'field 'prompt 'read-only t 'front-sticky t
+            'rear-nonsticky '(read-only face field front-sticky)))
+          (setq kargu-chat--prompt-marker nil
+                kargu-chat--output-marker (copy-marker start t)))))))
 
 (defun kargu-chat--ensure-prompt ()
   "Ensure the chat buffer ends with appropriate prompt or running status."
@@ -486,15 +442,16 @@ No prompt is inserted while this chat is waiting for an Eglot connection."
          (>= pos (marker-position kargu-chat--prompt-marker)))))
 
 (defun kargu-chat-beginning-of-line ()
-  "Move to the start of input, or the beginning of the line."
+  "Move to the current line start without entering the prompt prefix."
   (interactive "^")
   (if (kargu-chat--in-input-p)
-      (goto-char kargu-chat--prompt-marker)
+      (goto-char (max (marker-position kargu-chat--prompt-marker)
+                      (line-beginning-position)))
     (beginning-of-line)))
 
 (defun kargu-chat--input-text ()
   "Return the current prompt input, or the empty string."
-  (let ((buffer (kargu-chat--target-buffer)))
+  (let ((buffer (kargu-chat-output-buffer)))
     (cond
      ((not (buffer-live-p buffer)) "")
      (t
@@ -507,9 +464,9 @@ No prompt is inserted while this chat is waiting for an Eglot connection."
 
 (defun kargu-chat--consume-input ()
   "Return the prompt input and delete the prompt block."
-  (let ((buffer (kargu-chat--target-buffer)))
+  (let ((buffer (kargu-chat-output-buffer)))
     (unless (buffer-live-p buffer)
-      (error "kargu: no chat buffer"))
+      (error "Kargu: no chat buffer"))
     (with-current-buffer buffer
       (unless (kargu-chat--prompt-live-p)
         (kargu-chat--ensure-prompt))
@@ -523,4 +480,4 @@ No prompt is inserted while this chat is waiting for an Eglot connection."
 
 (provide 'kargu/chat/prompt)
 
-;;; kargu/chat/prompt.el ends here
+;;; prompt.el ends here

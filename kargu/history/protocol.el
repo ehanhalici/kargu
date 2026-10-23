@@ -1,4 +1,4 @@
-;;; kargu/history/protocol.el --- Protocol message history queue -*- lexical-binding: t; -*-
+;;; protocol.el --- Protocol message history queue -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -13,17 +13,12 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'kargu/core)
+(require 'kargu/history/store)
 (require 'kargu/contract)
 (require 'kargu/prompt)
 
-(declare-function kargu-api-cancel "kargu/api/client" ())
+(declare-function kargu-session-reset "kargu/application/reset" ())
 
-(defvar kargu--message-history nil
-  "Conversation history, oldest first.
-Each element is an alist with string keys in the OpenAI
-chat-completions shape: (\"role\" . \"system\"|\"user\"|\"assistant\"|\"tool\").")
-
-(defvar kargu--compaction-system)
 
 (defun kargu--history-add (role content &rest fields)
   "Append a message ((ROLE . CONTENT) . FIELDS) to the history.
@@ -35,9 +30,7 @@ Return the new message alist."
                          "Invalid message content %S (must be string, nil, or JSON null)"
                          content)
   (let ((msg (append `(("role" . ,role) ("content" . ,content)) fields)))
-    (setq kargu--message-history
-          (append kargu--message-history (list msg)))
-    msg))
+    (kargu-history-append msg)))
 
 (defalias 'kargu-history-add #'kargu--history-add)
 
@@ -52,22 +45,20 @@ NAME is the tool name, OUTPUT the result string."
 
 (defalias 'kargu-history-add-tool-result #'kargu--history-add-tool-result)
 
-(defun kargu-history-reset ()
-  "Clear the conversation history and cancel in-flight requests."
+(defun kargu-history-reset (&optional history)
+  "Clear owned HISTORY without cancelling unrelated transport resources.
+Interactive reset delegates cancellation and cache effects to the application."
   (interactive)
-  (when (fboundp 'kargu-api-cancel)
-    (kargu-api-cancel))
-  (setq kargu--message-history nil)
-  (setq kargu--compaction-system nil)
-  (kargu-prompt-clear-cache)
-  (kargu-log 'info "history cleared")
-  (when (called-interactively-p 'any)
-    (message "kargu history cleared")))
+  (if (called-interactively-p 'any)
+      (kargu-session-reset)
+    (setf (kargu-history-messages history) nil
+          (kargu-history-overlay history) nil
+          (kargu-history-system-key history) nil)
+    (kargu-log 'info "history cleared")))
 
-(defun kargu--history-last-role ()
-  "Role of the last history message, or nil when empty."
-  (when kargu--message-history
-    (kargu-aget (car (last kargu--message-history)) "role")))
+(defun kargu--history-last-role (&optional history)
+  "Return HISTORY's last role, or nil when empty; default to current owner."
+  (kargu-aget (kargu-history-last-message history) "role"))
 
 (defun kargu--role-name (role)
   "Canonical string name of ROLE (string or symbol), or nil."
@@ -95,7 +86,8 @@ Mutates MSG and returns it."
   msg)
 
 (defun kargu--calls-to-list (calls)
-  "Convert CALLS to a list of tool-call alists, or nil if empty."
+  "Normalize tool-call records into a list.
+Read CALLS as a list or vector and return nil for empty input."
   (cond
    ((null calls) nil)
    ((eq calls :json-null) nil)
@@ -104,9 +96,9 @@ Mutates MSG and returns it."
    ((listp calls) (if (null calls) nil calls))
    (t nil)))
 
-(defun kargu--empty-assistant-tail-p ()
-  "Non-nil when the history ends on a tool-less assistant turn."
-  (let ((last (car (last kargu--message-history))))
+(defun kargu--empty-assistant-tail-p (&optional history)
+  "Return non-nil if HISTORY ends on a tool-less assistant turn."
+  (let ((last (kargu-history-last-message history)))
     (and last
          (kargu--assistant-role-p (kargu-aget last "role"))
          (null (kargu--calls-to-list (kargu-aget last "tool_calls"))))))
@@ -132,9 +124,9 @@ Mutates MSG and returns it."
   "Dump the protocol view of the history to the log buffer."
   (interactive)
   (kargu-log 'info "--- history begin (%d messages) ---"
-             (length kargu--message-history))
+             (length (kargu-history-messages)))
   (let ((i 0))
-    (dolist (msg kargu--message-history)
+    (dolist (msg (kargu-history-messages))
       (setq i (1+ i))
       (let ((role (kargu-aget msg "role"))
             (text (or (kargu-aget msg "content") ""))
@@ -152,4 +144,4 @@ Mutates MSG and returns it."
 
 (provide 'kargu/history/protocol)
 
-;;; kargu/history/protocol.el ends here
+;;; protocol.el ends here

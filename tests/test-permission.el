@@ -3,25 +3,38 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Ensure the package root is on `load-path` during byte/native compilation.
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'tests/test-helpers)
 (require 'ert)
+(require 'cl-lib)
+
+(ert-deftest kargu-permission-async-result-is-delivered-once-test ()
+  "A tool completing twice can deliver only its first asynchronous result."
+  (let ((kargu-permission--mock-decision :approve) done results)
+    (kargu-permission-execute
+     :command "git status" :directory default-directory
+     :start (lambda (callback) (setq done callback))
+     :callback (lambda (result) (push result results)))
+    (funcall done "first")
+    (funcall done "second")
+    (should (equal results '("first")))))
 (require 'kargu/permission)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/bash)
 (require 'kargu/tools/search)
 (require 'kargu/loop)
+
+(ert-deftest kargu-permission-command-expansion-preserves-prefix-test ()
+  "Double slashes and tilde text must not discard an earlier forbidden path."
+  (let* ((root (kargu-test-scratch-root))
+         (process-environment (cons (concat "KARGU_VALIDATION_ROOT=" root) process-environment)))
+    (dolist (command (list (concat "cat /etc/passwd /" root "allowed")
+                          (concat "cat /etc/passwd " root "/allowed")
+                          (concat "cat /etc/passwd " root "/~literal")
+                          "cat /etc/passwd $KARGU_VALIDATION_ROOT/allowed"
+                          "cat /etc/passwd ${KARGU_VALIDATION_ROOT}/allowed"))
+      (should (string-prefix-p "cat /etc/passwd " (kargu-permission--expand-environment command)))
+      (should-error (kargu-permission-validate-command command root)))
+    (should (equal (kargu-permission--expand-environment "cat a//b a/~c") "cat a//b a/~c"))))
 
 (ert-deftest kargu-permission-within-project-test ()
   "Ensure kargu-permission-within-project-p correctly classifies in-tree and out-of-tree paths."
@@ -168,36 +181,61 @@
         (kargu-test-permission-click (car case))
         (should (eq verdict (cdr case)))))))
 
-(ert-deftest kargu-permission-call-async-asks-then-reruns-test ()
-  "A tool body that needs approval is re-run once after the human approves."
-  (let ((kargu-permission--mock-decision nil)
-        (kargu-permission-confirm-bash t)
-        (asked nil) (runs 0) (result nil))
+(ert-deftest kargu-permission-approval-is-scoped-to-directory-and-risks-test ()
+  "The same command needs its own approval for every prepared context."
+  (let* ((root (kargu-permission-project-root))
+         (a (make-temp-file (expand-file-name "approval-a-" root) t))
+         (b (make-temp-file (expand-file-name "approval-b-" root) t))
+         asked (delivered 0))
     (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
-               (lambda (cmd _dir _risks cb) (push cmd asked) (funcall cb t)))
-              ((symbol-function 'kargu-permission--auto-decision) (lambda (_) nil)))
-      (kargu-permission-call-async
-       (lambda (done)
-         (cl-incf runs)
-         (unless (kargu-permission-approve "git commit" "/tmp") (error "no"))
-         (funcall done "committed"))
-       (lambda (r) (setq result r))))
+               (lambda (command directory risks callback)
+                 (push (list command directory risks) asked)
+                 (funcall callback t) (funcall callback t))))
+      (dolist (entry (list (list a '("first risk")) (list b '("first risk"))
+                           (list b '("second risk"))))
+        (kargu-permission-execute
+         :command "same command" :directory (car entry) :risks (cadr entry)
+         :start (lambda (done) (funcall done "done"))
+         :callback (lambda (_) (cl-incf delivered)))))
+    (should (= (length asked) 3))
+    (should (= delivered 3))
+    (should-not (equal (car asked) (cadr asked)))))
+
+(ert-deftest kargu-permission-callback-failure-never-redelivers-test ()
+  "A failing sync or delayed continuation is logged without another delivery."
+  (dolist (delayed '(nil t))
+    (let ((kargu-permission--mock-decision :approve) (delivered 0) held)
+      (kargu-permission-execute
+       :command "git status" :directory default-directory
+       :start (lambda (done) (setq held done) (unless delayed (funcall done "ok")))
+       :callback (lambda (_) (cl-incf delivered) (error "Bad continuation")))
+      (funcall held "ok")
+      (funcall held "duplicate")
+      (should (= delivered 1)))))
+
+(ert-deftest kargu-permission-execute-asks-then-starts-once-test ()
+  "A prepared tool starts only once after the human approves, without replay."
+  (let ((asked nil) (runs 0) result)
+    (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
+               (lambda (cmd _dir _risks cb)
+                 (push cmd asked) (funcall cb t) (funcall cb t))))
+      (kargu-permission-execute
+       :command "git commit" :directory default-directory
+       :start (lambda (done) (cl-incf runs) (funcall done "committed"))
+       :callback (lambda (value) (setq result value))))
     (should (equal result "committed"))
     (should (equal asked '("git commit")))
-    (should (= runs 2))))
+    (should (= runs 1))))
 
-(ert-deftest kargu-permission-call-async-rejection-is-an-error-result-test ()
+(ert-deftest kargu-permission-execute-rejection-is-an-error-result-test ()
   "A refused approval becomes an ERROR result and the side effect never runs."
-  (let ((effect nil) (result nil))
+  (let ((effect nil) result)
     (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
-               (lambda (_c _d _r cb) (funcall cb nil)))
-              ((symbol-function 'kargu-permission--auto-decision) (lambda (_) nil)))
-      (kargu-permission-call-async
-       (lambda (done)
-         (unless (kargu-permission-approve "git commit" "/tmp") (error "no"))
-         (setq effect t)
-         (funcall done "ok"))
-       (lambda (r) (setq result r))))
+               (lambda (_c _d _r callback) (funcall callback nil))))
+      (kargu-permission-execute
+       :command "git commit" :directory default-directory
+       :start (lambda (done) (setq effect t) (funcall done "ok"))
+       :callback (lambda (value) (setq result value))))
     (should-not effect)
     (should (string-prefix-p "ERROR:" result))))
 

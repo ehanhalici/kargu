@@ -1,4 +1,4 @@
-;;; kargu/plan/dispatch.el --- Plan review actions and dispatch -*- lexical-binding: t; -*-
+;;; dispatch.el --- Plan review actions and dispatch -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -12,16 +12,14 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'kargu/core)
 (require 'kargu/plan/buffer)
 
-(defvar kargu-chat-buffer-name)
-(declare-function kargu-chat-prompt "kargu/chat" (&optional prompt))
-
-(defun kargu-plan-view ()
-  "Display the in-memory plan buffer in a suitable window for editing."
+(defun kargu-plan-view (&optional record)
+  "Display RECORD's review buffer, defaulting to the caller's current plan."
   (interactive)
-  (let ((buf (get-buffer kargu-plan-buffer-name)))
+  (let* ((record (or record (kargu-plan-current)))
+         (buf (and record (kargu-plan-record-buffer
+                           (kargu-plan-assert-current record)))))
     (if (not (and buf (buffer-live-p buf)))
         (message "kargu: no active plan buffer found")
       (let ((win (display-buffer buf '(display-buffer-pop-up-window
@@ -30,88 +28,121 @@
           (select-window win))
         (message "Edit plan freely in memory. Press C-c C-c to approve & apply, C-c C-k to cancel.")))))
 
-(declare-function kargu-chat-insert "kargu/chat/render" (text &optional face))
-
-(defun kargu-plan--close-window ()
-  "Close the window showing the plan buffer, if any."
-  (when-let* ((buf (get-buffer kargu-plan-buffer-name))
+(defun kargu-plan--close-window (record)
+  "Close the window showing RECORD's review buffer, if any."
+  (when-let* ((buf (kargu-plan-record-buffer record))
               (win (and (buffer-live-p buf) (get-buffer-window buf))))
     (quit-window nil win)))
 
-(defun kargu-plan--take-decision ()
-  "Claim the pending plan decision; return non-nil the first time only.
-A button stays in the transcript after it is used, so a second click
-finds no decision to make."
-  (prog1 kargu-plan--decision-pending
-    (setq kargu-plan--decision-pending nil)))
+(defun kargu-plan-publish (record event)
+  "Notify RECORD's optional presenter of EVENT without changing its decision."
+  (unless (memq event '(:ready :approved :rejected))
+    (error "Unknown plan presentation event: %S" event))
+  (when-let* ((publish (kargu-plan-context-publish (kargu-plan-record-context record))))
+    (condition-case err
+        (funcall publish record event)
+      (error (kargu-log 'warn "Plan presentation failed: %s" (error-message-string err))))))
 
-(defun kargu-plan-approve ()
-  "Approve the current in-memory plan and dispatch it to AI in agent mode."
-  (interactive)
-  (let* ((buf (get-buffer kargu-plan-buffer-name))
-         (plan-text (if (and buf (buffer-live-p buf))
-                        (with-current-buffer buf
-                          (string-trim (buffer-substring-no-properties (point-min) (point-max))))
-                      (or kargu-plan--current-plan ""))))
+(defun kargu-plan--dispatch-synchronous (record plan-text)
+  "Send RECORD's PLAN-TEXT through its captured dispatcher, claiming it once."
+  (let* ((context (kargu-plan-record-context record))
+         (preflight (kargu-plan-context-preflight context))
+         (dispatch (kargu-plan-context-dispatch context)) dispatched)
+    (unless dispatch
+      (user-error "Kargu: plan dispatcher unavailable; the plan is still pending"))
+    (when preflight (funcall preflight record))
+    (unless (kargu-plan-claim record)
+      (user-error "Kargu: this plan was already decided"))
+    (unwind-protect
+        (progn
+          (unless (kargu-contract-assert
+                   (lambda (result) (memq result '(nil t)))
+                   (funcall dispatch record plan-text))
+            (user-error "Kargu: plan startup refused; the plan is still pending"))
+          (setq dispatched t))
+      (kargu-plan-complete record dispatched))
+    (when (eq (kargu-plan-record-state record) :approved)
+      (kargu-plan--close-window record)
+      (kargu-plan-publish record :approved))))
+
+(defun kargu-plan--finish-dispatch (record success error)
+  "Settle RECORD's claimed startup with validated SUCCESS or ERROR."
+  (setf (kargu-plan-record-dispatch-task record) nil)
+  (kargu-plan-complete record (and success (null error)))
+  (cond
+   ((eq (kargu-plan-record-state record) :approved)
+    (kargu-plan--close-window record)
+    (kargu-plan-publish record :approved))
+   (error (message "Kargu: %s; the plan remains pending when its owner is current" error))))
+
+(defun kargu-plan--dispatch-asynchronous (record plan-text)
+  "Claim RECORD and await asynchronous PLAN-TEXT startup exactly once."
+  (let* ((context (kargu-plan-record-context record))
+         (preflight (kargu-plan-context-preflight context)))
+    (when preflight (funcall preflight record))
+    (unless (kargu-plan-claim record)
+      (user-error "Kargu: this plan was already decided"))
+    (with-current-buffer (kargu-plan-record-origin record)
+      (let ((task (kargu-async-start
+                   (lambda (success error) (kargu-plan--finish-dispatch record success error)))))
+        (setf (kargu-plan-record-dispatch-task record) task)
+        (condition-case failure
+            (let ((kargu-async--current-task task))
+              (funcall
+               (kargu-plan-context-dispatch context) record plan-text
+               (kargu-async-wrap
+                task (lambda (success &optional error)
+                       (kargu-contract-assert #'booleanp success)
+                       (kargu-contract-assert
+                        (lambda (value) (or (null value) (stringp value))) error)
+                       (kargu-async-finish task success error)))))
+          (error
+           (kargu-async-finish task nil (error-message-string failure))
+           (signal (car failure) (cdr failure))))))))
+
+(defun kargu-plan--dispatch-approved (record plan-text)
+  "Dispatch RECORD's PLAN-TEXT through its captured completion contract."
+  (let* ((context (kargu-plan-record-context record))
+         (dispatch (kargu-plan-context-dispatch context)))
     (cond
-     ((not kargu-plan--decision-pending)
+     ((null dispatch) (user-error "Kargu: plan dispatcher unavailable; the plan is still pending"))
+     ((eq (kargu-plan-context-dispatch-style context) :synchronous)
+      (kargu-plan--dispatch-synchronous record plan-text))
+     (t (kargu-plan--dispatch-asynchronous record plan-text)))))
+
+(defun kargu-plan-approve (&optional record)
+  "Approve RECORD, defaulting to the current chat or review buffer's plan."
+  (interactive)
+  (let* ((record (kargu-plan-assert-current (or record (kargu-plan-current))))
+         (plan-text (with-current-buffer (kargu-plan-record-buffer record)
+                      (save-restriction
+                        (widen)
+                        (string-trim (buffer-substring-no-properties (point-min) (point-max)))))))
+    (cond
+     ((not (kargu-plan-pending-p record))
       (message "kargu: this plan was already decided"))
      ((string-empty-p plan-text)
       (message "kargu: no plan text found to approve"))
      (t
-      (kargu-plan--take-decision)
-      (kargu-plan--close-window)
-      (kargu-chat-insert "  ✓ [Plan Approved] — Switching to agent mode and applying plan...\n\n"
-                          '(:inherit success :weight bold))
-      (kargu-set-mode 'agent)
-      (let ((prompt (format "Apply the following approved plan step-by-step:\n\n%s" plan-text)))
-        (if (fboundp 'kargu-chat-prompt)
-            (kargu-chat-prompt prompt)
-          (message "kargu-chat-prompt unavailable")))))))
+      (kargu-plan--dispatch-approved record plan-text)))))
 
-(defun kargu-plan-reject ()
-  "Reject and cancel the pending plan."
+(defun kargu-plan-reject (&optional record)
+  "Reject pending RECORD, defaulting to the caller's current plan."
   (interactive)
-  (if (not (kargu-plan--take-decision))
-      (message "kargu: this plan was already decided")
-    (kargu-plan--close-window)
-    (kargu-chat-insert "  ✗ [Plan Rejected] — Plan cancelled.\n\n" 'font-lock-warning-face)
-    (message "kargu: plan cancelled")))
-
-(defun kargu-plan--button (label action face help)
-  "A transcript button showing LABEL that calls ACTION, drawn with FACE."
-  (make-text-button label nil
-                    'action (lambda (_) (funcall action))
-                    'face face
-                    'help-echo help
-                    'follow-link t))
+  (let ((record (kargu-plan-assert-current (or record (kargu-plan-current)))))
+    (if (not (kargu-plan-decline record))
+        (message "kargu: this plan was already decided")
+      (kargu-plan--close-window record)
+      (kargu-plan-publish record :rejected)
+      (message "kargu: plan cancelled"))))
 
 (defun kargu-plan-handle-response (report)
-  "Render plan approval buttons and populate `*kargu-plan*' for REPORT."
-  (let ((plan-text (kargu-plan-extract-text report)))
-    (when (and (stringp plan-text) (not (string-empty-p plan-text)))
-      (kargu-plan-setup-buffer plan-text)
-      (kargu-chat-insert "\n")
-      (kargu-chat-insert "  📋 [Plan Ready] — Choose an option below:\n"
-                          '(:inherit font-lock-doc-face :weight bold))
-      (kargu-chat-insert "     ")
-      (kargu-chat-insert
-       (kargu-plan--button "[✓ Approve & Apply]" #'kargu-plan-approve
-                           '(:inherit success :weight bold)
-                           "Approve plan and start autonomous execution in Agent mode"))
-      (kargu-chat-insert "   ")
-      (kargu-chat-insert
-       (kargu-plan--button "[✏ View / Edit Plan]" #'kargu-plan-view
-                           '(:inherit warning :weight bold)
-                           "Open and edit plan in a side window (in-memory, no disk save)"))
-      (kargu-chat-insert "   ")
-      (kargu-chat-insert
-       (kargu-plan--button "[✗ Reject]" #'kargu-plan-reject
-                           '(:inherit error :weight bold)
-                           "Reject and cancel plan"))
-      (kargu-chat-insert "\n\n")
-      (message "kargu plan: click [✓ Approve & Apply], [✏ View / Edit Plan], or [✗ Reject]."))))
+  "Prepare an owned plan from REPORT and notify its optional presenter."
+  (when-let* ((text (kargu-plan-extract-text report)))
+    (let* ((buffer (kargu-plan-setup-buffer text))
+           (record (kargu-plan-current buffer)))
+      (kargu-plan-publish record :ready))))
 
 (provide 'kargu/plan/dispatch)
 
-;;; kargu/plan/dispatch.el ends here
+;;; dispatch.el ends here

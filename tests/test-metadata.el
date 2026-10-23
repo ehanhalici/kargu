@@ -11,19 +11,8 @@
 
 ;;; Code:
 
-;; Ensure the package root is on `load-path' during byte/native compilation.
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'kargu/contract/constants)
 (require 'kargu/core)
 (require 'kargu/api)
@@ -62,8 +51,8 @@
     ;; 128k tokens * 3.5 chars * 0.70 = 313,600 chars
     (should (= (kargu-history-compact-threshold) 313600)))
   (cl-letf (((symbol-function 'kargu-model-context-window) (lambda (&optional _) 10000)))
-    ;; 10k tokens * 3.5 chars * 0.70 = 24,500 chars -> bounded by floor 45,000
-    (should (= (kargu-history-compact-threshold) 45000))))
+    ;; The configured fallback never overrides a smaller known window.
+    (should (= (kargu-history-compact-threshold) 24500))))
 
 (ert-deftest kargu-output-truncation-and-buffer-read-test ()
   "Test that outputs exceeding 24k chars are preserved and readable via read_file."
@@ -113,7 +102,8 @@
 (ert-deftest kargu-model-supports-tools-default-test ()
   "Tools stay available unless the API explicitly disables them."
   (let ((kargu--model-metadata-table (make-hash-table :test 'equal))
-        (kargu--session-model "unknown-model"))
+        (kargu-session--context
+         (kargu-test-session-with-history :model "unknown-model")))
     (should (kargu-model-supports-tools-p "unknown-model"))
     (kargu-model-set-metadata "plain-model" '(("id" . "plain-model")))
     (should (kargu-model-supports-tools-p "plain-model"))
@@ -203,7 +193,8 @@
 (ert-deftest kargu-api-model-selection-strict-template-rejection-test ()
   "Test that model selection accepts only an exact catalog id."
   ;; A typed string that is not a catalog id is rejected.
-  (let ((kargu--session-model "gpt-4o")
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :model "gpt-4o"))
         (footer-refreshed nil))
     (cl-letf (((symbol-function 'kargu-chat-refresh-footer)
                (lambda () (setq footer-refreshed t)))
@@ -211,29 +202,32 @@
                (lambda (&rest _) "out-of-template-model-xyz")))
       (should-error (kargu-chat-select-model-company '("gpt-4o" "gemini-2.5-flash") nil "mock")
                     :type 'user-error)
-      (should (string= kargu--session-model "gpt-4o"))
+      (should (string= (kargu-selection-model) "gpt-4o"))
       (should footer-refreshed)))
   ;; A fuzzy fragment is a filter, not a confirmed choice.
-  (let ((kargu--session-model "gpt-4o"))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :model "gpt-4o")))
     (cl-letf (((symbol-function 'kargu--completing-read-with-company)
                (lambda (&rest _) "flash")))
       (should-error (kargu-chat-select-model-company '("gpt-4o" "gemini-2.5-flash") nil "mock")
                     :type 'user-error)
-      (should (string= kargu--session-model "gpt-4o"))))
+      (should (string= (kargu-selection-model) "gpt-4o"))))
   ;; The confirmed value must be the catalog id itself.
-  (let ((kargu--session-model "gpt-4o"))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :model "gpt-4o")))
     (cl-letf (((symbol-function 'kargu--completing-read-with-company)
                (lambda (&rest _) "gemini-2.5-flash")))
       (kargu-chat-select-model-company '("gpt-4o" "gemini-2.5-flash") nil "mock")
-      (should (string= kargu--session-model "gemini-2.5-flash")))))
+      (should (string= (kargu-selection-model) "gemini-2.5-flash")))))
 
 (ert-deftest kargu-chat-footer-rendering-and-buttons-test ()
   "Test that `kargu-chat--footer-string' renders provider, model, effort buttons and refreshes."
-  (let* ((kargu--session-provider "opencode")
-         (kargu--session-model "gemini-3.7-flash")
+  (let* ((kargu-session--context
+          (kargu-test-session-with-history :provider "opencode" :model "gemini-3.7-flash"))
+
          (kargu-reasoning-effort 'low))
-    (setq-local kargu-chat--session-provider "opencode")
-    (setq-local kargu-chat--session-model "gemini-3.7-flash")
+    (setf (kargu-selection-provider) "opencode")
+    (setf (kargu-selection-model) "gemini-3.7-flash")
     (kargu-model-set-metadata "gemini-3.7-flash" '(:id "gemini-3.7-flash" :context-window 1000000))
     (let ((footer (kargu-chat--footer-string)))
       ;; Check structure
@@ -277,6 +271,12 @@
                   ((string-match-p "effort" prompt) "medium"))))
               ((symbol-function 'kargu-api-list-models)
                (lambda (cb &optional _p)
+                 ;; The real catalog owns metadata writes, not its ID wrapper.
+                 (kargu--record-models-metadata
+                  '((("id" . "llama3.1-70b") ("context_length" . 128000)
+                     ("supports_reasoning" . t)
+                     ("reasoning" . (("supported_efforts" . ["low" "medium" "high"])))))
+                  "cerebras")
                  (funcall cb '((("id" . "llama3.1-70b")
                                 ("context_length" . 128000)
                                 ("supports_reasoning" . t)
@@ -286,7 +286,7 @@
       (kargu-chat-select-provider-company)
       (should (string= (kargu--provider-name) "cerebras"))
       (should (string= (kargu--model) "llama3.1-70b"))
-      (should (eq kargu-reasoning-effort 'medium)))))
+      (should (eq (kargu-selection-effort) 'medium)))))
 
 (ert-deftest kargu-company-in-buffer-select-at-point-test ()
   "Test in-buffer company field navigation and callback execution."
@@ -457,7 +457,8 @@
   "Test Company completion presents dynamic effort choices based on active model."
   (let ((kargu-reasoning-effort nil)
         (captured-cands nil)
-        (kargu--session-model "test/two-level-reasoner"))
+        (kargu-session--context
+         (kargu-test-session-with-history :model "test/two-level-reasoner")))
     ;; Register model with only low and medium
     (kargu-model-set-metadata "test/two-level-reasoner"
                               '(:id "two-level-reasoner" :reasoning-efforts ("low" "medium")))
@@ -468,13 +469,14 @@
       (kargu-chat-select-effort-company)
       ;; Candidates must include "off" and exactly the model's supported levels!
       (should (equal captured-cands '("off" "low" "medium")))
-      (should (eq kargu-reasoning-effort 'low)))))
+      (should (eq (kargu-selection-effort) 'low)))))
 
 (ert-deftest kargu-company-disabled-reasoning-model-test ()
   "Test effort selection when model explicitly disables reasoning."
   (let ((kargu-reasoning-effort 'high)
         (captured-cands nil)
-        (kargu--session-model "test/pure-chat-model"))
+        (kargu-session--context
+         (kargu-test-session-with-history :model "test/pure-chat-model")))
     (kargu-model-set-metadata "test/pure-chat-model"
                               '(:id "pure-chat-model" :supports-reasoning :json-false))
     (cl-letf (((symbol-function 'kargu--completing-read-with-company)
@@ -484,22 +486,23 @@
       (kargu-chat-select-effort-company)
       ;; Must only offer "off" and set effort to nil!
       (should (equal captured-cands '("off")))
-      (should (null kargu-reasoning-effort)))))
+      (should (null (kargu-selection-effort))))))
 
 (ert-deftest kargu-tune-cycle-dynamic-effort-test ()
   "Test `kargu-tune-cycle-reasoning-effort' respects dynamic model levels."
   (require 'kargu/chat/tune)
   (let ((kargu-reasoning-effort nil)
-        (kargu--session-model "test/dual-model"))
+        (kargu-session--context
+         (kargu-test-session-with-history :model "test/dual-model")))
     (kargu-model-set-metadata "test/dual-model"
                               '(:id "dual-model" :reasoning-efforts ("low" "medium")))
     ;; nil -> low -> medium -> nil
     (kargu-tune-cycle-reasoning-effort)
-    (should (eq kargu-reasoning-effort 'low))
+    (should (eq (kargu-selection-effort) 'low))
     (kargu-tune-cycle-reasoning-effort)
-    (should (eq kargu-reasoning-effort 'medium))
+    (should (eq (kargu-selection-effort) 'medium))
     (kargu-tune-cycle-reasoning-effort)
-    (should (null kargu-reasoning-effort))))
+    (should (null (kargu-selection-effort)))))
 
 (provide 'tests/test-metadata)
 

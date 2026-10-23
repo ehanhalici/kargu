@@ -1,8 +1,12 @@
-;;; kargu/languages/python.el --- Python language profile for Kargu -*- lexical-binding: t; -*-
+;;; python.el --- Python language profile for Kargu -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Part of kargu.
+
+;;; Commentary:
+
+;; Register Python modes, project detection and toolchain metadata.
 
 ;;; Code:
 
@@ -14,9 +18,10 @@
    :name "Python"
    :priority 80
    :extensions '("py" "pyi")
+   :modes '(python-mode python-ts-mode)
    :detectors '("pyproject.toml" "setup.py" "setup.cfg" "requirements.txt" "Pipfile")
    :toolchain
-   '(:build-cmd "python -m py_compile <file>"
+   '(:build-cmd "python -m compileall -q ."
      :test-cmd "pytest || python -m unittest discover"
      :lint-cmd "ruff check || mypy ."
      :notes "Run tests using `pytest` via `bash`. Check typing with `mypy` or `ruff`.")
@@ -39,10 +44,11 @@
      :purpose "Language Server for Python (code analysis and symbol navigation)"
      :hint "pip install pyright (or pip install python-lsp-server)")
    :lsp-notes
-   "Python symbols: functions (def), classes (class), async functions, methods. Pyright/Basedpyright provides precise symbol outlines."))
+   "Python symbols: functions (def), classes (class), async functions, methods. Pyright/Basedpyright provides precise symbol outlines.")
+  "Language profile for Python buffers and projects.")
 
 (kargu-language-register kargu-language-python-spec)
 
 (provide 'kargu/languages/python)
 
-;;; kargu/languages/python.el ends here
+;;; python.el ends here

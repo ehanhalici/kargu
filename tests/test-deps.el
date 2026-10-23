@@ -3,23 +3,22 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Ensure the package root is on `load-path` during byte/native compilation.
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'ert)
+(require 'tests/test-helpers)
 (require 'cl-lib)
 (require 'kargu)
 (require 'kargu/tools/deps)
 (require 'kargu/chat)
+
+(ert-deftest kargu-deps-optional-integrations-do-not-block-test ()
+  "Neither an absent adapter package nor a language server blocks chat."
+  (let ((kargu-deps-mandatory-executables nil)
+        (kargu-deps-check-lsp-server t))
+    (cl-letf (((symbol-function 'kargu-deps-package-installed-p)
+               (lambda (pkg) (not (memq pkg '(eglot dape)))))
+              ((symbol-function 'kargu-deps--check-lsp-server)
+               (lambda (&rest _) (error "Must not check optional LSP"))))
+      (should-not (kargu-deps-missing)))))
 
 (ert-deftest kargu-deps-package-check-test ()
   "Ensure kargu-deps correctly identifies installed and missing packages."
@@ -57,7 +56,7 @@
             (let ((kargu-deps-mandatory-packages nil)
                   (kargu-deps-mandatory-executables nil)
                   (kargu-deps-check-lsp-server t))
-              (let ((missing (kargu-deps-missing temp-dir)))
+              (let ((missing (kargu-deps-missing temp-dir t)))
                 (should (= (length missing) 1))
                 (should (eq (plist-get (car missing) :type) 'lsp-server))
                 (should (string-match-p "rust-analyzer" (plist-get (car missing) :name)))
@@ -162,8 +161,8 @@
       (let ((buf (kargu-chat--buffer)))
         (unwind-protect
             (with-current-buffer buf
-              (setq-local kargu-chat--session-provider "opencode")
-              (setq-local kargu-chat--session-model "nemotron-3-ultra-free")
+              (setf (kargu-selection-provider) "opencode")
+              (setf (kargu-selection-model) "nemotron-3-ultra-free")
               (kargu-chat--ensure-prompt)
               (goto-char (point-max))
               (insert "My prompt")

@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (plz "0.9") (transient "0.7") (eglot "1.14") (dape "0.10") (magit "3.3"))
+;; Package-Requires: ((emacs "29.1") (plz "0.9"))
 ;; Keywords: tools, convenience, ai, lsp, debug
 ;; URL: https://github.com/kargu/kargu
 
@@ -73,6 +73,12 @@
 
 ;;; Code:
 
+(declare-function kargu-ui-confirm-install "kargu/ui/confirm" ())
+(declare-function kargu-diff-install "kargu/tools/diff" ())
+(declare-function kargu-chat-plan-install "kargu/chat/plan" ())
+(declare-function kargu-chat-session-reset "kargu/chat/session" ())
+(declare-function kargu-chat-refresh-mode "kargu/chat/header" (_mode))
+
 ;; Ensure the package root is on `load-path' during byte/native
 ;; compilation from a subdirectory (Magit-style kargu/core features).
 (eval-and-compile
@@ -100,24 +106,37 @@
 (require 'kargu/prompt)
 (require 'kargu/history)
 (require 'kargu/history/compact)
-(require 'kargu/history/compact)
 (require 'kargu/fs)
 (require 'kargu/api/circuit)
 (require 'kargu/api)
-(require 'kargu/tools/lsp)
-(require 'kargu/tools/search)
-(require 'kargu/tools/dape)
-(require 'kargu/tools/diff)
-(require 'kargu/tools/bash)
-(require 'kargu/tools/git)
-(require 'kargu/tools/skill)
-(require 'kargu/tools/webfetch)
 (require 'kargu/tools/deps)
+
+;; Tool implementations expose definitions; only composition activates them.
+(dolist (adapter '((kargu/tools/lsp . kargu-lsp-register-tools)
+                   (kargu/tools/search . kargu-search-register-tools)
+                   (kargu/tools/dape . kargu-dape-register-tools)
+                   (kargu/files . kargu-file-register-tools)
+                   (kargu/tools/diff . kargu-diff-register-tools)
+                   (kargu/tools/bash . kargu-bash-register-tools)
+                   (kargu/tools/git . kargu-git-register-tools)
+                   (kargu/tools/skill . kargu-skill-register-tools)
+                   (kargu/tools/webfetch . kargu-webfetch-register-tools)))
+  (when (require (car adapter) nil t)
+    (funcall (cdr adapter))))
+
+(when (featurep 'kargu/tools/diff) (kargu-diff-install))
+
+(when (and kargu-ui-enabled (require 'kargu/ui/confirm nil t))
+  (kargu-ui-confirm-install))
 (require 'kargu/loop)
-(require 'company nil t)
-(require 'kargu/chat)
-(require 'kargu/plan)
-(require 'kargu/ui)
+(when (and kargu-ui-enabled (require 'kargu/chat nil t))
+  (add-hook 'kargu-session-reset-hook #'kargu-chat-session-reset)
+  (kargu-state-subscribe :mode #'kargu-chat-refresh-mode)
+  (require 'company nil t)
+  (when (require 'kargu/plan nil t)
+    (require 'kargu/chat/plan)
+    (kargu-chat-plan-install))
+  (require 'kargu/ui nil t))
 
 (provide 'kargu)
 

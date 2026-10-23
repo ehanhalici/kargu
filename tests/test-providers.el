@@ -11,18 +11,6 @@
 
 ;;; Code:
 
-;; Ensure the package root is on `load-path' during byte/native compilation.
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'tests/test-helpers)
 (require 'ert)
 (require 'cl-lib)
@@ -71,11 +59,9 @@
 (ert-deftest kargu-providers-zero-url-toml-config-test ()
   "When TOML specifies only `apikey', URL is automatically resolved."
   (let* ((temp-config (make-temp-file "kargu-test-config-" nil ".toml"))
-         (kargu--config-cache nil)
-         (kargu--config-cache-path nil)
-         (kargu--config-mtime nil)
-         (kargu--session-provider nil)
-         (kargu--session-model nil))
+         (kargu-application--bound (kargu-application-create))
+         (kargu-session--context
+          (kargu-test-session-with-history :provider nil :model nil)))
     (unwind-protect
         (progn
           (with-temp-file temp-config
@@ -84,6 +70,8 @@
                     "apikey = \"sk-test-deepseek-12345\"\n"
                     "model = \"deepseek-chat\"\n"))
           (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
+            (should (kargu-ok-p (kargu-test-await
+                                (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
             (should (equal (kargu--provider-name) "deepseek"))
             ;; API base should resolve to DeepSeek's default URL automatically:
             (should (equal (kargu--api-base) "https://api.deepseek.com/v1"))
@@ -96,11 +84,9 @@
 (ert-deftest kargu-providers-custom-url-override-test ()
   "When user specifies custom `api' in TOML, it overrides the built-in default."
   (let* ((temp-config (make-temp-file "kargu-test-config-" nil ".toml"))
-         (kargu--config-cache nil)
-         (kargu--config-cache-path nil)
-         (kargu--config-mtime nil)
-         (kargu--session-provider nil)
-         (kargu--session-model nil))
+         (kargu-application--bound (kargu-application-create))
+         (kargu-session--context
+          (kargu-test-session-with-history :provider nil :model nil)))
     (unwind-protect
         (progn
           (with-temp-file temp-config
@@ -109,6 +95,8 @@
                     "api = \"https://my-custom-proxy.internal/v1\"\n"
                     "apikey = \"sk-test-custom-key\"\n"))
           (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
+            (should (kargu-ok-p (kargu-test-await
+                                (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
             (should (equal (kargu--provider-name) "deepseek"))
             ;; User-provided API base must take precedence:
             (should (equal (kargu--api-base) "https://my-custom-proxy.internal/v1"))
@@ -118,16 +106,17 @@
 (ert-deftest kargu-providers-env-key-resolution-test ()
   "Environment variable specific to active provider is used if TOML omits apikey."
   (let* ((temp-config (make-temp-file "kargu-test-config-" nil ".toml"))
-         (kargu--config-cache nil)
-         (kargu--config-cache-path nil)
-         (kargu--config-mtime nil)
-         (kargu--session-provider "groq")
+         (kargu-application--bound (kargu-application-create))
+         (kargu-session--context
+          (kargu-test-session-with-history :provider "groq"))
          (kargu-api-key nil))
     (unwind-protect
         (progn
           (with-temp-file temp-config
             (insert "provider = \"groq\"\n"))
           (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
+            (should (kargu-ok-p (kargu-test-await
+                                (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
             (setenv "GROQ_API_KEY" "gsk_test_groq_env_key")
             (unwind-protect
                 (progn
@@ -152,13 +141,13 @@
 
 (ert-deftest kargu-providers-session-switch-test ()
   "`kargu-set-provider' sets session provider, model from live cache, and resolves correct API base."
-  (let ((kargu--session-provider nil)
-        (kargu--session-model nil))
+  (let ((kargu-session--context
+         (kargu-test-session-with-history :provider nil :model nil)))
     (puthash "cerebras" '("llama3.1-70b") kargu--live-models-cache)
     (kargu-set-provider "cerebras")
-    (should (equal kargu--session-provider "cerebras"))
+    (should (equal (kargu-selection-provider) "cerebras"))
     (should (equal (kargu--api-base) "https://api.cerebras.ai/v1"))
-    (should (equal kargu--session-model "llama3.1-70b"))))
+    (should (equal (kargu-selection-model) "llama3.1-70b"))))
 
 (ert-deftest kargu-providers-generic-catalog-test ()
   "Keyless and local properties are driven by catalog.el and lookup is exact."
@@ -201,8 +190,7 @@
   (should (member "llama_cpp" (kargu-connected-providers)))
   ;; Without key, a cloud provider is not authenticated
   (let* ((empty-cfg (make-temp-file "kargu-empty-" nil ".toml"))
-         (kargu--config-cache nil)
-         (kargu--config-cache-path nil)
+         (kargu-application--bound (kargu-application-create))
          (kargu-api-key nil))
     (unwind-protect
         (cl-letf (((symbol-function 'kargu-config-file) (lambda () empty-cfg)))
@@ -221,14 +209,14 @@
         (kargu-thinking-budget 4096)
         (kargu-max-tokens 8192)
         (kargu-temperature 0.5)
-        (kargu--session-provider "deepseek")
-        (kargu--session-model "deepseek-chat")
-        (kargu--message-history '((("role" . "user") ("content" . "hello")))))
+        (kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "hello"))) :provider "deepseek" :model "deepseek-chat")))
     (let ((payload (kargu--build-payload)))
       (should (equal (kargu-aget payload "model") "deepseek-chat"))
       (should (equal (kargu-aget payload "temperature") 0.5))
       (should (equal (kargu-aget payload "max_tokens") 8192))
-      (should (equal (kargu-aget payload "max_completion_tokens") 8192))
+      (should-not (assoc "max_completion_tokens" payload))
       (should (equal (kargu-aget payload "reasoning_effort") "medium"))
       ;; deepseek's format carries effort top-level only: no second shape.
       (should-not (assoc "reasoning" payload))
@@ -251,18 +239,19 @@
   (require 'kargu/chat/tune)
   (require 'kargu/api/catalog)
   (let ((kargu-reasoning-effort nil)
-        (kargu--session-model "test/cycle-model"))
+        (kargu-session--context
+         (kargu-test-session-with-history :model "test/cycle-model")))
     (kargu-model-set-metadata "test/cycle-model"
                               '(:id "cycle-model"
                                     :reasoning-efforts ("low" "medium" "high")))
     (kargu-tune-cycle-reasoning-effort)
-    (should (eq kargu-reasoning-effort 'low))
+    (should (eq (kargu-selection-effort) 'low))
     (kargu-tune-cycle-reasoning-effort)
-    (should (eq kargu-reasoning-effort 'medium))
+    (should (eq (kargu-selection-effort) 'medium))
     (kargu-tune-cycle-reasoning-effort)
-    (should (eq kargu-reasoning-effort 'high))
+    (should (eq (kargu-selection-effort) 'high))
     (kargu-tune-cycle-reasoning-effort)
-    (should (null kargu-reasoning-effort))))
+    (should (null (kargu-selection-effort)))))
 
 (ert-deftest kargu-providers-catalog-prompt-caching-completeness-test ()
   "Ensure every provider in `kargu-providers-builtin-catalog' defines `:prompt-caching'."
@@ -297,9 +286,9 @@
   (require 'kargu/api/tools)
   (kargu-register-tool "mock_tool" "A mock tool for testing" nil #'ignore)
   (let ((_ (kargu-test-mode 'agent))
-        (kargu--session-provider "openrouter")
-        (kargu--session-model "anthropic/claude-3.5-sonnet")
-        (kargu--message-history '((("role" . "user") ("content" . "hello")))))
+        (kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "hello"))) :provider "openrouter" :model "anthropic/claude-3.5-sonnet")))
     (let* ((payload (kargu--build-payload))
            (tools (kargu-aget payload "tools")))
       (should (vectorp tools))
@@ -314,9 +303,9 @@
   (require 'kargu/api/tools)
   (kargu-register-tool "mock_tool" "A mock tool for testing" nil #'ignore)
   (let ((_ (kargu-test-mode 'agent))
-        (kargu--session-provider "ollama")
-        (kargu--session-model "llama3")
-        (kargu--message-history '((("role" . "user") ("content" . "hello")))))
+        (kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "hello"))) :provider "ollama" :model "llama3")))
     (let* ((payload (kargu--build-payload))
            (tools (kargu-aget payload "tools")))
       (should (vectorp tools))
@@ -328,12 +317,14 @@
   "Ensure `kargu--build-payload' attaches `cache_control' to last completed turn for caching providers."
   (require 'kargu/api/http)
   (require 'kargu/api/tools)
-  (let ((kargu--session-provider "openrouter")
-        (kargu--session-model "anthropic/claude-3.5-sonnet")
-        (kargu--message-history '((("role" . "system") ("content" . "You are a coding assistant."))
-                                  (("role" . "user") ("content" . "Hello 1"))
-                                  (("role" . "assistant") ("content" . "Hi there 1"))
-                                  (("role" . "user") ("content" . "Hello 2")))))
+  (let (
+
+        (kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "system") ("content" . "You are a coding assistant."))
+                      (("role" . "user") ("content" . "Hello 1"))
+                      (("role" . "assistant") ("content" . "Hi there 1"))
+                      (("role" . "user") ("content" . "Hello 2"))) :provider "openrouter" :model "anthropic/claude-3.5-sonnet")))
     (let* ((payload (kargu--build-payload))
            (msgs (kargu-aget payload "messages")))
       (should (vectorp msgs))
@@ -341,7 +332,8 @@
       ;; Turn 2 (assistant) should have cache_control breakpoint
       (let ((prev-turn (aref msgs 2)))
         (should (equal (kargu-aget prev-turn "role") "assistant"))
-        (should (equal (kargu-aget prev-turn "cache_control")
+        (should-not (assoc "cache_control" prev-turn))
+        (should (equal (kargu-aget (aref (kargu-aget prev-turn "content") 0) "cache_control")
                        '(("type" . "ephemeral")))))
       ;; Latest turn (user 2) should NOT have cache_control
       (let ((curr-turn (aref msgs 3)))
@@ -353,16 +345,19 @@
   (require 'kargu/api/http)
   (require 'kargu/api/tools)
   (cl-letf (((symbol-function 'kargu--build-tools-vector) (lambda () [])))
-    (let ((kargu--session-provider "anthropic")
-          (kargu--session-model "claude-3-5-sonnet-20241022")
-          (kargu--message-history '((("role" . "system") ("content" . "System instructions"))
-                                    (("role" . "user") ("content" . "Hello")))))
+    (let (
+
+          (kargu-session--context
+           (kargu-test-session-with-history
+            :messages '((("role" . "system") ("content" . "System instructions"))
+                        (("role" . "user") ("content" . "Hello"))) :provider "anthropic" :model "claude-3-5-sonnet-20241022")))
       (let* ((payload (kargu--build-payload))
              (msgs (kargu-aget payload "messages")))
         (should (vectorp msgs))
         (let ((sys-msg (aref msgs 0)))
           (should (equal (kargu-aget sys-msg "role") "system"))
-          (should (equal (kargu-aget sys-msg "cache_control")
+          (should-not (assoc "cache_control" sys-msg))
+          (should (equal (kargu-aget (aref (kargu-aget sys-msg "content") 0) "cache_control")
                          '(("type" . "ephemeral")))))))))
 
 (provide 'tests/test-providers)

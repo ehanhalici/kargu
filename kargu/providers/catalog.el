@@ -32,21 +32,17 @@ Each entry is `:path' and `:type' (`list' or `csv').")
         :auth bearer
         :stream t
         :reasoning-shape nested
-        :params-menu kargu-tune-openrouter-menu
         :cache-marker t
         :default-headers (("HTTP-Referer" . :app-url) ("X-Title" . "kargu"))
         :models (:reasoning-efforts ,kargu-provider--effort-list)))
     (gemini
      . (:chat-path "/chat/completions"
         :auth bearer
-        :stream t
-        :params-menu kargu-tune-gemini-menu
-        :params-post kargu-provider-params--postprocess-gemini))
+        :stream t))
     (ollama
      . (:chat-path "/chat/completions"
         :auth bearer
         :stream t
-        :params-menu kargu-tune-ollama-menu
         :native-models (:path "/api/tags" :unless-suffix "/v1")))
     (anthropic
      . (:chat-path "/messages"
@@ -54,8 +50,6 @@ Each entry is `:path' and `:type' (`list' or `csv').")
         :stream nil
         :default-headers (("anthropic-version" . "2023-06-01"))
         :reasoning-shape thinking
-        :params-menu kargu-tune-anthropic-menu
-        :params-post kargu-provider-params--postprocess-anthropic
         :cache-marker t
         :message-shape blocks
         :response-shape blocks
@@ -75,6 +69,9 @@ Each entry is `:path' and `:type' (`list' or `csv').")
         :finish-default "stop"
         :usage (("input_tokens" . "prompt_tokens")
                 ("output_tokens" . "completion_tokens"))
+        :cache-usage (:read "cache_read_input_tokens"
+                      :write "cache_creation_input_tokens"
+                      :input-excludes-cache t)
         :detect ("stop_reason")
         :detect-type "message")))
   "Wire records keyed by catalog format symbol.
@@ -83,10 +80,6 @@ for providers that enable prompt caching.  `:native-models' names the models
 path of a server whose own API differs from the OpenAI one, used unless the
 base URL ends in the given suffix.  A header value `:app-url' or `:session'
 is filled in when the request is built.
-`:params-menu' is the transient command that tunes the provider's own
-parameters (default `kargu-tune-openapi-menu'); `:params-post' is the
-function that shapes those parameters for the wire, called with the
-provider id, the nested blocks table and the top-level entries.
 `:reasoning-shape' says how the request carries reasoning settings:
 `effort' (default, top-level `reasoning_effort'), `nested' (a `reasoning'
 object) or `thinking' (a `thinking' object with a token budget).
@@ -921,11 +914,13 @@ that format's `:models' map.")
      :env ("OPENAI_API_KEY")
      :npm "@ai-sdk/openai"
      :format openapi
+     :request (:max-output-key "max_completion_tokens" :sampling-parameters nil)
      :prompt-caching t)
     (:id "opencode"
      :name "OpenCode Zen"
      :api "https://opencode.ai/zen/v1"
      :models-api "https://opencode.ai/zen/v1/models"
+     :models-auth none
      :usage-api "https://opencode.ai/zen/v1/user"
      :env ("OPENCODE_API_KEY")
      :extra-headers (("x-opencode-session" . :session))
@@ -936,6 +931,7 @@ that format's `:models' map.")
      :name "OpenCode Go"
      :api "https://opencode.ai/zen/go/v1"
      :models-api "https://opencode.ai/zen/go/v1/models"
+     :models-auth none
      :env ("OPENCODE_API_KEY")
      :extra-headers (("x-opencode-session" . :session))
      :npm "@ai-sdk/openai-compatible"
@@ -946,6 +942,7 @@ that format's `:models' map.")
      :api "https://openrouter.ai/api/v1"
      :models-api "https://openrouter.ai/api/v1/models"
      :usage-api "https://openrouter.ai/api/v1/auth/key"
+     :extra-headers (("x-session-id" . :session))
      :env ("OPENROUTER_API_KEY")
      :npm "@openrouter/ai-sdk-provider"
      :format openrouter

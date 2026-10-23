@@ -1,4 +1,4 @@
-;;; kargu/loop/compact.el --- At most one compaction turn per run -*- lexical-binding: t; -*-
+;;; compact.el --- At most one compaction turn per run -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -16,15 +16,15 @@
 (require 'kargu/history)
 (require 'kargu/history/compact)
 (require 'kargu/api)
+(require 'kargu/confirm)
+(declare-function kargu-loop--wrap "kargu/loop" (run function))
 
 (defvar kargu-max-iterations)
-(defvar kargu--compaction-system)
 (declare-function kargu-loop--live-p "kargu/loop" (run))
 (declare-function kargu-loop--set-state "kargu/loop" (run state))
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
 (declare-function kargu--loop-request "kargu/loop/machine" (run prompt))
 (declare-function kargu-loop--turn-cap "kargu/loop/machine" (run))
-(declare-function kargu-ui-confirm "kargu/ui/confirm" (&rest plist))
 (declare-function kargu-circuit-reset "kargu/api/circuit" ())
 
 (defun kargu--loop-compact-allowed-p (run)
@@ -33,8 +33,8 @@
        (< (or (plist-get run :compactions) 0) 1)))
 
 (defun kargu--loop-start-compact (run prompt)
-  "Begin the single compaction turn for RUN, counting as one iteration.
-Return non-nil if started."
+  "Begin the single compaction turn for RUN and save PROMPT for resuming.
+Count one iteration and return non-nil if started."
   (when (and (kargu-loop--live-p run)
              (kargu--loop-compact-allowed-p run))
     (let ((iterations (1+ (or (plist-get run :iterations) 0))))
@@ -55,14 +55,14 @@ Return non-nil if started."
     (plist-put run :saved-no-tools (plist-get run :no-tools))
     (plist-put run :no-tools t)
     (plist-put run :compact-tail (kargu-history-compact-tail))
-    (setq kargu--compaction-system kargu-prompt-compaction-system)
+    (setf (kargu-history-overlay) kargu-prompt-compaction-system)
     ;; The request is its own user turn; it must never merge into a previous one.
     (when (equal (kargu--history-last-role) "user")
       (kargu--history-add "assistant" "Understood."))
     (kargu-api-send
      kargu-prompt-compaction-user
-     (lambda (response)
-       (kargu--loop-handle-compaction run response)))))
+     (kargu-loop--wrap run (lambda (response)
+                             (kargu--loop-handle-compaction run response))))))
 
 (defconst kargu-loop--on-compaction
   '((error . kargu-loop--compaction-fail)
@@ -87,7 +87,7 @@ Return non-nil if started."
              (string-match-p "stream exceeded ceiling" s)))))
 
 (defun kargu-loop--compaction-apply-retry (run err decision)
-  "Retry the compaction of RUN, or finish it with ERR."
+  "Apply DECISION to retry RUN's compaction, or finish it with ERR."
   (cond
    ((not (kargu-loop--live-p run)) nil)
    ((eq decision :retry)
@@ -100,8 +100,8 @@ Return non-nil if started."
     (kargu--loop-finish run :error err))))
 
 (defun kargu-loop--compaction-prompt-retry (run err)
-  "Ask whether to retry the compaction that failed with ERR."
-  (kargu-ui-confirm
+  "Ask whether to retry RUN's compaction that failed with ERR."
+  (kargu-confirm
    :title "⚠️  [Compaction Interrupted / Network Error]"
    :details (format "Compaction failed or timed out:\n%s" err)
    :notice "Choose whether to retry compaction or stop the current agent run."
@@ -158,15 +158,17 @@ A timeout asks whether to retry the compaction.  Other errors end the run."
 
 (defun kargu--loop-handle-compaction (run response)
   "Apply the compaction RESPONSE of RUN and continue the original work."
-  (setq kargu--compaction-system nil)
   (when (kargu-loop--live-p run)
-    (plist-put run :compacting nil)
-    (plist-put run :no-tools (plist-get run :saved-no-tools))
-    (plist-put run :saved-no-tools nil)
-    (funcall (alist-get (kargu-loop--classify-compaction response)
-                        kargu-loop--on-compaction)
-             run response)))
+    (let ((origin (plist-get run :chat-buffer)))
+      (with-current-buffer (if (buffer-live-p origin) origin (current-buffer))
+        (setf (kargu-history-overlay (plist-get run :history)) nil)
+        (plist-put run :compacting nil)
+        (plist-put run :no-tools (plist-get run :saved-no-tools))
+        (plist-put run :saved-no-tools nil)
+        (funcall (alist-get (kargu-loop--classify-compaction response)
+                            kargu-loop--on-compaction)
+                 run response)))))
 
 (provide 'kargu/loop/compact)
 
-;;; kargu/loop/compact.el ends here
+;;; compact.el ends here

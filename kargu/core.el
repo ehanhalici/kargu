@@ -1,4 +1,4 @@
-;;; kargu/core.el --- Slim core: helpers, mode, env -*- lexical-binding: t; -*-
+;;; core.el --- Slim core: helpers, mode, env -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -22,7 +22,7 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'subr-x)
+(require 'kargu/core/data)
 
 (require 'kargu/contract/constants)
 (require 'kargu/contract)
@@ -30,73 +30,33 @@
 (require 'kargu/core/custom)
 (require 'kargu/core/log)
 (require 'kargu/core/session)
-
-;;;; Alist helpers --------------------------------------------------------
-
-(defun kargu-aget (alist key &optional default)
-  "Return the value for string KEY in ALIST, or DEFAULT.
-Safely handles malformed alists, dotted pairs, and non-list data."
-  (if (and (consp alist) (listp (cdr alist)))
-      (condition-case nil
-          (alist-get key alist default nil #'equal)
-        (error default))
-    default))
-
-(defun kargu-nonempty (value)
-  "VALUE if it is a non-empty string, else nil."
-  (and (stringp value) (not (string-empty-p value)) value))
-
-(defalias 'kargu--aget #'kargu-aget)
-(defalias 'kargu--nonempty #'kargu-nonempty)
-
-(defun kargu-to-int (value &optional default)
-  "Coerce VALUE to an integer, or return DEFAULT (defaults to nil).
-Handles integers, floats (rounded), and integer strings."
-  (cond
-   ((integerp value) value)
-   ((numberp value) (round value))
-   ((stringp value)
-    (or (ignore-errors (cl-parse-integer (string-trim value) :junk-allowed t))
-        default))
-   (t default)))
-
-(defun kargu-cap-text (text limit &optional label)
-  "TEXT cut to LIMIT characters, with a one-line note when it was cut.
-The note names LABEL (default \"text\") and the original length.  A
-non-natural LIMIT leaves TEXT alone.  This is the one wording for a cut
-that is not the model-bound tool output (see `kargu--truncate-for-model')."
-  (if (and (natnump limit) (> (length text) limit))
-      (concat (substring text 0 limit)
-              (format "\n... [%s truncated: %d of %d chars shown]"
-                      (or label "text") limit (length text)))
-    text))
+(require 'kargu/application/mode)
 
 ;;;; Mode state -----------------------------------------------------------
 
 (defun kargu--publish-mode (mode)
-  "Refresh chat footers and the mode line after MODE changes."
+  "Report the committed MODE; optional views observe state notifications."
   (kargu-log 'info "mode set to `%s'" mode)
-  (dolist (buf (buffer-list))
-    (when (and (buffer-live-p buf)
-               (with-current-buffer buf (derived-mode-p 'kargu-chat-mode)))
-      (with-current-buffer buf
-        (when (fboundp 'kargu-chat-refresh-footer)
-          (kargu-chat-refresh-footer)))))
   (force-mode-line-update t)
   (message "kargu mode: %s" mode))
 
-(defun kargu-set-mode (mode)
-  "Set the active mode to MODE (`ask', `plan', `debug' or `agent')."
+(defun kargu-set-mode (mode &optional callback)
+  "Set the owning session's MODE after asynchronous preparation.
+Optional CALLBACK receives (MODE ERROR), including cancellation."
   (interactive
    (list (intern (completing-read "kargu mode: "
                                   '("ask" "plan" "debug" "agent")
                                   nil t))))
-  (kargu-contract-assert #'kargu-contract-mode-p mode
-                         "Unknown kargu mode: %s (expected one of %s)"
-                         mode kargu-all-modes)
-  (kargu-state-set-mode mode)
-  (kargu--publish-mode mode)
-  mode)
+  (kargu-mode-prepare
+   mode (lambda (ready error)
+          (let ((failure error))
+            (unless failure
+              (condition-case err
+                  (progn (kargu-state-set-mode ready) (kargu--publish-mode ready))
+                (error (setq failure (error-message-string err)))))
+            (cond
+             (callback (funcall callback (unless failure ready) failure))
+             (failure (message "Kargu: %s" failure)))))))
 
 (defun kargu-mode-ask ()
   "Switch kargu to ask mode (read-only answers)."
@@ -120,5 +80,4 @@ that is not the model-bound tool output (see `kargu--truncate-for-model')."
 
 (provide 'kargu/core)
 
-;;; kargu/core.el ends here
-
+;;; core.el ends here

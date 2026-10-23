@@ -3,24 +3,65 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Ensure the package root is on `load-path` during byte/native compilation.
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/languages)
 (require 'kargu/tools/toolchain)
 (require 'kargu/tools/deps)
 (require 'kargu/chat)
+
+(ert-deftest kargu-language-elisp-commands-validate-real-files-test ()
+  "Build and lint see real filenames, and ERT loads an existing runner."
+  (kargu-test-with-git-repo
+      '(("a space.el" . "(defun fixture () t)\n")
+        ("broken.el" . "(defun broken (\n"))
+    (let* ((toolchain (kargu-language-elisp-toolchain repo))
+           (build (plist-get toolchain :build-cmd))
+           (lint (plist-get toolchain :lint-cmd)))
+      (should-not (plist-get toolchain :test-cmd))
+      (dolist (command (list build lint))
+        (let ((result (kargu-test-await
+                       (lambda (callback)
+                         (kargu-process-run "sh" (list "-c" command) callback :dir repo)))))
+          (should-not (= (plist-get result :code) 0))))
+      (write-region "(defun fixed () t)\n" nil (expand-file-name "broken.el" repo))
+      (dolist (command (list build lint))
+        (let ((result (kargu-test-await
+                       (lambda (callback)
+                         (kargu-process-run "sh" (list "-c" command) callback :dir repo)))))
+          (should (= (plist-get result :code) 0))))
+      (should (file-exists-p (expand-file-name "a space.elc" repo)))
+      (make-directory (expand-file-name "tests" repo))
+      (write-region
+       "(require 'ert)\n(ert-deftest fixture-fails () (should nil))\n(ert-run-tests-batch-and-exit)\n"
+       nil (expand-file-name "tests/run-tests.el" repo))
+      (let* ((command (plist-get (kargu-language-elisp-toolchain repo) :test-cmd))
+             (result (kargu-test-await
+                      (lambda (callback)
+                        (kargu-process-run "sh" (list "-c" command) callback :dir repo)))))
+        (should-not (= (plist-get result :code) 0))
+        (should (string-search "fixture-fails" (plist-get result :stderr)))))))
+
+(ert-deftest kargu-languages-unsaved-buffer-major-modes-test ()
+  "Language profiles work before a buffer has any file or project marker."
+  (dolist (entry '((rust rust-mode rust-ts-mode rustic-mode)
+                   (python python-mode python-ts-mode)
+                   (golang go-mode go-ts-mode)
+                   (c c-mode c-ts-mode)
+                   (cpp c++-mode c++-ts-mode)
+                   (java java-mode java-ts-mode)
+                   (haskell haskell-mode literate-haskell-mode haskell-ts-mode)
+                   (ocaml tuareg-mode caml-mode ocaml-ts-mode)))
+    (dolist (mode (cdr entry))
+      (with-temp-buffer
+        (setq major-mode mode buffer-file-name nil)
+        (let ((spec (kargu-language-for-buffer)))
+          (should spec)
+          (should (eq (kargu-language-spec-id spec) (car entry)))))))
+  (with-temp-buffer
+    (setq major-mode 'kargu-test-derived-rust-mode)
+    (cl-letf (((get 'kargu-test-derived-rust-mode 'derived-mode-parent) 'rust-mode))
+      (should (eq (kargu-language-spec-id (kargu-language-for-buffer)) 'rust)))))
 
 (ert-deftest kargu-languages-registered-all-test ()
   "Ensure every target language is registered with a valid spec."
@@ -31,7 +72,8 @@
         (should (eq (kargu-language-spec-id spec) id))
         (should (stringp (kargu-language-spec-name spec)))
         (should (consp (kargu-language-spec-extensions spec)))
-        (should (plist-get (kargu-language-toolchain spec default-directory) :build-cmd))
+        (unless (eq id 'javascript)
+          (should (plist-get (kargu-language-toolchain spec default-directory) :build-cmd)))
         (when (kargu-language-requires-lsp-p spec)
           (should (plist-get (kargu-language-spec-lsp spec) :binaries)))
         (should (plist-get (kargu-language-spec-debugger spec) :adapter))))))
@@ -154,11 +196,14 @@
                (eq (buffer-local-value 'major-mode buf) 'kargu-chat-mode))
       (kill-buffer buf))))
 
-(ert-deftest kargu-languages-elisp-requires-eglot-and-does-not-ask ()
-  "Emacs Lisp requires a language server and never asks for a project root."
+(ert-deftest kargu-languages-elisp-uses-native-tools-without-a-server-test ()
+  "Emacs Lisp uses built-in navigation and never requires an external server."
   (let ((spec (kargu-language-get 'emacs-lisp)))
-    (should (kargu-language-requires-lsp-p spec))
-    (should (member "ellsp" (plist-get (kargu-language-spec-lsp spec) :binaries)))
+    (should-not (kargu-language-requires-lsp-p spec))
+    (should-not (kargu-language-spec-lsp spec))
+    (cl-letf (((symbol-function 'executable-find) (lambda (_) nil))
+              ((symbol-function 'kargu-deps--active-eglot-server-p) #'ignore))
+      (should-not (kargu-deps--check-lsp-server spec)))
     (with-temp-buffer
       (emacs-lisp-mode)
       (should (eq (kargu-language-spec-id (kargu-language-for-buffer))
@@ -168,8 +213,8 @@
       (should (eq (kargu-language-spec-id (kargu-language-for-buffer))
                   'emacs-lisp)))))
 
-(ert-deftest kargu-languages-emacs-lisp-without-eglot-blocks-the-prompt ()
-  "An Emacs Lisp buffer without Eglot shows the error and does not ask for a root."
+(ert-deftest kargu-languages-emacs-lisp-without-eglot-allows-the-prompt ()
+  "Emacs Lisp works without Eglot and never asks for a directory."
   (let ((root (make-temp-file "kargu-el-noeglot-" t))
         (kargu-session-auto-restore nil)
         (kargu-context-buffer nil)
@@ -182,18 +227,14 @@
           (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
                     ((symbol-function 'read-directory-name)
                      (lambda (&rest _) (error "should not ask for a directory"))))
-            (should (kargu-chat--workspace-blocked-p))
             (kargu-chat-show)
-            (should kargu-chat--awaiting-eglot)
-            (should-not (kargu-chat--prompt-live-p))
-            (should (string-match-p "Eglot is not connected" (buffer-string)))
-            (should-not (string-match-p "no language server" (buffer-string)))
-            (should-error (kargu-chat--send-input) :type 'user-error)))
+            (should (kargu-chat--prompt-live-p))
+            (should (string-search kargu-eglot-required-message (buffer-string)))))
       (kargu-languages--kill-chats)
       (delete-directory root t))))
 
-(ert-deftest kargu-languages-without-eglot-blocks-the-prompt ()
-  "A project with no Eglot connection shows the error and has no prompt."
+(ert-deftest kargu-languages-without-eglot-allows-the-prompt ()
+  "A project without a language server keeps a usable prompt."
   (let ((root (make-temp-file "kargu-noeglot-" t))
         (kargu-session-auto-restore nil)
         (kargu-context-buffer nil)
@@ -205,18 +246,16 @@
           (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
                     ((symbol-function 'read-directory-name)
                      (lambda (&rest _) (error "should not ask for a directory"))))
-            (should (kargu-chat--workspace-blocked-p))
             (kargu-chat-show)
-            (should kargu-chat--awaiting-eglot)
-            (should-not (kargu-chat--prompt-live-p))
-            (should (string-match-p "Eglot is not connected" (buffer-string)))
-            (should-error (kargu-chat--send-input) :type 'user-error)))
+            (should (kargu-chat--prompt-live-p))
+            (should (string-search kargu-eglot-required-message (buffer-string)))))
       (kargu-languages--kill-chats)
       (delete-directory root t))))
 
 (ert-deftest kargu-languages-eglot-connection-allows-the-prompt ()
   "A live Eglot server for this project allows the prompt."
   (let ((root (make-temp-file "kargu-eglot-ok-" t))
+        (kargu-permission--override-root nil)
         (kargu-session-auto-restore nil)
         (kargu-context-buffer nil)
         (noninteractive nil)
@@ -231,12 +270,12 @@
             (setq default-directory (file-name-as-directory root))
             (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
                       ((symbol-function 'eglot-current-server) (lambda () t))
+                      ((symbol-function 'kargu-permission-eglot-server-root)
+                       (lambda (_) root))
                       ((symbol-function 'read-directory-name)
                        (lambda (&rest _) (error "should not ask for a directory"))))
               (should (kargu-eglot-connected-p))
-              (should-not (kargu-chat--workspace-blocked-p))
               (kargu-chat-show)
-              (should-not kargu-chat--awaiting-eglot)
               (should (kargu-chat--prompt-live-p)))))
       (kargu-languages--kill-chats)
       (when (buffer-live-p eglot-buf) (kill-buffer eglot-buf))
@@ -245,6 +284,7 @@
 (ert-deftest kargu-languages-emacs-lisp-eglot-allows-the-prompt ()
   "A live Eglot server in an Emacs Lisp buffer allows the prompt and does not ask."
   (let ((root (make-temp-file "kargu-el-eglot-" t))
+        (kargu-permission--override-root nil)
         (kargu-session-auto-restore nil)
         (kargu-context-buffer nil)
         (noninteractive nil))
@@ -256,15 +296,51 @@
           (setq-local eglot--managed-mode t)
           (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
                     ((symbol-function 'eglot-current-server) (lambda () t))
+                    ((symbol-function 'kargu-permission-eglot-server-root)
+                     (lambda (_) root))
                     ((symbol-function 'read-directory-name)
                      (lambda (&rest _) (error "should not ask for a directory"))))
             (should (kargu-eglot-connected-p))
-            (should-not (kargu-chat--workspace-blocked-p))
             (kargu-chat-show)
-            (should-not kargu-chat--awaiting-eglot)
             (should (kargu-chat--prompt-live-p))))
       (kargu-languages--kill-chats)
       (delete-directory root t))))
+
+(ert-deftest kargu-languages-js-build-step-must-exist-test ()
+  "Plain JavaScript never advertises an absent build script."
+  (let ((root (make-temp-file "kargu-js-build-" t)))
+    (unwind-protect
+        (dolist (entry '(("{}" nil)
+                         ("{\"scripts\":{\"test\":\"node test.js\"}}" nil)
+                         ("{\"scripts\":{\"build\":\"\"}}" nil)
+                         ("{\"scripts\":{\"build\":\"bundler\"}}" "npm run build")))
+          (write-region (car entry) nil (expand-file-name "package.json" root) nil 'silent)
+          (should (equal (plist-get (kargu-language-js-toolchain root) :build-cmd)
+                         (cadr entry))))
+      (delete-directory root t))))
+
+(ert-deftest kargu-languages-python-build-has-no-placeholder-test ()
+  "Python compilation is project-wide and contains no unexpanded file marker."
+  (should (equal (plist-get (kargu-language-toolchain (kargu-language-get 'python))
+                            :build-cmd)
+                 "python -m compileall -q .")))
+
+(ert-deftest kargu-languages-nested-c-cpp-and-go-projects-test ()
+  "Source files in src/cmd directories participate in project detection."
+  (dolist (case '((c "src/main.c" "Makefile")
+                  (cpp "src/main.cpp" "CMakeLists.txt")
+                  (golang "cmd/app/main.go" nil)))
+    (let ((root (make-temp-file "kargu-language-nested-" t)))
+      (unwind-protect
+          (progn
+            (when (nth 2 case)
+              (with-temp-file (expand-file-name (nth 2 case) root) (insert "")))
+            (let ((file (expand-file-name (nth 1 case) root)))
+              (make-directory (file-name-directory file) t)
+              (with-temp-file file (insert "source")))
+            (should (eq (kargu-language-spec-id (kargu-language-detect root))
+                        (car case))))
+        (delete-directory root t)))))
 
 (provide 'tests/test-languages)
 
@@ -275,7 +351,8 @@
   (let ((dir (make-temp-file "kargu-web-" t)))
     (unwind-protect
         (progn
-          (write-region "{}" nil (expand-file-name "package.json" dir))
+          (write-region "{\"scripts\":{\"test\":\"node test.js\"}}" nil
+                        (expand-file-name "package.json" dir))
           (write-region "" nil (expand-file-name "pnpm-lock.yaml" dir))
           (should (eq (kargu-language-spec-id (kargu-language-detect dir)) 'javascript))
           (should (equal (plist-get (kargu-toolchain-detect dir) :test-cmd) "pnpm test"))

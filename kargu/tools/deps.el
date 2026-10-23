@@ -1,4 +1,4 @@
-;;; kargu/tools/deps.el --- Mandatory toolchain & dependency validation -*- lexical-binding: t; -*-
+;;; deps.el --- Mandatory toolchain & dependency validation -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -6,10 +6,10 @@
 
 ;;; Commentary:
 
-;; Validates presence of mandatory tools before Kargu can run:
-;;   * Emacs packages: plz, transient, eglot, dape, magit
-;;   * System executables: git, curl
-;;   * Project LSP server: rust-analyzer, gopls, pyright, clangd, etc.
+;; Validates the native model transport prerequisites: plz and curl.
+;; Optional UI, Git and editor adapters do not block unrelated runs.
+;; User-configured extra mandatory requirements are still enforced.
+;; Project LSP servers are checked only in optional setup diagnostics.
 ;;
 ;; If mandatory tools are missing:
 ;;   * Renders a clear and sensible error banner in the chat / prompt screen
@@ -38,8 +38,10 @@
   :prefix "kargu-deps-")
 
 (defcustom kargu-deps-mandatory-packages
-  '(plz transient eglot dape magit)
-  "List of mandatory Emacs packages required for Kargu operation."
+  '(plz)
+  "Packages required before starting a native model run.
+UI and editor integrations are optional.  Explicit additions still block
+run admission when absent; existing user customization is not rewritten."
   :type '(repeat symbol)
   :group 'kargu-deps)
 
@@ -69,8 +71,10 @@
   :group 'kargu-deps)
 
 (defcustom kargu-deps-mandatory-executables
-  '("git" "curl")
-  "List of mandatory CLI executables required for Kargu operation."
+  '("curl")
+  "Executables required before starting a native model run.
+Curl is the native HTTP transport.  Feature-specific tools such as Git
+are checked when used, unless explicitly added as a global requirement."
   :type '(repeat string)
   :group 'kargu-deps)
 
@@ -81,14 +85,14 @@
      :hint "Install git via your system package manager (e.g. apt install git / brew install git)")
     ("curl"
      :name "curl"
-     :purpose "HTTP client for documentation fetching tool (webfetch)"
+     :purpose "HTTP client for the native model transport and webfetch"
      :hint "Install curl via your system package manager (e.g. apt install curl / brew install curl)"))
   "Metadata for mandatory CLI executables."
   :type 'alist
   :group 'kargu-deps)
 
 (defcustom kargu-deps-check-lsp-server t
-  "Whether to require an LSP server for the detected project language."
+  "Whether optional setup diagnostics check the project's LSP server."
   :type 'boolean
   :group 'kargu-deps)
 
@@ -116,7 +120,7 @@ the defaults."
            (ignore-errors (package-installed-p pkg)))))
 
 (defun kargu-deps-executable-installed-p (exe)
-  "Return non-nil if executable EXE is found in `exec-path'."
+  "Return non-nil for EXE in the variable `exec-path'."
   (not (null (executable-find exe))))
 
 (defun kargu-deps--active-eglot-server-p (&optional root)
@@ -146,14 +150,13 @@ the defaults."
                     (kargu-language-detect proj))))
     (or spec
         (let ((file (or (buffer-file-name)
-                        (and (fboundp 'kargu--context-file)
-                             (kargu--context-file)))))
+                        (and (fboundp 'kargu-lsp-context-file)
+                             (kargu-lsp-context-file)))))
           (when (and file (fboundp 'kargu-language-detect-by-extension))
             (kargu-language-detect-by-extension file))))))
 
 (defun kargu-deps--check-lsp-server (lang-spec &optional root)
-  "Return plist of missing LSP server for LANG-SPEC, or nil if satisfied.
-A language whose spec sets `requires-lsp' to nil is satisfied."
+  "Return missing server information for LANG-SPEC in ROOT, or nil."
   (when (and kargu-deps-check-lsp-server
              lang-spec
              (kargu-language-requires-lsp-p lang-spec))
@@ -217,9 +220,10 @@ A language whose spec sets `requires-lsp' to nil is satisfied."
 
 ;;;; Main Validation Functions --------------------------------------------
 
-(defun kargu-deps-missing (&optional root)
+(defun kargu-deps-missing (&optional root include-optional)
   "Return a list of missing dependency plists for ROOT.
-Checks mandatory Emacs packages, system CLI executables, and project LSP server.
+Checks mandatory packages and CLI executables.  INCLUDE-OPTIONAL also
+checks the project LSP server for setup diagnostics, not run admission.
 Each plist contains:
   :id           - Symbol or string identifying the tool
   :name         - Human-readable name string
@@ -258,7 +262,7 @@ Each plist contains:
                 missing))))
 
     ;; 3. Check language-specific LSP server if project language detected
-    (when kargu-deps-check-lsp-server
+    (when (and include-optional kargu-deps-check-lsp-server)
       (when-let* ((lang-spec (kargu-deps-detect-project-language root))
                   (lsp-missing (kargu-deps--check-lsp-server lang-spec root)))
         (push lsp-missing missing)))
@@ -306,8 +310,8 @@ Each plist contains:
   "Signal a `user-error' if any mandatory tools are missing for ROOT."
   (when-let* ((missing (kargu-deps-missing root)))
     (let ((names (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", ")))
-      (user-error "kargu: cannot send prompt: mandatory tools are missing: %s (please install them first)" names))))
+      (user-error "Kargu: cannot send prompt: mandatory tools are missing: %s (please install them first)" names))))
 
 (provide 'kargu/tools/deps)
 
-;;; kargu/tools/deps.el ends here
+;;; deps.el ends here

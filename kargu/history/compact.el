@@ -1,4 +1,4 @@
-;;; kargu/history/compact.el --- History size compaction -*- lexical-binding: t; -*-
+;;; compact.el --- History size compaction -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -21,11 +21,19 @@
 
 (declare-function kargu--validate-history "kargu/history/repair")
 (declare-function kargu--history-fresh-system-message "kargu/history/repair" ())
-(declare-function kargu-model-context-window "kargu/api" (&optional model-id))
+(declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
+(declare-function kargu-tool-schema-char-count "kargu/api/tools" ())
+
+(defconst kargu-history--chars-per-token 3.5
+  "Estimated characters per token for text and code.")
+(defconst kargu-history--compact-ratio 0.70
+  "Fraction of a known context window available before compaction.")
+(defconst kargu-history--compact-ceiling 800000
+  "Largest dynamic compaction threshold in characters.")
 
 (defcustom kargu-history-compact-chars 45000
-  "Baseline character threshold for compaction when dynamic detection is disabled.
-When positive, serves as the minimum floor for dynamic compaction."
+  "Fallback character threshold when the model's context window is unknown.
+A known window takes precedence, even when smaller than this value."
   :type 'natnum
   :group 'kargu)
 
@@ -39,33 +47,36 @@ The suffix is walked back so it does not start on an orphan `tool' result."
 
 (defun kargu-history-compact-threshold ()
   "Dynamic character threshold to trigger history compaction.
-Calculated as 70% of the active model's context window capacity,
-bounded between `kargu-history-compact-chars' (default 45k) and 800k characters."
-  (let* ((ctx-tokens (and (fboundp 'kargu-model-context-window)
-                          (kargu-model-context-window)))
-         (floor-val (or kargu-history-compact-chars 45000))
-         ;; 1 token ≈ 3.5 characters in code/prose.  No window means the floor.
-         (calc (if (and (numberp ctx-tokens) (> ctx-tokens 0))
-                   (round (* ctx-tokens 3.5 0.70))
-                 floor-val)))
-    (max floor-val (min calc 800000))))
+Use 70% of the active model's window with 3.5 characters per token,
+capped at 800k characters.  With no known window, use the configured
+`kargu-history-compact-chars' fallback."
+  (kargu-history-context-threshold
+   (and (fboundp 'kargu-model-context-window) (kargu-model-context-window))))
+
+(defun kargu-history-context-threshold (ctx-tokens)
+  "Return the compaction character budget for explicit CTX-TOKENS.
+Use the configured fallback when that context window is unknown."
+  (let ((fallback (or kargu-history-compact-chars 45000)))
+    ;; Budget heuristic; actual tokenization is provider-specific.
+    (if (and (numberp ctx-tokens) (> ctx-tokens 0))
+        (min kargu-history--compact-ceiling
+             (max 1 (round (* ctx-tokens kargu-history--chars-per-token
+                              kargu-history--compact-ratio))))
+      fallback)))
 
 (defun kargu-history-char-count ()
-  "Approximate character cost of `kargu--message-history'."
-  (let ((n 0))
-    (dolist (msg kargu--message-history)
-      (let ((content (kargu-aget msg "content")))
-        (when (stringp content)
-          (setq n (+ n (length content)))))
-      (let ((calls (kargu-aget msg "tool_calls")))
-        (when calls
-          (setq n (+ n (length (format "%s" calls)))))))
-    n))
+  "Estimate serialized history and advertised schema character cost.
+Include system text, structured content, attachments and list/vector tool
+invocations.  Image tokenization remains provider-dependent."
+  (+ (kargu-history-message-char-count)
+     (if (fboundp 'kargu-tool-schema-char-count)
+         (kargu-tool-schema-char-count)
+       0)))
 
 (defun kargu-history-non-system-count ()
   "Number of non-system messages in the history."
   (let ((n 0))
-    (dolist (msg kargu--message-history)
+    (dolist (msg (kargu-history-messages))
       (unless (equal (kargu-aget msg "role") "system")
         (setq n (1+ n))))
     n))
@@ -91,10 +102,10 @@ System messages and compaction notices are dropped.  The suffix
 starts on a `user' role so the preceding assistant acknowledgment
 in the compaction summary preserves user/assistant turn alternation."
   (let (msgs)
-    (dolist (msg kargu--message-history)
+    (dolist (msg (kargu-history-messages))
       (unless (or (equal (kargu-aget msg "role") "system")
                   (kargu--history-compaction-msg-p msg))
-        (push (copy-tree msg) msgs)))
+        (push (copy-tree msg t) msgs)))
     (setq msgs (nreverse msgs))
     (let* ((slice (last msgs (max 1 kargu-history-compact-keep)))
            (tail slice))
@@ -111,19 +122,19 @@ in the compaction summary preserves user/assistant turn alternation."
 
 (defun kargu--history-drop-trailing-compaction ()
   "Remove a trailing compaction user turn if the request failed."
-  (when-let* ((last (car (last kargu--message-history))))
+  (when-let* ((last (car (last (kargu-history-messages)))))
     (when (and (equal (kargu-aget last "role") "user")
                (kargu--history-compaction-msg-p last))
-      (setq kargu--message-history (butlast kargu--message-history)))))
+      (setf (kargu-history-messages) (butlast (kargu-history-messages))))))
 
 (defun kargu-history-apply-compaction (summary tail)
   "Replace the history with SUMMARY plus preserved TAIL.
 The usual system prompt is restored (compaction overlay cleared)."
-  (setq kargu--compaction-system nil)
+  (setf (kargu-history-overlay) nil)
   (let* ((sys-msg (kargu--history-fresh-system-message))
          (kept (cl-remove-if #'kargu--history-compaction-msg-p tail))
          (first-kept-role (and kept (kargu-aget (car kept) "role"))))
-    (setq kargu--message-history
+    (setf (kargu-history-messages)
           (append
            (list sys-msg
                  `(("role" . "user")
@@ -137,10 +148,10 @@ The usual system prompt is restored (compaction overlay cleared)."
                      ("content" . "Please proceed with the task."))))
            kept))
     (kargu-log 'info "history compacted to %d messages (%d chars)"
-                     (length kargu--message-history)
-                     (kargu-history-char-count))
+               (length (kargu-history-messages))
+               (kargu-history-char-count))
     (kargu--validate-history 'keep-assistant-tail)))
 
 (provide 'kargu/history/compact)
 
-;;; kargu/history/compact.el ends here
+;;; compact.el ends here

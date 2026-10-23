@@ -3,18 +3,6 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Ensure the package root is on `load-path` during byte/native compilation.
-(eval-and-compile
-  (let ((root (locate-dominating-file
-               (or (bound-and-true-p byte-compile-current-file)
-                   load-file-name
-                   buffer-file-name
-                   default-directory)
-               "kargu.el")))
-    (when root
-      (add-to-list 'load-path (file-name-as-directory
-                               (expand-file-name root))))))
-
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/core)
@@ -22,7 +10,95 @@
 (require 'kargu/api)
 (require 'kargu/api/http)
 
-(declare-function kargu-model-read "kargu/api/catalog" (&optional model-id))
+(declare-function kargu-model-read "kargu/api/catalog" (&optional model-id provider))
+
+(ert-deftest kargu-catalog-public-opencode-does-not-resolve-secrets-test ()
+  "Only the declared public endpoint skips authentication, not custom URLs."
+  (dolist (provider '("opencode" "opencode-go"))
+    (let ((kargu--live-models-cache (make-hash-table :test #'equal)) seen result)
+      (cl-letf (((symbol-function 'kargu--resolve-api-key)
+                 (lambda (_) (error "Secret lookup must not run")))
+                ((symbol-function 'plz)
+                 (lambda (_method url &rest options)
+                   (setq seen url)
+                   (should (plist-get options :timeout))
+                   (should-not (assoc "Authorization" (plist-get options :headers)))
+                   (funcall (plist-get options :then) "{\"data\":[{\"id\":\"live-model\"}]}"))))
+        (kargu-api-fetch-model-ids provider (lambda (ids) (setq result ids)))
+        (should (equal seen (kargu-provider-models-api provider)))
+        (should (equal result '("live-model")))))
+    (should-not (kargu-provider-public-models-p "opencode" "https://private.example/models"))))
+
+(ert-deftest kargu-catalog-concurrent-requests-deliver-once-test ()
+  "Every request delivers even out of order; only the latest writes cache."
+  (let ((kargu--catalog-generations (make-hash-table :test #'equal))
+        (kargu--live-models-cache (make-hash-table :test #'equal))
+        pending results)
+    (cl-letf (((symbol-function 'plz)
+               (lambda (_method _url &rest options) (push options pending) nil)))
+      (kargu-api-fetch-model-ids "opencode" (lambda (ids) (push (cons 'old ids) results)))
+      (kargu-api-fetch-model-ids "opencode-go" (lambda (ids) (push (cons 'other ids) results)))
+      (kargu-api-fetch-model-ids "opencode" (lambda (ids) (push (cons 'new ids) results)))
+      (funcall (plist-get (nth 0 pending) :then) "{\"data\":[{\"id\":\"new\"}]}")
+      (funcall (plist-get (nth 1 pending) :then) "{\"data\":[{\"id\":\"other\"}]}")
+      (funcall (plist-get (nth 2 pending) :then) "{\"data\":[{\"id\":\"old\"}]}")
+      (funcall (plist-get (nth 2 pending) :else) 'late-error)
+      (should (= (length results) 3))
+      (should (equal (gethash "opencode" kargu--live-models-cache) '("new")))
+      (should (equal (cdr (assq 'old results)) '("old")))
+      (should (equal (gethash "opencode-go" kargu--live-models-cache) '("other"))))))
+
+(ert-deftest kargu-catalog-custom-url-still-requires-auth-test ()
+  "A private override cannot inherit public access from the standard catalog."
+  (let (requested result)
+    (cl-letf (((symbol-function 'kargu--api-base) (lambda (_) "https://private.example/v1"))
+              ((symbol-function 'kargu--resolve-api-key) (lambda (_) nil))
+              ((symbol-function 'plz) (lambda (&rest _) (setq requested t))))
+      (kargu-api-list-models (lambda (value) (setq result value)) "opencode")
+      (should-not requested)
+      (should (string-search "API key" (kargu-aget (kargu-aget result "error") "message"))))))
+
+(ert-deftest kargu-catalog-stale-selection-does-not-open-ui-test ()
+  "Provider changes and a closed origin buffer cannot reopen old selectors."
+  (let ((buffer (generate-new-buffer " *catalog selection*")) held opened
+        (provider "opencode")
+        (kargu--live-models-cache (make-hash-table :test #'equal)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'kargu-api-select--guard) #'ignore)
+                  ((symbol-function 'kargu--provider-name) (lambda () provider))
+                  ((symbol-function 'kargu-api-fetch-model-ids)
+                   (lambda (_provider callback &optional _error) (setq held callback)))
+                  ((symbol-function 'kargu-chat--open-model-selector)
+                   (lambda (&rest _) (setq opened t))))
+          (with-current-buffer buffer (kargu-chat-select-model-company))
+          (setq provider "opencode-go")
+          (funcall held '("old"))
+          (should-not opened)
+          (kill-buffer buffer)
+          (setq provider "opencode")
+          (funcall held '("old"))
+          (should-not opened))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest kargu-catalog-empty-timeout-and-prefetch-retry-test ()
+  "Empty catalogs clear stale IDs; timed out prefetches can be retried."
+  (let ((kargu--models-prefetched (make-hash-table :test #'equal))
+        (kargu--live-models-cache (make-hash-table :test #'equal))
+        pending task)
+    (puthash "opencode" '("stale") kargu--live-models-cache)
+    (cl-letf (((symbol-function 'plz)
+               (lambda (_method _url &rest options) (setq pending options) nil)))
+      (setq task (kargu-api-list-models #'ignore "opencode"))
+      (funcall (plist-get pending :then) "{\"data\":[]}")
+      (should-not (gethash "opencode" kargu--live-models-cache))
+      (should-not (kargu-async-task-timer task))
+      (kargu--prefetch-models-once "opencode")
+      (setq task (car kargu-async--pending))
+      (kargu-async-finish task nil "Request timed out")
+      (should-not (gethash "opencode" kargu--models-prefetched))
+      (kargu--prefetch-models-once "opencode")
+      (funcall (plist-get pending :then) "{\"data\":[]}")
+      (should (eq (gethash "opencode" kargu--models-prefetched) :ready)))))
 
 (ert-deftest kargu-dynamic-models-openrouter-metadata-test ()
   "Test parsing and metadata extraction from OpenRouter /models schema."
@@ -43,8 +119,8 @@
             ("architecture" . ((("modality" . "text+image->text"))))))))
     (kargu--record-models-metadata models-json "openrouter")
     ;; The store keeps the raw alist.  One reader extracts the fields.
-    (let ((fields (kargu-model-read "deepseek/deepseek-r1")))
-      (should (consp (kargu-model-get-metadata "deepseek/deepseek-r1")))
+    (let ((fields (kargu-model-read "deepseek/deepseek-r1" "openrouter")))
+      (should (consp (kargu-model-get-metadata "deepseek/deepseek-r1" "openrouter")))
       (should (= (plist-get fields :context-window) 131072))
       (should (= (plist-get fields :max-output) 8192))
       (should (equal (plist-get fields :reasoning-efforts) '("low" "medium" "high")))
@@ -53,7 +129,7 @@
         (should (string-match-p "max 8k" ann))
         (should (string-match-p "🧠 think: low..high" ann))
         (should (string-match-p "\\$0.55/1M" ann))))
-    (let ((fields (kargu-model-read "qwen/qwen-2.5-vl-72b-instruct:free")))
+    (let ((fields (kargu-model-read "qwen/qwen-2.5-vl-72b-instruct:free" "openrouter")))
       (should (= (plist-get fields :context-window) 32768))
       (should (plist-get fields :vision))
       (should (plist-get fields :free))
@@ -74,8 +150,8 @@
             ("details" . ((("parameter_size" . "32.8B")
                            ("quantization_level" . "Q4_K_M"))))))))
     (kargu--record-models-metadata ollama-json "ollama")
-    (let ((llama (kargu-model-read "llama3.3:70b"))
-          (r1 (kargu-model-read "deepseek-r1:32b")))
+    (let ((llama (kargu-model-read "llama3.3:70b" "ollama"))
+          (r1 (kargu-model-read "deepseek-r1:32b" "ollama")))
       (should (equal (plist-get llama :params) "70.6B Q4_K_M"))
       (should (equal (plist-get r1 :params) "32.8B Q4_K_M"))
       ;; The name "r1" is not a reasoning flag.  The record omitted one.
@@ -99,8 +175,8 @@
             ("outputTokenLimit" . 8192)
             ("description" . "Fast next-gen model")))))
     (kargu--record-models-metadata gemini-json "google")
-    (let ((pro (kargu-model-read "gemini-1.5-pro"))
-          (flash (kargu-model-read "gemini-2.0-flash")))
+    (let ((pro (kargu-model-read "gemini-1.5-pro" "google"))
+          (flash (kargu-model-read "gemini-2.0-flash" "google")))
       (should (= (plist-get pro :context-window) 2097152))
       (should (= (plist-get pro :max-output) 8192))
       (should (= (plist-get flash :context-window) 1048576))

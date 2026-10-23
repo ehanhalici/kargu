@@ -20,11 +20,11 @@ AllModes == {"ask", "plan", "debug", "agent"}
 
 MutatingToolNames == {"edit_file", "write_file", "bash", "apply_patch",
                        "edit", "write", "patch",
-                       "debug_toggle_breakpoint",
                        "git_commit", "git_stage", "git_unstage",
                        "git_branch", "git_stash"}
-ReadOnlyToolNames == {"read_file", "lsp_skeleton", "grep"}
-AllToolNames      == MutatingToolNames \cup ReadOnlyToolNames
+ReadOnlyToolNames == {"read_file", "lsp_skeleton", "grep", "git_branches", "git_stashes"}
+DebugToolNames    == {"debug_toggle_breakpoint"}
+AllToolNames      == MutatingToolNames \cup ReadOnlyToolNames \cup DebugToolNames
 
 (***************************************************************************)
 (* Message Schema                                                          *)
@@ -60,7 +60,8 @@ ContractToolCall(c) ==
     /\ c.name \in AllToolNames
 
 ContractToolCalls(calls) ==
-    \A k \in 1..Len(calls) : ContractToolCall(calls[k])
+    /\ \A k \in 1..Len(calls) : ContractToolCall(calls[k])
+    /\ Cardinality({calls[k].id : k \in 1..Len(calls)}) = Len(calls)
 
 ContractMessage(m) ==
     /\ ContractRole(m.role)
