@@ -444,7 +444,12 @@ Initialize installed PACKAGES only when requested."
      (cl-assert (null (locate-library "kargu/tools/diff")))
      (cl-assert (kargu-find-tool "read_file"))
      (let (report approved)
-       (cl-letf (((symbol-function 'kargu-deps-package-installed-p)
+       (cl-letf (((symbol-function 'kargu-api-prepare-connection)
+                  (lambda (callback &rest _)
+                    (funcall callback (kargu-ok (kargu-connection-snapshot--create
+                                                :provider "offline" :model "m"
+                                                :settings '(:tools nil))))))
+                 ((symbol-function 'kargu-deps-package-installed-p)
                   (lambda (package) (eq package 'plz)))
                  ((symbol-function 'kargu-deps-executable-installed-p)
                   (lambda (executable) (equal executable "curl")))
@@ -688,7 +693,12 @@ Initialize installed PACKAGES only when requested."
      (dolist (case '(close mode-change))
        (let ((origin (generate-new-buffer " *run-owner*")) session callback report rejected)
          (unwind-protect
-             (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+             (cl-letf (((symbol-function 'kargu-api-prepare-connection)
+                        (lambda (done &rest _)
+                          (funcall done (kargu-ok (kargu-connection-snapshot--create
+                                                  :provider "openai" :model "fake-model"
+                                                  :settings '(:tools nil))))))
+                       ((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
                        ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil))
                        ((symbol-function 'kargu--provider-name) (lambda (&rest _) "openai"))
                        ((symbol-function 'kargu--model) (lambda (&rest _) "fake-model"))
@@ -726,7 +736,12 @@ Initialize installed PACKAGES only when requested."
                                 (buffer-live-p origin))
                        (kill-buffer origin))))))
        (unwind-protect
-           (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
+           (cl-letf (((symbol-function 'kargu-api-prepare-connection)
+                      (lambda (done &rest _)
+                        (funcall done (kargu-ok (kargu-connection-snapshot--create
+                                                :provider "openai" :model "fake-model"
+                                                :settings '(:tools nil))))))
+                     ((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
                      ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil))
                      ((symbol-function 'kargu--provider-name) (lambda (&rest _) "openai"))
                      ((symbol-function 'kargu--model) (lambda (&rest _) "fake-model"))

@@ -14,6 +14,7 @@
 (require 'kargu/application/coordinator)
 (require 'kargu/core/session)
 (require 'kargu/async)
+(require 'kargu/config/connection)
 
 (defvar kargu--state-store)
 (defvar kargu-execution--current nil
@@ -23,7 +24,10 @@
   "Captured APP, CLAIM, SESSION, ORIGIN, ROOT and RUN with their TASK lifetime."
   (app nil :read-only t) claim (session nil :read-only t)
   (origin nil :read-only t) (root nil :read-only t)
-  (run nil :read-only t) task enter (state :starting))
+  (run nil :read-only t) task enter connection
+  (metadata-legacy (or kargu-metadata--legacy
+                       (null (or kargu-application--bound kargu-application-owner))))
+  (state :starting))
 
 (cl-defun kargu-execution-create (&key app session origin root run)
   "Capture validated APP, SESSION, ORIGIN, ROOT and RUN for native execution."
@@ -39,6 +43,15 @@
 (defun kargu-execution-prepare (_context)
   "Attach optional adapter bindings to execution CONTEXT at composition."
   nil)
+
+(defun kargu-execution-request-started ()
+  "Publish first-request admission in the current execution, exactly once."
+  (when kargu-execution--current
+    (let ((run (kargu-execution-run kargu-execution--current)))
+      (plist-put run :request-started t)
+      (when-let* ((callback (plist-get run :on-ready)))
+        (plist-put run :on-ready nil)
+        (funcall callback t nil)))))
 
 (defun kargu-execution-live-p (context)
   "Return non-nil while CONTEXT owns its exact application claim."
@@ -66,7 +79,9 @@
         (kargu--busy nil) (kargu--current-process nil)
         (kargu--generation (kargu-application-current-generation (kargu-execution-app context)))
         (kargu-async--current-task (kargu-execution-task context))
-        (kargu--state-store nil))
+        (kargu--state-store nil)
+        (kargu-connection--bound (kargu-execution-connection context))
+        (kargu-metadata--legacy (kargu-execution-metadata-legacy context)))
     (save-match-data
       (with-current-buffer (if (buffer-live-p (kargu-execution-origin context))
                                (kargu-execution-origin context) (current-buffer))

@@ -23,6 +23,14 @@
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-format-record "kargu/providers/registry" (format))
 (declare-function kargu--provider-name "kargu/config/key" ())
+(declare-function kargu-connection-current "kargu/config/connection" ())
+(declare-function kargu-connection-setting "kargu/config/connection" (name &optional snapshot))
+
+(defun kargu-api-wire-record (format)
+  "Return FORMAT's captured wire record inside a connection boundary."
+  (if (kargu-connection-current)
+      (kargu-connection-setting :wire)
+    (kargu-provider-format-record format)))
 
 (defun kargu-api--as-list (value)
   "VALUE as a list.  Vectors become lists.  Other types become nil."
@@ -33,16 +41,18 @@
 
 (defun kargu-api-active-format ()
   "Catalog format symbol of the active provider, or nil."
-  (when (fboundp 'kargu-provider-format)
+  (if (kargu-connection-current)
+      (kargu-connection-setting :format)
+    (when (fboundp 'kargu-provider-format)
     (let ((pname (if (fboundp 'kargu--provider-name) (kargu--provider-name) "")))
       (kargu-provider-format
-       (downcase (string-trim (format "%s" (or pname ""))))))))
+       (downcase (string-trim (format "%s" (or pname "")))))))))
 
 (defun kargu-api-chat-url (base format)
   "Chat endpoint for BASE and catalog FORMAT.
 The path comes from the format record.  A missing record uses
 `/chat/completions'."
-  (let ((path (or (plist-get (kargu-provider-format-record format) :chat-path)
+  (let ((path (or (plist-get (kargu-api-wire-record format) :chat-path)
                   "/chat/completions")))
     (concat base path)))
 
@@ -173,7 +183,7 @@ SYSTEM is a content-block list, preserving explicit cache boundaries."
 (defun kargu-api-prepare-payload (payload format)
   "PAYLOAD ready to post for catalog FORMAT.
 A `blocks' message shape is rewritten.  Every other shape is unchanged."
-  (let ((spec (kargu-provider-format-record format)))
+  (let ((spec (kargu-api-wire-record format)))
     (if (eq (plist-get spec :message-shape) 'blocks)
         (kargu-api--blocks-payload payload spec)
       payload)))
@@ -256,12 +266,16 @@ A `blocks' message shape is rewritten.  Every other shape is unchanged."
 
 (defun kargu-api--blocks-spec (response)
   "Format record whose blocks rules match RESPONSE, or nil."
-  (cl-some (lambda (cell)
+  (if (kargu-connection-current)
+      (let ((spec (kargu-connection-setting :wire)))
+        (and (eq (plist-get spec :response-shape) 'blocks)
+             (kargu-api--blocks-response-p response spec) spec))
+    (cl-some (lambda (cell)
              (let ((spec (cdr cell)))
                (and (eq (plist-get spec :response-shape) 'blocks)
                     (kargu-api--blocks-response-p response spec)
                     spec)))
-           kargu-provider-formats))
+           kargu-provider-formats)))
 
 (defun kargu-api-response-shape (response)
   "RESPONSE as an OpenAI chat-completions alist.

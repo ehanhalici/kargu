@@ -73,6 +73,13 @@ partially applied and must be corrected before requests can use that config.
 
 Run `M-x kargu-edit-config` to generate or edit your configuration.
 
+Native sends and connection tests prepare configuration and credentials in
+cancellable workers. Stop also cancels preparation. Each run captures its
+endpoint, model, wire policy and credentials once; retries retain that target.
+Authenticated HTTP requests refuse redirects and keep TLS verification enabled.
+See [connection ownership](docs/connection-ownership.md) for service boundaries
+and compatibility consumers.
+
 Project walks and searches exclude names in `kargu-fs-skip-dirs` at every
 directory depth. Customize this list when names such as `build` or `vendor`
 contain your source code; the same setting applies to fallback traversal.

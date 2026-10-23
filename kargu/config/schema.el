@@ -17,6 +17,7 @@
 (require 'kargu/config/toml)
 (require 'kargu/config/key)
 (require 'kargu/config/service)
+(require 'kargu/models/service)
 
 (defun kargu-config-revision ()
   "Return current monotonic integer revision of the configuration."
@@ -66,7 +67,7 @@ the native UI's separate model-selection step."
          (prov-plist (kargu--provider-plist name))
          (explicit-model (plist-get prov-plist :model))
          (cached-model (and (boundp 'kargu--live-models-cache)
-                            (car-safe (gethash name kargu--live-models-cache)))))
+                            (car-safe (gethash name (kargu-metadata-table :catalog kargu--live-models-cache))))))
     (when (kargu-selection-update :provider name
 				  :model (unless no-model
 					   (or (kargu-nonempty explicit-model)
@@ -152,10 +153,9 @@ the native UI's separate model-selection step."
       (push (format "missing package %s (%s)" (car dep) (cdr dep)) problems))
     (cons problems warnings)))
 
-(defun kargu-check-setup ()
-  "Check API key and dependencies; report in the echo area and log."
-  (interactive)
-  (let* ((key (or (kargu-config-api-key-fast) (kargu--resolve-direct-api-key)))
+(defun kargu-config--report-setup (result)
+  "Report setup dependencies and resolved credential RESULT."
+  (let* ((key (and (kargu-ok-p result) (kargu-result-value result)))
          (report (kargu--setup-problems
                   key (and (fboundp 'kargu-deps-missing) (kargu-deps-missing))
                   (kargu--missing-dependencies)))
@@ -178,7 +178,9 @@ the native UI's separate model-selection step."
                 ((string-empty-p key) "no Authorization header")
                 ((kargu--api-key-placeholder-p key) "placeholder API key")
                 (t "API key found"))
-               (if (file-readable-p (kargu-config-file))
+               (if (when-let* ((snapshot (kargu-config-service-snapshot
+                                         (kargu-config-service-context))))
+                     (kargu-config-snapshot-digest snapshot))
                    (kargu-config-file)
                  "not created yet")
                (if warnings
@@ -186,6 +188,15 @@ the native UI's separate model-selection step."
                            (string-join (nreverse warnings) "; ")
                            ")")
                  "")))))
+
+(defun kargu-check-setup ()
+  "Check configuration and credentials asynchronously, then report dependencies."
+  (interactive)
+  (kargu-config-refresh-async
+   (lambda (result)
+     (if (kargu-err-p result)
+         (message "Kargu: %s" (kargu-result-err-message result))
+       (kargu-config-resolve-api-key-async nil #'kargu-config--report-setup)))))
 
 (provide 'kargu/config/schema)
 

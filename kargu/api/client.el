@@ -24,6 +24,9 @@
 (require 'kargu/api/circuit)
 (require 'kargu/api/http)
 (require 'kargu/api/wire)
+(require 'kargu/api/prepare)
+
+(declare-function kargu-execution-request-started "kargu/application/execution" ())
 
 (declare-function kargu-busy-p "kargu/api/http" ())
 (declare-function kargu-loop-running-p "kargu/loop" ())
@@ -87,27 +90,57 @@ A busy client, a missing key, or a missing endpoint is refused first."
                          "ON-DELTA must be callable or nil: %S" on-delta)
   (kargu-api--send :prompt prompt :callback callback :on-delta on-delta))
 
-(cl-defun kargu-api--send (&key prompt callback on-delta (record-turn t) history)
-  "Validate connection settings and send PROMPT to CALLBACK and ON-DELTA.
-RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
-  (let ((key (and (not (kargu-busy-p)) (kargu--resolve-api-key)))
-        (base (and (not (kargu-busy-p)) (kargu--api-base))))
-    (cond
-     ((kargu-busy-p)
-      (kargu--api-refuse callback "request already in flight; cancel first"))
-     ((null key)
-      (kargu--api-refuse callback "no API key: M-x kargu-edit-config, or set `kargu-api-key', or a host env/auth-source entry"))
-     ((not (kargu-nonempty base))
-      (kargu--api-refuse callback "no API endpoint: set api on the active provider"))
-     (t
-      (kargu-api--send-turn :prompt prompt :callback callback :on-delta on-delta
-                            :key key :base base :record-turn record-turn :history history)))))
-
 (cl-defstruct (kargu-api--delivery (:constructor kargu-api--make-delivery))
   "One turn's response owner, including a terminal single-delivery state."
   callback generation record-turn request (app (kargu-application-context)) (state :pending)
   (origin (current-buffer)) (session (kargu-session-context))
   (history (kargu-history-context)))
+
+(cl-defun kargu-api--send (&key prompt callback on-delta (record-turn t) history)
+  "Validate connection settings and send PROMPT to CALLBACK and ON-DELTA.
+RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
+  (cond
+   ((kargu-busy-p) (kargu--api-refuse callback "request already in flight; cancel first"))
+   ((kargu-connection-current)
+    (kargu-api--send-turn
+     :prompt prompt :callback callback :on-delta on-delta :record-turn record-turn :history history
+     :key (kargu-connection-snapshot-secret (kargu-connection-current))
+     :base (kargu-connection-snapshot-endpoint (kargu-connection-current))))
+   (t (kargu-api--prepare-turn :prompt prompt :callback callback :on-delta on-delta
+                              :record-turn record-turn :history history))))
+
+(cl-defun kargu-api--prepare-turn (&key prompt callback on-delta record-turn history)
+  "Reserve PROMPT's request before preparing CALLBACK, ON-DELTA and HISTORY.
+RECORD-TURN controls whether a successful response enters history."
+  (let* ((delivery (kargu-api--make-delivery
+                    :callback callback :record-turn record-turn :history (kargu-history-context history)
+                    :generation (kargu-application-next-generation)))
+         (request (kargu-http--ensure-logical-request
+                   (kargu-api--delivery-generation delivery)
+                   (kargu-api--delivery-session delivery) (kargu-api--delivery-origin delivery))))
+    (setf (kargu-api--delivery-request delivery) request)
+    (kargu-state-transition-status :requesting)
+    (when (kargu-api--delivery-owner-live-p delivery)
+      (let ((task (kargu-api-prepare-connection
+                   (lambda (result) (kargu-api--prepared delivery prompt on-delta result)))))
+        (setf (kargu-logical-request-preparation request) task)
+        (kargu-logical-request-add-cleanup request (lambda () (kargu-async-cancel task)))))))
+
+(defun kargu-api--prepared (delivery prompt on-delta result)
+  "Send PROMPT with ON-DELTA for DELIVERY after preparation RESULT."
+  (cond
+   ((not (kargu-api--delivery-owner-live-p delivery))
+    (when (kargu-ok-p result) (kargu-connection-snapshot-wipe (kargu-result-value result))))
+   ((kargu-err-p result)
+    (kargu-api--deliver delivery (kargu--api-error-alist (kargu-result-err-message result))))
+   (t
+    (let ((snapshot (kargu-result-value result)))
+      (kargu-logical-request-add-cleanup
+       (kargu-api--delivery-request delivery) (lambda () (kargu-connection-snapshot-wipe snapshot)))
+      (kargu-connection-call
+       snapshot #'kargu-api--send-turn :prompt prompt :on-delta on-delta :delivery delivery
+       :key (kargu-connection-snapshot-secret snapshot)
+       :base (kargu-connection-snapshot-endpoint snapshot))))))
 
 (defun kargu-api--delivery-owner-live-p (delivery)
   "Return non-nil if DELIVERY still owns its buffer and captured session."
@@ -157,15 +190,17 @@ RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
       (kargu-api-store-assistant-turn response (kargu-api--delivery-history delivery))))
   response)
 
-(cl-defun kargu-api--send-turn (&key prompt callback on-delta key base (record-turn t) history)
+(cl-defun kargu-api--send-turn (&key prompt callback on-delta key base (record-turn t) history delivery)
   "Append PROMPT and start a request using KEY and BASE.
 Deliver events to ON-DELTA and the response to CALLBACK.
-RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
-  (let* ((history (kargu-history-context history))
+RECORD-TURN permits reply storage; HISTORY supplies drafts.
+DELIVERY retains the captured admission owner."
+  (let* ((history (if delivery (kargu-api--delivery-history delivery)
+                    (kargu-history-context history)))
          (added-prompt-p (and prompt (not (string-empty-p prompt))))
-         (delivery (kargu-api--make-delivery :callback callback :record-turn record-turn
+         (delivery (or delivery (kargu-api--make-delivery :callback callback :record-turn record-turn
                                              :history history
-                                             :generation (kargu-application-current-generation))))
+                                             :generation (kargu-application-current-generation)))))
     (when added-prompt-p
       (kargu-history-append `(("role" . "user") ("content" . ,prompt)) history))
     (condition-case-unless-debug err
@@ -181,25 +216,33 @@ RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
 (cl-defun kargu-api--start-turn (&key delivery on-delta key base)
   "Post the validated history using KEY and BASE.
 Send events to ON-DELTA and the response through DELIVERY."
-  (let ((gen (kargu-application-next-generation)))
+  (let ((gen (if (kargu-api--delivery-request delivery)
+                 (kargu-api--delivery-generation delivery)
+               (kargu-application-next-generation))))
     (setf (kargu-api--delivery-generation delivery) gen)
     (let* ((fmt (kargu-api-active-format))
            (payload (kargu-api-prepare-payload
                      (kargu-api-build-payload (kargu-api--delivery-history delivery)) fmt))
-           (delta (and (kargu-provider-format-stream-p fmt) on-delta)))
+           (wire (kargu-api-wire-record fmt))
+           (delta (and (or (null wire) (not (plist-member wire :stream))
+                           (plist-get wire :stream)) on-delta)))
       (setf (kargu-api--delivery-request delivery)
             (kargu-http--ensure-logical-request
              gen
              (kargu-api--delivery-session delivery)
              (kargu-api--delivery-origin delivery)))
+      (setf (kargu-logical-request-connection (kargu-api--delivery-request delivery))
+            (kargu-connection-current))
       (unless kargu-application-owner (setq kargu--busy t))
       (kargu-state-transition-status :requesting)
       (cond
        ((and (kargu-api--delivery-live-p delivery)
              (kargu-api--delivery-owner-live-p delivery))
-        (kargu--api-post
-         (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
-         (lambda (response) (kargu-api--deliver delivery response)) delta))
+        (when (fboundp 'kargu-execution-request-started) (kargu-execution-request-started))
+        (when (kargu-api--delivery-owner-live-p delivery)
+          (kargu--api-post
+           (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
+           (lambda (response) (kargu-api--deliver delivery response)) delta)))
        ((= gen (kargu-application-current-generation))
         (kargu-http-clear-busy)
         (kargu-api--deliver delivery

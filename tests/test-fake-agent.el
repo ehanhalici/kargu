@@ -3,8 +3,12 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
 ;; The chat commands, history firewall, loop, and payload builder stay
 ;; real.  Only `kargu--api-post' is replaced, by a synchronous queue.
+
+;;; Code:
 
 (require 'ert)
 (require 'tests/test-helpers)
@@ -111,7 +115,7 @@ The client, not this transport stub, stores the assistant turn."
       (funcall callback response))))
 
 (defun kargu-fake--post (_url _headers payload gen callback &optional on-delta _attempt)
-  "Synchronous stand-in for `kargu--api-post'."
+  "Deliver PAYLOAD at GEN to CALLBACK and ON-DELTA synchronously."
   (setq kargu-fake--seen (nconc kargu-fake--seen (list payload)))
   (let ((item (or (pop kargu-fake--queue)
                   '(:kind text :text "unscripted"))))
@@ -135,7 +139,7 @@ The client, not this transport stub, stores the assistant turn."
                              (plist-get held :item))))))
 
 (defun kargu-fake--read (_prompt candidates &optional default _annotations)
-  "Return the next scripted candidate, or signal `quit'."
+  "Return a scripted choice from CANDIDATES or DEFAULT, or signal `quit'."
   (let ((next (pop kargu-fake--reads)))
     (cond
      ((eq next 'quit) (signal 'quit nil))
@@ -192,7 +196,7 @@ An action that never posts runs once."
    (t '(none))))
 
 (defun kargu-fake--needle (mode tools action response)
-  "Transcript text ACTION/RESPONSE must leave, or nil."
+  "Return expected transcript text for MODE, TOOLS, ACTION and RESPONSE."
   (cond
    ((and (eq mode 'agent) (eq tools 'off)
          (memq action '(send stop-during)))
@@ -244,9 +248,9 @@ An action that never posts runs once."
 
 (defun kargu-fake--arm-tools (tools)
   "Apply TOOLS (`on' or `off') to the active model's metadata.
-An earlier tool rejection is remembered in `kargu--tools-refused';
+An earlier tool rejection is remembered by the metadata service;
 each row starts with that record cleared so it cannot leak."
-  (clrhash kargu--tools-refused)
+  (kargu-model-forget-tools-refusals)
   (let ((id (kargu--model)))
     (when (and (stringp id) (not (string-empty-p id)))
       (kargu-model-set-metadata
@@ -264,7 +268,7 @@ each row starts with that record cleared so it cannot leak."
     (cadr (memq mode kargu-fake--modes))))
 
 (defun kargu-fake--drive (mode tools action response)
-  "Perform ACTION.  Return nil, or the error message it signaled."
+  "Perform ACTION with MODE, TOOLS and RESPONSE; return any error message."
   (kargu-set-mode mode)
   (kargu-fake--arm-tools tools)
   (when (kargu-fake--posts-p mode tools action)
@@ -337,7 +341,7 @@ the system prompt is not an orphan."
     (and ok (not open) (= before (kargu-fake--tool-count)))))
 
 (defun kargu-fake--tool-result-p ()
-  "Non-nil when history holds the canned tool result."
+  "Test for the canned tool result in history."
   (cl-some
    (lambda (msg)
      (and (equal (kargu-aget msg "role") "tool")
@@ -346,7 +350,7 @@ the system prompt is not an orphan."
    (kargu-history-messages)))
 
 (defun kargu-fake--check (mode tools action response err)
-  "Return a failure string for this row, or nil."
+  "Check MODE, TOOLS, ACTION, RESPONSE and ERR; return a failure or nil."
   (let ((problems nil)
         (needle (kargu-fake--needle mode tools action response))
         (text (ignore-errors (kargu-fake--transcript)))
@@ -421,7 +425,8 @@ the system prompt is not an orphan."
         kargu-fake--held nil))
 
 (defun kargu-fake--run-row (mode tools action response saved-provider saved-model)
-  "Run one matrix row.  Return a failure string or nil."
+  "Run MODE, TOOLS, ACTION and RESPONSE; return a failure string or nil.
+SAVED-PROVIDER and SAVED-MODEL restore the row's initial selection."
   (kargu-fake--fresh-chat)
   (setf (kargu-selection-provider) saved-provider
         (kargu-selection-model) saved-model)

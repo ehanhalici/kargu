@@ -12,8 +12,7 @@
 ;; Read-only slots capture one target; consumers must not mutate borrowed
 ;; nested values.  Ordinary printed records and summaries omit credential
 ;; contents.  Wiping clears this scope's private string, not all copies that
-;; a transport, debugger or garbage collector may retain.  Native request
-;; composition still has to install and retain this snapshot explicitly.
+;; a transport, debugger or garbage collector may retain.
 
 ;;; Code:
 
@@ -28,6 +27,17 @@
 (require 'kargu/config/worker)
 
 (defvar kargu-config-credential-adapter)
+
+(defvar kargu-connection--bound nil
+  "Dynamically captured connection, never a retained default connection.")
+
+(defun kargu-connection-current ()
+  "Return the explicitly bound connection, or nil outside a request boundary."
+  kargu-connection--bound)
+
+(defun kargu-connection-call (snapshot function &rest args)
+  "Call FUNCTION with ARGS inside the captured connection SNAPSHOT."
+  (let ((kargu-connection--bound snapshot)) (apply function args)))
 
 (declare-function kargu--provider-name "kargu/config/key" ())
 (declare-function kargu--model "kargu/config/key" ())
@@ -87,17 +97,63 @@ Ordinary printed scope/snapshot records never include the secret value."
 
 ;;;; Connection Snapshot -----------------------------------------------------
 
-(cl-defstruct (kargu-connection-snapshot (:constructor kargu-connection-snapshot--create))
+(cl-defstruct (kargu-connection-snapshot (:constructor kargu-connection--make))
   "Immutable verified snapshot of provider connection target and credentials."
   (id (format "conn-%s" (kargu-random-uuid)) :read-only t)
-  (provider nil :read-only t)
-  (model nil :read-only t)
-  (endpoint nil :read-only t)
+  (provider-value nil :read-only t)
+  (model-value nil :read-only t)
+  (endpoint-value nil :read-only t)
   (wire-format :openai :read-only t)
-  (capabilities nil :read-only t)
+  (capability-data nil :read-only t)
+  (settings-cell nil :read-only t)
   (config-revision 0 :read-only t)
   (credential-scope nil :read-only t)
   (created-at (float-time) :read-only t))
+
+(cl-defun kargu-connection-snapshot--create
+    (&key provider model endpoint (wire-format :openai) capabilities settings
+          (config-revision 0) credential-scope)
+  "Capture PROVIDER, MODEL, ENDPOINT, WIRE-FORMAT and CAPABILITIES.
+SETTINGS and CONFIG-REVISION freeze policy; CREDENTIAL-SCOPE owns the secret."
+  (let ((cell (make-symbol "kargu-connection-settings")))
+    (put cell 'value (kargu-config-copy settings))
+    (kargu-connection--make
+     :provider-value (kargu-config-copy provider) :model-value (kargu-config-copy model)
+     :endpoint-value (kargu-config-copy endpoint) :wire-format wire-format
+     :capability-data (kargu-config-copy capabilities) :settings-cell cell
+     :config-revision config-revision :credential-scope credential-scope)))
+
+(defun kargu-connection-snapshot-settings (snapshot)
+  "Return detached settings from SNAPSHOT, keeping custom headers opaque."
+  (kargu-config-copy (get (kargu-connection-snapshot-settings-cell snapshot) 'value)))
+
+(defun kargu-connection-snapshot-provider (snapshot)
+  "Return a detached provider identifier from SNAPSHOT."
+  (kargu-config-copy (kargu-connection-snapshot-provider-value snapshot)))
+
+(defun kargu-connection-snapshot-model (snapshot)
+  "Return a detached model identifier from SNAPSHOT."
+  (kargu-config-copy (kargu-connection-snapshot-model-value snapshot)))
+
+(defun kargu-connection-snapshot-endpoint (snapshot)
+  "Return a detached endpoint from SNAPSHOT."
+  (kargu-config-copy (kargu-connection-snapshot-endpoint-value snapshot)))
+
+(defun kargu-connection-snapshot-capabilities (snapshot)
+  "Return detached model capabilities from SNAPSHOT."
+  (kargu-config-copy (kargu-connection-snapshot-capability-data snapshot)))
+
+(defun kargu-connection-setting (name &optional snapshot)
+  "Read captured setting NAME from SNAPSHOT or the current connection.
+The result is borrowed read-only data for trusted internal consumers."
+  (when-let* ((snapshot (or snapshot (kargu-connection-current))))
+    (plist-get (get (kargu-connection-snapshot-settings-cell snapshot) 'value) name)))
+
+(defun kargu-connection-matches-p (model provider)
+  "Return non-nil when optional MODEL and PROVIDER name the bound connection."
+  (when-let* ((snapshot (kargu-connection-current)))
+    (and (or (null model) (equal model (kargu-connection-snapshot-model-value snapshot)))
+         (or (null provider) (equal provider (kargu-connection-snapshot-provider-value snapshot))))))
 
 (defun kargu-connection-snapshot-secret (snapshot)
   "Extract resolved secret from SNAPSHOT's credential scope, or nil if wiped."
@@ -122,7 +178,7 @@ Ordinary printed scope/snapshot records never include the secret value."
         :model (kargu-connection-snapshot-model snapshot)
         :endpoint (kargu-connection-snapshot-endpoint snapshot)
         :wire-format (kargu-connection-snapshot-wire-format snapshot)
-        :capabilities (copy-sequence (kargu-connection-snapshot-capabilities snapshot))
+        :capabilities (kargu-connection-snapshot-capabilities snapshot)
         :config-revision (kargu-connection-snapshot-config-revision snapshot)
         :created-at (kargu-connection-snapshot-created-at snapshot)))
 
@@ -147,6 +203,7 @@ Ordinary printed scope/snapshot records never include the secret value."
    :endpoint (kargu-connection-snapshot-endpoint draft)
    :wire-format (kargu-connection-snapshot-wire-format draft)
    :capabilities (kargu-connection-snapshot-capabilities draft)
+   :settings (kargu-connection-snapshot-settings draft)
    :config-revision (kargu-connection-snapshot-config-revision draft)
    :credential-scope (kargu-credential-scope--create :raw-secret secret)))
 
@@ -188,10 +245,11 @@ Ordinary printed scope/snapshot records never include the secret value."
                      (kargu--api-base (kargu-connection-snapshot-provider draft)))))))
 
 (cl-defun kargu-connection-resolve-async
-    (provider model &key callback timeout origin capabilities)
+    (provider model &key callback timeout origin capabilities parent owner settings public)
   "Resolve PROVIDER and MODEL into CALLBACK as a captured connection result.
 ORIGIN retains session ownership; TIMEOUT bounds credential resolution.
-CAPABILITIES is copied into the snapshot and treated as borrowed read-only data."
+CAPABILITIES and SETTINGS are detached; PARENT and OWNER own preparation.
+PUBLIC skips authentication only for an independently verified public endpoint."
   (kargu-contract-assert #'functionp callback)
   (let* ((origin (or origin (current-buffer)))
          (session (kargu-session-context origin))
@@ -201,7 +259,8 @@ CAPABILITIES is copied into the snapshot and treated as borrowed read-only data.
                  :provider provider :model (copy-sequence (or model (kargu--model) ""))
                  :endpoint (copy-sequence (kargu--api-base provider))
                  :wire-format (if (keywordp format) format (intern (concat ":" (symbol-name format))))
-                 :capabilities (copy-tree (or capabilities (kargu-connection--default-capabilities provider)) t)
+                 :capabilities (or capabilities (kargu-connection--default-capabilities provider))
+                 :settings settings
                  :config-revision (kargu-config-revision)))
          (valid (lambda () (kargu-connection--current-p draft origin session)))
          (task (kargu-async-start
@@ -211,12 +270,15 @@ CAPABILITIES is copied into the snapshot and treated as borrowed read-only data.
                             ((not (funcall valid)) (kargu-err "Stale connection discarded" :stale-discard))
                             ((or (kargu-ok-p value) (kargu-err-p value)) value)
                             (t (kargu-err (or error "Connection resolution failed") :auth-unavailable)))))
-                :owner nil :parent nil :buffer origin
+                :owner owner :parent parent :buffer origin
                 :timeout (or timeout kargu-config-worker-default-timeout) :valid-p valid)))
     (if (kargu-contract-url-p (kargu-connection-snapshot-endpoint draft))
         (funcall (kargu-async-wrap task
-                                  (lambda () (kargu-connection--resolve-secret
-                                              task draft (or timeout kargu-config-worker-default-timeout)))))
+                                  (lambda ()
+                                    (if public
+                                        (kargu-connection--accept-secret task draft (kargu-ok ""))
+                                      (kargu-connection--resolve-secret
+                                       task draft (or timeout kargu-config-worker-default-timeout))))))
       (kargu-async-finish task (kargu-err "Invalid endpoint URL" :invalid-arguments)))
     task))
 

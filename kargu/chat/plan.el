@@ -16,7 +16,7 @@
 (require 'kargu/chat/transcript)
 (require 'kargu/state/selectors)
 
-(declare-function kargu-chat-prompt "kargu/chat" (&optional prompt))
+(declare-function kargu-chat-prompt "kargu/chat" (&optional prompt &key on-ready))
 (declare-function kargu-loop-running-p "kargu/loop" ())
 (declare-function kargu-chat--input-text "kargu/chat/prompt" ())
 
@@ -79,12 +79,15 @@
               (user-error "Kargu: plan mode publication was superseded"))
             (kargu-chat-prompt
              (format "Apply the following approved plan step-by-step:\n\n%s"
-                     (kargu-chat-plan-start-text start))))
+                     (kargu-chat-plan-start-text start))
+             :on-ready (lambda (success error)
+                         (unless success (kargu-chat-plan--restore-mode start))
+                         (funcall (kargu-chat-plan-start-complete start) success error))))
         (error (setq failure (error-message-string err)))))
     (when failure
       (condition-case err (kargu-chat-plan--restore-mode start)
         (error (kargu-log 'warn "Plan mode rollback refused: %s" (error-message-string err)))))
-    (funcall (kargu-chat-plan-start-complete start) (null failure) failure)
+    (when failure (funcall (kargu-chat-plan-start-complete start) nil failure))
     failure))
 
 (defun kargu-chat-plan--dispatch (record plan-text complete)

@@ -3,6 +3,12 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
+;; Load the offline contract and integration suites and run them in batch.
+
+;;; Code:
+
 (eval-and-compile
   (let ((root (locate-dominating-file
                (or (bound-and-true-p byte-compile-current-file)
@@ -22,6 +28,7 @@
 (require 'tests/test-modules)
 (require 'tests/test-application-context)
 (require 'tests/test-native-ownership)
+(require 'tests/test-connection-native)
 (require 'tests/test-run-budget)
 (require 'tests/test-wave1-empirical-challenge)
 (require 'tests/test-tool-execution-contract)

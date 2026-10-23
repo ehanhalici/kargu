@@ -1,6 +1,7 @@
 # Açık işler — birlikte çözülecek gruplar
 
-İnceleme tabanı: 32e917b, 2026-10-22. Son tam ERT tabanı: 1102/1102.
+İnceleme tabanı: 32e917b, 2026-10-22. Son tam ERT: 1116/1116, 2026-10-23.
+G02 bağlantı/metadata sözleşmesi ve kalan köprüler: docs/connection-ownership.md.
 Yalnız açık işler tutulur; tamamlanan alt maddeler ve tekrarlanan iş tarifleri
 çıkarılmıştır. Bir çekirdeğin testinin geçmesi, native tüketicilerin ona
 bağlandığı anlamına gelmez. Eski ARCH/MOD/DEEP/RISK kimlikleri kaynak
@@ -39,7 +40,6 @@ Aynı eski kimliğin farklı gruplardaki yönleri aşağıda açıkça ayrılmı
 
 | Grup | Birlikte ele alınacak iş | Önkoşul |
 |---|---|---|
-| G02 | Config I/O, connection snapshot ve metadata sahipliği | Yok |
 | G03 | Log gizliliği, sahipli retention ve ölçüm | G02 |
 | G04 | Tool context, onay ve tek typed edit sonucu | G02 |
 | G05 | Process/job/session ömrü ve stres riski | Yok |
@@ -51,32 +51,6 @@ Aynı eski kimliğin farklı gruplardaki yönleri aşağıda açıkça ayrılmı
 | G11 | Proje bağlamı, egress ve adapter güvenliği | G02, G03, G04 |
 | G12 | Native/fake agent backend portu | G02, G04, G05, G09, G11 |
 | G13 | Son köprü temizliği, lint ve bütünleşik kabul | G02–G12 |
-
-## G02 — Config I/O, bağlantı snapshot'ı ve metadata sahipliği
-
-**Kaynak:** CONFIG-02 (P2, K), DEEP-14, MOD-07'nin metadata tarafı, RISK-02 (P2, D).
-**Dosyalar:** config.el, config/{key,schema,toml,worker,connection}.el,
-api/{client,request,parameters,catalog,circuit}.el, models/store.el, providers/.
-
-- CONFIG-02: api--send hâlâ senkron key resolver'ını çağırıyor; config-plist
-  dosya seçimi/stat/TOML okuması yapıyor. Native startup ve connection testini
-  cancellable hazırlığa bağla; doğrulanmış config snapshot'ını bellekte yayımla.
-  Disk/auth-source/callable secret işini timer içine koymak çözüm değildir.
-- Provider/model/endpoint/wire/credential/config-capability revision'ı aynı
-  snapshot'tan tüketilsin; retry mutable metadata'yı tekrar okuyup hedef
-  değiştirmesin. İç içe string/liste kopya sınırını ve secret ömrünü doğrula;
-  readonly struct veya wipe bütün kopyalar için güvence değildir.
-- Catalog generation/cache/refusal ve circuit kayıtlarının açık servis sahibini
-  belirle; G09 aynı veri için ikinci store kurmasın. Async hazırlıkta busy/claim,
-  Stop, prompt geri alma ve stale endpoint/session/config denetimleri korunsun.
-- RISK-02: reasoning-effort ve reasoning-disallows-temperature dalı artık var.
-  Kalan iş somut sürümlü sözleşme veya sentetik hata fixture'ıyla koşullu
-  capability'yi doğrulamak; alanın hiç olmadığı teşhisini kullanma. Kanıt
-  olmadan provider/model regex'i veya yeni bir özel liste ekleme.
-- **Kabul:** yavaş/uzak config ve callable secret UI'da çalışmaz; timeout/Stop
-  worker'ı kapatır; keyless/off/none/inherit ayrışır; endpoint/key/capability
-  değişimi ve cross-origin redirect yanlış hedefe credential taşımaz.
-  TLS doğrulaması kapatılmaz, sessiz provider fallback yoktur.
 
 ## G03 — Log gizliliği, sahipli retention ve ölçüm
 
@@ -208,6 +182,8 @@ ve chat/plan.el'in application bağlaması; metadata store'un sahibi G02'dir.
 - View/draft/transcript/selection execution/connection portlarını tüketsin; ikinci veri
   deposu ve gizli global run araması kalmasın. Ortak pending confirmation
   listesi view/iş handle'larına taşınsın; adapter yokken karar güvenli ret.
+- Catalog discovery'nin legacy credential girişi asenkron connection portuna
+  taşınsın; G02'nin application metadata servisi ve public/keyless ayrımı korunsun.
 - Run/session/request/call/connection kimlikli pasif olay ile cevap bekleyen
   control request ayrı kalsın. Plan adapter'ı yeni application dispatcher'ını
   kullansın; mevcut plan claim/approved revision/mode/draft korumalarını koru.

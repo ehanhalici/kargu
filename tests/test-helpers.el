@@ -10,6 +10,28 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'kargu/api/prepare)
+
+(defconst kargu-test-real-prepare-connection
+  (symbol-function 'kargu-api-prepare-connection)
+  "Real preparation entry point used explicitly by connection integration tests.")
+
+(cl-defun kargu-test-prepare-connection (callback &key parent owner &allow-other-keys)
+  "Supply CALLBACK an offline connection owned by PARENT and OWNER.
+General loop tests mock this boundary; G02 tests exercise real preparation."
+  (let ((task (kargu-async-start
+               (lambda (value _error) (funcall callback value)) :parent parent :owner owner)))
+    (condition-case err
+        (let* ((provider (kargu--provider-name)) (model (kargu--model))
+               (settings (kargu-api-connection-settings provider model)))
+          (kargu-async-finish
+           task (kargu-ok (kargu-connection-snapshot--create
+                           :provider provider :model model
+                           :endpoint (or (kargu--api-base) "https://example.invalid/v1")
+                           :settings settings :capabilities (list :tools (plist-get settings :tools))
+                           :credential-scope (kargu-credential-scope--create :raw-secret "offline")))))
+      (error (kargu-async-finish task (kargu-err (error-message-string err) :connection-failed))))
+    task))
 
 (defun kargu-test-await (start &optional timeout)
   "Call START with a callback and return what the callback receives.
@@ -173,7 +195,8 @@ Tests never see the working tree of Kargu as their project."
                                    (copy-hash-table kargu-diff--snapshots)
                                  (make-hash-table :test #'equal)))
         (kargu-diff--run-modified-files (bound-and-true-p kargu-diff--run-modified-files)))
-    (apply run-test args)))
+    (cl-letf (((symbol-function 'kargu-api-prepare-connection) #'kargu-test-prepare-connection))
+      (apply run-test args))))
 
 (advice-add 'ert-run-test :around #'kargu-test--isolate)
 

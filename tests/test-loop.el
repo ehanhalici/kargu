@@ -114,14 +114,15 @@
       (should (equal (plist-get (car reports) :error) "Initial request failed")))))
 
 (ert-deftest kargu-loop-prompt-failure-never-publishes-a-run-test ()
-  "A prompt construction failure leaves prior run state and callbacks untouched."
+  "An asynchronously prepared prompt failure releases admission without sending."
   (let ((kargu--loop-run nil) (kargu--busy nil) reported)
     (kargu-test-mode 'ask)
     (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
               ((symbol-function 'kargu-prompt-wrap-user) (lambda (_) (error "Prompt failed"))))
-      (should-error (kargu-loop-send "Hello" nil (lambda (_) (setq reported t))))
+      (kargu-loop-send "Hello" nil (lambda (report) (setq reported report)))
       (should-not (kargu-loop-running-p))
-      (should-not reported))))
+      (should (eq (plist-get reported :status) :error))
+      (should-not (plist-get reported :request-started)))))
 
 (ert-deftest kargu-loop-missing-diagnostics-never-mean-clean-test ()
   "Nil diagnostics neither crash verification nor claim that the edit passed."
@@ -622,7 +623,7 @@
     (should (string-match-p "iteration 3/24" (kargu-loop-status)))))
 
 (ert-deftest kargu-loop-run-captures-immutable-snapshot-and-report-metadata-test ()
-  "A run captures mode, session-id, project-root and provider/model at start."
+  "A run captures mode, session ID, project root and provider/model at start."
   (let ((buf-a (generate-new-buffer " *kargu-run-snap-a*"))
         (buf-b (generate-new-buffer " *kargu-run-snap-b*")))
     (unwind-protect

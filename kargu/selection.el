@@ -15,6 +15,7 @@
 (require 'gv)
 (require 'kargu/core/session)
 (require 'kargu/application/coordinator)
+(require 'kargu/models/service)
 (require 'kargu/contract/selection)
 (require 'kargu/state/hooks)
 
@@ -101,7 +102,7 @@
 (defun kargu-selection-models-known-p (pname-str &optional live-ids cache-table)
   "Return non-nil if LIVE-IDS or PNAME-STR in CACHE-TABLE is known."
   (let ((table (or cache-table (and (boundp 'kargu--live-models-cache)
-                                    kargu--live-models-cache))))
+                                    (kargu-metadata-table :catalog kargu--live-models-cache)))))
     (or live-ids
         (and (hash-table-p table)
              (not (eq (gethash pname-str table :unknown) :unknown))))))
@@ -109,7 +110,7 @@
 (defun kargu-selection-model-candidates (pname-str &optional live-ids catalog-ids cache-table)
   "Return model IDs for PNAME-STR from CACHE-TABLE, LIVE-IDS or CATALOG-IDS."
   (let* ((table (or cache-table (and (boundp 'kargu--live-models-cache)
-                                     kargu--live-models-cache)))
+                                     (kargu-metadata-table :catalog kargu--live-models-cache))))
          (cached (if (hash-table-p table)
                      (gethash pname-str table :unknown)
                    :unknown))

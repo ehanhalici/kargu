@@ -27,6 +27,7 @@
 (require 'kargu/history)
 (require 'kargu/history/compact)
 (require 'kargu/api)
+(require 'kargu/api/prepare)
 (require 'kargu/edit)
 (require 'kargu/tools/deps nil t)
 (require 'kargu/confirm)
@@ -269,8 +270,8 @@ the diff run files and the UI as they were."
   (kargu-loop-require-tools-for-agent)
   (not (kargu-model-supports-tools-p)))
 
-(cl-defun kargu-loop--new-run (prompt &key no-tools on-delta on-finish)
-  "Build a run record for PROMPT with NO-TOOLS, ON-DELTA and ON-FINISH."
+(cl-defun kargu-loop--new-run (prompt &key no-tools on-delta on-finish on-ready)
+  "Build PROMPT's record with NO-TOOLS, ON-DELTA, ON-FINISH and ON-READY."
   (let ((session (kargu-session-context))
         (root (kargu-permission-project-root)))
     (list :id (kargu--generate-session-id)
@@ -285,6 +286,7 @@ the diff run files and the UI as they were."
           :api-base (kargu--api-base)
           :history (kargu-history-context)
           :max-iterations kargu-max-iterations :on-delta on-delta
+          :on-ready on-ready :request-started nil
           :on-finish (or on-finish #'kargu-loop--message-report)
           :iterations 0 :healing 0 :verifications 0 :empty-retries 0
           :upstream-retries 0 :compactions 0 :length-continues 0
@@ -312,23 +314,49 @@ the diff run files and the UI as they were."
          (kargu--loop-finish run :error (error-message-string err)))))))
 
 (defun kargu-loop--begin-run (run prompt)
-  "Initialize claimed RUN and issue its first PROMPT inside its boundary."
+  "Prepare claimed RUN asynchronously before publishing its first PROMPT."
   (let ((context (plist-get run :context)))
     (setf (kargu-execution-task context)
           (kargu-async-start #'ignore :owner (kargu-execution-app context) :parent nil))
-    (setf (kargu-execution-state context) :running)
     (let ((kargu-async--current-task (kargu-execution-task context)))
       (kargu-loop--attach-origin run)
-      (setf (kargu-history-overlay (plist-get run :history)) nil)
-      (kargu-edit-changes :reset)
       (kargu-state-transition-status :requesting)
       (when (kargu-loop--live-p run)
-        (kargu-session-mark-active t (plist-get run :session))
-        (kargu--loop-request run prompt)))))
+        (kargu-api-prepare-connection
+         (kargu-loop--wrap run (lambda (result) (kargu-loop--connection-ready run prompt result)))
+         :parent (kargu-execution-task context) :owner (kargu-execution-app context))))))
 
-(defun kargu-loop-send (prompt &optional on-delta on-finish)
+(defun kargu-loop--connection-ready (run prompt result)
+  "Start RUN's PROMPT only after its owned connection RESULT is ready."
+  (if (kargu-err-p result)
+      (kargu--loop-finish run :error (kargu-result-err-message result))
+    (let* ((context (plist-get run :context))
+           (snapshot (kargu-result-value result)))
+      (setf (kargu-execution-connection context) snapshot)
+      (kargu-async-add-cleanup (kargu-execution-task context)
+                               (lambda () (kargu-connection-snapshot-wipe snapshot)))
+      (kargu-execution-call context #'kargu-loop--send-ready run prompt))))
+
+(defun kargu-loop--send-ready (run prompt)
+  "Initialize RUN's algorithm state and send PROMPT after preparation."
+  (condition-case err
+      (progn
+        (kargu-loop-require-tools-for-agent)
+        (plist-put run :no-tools (not (kargu-model-supports-tools-p)))
+        (plist-put run :provider (kargu--provider-name))
+        (plist-put run :model (kargu--model))
+        (plist-put run :api-base (kargu--api-base))
+        (let ((wrapped (kargu-prompt-wrap-user prompt)))
+          (setf (kargu-execution-state (plist-get run :context)) :running)
+          (setf (kargu-history-overlay (plist-get run :history)) nil)
+          (kargu-edit-changes :reset)
+          (kargu-session-mark-active t (plist-get run :session))
+          (kargu--loop-request run wrapped)))
+    (error (kargu--loop-finish run :error (error-message-string err)))))
+
+(cl-defun kargu-loop-send (prompt &optional on-delta on-finish &key on-ready)
   "Start an agent run with PROMPT.
-Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
+Deliver events to ON-DELTA, completion to ON-FINISH, and admission to ON-READY."
   (interactive "skargu prompt: ")
   (kargu-contract-assert #'kargu-contract-non-empty-string-p prompt
                          "kargu: prompt must be a non-empty string: %S" prompt)
@@ -337,10 +365,9 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
   (kargu-contract-assert #'kargu-contract-callback-p on-finish
                          "kargu: on-finish must be callable or nil: %S" on-finish)
   (let* ((no-tools (kargu-loop-preflight))
-         (wrapped (kargu-prompt-wrap-user prompt))
          (run (kargu-loop--new-run prompt :no-tools no-tools
-                                   :on-delta on-delta :on-finish on-finish)))
-    (kargu-loop--start-run run wrapped)
+                                   :on-delta on-delta :on-finish on-finish :on-ready on-ready)))
+    (kargu-loop--start-run run prompt)
     run))
 
 (defun kargu-loop--finish-report (run status text)
@@ -349,6 +376,7 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
                       :run-id (plist-get run :id)
                       :session-id (plist-get run :session-id)
                       :mode (plist-get run :mode)
+                      :request-started (plist-get run :request-started)
                       :text (if (eq status :error) "" (or text ""))
                       :iterations (or (plist-get run :iterations) 0)
                       :healing (or (plist-get run :healing) 0)
@@ -376,14 +404,18 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
     (let* ((context (plist-get run :context))
            (app (and context (kargu-execution-app context)))
            (resetting (eq (kargu-application-current-status app) :resetting))
+           (initialized (or (null context) (eq (kargu-execution-state context) :running)))
            (_revoke (when context (setf (kargu-execution-state context) :closing)))
            (report (condition-case err (kargu-loop--finish-report run status text)
                      (error (list :status :error :error (error-message-string err))))))
-      (unwind-protect (kargu-loop--cleanup-run run status)
+      (unwind-protect (kargu-loop--cleanup-run run status initialized)
         (when context
           (kargu-application-release app (kargu-execution-claim context))
           (setf (kargu-execution-state context) :closed)
           (setq kargu--loop-run nil)))
+      (when-let* ((callback (plist-get run :on-ready)))
+        (plist-put run :on-ready nil)
+        (funcall callback nil (or text "Connection preparation was cancelled")))
       (when (and (not resetting) (fboundp 'kargu-state-transition-status))
         (let ((final-st (if (memq status '(:done :limit :stopped :error))
                             status :idle)))
@@ -400,8 +432,9 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
   (condition-case err (apply function args)
     (error (kargu-log 'error "Run cleanup failed: %s" (error-message-string err)))))
 
-(defun kargu-loop--cleanup-run (run status)
-  "Drain only RUN's resources before releasing its claim; STATUS controls abort."
+(cl-defun kargu-loop--cleanup-run (run status &optional (initialized t))
+  "Drain RUN's resources before release; STATUS controls abort.
+INITIALIZED is nil when preparation failed before history or edits were touched."
   (let ((context (plist-get run :context))
         (history (or (plist-get run :history) (kargu-history-context))))
     (kargu-loop--cleanup-step #'kargu-loop--detach-origin run)
@@ -414,11 +447,13 @@ Deliver streaming events to ON-DELTA and the final report to ON-FINISH."
       (kargu-loop--cleanup-step #'kargu-async-cancel-owner run)
       (kargu-loop--cleanup-step #'kargu-api-cancel)
       (kargu-application-set-active-run nil))
-    (when (memq status '(:stopped :error))
+    (when (and initialized (memq status '(:stopped :error)))
       (kargu-loop--cleanup-step #'kargu-edit-changes :abort))
-    (setf (kargu-history-overlay history) nil)
+    (when initialized
+      (setf (kargu-history-overlay history) nil))
     (kargu-loop--cleanup-step #'kargu-session-mark-active nil (plist-get run :session))
-    (kargu-loop--cleanup-step #'kargu--validate-history 'keep-assistant-tail history)))
+    (when initialized
+      (kargu-loop--cleanup-step #'kargu--validate-history 'keep-assistant-tail history))))
 
 (require 'kargu/loop/compact)
 (require 'kargu/loop/tools)

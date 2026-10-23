@@ -34,6 +34,7 @@
 (require 'kargu/api/request)
 (require 'kargu/api/retry)
 (require 'kargu/api/sse)
+(require 'kargu/api/transport)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-extra-headers "kargu/providers/registry" (id))
@@ -290,9 +291,15 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
 
 (defun kargu-http--wrap (request function)
   "Capture REQUEST's application for FUNCTION; retain bare legacy fixtures."
-  (if-let* ((app (kargu-http--request-app request)))
-      (kargu-application-wrap app function)
-    function))
+  (let* ((logical (kargu-http--request-logical request))
+         (snapshot (and logical (kargu-logical-request-connection logical)))
+         (wrapped (if snapshot
+                      (lambda (&rest args)
+                        (apply #'kargu-connection-call snapshot function args))
+                    function)))
+    (if-let* ((app (kargu-http--request-app request)))
+        (kargu-application-wrap app wrapped)
+      wrapped)))
 
 (defun kargu-http--live-request-p (request)
   "Return non-nil when REQUEST is pending in the current generation."
@@ -445,7 +452,7 @@ GEN identifies the request; ON-DELTA and ATTEMPT are retained for retries."
                   :callback callback :on-delta on-delta :attempt (or attempt 0))))
     (kargu-http--log-request request 'plain)
     (kargu-http--track-process
-     request (plz 'post url
+     request (kargu-transport-request 'post url
                   :headers headers :body (kargu-json-encode-record payload)
                   :as 'string :timeout kargu-api-timeout
                   :then (kargu-http--wrap request
@@ -471,7 +478,7 @@ ATTEMPT is the retry count."
          (on-event (lambda (event)
                      (push event (kargu-http--request-events request))))
          (process
-          (plz 'post (kargu-http--request-url request)
+          (kargu-transport-request 'post (kargu-http--request-url request)
                :headers (kargu-http--request-headers request)
                :body (kargu-json-encode-record
                       (append (kargu-http--request-payload request)

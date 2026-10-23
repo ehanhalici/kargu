@@ -440,30 +440,38 @@ Nothing is consumed or rendered, so a refusal keeps the typed input."
                  (>= (cdr pair) old-start))
         (set-window-point (car pair) (+ start (- (cdr pair) old-start)))))))
 
-(cl-defun kargu-chat--complete-submission (report &key buffer draft)
-  "Render REPORT in BUFFER and restore an optional unsent DRAFT."
+(cl-defun kargu-chat--complete-submission (report &key buffer draft preserve-draft session)
+  "Render REPORT in BUFFER and restore DRAFT for SESSION when still safe.
+PRESERVE-DRAFT also restores input following a successfully admitted request."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
+      (when (or (null session) (eq session (kargu-session-context)))
       (unwind-protect
           (kargu-chat--on-finish report)
-        (when draft (kargu-chat--restore-draft draft))))))
+        (when (and draft (or preserve-draft
+                             (and (plist-member report :request-started)
+                                  (not (plist-get report :request-started))))
+                   (string-empty-p (string-trim (kargu-chat--input-text))))
+          (kargu-chat--restore-draft draft)))))))
 
-(cl-defun kargu-chat--submit (prompt &key preserve-draft)
+(cl-defun kargu-chat--submit (prompt &key preserve-draft on-ready)
   "Start a run for PROMPT, restoring the draft if startup is rejected.
-When PRESERVE-DRAFT is non-nil, keep unsent input after completion too."
+PRESERVE-DRAFT keeps unsent input after completion; ON-READY reports admission."
   (kargu-chat--preflight prompt)
   (let ((expanded (kargu-chat--expand-prompt prompt))
         (saved (kargu-chat--capture-submission))
-        (buffer (current-buffer)))
+        (buffer (current-buffer))
+        (session (kargu-session-context)))
     (condition-case err
         (progn
           (kargu-chat--publish-submission prompt)
           (kargu-chat--follow-end buffer)
-          (kargu-loop-send
-           expanded #'kargu-chat--on-delta
-           (lambda (report)
-             (kargu-chat--complete-submission
-              report :buffer buffer :draft (and preserve-draft saved)))))
+          (apply #'kargu-loop-send
+                 expanded #'kargu-chat--on-delta
+                 (lambda (report)
+                   (kargu-chat--complete-submission
+                    report :buffer buffer :draft saved :preserve-draft preserve-draft :session session))
+                 (and on-ready (list :on-ready on-ready))))
       (error
        (unless (kargu-loop-running-p)
          (kargu-chat--rollback-submission saved))
@@ -549,16 +557,16 @@ When PRESERVE-DRAFT is non-nil, keep unsent input after completion too."
          (setf (kargu-chat--debug-prompt-state pending) :done)
          (message "kargu: debug session cancelled or failed: %s" reason))))))
 
-(cl-defun kargu-chat--send-prepared (text &key preserve-draft)
+(cl-defun kargu-chat--send-prepared (text &key preserve-draft on-ready)
   "Submit TEXT, keeping an unrelated input when PRESERVE-DRAFT is non-nil.
 A debug session that is not ready is started before the submit.
-Every refusal happens before the input is consumed."
+ON-READY reports asynchronous admission; refusals retain the original draft."
   (kargu-chat--preflight text)
   (cond
    ((kargu-chat--debug-session-needed-p)
     (kargu-chat--await-debug-prompt text preserve-draft))
    (t
-    (kargu-chat--submit text :preserve-draft preserve-draft))))
+    (kargu-chat--submit text :preserve-draft preserve-draft :on-ready on-ready))))
 
 (defun kargu-chat--send-input ()
   "Read, check, and send the current chat prompt."
@@ -600,8 +608,8 @@ from the menu with an empty prompt, this just opens the chat."
     (kargu-chat--debug-fallback-text))
    (t nil)))
 
-(defun kargu-chat--send-given (prompt)
-  "Send PROMPT from the chat buffer after startup validation."
+(defun kargu-chat--send-given (prompt &optional on-ready)
+  "Send PROMPT from the chat buffer and report admission through ON-READY."
   (let ((missing (kargu-chat--missing-tools (kargu-chat--project))))
     (when missing
       (kargu-chat-show)
@@ -609,14 +617,14 @@ from the menu with an empty prompt, this just opens the chat."
   (kargu-chat-show)
   (let ((text (kargu-chat--prompt-text prompt)))
     (with-current-buffer (kargu-chat--buffer)
-      (kargu-chat--send-prepared text :preserve-draft t))))
+      (kargu-chat--send-prepared text :preserve-draft t :on-ready on-ready))))
 
-(defun kargu-chat-prompt (&optional prompt)
-  "Send PROMPT, or the chat input when called interactively."
+(cl-defun kargu-chat-prompt (&optional prompt &key on-ready)
+  "Send PROMPT, reporting first-request admission through optional ON-READY."
   (interactive)
   (if (called-interactively-p 'interactive)
       (kargu-chat-send)
-    (kargu-chat--send-given prompt)))
+    (kargu-chat--send-given prompt on-ready)))
 
 (defun kargu-chat-reset ()
   "Reset the kargu session: stop the run, clear history and counters.

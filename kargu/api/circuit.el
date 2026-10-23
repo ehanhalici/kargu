@@ -20,6 +20,7 @@
 (require 'subr-x)
 (require 'kargu/core)
 (require 'kargu/contract/assert)
+(require 'kargu/models/service)
 
 (declare-function kargu--provider-name "kargu/config/key" ())
 
@@ -73,7 +74,8 @@
 
 (defun kargu-circuit--sync-from-legacy (cb)
   "Import compatibility state only into the default breaker CB."
-  (when (equal (kargu-circuit-breaker-key cb) "default")
+  (when (and (not (or kargu-application--bound kargu-application-owner))
+             (equal (kargu-circuit-breaker-key cb) "default"))
     (setf (kargu-circuit-breaker-state cb) kargu-circuit--state
           (kargu-circuit-breaker-failure-count cb) kargu-circuit--failure-count
           (kargu-circuit-breaker-probe-inflight cb) kargu-circuit--probe-inflight
@@ -81,7 +83,8 @@
 
 (defun kargu-circuit--sync-to-legacy (cb)
   "Publish compatibility state only from the default breaker CB."
-  (when (equal (kargu-circuit-breaker-key cb) "default")
+  (when (and (not (or kargu-application--bound kargu-application-owner))
+             (equal (kargu-circuit-breaker-key cb) "default"))
     (setq kargu-circuit--state (kargu-circuit-breaker-state cb)
           kargu-circuit--failure-count (kargu-circuit-breaker-failure-count cb)
           kargu-circuit--probe-inflight (kargu-circuit-breaker-probe-inflight cb)
@@ -90,12 +93,13 @@
 (defun kargu-circuit-get (&optional scope)
   "Return or create the `kargu-circuit-breaker' for SCOPE."
   (let* ((key (kargu-circuit--scope-key scope))
-         (cb (or (gethash key kargu-circuit--registry)
+         (registry (kargu-metadata-table :circuits kargu-circuit--registry))
+         (cb (or (gethash key registry)
                  (puthash key (kargu-circuit-breaker--create
                                :key key
                                :threshold kargu-circuit-failure-threshold
                                :cooldown kargu-circuit-cooldown-seconds)
-                          kargu-circuit--registry))))
+                          registry))))
     (kargu-circuit--sync-from-legacy cb)
     cb))
 
@@ -204,11 +208,12 @@ If failures reach threshold, trips circuit to :open."
   (interactive)
   (if (eq scope 'all)
       (progn
-        (clrhash kargu-circuit--registry)
-        (setq kargu-circuit--state :closed
+        (clrhash (kargu-metadata-table :circuits kargu-circuit--registry))
+        (unless (or kargu-application--bound kargu-application-owner)
+          (setq kargu-circuit--state :closed
               kargu-circuit--probe-inflight nil
               kargu-circuit--failure-count 0
-              kargu-circuit--last-failure-time 0.0)
+                kargu-circuit--last-failure-time 0.0))
         (kargu-log 'info "circuit breaker: all scoped breakers reset to :closed"))
     (let ((cb (kargu-circuit-get scope)))
       (setf (kargu-circuit-breaker-state cb) :closed

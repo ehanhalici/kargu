@@ -60,7 +60,8 @@ CALLBACK and ON-DELTA retain their original owner; ATTEMPT counts retries."
                    (or (null req-after)
                        (and (= (kargu-logical-request-generation req-after) generation)
                             (not (eq (kargu-logical-request-state req-after) :cancelled)))))
-          (kargu--api-post url headers payload generation callback on-delta attempt))))))
+          (let ((kargu-connection--bound (and req (kargu-logical-request-connection req))))
+            (kargu--api-post url headers payload generation callback on-delta attempt)))))))
 
 (defun kargu--summarize-http-body (body &optional status)
   "Human-readable summary of HTTP BODY, prefixed with STATUS when given.

@@ -48,6 +48,8 @@ ToolCallSequences ==
 MCNext ==
     \/ StartRun("Write test code")
     \/ FollowUpPrompt("Refactor the code")
+    \/ PreparationReady("Write test code")
+    \/ PreparationFailed
     \/ \E m \in AllModes, ready \in BOOLEAN : SetMode(m, ready)
     \/ ResetSession
     \/ RequestCompact

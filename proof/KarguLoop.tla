@@ -41,6 +41,7 @@ CONSTANTS
 
 States == {
     "IDLE",         \* No run yet
+    "PREPARING",    \* Claimed config/credential work; history is untouched
     "REQUEST",      \* Classifying the next request
     "WAIT_MODEL",   \* HTTP/SSE request in flight
     "EXEC_TOOLS",   \* Working through the tool queue
@@ -61,6 +62,7 @@ RunLive == States \ RunOver
 \* The status the state store shows for each loop state (`kargu-loop--set-state')
 StatusOf(s) ==
     CASE s = "IDLE"         -> ":idle"
+      [] s = "PREPARING"    -> ":requesting"
       [] s = "REQUEST"      -> ":requesting"
       [] s = "WAIT_MODEL"   -> ":waiting-model"
       [] s = "RECOVER"      -> ":waiting-model"
@@ -172,22 +174,33 @@ FreshRun ==
 StartRun(prompt) ==
     /\ AssertIngress(ContractPrompt(prompt), "StartRun: Prompt must be non-empty")
     /\ state = "IDLE"
-    /\ LET sysMsg == MakeMsg("system", "system-prompt-" \o activeMode, << >>, "none", "none")
-           usrMsg == MakeMsg("user", prompt, << >>, "none", "none")
-       IN history ' = IF Len(history) = 0 THEN <<sysMsg, usrMsg>> ELSE Append(history, usrMsg)
-    /\ state     ' = "REQUEST"
+    /\ state     ' = "PREPARING"
     /\ runStatus ' = "none"
     /\ FreshRun
-    /\ UNCHANGED <<activeMode, Circuit>>
+    /\ UNCHANGED <<history, activeMode, Circuit>>
 
 FollowUpPrompt(prompt) ==
     /\ AssertIngress(ContractPrompt(prompt), "FollowUpPrompt: Prompt must be non-empty")
     /\ state \in {"DONE", "STOPPED", "ERROR", "LIMIT"}
-    /\ history   ' = Append(history, MakeMsg("user", prompt, << >>, "none", "none"))
-    /\ state     ' = "REQUEST"
+    /\ state     ' = "PREPARING"
     /\ runStatus ' = "none"
     /\ FreshRun
-    /\ UNCHANGED <<activeMode, Circuit>>
+    /\ UNCHANGED <<history, activeMode, Circuit>>
+
+(* Prompt contents are abstract inputs at admission, not an extra store. *)
+PreparationReady(prompt) ==
+    /\ state = "PREPARING"
+    /\ AssertIngress(ContractPrompt(prompt), "PreparationReady: non-empty prompt")
+    /\ LET sysMsg == MakeMsg("system", "system-prompt-" \o activeMode, << >>, "none", "none")
+           usrMsg == MakeMsg("user", prompt, << >>, "none", "none")
+       IN history' = IF Len(history) = 0 THEN <<sysMsg, usrMsg>> ELSE Append(history, usrMsg)
+    /\ state' = "REQUEST"
+    /\ UNCHANGED <<activeMode, Counters, ToolVars, Flags, runStatus, generation, Circuit>>
+
+PreparationFailed ==
+    /\ state = "PREPARING"
+    /\ state' = "ERROR" /\ runStatus' = "error"
+    /\ UNCHANGED <<history, activeMode, Counters, ToolVars, Flags, generation, Circuit>>
 
 (* SetMode: `kargu-state-set-mode' refuses while a run is live (law 3) *)
 SetMode(newMode, debugReady) ==
@@ -533,7 +546,7 @@ CompactionFinish(success) ==
 (* A model-response continuation failed after entering a handler. *)
 ModelCallbackFailure ==
     /\ state \in RunLive
-    /\ history            ' = ValidateHistory(history, "keep")
+    /\ history            ' = IF state = "PREPARING" THEN history ELSE ValidateHistory(history, "keep")
     /\ state              ' = "ERROR"
     /\ runStatus          ' = "error"
     /\ pendingToolQueue   ' = << >>
@@ -549,7 +562,7 @@ ModelCallbackFailure ==
 (* which answers every open tool call, and keeps a trailing answer.         *)
 UserStop ==
     /\ state \in RunLive
-    /\ history            ' = ValidateHistory(history, "keep")
+    /\ history            ' = IF state = "PREPARING" THEN history ELSE ValidateHistory(history, "keep")
     /\ state              ' = "STOPPED"
     /\ runStatus          ' = "stopped"
     /\ pendingToolQueue   ' = << >>

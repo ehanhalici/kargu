@@ -27,6 +27,21 @@
 (declare-function kargu-provider-cache-marker-p "kargu/providers/registry" (id))
 (declare-function kargu-provider-reasoning-shape "kargu/providers/registry" (id))
 
+(defun kargu-api-connection-settings (provider model)
+  "Capture request policy and wire metadata once for PROVIDER and MODEL."
+  (let ((format (kargu-provider-format provider)))
+    (list :format format :wire (kargu-provider-format-record format)
+          :metadata (and model (kargu-model-get-metadata model provider))
+          :fields (kargu-model-read model provider)
+          :tools (kargu-model-supports-tools-p model provider)
+          :cache-marker (kargu-provider-cache-marker-p provider)
+          :effort (kargu-reasoning-effort-level)
+          :sampling (kargu-api-request-parameters
+                     :model model :provider provider :temperature kargu-temperature
+                     :max-tokens kargu-max-tokens)
+          :reasoning (kargu--build-reasoning-params provider)
+          :headers (kargu--api-headers "" provider))))
+
 
 (defun kargu-reasoning-effort-level ()
   "The reasoning effort to send as a string, or nil to send none.
@@ -34,11 +49,13 @@ The effective owned choice inherits `kargu-reasoning-effort' by default.
 Values nil, \"off\" and the
 empty string mean the user chose no effort.  \"none\" is a real level
 that some models accept, so it is sent."
-  (let* ((selected (kargu-selection-effort))
+  (if (kargu-connection-current)
+      (kargu-connection-setting :effort)
+    (let* ((selected (kargu-selection-effort))
          (effort (and selected (string-trim (format "%s" selected)))))
     (and effort
          (not (member (downcase effort) '("" "nil" "off")))
-         effort)))
+         effort))))
 
 (defun kargu-reasoning-budget ()
   "The thinking token budget when it is a positive integer, else nil."
@@ -49,7 +66,9 @@ that some models accept, so it is sent."
 (defun kargu--build-reasoning-params (&optional provider)
   "Request entries for effort and thinking budget in PROVIDER's wire shape.
 The shape comes from the provider's format record (`:reasoning-shape')."
-  (let ((effort (kargu-reasoning-effort-level))
+  (if (kargu-connection-current)
+      (kargu-connection-setting :reasoning)
+    (let ((effort (kargu-reasoning-effort-level))
         (budget (kargu-reasoning-budget))
         (shape (if (fboundp 'kargu-provider-reasoning-shape)
                    (kargu-provider-reasoning-shape
@@ -64,7 +83,7 @@ The shape comes from the provider's format record (`:reasoning-shape')."
        (let ((nested (append (and effort `(("effort" . ,effort)))
                              (and budget `(("max_tokens" . ,budget))))))
          (and nested `(("reasoning" . ,nested)))))
-      (_ (and effort `(("reasoning_effort" . ,effort)))))))
+      (_ (and effort `(("reasoning_effort" . ,effort))))))))
 
 (defun kargu--payload-merge (payload extra)
   "Merge EXTRA entries into PAYLOAD, replacing keys already present."
@@ -73,8 +92,10 @@ The shape comes from the provider's format record (`:reasoning-shape')."
 
 (defun kargu--payload-sampling-entries ()
   "Request entries for temperature and the output token cap."
-  (kargu-api-request-parameters :model (kargu--model) :provider (kargu--provider-name)
-                               :temperature kargu-temperature :max-tokens kargu-max-tokens))
+  (if (kargu-connection-current)
+      (kargu-connection-setting :sampling)
+    (kargu-api-request-parameters :model (kargu--model) :provider (kargu--provider-name)
+                                 :temperature kargu-temperature :max-tokens kargu-max-tokens)))
 
 (defun kargu--payload-tools-entries (tools cache-marked)
   "Request entries for the TOOLS vector; none when it is empty.
@@ -93,8 +114,10 @@ at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
 (defun kargu-api-build-payload (history &optional extra)
   "Build a payload snapshot from HISTORY and optional EXTRA entries."
   (let* ((tools (kargu--build-tools-vector))
-         (cache-marked (kargu-provider-cache-marker-p
-                        (downcase (string-trim (format "%s" (kargu--provider-name))))))
+         (cache-marked (if (kargu-connection-current)
+                           (kargu-connection-setting :cache-marker)
+                         (kargu-provider-cache-marker-p
+                          (downcase (string-trim (format "%s" (kargu--provider-name)))))))
          (messages (kargu-history-snapshot history))
          (payload
           (append
@@ -121,7 +144,9 @@ at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
 The format record's `:auth' selects `x-api-key' or a bearer token.
 An empty KEY sends neither."
   (when (kargu-nonempty key)
-    (if (eq (kargu-provider-format-auth format) 'x-api-key)
+    (if (eq (if (kargu-connection-current)
+                (plist-get (kargu-connection-setting :wire) :auth)
+              (kargu-provider-format-auth format)) 'x-api-key)
         `(("x-api-key" . ,key))
       `(("Authorization" . ,(concat "Bearer " key))))))
 
@@ -150,7 +175,10 @@ An empty KEY sends neither."
 KEY is the resolved secret.  An empty KEY omits Authorization so
 local or keyless proxies still work.  Auth and extra headers come
 from the provider catalog `:format' and `:extra-headers'."
-  (let* ((sid (kargu--api-session-id))
+  (if (kargu-connection-current)
+      (append (kargu-config-copy (kargu-connection-setting :headers))
+              (kargu--api-auth-headers key (kargu-connection-setting :format)))
+    (let* ((sid (kargu--api-session-id))
          (pname (if provider-name
                     (format "%s" provider-name)
                   (if (fboundp 'kargu--provider-name) (kargu--provider-name) "")))
@@ -166,7 +194,7 @@ from the provider catalog `:format' and `:extra-headers'."
      '(("Content-Type" . "application/json"))
      (kargu--api-auth-headers key format)
      (kargu--api-default-headers format expanded)
-     expanded)))
+     expanded))))
 
 (provide 'kargu/api/request)
 

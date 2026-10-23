@@ -21,6 +21,8 @@
 (defvar kargu--busy nil)
 (defvar kargu--generation 0)
 (defvar kargu--current-process nil)
+(defvar kargu-metadata--legacy nil
+  "Non-nil inside a detached compatibility continuation.")
 
 (declare-function kargu-loop-running-p "kargu/loop" ())
 (declare-function kargu-busy-p "kargu/api/http" ())
@@ -42,7 +44,21 @@
   (process nil)
   (retry-timer nil)
   (stream-timer nil)
-  owner-cleanup)
+  connection preparation cleanups owner-cleanup)
+
+(defun kargu-logical-request-add-cleanup (request cleanup)
+  "Attach CLEANUP to REQUEST, releasing late acquisitions immediately."
+  (if (kargu-logical-request-live-p request)
+      (push cleanup (kargu-logical-request-cleanups request))
+    (funcall cleanup)))
+
+(defun kargu-logical-request-clean-resources (request)
+  "Drain REQUEST's acquired resources exactly once."
+  (let ((cleanups (kargu-logical-request-cleanups request)))
+    (setf (kargu-logical-request-cleanups request) nil)
+    (dolist (cleanup cleanups)
+      (condition-case err (funcall cleanup)
+        (error (message "Kargu request cleanup failed: %s" (error-message-string err)))))))
 
 (defun kargu-logical-request-detach-owner (request)
   "Remove only REQUEST's captured origin lifecycle hooks."
@@ -120,6 +136,7 @@ CIRCUIT-SCOPE and BUDGET retain accounting owners; APP and CLAIM own delivery."
   "Idempotently cancel REQUEST and release its timers and transport process."
   (when (kargu-logical-request-p request)
     (setf (kargu-logical-request-state request) :cancelled)
+    (kargu-logical-request-clean-resources request)
     (kargu-logical-request-detach-owner request)
     (kargu-logical-request-cancel-retry-timer request)
     (kargu-logical-request-cancel-stream-timer request)
@@ -134,6 +151,7 @@ CIRCUIT-SCOPE and BUDGET retain accounting owners; APP and CLAIM own delivery."
     (kargu-logical-request-detach-owner request)
     (unless (eq (kargu-logical-request-state request) :cancelled)
       (setf (kargu-logical-request-state request) :finished))
+    (kargu-logical-request-clean-resources request)
     (kargu-logical-request-cancel-retry-timer request)
     (kargu-logical-request-cancel-stream-timer request)
     (setf (kargu-logical-request-process request) nil)))
@@ -382,13 +400,17 @@ Returns a `kargu-application-claim' token on success."
 (defun kargu-application-wrap (app function)
   "Capture APP for asynchronous FUNCTION without consulting the current owner."
   (let ((legacy (null (or kargu-application--bound kargu-application-owner)))
+        (metadata-legacy (or kargu-metadata--legacy
+                             (null (or kargu-application--bound kargu-application-owner))))
         (origin (current-buffer)))
     (lambda (&rest args)
       (with-current-buffer (if (buffer-live-p origin) origin (current-buffer))
         (if legacy
-            (let ((kargu-application--bound app) (kargu-application--context app))
+            (let ((kargu-application--bound app) (kargu-application--context app)
+                  (kargu-metadata--legacy metadata-legacy))
               (save-match-data (apply function args)))
           (let ((kargu-application--bound app)
+                (kargu-metadata--legacy metadata-legacy)
                 (kargu-application--context app)
                 (kargu--busy nil) (kargu--current-process nil))
             (save-match-data (apply function args))))))))

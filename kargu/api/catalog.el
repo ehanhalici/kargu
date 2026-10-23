@@ -21,6 +21,7 @@
 (require 'kargu/api/circuit)
 (require 'kargu/async)
 (require 'kargu/models/store)
+(require 'kargu/api/transport)
 
 (declare-function kargu-provider-models-api "kargu/providers/registry" (provider))
 (declare-function kargu-provider-public-models-p "kargu/providers/registry" (id url))
@@ -54,7 +55,9 @@ Without an explicit or recorded provider, use the active provider."
   "Read model ID's metadata for PROVIDER, defaulting to the active provider.
 Only unambiguous short aliases in that provider are accepted."
   (when (and (stringp id) (not (string-empty-p id)))
-    (kargu-model-store-get (or provider (kargu--provider-name)) id)))
+    (if (and (fboundp 'kargu-connection-matches-p) (kargu-connection-matches-p id provider))
+        (kargu-config-copy (kargu-connection-setting :metadata))
+      (kargu-model-store-get (or provider (kargu--provider-name)) id))))
 
 
 (defun kargu--extract-models-from-json (data)
@@ -293,7 +296,9 @@ An undeclared key yields nothing."
 The plist keys are `:context-window', `:max-output', `:reasoning-efforts',
 `:vision', `:free', `:params', and `:input-cost'.  A missing field is nil.
 PROVIDER defaults to the active provider.  No catalog fields are guessed."
-  (let* ((provider (or provider (kargu--provider-name)))
+  (if (and (fboundp 'kargu-connection-matches-p) (kargu-connection-matches-p model-id provider))
+      (kargu-config-copy (kargu-connection-setting :fields))
+    (let* ((provider (or provider (kargu--provider-name)))
          (data (kargu-model-get-metadata (or model-id (kargu--model) "") provider)))
     (list :context-window (kargu--read-context-window data)
           :max-output (kargu--read-max-output data)
@@ -301,7 +306,7 @@ PROVIDER defaults to the active provider.  No catalog fields are guessed."
           :vision (kargu--read-vision-p data)
           :free (kargu--read-free-p data)
           :params (kargu--read-params data)
-          :input-cost (kargu--read-input-cost data))))
+          :input-cost (kargu--read-input-cost data)))))
 
 (defun kargu-model-context-window (&optional model-id provider)
   "Return MODEL-ID's context window for PROVIDER, or nil when unknown."
@@ -351,21 +356,24 @@ This is what the endpoint said in this session; it is not catalog data.")
 (defun kargu-model-mark-tools-refused (&optional model-id provider)
   "Remember a tool refusal for MODEL-ID at PROVIDER, or the active pair."
   (puthash (kargu--tools-refusal-key (or model-id (kargu--model) "") provider) t
-           kargu--tools-refused))
+           (kargu-metadata-table :refusals kargu--tools-refused)))
 
 (defun kargu-model-forget-tools-refusals ()
   "Forget every provider refusal of tool use."
-  (clrhash kargu--tools-refused))
+  (clrhash (kargu-metadata-table :refusals kargu--tools-refused)))
 
 (defun kargu-model-supports-tools-p (&optional model-id provider)
   "Return non-nil unless tools are ruled out for MODEL-ID.
 Ruled out means the API metadata explicitly disables them or the provider
 refused tool use in this session.  Missing metadata and a missing field
 both leave tools available.  PROVIDER defaults to the active provider."
-  (let* ((mid (or model-id (kargu--model) ""))
+  (if (and (fboundp 'kargu-connection-matches-p) (kargu-connection-matches-p model-id provider))
+      (kargu-connection-setting :tools)
+    (let* ((mid (or model-id (kargu--model) ""))
          (data (kargu-model-get-metadata mid provider)))
-    (not (or (gethash (kargu--tools-refusal-key mid provider) kargu--tools-refused)
-             (and data (kargu--tools-explicitly-disabled-p data))))))
+    (not (or (gethash (kargu--tools-refusal-key mid provider)
+                     (kargu-metadata-table :refusals kargu--tools-refused))
+             (and data (kargu--tools-explicitly-disabled-p data)))))))
 
 (defun kargu--reasoning-support-flag (data)
   "Return the supports-reasoning flag in DATA, or nil when it is absent."
@@ -503,7 +511,7 @@ An explicit true flag is sufficient even without an API effort list."
   (let ((ids (kargu--catalog-clean-model-ids models)))
     (kargu--record-models-metadata models provider)
     (kargu-model-store-retain provider ids)
-    (puthash provider ids kargu--live-models-cache)))
+    (puthash provider ids (kargu-metadata-table :catalog kargu--live-models-cache))))
 
 (defun kargu--catalog-response (body)
   "Return the model list in BODY, rejecting malformed and provider errors."
@@ -523,7 +531,7 @@ An explicit true flag is sufficient even without an API effort list."
 (defun kargu--catalog-receive (task provider generation body)
   "Complete TASK with BODY, updating PROVIDER cache only for GENERATION."
   (let ((models (kargu--catalog-response body)))
-    (when (= generation (gethash provider kargu--catalog-generations))
+    (when (= generation (gethash provider (kargu-metadata-table :generations kargu--catalog-generations)))
       (kargu--catalog-cache-live-models provider models))
     (kargu-async-finish task models)))
 
@@ -535,11 +543,13 @@ An explicit true flag is sufficient even without an API effort list."
     (when (and (not public) (not key) (not (kargu-provider-keyless-p provider)))
       (error "No API key for provider %s" provider))
     (let ((request
-           (plz 'get url :headers (kargu--api-headers key provider)
+           (kargu-transport-request 'get url :headers (kargu--api-headers key provider)
                 :as 'string :timeout kargu-models-timeout
                 :then (kargu-async-wrap
-                       task (lambda (body)
-                              (kargu--catalog-receive task provider generation body)))
+                       task (kargu-application-wrap
+                             (kargu-application-context)
+                             (lambda (body)
+                               (kargu--catalog-receive task provider generation body))))
                 :else (kargu-async-wrap
                        task (lambda (error)
                               (kargu-async-finish task nil (kargu--plz-error-message error)))))))
@@ -553,16 +563,17 @@ CALLBACK receives model alists or an error alist.  Concurrent requests do
 not suppress each other's callbacks; only the newest updates shared cache."
   (interactive)
   (let* ((provider (downcase (string-trim (format "%s" (or provider-name (kargu--provider-name))))))
-         (generation (1+ (gethash provider kargu--catalog-generations 0)))
+         (generation (1+ (gethash provider (kargu-metadata-table :generations kargu--catalog-generations) 0)))
          ;; Catalog discovery is independent of a running agent and its Stop.
          (kargu--loop-run nil)
+         (kargu-execution--current nil)
          (kargu-async--current-task nil)
          (task (kargu-async-start
-                (lambda (models error)
+                (kargu-application-wrap (kargu-application-context) (lambda (models error)
                   (funcall (or callback #'ignore)
-                           (if error `(("error" . (("message" . ,error)))) models)))
+                           (if error `(("error" . (("message" . ,error)))) models))))
                 :timeout kargu-models-timeout)))
-    (puthash provider generation kargu--catalog-generations)
+    (puthash provider generation (kargu-metadata-table :generations kargu--catalog-generations))
     (funcall (kargu-async-wrap task
                               (lambda () (kargu--catalog-request task provider generation))))
     task))
@@ -588,12 +599,12 @@ compatibility.  A successful empty catalog also delivers nil."
 
 (defun kargu--prefetch-models-once (provider-name)
   "Fetch PROVIDER-NAME once, allowing another attempt after failure."
-  (unless (gethash provider-name kargu--models-prefetched)
-    (puthash provider-name :pending kargu--models-prefetched)
+  (unless (gethash provider-name (kargu-metadata-table :prefetch kargu--models-prefetched))
+    (puthash provider-name :pending (kargu-metadata-table :prefetch kargu--models-prefetched))
     (kargu-api-fetch-model-ids
      provider-name
-     (lambda (_) (puthash provider-name :ready kargu--models-prefetched))
-     (lambda (_) (remhash provider-name kargu--models-prefetched)))))
+     (lambda (_) (puthash provider-name :ready (kargu-metadata-table :prefetch kargu--models-prefetched)))
+     (lambda (_) (remhash provider-name (kargu-metadata-table :prefetch kargu--models-prefetched))))))
 
 (defun kargu-model-info--efforts-label (efforts)
   "One line naming EFFORTS."

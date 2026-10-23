@@ -15,6 +15,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'kargu/json)
+(require 'kargu/models/service)
 
 (cl-defstruct (kargu-model-entry (:constructor kargu-model-store--entry))
   "One provider's canonical model data and persistent local overrides."
@@ -42,7 +43,7 @@ records retained by snapshots or another reader.")
 
 (defun kargu-model-store--find (key exact)
   "Resolve KEY, allowing a unique short alias unless EXACT is non-nil."
-  (or (gethash key kargu--model-metadata-table)
+  (or (gethash key (kargu-metadata-table :records kargu--model-metadata-table))
       (unless (or exact (string-search "/" (cdr key)))
         (let ((suffix (concat "/" (cdr key))) found)
           (maphash
@@ -51,7 +52,7 @@ records retained by snapshots or another reader.")
                         (equal (car candidate) (car key))
                         (string-suffix-p suffix (cdr candidate)))
                (setq found (if found :ambiguous entry))))
-           kargu--model-metadata-table)
+           (kargu-metadata-table :records kargu--model-metadata-table))
           found))))
 
 (defun kargu-model-store--effective (entry)
@@ -77,12 +78,12 @@ EXACT refuses aliases; ambiguous short names always return nil."
 (defun kargu-model-store-put (provider id data)
   "Publish DATA for PROVIDER's canonical ID, preserving local overrides."
   (let* ((key (kargu-model-store--key provider id))
-         (old (gethash key kargu--model-metadata-table))
+         (old (gethash key (kargu-metadata-table :records kargu--model-metadata-table)))
          (entry (kargu-model-store--entry
                  :provider (car key) :id (cdr key)
                  :data (kargu-json-to-record data)
                  :overrides (and old (kargu-model-entry-overrides old)))))
-    (puthash key entry kargu--model-metadata-table)
+    (puthash key entry (kargu-metadata-table :records kargu--model-metadata-table))
     (kargu-model-store--effective entry)))
 
 (defun kargu-model-store-retain (provider ids)
@@ -101,9 +102,9 @@ An empty successful catalog clears all raw data for that provider alone."
              (puthash key (kargu-model-store--entry
                            :provider provider :id (kargu-model-entry-id entry)
                            :overrides (kargu-model-entry-overrides entry))
-                      kargu--model-metadata-table)
-           (remhash key kargu--model-metadata-table))))
-     kargu--model-metadata-table)))
+                      (kargu-metadata-table :records kargu--model-metadata-table))
+           (remhash key (kargu-metadata-table :records kargu--model-metadata-table)))))
+     (kargu-metadata-table :records kargu--model-metadata-table))))
 
 (cl-defun kargu-model-store-set-property (provider id &key property value)
   "Override PROPERTY with VALUE for PROVIDER's ID across catalog refreshes.
@@ -124,7 +125,7 @@ A unique alias updates its canonical record; ambiguous aliases are refused."
                                    (cl-remove-if
                                     (lambda (pair) (equal (car pair) property))
                                     (and old (kargu-model-entry-overrides old)))))))
-      (puthash key entry kargu--model-metadata-table)
+      (puthash key entry (kargu-metadata-table :records kargu--model-metadata-table))
       (kargu-model-store--effective entry))))
 
 (provide 'kargu/models/store)
