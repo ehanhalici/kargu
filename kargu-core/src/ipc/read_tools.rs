@@ -2,10 +2,10 @@
 
 use super::protocol::{Fault, RpcId};
 use crate::{
+    application::host::{Host, ReadScope},
     constants::{limits, protocol, timeouts},
     error::CoreError,
-    host::{Host, ReadScope},
-    workspace_read::{ReadResult, WorkspaceRead},
+    workspace::{ReadResult, WorkspaceRead},
 };
 use serde_json::Value;
 use std::{collections::HashMap, time::Instant};
@@ -177,7 +177,7 @@ fn fault(error: CoreError) -> Fault {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{listing::ListFilesInput, search::FindFilesInput};
+    use crate::workspace::{listing::ListFilesInput, search::FindFilesInput};
     use serde_json::json;
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 

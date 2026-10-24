@@ -2,7 +2,7 @@
 
 use kargu_core::{
     error::CoreError,
-    listing::{EntryKind, ListFilesInput, ListFilesPlan, ListFilesResult},
+    workspace::listing::{EntryKind, ListFilesInput, ListFilesPlan, ListFilesResult},
 };
 use std::{
     fs,

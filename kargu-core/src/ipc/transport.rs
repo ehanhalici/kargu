@@ -4,9 +4,9 @@ use super::{
     protocol::{self, Message},
     read_tools::ReadTools,
 };
+use crate::application::host::Host;
 use crate::constants::{protocol::methods, timeouts};
 use crate::domain::{ByteLimit, RequestScope};
-use crate::host::Host;
 use bytes::BytesMut;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;

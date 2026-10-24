@@ -1,5 +1,7 @@
 //! Single-writer admission, claims, tool ledger and revoke/drain/release lifecycle.
 
+pub mod host;
+
 use crate::{constants::limits, domain::*, error::CoreError, security::Workspace};
 use serde::Serialize;
 use std::{

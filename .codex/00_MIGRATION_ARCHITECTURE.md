@@ -30,6 +30,11 @@ testleri gerektirir. Ayrıntılar 01 ve proof/README.md ile eşlenir.
 
 ## 2. Nihai sorumluluk dağılımı
 
+Araç bileşimi ilkesi: listeleme/arama/Git motorlarını Rust'ta yeniden yazmak
+yerine `ls`/`rg`/`git` adapter'ları ortak süreç/izin altyapısını kullanır.
+Rust politika, sahiplik ve kaynak ömrünü yönetir. Güncel yön ve geçiş sırası:
+[17_UNIX_TOOL_COMPOSITION.md](17_UNIX_TOOL_COMPOSITION.md).
+
 | Katman | Sahip | Görev |
 | --- | --- | --- |
 | Domain/application | Rust | Claim/single-run, session/history, mode, plan dispatch, budget, tool gate |

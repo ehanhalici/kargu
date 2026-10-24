@@ -119,19 +119,19 @@ impl Host {
         &self,
         method: &str,
         params: Value,
-    ) -> Result<(ReadScope, crate::workspace_read::WorkspaceRead), Fault> {
-        use crate::workspace_read::WorkspaceRead;
+    ) -> Result<(ReadScope, crate::workspace::WorkspaceRead), Fault> {
+        use crate::workspace::WorkspaceRead;
         if self.phase != Phase::Ready {
             return Err(state_fault());
         }
         let (scope, input) = match method {
             methods::FIND_FILES => {
-                let request: ReadRequest<crate::search::FindFilesInput> =
+                let request: ReadRequest<crate::workspace::search::FindFilesInput> =
                     serde_json::from_value(params).map_err(|_| Fault::params())?;
                 (request.scope, WorkspaceRead::FindFiles(request.arguments))
             }
             methods::LIST_FILES => {
-                let request: ReadRequest<crate::listing::ListFilesInput> =
+                let request: ReadRequest<crate::workspace::listing::ListFilesInput> =
                     serde_json::from_value(params).map_err(|_| Fault::params())?;
                 (request.scope, WorkspaceRead::ListFiles(request.arguments))
             }

@@ -48,6 +48,12 @@ Git tracking kararı sonraki commit talebiyle kapatıldı; plan/notlar da tracke
 
 ## Aşama 2: Güvenlik, process/job, read/search/git ve edit temeli
 
+Güncel öncelik (2026-10-24 kullanıcı kararı): 17_UNIX_TOOL_COMPOSITION.md.
+Yeni native tarayıcı yazılmayacak. Önce modül klasörleme ve ortak komut/onay
+bağlantısı; ardından mevcut özel listing motoru `ls` adapter'ıyla değiştirilir.
+`workspace_grep` sonraki adapter'dır; aşağıdaki native read maddeleri önceki
+dilimlerin tarihsel kanıtını korur, yeni araç stratejisinin tanımı değildir.
+
 2026-10-24: typed execution/approval ve process supervisor library dilimi
 uygulandı; ayrıntılar 14_EXECUTION_FOUNDATIONS.md. Process stdin/EOF/status,
 bounded output, PGID/subreaper cleanup ve actor drain testleri geçti. Bu

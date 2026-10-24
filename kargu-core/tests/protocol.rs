@@ -1,7 +1,7 @@
 //! Envelope, lifecycle and take-once correlation contracts.
 
+use kargu_core::application::host::Host;
 use kargu_core::domain::RequestScope;
-use kargu_core::host::Host;
 use kargu_core::ipc::pending::{PendingFailure, PendingRequests, RegisterError};
 use kargu_core::ipc::protocol::{Message, RpcId, decode};
 use serde_json::{Value, json};

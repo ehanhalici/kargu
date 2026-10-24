@@ -2,7 +2,7 @@
 
 use kargu_core::{
     error::CoreError,
-    search::{FindFilesInput, FindFilesPlan, FindFilesResult},
+    workspace::search::{FindFilesInput, FindFilesPlan, FindFilesResult},
 };
 use std::{
     fs,

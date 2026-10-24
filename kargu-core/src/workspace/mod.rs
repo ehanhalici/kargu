@@ -1,10 +1,13 @@
 //! Closed native read-operation boundary shared by host admission and IO workers.
 
-use crate::{
-    error::CoreError,
+pub mod listing;
+pub mod search;
+
+use self::{
     listing::{ListFilesInput, ListFilesPlan, ListFilesResult},
     search::{FindFilesInput, FindFilesPlan, FindFilesResult},
 };
+use crate::error::CoreError;
 use serde::Serialize;
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
