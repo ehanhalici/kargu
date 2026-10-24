@@ -310,6 +310,164 @@ fn changing_retention_requires_a_different_exact_action_approval() -> TestResult
 }
 
 #[test]
+fn record_capture_and_success_codes_are_validated_and_bound_to_approval() -> TestResult {
+    for input in ["0", "-1", "1000002", "1.5", "true", "null"] {
+        assert!(serde_json::from_str::<RecordLimit>(input).is_err());
+    }
+    assert_eq!(
+        serde_json::from_str::<RecordLimit>("1000001")?.as_u64(),
+        1_000_001
+    );
+    let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+    let mut digests = Vec::new();
+    for (capture, success) in [
+        (CapturePolicy::default(), SuccessCodes::Zero),
+        (
+            CapturePolicy::Records(RecordLimit::try_from(1)?),
+            SuccessCodes::Zero,
+        ),
+        (
+            CapturePolicy::Records(RecordLimit::try_from(2)?),
+            SuccessCodes::Zero,
+        ),
+        (
+            CapturePolicy::Records(RecordLimit::try_from(2)?),
+            SuccessCodes::ZeroOrOne,
+        ),
+    ] {
+        let request = f.request_spec(
+            command(&f.root, "exit 1", Duration::from_secs(2))?
+                .with_capture(capture)
+                .with_success_codes(success),
+        )?;
+        assert!(!digests.contains(request.digest()));
+        digests.push(request.digest().clone());
+        assert!(matches!(request.retention(), OutputRetention::Prefix));
+        assert_eq!(
+            request.stdout_records().map(RecordLimit::as_u64),
+            capture.records().map(RecordLimit::as_u64)
+        );
+        assert!(
+            f.gate
+                .decide(&mut f.actor, &f.run, &request, UserDecision::Rejected)
+                .is_err()
+        );
+    }
+    let ordinary = f.request_spec(
+        command(&f.root, "exit 1", Duration::from_secs(2))?
+            .with_capture(CapturePolicy::Records(RecordLimit::try_from(1)?))
+            .with_retention(OutputRetention::Tail),
+    )?;
+    assert!(ordinary.stdout_records().is_none());
+    assert!(matches!(ordinary.retention(), OutputRetention::Tail));
+    assert!(
+        f.gate
+            .decide(&mut f.actor, &f.run, &ordinary, UserDecision::Rejected)
+            .is_err()
+    );
+    f.actor.finish(&f.run)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn record_budget_stops_a_live_producer_then_reaps_before_success() -> TestResult {
+    let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+    let request = f.request_spec(
+        command(
+            &f.root,
+            "printf 'one\\ntwo\\nthree\\n'; read value",
+            Duration::from_secs(2),
+        )?
+        .with_capture(CapturePolicy::Records(RecordLimit::try_from(2)?)),
+    )?;
+    let approved = f
+        .gate
+        .decide(&mut f.actor, &f.run, &request, UserDecision::Approved)?;
+    let started = tokio::time::Instant::now();
+    let job = f.supervisor.start(&mut f.actor, approved)?;
+    let result = f
+        .supervisor
+        .wait(&f.run, &job)
+        .await?
+        .deliver(&mut f.actor)?;
+    assert!(started.elapsed() >= Duration::from_millis(60));
+    assert!(result.cleanup_complete);
+    assert_eq!(result.capture_stop, Some(CaptureStop::Records));
+    assert_eq!(result.outcome, ToolOutcome::Ok);
+    assert_eq!(result.signal, Some(15));
+    assert_eq!(
+        f.output(&job, OutputStream::Stdout).await?,
+        (b"one\ntwo\n".to_vec(), true)
+    );
+    let summary = f.actor.finish(&f.run)?;
+    assert_eq!(
+        summary.tool_results.first().map(|result| result.outcome),
+        Some(ToolOutcome::Ok)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn byte_exhaustion_cannot_masquerade_as_complete_record_capture() -> TestResult {
+    let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+    let request = f.request_spec(
+        command(
+            &f.root,
+            "printf 'one\\ntwo\\n'; read value",
+            Duration::from_secs(2),
+        )?
+        .with_capture(CapturePolicy::Records(RecordLimit::try_from(2)?))
+        .with_output_limit(OutputLimit::try_from(2_usize)?),
+    )?;
+    let approved = f
+        .gate
+        .decide(&mut f.actor, &f.run, &request, UserDecision::Approved)?;
+    let job = f.supervisor.start(&mut f.actor, approved)?;
+    let result = f
+        .supervisor
+        .wait(&f.run, &job)
+        .await?
+        .deliver(&mut f.actor)?;
+    assert!(result.cleanup_complete);
+    assert_eq!(result.capture_stop, Some(CaptureStop::Bytes));
+    assert_eq!(result.outcome, ToolOutcome::Failed);
+    assert_eq!(
+        f.output(&job, OutputStream::Stdout).await?,
+        (b"on".to_vec(), true)
+    );
+    f.actor.finish(&f.run)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn no_match_exit_requires_the_explicit_approved_success_policy() -> TestResult {
+    for (policy, expected) in [
+        (SuccessCodes::Zero, ToolOutcome::Failed),
+        (SuccessCodes::ZeroOrOne, ToolOutcome::Ok),
+    ] {
+        let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+        let request = f.request_spec(
+            command(&f.root, "exit 1", Duration::from_secs(2))?.with_success_codes(policy),
+        )?;
+        let approved = f
+            .gate
+            .decide(&mut f.actor, &f.run, &request, UserDecision::Approved)?;
+        let job = f.supervisor.start(&mut f.actor, approved)?;
+        let result = f
+            .supervisor
+            .wait(&f.run, &job)
+            .await?
+            .deliver(&mut f.actor)?;
+        assert!(result.cleanup_complete);
+        assert_eq!(result.capture_stop, None);
+        assert_eq!(result.exit_code, Some(1));
+        assert_eq!(result.outcome, expected);
+        f.actor.finish(&f.run)?;
+    }
+    Ok(())
+}
+
+#[test]
 fn idle_policy_is_validated_and_changes_the_exact_action_digest() -> TestResult {
     for input in ["0", "-1", "86400001", "1.5", "true"] {
         assert!(serde_json::from_str::<IdleTimeout>(input).is_err());

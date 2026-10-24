@@ -328,6 +328,7 @@ impl Commands {
             "params":{"request_id":id.value(),"approval_id":request.id(),"scope":request.scope(),"program":request.program(),"invocation":request.invocation(),
             "retention":request.retention(),"output_bytes":request.output_limit(),"timeout_ms":request.execution_timeout().duration().map(|duration| duration.as_millis()),"stderr":request.stderr(),
             "idle_timeout_ms":request.idle_timeout().duration().map(|duration| duration.as_millis()),
+            "stdout_records":request.stdout_records(),"success_codes":request.success_codes(),
             "arguments":request.arguments().iter().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>(),"cwd":request.working_directory(),
             "environment":request.environment().entries().map(|(k,v)| (k.to_string_lossy().into_owned(),v.to_string_lossy().into_owned())).collect::<std::collections::BTreeMap<_,_>>()}});
         if message.to_string().len() > host.frame_limit().as_usize() {
@@ -426,7 +427,7 @@ impl Commands {
         };
         Ok(Progress::Done(Ok(
             json!({"outcome":result.outcome,"exit_code":result.exit_code,"signal":result.signal,
-            "cleanup_complete":result.cleanup_complete,"stdout":stdout,"stderr":stderr,"truncated":output.truncated,
+            "cleanup_complete":result.cleanup_complete,"capture_stop":result.capture_stop,"stdout":stdout,"stderr":stderr,"truncated":output.truncated,
             "text":format!("{stdout}{stderr}{notice}")}),
         )))
     }

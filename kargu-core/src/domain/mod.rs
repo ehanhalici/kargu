@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 
 mod deadline;
 pub use deadline::{Deadline, ExecutionTimeout, IdleTimeout};
+mod output;
+pub use output::{CapturePolicy, CaptureStop, RecordLimit, SuccessCodes};
 
 /// Positive OS process identity, for display only; never accepted as signal authority.
 #[derive(Clone, Copy, Serialize)]
@@ -201,6 +203,10 @@ counter!(
 counter!(
     ByteOffset,
     "Zero-based absolute byte offset in a retained stream."
+);
+counter!(
+    OutputRecords,
+    "Completed stdout records, independent of document line coordinates."
 );
 counter!(
     ColumnIndex,

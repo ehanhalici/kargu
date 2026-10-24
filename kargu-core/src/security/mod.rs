@@ -163,7 +163,8 @@ pub struct CommandSpec {
     pub(crate) cwd: Workspace,
     pub(crate) timeout: ExecutionTimeout,
     pub(crate) idle_timeout: IdleTimeout,
-    pub(crate) retention: OutputRetention,
+    pub(crate) capture: CapturePolicy,
+    pub(crate) success_codes: SuccessCodes,
     pub(crate) output_limit: OutputLimit,
     pub(crate) stderr: StderrPolicy,
     executable: File,
@@ -218,7 +219,8 @@ impl TryFrom<CommandInput> for CommandSpec {
             cwd: Workspace::try_from(input.working_directory)?,
             timeout,
             idle_timeout: IdleTimeout::DISABLED,
-            retention: OutputRetention::Prefix,
+            capture: CapturePolicy::default(),
+            success_codes: SuccessCodes::default(),
             output_limit: OutputLimit::default(),
             stderr: StderrPolicy::Separate,
             revision: ExecutableRevision::from(&metadata),
@@ -228,9 +230,19 @@ impl TryFrom<CommandInput> for CommandSpec {
     }
 }
 impl CommandSpec {
-    /// Capture output retention before approval; it is included in the action digest.
+    /// Select ordinary retention mode, replacing any record capture before approval.
     pub fn with_retention(mut self, retention: OutputRetention) -> Self {
-        self.retention = retention;
+        self.capture = CapturePolicy::Retain(retention);
+        self
+    }
+    /// Capture a complete output policy; Records always uses prefix retention.
+    pub fn with_capture(mut self, capture: CapturePolicy) -> Self {
+        self.capture = capture;
+        self
+    }
+    /// Capture adapter-selected success semantics, never inferred from command text.
+    pub fn with_success_codes(mut self, policy: SuccessCodes) -> Self {
+        self.success_codes = policy;
         self
     }
     /// Capture a bounded output capacity before requesting approval.
@@ -428,9 +440,19 @@ fn digest(
     } else {
         hash.update([0]);
     }
-    hash.update([match command.retention {
+    hash.update([match command.capture.retention() {
         OutputRetention::Prefix => 0,
         OutputRetention::Tail => 1,
+    }]);
+    if let Some(limit) = command.capture.records() {
+        hash.update([1]);
+        hash.update(limit.as_u64().to_le_bytes());
+    } else {
+        hash.update([0]);
+    }
+    hash.update([match command.success_codes {
+        SuccessCodes::Zero => 0,
+        SuccessCodes::ZeroOrOne => 1,
     }]);
     hash.update([match command.stderr {
         StderrPolicy::Separate => 0,
@@ -456,6 +478,8 @@ pub enum UserDecision {
 /// Immutable review data; command text is accessible only through explicit getters.
 pub struct ApprovalRequest {
     retention: OutputRetention,
+    stdout_records: Option<RecordLimit>,
+    success_codes: SuccessCodes,
     output_limit: OutputLimit,
     timeout: ExecutionTimeout,
     idle_timeout: IdleTimeout,
@@ -472,6 +496,14 @@ pub struct ApprovalRequest {
     environment: CommandEnvironment,
 }
 impl ApprovalRequest {
+    /// Exact stdout producer-stop budget, separate from retained byte capacity.
+    pub fn stdout_records(&self) -> Option<RecordLimit> {
+        self.stdout_records
+    }
+    /// Exact accepted exit semantics.
+    pub fn success_codes(&self) -> SuccessCodes {
+        self.success_codes
+    }
     /// Captured idle interval, separate from execution and approval timeouts.
     pub fn idle_timeout(&self) -> IdleTimeout {
         self.idle_timeout
@@ -632,7 +664,9 @@ impl ExecutionGate {
         actor.register_call(run, call_id.clone(), descriptor.name().clone())?;
         let id = ApprovalId::new();
         let request = ApprovalRequest {
-            retention: command.retention,
+            retention: command.capture.retention(),
+            stdout_records: command.capture.records(),
+            success_codes: command.success_codes,
             output_limit: command.output_limit,
             timeout: command.timeout,
             idle_timeout: command.idle_timeout,

@@ -18,6 +18,15 @@ pub(super) struct Archive {
     pub(super) eof: bool,
 }
 impl Archive {
+    /// Advance raw stream position after a captured prefix has been frozen.
+    pub fn discard(&mut self, length: usize) -> Result<(), CoreError> {
+        self.seen = self.seen.checked_add(offset(length)?)?;
+        self.truncated |= length != 0;
+        Ok(())
+    }
+    pub fn truncated(&self) -> bool {
+        self.truncated
+    }
     pub fn new(retention: OutputRetention, limit: OutputLimit) -> Self {
         Self {
             bytes: VecDeque::new(),

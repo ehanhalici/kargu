@@ -1,6 +1,6 @@
 //! Process pipes and bounded input acknowledgements, not lifecycle authority.
 
-use super::{Archive, InputMessage, activity::Activity};
+use super::{Archive, InputMessage, activity::Activity, records::RecordCapture};
 use crate::{application::RunHandle, constants::limits, error::CoreError};
 use std::sync::Arc;
 use tokio::{
@@ -15,6 +15,7 @@ pub(super) async fn drain<R: AsyncRead + Unpin>(
     archive: Arc<Mutex<Archive>>,
     run: RunHandle,
     activity: Activity,
+    mut capture: Option<RecordCapture>,
 ) -> Result<(), CoreError> {
     let mut buffer = vec![0_u8; limits::PROCESS_PAGE_BYTES];
     loop {
@@ -25,7 +26,11 @@ pub(super) async fn drain<R: AsyncRead + Unpin>(
         }
         activity.record();
         let chunk = buffer.get(..count).ok_or(CoreError::CleanupFailed)?;
-        archive.lock().await.push(chunk, &run)?;
+        let mut archive = archive.lock().await;
+        match &mut capture {
+            Some(capture) => capture.push(&mut archive, chunk, &run)?,
+            None => archive.push(chunk, &run)?,
+        }
     }
 }
 

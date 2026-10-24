@@ -40,6 +40,8 @@ pub mod limits {
     pub const RUN_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
     /// Input or output page length.
     pub const PROCESS_PAGE_BYTES: usize = 32 * 1024;
+    /// Bounded record capture, including a possible adapter lookahead record.
+    pub const PROCESS_RECORDS: u64 = 1_000_001;
     /// Queued stdin commands per job.
     pub const PROCESS_INPUT_QUEUE: usize = 8;
     /// Aggregate argv bytes before spawning a program.

@@ -7,7 +7,7 @@
 use crate::{
     application::{ApplicationActor, RunHandle, RunLease, ToolOutcome},
     constants::{limits, timeouts},
-    domain::{ByteLimit, ByteOffset, JobId, ProcessId, ToolCallId},
+    domain::{ByteLimit, ByteOffset, CaptureStop, JobId, ProcessId, ToolCallId},
     error::CoreError,
     security::AuthorizedCommand,
 };
@@ -34,10 +34,14 @@ use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 mod activity;
 mod archive;
 mod io;
+mod records;
 mod stdio;
+mod termination;
 use activity::IdleMonitor;
 use archive::Archive;
 use io::{drain, input_loop};
+use records::RecordMonitor;
+use termination::StopCause;
 
 /// Configuration DTO for bounded cleanup; independent of command/run deadlines.
 pub struct CleanupSettings {
@@ -141,6 +145,8 @@ pub struct ProcessResult {
     pub signal: Option<i32>,
     /// All tracked tasks and the direct child were drained/reaped.
     pub cleanup_complete: bool,
+    /// Explicit stdout capture stop, independent of the actual OS exit status.
+    pub capture_stop: Option<CaptureStop>,
 }
 
 /// Single-delivery completion. Its run lease stays live until the actor consumes it.
@@ -230,8 +236,14 @@ impl ProcessSupervisor {
         let cancel = authorized.run().cancel_token();
         let pid = ProcessId::try_from(child.id().ok_or(CoreError::CleanupFailed)?)?;
         let spec = authorized.command();
-        let stdout = Arc::new(Mutex::new(Archive::new(spec.retention, spec.output_limit)));
-        let stderr = Arc::new(Mutex::new(Archive::new(spec.retention, spec.output_limit)));
+        let stdout = Arc::new(Mutex::new(Archive::new(
+            spec.capture.retention(),
+            spec.output_limit,
+        )));
+        let stderr = Arc::new(Mutex::new(Archive::new(
+            spec.capture.retention(),
+            spec.output_limit,
+        )));
         let (input, rx) = mpsc::channel(limits::PROCESS_INPUT_QUEUE);
         let job_id = JobId::new();
         let run = authorized.run().clone();
@@ -575,18 +587,29 @@ async fn supervise_child(
         return unknown_result();
     };
     let (activity, mut idle) = IdleMonitor::new(command.idle_timeout);
+    let (capture, mut records) = RecordMonitor::new(command.capture.records());
     let mut out_task = AbortOnDropHandle::new(tokio::spawn(drain(
         stdout,
         streams.stdout,
         run.clone(),
         activity.clone(),
+        capture,
     )));
     let err_run = run.clone();
     let err_activity = activity.clone();
     let mut err_task = AbortOnDropHandle::new(tokio::spawn(async move {
         match stderr {
-            Some(pipe) => drain(pipe, streams.stderr, err_run, err_activity).await,
-            None => drain(tokio::io::empty(), streams.stderr, err_run, err_activity).await,
+            Some(pipe) => drain(pipe, streams.stderr, err_run, err_activity, None).await,
+            None => {
+                drain(
+                    tokio::io::empty(),
+                    streams.stderr,
+                    err_run,
+                    err_activity,
+                    None,
+                )
+                .await
+            }
         }
     }));
     let input_cancel = cancel.child_token();
@@ -605,27 +628,28 @@ async fn supervise_child(
     };
     let mut poll = tokio::time::interval(timeouts::PROCESS_POLL);
     let mut cleanup_ok = true;
-    let mut outcome = loop {
+    let cause = loop {
         tokio::select! { biased;
-            _ = cancel.cancelled() => break ToolOutcome::Cancelled,
-            _ = deadline.elapsed() => break ToolOutcome::Timeout,
+            _ = cancel.cancelled() => break StopCause::Cancelled,
+            _ = deadline.elapsed() => break StopCause::Timeout,
             expired = idle.expired() => match expired {
-                Ok(()) => break ToolOutcome::Timeout,
+                Ok(()) => break StopCause::Timeout,
                 // Idle observation failure does not revoke proven PGID identity.
                 // Still perform the full owned cleanup, without claiming success.
-                Err(_) => break ToolOutcome::OutcomeUnknown,
+                Err(_) => break StopCause::Unknown,
             },
+            reason = records.reached() => break StopCause::Capture(reason),
             _ = poll.tick() => match group.exited() {
-                Ok(true) => break ToolOutcome::Ok,
+                Ok(true) => break StopCause::Exited,
                 Ok(false) => {},
-                Err(_) => {cleanup_ok=false; break ToolOutcome::OutcomeUnknown},
+                Err(_) => {cleanup_ok=false; break StopCause::Unknown},
             }
         }
     };
     input_cancel.cancel();
     if cleanup_ok {
         cleanup_ok &= group.signal(Signal::SIGTERM).is_ok();
-        if outcome == ToolOutcome::Ok {
+        if matches!(cause, StopCause::Exited) {
             // A foreground leader has exited: finish output drain before final group cleanup.
             let until = Instant::now()
                 .checked_add(cleanup.grace)
@@ -663,16 +687,19 @@ async fn supervise_child(
             cleanup_ok = false
         }
     }
-    if !cleanup_ok {
-        outcome = ToolOutcome::OutcomeUnknown;
-    } else if outcome == ToolOutcome::Ok && status.as_ref().is_none_or(|s| !s.success()) {
-        outcome = ToolOutcome::Failed;
-    }
+    let capture_stop = records.current();
+    let outcome = cause.outcome(
+        status.as_ref(),
+        capture_stop,
+        command.success_codes,
+        cleanup_ok,
+    );
     ProcessResult {
         outcome,
         exit_code: status.as_ref().and_then(ExitStatus::code),
         signal: status.as_ref().and_then(ExitStatusExt::signal),
         cleanup_complete: cleanup_ok,
+        capture_stop,
     }
 }
 
@@ -682,6 +709,7 @@ fn unknown_result() -> ProcessResult {
         exit_code: None,
         signal: None,
         cleanup_complete: false,
+        capture_stop: None,
     }
 }
 

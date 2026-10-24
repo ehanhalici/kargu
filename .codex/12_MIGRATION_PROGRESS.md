@@ -1,5 +1,21 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — Ortak record-capture bütçesi
+
+`workspace_grep` için prerequisite: typed prefix record budget, bounded watch
+observation ve supervisor-owned intentional stop; byte exhaustion ayrı failure.
+Accepted exit-code policy exact action digest/review'a bağlıdır; genel komut
+default'u değişmez. Detay ve scope sınırları 26_RECORD_CAPTURE_BUDGET.md'de.
+Elisp grep henüz kesilmediği için engine bu commit'te korunur.
+
+**81 Rust testi + 2 compile-fail**, locked build/test, fmt ve strict Clippy
+temiz. **1180/1180 full source ERT**, 0 unexpected, **116.39 s**; yeniden
+build edilmiş binary ile odaklı exact-review testi de geçti. Warning-as-error
+bytecompile/checkdoc temiz, geçici .elc kaldırıldı. Bounded TLC process-session
+129/42/depth8 ve approval 8194/1536/depth11 hatasız; yeni concrete record
+observer için formal refinement iddiası yoktur. Kullanıcı shell.nix/07
+değişiklikleri kapsam dışında korunur.
+
 ## 2026-10-24 — Interactive session consumer cutover
 
 Native idle prerequisite `a843d7b` ardından session OS spawn/stdin/EOF/signal,
