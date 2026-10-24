@@ -1,5 +1,6 @@
 //! Single-writer admission, claims, tool ledger and revoke/drain/release lifecycle.
 
+pub mod budget;
 pub mod host;
 mod jobs;
 

@@ -128,6 +128,11 @@ identity!(
     "Single-use, server-held approval identity."
 );
 identity!(JobId, "job_", "One supervised subprocess identity.");
+identity!(
+    BudgetId,
+    "budget_",
+    "One non-reusable API accounting lifetime."
+);
 
 macro_rules! counter {
     ($name:ident, $doc:literal) => {
@@ -175,6 +180,11 @@ counter!(
 );
 counter!(PolicyRevision, "Captured permission policy revision.");
 counter!(TokenCount, "Token quantity with checked arithmetic.");
+counter!(
+    RequestCount,
+    "Charged API attempts, independent of retries or tool steps."
+);
+counter!(CompactionCount, "Started logical context compactions.");
 counter!(
     InputTokens,
     "Input usage, independent of output/reasoning usage."

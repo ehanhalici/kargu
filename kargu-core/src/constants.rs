@@ -59,6 +59,10 @@ pub mod limits {
     pub const API_REQUESTS: usize = 8;
     /// Network events waiting for the mailbox; a completion batch adds one barrier.
     pub const API_EVENTS: usize = 16;
+    /// Retained charges in one API accounting lifetime.
+    pub const API_BUDGET_ATTEMPTS: u64 = 10_000;
+    /// Accepted logical compactions per accounting lifetime.
+    pub const API_BUDGET_COMPACTIONS: u64 = 10_000;
     /// Maximum file discoveries accepted from a client configuration.
     pub const SEARCH_FILES: usize = 20_000;
     /// Maximum directory visits accepted from a client configuration.

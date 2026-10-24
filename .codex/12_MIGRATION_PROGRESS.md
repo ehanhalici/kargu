@@ -1,5 +1,14 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Native API budget domain foundation
+
+Typed budget meter eklendi: bounded attempt/compaction limits, checked exact
+usage, missing/partial/zero ayrımı, consumed seal ve move-only completion
+ticket. 13 yeni native test ve iki compile-fail sözleşmesi geçti; strict Clippy
+ve fmt temiz. Önceki bütün Rust testleri de geçer. Detaylar 36'dadır.
+Bu kesim henüz live consumer cutover değildir: capability ilan edilmedi,
+Elisp budget silinmedi; HTTP admission/run binding ve G08 reservation açık.
+
 ## 2026-10-25 — Editor application lease API consumer cutover
 
 POST ve model GET artık editor application'a ait native service scope'uyla
