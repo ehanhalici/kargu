@@ -22,7 +22,7 @@
 
 (cl-defun kargu-bridge-approval-execute
     (connection arguments callback &key owner (method "tool/execute")
-                (capability "command_execute") (purpose "agent_turn"))
+                (capability "command_execute") (purpose "agent_turn") valid-p)
   "Capture ARGUMENTS for CONNECTION and OWNER, delivering CALLBACK once."
   (if (not (and (eq (kargu-bridge-status connection) 'ready)
                 (member capability (append (kargu-bridge-connection-capabilities connection) nil))
@@ -37,7 +37,7 @@
                 (kargu-bridge--object "scope" (kargu-bridge-connection-read-scope connection) "arguments" captured)
                 callback :owner owner :timeout (+ 311 (/ (if (numberp timeout) timeout 0) 1000.0)))))
       (when-let* ((entry (and id (gethash id (kargu-bridge-connection-pending connection)))))
-        (setf (kargu-bridge--pending-review entry) (list captured session parent nil purpose))
+        (setf (kargu-bridge--pending-review entry) (list captured session parent nil purpose valid-p))
         (when parent
           (kargu-async-add-cleanup parent (lambda () (kargu-bridge-cancel connection id)))))
       id)))
@@ -62,6 +62,7 @@
              (< (float-time) (kargu-bridge--pending-deadline entry))
              (or (null (nth 2 review)) (kargu-async-pending-p (nth 2 review)))
              (eq (nth 1 review) (kargu-session-context owner))
+             (or (null (nth 5 review)) (funcall (nth 5 review)))
              (equal (gethash "mode" args) "agent")
              (equal (gethash "purpose" scope) (nth 4 review))
              (equal (gethash "retention" params) (if (equal (nth 4 review) "process_job") "tail" "prefix"))

@@ -90,6 +90,26 @@
     (when handle
       (kargu-async-add-cleanup task (lambda () (kargu-cancel-confirmation handle))))))
 
+(cl-defun kargu-permission-capture (command directory &key valid-p policy-revision risks start)
+  "Capture COMMAND and DIRECTORY freshness for a later native approval.
+VALID-P checks domain policy; POLICY-REVISION defaults to registry revision.
+RISKS and START are optional legacy presenter data.
+This snapshot grants no execution permission and presents no second prompt."
+  (let* ((root (kargu-permission-project-root))
+         (directory (file-name-as-directory (file-truename directory)))
+         (_contained (kargu-permission-assert-within-project directory root "approval directory"))
+         (revision (or policy-revision
+                       (and (boundp 'kargu--tool-registry)
+                            (kargu-tool-registry-p kargu--tool-registry)
+                            (kargu-tool-registry-revision kargu--tool-registry)))))
+    (kargu-permission--make-operation
+     :command (copy-sequence command) :directory directory :root root
+     :directories (mapcar #'kargu-permission--directory-identity (list root directory))
+     :origin (current-buffer) :session (kargu-session-context)
+     :owner kargu--loop-run :environment (copy-sequence process-environment)
+     :path (copy-sequence exec-path) :strict kargu-permission-strict-mode
+     :validator valid-p :policy-revision revision :risks (mapcar #'copy-sequence risks) :start start)))
+
 (cl-defun kargu-permission-execute (&key command directory risks start callback valid-p policy-revision)
   "Approve COMMAND in DIRECTORY with RISKS, then invoke START once.
 START receives a result continuation.  CALLBACK receives its result string
@@ -103,22 +123,8 @@ Return a task; cancellation or owner replacement suppresses stale effects."
   (kargu-contract-assert #'kargu-contract-callback-p valid-p)
   (kargu-contract-assert
    (lambda (value) (and (proper-list-p value) (cl-every #'stringp value))) risks)
-  (let* ((root (kargu-permission-project-root))
-         (directory (file-name-as-directory (file-truename directory)))
-         (_contained (kargu-permission-assert-within-project directory root "approval directory"))
-         (eff-rev (or policy-revision
-                      (and (boundp 'kargu--tool-registry)
-                           (kargu-tool-registry-p kargu--tool-registry)
-                           (kargu-tool-registry-revision kargu--tool-registry))))
-         (operation (kargu-permission--make-operation
-                     :command (copy-sequence command) :directory directory
-                     :risks (mapcar #'copy-sequence risks) :root root
-                     :directories (mapcar #'kargu-permission--directory-identity
-                                          (list root directory))
-                     :origin (current-buffer) :session (kargu-session-context)
-                     :owner kargu--loop-run :environment (copy-sequence process-environment)
-                     :path (copy-sequence exec-path) :strict kargu-permission-strict-mode
-                     :validator valid-p :policy-revision eff-rev :start start))
+  (let* ((operation (kargu-permission-capture command directory :valid-p valid-p
+                                              :policy-revision policy-revision :risks risks :start start))
          (task (kargu-async-start
                 (lambda (value error)
                   (funcall callback (if error (concat "ERROR: " error) value)))

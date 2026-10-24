@@ -28,5 +28,5 @@ jobs:
           cargo build --manifest-path kargu-core/Cargo.toml --locked
       - name: Compile and test independent Emacs bridge
         run: |
-          emacs --batch -Q -L . --eval '(setq byte-compile-error-on-warn t)' -f batch-byte-compile kargu/bridge.el kargu/bridge/approval.el kargu/bridge/jobs.el tests/test-bridge.el tests/test-bridge-jobs.el
+          emacs --batch -Q -L . --eval '(setq byte-compile-error-on-warn t)' -f batch-byte-compile kargu/bridge.el kargu/bridge/approval.el kargu/bridge/jobs.el kargu/bridge/job-output.el tests/test-bridge.el tests/test-bridge-jobs.el
           KARGU_CORE_TEST_BINARY="$PWD/kargu-core/target/debug/kargu-core" emacs --batch -Q -L . -l tests/test-bridge.el -l tests/test-bridge-jobs.el -f ert-run-tests-batch-and-exit

@@ -106,7 +106,7 @@
            (setf (kargu-bridge-job-state job) :running)
            (kargu-bridge--callback callback job nil))))))))
 
-(cl-defun kargu-bridge-job-start (connection arguments callback &key owner)
+(cl-defun kargu-bridge-job-start (connection arguments callback &key owner valid-p)
   "Start explicit ARGUMENTS on CONNECTION; CALLBACK receives (JOB ERROR).
 Install OWNER cleanup before claiming startup; OWNER defaults to current buffer."
   (let* ((owner (or owner (current-buffer)))
@@ -117,7 +117,7 @@ Install OWNER cleanup before claiming startup; OWNER defaults to current buffer.
      (lambda (result error-data)
        (if error-data (kargu-bridge--callback callback nil error-data)
          (kargu-bridge-job--adopt connection result root owner callback)))
-     :owner owner :method "job/start" :capability "process_jobs" :purpose "process_job")))
+     :owner owner :method "job/start" :capability "process_jobs" :purpose "process_job" :valid-p valid-p)))
 
 (defun kargu-bridge-job-status (job callback)
   "Asynchronously deliver JOB's native snapshot to CALLBACK."

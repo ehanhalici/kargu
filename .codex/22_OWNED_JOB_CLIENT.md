@@ -32,6 +32,16 @@ Değişen üretim/test Elisp dosyaları warning-as-error bytecompile ve checkdoc
 temiz; geçici .elc dosyaları kaldırıldı. Yeni job map/claim lease için eski
 bounded modellerin refinement ispatı olduğu iddia edilmez.
 
+İkinci küçük commit öncesi tamamlanan prerequisite: `bridge/job-output.el`
+native byte page/status poll eder. Aynı anda tek read/status zinciri vardır;
+en fazla üç incomplete UTF-8 byte tutulur, archive tekrar Elisp'te kopyalanmaz.
+Output callback yalnız editor presentation içindir; terminal callback native
+EOF + gerçek exited/drained sonucunu bekler. Consumer freshness callback'i
+onay açılırken ve karar geldiğinde yeniden sınanır. Legacy permission snapshot
+capture tek fonksiyona ayrıldı; eski approval yolları aynı snapshot'ı kullanır.
+Sekiz odaklı job/output testi ve full ERT 1159/1159, 0 unexpected, 65.87 s;
+warning-as-error bytecompile/checkdoc temiz, geçici .elc dosyaları kaldırıldı.
+
 Sonraki dilim Bash consumer'dır: native output poll + incremental UTF-8,
 editor output buffer presentation, foreground callback/background receipt,
 project-scoped list/status/cancel ve owner cleanup. Eski Bash OS engine'i

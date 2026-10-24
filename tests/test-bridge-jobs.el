@@ -11,11 +11,62 @@
 
 (require 'tests/test-bridge)
 (require 'kargu/bridge/jobs)
+(require 'kargu/bridge/job-output)
 
 (defun kargu-bridge-job-test--approve (request)
   "Approve only the fixture command described by confirmation REQUEST."
   (when (eq (kargu-confirmation-operation request) :prompt)
     (funcall (plist-get (kargu-confirmation-options request) :on-decision) :approve)))
+
+(ert-deftest kargu-bridge-output-utf8-carry-at-every-byte-boundary-test ()
+  "Page framing never corrupts a Unicode codepoint or keeps more than three bytes."
+  (let* ((text "ağ😀€z") (bytes (encode-coding-string text 'utf-8 t)))
+    (dotimes (cut (1+ (length bytes)))
+      (let* ((first (kargu-bridge-output--split (substring bytes 0 cut) nil))
+             (last (kargu-bridge-output--split (concat (cdr first) (substring bytes cut)) t)))
+        (should (<= (length (cdr first)) 3))
+        (should (equal (concat (car first) (car last)) text))
+        (should (equal (cdr last) ""))))))
+
+(ert-deftest kargu-bridge-output-real-merged-drain-test ()
+  "Output polling delivers merged text and completes only after real native drain."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-output-poll-" t)) job reader done result failure (text ""))
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation) #'kargu-bridge-job-test--approve))
+            (setq job (kargu-bridge-job-test--start conn root "printf 'ğ😀'; printf 'stderr' >&2" nil '(("stderr" . "merge"))))
+            (setq reader (kargu-bridge-output-start
+                          job (lambda (chunk _truncated) (setq text (concat text chunk)))
+                          (lambda (value error-data) (setq result value failure error-data done t))))
+            (kargu-bridge-test--wait (lambda () done))
+            (should-not failure)
+            (should (equal text "ğ😀stderr"))
+            (should (eq (gethash "cleanup_complete" result) t))
+            (should (= (gethash "exit_code" result) 0))
+            (should (kargu-bridge-output-closed reader)))
+        (when reader (kargu-bridge-output-close reader))
+        (kargu-bridge-job-test--dispose job)
+        (delete-directory root t)))))
+
+(ert-deftest kargu-bridge-job-domain-freshness-rechecked-after-prompt-test ()
+  "A delayed approval cannot bypass the consumer's captured domain policy."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-output-freshness-" t)) (valid t) decision done failure)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation)
+                     (lambda (request)
+                       (when (eq (kargu-confirmation-operation request) :prompt)
+                         (setq decision (plist-get (kargu-confirmation-options request) :on-decision))))))
+            (kargu-bridge-job-start
+             conn (kargu-bridge-test--command root "printf bad > effect")
+             (lambda (_job error-data) (setq failure error-data done t)) :valid-p (lambda () valid))
+            (kargu-bridge-test--wait (lambda () decision))
+            (setq valid nil)
+            (funcall decision :approve)
+            (kargu-bridge-test--wait (lambda () done))
+            (should failure)
+            (should-not (file-exists-p (expand-file-name "effect" root))))
+        (delete-directory root t)))))
 
 (defun kargu-bridge-job-test--start (connection root script &optional owner extras)
   "Start fixture SCRIPT on CONNECTION in ROOT for OWNER with EXTRAS."
