@@ -23,6 +23,9 @@ use std::{
 };
 use tokio::time::Instant;
 
+mod read_target;
+use read_target::ReadTarget;
+
 /// Pinned directory identity used by settings and commands.
 #[derive(Clone)]
 pub struct Workspace {
@@ -157,6 +160,7 @@ pub struct CommandInput {
 /// Validated immutable command; no Debug or Serialize can disclose its arguments.
 pub struct CommandSpec {
     safety: ToolSafetyLevel,
+    read_target: Option<ReadTarget>,
     pub(crate) invocation: PathBuf,
     pub(crate) program: PathBuf,
     pub(crate) arguments: Vec<OsString>,
@@ -213,6 +217,7 @@ impl TryFrom<CommandInput> for CommandSpec {
         }
         Ok(Self {
             safety: ToolSafetyLevel::ExecutesArbitraryCode,
+            read_target: None,
             invocation: input.program,
             program,
             arguments: input.arguments,
@@ -266,10 +271,23 @@ impl CommandSpec {
         command.safety = ToolSafetyLevel::SafeReadOnly;
         Ok(command)
     }
+    /// Only the trusted fixed-argv content-search adapter may request this class.
+    pub(crate) fn workspace_grep(input: CommandInput) -> Result<Self, CoreError> {
+        let mut command = Self::try_from(input)?;
+        command.safety = ToolSafetyLevel::SafeReadOnly;
+        Ok(command)
+    }
+    pub(crate) fn with_read_target(mut self, target: PathBuf) -> Result<Self, CoreError> {
+        self.read_target = Some(ReadTarget::try_from(target)?);
+        Ok(self)
+    }
     fn revalidate(&self, run: &RunHandle) -> Result<(), CoreError> {
         run.check_live()?;
         run.settings().workspace.revalidate()?;
         self.cwd.revalidate()?;
+        if let Some(target) = &self.read_target {
+            target.revalidate()?;
+        }
         if !self.cwd.path.starts_with(run.settings().workspace.path()) {
             return Err(CoreError::Rejected);
         }
@@ -326,6 +344,13 @@ impl ToolRegistry {
             ToolSafetyLevel::SafeReadOnly,
         )
     }
+    pub(crate) fn register_grep(&mut self) -> Result<(), CoreError> {
+        self.register(
+            ToolName::try_from("workspace_grep".to_owned())?,
+            vec![],
+            ToolSafetyLevel::SafeReadOnly,
+        )
+    }
     fn register(
         &mut self,
         name: ToolName,
@@ -376,6 +401,21 @@ fn digest(
 ) -> Result<ActionDigest, CoreError> {
     let mut hash = Sha256::new();
     hash.update(b"kargu-command-v1");
+    if let Some(target) = &command.read_target {
+        hash.update([1]);
+        let metadata = target.metadata()?;
+        hash.update(metadata.dev().to_le_bytes());
+        hash.update(metadata.ino().to_le_bytes());
+        let path = target.path.as_os_str().as_bytes();
+        hash.update(
+            u64::try_from(path.len())
+                .map_err(|_| CoreError::ArithmeticOverflow)?
+                .to_le_bytes(),
+        );
+        hash.update(path);
+    } else {
+        hash.update([0]);
+    }
     let scope = serde_json::to_vec(run.scope())
         .map_err(|_| CoreError::InvalidValue { field: "RunScope" })?;
     for bytes in [

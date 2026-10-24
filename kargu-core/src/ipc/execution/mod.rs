@@ -2,6 +2,7 @@
 
 pub(crate) mod input;
 mod jobs;
+mod reply;
 
 use super::{
     pending::{PendingOutcome, PendingRequests},
@@ -16,13 +17,14 @@ use crate::{
         limits,
         protocol::{error_codes as codes, methods},
     },
-    domain::{ByteLimit, JobId, RequestSequence, ToolCallId, ToolName},
+    domain::{JobId, RequestSequence, ToolCallId, ToolName},
     error::CoreError,
     process::{CleanupPolicy, JobStatus, ProcessSupervisor},
     security::{ApprovalRequest, ExecutionGate, ToolRegistry, UserDecision},
 };
 use futures_util::FutureExt;
 use input::{ExecuteInput, Prepared};
+use reply::Reply;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -42,6 +44,13 @@ struct ListingRequest {
     arguments: crate::workspace::listing::ListFilesInput,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GrepRequest {
+    scope: ReadScope,
+    arguments: crate::workspace::grep::GrepInput,
+}
+
 enum Stage {
     Preparing(JoinHandle<Result<Prepared, CoreError>>),
     Review {
@@ -53,6 +62,7 @@ enum Stage {
     Running {
         run: Box<RunHandle>,
         job: JobId,
+        reply: Reply,
     },
 }
 struct Operation {
@@ -79,6 +89,7 @@ impl Commands {
         let mut registry = ToolRegistry::default();
         registry.register_process(ToolName::try_from("bash".to_owned())?, vec![])?;
         registry.register_listing()?;
+        registry.register_grep()?;
         Ok(Self {
             operations: HashMap::new(),
             gate: ExecutionGate::default(),
@@ -122,6 +133,19 @@ impl Commands {
                 command,
                 settings,
                 tool: ToolName::try_from("list_files".to_owned())?,
+                reply: Reply::Command,
+            })
+        })
+    }
+    pub fn start_grep(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
+        let request: GrepRequest = serde_json::from_value(params).map_err(|_| Fault::params())?;
+        self.admit(host, id, request.scope, RunPurpose::AgentTurn, move || {
+            let (command, settings, report) = request.arguments.prepare()?;
+            Ok(Prepared {
+                command,
+                settings,
+                tool: ToolName::try_from("workspace_grep".to_owned())?,
+                reply: Reply::Grep(report),
             })
         })
     }
@@ -271,13 +295,13 @@ impl Commands {
                     Ok(Ok(value)) if value == json!({"approved":true}) => UserDecision::Approved,
                     _ => UserDecision::Rejected,
                 };
-                self.launch(host, &op.scope, run, request, decision)
+                self.launch(host, &op.scope, run, request, decision, Reply::Command)
             }
-            Stage::Running { run, job } => {
+            Stage::Running { run, job, reply } => {
                 if op.terminal.is_some() {
                     host.actor_mut(&op.scope)?.cancel(&run)?;
                 }
-                self.collect(host, &op.scope, run, job)
+                self.collect(host, &op.scope, run, job, reply)
             }
         }
     }
@@ -315,8 +339,15 @@ impl Commands {
                 return Ok(Progress::Done(Err(error)));
             }
         };
-        if prepared.tool.as_str() == "list_files" {
-            return self.launch(host, scope, run, Box::new(request), UserDecision::Approved);
+        if matches!(prepared.tool.as_str(), "list_files" | "workspace_grep") {
+            return self.launch(
+                host,
+                scope,
+                run,
+                Box::new(request),
+                UserDecision::Approved,
+                prepared.reply,
+            );
         }
         self.sequence = self.sequence.next()?;
         let reverse = RpcId::String(format!(
@@ -366,6 +397,7 @@ impl Commands {
         run: Box<RunHandle>,
         request: Box<ApprovalRequest>,
         decision: UserDecision,
+        reply: Reply,
     ) -> Result<Progress, CoreError> {
         let actor = host.actor_mut(scope)?;
         let grant = match self.gate.decide(actor, &run, &request, decision) {
@@ -389,7 +421,7 @@ impl Commands {
                     actor.cancel(&run)?;
                     return Err(error);
                 }
-                Ok(Progress::Pending(Stage::Running { run, job }))
+                Ok(Progress::Pending(Stage::Running { run, job, reply }))
             }
             Err(error) => {
                 actor.cancel(&run)?;
@@ -404,32 +436,22 @@ impl Commands {
         scope: &ReadScope,
         run: Box<RunHandle>,
         job: JobId,
+        reply: Reply,
     ) -> Result<Progress, CoreError> {
         if self.supervisor.status(&run, &job)? != JobStatus::CompletionReady {
-            return Ok(Progress::Pending(Stage::Running { run, job }));
+            return Ok(Progress::Pending(Stage::Running { run, job, reply }));
         }
-        let limit = ByteLimit::try_from(limits::SEARCH_RESULT_BYTES)?;
+        let limit = reply.capture_limit()?;
         let Some(output) = self.supervisor.capture(&run, &job, limit)? else {
-            return Ok(Progress::Pending(Stage::Running { run, job }));
+            return Ok(Progress::Pending(Stage::Running { run, job, reply }));
         };
         let Some(completion) = self.supervisor.try_wait(&run, &job)? else {
-            return Ok(Progress::Pending(Stage::Running { run, job }));
+            return Ok(Progress::Pending(Stage::Running { run, job, reply }));
         };
         let result = completion.deliver(host.actor_mut(scope)?)?;
         self.supervisor.forget(&run, &job)?;
         host.actor_mut(scope)?.finish(&run)?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let notice = if output.truncated {
-            "\n... (output truncated)"
-        } else {
-            ""
-        };
-        Ok(Progress::Done(Ok(
-            json!({"outcome":result.outcome,"exit_code":result.exit_code,"signal":result.signal,
-            "cleanup_complete":result.cleanup_complete,"capture_stop":result.capture_stop,"stdout":stdout,"stderr":stderr,"truncated":output.truncated,
-            "text":format!("{stdout}{stderr}{notice}")}),
-        )))
+        Ok(Progress::Done(reply.render(result, output)))
     }
     pub fn job_rpc(
         &mut self,

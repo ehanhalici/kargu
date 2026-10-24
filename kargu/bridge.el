@@ -166,10 +166,11 @@
   "Call METHOD with PARAMS on CONNECTION and asynchronously deliver CALLBACK.
 CALLBACK receives (RESULT ERROR).  OWNER is an optional live source buffer;
 its closure or major-mode change cancels delivery.  TIMEOUT overrides the
-default deadline.  Return the correlation id, or nil on local rejection."
+default deadline; :unlimited disables only this forward-request timer.
+Return the correlation id, or nil on local rejection."
   (let ((deadline (or timeout kargu-bridge-request-timeout)))
     (unless (and (functionp callback) (stringp method) (hash-table-p params)
-                 (numberp deadline) (> deadline 0)
+                 (or (eq deadline :unlimited) (and (numberp deadline) (> deadline 0)))
                  (or (null owner) (buffer-live-p owner)))
       (error "Invalid Rust request arguments"))
     (if (or (not (memq (kargu-bridge-connection-state connection) '(starting binding ready stopping)))
@@ -186,11 +187,12 @@ default deadline.  Return the correlation id, or nil on local rejection."
                          (cl-incf (kargu-bridge-connection-counter connection))))
              (cleanup (and owner (lambda () (kargu-bridge--cancel connection id "owner_closed"))))
              (entry (kargu-bridge--pending-create :callback callback :owner owner
-                                                  :deadline (+ (float-time) deadline)
+                                                  :deadline (when (numberp deadline) (+ (float-time) deadline))
                                                   :owner-cleanup cleanup)))
         (puthash id entry (kargu-bridge-connection-pending connection))
-        (setf (kargu-bridge--pending-timer entry)
-              (run-at-time deadline nil #'kargu-bridge--cancel connection id "timeout"))
+        (when (numberp deadline)
+          (setf (kargu-bridge--pending-timer entry)
+                (run-at-time deadline nil #'kargu-bridge--cancel connection id "timeout")))
         (when owner
           (with-current-buffer owner
             (add-hook 'kill-buffer-hook cleanup nil t)
@@ -248,6 +250,15 @@ CALLBACK receives the native (RESULT ERROR).  Never scan directories in Elisp."
   (kargu-bridge--workspace-read connection arguments callback :owner owner
                                :method "workspace/listFiles" :capability "workspace_list_files_ls"))
 
+(cl-defun kargu-bridge-grep (connection arguments callback &key owner)
+  "Search with captured ARGUMENTS on CONNECTION for OWNER using native Unix tools.
+CALLBACK receives (RESULT ERROR); no Elisp process fallback is executed."
+  (let ((timeout (gethash "timeout_ms" arguments 30000)))
+    (kargu-bridge--workspace-read
+     connection arguments callback :owner owner :method "workspace/grep"
+     :capability "workspace_grep"
+     :timeout (if (eq timeout :json-null) :unlimited (+ 11 (/ timeout 1000.0))))))
+
 (cl-defun kargu-bridge-execute (connection arguments callback &key owner)
   "Execute explicit program/argv ARGUMENTS on CONNECTION after user approval.
 CALLBACK receives (RESULT ERROR).  OWNER defaults to the current buffer.
@@ -255,7 +266,7 @@ This noninteractive port does not replace the existing Bash job tool."
   (require 'kargu/bridge/approval)
   (kargu-bridge-approval-execute connection arguments callback :owner (or owner (current-buffer))))
 
-(cl-defun kargu-bridge--workspace-read (connection arguments callback &key owner method capability)
+(cl-defun kargu-bridge--workspace-read (connection arguments callback &key owner method capability timeout)
   "Call read METHOD with ARGUMENTS on CONNECTION for OWNER.
 Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
   (if (not (and (eq (kargu-bridge-status connection) 'ready)
@@ -266,7 +277,7 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
     (kargu-bridge-call
      connection method
      (kargu-bridge--object "scope" (kargu-bridge-connection-read-scope connection) "arguments" arguments)
-     callback :owner owner)))
+     callback :owner owner :timeout timeout)))
 
 (defun kargu-bridge--normalize (value &optional depth)
   "Convert parsed VALUE into typed JSON, rejecting duplicate keys at DEPTH."
@@ -440,7 +451,7 @@ Raw stderr is deliberately discarded: future backends may put secrets there."
 This is an adapter service identity, not an imported user conversation or run."
   (if (not (cl-some (lambda (capability)
                      (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
-                   '("workspace_find_files" "workspace_list_files_ls" "command_execute")))
+                   '("workspace_find_files" "workspace_list_files_ls" "workspace_grep" "command_execute")))
       (kargu-bridge--start-finish connection callback nil)
     (setf (kargu-bridge-connection-state connection) 'binding)
     (kargu-bridge-call

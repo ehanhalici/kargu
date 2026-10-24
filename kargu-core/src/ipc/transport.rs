@@ -242,11 +242,13 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 }
                 if matches!(
                     method.as_str(),
-                    methods::EXECUTE | methods::LIST_FILES | methods::JOB_START
+                    methods::EXECUTE | methods::LIST_FILES | methods::GREP | methods::JOB_START
                 ) {
                     if let Some(id) = id.as_ref() {
                         let admitted = if method == methods::LIST_FILES {
                             commands.start_listing(host, id.clone(), params)
+                        } else if method == methods::GREP {
+                            commands.start_grep(host, id.clone(), params)
                         } else if method == methods::JOB_START {
                             commands.start_job(host, id.clone(), params)
                         } else {

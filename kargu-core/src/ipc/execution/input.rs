@@ -1,5 +1,6 @@
 //! Strict command DTO capture. Filesystem preparation runs off the mailbox.
 
+use super::reply::Reply;
 use crate::domain::StderrPolicy;
 use crate::{
     application::{Mode, RunPurpose, RunSettings},
@@ -60,6 +61,7 @@ pub(super) struct Prepared {
     pub tool: ToolName,
     pub command: CommandSpec,
     pub settings: RunSettings,
+    pub reply: Reply,
 }
 
 impl ExecuteInput {
@@ -130,6 +132,7 @@ impl ExecuteInput {
             });
         }
         Ok(Prepared {
+            reply: Reply::Command,
             command,
             settings,
             tool: ToolName::try_from("bash".to_owned())?,

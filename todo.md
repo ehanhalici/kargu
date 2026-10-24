@@ -47,9 +47,11 @@ engine'leri ve senkron directory scanner silindi. Kullanıcının Unix/GNU
 bileşimi kararıyla özel Rust listing tarayıcısı da kaldırıldı: `list_files`
 ortak Rust process/gate üzerinden GNU ls çıktısı verir (.codex/17–19).
 `find_files` şimdilik native'dir (.codex/15). Genel program/argv için Rust
-reverse approval + Emacs presenter bağlıdır; Bash/job consumer cutover'ı açıktır.
+reverse approval + Emacs presenter bağlıdır; Bash/job ve interactive session
+consumer'ları native porttadır (.codex/20–25). `workspace_grep` de rg/GNU grep
+adapter'ına bağlandı; eski Elisp grep engine'i kaldırıldı (.codex/26–27).
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
-output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan grep/read/
+output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan read/
 Git/skill/webfetch, egress/context ve global tüketiciler aşağıdaki gruplarda
 açık kalır. Yeni paralel iş listesi yoktur.
 

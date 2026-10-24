@@ -1,5 +1,30 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — workspace_grep native consumer cutover
+
+`6506899` record-budget prerequisite ardından rg/GNU grep adapter, scoped
+workspace/grep capability, immutable result context ve owned Elisp façade
+bağlandı. Eski Elisp grep argv/runner/truncation/formatter engine'i silindi.
+GNU fallback, global cap+1 lookahead, no-match=1, byte/timeout failure ve
+config capture korunur. Root/cwd yanında target descriptor identity de spawn
+öncesi doğrulanır. Ayrıntılar 27_NATIVE_WORKSPACE_GREP.md'dedir.
+
+Gerçek test rg positive-glob sırasının eski negative exclusion'ı geçersiz
+kılabildiğini yakaladı: user include önce, literal exclusions sonra uygulanır.
+Stderr byte overflow da record-capture failure'dır; late overflow sahte başarı
+üretemez. timeout=nil native ve forward-waiter düzeyinde unlimited kalır;
+owner/Stop/disconnect cleanup korunur. API ve dört application backend açık.
+
+**93 Rust testi + 2 compile-fail**, locked build/test, fmt ve strict Clippy
+temiz. Forced rg/GNU matrix, oversized frame/ping, slow unlimited search cancel
+ve actual /proc reap testleri dahil. **1183/1183 full source ERT**, 0 unexpected,
+**121.60 s**; odaklı 8 real-pipe/public regression + 3 capture/lifecycle testi.
+Warning-as-error bytecompile/checkdoc temiz, geçici .elc kaldırıldı. Bounded TLC
+approval 8194/1536/depth11, transport 1810/693/depth13, process-session
+129/42/depth7 hatasız; concrete adapter için refinement iddiası yoktur.
+Shared process.el Git/diff/webfetch ve diğer tüketiciler için kalır. Kullanıcı
+shell.nix ve 07 fence değişiklikleri commit dışında korunur.
+
 ## 2026-10-24 — Ortak record-capture bütçesi
 
 `workspace_grep` için prerequisite: typed prefix record budget, bounded watch

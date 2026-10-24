@@ -424,5 +424,23 @@
       (should (eq (kargu-bridge-status conn) 'closed))
       (should (= 0 (hash-table-count (kargu-bridge-connection-pending conn)))))))
 
+(ert-deftest kargu-bridge-unlimited-forward-request-keeps-owner-cancel-test ()
+  "An unlimited forward waiter has no timer but still loses its source lease."
+  (let ((connection (kargu-bridge--connection-create :state 'ready :epoch "test"))
+        (owner (generate-new-buffer " *kargu-unlimited-owner*")) id failure)
+    (unwind-protect
+        (cl-letf (((symbol-function 'kargu-bridge--send) #'ignore))
+          (setq id (kargu-bridge-call connection "workspace/grep" (kargu-bridge--object)
+                                      (lambda (_value error-data) (setq failure error-data))
+                                      :owner owner :timeout :unlimited))
+          (let ((entry (gethash id (kargu-bridge-connection-pending connection))))
+            (should entry)
+            (should-not (kargu-bridge--pending-deadline entry))
+            (should-not (kargu-bridge--pending-timer entry)))
+          (kill-buffer owner)
+          (should (equal (gethash "status" (gethash "data" failure)) "owner_closed"))
+          (should-not (gethash id (kargu-bridge-connection-pending connection))))
+      (when (buffer-live-p owner) (kill-buffer owner)))))
+
 (provide 'tests/test-bridge)
 ;;; test-bridge.el ends here

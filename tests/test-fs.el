@@ -41,6 +41,7 @@
 
 (ert-deftest kargu-fs-configurable-exclusions-keep-legitimate-source-names-test ()
   "Removing a generated-directory exclusion exposes source in walks and grep."
+  (kargu-bridge-test--with-core
   (kargu-fs-test--with-tree '(("src/build/main.el" . "needle\n")
                               ("src/vendor/library.el" . "needle\n")
                               (".git/secret" . "needle\n"))
@@ -53,7 +54,7 @@
                      (lambda (callback) (kargu-search-grep callback "needle")))))
         (should (string-search "src/build/main.el" output))
         (should (string-search "src/vendor/library.el" output))
-        (should-not (string-search ".git/secret" output))))))
+        (should-not (string-search ".git/secret" output)))))))
 
 (ert-deftest kargu-fs-walk-cap-counts-visited-files-test ()
   "The cap bounds visited files, whether or not the filter keeps them."
@@ -100,76 +101,58 @@
   (should (kargu-fs-skipped-path-p "/workspace/build/project/node_modules/a.js" "/workspace/build/project/"))
   (should-not (kargu-fs-skipped-path-p "/workspace/build/project/src/build" "/workspace/build/project/")))
 
-(ert-deftest kargu-search-grep-fallback-does-not-follow-external-links-test ()
-  "GNU grep fallback cannot follow recursive symlinks outside the project."
-  (skip-unless (executable-find "grep"))
+(ert-deftest kargu-search-grep-does-not-follow-external-links-test ()
+  "Native search cannot follow recursive symlinks outside the project.
+The forced GNU fallback is also exercised in Rust's real-pipe matrix."
+  (kargu-bridge-test--with-core
   (kargu-fs-test--with-tree '(("inside.txt" . "needle inside\n"))
-			    (let ((outside (make-temp-file "kargu-grep-external-" t)))
+			    (let ((outside (make-temp-file "kargu-grep-external-" t))
+                                  (kargu-permission--override-root root))
 			      (unwind-protect
 				  (progn
 				    (write-region "needle outside-secret\n" nil (expand-file-name "secret.txt" outside) nil 'silent)
 				    (make-symbolic-link outside (expand-file-name "external" root))
 				    (let ((result (kargu-test-await
-						   (lambda (done) (kargu-search--grep-gnu done "needle" :target root :root root :cap 20)))))
+						   (lambda (done) (kargu-search-grep done "needle" nil nil 20)))))
 				      (should (string-search "inside" result))
 				      (should-not (string-search "outside-secret" result))))
-				(delete-directory outside t)))))
+				(delete-directory outside t))))))
 
-(ert-deftest kargu-search-grep-global-budget-stops-both-engines-test ()
-  "Ripgrep and GNU grep stop at one shared budget across many files."
+(ert-deftest kargu-search-grep-native-global-budget-test ()
+  "Public native search uses one global cap and never the Elisp process runner.
+Both engines' raw lookahead/cleanup and argv policy live in Rust tests."
+  (kargu-bridge-test--with-core
   (kargu-fs-test--with-tree
       (cl-loop for index below 20
                collect (cons (format "%02d.txt" index) "needle\n"))
-    (dolist (engine '("rg" "grep"))
-      (when (executable-find engine)
-        (let ((run (symbol-function 'kargu-process-run))
-              raw options args)
-          (cl-letf (((symbol-function 'kargu-process-run)
-                     (lambda (program arguments callback &rest opts)
-                       (setq args arguments options opts)
-                       (apply run program arguments
-                              (lambda (result) (setq raw result) (funcall callback result))
-                              opts))))
-            (let ((out (kargu-test-await
-                        (lambda (callback)
-                          (funcall (if (equal engine "rg")
-                                       #'kargu-search--grep-rg
-                                     #'kargu-search--grep-gnu)
-                                   callback "needle" :target root :root root :cap 3)))))
-              (should (= (length (split-string out "\n" t)) 4))
-              (should (string-search "additional hits omitted" out))
-              (should-not (string-prefix-p "ERROR:" out))))
-          (should (plist-get raw :line-limit-reached))
-          (should (= (length (split-string (plist-get raw :output) "\n" t)) 4))
-          (should (= (length (delete-dups
-                              (mapcar (lambda (line) (string-remove-suffix ":1:needle" line))
-                                      (split-string (plist-get raw :output) "\n" t))))
-                     4))
-          (should (= (plist-get options :max-lines) 4))
-          (should (member "--line-buffered" args))
-          (should-not (member "--max-count" args)))))))
+    (let ((kargu-permission--override-root root))
+      (cl-letf (((symbol-function 'kargu-process-run)
+                 (lambda (&rest _) (ert-fail "Legacy search executed"))))
+        (let ((out (kargu-test-await
+                    (lambda (done) (kargu-search-grep done "needle" nil nil 3)))))
+          (should (= (length (split-string out "\n" t)) 4))
+          (should (string-search "additional hits omitted" out))
+          (should-not (string-prefix-p "ERROR:" out))))))))
 
 (ert-deftest kargu-search-grep-exact-budget-has-no-omission-test ()
   "An exact number of hits is not reported as truncated."
+  (kargu-bridge-test--with-core
   (kargu-fs-test--with-tree '(("a.txt" . "needle\nneedle\nneedle\n"))
     (let ((kargu-permission--override-root root))
       (let ((out (kargu-test-await
                   (lambda (callback) (kargu-search-grep callback "needle" nil nil 3)))))
         (should (= (length (split-string out "\n" t)) 3))
-        (should-not (string-search "omitted" out))))))
+        (should-not (string-search "omitted" out)))))))
 
 (ert-deftest kargu-search-grep-budget-preserves-empty-and-invalid-test ()
   "No matches and invalid patterns retain their distinct outcomes."
+  (kargu-bridge-test--with-core
   (kargu-fs-test--with-tree '(("a.txt" . "needle\n"))
-    (dolist (engine '("rg" "grep"))
-      (when (executable-find engine)
+    (let ((kargu-permission--override-root root))
         (dolist (pattern '("absent" "["))
           (let ((out (kargu-test-await
                       (lambda (callback)
-                        (funcall (if (equal engine "rg")
-                                     #'kargu-search--grep-rg
-                                   #'kargu-search--grep-gnu)
-                                 callback pattern :target root :root root :cap 3)))))
+                        (kargu-search-grep callback pattern nil nil 3)))))
             (if (equal pattern "absent")
                 (should (string-prefix-p "No matches" out))
               (should (string-prefix-p "ERROR:" out)))
@@ -193,7 +176,7 @@
                  (setq seen arguments)
                  (funcall callback (kargu-bridge--object "text" "visible.el\n") nil)
                  nil))
-              ((symbol-function 'kargu-search--run) (lambda (&rest _) (ert-fail "Legacy search executed"))))
+              ((symbol-function 'kargu-process-run) (lambda (&rest _) (ert-fail "Legacy search executed"))))
       (kargu-search-glob (lambda (text) (setq result text)) "*.el")
       (should (equal (gethash "skip_directories" seen) (vconcat kargu-fs-skip-dirs)))
       (should (equal (gethash "pattern" seen) "*.el"))
@@ -232,7 +215,7 @@
     (cl-letf (((symbol-function 'kargu-bridge-ensure)
                (lambda (callback)
                  (funcall callback nil (kargu-bridge--fault "startup_failed")) #'ignore))
-              ((symbol-function 'kargu-search--run) (lambda (&rest _) (ert-fail "Legacy search executed"))))
+              ((symbol-function 'kargu-process-run) (lambda (&rest _) (ert-fail "Legacy search executed"))))
       (kargu-search-glob (lambda (text) (cl-incf count) (setq result text)) "*.el")
       (should (= count 1))
       (should (string-prefix-p "ERROR: Rust core unavailable" result)))))
@@ -481,7 +464,7 @@
    '(("main.el" . "x") ("src/child.el" . "x") ("src/deep/grandchild.el" . "x")
      ("Makefile" . "x") ("src/Makefile" . "x"))
    (let ((kargu-permission--override-root root))
-     (cl-letf (((symbol-function 'kargu-search--run) (lambda (&rest _) (ert-fail "Legacy search executed"))))
+     (cl-letf (((symbol-function 'kargu-process-run) (lambda (&rest _) (ert-fail "Legacy search executed"))))
        (dolist (pattern '("*.el" "**/*.el"))
          (let ((result (kargu-test-await
                         (lambda (done) (kargu-search-glob done pattern)))))
@@ -494,6 +477,35 @@
        (should (equal (kargu-test-await
                        (lambda (done) (kargu-search-glob done "*.el" "main.el")))
                       "main.el\n")))))))
+
+(ert-deftest kargu-search-native-grep-captures-policy-without-legacy-engine-test ()
+  "Native grep captures output/timeout settings and cannot execute the old engine."
+  (let ((connection (kargu-bridge--connection-create :state 'ready)) seen result
+        (kargu-process-timeout nil) (kargu-process-max-bytes 1234)
+        (kargu-fs-skip-dirs '(".git" "literal*")))
+    (cl-letf (((symbol-function 'kargu-bridge-ensure)
+               (lambda (callback) (funcall callback connection nil) #'ignore))
+              ((symbol-function 'kargu-bridge-grep)
+               (lambda (_connection arguments callback &rest _options)
+                 (setq seen arguments)
+                 (funcall callback (kargu-bridge--object "text" "native hit\n" "outcome" "ok") nil)))
+              ((symbol-function 'kargu-process-run)
+               (lambda (&rest _) (ert-fail "Legacy search executed"))))
+      (kargu-search-grep (lambda (value) (setq result value)) "-needle" nil "**/*.el" 3)
+      (should (equal result "native hit\n"))
+      (should (eq (gethash "timeout_ms" seen) :json-null))
+      (should (= (gethash "output_bytes" seen) 1234))
+      (should (= (gethash "max_matches" seen) 3))
+      (should (equal (gethash "pattern" seen) "-needle"))
+      (should (equal (gethash "glob" seen) "**/*.el"))
+      (should (equal (gethash "skip_directories" seen) [".git" "literal*"])))))
+
+(ert-deftest kargu-search-legacy-grep-engine-is-removed-test ()
+  "There is no second grep argv, output or process implementation in Elisp."
+  (dolist (function '(kargu-search--run kargu-search--rg-exclude-args
+                      kargu-search--truncate-lines kargu-search--grep-report
+                      kargu-search--grep-rg kargu-search--grep-gnu))
+    (should-not (fboundp function))))
 
 (provide 'tests/test-fs)
 ;;; test-fs.el ends here

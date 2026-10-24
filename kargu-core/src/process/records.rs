@@ -8,12 +8,44 @@ use crate::{
 };
 use tokio::sync::watch;
 
+pub(super) enum StreamCapture {
+    Records(RecordCapture),
+    Bytes(ByteCapture),
+}
+impl StreamCapture {
+    pub fn push(
+        &mut self,
+        archive: &mut Archive,
+        bytes: &[u8],
+        run: &RunHandle,
+    ) -> Result<(), CoreError> {
+        match self {
+            Self::Records(capture) => capture.push(archive, bytes, run),
+            Self::Bytes(capture) => {
+                archive.push(bytes, run)?;
+                if archive.truncated() {
+                    capture.event.send_replace(Some(CaptureStop::Bytes));
+                }
+                Ok(())
+            }
+        }
+    }
+}
+pub(super) struct ByteCapture {
+    event: watch::Sender<Option<CaptureStop>>,
+}
+
 pub(super) struct RecordCapture {
     limit: RecordLimit,
     seen: Option<OutputRecords>,
     event: watch::Sender<Option<CaptureStop>>,
 }
 impl RecordCapture {
+    pub fn stderr(&self) -> StreamCapture {
+        StreamCapture::Bytes(ByteCapture {
+            event: self.event.clone(),
+        })
+    }
     pub fn push(
         &mut self,
         archive: &mut Archive,
@@ -44,7 +76,14 @@ impl RecordCapture {
         archive.discard(bytes.len().saturating_sub(accepted))?;
         if let Some(reason) = stopped {
             self.seen = None;
-            self.event.send_replace(Some(reason));
+            self.event.send_if_modified(|observed| {
+                if observed.is_none() || reason == CaptureStop::Bytes {
+                    *observed = Some(reason);
+                    true
+                } else {
+                    false
+                }
+            });
         }
         Ok(())
     }
@@ -129,6 +168,12 @@ mod tests {
         assert_eq!(page.next_cursor.as_u64(), 22);
         assert!(page.truncated);
         assert_eq!(monitor.current(), Some(CaptureStop::Records));
+        let mut stderr = capture.stderr();
+        let mut errors = Archive::new(OutputRetention::Prefix, OutputLimit::try_from(2_usize)?);
+        stderr.push(&mut errors, b"late error", &run)?;
+        assert_eq!(monitor.current(), Some(CaptureStop::Bytes));
+        capture.push(&mut archive, b"never revive\n", &run)?;
+        assert_eq!(monitor.current(), Some(CaptureStop::Bytes));
         actor.finish(&run)?;
         Ok(())
     }

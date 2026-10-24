@@ -1,5 +1,6 @@
 //! Fixed-argv GNU ls adapter. Listing and formatting belong to ls, not Rust.
 
+use super::command;
 use crate::{
     application::{Mode, RunSettings},
     constants::{limits, timeouts},
@@ -46,7 +47,7 @@ impl ListFilesInput {
             return Err(CoreError::Rejected);
         }
         let command = CommandSpec::directory_listing(CommandInput {
-            program: executable()?,
+            program: command::executable("ls")?,
             arguments,
             working_directory: target,
             timeout: Some(timeouts::WORKSPACE_READ),
@@ -67,19 +68,7 @@ impl ListFilesInput {
     }
 }
 
-fn executable() -> Result<PathBuf, CoreError> {
-    let paths = std::env::var_os("PATH").ok_or(CoreError::Unavailable)?;
-    std::env::split_paths(&paths)
-        .filter(|dir| dir.is_absolute())
-        .map(|dir| dir.join("ls"))
-        .find(|path| path.is_file())
-        .ok_or(CoreError::Unavailable)
-}
-
 fn arguments(exclusions: Vec<String>) -> Result<Vec<OsString>, CoreError> {
-    if exclusions.len() > 64 {
-        return Err(CoreError::Limit);
-    }
     let mut args: Vec<OsString> = [
         "-lAh",
         "--numeric-uid-gid",
@@ -89,27 +78,7 @@ fn arguments(exclusions: Vec<String>) -> Result<Vec<OsString>, CoreError> {
     .into_iter()
     .map(OsString::from)
     .collect();
-    for name in exclusions {
-        if name.is_empty()
-            || name.len() > 256
-            || matches!(name.as_str(), "." | "..")
-            || name.contains(['/', '\0'])
-        {
-            return Err(CoreError::InvalidValue {
-                field: "ListingExclusion",
-            });
-        }
-        // GNU --ignore accepts globs; escape literals without inspecting any entries.
-        let literal: String = name
-            .chars()
-            .flat_map(|c| {
-                if matches!(c, '*' | '?' | '[' | ']' | '\\') {
-                    vec!['\\', c]
-                } else {
-                    vec![c]
-                }
-            })
-            .collect();
+    for literal in command::exclusions(exclusions)? {
         args.push(format!("--ignore={literal}").into());
     }
     args.extend([OsString::from("--"), OsString::from(".")]);

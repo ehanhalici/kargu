@@ -63,7 +63,8 @@ Clone the repository and add it to your Emacs `load-path`:
 ### Experimental Rust core
 
 The Rust core provides bounded JSON-RPC IPC, application/session lifecycle,
-native `find_files` / GNU `ls` listing (including aliases), and Bash jobs. The Elisp
+native `find_files`, GNU `ls` listing, `rg`/GNU `grep` search (including aliases),
+and Bash/interactive jobs. The Elisp
 agent still owns prompts and model requests; this is not yet a Rust agent backend.
 
 The Rust library now includes typed run admission, single-use approvals and a
@@ -332,7 +333,13 @@ file. Both ripgrep and GNU grep use line-buffered output; Kargu stops the
 producer after at most one extra captured record to detect omitted hits.
 The omission notice does not invent a total count. An intentional record
 limit is distinct from byte-quota or timeout failures, which still reject
-the result rather than presenting it as a successful search.
+the result rather than presenting it as a successful search. Rust owns execution,
+record/byte budgets and process-group cleanup; there is no Elisp grep fallback.
+The configured process timeout and output-byte limit are captured per search;
+a nil timeout remains unlimited. Cancellation/intentional capture waits for
+actual TERM/grace/KILL/reap (the default grace is five seconds). Oversized IPC
+results fail explicitly instead of silently dropping hits. GNU grep's fallback
+glob filtering remains basename-only; it is not identical to ripgrep's glob syntax.
 
 Git commands use a separate `kargu-git-timeout` (nil by default), allowing
 hooks and signing to finish. Stop cancels Git work owned by the agent and

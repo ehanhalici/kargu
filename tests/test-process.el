@@ -17,6 +17,7 @@
 (require 'kargu/prompt)
 (defvar kargu-context-buffer nil)
 (require 'tests/test-helpers)
+(require 'tests/test-bridge)
 
 (ert-deftest kargu-process-separates-and-drains-stderr-test ()
   "A successful command's warnings never enter its structured stdout."
@@ -128,14 +129,12 @@
   "Quota-killed Git and search results cannot be parsed as complete records."
   (let ((result '(:code 0 :output "partial" :truncated t)))
     (should (= (car (kargu-git--result result)) -1))
-    (cl-letf (((symbol-function 'kargu-process-run)
-               (lambda (_program _args callback &rest _options)
-                 (funcall callback result))))
-      (let (received)
-        (kargu-search--run "rg" nil :root default-directory
-                           :callback (lambda (value) (setq received value)))
-        (should (= (car received) -1))
-        (should (string-search "output limit" (cdr received)))))))
+    (let (received)
+      (kargu-search--native-result
+       (kargu-async-start (lambda (_text failure) (setq received failure)))
+       (kargu-bridge--object "outcome" "failed" "capture_stop" "bytes"
+                            "text" "output limit") nil)
+      (should (string-search "output limit" received)))))
 
 (ert-deftest kargu-bash-shell-selection-ignores-login-shell-test ()
   "The Bash tool never runs its commands through Fish or Nushell."
@@ -328,17 +327,15 @@
       (should-not (seq-difference (process-list) before)))))
 
 (ert-deftest kargu-search-line-limit-does-not-hide-hard-failures-test ()
-  "Only an explicitly requested record stop can normalize a signal exit."
-  (dolist (failure '((:truncated t) (:timed-out t) nil))
-    (let ((result (append failure '(:code 9 :output "partial\n"
-                                  :line-limit-reached t))) received)
-      (cl-letf (((symbol-function 'kargu-process-run)
-                 (lambda (_program _args callback &rest _options)
-                   (funcall callback result))))
-        (kargu-search--run "rg" nil :root default-directory
-                           :callback (lambda (value) (setq received value))
-                           :max-lines (and failure 2)))
-      (should-not (memq (car received) '(0 1))))))
+  "Typed failure cannot be normalized by a late record-limit observation."
+  (dolist (outcome '("failed" "timeout" "cancelled" "outcome_unknown"))
+    (let (received)
+      (kargu-search--native-result
+       (kargu-async-start (lambda (_text failure) (setq received failure)))
+       (kargu-bridge--object "outcome" outcome "capture_stop" "records"
+                            "text" "partial\n") nil)
+      (should received)
+      (should (string-search outcome received)))))
 
 (ert-deftest kargu-process-start-failure-cleans-resources-test ()
   "A failed stdin setup releases the process, timer and output buffer."
@@ -373,10 +370,11 @@
 
 (ert-deftest kargu-search-grep-runs-asynchronously-test ()
   "The workspace_grep tool finds a string and answers by callback."
+  (kargu-bridge-test--with-core
   (kargu-test-with-git-repo '(("kargu/tools/process.el" . "(defun kargu-process-run ())\n"))
                             (let ((out (kargu-test-await
                                         (lambda (cb) (kargu-search-grep cb "kargu-process-run" "kargu/tools/process.el")))))
-                              (should (string-search "kargu-process-run" out)))))
+                              (should (string-search "kargu-process-run" out))))))
 
 (ert-deftest kargu-diff-line-stats-test ()
   "Added and deleted line counts follow a unified diff for a single edit."

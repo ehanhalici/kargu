@@ -6,8 +6,8 @@
 
 ;;; Commentary:
 
-;; Read-only workspace search.  Grep uses external tools; file discovery/listing is
-;; owned by the Rust core through `kargu/bridge'.  Shared exclusions come from
+;; Read-only workspace search.  Execution and budgets are owned by Rust through
+;; `kargu/bridge'; rg/grep and ls perform their own work.  Exclusions come from
 ;; `kargu/fs'.  Public: `kargu-search-grep',
 ;; `kargu-search-glob', `kargu-search-register-tools'.
 ;;
@@ -24,7 +24,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'rx)
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/api/tools)
@@ -44,15 +43,9 @@
   :type 'natnum
   :group 'kargu-search)
 
-(defconst kargu-search--omitted-hits-note
-  "\n... (additional hits omitted; raise max_matches or narrow the search)"
-  "Notice appended when the global hit budget stopped a search.")
-
 (defun kargu-search--root ()
   "Absolute project root used as the search cwd."
   (kargu-permission-project-root))
-
-(defalias 'kargu-search--rel #'kargu-rel-path)
 
 (defun kargu-search--resolve (path root)
   "Resolve optional PATH against ROOT; assert it is strictly inside ROOT."
@@ -70,44 +63,6 @@
              abs (or path "") effective-root effective-root))
     abs))
 
-(defun kargu-search--rg-exclude-args ()
-  "Ripgrep `--glob' arguments that skip junk directories."
-  (cl-loop for dir in kargu-fs-skip-dirs
-           append (list "--glob" (format "!**/%s/**" dir))))
-
-(cl-defun kargu-search--run (program args &key root callback max-lines)
-  "Run PROGRAM with ARGS in ROOT without waiting.
-CALLBACK receives (EXIT-CODE . STDOUT); a missing program is exit 127 and a
-timeout or byte-truncated output is exit -1.  MAX-LINES optionally stops
-after that many complete stdout records and accepts the intentional stop."
-  (kargu-process-run
-   program args
-   (lambda (result)
-     (let* ((code (plist-get result :code))
-            (incomplete (or (plist-get result :timed-out)
-                            (plist-get result :truncated)))
-            (limited (and max-lines (plist-get result :line-limit-reached)))
-            (failed (or incomplete (not (or limited (memq code '(0 1)))))))
-       (funcall callback
-                (cons (cond (incomplete -1) (limited 0) (t code))
-                      (if failed (kargu-process-failure program result)
-                        (or (plist-get result :output) ""))))))
-   :dir root :max-lines max-lines))
-
-(defun kargu-search--truncate-lines (text max-lines)
-  "Keep the first MAX-LINES lines of TEXT; note if truncated."
-  (let* ((lines (split-string text "\n" t))
-         (n (length lines))
-         (kept (if (> n max-lines)
-                   (cl-subseq lines 0 max-lines)
-                 lines)))
-    (concat (string-join kept "\n")
-            (if (> n max-lines)
-                kargu-search--omitted-hits-note
-              (if (string-empty-p (string-trim text))
-                  ""
-                "\n")))))
-
 ;;;; Grep -----------------------------------------------------------------
 
 (defun kargu-search-grep (callback pattern &optional path glob max-matches)
@@ -118,71 +73,18 @@ caps the number of hits returned."
                          "pattern is required: %S" pattern)
   (let* ((root (kargu-search--root))
          (target (kargu-search--resolve path root))
-         (cap (max 1 (kargu-to-int
-                      max-matches kargu-search-default-max-matches))))
-    (cond
-     ((executable-find "rg")
-      (kargu-search--grep-rg callback pattern
-                             :target target :root root :glob glob :cap cap))
-     ((executable-find "grep")
-      (kargu-search--grep-gnu callback pattern
-                              :target target :root root :glob glob :cap cap))
-     (t
-      (error "Neither rg nor grep is on PATH")))))
-
-(cl-defun kargu-search--grep-report (callback result &key label pattern cap)
-  "Turn the grep RESULT of tool LABEL into the text CALLBACK receives.
-PATTERN names the search; CAP bounds its reported hits."
-  (kargu-process-deliver
-   callback
-   (lambda ()
-     (let ((code (car result))
-           (out (cdr result)))
-       (unless (memq code '(0 1))
-         (error "%s failed (exit %s): %s" label code (string-trim (or out ""))))
-       (if (string-empty-p (string-trim out))
-           (format "No matches for %S" pattern)
-         (kargu-search--truncate-lines out cap))))))
-
-(cl-defun kargu-search--grep-rg (callback pattern &key target root glob cap)
-  "Ripgrep PATTERN in TARGET; report at most CAP hits to CALLBACK.
-ROOT is the working directory; GLOB optionally restricts files."
-  (let ((args (append
-               (list "-n" "-H" "--no-heading" "--color" "never" "--line-buffered")
-               (kargu-search--rg-exclude-args)
-               (when (and (stringp glob) (not (string-empty-p glob)))
-                 (list "--glob" glob))
-               (list "--" pattern target))))
-    (kargu-search--run
-     "rg" args :root root
-     :callback (lambda (result)
-                 (kargu-search--grep-report callback result
-                                            :label "rg" :pattern pattern :cap cap))
-     :max-lines (1+ cap))))
-
-(cl-defun kargu-search--grep-gnu (callback pattern &key target root glob cap)
-  "GNU grep fallback for PATTERN in TARGET; report to CALLBACK.
-ROOT is the working directory; GLOB filters files; CAP bounds reported hits."
-  (let* ((exclude (apply #'append
-                         (mapcar (lambda (dir) (list "--exclude-dir" dir))
-                                 kargu-fs-skip-dirs)))
-         (include (when (and (stringp glob) (not (string-empty-p glob)))
-                    (list "--include"
-                          (save-match-data
-                            (if (string-match
-                                 (rx "/" (group (+ (not (any "/")))) string-end)
-                                 glob)
-                                (match-string 1 glob)
-                              glob)))))
-         (args (append (list "-r" "-n" "-H" "-I" "--line-buffered")
-                       exclude include
-                       (list "--" pattern target))))
-    (kargu-search--run
-     "grep" args :root root
-     :callback (lambda (result)
-                 (kargu-search--grep-report callback result
-                                            :label "grep" :pattern pattern :cap cap))
-     :max-lines (1+ cap))))
+         (arguments (kargu-search--native-arguments root target)))
+    (unless (or (null kargu-process-timeout)
+                (and (numberp kargu-process-timeout) (> kargu-process-timeout 0)))
+      (error "Timeout must be positive or nil"))
+    (puthash "pattern" (copy-sequence pattern) arguments)
+    (puthash "glob" (if (and (stringp glob) (not (string-empty-p glob)))
+                         (copy-sequence glob) :json-null) arguments)
+    (puthash "max_matches" (max 1 (kargu-to-int max-matches kargu-search-default-max-matches)) arguments)
+    (puthash "output_bytes" kargu-process-max-bytes arguments)
+    (puthash "timeout_ms" (if kargu-process-timeout
+                              (max 1 (ceiling (* 1000 kargu-process-timeout))) :json-null) arguments)
+    (kargu-search--native-call callback arguments #'kargu-bridge-grep)))
 
 ;;;; Glob -----------------------------------------------------------------
 
@@ -244,7 +146,7 @@ Return an owned async task; Stop cancels its pending RPC, not sibling work."
    (error-data (kargu-async-finish task nil (gethash "message" error-data "Native read failed")))
    ((and (hash-table-p result) (gethash "outcome" result)
          (not (equal (gethash "outcome" result) "ok")))
-    (kargu-async-finish task nil (format "Listing failed (%s): %s"
+    (kargu-async-finish task nil (format "Native read failed (%s): %s"
                                        (gethash "outcome" result) (gethash "text" result ""))))
    ((not (and (hash-table-p result) (stringp (gethash "text" result))))
     (kargu-async-finish task nil "Invalid native read result"))

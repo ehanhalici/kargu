@@ -50,8 +50,9 @@ directory scanner silindi; ilk dilim 16'dadır. Güncel listing sözleşmesi
 20–25 sonrasında Bash ve interactive process/session OS engine'leri Rust job
 portuna bağlandı; Elisp spawn/signal/idle timer kodları silindi. Editor view ve
 source/runtime revalidation adapter'ları korunur. Shared process.el, diğer
-Git/search/diff/webfetch tüketicileri taşınmadığı için henüz kaldırılmaz.
-`workspace_grep`, diğer `fs.el` tüketicileri ve bu tablodaki kalan
+Git/diff/webfetch tüketicileri taşınmadığı için henüz kaldırılmaz.
+26–27 ardından `workspace_grep` rg/GNU grep adapter'ına bağlandı; eski Elisp
+grep argv/runner/formatter engine'i kaldırıldı. Diğer `fs.el` tüketicileri ve kalan
 aileler henüz taşınmış sayılmaz. Ayrıntı: 15_NATIVE_FIND_FILES.md.
 
 Davranış kanıtları: architecture-contracts.md, docs/modularity.md,

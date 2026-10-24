@@ -30,6 +30,9 @@ impl StopCause {
             Self::Timeout => ToolOutcome::Timeout,
             Self::Unknown => ToolOutcome::OutcomeUnknown,
             Self::Capture(CaptureStop::Bytes) => ToolOutcome::Failed,
+            Self::Capture(CaptureStop::Records) if capture == Some(CaptureStop::Bytes) => {
+                ToolOutcome::Failed
+            }
             // The supervisor intentionally stopped a still-running producer.
             // Its signal exit is evidence, not a failed exhaustive search.
             Self::Capture(CaptureStop::Records) => ToolOutcome::Ok,
@@ -102,6 +105,15 @@ mod tests {
                 true
             ),
             ToolOutcome::Ok
+        );
+        assert_eq!(
+            StopCause::Capture(CaptureStop::Records).outcome(
+                Some(&signal),
+                Some(CaptureStop::Bytes),
+                SuccessCodes::Zero,
+                true
+            ),
+            ToolOutcome::Failed
         );
     }
 }

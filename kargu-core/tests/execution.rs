@@ -440,6 +440,38 @@ async fn byte_exhaustion_cannot_masquerade_as_complete_record_capture() -> TestR
 }
 
 #[tokio::test]
+async fn search_stderr_byte_exhaustion_also_stops_and_fails_the_owned_producer() -> TestResult {
+    let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+    let request = f.request_spec(
+        command(
+            &f.root,
+            "printf too-much >&2; read value",
+            Duration::from_secs(2),
+        )?
+        .with_capture(CapturePolicy::Records(RecordLimit::try_from(2)?))
+        .with_output_limit(OutputLimit::try_from(2_usize)?),
+    )?;
+    let approved = f
+        .gate
+        .decide(&mut f.actor, &f.run, &request, UserDecision::Approved)?;
+    let job = f.supervisor.start(&mut f.actor, approved)?;
+    let result = f
+        .supervisor
+        .wait(&f.run, &job)
+        .await?
+        .deliver(&mut f.actor)?;
+    assert!(result.cleanup_complete);
+    assert_eq!(result.capture_stop, Some(CaptureStop::Bytes));
+    assert_eq!(result.outcome, ToolOutcome::Failed);
+    assert_eq!(
+        f.output(&job, OutputStream::Stderr).await?,
+        (b"to".to_vec(), true)
+    );
+    f.actor.finish(&f.run)?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn no_match_exit_requires_the_explicit_approved_success_policy() -> TestResult {
     for (policy, expected) in [
         (SuccessCodes::Zero, ToolOutcome::Failed),

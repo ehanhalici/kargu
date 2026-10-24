@@ -51,7 +51,8 @@ Git tracking kararı sonraki commit talebiyle kapatıldı; plan/notlar da tracke
 Güncel öncelik (2026-10-24 kullanıcı kararı): 17_UNIX_TOOL_COMPOSITION.md.
 Yeni native tarayıcı yazılmayacak. Önce modül klasörleme ve ortak komut/onay
 bağlantısı; ardından mevcut özel listing motoru `ls` adapter'ıyla değiştirilir.
-`workspace_grep` sonraki adapter'dır; aşağıdaki native read maddeleri önceki
+`workspace_grep` rg/GNU grep adapter'ı ve consumer cutover'ı tamamlandı (26–27);
+aşağıdaki native read maddeleri önceki
 dilimlerin tarihsel kanıtını korur, yeni araç stratejisinin tanımı değildir.
 
 2026-10-24: typed execution/approval ve process supervisor library dilimi
@@ -93,7 +94,9 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
   - [x] Native `list_files`/`ls`/`dir`, owner/cancel ve shared execution üzerinden
     GNU ls adapter'ı (19); eski native/Elisp listing scanner'ları kaldırıldı.
     Önceki fd-rooted metadata/no-follow garantisi güncel ls'e atfedilmez.
-  - [ ] `workspace_grep`, read/Git/skill/webfetch kalan portları.
+  - [x] `workspace_grep`: rg/GNU grep + aynı execution/gate, global record cap,
+    explicit no-match status, owned bridge ve eski Elisp grep engine kaldırma (26–27).
+  - [ ] read/Git/skill/webfetch kalan portları.
 - [ ] Diff parser/generator + revision'lı proposal/journal ve Emacs transaction
   adapter'ı 06'ya göre kurulsun; review callback'i placeholder kalmasın.
 - [ ] Eski Elisp loop opt-in adapter üzerinden `tool/execute` çağırabilsin.

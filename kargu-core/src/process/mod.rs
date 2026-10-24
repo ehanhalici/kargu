@@ -40,7 +40,7 @@ mod termination;
 use activity::IdleMonitor;
 use archive::Archive;
 use io::{drain, input_loop};
-use records::RecordMonitor;
+use records::{RecordCapture, RecordMonitor, StreamCapture};
 use termination::StopCause;
 
 /// Configuration DTO for bounded cleanup; independent of command/run deadlines.
@@ -588,18 +588,19 @@ async fn supervise_child(
     };
     let (activity, mut idle) = IdleMonitor::new(command.idle_timeout);
     let (capture, mut records) = RecordMonitor::new(command.capture.records());
+    let stderr_capture = capture.as_ref().map(RecordCapture::stderr);
     let mut out_task = AbortOnDropHandle::new(tokio::spawn(drain(
         stdout,
         streams.stdout,
         run.clone(),
         activity.clone(),
-        capture,
+        capture.map(StreamCapture::Records),
     )));
     let err_run = run.clone();
     let err_activity = activity.clone();
     let mut err_task = AbortOnDropHandle::new(tokio::spawn(async move {
         match stderr {
-            Some(pipe) => drain(pipe, streams.stderr, err_run, err_activity, None).await,
+            Some(pipe) => drain(pipe, streams.stderr, err_run, err_activity, stderr_capture).await,
             None => {
                 drain(
                     tokio::io::empty(),

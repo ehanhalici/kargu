@@ -1,5 +1,7 @@
 //! Closed native read-operation boundary shared by host admission and IO workers.
 
+mod command;
+pub mod grep;
 pub mod listing;
 pub mod search;
 
