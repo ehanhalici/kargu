@@ -740,7 +740,7 @@
            held payload)
       (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) "test-key"))
                 ((symbol-function 'kargu--api-base) (lambda (&rest _) "https://example.invalid"))
-                ((symbol-function 'plz)
+                ((symbol-function 'kargu-transport-request)
                  (lambda (_method _url &rest options)
                    (setq held (plist-get options :then)
                          payload (kargu--json-decode (plist-get options :body))) nil)))

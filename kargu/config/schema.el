@@ -110,7 +110,7 @@ the native UI's separate model-selection step."
     (find-file path)))
 
 (defconst kargu--dependencies
-  '((plz . "asynchronous HTTP + SSE streaming (mandatory)")
+  '((plz . "temporary API error DTO compatibility")
     (transient . "menu interface (mandatory)")
     (magit . "Git interface (mandatory)")
     (ediff . "diff approval engine (built into Emacs)"))

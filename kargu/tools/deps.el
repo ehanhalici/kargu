@@ -6,7 +6,7 @@
 
 ;;; Commentary:
 
-;; Validates the native model transport prerequisites: plz and curl.
+;; Validates configured prerequisites; model HTTP itself is owned by Rust.
 ;; Optional UI, Git and editor adapters do not block unrelated runs.
 ;; User-configured extra mandatory requirements are still enforced.
 ;; Project LSP servers are checked only in optional setup diagnostics.
@@ -48,7 +48,7 @@ run admission when absent; existing user customization is not rewritten."
 (defcustom kargu-deps-package-metadata
   '((plz
      :name "plz"
-     :purpose "Asynchronous HTTP & SSE streaming library (mandatory for API communication)"
+     :purpose "Temporary error DTO compatibility while retry policy is migrated"
      :hint "M-x package-install RET plz")
     (transient
      :name "transient"
@@ -71,10 +71,11 @@ run admission when absent; existing user customization is not rewritten."
   :group 'kargu-deps)
 
 (defcustom kargu-deps-mandatory-executables
-  '("curl")
+  nil
   "Executables required before starting a native model run.
-Curl is the native HTTP transport.  Feature-specific tools such as Git
-are checked when used, unless explicitly added as a global requirement."
+The Rust bridge checks its own configured binary at connection startup.
+Feature-specific tools such as Git and webfetch's curl are checked when used,
+unless explicitly added as a global requirement."
   :type '(repeat string)
   :group 'kargu-deps)
 
@@ -85,7 +86,7 @@ are checked when used, unless explicitly added as a global requirement."
      :hint "Install git via your system package manager (e.g. apt install git / brew install git)")
     ("curl"
      :name "curl"
-     :purpose "HTTP client for the native model transport and webfetch"
+     :purpose "Optional HTTP client for webfetch, not the model API transport"
      :hint "Install curl via your system package manager (e.g. apt install curl / brew install curl)"))
   "Metadata for mandatory CLI executables."
   :type 'alist

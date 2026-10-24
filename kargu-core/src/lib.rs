@@ -3,6 +3,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod api;
 pub mod application;
 pub mod constants;
 pub mod domain;

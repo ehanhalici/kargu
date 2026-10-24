@@ -37,7 +37,6 @@
 (require 'tests/test-wave1-empirical-challenge)
 (require 'tests/test-tool-execution-contract)
 (require 'tests/test-transport-contract)
-(require 'tests/test-stream-pressure)
 (require 'tests/test-job-owner)
 (require 'tests/test-process-session)
 (require 'tests/test-process-stress)

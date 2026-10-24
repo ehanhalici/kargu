@@ -848,8 +848,9 @@ Initialize installed PACKAGES only when requested."
   (let* ((root (make-temp-file "kargu-tool-package-" t))
          (missing '("kargu/api.el" "kargu/api/http.el"
                     "kargu/api/client.el" "kargu/api/catalog.el"))
-         (files (directory-files-recursively
-                 (expand-file-name "kargu" kargu-module-test--root) "\\.el\\'")))
+         (files (cons (expand-file-name "kargu-core/assets/providers.json" kargu-module-test--root)
+                      (directory-files-recursively
+                       (expand-file-name "kargu" kargu-module-test--root) "\\.el\\'"))))
     (unwind-protect
         (progn
           (dolist (file files)

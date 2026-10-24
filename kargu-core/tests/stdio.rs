@@ -27,6 +27,61 @@ fn provider_catalog_is_a_credential_free_core_projection() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn api_attempt_keeps_mailbox_live_and_owner_close_cancel_shutdown_eof_drain_sockets() -> TestResult
+{
+    use std::{io::Read, net::TcpListener, sync::mpsc};
+    for teardown in ["cancel", "close", "shutdown", "eof"] {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let url = format!("http://{}/v1/chat/completions", listener.local_addr()?);
+        let (connected_tx, connected_rx) = mpsc::channel();
+        let socket = std::thread::spawn(move || -> std::io::Result<()> {
+            let (mut stream, _) = listener.accept()?;
+            stream.set_read_timeout(Some(Duration::from_secs(4)))?;
+            let _ = connected_tx.send(());
+            // The client must close the socket; a timeout is a failed drain.
+            let mut request = Vec::new();
+            stream.read_to_end(&mut request)?;
+            Ok(())
+        });
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        peer.send(json!({"jsonrpc":"2.0","id":"api","method":"api/request","params":{"scope":scope,"arguments":{
+            "url":url,"method":"post","headers":{"Authorization":"Bearer synthetic-owned-key"},"body":"{}","stream":false,
+            "timeouts":{"connect_ms":1000,"first_byte_ms":3000,"idle_ms":null,"deadline_ms":null}}}}))?;
+        connected_rx.recv_timeout(Duration::from_secs(3))?;
+        peer.send(json!({"jsonrpc":"2.0","id":"ping","method":"ping"}))?;
+        assert_eq!(peer.read()?["id"], "ping");
+        match teardown {
+            "cancel"=>peer.send(json!({"jsonrpc":"2.0","method":"rpc/cancel","params":{"request_id":"api","scope":peer.epoch}}))?,
+            "close"=>peer.send(json!({"jsonrpc":"2.0","id":"close","method":"session/close","params":scope}))?,
+            "shutdown"=>peer.send(json!({"jsonrpc":"2.0","id":"shutdown","method":"shutdown"}))?,
+            _=>drop(peer.input.take()),
+        }
+        if teardown != "eof" {
+            let replies = if teardown == "cancel" {
+                vec![peer.read()?]
+            } else {
+                vec![peer.read()?, peer.read()?]
+            };
+            let reply = replies
+                .iter()
+                .find(|reply| reply["id"] == "api")
+                .ok_or("missing API terminal")?;
+            assert_eq!(reply["result"]["failure"]["code"], "cancelled");
+            assert!(!reply.to_string().contains("synthetic-owned-key"));
+            if teardown == "shutdown" {
+                assert_eq!(replies.last().ok_or("missing shutdown")?["id"], "shutdown");
+            }
+        } else {
+            assert!(peer.wait()?);
+        }
+        socket.join().map_err(|_| "socket fixture failed")??;
+    }
+    Ok(())
+}
+
 fn command_arguments(root: &std::path::Path, script: &str) -> Value {
     let shell = std::env::var_os("PATH")
         .and_then(|paths| {

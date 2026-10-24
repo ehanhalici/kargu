@@ -1,0 +1,178 @@
+//! Parse-once HTTP authority, secret headers and independent network timers.
+
+use super::ApiError;
+use crate::providers::ApiEndpoint;
+use reqwest::{
+    Method,
+    header::{HeaderMap, HeaderName, HeaderValue},
+};
+use serde::Deserialize;
+use std::{collections::BTreeMap, fmt, time::Duration};
+use zeroize::Zeroizing;
+
+/// A captured secret. Neither diagnostics nor serialization expose plaintext.
+#[derive(Deserialize)]
+#[serde(try_from = "String")]
+pub struct SecretString(Zeroizing<String>);
+impl TryFrom<String> for SecretString {
+    type Error = ApiError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let value = Zeroizing::new(value);
+        if value.len() > 16 * 1024 {
+            return Err(ApiError::Limit);
+        }
+        Ok(Self(value))
+    }
+}
+impl fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("***")
+    }
+}
+impl fmt::Display for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("***")
+    }
+}
+
+macro_rules! timeout_type {
+    ($name:ident) => {
+        #[derive(Deserialize)]
+        #[serde(try_from = "u64")]
+        struct $name(Duration);
+        impl TryFrom<u64> for $name {
+            type Error = ApiError;
+            fn try_from(ms: u64) -> Result<Self, ApiError> {
+                if !(1..=86_400_000).contains(&ms) {
+                    return Err(ApiError::InvalidRequest);
+                }
+                Ok(Self(Duration::from_millis(ms)))
+            }
+        }
+    };
+}
+timeout_type!(ConnectTimeout);
+timeout_type!(FirstByteTimeout);
+timeout_type!(IdleTimeout);
+timeout_type!(RequestDeadline);
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Timeouts {
+    connect_ms: ConnectTimeout,
+    first_byte_ms: FirstByteTimeout,
+    idle_ms: Option<IdleTimeout>,
+    deadline_ms: Option<RequestDeadline>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum HttpMethod {
+    Get,
+    Post,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RequestDto {
+    url: ApiEndpoint,
+    method: HttpMethod,
+    headers: BTreeMap<String, SecretString>,
+    body: Option<String>,
+    stream: bool,
+    timeouts: Timeouts,
+    #[serde(default)]
+    limits: super::stream::StreamLimits,
+}
+
+/// Immutable per-attempt HTTP capture, independent of mutable editor selection.
+#[derive(Deserialize)]
+#[serde(try_from = "RequestDto")]
+pub struct HttpRequest {
+    pub(super) url: ApiEndpoint,
+    pub(super) method: Method,
+    pub(super) headers: HeaderMap,
+    pub(super) body: Option<Zeroizing<String>>,
+    timeouts: Timeouts,
+    pub(super) limits: super::stream::StreamLimits,
+}
+
+impl TryFrom<RequestDto> for HttpRequest {
+    type Error = ApiError;
+    fn try_from(dto: RequestDto) -> Result<Self, ApiError> {
+        if dto.headers.len() > 64
+            || dto
+                .body
+                .as_ref()
+                .is_some_and(|body| body.len() > 768 * 1024)
+            || (matches!(dto.method, HttpMethod::Get) && (dto.body.is_some() || dto.stream))
+        {
+            return Err(ApiError::Limit);
+        }
+        let mut bytes = 0usize;
+        let mut headers = HeaderMap::new();
+        for (name, value) in dto.headers {
+            bytes = bytes
+                .saturating_add(name.len())
+                .saturating_add(value.0.len());
+            if bytes > 64 * 1024 {
+                return Err(ApiError::Limit);
+            }
+            let name =
+                HeaderName::from_bytes(name.as_bytes()).map_err(|_| ApiError::InvalidRequest)?;
+            if matches!(
+                name.as_str(),
+                "host"
+                    | "content-length"
+                    | "transfer-encoding"
+                    | "connection"
+                    | "proxy-authorization"
+            ) || headers.contains_key(&name)
+            {
+                return Err(ApiError::InvalidRequest);
+            }
+            let mut value =
+                HeaderValue::from_str(&value.0).map_err(|_| ApiError::InvalidRequest)?;
+            value.set_sensitive(true);
+            headers.insert(name, value);
+        }
+        if let Some(body) = dto.body.as_ref() {
+            let value: serde_json::Value =
+                serde_json::from_str(body).map_err(|_| ApiError::InvalidRequest)?;
+            if !value.is_object() {
+                return Err(ApiError::InvalidRequest);
+            }
+            if dto.stream && value.get("stream").and_then(serde_json::Value::as_bool) != Some(true)
+            {
+                return Err(ApiError::InvalidRequest);
+            }
+        } else if matches!(dto.method, HttpMethod::Post) {
+            return Err(ApiError::InvalidRequest);
+        }
+        Ok(Self {
+            url: dto.url,
+            method: match dto.method {
+                HttpMethod::Get => Method::GET,
+                HttpMethod::Post => Method::POST,
+            },
+            headers,
+            body: dto.body.map(Zeroizing::new),
+            timeouts: dto.timeouts,
+            limits: dto.limits,
+        })
+    }
+}
+impl HttpRequest {
+    pub(super) fn connect_timeout(&self) -> Duration {
+        self.timeouts.connect_ms.0
+    }
+    pub(super) fn first_byte_timeout(&self) -> Duration {
+        self.timeouts.first_byte_ms.0
+    }
+    pub(super) fn idle_timeout(&self) -> Option<Duration> {
+        self.timeouts.idle_ms.as_ref().map(|value| value.0)
+    }
+    pub(super) fn deadline(&self) -> Option<Duration> {
+        self.timeouts.deadline_ms.as_ref().map(|value| value.0)
+    }
+}

@@ -52,6 +52,11 @@ consumer'ları native porttadır (.codex/20–25). `workspace_grep` de rg/GNU gr
 adapter'ına bağlandı; eski Elisp grep engine'i kaldırıldı (.codex/26–27).
 `git_status` native Git + complete-output portundadır; eski Elisp status
 engine'i silindi (.codex/28). Diğer Git komutları henüz taşınmadı.
+Kullanıcının API önceliğiyle 162-provider catalog baseline Rust asset/core
+snapshot'a taşındı (.codex/29). Chat/model-list HTTP ve SSE motoru native'dir;
+Elisp parser/accumulator/watchdog silindi (.codex/30). Credential/UI portları
+kalır; wire/request policy, retry/circuit ve model metadata normalization
+henüz taşınmadığı için tüm API göçü tamamlandı sayılmaz.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
 output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan read/
 Git/skill/webfetch, egress/context ve global tüketiciler aşağıdaki gruplarda
@@ -201,7 +206,7 @@ api/{http,retry,request,cache}.el, history/, prompt.el, prompt/default.txt.
 ## G09 — View/selection olayları ve uçtan uca stream baskısı
 
 **Kaynak:** MOD-01'in view tarafı, ARCH-06'nın veri/view ayrımı, DEEP-12.
-**Dosyalar:** chat/, ui/, selection.el, api/{select,sse,stream}.el, plan/context.el
+**Dosyalar:** chat/, ui/, selection.el, api/select.el, Rust api/stream/, plan/context.el
 ve chat/plan.el'in application bağlaması; metadata store'un sahibi G02'dir.
 
 - View/draft/transcript/selection execution/connection portlarını tüketsin; ikinci veri

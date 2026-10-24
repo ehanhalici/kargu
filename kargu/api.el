@@ -9,8 +9,8 @@
 ;; Facade module for the Kargu API subsystem.
 ;; Requires modular subcomponents under `kargu/api/`:
 ;;   * `kargu/api/circuit'   -> circuit breaker (:closed, :open, :half-open)
-;;   * `kargu/api/http'      -> asynchronous HTTP transport via plz
-;;   * `kargu/api/stream'    -> SSE streaming parser and accumulator
+;;   * `kargu/api/http'      -> owned delivery/budget/retry facade for Rust HTTP
+;;   * Rust core            -> HTTP, SSE parsing and stream reconstruction
 ;;   * `kargu/api/response'  -> OpenAI chat-completion response decoding
 ;;   * `kargu/api/tools'     -> tool-call JSON encoding and schema conversion
 ;;   * `kargu/api/catalog'   -> dynamic model catalog querying, caching, metadata
@@ -26,7 +26,6 @@
 
 (require 'kargu/api/circuit)
 (require 'kargu/api/http)
-(require 'kargu/api/stream)
 (require 'kargu/api/response)
 (require 'kargu/api/tools)
 (require 'kargu/api/catalog)

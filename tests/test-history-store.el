@@ -94,7 +94,7 @@
         (setq snapshot (kargu-history-snapshot)))
       (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda () "test"))
                 ((symbol-function 'kargu--api-base) (lambda () "https://example.invalid"))
-                ((symbol-function 'plz)
+                ((symbol-function 'kargu-transport-request)
                  (lambda (_method _url &rest options)
                    (setq held (plist-get options :then)) nil)))
         (with-current-buffer a

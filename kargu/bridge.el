@@ -21,6 +21,7 @@
                   (connection arguments callback &rest options))
 (declare-function kargu-bridge-approval-request "kargu/bridge/approval" (connection id params))
 (declare-function kargu-bridge-job--disconnect "kargu/bridge/jobs" (job status))
+(declare-function kargu-providers-install-projection "kargu/providers/projection" (snapshot))
 
 (defgroup kargu-bridge nil
   "Opt-in Rust core connection."
@@ -53,7 +54,7 @@
 
 (cl-defstruct (kargu-bridge--pending (:constructor kargu-bridge--pending-create))
   "Take-once request waiter and its owner cleanup."
-  callback timer deadline owner owner-cleanup review)
+  callback timer deadline owner owner-cleanup review on-delta on-body)
 
 (defun kargu-bridge--dismiss-reverse (connection &optional forward-id)
   "Dismiss CONNECTION's reverse requests, optionally only for FORWARD-ID."
@@ -162,14 +163,18 @@
                                                     "scope" (kargu-bridge-connection-epoch connection))))
       (error nil))))
 
-(cl-defun kargu-bridge-call (connection method params callback &key owner timeout)
+(cl-defun kargu-bridge-call (connection method params callback &key owner timeout on-delta on-body)
   "Call METHOD with PARAMS on CONNECTION and asynchronously deliver CALLBACK.
 CALLBACK receives (RESULT ERROR).  OWNER is an optional live source buffer;
 its closure or major-mode change cancels delivery.  TIMEOUT overrides the
 default deadline; :unlimited disables only this forward-request timer.
+ON-DELTA receives core API events while this exact waiter remains owned.
+ON-BODY receives bounded final JSON body fragments, not provider events.
 Return the correlation id, or nil on local rejection."
   (let ((deadline (or timeout kargu-bridge-request-timeout)))
     (unless (and (functionp callback) (stringp method) (hash-table-p params)
+                 (or (null on-delta) (functionp on-delta))
+                 (or (null on-body) (functionp on-body))
                  (or (eq deadline :unlimited) (and (numberp deadline) (> deadline 0)))
                  (or (null owner) (buffer-live-p owner)))
       (error "Invalid Rust request arguments"))
@@ -187,6 +192,8 @@ Return the correlation id, or nil on local rejection."
                          (cl-incf (kargu-bridge-connection-counter connection))))
              (cleanup (and owner (lambda () (kargu-bridge--cancel connection id "owner_closed"))))
              (entry (kargu-bridge--pending-create :callback callback :owner owner
+                                                  :on-delta on-delta
+                                                  :on-body on-body
                                                   :deadline (when (numberp deadline) (+ (float-time) deadline))
                                                   :owner-cleanup cleanup)))
         (puthash id entry (kargu-bridge-connection-pending connection))
@@ -340,6 +347,16 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
                          (or (eq params :missing) (hash-table-p params) (vectorp params))))
             (error "Invalid request envelope"))
           (cond
+           ((and (eq id :missing) (member method '("api/delta" "api/body")))
+            (let* ((params (gethash "params" msg))
+                   (request-id (and (hash-table-p params) (gethash "request_id" params)))
+                   (entry (gethash request-id (kargu-bridge-connection-pending connection))))
+              (when-let* ((consumer (and entry (if (equal method "api/delta")
+                                                  (kargu-bridge--pending-on-delta entry)
+                                                (kargu-bridge--pending-on-body entry)))))
+                (condition-case nil
+                    (funcall consumer (gethash (if (equal method "api/delta") "delta" "chunk") params))
+                  ((error quit) (kargu-bridge--cancel connection request-id "consumer_failed"))))))
            ((and (eq id :missing) (equal method "rpc/cancel"))
             (let* ((params (gethash "params" msg))
                    (entry (and (hash-table-p params)
@@ -480,7 +497,7 @@ ERROR-DATA skips hydration; older peers retain the packaged projection."
 This is an adapter service identity, not an imported user conversation or run."
   (if (not (cl-some (lambda (capability)
                      (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
-                   '("workspace_find_files" "workspace_list_files_ls" "workspace_grep" "git_status" "command_execute")))
+                   '("workspace_find_files" "workspace_list_files_ls" "workspace_grep" "git_status" "command_execute" "api_request")))
       (kargu-bridge--start-finish connection callback nil)
     (setf (kargu-bridge-connection-state connection) 'binding)
     (kargu-bridge-call

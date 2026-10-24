@@ -21,9 +21,9 @@
     (dolist (response
              (list
               '(("choices" . [(("message" . (("tool_calls" . [(("function" . (("name" . "read_file") ("arguments" . "{}"))))]))))]))
-              (kargu--accumulate-stream-deltas
-               '((("choices" . [(("delta" . (("tool_calls" . [(("index" . 0) ("function" . (("name" . "read_file") ("arguments" . "{}"))))])))
-                                 ("finish_reason" . "tool_calls"))]))))
+              ;; Core has already completion-gated and assembled SSE fragments.
+              '(("choices" . [(("message" . (("tool_calls" . [(("id" . "") ("function" . (("name" . "read_file") ("arguments" . "{}"))))])))
+                               ("finish_reason" . "tool_calls"))]))
               '(("type" . "message") ("stop_reason" . "tool_use")
                 ("content" . [(("type" . "tool_use") ("name" . "read_file") ("input" . :json-empty-object))]))
               '(("choices" . [(("message" . (("function_call" . (("name" . "read_file") ("arguments" . "{}"))))))]))))

@@ -287,41 +287,8 @@
       (when task (kargu-async-cancel task))
       (delete-file path))))
 
-(ert-deftest kargu-resume-stream-unicode-event-and-args-byte-limits-test ()
-  "SSE events and tool arguments enforce byte limits before retaining Unicode."
-  (let ((kargu-sse-max-event-bytes 5)
-        (kargu-stream-max-tool-args-bytes 5)
-        (parser (kargu-sse-parser-create)))
-    (should-error (kargu-sse-parser-feed parser "data: 😀😀"))
-    (should-not (kargu-sse-parser-data parser))
-    (should-error (kargu--merge-tool-args "" "😀😀"))))
 
-(ert-deftest kargu-resume-stream-newline-does-not-hide-oversized-tail-test ()
-  "A complete line followed by an oversized partial line still aborts."
-  (with-temp-buffer
-    (let ((process (make-pipe-process :name "kargu-tail-bound" :buffer (current-buffer)))
-          (kargu-stream-max-incomplete-line-bytes 4))
-      (unwind-protect
-          (progn
-            (kargu--stream-filter process ": ping\n123456" #'ignore)
-            (should (eq (process-get process :kargu-stream-abort) 'line-buffer-overflow))
-            (should-not (process-get process :kargu-raw)))
-        (when (process-live-p process) (delete-process process))))))
 
-(ert-deftest kargu-resume-stream-parser-error-never-resumes-as-success-test ()
-  "An event overflow aborts once and ignores late finish or data events."
-  (with-temp-buffer
-    (let ((process (make-pipe-process :name "kargu-event-bound" :buffer (current-buffer)))
-          (kargu-sse-max-event-bytes 4) events)
-      (unwind-protect
-          (progn
-            (kargu--stream-filter process "data: 123456\n\n" #'ignore)
-            (should (eq (process-get process :kargu-stream-abort) 'protocol-failure))
-            (kargu--stream-filter process "data: [DONE]\n\n" #'ignore
-                                  (lambda (event) (push event events)))
-            (kargu--stream-flush process #'ignore (lambda (event) (push event events)))
-            (should-not events))
-        (when (process-live-p process) (delete-process process))))))
 
 (ert-deftest kargu-resume-delayed-tool-cannot-cross-application-run-test ()
   "A pending tool invocation loses authority when its application run changes."

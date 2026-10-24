@@ -31,7 +31,7 @@
         callbacks reports run-a run-b)
     (unwind-protect
         (kargu-test-native-boundary
-         (cl-letf (((symbol-function 'plz)
+         (cl-letf (((symbol-function 'kargu-transport-request)
                     (lambda (&rest options)
                       (push (plist-get (cddr options) :then) callbacks) nil)))
                   (with-current-buffer a
@@ -109,7 +109,7 @@
   (with-temp-buffer
     (let (held (calls 0))
       (kargu-test-native-boundary
-       (cl-letf (((symbol-function 'plz)
+       (cl-letf (((symbol-function 'kargu-transport-request)
                   (lambda (&rest options)
                     (setq held (plist-get (cddr options) :then)) nil)))
                 (kargu-api-send "hello" (lambda (_) (cl-incf calls)))
@@ -289,7 +289,7 @@
         (with-current-buffer origin
           (setq-local kargu-application-owner app)
           (kargu-test-native-boundary
-           (cl-letf (((symbol-function 'plz) (lambda (&rest _) nil)))
+           (cl-letf (((symbol-function 'kargu-transport-request) (lambda (&rest _) nil)))
                     (kargu-api-send "hello" #'ignore)
                     (setq request (kargu-application-current-request app))
                     (should (kargu-logical-request-live-p request))

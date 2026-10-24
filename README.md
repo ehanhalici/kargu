@@ -20,7 +20,7 @@ Rather than running heavy external daemons or separate browser windows, Kargu tu
   - **Live Debugging (`dape`)**: Inspect paused debug sessions, read call stacks, inspect variables, and evaluate expressions during active debugging.
   - **Version Control (`magit` / Git)**: Inspect branches, diffs, commits, and status directly.
   - **Interactive Menus (`transient`)**: Fast keyboard-driven menus for configuration, modes, and tuning.
-  - **Non-blocking Asynchronous Core (`plz`)**: UI operations stay smooth and responsive with streaming SSE output.
+  - **Non-blocking Rust HTTP/SSE Core**: UI operations stay responsive while Rust owns model connections and streaming reconstruction.
 - **Multi-Provider Support**: Connects to OpenAI, Anthropic, OpenRouter, Google Gemini, Ollama, LM Studio, llama.cpp, and more.
 - **Multiple Operational Modes**:
   - **`ask`**: Instant read-only answers and explanations.
@@ -36,7 +36,9 @@ Rather than running heavy external daemons or separate browser windows, Kargu tu
 
 ### Prerequisites
 - GNU Emacs 29.1 or newer
-- Required for the native model transport: `plz` and the `curl` executable.
+- Required for model connections: the built `kargu-core` binary (see below).
+  `plz` remains a temporary error-record dependency until retry policy migrates;
+  it no longer performs model HTTP or SSE. Curl is only needed by webfetch.
 - Optional interface packages: `transient` (menu), `company` (completion),
   `magit` (Git interface).
 - Optional integrations: `eglot` and a language server for LSP tools; `dape` and a configured debug adapter for debug mode. Kargu works without LSP.
@@ -64,8 +66,9 @@ Clone the repository and add it to your Emacs `load-path`:
 
 The Rust core provides bounded JSON-RPC IPC, application/session lifecycle,
 native `find_files`, GNU `ls` listing, `rg`/GNU `grep` search (including aliases),
-`git_status`, and Bash/interactive jobs. The Elisp
-agent still owns prompts and model requests; this is not yet a Rust agent backend.
+`git_status`, Bash/interactive jobs, the provider catalog and model HTTP/SSE.
+Elisp still owns prompts, request/wire policy and agent orchestration; this
+is not yet a complete Rust agent backend.
 
 The Rust library now includes typed run admission, single-use approvals and a
 Linux process supervisor with bounded interactive I/O and group/subreaper
@@ -84,12 +87,25 @@ cargo build --manifest-path kargu-core/Cargo.toml --locked
 ;; M-x kargu-bridge-start, kargu-bridge-status, kargu-bridge-stop
 ```
 
-Loading Kargu does not start the binary. The first native search/listing or Bash invocation
+Loading Kargu does not start the binary. The first model API, native search/listing or Bash invocation
 starts and negotiates a shared connection asynchronously. Configure the binary
 path above or install `kargu-core` on PATH. Missing binaries/capabilities are
 reported explicitly; there is no duplicate Elisp glob implementation or silent
 fallback. `kargu/bridge` can also be loaded independently of the agent, UI
 packages, credentials, and `plz`.
+
+Model chat GET/POST and model discovery now use Rust HTTP/TLS, with redirects
+refused, separate connect/first-byte/idle/total bounds, bounded SSE parsing,
+and explicit completion before streamed tool calls become final responses.
+Large final JSON bodies cross stdio in bounded pages without raising its
+1 MiB frame limit. Stop/owner loss/disconnect revoke only captured work.
+The 162-provider baseline is owned by `kargu-core/assets/providers.json`;
+package this asset alongside the Lisp sources at the same relative location.
+The editor reads it for synchronous startup, then receives the validated
+core revision before the connection becomes ready. Explicit user provider
+registrations survive refresh. Credentials remain in the editor's auth port.
+Wire/request policy, retry/circuit and live-model metadata normalization are
+still separate migration work, not a second HTTP/SSE implementation.
 
 Native discovery includes hidden sources, honors `kargu-fs-skip-dirs`, and skips
 compiled/backup artifacts. It does not depend on fd/rg or machine-global Git

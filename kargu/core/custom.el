@@ -79,6 +79,22 @@ Set to an integer (e.g. 2048, 4096) or nil for model default."
   :type 'boolean
   :group 'kargu)
 
+(defcustom kargu-stream-max-raw-bytes (* 4 1024 1024)
+  "Captured Rust response byte limit, at most 4 MiB."
+  :type 'natnum :group 'kargu)
+(defcustom kargu-stream-max-incomplete-line-bytes (* 64 1024)
+  "Captured Rust SSE line byte limit, at most 64 KiB."
+  :type 'natnum :group 'kargu)
+(defcustom kargu-sse-max-event-bytes (* 1024 1024)
+  "Captured Rust SSE event byte limit, at most 1 MiB."
+  :type 'natnum :group 'kargu)
+(defcustom kargu-stream-max-tool-calls 64
+  "Captured Rust streamed tool-call limit, at most 64."
+  :type 'natnum :group 'kargu)
+(defcustom kargu-stream-max-tool-args-bytes (* 512 1024)
+  "Captured Rust argument byte limit per streamed call, at most 512 KiB."
+  :type 'natnum :group 'kargu)
+
 (defcustom kargu-api-retry-max 5
   "How many times to retry a chat request after HTTP 429/5xx."
   :type 'natnum
@@ -135,17 +151,23 @@ Error text from a 200 response that names one of these is treated the same."
   :group 'kargu)
 
 (defcustom kargu-api-timeout 90
-  "Timeout in seconds for a non-streaming chat request.
-Streaming requests ignore this.  They use `kargu-api-stall-timeout'
-and `kargu-api-stream-ceiling' instead.  plz maps this value to
-curl --max-time, a cap on the whole transfer."
+  "Rust total deadline in seconds for a non-streaming chat request.
+Streaming uses `kargu-api-stall-timeout' and `kargu-api-stream-ceiling'.
+Connection and first-byte bounds remain independent even when this is nil."
   :type '(choice (natnum :tag "Seconds") (const :tag "No timeout" nil))
   :group 'kargu)
 
+(defcustom kargu-api-connect-timeout 10
+  "Rust connection timeout in seconds, independent of the response deadline."
+  :type 'natnum :group 'kargu)
+
+(defcustom kargu-api-first-byte-timeout 30
+  "Rust response-header timeout in seconds, including connection setup."
+  :type 'natnum :group 'kargu)
+
 (defcustom kargu-api-stall-timeout 45
   "Seconds a streaming response may go without bytes before it is aborted.
-nil disables the stall watch.  The abort message is \"stream stalled\",
-which is not a curl --max-time failure."
+nil disables only the idle bound; Rust still applies the other deadlines."
   :type '(choice (natnum :tag "Seconds") (const :tag "No stall timeout" nil))
   :group 'kargu)
 

@@ -107,7 +107,8 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 11] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 12] = [
+        "api_request",
         "application_lifecycle",
         "session_lifecycle",
         methods::PING,
@@ -156,6 +157,8 @@ pub mod protocol {
     pub mod methods {
         /// Credential-free embedded provider definitions for editor projection.
         pub const PROVIDER_CATALOG: &str = "provider/catalog";
+        /// Owned HTTP attempt with bounded SSE deltas and explicit cancellation.
+        pub const API_REQUEST: &str = "api/request";
         /// Approved persistent process startup; returns identity, not completion.
         pub const JOB_START: &str = "job/start";
         /// Confirm that the client installed its owner-close cleanup after startup.

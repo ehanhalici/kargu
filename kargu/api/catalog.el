@@ -555,7 +555,7 @@ An explicit true flag is sufficient even without an API effort list."
                               (kargu-async-finish task nil (kargu--plz-error-message error)))))))
       (when (kargu-async-pending-p task)
         (setf (kargu-async-task-cancel task)
-              (lambda () (when (processp request) (delete-process request))))))))
+              (lambda () (kargu-transport-cancel request)))))))
 
 (defun kargu-api-list-models (&optional callback provider-name)
   "Fetch PROVIDER-NAME's live catalog asynchronously, delivering once.

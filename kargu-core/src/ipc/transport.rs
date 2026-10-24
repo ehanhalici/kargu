@@ -1,5 +1,6 @@
 use super::{
     CONTROL_BYTES, CONTROL_CAPACITY, MAX_FRAME_BYTES,
+    api::ApiRequests,
     execution::Commands,
     pending::PendingRequests,
     protocol::{self, Message},
@@ -42,6 +43,7 @@ struct Frame {
 struct Services {
     reads: ReadTools,
     commands: Commands,
+    api: ApiRequests,
 }
 
 // Unlike LinesCodec's default EOF behavior, an incomplete trailing line is
@@ -139,6 +141,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
     let mut services = Services {
         reads: ReadTools::default(),
         commands: Commands::new().map_err(|_| TransportError::Command)?,
+        api: ApiRequests::default(),
     };
     let result = read_messages(
         reader,
@@ -151,9 +154,14 @@ async fn read_loop<R: AsyncRead + Unpin>(
     )
     .await;
     pending.disconnect();
-    let Services { reads, commands } = &mut services;
+    let Services {
+        reads,
+        commands,
+        api,
+    } = &mut services;
     reads.cancel_all();
     commands.cancel_all();
+    api.drain().await.map_err(|_| TransportError::ReadWorker)?;
     while !commands.is_empty() {
         commands
             .tick(&mut host, pending)
@@ -177,7 +185,11 @@ async fn read_messages<R: AsyncRead + Unpin>(
     services: &mut Services,
     stop: &CancellationToken,
 ) -> Result<(), TransportError> {
-    let Services { reads, commands } = services;
+    let Services {
+        reads,
+        commands,
+        api,
+    } = services;
     let mut input = FramedRead::new(reader, StrictLines::new(ByteLimit::WIRE_MAX));
     let mut expiry = tokio::time::interval(timeouts::PENDING_SWEEP);
     let mut shutdown_reply = None;
@@ -185,11 +197,28 @@ async fn read_messages<R: AsyncRead + Unpin>(
         let frame = tokio::select! {
             _ = stop.cancelled() => return Ok(()),
             frame = input.next() => frame,
+            completion = async {
+                // Network producers backpressure on actual writer capacity. The
+                // mailbox still accepts cancellation, owner-close and ping while
+                // this future waits; no event is consumed without frame capacity.
+                let bytes = u32::try_from(host.frame_limit().as_usize()).map_err(|_| TransportError::Overloaded)?;
+                let permit = permits.clone().acquire_many_owned(bytes).await.map_err(|_| TransportError::Writer)?;
+                drop(permit);
+                api.next(host).await.map_err(|_| TransportError::ReadWorker)
+            }, if !api.is_empty() => {
+                if let Some(reply) = completion? {
+                    queue_reply(reply, host.frame_limit(), tx, permits)?;
+                }
+                if reads.is_empty() && commands.is_empty() && api.is_empty() && let Some(reply) = shutdown_reply.take() {
+                    queue_reply(reply, host.frame_limit(), tx, permits)?;
+                }
+                continue;
+            }
             completion = reads.next(host), if !reads.is_empty() => {
                 let reply = completion.ok_or(TransportError::ReadWorker)?
                     .map_err(|_| TransportError::ReadWorker)?;
                 queue_reply(reply, host.frame_limit(), tx, permits)?;
-                if reads.is_empty() && commands.is_empty() && let Some(reply) = shutdown_reply.take() {
+                if reads.is_empty() && commands.is_empty() && api.is_empty() && let Some(reply) = shutdown_reply.take() {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
                 continue;
@@ -197,10 +226,11 @@ async fn read_messages<R: AsyncRead + Unpin>(
             _ = expiry.tick() => {
                 pending.expire(tokio::time::Instant::now());
                 reads.sweep(host);
+                api.sweep(host);
                 for message in commands.tick(host, pending).map_err(|_| TransportError::Command)? {
                     queue_reply(message, host.frame_limit(), tx, permits)?;
                 }
-                if reads.is_empty() && commands.is_empty() && let Some(reply) = shutdown_reply.take() {
+                if reads.is_empty() && commands.is_empty() && api.is_empty() && let Some(reply) = shutdown_reply.take() {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
                 continue;
@@ -229,16 +259,24 @@ async fn read_messages<R: AsyncRead + Unpin>(
                         if host.matches_epoch(&scope) {
                             reads.cancel(&id);
                             commands.cancel(&id);
+                            api.cancel(&id);
                         }
                     }
                     continue;
                 }
-                if id
-                    .as_ref()
-                    .is_some_and(|id| reads.contains(id) || commands.contains(id))
-                {
+                if id.as_ref().is_some_and(|id| {
+                    reads.contains(id) || commands.contains(id) || api.contains(id)
+                }) {
                     // Two responses with the same live id would be ambiguous.
                     return Err(TransportError::Framing);
+                }
+                if method == methods::API_REQUEST {
+                    if let Some(id) = id.as_ref()
+                        && let Err(fault) = api.start(host, id.clone(), params)
+                    {
+                        queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                    }
+                    continue;
                 }
                 if matches!(
                     method.as_str(),
@@ -303,6 +341,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 let dispatch = host.dispatch(&method, params, id.is_some());
                 let draining_shutdown = method == methods::SHUTDOWN && dispatch.result.is_ok();
                 reads.sweep(host);
+                api.sweep(host);
                 if dispatch.exit {
                     return Ok(());
                 }
@@ -315,7 +354,9 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     Ok(result) => protocol::success(id, result),
                     Err(fault) => fault.response(Some(id)),
                 });
-                if draining_shutdown && (!reads.is_empty() || !commands.is_empty()) {
+                if draining_shutdown
+                    && (!reads.is_empty() || !commands.is_empty() || !api.is_empty())
+                {
                     shutdown_reply = reply;
                     None
                 } else {

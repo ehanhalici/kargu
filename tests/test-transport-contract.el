@@ -155,29 +155,6 @@
     (should (eq (kargu-result-err-code err-timeout) :timeout))
     (should (eq (plist-get (kargu-result-err-data err-timeout) :side-effect) :unknown))))
 
-(ert-deftest kargu-transport-cross-origin-auth-stripping-test ()
-  "Cross-origin redirects strip sensitive authorization and api-key headers."
-  (let ((orig-url "https://api.openai.com/v1/chat/completions")
-        (same-url "https://api.openai.com/v1/other")
-        (diff-host "https://evil.com/v1/chat")
-        (diff-port "https://api.openai.com:8443/v1/chat")
-        (diff-proto "http://api.openai.com/v1/chat")
-        (headers '(("Authorization" . "Bearer secret-token")
-                   ("X-API-Key" . "api-key-1234")
-                   ("Content-Type" . "application/json"))))
-    ;; Same origin preserves headers
-    (should (equal (kargu-http--strip-auth-for-cross-origin orig-url same-url headers)
-                   headers))
-    ;; Cross-origin host strips Authorization and X-API-Key
-    (let ((stripped-host (kargu-http--strip-auth-for-cross-origin orig-url diff-host headers)))
-      (should (= (length stripped-host) 1))
-      (should (equal (car stripped-host) '("Content-Type" . "application/json"))))
-    ;; Cross-origin port strips
-    (let ((stripped-port (kargu-http--strip-auth-for-cross-origin orig-url diff-port headers)))
-      (should (= (length stripped-port) 1)))
-    ;; Cross-origin protocol strips
-    (let ((stripped-proto (kargu-http--strip-auth-for-cross-origin orig-url diff-proto headers)))
-      (should (= (length stripped-proto) 1)))))
 
 (ert-deftest kargu-transport-error-classification-canonical-test ()
   "Classifies error codes and checks retryability using canonical codes without string parsing."

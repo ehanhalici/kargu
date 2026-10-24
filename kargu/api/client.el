@@ -20,7 +20,6 @@
 (require 'kargu/history)
 (require 'kargu/api/tools)
 (require 'kargu/api/response)
-(require 'kargu/api/stream)
 (require 'kargu/api/circuit)
 (require 'kargu/api/http)
 (require 'kargu/api/wire)

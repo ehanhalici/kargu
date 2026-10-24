@@ -19,8 +19,6 @@
      kargu/api/request
      kargu/api/response
      kargu/api/retry
-     kargu/api/sse
-     kargu/api/stream
      kargu/api/tool-calls
      kargu/api/tools
      kargu/api/wire

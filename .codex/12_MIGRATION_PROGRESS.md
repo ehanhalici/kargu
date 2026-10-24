@@ -1,5 +1,39 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — Provider catalog ve model HTTP/SSE cutover
+
+Kullanıcının yeni API önceliğiyle ilk kesim `36e0e1a`: 162-provider/5-wire
+baseline Rust asset ve validated provider/catalog snapshot'a taşındı. Eski
+1416 satırlık Elisp literal catalog kaldırıldı; core ready öncesinde editor
+projection beslenir, explicit kullanıcı kayıtları ezilmez. Synchronous startup
+aynı Rust asset'ini okur; ayrı metadata kopyası yoktur. Detay/öğrenim 29'dadır.
+
+İkinci kesim: gerçek chat/model-discovery GET/POST ve SSE IO Rust api/stream/
+ve owned ipc/api service'e bağlandı. Elisp SSE parser/accumulator, HTTP
+watchdog/flush ve redirect helper engine'leri silindi; plz HTTP çağrısı yoktur.
+Plz yalnız henüz taşınmamış retry hata DTO'ları için kalır. Curl global API
+prerequisite değildir. Bounded final body pages frame limitini yükseltmeden
+1.2MiB katalog aktarır; owner/cancel/shutdown/EOF socket drain testlidir.
+copy-tree'nin string alias'ı mutation testiyle yakalanıp explicit URL/body/
+header string capture ile düzeltildi. Secret/timeout/limit sınırları 30'dadır.
+
+**122 Rust testi + 2 compile-fail**, locked build/test, fmt ve strict Clippy
+temiz. **1165/1165 full source ERT**, 0 unexpected, **123.39 s**. Eski Elisp
+parser/pressure engine testleri Rust contract fixture'larına taşındı; sayıdaki
+azalma engine testlerinin iki dilde yinelenmesinin kaldırılmasıdır. Yeni real
+loopback/capture/consumer testleri dahildir. Warning-as-error bytecompile ve
+checkdoc temiz. Bounded TLC transport 1810/693/depth12 hatasız; bu HTTP portu
+için concrete refinement ispatı değildir. Gerçek hesap/ücretli API çağrısı yok.
+Son callback guard değişiklikleri ardından ek **74/74** source ERT geçer;
+geçici bytecompile çıktıları kaldırıldı. Sistem DNS syscall preemption ve
+sağlayıcı tarafı faturalama iptali garantisi verilmez (30'daki sınırlar).
+
+Kalan wire/request policy, model metadata normalization/store, retry/circuit
+ve editor history/agent orchestration henüz Rust'ta değildir; API geçişinin
+tamamı bitmiş sayılmaz. Registry bu tüketicilerin UI/config facade'ı olarak
+kalır. API + dört installed-app backend kapsamı değişmez. Kullanıcı shell.nix
+ve 07 fence değişiklikleri commit dışında korunur.
+
 ## 2026-10-24 — Native Git status ve complete-output portu
 
 `0cbd4a5` ardından `git_status` fixed-argv Git/Rust portuna bağlandı; Elisp

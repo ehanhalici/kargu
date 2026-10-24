@@ -6,7 +6,6 @@
 (require 'ert)
 (require 'tests/test-helpers)
 (require 'kargu/api/response)
-(require 'kargu/api/stream)
 (require 'kargu/api/circuit)
 
 (defvar kargu-api-timeout)
@@ -54,7 +53,7 @@
                (lambda (_time _repeat function &rest _) (setq scheduled function)))
               ((symbol-function 'kargu--api-post) #'ignore))
       (should (kargu--api-schedule-retry "https://example.invalid" nil nil 100
-                                        #'ignore consumer 0 "overloaded"))
+                                         #'ignore consumer 0 "overloaded"))
       (should-not seen)
       (funcall scheduled)
       (should (equal seen (list (cons 100 consumer)))))))
@@ -127,66 +126,24 @@
                                (kargu-response-error-message (car results))))
         (should-not kargu--busy)))))
 
-(ert-deftest kargu-api-watch-startup-failure-never-launches-a-second-request-test ()
-  "Watch failure closes the stream before delivering a single error result."
-  (with-temp-buffer
-    (let* ((old (make-pipe-process :name "kargu-startup-old" :buffer (current-buffer)))
-           (new (make-pipe-process :name "kargu-startup-new" :buffer (current-buffer)))
-           (kargu--generation 50) (kargu--current-process nil)
-           (kargu--busy t) (kargu-stream t)
-           (requests 0) options results)
-      (unwind-protect
-          (cl-letf (((symbol-function 'kargu-circuit-allow-request-p) (lambda (&optional _scope) t))
-                    ((symbol-function 'plz)
-                     (lambda (_method _url &rest args)
-                       (cl-incf requests) (setq options args) old))
-                    ((symbol-function 'kargu--api-arm-stream-watch)
-                     (lambda (process)
-                       (process-put process :kargu-stream-timer
-                                    (run-at-time 60 nil #'ignore))
-                       (error "watch setup failed"))))
-            (kargu--api-post
-             "https://example.invalid" nil nil 50
-             (lambda (response)
-               (push response results)
-               (setq kargu--current-process new kargu--busy t))
-             #'ignore)
-            (should (= requests 1))
-            (should (= (length results) 1))
-            (should (string-search "watch setup failed"
-                                   (kargu-response-error-message (car results))))
-            (should-not (process-live-p old))
-            (should-not (process-get old :kargu-stream-timer))
-            (funcall (plist-get options :then) "{}")
-            (funcall (plist-get options :else) nil)
-            (should (= (length results) 1))
-            (should (eq kargu--current-process new))
-            (should (process-live-p new))
-            (should kargu--busy))
-        (kargu--api-cancel-stream-watch old)
-        (delete-process old)
-        (delete-process new)))))
 
 (ert-deftest kargu-api-synchronous-completion-keeps-new-process-test ()
   "A synchronous completion cannot publish an obsolete process afterwards."
   (dolist (stream '(nil t))
-    (let ((kargu--generation 60) (kargu--current-process nil) armed)
-      (cl-letf (((symbol-function 'plz)
+    (let ((kargu--generation 60) (kargu--current-process nil))
+      (cl-letf (((symbol-function 'kargu-transport-request)
                  (lambda (_method _url &rest options)
                    (funcall (plist-get options :then) "{}")
                    'old-process))
                 ((symbol-function 'kargu--api-handle-body)
-                 (lambda (_body callback &rest _) (funcall callback 'ok)))
-                ((symbol-function 'kargu--api-arm-stream-watch)
-                 (lambda (_) (setq armed t))))
+                 (lambda (_body callback &rest _) (funcall callback 'ok))))
         (let ((finish (lambda (_)
                         (setq kargu--generation 61
                               kargu--current-process 'new-process))))
           (if stream
               (kargu--api-post-streaming "https://example.invalid" nil nil 60 finish #'ignore)
             (kargu--api-post-plain "https://example.invalid" nil nil 60 finish)))
-        (should (eq kargu--current-process 'new-process))
-        (should-not armed)))))
+        (should (eq kargu--current-process 'new-process))))))
 
 (ert-deftest kargu-api-stream-start-errors-do-not-trigger-plain-fallback-test ()
   "A startup or synchronous continuation error never resends the request."
@@ -194,7 +151,7 @@
     (let ((kargu--generation 70) (kargu--current-process nil)
           (kargu-stream t) (requests 0) (delivered 0))
       (cl-letf (((symbol-function 'kargu-circuit-allow-request-p) (lambda (&optional _scope) t))
-                ((symbol-function 'plz)
+                ((symbol-function 'kargu-transport-request)
                  (lambda (_method _url &rest options)
                    (cl-incf requests)
                    (when completed (funcall (plist-get options :then) "{}"))
@@ -214,7 +171,7 @@
     (let ((kargu--generation 10)
           (kargu--current-process nil)
           then else delivered)
-      (cl-letf (((symbol-function 'plz)
+      (cl-letf (((symbol-function 'kargu-transport-request)
                  (lambda (_method _url &rest options)
                    (setq then (plist-get options :then)
                          else (plist-get options :else))
@@ -238,7 +195,7 @@
     (let ((kargu--generation 20)
           (kargu--current-process nil)
           then else (delivered 0))
-      (cl-letf (((symbol-function 'plz)
+      (cl-letf (((symbol-function 'kargu-transport-request)
                  (lambda (_method _url &rest options)
                    (setq then (plist-get options :then)
                          else (plist-get options :else))
@@ -255,49 +212,7 @@
         (funcall else nil)
         (should (= delivered 1))))))
 
-(ert-deftest kargu-api-stream-flush-forwards-final-event-test ()
-  "A final SSE line without a newline reaches both consumers."
-  (with-temp-buffer
-    (let* ((kargu--generation 30)
-           (kargu--current-process nil)
-           (process (make-pipe-process :name "kargu-flush" :buffer (current-buffer)))
-           events parsed
-           (request (kargu-http--make-request
-                     :generation 30 :process process :attempt 0
-                     :on-delta (lambda (event) (push event events)))))
-      (unwind-protect
-          (progn
-            (process-put process :kargu-raw "data: {\"choices\":[]}")
-            (cl-letf (((symbol-function 'kargu--api-handle-body)
-                       (lambda (&rest args) (setq parsed (nth 8 args)))))
-              (kargu-http--finish-stream request ""))
-            (should (= (length events) 1))
-            (should (equal events parsed)))
-        (delete-process process)))))
 
-(ert-deftest kargu-api-sse-preserves-split-utf8-and-match-data-test ()
-  "Split UTF-8 bytes reconstruct one event without leaking callback matches."
-  (with-temp-buffer
-    (set-buffer-multibyte nil)
-    (let* ((process (make-pipe-process :name "kargu-utf8" :buffer (current-buffer)))
-           (raw (encode-coding-string "data: {\"content\":\"ğ🙂\"}\n\n" 'utf-8))
-           (split (1+ (string-search (encode-coding-string "ğ" 'utf-8) raw)))
-           events
-           (callback (lambda (event)
-                       (string-match "changed" "changed")
-                       (push event events))))
-      (unwind-protect
-          (progn
-            (string-match "saved" "saved")
-            (let ((saved (match-data)))
-              (kargu--stream-filter process (substring raw 0 split) callback)
-              (should-not events)
-              (kargu--stream-filter process (substring raw split) callback)
-              (should (equal (match-data) saved)))
-            (should (= (length events) 1))
-            (should (equal (kargu-aget (car events) "content") "ğ🙂"))
-            (should (equal (buffer-string) raw)))
-        (delete-process process)))))
 
 (declare-function kargu-api-chat-url "kargu/api/wire" (base format))
 (declare-function kargu-api-prepare-payload "kargu/api/wire" (payload format))
@@ -306,10 +221,6 @@
 (declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
 (declare-function kargu--api-headers "kargu/api/http" (key &optional provider-name))
 (declare-function kargu--api-error-looks-retryable-p "kargu/api/http" (message))
-(declare-function kargu--stream-filter "kargu/api/http" (process string on-delta &optional on-event))
-(declare-function kargu--api-arm-stream-watch "kargu/api/http" (process))
-(declare-function kargu--api-stream-watch-tick "kargu/api/http" (process))
-(declare-function kargu--api-cancel-stream-watch "kargu/api/http" (process))
 
 (ert-deftest kargu-api-response-vector-choices-test ()
   "Ensure kargu--response-choice handles vector choices correctly (Bug 2 regression)."
@@ -326,17 +237,6 @@
     (should (equal (kargu-response-finish-reason resp-vec) "stop"))
     (should (equal (kargu-response-finish-reason resp-list) "stop"))))
 
-(ert-deftest kargu-api-stream-vector-choices-test ()
-  "Ensure SSE delta accumulator handles vector choices and vector frags (Bug 3 regression)."
-  (let* ((event1 '(("choices" . [(("index" . 0)
-                                  ("delta" . (("content" . "hello ")))
-                                  ("finish_reason" . nil))])))
-         (event2 '(("choices" . [(("index" . 0)
-                                  ("delta" . (("content" . "world!")))
-                                  ("finish_reason" . "stop"))])))
-         (reconstructed (kargu--accumulate-stream-deltas (list event1 event2))))
-    (should (equal (kargu-response-text reconstructed) "hello world!"))
-    (should (equal (kargu-response-finish-reason reconstructed) "stop"))))
 
 (ert-deftest kargu-api-circuit-breaker-lifecycle-test ()
   "Test circuit breaker state machine transitions."
@@ -391,20 +291,6 @@
       (should scheduled)
       (should-not (kargu-circuit-allow-request-p)))))
 
-(ert-deftest kargu-api-stream-accumulator-chunks-test ()
-  "Test linear stream accumulator with multiple text chunks and reasoning."
-  (let* ((ev1 '(("choices" . [(("index" . 0)
-                               ("delta" . (("content" . "part1 ")
-                                           ("reasoning_content" . "think1 ")))
-                               ("finish_reason" . nil))])))
-         (ev2 '(("choices" . [(("index" . 0)
-                               ("delta" . (("content" . "part2")
-                                           ("reasoning_content" . "think2")))
-                               ("finish_reason" . "stop"))])))
-         (resp (kargu--accumulate-stream-deltas (list ev1 ev2))))
-    (should (equal (kargu-response-text resp) "part1 part2"))
-    (should (equal (kargu-response-reasoning-text resp) "think1 think2"))
-    (should (equal (kargu-response-finish-reason resp) "stop"))))
 
 (ert-deftest kargu-api-timeout-config-test ()
   "Ensure kargu-api-timeout has a valid default."
@@ -416,25 +302,6 @@
   (should (numberp kargu-api-stream-ceiling))
   (should (> kargu-api-stream-ceiling kargu-api-timeout)))
 
-(ert-deftest kargu-api-stream-stall-watch-test ()
-  "A dead stream process drops its watch without recording an abort."
-  (require 'kargu/api/http)
-  (let* ((buf (generate-new-buffer " *kargu-stall*"))
-         (proc (start-process "kargu-stall" buf "sleep" "30")))
-    (unwind-protect
-        (progn
-          (process-put proc :kargu-last-byte 0)
-          (kargu--stream-filter proc "data: {}\n" nil)
-          (should (> (or (process-get proc :kargu-last-byte) 0) 0))
-          (kargu--api-arm-stream-watch proc)
-          (should (process-get proc :kargu-stream-timer))
-          (delete-process proc)
-          (kargu--api-stream-watch-tick proc)
-          (should-not (process-get proc :kargu-stream-abort))
-          (should-not (process-get proc :kargu-stream-timer)))
-      (kargu--api-cancel-stream-watch proc)
-      (when (process-live-p proc) (delete-process proc))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest kargu-api-anthropic-url-and-response-test ()
   "Anthropic format posts to /messages and comes back as choices."
@@ -558,18 +425,6 @@
     (should (kargu--api-error-looks-retryable-p "HTTP 418: teapot"))
     (should-not (kargu--api-error-looks-retryable-p "HTTP 502: bad gateway"))))
 
-(ert-deftest kargu-stream-tool-calls-keep-name-and-get-an-id-test ()
-  "An empty later name is preserved and the boundary assigns a canonical ID."
-  (let* ((events (list '(("choices" . ((("delta" . (("tool_calls" . ((("index" . 0)
-                                                                      ("function" . (("name" . "read_file") ("arguments" . "{\"a\":"))))))))))))
-                       '(("choices" . ((("delta" . (("tool_calls" . ((("index" . 0) ("id" . "")
-                                                                      ("function" . (("name" . "") ("arguments" . "1}"))))))))
-                                        ("finish_reason" . "tool_calls")))))))
-         (resp (kargu-api-normalize-response (kargu--accumulate-stream-deltas events)))
-         (call (car (kargu-seq-to-list (kargu-response-tool-calls resp)))))
-    (should (equal (kargu-aget (kargu-aget call "function") "name") "read_file"))
-    (should (string-prefix-p "call_kargu_" (kargu-aget call "id")))
-    (should (equal (kargu-aget (kargu-aget call "function") "arguments") "{\"a\":1}"))))
 
 (ert-deftest kargu-logical-request-cancel-clears-scheduled-retry-timer-test ()
   "Cancelling a logical request cancels its pending retry timer and blocks repost."
