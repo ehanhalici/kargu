@@ -37,6 +37,9 @@ use tokio::{
 };
 use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 
+mod archive;
+use archive::Archive;
+
 /// Configuration DTO for bounded cleanup; independent of command/run deadlines.
 pub struct CleanupSettings {
     /// TERM grace; must be positive.
@@ -103,6 +106,8 @@ pub enum OutputStream {
 
 /// A lossless byte page; UTF-8 decoding belongs to the consumer after reassembly.
 pub struct OutputPage {
+    /// Actual first retained byte; a larger value than requested reports a tail gap.
+    pub start_cursor: ByteOffset,
     /// Retained bytes, at most one page.
     pub bytes: Vec<u8>,
     /// Absolute cursor, including any explicitly skipped truncated interval.
@@ -118,58 +123,6 @@ pub(crate) struct CapturedOutput {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
     pub truncated: bool,
-}
-
-#[derive(Default)]
-struct Archive {
-    bytes: Vec<u8>,
-    seen: ByteOffset,
-    truncated: bool,
-    eof: bool,
-}
-impl Archive {
-    fn push(&mut self, bytes: &[u8], run: &RunHandle) -> Result<(), CoreError> {
-        self.seen = self.seen.checked_add(ByteOffset::try_from(
-            u64::try_from(bytes.len()).map_err(|_| CoreError::ArithmeticOverflow)?,
-        )?)?;
-        let room = limits::PROCESS_OUTPUT_BYTES
-            .saturating_sub(self.bytes.len())
-            .min(bytes.len());
-        let keep = if room == 0 {
-            0
-        } else {
-            run.reserve_output(ByteLimit::try_from(room)?)
-        };
-        self.bytes.extend(bytes.iter().take(keep));
-        self.truncated |= keep < bytes.len();
-        Ok(())
-    }
-    fn page(&self, cursor: ByteOffset) -> Result<OutputPage, CoreError> {
-        if cursor > self.seen {
-            return Err(CoreError::InvalidValue {
-                field: "OutputCursor",
-            });
-        }
-        let start = usize::try_from(cursor.as_u64()).map_err(|_| CoreError::ArithmeticOverflow)?;
-        let mut bytes = Vec::new();
-        if let Some(retained) = self.bytes.get(start..) {
-            bytes.extend(retained.iter().take(limits::PROCESS_PAGE_BYTES));
-        }
-        let end = start
-            .checked_add(bytes.len())
-            .ok_or(CoreError::ArithmeticOverflow)?;
-        let next_cursor = if end >= self.bytes.len() {
-            self.seen
-        } else {
-            ByteOffset::try_from(u64::try_from(end).map_err(|_| CoreError::ArithmeticOverflow)?)?
-        };
-        Ok(OutputPage {
-            bytes,
-            next_cursor,
-            truncated: self.truncated,
-            eof: self.eof,
-        })
-    }
 }
 
 enum InputMessage {
@@ -274,8 +227,8 @@ impl ProcessSupervisor {
             }
         };
         let cancel = authorized.run().cancel_token();
-        let stdout = Arc::new(Mutex::new(Archive::default()));
-        let stderr = Arc::new(Mutex::new(Archive::default()));
+        let stdout = Arc::new(Mutex::new(Archive::new(authorized.command().retention)));
+        let stderr = Arc::new(Mutex::new(Archive::new(authorized.command().retention)));
         let (input, rx) = mpsc::channel(limits::PROCESS_INPUT_QUEUE);
         let job_id = JobId::new();
         let run = authorized.run().clone();
@@ -442,14 +395,12 @@ impl ProcessSupervisor {
         let (Ok(stdout), Ok(stderr)) = (job.stdout.try_lock(), job.stderr.try_lock()) else {
             return Ok(None);
         };
-        let bound = limit.as_usize();
+        let (stdout, out_truncated) = stdout.snapshot(limit);
+        let (stderr, err_truncated) = stderr.snapshot(limit);
         Ok(Some(CapturedOutput {
-            stdout: stdout.bytes.iter().take(bound).copied().collect(),
-            stderr: stderr.bytes.iter().take(bound).copied().collect(),
-            truncated: stdout.truncated
-                || stderr.truncated
-                || stdout.bytes.len() > bound
-                || stderr.bytes.len() > bound,
+            stdout,
+            stderr,
+            truncated: out_truncated || err_truncated,
         }))
     }
     /// Queue EOF without waiting on child stdin; supervision owns its acknowledgement.
@@ -644,16 +595,19 @@ async fn supervise_child(
     let input_cancel = cancel.child_token();
     let mut input_task =
         AbortOnDropHandle::new(tokio::spawn(input_loop(stdin, rx, input_cancel.clone())));
-    let deadline = Instant::now()
-        .checked_add(command.timeout)
-        .unwrap_or(run.deadline())
-        .min(run.deadline());
+    let Ok(deadline) = command
+        .timeout
+        .start()
+        .map(|deadline| deadline.earliest(run.deadline()))
+    else {
+        return unknown_result();
+    };
     let mut poll = tokio::time::interval(timeouts::PROCESS_POLL);
     let mut cleanup_ok = true;
     let mut outcome = loop {
         tokio::select! { biased;
             _ = cancel.cancelled() => break ToolOutcome::Cancelled,
-            _ = tokio::time::sleep_until(deadline) => break ToolOutcome::Timeout,
+            _ = deadline.elapsed() => break ToolOutcome::Timeout,
             _ = poll.tick() => match group.exited() {
                 Ok(true) => break ToolOutcome::Ok,
                 Ok(false) => {},

@@ -149,7 +149,7 @@ pub struct CommandInput {
     /// Explicit working directory.
     pub working_directory: PathBuf,
     /// Per-command wall-clock limit, also capped by the run deadline.
-    pub timeout: Duration,
+    pub timeout: Option<Duration>,
     /// Exact approved environment. Empty means env_clear, not implicit inheritance.
     pub environment: CommandEnvironment,
 }
@@ -161,7 +161,8 @@ pub struct CommandSpec {
     pub(crate) program: PathBuf,
     pub(crate) arguments: Vec<OsString>,
     pub(crate) cwd: Workspace,
-    pub(crate) timeout: Duration,
+    pub(crate) timeout: ExecutionTimeout,
+    pub(crate) retention: OutputRetention,
     executable: File,
     revision: ExecutableRevision,
     pub(crate) environment: CommandEnvironment,
@@ -169,11 +170,8 @@ pub struct CommandSpec {
 impl TryFrom<CommandInput> for CommandSpec {
     type Error = CoreError;
     fn try_from(input: CommandInput) -> Result<Self, CoreError> {
-        if !input.program.is_absolute()
-            || input.arguments.len() > limits::COMMAND_ARGUMENTS
-            || input.timeout.is_zero()
-            || Instant::now().checked_add(input.timeout).is_none()
-        {
+        let timeout = ExecutionTimeout::try_from(input.timeout)?;
+        if !input.program.is_absolute() || input.arguments.len() > limits::COMMAND_ARGUMENTS {
             return Err(CoreError::InvalidValue { field: "Command" });
         }
         let mut size = input.program.as_os_str().len();
@@ -215,7 +213,8 @@ impl TryFrom<CommandInput> for CommandSpec {
             program,
             arguments: input.arguments,
             cwd: Workspace::try_from(input.working_directory)?,
-            timeout: input.timeout,
+            timeout,
+            retention: OutputRetention::Prefix,
             revision: ExecutableRevision::from(&metadata),
             executable,
             environment: input.environment,
@@ -223,6 +222,11 @@ impl TryFrom<CommandInput> for CommandSpec {
     }
 }
 impl CommandSpec {
+    /// Capture output retention before approval; it is included in the action digest.
+    pub fn with_retention(mut self, retention: OutputRetention) -> Self {
+        self.retention = retention;
+        self
+    }
     /// Only the trusted fixed-argv listing adapter can request this class.
     pub(crate) fn directory_listing(input: CommandInput) -> Result<Self, CoreError> {
         let mut command = Self::try_from(input)?;
@@ -391,7 +395,16 @@ fn digest(
         hash.update(metadata.dev().to_le_bytes());
         hash.update(metadata.ino().to_le_bytes());
     }
-    hash.update(command.timeout.as_nanos().to_le_bytes());
+    if let Some(duration) = command.timeout.duration() {
+        hash.update([1]);
+        hash.update(duration.as_nanos().to_le_bytes());
+    } else {
+        hash.update([0]);
+    }
+    hash.update([match command.retention {
+        OutputRetention::Prefix => 0,
+        OutputRetention::Tail => 1,
+    }]);
     Ok(ActionDigest(hash.finalize().into()))
 }
 
@@ -549,10 +562,11 @@ impl ExecutionGate {
         }
         command.revalidate(run)?;
         let action_digest = digest(run, descriptor.name(), &command)?;
-        let deadline = Instant::now()
-            .checked_add(timeouts::APPROVAL)
-            .ok_or(CoreError::ArithmeticOverflow)?
-            .min(run.deadline());
+        let deadline = run.deadline().cap(
+            Instant::now()
+                .checked_add(timeouts::APPROVAL)
+                .ok_or(CoreError::ArithmeticOverflow)?,
+        );
         let lease = run.lease()?;
         actor.register_call(run, call_id.clone(), descriptor.name().clone())?;
         let id = ApprovalId::new();

@@ -86,7 +86,7 @@ impl ExecuteInput {
             program: self.program,
             arguments: self.arguments.into_iter().map(OsString::from).collect(),
             working_directory: cwd,
-            timeout,
+            timeout: Some(timeout),
             environment: CommandEnvironment::try_from(environment)?,
         })?;
         if command.program.to_str().is_none() || command.cwd.path().to_str().is_none() {

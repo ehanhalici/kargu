@@ -60,6 +60,9 @@ impl Fixture {
     }
     fn request(&mut self, script: &str, timeout: Duration) -> Result<ApprovalRequest, CoreError> {
         let command = command(&self.root, script, timeout)?;
+        self.request_spec(command)
+    }
+    fn request_spec(&mut self, command: CommandSpec) -> Result<ApprovalRequest, CoreError> {
         self.gate.prepare(
             &mut self.actor,
             &self.run,
@@ -135,7 +138,7 @@ fn command(root: &Path, script: &str, timeout: Duration) -> Result<CommandSpec, 
         program: executable("sh")?,
         arguments: vec!["-c".into(), script.into()],
         working_directory: root.to_path_buf(),
-        timeout,
+        timeout: Some(timeout),
         environment: CommandEnvironment::default(),
     })
 }
@@ -162,6 +165,121 @@ fn validated_values_reject_invalid_input_and_overflow() -> TestResult {
         Err(CoreError::ArithmeticOverflow)
     ));
     assert_ne!(ReasoningEffort::ProviderDefault, ReasoningEffort::Off);
+    assert!(ExecutionTimeout::try_from(Some(Duration::ZERO)).is_err());
+    assert!(ExecutionTimeout::try_from(Some(Duration::MAX)).is_err());
+    assert!(ExecutionTimeout::try_from(None)?.duration().is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn persistent_execution_has_no_synthetic_deadline_but_approval_is_bounded() -> TestResult {
+    let mut f = Fixture::new(Mode::Agent, Duration::from_secs(2))?;
+    f.actor.cancel(&f.run)?;
+    f.actor.finish(&f.run)?;
+    f.run = f.actor.admit(
+        &f.session,
+        RunSettings::persistent(
+            Mode::Agent,
+            Workspace::try_from(f.root.clone())?,
+            ToolCallLimit::default(),
+            ConfigRevision::ZERO,
+            PolicyRevision::ZERO,
+        ),
+    )?;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), f.run.deadline().elapsed())
+            .await
+            .is_err()
+    );
+    let spec = CommandSpec::try_from(CommandInput {
+        program: executable("sh")?,
+        arguments: vec![
+            "-c".into(),
+            "printf 'ready\\n'; read value; printf '%s' \"$value\"".into(),
+        ],
+        working_directory: f.root.clone(),
+        timeout: None,
+        environment: CommandEnvironment::default(),
+    })?;
+    let request = f.request_spec(spec)?;
+    assert!(
+        request
+            .deadline()
+            .saturating_duration_since(tokio::time::Instant::now())
+            <= Duration::from_secs(300)
+    );
+    let grant = f
+        .gate
+        .decide(&mut f.actor, &f.run, &request, UserDecision::Approved)?;
+    let job = f.supervisor.start(&mut f.actor, grant)?;
+    f.ready(&job).await?;
+    f.supervisor
+        .write(&f.run, &job, InputChunk::try_from(b"accepted\n".to_vec())?)
+        .await?;
+    let result = f
+        .supervisor
+        .wait(&f.run, &job)
+        .await?
+        .deliver(&mut f.actor)?;
+    assert_eq!(result.outcome, ToolOutcome::Ok);
+    assert_eq!(
+        f.output(&job, OutputStream::Stdout).await?.0,
+        b"ready\naccepted"
+    );
+    f.actor.finish(&f.run)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rolling_tail_keeps_recent_output_and_reports_the_skipped_byte_interval() -> TestResult {
+    let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+    let block = "x".repeat(1024);
+    let script = format!(
+        "i=0; while [ \"$i\" -lt 2048 ]; do printf '%s' '{block}'; i=$((i+1)); done; printf final-marker"
+    );
+    let spec =
+        command(&f.root, &script, Duration::from_secs(4))?.with_retention(OutputRetention::Tail);
+    let request = f.request_spec(spec)?;
+    let grant = f
+        .gate
+        .decide(&mut f.actor, &f.run, &request, UserDecision::Approved)?;
+    let job = f.supervisor.start(&mut f.actor, grant)?;
+    let result = f
+        .supervisor
+        .wait(&f.run, &job)
+        .await?
+        .deliver(&mut f.actor)?;
+    assert_eq!(result.outcome, ToolOutcome::Ok);
+    let first = f
+        .supervisor
+        .read(&f.run, &job, OutputStream::Stdout, ByteOffset::ZERO)
+        .await?;
+    assert!(first.start_cursor > ByteOffset::ZERO);
+    let (output, truncated) = f.output(&job, OutputStream::Stdout).await?;
+    assert!(truncated);
+    assert_eq!(output.len(), limits::PROCESS_OUTPUT_BYTES);
+    assert!(output.ends_with(b"final-marker"));
+    f.actor.finish(&f.run)?;
+    Ok(())
+}
+
+#[test]
+fn changing_retention_requires_a_different_exact_action_approval() -> TestResult {
+    let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+    let prefix = f.request("printf fixture", Duration::from_secs(2))?;
+    let tail = f.request_spec(
+        command(&f.root, "printf fixture", Duration::from_secs(2))?
+            .with_retention(OutputRetention::Tail),
+    )?;
+    assert_ne!(prefix.digest(), tail.digest());
+    for request in [prefix, tail] {
+        assert!(matches!(
+            f.gate
+                .decide(&mut f.actor, &f.run, &request, UserDecision::Rejected),
+            Err(CoreError::Rejected)
+        ));
+    }
+    f.actor.finish(&f.run)?;
     Ok(())
 }
 
@@ -279,7 +397,7 @@ fn action_binding_covers_argv_environment_and_runtime_revision() -> TestResult {
         program: executable("sh")?,
         arguments: vec!["-c".into(), "printf same".into()],
         working_directory: f.root.clone(),
-        timeout: Duration::from_secs(1),
+        timeout: Some(Duration::from_secs(1)),
         environment: environment.try_into()?,
     })?;
     let third = f.gate.prepare(
@@ -549,7 +667,7 @@ async fn executable_replacement_after_approval_is_rejected_before_spawn() -> Tes
         program: executable.clone(),
         arguments: vec![],
         working_directory: f.root.clone(),
-        timeout: Duration::from_secs(2),
+        timeout: Some(Duration::from_secs(2)),
         environment: CommandEnvironment::default(),
     })?;
     let request = f.gate.prepare(

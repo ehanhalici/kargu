@@ -12,7 +12,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{sync::Semaphore, time::Instant};
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 /// Existing Kargu modes; execution is checked again after approval.
@@ -35,7 +35,7 @@ pub struct RunSettings {
     pub(crate) mode: Mode,
     pub(crate) workspace: Workspace,
     pub(crate) tool_limit: ToolCallLimit,
-    timeout: Duration,
+    timeout: ExecutionTimeout,
     config_revision: ConfigRevision,
     policy_revision: PolicyRevision,
 }
@@ -49,11 +49,7 @@ impl RunSettings {
         config_revision: ConfigRevision,
         policy_revision: PolicyRevision,
     ) -> Result<Self, CoreError> {
-        if timeout.is_zero() || Instant::now().checked_add(timeout).is_none() {
-            return Err(CoreError::InvalidValue {
-                field: "RunDeadline",
-            });
-        }
+        let timeout = ExecutionTimeout::try_from(timeout)?;
         Ok(Self {
             mode,
             workspace,
@@ -62,6 +58,23 @@ impl RunSettings {
             config_revision,
             policy_revision,
         })
+    }
+    /// Explicit persistent service execution; approval and cleanup remain bounded.
+    pub fn persistent(
+        mode: Mode,
+        workspace: Workspace,
+        tool_limit: ToolCallLimit,
+        config_revision: ConfigRevision,
+        policy_revision: PolicyRevision,
+    ) -> Self {
+        Self {
+            mode,
+            workspace,
+            tool_limit,
+            timeout: ExecutionTimeout::UNLIMITED,
+            config_revision,
+            policy_revision,
+        }
     }
 }
 
@@ -107,7 +120,7 @@ struct Resources {
 pub struct RunHandle {
     scope: RunScope,
     settings: RunSettings,
-    deadline: Instant,
+    deadline: Deadline,
     resources: Arc<Resources>,
 }
 impl RunHandle {
@@ -116,7 +129,7 @@ impl RunHandle {
         &self.scope
     }
     /// Captured deadline shared by tools and approval waits.
-    pub fn deadline(&self) -> Instant {
+    pub fn deadline(&self) -> Deadline {
         self.deadline
     }
     /// Reject revoked or expired execution/publication rights.
@@ -124,7 +137,7 @@ impl RunHandle {
         if self.resources.cancellation.is_cancelled() {
             return Err(CoreError::Cancelled);
         }
-        if Instant::now() >= self.deadline {
+        if self.deadline.expired() {
             return Err(CoreError::Deadline);
         }
         Ok(())
@@ -323,9 +336,7 @@ impl ApplicationActor {
         }
         settings.workspace.revalidate()?;
         let generation = self.generation.next()?;
-        let deadline = Instant::now()
-            .checked_add(settings.timeout)
-            .ok_or(CoreError::ArithmeticOverflow)?;
+        let deadline = settings.timeout.start()?;
         let handle = RunHandle {
             scope: RunScope {
                 application_id: self.id.clone(),
@@ -467,7 +478,7 @@ impl ApplicationActor {
             let call = run.calls.get(id).ok_or(CoreError::StaleOwner)?;
             let outcome = call.outcome.unwrap_or(if call.started {
                 ToolOutcome::OutcomeUnknown
-            } else if Instant::now() >= handle.deadline {
+            } else if handle.deadline.expired() {
                 ToolOutcome::Timeout
             } else {
                 ToolOutcome::Cancelled

@@ -49,7 +49,7 @@ impl ListFilesInput {
             program: executable()?,
             arguments,
             working_directory: target,
-            timeout: timeouts::WORKSPACE_READ,
+            timeout: Some(timeouts::WORKSPACE_READ),
             environment: CommandEnvironment::try_from(BTreeMap::from([(
                 "LC_ALL".into(),
                 "C".into(),

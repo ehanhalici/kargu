@@ -9,6 +9,20 @@
 use crate::{constants::limits, error::CoreError};
 use serde::{Deserialize, Serialize};
 
+mod deadline;
+pub use deadline::{Deadline, ExecutionTimeout};
+
+/// Which bounded process output interval remains available after truncation.
+#[derive(Clone, Copy, Default, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputRetention {
+    /// Initial output, used by structured one-shot tool adapters.
+    #[default]
+    Prefix,
+    /// Recent output, used by live foreground/background job logs.
+    Tail,
+}
+
 macro_rules! identity {
     ($name:ident, $prefix:literal, $doc:literal) => {
         #[doc = $doc]
