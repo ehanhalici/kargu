@@ -3,7 +3,7 @@
 pub mod host;
 
 use crate::{constants::limits, domain::*, error::CoreError, security::Workspace};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     sync::{
@@ -16,7 +16,7 @@ use tokio::{sync::Semaphore, time::Instant};
 use tokio_util::sync::CancellationToken;
 
 /// Existing Kargu modes; execution is checked again after approval.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
     /// Read-only question mode.
@@ -296,6 +296,18 @@ impl ApplicationActor {
         } else {
             Err(CoreError::StaleOwner)
         }
+    }
+    /// Revoke a closing IPC owner immediately, retaining its run until drain.
+    pub(crate) fn revoke_session(&mut self, session: &SessionId) -> Result<(), CoreError> {
+        if !self.sessions.remove(session) {
+            return Err(CoreError::StaleOwner);
+        }
+        if let Some(run) = &self.active
+            && run.handle.scope.session_id() == session
+        {
+            run.handle.resources.cancellation.cancel();
+        }
+        Ok(())
     }
     /// Claim before any async preparation, policy UI, spawn or view effect.
     pub fn admit(

@@ -11,6 +11,7 @@ use crate::{
     error::CoreError,
     security::AuthorizedCommand,
 };
+use futures_util::FutureExt;
 use nix::{
     errno::Errno,
     sys::{
@@ -110,6 +111,13 @@ pub struct OutputPage {
     pub truncated: bool,
     /// The pipe has closed.
     pub eof: bool,
+}
+
+/// Bounded terminal output, copied without waiting on a pipe or archive lock.
+pub(crate) struct CapturedOutput {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub truncated: bool,
 }
 
 #[derive(Default)]
@@ -406,6 +414,50 @@ impl ProcessSupervisor {
         let completed = task.await.map_err(|_| CoreError::CleanupFailed);
         job.task = None;
         completed
+    }
+    /// Poll a terminal completion without awaiting I/O in the owner mailbox.
+    pub(crate) fn try_wait(
+        &mut self,
+        run: &RunHandle,
+        id: &JobId,
+    ) -> Result<Option<JobCompletion>, CoreError> {
+        self.job(run, id)?;
+        let job = self.jobs.get_mut(id).ok_or(CoreError::StaleOwner)?;
+        let task = job.task.as_mut().ok_or(CoreError::AlreadyCompleted)?;
+        let Some(result) = task.now_or_never() else {
+            return Ok(None);
+        };
+        job.task = None;
+        result.map(Some).map_err(|_| CoreError::CleanupFailed)
+    }
+    /// Capture a bounded prefix after completion; contention is retried on a later tick.
+    pub(crate) fn capture(
+        &self,
+        run: &RunHandle,
+        id: &JobId,
+        limit: ByteLimit,
+    ) -> Result<Option<CapturedOutput>, CoreError> {
+        let job = self.job(run, id)?;
+        let (Ok(stdout), Ok(stderr)) = (job.stdout.try_lock(), job.stderr.try_lock()) else {
+            return Ok(None);
+        };
+        let bound = limit.as_usize();
+        Ok(Some(CapturedOutput {
+            stdout: stdout.bytes.iter().take(bound).copied().collect(),
+            stderr: stderr.bytes.iter().take(bound).copied().collect(),
+            truncated: stdout.truncated
+                || stderr.truncated
+                || stdout.bytes.len() > bound
+                || stderr.bytes.len() > bound,
+        }))
+    }
+    /// Queue EOF without waiting on child stdin; supervision owns its acknowledgement.
+    pub(crate) fn close_input(&self, run: &RunHandle, id: &JobId) -> Result<(), CoreError> {
+        let (tx, _rx) = oneshot::channel();
+        self.job(run, id)?
+            .input
+            .try_send(InputMessage::Eof(tx))
+            .map_err(|_| CoreError::Limit)
     }
     /// Drop retained output only after the terminal completion has been collected.
     pub fn forget(&mut self, run: &RunHandle, id: &JobId) -> Result<(), CoreError> {

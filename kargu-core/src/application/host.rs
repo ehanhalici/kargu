@@ -115,6 +115,15 @@ impl Host {
                 .is_some_and(|actor| actor.owns_session(&scope.session_id))
     }
 
+    pub(crate) fn actor_mut(
+        &mut self,
+        scope: &ReadScope,
+    ) -> Result<&mut ApplicationActor, crate::error::CoreError> {
+        self.applications
+            .get_mut(&scope.application_id)
+            .ok_or(crate::error::CoreError::StaleOwner)
+    }
+
     pub(crate) fn prepare_workspace_read(
         &self,
         method: &str,
@@ -146,6 +155,9 @@ impl Host {
     pub(crate) fn matches_epoch(&self, scope: &RequestScope) -> bool {
         scope.as_str() == self.epoch
     }
+    pub(crate) fn request_scope(&self) -> Result<RequestScope, crate::error::CoreError> {
+        RequestScope::try_from(self.epoch.clone())
+    }
 
     /// Dispatch a request or notification; state-changing methods require ids.
     pub fn dispatch(&mut self, method: &str, params: Value, request: bool) -> Dispatch {
@@ -176,7 +188,6 @@ impl Host {
             && self.phase != Phase::Shutdown
         {
             if empty_params(&params) {
-                self.applications.clear();
                 self.phase = Phase::Shutdown;
                 Ok(Value::Null)
             } else {
@@ -274,7 +285,7 @@ impl Host {
                 }
                 if method == methods::SESSION_CLOSE {
                     actor
-                        .close_session(&scope.session_id)
+                        .revoke_session(&scope.session_id)
                         .map_err(|_| owner_fault())?;
                     Ok(json!({"status":"closed"}))
                 } else {

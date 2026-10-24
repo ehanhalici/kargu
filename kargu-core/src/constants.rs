@@ -98,12 +98,13 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented wire capabilities; arbitrary command execution is not exposed.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 5] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 6] = [
         "application_lifecycle",
         "session_lifecycle",
         methods::PING,
         "workspace_find_files",
         "workspace_list_files",
+        "command_execute",
     ];
 
     /// JSON-RPC and host error codes, kept separate from human error messages.
@@ -137,6 +138,10 @@ pub mod protocol {
     }
     /// Canonical method names.
     pub mod methods {
+        /// Standalone approved program/argv execution during the migration.
+        pub const EXECUTE: &str = "tool/execute";
+        /// Exact-action asynchronous command approval presenter.
+        pub const REQUEST_APPROVAL: &str = "editor/request_approval";
         /// Initialize connection.
         pub const INITIALIZE: &str = "initialize";
         /// Complete negotiation.

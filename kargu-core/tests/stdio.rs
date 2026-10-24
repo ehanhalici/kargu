@@ -12,6 +12,7 @@ struct Peer {
     child: Child,
     input: Option<ChildStdin>,
     output: Receiver<String>,
+    epoch: String,
 }
 
 impl Peer {
@@ -41,6 +42,7 @@ impl Peer {
             child,
             input: Some(input),
             output,
+            epoch: String::new(),
         })
     }
     fn raw(&mut self, bytes: &[u8]) -> TestResult {
@@ -53,14 +55,19 @@ impl Peer {
         self.raw(format!("{value}\n").as_bytes())
     }
     fn read(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let line = self.output.recv_timeout(Duration::from_secs(5))?;
+        // Production cleanup includes a five-second TERM grace and pipe/reap drain.
+        let line = self.output.recv_timeout(Duration::from_secs(12))?;
         Ok(serde_json::from_str(&line)?)
     }
     fn initialize(&mut self) -> TestResult {
         self.send(json!({"jsonrpc":"2.0","id":"e:init","method":"initialize",
             "params":{"protocol_major":1,"protocol_minor":0,"client_version":"pipe-test",
             "capabilities":[],"limits":{"max_frame_bytes":1048576}}}))?;
-        assert!(self.read()?.get("result").is_some());
+        let initialized = self.read()?;
+        self.epoch = initialized["result"]["connection_epoch"]
+            .as_str()
+            .ok_or("epoch missing")?
+            .to_owned();
         self.send(json!({"jsonrpc":"2.0","method":"initialized"}))
     }
     fn scope(&mut self) -> Result<Value, Box<dyn std::error::Error>> {
@@ -87,6 +94,198 @@ impl Drop for Peer {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+fn command_arguments(root: &std::path::Path, script: &str) -> Value {
+    let shell = std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|p| p.join("sh"))
+                .find(|p| p.is_file())
+        })
+        .unwrap_or_else(|| "/bin/sh".into());
+    json!({"root":root,"mode":"agent","program":shell,"arguments":["-c",script],
+        "cwd":null,"timeout_ms":1000,"environment":{},"config_revision":1,"policy_revision":1})
+}
+
+#[test]
+fn approved_program_argv_keeps_mailbox_live_and_delivers_once() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    peer.send(json!({"jsonrpc":"2.0","id":3,"method":"tool/execute",
+        "params":{"scope":scope,"arguments":command_arguments(root.path(), "printf ready; printf warning >&2; exit 7")}}))?;
+    let review = peer.read()?;
+    assert_eq!(review["method"], "editor/request_approval");
+    assert_eq!(review["params"]["request_id"], 3);
+    assert!(!root.path().join("effect").exists());
+    peer.send(json!({"jsonrpc":"2.0","id":4,"method":"ping"}))?;
+    assert_eq!(peer.read()?["result"]["status"], "ok");
+    peer.send(json!({"jsonrpc":"2.0","id":review["id"],"result":{"approved":true}}))?;
+    let result = peer.read()?;
+    assert_eq!(result["id"], 3);
+    assert_eq!(result["result"]["stdout"], "ready");
+    assert_eq!(result["result"]["stderr"], "warning");
+    assert_eq!(result["result"]["exit_code"], 7);
+    assert_eq!(result["result"]["outcome"], "failed");
+    assert_eq!(result["result"]["cleanup_complete"], true);
+    peer.send(json!({"jsonrpc":"2.0","id":review["id"],"result":{"approved":true}}))?;
+    peer.send(json!({"jsonrpc":"2.0","id":5,"method":"session/close","params":scope}))?;
+    assert_eq!(peer.read()?["id"], 5);
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn rejected_or_missing_approval_never_runs_and_next_call_can_start() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    for (index, response) in [
+        json!({"approved":false}),
+        json!({"approved":"true"}),
+        json!({"approved":true,"extra":true}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = i64::try_from(index)?.checked_add(3).ok_or("overflow")?;
+        peer.send(
+            json!({"jsonrpc":"2.0","id":id,"method":"tool/execute","params":{
+            "scope":scope,"arguments":command_arguments(root.path(), "printf bad > effect")}}),
+        )?;
+        let review = peer.read()?;
+        assert_eq!(review["method"], "editor/request_approval");
+        peer.send(json!({"jsonrpc":"2.0","id":review["id"],"result":response}))?;
+        assert_eq!(peer.read()?["error"]["data"]["status"], "rejected");
+        assert!(!root.path().join("effect").exists());
+    }
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn closing_owner_cancels_review_and_late_approval_is_inert() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    peer.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"tool/execute","params":{
+        "scope":scope,"arguments":command_arguments(root.path(), "printf bad > effect")}}),
+    )?;
+    let review = peer.read()?;
+    peer.send(json!({"jsonrpc":"2.0","id":4,"method":"session/close","params":scope}))?;
+    assert_eq!(peer.read()?["result"]["status"], "closed");
+    let cancel = peer.read()?;
+    assert_eq!(cancel["method"], "rpc/cancel");
+    assert_eq!(peer.read()?["error"]["data"]["status"], "stale_owner");
+    peer.send(json!({"jsonrpc":"2.0","id":review["id"],"result":{"approved":true}}))?;
+    peer.send(json!({"jsonrpc":"2.0","id":5,"method":"ping"}))?;
+    assert_eq!(peer.read()?["id"], 5);
+    assert!(!root.path().join("effect").exists());
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn arbitrary_command_mode_path_and_owner_are_rejected_without_review() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    for mode in ["ask", "plan", "debug"] {
+        let mut arguments = command_arguments(root.path(), "true");
+        arguments["mode"] = json!(mode);
+        peer.send(json!({"jsonrpc":"2.0","id":3,"method":"tool/execute","params":{"scope":scope,"arguments":arguments}}))?;
+        assert_eq!(peer.read()?["error"]["data"]["status"], "rejected");
+    }
+    let mut arguments = command_arguments(root.path(), "true");
+    arguments["cwd"] = json!("../escape");
+    peer.send(json!({"jsonrpc":"2.0","id":4,"method":"tool/execute","params":{"scope":scope,"arguments":arguments}}))?;
+    assert_eq!(peer.read()?["error"]["data"]["status"], "rejected");
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn approved_command_output_is_bounded_and_timeout_is_typed() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    for (id, script, timeout) in [
+        (3, "printf '%070000d' 0", 1000),
+        (4, "while :; do :; done", 80),
+    ] {
+        let mut arguments = command_arguments(root.path(), script);
+        arguments["timeout_ms"] = json!(timeout);
+        peer.send(json!({"jsonrpc":"2.0","id":id,"method":"tool/execute","params":{"scope":scope,"arguments":arguments}}))?;
+        let review = peer.read()?;
+        peer.send(json!({"jsonrpc":"2.0","id":review["id"],"result":{"approved":true}}))?;
+        let result = peer.read()?;
+        if id == 3 {
+            assert_eq!(result["result"]["truncated"], true);
+            assert_eq!(
+                result["result"]["stdout"]
+                    .as_str()
+                    .ok_or("stdout missing")?
+                    .len(),
+                65536
+            );
+        } else {
+            assert_eq!(result["result"]["outcome"], "timeout");
+        }
+    }
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn cancelled_request_and_eof_reap_the_approved_process_before_release() -> TestResult {
+    for eof in [false, true] {
+        let root = tempfile::tempdir()?;
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let arguments = command_arguments(
+            root.path(),
+            "printf '%s' $$ > leader.pid; while :; do :; done",
+        );
+        peer.send(json!({"jsonrpc":"2.0","id":3,"method":"tool/execute","params":{"scope":scope,"arguments":arguments}}))?;
+        let review = peer.read()?;
+        peer.send(json!({"jsonrpc":"2.0","id":review["id"],"result":{"approved":true}}))?;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let pid = loop {
+            if let Ok(text) = std::fs::read_to_string(root.path().join("leader.pid"))
+                && let Ok(pid) = text.parse::<u32>()
+            {
+                break pid;
+            }
+            if Instant::now() >= deadline {
+                return Err("process did not start".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        if eof {
+            peer.input.take();
+        } else {
+            peer.send(json!({"jsonrpc":"2.0","method":"rpc/cancel","params":{"request_id":3,"scope":peer.epoch}}))?;
+            assert_eq!(peer.read()?["error"]["data"]["status"], "cancelled");
+            assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
+            peer.input.take();
+        }
+        assert!(peer.wait()?);
+        assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
+    }
+    Ok(())
 }
 
 #[test]

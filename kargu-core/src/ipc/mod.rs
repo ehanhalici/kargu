@@ -1,5 +1,6 @@
 //! Bounded JSON-RPC framing, correlation and transport.
 
+mod execution;
 pub mod pending;
 pub mod protocol;
 mod read_tools;

@@ -1,5 +1,6 @@
 use super::{
     CONTROL_BYTES, CONTROL_CAPACITY, MAX_FRAME_BYTES,
+    execution::Commands,
     pending::PendingRequests,
     protocol::{self, Message},
     read_tools::ReadTools,
@@ -14,6 +15,7 @@ use std::{io, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use tokio_util::codec::{Decoder, FramedRead, FramedWrite, LinesCodec};
+use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 
 /// Errors are deliberately payload-free so callers can safely classify them.
@@ -27,11 +29,19 @@ pub enum TransportError {
     Writer,
     #[error("read worker failed during cleanup")]
     ReadWorker,
+    /// Command owner or process cleanup failed.
+    #[error("command service cleanup failed")]
+    Command,
 }
 
 struct Frame {
     line: String,
     _permit: OwnedSemaphorePermit,
+}
+
+struct Services {
+    reads: ReadTools,
+    commands: Commands,
 }
 
 // Unlike LinesCodec's default EOF behavior, an incomplete trailing line is
@@ -86,14 +96,22 @@ where
         Ok::<(), TransportError>(())
     }));
     let mut pending = PendingRequests::default();
+    let stop = CancellationToken::new();
     let mut writer_finished = false;
-    let result = tokio::select! {
-        result = read_loop(reader, &tx, permits, &mut pending) => result,
-        result = &mut writer_task => {
-            writer_finished = true;
-            result.map_err(|_| TransportError::Writer).and_then(|result| result)
+    let result = {
+        let reader_task = read_loop(reader, &tx, permits, &mut pending, &stop);
+        tokio::pin!(reader_task);
+        tokio::select! {
+          result = &mut reader_task => result,
+          result = &mut writer_task => {
+              writer_finished = true;
+              stop.cancel();
+              let _ = (&mut reader_task).await;
+              result.map_err(|_| TransportError::Writer).and_then(|result| result)
+          }
         }
     };
+    // The read future disconnects pending calls before draining subprocesses.
     pending.disconnect();
     drop(tx);
     if !writer_finished {
@@ -115,11 +133,33 @@ async fn read_loop<R: AsyncRead + Unpin>(
     tx: &mpsc::Sender<Frame>,
     permits: Arc<Semaphore>,
     pending: &mut PendingRequests,
+    stop: &CancellationToken,
 ) -> Result<(), TransportError> {
     let mut host = Host::new();
-    let mut reads = ReadTools::default();
-    let result = read_messages(reader, tx, &permits, pending, &mut host, &mut reads).await;
+    let mut services = Services {
+        reads: ReadTools::default(),
+        commands: Commands::new().map_err(|_| TransportError::Command)?,
+    };
+    let result = read_messages(
+        reader,
+        tx,
+        &permits,
+        pending,
+        &mut host,
+        &mut services,
+        stop,
+    )
+    .await;
+    pending.disconnect();
+    let Services { reads, commands } = &mut services;
     reads.cancel_all();
+    commands.cancel_all();
+    while !commands.is_empty() {
+        commands
+            .tick(&mut host, pending)
+            .map_err(|_| TransportError::Command)?;
+        tokio::time::sleep(timeouts::PROCESS_POLL).await;
+    }
     // EOF/error revokes publication immediately, but worker slots are not released
     // early. Blocking filesystem calls cannot be safely aborted by dropping a task.
     while let Some(completion) = reads.next(&host).await {
@@ -134,19 +174,22 @@ async fn read_messages<R: AsyncRead + Unpin>(
     permits: &Arc<Semaphore>,
     pending: &mut PendingRequests,
     host: &mut Host,
-    reads: &mut ReadTools,
+    services: &mut Services,
+    stop: &CancellationToken,
 ) -> Result<(), TransportError> {
+    let Services { reads, commands } = services;
     let mut input = FramedRead::new(reader, StrictLines::new(ByteLimit::WIRE_MAX));
     let mut expiry = tokio::time::interval(timeouts::PENDING_SWEEP);
     let mut shutdown_reply = None;
     loop {
         let frame = tokio::select! {
+            _ = stop.cancelled() => return Ok(()),
             frame = input.next() => frame,
             completion = reads.next(host), if !reads.is_empty() => {
                 let reply = completion.ok_or(TransportError::ReadWorker)?
                     .map_err(|_| TransportError::ReadWorker)?;
                 queue_reply(reply, host.frame_limit(), tx, permits)?;
-                if reads.is_empty() && let Some(reply) = shutdown_reply.take() {
+                if reads.is_empty() && commands.is_empty() && let Some(reply) = shutdown_reply.take() {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
                 continue;
@@ -154,6 +197,12 @@ async fn read_messages<R: AsyncRead + Unpin>(
             _ = expiry.tick() => {
                 pending.expire(tokio::time::Instant::now());
                 reads.sweep(host);
+                for message in commands.tick(host, pending).map_err(|_| TransportError::Command)? {
+                    queue_reply(message, host.frame_limit(), tx, permits)?;
+                }
+                if reads.is_empty() && commands.is_empty() && let Some(reply) = shutdown_reply.take() {
+                    queue_reply(reply, host.frame_limit(), tx, permits)?;
+                }
                 continue;
             }
         };
@@ -179,13 +228,25 @@ async fn read_messages<R: AsyncRead + Unpin>(
                         pending.cancel(&id, &scope);
                         if host.matches_epoch(&scope) {
                             reads.cancel(&id);
+                            commands.cancel(&id);
                         }
                     }
                     continue;
                 }
-                if id.as_ref().is_some_and(|id| reads.contains(id)) {
+                if id
+                    .as_ref()
+                    .is_some_and(|id| reads.contains(id) || commands.contains(id))
+                {
                     // Two responses with the same live id would be ambiguous.
                     return Err(TransportError::Framing);
+                }
+                if method == methods::EXECUTE {
+                    if let Some(id) = id.as_ref()
+                        && let Err(fault) = commands.start(host, id.clone(), params)
+                    {
+                        queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                    }
+                    continue;
                 }
                 if matches!(method.as_str(), methods::FIND_FILES | methods::LIST_FILES) {
                     if let Some(id) = id.as_ref() {
@@ -213,7 +274,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     Ok(result) => protocol::success(id, result),
                     Err(fault) => fault.response(Some(id)),
                 });
-                if draining_shutdown && !reads.is_empty() {
+                if draining_shutdown && (!reads.is_empty() || !commands.is_empty()) {
                     shutdown_reply = reply;
                     None
                 } else {

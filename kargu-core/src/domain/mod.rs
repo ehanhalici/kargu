@@ -103,6 +103,7 @@ macro_rules! counter {
     };
 }
 counter!(Generation, "Application run generation.");
+counter!(RequestSequence, "Connection-owned reverse RPC sequence.");
 counter!(
     ConfigRevision,
     "Captured configuration publication revision."

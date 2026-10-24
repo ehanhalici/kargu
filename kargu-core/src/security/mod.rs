@@ -246,7 +246,18 @@ impl TryFrom<CommandInput> for CommandSpec {
             return Err(CoreError::Limit);
         }
         let program = input.program.canonicalize()?;
-        let executable = File::open(&program)?;
+        // Refuse FIFO/device blocking at an untrusted executable boundary.
+        let executable = File::from(
+            nix::fcntl::open(
+                &program,
+                nix::fcntl::OFlag::O_RDONLY
+                    | nix::fcntl::OFlag::O_NONBLOCK
+                    | nix::fcntl::OFlag::O_NOFOLLOW
+                    | nix::fcntl::OFlag::O_CLOEXEC,
+                nix::sys::stat::Mode::empty(),
+            )
+            .map_err(std::io::Error::from)?,
+        );
         let metadata = executable.metadata()?;
         if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
             return Err(CoreError::InvalidValue {
