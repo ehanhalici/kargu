@@ -41,6 +41,13 @@ fn start_arguments(
     let review = peer.read()?;
     assert_eq!(review["method"], "editor/request_approval");
     assert_eq!(review["params"]["scope"]["purpose"], "process_job");
+    assert_eq!(
+        review["params"]["idle_timeout_ms"],
+        arguments
+            .get("idle_timeout_ms")
+            .cloned()
+            .unwrap_or(Value::Null)
+    );
     peer.send(json!({"jsonrpc":"2.0","id":review["id"],"result":{"approved":true}}))?;
     let reply = peer.read()?;
     assert_eq!(reply["id"], 3);
@@ -346,6 +353,88 @@ fn explicit_merged_stderr_is_one_ordered_os_pipe() -> TestResult {
     )?;
     assert_eq!(stderr["result"]["data"], json!([]));
     assert_eq!(stderr["result"]["eof"], true);
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn idle_expiry_drains_only_its_job_without_borrowing_a_sibling() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let bound = owner(&scope, root.path());
+    let sibling = start(&mut peer, &scope, root.path(), "read value")?;
+    let mut args = arguments(root.path(), "read value")?;
+    args["idle_timeout_ms"] = json!(100);
+    let idle = start_arguments(&mut peer, &scope, args)?;
+    let terminal = exited(&mut peer, &bound, &idle)?;
+    assert_eq!(terminal["result"]["outcome"], "timeout");
+    assert_eq!(terminal["result"]["cleanup_complete"], true);
+    let pid = idle["process_id"].as_u64().ok_or("process id missing")?;
+    assert!(!Path::new(&format!("/proc/{pid}")).exists());
+    assert_eq!(
+        call(&mut peer, "job/status", query(&bound, &sibling))?["result"]["state"],
+        "running"
+    );
+    call(&mut peer, "job/eof", query(&bound, &sibling))?;
+    exited(&mut peer, &bound, &sibling)?;
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn stdout_and_stderr_activity_reset_idle_without_a_total_duration_limit() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let bound = owner(&scope, root.path());
+    for redirect in ["", " >&2"] {
+        let script = format!(
+            "i=0; while [ \"$i\" -lt 6 ]; do printf x{redirect}; sleep 0.1; i=$((i+1)); done"
+        );
+        let mut args = arguments(root.path(), &script)?;
+        args["environment"] = json!({"PATH":std::env::var("PATH")?});
+        args["idle_timeout_ms"] = json!(300);
+        let job = start_arguments(&mut peer, &scope, args)?;
+        assert_eq!(exited(&mut peer, &bound, &job)?["result"]["outcome"], "ok");
+        call(&mut peer, "job/forget", query(&bound, &job))?;
+    }
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn successful_nonempty_stdin_resets_idle_and_eof_can_finish_normally() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let bound = owner(&scope, root.path());
+    let mut args = arguments(root.path(), "while IFS= read -r line; do :; done")?;
+    args["idle_timeout_ms"] = json!(300);
+    let job = start_arguments(&mut peer, &scope, args)?;
+    for _ in 0..5 {
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            call(
+                &mut peer,
+                "job/write",
+                json!({"owner":bound,"job_id":job["job_id"],"text":"pulse\n"})
+            )?["result"]["accepted"],
+            true
+        );
+    }
+    assert_eq!(
+        call(&mut peer, "job/status", query(&bound, &job))?["result"]["state"],
+        "running"
+    );
+    call(&mut peer, "job/eof", query(&bound, &job))?;
+    assert_eq!(exited(&mut peer, &bound, &job)?["result"]["outcome"], "ok");
     peer.input.take();
     assert!(peer.wait()?);
     Ok(())

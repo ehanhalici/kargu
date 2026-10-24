@@ -26,8 +26,10 @@
   "Capture ARGUMENTS for CONNECTION and OWNER, delivering CALLBACK once."
   (if (not (and (eq (kargu-bridge-status connection) 'ready)
                 (member capability (append (kargu-bridge-connection-capabilities connection) nil))
+                (or (eq (gethash "idle_timeout_ms" arguments :json-null) :json-null)
+                    (member "process_idle_timeout" (append (kargu-bridge-connection-capabilities connection) nil)))
                 (hash-table-p (kargu-bridge-connection-read-scope connection))))
-      (progn (kargu-bridge--callback callback nil (kargu-bridge--fault "unavailable")) nil)
+      (progn (kargu-bridge--callback callback nil (kargu-bridge--fault "unavailable" "Required native command capability unavailable; rebuild kargu-core")) nil)
     (let* ((captured (kargu-bridge-approval--copy arguments))
            (timeout (gethash "timeout_ms" captured))
            (session (kargu-session-context owner))
@@ -67,6 +69,7 @@
              (equal (gethash "purpose" scope) (nth 4 review))
              (equal (gethash "retention" params) (if (equal (nth 4 review) "process_job") "tail" "prefix"))
              (equal (gethash "timeout_ms" params) (gethash "timeout_ms" args))
+             (equal (gethash "idle_timeout_ms" params :json-null) (gethash "idle_timeout_ms" args :json-null))
              (equal (gethash "output_bytes" params) (gethash "output_bytes" args 1048576))
              (equal (gethash "stderr" params) (gethash "stderr" args "separate"))
              (equal (gethash "application_id" scope) (gethash "application_id" bound))
@@ -94,10 +97,10 @@
   "Format exact PARAMS for the trusted approval UI, not for logs."
   (let (environment)
     (maphash (lambda (key _value) (push key environment)) (gethash "environment" params))
-    (format "Invocation (argv[0]): %S\nExecutable: %S\nArguments: %S\nDirectory: %S\nOutput: %s, %s bytes/stream, stderr=%s\nTimeout: %S ms\nExplicit environment keys (values withheld): %s"
+    (format "Invocation (argv[0]): %S\nExecutable: %S\nArguments: %S\nDirectory: %S\nOutput: %s, %s bytes/stream, stderr=%s\nTimeout: %S ms; idle: %S ms\nExplicit environment keys (values withheld): %s"
             (gethash "invocation" params) (gethash "program" params) (gethash "arguments" params)
             (gethash "cwd" params) (gethash "retention" params) (gethash "output_bytes" params)
-            (gethash "stderr" params) (gethash "timeout_ms" params)
+            (gethash "stderr" params) (gethash "timeout_ms" params) (gethash "idle_timeout_ms" params)
             (string-join (sort environment #'string<) ", "))))
 
 (defun kargu-bridge-approval-request (connection id params)

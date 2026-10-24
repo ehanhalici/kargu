@@ -309,6 +309,66 @@ fn changing_retention_requires_a_different_exact_action_approval() -> TestResult
     Ok(())
 }
 
+#[test]
+fn idle_policy_is_validated_and_changes_the_exact_action_digest() -> TestResult {
+    for input in ["0", "-1", "86400001", "1.5", "true"] {
+        assert!(serde_json::from_str::<IdleTimeout>(input).is_err());
+    }
+    assert!(
+        serde_json::from_str::<IdleTimeout>("null")?
+            .duration()
+            .is_none()
+    );
+    assert_eq!(
+        serde_json::from_str::<IdleTimeout>("86400000")?.duration(),
+        Some(Duration::from_secs(86_400))
+    );
+    let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+    let disabled = f.request("printf fixture", Duration::from_secs(2))?;
+    let enabled = f.request_spec(
+        command(&f.root, "printf fixture", Duration::from_secs(2))?
+            .with_idle_timeout(IdleTimeout::try_from(Some(Duration::from_millis(200)))?),
+    )?;
+    assert_ne!(disabled.digest(), enabled.digest());
+    assert_eq!(
+        enabled.idle_timeout().duration(),
+        Some(Duration::from_millis(200))
+    );
+    for request in [disabled, enabled] {
+        assert!(matches!(
+            f.gate
+                .decide(&mut f.actor, &f.run, &request, UserDecision::Rejected),
+            Err(CoreError::Rejected)
+        ));
+    }
+    f.actor.finish(&f.run)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn idle_period_starts_with_process_pipes_not_during_approval() -> TestResult {
+    let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+    let request = f.request_spec(
+        command(&f.root, "printf ready", Duration::from_secs(2))?
+            .with_idle_timeout(IdleTimeout::try_from(Some(Duration::from_millis(80)))?),
+    )?;
+    tokio::time::sleep(Duration::from_millis(160)).await;
+    let grant = f
+        .gate
+        .decide(&mut f.actor, &f.run, &request, UserDecision::Approved)?;
+    let job = f.supervisor.start(&mut f.actor, grant)?;
+    let result = f
+        .supervisor
+        .wait(&f.run, &job)
+        .await?
+        .deliver(&mut f.actor)?;
+    assert_eq!(result.outcome, ToolOutcome::Ok);
+    assert!(result.cleanup_complete);
+    assert_eq!(f.output(&job, OutputStream::Stdout).await?.0, b"ready");
+    f.actor.finish(&f.run)?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn completing_a_service_job_cannot_release_an_active_agent_turn() -> TestResult {
     let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;

@@ -24,17 +24,20 @@ use nix::{
 use std::os::unix::process::ExitStatusExt;
 use std::{collections::HashMap, process::ExitStatus, sync::Arc, time::Duration};
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
-    process::{Child, ChildStdin},
+    process::Child,
     sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot},
     task::JoinHandle,
     time::Instant,
 };
 use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 
+mod activity;
 mod archive;
+mod io;
 mod stdio;
+use activity::IdleMonitor;
 use archive::Archive;
+use io::{drain, input_loop};
 
 /// Configuration DTO for bounded cleanup; independent of command/run deadlines.
 pub struct CleanupSettings {
@@ -509,54 +512,6 @@ impl ProcessGroup {
     }
 }
 
-async fn drain<R: AsyncRead + Unpin>(
-    mut pipe: R,
-    archive: Arc<Mutex<Archive>>,
-    run: RunHandle,
-) -> Result<(), CoreError> {
-    let mut buffer = vec![0_u8; limits::PROCESS_PAGE_BYTES];
-    loop {
-        let count = pipe.read(&mut buffer).await?;
-        if count == 0 {
-            archive.lock().await.eof = true;
-            return Ok(());
-        }
-        let chunk = buffer.get(..count).ok_or(CoreError::CleanupFailed)?;
-        archive.lock().await.push(chunk, &run)?;
-    }
-}
-
-async fn input_loop(
-    mut pipe: ChildStdin,
-    mut rx: mpsc::Receiver<InputMessage>,
-    cancel: CancellationToken,
-) {
-    loop {
-        let command = tokio::select! { biased;
-            _ = cancel.cancelled() => break,
-            command = rx.recv() => match command {Some(command)=>command, None=>break},
-        };
-        match command {
-            InputMessage::Write(chunk, ack) => {
-                let result = tokio::select! { biased;
-                    _ = cancel.cancelled() => Err(CoreError::Cancelled),
-                    result = pipe.write_all(&chunk.0) => result.map_err(CoreError::Io),
-                };
-                let failed = result.is_err();
-                let _ = ack.send(result);
-                if failed {
-                    break;
-                }
-            }
-            InputMessage::Eof(ack) => {
-                drop(pipe);
-                let _ = ack.send(Ok(()));
-                break;
-            }
-        }
-    }
-}
-
 async fn join_drain(
     task: &mut AbortOnDropHandle<Result<(), CoreError>>,
     deadline: Instant,
@@ -619,18 +574,28 @@ async fn supervise_child(
     let Ok(group) = ProcessGroup::capture(child) else {
         return unknown_result();
     };
-    let mut out_task =
-        AbortOnDropHandle::new(tokio::spawn(drain(stdout, streams.stdout, run.clone())));
+    let (activity, mut idle) = IdleMonitor::new(command.idle_timeout);
+    let mut out_task = AbortOnDropHandle::new(tokio::spawn(drain(
+        stdout,
+        streams.stdout,
+        run.clone(),
+        activity.clone(),
+    )));
     let err_run = run.clone();
+    let err_activity = activity.clone();
     let mut err_task = AbortOnDropHandle::new(tokio::spawn(async move {
         match stderr {
-            Some(pipe) => drain(pipe, streams.stderr, err_run).await,
-            None => drain(tokio::io::empty(), streams.stderr, err_run).await,
+            Some(pipe) => drain(pipe, streams.stderr, err_run, err_activity).await,
+            None => drain(tokio::io::empty(), streams.stderr, err_run, err_activity).await,
         }
     }));
     let input_cancel = cancel.child_token();
-    let mut input_task =
-        AbortOnDropHandle::new(tokio::spawn(input_loop(stdin, rx, input_cancel.clone())));
+    let mut input_task = AbortOnDropHandle::new(tokio::spawn(input_loop(
+        stdin,
+        rx,
+        input_cancel.clone(),
+        activity.clone(),
+    )));
     let Ok(deadline) = command
         .timeout
         .start()
@@ -644,6 +609,12 @@ async fn supervise_child(
         tokio::select! { biased;
             _ = cancel.cancelled() => break ToolOutcome::Cancelled,
             _ = deadline.elapsed() => break ToolOutcome::Timeout,
+            expired = idle.expired() => match expired {
+                Ok(()) => break ToolOutcome::Timeout,
+                // Idle observation failure does not revoke proven PGID identity.
+                // Still perform the full owned cleanup, without claiming success.
+                Err(_) => break ToolOutcome::OutcomeUnknown,
+            },
             _ = poll.tick() => match group.exited() {
                 Ok(true) => break ToolOutcome::Ok,
                 Ok(false) => {},

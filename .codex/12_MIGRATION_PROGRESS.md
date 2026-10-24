@@ -1,5 +1,19 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — Native idle policy prerequisite
+
+Bash cutover `a7ecdfa` ardından `IdleTimeout` ayrı tip, exact digest/review,
+`process_idle_timeout` capability ve bounded I/O observation eklendi. Süreç
+pipe kodu `process/io.rs`, idle observation `process/activity.rs` içine ayrıldı.
+Partial stdin write da activity sayılır; late/coalesced pulse eski timeout'u
+canlandıramaz. Ayrıntı ve yeni kanıt sınırı 24_NATIVE_IDLE_POLICY.md'dedir.
+
+**74 Rust testi + 2 compile-fail**; locked build/test, fmt, strict Clippy
+temiz. **1170/1170 full source ERT**, 0 unexpected, **94.48 s**; warning-as-error
+bytecompile/checkdoc başarılı, geçici .elc kaldırıldı. Yeni idle modeli için
+formal refinement iddiası yoktur. Ayrı Elisp interactive session motoru henüz
+bu porta bağlanmadığından korunur; sıradaki kesimde adapter'a dönüşecektir.
+
 ## 2026-10-24 — Bash OS engine cutover
 
 `eb59416` owned job client/claim/merged pipe; `5f5994d` incremental UTF-8

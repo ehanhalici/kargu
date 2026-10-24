@@ -105,7 +105,7 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 7] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 8] = [
         "application_lifecycle",
         "session_lifecycle",
         methods::PING,
@@ -113,6 +113,7 @@ pub mod protocol {
         "workspace_list_files_ls",
         "command_execute",
         "process_jobs",
+        "process_idle_timeout",
     ];
 
     /// JSON-RPC and host error codes, kept separate from human error messages.

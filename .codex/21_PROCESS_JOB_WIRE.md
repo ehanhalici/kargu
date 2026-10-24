@@ -1,5 +1,9 @@
 # Süreç job portu: ayrı lifetime, ortak gate/supervisor
 
+Güncel consumer durumu: Bash OS engine cutover'ı 23'te tamamlandı. Opsiyonel
+idle policy ve `process_idle_timeout` capability'si 24'te tanımlıdır. Aşağıdaki
+ilk wire diliminin sayıları ve o sıradaki açık işler tarihsel kayıttır.
+
 2026-10-24. 20'deki prerequisite sonrasında Rust wire dilimi.
 
 ## Ownership ve ömür

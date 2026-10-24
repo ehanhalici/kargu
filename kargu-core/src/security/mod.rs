@@ -162,6 +162,7 @@ pub struct CommandSpec {
     pub(crate) arguments: Vec<OsString>,
     pub(crate) cwd: Workspace,
     pub(crate) timeout: ExecutionTimeout,
+    pub(crate) idle_timeout: IdleTimeout,
     pub(crate) retention: OutputRetention,
     pub(crate) output_limit: OutputLimit,
     pub(crate) stderr: StderrPolicy,
@@ -216,6 +217,7 @@ impl TryFrom<CommandInput> for CommandSpec {
             arguments: input.arguments,
             cwd: Workspace::try_from(input.working_directory)?,
             timeout,
+            idle_timeout: IdleTimeout::DISABLED,
             retention: OutputRetention::Prefix,
             output_limit: OutputLimit::default(),
             stderr: StderrPolicy::Separate,
@@ -239,6 +241,11 @@ impl CommandSpec {
     /// Capture OS-level stderr routing before approval.
     pub fn with_stderr(mut self, policy: StderrPolicy) -> Self {
         self.stderr = policy;
+        self
+    }
+    /// Capture idle termination as part of the exact approved action.
+    pub fn with_idle_timeout(mut self, timeout: IdleTimeout) -> Self {
+        self.idle_timeout = timeout;
         self
     }
     /// Only the trusted fixed-argv listing adapter can request this class.
@@ -415,6 +422,12 @@ fn digest(
     } else {
         hash.update([0]);
     }
+    if let Some(duration) = command.idle_timeout.duration() {
+        hash.update([1]);
+        hash.update(duration.as_nanos().to_le_bytes());
+    } else {
+        hash.update([0]);
+    }
     hash.update([match command.retention {
         OutputRetention::Prefix => 0,
         OutputRetention::Tail => 1,
@@ -445,6 +458,7 @@ pub struct ApprovalRequest {
     retention: OutputRetention,
     output_limit: OutputLimit,
     timeout: ExecutionTimeout,
+    idle_timeout: IdleTimeout,
     stderr: StderrPolicy,
     id: ApprovalId,
     scope: RunScope,
@@ -458,6 +472,10 @@ pub struct ApprovalRequest {
     environment: CommandEnvironment,
 }
 impl ApprovalRequest {
+    /// Captured idle interval, separate from execution and approval timeouts.
+    pub fn idle_timeout(&self) -> IdleTimeout {
+        self.idle_timeout
+    }
     /// Captured stdout/stderr routing.
     pub fn stderr(&self) -> StderrPolicy {
         self.stderr
@@ -617,6 +635,7 @@ impl ExecutionGate {
             retention: command.retention,
             output_limit: command.output_limit,
             timeout: command.timeout,
+            idle_timeout: command.idle_timeout,
             stderr: command.stderr,
             id: id.clone(),
             scope: run.scope().clone(),

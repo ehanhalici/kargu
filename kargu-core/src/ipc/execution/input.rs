@@ -5,8 +5,8 @@ use crate::{
     application::{Mode, RunPurpose, RunSettings},
     constants::{limits, timeouts},
     domain::{
-        ConfigRevision, ExecutionTimeout, OutputLimit, OutputRetention, PolicyRevision,
-        ToolCallLimit, ToolName,
+        ConfigRevision, ExecutionTimeout, IdleTimeout, OutputLimit, OutputRetention,
+        PolicyRevision, ToolCallLimit, ToolName,
     },
     error::CoreError,
     security::{CommandEnvironment, CommandInput, CommandSpec, Workspace},
@@ -28,6 +28,8 @@ pub(super) struct ExecuteInput {
     arguments: Vec<String>,
     cwd: Option<PathBuf>,
     timeout_ms: CommandTimeout,
+    #[serde(default)]
+    idle_timeout_ms: IdleTimeout,
     #[serde(default)]
     output_bytes: OutputLimit,
     #[serde(default)]
@@ -120,6 +122,7 @@ impl ExecuteInput {
             OutputRetention::Prefix
         })
         .with_output_limit(self.output_bytes)
+        .with_idle_timeout(self.idle_timeout_ms)
         .with_stderr(self.stderr);
         if command.program.to_str().is_none() || command.cwd.path().to_str().is_none() {
             return Err(CoreError::InvalidValue {

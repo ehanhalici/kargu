@@ -4,6 +4,41 @@ use crate::error::CoreError;
 use std::time::Duration;
 use tokio::time::Instant;
 
+/// Optional idle interval, distinct from a total execution deadline.
+/// Measured from process startup or the last successful nonempty input/output.
+#[derive(Clone, Copy, Default, serde::Deserialize)]
+#[serde(try_from = "Option<u64>")]
+pub struct IdleTimeout(Option<Duration>);
+impl IdleTimeout {
+    /// Disable idle termination; independent command/run deadlines still apply.
+    pub const DISABLED: Self = Self(None);
+    /// Captured idle duration, never a synthetic far-future deadline.
+    pub fn duration(self) -> Option<Duration> {
+        self.0
+    }
+}
+impl TryFrom<Option<u64>> for IdleTimeout {
+    type Error = CoreError;
+    fn try_from(milliseconds: Option<u64>) -> Result<Self, CoreError> {
+        Self::try_from(milliseconds.map(Duration::from_millis))
+    }
+}
+impl TryFrom<Option<Duration>> for IdleTimeout {
+    type Error = CoreError;
+    fn try_from(value: Option<Duration>) -> Result<Self, CoreError> {
+        if value.is_some_and(|duration| {
+            duration.is_zero()
+                || duration > Duration::from_secs(86_400)
+                || Instant::now().checked_add(duration).is_none()
+        }) {
+            return Err(CoreError::InvalidValue {
+                field: "IdleTimeout",
+            });
+        }
+        Ok(Self(value))
+    }
+}
+
 /// Validated optional wall-clock limit; None means genuinely unlimited.
 #[derive(Clone, Copy)]
 pub struct ExecutionTimeout(Option<Duration>);

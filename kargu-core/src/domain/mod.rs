@@ -10,7 +10,7 @@ use crate::{constants::limits, error::CoreError};
 use serde::{Deserialize, Serialize};
 
 mod deadline;
-pub use deadline::{Deadline, ExecutionTimeout};
+pub use deadline::{Deadline, ExecutionTimeout, IdleTimeout};
 
 /// Positive OS process identity, for display only; never accepted as signal authority.
 #[derive(Clone, Copy, Serialize)]

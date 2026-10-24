@@ -28,6 +28,15 @@
         (should (equal (concat (car first) (car last)) text))
         (should (equal (cdr last) ""))))))
 
+(ert-deftest kargu-bridge-job-idle-missing-capability-does-not-start-test ()
+  "An older core cannot silently discard an enabled idle termination policy."
+  (let ((conn (kargu-bridge--connection-create
+               :state 'ready :capabilities ["process_jobs"] :read-scope (kargu-bridge--object))) failure)
+    (cl-letf (((symbol-function 'kargu-bridge-call) (lambda (&rest _) (ert-fail "Unsupported idle job sent RPC"))))
+      (kargu-bridge-approval-execute conn (kargu-bridge--object "idle_timeout_ms" 100)
+                                      (lambda (_value error-data) (setq failure error-data)) :capability "process_jobs")
+      (should (equal "unavailable" (gethash "status" (gethash "data" failure)))))))
+
 (ert-deftest kargu-bridge-output-real-merged-drain-test ()
   "Output polling delivers merged text and completes only after real native drain."
   (kargu-bridge-test--with-core
@@ -66,6 +75,29 @@
             (kargu-bridge-test--wait (lambda () done))
             (should failure)
             (should-not (file-exists-p (expand-file-name "effect" root))))
+        (delete-directory root t)))))
+
+(ert-deftest kargu-bridge-job-idle-policy-is-exactly-reviewed-test ()
+  "Changing idle metadata fails exact review; the captured interval is displayed."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-idle-review-" t)) job details
+          (validate (symbol-function 'kargu-bridge-approval--valid)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation)
+                     (lambda (request)
+                       (when (eq (kargu-confirmation-operation request) :prompt)
+                         (setq details (plist-get (kargu-confirmation-options request) :details))
+                         (kargu-bridge-job-test--approve request))))
+                    ((symbol-function 'kargu-bridge-approval--valid)
+                     (lambda (connection params entry)
+                       (let ((wrong (kargu-bridge-approval--copy params)))
+                         (puthash "idle_timeout_ms" 101 wrong)
+                         (should-not (funcall validate connection wrong entry)))
+                       (funcall validate connection params entry))))
+            (setq job (kargu-bridge-job-test--start conn root "printf idle-safe" nil '(("idle_timeout_ms" . 100))))
+            (should (string-search "idle: 100 ms" details))
+            (should (equal (gethash "outcome" (kargu-bridge-job-test--exited job)) "ok")))
+        (kargu-bridge-job-test--dispose job)
         (delete-directory root t)))))
 
 (defun kargu-bridge-job-test--start (connection root script &optional owner extras)
