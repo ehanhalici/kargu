@@ -1,0 +1,32 @@
+name: Rust core and Emacs bridge
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain and Emacs
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+          sudo apt-get update
+          sudo apt-get install -y emacs-nox
+      - name: Rust checks
+        run: |
+          cargo fmt --manifest-path kargu-core/Cargo.toml --check
+          cargo clippy --manifest-path kargu-core/Cargo.toml --locked --all-targets -- -D warnings
+          cargo test --manifest-path kargu-core/Cargo.toml --locked
+          cargo build --manifest-path kargu-core/Cargo.toml --locked
+      - name: Compile and test independent Emacs bridge
+        run: |
+          emacs --batch -Q -L . --eval '(setq byte-compile-error-on-warn t)' -f batch-byte-compile kargu/bridge.el tests/test-bridge.el
+          KARGU_CORE_TEST_BINARY="$PWD/kargu-core/target/debug/kargu-core" emacs --batch -Q -L . -l tests/test-bridge.el -f ert-run-tests-batch-and-exit

@@ -73,6 +73,10 @@
 
 ;;; Code:
 
+(autoload 'kargu-bridge-start "kargu/bridge" nil t)
+(autoload 'kargu-bridge-stop "kargu/bridge" nil t)
+(autoload 'kargu-bridge-status "kargu/bridge" nil t)
+
 (declare-function kargu-ui-confirm-install "kargu/ui/confirm" ())
 (declare-function kargu-diff-install "kargu/tools/diff" ())
 (declare-function kargu-chat-plan-install "kargu/chat/plan" ())

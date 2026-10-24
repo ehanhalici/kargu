@@ -25,6 +25,8 @@
 (require 'ert)
 (require 'kargu)
 (require 'tests/test-helpers)
+(require 'tests/test-bridge)
+(require 'tests/test-migration-fixtures)
 (require 'tests/test-modules)
 (require 'tests/test-application-context)
 (require 'tests/test-native-ownership)

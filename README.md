@@ -60,6 +60,41 @@ Clone the repository and add it to your Emacs `load-path`:
 
 ## Configuration
 
+### Experimental Rust core
+
+The first Rust migration slice provides bounded JSON-RPC IPC and application/
+session lifecycle operations. The existing Elisp agent remains the default;
+the Rust core does not yet execute prompts, tools, or model requests.
+
+The Rust library now includes typed run admission, single-use approvals and a
+Linux process supervisor with bounded interactive I/O and group/subreaper
+cleanup. These services are tested independently and are not yet exposed as
+Emacs tool capabilities; the stdio bridge still advertises lifecycle only.
+
+Build with Rust 1.95.0 (Linux is the initial target):
+
+```sh
+cargo build --manifest-path kargu-core/Cargo.toml --locked
+```
+
+```elisp
+(setq kargu-bridge-binary-path "/absolute/path/to/kargu-core/target/debug/kargu-core")
+;; M-x kargu-bridge-start, kargu-bridge-status, kargu-bridge-stop
+```
+
+Loading Kargu does not start the binary. A missing or incompatible binary is
+reported explicitly. `kargu/bridge` can also be loaded independently of the
+agent, UI packages, credentials, and `plz`.
+
+Run the Rust and real-pipe bridge checks with:
+
+```sh
+cargo test --manifest-path kargu-core/Cargo.toml --locked
+KARGU_CORE_TEST_BINARY="$PWD/kargu-core/target/debug/kargu-core" emacs --batch -Q -L . -l tests/test-bridge.el -f ert-run-tests-batch-and-exit
+```
+
+### Model configuration
+
 Kargu can be configured via a simple TOML configuration file (`~/.config/kargu/config.toml` or `~/.emacs.d/kargu.toml`), environment variables, or Emacs `auth-source`.
 
 The configuration reader intentionally supports a strict TOML subset:
