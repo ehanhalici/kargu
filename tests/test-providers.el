@@ -280,85 +280,24 @@
   (should (null (kargu-provider-prompt-caching "cohere")))
   (should (null (kargu-provider-prompt-caching "perplexity"))))
 
-(ert-deftest kargu-providers-prompt-caching-payload-tools-test ()
-  "Ensure `kargu--build-payload' attaches `cache_control' to last tool for caching providers."
-  (require 'kargu/api/http)
-  (require 'kargu/api/tools)
-  (kargu-register-tool "mock_tool" "A mock tool for testing" nil #'ignore)
-  (let ((_ (kargu-test-mode 'agent))
-        (kargu-session--context
-         (kargu-test-session-with-history
-          :messages '((("role" . "user") ("content" . "hello"))) :provider "openrouter" :model "anthropic/claude-3.5-sonnet")))
-    (let* ((payload (kargu--build-payload))
-           (tools (kargu-aget payload "tools")))
-      (should (vectorp tools))
-      (should (> (length tools) 0))
-      (let ((last-tool (aref tools (1- (length tools)))))
-        (should (equal (kargu-aget last-tool "cache_control")
-                       '(("type" . "ephemeral"))))))))
-
-(ert-deftest kargu-providers-prompt-caching-payload-disabled-test ()
-  "Ensure `kargu--build-payload' does not attach `cache_control' when provider does not support it."
-  (require 'kargu/api/http)
-  (require 'kargu/api/tools)
-  (kargu-register-tool "mock_tool" "A mock tool for testing" nil #'ignore)
-  (let ((_ (kargu-test-mode 'agent))
-        (kargu-session--context
-         (kargu-test-session-with-history
-          :messages '((("role" . "user") ("content" . "hello"))) :provider "ollama" :model "llama3")))
-    (let* ((payload (kargu--build-payload))
-           (tools (kargu-aget payload "tools")))
-      (should (vectorp tools))
-      (should (> (length tools) 0))
-      (let ((last-tool (aref tools (1- (length tools)))))
-        (should-not (assoc "cache_control" last-tool))))))
-
-(ert-deftest kargu-providers-prompt-caching-payload-messages-multi-turn-test ()
-  "Ensure `kargu--build-payload' attaches `cache_control' to last completed turn for caching providers."
-  (require 'kargu/api/http)
-  (require 'kargu/api/tools)
-  (let (
-
-        (kargu-session--context
-         (kargu-test-session-with-history
-          :messages '((("role" . "system") ("content" . "You are a coding assistant."))
-                      (("role" . "user") ("content" . "Hello 1"))
-                      (("role" . "assistant") ("content" . "Hi there 1"))
-                      (("role" . "user") ("content" . "Hello 2"))) :provider "openrouter" :model "anthropic/claude-3.5-sonnet")))
-    (let* ((payload (kargu--build-payload))
-           (msgs (kargu-aget payload "messages")))
-      (should (vectorp msgs))
-      (should (= (length msgs) 4))
-      ;; Turn 2 (assistant) should have cache_control breakpoint
-      (let ((prev-turn (aref msgs 2)))
-        (should (equal (kargu-aget prev-turn "role") "assistant"))
-        (should-not (assoc "cache_control" prev-turn))
-        (should (equal (kargu-aget (aref (kargu-aget prev-turn "content") 0) "cache_control")
-                       '(("type" . "ephemeral")))))
-      ;; Latest turn (user 2) should NOT have cache_control
-      (let ((curr-turn (aref msgs 3)))
-        (should (equal (kargu-aget curr-turn "role") "user"))
-        (should-not (assoc "cache_control" curr-turn))))))
-
-(ert-deftest kargu-providers-prompt-caching-payload-empty-tools-system-test ()
-  "Ensure `kargu--build-payload' attaches `cache_control' to system message when tools are empty."
-  (require 'kargu/api/http)
-  (require 'kargu/api/tools)
-  (cl-letf (((symbol-function 'kargu--build-tools-vector) (lambda () [])))
-    (let (
-
-          (kargu-session--context
-           (kargu-test-session-with-history
-            :messages '((("role" . "system") ("content" . "System instructions"))
-                        (("role" . "user") ("content" . "Hello"))) :provider "anthropic" :model "claude-3-5-sonnet-20241022")))
-      (let* ((payload (kargu--build-payload))
-             (msgs (kargu-aget payload "messages")))
-        (should (vectorp msgs))
-        (let ((sys-msg (aref msgs 0)))
-          (should (equal (kargu-aget sys-msg "role") "system"))
-          (should-not (assoc "cache_control" sys-msg))
-          (should (equal (kargu-aget (aref (kargu-aget sys-msg "content") 0) "cache_control")
-                         '(("type" . "ephemeral")))))))))
+(ert-deftest kargu-providers-prompt-caching-is-captured-not-applied-by-editor-test ()
+  "Editor captures native cache policy but leaves canonical history unchanged.
+Marker placement cases moved to kargu-core/tests/api_wire.rs."
+  (dolist (provider '("openrouter" "anthropic" "ollama"))
+    (let* ((kargu-session--context
+            (kargu-test-session-with-history
+             :messages '((("role" . "system") ("content" . "Stable"))
+                         (("role" . "user") ("content" . "one"))
+                         (("role" . "assistant") ("content" . "answer"))
+                         (("role" . "user") ("content" . "two")))
+             :provider provider :model "fixture"))
+           (settings (kargu-api-connection-settings provider "fixture"))
+           (payload (kargu--build-payload)))
+      (should (eq (plist-get settings :cache-marker)
+                  (if (equal provider "ollama") nil t)))
+      (should (equal (kargu-aget (aref (kargu-aget payload "messages") 0) "content") "Stable"))
+      (should (equal (kargu-aget (aref (kargu-aget payload "messages") 2) "content") "answer"))
+      (should-not (string-search "cache_control" (kargu-json-encode-record payload))))))
 
 (ert-deftest kargu-providers-native-projection-preserves-explicit-override-test ()
   "A refreshed core baseline must not overwrite an editor registration."

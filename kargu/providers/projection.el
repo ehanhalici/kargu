@@ -22,6 +22,36 @@
 (defvar kargu-providers-builtin-catalog nil
   "Compatibility view of core-owned built-in records, not a second catalog.")
 
+(defun kargu-providers-wire-object (value &optional field)
+  "Encode captured metadata VALUE as plain JSON data for core FIELD.
+This is a DTO projection only; no format or request policy is evaluated."
+  (cond
+   ((memq value '(:session :app-url))
+    (let ((object (make-hash-table :test #'equal)))
+      (puthash "binding" (substring (symbol-name value) 1) object) object))
+   ((null value)
+    (cond ((memq field '(:stream :input-excludes-cache :cache-marker)) :json-false)
+          ((memq field '(:blocks :copy-keys :detect)) [])
+          (t :json-null)))
+   ((eq value t) t)
+   ((stringp value) (copy-sequence value))
+   ((keywordp (car-safe value))
+    (let ((object (make-hash-table :test #'equal)))
+      (while value
+        (let ((key (pop value)) (item (pop value)))
+          (puthash (substring (symbol-name key) 1)
+                   (kargu-providers-wire-object item key) object)))
+      object))
+   ((and (consp value) (stringp (car-safe (car value))))
+    (let ((object (make-hash-table :test #'equal)))
+      (dolist (pair value)
+        (puthash (copy-sequence (car pair)) (kargu-providers-wire-object (cdr pair)) object))
+      object))
+   ((or (vectorp value) (listp value))
+    (vconcat (mapcar #'kargu-providers-wire-object (append value nil))))
+   ((symbolp value) (symbol-name value))
+   (t value)))
+
 (defun kargu-providers--decode (value &optional field)
   "Translate projection VALUE for legacy plist FIELD readers without evaluation."
   (cond

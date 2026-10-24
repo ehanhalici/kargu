@@ -23,7 +23,9 @@
 (require 'kargu/state/selectors)
 (require 'kargu/tools/toolchain)
 (require 'kargu/languages)
-(require 'kargu/api/cache)
+
+(defconst kargu-prompt-runtime-boundary "<runtime_environment>\n"
+  "Protocol delimiter separating instructions from volatile editor context.")
 
 (declare-function kargu-tools-enabled-p "kargu/loop" (&optional run))
 (declare-function kargu-provider-prompt-file "kargu/providers/registry" (model-id))
@@ -338,7 +340,7 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
                             (let ((s (funcall fn)))
                               (and (stringp s) (not (string-empty-p (string-trim s))) s)))
                           kargu-prompt--parts))
-        (list (concat kargu-cache-runtime-boundary (kargu--environment-block)
+        (list (concat kargu-prompt-runtime-boundary (kargu--environment-block)
                       "</runtime_environment>")))
        "\n\n")))
 

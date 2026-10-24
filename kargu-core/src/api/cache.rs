@@ -1,0 +1,100 @@
+//! Cache boundaries on an owned canonical request, never on stored history.
+
+use super::ApiError;
+use serde_json::{Value, json};
+
+const RUNTIME_BOUNDARY: &str = "<runtime_environment>\n";
+
+fn text_block(text: &str, marked: bool) -> Value {
+    let mut block = json!({"type":"text","text":text});
+    if marked {
+        block["cache_control"] = json!({"type":"ephemeral"});
+    }
+    block
+}
+
+fn mark(message: &mut Value) -> Result<bool, ApiError> {
+    let Some(content) = message.get_mut("content") else {
+        return Ok(false);
+    };
+    if let Some(text) = content.as_str() {
+        if text.is_empty() {
+            return Ok(false);
+        }
+        *content = json!([text_block(text, false)]);
+    }
+    let Some(blocks) = content.as_array_mut() else {
+        return Ok(false);
+    };
+    for block in blocks.iter_mut().rev() {
+        if block.get("type").and_then(Value::as_str) == Some("text")
+            && block
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.is_empty())
+        {
+            block
+                .as_object_mut()
+                .ok_or(ApiError::InvalidRequest)?
+                .insert("cache_control".into(), json!({"type":"ephemeral"}));
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Apply explicitly captured cache policy before provider wire encoding.
+pub fn prepare(payload: &mut Value) -> Result<(), ApiError> {
+    if let Some(messages) = payload.get_mut("messages") {
+        let messages = messages.as_array_mut().ok_or(ApiError::InvalidRequest)?;
+        if let Some(first) = messages.first_mut()
+            && first.get("role").and_then(Value::as_str) == Some("system")
+        {
+            let split = first
+                .get("content")
+                .and_then(Value::as_str)
+                .and_then(|text| {
+                    text.find(RUNTIME_BOUNDARY)
+                        .filter(|offset| *offset > 0)
+                        .map(|offset| {
+                            (
+                                text_block(&text[..offset], true),
+                                text_block(&text[offset..], false),
+                            )
+                        })
+                });
+            if let Some((stable, runtime)) = split {
+                first
+                    .as_object_mut()
+                    .ok_or(ApiError::InvalidRequest)?
+                    .insert("content".into(), json!([stable, runtime]));
+            } else {
+                mark(first)?;
+            }
+        }
+        let completed = if messages
+            .last()
+            .and_then(|message| message.get("role"))
+            .and_then(Value::as_str)
+            == Some("tool")
+        {
+            messages.len()
+        } else {
+            messages.len().saturating_sub(1)
+        };
+        for message in messages.iter_mut().take(completed).rev() {
+            if message.get("role").and_then(Value::as_str) != Some("system") && mark(message)? {
+                break;
+            }
+        }
+    }
+    if let Some(tools) = payload.get_mut("tools") {
+        let tools = tools.as_array_mut().ok_or(ApiError::InvalidRequest)?;
+        if let Some(last) = tools.last_mut() {
+            last.as_object_mut()
+                .ok_or(ApiError::InvalidRequest)?
+                .insert("cache_control".into(), json!({"type":"ephemeral"}));
+        }
+    }
+    Ok(())
+}

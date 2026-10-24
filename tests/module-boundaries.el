@@ -21,7 +21,6 @@
      kargu/api/retry
      kargu/api/tool-calls
      kargu/api/tools
-     kargu/api/wire
      kargu/chat
      kargu/chat/attach
      kargu/chat/complete

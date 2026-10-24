@@ -16,7 +16,6 @@
 (require 'kargu/config)
 (require 'kargu/history)
 (require 'kargu/api/tools)
-(require 'kargu/api/cache)
 (require 'kargu/api/parameters)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
@@ -97,11 +96,10 @@ The shape comes from the provider's format record (`:reasoning-shape')."
     (kargu-api-request-parameters :model (kargu--model) :provider (kargu--provider-name)
                                  :temperature kargu-temperature :max-tokens kargu-max-tokens)))
 
-(defun kargu--payload-tools-entries (tools cache-marked)
-  "Request entries for the TOOLS vector; none when it is empty.
-CACHE-MARKED puts a cache marker on the last tool."
+(defun kargu--payload-tools-entries (tools)
+  "Return canonical TOOLS entries without evaluating native cache policy."
   (when (> (length tools) 0)
-    `(("tools" . ,(if cache-marked (kargu-cache-prepare-tools tools) tools))
+    `(("tools" . ,tools)
       ("tool_choice" . "auto"))))
 
 (defun kargu--build-payload (&rest extra)
@@ -114,19 +112,13 @@ at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
 (defun kargu-api-build-payload (history &optional extra)
   "Build a payload snapshot from HISTORY and optional EXTRA entries."
   (let* ((tools (kargu--build-tools-vector))
-         (cache-marked (if (kargu-connection-current)
-                           (kargu-connection-setting :cache-marker)
-                         (kargu-provider-cache-marker-p
-                          (downcase (string-trim (format "%s" (kargu--provider-name)))))))
          (messages (kargu-history-snapshot history))
          (payload
           (append
            `(("model" . ,(kargu--model))
-             ("messages" . ,(vconcat (if cache-marked
-                                         (kargu-cache-prepare-messages messages)
-                                       messages))))
+             ("messages" . ,(vconcat messages)))
            (kargu--payload-sampling-entries)
-           (kargu--payload-tools-entries tools cache-marked))))
+           (kargu--payload-tools-entries tools))))
     (dolist (entries (list (kargu--build-reasoning-params)
                            extra))
       (setq payload (kargu--payload-merge payload entries)))

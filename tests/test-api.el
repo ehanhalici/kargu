@@ -3,6 +3,12 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
+;; Editor request ownership and native API delivery contracts.
+
+;;; Code:
+
 (require 'ert)
 (require 'tests/test-helpers)
 (require 'kargu/api/response)
@@ -34,7 +40,7 @@
   "Retry observers run once, and cancellation during notification prevents POST."
   (let* ((kargu--generation 100) (posts 0) (observations 0)
          (kargu-api-retry-hook
-          (list (lambda (&rest _) (error "bad observer"))
+          (list (lambda (&rest _) (error "Bad observer"))
                 (lambda (&rest _) (cl-incf observations) (setq kargu--generation 200)))))
     (cl-letf (((symbol-function 'kargu--api-post) (lambda (&rest _) (cl-incf posts))))
       (kargu-api--retry-post 100 :url "https://example.invalid" :attempt 1)
@@ -155,12 +161,12 @@
                  (lambda (_method _url &rest options)
                    (cl-incf requests)
                    (when completed (funcall (plist-get options :then) "{}"))
-                   (error "transport startup failed")))
+                   (error "Transport startup failed")))
                 ((symbol-function 'kargu--api-handle-body)
                  (lambda (_body callback &rest _) (funcall callback 'ok))))
         (should-error
          (kargu--api-post "https://example.invalid" nil nil 70
-                          (lambda (_) (cl-incf delivered) (error "continuation failed"))
+                          (lambda (_) (cl-incf delivered) (error "Continuation failed"))
                           #'ignore))
         (should (= requests 1))
         (should (= delivered (if completed 1 0)))))))
@@ -215,7 +221,6 @@
 
 
 (declare-function kargu-api-chat-url "kargu/api/wire" (base format))
-(declare-function kargu-api-prepare-payload "kargu/api/wire" (payload format))
 (declare-function kargu-api-normalize-response "kargu/api/wire" (response))
 (declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
 (declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
@@ -223,7 +228,7 @@
 (declare-function kargu--api-error-looks-retryable-p "kargu/api/http" (message))
 
 (ert-deftest kargu-api-response-vector-choices-test ()
-  "Ensure kargu--response-choice handles vector choices correctly (Bug 2 regression)."
+  "Ensure `kargu--response-choice' handles vector choices (Bug 2 regression)."
   (let ((resp-vec '(("choices" . [(("index" . 0)
                                    ("message" . (("role" . "assistant")
                                                  ("content" . "vector response test")))
@@ -293,7 +298,7 @@
 
 
 (ert-deftest kargu-api-timeout-config-test ()
-  "Ensure kargu-api-timeout has a valid default."
+  "Ensure `kargu-api-timeout' has a valid default."
   (require 'kargu/core)
   (should (numberp kargu-api-timeout))
   (should (> kargu-api-timeout 0))
@@ -304,36 +309,17 @@
 
 
 (ert-deftest kargu-api-anthropic-url-and-response-test ()
-  "Anthropic format posts to /messages and comes back as choices."
-  (require 'kargu/api/wire)
+  "Editor reads native format metadata without duplicating its codec."
   (should (equal (kargu-api-chat-url "https://api.anthropic.com/v1" 'anthropic)
                  "https://api.anthropic.com/v1/messages"))
   (should (equal (kargu-api-chat-url "https://api.openai.com/v1" 'openapi)
                  "https://api.openai.com/v1/chat/completions"))
   (should-not (kargu-provider-format-stream-p 'anthropic))
   (should (eq (kargu-provider-format-auth 'anthropic) 'x-api-key))
-  (let* ((payload '(("model" . "claude")
-                    ("messages" . ((("role" . "system") ("content" . "be brief"))
-                                   (("role" . "user") ("content" . "hi"))))))
-         (body (kargu-api-prepare-payload payload 'anthropic))
-         (native '(("stop_reason" . "end_turn")
-                   ("content" . ((("type" . "text") ("text" . "hello"))))
-                   ("usage" . (("input_tokens" . 3) ("output_tokens" . 1)))))
-         (norm (kargu-api-normalize-response native))
-         (tool '(("stop_reason" . "tool_use")
-                 ("content" . ((("type" . "tool_use")
-                                ("id" . "c1")
-                                ("name" . "read")
-                                ("input" . (("path" . "a")))))))))
-    (should (equal (kargu-aget (car (kargu-aget body "system")) "text") "be brief"))
-    (should (equal (kargu-response-answer-text norm) "hello"))
-    (should (equal (kargu-response-finish-reason norm) "stop"))
-    (should (equal (kargu-response-finish-reason (kargu-api-normalize-response tool))
-                   "tool_calls"))
-    (let ((call (car (append (kargu-response-tool-calls
-                              (kargu-api-normalize-response tool))
-                             nil))))
-      (should (equal (kargu-aget (kargu-aget call "function") "name") "read")))))
+  ;; System lifting, tool conversion and finish/usage cases moved to api_wire.rs.
+  (should (equal (gethash "message-shape"
+                          (kargu-providers-wire-object (kargu-api-wire-record 'anthropic)))
+                 "blocks")))
 
 (ert-deftest kargu-tool-flag-json-false-test ()
   "JSON false is not a true tool flag."
@@ -395,7 +381,7 @@
   (dolist (value '(nil :json-null :json-false))
     (should-not (kargu-response-error-message (list (cons "error" value))))
     (should (kargu-aget (kargu-api-normalize-response
-                         (list (cons "type" "message") (cons "stop_reason" "end_turn")
+                         (list (cons "choices" [(("message" . (("content" . "Done"))))])
                                (cons "error" value))) "choices")))
   (should (equal (kargu-response-error-message '(("error" . (("message" . "Rejected")))))
                  "Rejected")))
@@ -439,7 +425,7 @@
                  (push timer cancelled-timers)))
               ((symbol-function 'kargu--api-post)
                (lambda (&rest _) (setq reposted t))))
-      (kargu--api-on-transport-error
+      (funcall #'kargu--api-on-transport-error
        "https://example.invalid/v1/chat/completions" nil '(("model" . "m"))
        100 #'ignore nil 0 'mock-error)
       (let* ((req (kargu-application-current-request))

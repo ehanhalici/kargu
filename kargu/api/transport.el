@@ -15,6 +15,7 @@
 (require 'kargu/bridge)
 (require 'kargu/json)
 (require 'kargu/core/custom)
+(require 'kargu/providers/projection)
 
 (defvar kargu-api-timeout)
 (defvar kargu-api-connect-timeout)
@@ -106,6 +107,10 @@ No network request or subprocess is ever started by Elisp."
            "method" (symbol-name method) "url" url "headers" headers
            "body" (if-let* ((body (plist-get options :body))) (copy-sequence body) :json-null)
            "stream" (if stream t :json-false)
+           "wire" (kargu-providers-wire-object (plist-get options :wire))
+           "provider" (if-let* ((provider (plist-get options :provider)))
+                           (copy-sequence provider) :json-null)
+           "cache_markers" (if (plist-get options :cache-markers) t :json-false)
            "limits" (kargu-bridge--object
                      "raw_bytes" kargu-stream-max-raw-bytes
                      "line_bytes" kargu-stream-max-incomplete-line-bytes
@@ -126,7 +131,9 @@ No network request or subprocess is ever started by Elisp."
            (lambda (connection failure)
              (when (eq (kargu-transport-handle-state handle) :pending)
                (if (or failure
-                       (not (member "api_request" (append (kargu-bridge-connection-capabilities connection) nil))))
+                       (not (member "api_request" (append (kargu-bridge-connection-capabilities connection) nil)))
+                       (and (or (plist-get options :wire) (plist-get options :cache-markers))
+                            (not (member "api_wire" (append (kargu-bridge-connection-capabilities connection) nil)))))
                    (kargu-transport--deliver handle options nil
                                              (or failure (kargu-bridge--fault "unsupported_api")))
                  (setf (kargu-transport-handle-connection handle) connection

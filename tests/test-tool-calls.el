@@ -24,8 +24,11 @@
               ;; Core has already completion-gated and assembled SSE fragments.
               '(("choices" . [(("message" . (("tool_calls" . [(("id" . "") ("function" . (("name" . "read_file") ("arguments" . "{}"))))])))
                                ("finish_reason" . "tool_calls"))]))
-              '(("type" . "message") ("stop_reason" . "tool_use")
-                ("content" . [(("type" . "tool_use") ("name" . "read_file") ("input" . :json-empty-object))]))
+              ;; Core has decoded native tool blocks; IDs remain the history
+              ;; adapter's responsibility until the history store migrates.
+              '(("choices" . [(("message" . (("tool_calls" . [(("id" . :json-null) ("type" . "function")
+                                                                              ("function" . (("name" . "read_file") ("arguments" . "{}"))))])))
+                               ("finish_reason" . "tool_calls"))]))
               '(("choices" . [(("message" . (("function_call" . (("name" . "read_file") ("arguments" . "{}"))))))]))))
       (let* ((normalized (kargu-api-normalize-response response))
              (call (car (kargu-seq-to-list (kargu-response-tool-calls normalized))))

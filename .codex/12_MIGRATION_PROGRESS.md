@@ -1,5 +1,22 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Native wire ve prompt-cache cutover
+
+HTTP admission artık captured typed formatı kullanır; request/response blocks,
+cache sınırları ve checked cache usage Rust'a taşındı. `api/cache.el` ve wire
+codec engine'leri silindi; UI canonical DTO/metadata projection kalır. Opaque
+continuation endpoint/model/provider/format revision'ına bağlıdır. Detay ve
+eski testlerin native eşlemesi 31_NATIVE_WIRE_AND_CACHE.md'dedir.
+
+**130 Rust testi + 2 compile-fail**, locked build/test, fmt ve strict Clippy
+temiz. **1163/1163 full source ERT**, 0 unexpected, **124.50 s**. Bytecompile
+warning-as-error ve touched checkdoc temiz; geçici .elc çıktıları kaldırıldı.
+Ek 3/3 focused test son doc/test-call cleanup'ını doğrular. Real Emacs→Rust→
+loopback wire/cache round-trip dahildir; canlı hesap/ücretli çağrı yoktur.
+Request policy, retry/breaker, model metadata ve core agent/history henüz açık;
+API + dört uygulama backend kapsamı değişmedi. Kullanıcı shell.nix/07
+değişiklikleri commit dışında tutulur.
+
 ## 2026-10-24 — Provider catalog ve model HTTP/SSE cutover
 
 Kullanıcının yeni API önceliğiyle ilk kesim `36e0e1a`: 162-provider/5-wire

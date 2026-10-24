@@ -14,40 +14,10 @@
 (require 'kargu)
 (require 'tests/test-helpers)
 
-(ert-deftest kargu-cache-system-prefix-is-stable-and-pure-test ()
-  "Volatile environment changes cannot alter the marked stable prefix."
-  (let* ((first (list (list (cons "role" "system")
-                            (cons "content" (concat "Instructions\n" kargu-cache-runtime-boundary "file: a")))
-                      '(("role" . "user") ("content" . "Question"))))
-         (snapshot (copy-tree first t))
-         (marked (kargu-cache-prepare-messages first))
-         (content (kargu-aget (car marked) "content")))
-    (should (equal first snapshot))
-    (should (kargu-aget (aref content 0) "cache_control"))
-    (should-not (kargu-aget (aref content 1) "cache_control"))
-    (should-not (kargu-aget (car marked) "cache_control"))
-    (setcdr (assoc "content" (car first)) (concat "Instructions\n" kargu-cache-runtime-boundary "file: b"))
-    (should (equal (aref content 0)
-                   (aref (kargu-aget (car (kargu-cache-prepare-messages first)) "content") 0)))))
-
-(ert-deftest kargu-cache-native-wire-keeps-block-and-tool-markers-test ()
-  "Native Messages requests retain cache boundaries on tools, system and results."
-  (let* ((messages '((("role" . "system") ("content" . "Stable instructions"))
-                     (("role" . "user") ("content" . "Question"))
-                     (("role" . "assistant") ("content" . "")
-                      ("tool_calls" . [(("id" . "c1") ("function" . (("name" . "read_file") ("arguments" . "{}"))))]))
-                     (("role" . "tool") ("tool_call_id" . "c1") ("content" . "Result"))))
-         (tools [(("type" . "function") ("function" . (("name" . "read_file") ("parameters" . :json-empty-object))))])
-         (body (kargu-api-prepare-payload
-                (list (cons "model" "test")
-                      (cons "messages" (vconcat (kargu-cache-prepare-messages messages)))
-                      (cons "tools" (kargu-cache-prepare-tools tools))) 'anthropic))
-         (result (car (kargu-aget (car (last (kargu-aget body "messages"))) "content"))))
-    (should (kargu-aget (car (kargu-aget body "system")) "cache_control"))
-    (should (kargu-aget (aref (kargu-aget body "tools") 0) "cache_control"))
-    (should (kargu-aget (aref (kargu-aget result "content") 0) "cache_control"))
-    (should (string-search "cache_control" (kargu-json-encode-record body)))
-    (should-not (kargu-aget (aref tools 0) "cache_control"))))
+;; Pure marker and native wire cases moved to kargu-core/tests/api_wire.rs:
+;; stable_cache_prefix_is_pure_and_runtime_is_not_marked,
+;; native_cache_boundaries_survive_tools_and_completed_tool_results.
+;; The real editor/core loopback path is covered by tests/test-stream.el.
 
 (ert-deftest kargu-cache-tools-are-canonical-and-deterministic-test ()
   "Aliases remain executable without duplicate schemas or guidance."
@@ -128,11 +98,12 @@
   (let* ((kargu-session--context
           (kargu-session-create :id-value (kargu-session-id)
                                 :usage-value (list :requests 0)))
-         (response (kargu-api-normalize-response
-                    '(("type" . "message") ("stop_reason" . "end_turn")
-                      ("content" . [(("type" . "text") ("text" . "Done"))])
-                      ("usage" . (("input_tokens" . 100) ("output_tokens" . 1)
-                                  ("cache_read_input_tokens" . 80) ("cache_creation_input_tokens" . 20)))))))
+         ;; Core has already normalized native input/cache counters; the
+         ;; original wire response is covered by api_wire.rs.
+         (response '(("choices" . [(("message" . (("content" . "Done"))))])
+                     ("usage" . (("prompt_tokens" . 200) ("completion_tokens" . 1)
+                                 ("prompt_tokens_details" . (("cached_tokens" . 80)
+                                                             ("cache_write_tokens" . 20))))))))
     (should (string-search "cache-read: unknown" (kargu-session-usage)))
     (kargu--record-usage response)
     (should (= (plist-get (kargu-session-snapshot) :tokens-in) 200))

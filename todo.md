@@ -55,8 +55,9 @@ engine'i silindi (.codex/28). Diğer Git komutları henüz taşınmadı.
 Kullanıcının API önceliğiyle 162-provider catalog baseline Rust asset/core
 snapshot'a taşındı (.codex/29). Chat/model-list HTTP ve SSE motoru native'dir;
 Elisp parser/accumulator/watchdog silindi (.codex/30). Credential/UI portları
-kalır; wire/request policy, retry/circuit ve model metadata normalization
-henüz taşınmadığı için tüm API göçü tamamlandı sayılmaz.
+kalır; wire ve prompt-cache engine'leri de native'ye taşınıp silindi (.codex/31).
+Request policy, retry/circuit ve model metadata normalization henüz açık olduğu
+için tüm API göçü tamamlandı sayılmaz.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
 output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan read/
 Git/skill/webfetch, egress/context ve global tüketiciler aşağıdaki gruplarda

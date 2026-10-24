@@ -1,9 +1,11 @@
 //! Owned model HTTP boundary. No shell, redirects, logs or ambient auth lookup.
 
+pub mod cache;
 mod domain;
 mod http;
 pub mod stream;
-pub use domain::{HttpRequest, SecretString};
+pub mod wire;
+pub use domain::{HttpRequest, ModelId, SecretString};
 pub use http::execute;
 
 use serde_json::{Value, json};

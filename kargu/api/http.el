@@ -320,6 +320,11 @@ GEN identifies the request; ON-DELTA and ATTEMPT are retained for retries."
     (kargu-http--track-process
      request (kargu-transport-request 'post url
                   :headers headers :body (kargu-json-encode-record payload)
+                  :wire (kargu-api-wire-record (kargu-api-active-format))
+                  :provider (kargu--provider-name)
+                  :cache-markers (if (kargu-connection-current)
+                                     (kargu-connection-setting :cache-marker)
+                                   (kargu-provider-cache-marker-p (kargu--provider-name)))
                   :as 'string :timeout kargu-api-timeout
                   :then (kargu-http--wrap request
                                           (lambda (body) (kargu-http--finish-plain request body)))
@@ -345,6 +350,11 @@ ATTEMPT is the retry count."
    (kargu-transport-request
     'post (kargu-http--request-url request)
     :headers (kargu-http--request-headers request)
+    :wire (kargu-api-wire-record (kargu-api-active-format))
+    :provider (kargu--provider-name)
+    :cache-markers (if (kargu-connection-current)
+                       (kargu-connection-setting :cache-marker)
+                     (kargu-provider-cache-marker-p (kargu--provider-name)))
     :body (kargu-json-encode-record
            (append (kargu-http--request-payload request) '(("stream" . t))))
     :as 'string :timeout nil :stream t
@@ -401,8 +411,7 @@ Streaming bodies are already completion-gated and reconstructed by Rust."
          (attempt (or attempt 0)))
     (kargu--log-block "IN HTTP body" (or body "")
                       (kargu--log-looks-json-p trimmed))
-    (let* ((response (kargu-api-response-shape
-                      (and (stringp body) (kargu--json-decode-safe body))))
+    (let* ((response (and (stringp body) (kargu--json-decode-safe body)))
            (err (and response (kargu-response-error-message response))))
       (when (and kargu-log-wire response)
         (kargu--log-block "IN reconstructed JSON"

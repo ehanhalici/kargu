@@ -10,6 +10,20 @@ use serde::Deserialize;
 use std::{collections::BTreeMap, fmt, time::Duration};
 use zeroize::Zeroizing;
 
+/// Open model namespace; never confused with a provider or external thread ID.
+#[derive(Clone, Deserialize, serde::Serialize)]
+#[serde(try_from = "String")]
+pub struct ModelId(String);
+impl TryFrom<String> for ModelId {
+    type Error = ApiError;
+    fn try_from(value: String) -> Result<Self, ApiError> {
+        if value.trim().is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
+            return Err(ApiError::InvalidRequest);
+        }
+        Ok(Self(value))
+    }
+}
+
 /// A captured secret. Neither diagnostics nor serialization expose plaintext.
 #[derive(Deserialize)]
 #[serde(try_from = "String")]
@@ -83,6 +97,10 @@ struct RequestDto {
     timeouts: Timeouts,
     #[serde(default)]
     limits: super::stream::StreamLimits,
+    wire: Option<super::wire::WireSpec>,
+    provider: Option<crate::providers::ApiProviderId>,
+    #[serde(default)]
+    cache_markers: bool,
 }
 
 /// Immutable per-attempt HTTP capture, independent of mutable editor selection.
@@ -95,6 +113,7 @@ pub struct HttpRequest {
     pub(super) body: Option<Zeroizing<String>>,
     timeouts: Timeouts,
     pub(super) limits: super::stream::StreamLimits,
+    pub(super) wire: super::wire::WireCodec,
 }
 
 impl TryFrom<RequestDto> for HttpRequest {
@@ -136,19 +155,47 @@ impl TryFrom<RequestDto> for HttpRequest {
             value.set_sensitive(true);
             headers.insert(name, value);
         }
-        if let Some(body) = dto.body.as_ref() {
-            let value: serde_json::Value =
-                serde_json::from_str(body).map_err(|_| ApiError::InvalidRequest)?;
+        let value = match dto.body.as_ref() {
+            Some(body) => Some(
+                serde_json::from_str::<serde_json::Value>(body)
+                    .map_err(|_| ApiError::InvalidRequest)?,
+            ),
+            None => None,
+        };
+        let model = value
+            .as_ref()
+            .and_then(|value| value.get("model"))
+            .map(|value| serde_json::from_value::<ModelId>(value.clone()))
+            .transpose()
+            .map_err(|_| ApiError::InvalidRequest)?;
+        let wire =
+            dto.wire
+                .unwrap_or_default()
+                .bind(&dto.url, model.as_ref(), dto.provider.as_ref())?;
+        let body = if let Some(mut value) = value {
             if !value.is_object() {
                 return Err(ApiError::InvalidRequest);
             }
-            if dto.stream && value.get("stream").and_then(serde_json::Value::as_bool) != Some(true)
+            if dto.stream
+                && (!wire.streams()
+                    || value.get("stream").and_then(serde_json::Value::as_bool) != Some(true))
             {
                 return Err(ApiError::InvalidRequest);
             }
-        } else if matches!(dto.method, HttpMethod::Post) {
-            return Err(ApiError::InvalidRequest);
-        }
+            if dto.cache_markers {
+                super::cache::prepare(&mut value)?;
+            }
+            let encoded = wire.encode(value)?.to_string();
+            if encoded.len() > 768 * 1024 {
+                return Err(ApiError::Limit);
+            }
+            Some(Zeroizing::new(encoded))
+        } else {
+            if matches!(dto.method, HttpMethod::Post) {
+                return Err(ApiError::InvalidRequest);
+            }
+            None
+        };
         Ok(Self {
             url: dto.url,
             method: match dto.method {
@@ -156,9 +203,10 @@ impl TryFrom<RequestDto> for HttpRequest {
                 HttpMethod::Post => Method::POST,
             },
             headers,
-            body: dto.body.map(Zeroizing::new),
+            body,
             timeouts: dto.timeouts,
             limits: dto.limits,
+            wire,
         })
     }
 }

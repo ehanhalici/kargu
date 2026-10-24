@@ -126,7 +126,7 @@ where
     if let Some(decoder) = decoder {
         let (deltas, result) = decoder.finish()?;
         publish(deltas, &events).await?;
-        Ok(result)
+        request.wire.decode(result)
     } else {
         let value: Value = serde_json::from_slice(&json).map_err(|_| ApiError::Protocol)?;
         if value
@@ -166,7 +166,7 @@ where
                 },
             );
         }
-        Ok(value)
+        request.wire.decode(value)
     }
 }
 

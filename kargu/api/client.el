@@ -220,8 +220,7 @@ Send events to ON-DELTA and the response through DELIVERY."
                (kargu-application-next-generation))))
     (setf (kargu-api--delivery-generation delivery) gen)
     (let* ((fmt (kargu-api-active-format))
-           (payload (kargu-api-prepare-payload
-                     (kargu-api-build-payload (kargu-api--delivery-history delivery)) fmt))
+           (payload (kargu-api-build-payload (kargu-api--delivery-history delivery)))
            (wire (kargu-api-wire-record fmt))
            (delta (and (or (null wire) (not (plist-member wire :stream))
                            (plist-get wire :stream)) on-delta)))
