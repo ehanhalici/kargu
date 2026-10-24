@@ -360,6 +360,18 @@
           (should (equal (kargu-aget (aref (kargu-aget sys-msg "content") 0) "cache_control")
                          '(("type" . "ephemeral")))))))))
 
+(ert-deftest kargu-providers-native-projection-preserves-explicit-override-test ()
+  "A refreshed core baseline must not overwrite an editor registration."
+  (let ((kargu-providers--table (copy-hash-table kargu-providers--table))
+        (kargu-providers--baseline (copy-hash-table kargu-providers--baseline))
+        (kargu-provider-formats (copy-tree kargu-provider-formats)))
+    (kargu-register-provider :id "openai" :name "Explicit override" :api "http://localhost:1234/v1")
+    (kargu-providers-install-projection kargu-providers--projection)
+    (should (equal (kargu-provider-name "openai") "Explicit override"))
+    (should (equal (kargu-provider-api "openai") "http://localhost:1234/v1"))
+    (should (equal (cdr (assoc "HTTP-Referer" (kargu-provider-format-headers 'openrouter))) :app-url))
+    (should (equal (cdr (assoc "x-session-id" (kargu-provider-extra-headers "openrouter"))) :session))))
+
 (provide 'tests/test-providers)
 
 ;;; test-providers.el ends here

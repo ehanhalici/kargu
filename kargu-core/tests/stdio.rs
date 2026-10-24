@@ -7,6 +7,26 @@ use support::Peer;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+#[test]
+fn provider_catalog_is_a_credential_free_core_projection() -> TestResult {
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    peer.send(json!({"jsonrpc":"2.0","id":"catalog","method":"provider/catalog","params":{}}))?;
+    let reply = peer.read()?;
+    assert_eq!(reply["result"]["schema_version"], 1);
+    assert_eq!(
+        reply["result"]["providers"].as_array().map(Vec::len),
+        Some(162)
+    );
+    peer.send(json!({"jsonrpc":"2.0","id":"bad","method":"provider/catalog","params":{"credential":"do-not-echo"}}))?;
+    let rejected = peer.read()?;
+    assert!(rejected.get("error").is_some());
+    assert!(!rejected.to_string().contains("do-not-echo"));
+    peer.send(json!({"jsonrpc":"2.0","id":"ping","method":"ping"}))?;
+    assert_eq!(peer.read()?["id"], "ping");
+    Ok(())
+}
+
 fn command_arguments(root: &std::path::Path, script: &str) -> Value {
     let shell = std::env::var_os("PATH")
         .and_then(|paths| {

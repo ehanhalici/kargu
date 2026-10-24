@@ -40,6 +40,7 @@ pub struct Host {
     phase: Phase,
     frame_limit: ByteLimit,
     applications: HashMap<ApplicationId, ApplicationActor>,
+    providers: Result<crate::providers::ProviderCatalog, crate::error::CoreError>,
 }
 
 /// Effect of dispatching one call.
@@ -94,6 +95,7 @@ impl Host {
             phase: Phase::Fresh,
             frame_limit: ByteLimit::WIRE_MAX,
             applications: HashMap::new(),
+            providers: crate::providers::ProviderCatalog::embedded(),
         }
     }
 
@@ -234,6 +236,16 @@ impl Host {
         match method {
             methods::PING if empty_params(&params) => Ok(json!({"status":"ok"})),
             methods::PING => Err(Fault::params()),
+            methods::PROVIDER_CATALOG if empty_params(&params) => self
+                .providers
+                .as_ref()
+                .map(crate::providers::ProviderCatalog::snapshot)
+                .map_err(|_| Fault {
+                    code: protocol::error_codes::INVALID_STATE,
+                    message: "Provider manifest is invalid",
+                    status: "invalid_catalog",
+                }),
+            methods::PROVIDER_CATALOG => Err(Fault::params()),
             methods::APPLICATION_CREATE => {
                 if !empty_params(&params) {
                     return Err(Fault::params());

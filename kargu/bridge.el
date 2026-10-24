@@ -177,7 +177,7 @@ Return the correlation id, or nil on local rejection."
             (and (eq (kargu-bridge-connection-state connection) 'starting)
                  (not (equal method "initialize")))
             (and (eq (kargu-bridge-connection-state connection) 'binding)
-                 (not (member method '("application/create" "session/create"))))
+                 (not (member method '("application/create" "session/create" "provider/catalog"))))
             (and (eq (kargu-bridge-connection-state connection) 'stopping)
                  (not (equal method "shutdown")))
             (>= (hash-table-count (kargu-bridge-connection-pending connection))
@@ -444,6 +444,24 @@ Raw stderr is deliberately discarded: future backends may put secrets there."
           (delete-region (point-min) (- (point-max) kargu-bridge--max-frame)))))))
 
 (defun kargu-bridge--start-finish (connection callback error-data)
+  "Hydrate CONNECTION's provider projection before completing CALLBACK.
+ERROR-DATA skips hydration; older peers retain the packaged projection."
+  (if (and (null error-data)
+           (member "provider_catalog" (append (kargu-bridge-connection-capabilities connection) nil)))
+      (progn
+        (setf (kargu-bridge-connection-state connection) 'binding)
+        (kargu-bridge-call
+         connection "provider/catalog" (kargu-bridge--object)
+         (lambda (snapshot failure)
+           (unless failure
+             (condition-case nil
+                 (progn (require 'kargu/providers/projection)
+                        (kargu-providers-install-projection snapshot))
+               (error (setq failure (kargu-bridge--fault "invalid_catalog")))))
+           (kargu-bridge--start-ready connection callback failure))))
+    (kargu-bridge--start-ready connection callback error-data)))
+
+(defun kargu-bridge--start-ready (connection callback error-data)
   "Complete CONNECTION startup once and deliver CALLBACK or ERROR-DATA."
   (when (and (null error-data) (eq (kargu-bridge-status connection) 'closed))
     (setq error-data (kargu-bridge--fault "disconnected")))

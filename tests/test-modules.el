@@ -56,7 +56,8 @@ Initialize installed PACKAGES only when requested."
 (defun kargu-module-test--without-sources (prefixes forms)
   "Evaluate FORMS in a package physically missing source PREFIXES."
   (let* ((root (make-temp-file "kargu-module-matrix-" t))
-         (files (cons (expand-file-name "kargu.el" kargu-module-test--root)
+         (files (append (mapcar (lambda (file) (expand-file-name file kargu-module-test--root))
+                                '("kargu.el" "kargu-core/assets/providers.json"))
                       (directory-files-recursively
                        (expand-file-name "kargu" kargu-module-test--root)
                        "\\.\\(?:el\\|txt\\)\\'"))))

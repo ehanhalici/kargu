@@ -107,7 +107,7 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 10] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 11] = [
         "application_lifecycle",
         "session_lifecycle",
         methods::PING,
@@ -115,6 +115,7 @@ pub mod protocol {
         "workspace_list_files_ls",
         "workspace_grep",
         "git_status",
+        "provider_catalog",
         "command_execute",
         "process_jobs",
         "process_idle_timeout",
@@ -153,6 +154,8 @@ pub mod protocol {
     }
     /// Canonical method names.
     pub mod methods {
+        /// Credential-free embedded provider definitions for editor projection.
+        pub const PROVIDER_CATALOG: &str = "provider/catalog";
         /// Approved persistent process startup; returns identity, not completion.
         pub const JOB_START: &str = "job/start";
         /// Confirm that the client installed its owner-close cleanup after startup.
