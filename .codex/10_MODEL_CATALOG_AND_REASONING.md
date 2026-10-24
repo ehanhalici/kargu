@@ -25,6 +25,28 @@ tahmin edilip kesinmiş gibi sunulmaz. Özel models.toml schema'sı named
 `models` tablosu/array-of-tables içerir; bare root Vec<T> varsayılmaz.
 Dosya parse/size/timeout ve unknown-field hataları typed'dır.
 
+### API ve uygulama kayıtlarını ayırma
+
+Nihai GUI provider alanı API sağlayıcılarına ek olarak kurulu **Codex,
+Antigravity, Claude Code ve OpenCode** kayıtlarını sunar (03/06). Core seçiminde
+doğrudan API ile yerel uygulama farklı typed varyantlardır; `ApiProviderId`,
+uygulama backend kimliği, model ve external session/thread kimlikleri birbirinin
+yerine kullanılamaz. Mevcut custom API provider namespace'i açık kalır; dört
+uygulamalı bir enum'a çevrilip genişletilebilirlik kaybedilmez.
+
+Legacy provider config'i API davranışıyla import edilir. Uygulama seçimi için
+ayrı ve açık bir ayrım gerekir; eski `provider` string'ini tahminle binary
+çalıştırma talimatı saymak yasaktır. Yeni config/persistence sınırı schema ve
+geri uyumlu import fixture'ıyla doğrulanır.
+
+Uygulama discovery kayıtları installed path/connection, sürüm, protokol,
+uygunluk nedeni, capability ve publication revision taşır. Durum tanımları 03
+bölüm 0'dan gelir; UI başka bir hazır-olma algoritması uygulamaz. Model/effort
+kataloğu seçilen uygulamanın bildirdiği destekten gelir; REST catalog bilgisi
+CLI/server parametresi diye aktarılmaz. Capability bilinmiyorsa model/effort
+seçeneği uydurulmaz; backend-default ancak protokolün izin verdiği biçimde sunulur.
+Backend kaybolunca seçim sessizce API'ye veya başka uygulamaya değiştirilmez.
+
 ## 2. Reasoning modeli
 
 UI seviyesi ile wire parametresi ayrıdır. Tercih `ProviderDefault`,

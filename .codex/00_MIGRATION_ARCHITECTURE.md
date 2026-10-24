@@ -8,6 +8,13 @@ agent motorunu Rust'a taşımak; Emacs'i canlı editör adapter'ı ve UI olarak
 tutmaktır. Nihai uygulama aşama kapılarıyla doğrulanır; bu belge bir üretim
 hazırlığı veya hatasızlık garantisi değildir.
 
+Kesin ürün kapsamı: mevcut **doğrudan API desteği Elisp'ten Rust'a taşınarak
+korunur**; yanına **Codex, Antigravity, Claude Code ve OpenCode** uygulama
+backend'leri eklenir. Kullanıcı aynı GUI **provider alanından** API sağlayıcısı
+veya kurulu uygulama seçer. Bunlar alternatif yürütme yollarıdır; uygulama
+desteği API'yi kaldırmaz. Kurulum/uygunluk ve dört-backend kabul koşullarının
+tek kaynağı [03_EXTERNAL_BRIDGES.md](03_EXTERNAL_BRIDGES.md) bölüm 0/6'dır.
+
 ## 1. Neden Rust, hangi sınırlarla?
 
 Rust tip sistemi geçersiz veri ve bazı iç geçiş hatalarını derlemede yakalar.
@@ -30,7 +37,7 @@ testleri gerektirir. Ayrıntılar 01 ve proof/README.md ile eşlenir.
 | Edit/review | Hibrit | Rust proposal/diff/review; Emacs buffer/undo/save transaction |
 | Canlı sensör | Emacs | Eglot/Flymake publication, Xref/symbol/range; Dape connection/thread/frame/stop |
 | Görünüm/etkileşim | Emacs | Chat/draft/routing, Markdown/scroll/header, picker/completion, review/approval UI |
-| Harici köprü | Opsiyonel Rust adapter'ları | Agent backend ve MCP tool sunumu ayrı capability |
+| Harici köprü | Rust uygulama adapter'ları; ayrı MCP adapter'ı | Codex, Antigravity, Claude Code, OpenCode; agent backend ve MCP tool sunumu ayrı capability |
 
 Emacs'in runtime kanıtı olan document tick, diagnostic publication, debugger
 connection/stop generation ve buffer/window sahipliği Rust'a taşınıp disk
@@ -64,8 +71,9 @@ başarısız Rust mutation'dan sonra otomatik Elisp replay yapılmaz.
 
 ## 4. Korunacak özellikler
 
-- Doğrudan API: mevcut OpenAI uyumlu/custom/yerel, Anthropic ve diğer kayıtlı
-  wire ailelerinin model seçimi, streaming, tool calls, usage ve retry davranışı.
+- Doğrudan API: Elisp API uygulaması Rust'a taşınır; mevcut OpenAI uyumlu/
+  custom/yerel, Anthropic ve diğer kayıtlı wire ailelerinin model seçimi,
+  streaming, tool calls, usage ve retry davranışı korunur.
   Responses/Chat Completions gibi farklı wire şekilleri ayrı adapter'dır.
 - Tool registry: canonical ad, alias, JSON schema, mode/availability ve ortak
   permission gate. Native OS ve delegated editor araçları aynı kapıdan geçer.
@@ -91,11 +99,15 @@ başarısız Rust mutation'dan sonra otomatik Elisp replay yapılmaz.
   reasoning/sampling capability ve kesir artıklı MicroUsd muhasebesi.
 - UI: çoklu chat buffer, Markdown/code, role/transcript, scroll, header,
   completion/model/effort picker, Transient ve cancellable confirmation.
+  Provider alanı API ve kurulu uygulamaları aynı seçim arayüzünde sunar;
+  discovery/uygunluk nedeni görünürdür, aktif run'da backend değiştirilmez.
 - Dinamik context: legacy @path/@file::symbol ile yeni file/buff/sym/git/line/
   folder etiketleri; RAM snapshot, provenance ve byte/token bütçesi.
-- Harici araçlar: Claude/Codex backend adapter'ları, MCP üzerinden editor
-  araçları; Antigravity için belgelenmiş MCP sunumu. Doğrulanmış chat-control
-  protokolü olmadan Antigravity backend desteği ilan edilmez (03).
+- Uygulama backend'leri: Codex, Antigravity, Claude Code ve OpenCode için
+  Kargu'dan konuşma/turn başlatma, stream/terminal sonuç ve Stop/iptal desteği.
+  MCP üzerinden editor araçlarını sunmak ayrı özelliktir; özellikle Antigravity
+  için MCP-only entegrasyon backend teslimi sayılmaz. Protokol doğrulanamıyorsa
+  ilgili adapter açık teslim engeli kalır; dört-uygulama kapsamı sessizce daraltılmaz (03).
 
 ## 5. Taviz verilmeyen güvenlik ve lifecycle kuralları
 

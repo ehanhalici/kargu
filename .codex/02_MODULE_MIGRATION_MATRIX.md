@@ -10,6 +10,7 @@ eşlenip 04'teki kapıdan geçer. Façade'lar son tüketici geçene kadar kalır
 | api/retry, circuit, cache, catalog, parameters, select | Rust metadata/resilience; Emacs picker | Snapshot, cache scope, tek probe, capability; 01/10 |
 | api/tools, tool-calls; tools/registry, execution | Rust registry/execution gate | Public ad, alias, şema, mode/policy, duplicate ID; 01/08 |
 | providers.el, providers/registry, catalog; models/service, store; selection.el | Rust | Custom provider, endpoint namespace, discovery/override, selection revision; 10 |
+| Yeni uygulama backend/discovery adapter'ları (legacy Elisp karşılığı yok) | Rust; provider picker sunumu Emacs | Codex, Antigravity, Claude Code, OpenCode; API'den ayrı typed seçim, kurulum/uygunluk, stream/cancel/session; 03/06/10 |
 | config.el, config/toml, schema, service, connection, worker, key | Hibrit | Rust parse/schema/snapshot; Emacs config UI ve gerektiğinde auth-source/callable credential port; 08 |
 | loop.el, loop/machine, tools, heal, compact; state.el, state/store, transitions, selectors | Rust; UI projection Emacs | Single run, typed transitions, bounded healing/compaction; 01/08 |
 | application/coordinator, execution, budget, mode, reset | Rust; Emacs mode-preflight adapter | Claim-before-effect, reset/drain, mevcut ask/plan/debug/agent modları |

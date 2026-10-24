@@ -28,6 +28,27 @@ Session persistence Rust'a taşınırken görünüm restore modeli 08'e göre
 üretilir. Kullanıcının gönderilmemiş taslağı admission/credential hatasında
 kaybolmaz. Backend seçimi session sahibinde kalır.
 
+### Provider alanında API ve uygulama seçimi
+
+Mevcut provider alanı kaldırılmaz; aynı picker içinde `API` ve `Uygulamalar`
+grupları gösterilir. Rust'a taşınan doğrudan API sağlayıcıları korunur. Kurulu
+Codex, Antigravity, Claude Code ve OpenCode uygulamaları ayrı backend
+kayıtlarıdır; API endpoint takma adı değildir. Kanonik kayıt ve uygunluk
+Rust'tan gelir; kurulum/probe/login işi Emacs process filter'ında yapılmaz.
+
+Kurulu ve `Ready` uygulama seçilince prompt o adapter'a yönlenir. Kurulu ama
+hazır olmayan kayıt görünür kalır; sürüm/protokol/login/probe nedeni ve gerekli
+adım gösterilir, prompt gönderimi engellenir. Kurulu olmayan uygulama çalışır
+seçim gibi sunulmaz. Durumların tek kaynağı 03 bölüm 0'dır. Picker açılması
+yavaş probe yüzünden donmaz; refresh ve geç snapshot session/revision ile korunur.
+
+Model/effort alanı seçilen backend'in capability'sinden üretilir; uygulamaya API
+model listesi veya REST parametresi zorla uygulanmaz. Aktif run'da provider/
+backend değişimi reddedilir; iptal ve drain tamamlanmadan yeni backend turn'ü
+başlatılmaz. Idle seçiminde opaque external thread/history başka backend'de
+kendiliğinden kullanılmaz; session binding/uyumluluk kararı açıkça uygulanır.
+Kurulu uygulama desteği ve MCP tool sunumu UI'da birbirinin yerine gösterilmez.
+
 ## 2. Plan modu ve mod değişimi
 
 plan/store, context, dispatch domain kuralları Rust'a taşınır; plan/buffer ve
@@ -106,3 +127,8 @@ test-edit-service ve test-edit-transaction kapsamı korunur. Yeni fixture'lar
 stale review, dirty buffer, undo, save-hook mutation/failure, foreign edit,
 partial multi-file failure, owner closure ve duplicate apply'ı test eder.
 Duplicate edit_id önceki sonucu verir veya stale döner; ikinci kez uygulanmaz.
+
+Provider kabulü: aynı picker'da API ve dört uygulama; kurulu/kurulu değil,
+ready/needs-login/unsupported/probe-failure görünümleri, backend'e göre model
+seçenekleri, aktif run'da değişim reddi ve iki session'da bağımsız seçim.
+Antigravity MCP-only bağlantısı seçilebilir chat backend başarısı sayılmaz.

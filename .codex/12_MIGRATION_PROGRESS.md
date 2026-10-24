@@ -1,5 +1,27 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — API + dört uygulama kapsamının netleştirilmesi
+
+Kullanıcı kararı: mevcut Elisp API desteği Rust'a taşınarak korunacak; yanına
+Codex, Antigravity, Claude Code ve OpenCode backend'leri gelecek. Aynı GUI
+provider alanından API veya kurulu uygulama seçilecek. Dört uygulama nihai
+ürün kapsamıdır; opsiyonellik kullanıcının yerel kurulumuna aittir.
+
+03 tek sözleşme kaynağı olarak güncellendi; kapsam (00), modül matrisi (02),
+yol haritası (04), provider UI (06) ve typed metadata/config ayrımı (10) buna
+uyarlandı. OpenCode ayrı adapter/kabul maddesi kazandı. Antigravity için MCP
+sunumu chat backend teslimi sayılmıyor; uygun turn/stream/cancel protokolü
+doğrulanamazsa ilgili iş açık teslim engeli kalıyor. Kapsam sessizce daraltılmaz.
+Installed/unverified/login/version/protocol/probe/ready ayrımı, immutable
+selection snapshot ve hatada sessiz API/backend replay yasağı yazıldı.
+
+Bu adım yalnız plan değişikliğidir: runtime/adapter kodu uygulanmadı, yeni
+ürün/protokol keşfi veya canlı uygulama testi yapılmadı. Protokol doğrulaması
+uygulama öncesi kabul işi olarak açık bırakıldı; önceki test sonuçları yeniden
+çalıştırılmış gibi sunulmaz. Generic 01 standardı ve kullanıcının `shell.nix`
+değişikliği değiştirilmedi. Plan tutarlılığı, Markdown link/fence ve whitespace
+kontrolleri bu adımın doğrulamasıdır.
+
 ## 2026-10-24 — Üçüncü dilim: ilk canlı tool portu ve commit zinciri
 
 Kullanıcının güncel, generic 01 standardı değişmeden korundu. Rust tool safety

@@ -4,6 +4,13 @@ Sıra: baseline -> IPC -> OS/güvenlik -> canlı adapter -> core run -> köprül
 -> legacy kaldırma. 05–08 dosya numaraları **katman numarasıdır**, uygulama
 sırası değildir. Hafta tahminleri kabul ölçütünün yerine geçmez.
 
+Kesin teslim kapsamı: **Elisp API -> Rust API göçü + yanında Codex,
+Antigravity, Claude Code, OpenCode uygulama backend'leri**. Aynı GUI provider
+alanından API/kurulu uygulama seçimi yapılır (03/06/10). Aşağıdaki geçici
+`elisp`/`rust` implementation cutover seçimi bu nihai API/uygulama seçimiyle
+karıştırılmaz. Dört uygulamadan birinin protokolü doğrulanamıyorsa ilgili
+kabul kutusu açık kalır; API göçü ilerler, ürün kapsamı tamamlandı sayılmaz.
+
 ## Aşama 0: Davranış baseline'ı ve paketleme kararı
 
 - [x] 02'ye göre kaynak/public command/tool/schema/alias/policy envanteri ve
@@ -85,6 +92,8 @@ ilan edilmez. Kanıt ve test eşlemesi: 15_NATIVE_FIND_FILES.md.
 
 ## Aşama 4: Rust core run, provider ağı ve persistence
 
+- [ ] Mevcut doğrudan API desteği, custom/yerel sağlayıcılar ve wire aileleri
+  korunarak Elisp'ten Rust'a taşınsın; uygulama backend'leri API'nin yerine geçmesin.
 - [ ] application claim/single-run, session actor, mode preparation, immutable
   connection/config/metadata snapshot ve ortak budget taşınsın.
 - [ ] Her mevcut provider wire ailesi fixture'la uygulansın; capability/
@@ -103,14 +112,34 @@ ilan edilmez. Kanıt ve test eşlemesi: 15_NATIVE_FIND_FILES.md.
 
 ## Aşama 5: Harici backend ve MCP
 
+- [ ] Typed API/uygulama backend ayrımı, legacy provider config uyumluluğu ve
+  session-owned seçim/revision snapshot'ı kurulsun; aktif run'da değişim reddedilsin.
+- [ ] Codex, Antigravity, Claude Code ve OpenCode için bounded yerel kurulum/
+  sürüm/protokol/auth discovery uygulansın. GUI provider alanında API ve kurulu
+  uygulama grupları, hazır olmayan kayıtların nedeni ve refresh davranışı test edilsin.
+- [ ] Codex adapter'ı: doğrulanmış binary/şema ve gerçek Kargu turn/stream/
+  terminal/cancel/session smoke testi; ek capability'ler açıkça bildirilsin.
+- [ ] Claude Code adapter'ı: doğrulanmış binary/stream şeması ve gerçek Kargu
+  turn/stream/terminal/cancel/session smoke testi; ek capability'ler bildirilsin.
+- [ ] OpenCode adapter'ı: resmi entegrasyon yolu/sürümü uygulama öncesi
+  doğrulansın; discovery, ownership ve gerçek Kargu turn/stream/terminal/cancel/
+  session smoke testleri geçsin. Tahmini port/CLI bayrağı kullanılmasın.
+- [ ] Antigravity adapter'ı: konuşma/turn kontrolü sağlayan desteklenen yol
+  doğrulansın ve gerçek Kargu turn/stream/terminal/cancel/session smoke testi
+  geçsin. MCP-only sunum bu kutuyu kapatmaz; uygun protokol bulunamazsa açık
+  engel kaydedilsin, kapsam ancak kullanıcının açık kararıyla değişsin.
 - [ ] 03'teki proxy/session capability topolojisi ve MCP handshake uygulansın.
-- [ ] Claude/Codex backend adapter'ları seçilen binary sürümü/şema ile ayrı
-  smoke testten geçsin. Login/onay/usage/cancel/resume destekleri bildirilsin.
-- [ ] Antigravity için önce MCP tool sunumu doğrulansın; belgelenmemiş chat
-  backend'i destekleniyor diye gösterilmesin.
+- [ ] Her backend'de model/effort, login/config, approval, usage ve resume
+  capability'leri ayrı bildirilsin; desteklenmeyen/bilinmeyen bilgi uydurulmasın.
+- [ ] Dört uygulamanın ayrı kurulumu/eksikliği, incompatible version/protocol,
+  needs-login, probe timeout/crash, session izolasyonu, geç olay ve Stop testleri
+  geçsin. Bir uygulama hatası API'ye/başka backend'e sessiz replay başlatmasın.
 - [ ] Gate: harici native tool policy sınırı ve dirty buffer yazı politikası
   kanıtlansın; iki istemci scope/replay/isolation testleri geçsin.
   Opsiyonel köprü hatası doğrudan API çekirdeğini kullanılamaz yapmasın.
+
+Buradaki opsiyonellik kullanıcının yerel kurulumuna aittir. Nihai kapsamın
+kabulü dört uygulama için ayrı kanıt ister; biri eksikken aşama kapatılmaz.
 
 ## Aşama 6: Varsayılanı değiştirme ve legacy kaldırma
 
