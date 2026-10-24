@@ -39,6 +39,11 @@ impl Default for ReadTools {
 }
 
 impl ReadTools {
+    pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
+        self.requests
+            .values()
+            .any(|pending| &pending.scope.application_id == id)
+    }
     pub fn contains(&self, id: &RpcId) -> bool {
         self.requests.contains_key(id)
     }

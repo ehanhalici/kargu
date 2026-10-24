@@ -2,6 +2,7 @@ use super::{
     CONTROL_BYTES, CONTROL_CAPACITY, MAX_FRAME_BYTES,
     api::ApiRequests,
     execution::Commands,
+    lifecycle::Lifecycle,
     pending::PendingRequests,
     protocol::{self, Message},
     read_tools::ReadTools,
@@ -44,6 +45,7 @@ struct Services {
     reads: ReadTools,
     commands: Commands,
     api: ApiRequests,
+    lifecycle: Lifecycle,
 }
 
 // Unlike LinesCodec's default EOF behavior, an incomplete trailing line is
@@ -142,6 +144,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
         reads: ReadTools::default(),
         commands: Commands::new().map_err(|_| TransportError::Command)?,
         api: ApiRequests::default(),
+        lifecycle: Lifecycle::default(),
     };
     let result = read_messages(
         reader,
@@ -158,6 +161,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
         reads,
         commands,
         api,
+        ..
     } = &mut services;
     reads.cancel_all();
     commands.cancel_all();
@@ -189,11 +193,30 @@ async fn read_messages<R: AsyncRead + Unpin>(
         reads,
         commands,
         api,
+        lifecycle,
     } = services;
     let mut input = FramedRead::new(reader, StrictLines::new(ByteLimit::WIRE_MAX));
     let mut expiry = tokio::time::interval(timeouts::PENDING_SWEEP);
     let mut shutdown_reply = None;
     loop {
+        for reply in lifecycle
+            .collect(host, |application| {
+                reads.owns_application(application)
+                    || commands.owns_application(application)
+                    || api.owns_application(application)
+            })
+            .map_err(|_| TransportError::Command)?
+        {
+            queue_reply(reply, host.frame_limit(), tx, permits)?;
+        }
+        if reads.is_empty()
+            && commands.is_empty()
+            && api.is_empty()
+            && lifecycle.is_empty()
+            && let Some(reply) = shutdown_reply.take()
+        {
+            queue_reply(reply, host.frame_limit(), tx, permits)?;
+        }
         let frame = tokio::select! {
             _ = stop.cancelled() => return Ok(()),
             frame = input.next() => frame,
@@ -209,7 +232,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 if let Some(reply) = completion? {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
-                if reads.is_empty() && commands.is_empty() && api.is_empty() && let Some(reply) = shutdown_reply.take() {
+                if reads.is_empty() && commands.is_empty() && api.is_empty() && lifecycle.is_empty() && let Some(reply) = shutdown_reply.take() {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
                 continue;
@@ -218,7 +241,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 let reply = completion.ok_or(TransportError::ReadWorker)?
                     .map_err(|_| TransportError::ReadWorker)?;
                 queue_reply(reply, host.frame_limit(), tx, permits)?;
-                if reads.is_empty() && commands.is_empty() && api.is_empty() && let Some(reply) = shutdown_reply.take() {
+                if reads.is_empty() && commands.is_empty() && api.is_empty() && lifecycle.is_empty() && let Some(reply) = shutdown_reply.take() {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
                 continue;
@@ -230,7 +253,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 for message in commands.tick(host, pending).map_err(|_| TransportError::Command)? {
                     queue_reply(message, host.frame_limit(), tx, permits)?;
                 }
-                if reads.is_empty() && commands.is_empty() && api.is_empty() && let Some(reply) = shutdown_reply.take() {
+                if reads.is_empty() && commands.is_empty() && api.is_empty() && lifecycle.is_empty() && let Some(reply) = shutdown_reply.take() {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
                 continue;
@@ -260,15 +283,29 @@ async fn read_messages<R: AsyncRead + Unpin>(
                             reads.cancel(&id);
                             commands.cancel(&id);
                             api.cancel(&id);
+                            lifecycle.cancel(&id);
                         }
                     }
                     continue;
                 }
                 if id.as_ref().is_some_and(|id| {
-                    reads.contains(id) || commands.contains(id) || api.contains(id)
+                    reads.contains(id)
+                        || commands.contains(id)
+                        || api.contains(id)
+                        || lifecycle.contains(id)
                 }) {
                     // Two responses with the same live id would be ambiguous.
                     return Err(TransportError::Framing);
+                }
+                if method == methods::APPLICATION_CLOSE {
+                    if let Some(id) = id.as_ref()
+                        && let Err(fault) = lifecycle.start(host, id.clone(), params)
+                    {
+                        queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                    }
+                    reads.sweep(host);
+                    api.sweep(host);
+                    continue;
                 }
                 if method == methods::API_REQUEST {
                     if let Some(id) = id.as_ref()
@@ -355,7 +392,10 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     Err(fault) => fault.response(Some(id)),
                 });
                 if draining_shutdown
-                    && (!reads.is_empty() || !commands.is_empty() || !api.is_empty())
+                    && (!reads.is_empty()
+                        || !commands.is_empty()
+                        || !api.is_empty()
+                        || !lifecycle.is_empty())
                 {
                     shutdown_reply = reply;
                     None

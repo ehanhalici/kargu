@@ -1,6 +1,7 @@
 //! A single mailbox writer owns API admission, publication and drained release.
 
 use super::protocol::{self, Fault, RpcId};
+use crate::constants::limits;
 use crate::{
     api::{ApiError, HttpRequest},
     application::host::{Host, ReadScope},
@@ -8,7 +9,7 @@ use crate::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
@@ -33,41 +34,53 @@ enum EventValue {
     Body(String),
 }
 
+enum Ready {
+    Event(Event),
+    Completed(RpcId, Result<Value, ApiError>),
+}
+
 pub(super) struct ApiRequests {
     pending: HashMap<RpcId, Pending>,
     workers: JoinSet<(RpcId, Result<Value, ApiError>)>,
     sender: mpsc::Sender<Event>,
     events: mpsc::Receiver<Event>,
+    ready: VecDeque<Ready>,
     root: CancellationToken,
     _guard: DropGuard,
 }
 impl Default for ApiRequests {
     fn default() -> Self {
         let root = CancellationToken::new();
-        let (sender, events) = mpsc::channel(16);
+        let (sender, events) = mpsc::channel(limits::API_EVENTS);
         Self {
             pending: HashMap::new(),
             workers: JoinSet::new(),
             sender,
             events,
+            ready: VecDeque::with_capacity(limits::API_EVENTS.saturating_add(1)),
             _guard: root.clone().drop_guard(),
             root,
         }
     }
 }
 impl ApiRequests {
+    pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
+        self.pending
+            .values()
+            .any(|pending| &pending.scope.application_id == id)
+    }
     pub fn contains(&self, id: &RpcId) -> bool {
         self.pending.contains_key(id)
     }
     pub fn is_empty(&self) -> bool {
-        self.workers.is_empty()
+        self.workers.is_empty() && self.pending.is_empty() && self.ready.is_empty()
     }
     pub fn start(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
         let request: Request = serde_json::from_value(params).map_err(|_| Fault::params())?;
         if !host.owns_read_scope(&request.scope) {
             return Err(fault("stale_owner", "API owner is no longer live"));
         }
-        if self.root.is_cancelled() || self.pending.len() >= 8 {
+        if self.root.is_cancelled() || self.pending.len() >= limits::API_REQUESTS {
             return Err(fault("resource_limit", "API admission limit reached"));
         }
         let cancel = self.root.child_token();
@@ -132,47 +145,83 @@ impl ApiRequests {
         }
     }
     pub async fn next(&mut self, host: &Host) -> Result<Option<Value>, CoreError> {
-        // Drain already-enqueued deltas before their terminal response. The shared
-        // bounded event channel backpressures producers without blocking Host.
+        if let Some(ready) = self.ready.pop_front() {
+            return self.deliver(host, ready);
+        }
         tokio::select! {
             biased;
+            completion = self.workers.join_next(), if !self.workers.is_empty() => {
+                let (id,result) = completion.ok_or(CoreError::CleanupFailed)?.map_err(|_| CoreError::CleanupFailed)?;
+                // All events from this joined worker were enqueued before join.
+                // Capture the finite FIFO prefix, then its terminal barrier. New
+                // foreign events cannot extend this batch or starve collection.
+                let prefix = self.events.len();
+                for _ in 0..prefix {
+                    let event = self.events.try_recv().map_err(|_|CoreError::CleanupFailed)?;
+                    self.ready.push_back(Ready::Event(event));
+                }
+                self.ready.push_back(Ready::Completed(id,result));
+                let ready = self.ready.pop_front().ok_or(CoreError::CleanupFailed)?;
+                self.deliver(host,ready)
+            }
             event = self.events.recv() => {
-                let Some(event) = event else { return Err(CoreError::CleanupFailed); };
-                let Some(pending) = self.pending.get_mut(&event.id) else { return Ok(None); };
-                if pending.cancel.is_cancelled() || !host.owns_read_scope(&pending.scope) { return Ok(None); }
+                let event=event.ok_or(CoreError::CleanupFailed)?;
+                self.deliver(host,Ready::Event(event))
+            }
+        }
+    }
+    fn deliver(&mut self, host: &Host, ready: Ready) -> Result<Option<Value>, CoreError> {
+        match ready {
+            Ready::Event(event) => {
+                let Some(pending) = self.pending.get_mut(&event.id) else {
+                    return Ok(None);
+                };
+                if pending.cancel.is_cancelled() || !host.owns_read_scope(&pending.scope) {
+                    return Ok(None);
+                }
                 let notification = match event.value {
                     EventValue::Delta(value) => {
                         pending.published = true;
                         json!({"jsonrpc":"2.0","method":"api/delta","params":{"request_id":event.id.value(),"delta":value}})
                     }
-                    EventValue::Body(chunk) => json!({"jsonrpc":"2.0","method":"api/body","params":{"request_id":event.id.value(),"chunk":chunk}}),
+                    EventValue::Body(chunk) => {
+                        json!({"jsonrpc":"2.0","method":"api/body","params":{"request_id":event.id.value(),"chunk":chunk}})
+                    }
                 };
-                if notification.to_string().len().saturating_add(1) > host.frame_limit().as_usize() {
+                if notification.to_string().len().saturating_add(1) > host.frame_limit().as_usize()
+                {
                     pending.terminal = Some(ApiError::Limit);
                     pending.cancel.cancel();
                     return Ok(None);
                 }
                 Ok(Some(notification))
             }
-            completion = self.workers.join_next() => {
-                let (id,result) = completion.ok_or(CoreError::CleanupFailed)?.map_err(|_| CoreError::CleanupFailed)?;
+            Ready::Completed(id, result) => {
                 let pending = self.pending.remove(&id).ok_or(CoreError::CleanupFailed)?;
-                let result = if let Some(error) = pending.terminal { Err(error) }
-                    else if pending.cancel.is_cancelled() || !host.owns_read_scope(&pending.scope) { Err(ApiError::Cancelled) } else { result };
+                let result = if let Some(error) = pending.terminal {
+                    Err(error)
+                } else if pending.cancel.is_cancelled() || !host.owns_read_scope(&pending.scope) {
+                    Err(ApiError::Cancelled)
+                } else {
+                    result
+                };
                 let payload = match result {
                     Ok(value) => value,
                     Err(error) => json!({"failure":error.snapshot(),"partial":pending.published}),
                 };
-                Ok(Some(protocol::success(&id,payload)))
+                Ok(Some(protocol::success(&id, payload)))
             }
         }
     }
     pub async fn drain(&mut self) -> Result<(), CoreError> {
         self.cancel_all();
+        self.events.close();
         while let Some(result) = self.workers.join_next().await {
             let _ = result.map_err(|_| CoreError::CleanupFailed)?;
         }
         self.pending.clear();
+        self.ready.clear();
+        while self.events.try_recv().is_ok() {}
         Ok(())
     }
 }
@@ -218,5 +267,93 @@ fn fault(status: &'static str, message: &'static str) -> Fault {
         code: crate::constants::protocol::error_codes::INVALID_STATE,
         message,
         status,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+    #[tokio::test]
+    async fn continuous_foreign_deltas_cannot_starve_join_or_overtake_body() -> TestResult {
+        let mut host = Host::new();
+        host.dispatch("initialize",json!({"protocol_major":1,"protocol_minor":0,"client_version":"api-fairness","capabilities":[],"limits":{"max_frame_bytes":1048576}}),true).result.map_err(|_|"initialize")?;
+        host.dispatch("initialized", json!({}), false)
+            .result
+            .map_err(|_| "initialized")?;
+        let mut api = ApiRequests::default();
+        let first = RpcId::parse(&json!("first")).ok_or("id")?;
+        let foreign = RpcId::parse(&json!("foreign")).ok_or("id")?;
+        for id in [&first, &foreign] {
+            let app = host
+                .dispatch("application/create", json!({}), true)
+                .result
+                .map_err(|_| "application")?;
+            let scope = host
+                .dispatch("session/create", app, true)
+                .result
+                .map_err(|_| "session")?;
+            api.pending.insert(
+                id.clone(),
+                Pending {
+                    scope: serde_json::from_value(scope)?,
+                    cancel: api.root.child_token(),
+                    published: false,
+                    terminal: None,
+                },
+            );
+        }
+        api.sender
+            .send(Event {
+                id: first.clone(),
+                value: EventValue::Body("{}".into()),
+            })
+            .await?;
+        for _ in 1..limits::API_EVENTS {
+            api.sender
+                .send(Event {
+                    id: foreign.clone(),
+                    value: EventValue::Delta(json!({"text":"x"})),
+                })
+                .await?;
+        }
+        let sender = api.sender.clone();
+        let stop = api.root.clone();
+        let flood = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _=stop.cancelled()=>break,
+                    result=sender.send(Event{id:foreign.clone(),value:EventValue::Delta(json!({"text":"x"}))})=>{
+                        if result.is_err() { break; }
+                    }
+                }
+            }
+        });
+        let completed = first.clone();
+        api.workers
+            .spawn(async move { (completed, Ok(json!({"body_ready":true}))) });
+        tokio::task::yield_now().await;
+        let mut body = false;
+        let mut terminal = false;
+        for _ in 0..limits::API_EVENTS.saturating_add(2) {
+            if let Some(reply) = api.next(&host).await? {
+                if reply["method"] == "api/body" && reply["params"]["request_id"] == first.value() {
+                    body = true;
+                }
+                if reply["id"] == first.value() {
+                    terminal = body;
+                    break;
+                }
+            }
+            // Let the adversarial producer keep its event queue permanently full.
+            tokio::task::yield_now().await;
+        }
+        api.drain().await?;
+        flood.await?;
+        assert!(
+            terminal,
+            "A completed attempt was starved or overtook its body"
+        );
+        Ok(())
     }
 }

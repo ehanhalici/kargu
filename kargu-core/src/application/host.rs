@@ -34,12 +34,39 @@ enum Phase {
     Shutdown,
 }
 
+enum Application {
+    Live(ApplicationActor),
+    Draining(ApplicationActor),
+}
+impl Application {
+    fn actor(&self) -> &ApplicationActor {
+        match self {
+            Self::Live(actor) | Self::Draining(actor) => actor,
+        }
+    }
+    fn actor_mut(&mut self) -> &mut ApplicationActor {
+        match self {
+            Self::Live(actor) | Self::Draining(actor) => actor,
+        }
+    }
+    fn is_live(&self) -> bool {
+        matches!(self, Self::Live(_))
+    }
+    fn close(self) -> Self {
+        let mut actor = match self {
+            Self::Live(actor) | Self::Draining(actor) => actor,
+        };
+        actor.revoke_all();
+        Self::Draining(actor)
+    }
+}
+
 /// Transport-independent host. It does not admit agent runs yet.
 pub struct Host {
     epoch: String,
     phase: Phase,
     frame_limit: ByteLimit,
-    applications: HashMap<ApplicationId, ApplicationActor>,
+    applications: HashMap<ApplicationId, Application>,
     providers: Result<crate::providers::ProviderCatalog, crate::error::CoreError>,
 }
 
@@ -114,7 +141,9 @@ impl Host {
             && self
                 .applications
                 .get(&scope.application_id)
-                .is_some_and(|actor| actor.owns_session(&scope.session_id))
+                .is_some_and(|entry| {
+                    entry.is_live() && entry.actor().owns_session(&scope.session_id)
+                })
     }
 
     pub(crate) fn actor_mut(
@@ -123,7 +152,43 @@ impl Host {
     ) -> Result<&mut ApplicationActor, crate::error::CoreError> {
         self.applications
             .get_mut(&scope.application_id)
+            .map(Application::actor_mut)
             .ok_or(crate::error::CoreError::StaleOwner)
+    }
+
+    pub(crate) fn close_application(&mut self, params: Value) -> Result<ApplicationId, Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let scope: ApplicationScope =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self
+            .applications
+            .get(&scope.application_id)
+            .ok_or_else(owner_fault)?
+            .is_live()
+        {
+            return Err(state_fault());
+        }
+        let entry = self
+            .applications
+            .remove(&scope.application_id)
+            .ok_or_else(owner_fault)?;
+        self.applications
+            .insert(scope.application_id.clone(), entry.close());
+        Ok(scope.application_id)
+    }
+    pub(crate) fn release_application(
+        &mut self,
+        id: &ApplicationId,
+    ) -> Result<bool, crate::error::CoreError> {
+        match self.applications.get(id) {
+            Some(Application::Draining(actor)) if actor.drained() => {}
+            Some(Application::Draining(_)) => return Ok(false),
+            _ => return Err(crate::error::CoreError::StaleOwner),
+        }
+        self.applications.remove(id);
+        Ok(true)
     }
 
     pub(crate) fn prepare_workspace_read(
@@ -254,20 +319,26 @@ impl Host {
                     return Err(capacity_fault());
                 }
                 let id = ApplicationId::new();
-                self.applications
-                    .insert(id.clone(), ApplicationActor::new(id.clone()));
+                self.applications.insert(
+                    id.clone(),
+                    Application::Live(ApplicationActor::new(id.clone())),
+                );
                 Ok(json!({"application_id":id}))
             }
             methods::SESSION_CREATE => {
                 let scope: ApplicationScope =
                     serde_json::from_value(params).map_err(|_| Fault::params())?;
-                if !self.applications.contains_key(&scope.application_id) {
+                if !self
+                    .applications
+                    .get(&scope.application_id)
+                    .is_some_and(Application::is_live)
+                {
                     return Err(owner_fault());
                 }
                 if self
                     .applications
                     .values()
-                    .map(ApplicationActor::session_count)
+                    .map(|entry| entry.actor().session_count())
                     .sum::<usize>()
                     >= limits::MAX_SESSIONS
                 {
@@ -277,7 +348,7 @@ impl Host {
                     .applications
                     .get_mut(&scope.application_id)
                     .ok_or_else(owner_fault)?;
-                let id = actor.create_session();
+                let id = actor.actor_mut().create_session();
                 Ok(json!({"application_id":scope.application_id,"session_id":id}))
             }
             methods::SESSION_SNAPSHOT | methods::SESSION_CLOSE => {
@@ -286,7 +357,8 @@ impl Host {
                 let actor = self
                     .applications
                     .get_mut(&scope.application_id)
-                    .ok_or_else(owner_fault)?;
+                    .ok_or_else(owner_fault)?
+                    .actor_mut();
                 if !actor.owns_session(&scope.session_id) {
                     return Err(owner_fault());
                 }

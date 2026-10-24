@@ -341,6 +341,16 @@ impl ApplicationActor {
         }
         Ok(())
     }
+    /// Revoke application admission/publication while retaining live run ledgers.
+    pub(crate) fn revoke_all(&mut self) {
+        self.sessions.clear();
+        for run in self.active.iter().chain(self.job_runs.values()) {
+            run.handle.resources.cancellation.cancel();
+        }
+    }
+    pub(crate) fn drained(&self) -> bool {
+        self.active.is_none() && self.job_runs.is_empty()
+    }
     /// Claim before any async preparation, policy UI, spawn or view effect.
     pub fn admit(
         &mut self,

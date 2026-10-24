@@ -92,6 +92,12 @@ pub(super) struct Commands {
     jobs: jobs::Jobs,
 }
 impl Commands {
+    pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
+        self.operations
+            .values()
+            .any(|operation| &operation.scope.application_id == id)
+            || self.jobs.owns_application(id)
+    }
     pub fn new() -> Result<Self, CoreError> {
         let mut registry = ToolRegistry::default();
         registry.register_process(ToolName::try_from("bash".to_owned())?, vec![])?;

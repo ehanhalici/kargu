@@ -64,6 +64,12 @@ pub(super) struct Jobs {
     closing: bool,
 }
 impl Jobs {
+    pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
+        self.records
+            .values()
+            .any(|job| &job.owner.scope.application_id == id)
+            || self.io.owns_application(id)
+    }
     pub fn contains_request(&self, id: &RpcId) -> bool {
         self.io.contains(id)
     }

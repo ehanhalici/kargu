@@ -33,6 +33,11 @@ pub(super) struct Requests {
     entries: HashMap<RpcId, Request>,
 }
 impl Requests {
+    pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
+        self.entries
+            .values()
+            .any(|request| &request.owner.scope.application_id == id)
+    }
     pub fn contains(&self, id: &RpcId) -> bool {
         self.entries.contains_key(id)
     }

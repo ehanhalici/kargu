@@ -2,6 +2,7 @@
 
 mod api;
 mod execution;
+mod lifecycle;
 pub mod pending;
 pub mod protocol;
 mod read_tools;

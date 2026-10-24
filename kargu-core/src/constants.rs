@@ -55,6 +55,10 @@ pub mod limits {
     pub const JOBS: usize = 64;
     /// Concurrent native read workers on one connection, including draining work.
     pub const READ_WORKERS: usize = 4;
+    /// Live/draining HTTP attempts on one connection.
+    pub const API_REQUESTS: usize = 8;
+    /// Network events waiting for the mailbox; a completion batch adds one barrier.
+    pub const API_EVENTS: usize = 16;
     /// Maximum file discoveries accepted from a client configuration.
     pub const SEARCH_FILES: usize = 20_000;
     /// Maximum directory visits accepted from a client configuration.
@@ -107,12 +111,13 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 15] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 16] = [
         "api_request",
         "api_wire",
         "api_request_policy",
         "api_auth",
         "application_lifecycle",
+        "application_close",
         "session_lifecycle",
         methods::PING,
         "workspace_find_files",
@@ -192,6 +197,8 @@ pub mod protocol {
         pub const PING: &str = "ping";
         /// Create application.
         pub const APPLICATION_CREATE: &str = "application/create";
+        /// Revoke application ownership, then reply only after service drain.
+        pub const APPLICATION_CLOSE: &str = "application/close";
         /// Create session.
         pub const SESSION_CREATE: &str = "session/create";
         /// Get lifecycle projection.

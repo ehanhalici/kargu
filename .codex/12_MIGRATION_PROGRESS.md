@@ -1,5 +1,26 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Drain-before-release application close ve API fairness
+
+Native `application/close` public stdio consumer'a bağlandı. Host `Live`/
+`Draining` entry ile admission/publication'ı geri alır; HTTP/read/command/job/IO
+ve actor ledger boşalmadan closed reply veya application slot release yoktur.
+Önkoşul 34'te anlatılır; henüz editor application/run consumer'ı taşınmış sayılmaz.
+
+Continuous foreign delta üretiminin completed API join'ini starve ettiği testle
+yeniden üretildi (önce kırmızı). Joined worker'ın sonlu FIFO-prefix+terminal
+barrier batch'i ile düzeltildi; yeni foreign event'ler batch'i uzatamaz. Network
+16 + retirement 17 sınırı explicit, body-before-terminal ve cancel/drain korunur.
+
+**148 Rust testi + 2 compile-fail**, locked build/test, fmt, strict Clippy temiz.
+**1160/1160 full source ERT**, 0 unexpected, **124.68 s**. Real pipe/socket,
+sibling isolation, stale rejection, 80 close/recreate, revoked review/late reply,
+process reap-before-close ve shutdown ordering testlidir. TLC application
+6151/1681/depth25; transport 1810/693/depth13 hatasız. Concrete refinement
+ispatı iddia edilmez. Canlı hesap/ücretli çağrı yok; shell.nix/07 kullanıcı
+değişiklikleri commit dışındadır. Native run/budget/retry, metadata ve agent
+portları, ayrıca dört app backend'i hâlâ açıktır.
+
 ## 2026-10-25 — Native auth/header assembly
 
 Bearer/x-api-key seçimi, format defaults, case-insensitive provider overrides
