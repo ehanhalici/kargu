@@ -23,6 +23,32 @@ use std::{
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+#[test]
+fn development_environment_preserves_entries_without_removing_byte_bounds() -> TestResult {
+    let mut environment = BTreeMap::new();
+    for index in 0..limits::COMMAND_ENVIRONMENT_ENTRIES {
+        environment.insert(
+            OsString::from(format!("FIXTURE_{index}")),
+            OsString::from("v"),
+        );
+    }
+    CommandEnvironment::try_from(environment.clone())?;
+    environment.insert(OsString::from("OVER_LIMIT"), OsString::from("v"));
+    assert!(matches!(
+        CommandEnvironment::try_from(environment),
+        Err(CoreError::Limit)
+    ));
+    let oversized = BTreeMap::from([(
+        OsString::from("ONE"),
+        OsString::from("x".repeat(limits::COMMAND_BYTES)),
+    )]);
+    assert!(matches!(
+        CommandEnvironment::try_from(oversized),
+        Err(CoreError::Limit)
+    ));
+    Ok(())
+}
+
 struct Fixture {
     _directory: tempfile::TempDir,
     root: PathBuf,

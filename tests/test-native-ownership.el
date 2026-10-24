@@ -12,6 +12,7 @@
 (require 'ert)
 (require 'kargu)
 (require 'tests/test-helpers)
+(require 'kargu/tools/bash/native)
 
 (defmacro kargu-test-native-boundary (&rest body)
   "Run BODY with offline provider and prompt boundaries."
@@ -182,6 +183,7 @@
   "Foreground jobs register exact cleanup handles, even in a shared project."
   (with-temp-buffer
     (setq-local kargu-application-owner (kargu-application-create))
+    (kargu-test-mode 'agent)
     (let ((foreign (kargu-bash--make-job :id "foreign" :state :running))
           (kargu-job--services (make-hash-table :test #'equal))
           (kargu-bash--processes (make-hash-table :test #'equal)) cancelled)
@@ -189,11 +191,11 @@
       (puthash "foreign" foreign kargu-bash--processes)
       (kargu-test-native-boundary
        (cl-letf (((symbol-function 'kargu-api-send) #'ignore)
-                 ((symbol-function 'kargu-process-run) (lambda (&rest _) nil))
+                 ((symbol-function 'kargu-bridge-ensure) (lambda (&rest _) #'ignore))
                  ((symbol-function 'kargu-job-cancel) (lambda (job &rest _) (push job cancelled))))
                 (let ((run (kargu-loop-send "hello" nil #'ignore)))
                   (kargu-execution-call (plist-get run :context) #'kargu-bash-start-job
-                                        "echo test" default-directory "sh")
+                                        "echo test" default-directory "sh" :callback #'ignore)
                   (kargu-loop-stop)
                   (should (= (length cancelled) 1))
                   (should-not (memq foreign cancelled))

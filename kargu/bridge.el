@@ -541,7 +541,9 @@ Allow Rust TERM/grace/drain before forcing transport cleanup."
                    (kargu-bridge--send conn (kargu-bridge--object "jsonrpc" "2.0" "method" "exit"))
                    (process-send-eof (kargu-bridge-connection-process conn)))
                (error (kargu-bridge--close conn "disconnected")))))
-         :timeout 5)))))
+         ;; Native shutdown may consume 5s TERM grace plus 5s pipe/reap drain.
+         ;; Do not let the RPC waiter kill the core before that work completes.
+         :timeout 12)))))
 
 (defun kargu-bridge-status (&optional connection)
   "Return CONNECTION state, or `stopped' when no bridge exists."

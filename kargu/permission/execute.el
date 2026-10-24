@@ -106,8 +106,8 @@ This snapshot grants no execution permission and presents no second prompt."
      :command (copy-sequence command) :directory directory :root root
      :directories (mapcar #'kargu-permission--directory-identity (list root directory))
      :origin (current-buffer) :session (kargu-session-context)
-     :owner kargu--loop-run :environment (copy-sequence process-environment)
-     :path (copy-sequence exec-path) :strict kargu-permission-strict-mode
+     :owner kargu--loop-run :environment (mapcar #'copy-sequence process-environment)
+     :path (mapcar (lambda (entry) (and entry (copy-sequence entry))) exec-path) :strict kargu-permission-strict-mode
      :validator valid-p :policy-revision revision :risks (mapcar #'copy-sequence risks) :start start)))
 
 (cl-defun kargu-permission-execute (&key command directory risks start callback valid-p policy-revision)

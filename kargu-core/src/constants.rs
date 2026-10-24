@@ -46,8 +46,9 @@ pub mod limits {
     pub const COMMAND_BYTES: usize = 64 * 1024;
     /// Maximum command argument count.
     pub const COMMAND_ARGUMENTS: usize = 256;
-    /// Maximum explicit environment entries, separate from argv limits.
-    pub const COMMAND_ENVIRONMENT_ENTRIES: usize = 128;
+    /// Explicit environment entries; Nix/dev shells commonly exceed 128.
+    /// Aggregate environment bytes remain bounded by COMMAND_BYTES.
+    pub const COMMAND_ENVIRONMENT_ENTRIES: usize = 512;
     /// Tracked jobs, including terminal but uncollected jobs.
     pub const JOBS: usize = 64;
     /// Concurrent native read workers on one connection, including draining work.

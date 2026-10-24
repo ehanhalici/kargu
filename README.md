@@ -63,13 +63,14 @@ Clone the repository and add it to your Emacs `load-path`:
 ### Experimental Rust core
 
 The Rust core provides bounded JSON-RPC IPC, application/session lifecycle,
-and native `find_files` / `list_files` discovery (including their aliases). The Elisp
+native `find_files` / GNU `ls` listing (including aliases), and Bash jobs. The Elisp
 agent still owns prompts and model requests; this is not yet a Rust agent backend.
 
 The Rust library now includes typed run admission, single-use approvals and a
 Linux process supervisor with bounded interactive I/O and group/subreaper
-cleanup. These services are tested independently and are not yet exposed as
-Emacs command capabilities; arbitrary execution still has no stdio entry point.
+cleanup. Command execution uses exact-action reverse approval; persistent jobs
+have scoped start/claim/status/read/write/EOF/cancel/forget ports. The Bash
+tool uses this Rust engine, with no duplicate Elisp execution fallback.
 
 Build with Rust 1.95.0 (Linux is the initial target):
 
@@ -82,7 +83,7 @@ cargo build --manifest-path kargu-core/Cargo.toml --locked
 ;; M-x kargu-bridge-start, kargu-bridge-status, kargu-bridge-stop
 ```
 
-Loading Kargu does not start the binary. The first `find_files` or `list_files` invocation
+Loading Kargu does not start the binary. The first native search/listing or Bash invocation
 starts and negotiates a shared connection asynchronously. Configure the binary
 path above or install `kargu-core` on PATH. Missing binaries/capabilities are
 reported explicitly; there is no duplicate Elisp glob implementation or silent
@@ -92,11 +93,13 @@ packages, credentials, and `plz`.
 Native discovery includes hidden sources, honors `kargu-fs-skip-dirs`, and skips
 compiled/backup artifacts. It does not depend on fd/rg or machine-global Git
 ignore settings. Visit/output limits report incomplete searches explicitly;
-discovered symlinks are not followed. Direct directory listings retain the
-`[DIR]` / `[FILE]` labels and mark symlinks `[LINK]` without following their
-targets. Listing retains compiled/backup entries, unlike glob discovery.
-`kargu-search-list-max-entries` bounds inspected entries independently of the
-retained-result/byte limits. The Lisp entry point is now asynchronous:
+discovered symlinks are not followed. Direct directory listings delegate to GNU
+`ls -lAh` with fixed safe options, returning its text unchanged. Missing GNU
+tools report failure, not a custom scanner fallback. Listing keeps compiled/
+backup entries, unlike glob discovery. The former entry-count limit and
+`[DIR]`/`[FILE]` labels are gone; shared process timeout/output bounds apply.
+Those bounds do not constrain GNU ls's internal sorting memory. The Lisp entry
+point is asynchronous:
 `(kargu-search-list-files path callback)`; calls without a callback return an
 explicit error, never an implicit wait or an Elisp directory scan.
 Stop revokes only the owning request.
@@ -107,7 +110,7 @@ Run the Rust and real-pipe bridge checks with:
 
 ```sh
 cargo test --manifest-path kargu-core/Cargo.toml --locked
-KARGU_CORE_TEST_BINARY="$PWD/kargu-core/target/debug/kargu-core" emacs --batch -Q -L . -l tests/test-bridge.el -f ert-run-tests-batch-and-exit
+KARGU_CORE_TEST_BINARY="$PWD/kargu-core/target/debug/kargu-core" emacs --batch -Q -L . -l tests/test-bridge.el -l tests/test-bridge-jobs.el -f ert-run-tests-batch-and-exit
 ```
 
 ### Model configuration
@@ -291,6 +294,13 @@ that log to cancel the job. The assistant can use `bash` commands `list`,
 terminating the process. Stop cancels the foreground tool; background
 jobs continue until explicitly cancelled. Other bounded tools keep their
 normal timeouts. A positive `kargu-bash-timeout` opts into a deadline.
+Bash now requires the Rust core and Agent mode. Starting either foreground or
+background work from Lisp requires a callback; background startup is reported
+only after the real native receipt. Cancellation is acknowledged separately
+from completed process-group cleanup. Background jobs remain owned by their
+original source buffer/session; closing that owner cancels and drains them.
+The captured environment is explicit (at most 512 entries / 64 KiB), and its
+values are withheld from the approval display. Output retention is 0..4 MiB.
 
 `read_file` normalizes its line window once. `from_line`/`to_line` are positive
 1-based inclusive integers; `limit` alone reads the first N lines. The legacy
@@ -336,10 +346,11 @@ target reuses a matching chat or gets a new unique buffer. A missing record does
 not allocate a chat. Transactional restore remains tracked in `todo.md`.
 
 Shell validation and approval are best-effort guards, not an operating-system
-sandbox. Keep shell confirmation enabled for untrusted commands; command strings
+sandbox. Rust shell execution always requires explicit approval, even if the
+legacy `kargu-permission-confirm-bash` option is nil. Command strings
 can invoke scripts and interpreters whose filesystem effects cannot be inferred
 by the path tokenizer. Missing variables and shell-local `PWD`/`OLDPWD` expansions
-require explicit approval even when ordinary shell confirmation is disabled.
+require explicit approval as well.
 Remaining parser limitations are tracked in `todo.md`.
 
 Webfetch validates numeric resolver results before pinning a connection and

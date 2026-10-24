@@ -281,18 +281,6 @@
          (should (string-match-p "Allowed project root:" msg))
          (should (string-match-p "Guidance:" msg)))))))
 
-(ert-deftest kargu-permission-detailed-bash-rejection-test ()
-  "Ensure kargu-bash-run user rejection returns detailed context and guidance."
-  (let ((kargu-permission--mock-decision :reject))
-    (condition-case err
-        (kargu-bash-run "python3 script.py")
-      (error
-       (let ((msg (error-message-string err)))
-         (should (string-match-p "Command execution was rejected by the user" msg))
-         (should (string-match-p "Rejected command:.*python3 script.py" msg))
-         (should (string-match-p "Allowed project root:" msg))
-         (should (string-match-p "Guidance:" msg)))))))
-
 (ert-deftest kargu-permission-detailed-mode-gating-test ()
   "Ensure kargu-loop--gate-tool returns detailed error messages for blocked mutating tools."
   (let ((_ (kargu-test-mode 'plan)))

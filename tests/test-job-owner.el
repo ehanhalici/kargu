@@ -83,10 +83,10 @@
                :id "p99" :root root :service svc :state :running)))
     (setf (kargu-job-service-active-async-proc svc) 'fake-proc)
     (setq kargu-bash--active-async-proc 'fake-proc)
-    (setf (kargu-bash--job-process job) 'fake-proc)
-    (cl-letf (((symbol-function 'kargu-process-cancel) #'ignore))
+    (setf (kargu-bash--job-handle job) 'fake-proc)
+    (cl-letf (((symbol-function 'kargu-bridge-job-cancel) #'ignore))
       (kargu-job-cancel job 0.01))
-    (should (eq (kargu-bash--job-state job) :cancelled))
+    (should (eq (kargu-bash--job-state job) :cancelling))
     (should-not (kargu-job-service-active-async-proc svc))
     (should-not kargu-bash--active-async-proc)))
 

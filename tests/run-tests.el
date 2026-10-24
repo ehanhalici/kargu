@@ -27,6 +27,7 @@
 (require 'tests/test-helpers)
 (require 'tests/test-bridge)
 (require 'tests/test-bridge-jobs)
+(require 'tests/test-native-bash)
 (require 'tests/test-migration-fixtures)
 (require 'tests/test-modules)
 (require 'tests/test-application-context)

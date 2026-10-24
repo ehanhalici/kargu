@@ -1,5 +1,27 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — Bash OS engine cutover
+
+`eb59416` owned job client/claim/merged pipe; `5f5994d` incremental UTF-8
+polling ve shared permission snapshot ardından Bash gerçek Rust job portuna
+bağlandı. Elisp Bash spawn/PID/PGID/signal motoru kaldırıldı; editor log,
+cached UI routing/pruning ve presentation korunur. No fallback. Ayrıntı ve
+callback/approval uyumluluk sınırı 23_NATIVE_BASH_CUTOVER.md'dedir.
+
+Nix 202 env entry bulgusu: 512-entry bounded capture, mevcut 64KiB byte
+sınırı korunarak test edildi. Shutdown RPC 5s -> 12s; dış kapanış 15s.
+TERM-ignore child testi gerçek drain cevabı ve /proc temizliğini denetler.
+
+**1168/1168 full ERT expected**, 0 unexpected, **93.02 s**; **66 Rust testi +
+2 compile-fail**; fmt, locked build/test, strict Clippy, warning-as-error
+bytecompile ve checkdoc başarılı. .elc çıktıları kaldırıldı. Bounded process
+535/179/depth9, process-session 129/42/depth7, approval 8194/1536/depth11
+yeniden hatasız; yeni concrete runtime için refinement ispatı değildir.
+
+Kalan shared process/session, policy parser ve read/search/Git tüketicileri
+taşınmadan silinmez. API -> Rust + dört application backend açık kapsamdır.
+Kullanıcıya ait shell.nix ve 07 fence değişiklikleri commit dışında korunur.
+
 ## 2026-10-24 — Persistent execution ve owned job köprüsü
 
 Kullanıcının devam/commit döngüsüyle üç küçük dilim:

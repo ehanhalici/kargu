@@ -76,29 +76,6 @@
       ;; Cleanup buffer
       (kill-buffer buf-name))))
 
-(ert-deftest kargu-bash-background-process-test ()
-  "Test starting a background process with bash and managing it (list, status, kill)."
-  (let* ((kargu-permission--mock-decision :approve)
-         (kargu-permission-confirm-bash nil)
-         ;; Start background sleep process
-         (result (kargu-bash-run "sleep 10" default-directory t)))
-    (should (string-match-p "Process started in background: ID=\\[\\(p[0-9]+\\)\\]" result))
-    (string-match "\\[\\(p[0-9]+\\)\\]" result)
-    (let ((id (match-string 1 result)))
-      (should id)
-      ;; 1. Test list command
-      (let ((list-out (kargu-bash-run "list")))
-        (should (string-match-p id list-out)))
-      ;; 2. Test status command
-      (let ((status-out (kargu-bash-run (concat "status " id))))
-        (should (string-match-p "RUNNING" status-out)))
-      ;; 3. Test kill command
-      (let ((kill-out (kargu-bash-run (concat "kill " id))))
-        (should (string-match-p "terminated" kill-out)))
-      ;; Process should no longer be listed
-      (let ((status-after (kargu-bash-run (concat "status " id))))
-        (should (string-match-p "ERROR: no background process" status-after))))))
-
 (ert-deftest kargu-model-supports-tools-default-test ()
   "Tools stay available unless the API explicitly disables them."
   (let ((kargu--model-metadata-table (make-hash-table :test 'equal))

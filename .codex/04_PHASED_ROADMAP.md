@@ -78,8 +78,10 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
     (18); sabit `list_files` GNU ls adapter'ı aynı execution yolunda (19).
   - [x] Emacs owned reverse approval presenter ve gerçek pipe public
     `kargu-bridge-execute` adapter testi (18). Bu port noninteractive'dir.
-  - [ ] Genel Bash/job consumer cutover; interactive stdin/status/output/poll
-    sözleşmesi taşınmadan eski Elisp executor kaldırılmaz.
+  - [x] Genel Bash/job consumer cutover: owned native jobs + output poll,
+    foreground/background callback, gerçek cancellation/drain; eski Bash OS
+    executor silindi (20–23). Generic job stdin/EOF portu hazırdır; ayrı
+    `tools/process/session.el` idle-timeout tüketicisi henüz taşınmamıştır.
 - [ ] Process startup barrier, group supervision, bounded stdout/stderr,
   interactive stdin/poll/EOF/cancel ve TERM/KILL/reap uygulansın.
 - [ ] Read/search/Git/skill/webfetch portları ve capability discovery taşınsın.

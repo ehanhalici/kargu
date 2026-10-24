@@ -197,5 +197,31 @@
         (when pid (should-not (file-exists-p (format "/proc/%s" pid))))
         (delete-directory root t)))))
 
+(ert-deftest kargu-bridge-job-shutdown-waits-beyond-term-grace-test ()
+  "The client keeps the shutdown RPC alive through native TERM/grace/KILL/drain."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-shutdown-drain-" t)) job reply failure
+          (call (symbol-function 'kargu-bridge-call)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation) #'kargu-bridge-job-test--approve)
+                    ((symbol-function 'kargu-bridge-call)
+                     (lambda (connection method params callback &rest options)
+                       (apply call connection method params
+                              (if (equal method "shutdown")
+                                  (lambda (value error-data)
+                                    (setq reply value failure error-data)
+                                    (funcall callback value error-data)) callback) options))))
+            (setq job (kargu-bridge-job-test--start conn root "trap '' TERM; printf ready; while :; do read value || :; done"))
+            (kargu-bridge-test--wait
+             (lambda () (let ((page (kargu-bridge-job-test--call #'kargu-bridge-job-read job "stdout" 0)))
+                          (> (length (gethash "data" page)) 0))))
+            (kargu-bridge-stop conn)
+            (kargu-bridge-test--wait (lambda () (eq (kargu-bridge-status conn) 'closed)))
+            (should-not failure)
+            (should (eq reply :json-null))
+            (should-not (file-exists-p (format "/proc/%s" (kargu-bridge-job-pid job)))))
+        (kargu-bridge-job-test--dispose job)
+        (delete-directory root t)))))
+
 (provide 'tests/test-bridge-jobs)
 ;;; test-bridge-jobs.el ends here

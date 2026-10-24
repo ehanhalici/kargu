@@ -214,34 +214,6 @@
       (should (equal (buffer-string) "zend"))
       (should (plist-get state :truncated)))))
 
-(ert-deftest kargu-bash-job-is-live-bounded-and-cancellable-test ()
-  "Long jobs can be inspected and cancelled while their output stays bounded."
-  (let ((kargu-bash-timeout nil) (kargu-process-timeout 0.01)
-        (kargu-process-max-bytes 256) (kargu-permission-confirm-bash nil)
-        (kargu-bash--processes (make-hash-table :test #'equal))
-        result process job)
-    (unwind-protect
-        (progn
-          (setq process (kargu-bash--run-async
-                         "echo started; sleep 30" default-directory
-                         (kargu-bash--resolve-shell) (lambda (value) (setq result value))))
-          (maphash (lambda (_id value) (setq job value)) kargu-bash--processes)
-          (accept-process-output process 0.05)
-          (should (process-live-p process))
-          (should-not result)
-          (should (string-search "started" (kargu-bash-manage-job
-                                             (concat "status " (kargu-bash--job-id job)))))
-          (kargu-bash-cancel-process (kargu-bash--job-id job))
-          (let ((deadline (+ (float-time) 2)))
-            (while (and (not result) (< (float-time) deadline))
-              (accept-process-output nil 0.02)))
-          (should result)
-          (should-not (process-live-p process))
-          (should (eq (kargu-bash--job-state job) :cancelled)))
-      (when process (kargu-process-cancel process))
-      (when (and job (buffer-live-p (kargu-bash--job-buffer job)))
-        (kill-buffer (kargu-bash--job-buffer job))))))
-
 (ert-deftest kargu-process-cancel-terminates-child-process-group-test ()
   "Cancelling a Unix shell also stops its long-running child."
   (skip-unless (memq system-type '(gnu/linux darwin berkeley-unix)))

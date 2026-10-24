@@ -18,8 +18,6 @@
 (require 'kargu/contract)
 (require 'kargu/api/tools)
 (require 'kargu/permission)
-(require 'kargu/permission/execute)
-(require 'kargu/tools/process)
 
 (defgroup kargu-bash nil
   "Shell command tool."
@@ -54,61 +52,23 @@
       (executable-find "sh")
       (error "Bash tool requires an executable bash or sh")))
 
-(defun kargu-bash--run-background (command dir shell)
-  "Start persistent COMMAND in DIR using SHELL and return its job ID."
-  (kargu-bash-start-job command dir shell :background t))
+(defun kargu-bash--run-background (command dir shell callback)
+  "Start persistent COMMAND in DIR using SHELL and deliver receipt to CALLBACK."
+  (kargu-bash-start-job command dir shell :background t :callback callback))
 
 (defun kargu-bash--run-async (command dir shell callback)
   "Run COMMAND in DIR using SHELL, delivering output to CALLBACK."
   (kargu-bash-start-job command dir shell :callback callback))
 
 (defun kargu-bash--manage-kill (id)
-  "Cancel and forget shell job ID."
+  "Request cancellation of shell job ID without discarding its live log."
   (kargu-bash-manage-job (concat "kill " id)))
-
-(defun kargu-bash--rejection-text (command dir root)
-  "Model-facing text for a COMMAND in DIR the user refused (ROOT is the project)."
-  (concat "Permission denied: Command execution was rejected by the user.\n"
-          "  - Rejected command: '" command "'\n"
-          "  - Working directory: '" dir "'\n"
-          "  - Allowed project root: '" root "'\n"
-          "  - Reason: The user chose not to grant execution permission for this shell command.\n"
-          "  - Guidance: Do not repeatedly execute the identical command without user clarification. Consider an alternative approach that works strictly within '" root "' or ask the user for guidance."))
-
-(defun kargu-bash--start (command dir background callback)
-  "Start approved COMMAND in DIR and deliver output to CALLBACK.
-Return a persistent process identifier when BACKGROUND is non-nil."
-  (let ((shell (kargu-bash--resolve-shell)))
-    (cond
-     (background
-      (let ((res (kargu-bash--run-background command dir shell)))
-        (if callback (funcall callback res) res)))
-     (callback
-      (let ((process (kargu-bash--run-async command dir shell callback))
-            (task kargu-async--current-task))
-        (when (and task (processp process))
-          (kargu-async-add-cleanup task (lambda () (kargu-process-cancel process))))
-        process))
-     (t
-      (error "Bash commands never run synchronously: pass a CALLBACK")))))
-
-(defun kargu-bash--run-async-approved (command dir root background callback)
-  "Approve COMMAND in DIR within ROOT and deliver output to CALLBACK.
-Start a persistent process when BACKGROUND is non-nil."
-  (let ((command (copy-sequence command)) (dir (copy-sequence dir))
-        (root (copy-sequence root)))
-    (kargu-permission-execute
-     :command command :directory dir :risks (kargu-permission-command-risks command)
-     :valid-p (lambda () (kargu-permission-validate-command command root dir) t)
-     :start (lambda (done) (kargu-bash--start command dir background done))
-     :callback callback)))
 
 (defun kargu-bash-run (command &optional cwd background callback)
   "Run COMMAND in CWD, capturing stdout and stderr.
 With CALLBACK the call returns at once: approval, execution and the result
-all arrive asynchronously.  Without CALLBACK only background processes and
-process management (`list', `status', `kill') are served, since Emacs never
-waits for a command.
+all arrive asynchronously.  Without CALLBACK only cached UI list/status/kill
+management is served; starting any command requires CALLBACK.
 When BACKGROUND is non-nil, start a persistent background process.
 Strictly validates that CWD and all path arguments stay within project root."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p command
@@ -119,13 +79,9 @@ Strictly validates that CWD and all path arguments stay within project root."
       (let* ((root (kargu-permission-project-root))
              (dir (kargu-bash--cwd cwd)))
         (kargu-permission-validate-command command root dir)
-        (cond
-         (callback
-          (kargu-bash--run-async-approved command dir root background callback))
-         ((kargu-permission-request-approval
-           command dir (kargu-permission-command-risks command))
-          (kargu-bash--start command dir background nil))
-         (t (error "%s" (kargu-bash--rejection-text command dir root))))))))
+        (unless callback (error "Bash commands run asynchronously: pass a CALLBACK"))
+        (kargu-bash-start-job command dir (kargu-bash--resolve-shell)
+                              :background background :callback callback)))))
 
 (defun kargu-bash-register-tools ()
   "Register the bash tool."

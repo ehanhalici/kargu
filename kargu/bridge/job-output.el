@@ -69,11 +69,11 @@
                        (kargu-bridge-output-carry reader) (cdr decoded))
                  (funcall (kargu-bridge-output-output reader) (car decoded)
                           (or gap (eq (gethash "truncated" page) t)))
-                 (kargu-bridge-output--status reader eof)))
+                 (kargu-bridge-output--status reader eof (> (length data) 0))))
            (error (kargu-bridge-output--finish reader nil (kargu-bridge--fault "output_failed")))))))))
 
-(defun kargu-bridge-output--status (reader eof)
-  "Poll READER's native completion after a page marked EOF or not."
+(defun kargu-bridge-output--status (reader eof progress)
+  "Poll READER after a page marked EOF or not; PROGRESS permits a prompt next page."
   (kargu-bridge-job-status
    (kargu-bridge-output-job reader)
    (lambda (snapshot error-data)
@@ -83,7 +83,7 @@
         ((and eof (hash-table-p snapshot) (equal (gethash "state" snapshot) "exited"))
          (kargu-bridge-output--finish reader (gethash "result" snapshot) nil))
         (t (setf (kargu-bridge-output-timer reader)
-                 (run-at-time 0.05 nil #'kargu-bridge-output--tick reader))))))))
+                 (run-at-time (if progress 0 0.05) nil #'kargu-bridge-output--tick reader))))))))
 
 (defun kargu-bridge-output-start (job on-output on-finish)
   "Stream JOB's merged/stdout text to ON-OUTPUT (TEXT TRUNCATED).
