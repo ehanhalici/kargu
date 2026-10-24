@@ -219,13 +219,25 @@ this waiter; it never kills a connection used by another task."
 (cl-defun kargu-bridge-find-files (connection arguments callback &key owner)
   "Run native file discovery with ARGUMENTS on CONNECTION for OWNER.
 CALLBACK receives the native (RESULT ERROR).  No Elisp fallback is executed."
+  (kargu-bridge--workspace-read connection arguments callback :owner owner
+                               :method "workspace/findFiles" :capability "workspace_find_files"))
+
+(cl-defun kargu-bridge-list-files (connection arguments callback &key owner)
+  "List a directory using ARGUMENTS on CONNECTION for OWNER.
+CALLBACK receives the native (RESULT ERROR).  Never scan directories in Elisp."
+  (kargu-bridge--workspace-read connection arguments callback :owner owner
+                               :method "workspace/listFiles" :capability "workspace_list_files"))
+
+(cl-defun kargu-bridge--workspace-read (connection arguments callback &key owner method capability)
+  "Call read METHOD with ARGUMENTS on CONNECTION for OWNER.
+Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
   (if (not (and (eq (kargu-bridge-status connection) 'ready)
-                (member "workspace_find_files" (append (kargu-bridge-connection-capabilities connection) nil))
+                (member capability (append (kargu-bridge-connection-capabilities connection) nil))
                 (hash-table-p (kargu-bridge-connection-read-scope connection))))
       (progn (kargu-bridge--callback callback nil
-                                    (kargu-bridge--fault "unavailable" "Native file discovery unavailable; rebuild kargu-core")) nil)
+                                    (kargu-bridge--fault "unavailable" "Native workspace read unavailable; rebuild kargu-core")) nil)
     (kargu-bridge-call
-     connection "workspace/findFiles"
+     connection method
      (kargu-bridge--object "scope" (kargu-bridge-connection-read-scope connection) "arguments" arguments)
      callback :owner owner)))
 
@@ -389,7 +401,9 @@ Raw stderr is deliberately discarded: future backends may put secrets there."
 (defun kargu-bridge--bind-read-service (connection callback)
   "Bind CONNECTION's read-service session before completing startup CALLBACK.
 This is an adapter service identity, not an imported user conversation or run."
-  (if (not (member "workspace_find_files" (append (kargu-bridge-connection-capabilities connection) nil)))
+  (if (not (cl-some (lambda (capability)
+                     (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
+                   '("workspace_find_files" "workspace_list_files")))
       (kargu-bridge--start-finish connection callback nil)
     (setf (kargu-bridge-connection-state connection) 'binding)
     (kargu-bridge-call

@@ -63,7 +63,7 @@ Clone the repository and add it to your Emacs `load-path`:
 ### Experimental Rust core
 
 The Rust core provides bounded JSON-RPC IPC, application/session lifecycle,
-and native `find_files` discovery (including its existing aliases). The Elisp
+and native `find_files` / `list_files` discovery (including their aliases). The Elisp
 agent still owns prompts and model requests; this is not yet a Rust agent backend.
 
 The Rust library now includes typed run admission, single-use approvals and a
@@ -82,7 +82,7 @@ cargo build --manifest-path kargu-core/Cargo.toml --locked
 ;; M-x kargu-bridge-start, kargu-bridge-status, kargu-bridge-stop
 ```
 
-Loading Kargu does not start the binary. The first `find_files` invocation
+Loading Kargu does not start the binary. The first `find_files` or `list_files` invocation
 starts and negotiates a shared connection asynchronously. Configure the binary
 path above or install `kargu-core` on PATH. Missing binaries/capabilities are
 reported explicitly; there is no duplicate Elisp glob implementation or silent
@@ -92,7 +92,14 @@ packages, credentials, and `plz`.
 Native discovery includes hidden sources, honors `kargu-fs-skip-dirs`, and skips
 compiled/backup artifacts. It does not depend on fd/rg or machine-global Git
 ignore settings. Visit/output limits report incomplete searches explicitly;
-discovered symlinks are not followed. Stop revokes only the owning request.
+discovered symlinks are not followed. Direct directory listings retain the
+`[DIR]` / `[FILE]` labels and mark symlinks `[LINK]` without following their
+targets. Listing retains compiled/backup entries, unlike glob discovery.
+`kargu-search-list-max-entries` bounds inspected entries independently of the
+retained-result/byte limits. The Lisp entry point is now asynchronous:
+`(kargu-search-list-files path callback)`; calls without a callback return an
+explicit error, never an implicit wait or an Elisp directory scan.
+Stop revokes only the owning request.
 Filesystem cancellation is cooperative between OS calls, not a guarantee of
 interrupting a stalled filesystem syscall.
 

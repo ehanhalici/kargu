@@ -205,6 +205,52 @@
             (should (eq (gethash "truncated" reply) :json-false)))
         (delete-directory root t)))))
 
+(ert-deftest kargu-bridge-real-native-list-files-test ()
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-native-list-" t)) finished reply failure)
+      (unwind-protect
+          (progn
+            (write-region "fixture" nil (expand-file-name "kaynak.el" root) nil 'silent)
+            (kargu-bridge-list-files
+             conn (kargu-bridge--object "root" root "path" :json-null
+                                       "skip_directories" [] "max_entries" 2000)
+             (lambda (result error-data) (setq reply result failure error-data finished t)))
+            (kargu-bridge-test--wait (lambda () finished))
+            (should-not failure)
+            (should (equal (gethash "text" reply) "[FILE] kaynak.el"))
+            (should (equal (gethash "kind" (aref (gethash "entries" reply) 0)) "file"))
+            (should (eq (gethash "truncated" reply) :json-false)))
+        (delete-directory root t)))))
+
+(ert-deftest kargu-bridge-missing-listing-capability-fails-without-disconnecting-test ()
+  (let ((conn (kargu-bridge--connection-create
+               :state 'ready :capabilities ["workspace_find_files"]
+               :read-scope (kargu-bridge--object)))
+        failure (count 0))
+    (cl-letf (((symbol-function 'kargu-bridge-call) (lambda (&rest _) (ert-fail "Unnegotiated method called"))))
+      (should-not (kargu-bridge-list-files
+                   conn (kargu-bridge--object)
+                   (lambda (_result error-data) (cl-incf count) (setq failure error-data))))
+      (should (= count 1))
+      (should (equal (gethash "status" (gethash "data" failure)) "unavailable"))
+      (should (eq (kargu-bridge-status conn) 'ready)))))
+
+(ert-deftest kargu-bridge-listing-only-capability-binds-read-service-test ()
+  (let ((conn (kargu-bridge--connection-create :capabilities ["workspace_list_files"])) ready failure methods)
+    (cl-letf (((symbol-function 'kargu-bridge-call)
+               (lambda (_conn method _arguments callback &rest _options)
+                 (push method methods)
+                 (funcall callback
+                          (if (equal method "application/create")
+                              (kargu-bridge--object "application_id" "app_fixture")
+                            (kargu-bridge--object "application_id" "app_fixture" "session_id" "sess_fixture")) nil))))
+      (kargu-bridge--bind-read-service conn (lambda (value error-data) (setq ready value failure error-data)))
+      (should-not failure)
+      (should (eq ready conn))
+      (should (eq (kargu-bridge-status conn) 'ready))
+      (should (hash-table-p (kargu-bridge-connection-read-scope conn)))
+      (should (equal (nreverse methods) '("application/create" "session/create"))))))
+
 (ert-deftest kargu-bridge-real-concurrent-ensure-binds-one-service-session-test ()
   (let* ((binary (getenv "KARGU_CORE_TEST_BINARY"))
          (kargu-bridge-binary-path binary) (kargu-bridge--connection nil)

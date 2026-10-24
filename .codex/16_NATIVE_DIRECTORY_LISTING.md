@@ -61,9 +61,45 @@ foreign/closed owner ve small-frame error testleri eklendi. Ortak ledger'da
 find/list toplam kapasitesi, request-scoped cancel, late expired/closed owner
 publication reddi test edilir. Önceki process/approval testleri de korunur.
 
-Emacs facade geçişi ve final ERT/compile sonucu sonraki adımda eklenecek.
+Aşağıdaki ilk regresyon native commit öncesinin kaydıdır; frontend cutover
+ve final kabul sonraki bölümde kayıtlıdır.
 
 Native dilim sonrası mevcut full ERT: **1137/1137 expected, 0 unexpected**,
 47.52 s. Bu koşuda listeleme tüketicisi henüz eski Elisp yoludur; yeni native
 servis eşdeğerliği Rust/gerçek-stdio testleriyle doğrulanmıştır. Locked fmt ve
 strict all-target Clippy temiz. Henüz frontend cutover yapılmış gibi sunulmaz.
+
+## Emacs cutover ve legacy silme
+
+Native servis/test dilimi `3fa1a45` ile commit'lendi. Ardından `list_files`,
+`ls` ve `dir`, mevcut tool gate/mode/schema/alias zinciri üzerinden Rust'a
+yönlendirildi. `kargu-search-list-files` içindeki `directory-files`, entry türü
+kararı, label/sort ve join engine'i silindi. Ortak find/list adapter'ı yalnız
+argüman snapshot'ı, startup, callback ve owner cleanup yürütür; domain taraması
+ve formatlama Rust'tadır. `kargu-fs-walk` ve grep'in canlı tüketicileri silinmedi.
+
+Public tool adları, alias'ları ve schema korunur. Lisp façade adı ve ilk PATH
+argümanı kalır, sonuç callback ile gelir: `(kargu-search-list-files path callback)`.
+Callback'siz eski senkron çağrı açık hata döndürür; Emacs'te Rust bekleyen bir
+sync bridge eklenmez. `kargu-search-list-max-entries` varsayılan 2000, max
+100.000 ayrı entry budget'tır. Find/list aynı parent task + captured buffer
+temizliğini paylaşır; Stop kendi RPC'sini iptal eder, geç output teslim edilmez.
+Capability'siz eski binary'de açık unavailable vardır, eski scanner'a replay yoktur.
+
+Eşdeğerlik kanıtı: eski `kargu-search-list-files-test` aynı etiket/sıra çıktısını
+gerçek core callback'inden denetler. Rust domain testleri immediate/subdirectory,
+hidden/compiled/backup ve configurable exclusion davranışını korur. Yeni ERT
+`list_files`/`ls`/`dir` adlarını dört mode'da gerçek gate üzerinden çalıştırır;
+file target error, empty/partial/link ve scope cleanup test edilir. Kontrollü
+façade testinde `directory-files` çağrısı hata üretecek şekilde kapalıdır; sonuç
+yine native porttan alınır. Duplicate/malformed callback, missing binary/capability,
+late result ve parent cancellation testleri eklenmiştir. Listing-only capability
+bulunan peer de read-service startup yapabilir; find capability zorunlu değildir.
+
+Final kabul: **1146/1146 full ERT expected, 0 unexpected, 0 skipped**. Odaklı
+Son full koşu güncel binary ve .elc olmadan kaynaklardan: **47.79 saniye**.
+bridge/search: **39/39**; bunun **20** testi bağımsız bridge suite'indedir.
+Rust: **47 test + 2 compile-fail doctest**. Locked fmt/strict all-target Clippy,
+warning-as-error byte compilation ve checkdoc geçer. TLA+ modelleri değiştirilmedi;
+bu read-service uygulaması için yeni model/refinement kanıtı iddia edilmez.
+Uzak CI ve gerçek provider/CLI/MCP testi bu dilimde çalıştırılmadı.

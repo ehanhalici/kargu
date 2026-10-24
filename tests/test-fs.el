@@ -257,6 +257,101 @@
         (should (= 0 (kargu-tool-execution-active-task-count kargu--tool-registry "find_files")))
         (should (= 0 (hash-table-count (kargu-bridge-connection-pending conn))))))))
 
+(ert-deftest kargu-search-listing-without-callback-is-explicitly-nonblocking-test ()
+  "The old synchronous signature never starts an implicit wait or scanner."
+  (cl-letf (((symbol-function 'kargu-bridge-ensure) (lambda (&rest _) (ert-fail "Unexpected startup"))))
+    (should (string-prefix-p "ERROR: directory listing runs asynchronously" (kargu-search-list-files)))))
+
+(ert-deftest kargu-search-listing-parent-cancel-revokes-rpc-and-ignores-late-result-test ()
+  "A cancelled native listing cannot deliver stale output or kill a sibling."
+  (let* ((kargu--loop-run nil) (kargu-execution--current nil) (kargu-async--current-task nil)
+         (parent (kargu-async-start #'ignore :owner nil :parent nil))
+         (connection (kargu-bridge--connection-create :state 'ready)) reply cancelled delivered child)
+    (unwind-protect
+        (cl-letf (((symbol-function 'kargu-bridge-ensure)
+                   (lambda (callback) (funcall callback connection nil) #'ignore))
+                  ((symbol-function 'kargu-bridge-list-files)
+                   (lambda (_connection _arguments callback &rest _options) (setq reply callback) "list-rpc"))
+                  ((symbol-function 'kargu-bridge-cancel)
+                   (lambda (conn id) (push (cons conn id) cancelled))))
+          (let ((kargu-async--current-task parent))
+            (setq child (kargu-search-list-files nil (lambda (text) (setq delivered text)))))
+          (kargu-async-cancel parent)
+          (should (eq (kargu-async-task-state child) :cancelled))
+          (should (equal cancelled (list (cons connection "list-rpc"))))
+          (funcall reply (kargu-bridge--object "text" "late") nil)
+          (should-not delivered))
+      (kargu-async-cancel parent))))
+
+(ert-deftest kargu-search-listing-captures-policy-and-does-not-rescan-in-elisp-test ()
+  "Root, target, exclusions and entry limits are captured for native execution."
+  (let ((connection (kargu-bridge--connection-create :state 'ready))
+        (kargu-search-list-max-entries 17) seen result)
+    (cl-letf (((symbol-function 'kargu-bridge-ensure)
+               (lambda (callback) (funcall callback connection nil) #'ignore))
+              ((symbol-function 'kargu-bridge-list-files)
+               (lambda (_conn arguments callback &rest _options)
+                 (setq seen arguments)
+                 (funcall callback (kargu-bridge--object "text" "native-listing") nil) nil))
+              ((symbol-function 'directory-files) (lambda (&rest _) (ert-fail "Elisp directory scan executed"))))
+      (kargu-search-list-files nil (lambda (text) (setq result text)))
+      (should (= (gethash "max_entries" seen) 17))
+      (should (equal (gethash "skip_directories" seen) (vconcat kargu-fs-skip-dirs)))
+      (should (stringp (gethash "root" seen)))
+      (should (stringp (gethash "path" seen)))
+      (should (equal result "native-listing")))))
+
+(ert-deftest kargu-search-listing-native-errors-and-invalid-results-finish-once-test ()
+  "Malformed output and native failure remain explicit terminal errors."
+  (let ((connection (kargu-bridge--connection-create :state 'ready)))
+    (dolist (failure '(nil native unavailable))
+      (let ((count 0) result)
+        (cl-letf (((symbol-function 'kargu-bridge-ensure)
+                   (lambda (callback)
+                     (funcall callback (unless (eq failure 'unavailable) connection)
+                              (and (eq failure 'unavailable) (kargu-bridge--fault "unavailable"))) #'ignore))
+                  ((symbol-function 'kargu-bridge-list-files)
+                   (lambda (_conn _args callback &rest _options)
+                     (dotimes (_ 2)
+                       (funcall callback (kargu-bridge--object "text" 7)
+                                (and (eq failure 'native) (kargu-bridge--fault "io_error")))) nil)))
+          (kargu-search-list-files nil (lambda (text) (cl-incf count) (setq result text)))
+          (should (= count 1))
+          (should (string-prefix-p "ERROR:" result)))))))
+
+(ert-deftest kargu-search-listing-canonical-alias-mode-and-path-equivalence-test ()
+  "Real list_files/ls/dir calls keep their schema and read-only mode gate."
+  (kargu-bridge-test--with-core
+    (kargu-fs-test--with-tree '(("root.el" . "x") ("src/child.el" . "x") ("node_modules/ignored.el" . "x"))
+      (let ((kargu--tool-registry (kargu-tool-registry-create))
+            (kargu-permission--override-root root) (kargu--loop-run nil))
+        (kargu-search-register-tools)
+        (dolist (mode '(ask plan debug agent))
+          (let ((context (kargu-tool-execution-context-create
+                          :root root :mode mode :policy-revision (kargu-tool-registry-revision kargu--tool-registry))))
+            (dolist (name '("list_files" "ls" "dir"))
+              (should (equal (kargu-test-await
+                              (lambda (done) (kargu-tool-gate-execute kargu--tool-registry context name nil :callback done)))
+                             "[DIR]  src\n[FILE] root.el")))))
+        (should (equal (kargu-test-await (lambda (done) (kargu-search-list-files "src" done))) "[FILE] src/child.el"))
+        (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-search-list-files "root.el" done)))))
+        (should (= 0 (kargu-tool-execution-active-task-count kargu--tool-registry "list_files")))
+        (should (= 0 (hash-table-count (kargu-bridge-connection-pending conn))))))))
+
+(ert-deftest kargu-search-listing-empty-partial-symlink-and-custom-exclusion-test ()
+  "Real native output distinguishes empty, incomplete and symbolic entries."
+  (kargu-bridge-test--with-core
+    (kargu-fs-test--with-tree '(("src/a.el" . "x") ("src/b.el" . "x"))
+      (let ((kargu-permission--override-root root))
+        (make-directory (expand-file-name "empty" root))
+        (make-symbolic-link "missing-target" (expand-file-name "broken" root))
+        (should (equal (kargu-test-await (lambda (done) (kargu-search-list-files "empty" done))) "(empty directory)"))
+        (should (string-search "[LINK] broken" (kargu-test-await (lambda (done) (kargu-search-list-files nil done)))))
+        (let ((kargu-search-list-max-entries 1))
+          (should (string-search "omitted" (kargu-test-await (lambda (done) (kargu-search-list-files "src" done))))))
+        (let ((kargu-fs-skip-dirs '("src" "broken")))
+          (should (equal (kargu-test-await (lambda (done) (kargu-search-list-files nil done))) "[DIR]  empty")))))))
+
 (ert-deftest kargu-fs-has-file-p-test ()
   "Existence is checked under the given root only."
   (kargu-fs-test--with-tree '(("Cargo.toml" . ""))

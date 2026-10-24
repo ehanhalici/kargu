@@ -6,7 +6,7 @@
 
 ;;; Commentary:
 
-;; Read-only workspace search.  Grep uses external tools; file discovery is
+;; Read-only workspace search.  Grep uses external tools; file discovery/listing is
 ;; owned by the Rust core through `kargu/bridge'.  Shared exclusions come from
 ;; `kargu/fs'.  Public: `kargu-search-grep',
 ;; `kargu-search-glob', `kargu-search-register-tools'.
@@ -16,6 +16,7 @@
 ;;  * `workspace_grep'  — ripgrep (`rg') when available, otherwise
 ;;    GNU grep.  Returns path:line:text hits, capped.
 ;;  * `find_files_by_glob' — bounded native Rust file discovery.
+;;  * `list_files' — bounded native Rust directory listing.
 ;;
 ;; Both stay visible in ask/plan/debug (they do not mutate files).
 
@@ -40,6 +41,13 @@
 
 (defcustom kargu-search-default-max-matches 50
   "Default cap on grep hits returned to the model."
+  :type 'natnum
+  :group 'kargu-search)
+
+(defcustom kargu-search-list-max-entries 2000
+  "Maximum entries inspected by a native directory listing.
+Excluded names count against this budget.  Rust enforces a hard maximum of
+100000, plus independent retained-result and byte limits."
   :type 'natnum
   :group 'kargu-search)
 
@@ -206,23 +214,23 @@ ROOT is the working directory; GLOB filters files; CAP bounds reported hits."
          "• `rg` (ripgrep) is available and recommended for searching code (preferred over `grep`).\n"
        "• `grep` is available for searching code.\n"))))
 
-(defun kargu-search-list-files (&optional path)
-  "List files and directories directly under PATH (default: project root)."
-  (let* ((root (kargu-search--root))
-         (target (kargu-search--resolve path root)))
-    (unless (file-directory-p target)
-      (error "Path %s is not a directory" target))
-    (let* ((entries (directory-files target nil directory-files-no-dot-files-regexp t))
-           (lines nil))
-      (dolist (entry entries)
-        (unless (member entry kargu-fs-skip-dirs)
-          (let* ((full (expand-file-name entry target))
-                 (is-dir (file-directory-p full))
-                 (rel (kargu-search--rel full root)))
-            (push (format "%s %s" (if is-dir "[DIR] " "[FILE]") rel) lines))))
-      (if (null lines)
-          "(empty directory)"
-        (string-join (sort (nreverse lines) #'string<) "\n")))))
+(defun kargu-search-list-files (&optional path callback)
+  "Asynchronously list entries under PATH (default: project root) to CALLBACK.
+Return an owned async task.  Without CALLBACK return an explicit error, never
+wait for Rust or run the removed synchronous directory scanner."
+  (if (not callback)
+      "ERROR: directory listing runs asynchronously; provide a callback"
+    (let* ((root (kargu-search--root))
+           (target (kargu-search--resolve path root))
+           (arguments (kargu-search--native-arguments root target)))
+      (puthash "max_entries" kargu-search-list-max-entries arguments)
+      (kargu-search--native-call callback arguments #'kargu-bridge-list-files))))
+
+(defun kargu-search--native-arguments (root target)
+  "Capture the shared immutable read arguments for ROOT and TARGET."
+  (kargu-bridge--object
+   "root" (copy-sequence root) "path" (copy-sequence target)
+   "skip_directories" (vconcat (mapcar #'copy-sequence kargu-fs-skip-dirs))))
 
 (defun kargu-search-glob (callback pattern &optional path)
   "List files matching glob PATTERN under PATH (default: project root).
@@ -232,13 +240,35 @@ Return an owned async task; Stop cancels its pending RPC, not sibling work."
                          "pattern is required: %S" pattern)
   (let* ((root (kargu-search--root))
          (target (kargu-search--resolve path root))
-         (owner (current-buffer))
-         (arguments (kargu-bridge--object
-                     "root" (copy-sequence root) "path" (copy-sequence target)
-                     "pattern" (copy-sequence pattern)
-                     "skip_directories" (vconcat (mapcar #'copy-sequence kargu-fs-skip-dirs))
-                     "max_files" kargu-fs-max-listed-files
-                     "max_directories" kargu-fs-max-visited-directories))
+         (arguments (kargu-search--native-arguments root target)))
+    (puthash "pattern" (copy-sequence pattern) arguments)
+    (puthash "max_files" kargu-fs-max-listed-files arguments)
+    (puthash "max_directories" kargu-fs-max-visited-directories arguments)
+    (kargu-search--native-call callback arguments #'kargu-bridge-find-files)))
+
+(defun kargu-search--native-result (task result error-data)
+  "Finish TASK from one native RESULT or ERROR-DATA without parsing display text."
+  (cond
+   (error-data (kargu-async-finish task nil (gethash "message" error-data "Native read failed")))
+   ((not (and (hash-table-p result) (stringp (gethash "text" result))))
+    (kargu-async-finish task nil "Invalid native read result"))
+   (t (kargu-async-finish task (gethash "text" result)))))
+
+(cl-defun kargu-search--native-dispatch (task &key owner arguments request connection failure)
+  "Dispatch REQUEST with ARGUMENTS on CONNECTION for TASK and OWNER.
+FAILURE is a startup error; a failed start never invokes a fallback."
+  (if failure (kargu-async-finish task nil "Rust core unavailable; check kargu-bridge-binary-path")
+    (let ((id (funcall request connection arguments
+                       (kargu-async-wrap task (lambda (result error-data)
+                                                (kargu-search--native-result task result error-data)))
+                       :owner owner)))
+      (when id
+        (kargu-async-add-cleanup task (lambda () (kargu-bridge-cancel connection id)))))))
+
+(defun kargu-search--native-call (callback arguments request)
+  "Deliver CALLBACK through native REQUEST with captured ARGUMENTS.
+Use the existing parent task, owner buffer and take-once RPC cleanup."
+  (let* ((owner (current-buffer))
          (task (kargu-async-start
                 (lambda (text error-data)
                   (funcall callback (if error-data (concat "ERROR: " error-data) text))))))
@@ -248,20 +278,8 @@ Return an owned async task; Stop cancels its pending RPC, not sibling work."
       (kargu-async-wrap
        task
        (lambda (connection failure)
-         (if failure (kargu-async-finish task nil "Rust core unavailable; check kargu-bridge-binary-path")
-           (let ((id (kargu-bridge-find-files
-                      connection arguments
-                      (kargu-async-wrap
-                       task (lambda (result error-data)
-                              (cond
-                               (error-data
-                                (kargu-async-finish task nil (gethash "message" error-data "Native search failed")))
-                               ((not (and (hash-table-p result) (stringp (gethash "text" result))))
-                                (kargu-async-finish task nil "Invalid native search result"))
-                               (t (kargu-async-finish task (gethash "text" result))))))
-                      :owner owner)))
-             (when id
-               (kargu-async-add-cleanup task (lambda () (kargu-bridge-cancel connection id))))))))))
+         (kargu-search--native-dispatch task :owner owner :arguments arguments
+                                        :request request :connection connection :failure failure)))))
     task))
 
 ;;;; Tool registration -----------------------------------------------------
@@ -318,15 +336,15 @@ a callback is required."
         (kargu--tool-arg args "path" "file_path" "filePath")))))
    (list
     "list_files"
-    "List files and directories directly under a project path (similar to `ls'). Read-only, available in all modes."
+    "List immediate project entries using bounded native Rust discovery (similar to ls). Read-only in all modes. Symlinks are marked LINK without following their targets; incomplete listings are reported explicitly."
     '(("type" . "object")
       ("properties" . (("path" . (("type" . "string")
                                   ("description" . "Directory path to list (default: project root).")))))
       ("required" . []))
-    (lambda (args)
-      (kargu-safe-tool-call
+    (kargu-search--executor
+     (lambda (args done)
        (kargu-search-list-files
-        (kargu--tool-arg args "path" "directory" "dir"))))))
+        (kargu--tool-arg args "path" "directory" "dir") done)))))
   "Tool schemas and executors for search operations.")
 
 (defconst kargu-search--tool-aliases
