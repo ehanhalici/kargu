@@ -16,6 +16,7 @@
 (require 'kargu/chat/prompt)
 (require 'kargu/tools/diff)
 (require 'kargu/tools/search)
+(require 'tests/test-bridge)
 (require 'kargu/tools/webfetch)
 (require 'kargu/tools/bash)
 (declare-function rust-mode "rust-mode" ())
@@ -183,14 +184,15 @@
         (delete-file temp)))))
 
 (ert-deftest kargu-search-glob-subdirectory-test ()
-  "The Elisp glob fallback matches files under subdirectories."
+  "The native adapter matches files under subdirectories."
+  (kargu-bridge-test--with-core
   (kargu-test-with-git-repo '(("kargu/core.el" . "x") ("kargu/tools/a.el" . "y") ("readme.md" . "z"))
     (let* ((target (expand-file-name "kargu" repo))
-           (res (kargu-search--glob-elisp "*.el" target repo)))
+           (res (kargu-test-await (lambda (done) (kargu-search-glob done "*.el" target)))))
       (should (stringp res))
       (should-not (string-prefix-p "No files matching" res))
       (should (string-search "core.el" res))
-      (should-not (string-search "readme.md" res)))))
+      (should-not (string-search "readme.md" res))))))
 
 (ert-deftest kargu-search-list-files-test ()
   "Directory entries have [DIR] and [FILE] tags."

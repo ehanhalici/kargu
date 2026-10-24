@@ -62,10 +62,9 @@ Clone the repository and add it to your Emacs `load-path`:
 
 ### Experimental Rust core
 
-The first Rust migration slice provides bounded JSON-RPC IPC and application/
-session lifecycle operations. The existing Elisp agent remains the default;
-the Rust core does not yet execute prompts or model requests. It also exposes
-the bounded, read-only `workspace/findFiles` service for the next adapter slice.
+The Rust core provides bounded JSON-RPC IPC, application/session lifecycle,
+and native `find_files` discovery (including its existing aliases). The Elisp
+agent still owns prompts and model requests; this is not yet a Rust agent backend.
 
 The Rust library now includes typed run admission, single-use approvals and a
 Linux process supervisor with bounded interactive I/O and group/subreaper
@@ -83,9 +82,19 @@ cargo build --manifest-path kargu-core/Cargo.toml --locked
 ;; M-x kargu-bridge-start, kargu-bridge-status, kargu-bridge-stop
 ```
 
-Loading Kargu does not start the binary. A missing or incompatible binary is
-reported explicitly. `kargu/bridge` can also be loaded independently of the
-agent, UI packages, credentials, and `plz`.
+Loading Kargu does not start the binary. The first `find_files` invocation
+starts and negotiates a shared connection asynchronously. Configure the binary
+path above or install `kargu-core` on PATH. Missing binaries/capabilities are
+reported explicitly; there is no duplicate Elisp glob implementation or silent
+fallback. `kargu/bridge` can also be loaded independently of the agent, UI
+packages, credentials, and `plz`.
+
+Native discovery includes hidden sources, honors `kargu-fs-skip-dirs`, and skips
+compiled/backup artifacts. It does not depend on fd/rg or machine-global Git
+ignore settings. Visit/output limits report incomplete searches explicitly;
+discovered symlinks are not followed. Stop revokes only the owning request.
+Filesystem cancellation is cooperative between OS calls, not a guarantee of
+interrupting a stalled filesystem syscall.
 
 Run the Rust and real-pipe bridge checks with:
 

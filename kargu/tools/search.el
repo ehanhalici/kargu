@@ -6,8 +6,8 @@
 
 ;;; Commentary:
 
-;; Read-only workspace search.  Skip dirs and the Elisp glob walk
-;; come from `kargu/fs'.  Requires: `kargu/core', `kargu/api/tools',
+;; Read-only workspace search.  Grep uses external tools; file discovery is
+;; owned by the Rust core through `kargu/bridge'.  Shared exclusions come from
 ;; `kargu/fs'.  Public: `kargu-search-grep',
 ;; `kargu-search-glob', `kargu-search-register-tools'.
 ;;
@@ -15,8 +15,7 @@
 ;;
 ;;  * `workspace_grep'  — ripgrep (`rg') when available, otherwise
 ;;    GNU grep.  Returns path:line:text hits, capped.
-;;  * `find_files_by_glob' — `rg --files -g PATTERN', with an Emacs
-;;    bounded Elisp directory walk fallback.
+;;  * `find_files_by_glob' — bounded native Rust file discovery.
 ;;
 ;; Both stay visible in ask/plan/debug (they do not mutate files).
 
@@ -31,6 +30,8 @@
 (require 'kargu/permission)
 (require 'kargu/tools/process)
 (require 'kargu/fs)
+(require 'kargu/async)
+(require 'kargu/bridge)
 
 (defgroup kargu-search nil
   "Workspace grep and glob tools."
@@ -184,35 +185,6 @@ ROOT is the working directory; GLOB filters files; CAP bounds reported hits."
 
 ;;;; Glob -----------------------------------------------------------------
 
-(defun kargu-search--normalize-glob (glob)
-  "Normalize GLOB so a basename pattern also matches nested files."
-  (cond
-   ((or (null glob) (string-empty-p glob)) "**/*")
-   ((string-match-p "/" glob) glob)
-   (t (concat "**/" glob))))
-
-(defun kargu-search--glob-to-regexp (glob)
-  "Regexp matching a project-relative path against GLOB."
-  (let* ((g (kargu-search--normalize-glob glob))
-         (size (length g))
-         (pos 0)
-         parts)
-    (while (< pos size)
-      (let ((char (aref g pos)))
-        (cl-incf pos)
-        (cond
-         ((and (= char ?*) (< pos size) (= (aref g pos) ?*))
-          (cl-incf pos)
-          (cond
-           ((and (< pos size) (= (aref g pos) ?/))
-            (cl-incf pos)
-            (push (rx (* (seq (+ (not (any "/"))) "/"))) parts))
-           (t (push (rx (* anything)) parts))))
-         ((= char ?*) (push (rx (* (not (any "/")))) parts))
-         ((= char ??) (push (rx (not (any "/"))) parts))
-         (t (push (regexp-quote (char-to-string char)) parts)))))
-    (concat (rx string-start) (string-join (nreverse parts)) (rx string-end))))
-
 (defun kargu-search-fd-executable ()
   "Return the path to fd (or fdfind) if available on PATH."
   (or (executable-find "fd")
@@ -254,98 +226,43 @@ ROOT is the working directory; GLOB filters files; CAP bounds reported hits."
 
 (defun kargu-search-glob (callback pattern &optional path)
   "List files matching glob PATTERN under PATH (default: project root).
-The list goes to CALLBACK.  Prefers fd, then ripgrep, then a bounded Elisp walk."
+The list goes to CALLBACK.  Rust owns matching, traversal and rendering.
+Return an owned async task; Stop cancels its pending RPC, not sibling work."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p pattern
                          "pattern is required: %S" pattern)
   (let* ((root (kargu-search--root))
          (target (kargu-search--resolve path root))
-         (fd (kargu-search-fd-executable)))
-    (cond
-     (fd (kargu-search--glob-fd callback fd pattern target root))
-     ((kargu-search-rg-executable)
-      (kargu-search--glob-rg callback pattern target root))
-     (t
-      (kargu-process-deliver
-       callback
-       (lambda () (kargu-search--glob-elisp pattern target root)))))))
-
-(defun kargu-search--format-files (files pattern)
-  "Text for the project-relative FILES matching PATTERN, capped."
-  (if (null files)
-      (format "No files matching %S" pattern)
-    (let ((n (length files))
-          (cap 200))
-      (concat (string-join (cl-subseq files 0 (min cap n)) "\n")
-              (if (> n cap)
-                  (format "\n... (%d more files truncated)" (- n cap))
-                "\n")))))
-
-(defun kargu-search--glob-fallback (callback pattern target root)
-  "Find PATTERN in TARGET under ROOT and report to CALLBACK.
-Use ripgrep when available and otherwise a bounded directory walk."
-  (if (kargu-search-rg-executable)
-      (kargu-search--glob-rg callback pattern target root)
-    (kargu-process-deliver
-     callback (lambda () (kargu-search--glob-elisp pattern target root)))))
-
-(defun kargu-search--glob-fd (callback fd-exe pattern target root)
-  "Find PATTERN in TARGET under ROOT using FD-EXE; report to CALLBACK."
-  (kargu-search--run
-   fd-exe
-   (append (list "--color" "never" "--hidden")
-           (mapcan (lambda (dir) (list "--exclude" dir)) kargu-fs-skip-dirs)
-           (list "--glob" (kargu-search--normalize-glob pattern)
-                 "--base-directory" target))
-   :root root
-   :callback
-   (lambda (result)
-     (if (/= (car result) 0)
-         (kargu-search--glob-fallback callback pattern target root)
-       (kargu-process-deliver
-        callback
-        (lambda ()
-          (kargu-search--format-files
-           (mapcar (lambda (f) (kargu-search--rel (expand-file-name f target) root))
-                   (split-string (cdr result) "\n" t))
-           pattern)))))))
-
-(defun kargu-search--glob-rg (callback pattern target root)
-  "List files matching PATTERN under TARGET via ripgrep; report to CALLBACK."
-  (kargu-search--run
-   "rg"
-   (append (list "--files" "--color" "never")
-           (kargu-search--rg-exclude-args)
-           (list "--glob" (kargu-search--normalize-glob pattern) "--" target))
-   :root root
-   :callback
-   (lambda (result)
-     (kargu-process-deliver
-      callback
-      (lambda ()
-        (unless (memq (car result) '(0 1))
-          (error "Rg --files failed (exit %s): %s"
-                 (car result) (string-trim (or (cdr result) ""))))
-        (kargu-search--format-files
-         (mapcar (lambda (f) (kargu-search--rel f root))
-                 (split-string (cdr result) "\n" t))
-         pattern))))))
-
-(defun kargu-search--glob-elisp (pattern target root)
-  "Find PATTERN in TARGET within ROOT using a bounded directory walk."
-  (let* ((re (kargu-search--glob-to-regexp pattern))
-         (match-p (lambda (path)
-                    (or (string-match-p re (kargu-search--rel path root))
-                        (string-match-p re (kargu-search--rel path target))
-                        (string-match-p re (file-name-nondirectory path)))))
-         (files
-          (if (file-directory-p target)
-              (kargu-fs-walk target kargu-fs-max-listed-files match-p)
-            (let ((path (expand-file-name target)))
-              (and (funcall match-p path)
-                   (list path))))))
-    (kargu-search--format-files
-     (mapcar (lambda (p) (kargu-search--rel p root)) files)
-     pattern)))
+         (owner (current-buffer))
+         (arguments (kargu-bridge--object
+                     "root" (copy-sequence root) "path" (copy-sequence target)
+                     "pattern" (copy-sequence pattern)
+                     "skip_directories" (vconcat (mapcar #'copy-sequence kargu-fs-skip-dirs))
+                     "max_files" kargu-fs-max-listed-files
+                     "max_directories" kargu-fs-max-visited-directories))
+         (task (kargu-async-start
+                (lambda (text error-data)
+                  (funcall callback (if error-data (concat "ERROR: " error-data) text))))))
+    (kargu-async-add-cleanup
+     task
+     (kargu-bridge-ensure
+      (kargu-async-wrap
+       task
+       (lambda (connection failure)
+         (if failure (kargu-async-finish task nil "Rust core unavailable; check kargu-bridge-binary-path")
+           (let ((id (kargu-bridge-find-files
+                      connection arguments
+                      (kargu-async-wrap
+                       task (lambda (result error-data)
+                              (cond
+                               (error-data
+                                (kargu-async-finish task nil (gethash "message" error-data "Native search failed")))
+                               ((not (and (hash-table-p result) (stringp (gethash "text" result))))
+                                (kargu-async-finish task nil "Invalid native search result"))
+                               (t (kargu-async-finish task (gethash "text" result))))))
+                      :owner owner)))
+             (when id
+               (kargu-async-add-cleanup task (lambda () (kargu-bridge-cancel connection id))))))))))
+    task))
 
 ;;;; Tool registration -----------------------------------------------------
 
@@ -386,7 +303,7 @@ a callback is required."
         (kargu--tool-arg args "max_matches" "maxMatches" "limit")))))
    (list
     "find_files"
-    "Find project files matching a glob pattern (e.g. **/*.rs, *.el, *test*). Uses `fd' if available (preferred over `find'), otherwise `rg --files' or directory walk. Read-only, available in all modes."
+    "Find project files matching a glob pattern (e.g. **/*.rs, *.el, *test*) using bounded native Rust discovery. Includes hidden sources, applies configured directory/artifact exclusions, and reports incomplete searches. Read-only, available in all modes."
     '(("type" . "object")
       ("properties" . (("pattern" . (("type" . "string")
                                      ("description" . "Glob pattern such as **/*.rs or *.el.")))

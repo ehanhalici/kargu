@@ -7,7 +7,7 @@
 ;;; Commentary:
 
 ;; Shared skip-directory table and a capped recursive file walk
-;; used by `@' completion and the Elisp glob fallback.
+;; used by `@' completion and other editor-side discovery consumers.
 ;; Requires: `kargu/core/group'.
 ;; Public: `kargu-fs-walk', `kargu-fs-skipped-path-p'.
 

@@ -52,4 +52,42 @@ limitleri, cancellation sırasında slot tutma, expired/closed owner'ın geç
 başarı üretememesi, drop revocation, gerçek pipe search+ping+foreign scope+
 shutdown drain ve negotiated-small-frame error.
 
-Emacs facade ve legacy kaldırma sonucu bu dosyaya sonraki commit'te eklenecek.
+## Emacs entegrasyonu ve legacy kaldırma
+
+Bridge startup capability negotiation sonrasında bir application/session
+**read-service adapter identity** bağlar. Bu, kullanıcı conversation import'u
+değildir. Eşzamanlı ilk tool çağrıları tek startup'ı paylaşır; bounded startup
+waiter'ı iptal edilince yalnız kendi callback'i kaldırılır. Core bridge load
+anında değil, explicit start veya migrated tool invocation ile başlar.
+
+`kargu-search-glob` yalnız policy/config snapshot + asenkron facade'dır.
+Mevcut `kargu-tool-gate-execute` mode/schema/alias/budget/claim kararları ve
+`kargu-async` parent task zinciri korunur. Parent Stop kendi RPC'sini revoke
+eder; geç reply callback'i canlandıramaz, sibling connection öldürülmez.
+Facade native completion beklerken Emacs'i bloke etmez. Missing binary veya
+capability açık hata verir; Elisp fallback/replay yoktur.
+
+Silinen üretim fonksiyonları: `--normalize-glob`, `--glob-to-regexp`,
+`--format-files`, `--glob-fallback`, `--glob-fd`, `--glob-rg`, `--glob-elisp`
+(`kargu-search` prefix'iyle). `kargu-fs-walk` başka canlı editor tüketicileri
+olduğu için silinmedi; grep/list_files bu dilimde henüz taşınmadı.
+
+Test eşlemesi:
+
+- Eski glob regexp fixture'ları -> Rust search.rs recursive/literal testi.
+- Eski fd exclude-argv testi -> Rust shared-policy testi + facade'nın gerçek
+  policy snapshot'ını RPC'ye ilettiği ERT.
+- Root/subdirectory/file hedefi -> aynı public facade üzerinden gerçek core ERT.
+- Yeni: `find_files`, `find_files_by_glob`, `find`, `fd`, `glob` adları dört
+  modda gerçek mevcut tool gate -> IPC -> Rust -> callback zincirinden geçer.
+- Yeni: shared startup/cancelled waiter/missing binary ve parent Stop sonrası
+  geç native result suppression. Legacy fonksiyonların yüklü kalmadığı assertion.
+
+Full regression: **1137/1137 ERT expected, 0 unexpected, 0 skipped**, 47.08 s.
+Rust: **35 test + 2 compile-fail doctest**. Üretim Elisp + değişen testler,
+gerekli Dape tanımları compiler ortamına yüklenerek warning-as-error ile
+derlendi; checkdoc temiz. Test tool modülündeki Dape forward declaration
+uyarısı, ilgili modül compiler ortamına alınarak çözüldü; kural gevşetilmedi.
+Ortamın mevcut OpenPGP package autoload uyarısı test/compile başarısını etkilemez.
+TLA+ modelleri değiştirilmedi; önceki bounded sonuçlar bu yeni read-service
+uygulamasının refinement kanıtı gibi sunulmaz. Uzak CI henüz çalıştırılmadı.

@@ -23,7 +23,7 @@ jobs:
       - name: Rust checks
         run: |
           cargo fmt --manifest-path kargu-core/Cargo.toml --check
-          cargo clippy --manifest-path kargu-core/Cargo.toml --locked --all-targets -- -D warnings
+          cargo clippy --manifest-path kargu-core/Cargo.toml --locked --all-targets -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic
           cargo test --manifest-path kargu-core/Cargo.toml --locked
           cargo build --manifest-path kargu-core/Cargo.toml --locked
       - name: Compile and test independent Emacs bridge

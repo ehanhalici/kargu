@@ -17,6 +17,7 @@
 (require 'kargu/tools/skill)
 (require 'kargu/permission/guards)
 (require 'kargu/tools/search)
+(require 'tests/test-bridge)
 
 (defmacro kargu-fs-test--with-tree (files &rest body)
   "Run BODY in a temp directory `root' holding FILES, an alist of (NAME . TEXT)."
@@ -182,18 +183,79 @@
   (should (equal (kargu-rel-path "/p/..notes/x.js" "/p/") "..notes/x.js"))
   (should (equal (kargu-rel-path "/elsewhere/x.js" "/p/") "/elsewhere/x.js")))
 
-(ert-deftest kargu-search-fd-excludes-the-shared-directory-policy-test ()
-  "Hidden file discovery excludes .git and the same artifact directories as rg."
-  (let (seen result)
-    (cl-letf (((symbol-function 'kargu-search--run)
-               (lambda (_program args &rest options)
-                 (setq seen args)
-                 (funcall (plist-get options :callback) '(0 . "visible.el\n")))))
-      (kargu-search--glob-fd (lambda (text) (setq result text)) "fd" "*.el" default-directory default-directory)
-      (should (member "--hidden" seen))
-      (dolist (dir kargu-fs-skip-dirs)
-        (should (cl-loop for (flag value) on seen thereis (and (equal flag "--exclude") (equal value dir)))))
-      (should (string-search "visible.el" result)))))
+(ert-deftest kargu-search-native-port-captures-shared-directory-policy-test ()
+  "The native port captures configuration and never starts an Elisp search."
+  (let ((connection (kargu-bridge--connection-create :state 'ready)) seen result)
+    (cl-letf (((symbol-function 'kargu-bridge-ensure)
+               (lambda (callback) (funcall callback connection nil) #'ignore))
+              ((symbol-function 'kargu-bridge-find-files)
+               (lambda (_connection arguments callback &rest _options)
+                 (setq seen arguments)
+                 (funcall callback (kargu-bridge--object "text" "visible.el\n") nil)
+                 nil))
+              ((symbol-function 'kargu-search--run) (lambda (&rest _) (ert-fail "Legacy search executed"))))
+      (kargu-search-glob (lambda (text) (setq result text)) "*.el")
+      (should (equal (gethash "skip_directories" seen) (vconcat kargu-fs-skip-dirs)))
+      (should (equal (gethash "pattern" seen) "*.el"))
+      (should (= (gethash "max_files" seen) kargu-fs-max-listed-files))
+      (should (= (gethash "max_directories" seen) kargu-fs-max-visited-directories))
+      (should (equal result "visible.el\n")))))
+
+(ert-deftest kargu-search-native-parent-cancel-revokes-rpc-and-suppresses-late-result-test ()
+  "Stop revokes only the captured request and cannot publish a late result."
+  (let* ((kargu--loop-run nil) (kargu-execution--current nil)
+         (kargu-async--current-task nil)
+         (parent (kargu-async-start #'ignore :owner nil :parent nil))
+         (connection (kargu-bridge--connection-create :state 'ready))
+         reply cancelled delivered child)
+    (unwind-protect
+        (cl-letf (((symbol-function 'kargu-bridge-ensure)
+                   (lambda (callback) (funcall callback connection nil) #'ignore))
+                  ((symbol-function 'kargu-bridge-find-files)
+                   (lambda (_connection _arguments callback &rest _options)
+                     (setq reply callback) "owned-rpc"))
+                  ((symbol-function 'kargu-bridge-cancel)
+                   (lambda (conn id) (push (cons conn id) cancelled))))
+          (let ((kargu-async--current-task parent))
+            (setq child (kargu-search-glob (lambda (text) (setq delivered text)) "*.el")))
+          (kargu-async-cancel parent)
+          (should (eq (kargu-async-task-state child) :cancelled))
+          (should (equal cancelled (list (cons connection "owned-rpc"))))
+          (funcall reply (kargu-bridge--object "text" "late.el\n") nil)
+          (should-not delivered)
+          (should-not (kargu-async-task-children parent)))
+      (kargu-async-cancel parent))))
+
+(ert-deftest kargu-search-native-unavailable-is-an-explicit-error-without-fallback-test ()
+  "A missing binary reports failure once rather than re-entering legacy code."
+  (let ((count 0) result)
+    (cl-letf (((symbol-function 'kargu-bridge-ensure)
+               (lambda (callback)
+                 (funcall callback nil (kargu-bridge--fault "startup_failed")) #'ignore))
+              ((symbol-function 'kargu-search--run) (lambda (&rest _) (ert-fail "Legacy search executed"))))
+      (kargu-search-glob (lambda (text) (cl-incf count) (setq result text)) "*.el")
+      (should (= count 1))
+      (should (string-prefix-p "ERROR: Rust core unavailable" result)))))
+
+(ert-deftest kargu-search-native-canonical-and-alias-tools-use-existing-gate-test ()
+  "Actual registered tools reach Rust through the existing read-only gate."
+  (kargu-bridge-test--with-core
+    (kargu-fs-test--with-tree '(("src/main.el" . "fixture") ("node_modules/hidden.el" . "fixture"))
+      (let ((kargu--tool-registry (kargu-tool-registry-create))
+            (kargu-permission--override-root root) (kargu--loop-run nil))
+        (kargu-search-register-tools)
+        (dolist (mode '(ask plan debug agent))
+          (let ((context (kargu-tool-execution-context-create
+                          :root root :mode mode
+                          :policy-revision (kargu-tool-registry-revision kargu--tool-registry))))
+            (dolist (name '("find_files" "find_files_by_glob" "find" "fd" "glob"))
+              (should (equal (kargu-test-await
+                              (lambda (done)
+                                (kargu-tool-gate-execute
+                                 kargu--tool-registry context name '(("pattern" . "*.el")) :callback done)))
+                             "src/main.el\n")))))
+        (should (= 0 (kargu-tool-execution-active-task-count kargu--tool-registry "find_files")))
+        (should (= 0 (hash-table-count (kargu-bridge-connection-pending conn))))))))
 
 (ert-deftest kargu-fs-has-file-p-test ()
   "Existence is checked under the given root only."
@@ -307,29 +369,21 @@
 				  (should (< (length out) 300))
 				  (should (string-search "truncated" out)))))))
 
-(ert-deftest kargu-search-elisp-globs-match-zero-or-more-directories-test ()
-  "A recursive glob includes root files and every nested directory depth."
-  (dolist (pattern '("*.el" "**/*.el"))
-    (let ((regexp (kargu-search--glob-to-regexp pattern)))
-      (dolist (path '("main.el" "src/main.el" "src/deep/main.el"))
-        (should (string-match-p regexp path)))
-      (should-not (string-match-p regexp "main.elc"))))
-  (let ((regexp (kargu-search--glob-to-regexp "src/**/test?.el")))
-    (dolist (path '("src/test1.el" "src/a/test2.el" "src/a/b/test3.el"))
-      (should (string-match-p regexp path)))
-    (dolist (path '("test1.el" "src/test12.el" "src/a/test.elc"))
-      (should-not (string-match-p regexp path))))
-  (should (string-match-p (kargu-search--glob-to-regexp "main+.el") "main+.el"))
-  (should-not (string-match-p (kargu-search--glob-to-regexp "main+.el") "main.el")))
+(ert-deftest kargu-search-legacy-glob-implementation-is-removed-test ()
+  "Matching fixtures now live in Rust; no second implementation may execute."
+  (dolist (function '(kargu-search--glob-to-regexp kargu-search--normalize-glob
+                      kargu-search--glob-elisp kargu-search--glob-fd kargu-search--glob-rg
+                      kargu-search--glob-fallback kargu-search--format-files))
+    (should-not (fboundp function))))
 
-(ert-deftest kargu-search-find-files-fallback-includes-project-root-test ()
-  "The public find-files path works without fd or rg, including file targets."
+(ert-deftest kargu-search-native-find-files-includes-project-root-test ()
+  "Public discovery uses the real Rust binary, including file targets."
+  (kargu-bridge-test--with-core
   (kargu-fs-test--with-tree
    '(("main.el" . "x") ("src/child.el" . "x") ("src/deep/grandchild.el" . "x")
      ("Makefile" . "x") ("src/Makefile" . "x"))
    (let ((kargu-permission--override-root root))
-     (cl-letf (((symbol-function 'kargu-search-fd-executable) (lambda () nil))
-               ((symbol-function 'kargu-search-rg-executable) (lambda () nil)))
+     (cl-letf (((symbol-function 'kargu-search--run) (lambda (&rest _) (ert-fail "Legacy search executed"))))
        (dolist (pattern '("*.el" "**/*.el"))
          (let ((result (kargu-test-await
                         (lambda (done) (kargu-search-glob done pattern)))))
@@ -341,7 +395,7 @@
                         '("Makefile" "src/Makefile"))))
        (should (equal (kargu-test-await
                        (lambda (done) (kargu-search-glob done "*.el" "main.el")))
-                      "main.el\n"))))))
+                      "main.el\n")))))))
 
 (provide 'tests/test-fs)
 ;;; test-fs.el ends here

@@ -5,8 +5,9 @@
 
 ;;; Commentary:
 
-;; Opt-in lifecycle client.  Loading this file never starts a process and does
-;; not replace the Elisp agent.  Callbacks receive (RESULT ERROR); wire null and
+;; Lifecycle and native read-service client.  Loading this file never starts a
+;; process and does not replace the Elisp agent.  Migrated tools may explicitly
+;; ensure a connection on invocation.  Callbacks receive (RESULT ERROR); wire null and
 ;; false are :json-null and :json-false.  Arrays remain vectors.
 
 ;;; Code:
@@ -41,7 +42,7 @@
   process stderr-process stderr-buffer epoch (state 'starting)
   (frame-limit kargu-bridge--max-frame) (counter 0) (partial "")
   (pending (make-hash-table :test #'equal)) queue queue-tail (queue-bytes 0)
-  dispatch-timer stop-timer reverse-timers)
+  dispatch-timer stop-timer reverse-timers capabilities read-scope ready-waiters)
 
 (cl-defstruct (kargu-bridge--pending (:constructor kargu-bridge--pending-create))
   "Take-once request waiter and its owner cleanup."
@@ -56,9 +57,9 @@
     (while pairs (puthash (pop pairs) (pop pairs) object))
     object))
 
-(defun kargu-bridge--fault (status)
-  "Construct a sanitized local error with machine-readable STATUS."
-  (kargu-bridge--object "code" -32000 "message" "Kargu bridge request failed"
+(defun kargu-bridge--fault (status &optional message)
+  "Construct a local error with STATUS and optional static sanitized MESSAGE."
+  (kargu-bridge--object "code" -32000 "message" (or message "Kargu bridge request failed")
                         "data" (kargu-bridge--object "status" status)))
 
 (defun kargu-bridge--callback (callback result error)
@@ -66,6 +67,15 @@
   (when callback
     (condition-case nil (funcall callback result error)
       ((error quit) (message "Kargu bridge callback failed")))))
+
+(defun kargu-bridge--notify-ready (connection error-data)
+  "Take CONNECTION's startup waiters and deliver ERROR-DATA at most once."
+  (let ((waiters (kargu-bridge-connection-ready-waiters connection)))
+    (setf (kargu-bridge-connection-ready-waiters connection) nil)
+    (dolist (ticket waiters)
+      (let ((callback (car ticket)))
+        (setcar ticket nil)
+        (kargu-bridge--callback callback (unless error-data connection) error-data)))))
 
 (defun kargu-bridge--finish (connection id result error)
   "Take ID from CONNECTION and deliver RESULT or ERROR at most once."
@@ -98,7 +108,9 @@
           (kargu-bridge-connection-queue connection) nil
           (kargu-bridge-connection-queue-tail connection) nil
           (kargu-bridge-connection-queue-bytes connection) 0
-          (kargu-bridge-connection-partial connection) "")
+          (kargu-bridge-connection-partial connection) ""
+          (kargu-bridge-connection-read-scope connection) nil)
+    (kargu-bridge--notify-ready connection (kargu-bridge--fault status))
     (let ((ids (hash-table-keys (kargu-bridge-connection-pending connection))))
       (dolist (id ids)
         (kargu-bridge--finish connection id nil (kargu-bridge--fault status))))
@@ -140,9 +152,11 @@ default deadline.  Return the correlation id, or nil on local rejection."
                  (numberp deadline) (> deadline 0)
                  (or (null owner) (buffer-live-p owner)))
       (error "Invalid Rust request arguments"))
-    (if (or (not (memq (kargu-bridge-connection-state connection) '(starting ready stopping)))
+    (if (or (not (memq (kargu-bridge-connection-state connection) '(starting binding ready stopping)))
             (and (eq (kargu-bridge-connection-state connection) 'starting)
                  (not (equal method "initialize")))
+            (and (eq (kargu-bridge-connection-state connection) 'binding)
+                 (not (member method '("application/create" "session/create"))))
             (and (eq (kargu-bridge-connection-state connection) 'stopping)
                  (not (equal method "shutdown")))
             (>= (hash-table-count (kargu-bridge-connection-pending connection))
@@ -169,6 +183,51 @@ default deadline.  Return the correlation id, or nil on local rejection."
            (kargu-bridge--finish connection id nil (kargu-bridge--fault "send_failed"))
            (kargu-bridge--close connection "disconnected")))
         id))))
+
+(defun kargu-bridge-cancel (connection id)
+  "Cancel only pending ID on its captured CONNECTION."
+  (kargu-bridge--cancel connection id "cancelled"))
+
+(defun kargu-bridge-ensure (callback)
+  "Ensure a ready native service connection and call CALLBACK with (CONN ERROR).
+Concurrent invocations share startup.  Return a function that removes only
+this waiter; it never kills a connection used by another task."
+  (let ((connection kargu-bridge--connection))
+    (when (or (null connection) (eq (kargu-bridge-status connection) 'closed))
+      (condition-case nil
+          (setq connection (kargu-bridge-start #'ignore))
+        (error (setq connection nil))))
+    (cond
+     ((null connection)
+      (kargu-bridge--callback callback nil (kargu-bridge--fault "startup_failed"))
+      #'ignore)
+     ((eq (kargu-bridge-status connection) 'ready)
+      (kargu-bridge--callback callback connection nil)
+      #'ignore)
+     ((and (memq (kargu-bridge-status connection) '(starting binding))
+           (< (length (kargu-bridge-connection-ready-waiters connection)) kargu-bridge--max-pending))
+      (let ((ticket (list callback)))
+        (push ticket (kargu-bridge-connection-ready-waiters connection))
+        (lambda ()
+          (setcar ticket nil)
+          (setf (kargu-bridge-connection-ready-waiters connection)
+                (delq ticket (kargu-bridge-connection-ready-waiters connection))))))
+     (t
+      (kargu-bridge--callback callback nil (kargu-bridge--fault "unavailable"))
+      #'ignore))))
+
+(cl-defun kargu-bridge-find-files (connection arguments callback &key owner)
+  "Run native file discovery with ARGUMENTS on CONNECTION for OWNER.
+CALLBACK receives the native (RESULT ERROR).  No Elisp fallback is executed."
+  (if (not (and (eq (kargu-bridge-status connection) 'ready)
+                (member "workspace_find_files" (append (kargu-bridge-connection-capabilities connection) nil))
+                (hash-table-p (kargu-bridge-connection-read-scope connection))))
+      (progn (kargu-bridge--callback callback nil
+                                    (kargu-bridge--fault "unavailable" "Native file discovery unavailable; rebuild kargu-core")) nil)
+    (kargu-bridge-call
+     connection "workspace/findFiles"
+     (kargu-bridge--object "scope" (kargu-bridge-connection-read-scope connection) "arguments" arguments)
+     callback :owner owner)))
 
 (defun kargu-bridge--normalize (value &optional depth)
   "Convert parsed VALUE into typed JSON, rejecting duplicate keys at DEPTH."
@@ -313,6 +372,44 @@ Raw stderr is deliberately discarded: future backends may put secrets there."
         (when (> (buffer-size) kargu-bridge--max-frame)
           (delete-region (point-min) (- (point-max) kargu-bridge--max-frame)))))))
 
+(defun kargu-bridge--start-finish (connection callback error-data)
+  "Complete CONNECTION startup once and deliver CALLBACK or ERROR-DATA."
+  (when (and (null error-data) (eq (kargu-bridge-status connection) 'closed))
+    (setq error-data (kargu-bridge--fault "disconnected")))
+  (if error-data
+      (progn
+        (kargu-bridge--close connection "startup_failed")
+        (unless callback (message "Kargu Rust core initialization failed"))
+        (kargu-bridge--callback callback nil error-data))
+    (setf (kargu-bridge-connection-state connection) 'ready)
+    (kargu-bridge--notify-ready connection nil)
+    (unless callback (message "Kargu Rust core ready"))
+    (kargu-bridge--callback callback connection nil)))
+
+(defun kargu-bridge--bind-read-service (connection callback)
+  "Bind CONNECTION's read-service session before completing startup CALLBACK.
+This is an adapter service identity, not an imported user conversation or run."
+  (if (not (member "workspace_find_files" (append (kargu-bridge-connection-capabilities connection) nil)))
+      (kargu-bridge--start-finish connection callback nil)
+    (setf (kargu-bridge-connection-state connection) 'binding)
+    (kargu-bridge-call
+     connection "application/create" (kargu-bridge--object)
+     (lambda (application error-data)
+       (if error-data (kargu-bridge--start-finish connection callback error-data)
+         (let ((id (and (hash-table-p application) (gethash "application_id" application))))
+           (if (not (and (stringp id) (string-prefix-p "app_" id)))
+               (kargu-bridge--start-finish connection callback (kargu-bridge--fault "protocol_error"))
+             (kargu-bridge-call
+              connection "session/create" (kargu-bridge--object "application_id" id)
+              (lambda (scope failure)
+                (unless failure
+                  (if (not (and (hash-table-p scope) (equal (gethash "application_id" scope) id)
+                                (stringp (gethash "session_id" scope))
+                                (string-prefix-p "sess_" (gethash "session_id" scope))))
+                      (setq failure (kargu-bridge--fault "protocol_error"))
+                    (setf (kargu-bridge-connection-read-scope connection) scope)))
+                (kargu-bridge--start-finish connection callback failure))))))))))
+
 (defun kargu-bridge-start (&optional callback)
   "Start the opt-in Rust core and asynchronously negotiate its capabilities.
 CALLBACK receives (CONNECTION ERROR).  Return the starting connection handle."
@@ -362,12 +459,11 @@ CALLBACK receives (CONNECTION ERROR).  Return the starting connection handle."
                                   (vectorp (gethash "capabilities" result)))
                        (error "Invalid handshake"))
                      (setf (kargu-bridge-connection-epoch connection) epoch
-                           (kargu-bridge-connection-frame-limit connection) limit)
+                           (kargu-bridge-connection-frame-limit connection) limit
+                           (kargu-bridge-connection-capabilities connection) (gethash "capabilities" result))
                      (kargu-bridge--send connection
                                          (kargu-bridge--object "jsonrpc" "2.0" "method" "initialized"))
-                     (setf (kargu-bridge-connection-state connection) 'ready)
-                     (unless callback (message "Kargu Rust core ready"))
-                     (kargu-bridge--callback callback connection nil))
+                     (kargu-bridge--bind-read-service connection callback))
                  (error (kargu-bridge--close connection "protocol_error")
                         (unless callback (message "Kargu Rust core handshake rejected"))
                         (kargu-bridge--callback callback nil (kargu-bridge--fault "protocol_error")))))))
