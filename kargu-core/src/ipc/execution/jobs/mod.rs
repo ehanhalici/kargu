@@ -6,7 +6,7 @@ use crate::{
         RunHandle,
         host::{Host, ReadScope},
     },
-    constants::{limits, protocol::methods},
+    constants::{limits, protocol::methods, timeouts},
     domain::{ApplicationId, ByteLimit, ByteOffset, JobId},
     error::CoreError,
     ipc::protocol::{Fault, RpcId},
@@ -15,6 +15,7 @@ use crate::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::PathBuf};
+use tokio::time::Instant;
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,6 +51,8 @@ struct List {
 }
 
 struct Job {
+    claimed: bool,
+    claim_deadline: Instant,
     owner: JobOwner,
     run: Box<RunHandle>,
     result: Option<ProcessResult>,
@@ -97,15 +100,20 @@ impl Jobs {
     ) -> Result<Value, CoreError> {
         let pid = supervisor.process_id(&run, &id)?;
         let root = run.settings().workspace.path().to_owned();
+        let claim_deadline = Instant::now()
+            .checked_add(timeouts::JOB_CLAIM)
+            .ok_or(CoreError::ArithmeticOverflow)?;
         self.records.insert(
             id.clone(),
             Job {
+                claimed: false,
+                claim_deadline,
                 owner: JobOwner { scope, root },
                 run,
                 result: None,
             },
         );
-        Ok(json!({"job_id":id,"process_id":pid,"state":"running"}))
+        Ok(json!({"job_id":id,"process_id":pid,"state":"awaiting_claim"}))
     }
     fn owned(&self, owner: &JobOwner, id: &JobId) -> Result<&Job, CoreError> {
         self.records
@@ -200,6 +208,19 @@ impl Jobs {
         check_owner(host, &request.owner)?;
         let job = self.owned(&request.owner, &request.job_id)?;
         match method {
+            methods::JOB_CLAIM => {
+                if !job.claimed && Instant::now() >= job.claim_deadline {
+                    return Err(CoreError::StaleOwner);
+                }
+                let job = self
+                    .records
+                    .get_mut(&request.job_id)
+                    .ok_or(CoreError::StaleOwner)?;
+                job.claimed = true;
+                Ok(Some(
+                    json!({"claimed":true,"state":if job.result.is_some() {"exited"} else {"running"}}),
+                ))
+            }
             methods::JOB_STATUS => Ok(Some(snapshot(&request.job_id, job, supervisor)?)),
             methods::JOB_CANCEL => {
                 supervisor.cancel(&job.run, &request.job_id)?;
@@ -244,7 +265,9 @@ impl Jobs {
         id: &JobId,
     ) -> Result<(), CoreError> {
         let job = self.records.get_mut(id).ok_or(CoreError::StaleOwner)?;
-        let live_owner = host.owns_read_scope(&job.owner.scope) && !self.closing;
+        let live_owner = host.owns_read_scope(&job.owner.scope)
+            && !self.closing
+            && (job.claimed || Instant::now() < job.claim_deadline);
         if job.result.is_none() {
             if !live_owner {
                 host.actor_mut(&job.owner.scope)?.cancel(&job.run)?;
@@ -294,6 +317,6 @@ fn snapshot(id: &JobId, job: &Job, supervisor: &ProcessSupervisor) -> Result<Val
         }
     };
     Ok(
-        json!({"job_id":id,"process_id":supervisor.process_id(&job.run,id)?,"state":state,"result":job.result}),
+        json!({"job_id":id,"process_id":supervisor.process_id(&job.run,id)?,"state":state,"claimed":job.claimed,"result":job.result}),
     )
 }

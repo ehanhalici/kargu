@@ -45,7 +45,20 @@ fn start_arguments(
     let reply = peer.read()?;
     assert_eq!(reply["id"], 3);
     assert!(reply.get("error").is_none(), "{reply}");
-    Ok(reply["result"].clone())
+    let job = reply["result"].clone();
+    let bound = owner(
+        scope,
+        arguments
+            .get("root")
+            .and_then(Value::as_str)
+            .map(Path::new)
+            .ok_or("root missing")?,
+    );
+    assert_eq!(
+        call(peer, "job/claim", query(&bound, &job))?["result"]["claimed"],
+        true
+    );
+    Ok(job)
 }
 fn call(peer: &mut Peer, method: &str, params: Value) -> Result<Value, Box<dyn std::error::Error>> {
     peer.send(json!({"jsonrpc":"2.0","id":20,"method":method,"params":params}))?;
@@ -128,7 +141,7 @@ fn unlimited_interactive_start_write_eof_and_lossless_output() -> TestResult {
         root.path(),
         "printf ready; while IFS= read -r line; do printf '%s\\n' \"$line\"; done; printf closed",
     )?;
-    assert_eq!(job["state"], "running");
+    assert_eq!(job["state"], "awaiting_claim");
     assert_eq!(
         call(
             &mut peer,
@@ -309,6 +322,64 @@ fn configured_and_zero_tail_capacity_are_bound_before_approval() -> TestResult {
         }
         call(&mut peer, "job/forget", query(&bound, &job))?;
     }
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn explicit_merged_stderr_is_one_ordered_os_pipe() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let bound = owner(&scope, root.path());
+    let mut args = arguments(root.path(), "printf out; printf err >&2; printf done")?;
+    args["stderr"] = json!("merge");
+    let job = start_arguments(&mut peer, &scope, args)?;
+    assert_eq!(exited(&mut peer, &bound, &job)?["result"]["outcome"], "ok");
+    assert_eq!(output(&mut peer, &bound, &job)?, b"outerrdone");
+    let stderr = call(
+        &mut peer,
+        "job/read",
+        json!({"owner":bound,"job_id":job["job_id"],"stream":"stderr","cursor":0}),
+    )?;
+    assert_eq!(stderr["result"]["data"], json!([]));
+    assert_eq!(stderr["result"]["eof"], true);
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn unclaimed_job_is_revoked_and_reaped_without_losing_connection() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let bound = owner(&scope, root.path());
+    peer.send(json!({"jsonrpc":"2.0","id":3,"method":"job/start","params":{"scope":scope,"arguments":arguments(root.path(),"read value")?}}))?;
+    let review = peer.read()?;
+    peer.send(json!({"jsonrpc":"2.0","id":review["id"],"result":{"approved":true}}))?;
+    let job = peer.read()?["result"].clone();
+    let until = Instant::now() + Duration::from_secs(12);
+    loop {
+        let reply = call(&mut peer, "job/status", query(&bound, &job))?;
+        if reply.get("error").is_some() {
+            assert_eq!(reply["error"]["data"]["status"], "stale_owner");
+            break;
+        }
+        if Instant::now() >= until {
+            return Err("unclaimed job was not reaped".into());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let pid = job["process_id"].as_u64().ok_or("pid missing")?;
+    assert!(!Path::new(&format!("/proc/{pid}")).exists());
+    assert_eq!(
+        call(&mut peer, "ping", json!({}))?["result"]["status"],
+        "ok"
+    );
     peer.input.take();
     assert!(peer.wait()?);
     Ok(())

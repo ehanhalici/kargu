@@ -81,6 +81,8 @@ pub mod timeouts {
     pub const PROCESS_POLL: Duration = Duration::from_millis(20);
     /// Maximum wait for stdin acceptance or a contended output page.
     pub const INPUT_ACK: Duration = Duration::from_secs(10);
+    /// Receipt-to-client ownership handoff before an unclaimed job is revoked.
+    pub const JOB_CLAIM: Duration = Duration::from_secs(5);
     /// Human approval lifetime.
     pub const APPROVAL: Duration = Duration::from_secs(300);
     /// TERM before KILL grace.
@@ -147,6 +149,8 @@ pub mod protocol {
     pub mod methods {
         /// Approved persistent process startup; returns identity, not completion.
         pub const JOB_START: &str = "job/start";
+        /// Confirm that the client installed its owner-close cleanup after startup.
+        pub const JOB_CLAIM: &str = "job/claim";
         /// Owner/project-scoped job snapshots.
         pub const JOB_LIST: &str = "job/list";
         /// Inspect startup/running/terminal state.

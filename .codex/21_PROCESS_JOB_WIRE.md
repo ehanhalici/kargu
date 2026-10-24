@@ -27,7 +27,10 @@ null gerçek unlimited'dır; genel tool/execute null süreyi reddetmeye devam ed
 Tail policy seçilir. Timeout/retention/output_bytes onay metadatasına ve digest'e
 bağlıdır; ordinary prefix capture varsayılanı değişmez.
 
-Başlangıç sonucu job_id + process_id (display-only) + state=running'dir.
+Başlangıç sonucu job_id + process_id (display-only) + state=awaiting_claim'dir.
+İstemci owner cleanup'ını kurduktan sonra 5 saniye içinde `job/claim`
+({owner,job_id}) göndermelidir. Receipt kaybolursa unclaimed job revoke/drain
+edilip unutulur; RPC id yeniden kullanımını startup sahipliğiyle karıştırmayız.
 Sonraki portlar:
 
 - `job/list`: {owner}; sonuç {jobs:[snapshot...]}.
@@ -42,8 +45,9 @@ eşleşen kayıtları döndürür. Forget gerçek terminal completion/drain'den 
 reddedilir; görünür log veya process kullanıcıdan habersiz unutulmaz.
 
 Read sayfası frame bütçesine göre daralır. Byte array kasıtlıdır: UTF-8 codepoint
-iki sayfaya bölünse de byte kaybı olmaz. stdout/stderr ayrı kalır; shell client
-gerekirse Bash'in kendi redirection semantiğiyle merge eder.
+iki sayfaya bölünse de byte kaybı olmaz. stdout/stderr varsayılan olarak ayrıdır.
+İsteğe bağlı stderr=merge aynı OS pipe'ını iki fd'ye bağlar; shell metnine
+redirection eklenmez. Policy exact approval ve action digest'e dahildir.
 
 ## Bounded devam işlemleri
 

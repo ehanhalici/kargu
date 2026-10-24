@@ -1,0 +1,150 @@
+;;; test-bridge-jobs.el --- Native job client ownership contracts -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 kargu developers.
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Explicit fixture approval only; no paid application, login or model call.
+
+;;; Code:
+
+(require 'tests/test-bridge)
+(require 'kargu/bridge/jobs)
+
+(defun kargu-bridge-job-test--approve (request)
+  "Approve only the fixture command described by confirmation REQUEST."
+  (when (eq (kargu-confirmation-operation request) :prompt)
+    (funcall (plist-get (kargu-confirmation-options request) :on-decision) :approve)))
+
+(defun kargu-bridge-job-test--start (connection root script &optional owner extras)
+  "Start fixture SCRIPT on CONNECTION in ROOT for OWNER with EXTRAS."
+  (let ((args (kargu-bridge-test--command root script)) finished job failure)
+    (puthash "timeout_ms" :json-null args)
+    (dolist (pair extras) (puthash (car pair) (cdr pair) args))
+    (kargu-bridge-job-start connection args
+                            (lambda (value error-data) (setq job value failure error-data finished t)) :owner owner)
+    (kargu-bridge-test--wait (lambda () finished))
+    (should-not failure)
+    (should (kargu-bridge-job-p job))
+    job))
+
+(defun kargu-bridge-job-test--call (function &rest arguments)
+  "Await test-only FUNCTION with ARGUMENTS, returning its native result."
+  (let (finished result failure)
+    (apply function (append arguments (list (lambda (value error-data)
+                                            (setq result value failure error-data finished t)))))
+    (kargu-bridge-test--wait (lambda () finished))
+    (should-not failure)
+    result))
+
+(defun kargu-bridge-job-test--exited (job)
+  "Await JOB's actual native terminal result, never just its startup receipt."
+  (let (result)
+    (kargu-bridge-test--wait
+     (lambda ()
+       (setq result (kargu-bridge-job-test--call #'kargu-bridge-job-status job))
+       (equal (gethash "state" result) "exited")))
+    (gethash "result" result)))
+
+(defun kargu-bridge-job-test--dispose (job)
+  "Drain fixture JOB before closing its core connection."
+  (when job
+    (kargu-bridge-job-dispose job)
+    (kargu-bridge-test--wait (lambda () (memq (kargu-bridge-job-state job) '(:forgotten :disconnected))))))
+
+(ert-deftest kargu-bridge-job-real-stdin-eof-and-claimed-owner-test ()
+  "The client claims only after installing owner hooks; stdin remains interactive."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-job-client-" t)) job)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation) #'kargu-bridge-job-test--approve))
+            (setq job (kargu-bridge-job-test--start conn root "while IFS= read -r line; do printf '%s' \"$line\"; done"))
+            (should (eq (kargu-bridge-job-state job) :running))
+            (should (eq (gethash "claimed" (kargu-bridge-job-test--call #'kargu-bridge-job-status job)) t))
+            (should (eq (gethash "accepted" (kargu-bridge-job-test--call #'kargu-bridge-job-write job "echo😀\n")) t))
+            (kargu-bridge-job-test--call #'kargu-bridge-job-eof job)
+            (should (equal (gethash "outcome" (kargu-bridge-job-test--exited job)) "ok"))
+            (let* ((page (kargu-bridge-job-test--call #'kargu-bridge-job-read job "stdout" 0))
+                   (bytes (apply #'unibyte-string (append (gethash "data" page) nil))))
+              (should (equal (decode-coding-string bytes 'utf-8) "echo😀")))
+            (kargu-bridge-job-test--call #'kargu-bridge-job-forget job)
+            (should (= 0 (hash-table-count (kargu-bridge-connection-jobs conn)))))
+        (kargu-bridge-job-test--dispose job)
+        (delete-directory root t)))))
+
+(ert-deftest kargu-bridge-job-source-close-drains-and-forgets-only-its-job-test ()
+  "Source closure cancels its job without closing another owner's pipe."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-job-owner-" t))
+          (owner (generate-new-buffer " *kargu-native-job-owner*")) first second)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation) #'kargu-bridge-job-test--approve))
+            (setq first (kargu-bridge-job-test--start conn root "read value" owner)
+                  second (kargu-bridge-job-test--start conn root "read value"))
+            (kill-buffer owner)
+            (kargu-bridge-test--wait (lambda () (eq (kargu-bridge-job-state first) :forgotten)))
+            (should-not (file-exists-p (format "/proc/%s" (kargu-bridge-job-pid first))))
+            (should (equal (gethash "state" (kargu-bridge-job-test--call #'kargu-bridge-job-status second)) "running")))
+        (when (buffer-live-p owner) (kill-buffer owner))
+        (kargu-bridge-job-test--dispose first)
+        (kargu-bridge-job-test--dispose second)
+        (delete-directory root t)))))
+
+(ert-deftest kargu-bridge-job-environment-is-exact-but-not-printed-in-review-test ()
+  "Approval keeps the exact environment while withholding its plaintext values."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-job-environment-" t)) details job)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation)
+                     (lambda (request)
+                       (when (eq (kargu-confirmation-operation request) :prompt)
+                         (setq details (plist-get (kargu-confirmation-options request) :details))
+                         (kargu-bridge-job-test--approve request)))))
+            (setq job (kargu-bridge-job-test--start
+                       conn root "printf '%s' \"$KARGU_FIXTURE_PRIVATE\"" nil
+                       `(("environment" . ,(kargu-bridge--object "KARGU_FIXTURE_PRIVATE" "synthetic-private-value")))))
+            (should (string-search "KARGU_FIXTURE_PRIVATE" details))
+            (should-not (string-search "synthetic-private-value" details))
+            (kargu-bridge-job-test--exited job)
+            (let ((page (kargu-bridge-job-test--call #'kargu-bridge-job-read job "stdout" 0)))
+              (should (equal (append (gethash "data" page) nil) (string-to-list "synthetic-private-value")))))
+        (kargu-bridge-job-test--dispose job)
+        (delete-directory root t)))))
+
+(ert-deftest kargu-bridge-job-forgotten-handle-never-reconnects-or-sends-test ()
+  "A forgotten job is inert and cannot borrow a replacement connection."
+  (let* ((conn (kargu-bridge--connection-create :state 'ready))
+         (job (kargu-bridge-job--create :connection conn :state :forgotten)) failure)
+    (cl-letf (((symbol-function 'kargu-bridge-call) (lambda (&rest _) (ert-fail "Stale job sent RPC"))))
+      (kargu-bridge-job-cancel job (lambda (_result error-data) (setq failure error-data)))
+      (should failure)
+      (should (eq (kargu-bridge-job-state job) :forgotten)))))
+
+(ert-deftest kargu-bridge-job-owner-dies-between-receipt-and-claim-test ()
+  "A startup handoff race is an explicit error, not an orphaned client waiter."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-job-handoff-" t))
+          (owner (generate-new-buffer " *kargu-job-handoff*")) finished failure pid
+          (adopt (symbol-function 'kargu-bridge-job--adopt)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation) #'kargu-bridge-job-test--approve)
+                    ((symbol-function 'kargu-bridge-job--adopt)
+                     (lambda (connection receipt project source callback)
+                       (setq pid (gethash "process_id" receipt))
+                       (kill-buffer source)
+                       (funcall adopt connection receipt project source callback))))
+            (let ((args (kargu-bridge-test--command root "read value")))
+              (puthash "timeout_ms" :json-null args)
+              (kargu-bridge-job-start conn args (lambda (_job error-data) (setq failure error-data finished t)) :owner owner))
+            (kargu-bridge-test--wait (lambda () finished))
+            (should (equal (gethash "status" (gethash "data" failure)) "stale_owner"))
+            (should (= 0 (hash-table-count (kargu-bridge-connection-jobs conn)))))
+        (when (buffer-live-p owner) (kill-buffer owner))
+        (kargu-bridge-stop conn)
+        (kargu-bridge-test--wait (lambda () (eq (kargu-bridge-status conn) 'closed)))
+        (when pid (should-not (file-exists-p (format "/proc/%s" pid))))
+        (delete-directory root t)))))
+
+(provide 'tests/test-bridge-jobs)
+;;; test-bridge-jobs.el ends here

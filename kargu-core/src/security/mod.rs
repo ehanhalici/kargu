@@ -164,6 +164,7 @@ pub struct CommandSpec {
     pub(crate) timeout: ExecutionTimeout,
     pub(crate) retention: OutputRetention,
     pub(crate) output_limit: OutputLimit,
+    pub(crate) stderr: StderrPolicy,
     executable: File,
     revision: ExecutableRevision,
     pub(crate) environment: CommandEnvironment,
@@ -217,6 +218,7 @@ impl TryFrom<CommandInput> for CommandSpec {
             timeout,
             retention: OutputRetention::Prefix,
             output_limit: OutputLimit::default(),
+            stderr: StderrPolicy::Separate,
             revision: ExecutableRevision::from(&metadata),
             executable,
             environment: input.environment,
@@ -232,6 +234,11 @@ impl CommandSpec {
     /// Capture a bounded output capacity before requesting approval.
     pub fn with_output_limit(mut self, limit: OutputLimit) -> Self {
         self.output_limit = limit;
+        self
+    }
+    /// Capture OS-level stderr routing before approval.
+    pub fn with_stderr(mut self, policy: StderrPolicy) -> Self {
+        self.stderr = policy;
         self
     }
     /// Only the trusted fixed-argv listing adapter can request this class.
@@ -412,6 +419,10 @@ fn digest(
         OutputRetention::Prefix => 0,
         OutputRetention::Tail => 1,
     }]);
+    hash.update([match command.stderr {
+        StderrPolicy::Separate => 0,
+        StderrPolicy::Merge => 1,
+    }]);
     hash.update(
         u64::try_from(command.output_limit.as_usize())
             .map_err(|_| CoreError::ArithmeticOverflow)?
@@ -434,6 +445,7 @@ pub struct ApprovalRequest {
     retention: OutputRetention,
     output_limit: OutputLimit,
     timeout: ExecutionTimeout,
+    stderr: StderrPolicy,
     id: ApprovalId,
     scope: RunScope,
     digest: ActionDigest,
@@ -446,6 +458,10 @@ pub struct ApprovalRequest {
     environment: CommandEnvironment,
 }
 impl ApprovalRequest {
+    /// Captured stdout/stderr routing.
+    pub fn stderr(&self) -> StderrPolicy {
+        self.stderr
+    }
     /// Captured output policy shown to the reviewer.
     pub fn retention(&self) -> OutputRetention {
         self.retention
@@ -601,6 +617,7 @@ impl ExecutionGate {
             retention: command.retention,
             output_limit: command.output_limit,
             timeout: command.timeout,
+            stderr: command.stderr,
             id: id.clone(),
             scope: run.scope().clone(),
             digest: action_digest.clone(),

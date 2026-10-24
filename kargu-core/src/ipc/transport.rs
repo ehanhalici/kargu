@@ -272,6 +272,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 if matches!(
                     method.as_str(),
                     methods::JOB_LIST
+                        | methods::JOB_CLAIM
                         | methods::JOB_STATUS
                         | methods::JOB_READ
                         | methods::JOB_WRITE

@@ -1,5 +1,6 @@
 //! Strict command DTO capture. Filesystem preparation runs off the mailbox.
 
+use crate::domain::StderrPolicy;
 use crate::{
     application::{Mode, RunPurpose, RunSettings},
     constants::{limits, timeouts},
@@ -29,6 +30,8 @@ pub(super) struct ExecuteInput {
     timeout_ms: CommandTimeout,
     #[serde(default)]
     output_bytes: OutputLimit,
+    #[serde(default)]
+    stderr: StderrPolicy,
     environment: BTreeMap<String, String>,
     config_revision: ConfigRevision,
     policy_revision: PolicyRevision,
@@ -116,7 +119,8 @@ impl ExecuteInput {
         } else {
             OutputRetention::Prefix
         })
-        .with_output_limit(self.output_bytes);
+        .with_output_limit(self.output_bytes)
+        .with_stderr(self.stderr);
         if command.program.to_str().is_none() || command.cwd.path().to_str().is_none() {
             return Err(CoreError::InvalidValue {
                 field: "CommandPathEncoding",

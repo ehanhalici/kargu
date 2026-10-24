@@ -22,15 +22,10 @@ use nix::{
     unistd::Pid,
 };
 use std::os::unix::process::ExitStatusExt;
-use std::{
-    collections::HashMap,
-    process::{ExitStatus, Stdio},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, process::ExitStatus, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
-    process::{Child, ChildStdin, Command},
+    process::{Child, ChildStdin},
     sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot},
     task::JoinHandle,
     time::Instant,
@@ -38,6 +33,7 @@ use tokio::{
 use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 
 mod archive;
+mod stdio;
 use archive::Archive;
 
 /// Configuration DTO for bounded cleanup; independent of command/run deadlines.
@@ -284,21 +280,8 @@ impl ProcessSupervisor {
             .try_acquire_owned()
             .map_err(|_| CoreError::Limit)?;
         actor.mark_started(authorized.run(), authorized.call_id())?;
-        let spec = authorized.command();
-        let mut command = Command::new(&spec.program);
-        command
-            .arg0(&spec.invocation)
-            .args(&spec.arguments)
-            .current_dir(spec.cwd.path())
-            .env_clear()
-            .envs(spec.environment.entries())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0)
-            .kill_on_drop(true);
         Ok((
-            command.spawn()?,
+            stdio::spawn(authorized.command())?,
             Slots {
                 _host: host_slot,
                 _run: run_slot,
@@ -626,9 +609,10 @@ async fn supervise_child(
     let Some(stdout) = child.stdout.take() else {
         return unknown_result();
     };
-    let Some(stderr) = child.stderr.take() else {
+    let stderr = child.stderr.take();
+    if stderr.is_none() && command.stderr == crate::domain::StderrPolicy::Separate {
         return unknown_result();
-    };
+    }
     let Some(stdin) = child.stdin.take() else {
         return unknown_result();
     };
@@ -637,8 +621,13 @@ async fn supervise_child(
     };
     let mut out_task =
         AbortOnDropHandle::new(tokio::spawn(drain(stdout, streams.stdout, run.clone())));
-    let mut err_task =
-        AbortOnDropHandle::new(tokio::spawn(drain(stderr, streams.stderr, run.clone())));
+    let err_run = run.clone();
+    let mut err_task = AbortOnDropHandle::new(tokio::spawn(async move {
+        match stderr {
+            Some(pipe) => drain(pipe, streams.stderr, err_run).await,
+            None => drain(tokio::io::empty(), streams.stderr, err_run).await,
+        }
+    }));
     let input_cancel = cancel.child_token();
     let mut input_task =
         AbortOnDropHandle::new(tokio::spawn(input_loop(stdin, rx, input_cancel.clone())));

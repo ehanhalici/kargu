@@ -18,8 +18,9 @@
 (require 'kargu/core/group)
 
 (declare-function kargu-bridge-approval-execute "kargu/bridge/approval"
-                  (connection arguments callback &key owner))
+                  (connection arguments callback &rest options))
 (declare-function kargu-bridge-approval-request "kargu/bridge/approval" (connection id params))
+(declare-function kargu-bridge-job--disconnect "kargu/bridge/jobs" (job status))
 
 (defgroup kargu-bridge nil
   "Opt-in Rust core connection."
@@ -47,7 +48,8 @@
   (frame-limit kargu-bridge--max-frame) (counter 0) (partial "")
   (pending (make-hash-table :test #'equal)) queue queue-tail (queue-bytes 0)
   dispatch-timer stop-timer reverse-timers capabilities read-scope ready-waiters
-  (reverse-cleanups (make-hash-table :test #'equal)))
+  (reverse-cleanups (make-hash-table :test #'equal))
+  (jobs (make-hash-table :test #'equal)))
 
 (cl-defstruct (kargu-bridge--pending (:constructor kargu-bridge--pending-create))
   "Take-once request waiter and its owner cleanup."
@@ -113,6 +115,8 @@
   "Revoke CONNECTION and finish every waiter with STATUS before resource release."
   (unless (eq (kargu-bridge-connection-state connection) 'closed)
     (setf (kargu-bridge-connection-state connection) 'closed)
+    (dolist (job (hash-table-values (kargu-bridge-connection-jobs connection)))
+      (kargu-bridge-job--disconnect job status))
     (kargu-bridge--dismiss-reverse connection)
     (dolist (timer (append (list (kargu-bridge-connection-dispatch-timer connection)
                                 (kargu-bridge-connection-stop-timer connection))

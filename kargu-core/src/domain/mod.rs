@@ -61,6 +61,17 @@ pub enum OutputRetention {
     Tail,
 }
 
+/// Explicit stderr routing; structured adapters keep streams separate by default.
+#[derive(Clone, Copy, Default, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StderrPolicy {
+    /// Independent stdout/stderr archives.
+    #[default]
+    Separate,
+    /// One OS pipe shared by both descriptors, preserving their observed ordering.
+    Merge,
+}
+
 macro_rules! identity {
     ($name:ident, $prefix:literal, $doc:literal) => {
         #[doc = $doc]

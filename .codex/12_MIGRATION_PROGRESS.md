@@ -1,5 +1,24 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — Persistent execution ve owned job köprüsü
+
+Kullanıcının devam/commit döngüsüyle üç küçük dilim:
+
+1. `5c787da`: gerçek unlimited deadline ve bounded rolling-tail archive;
+   timeout/retention action digest'e bağlı. Ayrıntılar 20'de.
+2. `db5aeb6`: ayrı lifetime'lı process jobs, aynı actor/gate/supervisor,
+   bounded nonblocking stdin/read ve scoped wire. Ayrıntılar 21'de.
+3. Owned Emacs job client, receipt/claim lease, source close drain, gerçek
+   merged stderr pipe ve environment değerlerini gizleyen exact approval.
+   Ayrıntılar 22'de. Bash consumer henüz eski engine'den kesilmedi.
+
+Güncel kaynak ERT **1156/1156**, 0 unexpected, **65.07 s**; Rust **65 test +
+2 compile-fail**; fmt, locked build/test ve strict Clippy sıfır uyarı.
+Warning-as-error bytecompile/checkdoc başarılı, geçici .elc kaldırıldı.
+Yeni concrete job tablosu/lease için formal refinement iddiası yoktur.
+Kullanıcıya ait shell.nix ve 07 fence değişikliği commit dışında korunur.
+API -> Rust ve dört uygulama backend'i açık kapsam olarak devam eder.
+
 ## 2026-10-24 — Unix/GNU bileşimi, klasörleme ve canlı command/approval köprüsü
 
 Kullanıcı kararı: her araç kendi işini yapar; Rust `ls`/`rg`/`git` motorlarını
