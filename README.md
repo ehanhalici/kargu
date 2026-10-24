@@ -64,12 +64,13 @@ Clone the repository and add it to your Emacs `load-path`:
 
 The first Rust migration slice provides bounded JSON-RPC IPC and application/
 session lifecycle operations. The existing Elisp agent remains the default;
-the Rust core does not yet execute prompts, tools, or model requests.
+the Rust core does not yet execute prompts or model requests. It also exposes
+the bounded, read-only `workspace/findFiles` service for the next adapter slice.
 
 The Rust library now includes typed run admission, single-use approvals and a
 Linux process supervisor with bounded interactive I/O and group/subreaper
 cleanup. These services are tested independently and are not yet exposed as
-Emacs tool capabilities; the stdio bridge still advertises lifecycle only.
+Emacs command capabilities; arbitrary execution still has no stdio entry point.
 
 Build with Rust 1.95.0 (Linux is the initial target):
 

@@ -1,5 +1,5 @@
 //! Kargu's opt-in Rust host and typed execution services.
-//! The stdio capability surface remains lifecycle-only while execution adapters migrate.
+//! Stdio exposes lifecycle and bounded read services while execution adapters migrate.
 
 #![forbid(unsafe_code)]
 
@@ -10,6 +10,7 @@ pub mod error;
 pub mod host;
 pub mod ipc;
 pub mod process;
+pub mod search;
 pub mod security;
 
 /// Package version advertised during negotiation.

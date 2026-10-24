@@ -251,6 +251,12 @@ impl ToolName {
 /// Opaque, bounded owner identity for transport-only reverse calls.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestScope(String);
+impl RequestScope {
+    /// Borrow a validated opaque owner scope at the transport boundary.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 impl TryFrom<String> for RequestScope {
     type Error = CoreError;
     fn try_from(value: String) -> Result<Self, CoreError> {

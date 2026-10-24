@@ -2,6 +2,7 @@ use super::{
     CONTROL_BYTES, CONTROL_CAPACITY, MAX_FRAME_BYTES,
     pending::PendingRequests,
     protocol::{self, Message},
+    read_tools::ReadTools,
 };
 use crate::constants::{protocol::methods, timeouts};
 use crate::domain::{ByteLimit, RequestScope};
@@ -24,6 +25,8 @@ pub enum TransportError {
     Overloaded,
     #[error("writer failed or timed out")]
     Writer,
+    #[error("read worker failed during cleanup")]
+    ReadWorker,
 }
 
 struct Frame {
@@ -64,7 +67,7 @@ impl Decoder for StrictLines {
 }
 
 /// Serve one owned connection; EOF and writer failure revoke all pending work.
-/// Only lifecycle capabilities are advertised during this migration stage.
+/// Native read services execute off-mailbox; execution grants are not exposed.
 pub async fn serve<R, W>(reader: R, writer: W) -> Result<(), TransportError>
 where
     R: AsyncRead + Unpin,
@@ -113,13 +116,46 @@ async fn read_loop<R: AsyncRead + Unpin>(
     permits: Arc<Semaphore>,
     pending: &mut PendingRequests,
 ) -> Result<(), TransportError> {
-    let mut input = FramedRead::new(reader, StrictLines::new(ByteLimit::WIRE_MAX));
     let mut host = Host::new();
+    let mut reads = ReadTools::default();
+    let result = read_messages(reader, tx, &permits, pending, &mut host, &mut reads).await;
+    reads.cancel_all();
+    // EOF/error revokes publication immediately, but worker slots are not released
+    // early. Blocking filesystem calls cannot be safely aborted by dropping a task.
+    while let Some(completion) = reads.next(&host).await {
+        completion.map_err(|_| TransportError::ReadWorker)?;
+    }
+    result
+}
+
+async fn read_messages<R: AsyncRead + Unpin>(
+    reader: R,
+    tx: &mpsc::Sender<Frame>,
+    permits: &Arc<Semaphore>,
+    pending: &mut PendingRequests,
+    host: &mut Host,
+    reads: &mut ReadTools,
+) -> Result<(), TransportError> {
+    let mut input = FramedRead::new(reader, StrictLines::new(ByteLimit::WIRE_MAX));
     let mut expiry = tokio::time::interval(timeouts::PENDING_SWEEP);
+    let mut shutdown_reply = None;
     loop {
         let frame = tokio::select! {
             frame = input.next() => frame,
-            _ = expiry.tick() => { pending.expire(tokio::time::Instant::now()); continue; }
+            completion = reads.next(host), if !reads.is_empty() => {
+                let reply = completion.ok_or(TransportError::ReadWorker)?
+                    .map_err(|_| TransportError::ReadWorker)?;
+                queue_reply(reply, host.frame_limit(), tx, permits)?;
+                if reads.is_empty() && let Some(reply) = shutdown_reply.take() {
+                    queue_reply(reply, host.frame_limit(), tx, permits)?;
+                }
+                continue;
+            }
+            _ = expiry.tick() => {
+                pending.expire(tokio::time::Instant::now());
+                reads.sweep(host);
+                continue;
+            }
         };
         let Some(frame) = frame else {
             return Ok(());
@@ -141,10 +177,30 @@ async fn read_loop<R: AsyncRead + Unpin>(
                             .and_then(|s| RequestScope::try_from(s.to_owned()).ok()),
                     ) {
                         pending.cancel(&id, &scope);
+                        if host.matches_epoch(&scope) {
+                            reads.cancel(&id);
+                        }
+                    }
+                    continue;
+                }
+                if id.as_ref().is_some_and(|id| reads.contains(id)) {
+                    // Two responses with the same live id would be ambiguous.
+                    return Err(TransportError::Framing);
+                }
+                if method == methods::FIND_FILES {
+                    if let Some(id) = id.as_ref() {
+                        let admitted = host
+                            .prepare_find_files(params)
+                            .and_then(|(scope, input)| reads.start(id.clone(), scope, input));
+                        if let Err(fault) = admitted {
+                            queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
                     }
                     continue;
                 }
                 let dispatch = host.dispatch(&method, params, id.is_some());
+                let draining_shutdown = method == methods::SHUTDOWN && dispatch.result.is_ok();
+                reads.sweep(host);
                 if dispatch.exit {
                     return Ok(());
                 }
@@ -153,27 +209,55 @@ async fn read_loop<R: AsyncRead + Unpin>(
                 if host.is_shutdown() {
                     pending.disconnect();
                 }
-                id.as_ref().map(|id| match dispatch.result {
+                let reply = id.as_ref().map(|id| match dispatch.result {
                     Ok(result) => protocol::success(id, result),
                     Err(fault) => fault.response(Some(id)),
-                })
+                });
+                if draining_shutdown && !reads.is_empty() {
+                    shutdown_reply = reply;
+                    None
+                } else {
+                    reply
+                }
             }
         };
         if let Some(reply) = reply {
-            let line = serde_json::to_string(&reply).map_err(|_| TransportError::Framing)?;
-            if line.len() > host.frame_limit().as_usize() {
-                return Err(TransportError::Overloaded);
-            }
-            let bytes = u32::try_from(line.len() + 1).map_err(|_| TransportError::Overloaded)?;
-            let permit = permits
-                .clone()
-                .try_acquire_many_owned(bytes)
-                .map_err(|_| TransportError::Overloaded)?;
-            tx.try_send(Frame {
-                line,
-                _permit: permit,
-            })
-            .map_err(|_| TransportError::Overloaded)?;
+            queue_reply(reply, host.frame_limit(), tx, permits)?;
         }
     }
+}
+
+fn queue_reply(
+    reply: Value,
+    limit: ByteLimit,
+    tx: &mpsc::Sender<Frame>,
+    permits: &Arc<Semaphore>,
+) -> Result<(), TransportError> {
+    let mut line = serde_json::to_string(&reply).map_err(|_| TransportError::Framing)?;
+    if line.len() > limit.as_usize() {
+        let id = reply.get("id").and_then(protocol::RpcId::parse);
+        line = serde_json::to_string(
+            &protocol::Fault {
+                code: crate::constants::protocol::error_codes::RESOURCE_LIMIT,
+                message: "Response exceeds negotiated frame limit",
+                status: "resource_limit",
+            }
+            .response(id.as_ref()),
+        )
+        .map_err(|_| TransportError::Framing)?;
+        if line.len() > limit.as_usize() {
+            return Err(TransportError::Overloaded);
+        }
+    }
+    let bytes =
+        u32::try_from(line.len().saturating_add(1)).map_err(|_| TransportError::Overloaded)?;
+    let permit = permits
+        .clone()
+        .try_acquire_many_owned(bytes)
+        .map_err(|_| TransportError::Overloaded)?;
+    tx.try_send(Frame {
+        line,
+        _permit: permit,
+    })
+    .map_err(|_| TransportError::Overloaded)
 }

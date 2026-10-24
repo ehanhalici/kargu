@@ -84,6 +84,91 @@ impl Drop for Peer {
 }
 
 #[test]
+fn native_file_discovery_uses_owned_session_and_keeps_reader_responsive() -> TestResult {
+    let root = tempfile::tempdir()?;
+    std::fs::create_dir(root.path().join("src"))?;
+    std::fs::write(root.path().join("src/main.el"), "fixture")?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    peer.send(json!({"jsonrpc":"2.0","id":1,"method":"application/create"}))?;
+    let app = peer.read()?["result"]["application_id"].clone();
+    peer.send(
+        json!({"jsonrpc":"2.0","id":2,"method":"session/create","params":{"application_id":app}}),
+    )?;
+    let scope = peer.read()?["result"].clone();
+    let arguments = json!({"root":root.path(),"path":null,"pattern":"*.el",
+        "skip_directories":[".git"],"max_files":2000,"max_directories":2000});
+    peer.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"workspace/findFiles",
+        "params":{"scope":scope,"arguments":arguments}}),
+    )?;
+    peer.send(json!({"jsonrpc":"2.0","id":4,"method":"ping"}))?;
+    let replies = [peer.read()?, peer.read()?];
+    let search = replies
+        .iter()
+        .find(|reply| reply["id"] == 3)
+        .ok_or("search reply missing")?;
+    let ping = replies
+        .iter()
+        .find(|reply| reply["id"] == 4)
+        .ok_or("ping reply missing")?;
+    assert_eq!(search["result"]["text"], "src/main.el\n");
+    assert_eq!(search["result"]["truncated"], false);
+    assert_eq!(ping["result"]["status"], "ok");
+    peer.send(json!({"jsonrpc":"2.0","id":5,"method":"application/create"}))?;
+    let other = peer.read()?["result"]["application_id"].clone();
+    peer.send(json!({"jsonrpc":"2.0","id":6,"method":"workspace/findFiles",
+        "params":{"scope":{"application_id":other,"session_id":scope["session_id"]},"arguments":arguments}}))?;
+    assert_eq!(peer.read()?["error"]["data"]["status"], "stale_owner");
+    peer.send(
+        json!({"jsonrpc":"2.0","id":7,"method":"workspace/findFiles",
+        "params":{"scope":scope,"arguments":arguments}}),
+    )?;
+    peer.send(json!({"jsonrpc":"2.0","id":8,"method":"shutdown"}))?;
+    let replies = [peer.read()?, peer.read()?];
+    assert!(replies.iter().any(|reply| reply["id"] == 7));
+    assert_eq!(replies.last().ok_or("shutdown reply missing")?["id"], 8);
+    peer.send(json!({"jsonrpc":"2.0","method":"exit"}))?;
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn oversized_search_response_is_a_scoped_error_not_transport_failure() -> TestResult {
+    let root = tempfile::tempdir()?;
+    for n in 0..100 {
+        std::fs::write(
+            root.path().join(format!("source-file-{n:04}.el")),
+            "fixture",
+        )?;
+    }
+    let mut peer = Peer::start()?;
+    peer.send(
+        json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+        "protocol_major":1,"protocol_minor":0,"client_version":"test","capabilities":[],
+        "limits":{"max_frame_bytes":1024}}}),
+    )?;
+    assert!(peer.read()?.get("result").is_some());
+    peer.send(json!({"jsonrpc":"2.0","method":"initialized"}))?;
+    peer.send(json!({"jsonrpc":"2.0","id":1,"method":"application/create"}))?;
+    let app = peer.read()?["result"].clone();
+    peer.send(json!({"jsonrpc":"2.0","id":2,"method":"session/create","params":app}))?;
+    let scope = peer.read()?["result"].clone();
+    peer.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"workspace/findFiles","params":{
+        "scope":scope,"arguments":{"root":root.path(),"path":null,"pattern":"*.el",
+        "skip_directories":[],"max_files":2000,"max_directories":2000}}}),
+    )?;
+    assert_eq!(peer.read()?["error"]["data"]["status"], "resource_limit");
+    peer.send(json!({"jsonrpc":"2.0","id":4,"method":"ping"}))?;
+    assert_eq!(peer.read()?["result"]["status"], "ok");
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
 fn real_pipe_lifecycle_and_clean_shutdown() -> TestResult {
     let mut peer = Peer::start()?;
     peer.initialize()?;

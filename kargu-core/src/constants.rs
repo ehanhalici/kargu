@@ -46,6 +46,24 @@ pub mod limits {
     pub const COMMAND_ENVIRONMENT_ENTRIES: usize = 128;
     /// Tracked jobs, including terminal but uncollected jobs.
     pub const JOBS: usize = 64;
+    /// Concurrent native read workers on one connection, including draining work.
+    pub const READ_WORKERS: usize = 4;
+    /// Maximum file discoveries accepted from a client configuration.
+    pub const SEARCH_FILES: usize = 20_000;
+    /// Maximum directory visits accepted from a client configuration.
+    pub const SEARCH_DIRECTORIES: usize = 20_000;
+    /// Hard bound on all inspected directory entries, including non-files.
+    pub const SEARCH_ENTRIES: usize = 100_000;
+    /// Open directory iterator depth; directory symlinks are never followed.
+    pub const SEARCH_DEPTH: usize = 128;
+    /// File paths in one result.
+    pub const SEARCH_RESULTS: usize = 200;
+    /// Unescaped result text; transport also checks the negotiated frame size.
+    pub const SEARCH_RESULT_BYTES: usize = 64 * 1024;
+    /// Bytes in one glob expression.
+    pub const SEARCH_PATTERN_BYTES: usize = 1024;
+    /// Bytes in a client-supplied path.
+    pub const SEARCH_PATH_BYTES: usize = 4096;
 }
 
 /// Timeouts are typed durations, never shared unlabelled numbers.
@@ -63,6 +81,8 @@ pub mod timeouts {
     pub const PROCESS_GRACE: Duration = Duration::from_secs(5);
     /// Pipe and reap cleanup deadline after forced termination.
     pub const PROCESS_DRAIN: Duration = Duration::from_secs(5);
+    /// Read-only native workspace operation lifetime.
+    pub const WORKSPACE_READ: Duration = Duration::from_secs(30);
 }
 
 /// Negotiated wire version and method identifiers.
@@ -75,9 +95,13 @@ pub mod protocol {
     pub const MINOR: u16 = 0;
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
-    /// Only implemented stdio capabilities; library execution is not exposed yet.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 3] =
-        ["application_lifecycle", "session_lifecycle", methods::PING];
+    /// Implemented wire capabilities; arbitrary command execution is not exposed.
+    pub const LIFECYCLE_CAPABILITIES: [&str; 4] = [
+        "application_lifecycle",
+        "session_lifecycle",
+        methods::PING,
+        "workspace_find_files",
+    ];
 
     /// JSON-RPC and host error codes, kept separate from human error messages.
     pub mod error_codes {
@@ -97,6 +121,16 @@ pub mod protocol {
         pub const STALE_OWNER: i64 = -32003;
         /// Host resource capacity.
         pub const RESOURCE_LIMIT: i64 = -32004;
+        /// Workspace policy rejected a read target.
+        pub const REJECTED: i64 = -32005;
+        /// An operation was cancelled before publication.
+        pub const CANCELLED: i64 = -32006;
+        /// Operation deadline expired.
+        pub const TIMEOUT: i64 = -32007;
+        /// Captured filesystem identity changed.
+        pub const WORKSPACE_CHANGED: i64 = -32008;
+        /// Sanitized filesystem failure.
+        pub const IO: i64 = -32009;
     }
     /// Canonical method names.
     pub mod methods {
@@ -114,6 +148,8 @@ pub mod protocol {
         pub const SESSION_SNAPSHOT: &str = "session/snapshot";
         /// Close session.
         pub const SESSION_CLOSE: &str = "session/close";
+        /// Bounded, read-only native file discovery.
+        pub const FIND_FILES: &str = "workspace/findFiles";
         /// Cancel pending request.
         pub const CANCEL: &str = "rpc/cancel";
         /// Drain host.

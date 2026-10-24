@@ -5,11 +5,26 @@ use crate::constants::{
     limits,
     protocol::{self, methods},
 };
-use crate::domain::{ApplicationId, ByteLimit, SessionId};
+use crate::domain::{ApplicationId, ByteLimit, RequestScope, SessionId};
 use crate::ipc::protocol::Fault;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+
+/// Owner of a standalone read service, not an agent run or execution grant.
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReadScope {
+    pub application_id: ApplicationId,
+    pub session_id: SessionId,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FindFilesRequest {
+    scope: ReadScope,
+    arguments: crate::search::FindFilesInput,
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Phase {
@@ -90,6 +105,33 @@ impl Host {
     /// Whether this connection has finished draining its domain resources.
     pub fn is_shutdown(&self) -> bool {
         self.phase == Phase::Shutdown
+    }
+
+    pub(crate) fn owns_read_scope(&self, scope: &ReadScope) -> bool {
+        self.phase == Phase::Ready
+            && self
+                .applications
+                .get(&scope.application_id)
+                .is_some_and(|actor| actor.owns_session(&scope.session_id))
+    }
+
+    pub(crate) fn prepare_find_files(
+        &self,
+        params: Value,
+    ) -> Result<(ReadScope, crate::search::FindFilesInput), Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let request: FindFilesRequest =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&request.scope) {
+            return Err(owner_fault());
+        }
+        Ok((request.scope, request.arguments))
+    }
+
+    pub(crate) fn matches_epoch(&self, scope: &RequestScope) -> bool {
+        scope.as_str() == self.epoch
     }
 
     /// Dispatch a request or notification; state-changing methods require ids.
