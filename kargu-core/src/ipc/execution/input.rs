@@ -3,7 +3,7 @@
 use crate::{
     application::{Mode, RunSettings},
     constants::{limits, timeouts},
-    domain::{ConfigRevision, PolicyRevision, ToolCallLimit},
+    domain::{ConfigRevision, PolicyRevision, ToolCallLimit, ToolName},
     error::CoreError,
     security::{CommandEnvironment, CommandInput, CommandSpec, Workspace},
 };
@@ -45,6 +45,7 @@ impl TryFrom<u64> for CommandTimeout {
 }
 
 pub(super) struct Prepared {
+    pub tool: ToolName,
     pub command: CommandSpec,
     pub settings: RunSettings,
 }
@@ -88,7 +89,11 @@ impl ExecuteInput {
             timeout,
             environment: CommandEnvironment::try_from(environment)?,
         })?;
-        Ok(Prepared { command, settings })
+        Ok(Prepared {
+            command,
+            settings,
+            tool: ToolName::try_from("bash".to_owned())?,
+        })
     }
 }
 

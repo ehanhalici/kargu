@@ -34,6 +34,13 @@ struct ExecuteRequest {
     arguments: ExecuteInput,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListingRequest {
+    scope: ReadScope,
+    arguments: crate::workspace::listing::ListFilesInput,
+}
+
 enum Stage {
     Preparing(JoinHandle<Result<Prepared, CoreError>>),
     Review {
@@ -68,6 +75,7 @@ impl Commands {
     pub fn new() -> Result<Self, CoreError> {
         let mut registry = ToolRegistry::default();
         registry.register_process(ToolName::try_from("bash".to_owned())?, vec![])?;
+        registry.register_listing()?;
         Ok(Self {
             operations: HashMap::new(),
             gate: ExecutionGate::default(),
@@ -86,6 +94,18 @@ impl Commands {
         let request: ExecuteRequest =
             serde_json::from_value(params).map_err(|_| Fault::params())?;
         self.admit(host, id, request.scope, move || request.arguments.prepare())
+    }
+    pub fn start_listing(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
+        let request: ListingRequest =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        self.admit(host, id, request.scope, move || {
+            let (command, settings) = request.arguments.prepare()?;
+            Ok(Prepared {
+                command,
+                settings,
+                tool: ToolName::try_from("list_files".to_owned())?,
+            })
+        })
     }
     fn admit(
         &mut self,
@@ -242,7 +262,7 @@ impl Commands {
             actor,
             &run,
             &self.registry,
-            &ToolName::try_from("bash".to_owned())?,
+            &prepared.tool,
             ToolCallId::new(),
             prepared.command,
         ) {
@@ -253,6 +273,9 @@ impl Commands {
                 return Ok(Progress::Done(Err(error)));
             }
         };
+        if prepared.tool.as_str() == "list_files" {
+            return self.launch(host, scope, run, Box::new(request), UserDecision::Approved);
+        }
         self.sequence = self.sequence.next()?;
         let reverse = RpcId::String(format!(
             "r:{}:{}",
@@ -263,7 +286,7 @@ impl Commands {
             .register(reverse.clone(), host.request_scope()?, request.deadline())
             .map_err(|_| CoreError::Limit)?;
         messages.push(json!({"jsonrpc":"2.0","id":reverse.value(),"method":methods::REQUEST_APPROVAL,
-            "params":{"request_id":id.value(),"approval_id":request.id(),"scope":request.scope(),"program":request.program(),
+            "params":{"request_id":id.value(),"approval_id":request.id(),"scope":request.scope(),"program":request.program(),"invocation":request.invocation(),
             "arguments":request.arguments(),"cwd":request.working_directory(),
             "environment":request.environment().entries().map(|(k,v)| (k.to_string_lossy().into_owned(),v.to_string_lossy().into_owned())).collect::<std::collections::BTreeMap<_,_>>()}}));
         Ok(Progress::Pending(Stage::Review {

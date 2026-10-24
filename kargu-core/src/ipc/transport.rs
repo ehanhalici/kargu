@@ -240,15 +240,20 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     // Two responses with the same live id would be ambiguous.
                     return Err(TransportError::Framing);
                 }
-                if method == methods::EXECUTE {
-                    if let Some(id) = id.as_ref()
-                        && let Err(fault) = commands.start(host, id.clone(), params)
-                    {
-                        queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                if matches!(method.as_str(), methods::EXECUTE | methods::LIST_FILES) {
+                    if let Some(id) = id.as_ref() {
+                        let admitted = if method == methods::LIST_FILES {
+                            commands.start_listing(host, id.clone(), params)
+                        } else {
+                            commands.start(host, id.clone(), params)
+                        };
+                        if let Err(fault) = admitted {
+                            queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
                     }
                     continue;
                 }
-                if matches!(method.as_str(), methods::FIND_FILES | methods::LIST_FILES) {
+                if method == methods::FIND_FILES {
                     if let Some(id) = id.as_ref() {
                         let admitted = host
                             .prepare_workspace_read(&method, params)

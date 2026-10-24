@@ -74,6 +74,9 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
 
 - [ ] Ortak execution gate, path/egress policy, scoped approval ledger ve
   asenkron Emacs approval presenter kurulsun. UI 300 s ve sensör 10 s ayrı olsun.
+  - [x] Standalone `tool/execute` Rust reverse approval + process drain portu
+    (18); sabit `list_files` GNU ls adapter'ı aynı execution yolunda (19).
+  - [ ] Emacs reverse approval presenter ve genel Bash/job consumer cutover.
 - [ ] Process startup barrier, group supervision, bounded stdout/stderr,
   interactive stdin/poll/EOF/cancel ve TERM/KILL/reap uygulansın.
 - [ ] Read/search/Git/skill/webfetch portları ve capability discovery taşınsın.

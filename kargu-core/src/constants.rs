@@ -64,8 +64,6 @@ pub mod limits {
     pub const SEARCH_PATTERN_BYTES: usize = 1024;
     /// Bytes in a client-supplied path.
     pub const SEARCH_PATH_BYTES: usize = 4096;
-    /// Visible entries retained by one direct directory listing.
-    pub const LIST_RESULTS: usize = 200;
 }
 
 /// Timeouts are typed durations, never shared unlabelled numbers.
@@ -103,7 +101,7 @@ pub mod protocol {
         "session_lifecycle",
         methods::PING,
         "workspace_find_files",
-        "workspace_list_files",
+        "workspace_list_files_ls",
         "command_execute",
     ];
 
@@ -158,7 +156,7 @@ pub mod protocol {
         pub const SESSION_CLOSE: &str = "session/close";
         /// Bounded, read-only native file discovery.
         pub const FIND_FILES: &str = "workspace/findFiles";
-        /// Bounded direct directory listing without following entry symlinks.
+        /// Bounded fixed-argv GNU ls listing, through the shared command service.
         pub const LIST_FILES: &str = "workspace/listFiles";
         /// Cancel pending request.
         pub const CANCEL: &str = "rpc/cancel";

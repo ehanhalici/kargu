@@ -1,100 +1,11 @@
 //! Real-pipe framing, shutdown and adversarial consumer checks.
 
+mod support;
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
+use support::Peer;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
-
-struct Peer {
-    child: Child,
-    input: Option<ChildStdin>,
-    output: Receiver<String>,
-    epoch: String,
-}
-
-impl Peer {
-    fn start() -> Result<Self, Box<dyn std::error::Error>> {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_kargu-core"))
-            .arg("--stdio")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()?;
-        let input = child.stdin.take().ok_or("missing stdin")?;
-        let stdout = child.stdout.take().ok_or("missing stdout")?;
-        let (tx, output) = mpsc::channel();
-        std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                match line {
-                    Ok(line) => {
-                        if tx.send(line).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
-        Ok(Self {
-            child,
-            input: Some(input),
-            output,
-            epoch: String::new(),
-        })
-    }
-    fn raw(&mut self, bytes: &[u8]) -> TestResult {
-        let input = self.input.as_mut().ok_or("closed stdin")?;
-        input.write_all(bytes)?;
-        input.flush()?;
-        Ok(())
-    }
-    fn send(&mut self, value: Value) -> TestResult {
-        self.raw(format!("{value}\n").as_bytes())
-    }
-    fn read(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        // Production cleanup includes a five-second TERM grace and pipe/reap drain.
-        let line = self.output.recv_timeout(Duration::from_secs(12))?;
-        Ok(serde_json::from_str(&line)?)
-    }
-    fn initialize(&mut self) -> TestResult {
-        self.send(json!({"jsonrpc":"2.0","id":"e:init","method":"initialize",
-            "params":{"protocol_major":1,"protocol_minor":0,"client_version":"pipe-test",
-            "capabilities":[],"limits":{"max_frame_bytes":1048576}}}))?;
-        let initialized = self.read()?;
-        self.epoch = initialized["result"]["connection_epoch"]
-            .as_str()
-            .ok_or("epoch missing")?
-            .to_owned();
-        self.send(json!({"jsonrpc":"2.0","method":"initialized"}))
-    }
-    fn scope(&mut self) -> Result<Value, Box<dyn std::error::Error>> {
-        self.send(json!({"jsonrpc":"2.0","id":1,"method":"application/create"}))?;
-        let app = self.read()?["result"].clone();
-        self.send(json!({"jsonrpc":"2.0","id":2,"method":"session/create","params":app}))?;
-        Ok(self.read()?["result"].clone())
-    }
-    fn wait(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
-        let deadline = Instant::now() + Duration::from_secs(8);
-        loop {
-            if let Some(status) = self.child.try_wait()? {
-                return Ok(status.success());
-            }
-            if Instant::now() >= deadline {
-                return Err("child failed to exit".into());
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-    }
-}
-impl Drop for Peer {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
 
 fn command_arguments(root: &std::path::Path, script: &str) -> Value {
     let shell = std::env::var_os("PATH")
@@ -297,8 +208,7 @@ fn native_listing_uses_the_same_owner_and_nonblocking_mailbox() -> TestResult {
     let mut peer = Peer::start()?;
     peer.initialize()?;
     let scope = peer.scope()?;
-    let arguments =
-        json!({"root":root.path(),"path":null,"skip_directories":[],"max_entries":2000});
+    let arguments = json!({"root":root.path(),"path":null,"skip_directories":[]});
     peer.send(
         json!({"jsonrpc":"2.0","id":3,"method":"workspace/listFiles",
         "params":{"scope":scope,"arguments":arguments}}),
@@ -309,14 +219,12 @@ fn native_listing_uses_the_same_owner_and_nonblocking_mailbox() -> TestResult {
         .iter()
         .find(|reply| reply["id"] == 3)
         .ok_or("listing missing")?;
-    assert_eq!(listing["result"]["text"], "[DIR]  sub\n[FILE] top.el");
-    assert_eq!(
-        listing["result"]["entries"]
-            .as_array()
-            .ok_or("entries missing")?
-            .len(),
-        2
-    );
+    let text = listing["result"]["text"]
+        .as_str()
+        .ok_or("ls text missing")?;
+    assert!(text.contains("sub"));
+    assert!(text.contains("top.el"));
+    assert!(listing["result"].get("entries").is_none());
     assert!(
         replies
             .iter()
@@ -340,7 +248,7 @@ fn listing_invalid_dto_and_foreign_owner_are_rejected_before_io() -> TestResult 
     peer.initialize()?;
     let scope = peer.scope()?;
     let mut arguments = json!({"root":"/kargu-nonexistent-fixture-root","path":null,
-        "skip_directories":[],"max_entries":2000});
+        "skip_directories":[]});
     arguments["unexpected"] = json!(true);
     peer.send(
         json!({"jsonrpc":"2.0","id":3,"method":"workspace/listFiles",
@@ -380,8 +288,10 @@ fn oversized_listing_is_a_scoped_error_and_ping_survives() -> TestResult {
     assert!(peer.read()?.get("result").is_some());
     peer.send(json!({"jsonrpc":"2.0","method":"initialized"}))?;
     let scope = peer.scope()?;
-    peer.send(json!({"jsonrpc":"2.0","id":3,"method":"workspace/listFiles","params":{
-        "scope":scope,"arguments":{"root":root.path(),"path":null,"skip_directories":[],"max_entries":2000}}}))?;
+    peer.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"workspace/listFiles","params":{
+        "scope":scope,"arguments":{"root":root.path(),"path":null,"skip_directories":[]}}}),
+    )?;
     assert_eq!(peer.read()?["error"]["data"]["status"], "resource_limit");
     peer.send(json!({"jsonrpc":"2.0","id":4,"method":"ping"}))?;
     assert_eq!(peer.read()?["result"]["status"], "ok");

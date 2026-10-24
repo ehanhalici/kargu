@@ -195,11 +195,13 @@
       (should-not (string-search "readme.md" res))))))
 
 (ert-deftest kargu-search-list-files-test ()
-  "Native directory entries retain [DIR] and [FILE] display tags."
+  "Directory listing returns GNU ls output without native display tags."
   (kargu-bridge-test--with-core
     (kargu-test-with-git-repo '(("top.el" . "x") ("sub/inner.el" . "y"))
       (let ((out (kargu-test-await (lambda (done) (kargu-search-list-files nil done)))))
-        (should (equal out "[DIR]  sub\n[FILE] top.el"))))))
+        (should (string-search "sub" out))
+        (should (string-search "top.el" out))
+        (should-not (string-search "[FILE]" out))))))
 
 (ert-deftest kargu-search-tool-recommendations-test ()
   "Search recommendations describe available discovery commands."

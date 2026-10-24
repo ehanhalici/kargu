@@ -16,7 +16,7 @@
 ;;  * `workspace_grep'  — ripgrep (`rg') when available, otherwise
 ;;    GNU grep.  Returns path:line:text hits, capped.
 ;;  * `find_files_by_glob' — bounded native Rust file discovery.
-;;  * `list_files' — bounded native Rust directory listing.
+;;  * `list_files' — GNU ls through the bounded Rust command service.
 ;;
 ;; Both stay visible in ask/plan/debug (they do not mutate files).
 
@@ -41,13 +41,6 @@
 
 (defcustom kargu-search-default-max-matches 50
   "Default cap on grep hits returned to the model."
-  :type 'natnum
-  :group 'kargu-search)
-
-(defcustom kargu-search-list-max-entries 2000
-  "Maximum entries inspected by a native directory listing.
-Excluded names count against this budget.  Rust enforces a hard maximum of
-100000, plus independent retained-result and byte limits."
   :type 'natnum
   :group 'kargu-search)
 
@@ -223,7 +216,6 @@ wait for Rust or run the removed synchronous directory scanner."
     (let* ((root (kargu-search--root))
            (target (kargu-search--resolve path root))
            (arguments (kargu-search--native-arguments root target)))
-      (puthash "max_entries" kargu-search-list-max-entries arguments)
       (kargu-search--native-call callback arguments #'kargu-bridge-list-files))))
 
 (defun kargu-search--native-arguments (root target)
@@ -250,6 +242,10 @@ Return an owned async task; Stop cancels its pending RPC, not sibling work."
   "Finish TASK from one native RESULT or ERROR-DATA without parsing display text."
   (cond
    (error-data (kargu-async-finish task nil (gethash "message" error-data "Native read failed")))
+   ((and (hash-table-p result) (gethash "outcome" result)
+         (not (equal (gethash "outcome" result) "ok")))
+    (kargu-async-finish task nil (format "Listing failed (%s): %s"
+                                       (gethash "outcome" result) (gethash "text" result ""))))
    ((not (and (hash-table-p result) (stringp (gethash "text" result))))
     (kargu-async-finish task nil "Invalid native read result"))
    (t (kargu-async-finish task (gethash "text" result)))))
@@ -336,7 +332,7 @@ a callback is required."
         (kargu--tool-arg args "path" "file_path" "filePath")))))
    (list
     "list_files"
-    "List immediate project entries using bounded native Rust discovery (similar to ls). Read-only in all modes. Symlinks are marked LINK without following their targets; incomplete listings are reported explicitly."
+    "List a project directory using GNU ls -lAh through the Rust command service. Read-only in all modes; returns ls text with bounded output and explicit truncation. For custom ls options use the bash tool with the full command."
     '(("type" . "object")
       ("properties" . (("path" . (("type" . "string")
                                   ("description" . "Directory path to list (default: project root).")))))

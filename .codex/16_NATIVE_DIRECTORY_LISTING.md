@@ -103,3 +103,8 @@ Rust: **47 test + 2 compile-fail doctest**. Locked fmt/strict all-target Clippy,
 warning-as-error byte compilation ve checkdoc geçer. TLA+ modelleri değiştirilmedi;
 bu read-service uygulaması için yeni model/refinement kanıtı iddia edilmez.
 Uzak CI ve gerçek provider/CLI/MCP testi bu dilimde çalıştırılmadı.
+# Güncel durum
+
+Bu dosya önceki native listing diliminin tarihsel kanıtıdır. Kullanıcının
+Unix/GNU bileşimi kararıyla özel tarayıcı kaldırıldı; güncel sözleşme ve testler
+19_GNU_LS_ADAPTER.md içinde, gerekçe 17_UNIX_TOOL_COMPOSITION.md içindedir.

@@ -213,12 +213,13 @@
             (write-region "fixture" nil (expand-file-name "kaynak.el" root) nil 'silent)
             (kargu-bridge-list-files
              conn (kargu-bridge--object "root" root "path" :json-null
-                                       "skip_directories" [] "max_entries" 2000)
+                                       "skip_directories" [])
              (lambda (result error-data) (setq reply result failure error-data finished t)))
             (kargu-bridge-test--wait (lambda () finished))
             (should-not failure)
-            (should (equal (gethash "text" reply) "[FILE] kaynak.el"))
-            (should (equal (gethash "kind" (aref (gethash "entries" reply) 0)) "file"))
+            (should (string-search "kaynak.el" (gethash "text" reply)))
+            (should (equal (gethash "outcome" reply) "ok"))
+            (should-not (gethash "entries" reply))
             (should (eq (gethash "truncated" reply) :json-false)))
         (delete-directory root t)))))
 
@@ -236,7 +237,7 @@
       (should (eq (kargu-bridge-status conn) 'ready)))))
 
 (ert-deftest kargu-bridge-listing-only-capability-binds-read-service-test ()
-  (let ((conn (kargu-bridge--connection-create :capabilities ["workspace_list_files"])) ready failure methods)
+  (let ((conn (kargu-bridge--connection-create :capabilities ["workspace_list_files_ls"])) ready failure methods)
     (cl-letf (((symbol-function 'kargu-bridge-call)
                (lambda (_conn method _arguments callback &rest _options)
                  (push method methods)

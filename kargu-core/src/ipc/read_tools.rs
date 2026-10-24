@@ -177,7 +177,7 @@ fn fault(error: CoreError) -> Fault {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace::{listing::ListFilesInput, search::FindFilesInput};
+    use crate::workspace::search::FindFilesInput;
     use serde_json::json;
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -216,26 +216,13 @@ mod tests {
         })
     }
 
-    fn listing_arguments(root: &std::path::Path) -> WorkspaceRead {
-        WorkspaceRead::ListFiles(ListFilesInput {
-            root: root.to_owned(),
-            path: None,
-            skip_directories: vec![],
-            max_entries: 2000,
-        })
-    }
-
     #[tokio::test]
-    async fn listing_shares_capacity_with_discovery_and_cancel_is_request_scoped() -> TestResult {
+    async fn discovery_capacity_and_cancel_are_request_scoped() -> TestResult {
         let root = tempfile::tempdir()?;
         let (host, scope) = owner()?;
         let mut tools = ReadTools::default();
         for n in 0..4 {
-            let input = if n % 2 == 0 {
-                arguments(root.path())
-            } else {
-                listing_arguments(root.path())
-            };
+            let input = arguments(root.path());
             tools
                 .start(RpcId::Integer(n), scope.clone(), input)
                 .map_err(|_| "start failed")?;
@@ -243,7 +230,7 @@ mod tests {
         tools.cancel(&RpcId::Integer(1));
         assert!(
             tools
-                .start(RpcId::Integer(4), scope, listing_arguments(root.path()))
+                .start(RpcId::Integer(4), scope, arguments(root.path()))
                 .is_err()
         );
         let mut completed = 0_usize;
@@ -304,20 +291,12 @@ mod tests {
     async fn expired_and_closed_owners_cannot_publish_success_even_after_worker_completed()
     -> TestResult {
         let root = tempfile::tempdir()?;
-        for (expired, listing) in [(true, false), (false, false), (true, true), (false, true)] {
+        for expired in [true, false] {
             let (mut host, scope) = owner()?;
             let mut tools = ReadTools::default();
             let id = RpcId::Integer(1);
             tools
-                .start(
-                    id.clone(),
-                    scope.clone(),
-                    if listing {
-                        listing_arguments(root.path())
-                    } else {
-                        arguments(root.path())
-                    },
-                )
+                .start(id.clone(), scope.clone(), arguments(root.path()))
                 .map_err(|_| "start failed")?;
             if expired {
                 tools

@@ -226,7 +226,7 @@ CALLBACK receives the native (RESULT ERROR).  No Elisp fallback is executed."
   "List a directory using ARGUMENTS on CONNECTION for OWNER.
 CALLBACK receives the native (RESULT ERROR).  Never scan directories in Elisp."
   (kargu-bridge--workspace-read connection arguments callback :owner owner
-                               :method "workspace/listFiles" :capability "workspace_list_files"))
+                               :method "workspace/listFiles" :capability "workspace_list_files_ls"))
 
 (cl-defun kargu-bridge--workspace-read (connection arguments callback &key owner method capability)
   "Call read METHOD with ARGUMENTS on CONNECTION for OWNER.
@@ -403,7 +403,7 @@ Raw stderr is deliberately discarded: future backends may put secrets there."
 This is an adapter service identity, not an imported user conversation or run."
   (if (not (cl-some (lambda (capability)
                      (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
-                   '("workspace_find_files" "workspace_list_files")))
+                   '("workspace_find_files" "workspace_list_files_ls" "command_execute")))
       (kargu-bridge--start-finish connection callback nil)
     (setf (kargu-bridge-connection-state connection) 'binding)
     (kargu-bridge-call

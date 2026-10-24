@@ -1,278 +1,169 @@
-//! Native direct-listing parity, resource limits and no-follow ownership tests.
+//! GNU ls composition, path policy and bounded-output regression checks.
 
-use kargu_core::{
-    error::CoreError,
-    workspace::listing::{EntryKind, ListFilesInput, ListFilesPlan, ListFilesResult},
-};
+mod support;
+use serde_json::{Value, json};
 use std::{
     fs,
+    os::unix::{fs::symlink, net::UnixListener},
     path::Path,
-    time::{Duration, Instant},
 };
-use tempfile::TempDir;
-use tokio_util::sync::CancellationToken;
+use support::Peer;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-fn tree(names: &[&str]) -> Result<TempDir, Box<dyn std::error::Error>> {
-    let directory = tempfile::tempdir()?;
-    for name in names {
-        let file = directory.path().join(name);
-        fs::create_dir_all(file.parent().ok_or("missing parent")?)?;
-        fs::write(file, "fixture")?;
-    }
-    Ok(directory)
+#[test]
+fn missing_ls_is_unavailable_without_a_native_or_elisp_fallback() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start_with_path(Some(root.path()))?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    peer.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"workspace/listFiles","params":{
+        "scope":scope,"arguments":{"root":root.path(),"path":null,"skip_directories":[]}}}),
+    )?;
+    assert_eq!(peer.read()?["error"]["data"]["status"], "unavailable");
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
 }
 
-fn input(root: &Path, path: Option<&str>) -> ListFilesInput {
-    ListFilesInput {
-        root: root.to_owned(),
-        path: path.map(Into::into),
-        skip_directories: vec![".git".into(), "node_modules".into(), "target".into()],
-        max_entries: 2000,
-    }
-}
-
-fn run(input: ListFilesInput) -> Result<ListFilesResult, CoreError> {
-    ListFilesPlan::try_from(input)?.execute(
-        &CancellationToken::new(),
-        Instant::now()
-            .checked_add(Duration::from_secs(5))
-            .ok_or(CoreError::ArithmeticOverflow)?,
-    )
+fn listing(
+    root: &Path,
+    path: Option<&str>,
+    exclusions: &[&str],
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    peer.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"workspace/listFiles","params":{
+        "scope":scope,"arguments":{"root":root,"path":path,"skip_directories":exclusions}}}),
+    )?;
+    let reply = peer.read()?;
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(reply)
 }
 
 #[test]
-fn direct_listing_preserves_labels_sorting_hidden_files_and_shared_exclusions() -> TestResult {
-    let root = tree(&[
+fn listing_returns_ls_text_with_hidden_files_links_and_literal_exclusions() -> TestResult {
+    let root = tempfile::tempdir()?;
+    for file in [
         "top.el",
-        "sub/inner.el",
         ".hidden",
         "compiled.elc",
-        "backup.el~",
-        ".git/config",
-        "node_modules/module.el",
-        "target",
-    ])?;
-    let result = run(input(root.path(), None))?;
-    assert_eq!(
-        result.text,
-        "[DIR]  sub\n[FILE] .hidden\n[FILE] backup.el~\n[FILE] compiled.elc\n[FILE] top.el"
-    );
-    assert!(!result.truncated);
-    assert!(
-        !result
-            .entries
-            .iter()
-            .any(|entry| entry.path.contains("inner.el"))
-    );
-    assert_eq!(
-        run(input(root.path(), Some("sub")))?.text,
-        "[FILE] sub/inner.el"
-    );
-    let mut config = input(root.path(), None);
-    config.skip_directories.clear();
-    assert!(
-        run(config)?
-            .entries
-            .iter()
-            .any(|entry| entry.path == "target")
-    );
-    Ok(())
-}
-
-#[test]
-fn links_and_special_entries_are_reported_without_following_or_opening_them() -> TestResult {
-    let root = tree(&["inside.el"])?;
-    let outside = tree(&["secret.el"])?;
-    std::os::unix::fs::symlink(outside.path(), root.path().join("escape"))?;
-    std::os::unix::fs::symlink("missing", root.path().join("broken"))?;
-    std::os::unix::fs::symlink(root.path(), root.path().join("cycle"))?;
-    let _socket = std::os::unix::net::UnixListener::bind(root.path().join("service.sock"))?;
-    let result = run(input(root.path(), None))?;
-    for name in ["escape", "broken", "cycle"] {
-        let entry = result
-            .entries
-            .iter()
-            .find(|entry| entry.path == name)
-            .ok_or("missing link")?;
-        assert_eq!(entry.kind, EntryKind::Symlink);
-        assert!(result.text.contains(&format!("[LINK] {name}")));
+        "back~",
+        "a*b",
+        "ab",
+        "line\nbreak",
+    ] {
+        fs::write(root.path().join(file), "fixture")?;
     }
-    assert_eq!(
-        result
-            .entries
-            .iter()
-            .find(|entry| entry.path == "service.sock")
-            .ok_or("missing socket")?
-            .kind,
-        EntryKind::Other
-    );
-    assert!(!result.text.contains("secret.el"));
-    assert!(matches!(
-        ListFilesPlan::try_from(input(root.path(), Some("escape"))),
-        Err(CoreError::Rejected)
-    ));
-    Ok(())
-}
-
-#[test]
-fn traversal_invalid_configuration_and_non_directory_targets_fail_closed() -> TestResult {
-    let root = tree(&["file.el"])?;
-    let mut request = input(root.path(), Some("../missing"));
-    request.root = root.path().join("not-created");
-    assert!(matches!(
-        ListFilesPlan::try_from(request),
-        Err(CoreError::InvalidValue { .. })
-    ));
-    assert!(matches!(
-        ListFilesPlan::try_from(input(root.path(), Some("/not-created-kargu-outside"))),
-        Err(CoreError::Rejected)
-    ));
-    assert!(ListFilesPlan::try_from(input(root.path(), Some("file.el"))).is_err());
-    let fifo = root.path().join("pipe");
-    nix::unistd::mkfifo(
-        &fifo,
-        nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
-    )?;
-    // Opening a FIFO as a normal File would wait for a writer indefinitely.
-    assert!(ListFilesPlan::try_from(input(&fifo, None)).is_err());
-    assert!(ListFilesPlan::try_from(input(root.path(), Some("pipe"))).is_err());
-    let mut request = input(root.path(), None);
-    request.max_entries = usize::MAX;
-    assert!(matches!(
-        ListFilesPlan::try_from(request),
-        Err(CoreError::Limit)
-    ));
-    let mut request = input(root.path(), None);
-    request.skip_directories.push("../escape".into());
-    assert!(matches!(
-        ListFilesPlan::try_from(request),
-        Err(CoreError::InvalidValue { .. })
-    ));
-    Ok(())
-}
-
-#[test]
-fn replaced_root_or_target_cannot_publish_from_a_new_directory() -> TestResult {
-    for replace_root in [true, false] {
-        let parent = tempfile::tempdir()?;
-        let root = parent.path().join("workspace");
-        fs::create_dir_all(root.join("sub"))?;
-        let plan = ListFilesPlan::try_from(input(&root, Some("sub")))?;
-        let target = if replace_root {
-            root.clone()
-        } else {
-            root.join("sub")
-        };
-        fs::rename(&target, parent.path().join("old"))?;
-        fs::create_dir(&target)?;
-        fs::write(target.join("replacement.txt"), "fixture")?;
-        assert!(matches!(
-            plan.execute(
-                &CancellationToken::new(),
-                Instant::now() + Duration::from_secs(1)
-            ),
-            Err(CoreError::WorkspaceChanged)
-        ));
+    fs::create_dir(root.path().join("sub"))?;
+    fs::create_dir(root.path().join("node_modules"))?;
+    symlink("/outside-target", root.path().join("broken"))?;
+    let _socket = UnixListener::bind(root.path().join("socket"))?;
+    let reply = listing(root.path(), None, &["node_modules", "a*b"])?;
+    let text = reply["result"]["text"].as_str().ok_or("text missing")?;
+    for expected in [
+        "total ",
+        "top.el",
+        ".hidden",
+        "compiled.elc",
+        "back~",
+        "broken -> /outside-target",
+        "socket",
+        "sub",
+        " ab\n",
+        "\\n",
+    ] {
+        assert!(text.contains(expected), "missing ls output: {expected:?}");
     }
-    let root = tree(&["sub/inside.el"])?;
-    let outside = tree(&["foreign.el"])?;
-    let plan = ListFilesPlan::try_from(input(root.path(), Some("sub")))?;
-    fs::rename(root.path().join("sub"), root.path().join("old"))?;
-    std::os::unix::fs::symlink(outside.path(), root.path().join("sub"))?;
-    assert!(matches!(
-        plan.execute(
-            &CancellationToken::new(),
-            Instant::now() + Duration::from_secs(1)
-        ),
-        Err(CoreError::WorkspaceChanged)
-    ));
+    assert!(!text.contains("node_modules"));
+    assert!(!text.contains("a*b"));
+    assert!(!text.contains("[FILE]"));
+    assert!(!text.contains("[DIR]"));
+    assert!(reply["result"].get("entries").is_none());
+    assert_eq!(reply["result"]["outcome"], "ok");
     Ok(())
 }
 
 #[test]
-fn empty_zero_exact_and_exhausted_entry_budgets_are_distinct() -> TestResult {
-    let empty = tempfile::tempdir()?;
-    let mut request = input(empty.path(), None);
-    request.max_entries = 0;
-    let result = run(request)?;
-    assert_eq!(result.text, "(empty directory)");
-    assert!(!result.truncated);
-    let root = tree(&["a.el", "b.el"])?;
-    for limit in [0, 1, 2] {
-        let mut request = input(root.path(), None);
-        request.max_entries = limit;
-        let result = run(request)?;
-        assert_eq!(result.entries.len(), limit);
-        assert_eq!(result.truncated, limit < 2);
-        if limit < 2 {
-            assert!(result.text.contains("omitted"));
-            assert!(!result.text.contains("empty directory"));
-        }
-    }
-    Ok(())
-}
-
-#[test]
-fn retained_entry_and_output_byte_limits_are_explicit() -> TestResult {
+fn empty_and_subdirectory_outputs_remain_ls_output() -> TestResult {
     let root = tempfile::tempdir()?;
-    for n in 0..201 {
-        fs::write(root.path().join(format!("file-{n:04}")), "fixture")?;
+    fs::create_dir(root.path().join("empty"))?;
+    assert_eq!(
+        listing(root.path(), Some("empty"), &[])?["result"]["text"],
+        "total 0\n"
+    );
+    fs::write(root.path().join("empty/child.el"), "fixture")?;
+    let reply = listing(root.path(), Some("empty"), &[])?;
+    let text = reply["result"]["text"].as_str().ok_or("text missing")?;
+    assert!(text.contains("child.el"));
+    assert!(!text.contains("empty/child.el"));
+    Ok(())
+}
+
+#[test]
+fn traversal_outside_symlink_and_non_directory_targets_are_rejected() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let outside = tempfile::tempdir()?;
+    symlink(outside.path(), root.path().join("escape"))?;
+    fs::write(root.path().join("file"), "fixture")?;
+    nix::unistd::mkfifo(&root.path().join("fifo"), nix::sys::stat::Mode::S_IRUSR)?;
+    for path in ["../escape", "escape", "file", "fifo"] {
+        let reply = listing(root.path(), Some(path), &[])?;
+        assert!(reply.get("error").is_some(), "accepted {path}");
     }
-    let result = run(input(root.path(), None))?;
-    assert_eq!(result.entries.len(), 200);
-    assert!(result.truncated);
-    let nested = format!("{}/{}", "a".repeat(240), "b".repeat(240));
-    fs::create_dir_all(root.path().join(&nested))?;
-    for n in 0..200 {
+    let reply = listing(Path::new("/nonexistent-kargu-root"), Some("../escape"), &[])?;
+    assert_eq!(reply["error"]["data"]["status"], "rejected");
+    Ok(())
+}
+
+#[test]
+fn invalid_exclusions_cannot_inject_flags_or_shell_operations() -> TestResult {
+    let root = tempfile::tempdir()?;
+    for invalid in ["../escape", ".", "", "bad\0name"] {
+        assert!(
+            listing(root.path(), None, &[invalid])?
+                .get("error")
+                .is_some()
+        );
+    }
+    let reply = listing(
+        root.path(),
+        None,
+        &["--help", "$(touch injected)", "x;touch injected"],
+    )?;
+    assert_eq!(reply["result"]["outcome"], "ok");
+    assert!(!root.path().join("injected").exists());
+    Ok(())
+}
+
+#[test]
+fn large_listing_uses_shared_process_output_bound_and_explicit_truncation() -> TestResult {
+    let root = tempfile::tempdir()?;
+    for n in 0..1200 {
         fs::write(
-            root.path().join(&nested).join(format!("file-{n:04}")),
+            root.path().join(format!("entry-{n:04}-{}", "x".repeat(80))),
             "fixture",
         )?;
     }
-    let result = run(input(root.path(), Some(&nested)))?;
-    assert!(result.truncated && result.entries.len() < 200);
-    assert!(result.text.len() <= kargu_core::constants::limits::SEARCH_RESULT_BYTES);
-    Ok(())
-}
-
-#[test]
-fn cancelled_expired_and_invalid_path_records_never_claim_success() -> TestResult {
-    let root = tree(&["Türkçe🦀.el"])?;
-    assert!(run(input(root.path(), None))?.text.contains("Türkçe🦀.el"));
-    let cancel = CancellationToken::new();
-    cancel.cancel();
-    assert!(matches!(
-        ListFilesPlan::try_from(input(root.path(), None))?
-            .execute(&cancel, Instant::now() + Duration::from_secs(1)),
-        Err(CoreError::Cancelled)
-    ));
-    assert!(matches!(
-        ListFilesPlan::try_from(input(root.path(), None))?
-            .execute(&CancellationToken::new(), Instant::now()),
-        Err(CoreError::Deadline)
-    ));
-    fs::write(root.path().join("bad\nrecord"), "fixture")?;
-    assert!(matches!(
-        run(input(root.path(), None)),
-        Err(CoreError::InvalidValue { .. })
-    ));
-    Ok(())
-}
-
-#[test]
-fn success_and_failure_release_pinned_directory_descriptors() -> TestResult {
-    let root = tree(&["file.el"])?;
-    for _ in 0..5 {
-        run(input(root.path(), None))?;
-    }
-    fs::write(root.path().join("bad\nrecord"), "fixture")?;
-    assert!(run(input(root.path(), None)).is_err());
-    let retained = fs::read_dir("/proc/self/fd")?
-        .filter_map(Result::ok)
-        .filter_map(|entry| fs::read_link(entry.path()).ok())
-        .any(|path| path.starts_with(root.path()));
-    assert!(!retained);
+    let reply = listing(root.path(), None, &[])?;
+    assert_eq!(reply["result"]["truncated"], true);
+    assert_eq!(
+        reply["result"]["stdout"]
+            .as_str()
+            .ok_or("stdout missing")?
+            .len(),
+        65536
+    );
+    assert!(
+        reply["result"]["text"]
+            .as_str()
+            .ok_or("text missing")?
+            .contains("output truncated")
+    );
+    assert_eq!(reply["result"]["cleanup_complete"], true);
     Ok(())
 }

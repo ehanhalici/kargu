@@ -55,35 +55,6 @@ impl Workspace {
         &self.path
     }
 
-    /// Capture a directory by walking canonical components from the held root.
-    /// Each open is relative to an owned fd and refuses symlink substitution.
-    pub(crate) fn open_read_directory(&self, input: &Path) -> Result<ReadDirectory, CoreError> {
-        use nix::fcntl::{OFlag, openat};
-        use nix::sys::stat::Mode as FileMode;
-        self.revalidate()?;
-        if input.is_absolute() && !input.starts_with(&self.path) {
-            return Err(CoreError::Rejected);
-        }
-        let path = self.path.join(input).canonicalize()?;
-        let relative = path
-            .strip_prefix(&self.path)
-            .map_err(|_| CoreError::Rejected)?;
-        let mut file = self.directory.try_clone()?;
-        for component in relative.components() {
-            let next = openat(
-                &file,
-                Path::new(component.as_os_str()),
-                OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
-                FileMode::empty(),
-            )
-            .map_err(std::io::Error::from)?;
-            file = File::from(next);
-        }
-        let directory = ReadDirectory { path, file };
-        self.revalidate()?;
-        directory.revalidate()?;
-        Ok(directory)
-    }
     /// Compare current path identity to the held directory, before side effects.
     pub fn revalidate(&self) -> Result<(), CoreError> {
         let held = self.directory.metadata()?;
@@ -94,34 +65,6 @@ impl Workspace {
         if !current.is_dir()
             || held.dev() != current.dev()
             || held.ino() != current.ino()
-            || self
-                .path
-                .canonicalize()
-                .map_err(|_| CoreError::WorkspaceChanged)?
-                != self.path
-        {
-            return Err(CoreError::WorkspaceChanged);
-        }
-        Ok(())
-    }
-}
-
-/// Directory identity and owned descriptor; never reconstructed from a numeric fd.
-pub(crate) struct ReadDirectory {
-    pub(crate) path: PathBuf,
-    pub(crate) file: File,
-}
-
-impl ReadDirectory {
-    pub(crate) fn revalidate(&self) -> Result<(), CoreError> {
-        let held = self.file.metadata()?;
-        let current = self
-            .path
-            .metadata()
-            .map_err(|_| CoreError::WorkspaceChanged)?;
-        if held.dev() != current.dev()
-            || held.ino() != current.ino()
-            || !current.is_dir()
             || self
                 .path
                 .canonicalize()
@@ -213,6 +156,8 @@ pub struct CommandInput {
 
 /// Validated immutable command; no Debug or Serialize can disclose its arguments.
 pub struct CommandSpec {
+    safety: ToolSafetyLevel,
+    pub(crate) invocation: PathBuf,
     pub(crate) program: PathBuf,
     pub(crate) arguments: Vec<OsString>,
     pub(crate) cwd: Workspace,
@@ -265,6 +210,8 @@ impl TryFrom<CommandInput> for CommandSpec {
             });
         }
         Ok(Self {
+            safety: ToolSafetyLevel::ExecutesArbitraryCode,
+            invocation: input.program,
             program,
             arguments: input.arguments,
             cwd: Workspace::try_from(input.working_directory)?,
@@ -276,6 +223,12 @@ impl TryFrom<CommandInput> for CommandSpec {
     }
 }
 impl CommandSpec {
+    /// Only the trusted fixed-argv listing adapter can request this class.
+    pub(crate) fn directory_listing(input: CommandInput) -> Result<Self, CoreError> {
+        let mut command = Self::try_from(input)?;
+        command.safety = ToolSafetyLevel::SafeReadOnly;
+        Ok(command)
+    }
     fn revalidate(&self, run: &RunHandle) -> Result<(), CoreError> {
         run.check_live()?;
         run.settings().workspace.revalidate()?;
@@ -327,6 +280,21 @@ impl ToolRegistry {
         name: ToolName,
         aliases: Vec<ToolName>,
     ) -> Result<(), CoreError> {
+        self.register(name, aliases, ToolSafetyLevel::ExecutesArbitraryCode)
+    }
+    pub(crate) fn register_listing(&mut self) -> Result<(), CoreError> {
+        self.register(
+            ToolName::try_from("list_files".to_owned())?,
+            vec![],
+            ToolSafetyLevel::SafeReadOnly,
+        )
+    }
+    fn register(
+        &mut self,
+        name: ToolName,
+        aliases: Vec<ToolName>,
+        safety: ToolSafetyLevel,
+    ) -> Result<(), CoreError> {
         if self.aliases.contains_key(&name)
             || aliases.iter().any(|alias| {
                 alias != &name
@@ -343,7 +311,7 @@ impl ToolRegistry {
             name.clone(),
             ToolDescriptor {
                 name: name.clone(),
-                safety: ToolSafetyLevel::ExecutesArbitraryCode,
+                safety,
             },
         );
         for alias in aliases {
@@ -377,6 +345,7 @@ fn digest(
         scope.as_slice(),
         name.as_str().as_bytes(),
         command.program.as_os_str().as_bytes(),
+        command.invocation.as_os_str().as_bytes(),
         command.cwd.path().as_os_str().as_bytes(),
     ] {
         hash.update(
@@ -443,6 +412,7 @@ pub struct ApprovalRequest {
     deadline: Instant,
     name: ToolName,
     program: PathBuf,
+    invocation: PathBuf,
     arguments: Vec<OsString>,
     cwd: PathBuf,
     environment: CommandEnvironment,
@@ -471,6 +441,10 @@ impl ApprovalRequest {
     /// Explicitly access the executable for a trusted confirmation presenter.
     pub fn program(&self) -> &Path {
         &self.program
+    }
+    /// Original executable spelling used as argv[0], significant for multicall binaries.
+    pub fn invocation(&self) -> &Path {
+        &self.invocation
     }
     /// Explicitly access argv; never put this in Debug/log output.
     pub fn arguments(&self) -> &[OsString] {
@@ -537,7 +511,9 @@ impl AuthorizedCommand {
         if Instant::now() >= self.deadline {
             return Err(CoreError::ApprovalExpired);
         }
-        if self.run.settings().mode != Mode::Agent {
+        if self.run.settings().mode != Mode::Agent
+            && self.command.safety != ToolSafetyLevel::SafeReadOnly
+        {
             return Err(CoreError::Rejected);
         }
         self.command.revalidate(&self.run)
@@ -562,7 +538,10 @@ impl ExecutionGate {
     ) -> Result<ApprovalRequest, CoreError> {
         actor.validate(run)?;
         let descriptor = registry.resolve(requested)?;
-        if run.settings().mode != Mode::Agent {
+        if descriptor.safety != command.safety
+            || (run.settings().mode != Mode::Agent
+                && descriptor.safety != ToolSafetyLevel::SafeReadOnly)
+        {
             return Err(CoreError::Rejected);
         }
         if self.pending.len() >= limits::MAX_PENDING {
@@ -584,6 +563,7 @@ impl ExecutionGate {
             deadline,
             name: descriptor.name().clone(),
             program: command.program.clone(),
+            invocation: command.invocation.clone(),
             arguments: command.arguments.clone(),
             cwd: command.cwd.path.clone(),
             environment: command.environment.clone(),

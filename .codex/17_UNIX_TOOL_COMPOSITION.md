@@ -42,3 +42,13 @@ environment, bounded stdout/stderr, timeout, cancel, PGID ve drain/reap.
 Her doğrulanmış dilim ayrı commit'tir. API göçü ve dört uygulama backend'i
 kapsamı değişmez. Bu not tamamlanmış uygulama veya tüm araçların taşındığı
 iddiası değildir; güncel kanıt 12_MIGRATION_PROGRESS.md içinde tutulur.
+
+## Doğrulamada öğrenilen: argv[0] da davranışın parçasıdır
+
+Nix ortamında `ls`, canonicalize edildiğinde multicall `coreutils` binary'sine
+çözülebiliyor. Sadece canonical executable + argv çalıştırmak `ls -lAh` yerine
+`coreutils -lAh` çalıştırdı ve gerçek entegrasyon testi bunu yakaladı.
+Orijinal çağrı adı (`argv[0]`) korunmalı, onayda gösterilmeli ve action digest'e
+katılmalıdır. Canonical path executable kimliğini, invocation ise multicall
+davranışını belirler; ikisi aynı kavram değildir. Bu bulgu diğer Unix adapter'ları
+ve BusyBox benzeri dağıtımlar için de geçerlidir.

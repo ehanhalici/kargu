@@ -329,6 +329,7 @@ impl ProcessSupervisor {
         let spec = authorized.command();
         let mut command = Command::new(&spec.program);
         command
+            .arg0(&spec.invocation)
             .args(&spec.arguments)
             .current_dir(spec.cwd.path())
             .env_clear()

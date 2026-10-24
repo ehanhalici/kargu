@@ -284,9 +284,9 @@
       (kargu-async-cancel parent))))
 
 (ert-deftest kargu-search-listing-captures-policy-and-does-not-rescan-in-elisp-test ()
-  "Root, target, exclusions and entry limits are captured for native execution."
+  "Root, target and exclusions are captured without an Elisp directory scan."
   (let ((connection (kargu-bridge--connection-create :state 'ready))
-        (kargu-search-list-max-entries 17) seen result)
+        seen result)
     (cl-letf (((symbol-function 'kargu-bridge-ensure)
                (lambda (callback) (funcall callback connection nil) #'ignore))
               ((symbol-function 'kargu-bridge-list-files)
@@ -295,7 +295,7 @@
                  (funcall callback (kargu-bridge--object "text" "native-listing") nil) nil))
               ((symbol-function 'directory-files) (lambda (&rest _) (ert-fail "Elisp directory scan executed"))))
       (kargu-search-list-files nil (lambda (text) (setq result text)))
-      (should (= (gethash "max_entries" seen) 17))
+      (should-not (gethash "max_entries" seen))
       (should (equal (gethash "skip_directories" seen) (vconcat kargu-fs-skip-dirs)))
       (should (stringp (gethash "root" seen)))
       (should (stringp (gethash "path" seen)))
@@ -330,27 +330,30 @@
           (let ((context (kargu-tool-execution-context-create
                           :root root :mode mode :policy-revision (kargu-tool-registry-revision kargu--tool-registry))))
             (dolist (name '("list_files" "ls" "dir"))
-              (should (equal (kargu-test-await
-                              (lambda (done) (kargu-tool-gate-execute kargu--tool-registry context name nil :callback done)))
-                             "[DIR]  src\n[FILE] root.el")))))
-        (should (equal (kargu-test-await (lambda (done) (kargu-search-list-files "src" done))) "[FILE] src/child.el"))
+              (let ((text (kargu-test-await
+                           (lambda (done) (kargu-tool-gate-execute kargu--tool-registry context name nil :callback done)))))
+                (should (string-search "src" text))
+                (should (string-search "root.el" text))
+                (should-not (string-search "node_modules" text))))))
+        (should (string-search "child.el" (kargu-test-await (lambda (done) (kargu-search-list-files "src" done)))))
         (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-search-list-files "root.el" done)))))
         (should (= 0 (kargu-tool-execution-active-task-count kargu--tool-registry "list_files")))
         (should (= 0 (hash-table-count (kargu-bridge-connection-pending conn))))))))
 
-(ert-deftest kargu-search-listing-empty-partial-symlink-and-custom-exclusion-test ()
-  "Real native output distinguishes empty, incomplete and symbolic entries."
+(ert-deftest kargu-search-listing-empty-symlink-and-custom-exclusion-test ()
+  "Real GNU output retains empty directory, symlink and exclusion semantics."
   (kargu-bridge-test--with-core
     (kargu-fs-test--with-tree '(("src/a.el" . "x") ("src/b.el" . "x"))
       (let ((kargu-permission--override-root root))
         (make-directory (expand-file-name "empty" root))
         (make-symbolic-link "missing-target" (expand-file-name "broken" root))
-        (should (equal (kargu-test-await (lambda (done) (kargu-search-list-files "empty" done))) "(empty directory)"))
-        (should (string-search "[LINK] broken" (kargu-test-await (lambda (done) (kargu-search-list-files nil done)))))
-        (let ((kargu-search-list-max-entries 1))
-          (should (string-search "omitted" (kargu-test-await (lambda (done) (kargu-search-list-files "src" done))))))
+        (should (equal (kargu-test-await (lambda (done) (kargu-search-list-files "empty" done))) "total 0\n"))
+        (should (string-search "broken -> missing-target" (kargu-test-await (lambda (done) (kargu-search-list-files nil done)))))
         (let ((kargu-fs-skip-dirs '("src" "broken")))
-          (should (equal (kargu-test-await (lambda (done) (kargu-search-list-files nil done))) "[DIR]  empty")))))))
+          (let ((text (kargu-test-await (lambda (done) (kargu-search-list-files nil done)))))
+            (should (string-search "empty" text))
+            (should-not (string-search "broken" text))
+            (should-not (string-search "src" text))))))))
 
 (ert-deftest kargu-fs-has-file-p-test ()
   "Existence is checked under the given root only."
