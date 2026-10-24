@@ -1,5 +1,21 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Native request-policy cutover
+
+Sampling/cap/reasoning policy ve default/format/provider merge `api/policy/`
+altına taşındı. Elisp parameters.el ile request/registry karar motorları silindi;
+UI yalnız exact metadata ve raw tuning snapshot'ını gönderir. Explicit null,
+tek cap alanı, finite temperature, positive limit ve extras bypass reddi
+native'dir. Model-specific capability doğrulaması hâlâ açıktır; ayrıntı 32'dedir.
+
+**136 Rust testi + 2 compile-fail**, locked build/test, fmt ve strict Clippy
+temiz. **1159/1159 full source ERT**, 0 unexpected, **124.46 s**; high-level chat
+POST gerçek loopback native policy kabulü dahil. Warning-as-error bytecompile
+ve touched checkdoc temiz. Son common POST/extras guard değişikliği ardından
+21 focused Rust testi tekrar geçer. Geçici .elc çıktıları kaldırıldı. Canlı
+hesap/ücretli çağrı yapılmadı. Native retry/breaker/budget, model store ve core
+agent/history hâlâ açık; kullanıcı shell.nix/07 commit dışında korunur.
+
 ## 2026-10-25 — Native wire ve prompt-cache cutover
 
 HTTP admission artık captured typed formatı kullanır; request/response blocks,

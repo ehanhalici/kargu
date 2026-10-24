@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Deserialize, serde::Serialize)]
 #[serde(try_from = "u64")]
-pub(super) struct OutputLimit(TokenCount);
+pub struct OutputLimit(TokenCount);
 impl TryFrom<u64> for OutputLimit {
     type Error = ApiError;
     fn try_from(value: u64) -> Result<Self, ApiError> {
@@ -114,6 +114,8 @@ struct WireDto {
     #[serde(default)]
     usage: BTreeMap<Field, Field>,
     cache_usage: Option<CacheUsage>,
+    request: Option<crate::api::policy::DefaultsPatch>,
+    reasoning_shape: Option<crate::api::policy::ReasoningShape>,
 }
 
 pub(super) struct RequestRules {
@@ -146,6 +148,8 @@ pub struct WireSpec {
     pub(super) response: Option<ResponseRules>,
     pub(super) stream: bool,
     pub(super) revision: WireRevision,
+    pub(super) policy: crate::api::policy::DefaultsPatch,
+    pub(super) reasoning: crate::api::policy::ReasoningShape,
 }
 pub(super) struct WireRevision(pub String);
 impl Default for WireSpec {
@@ -155,6 +159,8 @@ impl Default for WireSpec {
             response: None,
             stream: true,
             revision: WireRevision(String::new()),
+            policy: Default::default(),
+            reasoning: Default::default(),
         }
     }
 }
@@ -254,6 +260,8 @@ impl TryFrom<WireDto> for WireSpec {
             response,
             stream: dto.stream.unwrap_or(true),
             revision: WireRevision(String::new()),
+            policy: dto.request.unwrap_or_default(),
+            reasoning: dto.reasoning_shape.unwrap_or_default(),
         })
     }
 }

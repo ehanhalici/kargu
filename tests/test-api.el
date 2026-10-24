@@ -339,18 +339,14 @@
       (should (> (length (cdr (assoc "x-opencode-session" headers))) 10)))))
 
 (ert-deftest kargu-reasoning-request-shape-follows-the-catalog-test ()
-  "Effort and budget are shaped by the declared provider format."
-  (let ((kargu-reasoning-effort 'none) (kargu-thinking-budget nil))
-    (should (equal (kargu--build-reasoning-params "openai")
-                   '(("reasoning_effort" . "none"))))
-    (should (equal (kargu--build-reasoning-params "openrouter")
-                   '(("reasoning" . (("effort" . "none")))))))
-  (let ((kargu-reasoning-effort "off") (kargu-thinking-budget 4096))
-    (should-not (kargu--build-reasoning-params "openai"))
-    (should (equal (kargu--build-reasoning-params "openrouter")
-                   '(("reasoning" . (("max_tokens" . 4096))))))
-    (should (equal (kargu--build-reasoning-params "anthropic")
-                   '(("thinking" . (("type" . "enabled") ("budget_tokens" . 4096))))))))
+  "Editor captures effort/budget without applying provider-specific wire policy."
+  ;; Effort/nested/thinking cases moved to kargu-core/tests/api_policy.rs.
+  (dolist (effort '(none "off" nil))
+    (let ((kargu-reasoning-effort effort) (kargu-thinking-budget 4096))
+      (dolist (provider '("openai" "openrouter" "anthropic"))
+        (let ((tuning (kargu-api-request-tuning provider "fixture")))
+          (should (equal (kargu-aget tuning "effort") (if effort (format "%s" effort) :json-null)))
+          (should (= (kargu-aget tuning "thinking_budget") 4096)))))))
 
 (ert-deftest kargu-payload-merge-replaces-duplicate-keys-test ()
   "Explicit entries replace existing keys without duplicate payload fields."
@@ -366,8 +362,9 @@
           :messages '((("role" . "system") ("content" . "System"))
                       (("role" . "user") ("content" . "Hi"))))))
     (let ((payload (kargu--build-payload)))
-      (should (equal (kargu-aget payload "temperature") 0.2))
-      (should (= (kargu-aget payload "max_tokens") 1234))
+      (should-not (kargu-aget payload "temperature"))
+      (should-not (kargu-aget payload "max_tokens"))
+      (should (= (kargu-aget (kargu-api-request-tuning (kargu--provider-name) (kargu--model)) "max_tokens") 1234))
       (should-not (kargu-aget payload "provider"))
       (should-not (string-search "[params" (kargu-chat--footer-string))))))
 

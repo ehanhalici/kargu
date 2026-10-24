@@ -211,20 +211,18 @@
       (should (= (kargu-circuit-breaker-failure-count (kargu-circuit-get "g02")) 1)))))
 
 (ert-deftest kargu-connection-conditional-reasoning-fixture-test ()
-  "A synthetic endpoint rejects temperature only with active reasoning."
-  (let ((kargu-providers--table (copy-hash-table kargu-providers--table)))
+  "Conditional rules are captured unchanged for the native policy engine."
+  ;; The synthetic endpoint rejection cases moved to api_policy.rs.
+  (let ((kargu-providers--table (copy-hash-table kargu-providers--table))
+        (kargu-reasoning-effort "none") (kargu-temperature 0.5))
     (kargu-register-provider :id "conditional-fixture" :format 'openapi
                              :request '(:sampling-parameters ("temperature")
-							     :reasoning-disallows-temperature t))
-    (dolist (effort '("off" "none" "high"))
-      (let* ((fields (kargu-api-request-parameters
-                      :model "fixture-v1" :provider "conditional-fixture"
-                      :temperature 0.5 :reasoning-effort effort))
-             (active (not (equal effort "off")))
-             (rejection (and active (assoc "temperature" fields)
-                             '(400 "temperature is unsupported with reasoning"))))
-        (should-not rejection)
-        (should (eq (not (null (assoc "temperature" fields))) (not active)))))))
+                                        :reasoning-disallows-temperature t))
+    (let* ((tuning (kargu-api-request-tuning "conditional-fixture" "fixture-v1"))
+           (policy (kargu-aget tuning "provider_policy")))
+      (should (plist-get policy :reasoning-disallows-temperature))
+      (should (equal (plist-get policy :sampling-parameters) '("temperature")))
+      (should (= (kargu-aget tuning "temperature") 0.5)))))
 
 (ert-deftest kargu-connection-catalog-callback-keeps-application-owner-test ()
   "A delayed catalog response publishes only to its original application."

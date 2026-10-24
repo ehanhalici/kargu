@@ -111,6 +111,7 @@ No network request or subprocess is ever started by Elisp."
            "provider" (if-let* ((provider (plist-get options :provider)))
                            (copy-sequence provider) :json-null)
            "cache_markers" (if (plist-get options :cache-markers) t :json-false)
+           "tuning" (kargu-providers-wire-object (plist-get options :tuning))
            "limits" (kargu-bridge--object
                      "raw_bytes" kargu-stream-max-raw-bytes
                      "line_bytes" kargu-stream-max-incomplete-line-bytes
@@ -133,7 +134,9 @@ No network request or subprocess is ever started by Elisp."
                (if (or failure
                        (not (member "api_request" (append (kargu-bridge-connection-capabilities connection) nil)))
                        (and (or (plist-get options :wire) (plist-get options :cache-markers))
-                            (not (member "api_wire" (append (kargu-bridge-connection-capabilities connection) nil)))))
+                            (not (member "api_wire" (append (kargu-bridge-connection-capabilities connection) nil))))
+                       (and (plist-get options :tuning)
+                            (not (member "api_request_policy" (append (kargu-bridge-connection-capabilities connection) nil)))))
                    (kargu-transport--deliver handle options nil
                                              (or failure (kargu-bridge--fault "unsupported_api")))
                  (setf (kargu-transport-handle-connection handle) connection

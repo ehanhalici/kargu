@@ -90,9 +90,9 @@
       (should-not (kargu-selection-effort))
       (should (eq kargu-reasoning-effort 'high))
       (kargu-state-set-reasoning-effort 'none)
-      (should (equal (kargu-reasoning-effort-level) "none"))
+      (should (equal (kargu-aget (kargu-api-request-tuning (kargu--provider-name) (kargu--model)) "effort") "none"))
       (kargu-state-set-reasoning-effort :inherit)
-      (should (equal (kargu-reasoning-effort-level) ":inherit"))
+      (should (equal (kargu-aget (kargu-api-request-tuning (kargu--provider-name) (kargu--model)) "effort") ":inherit"))
       (kargu-selection-update :effort kargu-selection-default-effort)
       (should (eq (kargu-selection-effort) 'high)))))
 

@@ -204,23 +204,21 @@
       (when (file-exists-p empty-cfg) (delete-file empty-cfg)))))
 
 (ert-deftest kargu-providers-payload-tuning-test ()
-  "Payload builder respects reasoning effort and max tokens in the provider's shape."
-  (let ((kargu-reasoning-effort 'medium)
-        (kargu-thinking-budget 4096)
-        (kargu-max-tokens 8192)
-        (kargu-temperature 0.5)
+  "Payload stays canonical while core receives raw tuning preferences."
+  (let ((kargu-reasoning-effort 'medium) (kargu-thinking-budget 4096)
+        (kargu-max-tokens 8192) (kargu-temperature 0.5)
         (kargu-session--context
-         (kargu-test-session-with-history
-          :messages '((("role" . "user") ("content" . "hello"))) :provider "deepseek" :model "deepseek-chat")))
-    (let ((payload (kargu--build-payload)))
+         (kargu-test-session-with-history :messages '((("role" . "user") ("content" . "hello")))
+                                         :provider "deepseek" :model "deepseek-chat")))
+    (let ((payload (kargu--build-payload))
+          (tuning (kargu-api-request-tuning "deepseek" "deepseek-chat")))
       (should (equal (kargu-aget payload "model") "deepseek-chat"))
-      (should (equal (kargu-aget payload "temperature") 0.5))
-      (should (equal (kargu-aget payload "max_tokens") 8192))
-      (should-not (assoc "max_completion_tokens" payload))
-      (should (equal (kargu-aget payload "reasoning_effort") "medium"))
-      ;; deepseek's format carries effort top-level only: no second shape.
-      (should-not (assoc "reasoning" payload))
-      (should-not (assoc "thinking" payload)))))
+      (should-not (assoc "temperature" payload))
+      (should-not (assoc "max_tokens" payload))
+      (should-not (assoc "reasoning_effort" payload))
+      (should (= (kargu-aget tuning "temperature") 0.5))
+      (should (= (kargu-aget tuning "max_tokens") 8192))
+      (should (equal (kargu-aget tuning "effort") "medium")))))
 
 (ert-deftest kargu-providers-extract-models-test ()
   "`kargu--extract-models-from-json' handles data, models, and bare vectors."

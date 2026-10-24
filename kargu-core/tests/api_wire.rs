@@ -197,6 +197,10 @@ fn malformed_rules_and_tool_arguments_fail_before_io() -> TestResult {
         .push(block);
     assert!(WireSpec::try_from(duplicate).is_err());
     let wire = WireSpec::try_from(spec()?)?;
+    assert!(
+        wire.encode(json!({"model":"claude","messages":[],"max_completion_tokens":10}))
+            .is_err()
+    );
     for arguments in [json!("[1]"), json!("{broken"), json!(false), json!([])] {
         assert!(wire.encode(json!({"model":"claude","messages":[{"role":"assistant","tool_calls":[{"id":"c1","function":{"name":"read","arguments":arguments}}]}]})).is_err());
     }

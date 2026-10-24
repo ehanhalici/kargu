@@ -229,5 +229,73 @@
       (should failure)
       (should-not posted))))
 
+(ert-deftest kargu-stream-native-request-policy-full-editor-post-test ()
+  "The actual chat POST uses captured native tuning and provider precedence."
+  (kargu-bridge-test--with-core
+    (let ((kargu-providers--table (copy-hash-table kargu-providers--table)))
+      (kargu-register-provider :id "conditional" :format 'openapi
+                               :request '(:reasoning-disallows-temperature t))
+      (dolist (provider '("openai" "openrouter" "anthropic" "conditional"))
+        (let* ((native (equal provider "anthropic"))
+               (kargu-session--context
+                (kargu-test-session-with-history :provider provider :model "fixture"
+                                                 :messages '((("role" . "user") ("content" . "hello")))))
+               (kargu-temperature 0.4) (kargu-max-tokens 8192)
+               (kargu-reasoning-effort "none") (kargu-thinking-budget 4096)
+               (kargu-stream nil)
+               (settings (kargu-api-connection-settings provider "fixture"))
+               (snapshot (kargu-connection-snapshot--create :provider provider :model "fixture" :settings settings))
+               captured result
+               (server (kargu-stream-test--server
+                        (if native "{\"type\":\"message\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}"
+                          "{\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}")
+                        nil nil (lambda (raw) (setq captured (kargu--json-decode (decode-coding-string raw 'utf-8)))))))
+          (unwind-protect
+              (progn
+                (kargu-connection-call
+                 snapshot
+                 (lambda ()
+                   (kargu--api-post
+                    (format "http://127.0.0.1:%d/chat" (process-contact server :service)) nil
+                    (kargu--build-payload) (kargu-application-current-generation)
+                    (lambda (response) (setq result response)))))
+                (setq kargu-temperature 1.0 kargu-max-tokens 1 kargu-thinking-budget nil kargu-reasoning-effort "off")
+                (kargu-bridge-test--wait (lambda () result))
+                (should (equal (kargu-response-text result) "ok"))
+                (if (equal provider "openai")
+                    (progn (should (= (kargu-aget captured "max_completion_tokens") 8192))
+                           (should-not (kargu-aget captured "max_tokens")))
+                  (should (= (kargu-aget captured "max_tokens") 8192))
+                  (should-not (kargu-aget captured "max_completion_tokens")))
+                (if (member provider '("openai" "conditional"))
+                    (should-not (kargu-aget captured "temperature"))
+                  (should (= (kargu-aget captured "temperature") 0.4)))
+                (cond (native (should (= (kargu-aget (kargu-aget captured "thinking") "budget_tokens") 4096)))
+                      ((equal provider "openrouter")
+                       (should (equal (kargu-aget (kargu-aget captured "reasoning") "effort") "none"))
+                       (should (= (kargu-aget (kargu-aget captured "reasoning") "max_tokens") 4096)))
+                      (t (should (equal (kargu-aget captured "reasoning_effort") "none")))))
+            (kargu-http-cancel)
+            (delete-process server)))))))
+
+(ert-deftest kargu-stream-native-invalid-policy-does-not-open-http-test ()
+  "Conflicting explicit cap extras fail admission before any socket request."
+  (kargu-bridge-test--with-core
+    (let* (captured finished failure
+           (server (kargu-stream-test--server "{}" nil nil (lambda (raw) (setq captured raw)))))
+      (unwind-protect
+          (progn
+            (kargu-transport-request
+             'post (format "http://127.0.0.1:%d/chat" (process-contact server :service))
+             :body "{\"model\":\"fixture\",\"messages\":[],\"max_tokens\":200}"
+             :tuning '(("max_tokens" . 100) ("provider_policy" . (:max-output-key "max_completion_tokens")))
+             :then (lambda (_) (setq finished t))
+             :else (lambda (err) (setq finished t failure err)))
+            (kargu-bridge-test--wait (lambda () finished))
+            (should failure)
+            (should-not captured)
+            (should (= (kargu--plz-http-status failure) 400)))
+        (delete-process server)))))
+
 (provide 'tests/test-stream)
 ;;; test-stream.el ends here

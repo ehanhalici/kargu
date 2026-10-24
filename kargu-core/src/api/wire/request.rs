@@ -48,6 +48,11 @@ fn tool_call(call: &Value, rules: &RequestRules) -> Result<Value, ApiError> {
 }
 pub(super) fn encode(payload: Value, rules: &RequestRules) -> Result<Value, ApiError> {
     let payload = payload.as_object().ok_or(ApiError::InvalidRequest)?;
+    // This block protocol has one explicit output-cap field.  Never silently
+    // discard a cap selected by contradictory custom metadata.
+    if payload.contains_key("max_completion_tokens") {
+        return Err(ApiError::InvalidRequest);
+    }
     let input = payload
         .get("messages")
         .and_then(Value::as_array)

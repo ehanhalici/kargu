@@ -5,6 +5,7 @@ mod request;
 mod response;
 use super::{ApiError, ModelId};
 use crate::providers::{ApiEndpoint, ApiProviderId};
+pub(super) use domain::OutputLimit;
 pub use domain::WireSpec;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -18,6 +19,13 @@ pub struct WireCodec {
 }
 
 impl WireCodec {
+    pub(super) fn tune(
+        &self,
+        payload: Value,
+        tuning: &super::policy::RequestTuning,
+    ) -> Result<Value, ApiError> {
+        tuning.apply(payload, &self.spec.policy, self.spec.reasoning)
+    }
     /// Encode only opaque continuation blocks from this same captured authority.
     pub fn encode(&self, mut payload: Value) -> Result<Value, ApiError> {
         if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {

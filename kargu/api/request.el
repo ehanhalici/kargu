@@ -16,7 +16,6 @@
 (require 'kargu/config)
 (require 'kargu/history)
 (require 'kargu/api/tools)
-(require 'kargu/api/parameters)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-extra-headers "kargu/providers/registry" (id))
@@ -24,77 +23,39 @@
 (declare-function kargu-provider-format-headers "kargu/providers/registry" (format))
 
 (declare-function kargu-provider-cache-marker-p "kargu/providers/registry" (id))
-(declare-function kargu-provider-reasoning-shape "kargu/providers/registry" (id))
+
+(defun kargu-api-request-tuning (provider model)
+  "Capture raw preferences and exact metadata for native PROVIDER/MODEL policy.
+No parameter is selected or wire-shaped in the editor."
+  (if (kargu-connection-current)
+      (kargu-connection-setting :tuning)
+    (let ((effort (kargu-selection-effort)))
+      (list (cons "temperature" (or kargu-temperature :json-null))
+            (cons "max_tokens" (or kargu-max-tokens :json-null))
+            (cons "effort" (if effort (format "%s" effort) :json-null))
+            (cons "thinking_budget" (or kargu-thinking-budget :json-null))
+            (cons "supported_parameters"
+                  (if-let* ((parameters (kargu-model-request-parameters model provider)))
+                      (vconcat parameters) :json-null))
+            (cons "provider_policy"
+                  (or (plist-get (kargu-provider-get provider) :request) :json-empty-object))))))
 
 (defun kargu-api-connection-settings (provider model)
-  "Capture request policy and wire metadata once for PROVIDER and MODEL."
+  "Capture metadata and raw preferences once for PROVIDER and MODEL."
   (let ((format (kargu-provider-format provider)))
     (list :format format :wire (kargu-provider-format-record format)
           :metadata (and model (kargu-model-get-metadata model provider))
           :fields (kargu-model-read model provider)
           :tools (kargu-model-supports-tools-p model provider)
           :cache-marker (kargu-provider-cache-marker-p provider)
-          :effort (kargu-reasoning-effort-level)
-          :sampling (kargu-api-request-parameters
-                     :model model :provider provider :temperature kargu-temperature
-                     :max-tokens kargu-max-tokens)
-          :reasoning (kargu--build-reasoning-params provider)
+          :tuning (kargu-api-request-tuning provider model)
           :headers (kargu--api-headers "" provider))))
-
-
-(defun kargu-reasoning-effort-level ()
-  "The reasoning effort to send as a string, or nil to send none.
-The effective owned choice inherits `kargu-reasoning-effort' by default.
-Values nil, \"off\" and the
-empty string mean the user chose no effort.  \"none\" is a real level
-that some models accept, so it is sent."
-  (if (kargu-connection-current)
-      (kargu-connection-setting :effort)
-    (let* ((selected (kargu-selection-effort))
-         (effort (and selected (string-trim (format "%s" selected)))))
-    (and effort
-         (not (member (downcase effort) '("" "nil" "off")))
-         effort))))
-
-(defun kargu-reasoning-budget ()
-  "The thinking token budget when it is a positive integer, else nil."
-  (and (integerp kargu-thinking-budget)
-       (> kargu-thinking-budget 0)
-       kargu-thinking-budget))
-
-(defun kargu--build-reasoning-params (&optional provider)
-  "Request entries for effort and thinking budget in PROVIDER's wire shape.
-The shape comes from the provider's format record (`:reasoning-shape')."
-  (if (kargu-connection-current)
-      (kargu-connection-setting :reasoning)
-    (let ((effort (kargu-reasoning-effort-level))
-        (budget (kargu-reasoning-budget))
-        (shape (if (fboundp 'kargu-provider-reasoning-shape)
-                   (kargu-provider-reasoning-shape
-                    (or provider (kargu--provider-name)))
-                 'effort)))
-    (pcase shape
-      ('thinking
-       (and budget
-            `(("thinking" . (("type" . "enabled")
-                             ("budget_tokens" . ,budget))))))
-      ('nested
-       (let ((nested (append (and effort `(("effort" . ,effort)))
-                             (and budget `(("max_tokens" . ,budget))))))
-         (and nested `(("reasoning" . ,nested)))))
-      (_ (and effort `(("reasoning_effort" . ,effort))))))))
 
 (defun kargu--payload-merge (payload extra)
   "Merge EXTRA entries into PAYLOAD, replacing keys already present."
   (append (seq-remove (lambda (cell) (assoc (car cell) extra)) payload)
           extra))
 
-(defun kargu--payload-sampling-entries ()
-  "Request entries for temperature and the output token cap."
-  (if (kargu-connection-current)
-      (kargu-connection-setting :sampling)
-    (kargu-api-request-parameters :model (kargu--model) :provider (kargu--provider-name)
-                                 :temperature kargu-temperature :max-tokens kargu-max-tokens)))
 
 (defun kargu--payload-tools-entries (tools)
   "Return canonical TOOLS entries without evaluating native cache policy."
@@ -117,14 +78,8 @@ at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
           (append
            `(("model" . ,(kargu--model))
              ("messages" . ,(vconcat messages)))
-           (kargu--payload-sampling-entries)
            (kargu--payload-tools-entries tools))))
-    (dolist (entries (list (kargu--build-reasoning-params)
-                           extra))
-      (setq payload (kargu--payload-merge payload entries)))
-    (when (and (assoc "max_tokens" payload) (assoc "max_completion_tokens" payload))
-      (user-error "Kargu: request cannot contain both output token-limit fields"))
-    payload))
+    (kargu--payload-merge payload extra)))
 
 (defun kargu--api-provider-format (provider-name)
   "API format symbol for PROVIDER-NAME, or nil."

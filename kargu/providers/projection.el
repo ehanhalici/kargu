@@ -26,15 +26,23 @@
   "Encode captured metadata VALUE as plain JSON data for core FIELD.
 This is a DTO projection only; no format or request policy is evaluated."
   (cond
+   ((memq value '(:json-null :json-false)) value)
+   ((eq value :json-empty-object) (make-hash-table :test #'equal))
    ((memq value '(:session :app-url))
     (let ((object (make-hash-table :test #'equal)))
       (puthash "binding" (substring (symbol-name value) 1) object) object))
    ((null value)
-    (cond ((memq field '(:stream :input-excludes-cache :cache-marker)) :json-false)
+    (cond ((memq field '(:stream :input-excludes-cache :cache-marker
+                        :reasoning-disallows-temperature)) :json-false)
           ((memq field '(:blocks :copy-keys :detect)) [])
           (t :json-null)))
    ((eq value t) t)
    ((stringp value) (copy-sequence value))
+   ((hash-table-p value)
+    (let ((object (make-hash-table :test #'equal)))
+      (maphash (lambda (key item)
+                 (puthash (copy-sequence key) (kargu-providers-wire-object item) object)) value)
+      object))
    ((keywordp (car-safe value))
     (let ((object (make-hash-table :test #'equal)))
       (while value

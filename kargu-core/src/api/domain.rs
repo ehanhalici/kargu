@@ -101,6 +101,7 @@ struct RequestDto {
     provider: Option<crate::providers::ApiProviderId>,
     #[serde(default)]
     cache_markers: bool,
+    tuning: Option<super::policy::RequestTuning>,
 }
 
 /// Immutable per-attempt HTTP capture, independent of mutable editor selection.
@@ -182,6 +183,7 @@ impl TryFrom<RequestDto> for HttpRequest {
             {
                 return Err(ApiError::InvalidRequest);
             }
+            value = wire.tune(value, &dto.tuning.unwrap_or_default())?;
             if dto.cache_markers {
                 super::cache::prepare(&mut value)?;
             }
