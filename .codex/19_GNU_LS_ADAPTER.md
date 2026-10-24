@@ -1,5 +1,8 @@
 # GNU ls adapter'ı: özel listing motorunun kaldırılması
 
+Güncel ek: bu ls diliminin ardından Emacs reverse approval presenter'ı da
+bağlandı (18). Son toplam test/commit durumu 12'deki en üst kayıttadır.
+
 2026-10-24. 17'deki kullanıcı kararı uygulandı. 16 belgesi önceki native
 tarayıcının tarihsel kaydıdır; aşağıdaki sözleşme onun yerini alır.
 

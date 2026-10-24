@@ -76,7 +76,10 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
   asenkron Emacs approval presenter kurulsun. UI 300 s ve sensör 10 s ayrı olsun.
   - [x] Standalone `tool/execute` Rust reverse approval + process drain portu
     (18); sabit `list_files` GNU ls adapter'ı aynı execution yolunda (19).
-  - [ ] Emacs reverse approval presenter ve genel Bash/job consumer cutover.
+  - [x] Emacs owned reverse approval presenter ve gerçek pipe public
+    `kargu-bridge-execute` adapter testi (18). Bu port noninteractive'dir.
+  - [ ] Genel Bash/job consumer cutover; interactive stdin/status/output/poll
+    sözleşmesi taşınmadan eski Elisp executor kaldırılmaz.
 - [ ] Process startup barrier, group supervision, bounded stdout/stderr,
   interactive stdin/poll/EOF/cancel ve TERM/KILL/reap uygulansın.
 - [ ] Read/search/Git/skill/webfetch portları ve capability discovery taşınsın.

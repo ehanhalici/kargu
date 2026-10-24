@@ -1,5 +1,51 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — Unix/GNU bileşimi, klasörleme ve canlı command/approval köprüsü
+
+Kullanıcı kararı: her araç kendi işini yapar; Rust `ls`/`rg`/`git` motorlarını
+yeniden yazmaz. İlke ve argv[0]/multicall öğrenimi 17'de; komut/onay wire ve
+Emacs presenter ayrıntıları 18'de; native scanner yerine GNU ls sözleşmesi 19'dadır.
+
+Küçük commit sırası:
+
+1. `39d2666`: `.codex` bileşim kararı ve davranış değiştirmeyen klasörleme.
+   `src` altında application/host, domain, ipc, process, security ve workspace
+   sorumlulukları ayrıldı; yalnız composition/shared constants/error kökte kaldı.
+2. `9c9698a`: standalone `tool/execute`, exact-action reverse approval,
+   shared supervisor, nonblocking completion ve cancel/EOF/drain.
+3. `5988320`: özel Rust directory scanner ve artık tüketilmeyen fd-walking kodu
+   silindi; mevcut Elisp `list_files`/`ls`/`dir` ortak Rust gate üzerinden GNU ls
+   çıktısı döndürüyor. Scanner testleri yeni sözleşmeye eşlendi; engine fallback yok.
+4. Ardından owned Emacs approval presenter, public `kargu-bridge-execute`,
+   unsolicited/replayed/stale UI reddi ve negotiated approval frame sınırı eklendi.
+
+Güncel doğrulama: **1151/1151 full ERT expected, 0 unexpected**, **49.56 s**;
+güncel binary + kaynaklar (.elc yok). **52 Rust testi + 2 compile-fail**;
+locked build/test, fmt ve katı all-target Clippy sıfır uyarı. Değişen Elisp
+üretim/test dosyaları warning-as-error bytecompile ve checkdoc temiz.
+Geçici compile çıktıları kaldırıldı. Nix OpenPGP autoload ortam bildirimi
+derleme/test hatası değildir; kontrollerin exit kodu 0'dır.
+
+Bounded TLC yeniden hatasız: application 6151 generated/1681 distinct/depth25;
+approval 8194/1536/depth11; process 535/179/depth9; transport 1810/693/depth13.
+Bu mevcut soyut modellerin regresyon kapısıdır; gerçek Rust/Emacs/OS davranışının
+refinement veya sınırsız-state ispatı değildir. Remote CI, gerçek provider,
+harici uygulama/login ve ücretli CLI/MCP testi yapılmadı.
+
+Güncel sınırlar: `find_files` geçici olarak native motorunu kullanır; sıradaki
+arama portlarında harici araç bileşimi esastır. Genel Bash/job executor hâlâ
+Elisp'tedir; interactive stdin/status/output/poll/continuation adapter'ları
+tamamlanmadan silinmez. Yeni program/argv portu explicit timeout ve EOF stdin
+ile noninteractive'dir; full agent/provider run cutover'ı değildir. Sabit GNU
+ls salt-okunur tüm modlarda, genel komut Agent + explicit approval yolundadır.
+Eski fd-rooted listing garantisi güncel ls çıktısına atfedilmez.
+
+01 generic standartları değiştirilmedi. `todo.md` G03–G13, API -> Rust ve dört
+uygulama backend'i kapsamı açık kalır. Kullanıcının `shell.nix` ve çalışma
+sırasında görülen `.codex/07_GECIS_3.md` fence değişikliği korunup commit dışında
+bırakıldı. Aşağıdaki önceki dilim kayıtları tarihsel kanıttır, güncel strateji
+veya implementasyon durumunun yerine geçmez.
+
 ## 2026-10-24 — Dördüncü dilim: list_files native cutover
 
 Onaylı Aşama 2'ye devam edildi; `todo.md` G11/G13 kalan kabul yükümlülükleri

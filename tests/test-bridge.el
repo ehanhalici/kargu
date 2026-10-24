@@ -6,13 +6,15 @@
 ;;; Commentary:
 
 ;; Set KARGU_CORE_TEST_BINARY to the built binary to run real-pipe checks.
-;; No model, shell tool, user credential or real session file is used.
+;; No model, user credential or real session file is used.  Approval fixtures
+;; run only explicit printf commands in temporary directories.
 
 ;;; Code:
 
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/bridge)
+(require 'kargu/bridge/approval)
 
 (defun kargu-bridge-test--wait (predicate)
   "Wait for PREDICATE in the test event loop, failing after ten seconds."
@@ -51,6 +53,105 @@
          (when (buffer-live-p (kargu-bridge-connection-stderr-buffer conn))
            (kill-buffer (kargu-bridge-connection-stderr-buffer conn)))))))
 
+(defun kargu-bridge-test--command (root script)
+  "Build explicit fixture arguments for SCRIPT in ROOT with no inherited env."
+  (kargu-bridge--object "root" root "mode" "agent" "program" (executable-find "sh")
+                        "arguments" (vector "-c" script) "cwd" :json-null "timeout_ms" 1000
+                        "environment" (kargu-bridge--object) "config_revision" 1 "policy_revision" 1))
+
+(ert-deftest kargu-bridge-command-approval-real-pipe-and-exact-capture-test ()
+  "Only the captured action runs; duplicate UI decisions cannot execute twice."
+  (kargu-bridge-test--with-core
+    (let* ((root (make-temp-file "kargu-approved-command-" t))
+           (args (kargu-bridge-test--command root "printf original"))
+           finished reply failure decision details)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation)
+                     (lambda (request)
+                       (when (eq (kargu-confirmation-operation request) :prompt)
+                         (setq decision (plist-get (kargu-confirmation-options request) :on-decision)
+                               details (plist-get (kargu-confirmation-options request) :details))))))
+            (kargu-bridge-execute conn args (lambda (result error-data) (setq reply result failure error-data finished t)))
+            (puthash "arguments" ["-c" "printf mutated"] args)
+            (kargu-bridge-test--wait (lambda () decision))
+            (should (string-search "original" details))
+            (should-not (string-search "mutated" details))
+            (should (equal (gethash "status" (car (kargu-bridge-test--call conn "ping" (kargu-bridge--object)))) "ok"))
+            (funcall decision :approve) (funcall decision :approve)
+            (kargu-bridge-test--wait (lambda () finished))
+            (should-not failure)
+            (should (equal (gethash "stdout" reply) "original"))
+            (should (equal (gethash "outcome" reply) "ok"))
+            (should (= 0 (hash-table-count (kargu-bridge-connection-reverse-cleanups conn)))))
+        (delete-directory root t)))))
+
+(ert-deftest kargu-bridge-command-headless-and-quit-reject-without-effects-test ()
+  "Missing UI and keyboard quit never grant arbitrary execution."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-rejected-command-" t)))
+      (unwind-protect
+          (dolist (quit '(nil t))
+            (let (finished failure)
+              (cl-letf (((symbol-function 'kargu-present-confirmation)
+                         (lambda (request)
+                           (when (eq (kargu-confirmation-operation request) :prompt)
+                             (if quit (signal 'quit nil)
+                               (funcall (plist-get (kargu-confirmation-options request) :on-decision) :reject))))))
+                (kargu-bridge-execute conn (kargu-bridge-test--command root "printf bad > effect")
+                                      (lambda (_result error-data) (setq failure error-data finished t)))
+                (kargu-bridge-test--wait (lambda () finished))
+                (should (equal (gethash "status" (gethash "data" failure)) "rejected"))
+                (should-not (file-exists-p (expand-file-name "effect" root)))
+                (should (= 0 (hash-table-count (kargu-bridge-connection-reverse-cleanups conn)))))))
+        (delete-directory root t)))))
+
+(ert-deftest kargu-bridge-command-owner-close-dismisses-ui-and-rejects-late-click-test ()
+  "Closing the captured source owner dismisses only its confirmation."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-owner-command-" t))
+          (owner (generate-new-buffer " *kargu-command-owner*")) decision cancelled failure)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation)
+                     (lambda (request)
+                       (pcase (kargu-confirmation-operation request)
+                         (:prompt (setq decision (plist-get (kargu-confirmation-options request) :on-decision)) 'owned-handle)
+                         (:cancel (setq cancelled t))))))
+            (kargu-bridge-execute conn (kargu-bridge-test--command root "printf bad > effect")
+                                  (lambda (_result error-data) (setq failure error-data)) :owner owner)
+            (kargu-bridge-test--wait (lambda () decision))
+            (kill-buffer owner)
+            (should cancelled)
+            (funcall decision :approve)
+            (should (equal (gethash "status" (gethash "data" failure)) "owner_closed"))
+            (should (= 0 (hash-table-count (kargu-bridge-connection-reverse-cleanups conn)))))
+        (when (buffer-live-p owner) (kill-buffer owner))
+        (kargu-bridge-stop conn)
+        (kargu-bridge-test--wait (lambda () (eq (kargu-bridge-status conn) 'closed)))
+        (should-not (file-exists-p (expand-file-name "effect" root)))
+        (delete-directory root t)))))
+
+(ert-deftest kargu-bridge-command-server-revoke-dismisses-reverse-ui-test ()
+  "Rust owner closure cancels its reverse UI and makes a late approval inert."
+  (kargu-bridge-test--with-core
+    (let ((root (make-temp-file "kargu-revoke-command-" t)) decision cancelled finished failure)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-present-confirmation)
+                     (lambda (request)
+                       (pcase (kargu-confirmation-operation request)
+                         (:prompt (setq decision (plist-get (kargu-confirmation-options request) :on-decision)) 'reverse-handle)
+                         (:cancel (setq cancelled t))))))
+            (kargu-bridge-execute conn (kargu-bridge-test--command root "printf bad > effect")
+                                  (lambda (_result error-data) (setq failure error-data finished t)))
+            (kargu-bridge-test--wait (lambda () decision))
+            (kargu-bridge-test--call conn "session/close" (kargu-bridge-connection-read-scope conn))
+            (kargu-bridge-test--wait (lambda () finished))
+            (should cancelled)
+            (should (equal (gethash "status" (gethash "data" failure)) "stale_owner"))
+            (funcall decision :approve)
+            (should-not (file-exists-p (expand-file-name "effect" root)))
+            (should (= 0 (hash-table-count (kargu-bridge-connection-reverse-cleanups conn)))))
+        (delete-directory root t)))))
+
 (ert-deftest kargu-bridge-json-rejects-duplicate-keys-and-trailing-input-test ()
   (dolist (line '("{\"id\":1,\"id\":2}" "{\"params\":{\"x\":false,\"x\":1}}"
                   "{\"a\":[{\"x\":1,\"x\":2}]}" "{} false"))
@@ -60,6 +161,16 @@
     (should (eq (gethash "f" decoded) :json-false))
     (should (equal (gethash "a" decoded) []))
     (should (hash-table-p (gethash "o" decoded)))))
+
+(ert-deftest kargu-bridge-command-unsolicited-approval-is-rejected-without-ui-test ()
+  "An unsolicited reverse review cannot borrow authority from another request."
+  (let ((conn (kargu-bridge--connection-create :state 'ready)) reply)
+    (cl-letf (((symbol-function 'kargu-bridge--send) (lambda (_conn value) (setq reply value)))
+              ((symbol-function 'kargu-present-confirmation) (lambda (&rest _) (ert-fail "Unsolicited approval UI"))))
+      (kargu-bridge--dispatch-line
+       conn "{\"jsonrpc\":\"2.0\",\"id\":\"r:unknown:1\",\"method\":\"editor/request_approval\",\"params\":{\"request_id\":\"e:unknown:1\"}}")
+      (should (eq (gethash "approved" (gethash "result" reply)) :json-false))
+      (should (eq (kargu-bridge-status conn) 'ready)))))
 
 (ert-deftest kargu-bridge-null-result-is-delivered-once-test ()
   (let ((conn (kargu-bridge--connection-create :state 'ready)) (count 0) delivered)

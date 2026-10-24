@@ -89,6 +89,11 @@ impl ExecuteInput {
             timeout,
             environment: CommandEnvironment::try_from(environment)?,
         })?;
+        if command.program.to_str().is_none() || command.cwd.path().to_str().is_none() {
+            return Err(CoreError::InvalidValue {
+                field: "CommandPathEncoding",
+            });
+        }
         Ok(Prepared {
             command,
             settings,

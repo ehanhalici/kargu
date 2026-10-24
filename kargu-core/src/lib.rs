@@ -1,5 +1,5 @@
 //! Kargu's opt-in Rust host and typed execution services.
-//! Stdio exposes lifecycle and bounded read services while execution adapters migrate.
+//! Stdio exposes lifecycle, bounded reads and explicitly approved command execution.
 
 #![forbid(unsafe_code)]
 

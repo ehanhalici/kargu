@@ -1,5 +1,8 @@
 # Ortak komut yürütme ve ters onay köprüsü
 
+Güncel ek: aşağıdaki ilk Rust diliminin ardından Emacs owned presenter da
+bağlandı; sondaki bölüm ve 12'deki güncel doğrulama kaydı esas alınır.
+
 2026-10-24. 17'deki araç bileşimi kararının ilk yürütme dilimi.
 
 ## Rust wire temeli
@@ -51,3 +54,39 @@ tutulur. setsid/cgroup/ani SIGKILL sınırları 14'tekiyle aynıdır.
 Sonraki dilim: Emacs owned approval presenter ve sabit `ls` adapter'ı;
 önceki listing tarayıcısı/testleri yeni sözleşmeyle değiştirilir. API ve dört
 uygulama backend'i kapsamı değişmedi.
+
+## Emacs presenter bağlantısı
+
+`kargu-bridge-execute` explicit program/argv DTO'sunu derin kopyalayarak mevcut
+source buffer/session ve varsa async parent'a bağlar. Bu opt-in, noninteractive
+public bridge portudur; Bash registry/jobs tüketicileri hâlâ eski executor'dadır.
+`kargu/bridge/approval.el` yalnız ilgili çağrıda yüklenir; sıradan bridge load'u
+onay UI'sını veya process'i başlatmaz.
+
+Reverse request yalnız canlı forward request_id kaydıyla eşleşirse sunulur.
+Canonical executable, invocation/argv[0], argv, cwd, explicit environment,
+application/session ve config/policy revision birebir karşılaştırılır.
+Eksik UI, unsolicited/malformed review ve keyboard quit reddir. Bir forward
+request yalnız bir review sunabilir; aynı UI kararının replay'i etkisizdir.
+Snapshot DTO sonradan değişen caller hash-table/vector'larını paylaşmaz.
+
+300 saniyelik UI timer, source buffer kill/major-mode, async parent cancel,
+forward timeout/finish, reverse rpc/cancel ve connection close yalnız ilgili
+opaque confirmation handle'ını kapatır. Geç click response gönderemez; hiçbir
+yanıt ölü core'u yeniden başlatmaz. Grace + drain 10 saniyeye çıkabileceğinden
+bridge stop hard-close penceresi 5'ten 15 saniyeye çıkarıldı.
+
+Somut wire öğrenimi: serde OsString'in varsayılan JSON gösterimi string argv
+değildir; IPC DTO'sunda argv açık string array'e çevrildi ve gerçek pipe testi
+bunu kontrol eder. Bu port UTF-8 girdi kullanır; canonical executable/cwd UTF-8
+değilse typed hata verir, onay ekranına lossy path ile yetki taşınmaz.
+
+Negotiated frame'e sığmayan reverse approval gönderilmez: pending grant/claim
+iptal edilip scoped resource_limit döner; kullanıcı 300 saniye bekletilmez.
+Regresyon fixture'ı ardından session close/admission'ın serbest kaldığını sınar.
+`nix` crate'inin yalnız silinen scanner'a ait `dir` feature'ı da kaldırıldı.
+
+Beş yeni Emacs regresyonu: gerçek approve/exact immutable capture/double click,
+missing UI/quit, source owner close, Rust session revoke ve unsolicited review.
+TLA+ application/approval/process/transport bounded modelleri yeniden hatasız
+çalıştı; gerçek OS/Emacs adapter'ının formal refinement ispatı değildir.

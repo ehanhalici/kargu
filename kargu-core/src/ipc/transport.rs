@@ -77,7 +77,7 @@ impl Decoder for StrictLines {
 }
 
 /// Serve one owned connection; EOF and writer failure revoke all pending work.
-/// Native read services execute off-mailbox; execution grants are not exposed.
+/// Preparation runs off-mailbox; exact approvals and job completions are polled.
 pub async fn serve<R, W>(reader: R, writer: W) -> Result<(), TransportError>
 where
     R: AsyncRead + Unpin,

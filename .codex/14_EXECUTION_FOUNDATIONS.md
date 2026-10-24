@@ -1,5 +1,10 @@
 # Aşama 2 — Tipli yürütme, onay ve Linux süreç sahipliği
 
+Güncel bağlantı: 18_COMMAND_EXECUTION_BRIDGE.md ile standalone program/argv
+wire portu ve Emacs reverse approval presenter'ı eklendi; 19'daki GNU ls aynı
+process/gate yolunu kullanır. Aşağıdaki library-only/henüz-wire-yok ifadeleri
+bu ilk dilimin tarihsel durumudur. Genel Bash/job cutover'ı hâlâ açıktır.
+
 Güncel ek: sonraki dilimde native read-service capability'si ve ilk `find_files`
 portu eklendi (15_NATIVE_FIND_FILES.md). Aşağıdaki lifecycle-only kapsam ifadesi
 bu library diliminin tarihsel durumudur; arbitrary execution hâlâ wire'da yoktur.

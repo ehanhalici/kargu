@@ -17,6 +17,10 @@
 (require 'subr-x)
 (require 'kargu/core/group)
 
+(declare-function kargu-bridge-approval-execute "kargu/bridge/approval"
+                  (connection arguments callback &key owner))
+(declare-function kargu-bridge-approval-request "kargu/bridge/approval" (connection id params))
+
 (defgroup kargu-bridge nil
   "Opt-in Rust core connection."
   :group 'kargu)
@@ -42,11 +46,21 @@
   process stderr-process stderr-buffer epoch (state 'starting)
   (frame-limit kargu-bridge--max-frame) (counter 0) (partial "")
   (pending (make-hash-table :test #'equal)) queue queue-tail (queue-bytes 0)
-  dispatch-timer stop-timer reverse-timers capabilities read-scope ready-waiters)
+  dispatch-timer stop-timer reverse-timers capabilities read-scope ready-waiters
+  (reverse-cleanups (make-hash-table :test #'equal)))
 
 (cl-defstruct (kargu-bridge--pending (:constructor kargu-bridge--pending-create))
   "Take-once request waiter and its owner cleanup."
-  callback timer deadline owner owner-cleanup)
+  callback timer deadline owner owner-cleanup review)
+
+(defun kargu-bridge--dismiss-reverse (connection &optional forward-id)
+  "Dismiss CONNECTION's reverse requests, optionally only for FORWARD-ID."
+  (let ((table (kargu-bridge-connection-reverse-cleanups connection)) cleanups)
+    (maphash (lambda (_id entry)
+               (when (or (null forward-id) (equal (car entry) forward-id))
+                 (push (cdr entry) cleanups))) table)
+    (dolist (cleanup cleanups)
+      (condition-case nil (funcall cleanup) ((error quit) nil)))))
 
 (defvar kargu-bridge--connection nil
   "Default client handle; callbacks always retain their actual connection.")
@@ -81,6 +95,7 @@
   "Take ID from CONNECTION and deliver RESULT or ERROR at most once."
   (when-let* ((entry (gethash id (kargu-bridge-connection-pending connection))))
     (remhash id (kargu-bridge-connection-pending connection))
+    (kargu-bridge--dismiss-reverse connection id)
     (when (and (null error) (kargu-bridge--pending-deadline entry)
                (>= (float-time) (kargu-bridge--pending-deadline entry)))
       (setq result nil error (kargu-bridge--fault "timeout")))
@@ -98,6 +113,7 @@
   "Revoke CONNECTION and finish every waiter with STATUS before resource release."
   (unless (eq (kargu-bridge-connection-state connection) 'closed)
     (setf (kargu-bridge-connection-state connection) 'closed)
+    (kargu-bridge--dismiss-reverse connection)
     (dolist (timer (append (list (kargu-bridge-connection-dispatch-timer connection)
                                 (kargu-bridge-connection-stop-timer connection))
                           (kargu-bridge-connection-reverse-timers connection)))
@@ -228,6 +244,13 @@ CALLBACK receives the native (RESULT ERROR).  Never scan directories in Elisp."
   (kargu-bridge--workspace-read connection arguments callback :owner owner
                                :method "workspace/listFiles" :capability "workspace_list_files_ls"))
 
+(cl-defun kargu-bridge-execute (connection arguments callback &key owner)
+  "Execute explicit program/argv ARGUMENTS on CONNECTION after user approval.
+CALLBACK receives (RESULT ERROR).  OWNER defaults to the current buffer.
+This noninteractive port does not replace the existing Bash job tool."
+  (require 'kargu/bridge/approval)
+  (kargu-bridge-approval-execute connection arguments callback :owner (or owner (current-buffer))))
+
 (cl-defun kargu-bridge--workspace-read (connection arguments callback &key owner method capability)
   "Call read METHOD with ARGUMENTS on CONNECTION for OWNER.
 Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
@@ -290,12 +313,22 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
                        (let ((params (gethash "params" msg :missing)))
                          (or (eq params :missing) (hash-table-p params) (vectorp params))))
             (error "Invalid request envelope"))
-          ;; No delegated editor capability is advertised in stage one.
-          (unless (eq id :missing)
+          (cond
+           ((and (eq id :missing) (equal method "rpc/cancel"))
+            (let* ((params (gethash "params" msg))
+                   (entry (and (hash-table-p params)
+                               (equal (gethash "scope" params) (kargu-bridge-connection-epoch connection))
+                               (gethash (gethash "request_id" params)
+                                        (kargu-bridge-connection-reverse-cleanups connection)))))
+              (when entry (funcall (cdr entry)))))
+           ((and (not (eq id :missing)) (equal method "editor/request_approval"))
+            (require 'kargu/bridge/approval)
+            (kargu-bridge-approval-request connection id (gethash "params" msg)))
+           ((not (eq id :missing))
             (kargu-bridge--send
              connection (kargu-bridge--object
                          "jsonrpc" "2.0" "id" id
-                         "error" (kargu-bridge--object "code" -32601 "message" "Method not found")))))
+                         "error" (kargu-bridge--object "code" -32601 "message" "Method not found"))))))
          (t
           (unless (and (kargu-bridge--valid-id-p id)
                        (not (eq (eq result :missing) (eq error-data :missing)))
@@ -486,7 +519,7 @@ CALLBACK receives (CONNECTION ERROR).  Return the starting connection handle."
 
 (defun kargu-bridge-stop (&optional connection)
   "Request shutdown of CONNECTION, defaulting to the current bridge.
-Force transport cleanup after five seconds if the peer fails to exit."
+Allow Rust TERM/grace/drain before forcing transport cleanup."
   (interactive)
   (let ((conn (or connection kargu-bridge--connection)))
     (when (and conn (not (eq (kargu-bridge-connection-state conn) 'closed)))
@@ -494,7 +527,7 @@ Force transport cleanup after five seconds if the peer fails to exit."
           (kargu-bridge--close conn "cancelled")
         (setf (kargu-bridge-connection-state conn) 'stopping
               (kargu-bridge-connection-stop-timer conn)
-              (run-at-time 5 nil #'kargu-bridge--close conn "shutdown_timeout"))
+              (run-at-time 15 nil #'kargu-bridge--close conn "shutdown_timeout"))
         (kargu-bridge-call
          conn "shutdown" (kargu-bridge--object)
          (lambda (_result error-data)

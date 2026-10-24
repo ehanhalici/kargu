@@ -282,19 +282,37 @@ impl Commands {
             host.request_scope()?.as_str(),
             self.sequence.as_u64()
         ));
-        let receiver = pending
-            .register(reverse.clone(), host.request_scope()?, request.deadline())
-            .map_err(|_| CoreError::Limit)?;
-        messages.push(json!({"jsonrpc":"2.0","id":reverse.value(),"method":methods::REQUEST_APPROVAL,
+        let message = json!({"jsonrpc":"2.0","id":reverse.value(),"method":methods::REQUEST_APPROVAL,
             "params":{"request_id":id.value(),"approval_id":request.id(),"scope":request.scope(),"program":request.program(),"invocation":request.invocation(),
-            "arguments":request.arguments(),"cwd":request.working_directory(),
-            "environment":request.environment().entries().map(|(k,v)| (k.to_string_lossy().into_owned(),v.to_string_lossy().into_owned())).collect::<std::collections::BTreeMap<_,_>>()}}));
+            "arguments":request.arguments().iter().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>(),"cwd":request.working_directory(),
+            "environment":request.environment().entries().map(|(k,v)| (k.to_string_lossy().into_owned(),v.to_string_lossy().into_owned())).collect::<std::collections::BTreeMap<_,_>>()}});
+        if message.to_string().len() > host.frame_limit().as_usize() {
+            return self.reject_review(host, scope, &run);
+        }
+        let receiver =
+            match pending.register(reverse.clone(), host.request_scope()?, request.deadline()) {
+                Ok(receiver) => receiver,
+                Err(_) => return self.reject_review(host, scope, &run),
+            };
+        messages.push(message);
         Ok(Progress::Pending(Stage::Review {
             run,
             request: Box::new(request),
             reverse,
             receiver,
         }))
+    }
+    fn reject_review(
+        &mut self,
+        host: &mut Host,
+        scope: &ReadScope,
+        run: &RunHandle,
+    ) -> Result<Progress, CoreError> {
+        let actor = host.actor_mut(scope)?;
+        actor.cancel(run)?;
+        self.gate.dismiss_run(actor, run)?;
+        actor.finish(run)?;
+        Ok(Progress::Done(Err(CoreError::Limit)))
     }
     fn launch(
         &mut self,

@@ -30,6 +30,10 @@ fn approved_program_argv_keeps_mailbox_live_and_delivers_once() -> TestResult {
     let review = peer.read()?;
     assert_eq!(review["method"], "editor/request_approval");
     assert_eq!(review["params"]["request_id"], 3);
+    assert_eq!(
+        review["params"]["arguments"],
+        json!(["-c", "printf ready; printf warning >&2; exit 7"])
+    );
     assert!(!root.path().join("effect").exists());
     peer.send(json!({"jsonrpc":"2.0","id":4,"method":"ping"}))?;
     assert_eq!(peer.read()?["result"]["status"], "ok");
@@ -44,6 +48,28 @@ fn approved_program_argv_keeps_mailbox_live_and_delivers_once() -> TestResult {
     peer.send(json!({"jsonrpc":"2.0","id":review["id"],"result":{"approved":true}}))?;
     peer.send(json!({"jsonrpc":"2.0","id":5,"method":"session/close","params":scope}))?;
     assert_eq!(peer.read()?["id"], 5);
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn approval_exceeding_negotiated_frame_releases_claim_without_hanging() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.send(
+        json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+        "protocol_major":1,"protocol_minor":0,"client_version":"test","capabilities":[],
+        "limits":{"max_frame_bytes":1024}}}),
+    )?;
+    assert!(peer.read()?.get("result").is_some());
+    peer.send(json!({"jsonrpc":"2.0","method":"initialized"}))?;
+    let scope = peer.scope()?;
+    let arguments = command_arguments(root.path(), &format!("#{}", "x".repeat(450)));
+    peer.send(json!({"jsonrpc":"2.0","id":3,"method":"tool/execute","params":{"scope":scope,"arguments":arguments}}))?;
+    assert_eq!(peer.read()?["error"]["data"]["status"], "resource_limit");
+    peer.send(json!({"jsonrpc":"2.0","id":4,"method":"session/close","params":scope}))?;
+    assert_eq!(peer.read()?["result"]["status"], "closed");
     peer.input.take();
     assert!(peer.wait()?);
     Ok(())

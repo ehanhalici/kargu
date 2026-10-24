@@ -42,12 +42,16 @@ G03–G13'teki kalan davranış/güvenlik yükümlülükleri Rust'a geçince kap
 Mevcut API desteği Rust'a taşınırken Codex, Antigravity, Claude Code ve OpenCode
 backend'leri ayrıca eklenecek; provider seçimi ve kabul koşulları .codex/03'tedir.
 
-Native `find_files` ve `list_files` portları gerçek Elisp tool gate'ine bağlandı;
-eski glob engine'leri ve senkron directory scanner silindi. G11'in bu read
-tüketicileri için bounded traversal, no-follow directory capture, owner/cancel
-ve çıktı limitleri test edildi (.codex/15 ve 16). Bu kısmi kanıt G11/G13'ün
-tamamını kapatmaz; kalan grep/read/Git/skill/webfetch, egress/context ve diğer
-global tüketiciler aşağıdaki gruplarda açık kalır. Yeni paralel iş listesi yoktur.
+`find_files` ve `list_files` gerçek Elisp tool gate'ine bağlandı; eski glob
+engine'leri ve senkron directory scanner silindi. Kullanıcının Unix/GNU
+bileşimi kararıyla özel Rust listing tarayıcısı da kaldırıldı: `list_files`
+ortak Rust process/gate üzerinden GNU ls çıktısı verir (.codex/17–19).
+`find_files` şimdilik native'dir (.codex/15). Genel program/argv için Rust
+reverse approval + Emacs presenter bağlıdır; Bash/job consumer cutover'ı açıktır.
+Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
+output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan grep/read/
+Git/skill/webfetch, egress/context ve global tüketiciler aşağıdaki gruplarda
+açık kalır. Yeni paralel iş listesi yoktur.
 
 ## Gruplar ve önkoşullar
 

@@ -95,7 +95,7 @@ pub mod protocol {
     pub const MINOR: u16 = 0;
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
-    /// Implemented wire capabilities; arbitrary command execution is not exposed.
+    /// Implemented standalone wire services, not yet a full agent backend.
     pub const LIFECYCLE_CAPABILITIES: [&str; 6] = [
         "application_lifecycle",
         "session_lifecycle",
