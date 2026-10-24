@@ -44,7 +44,9 @@ Yeni envanter, eksik modülleri gizlemek için test baseline'ını yeniden üret
 2026-10-24 uygulama durumu: `find_files` eşdeğer Rust/IPC testlerinden sonra
 taşındı; `tools/search.el` içindeki glob parser, formatter ve fd/rg/Elisp glob
 engine'leri silindi. Public araç/alias/schema ve eski tool gate façade'sı kalır.
-`workspace_grep`, `list_files`, diğer `fs.el` tüketicileri ve bu tablodaki kalan
+Sonraki dilimde `list_files`/`ls`/`dir` Rust'a taşındı ve eski senkron Elisp
+directory scanner silindi; ayrıntı 16_NATIVE_DIRECTORY_LISTING.md.
+`workspace_grep`, diğer `fs.el` tüketicileri ve bu tablodaki kalan
 aileler henüz taşınmış sayılmaz. Ayrıntı: 15_NATIVE_FIND_FILES.md.
 
 Davranış kanıtları: architecture-contracts.md, docs/modularity.md,

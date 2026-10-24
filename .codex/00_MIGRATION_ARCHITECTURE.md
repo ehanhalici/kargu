@@ -1,7 +1,8 @@
 # 00. RUST GEÇİŞ MİMARİSİ VE KAPSAM SÖZLEŞMESİ
 
 Durum: **Rust IPC/Emacs bridge, execution library temelleri ve ilk native
-`find_files` geçişi uygulandı; eski Elisp glob engine'leri kaldırıldı** (2026-10-24).
+`find_files` / `list_files` geçişi uygulandı; eski Elisp glob engine'leri ve
+senkron directory scanner kaldırıldı** (2026-10-24).
 Uygulama kanıtı ve kalan işler: [12_MIGRATION_PROGRESS.md](12_MIGRATION_PROGRESS.md).
 Hedef, mevcut Kargu yeteneklerini ve güvenlik/sahiplik sözleşmelerini koruyarak
 agent motorunu Rust'a taşımak; Emacs'i canlı editör adapter'ı ve UI olarak
@@ -63,7 +64,7 @@ run'larına izin vermez. Core her session'a tek yazıcı sağlar. Foreign/obsole
 callback, owner closure ve reset eski sonucu başka session'a taşıyamaz.
 
 Rust agent backend cutover'ı henüz yapılmadı; Elisp agent default kalır.
-Taşınan `find_files` artık yalnız Rust tarafından yürütülür; missing binary
+Taşınan `find_files` / `list_files` artık yalnız Rust tarafından yürütülür; missing binary
 durumunda eski Elisp engine'e dönülmez. Bu read portu agent backend seçimi
 değildir. Aktif run boyunca backend/connection snapshot
 sabitlenir. Legacy ve Rust aynı yan etkiyi veya state'i birlikte yönetmez;
@@ -150,4 +151,5 @@ değişiklik gerekçesi, model/test eşlemesiyle ayrıca kaydedilir.
 Uygulama sırası: [04_PHASED_ROADMAP.md](04_PHASED_ROADMAP.md).
 İlk IPC dilimi mevcut Elisp motorundan bağımsızdı. Güncel ilk tool portu ve
 legacy kaldırma kanıtı: [15_NATIVE_FIND_FILES.md](15_NATIVE_FIND_FILES.md).
+İkinci canlı read portu: [16_NATIVE_DIRECTORY_LISTING.md](16_NATIVE_DIRECTORY_LISTING.md).
 Agent run/provider/history ve diğer tool aileleri henüz Elisp'tedir.

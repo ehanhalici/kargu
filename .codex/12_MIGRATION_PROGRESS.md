@@ -1,5 +1,44 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — Dördüncü dilim: list_files native cutover
+
+Onaylı Aşama 2'ye devam edildi; `todo.md` G11/G13 kalan kabul yükümlülükleri
+korundu. Küçük commit sırası:
+
+1. `3fa1a45`: typed `ListFilesPlan`, fd-rooted/no-follow directory capture,
+   bounded native listing ve shared read mailbox; Rust/gerçek-stdio testleri.
+2. `6d73867`: `list_files`/`ls`/`dir` mevcut Elisp tool gate'inden Rust'a
+   bağlandı; senkron Elisp scanner, entry classification ve display engine'i silindi.
+
+Detay ve eşdeğerlik/uyumluluk sınırı:
+[16_NATIVE_DIRECTORY_LISTING.md](16_NATIVE_DIRECTORY_LISTING.md).
+Tool şeması ve alias'ları korunur; Lisp entry point sonucu artık callback ile
+verir. Callback'siz çağrıyı bekleten bir sync bridge veya Elisp fallback yoktur.
+Glob/listing aynı task/owner/cancel adapter'ını ve dört-worker toplam kotasını
+paylaşır. Legacy `kargu-fs-walk`/grep tüketicileri henüz taşınmadığı için korunur.
+
+Öğrenim: root'u normal File::open ile açıp sonra dizin kontrolü yapmak FIFO'da
+daha kontrole ulaşmadan bekleyebilir. Workspace `O_DIRECTORY | O_NOFOLLOW`
+ile açılır; root/target FIFO, symlink ve directory replacement testleri vardır.
+Symlink hedefi takip edilmez, `[LINK]` gösterilir; special entry `[OTHER]` olur.
+İncomplete sonuç sahte empty/complete olarak sunulmaz. Scope ve limitler,
+atomic filesystem snapshot veya OS sandbox garantisi diye adlandırılmaz.
+
+Final güncel binary + kaynaklardan (.elc yok) ERT: **1146/1146 expected,
+0 unexpected, 0 skipped**, **47.79 s**. Odaklı bridge/search **39/39**, bağımsız
+bridge **20/20**. Rust **47 test + 2 compile-fail doctest**; locked fmt/build,
+strict all-target Clippy, warning-as-error Elisp/test byte compilation ve
+checkdoc temiz. Doğrulama için üretilen beş .elc kaldırıldı. TLA+ modelleri
+değişmedi; yeni refinement/uzak CI/canlı provider veya CLI/MCP kanıtı iddia edilmez.
+
+`todo.md` güncel Rust planına bağlandı, fakat açık G03–G13 grupları bu read
+portu nedeniyle kapatılmadı. API -> Rust ve dört uygulama backend'i gereksinimi
+aynen korunur; onlar uygulanmış sayılmaz. Generic 01 ve kullanıcının mevcut
+`shell.nix` değişikliği değiştirilmedi. Sıradaki read portu `workspace_grep`;
+ardından kalan read/Git/skill/webfetch ve execution/approval presenter bağlantısı.
+
+Aşağıdaki önceki dilim kayıtları tarihsel kapsam ve test sonuçlarıdır.
+
 ## 2026-10-24 — API + dört uygulama kapsamının netleştirilmesi
 
 Kullanıcı kararı: mevcut Elisp API desteği Rust'a taşınarak korunacak; yanına

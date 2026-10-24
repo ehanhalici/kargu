@@ -61,6 +61,11 @@ engine'leri silindi; diğer `kargu-fs-walk` tüketicileri korunur. Bu port stand
 read servisidir; genel `tool/execute`, agent run veya shell capability'si diye
 ilan edilmez. Kanıt ve test eşlemesi: 15_NATIVE_FIND_FILES.md.
 
+İkinci canlı read adapter `list_files` ve `ls`/`dir` alias'larıdır. Listeleme
+Rust'ta fd-rooted/no-follow ve bounded çalışır; eski Elisp directory scanner
+silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
+16_NATIVE_DIRECTORY_LISTING.md. G11/G13'ün kalan todo.md yükümlülükleri kapanmaz.
+
 - [ ] Ortak execution gate, path/egress policy, scoped approval ledger ve
   asenkron Emacs approval presenter kurulsun. UI 300 s ve sensör 10 s ayrı olsun.
 - [ ] Process startup barrier, group supervision, bounded stdout/stderr,
@@ -69,7 +74,9 @@ ilan edilmez. Kanıt ve test eşlemesi: 15_NATIVE_FIND_FILES.md.
   Text reader diff adapter'ından bağımsız kalsın.
   - [x] Native `find_files`, bounded discovery, actual Emacs tool gate/alias/mode
     entegrasyonu ve eşdeğer testlerden sonra eski Elisp implementation kaldırma.
-  - [ ] `workspace_grep`, `list_files`, read/Git/skill/webfetch kalan portları.
+  - [x] Native `list_files`/`ls`/`dir`, owner/cancel ve fd-rooted/no-follow
+    directory capture; async tüketici cutover ve eski Elisp scanner kaldırma.
+  - [ ] `workspace_grep`, read/Git/skill/webfetch kalan portları.
 - [ ] Diff parser/generator + revision'lı proposal/journal ve Emacs transaction
   adapter'ı 06'ya göre kurulsun; review callback'i placeholder kalmasın.
 - [ ] Eski Elisp loop opt-in adapter üzerinden `tool/execute` çağırabilsin.

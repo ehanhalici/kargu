@@ -1,5 +1,9 @@
 # Üçüncü dilim: native find_files ve Emacs portu
 
+Sonraki dilim notu: `list_files` da taşındı; güncel ikinci port ve paylaşılan
+adapter için 16_NATIVE_DIRECTORY_LISTING.md. Aşağıdaki kapsam/test sayıları
+ilk `find_files` diliminin tarihsel kanıtıdır.
+
 ## Rust servisi
 
 `workspace/findFiles`, application/session scope'u zorunlu, ayrı bir **read

@@ -1,6 +1,7 @@
 # Açık işler — birlikte çözülecek gruplar
 
-İnceleme tabanı: 32e917b, 2026-10-22. Son tam ERT: 1116/1116, 2026-10-23.
+İnceleme tabanı: 32e917b, 2026-10-22. İnceleme ERT baseline'ı: 1116/1116,
+2026-10-23. Rust göçünün güncel uygulama/test kaydı: .codex/12_MIGRATION_PROGRESS.md.
 G02 bağlantı/metadata sözleşmesi ve kalan köprüler: docs/connection-ownership.md.
 Yalnız açık işler tutulur; tamamlanan alt maddeler ve tekrarlanan iş tarifleri
 çıkarılmıştır. Bir çekirdeğin testinin geçmesi, native tüketicilerin ona
@@ -30,7 +31,23 @@ Bu belge gruplamadır; aşağıdaki uygulamalar henüz onaylanmış sayılmaz.
    bağlantıyı kendi tüketicisinde yapar; son tüketici taşınmadan köprü silinmez.
    Kalan global tüketicilerin isimleri kapanışta kaydedilir, son silme G13'tedir.
 5. skills.md stage edilmez; kullanıcıya ait .gitignore/yerel dosyalar korunur.
-   Gerçek CLI/MCP entegrasyonu ve master merge/push ayrıca onay gerektirir.
+   Harici uygulama adapter'larının onaylı kapsamı .codex/03 ve 04 Aşama 5'tedir.
+   Canlı hesap/ücretli CLI/MCP testi, binary indirme/kurulum, credential taşıma
+   ve master merge/push ayrıca onay gerektirir.
+
+### Onaylı Rust geçişi ile ilişki
+
+Kullanıcının ayrıca onayladığı Rust göçünde uygulama sırası .codex/04'tür;
+G03–G13'teki kalan davranış/güvenlik yükümlülükleri Rust'a geçince kapanmaz.
+Mevcut API desteği Rust'a taşınırken Codex, Antigravity, Claude Code ve OpenCode
+backend'leri ayrıca eklenecek; provider seçimi ve kabul koşulları .codex/03'tedir.
+
+Native `find_files` ve `list_files` portları gerçek Elisp tool gate'ine bağlandı;
+eski glob engine'leri ve senkron directory scanner silindi. G11'in bu read
+tüketicileri için bounded traversal, no-follow directory capture, owner/cancel
+ve çıktı limitleri test edildi (.codex/15 ve 16). Bu kısmi kanıt G11/G13'ün
+tamamını kapatmaz; kalan grep/read/Git/skill/webfetch, egress/context ve diğer
+global tüketiciler aşağıdaki gruplarda açık kalır. Yeni paralel iş listesi yoktur.
 
 ## Gruplar ve önkoşullar
 
@@ -250,8 +267,10 @@ tests/fixtures/fake-agent.el ve ortak backend contract testleri.
 - **Kabul:** native/fake ortak suite; disconnect, duplicate/out-of-order,
   approval'da reset, foreign session ve cancel sonrası late event. Dış etkiyi
   gözlemlenmediyse unknown taşı; Kargu onayı verilmiş gibi gösterme.
-  Gerçek Codex/Claude/Cursor/OpenCode, CLI/desktop/MCP bağlantısı, binary
-  indirme veya credential taşıma bu grubun kapsamı değildir.
+  Gerçek Codex/Antigravity/Claude Code/OpenCode backend'leri .codex/04 Aşama 5'in
+  ayrı teslim kapsamıdır; G12 native/fake portunun tamamlanması onların canlı
+  entegrasyon kanıtı değildir. Binary indirme veya credential taşıma bu grubun
+  kapsamı değildir.
 
 ## G13 — Son köprü temizliği, lint ve bütünleşik kabul
 

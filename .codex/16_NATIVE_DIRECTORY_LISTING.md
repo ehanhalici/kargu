@@ -96,9 +96,9 @@ yine native porttan alınır. Duplicate/malformed callback, missing binary/capab
 late result ve parent cancellation testleri eklenmiştir. Listing-only capability
 bulunan peer de read-service startup yapabilir; find capability zorunlu değildir.
 
-Final kabul: **1146/1146 full ERT expected, 0 unexpected, 0 skipped**. Odaklı
+Final kabul: **1146/1146 full ERT expected, 0 unexpected, 0 skipped**.
 Son full koşu güncel binary ve .elc olmadan kaynaklardan: **47.79 saniye**.
-bridge/search: **39/39**; bunun **20** testi bağımsız bridge suite'indedir.
+Odaklı bridge/search: **39/39**; bunun **20** testi bağımsız bridge suite'indedir.
 Rust: **47 test + 2 compile-fail doctest**. Locked fmt/strict all-target Clippy,
 warning-as-error byte compilation ve checkdoc geçer. TLA+ modelleri değiştirilmedi;
 bu read-service uygulaması için yeni model/refinement kanıtı iddia edilmez.
