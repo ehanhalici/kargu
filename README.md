@@ -302,6 +302,15 @@ original source buffer/session; closing that owner cancels and drains them.
 The captured environment is explicit (at most 512 entries / 64 KiB), and its
 values are withheld from the approval display. Output retention is 0..4 MiB.
 
+Interactive `kargu-process-session-start` uses the same Rust job engine and
+returns a starting handle immediately. Await its `:on-ready` callback before
+sending input or EOF. Each send is bounded to 32 KiB of UTF-8; optional input
+callbacks acknowledge actual delivery, without automatic replay. Idle timeouts
+run in Rust. The private output buffer is released after native terminal drain
+or an explicit transport/owner failure. `result` and `failure` accessors retain
+the typed evidence; a local closed view is not proof of OS cleanup. Callbacks
+are revoked when their original source/session is lost.
+
 `read_file` normalizes its line window once. `from_line`/`to_line` are positive
 1-based inclusive integers; `limit` alone reads the first N lines. The legacy
 `offset` is a 1-based start alias, with zero also meaning the first line.

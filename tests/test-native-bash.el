@@ -41,7 +41,7 @@
 (ert-deftest kargu-bash-native-environment-first-entry-and-unset-test ()
   "Explicit environment capture preserves Emacs duplicate/unset semantics."
   (let* ((process-environment '("FIRST=first" "FIRST=second" "UNSET" "UNSET=hidden"))
-         (environment (kargu-bash-native--environment)))
+         (environment (kargu-bridge-command--environment)))
     (should (= 1 (hash-table-count environment)))
     (should (equal "first" (gethash "FIRST" environment)))
     (should-not (gethash "UNSET" environment))))
@@ -194,6 +194,23 @@
         (kargu-bash-run "printf bad > effect" nil nil (lambda (text) (setq result text)))
         (kargu-bridge-test--wait (lambda () decision))
         (push "KARGU_CHANGED_AFTER_REVIEW=yes" process-environment)
+        (funcall decision :approve)
+        (kargu-bridge-test--wait (lambda () result))
+        (should (string-search "ERROR:" result))
+        (should-not (file-exists-p (expand-file-name "effect" root)))))))
+
+(ert-deftest kargu-bash-native-mode-cycle-invalidates-old-approval-test ()
+  "Returning to Agent mode cannot revive an approval from an earlier mode revision."
+  (kargu-bash-test--with-core
+    (let (decision result)
+      (cl-letf (((symbol-function 'kargu-present-confirmation)
+                 (lambda (request)
+                   (when (eq (kargu-confirmation-operation request) :prompt)
+                     (setq decision (plist-get (kargu-confirmation-options request) :on-decision))))))
+        (kargu-bash-run "printf bad > effect" nil nil (lambda (text) (setq result text)))
+        (kargu-bridge-test--wait (lambda () decision))
+        (kargu-test-mode 'ask)
+        (kargu-test-mode 'agent)
         (funcall decision :approve)
         (kargu-bridge-test--wait (lambda () result))
         (should (string-search "ERROR:" result))

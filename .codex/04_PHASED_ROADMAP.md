@@ -80,16 +80,19 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
     `kargu-bridge-execute` adapter testi (18). Bu port noninteractive'dir.
   - [x] Genel Bash/job consumer cutover: owned native jobs + output poll,
     foreground/background callback, gerçek cancellation/drain; eski Bash OS
-    executor silindi (20–23). Generic job stdin/EOF portu hazırdır; ayrı
-    `tools/process/session.el` idle-timeout tüketicisi henüz taşınmamıştır.
-- [ ] Process startup barrier, group supervision, bounded stdout/stderr,
+    executor silindi (20–23). Interaktif session consumer ve idle policy de
+    native'a bağlandı; eski OS/idle timer engine'i kaldırıldı (24–25).
+- [x] Process startup barrier, group supervision, bounded stdout/stderr,
   interactive stdin/poll/EOF/cancel ve TERM/KILL/reap uygulansın.
+  Bash/session bu native portu kullanır; diğer eski OS tüketicileri aşağıdaki
+  ayrı read/search/Git/skill/webfetch migration maddelerinde açık kalır.
 - [ ] Read/search/Git/skill/webfetch portları ve capability discovery taşınsın.
   Text reader diff adapter'ından bağımsız kalsın.
   - [x] Native `find_files`, bounded discovery, actual Emacs tool gate/alias/mode
     entegrasyonu ve eşdeğer testlerden sonra eski Elisp implementation kaldırma.
-  - [x] Native `list_files`/`ls`/`dir`, owner/cancel ve fd-rooted/no-follow
-    directory capture; async tüketici cutover ve eski Elisp scanner kaldırma.
+  - [x] Native `list_files`/`ls`/`dir`, owner/cancel ve shared execution üzerinden
+    GNU ls adapter'ı (19); eski native/Elisp listing scanner'ları kaldırıldı.
+    Önceki fd-rooted metadata/no-follow garantisi güncel ls'e atfedilmez.
   - [ ] `workspace_grep`, read/Git/skill/webfetch kalan portları.
 - [ ] Diff parser/generator + revision'lı proposal/journal ve Emacs transaction
   adapter'ı 06'ya göre kurulsun; review callback'i placeholder kalmasın.

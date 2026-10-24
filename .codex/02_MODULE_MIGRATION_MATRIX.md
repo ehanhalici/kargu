@@ -45,7 +45,12 @@ Yeni envanter, eksik modülleri gizlemek için test baseline'ını yeniden üret
 taşındı; `tools/search.el` içindeki glob parser, formatter ve fd/rg/Elisp glob
 engine'leri silindi. Public araç/alias/schema ve eski tool gate façade'sı kalır.
 Sonraki dilimde `list_files`/`ls`/`dir` Rust'a taşındı ve eski senkron Elisp
-directory scanner silindi; ayrıntı 16_NATIVE_DIRECTORY_LISTING.md.
+directory scanner silindi; ilk dilim 16'dadır. Güncel listing sözleşmesi
+özel native scanner değil GNU ls adapter'ıdır (19).
+20–25 sonrasında Bash ve interactive process/session OS engine'leri Rust job
+portuna bağlandı; Elisp spawn/signal/idle timer kodları silindi. Editor view ve
+source/runtime revalidation adapter'ları korunur. Shared process.el, diğer
+Git/search/diff/webfetch tüketicileri taşınmadığı için henüz kaldırılmaz.
 `workspace_grep`, diğer `fs.el` tüketicileri ve bu tablodaki kalan
 aileler henüz taşınmış sayılmaz. Ayrıntı: 15_NATIVE_FIND_FILES.md.
 

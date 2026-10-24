@@ -12,21 +12,8 @@
 
 (require 'kargu/tools/bash/jobs)
 (require 'kargu/bridge/job-output)
-(require 'kargu/permission/execute)
-(require 'kargu/state/selectors)
+(require 'kargu/bridge/command)
 (defvar kargu-bash-timeout)
-(declare-function kargu-execution-call "kargu/application/execution" (context function &rest args))
-(declare-function kargu-execution-live-p "kargu/application/execution" (context))
-
-(defun kargu-bash-native--environment ()
-  "Capture Emacs child environment explicitly, with first entry taking priority."
-  (let ((result (make-hash-table :test #'equal)) (seen (make-hash-table :test #'equal)))
-    (dolist (entry process-environment)
-      (let* ((at (string-search "=" entry)) (name (if at (substring entry 0 at) entry)))
-        (unless (gethash name seen)
-          (puthash name t seen)
-          (when at (puthash name (substring entry (1+ at)) result)))))
-    result))
 
 (defun kargu-bash-native--append (job text truncated)
   "Append TEXT to JOB's bounded editor view, recording TRUNCATED output."
@@ -71,7 +58,9 @@
 (defun kargu-bash-native--admitted (job task handle error-data)
   "Attach actual native HANDLE to JOB and TASK, or report ERROR-DATA."
   (cond
-   ((not (kargu-async-pending-p task)) (when handle (kargu-bridge-job-dispose handle)))
+   ((not (kargu-async-pending-p task))
+    (when handle (kargu-bridge-job-dispose handle))
+    (kargu-async-cancel task))
    (error-data
     (kargu-bash-native--finish job task nil error-data)
     (when (kargu-bash--job-background job)
@@ -89,39 +78,17 @@
     (when (kargu-bash--job-background job)
       (kargu-async-finish task (kargu-bash--started-text job))))))
 
-(defun kargu-bash-native--fresh-p (operation context mode)
-  "Check captured OPERATION and MODE inside the original execution CONTEXT."
-  (condition-case nil
-      (let ((check (lambda ()
-                     (and (eq mode (or (plist-get kargu--loop-run :mode) (kargu-state-mode)))
-                          (kargu-permission--operation-valid-p operation)))))
-        (if context
-            (and (kargu-execution-live-p context) (kargu-execution-call context check))
-          (with-current-buffer (kargu-permission-operation-origin operation) (funcall check))))
-    (error nil)))
-
 (defun kargu-bash-native-start (command directory shell background callback)
   "Start COMMAND in DIRECTORY using SHELL; deliver BACKGROUND or terminal CALLBACK."
   (unless (functionp callback) (error "Native Bash startup requires a CALLBACK"))
   (let* ((root (kargu-permission-project-root))
          (command (copy-sequence command))
          (directory (file-name-as-directory (file-truename directory)))
-         (mode (or (plist-get kargu--loop-run :mode) (kargu-state-mode)))
-         (context kargu-execution--current)
-         (owner (current-buffer))
-         (operation (kargu-permission-capture
-                     command directory :valid-p (lambda () (kargu-permission-validate-command command root directory) t)))
          (limit kargu-process-max-bytes)
-         (arguments (kargu-bridge--object
-                     "root" root "mode" (symbol-name mode) "program" shell
-                     "arguments" (vector "-c" command) "cwd" directory
-                     "timeout_ms" (if kargu-bash-timeout (ceiling (* 1000 kargu-bash-timeout)) :json-null)
-                     "environment" (kargu-bash-native--environment) "config_revision" 0
-                     "policy_revision" (or (kargu-permission-operation-policy-revision operation) 0)
-                     "output_bytes" limit "stderr" "merge")))
-    (unless (eq mode 'agent) (error "Bash requires Agent mode"))
-    (unless (and (natnump limit) (<= limit 4194304))
-      (error "Native Bash output capacity must be 0..4194304 bytes"))
+         (capture (kargu-bridge-command-capture
+                   shell (list "-c" command) directory :timeout kargu-bash-timeout
+                   :output-bytes limit :stderr "merge"
+                   :valid-p (lambda () (kargu-permission-validate-command command root directory) t))))
     (let* ((service (kargu-job-service-for-project root))
            (id (format "p%d" (cl-incf kargu-bash--counter)))
            (buffer (generate-new-buffer (format "*kargu-proc-%s*" id)))
@@ -149,9 +116,9 @@
               task (lambda (connection failure)
                      (if failure (kargu-bash-native--admitted job task nil failure)
                        (kargu-bridge-job-start
-                        connection arguments
+                        connection (kargu-bridge-command-arguments capture)
                         (lambda (handle error-data) (kargu-bash-native--admitted job task handle error-data))
-                        :owner owner :valid-p (lambda () (kargu-bash-native--fresh-p operation context mode))))))))
+                        :owner (kargu-bridge-command-owner capture) :valid-p (kargu-bridge-command-valid-p capture)))))))
       task)))
 
 (provide 'kargu/tools/bash/native)

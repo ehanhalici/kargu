@@ -1,5 +1,25 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — Interactive session consumer cutover
+
+Native idle prerequisite `a843d7b` ardından session OS spawn/stdin/EOF/signal,
+PID/PGID ve idle timer engine'i Elisp'ten kaldırıldı. `bridge/command.el`
+ortak immutable editor capture'dır; Bash ve session aynı environment/policy/
+mode-revision freshness kontrolünü kullanır. Ayrıntılar 25'tedir.
+
+Owner callback lease kill hook'tan önce revoke edilir; buffer-live-p tek
+başına yeterli değildir. Geç ack/receipt, source loss, sibling isolation ve
+unknown cleanup/legacy zero ayrımı sınandı. Start artık on-ready ile async;
+eski sync engine veya fallback yoktur. Shared process.el diğer OS consumer'lar
+taşınmadığı için korunur. API + dört uygulama backend kapsamı açık kalır.
+
+**1180/1180 full source ERT**, 0 unexpected, **117.01 s**; odaklı 19/19;
+warning-as-error bytecompile/checkdoc temiz, geçici .elc kaldırıldı. Rust
+değişmedi: önceki **74 test + 2 compile-fail** kanıtı geçerlidir. Bounded TLC
+process-session 129/42/depth7, approval 8194/1536/depth11 ve transport
+1810/693/depth13 yeniden hatasız; yeni refinement iddiası yoktur. Kullanıcı
+shell.nix ve 07 fence değişiklikleri commit dışında korunur.
+
 ## 2026-10-24 — Native idle policy prerequisite
 
 Bash cutover `a7ecdfa` ardından `IdleTimeout` ayrı tip, exact digest/review,

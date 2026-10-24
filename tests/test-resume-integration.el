@@ -14,6 +14,7 @@
 (require 'kargu)
 (require 'kargu/tools/execution)
 (require 'kargu/tools/process/session)
+(require 'tests/test-process-session)
 
 (ert-deftest kargu-resume-old-claim-cannot-release-reused-run-name-test ()
   "An old claim cannot release a new claim even when run labels are reused."
@@ -145,28 +146,27 @@
 
 (ert-deftest kargu-resume-session-natural-exit-releases-buffer-once-test ()
   "A natural exit releases its private buffer and delivers one terminal event."
-  (skip-unless (executable-find "cat"))
-  (let* ((calls 0)
-         (session (kargu-process-session-start
-                   "cat" nil :on-exit (lambda (_code) (cl-incf calls)))))
-    (unwind-protect
-        (progn
-          (kargu-process-session-close session)
-          (let ((deadline (+ (float-time) 2)))
-            (while (and (zerop calls) (< (float-time) deadline))
-              (accept-process-output nil 0.01)))
-          (kargu-process-session--finish session)
-          (should (= calls 1))
-          (should-not (buffer-live-p (kargu-process-session-buffer session))))
-      (kargu-process-session-kill session))))
+  (kargu-session-test--with-core
+    (let* ((calls 0)
+           (session (kargu-session-test--start :on-exit (lambda (_code) (cl-incf calls)))))
+      (kargu-process-session-close session)
+      (kargu-bridge-test--wait (lambda () (eq (kargu-process-session-state session) :closed)))
+      (kargu-process-session--finish session)
+      (should (= calls 1))
+      (should-not (buffer-live-p (kargu-process-session-buffer session))))))
 
 (ert-deftest kargu-resume-session-spawn-error-releases-buffer-test ()
   "A failed interactive spawn does not retain its allocated output buffer."
-  (let ((before (buffer-list)))
-    (cl-letf (((symbol-function 'executable-find) (lambda (_program) "/unused"))
-              ((symbol-function 'make-process) (lambda (&rest _args) (error "Spawn failed"))))
-      (should-error (kargu-process-session-start "unused" nil)))
-    (should (equal before (buffer-list)))))
+  (kargu-session-test--with-core
+    (let ((before (buffer-list)))
+      (cl-letf (((symbol-function 'kargu-bridge-job-start)
+                 (lambda (_connection _arguments callback &rest _options)
+                   (funcall callback nil (kargu-bridge--fault "spawn_failed")))))
+        (let ((session (kargu-process-session-start "cat" nil)))
+          (push session kargu-session-test--sessions)
+          (should (eq (kargu-process-session-state session) :closed))
+          (should (kargu-process-session-failure session))))
+      (should (equal before (buffer-list))))))
 
 (ert-deftest kargu-resume-reaped-process-never-signaled-test ()
   "A late force-cancel never signals a numeric group after process reaping."
