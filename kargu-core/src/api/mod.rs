@@ -1,5 +1,6 @@
 //! Owned model HTTP boundary. No shell, redirects, logs or ambient auth lookup.
 
+mod auth;
 pub mod cache;
 mod domain;
 mod http;

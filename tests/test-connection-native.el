@@ -95,7 +95,7 @@
    (let ((kargu-api-retry-max 1) calls callbacks report snapshot run)
      (cl-letf (((symbol-function 'kargu-transport-request)
                 (lambda (_method url &rest options)
-                  (push (list url (plist-get options :headers) (plist-get options :body)) calls)
+                  (push (list url (plist-get options :auth) (plist-get options :body)) calls)
                   (push (plist-get options :then) callbacks) nil))
                ((symbol-function 'kargu--api-retry-delay) (lambda (&rest _) 0.5)))
        (kargu-test-await
@@ -118,7 +118,7 @@
        (should (= (length calls) 2))
        (should (equal (car calls) (cadr calls)))
        (should (equal (caar calls) "https://example.invalid/Original/chat/completions"))
-       (should (equal (cdr (assoc "Authorization" (cadar calls))) "Bearer synthetic-native-key"))
+       (should (equal (kargu-aget (cadar calls) "key") "synthetic-native-key"))
        (funcall (car callbacks) "{\"choices\":[{\"message\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}")
        (should (eq (plist-get report :status) :done))
        (should-not (kargu-connection-snapshot-secret snapshot))))))

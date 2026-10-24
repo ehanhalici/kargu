@@ -84,7 +84,7 @@
             :messages nil)) (delivered 0) (stored 0) held)
       (cl-letf (((symbol-function 'kargu--api-validate-preflight) #'ignore)
                 ((symbol-function 'kargu-api-build-payload) (lambda (&rest _) nil))
-                ((symbol-function 'kargu--api-headers) (lambda (&rest _) nil))
+                ((symbol-function 'kargu-api-auth-intent) (lambda (&rest _) nil))
                 ((symbol-function 'kargu-api-store-assistant-turn)
                  (lambda (_ &optional _) (cl-incf stored)))
                 ((symbol-function 'kargu--api-post)
@@ -116,7 +116,7 @@
             :messages nil)) results held)
       (cl-letf (((symbol-function 'kargu--api-validate-preflight) #'ignore)
                 ((symbol-function 'kargu-api-build-payload) (lambda (&rest _) nil))
-                ((symbol-function 'kargu--api-headers) (lambda (&rest _) nil))
+                ((symbol-function 'kargu-api-auth-intent) (lambda (&rest _) nil))
                 ((symbol-function 'kargu-api-store-assistant-turn)
                  (lambda (_ &optional _) (error "Storage failed")))
                 ((symbol-function 'kargu--api-post)
@@ -224,7 +224,6 @@
 (declare-function kargu-api-normalize-response "kargu/api/wire" (response))
 (declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
 (declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
-(declare-function kargu--api-headers "kargu/api/http" (key &optional provider-name))
 (declare-function kargu--api-error-looks-retryable-p "kargu/api/http" (message))
 
 (ert-deftest kargu-api-response-vector-choices-test ()
@@ -329,14 +328,15 @@
   (should-not (kargu--tool-flag '(("staged" . "false")) "staged")))
 
 (ert-deftest kargu-api-opencode-session-header-test ()
-  "Test that x-opencode-session header is generated and passed for OpenCode."
+  "Capture the session binding for Rust's OpenCode header construction."
   (let ((kargu-session--context
          (kargu-test-session-with-history :provider "opencode"))
         (kargu--session-id nil))
-    (let ((headers (kargu--api-headers "test-key")))
-      (should (assoc "x-opencode-session" headers))
-      (should (stringp (cdr (assoc "x-opencode-session" headers))))
-      (should (> (length (cdr (assoc "x-opencode-session" headers))) 10)))))
+    (let ((auth (kargu-api-auth-intent "test-key")))
+      (should (equal (kargu-aget auth "key") "test-key"))
+      (should (stringp (kargu-aget auth "session")))
+      (should (> (length (kargu-aget auth "session")) 10))
+      (should (eq (cdr (assoc "x-opencode-session" (kargu-aget auth "extra_headers"))) :session)))))
 
 (ert-deftest kargu-reasoning-request-shape-follows-the-catalog-test ()
   "Editor captures effort/budget without applying provider-specific wire policy."
@@ -437,5 +437,5 @@
         ;; Even if the timer callback runs late, it is a no-op
         (kargu-api--retry-post
          100 :url "https://example.invalid/v1/chat/completions"
-         :headers nil :payload '(("model" . "m")) :callback #'ignore :attempt 1)
+         :auth nil :payload '(("model" . "m")) :callback #'ignore :attempt 1)
         (should-not reposted)))))

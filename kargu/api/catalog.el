@@ -30,7 +30,7 @@
 (declare-function kargu-provider-format "kargu/providers/registry" (provider))
 (declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
 (declare-function kargu--plz-error-message "kargu/api/retry" (err))
-(declare-function kargu--api-headers "kargu/api/request" (key &optional provider-name))
+(declare-function kargu-api-auth-intent "kargu/api/request" (key &optional provider))
 (declare-function kargu-history-context-threshold "kargu/history/compact" (ctx-tokens))
 
 (defvar kargu--catalog-generations (make-hash-table :test #'equal)
@@ -543,7 +543,10 @@ An explicit true flag is sufficient even without an API effort list."
     (when (and (not public) (not key) (not (kargu-provider-keyless-p provider)))
       (error "No API key for provider %s" provider))
     (let ((request
-           (kargu-transport-request 'get url :headers (kargu--api-headers key provider)
+           (kargu-transport-request 'get url :auth (kargu-api-auth-intent key provider)
+                :wire (if (kargu-connection-current) (kargu-connection-setting :wire)
+                        (kargu-provider-format-record (kargu-provider-format provider)))
+                :provider provider
                 :as 'string :timeout kargu-models-timeout
                 :then (kargu-async-wrap
                        task (kargu-application-wrap

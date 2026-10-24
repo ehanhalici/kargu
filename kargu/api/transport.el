@@ -93,7 +93,8 @@ PARTIAL prevents retries after any published response event."
 
 (defun kargu-transport-request (method url &rest options)
   "Send METHOD to captured URL via Rust, returning an owned delivery handle.
-OPTIONS contain :headers, :body, :timeout, :stream, :on-delta, :then and :else.
+OPTIONS contain captured :auth/:wire/:tuning, :body, :timeout, :stream,
+:on-delta, :then and :else; raw :headers are reserved for explicit callers.
 No network request or subprocess is ever started by Elisp."
   (let* ((options (copy-tree options t))
          (url (copy-sequence url))
@@ -112,6 +113,7 @@ No network request or subprocess is ever started by Elisp."
                            (copy-sequence provider) :json-null)
            "cache_markers" (if (plist-get options :cache-markers) t :json-false)
            "tuning" (kargu-providers-wire-object (plist-get options :tuning))
+           "auth" (kargu-providers-wire-object (plist-get options :auth))
            "limits" (kargu-bridge--object
                      "raw_bytes" kargu-stream-max-raw-bytes
                      "line_bytes" kargu-stream-max-incomplete-line-bytes
@@ -136,7 +138,9 @@ No network request or subprocess is ever started by Elisp."
                        (and (or (plist-get options :wire) (plist-get options :cache-markers))
                             (not (member "api_wire" (append (kargu-bridge-connection-capabilities connection) nil))))
                        (and (plist-get options :tuning)
-                            (not (member "api_request_policy" (append (kargu-bridge-connection-capabilities connection) nil)))))
+                            (not (member "api_request_policy" (append (kargu-bridge-connection-capabilities connection) nil))))
+                       (and (plist-get options :auth)
+                            (not (member "api_auth" (append (kargu-bridge-connection-capabilities connection) nil)))))
                    (kargu-transport--deliver handle options nil
                                              (or failure (kargu-bridge--fault "unsupported_api")))
                  (setf (kargu-transport-handle-connection handle) connection

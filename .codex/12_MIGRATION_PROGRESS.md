@@ -1,5 +1,23 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Native auth/header assembly
+
+Bearer/x-api-key seçimi, format defaults, case-insensitive provider overrides
+ve header bindings Rust api/auth sınırına geçti. Elisp auth/header üretim
+motorları silindi; credential çözümleme UI portunda kaldı. Client POST, catalog
+GET ve immutable retry auth capture kullanır. Header injection/ambiguity/bounds
+HTTP öncesi reddedilir. Credential/tenant değişince opaque continuation scope'u
+da değişir; detay ve fingerprint sınırı 33_NATIVE_AUTH_HEADERS.md'dedir.
+
+**141 Rust testi + 2 compile-fail**, locked build/test, fmt ve strict Clippy
+temiz. **1160/1160 full source ERT**, 0 unexpected, **124.50 s**. Ek **82/82**
+focused test; gerçek loopback auth/header GET/POST ve queued secret mutation
+dahil. Warning-as-error bytecompile ve touched checkdoc temiz; geçici .elc
+çıktıları kaldırıldı. Build tamamlanmadan başlatılan bir ERT koşusu old-binary
+DTO mismatch ile reddedildi; rebuild sonrası tekrar geçer. Gerçek hesap/ücretli
+çağrı yok. Native budget/claim/retry/breaker, model store, agent/history ve app
+backend'leri roadmap'te açık. Kullanıcı shell.nix/07 commit dışında korunur.
+
 ## 2026-10-25 — Native request-policy cutover
 
 Sampling/cap/reasoning policy ve default/format/provider merge `api/policy/`

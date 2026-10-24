@@ -19,6 +19,43 @@ pub struct WireCodec {
 }
 
 impl WireCodec {
+    pub(super) fn capture_headers(
+        mut self,
+        headers: &reqwest::header::HeaderMap,
+    ) -> Result<Self, ApiError> {
+        // Length-framed hashing avoids copying secret headers into JSON or
+        // diagnostics. Continuations cannot cross a credential/tenant change.
+        let mut digest = Sha256::new();
+        digest.update(self.scope.0.as_bytes());
+        let mut headers: Vec<_> = headers.iter().collect();
+        headers.sort_unstable_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()));
+        for (name, value) in headers {
+            digest.update(
+                u64::try_from(name.as_str().len())
+                    .map_err(|_| ApiError::Limit)?
+                    .to_le_bytes(),
+            );
+            digest.update(name.as_str().as_bytes());
+            digest.update(
+                u64::try_from(value.len())
+                    .map_err(|_| ApiError::Limit)?
+                    .to_le_bytes(),
+            );
+            digest.update(value.as_bytes());
+        }
+        self.scope = ContinuationScope(format!("{:x}", digest.finalize()));
+        Ok(self)
+    }
+    pub(super) fn headers(
+        &self,
+        headers: reqwest::header::HeaderMap,
+        capture: Option<super::auth::AuthCapture>,
+    ) -> Result<reqwest::header::HeaderMap, ApiError> {
+        match capture {
+            Some(capture) => self.spec.headers.build(headers, capture),
+            None => Ok(headers),
+        }
+    }
     pub(super) fn tune(
         &self,
         payload: Value,

@@ -2,10 +2,7 @@
 
 use super::ApiError;
 use crate::providers::ApiEndpoint;
-use reqwest::{
-    Method,
-    header::{HeaderMap, HeaderName, HeaderValue},
-};
+use reqwest::{Method, header::HeaderMap};
 use serde::Deserialize;
 use std::{collections::BTreeMap, fmt, time::Duration};
 use zeroize::Zeroizing;
@@ -28,6 +25,11 @@ impl TryFrom<String> for ModelId {
 #[derive(Deserialize)]
 #[serde(try_from = "String")]
 pub struct SecretString(Zeroizing<String>);
+impl SecretString {
+    pub(super) fn exposed(&self) -> &str {
+        &self.0
+    }
+}
 impl TryFrom<String> for SecretString {
     type Error = ApiError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
@@ -102,6 +104,7 @@ struct RequestDto {
     #[serde(default)]
     cache_markers: bool,
     tuning: Option<super::policy::RequestTuning>,
+    auth: Option<super::auth::AuthCapture>,
 }
 
 /// Immutable per-attempt HTTP capture, independent of mutable editor selection.
@@ -129,33 +132,15 @@ impl TryFrom<RequestDto> for HttpRequest {
         {
             return Err(ApiError::Limit);
         }
-        let mut bytes = 0usize;
         let mut headers = HeaderMap::new();
         for (name, value) in dto.headers {
-            bytes = bytes
-                .saturating_add(name.len())
-                .saturating_add(value.0.len());
-            if bytes > 64 * 1024 {
-                return Err(ApiError::Limit);
-            }
-            let name =
-                HeaderName::from_bytes(name.as_bytes()).map_err(|_| ApiError::InvalidRequest)?;
-            if matches!(
-                name.as_str(),
-                "host"
-                    | "content-length"
-                    | "transfer-encoding"
-                    | "connection"
-                    | "proxy-authorization"
-            ) || headers.contains_key(&name)
-            {
+            let name = super::auth::header_name(&name)?;
+            if headers.contains_key(&name) {
                 return Err(ApiError::InvalidRequest);
             }
-            let mut value =
-                HeaderValue::from_str(&value.0).map_err(|_| ApiError::InvalidRequest)?;
-            value.set_sensitive(true);
-            headers.insert(name, value);
+            headers.insert(name, super::auth::header_value(value.exposed())?);
         }
+        super::auth::check_size(&headers)?;
         let value = match dto.body.as_ref() {
             Some(body) => Some(
                 serde_json::from_str::<serde_json::Value>(body)
@@ -173,6 +158,8 @@ impl TryFrom<RequestDto> for HttpRequest {
             dto.wire
                 .unwrap_or_default()
                 .bind(&dto.url, model.as_ref(), dto.provider.as_ref())?;
+        let headers = wire.headers(headers, dto.auth)?;
+        let wire = wire.capture_headers(&headers)?;
         let body = if let Some(mut value) = value {
             if !value.is_object() {
                 return Err(ApiError::InvalidRequest);

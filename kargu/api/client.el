@@ -239,7 +239,7 @@ Send events to ON-DELTA and the response through DELIVERY."
         (when (fboundp 'kargu-execution-request-started) (kargu-execution-request-started))
         (when (kargu-api--delivery-owner-live-p delivery)
           (kargu--api-post
-           (kargu-api-chat-url base fmt) (kargu--api-headers key) payload gen
+           (kargu-api-chat-url base fmt) (kargu-api-auth-intent key) payload gen
            (lambda (response) (kargu-api--deliver delivery response)) delta)))
        ((= gen (kargu-application-current-generation))
         (kargu-http-clear-busy)

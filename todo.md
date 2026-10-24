@@ -57,8 +57,9 @@ snapshot'a taşındı (.codex/29). Chat/model-list HTTP ve SSE motoru native'dir
 Elisp parser/accumulator/watchdog silindi (.codex/30). Credential/UI portları
 kalır; wire ve prompt-cache engine'leri de native'ye taşınıp silindi (.codex/31).
 Request policy de native'ye taşınıp eski seçim/merge motorları silindi (.codex/32).
-Retry/circuit, credential/header assembly ve model metadata normalization hâlâ
-açık olduğu için tüm API göçü tamamlandı sayılmaz.
+Credential/header assembly de native'ye taşınıp Elisp üretim motorları silindi
+(.codex/33); credential lookup editör portudur. Retry/circuit ve model metadata
+normalization hâlâ açık olduğu için tüm API göçü tamamlandı sayılmaz.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
 output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan read/
 Git/skill/webfetch, egress/context ve global tüketiciler aşağıdaki gruplarda

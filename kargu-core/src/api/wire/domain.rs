@@ -93,6 +93,9 @@ pub(super) struct CacheUsage {
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 struct WireDto {
+    auth: Option<crate::api::auth::AuthKind>,
+    #[serde(default)]
+    default_headers: crate::api::auth::HeaderTemplates,
     stream: Option<bool>,
     message_shape: Option<Shape>,
     response_shape: Option<Shape>,
@@ -144,6 +147,7 @@ pub(super) struct ResponseRules {
 #[derive(Deserialize)]
 #[serde(try_from = "serde_json::Value")]
 pub struct WireSpec {
+    pub(super) headers: crate::api::auth::HeaderRules,
     pub(super) request: Option<RequestRules>,
     pub(super) response: Option<ResponseRules>,
     pub(super) stream: bool,
@@ -155,6 +159,7 @@ pub(super) struct WireRevision(pub String);
 impl Default for WireSpec {
     fn default() -> Self {
         Self {
+            headers: Default::default(),
             request: None,
             response: None,
             stream: true,
@@ -256,6 +261,10 @@ impl TryFrom<WireDto> for WireSpec {
             None
         };
         Ok(Self {
+            headers: crate::api::auth::HeaderRules::new(
+                dto.auth.unwrap_or_default(),
+                dto.default_headers,
+            ),
             request,
             response,
             stream: dto.stream.unwrap_or(true),

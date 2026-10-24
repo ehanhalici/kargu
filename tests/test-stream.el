@@ -15,8 +15,9 @@
 (require 'tests/test-bridge)
 (require 'kargu/api/transport)
 
-(defun kargu-stream-test--server (body stream &optional hold capture)
-  "Serve BODY as SSE when STREAM; keep open if HOLD, send request to CAPTURE."
+(defun kargu-stream-test--server (body stream &optional hold capture capture-headers)
+  "Serve BODY as SSE when STREAM; keep open if HOLD.
+Send the request body to CAPTURE and its headers to CAPTURE-HEADERS."
   (make-network-process
    :name "kargu-native-api-fixture" :server t :host "127.0.0.1" :service t
    :noquery t :coding 'binary
@@ -32,6 +33,7 @@
                     (not (process-get client :answered)))
            (process-put client :answered t)
            (when capture (funcall capture (substring raw (+ end 4))))
+           (when capture-headers (funcall capture-headers (substring raw 0 end)))
            (let ((bytes (encode-coding-string body 'utf-8)))
              (process-send-string
               client (format "HTTP/1.1 200 OK\r\nContent-Type: %s\r\n%sConnection: close\r\n\r\n"
@@ -199,7 +201,9 @@
 (ert-deftest kargu-stream-native-captures-wire-and-policy-before-startup-test ()
   "A queued request cannot borrow later provider or format mutations."
   (let ((wire (copy-tree (kargu-provider-format-record 'anthropic) t))
-        (provider (copy-sequence "anthropic")) ready captured)
+        (provider (copy-sequence "anthropic"))
+        (key (copy-sequence "original-private-key"))
+        (header (copy-sequence "original-header")) ready captured)
     (cl-letf (((symbol-function 'kargu-bridge-ensure)
                (lambda (callback) (setq ready callback) #'ignore))
               ((symbol-function 'kargu-bridge-call)
@@ -207,14 +211,19 @@
                  (setq captured (gethash "arguments" params)) "fixture")))
       (let ((handle (kargu-transport-request 'post "http://localhost:1"
                                             :wire wire :provider provider :cache-markers t
+                                            :auth (list (cons "key" key) (cons "extra_headers" (list (cons "x-private" header))))
                                             :body "{}" :then #'ignore :else #'ignore)))
         (setf (plist-get wire :max-tokens-default) 1)
         (aset provider 0 ?X)
+        (aset key 0 ?X)
+        (aset header 0 ?X)
         (funcall ready (kargu-bridge--connection-create
-                        :state 'ready :capabilities ["api_request" "api_wire"]) nil)
+                        :state 'ready :capabilities ["api_request" "api_wire" "api_auth"]) nil)
         (should (= (gethash "max-tokens-default" (gethash "wire" captured)) 4096))
         (should (equal (gethash "provider" captured) "anthropic"))
         (should (eq (gethash "cache_markers" captured) t))
+        (should (equal (gethash "key" (gethash "auth" captured)) "original-private-key"))
+        (should (equal (gethash "x-private" (gethash "extra_headers" (gethash "auth" captured))) "original-header"))
         (setf (kargu-transport-handle-state handle) :finished)))))
 
 (ert-deftest kargu-stream-native-rejects-old-core-before-wire-post-test ()
@@ -296,6 +305,48 @@
             (should-not captured)
             (should (= (kargu--plz-http-status failure) 400)))
         (delete-process server)))))
+
+(ert-deftest kargu-stream-native-auth-headers-and-model-get-round-trip-test ()
+  "Rust builds captured auth, defaults and bindings for both POST and GET."
+  (kargu-bridge-test--with-core
+    (dolist (mode '(openai anthropic openrouter opencode public custom))
+      (let* ((provider (if (memq mode '(public custom)) "openrouter" (symbol-name mode)))
+             (format (kargu-provider-format provider))
+             (auth (kargu-api-auth-intent (unless (eq mode 'public) "synthetic-header-key") provider))
+             (public (eq mode 'public))
+             (wire (kargu-provider-format-record format))
+             headers finished failure
+             (server (kargu-stream-test--server
+                      (if public "{\"data\":[]}" "{\"choices\":[]}") nil nil nil
+                      (lambda (raw) (setq headers (downcase raw))))))
+        (when (eq mode 'custom)
+          (setcdr (assoc "extra_headers" auth) '(("X-Title" . "explicit-title") ("X-Custom" . "explicit-value"))))
+        (unwind-protect
+            (progn
+              (kargu-transport-request
+               (if public 'get 'post) (format "http://127.0.0.1:%d/fixture" (process-contact server :service))
+               :body (unless public "{\"model\":\"fixture\",\"messages\":[]}")
+               :auth auth :wire wire :provider provider :timeout 3
+               :then (lambda (_) (setq finished t))
+               :else (lambda (err) (setq finished t failure err)))
+              (kargu-bridge-test--wait (lambda () finished))
+              (should-not failure)
+              (should (string-search "content-type: application/json" headers))
+              (cond ((eq mode 'anthropic)
+                     (should (string-search "x-api-key: synthetic-header-key" headers))
+                     (should (string-search "anthropic-version: 2023-06-01" headers))
+                     (should-not (string-search "authorization:" headers)))
+                    (public (should-not (string-search "authorization:" headers)))
+                    (t (should (string-search "authorization: bearer synthetic-header-key" headers))))
+              (when (eq mode 'opencode)
+                (should (string-search (concat "x-opencode-session: " (downcase (kargu-aget auth "session"))) headers)))
+              (when (memq mode '(openrouter public custom))
+                (should (string-search (concat "http-referer: " (downcase kargu-app-url)) headers)))
+              (when (eq mode 'custom)
+                (should (string-search "x-title: explicit-title" headers))
+                (should-not (string-search "x-title: kargu" headers))
+                (should (string-search "x-custom: explicit-value" headers))))
+          (delete-process server))))))
 
 (provide 'tests/test-stream)
 ;;; test-stream.el ends here

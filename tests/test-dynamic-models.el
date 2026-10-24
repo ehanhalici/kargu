@@ -3,6 +3,12 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
+;; Provider discovery, editor metadata projection and owned catalog callbacks.
+
+;;; Code:
+
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/core)
@@ -22,7 +28,7 @@
                  (lambda (_method url &rest options)
                    (setq seen url)
                    (should (plist-get options :timeout))
-                   (should-not (assoc "Authorization" (plist-get options :headers)))
+                   (should (eq (kargu-aget (plist-get options :auth) "key") :json-null))
                    (funcall (plist-get options :then) "{\"data\":[{\"id\":\"live-model\"}]}"))))
         (kargu-api-fetch-model-ids provider (lambda (ids) (setq result ids)))
         (should (equal seen (kargu-provider-models-api provider)))
@@ -197,10 +203,10 @@
   (should (equal (kargu-provider-models-api "test-provider-custom") "https://api.custom.ai/v2/catalog/models"))
   (should (equal (kargu-provider-usage-api "test-provider-custom") "https://api.custom.ai/v1/user/usage"))
   (should (equal (kargu-provider-extra-headers "test-provider-custom") '(("X-Custom-Header" . "CustomVal"))))
-  ;; Check header generation
-  (let ((headers (kargu--api-headers "test-secret" "test-provider-custom")))
-    (should (assoc "X-Custom-Header" headers))
-    (should (equal (cdr (assoc "X-Custom-Header" headers)) "CustomVal"))))
+  ;; Header generation is native; the editor captures raw overrides only.
+  (let ((intent (kargu-api-auth-intent "test-secret" "test-provider-custom")))
+    (should (equal (kargu-aget intent "key") "test-secret"))
+    (should (equal (cdr (assoc "X-Custom-Header" (kargu-aget intent "extra_headers"))) "CustomVal"))))
 
 (ert-deftest kargu-provider-catalog-endpoints-test ()
   "Test that provider endpoints are dynamic and no hallucinated models are statically registered."

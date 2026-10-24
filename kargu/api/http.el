@@ -33,9 +33,9 @@
 (require 'kargu/api/transport)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
-(declare-function kargu-provider-extra-headers "kargu/providers/registry" (id))
+(declare-function kargu-provider-extra-auth "kargu/providers/registry" (id))
 (declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
-(declare-function kargu-provider-format-headers "kargu/providers/registry" (format))
+(declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
 (declare-function kargu--provider-name "kargu/config/key" ())
 
 ;;;; Asynchronous request plumbing ----------------------------------------
@@ -152,8 +152,8 @@ Application status, loop ownership and UI belong to the caller."
       (setq kargu--busy nil)
       (kargu-log 'warn "request cancelled"))))
 
-(defun kargu--api-post (url headers payload gen callback &optional on-delta attempt)
-  "POST PAYLOAD to URL with HEADERS and dispatch the result to CALLBACK.
+(defun kargu--api-post (url auth payload gen callback &optional on-delta attempt)
+  "POST PAYLOAD to URL with AUTH and dispatch the result to CALLBACK.
 GEN is the cancellation generation.  ON-DELTA enables SSE streaming;
 ATTEMPT is the zero-based retry count.
 Enforces provider circuit breakers and unified run budget (Contract 6)."
@@ -185,14 +185,14 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
             (cl-return-from kargu--api-post nil))))
 
       (if (and on-delta kargu-stream)
-          (kargu--api-post-streaming url headers payload gen callback
+          (kargu--api-post-streaming url auth payload gen callback
                                      on-delta attempt)
-        (kargu--api-post-plain url headers payload gen callback
+        (kargu--api-post-plain url auth payload gen callback
                                on-delta attempt)))))
 
 (cl-defstruct (kargu-http--request (:constructor kargu-http--make-request))
   "One HTTP attempt and its asynchronous resources."
-  url headers payload generation callback on-delta attempt process
+  url auth payload generation callback on-delta attempt process
   (app (and (kargu-application-current-request) (kargu-application-context)))
   (logical (kargu-application-current-request))
   (state :pending))
@@ -283,7 +283,7 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
     (kargu--api-handle-body
      body (kargu-http--request-callback request)
      (kargu-http--request-url request)
-     (kargu-http--request-headers request)
+     (kargu-http--request-auth request)
      (kargu-http--request-payload request)
      (kargu-http--request-generation request)
      (kargu-http--request-on-delta request)
@@ -298,7 +298,7 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
   "Deliver sanitized ERR for the current REQUEST, retaining retry ownership."
   (when (kargu-http--claim-response request)
     (kargu--api-on-transport-error
-     (kargu-http--request-url request) (kargu-http--request-headers request)
+     (kargu-http--request-url request) (kargu-http--request-auth request)
      (kargu-http--request-payload request) (kargu-http--request-generation request)
      (kargu-http--request-callback request) (kargu-http--request-on-delta request)
      (kargu-http--request-attempt request) err)))
@@ -310,16 +310,16 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
       (when-let* ((on-delta (kargu-http--request-on-delta request)))
         (funcall on-delta event)))))
 
-(defun kargu--api-post-plain (url headers payload gen callback &optional on-delta attempt)
-  "POST PAYLOAD to URL with HEADERS and deliver it to CALLBACK.
+(defun kargu--api-post-plain (url auth payload gen callback &optional on-delta attempt)
+  "POST PAYLOAD to URL with AUTH and deliver it to CALLBACK.
 GEN identifies the request; ON-DELTA and ATTEMPT are retained for retries."
   (let ((request (kargu-http--make-request
-                  :url url :headers headers :payload payload :generation gen
+                  :url url :auth auth :payload payload :generation gen
                   :callback callback :on-delta on-delta :attempt (or attempt 0))))
     (kargu-http--log-request request 'plain)
     (kargu-http--track-process
      request (kargu-transport-request 'post url
-                  :headers headers :body (kargu-json-encode-record payload)
+                  :auth auth :body (kargu-json-encode-record payload)
                   :wire (kargu-api-wire-record (kargu-api-active-format))
                   :tuning (kargu-api-request-tuning (kargu--provider-name) (kargu--model))
                   :provider (kargu--provider-name)
@@ -332,13 +332,13 @@ GEN identifies the request; ON-DELTA and ATTEMPT are retained for retries."
                   :else (kargu-http--wrap request
                                           (lambda (err) (kargu-http--fail-request request err)))))))
 
-(defun kargu--api-post-streaming (url headers payload gen callback on-delta
+(defun kargu--api-post-streaming (url auth payload gen callback on-delta
                                       &optional attempt)
-  "Stream PAYLOAD to URL with HEADERS for request generation GEN.
+  "Stream PAYLOAD to URL with AUTH for request generation GEN.
 Deliver events to ON-DELTA and the final response to CALLBACK.
 ATTEMPT is the retry count."
   (let ((request (kargu-http--make-request
-                  :url url :headers headers
+                  :url url :auth auth
                   :payload payload :generation gen
                   :callback callback :on-delta on-delta :attempt (or attempt 0))))
     (kargu-http--log-request request 'streaming)
@@ -350,7 +350,7 @@ ATTEMPT is the retry count."
    request
    (kargu-transport-request
     'post (kargu-http--request-url request)
-    :headers (kargu-http--request-headers request)
+    :auth (kargu-http--request-auth request)
     :wire (kargu-api-wire-record (kargu-api-active-format))
     :tuning (kargu-api-request-tuning (kargu--provider-name) (kargu--model))
     :provider (kargu--provider-name)
@@ -382,16 +382,16 @@ the loop never has to record it again."
       (kargu-circuit-release-probe scope))
     (funcall callback (kargu--api-error-alist msg))))
 
-(defun kargu--api-handle-no-choices (response trimmed url headers payload gen
+(defun kargu--api-handle-no-choices (response trimmed url auth payload gen
                                               callback on-delta attempt)
   "Handle RESPONSE without choices, using TRIMMED for error details.
-Retry URL with HEADERS and PAYLOAD for GEN and ATTEMPT when appropriate.
+Retry URL with AUTH and PAYLOAD for GEN and ATTEMPT when appropriate.
 CALLBACK receives the result; ON-DELTA receives streaming events."
   (let ((parsed (kargu--provider-error-text response)))
     (if (and parsed
              (kargu--api-error-looks-retryable-p parsed)
              (kargu--api-schedule-retry
-              url headers payload gen callback on-delta attempt
+              url auth payload gen callback on-delta attempt
               (format "HTTP 200: %s" parsed)))
         nil
       (kargu--api-dispatch-error
@@ -403,10 +403,10 @@ CALLBACK receives the result; ON-DELTA receives streaming events."
                      (concat ": " (truncate-string-to-width trimmed 200))
                    "")))))))
 
-(defun kargu--api-handle-body (body callback &optional url headers payload gen
+(defun kargu--api-handle-body (body callback &optional url auth payload gen
                                     on-delta attempt)
   "Decode BODY and deliver its result to CALLBACK.
-URL, HEADERS and PAYLOAD retain request data for retries.  GEN identifies
+URL, AUTH and PAYLOAD retain request data for retries.  GEN identifies
 the request, ON-DELTA receives events and ATTEMPT counts retries.
 Streaming bodies are already completion-gated and reconstructed by Rust."
   (let* ((trimmed (and (stringp body) (string-trim body)))
@@ -423,7 +423,7 @@ Streaming bodies are already completion-gated and reconstructed by Rust."
        ((and err
              (kargu--api-error-looks-retryable-p err)
              (kargu--api-schedule-retry
-              url headers payload gen callback on-delta attempt
+              url auth payload gen callback on-delta attempt
               (format "HTTP 200: %s" err)))
         nil)
        ((null response)
@@ -437,7 +437,7 @@ Streaming bodies are already completion-gated and reconstructed by Rust."
          (format "HTTP 200: %s" err)))
        ((null (kargu-aget response "choices"))
         (kargu--api-handle-no-choices
-         response trimmed url headers payload gen callback on-delta attempt))
+         response trimmed url auth payload gen callback on-delta attempt))
        (t
         (kargu--api-handle-success response callback))))))
 

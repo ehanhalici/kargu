@@ -35,7 +35,7 @@
 ON-DELTA identifies the original event consumer; no request secrets are exposed.")
 
 (declare-function kargu--api-post "kargu/api/http"
-                  (url headers payload gen callback &optional on-delta attempt))
+                  (url auth payload gen callback &optional on-delta attempt))
 (declare-function kargu-http--ensure-logical-request "kargu/api/http"
                   (gen &optional session origin))
 (declare-function kargu-http-clear-busy "kargu/api/http" ())
@@ -43,8 +43,8 @@ ON-DELTA identifies the original event consumer; no request secrets are exposed.
 (declare-function kargu-http-request-scope "kargu/api/http" (&optional generation))
 (declare-function kargu--provider-name "kargu/config/key" ())
 
-(cl-defun kargu-api--retry-post (generation &key url headers payload callback on-delta attempt)
-  "Retry GENERATION's URL with HEADERS and PAYLOAD if it still owns the client.
+(cl-defun kargu-api--retry-post (generation &key url auth payload callback on-delta attempt)
+  "Retry GENERATION's URL with AUTH and PAYLOAD if it still owns the client.
 CALLBACK and ON-DELTA retain their original owner; ATTEMPT counts retries."
   (let ((req (kargu-application-current-request)))
     (when (and (= generation (kargu-application-current-generation))
@@ -61,7 +61,7 @@ CALLBACK and ON-DELTA retain their original owner; ATTEMPT counts retries."
                        (and (= (kargu-logical-request-generation req-after) generation)
                             (not (eq (kargu-logical-request-state req-after) :cancelled)))))
           (let ((kargu-connection--bound (and req (kargu-logical-request-connection req))))
-            (kargu--api-post url headers payload generation callback on-delta attempt)))))))
+            (kargu--api-post url auth payload generation callback on-delta attempt)))))))
 
 (defun kargu--summarize-http-body (body &optional status)
   "Human-readable summary of HTTP BODY, prefixed with STATUS when given.
@@ -217,15 +217,15 @@ Never below 0.5s, even when Retry-After is 0."
     (max 0.5 (float (or after backoff)))))
 
 (defun kargu--log-out-payload (payload)
-  "Wire-dump encoded PAYLOAD.  Never logs headers or API keys."
+  "Wire-dump encoded PAYLOAD.  Never logs auth or API keys."
   (when kargu-log-wire
     (kargu--log-block "OUT request JSON"
                       (kargu-json-encode-record payload)
                       t)))
 
-(defun kargu--api-schedule-retry (url headers payload gen callback on-delta
+(defun kargu--api-schedule-retry (url auth payload gen callback on-delta
                                       attempt reason)
-  "Schedule another POST to URL with HEADERS and PAYLOAD.
+  "Schedule another POST to URL with AUTH and PAYLOAD.
 GEN identifies the request.  CALLBACK receives the result and ON-DELTA
 receives events.  ATTEMPT counts retries and REASON explains this retry.
 Checks budget before scheduling and halts retry if exhausted (Contract 6).
@@ -255,14 +255,14 @@ Return non-nil if retry or terminal budget refusal handled the response."
                                                 (lambda ()
                                                   (when (kargu-logical-request-current-p req)
                                                     (kargu-api--retry-post
-                                                     gen :url url :headers headers :payload payload :callback callback
+                                                     gen :url url :auth auth :payload payload :callback callback
                                                      :on-delta on-delta :attempt (1+ attempt)))))))
           t)))))
 
-(defun kargu--api-on-transport-error (url headers payload gen callback
+(defun kargu--api-on-transport-error (url auth payload gen callback
                                           on-delta attempt err)
   "Retry URL or report transport error ERR to CALLBACK.
-HEADERS and PAYLOAD retain the request; GEN identifies it, ON-DELTA
+AUTH and PAYLOAD retain the request; GEN identifies it, ON-DELTA
 receives events, and ATTEMPT counts completed retries."
   (when (= gen (kargu-application-current-generation))
     (when kargu-log-wire
@@ -292,7 +292,7 @@ receives events, and ATTEMPT counts completed retries."
                                                   (lambda ()
                                                     (when (kargu-logical-request-current-p req)
                                                       (kargu-api--retry-post
-                                                       gen :url url :headers headers :payload payload :callback callback
+                                                       gen :url url :auth auth :payload payload :callback callback
                                                        :on-delta on-delta :attempt (1+ attempt))))))))
         (kargu-http-clear-busy)
         (let* ((code (kargu-api-classify-error-code err status))
