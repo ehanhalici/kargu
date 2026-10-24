@@ -1,0 +1,3198 @@
+{
+  "schema_version": 1,
+  "emacs_version": "30.2",
+  "session_schema_version": 2,
+  "source_files": [
+    "kargu.el",
+    "kargu/api.el",
+    "kargu/api/cache.el",
+    "kargu/api/catalog.el",
+    "kargu/api/circuit.el",
+    "kargu/api/client.el",
+    "kargu/api/http.el",
+    "kargu/api/parameters.el",
+    "kargu/api/prepare.el",
+    "kargu/api/request.el",
+    "kargu/api/response.el",
+    "kargu/api/retry.el",
+    "kargu/api/select.el",
+    "kargu/api/sse.el",
+    "kargu/api/stream.el",
+    "kargu/api/tool-calls.el",
+    "kargu/api/tools.el",
+    "kargu/api/transport.el",
+    "kargu/api/wire.el",
+    "kargu/application/budget.el",
+    "kargu/application/coordinator.el",
+    "kargu/application/execution.el",
+    "kargu/application/mode.el",
+    "kargu/application/reset.el",
+    "kargu/async.el",
+    "kargu/bridge.el",
+    "kargu/chat.el",
+    "kargu/chat/attach.el",
+    "kargu/chat/complete.el",
+    "kargu/chat/header.el",
+    "kargu/chat/plan.el",
+    "kargu/chat/prompt.el",
+    "kargu/chat/render.el",
+    "kargu/chat/routing.el",
+    "kargu/chat/select.el",
+    "kargu/chat/session.el",
+    "kargu/chat/session/restore.el",
+    "kargu/chat/session/schema.el",
+    "kargu/chat/session/storage.el",
+    "kargu/chat/session/validate.el",
+    "kargu/chat/session/worker.el",
+    "kargu/chat/stream.el",
+    "kargu/chat/transcript.el",
+    "kargu/chat/tune.el",
+    "kargu/config.el",
+    "kargu/config/connection.el",
+    "kargu/config/key.el",
+    "kargu/config/schema.el",
+    "kargu/config/service.el",
+    "kargu/config/toml.el",
+    "kargu/config/worker.el",
+    "kargu/confirm.el",
+    "kargu/contract.el",
+    "kargu/contract/assert.el",
+    "kargu/contract/constants.el",
+    "kargu/contract/file-window.el",
+    "kargu/contract/history.el",
+    "kargu/contract/result.el",
+    "kargu/contract/selection.el",
+    "kargu/contract/types.el",
+    "kargu/core.el",
+    "kargu/core/custom.el",
+    "kargu/core/data.el",
+    "kargu/core/group.el",
+    "kargu/core/log.el",
+    "kargu/core/observers.el",
+    "kargu/core/session.el",
+    "kargu/edit.el",
+    "kargu/files.el",
+    "kargu/files/async.el",
+    "kargu/files/worker.el",
+    "kargu/fs.el",
+    "kargu/history.el",
+    "kargu/history/compact.el",
+    "kargu/history/protocol.el",
+    "kargu/history/repair.el",
+    "kargu/history/store.el",
+    "kargu/json.el",
+    "kargu/languages.el",
+    "kargu/languages/c.el",
+    "kargu/languages/core.el",
+    "kargu/languages/cpp.el",
+    "kargu/languages/elisp.el",
+    "kargu/languages/golang.el",
+    "kargu/languages/haskell.el",
+    "kargu/languages/java.el",
+    "kargu/languages/javascript.el",
+    "kargu/languages/ocaml.el",
+    "kargu/languages/python.el",
+    "kargu/languages/rust.el",
+    "kargu/languages/typescript.el",
+    "kargu/loop.el",
+    "kargu/loop/compact.el",
+    "kargu/loop/heal.el",
+    "kargu/loop/machine.el",
+    "kargu/loop/tools.el",
+    "kargu/loop/ui.el",
+    "kargu/models/service.el",
+    "kargu/models/store.el",
+    "kargu/net/address.el",
+    "kargu/net/resolve.el",
+    "kargu/permission.el",
+    "kargu/permission/bash.el",
+    "kargu/permission/execute.el",
+    "kargu/permission/guards.el",
+    "kargu/permission/policy.el",
+    "kargu/plan.el",
+    "kargu/plan/buffer.el",
+    "kargu/plan/context.el",
+    "kargu/plan/dispatch.el",
+    "kargu/plan/store.el",
+    "kargu/prompt.el",
+    "kargu/providers.el",
+    "kargu/providers/catalog.el",
+    "kargu/providers/registry.el",
+    "kargu/selection.el",
+    "kargu/state.el",
+    "kargu/state/hooks.el",
+    "kargu/state/selectors.el",
+    "kargu/state/store.el",
+    "kargu/state/transitions.el",
+    "kargu/tools/bash.el",
+    "kargu/tools/bash/jobs.el",
+    "kargu/tools/dape.el",
+    "kargu/tools/dape/commands.el",
+    "kargu/tools/dape/context.el",
+    "kargu/tools/dape/events.el",
+    "kargu/tools/dape/execution.el",
+    "kargu/tools/dape/launch.el",
+    "kargu/tools/dape/lifecycle.el",
+    "kargu/tools/dape/policy.el",
+    "kargu/tools/dape/preflight.el",
+    "kargu/tools/dape/readiness.el",
+    "kargu/tools/dape/register.el",
+    "kargu/tools/dape/render.el",
+    "kargu/tools/dape/selection.el",
+    "kargu/tools/dape/session.el",
+    "kargu/tools/dape/watch.el",
+    "kargu/tools/dape/workspace.el",
+    "kargu/tools/deps.el",
+    "kargu/tools/diff.el",
+    "kargu/tools/diff/context.el",
+    "kargu/tools/diff/review.el",
+    "kargu/tools/diff/stage.el",
+    "kargu/tools/diff/track.el",
+    "kargu/tools/execution.el",
+    "kargu/tools/git.el",
+    "kargu/tools/lsp.el",
+    "kargu/tools/lsp/context.el",
+    "kargu/tools/lsp/diagnostics.el",
+    "kargu/tools/lsp/freshness.el",
+    "kargu/tools/lsp/register.el",
+    "kargu/tools/lsp/settle.el",
+    "kargu/tools/lsp/skeleton.el",
+    "kargu/tools/lsp/symbols.el",
+    "kargu/tools/process.el",
+    "kargu/tools/process/session.el",
+    "kargu/tools/registry.el",
+    "kargu/tools/search.el",
+    "kargu/tools/skill.el",
+    "kargu/tools/toolchain.el",
+    "kargu/tools/webfetch.el",
+    "kargu/ui.el",
+    "kargu/ui/confirm.el",
+    "kargu/ui/notify.el",
+    "kargu/ui/transient.el"
+  ],
+  "loaded_public_functions": [
+    "kargu-advertised-tools",
+    "kargu-aget",
+    "kargu-api-active-format",
+    "kargu-api-build-payload",
+    "kargu-api-cancel",
+    "kargu-api-chat-url",
+    "kargu-api-classify-error-code",
+    "kargu-api-clear-busy",
+    "kargu-api-connection-settings",
+    "kargu-api-fetch-model-ids",
+    "kargu-api-list-models",
+    "kargu-api-normalize-response",
+    "kargu-api-normalize-tool-calls",
+    "kargu-api-prefetch-models",
+    "kargu-api-prepare-connection",
+    "kargu-api-prepare-payload",
+    "kargu-api-request-parameters",
+    "kargu-api-response-shape",
+    "kargu-api-select",
+    "kargu-api-send",
+    "kargu-api-store-assistant-turn",
+    "kargu-api-wire-record",
+    "kargu-application-active-claim-token",
+    "kargu-application-active-request",
+    "kargu-application-active-run",
+    "kargu-application-budget",
+    "kargu-application-budget-get",
+    "kargu-application-busy-p",
+    "kargu-application-claim",
+    "kargu-application-claim-app",
+    "kargu-application-claim-app-id",
+    "kargu-application-claim-created-at",
+    "kargu-application-claim-id",
+    "kargu-application-claim-mode",
+    "kargu-application-claim-p",
+    "kargu-application-claim-run-id",
+    "kargu-application-claim-session-id",
+    "kargu-application-claim-token",
+    "kargu-application-context",
+    "kargu-application-create",
+    "kargu-application-current-generation",
+    "kargu-application-current-request",
+    "kargu-application-current-run",
+    "kargu-application-current-status",
+    "kargu-application-generation",
+    "kargu-application-id",
+    "kargu-application-next-generation",
+    "kargu-application-p",
+    "kargu-application-release",
+    "kargu-application-reset",
+    "kargu-application-run-id",
+    "kargu-application-service",
+    "kargu-application-services",
+    "kargu-application-session-id",
+    "kargu-application-set-active-request",
+    "kargu-application-set-active-run",
+    "kargu-application-set-budget",
+    "kargu-application-set-status",
+    "kargu-application-status",
+    "kargu-application-transition",
+    "kargu-application-valid-transition-p",
+    "kargu-application-work-active-p",
+    "kargu-application-wrap",
+    "kargu-async-add-cleanup",
+    "kargu-async-cancel",
+    "kargu-async-cancel-owner",
+    "kargu-async-finish",
+    "kargu-async-pending-p",
+    "kargu-async-start",
+    "kargu-async-task-buffer",
+    "kargu-async-task-callback",
+    "kargu-async-task-cancel",
+    "kargu-async-task-children",
+    "kargu-async-task-context",
+    "kargu-async-task-deadline",
+    "kargu-async-task-id",
+    "kargu-async-task-owner",
+    "kargu-async-task-owner-claim",
+    "kargu-async-task-owner-run",
+    "kargu-async-task-p",
+    "kargu-async-task-parent",
+    "kargu-async-task-state",
+    "kargu-async-task-timer",
+    "kargu-async-task-valid-p",
+    "kargu-async-wrap",
+    "kargu-bash-cancel-process",
+    "kargu-bash-kill-active-async",
+    "kargu-bash-manage-job",
+    "kargu-bash-output-mode",
+    "kargu-bash-register-tools",
+    "kargu-bash-run",
+    "kargu-bash-show-process",
+    "kargu-bash-start-job",
+    "kargu-bridge-start",
+    "kargu-bridge-status",
+    "kargu-bridge-stop",
+    "kargu-budget-create",
+    "kargu-budget-debit",
+    "kargu-budget-exhausted-p",
+    "kargu-budget-live-p",
+    "kargu-budget-record-tokens",
+    "kargu-budget-remaining-requests",
+    "kargu-budget-remaining-time",
+    "kargu-budget-seal",
+    "kargu-budget-summary",
+    "kargu-busy-p",
+    "kargu-cache-prepare-messages",
+    "kargu-cache-prepare-tools",
+    "kargu-cancel-confirmation",
+    "kargu-canonical-tool-name",
+    "kargu-cap-text",
+    "kargu-change-query-create",
+    "kargu-change-query-operation",
+    "kargu-change-query-p",
+    "kargu-change-query-value",
+    "kargu-chat",
+    "kargu-chat-beginning-of-line",
+    "kargu-chat-check-and-display-missing-tools",
+    "kargu-chat-clear",
+    "kargu-chat-company",
+    "kargu-chat-find-buffer",
+    "kargu-chat-flush-stream",
+    "kargu-chat-goto-footer-field",
+    "kargu-chat-insert",
+    "kargu-chat-insert-into",
+    "kargu-chat-list-buffers",
+    "kargu-chat-mode",
+    "kargu-chat-new",
+    "kargu-chat-output-buffer",
+    "kargu-chat-plan-install",
+    "kargu-chat-plan-start-complete",
+    "kargu-chat-plan-start-draft",
+    "kargu-chat-plan-start-mode",
+    "kargu-chat-plan-start-p",
+    "kargu-chat-plan-start-record",
+    "kargu-chat-plan-start-revision",
+    "kargu-chat-plan-start-selection",
+    "kargu-chat-plan-start-session",
+    "kargu-chat-plan-start-text",
+    "kargu-chat-plan-start-view-tick",
+    "kargu-chat-prompt",
+    "kargu-chat-quit",
+    "kargu-chat-refresh-footer",
+    "kargu-chat-refresh-mode",
+    "kargu-chat-reset",
+    "kargu-chat-restore-target",
+    "kargu-chat-return",
+    "kargu-chat-select-effort-company",
+    "kargu-chat-select-mode-company",
+    "kargu-chat-select-model-company",
+    "kargu-chat-select-provider",
+    "kargu-chat-select-provider-company",
+    "kargu-chat-send",
+    "kargu-chat-session-id",
+    "kargu-chat-session-reset",
+    "kargu-chat-sessions",
+    "kargu-chat-show",
+    "kargu-chat-stop",
+    "kargu-chat-switch",
+    "kargu-chat-toggle",
+    "kargu-check-setup",
+    "kargu-circuit-allow-request-p",
+    "kargu-circuit-breaker-cooldown",
+    "kargu-circuit-breaker-failure-count",
+    "kargu-circuit-breaker-key",
+    "kargu-circuit-breaker-last-failure-time",
+    "kargu-circuit-breaker-p",
+    "kargu-circuit-breaker-probe-inflight",
+    "kargu-circuit-breaker-state",
+    "kargu-circuit-breaker-threshold",
+    "kargu-circuit-get",
+    "kargu-circuit-open-p",
+    "kargu-circuit-record-failure",
+    "kargu-circuit-record-success",
+    "kargu-circuit-release-probe",
+    "kargu-circuit-reset",
+    "kargu-circuit-status-string",
+    "kargu-config-api-key",
+    "kargu-config-api-key-fast",
+    "kargu-config-auth-source-supported-p",
+    "kargu-config-bump-revision",
+    "kargu-config-copy",
+    "kargu-config-current-data",
+    "kargu-config-current-snapshot",
+    "kargu-config-file",
+    "kargu-config-publish",
+    "kargu-config-refresh-async",
+    "kargu-config-resolve-api-key-async",
+    "kargu-config-resolve-api-key-result",
+    "kargu-config-revision",
+    "kargu-config-service-context",
+    "kargu-config-service-create",
+    "kargu-config-service-generation",
+    "kargu-config-service-p",
+    "kargu-config-service-revision",
+    "kargu-config-service-snapshot",
+    "kargu-config-snapshot-content",
+    "kargu-config-snapshot-create",
+    "kargu-config-snapshot-data",
+    "kargu-config-snapshot-digest",
+    "kargu-config-snapshot-p",
+    "kargu-config-snapshot-path",
+    "kargu-config-snapshot-revision",
+    "kargu-config-worker-plain-sources",
+    "kargu-config-worker-resolve",
+    "kargu-config-worker-source-path",
+    "kargu-config-worker-start",
+    "kargu-config-worker-unsupported-p",
+    "kargu-confirm",
+    "kargu-confirm-dismiss-all",
+    "kargu-confirmation-operation",
+    "kargu-confirmation-options",
+    "kargu-confirmation-p",
+    "kargu-connected-providers",
+    "kargu-connection-call",
+    "kargu-connection-current",
+    "kargu-connection-matches-p",
+    "kargu-connection-preparation-app",
+    "kargu-connection-preparation-create",
+    "kargu-connection-preparation-model",
+    "kargu-connection-preparation-origin",
+    "kargu-connection-preparation-p",
+    "kargu-connection-preparation-provider",
+    "kargu-connection-preparation-public",
+    "kargu-connection-preparation-selection",
+    "kargu-connection-preparation-session",
+    "kargu-connection-preparation-state",
+    "kargu-connection-preparation-task",
+    "kargu-connection-preparation-tuning",
+    "kargu-connection-redacted-summary",
+    "kargu-connection-resolve-async",
+    "kargu-connection-setting",
+    "kargu-connection-snapshot-capabilities",
+    "kargu-connection-snapshot-capability-data",
+    "kargu-connection-snapshot-config-revision",
+    "kargu-connection-snapshot-created-at",
+    "kargu-connection-snapshot-credential-scope",
+    "kargu-connection-snapshot-endpoint",
+    "kargu-connection-snapshot-endpoint-value",
+    "kargu-connection-snapshot-id",
+    "kargu-connection-snapshot-model",
+    "kargu-connection-snapshot-model-value",
+    "kargu-connection-snapshot-p",
+    "kargu-connection-snapshot-provider",
+    "kargu-connection-snapshot-provider-value",
+    "kargu-connection-snapshot-secret",
+    "kargu-connection-snapshot-settings",
+    "kargu-connection-snapshot-settings-cell",
+    "kargu-connection-snapshot-wipe",
+    "kargu-connection-snapshot-wire-format",
+    "kargu-contract-assert",
+    "kargu-contract-callback-p",
+    "kargu-contract-content-p",
+    "kargu-contract-filepath-p",
+    "kargu-contract-message-p",
+    "kargu-contract-mode-p",
+    "kargu-contract-non-empty-string-p",
+    "kargu-contract-prompt-p",
+    "kargu-contract-role-p",
+    "kargu-contract-tool-call-p",
+    "kargu-contract-tool-calls-p",
+    "kargu-contract-tool-executor-p",
+    "kargu-contract-tool-schema-p",
+    "kargu-contract-url-p",
+    "kargu-contract-validate",
+    "kargu-credential-scope-created-at",
+    "kargu-credential-scope-id",
+    "kargu-credential-scope-p",
+    "kargu-credential-scope-secret",
+    "kargu-credential-scope-secret-cell",
+    "kargu-credential-scope-wipe",
+    "kargu-credential-scope-wiped-p",
+    "kargu-dape-adopt",
+    "kargu-dape-cancel-session-wait",
+    "kargu-dape-capture-selection",
+    "kargu-dape-clear-breakpoint",
+    "kargu-dape-close",
+    "kargu-dape-close-operation-directory",
+    "kargu-dape-close-operation-origin",
+    "kargu-dape-close-operation-p",
+    "kargu-dape-close-operation-resources",
+    "kargu-dape-close-operation-session",
+    "kargu-dape-close-operation-task",
+    "kargu-dape-closing-p",
+    "kargu-dape-context-snapshot",
+    "kargu-dape-continue",
+    "kargu-dape-debug-refusal",
+    "kargu-dape-disconnect",
+    "kargu-dape-down",
+    "kargu-dape-ensure-session",
+    "kargu-dape-eval-expression",
+    "kargu-dape-event-generation",
+    "kargu-dape-get-context",
+    "kargu-dape-inspection-thread",
+    "kargu-dape-kill",
+    "kargu-dape-launch",
+    "kargu-dape-launch-config",
+    "kargu-dape-launch-connections",
+    "kargu-dape-lifecycle-supported-p",
+    "kargu-dape-list-breakpoints",
+    "kargu-dape-live-p",
+    "kargu-dape-modules",
+    "kargu-dape-pause",
+    "kargu-dape-prepare-debug",
+    "kargu-dape-project-connections",
+    "kargu-dape-publish-event",
+    "kargu-dape-quit",
+    "kargu-dape-ready-p",
+    "kargu-dape-register-tools",
+    "kargu-dape-resource",
+    "kargu-dape-resource-buffers",
+    "kargu-dape-resource-children",
+    "kargu-dape-resource-close-operation",
+    "kargu-dape-resource-connection",
+    "kargu-dape-resource-event-handler",
+    "kargu-dape-resource-p",
+    "kargu-dape-resource-parent",
+    "kargu-dape-resource-phase",
+    "kargu-dape-resource-pipes",
+    "kargu-dape-resource-preserve-selected",
+    "kargu-dape-resource-process",
+    "kargu-dape-resource-request-handler",
+    "kargu-dape-resource-server",
+    "kargu-dape-resource-stop",
+    "kargu-dape-restart",
+    "kargu-dape-scope",
+    "kargu-dape-selected-config",
+    "kargu-dape-selection-connection",
+    "kargu-dape-selection-current-p",
+    "kargu-dape-selection-frame",
+    "kargu-dape-selection-frame-id",
+    "kargu-dape-selection-generation",
+    "kargu-dape-selection-live-thread",
+    "kargu-dape-selection-p",
+    "kargu-dape-selection-prepared",
+    "kargu-dape-selection-thread",
+    "kargu-dape-selection-thread-id",
+    "kargu-dape-selection-valid-p",
+    "kargu-dape-set-breakpoint",
+    "kargu-dape-source-buffer",
+    "kargu-dape-source-read-operation-budget",
+    "kargu-dape-source-read-operation-buffer-ticks",
+    "kargu-dape-source-read-operation-origin",
+    "kargu-dape-source-read-operation-owner",
+    "kargu-dape-source-read-operation-p",
+    "kargu-dape-source-read-operation-path",
+    "kargu-dape-source-read-operation-root",
+    "kargu-dape-source-read-operation-selection",
+    "kargu-dape-source-read-operation-session",
+    "kargu-dape-source-read-operation-session-ctx",
+    "kargu-dape-source-read-operation-task",
+    "kargu-dape-sources",
+    "kargu-dape-stack",
+    "kargu-dape-start",
+    "kargu-dape-step-in",
+    "kargu-dape-step-out",
+    "kargu-dape-step-over",
+    "kargu-dape-threads",
+    "kargu-dape-toggle-breakpoint",
+    "kargu-dape-tool-guide",
+    "kargu-dape-tool-policy",
+    "kargu-dape-tool-refusal",
+    "kargu-dape-up",
+    "kargu-dape-wait-for-session",
+    "kargu-dape-watch",
+    "kargu-dape-watch-expressions",
+    "kargu-deps-assert-all-present",
+    "kargu-deps-detect-project-language",
+    "kargu-deps-executable-installed-p",
+    "kargu-deps-format-missing-report",
+    "kargu-deps-missing",
+    "kargu-deps-missing-p",
+    "kargu-deps-package-installed-p",
+    "kargu-diff-abort-all-sessions",
+    "kargu-diff-apply-patch",
+    "kargu-diff-apply-proposal",
+    "kargu-diff-apply-replace",
+    "kargu-diff-change-baseline",
+    "kargu-diff-change-identity",
+    "kargu-diff-change-p",
+    "kargu-diff-change-path",
+    "kargu-diff-changed-files",
+    "kargu-diff-consume-change",
+    "kargu-diff-consume-file",
+    "kargu-diff-file-stats",
+    "kargu-diff-install",
+    "kargu-diff-list-snapshots",
+    "kargu-diff-pending-change",
+    "kargu-diff-pending-reviews",
+    "kargu-diff-prepare-execution",
+    "kargu-diff-query-changes",
+    "kargu-diff-read-file",
+    "kargu-diff-register-tools",
+    "kargu-diff-reset-run-files",
+    "kargu-diff-retire-session",
+    "kargu-diff-review",
+    "kargu-diff-rollback",
+    "kargu-diff-rollback-all",
+    "kargu-diff-run-modified-files",
+    "kargu-diff-snapshot-paths",
+    "kargu-diff-submit-edit",
+    "kargu-diff-submit-plan",
+    "kargu-diff-with-service",
+    "kargu-dismiss-confirmations",
+    "kargu-edit-changes",
+    "kargu-edit-config",
+    "kargu-edit-outcome-create",
+    "kargu-edit-outcome-decided-content",
+    "kargu-edit-outcome-hook-transformed",
+    "kargu-edit-outcome-hunks-applied",
+    "kargu-edit-outcome-hunks-total",
+    "kargu-edit-outcome-message",
+    "kargu-edit-outcome-p",
+    "kargu-edit-outcome-path",
+    "kargu-edit-outcome-plan-id",
+    "kargu-edit-outcome-post-revision",
+    "kargu-edit-outcome-rollback-status",
+    "kargu-edit-outcome-saved",
+    "kargu-edit-outcome-snapshot",
+    "kargu-edit-outcome-status",
+    "kargu-edit-outcome-write-effects",
+    "kargu-edit-plan-app-id",
+    "kargu-edit-plan-auto-save",
+    "kargu-edit-plan-create",
+    "kargu-edit-plan-created-at",
+    "kargu-edit-plan-expected-revision",
+    "kargu-edit-plan-kind",
+    "kargu-edit-plan-metadata",
+    "kargu-edit-plan-p",
+    "kargu-edit-plan-path",
+    "kargu-edit-plan-plan-id",
+    "kargu-edit-plan-policy-revision",
+    "kargu-edit-plan-proposed-content",
+    "kargu-edit-plan-review-mode",
+    "kargu-edit-plan-run-id",
+    "kargu-edit-plan-session-id",
+    "kargu-edit-propose",
+    "kargu-edit-request-callback",
+    "kargu-edit-request-content",
+    "kargu-edit-request-create",
+    "kargu-edit-request-p",
+    "kargu-edit-request-path",
+    "kargu-edit-service-active-plans",
+    "kargu-edit-service-auto-save",
+    "kargu-edit-service-buffers",
+    "kargu-edit-service-changes",
+    "kargu-edit-service-close",
+    "kargu-edit-service-closed",
+    "kargu-edit-service-closed-p",
+    "kargu-edit-service-create",
+    "kargu-edit-service-p",
+    "kargu-edit-service-policy-revision",
+    "kargu-edit-service-processes",
+    "kargu-edit-service-register-buffer",
+    "kargu-edit-service-register-process",
+    "kargu-edit-service-register-temp-dir",
+    "kargu-edit-service-register-timer",
+    "kargu-edit-service-review-mode",
+    "kargu-edit-service-reviews",
+    "kargu-edit-service-root",
+    "kargu-edit-service-run-modified-files",
+    "kargu-edit-service-service-id",
+    "kargu-edit-service-snapshots",
+    "kargu-edit-service-temp-dirs",
+    "kargu-edit-service-timers",
+    "kargu-edit-service-unregister-buffer",
+    "kargu-edit-service-unregister-process",
+    "kargu-edit-service-unregister-temp-dir",
+    "kargu-edit-service-unregister-timer",
+    "kargu-edit-submit",
+    "kargu-edit-submit-plan",
+    "kargu-eglot-connected-p",
+    "kargu-err",
+    "kargu-err-p",
+    "kargu-execute-tool",
+    "kargu-execution-app",
+    "kargu-execution-call",
+    "kargu-execution-claim",
+    "kargu-execution-connection",
+    "kargu-execution-create",
+    "kargu-execution-enter",
+    "kargu-execution-live-p",
+    "kargu-execution-metadata-legacy",
+    "kargu-execution-origin",
+    "kargu-execution-p",
+    "kargu-execution-prepare",
+    "kargu-execution-request-started",
+    "kargu-execution-root",
+    "kargu-execution-run",
+    "kargu-execution-session",
+    "kargu-execution-state",
+    "kargu-execution-task",
+    "kargu-execution-wrap",
+    "kargu-file-current-revision",
+    "kargu-file-excerpt-body",
+    "kargu-file-excerpt-from",
+    "kargu-file-excerpt-needs-more",
+    "kargu-file-excerpt-p",
+    "kargu-file-excerpt-to",
+    "kargu-file-excerpt-total",
+    "kargu-file-excerpt-truncated",
+    "kargu-file-read",
+    "kargu-file-read-async",
+    "kargu-file-read-window",
+    "kargu-file-register-tools",
+    "kargu-file-revision-bytes",
+    "kargu-file-revision-device",
+    "kargu-file-revision-inode",
+    "kargu-file-revision-mtime",
+    "kargu-file-revision-p",
+    "kargu-file-text",
+    "kargu-file-window-create",
+    "kargu-file-window-from",
+    "kargu-file-window-p",
+    "kargu-file-window-to",
+    "kargu-find-tool",
+    "kargu-fs-has-extension-p",
+    "kargu-fs-has-file-p",
+    "kargu-fs-ignore-file-p",
+    "kargu-fs-skipped-path-p",
+    "kargu-fs-walk",
+    "kargu-git-blame",
+    "kargu-git-branch",
+    "kargu-git-commit",
+    "kargu-git-diff",
+    "kargu-git-log",
+    "kargu-git-magit-status",
+    "kargu-git-register-tools",
+    "kargu-git-stage",
+    "kargu-git-stash",
+    "kargu-git-status",
+    "kargu-git-unstage",
+    "kargu-history-add",
+    "kargu-history-add-tool-result",
+    "kargu-history-append",
+    "kargu-history-apply-compaction",
+    "kargu-history-char-count",
+    "kargu-history-char-count-value",
+    "kargu-history-compact-tail",
+    "kargu-history-compact-threshold",
+    "kargu-history-context",
+    "kargu-history-context-threshold",
+    "kargu-history-create",
+    "kargu-history-inspect",
+    "kargu-history-last-message",
+    "kargu-history-measured-tail-value",
+    "kargu-history-message-char-count",
+    "kargu-history-messages",
+    "kargu-history-messages-value",
+    "kargu-history-needs-compact-p",
+    "kargu-history-non-system-count",
+    "kargu-history-overlay",
+    "kargu-history-overlay-value",
+    "kargu-history-p",
+    "kargu-history-replace",
+    "kargu-history-reset",
+    "kargu-history-set-overlay",
+    "kargu-history-snapshot",
+    "kargu-history-system-key",
+    "kargu-history-system-key-value",
+    "kargu-history-tail-value",
+    "kargu-history-validate",
+    "kargu-http-cancel",
+    "kargu-http-clear-busy",
+    "kargu-http-request-budget",
+    "kargu-http-request-scope",
+    "kargu-ip-address",
+    "kargu-ip-format",
+    "kargu-ip-public-p",
+    "kargu-job-cancel",
+    "kargu-job-service-active-async-proc",
+    "kargu-job-service-close",
+    "kargu-job-service-completed-limit",
+    "kargu-job-service-counter",
+    "kargu-job-service-for-project",
+    "kargu-job-service-id",
+    "kargu-job-service-jobs",
+    "kargu-job-service-p",
+    "kargu-job-service-project-root",
+    "kargu-job-services-reset",
+    "kargu-json-decode",
+    "kargu-json-encode-record",
+    "kargu-json-to-record",
+    "kargu-language-active",
+    "kargu-language-context-spec",
+    "kargu-language-detect",
+    "kargu-language-detect-by-extension",
+    "kargu-language-elisp-toolchain",
+    "kargu-language-eval-hint",
+    "kargu-language-for-buffer",
+    "kargu-language-get",
+    "kargu-language-java-toolchain",
+    "kargu-language-js-package-manager",
+    "kargu-language-js-toolchain",
+    "kargu-language-list",
+    "kargu-language-prompt-guidance",
+    "kargu-language-register",
+    "kargu-language-requires-lsp-p",
+    "kargu-language-spec-debugger",
+    "kargu-language-spec-detectors",
+    "kargu-language-spec-extensions",
+    "kargu-language-spec-id",
+    "kargu-language-spec-lsp",
+    "kargu-language-spec-lsp-notes",
+    "kargu-language-spec-modes",
+    "kargu-language-spec-name",
+    "kargu-language-spec-p",
+    "kargu-language-spec-priority",
+    "kargu-language-spec-requires-lsp",
+    "kargu-language-spec-toolchain",
+    "kargu-language-toolchain",
+    "kargu-log",
+    "kargu-logical-request-add-cleanup",
+    "kargu-logical-request-app",
+    "kargu-logical-request-budget",
+    "kargu-logical-request-cancel",
+    "kargu-logical-request-cancel-retry-timer",
+    "kargu-logical-request-cancel-stream-timer",
+    "kargu-logical-request-circuit-scope",
+    "kargu-logical-request-claim",
+    "kargu-logical-request-clean-resources",
+    "kargu-logical-request-cleanups",
+    "kargu-logical-request-connection",
+    "kargu-logical-request-create",
+    "kargu-logical-request-current-p",
+    "kargu-logical-request-detach-owner",
+    "kargu-logical-request-finish",
+    "kargu-logical-request-generation",
+    "kargu-logical-request-id",
+    "kargu-logical-request-live-p",
+    "kargu-logical-request-origin",
+    "kargu-logical-request-owner-cleanup",
+    "kargu-logical-request-p",
+    "kargu-logical-request-preparation",
+    "kargu-logical-request-process",
+    "kargu-logical-request-retry-timer",
+    "kargu-logical-request-session",
+    "kargu-logical-request-set-retry-timer",
+    "kargu-logical-request-state",
+    "kargu-logical-request-stream-timer",
+    "kargu-loop-cancel",
+    "kargu-loop-preflight",
+    "kargu-loop-require-tools-for-agent",
+    "kargu-loop-running-p",
+    "kargu-loop-send",
+    "kargu-loop-status",
+    "kargu-loop-stop",
+    "kargu-loop-tool-visible-p",
+    "kargu-lsp-all-symbols",
+    "kargu-lsp-backend",
+    "kargu-lsp-begin-diagnostic-barrier",
+    "kargu-lsp-build-skeleton",
+    "kargu-lsp-context-file",
+    "kargu-lsp-current-diagnostics-p",
+    "kargu-lsp-diagnostic-barrier-backends",
+    "kargu-lsp-diagnostic-barrier-buffer",
+    "kargu-lsp-diagnostic-barrier-file",
+    "kargu-lsp-diagnostic-barrier-p",
+    "kargu-lsp-diagnostic-barrier-ready-p",
+    "kargu-lsp-diagnostic-barrier-reports",
+    "kargu-lsp-diagnostic-barrier-server",
+    "kargu-lsp-diagnostic-barrier-tick",
+    "kargu-lsp-diagnostic-barrier-valid-p",
+    "kargu-lsp-diagnostic-barrier-version",
+    "kargu-lsp-diagnostics-snapshot",
+    "kargu-lsp-edit-symbol",
+    "kargu-lsp-edit-unavailable-reason",
+    "kargu-lsp-find-definition",
+    "kargu-lsp-format-diagnostics",
+    "kargu-lsp-format-symbols-outline",
+    "kargu-lsp-get-diagnostics",
+    "kargu-lsp-get-file-symbols",
+    "kargu-lsp-get-project-diagnostics",
+    "kargu-lsp-native-elisp-p",
+    "kargu-lsp-project-root",
+    "kargu-lsp-read-file-symbols",
+    "kargu-lsp-read-symbol",
+    "kargu-lsp-register-tools",
+    "kargu-lsp-symbols-unavailable-reason",
+    "kargu-lsp-sync-diagnostic-barrier",
+    "kargu-lsp-unavailable-reason",
+    "kargu-lsp-wait-diagnostics",
+    "kargu-make-language-spec",
+    "kargu-make-toolchain-strategy",
+    "kargu-menu",
+    "kargu-metadata-table",
+    "kargu-migration-print-inventory",
+    "kargu-mode-agent",
+    "kargu-mode-ask",
+    "kargu-mode-cancel",
+    "kargu-mode-debug",
+    "kargu-mode-plan",
+    "kargu-mode-preparation-app",
+    "kargu-mode-preparation-directory",
+    "kargu-mode-preparation-mode",
+    "kargu-mode-preparation-origin",
+    "kargu-mode-preparation-p",
+    "kargu-mode-preparation-session",
+    "kargu-mode-preparation-task",
+    "kargu-mode-prepare",
+    "kargu-model-annotation-string",
+    "kargu-model-context-window",
+    "kargu-model-edit-prop",
+    "kargu-model-entry-data",
+    "kargu-model-entry-id",
+    "kargu-model-entry-overrides",
+    "kargu-model-entry-p",
+    "kargu-model-entry-provider",
+    "kargu-model-forget-tools-refusals",
+    "kargu-model-get-metadata",
+    "kargu-model-get-prop",
+    "kargu-model-info",
+    "kargu-model-info-facts",
+    "kargu-model-mark-tools-refused",
+    "kargu-model-read",
+    "kargu-model-reasoning-efforts",
+    "kargu-model-request-parameters",
+    "kargu-model-set-metadata",
+    "kargu-model-set-prop",
+    "kargu-model-store-get",
+    "kargu-model-store-put",
+    "kargu-model-store-retain",
+    "kargu-model-store-set-property",
+    "kargu-model-supports-reasoning-p",
+    "kargu-model-supports-tools-p",
+    "kargu-nonempty",
+    "kargu-notify",
+    "kargu-notify-sound",
+    "kargu-ok",
+    "kargu-ok-p",
+    "kargu-permission-allowed-binary-p",
+    "kargu-permission-assert-within-project",
+    "kargu-permission-command-risks",
+    "kargu-permission-context-root",
+    "kargu-permission-eglot-server-root",
+    "kargu-permission-execute",
+    "kargu-permission-operation-command",
+    "kargu-permission-operation-directories",
+    "kargu-permission-operation-directory",
+    "kargu-permission-operation-environment",
+    "kargu-permission-operation-origin",
+    "kargu-permission-operation-owner",
+    "kargu-permission-operation-p",
+    "kargu-permission-operation-path",
+    "kargu-permission-operation-phase",
+    "kargu-permission-operation-policy-revision",
+    "kargu-permission-operation-risks",
+    "kargu-permission-operation-root",
+    "kargu-permission-operation-session",
+    "kargu-permission-operation-start",
+    "kargu-permission-operation-strict",
+    "kargu-permission-operation-task",
+    "kargu-permission-operation-validator",
+    "kargu-permission-project-root",
+    "kargu-permission-request-approval",
+    "kargu-permission-request-approval-async",
+    "kargu-permission-resolve",
+    "kargu-permission-tokenize-command",
+    "kargu-permission-validate-command",
+    "kargu-permission-within-project-p",
+    "kargu-plan-approve",
+    "kargu-plan-assert-current",
+    "kargu-plan-cancel-dispatch",
+    "kargu-plan-claim",
+    "kargu-plan-complete",
+    "kargu-plan-context-create",
+    "kargu-plan-context-current-p",
+    "kargu-plan-context-dispatch",
+    "kargu-plan-context-dispatch-style",
+    "kargu-plan-context-for-buffer",
+    "kargu-plan-context-p",
+    "kargu-plan-context-preflight",
+    "kargu-plan-context-publish",
+    "kargu-plan-context-root",
+    "kargu-plan-context-session",
+    "kargu-plan-context-validate",
+    "kargu-plan-create",
+    "kargu-plan-current",
+    "kargu-plan-current-p",
+    "kargu-plan-decline",
+    "kargu-plan-extract-text",
+    "kargu-plan-handle-response",
+    "kargu-plan-mode",
+    "kargu-plan-pending-p",
+    "kargu-plan-publish",
+    "kargu-plan-record-buffer",
+    "kargu-plan-record-context",
+    "kargu-plan-record-dispatch-task",
+    "kargu-plan-record-origin",
+    "kargu-plan-record-p",
+    "kargu-plan-record-root",
+    "kargu-plan-record-session",
+    "kargu-plan-record-state",
+    "kargu-plan-reject",
+    "kargu-plan-setup-buffer",
+    "kargu-plan-view",
+    "kargu-present-confirmation",
+    "kargu-process-cancel",
+    "kargu-process-deliver",
+    "kargu-process-failure",
+    "kargu-process-run",
+    "kargu-prompt-clear-cache",
+    "kargu-prompt-debug-message",
+    "kargu-prompt-mode-reminder",
+    "kargu-prompt-synthetic-user-p",
+    "kargu-prompt-system-key",
+    "kargu-prompt-wrap-user",
+    "kargu-provider-api",
+    "kargu-provider-authenticated-p",
+    "kargu-provider-cache-marker-p",
+    "kargu-provider-effort-specs",
+    "kargu-provider-env",
+    "kargu-provider-extra-headers",
+    "kargu-provider-format",
+    "kargu-provider-format-auth",
+    "kargu-provider-format-field",
+    "kargu-provider-format-headers",
+    "kargu-provider-format-record",
+    "kargu-provider-format-stream-p",
+    "kargu-provider-get",
+    "kargu-provider-keyless-p",
+    "kargu-provider-list",
+    "kargu-provider-local-p",
+    "kargu-provider-models",
+    "kargu-provider-models-api",
+    "kargu-provider-name",
+    "kargu-provider-native-models-path",
+    "kargu-provider-prompt-caching",
+    "kargu-provider-prompt-file",
+    "kargu-provider-public-models-p",
+    "kargu-provider-reasoning-shape",
+    "kargu-provider-request-policy",
+    "kargu-provider-usage-api",
+    "kargu-provider-valid-key-p",
+    "kargu-provider-wire",
+    "kargu-query-changes",
+    "kargu-random-uuid",
+    "kargu-reasoning-budget",
+    "kargu-reasoning-effort-level",
+    "kargu-register-provider",
+    "kargu-register-tool",
+    "kargu-register-tool-alias",
+    "kargu-register-tools",
+    "kargu-registered-tool-count",
+    "kargu-registered-tools",
+    "kargu-rel-path",
+    "kargu-resolver-command",
+    "kargu-resolver-main",
+    "kargu-response-answer-text",
+    "kargu-response-error-message",
+    "kargu-response-finish-reason",
+    "kargu-response-overflow-p",
+    "kargu-response-reasoning-text",
+    "kargu-response-text",
+    "kargu-response-tool-calls",
+    "kargu-result-err-code",
+    "kargu-result-err-data",
+    "kargu-result-err-message",
+    "kargu-result-err-p",
+    "kargu-result-ok-p",
+    "kargu-result-ok-value",
+    "kargu-result-value",
+    "kargu-run-budget-compactions-spent",
+    "kargu-run-budget-deadline",
+    "kargu-run-budget-max-compactions",
+    "kargu-run-budget-max-requests",
+    "kargu-run-budget-max-tokens",
+    "kargu-run-budget-p",
+    "kargu-run-budget-requests-spent",
+    "kargu-run-budget-run-id",
+    "kargu-run-budget-status",
+    "kargu-run-budget-tokens-spent",
+    "kargu-run-budget-tokens-unknown-p",
+    "kargu-run-observers",
+    "kargu-safe-tool-call",
+    "kargu-search-fd-executable",
+    "kargu-search-glob",
+    "kargu-search-grep",
+    "kargu-search-list-files",
+    "kargu-search-register-tools",
+    "kargu-search-rg-executable",
+    "kargu-search-tool-recommendations",
+    "kargu-selection-busy-p",
+    "kargu-selection-context",
+    "kargu-selection-create",
+    "kargu-selection-effort",
+    "kargu-selection-effort-candidates",
+    "kargu-selection-effort-value",
+    "kargu-selection-model",
+    "kargu-selection-model-candidates",
+    "kargu-selection-model-value",
+    "kargu-selection-models-known-p",
+    "kargu-selection-normalize-candidates",
+    "kargu-selection-p",
+    "kargu-selection-plain-choice",
+    "kargu-selection-provider",
+    "kargu-selection-provider-candidates",
+    "kargu-selection-provider-value",
+    "kargu-selection-publish",
+    "kargu-selection-require-idle",
+    "kargu-selection-reset",
+    "kargu-selection-update",
+    "kargu-selection-validate-member",
+    "kargu-seq-to-list",
+    "kargu-session-auto-save-all",
+    "kargu-session-cancel-listing",
+    "kargu-session-clear",
+    "kargu-session-context",
+    "kargu-session-context-info",
+    "kargu-session-create",
+    "kargu-session-decode-effort",
+    "kargu-session-delete",
+    "kargu-session-encode-effort",
+    "kargu-session-history-value",
+    "kargu-session-id",
+    "kargu-session-id-value",
+    "kargu-session-import-local",
+    "kargu-session-list",
+    "kargu-session-list-async",
+    "kargu-session-load",
+    "kargu-session-mark-active",
+    "kargu-session-metadata-p",
+    "kargu-session-migrate",
+    "kargu-session-mode-request",
+    "kargu-session-mode-revision",
+    "kargu-session-mode-value",
+    "kargu-session-p",
+    "kargu-session-project-root",
+    "kargu-session-record-cache-usage",
+    "kargu-session-record-usage",
+    "kargu-session-replace-usage",
+    "kargu-session-reset",
+    "kargu-session-restore",
+    "kargu-session-restore-operation-data",
+    "kargu-session-restore-operation-directory",
+    "kargu-session-restore-operation-mode-revision",
+    "kargu-session-restore-operation-owner",
+    "kargu-session-restore-operation-p",
+    "kargu-session-restore-operation-prepared",
+    "kargu-session-restore-operation-project",
+    "kargu-session-restore-operation-root",
+    "kargu-session-restore-operation-selection",
+    "kargu-session-restore-operation-target",
+    "kargu-session-restore-operation-task",
+    "kargu-session-restore-operation-tick",
+    "kargu-session-restore-operation-view",
+    "kargu-session-retire",
+    "kargu-session-save",
+    "kargu-session-selection-value",
+    "kargu-session-snapshot",
+    "kargu-session-storage-directory",
+    "kargu-session-storage-file",
+    "kargu-session-storage-import-local",
+    "kargu-session-storage-list-metadata",
+    "kargu-session-storage-local-ids",
+    "kargu-session-storage-newer-p",
+    "kargu-session-storage-read",
+    "kargu-session-storage-write",
+    "kargu-session-usage",
+    "kargu-session-usage-value",
+    "kargu-session-validate",
+    "kargu-session-view-capture",
+    "kargu-session-view-locals",
+    "kargu-session-view-mark",
+    "kargu-session-view-mark-active",
+    "kargu-session-view-markers",
+    "kargu-session-view-maximum",
+    "kargu-session-view-minimum",
+    "kargu-session-view-modified",
+    "kargu-session-view-p",
+    "kargu-session-view-point",
+    "kargu-session-view-restore",
+    "kargu-session-view-text",
+    "kargu-session-view-undo",
+    "kargu-set-context-buffer",
+    "kargu-set-mode",
+    "kargu-set-model",
+    "kargu-set-provider",
+    "kargu-set-tool-policy",
+    "kargu-show-log",
+    "kargu-skill-format-catalog",
+    "kargu-skill-list",
+    "kargu-skill-load",
+    "kargu-skill-register-tools",
+    "kargu-sse-decode-data",
+    "kargu-sse-parser-bytes",
+    "kargu-sse-parser-create",
+    "kargu-sse-parser-data",
+    "kargu-sse-parser-event",
+    "kargu-sse-parser-feed",
+    "kargu-sse-parser-p",
+    "kargu-state-busy-p",
+    "kargu-state-check-mode",
+    "kargu-state-clear-model",
+    "kargu-state-get",
+    "kargu-state-init",
+    "kargu-state-initial",
+    "kargu-state-mode",
+    "kargu-state-model",
+    "kargu-state-notify",
+    "kargu-state-notify-tokens",
+    "kargu-state-provider",
+    "kargu-state-reasoning-effort",
+    "kargu-state-record-tokens",
+    "kargu-state-reset",
+    "kargu-state-set-mode",
+    "kargu-state-set-model",
+    "kargu-state-set-provider",
+    "kargu-state-set-reasoning-effort",
+    "kargu-state-status",
+    "kargu-state-subscribe",
+    "kargu-state-tokens",
+    "kargu-state-transition-status",
+    "kargu-state-unsubscribe",
+    "kargu-switch-provider-and-model",
+    "kargu-test-connection",
+    "kargu-to-int",
+    "kargu-toggle-wire-log",
+    "kargu-tool-approval-args-hash",
+    "kargu-tool-approval-claim",
+    "kargu-tool-approval-claimed-p",
+    "kargu-tool-approval-create",
+    "kargu-tool-approval-environment-hash",
+    "kargu-tool-approval-p",
+    "kargu-tool-approval-policy-revision",
+    "kargu-tool-approval-root",
+    "kargu-tool-approval-token-id",
+    "kargu-tool-approval-tool-name",
+    "kargu-tool-definition-description",
+    "kargu-tool-definition-executor",
+    "kargu-tool-definition-name",
+    "kargu-tool-definition-p",
+    "kargu-tool-definition-parameters",
+    "kargu-tool-definition-policy",
+    "kargu-tool-description",
+    "kargu-tool-execution-active-task-count",
+    "kargu-tool-execution-context-app",
+    "kargu-tool-execution-context-budget-scope",
+    "kargu-tool-execution-context-context-id",
+    "kargu-tool-execution-context-create",
+    "kargu-tool-execution-context-mode",
+    "kargu-tool-execution-context-p",
+    "kargu-tool-execution-context-policy-revision",
+    "kargu-tool-execution-context-root",
+    "kargu-tool-execution-context-run-id",
+    "kargu-tool-execution-context-session-id",
+    "kargu-tool-execution-decode-arguments",
+    "kargu-tool-execution-drain",
+    "kargu-tool-execution-format-result",
+    "kargu-tool-execution-redact",
+    "kargu-tool-execution-truncate-for-model",
+    "kargu-tool-gate-execute",
+    "kargu-tool-gate-execute-sync",
+    "kargu-tool-invocation-app-run",
+    "kargu-tool-invocation-args",
+    "kargu-tool-invocation-context",
+    "kargu-tool-invocation-definition",
+    "kargu-tool-invocation-environment",
+    "kargu-tool-invocation-origin",
+    "kargu-tool-invocation-p",
+    "kargu-tool-invocation-path",
+    "kargu-tool-invocation-registry",
+    "kargu-tool-invocation-revision",
+    "kargu-tool-invocation-session",
+    "kargu-tool-invocation-synchronous",
+    "kargu-tool-invocation-task",
+    "kargu-tool-output-buffer",
+    "kargu-tool-policy-error",
+    "kargu-tool-registry-alias",
+    "kargu-tool-registry-canonical-name",
+    "kargu-tool-registry-clear-draining",
+    "kargu-tool-registry-count",
+    "kargu-tool-registry-create",
+    "kargu-tool-registry-draining",
+    "kargu-tool-registry-draining-p",
+    "kargu-tool-registry-entries",
+    "kargu-tool-registry-find",
+    "kargu-tool-registry-mark-draining",
+    "kargu-tool-registry-names",
+    "kargu-tool-registry-p",
+    "kargu-tool-registry-register",
+    "kargu-tool-registry-remove",
+    "kargu-tool-registry-revision",
+    "kargu-tool-registry-set-policy",
+    "kargu-tool-registry-tasks",
+    "kargu-tool-schema-char-count",
+    "kargu-tool-visible-p",
+    "kargu-toolchain-detect",
+    "kargu-toolchain-register",
+    "kargu-toolchain-strategy-detector",
+    "kargu-toolchain-strategy-name",
+    "kargu-toolchain-strategy-p",
+    "kargu-toolchain-strategy-priority",
+    "kargu-toolchain-strategy-resolver",
+    "kargu-tools-enabled-p",
+    "kargu-transport-request",
+    "kargu-tune-cycle-reasoning-effort",
+    "kargu-tune-menu",
+    "kargu-tune-reset-defaults",
+    "kargu-tune-set-max-tokens",
+    "kargu-tune-set-temperature",
+    "kargu-tune-set-thinking-budget",
+    "kargu-tune-toggle-low-usage",
+    "kargu-tune-toggle-review-mode",
+    "kargu-tune-toggle-stream",
+    "kargu-ui-breakpoints",
+    "kargu-ui-choose-model",
+    "kargu-ui-choose-provider",
+    "kargu-ui-confirm",
+    "kargu-ui-confirm-install",
+    "kargu-ui-debug-context",
+    "kargu-ui-debug-eval",
+    "kargu-ui-diagnostics",
+    "kargu-ui-find-symbol",
+    "kargu-ui-history",
+    "kargu-ui-open-skeleton",
+    "kargu-ui-pending-reviews",
+    "kargu-ui-present-confirmation",
+    "kargu-ui-review-diff",
+    "kargu-ui-rollback",
+    "kargu-ui-set-context",
+    "kargu-ui-snapshots",
+    "kargu-ui-status",
+    "kargu-ui-stop",
+    "kargu-ui-test-connection",
+    "kargu-ui-toggle-review-mode",
+    "kargu-unregister-tool",
+    "kargu-usage-limit",
+    "kargu-webfetch-register-tools",
+    "kargu-webfetch-url"
+  ],
+  "loaded_public_commands": [
+    "kargu-api-cancel",
+    "kargu-api-list-models",
+    "kargu-api-prefetch-models",
+    "kargu-bash-cancel-process",
+    "kargu-bash-output-mode",
+    "kargu-bash-show-process",
+    "kargu-bridge-start",
+    "kargu-bridge-status",
+    "kargu-bridge-stop",
+    "kargu-chat",
+    "kargu-chat-beginning-of-line",
+    "kargu-chat-clear",
+    "kargu-chat-company",
+    "kargu-chat-mode",
+    "kargu-chat-new",
+    "kargu-chat-prompt",
+    "kargu-chat-quit",
+    "kargu-chat-reset",
+    "kargu-chat-return",
+    "kargu-chat-select-effort-company",
+    "kargu-chat-select-mode-company",
+    "kargu-chat-select-model-company",
+    "kargu-chat-select-provider",
+    "kargu-chat-select-provider-company",
+    "kargu-chat-send",
+    "kargu-chat-sessions",
+    "kargu-chat-show",
+    "kargu-chat-stop",
+    "kargu-chat-switch",
+    "kargu-chat-toggle",
+    "kargu-check-setup",
+    "kargu-circuit-reset",
+    "kargu-dape-continue",
+    "kargu-dape-disconnect",
+    "kargu-dape-get-context",
+    "kargu-dape-kill",
+    "kargu-dape-pause",
+    "kargu-dape-quit",
+    "kargu-dape-restart",
+    "kargu-dape-step-in",
+    "kargu-dape-step-out",
+    "kargu-dape-step-over",
+    "kargu-diff-list-snapshots",
+    "kargu-diff-pending-reviews",
+    "kargu-diff-review",
+    "kargu-diff-rollback",
+    "kargu-diff-rollback-all",
+    "kargu-edit-config",
+    "kargu-git-magit-status",
+    "kargu-history-inspect",
+    "kargu-history-reset",
+    "kargu-loop-send",
+    "kargu-loop-status",
+    "kargu-loop-stop",
+    "kargu-lsp-build-skeleton",
+    "kargu-lsp-find-definition",
+    "kargu-lsp-get-diagnostics",
+    "kargu-lsp-get-project-diagnostics",
+    "kargu-menu",
+    "kargu-mode-agent",
+    "kargu-mode-ask",
+    "kargu-mode-debug",
+    "kargu-mode-plan",
+    "kargu-model-edit-prop",
+    "kargu-model-info",
+    "kargu-plan-approve",
+    "kargu-plan-mode",
+    "kargu-plan-reject",
+    "kargu-plan-view",
+    "kargu-session-delete",
+    "kargu-session-import-local",
+    "kargu-session-reset",
+    "kargu-session-usage",
+    "kargu-set-context-buffer",
+    "kargu-set-mode",
+    "kargu-set-model",
+    "kargu-set-provider",
+    "kargu-show-log",
+    "kargu-switch-provider-and-model",
+    "kargu-test-connection",
+    "kargu-toggle-wire-log",
+    "kargu-tune-cycle-reasoning-effort",
+    "kargu-tune-menu",
+    "kargu-tune-reset-defaults",
+    "kargu-tune-set-max-tokens",
+    "kargu-tune-set-temperature",
+    "kargu-tune-set-thinking-budget",
+    "kargu-tune-toggle-low-usage",
+    "kargu-tune-toggle-review-mode",
+    "kargu-tune-toggle-stream",
+    "kargu-ui-breakpoints",
+    "kargu-ui-choose-model",
+    "kargu-ui-choose-provider",
+    "kargu-ui-debug-context",
+    "kargu-ui-debug-eval",
+    "kargu-ui-diagnostics",
+    "kargu-ui-find-symbol",
+    "kargu-ui-history",
+    "kargu-ui-open-skeleton",
+    "kargu-ui-pending-reviews",
+    "kargu-ui-review-diff",
+    "kargu-ui-rollback",
+    "kargu-ui-set-context",
+    "kargu-ui-snapshots",
+    "kargu-ui-status",
+    "kargu-ui-stop",
+    "kargu-ui-test-connection",
+    "kargu-ui-toggle-review-mode"
+  ],
+  "tools": [
+    {
+      "name": "apply_patch",
+      "canonical": "apply_patch",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "patch": {
+            "type": "string",
+            "description": "Standard Unified Diff patch text (--- a/file, +++ b/file, @@ -L,C +L,C @@)."
+          }
+        },
+        "required": [
+          "patch"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "bash",
+      "canonical": "bash",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Shell command to run, or 'status <id>', 'kill <id>', 'list'."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory (default: project root)."
+          },
+          "background": {
+            "type": "boolean",
+            "description": "Set true to start a persistent background server/watcher."
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "breakpoints",
+      "canonical": "debug_list_breakpoints",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_list_breakpoints\"))])"
+    },
+    {
+      "name": "clear_breakpoint",
+      "canonical": "debug_clear_breakpoint",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the source file."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number to clear breakpoint from."
+          }
+        },
+        "required": [
+          "file_path",
+          "line"
+        ]
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_clear_breakpoint\"))])"
+    },
+    {
+      "name": "continue",
+      "canonical": "debug_continue",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_continue\"))])"
+    },
+    {
+      "name": "debug",
+      "canonical": "debug_start",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "config_name": {
+            "type": "string",
+            "description": "Optional dape configuration name (e.g. 'lldb-vscode', 'dlv', 'debugpy')."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_start\"))])"
+    },
+    {
+      "name": "debug_breakpoints",
+      "canonical": "debug_list_breakpoints",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_list_breakpoints\"))])"
+    },
+    {
+      "name": "debug_clear_breakpoint",
+      "canonical": "debug_clear_breakpoint",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the source file."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number to clear breakpoint from."
+          }
+        },
+        "required": [
+          "file_path",
+          "line"
+        ]
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_clear_breakpoint\"))])"
+    },
+    {
+      "name": "debug_continue",
+      "canonical": "debug_continue",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_continue\"))])"
+    },
+    {
+      "name": "debug_disconnect",
+      "canonical": "debug_disconnect",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_disconnect\"))])"
+    },
+    {
+      "name": "debug_down",
+      "canonical": "debug_down",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of stack frames to navigate down (default 1)."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_down\"))])"
+    },
+    {
+      "name": "debug_eval",
+      "canonical": "debug_eval",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "Expression to evaluate."
+          },
+          "context": {
+            "type": "string",
+            "description": "Evaluation context: 'repl' (default), 'hover', or 'watch'."
+          }
+        },
+        "required": [
+          "expression"
+        ]
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_eval\"))])"
+    },
+    {
+      "name": "debug_get_context",
+      "canonical": "debug_get_context",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_get_context\"))])"
+    },
+    {
+      "name": "debug_inspect_variable",
+      "canonical": "debug_scope",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "variable_name": {
+            "type": "string",
+            "description": "Name of variable to expand child fields for (e.g. 'frame', 'landmarks_2d')."
+          },
+          "scope_index": {
+            "type": "integer",
+            "description": "Index of scope to list (0-based)."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_scope\"))])"
+    },
+    {
+      "name": "debug_kill",
+      "canonical": "debug_kill",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_kill\"))])"
+    },
+    {
+      "name": "debug_list_breakpoints",
+      "canonical": "debug_list_breakpoints",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_list_breakpoints\"))])"
+    },
+    {
+      "name": "debug_modules",
+      "canonical": "debug_modules",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_modules\"))])"
+    },
+    {
+      "name": "debug_pause",
+      "canonical": "debug_pause",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_pause\"))])"
+    },
+    {
+      "name": "debug_quit",
+      "canonical": "debug_quit",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_quit\"))])"
+    },
+    {
+      "name": "debug_restart",
+      "canonical": "debug_restart",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_restart\"))])"
+    },
+    {
+      "name": "debug_scope",
+      "canonical": "debug_scope",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "variable_name": {
+            "type": "string",
+            "description": "Name of variable to expand child fields for (e.g. 'frame', 'landmarks_2d')."
+          },
+          "scope_index": {
+            "type": "integer",
+            "description": "Index of scope to list (0-based)."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_scope\"))])"
+    },
+    {
+      "name": "debug_set_breakpoint",
+      "canonical": "debug_set_breakpoint",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the source file."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number to set breakpoint on."
+          }
+        },
+        "required": [
+          "file_path",
+          "line"
+        ]
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_set_breakpoint\"))])"
+    },
+    {
+      "name": "debug_sources",
+      "canonical": "debug_sources",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_sources\"))])"
+    },
+    {
+      "name": "debug_stack",
+      "canonical": "debug_stack",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "levels": {
+            "type": "integer",
+            "description": "Maximum frame depth to report (default 20)."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_stack\"))])"
+    },
+    {
+      "name": "debug_start",
+      "canonical": "debug_start",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "config_name": {
+            "type": "string",
+            "description": "Optional dape configuration name (e.g. 'lldb-vscode', 'dlv', 'debugpy')."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_start\"))])"
+    },
+    {
+      "name": "debug_step_in",
+      "canonical": "debug_step_in",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_step_in\"))])"
+    },
+    {
+      "name": "debug_step_out",
+      "canonical": "debug_step_out",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_step_out\"))])"
+    },
+    {
+      "name": "debug_step_over",
+      "canonical": "debug_step_over",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_step_over\"))])"
+    },
+    {
+      "name": "debug_threads",
+      "canonical": "debug_threads",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_threads\"))])"
+    },
+    {
+      "name": "debug_toggle_breakpoint",
+      "canonical": "debug_toggle_breakpoint",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the source file."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number."
+          }
+        },
+        "required": [
+          "file_path",
+          "line"
+        ]
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_toggle_breakpoint\"))])"
+    },
+    {
+      "name": "debug_up",
+      "canonical": "debug_up",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of stack frames to navigate up (default 1)."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_up\"))])"
+    },
+    {
+      "name": "debug_variables",
+      "canonical": "debug_scope",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "variable_name": {
+            "type": "string",
+            "description": "Name of variable to expand child fields for (e.g. 'frame', 'landmarks_2d')."
+          },
+          "scope_index": {
+            "type": "integer",
+            "description": "Index of scope to list (0-based)."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_scope\"))])"
+    },
+    {
+      "name": "debug_watch",
+      "canonical": "debug_watch",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "Expression to add or remove from watch list."
+          },
+          "remove": {
+            "type": "boolean",
+            "description": "Set true to remove expression instead of adding."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_watch\"))])"
+    },
+    {
+      "name": "dir",
+      "canonical": "list_files",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory path to list (default: project root)."
+          }
+        },
+        "required": []
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "disconnect",
+      "canonical": "debug_disconnect",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_disconnect\"))])"
+    },
+    {
+      "name": "down",
+      "canonical": "debug_down",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of stack frames to navigate down (default 1)."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_down\"))])"
+    },
+    {
+      "name": "edit",
+      "canonical": "edit_file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to edit."
+          },
+          "old_string": {
+            "type": "string",
+            "description": "The exact unique string to replace, copied from read_file without the line-number prefix."
+          },
+          "new_string": {
+            "type": "string",
+            "description": "The replacement string."
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-sentence justification of the edit, shown to the human during review."
+          }
+        },
+        "required": [
+          "file_path",
+          "old_string",
+          "new_string"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "edit_by_lsp",
+      "canonical": "edit_by_lsp",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to edit."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to replace."
+          },
+          "new_content": {
+            "type": "string",
+            "description": "New code to replace the entire symbol body/definition with (use empty string to delete)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional explanation for the change."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol",
+          "new_content"
+        ]
+      },
+      "policy_lisp": "(:modes (agent) :available-p kargu-lsp-edit-unavailable-reason)"
+    },
+    {
+      "name": "edit_by_symbol",
+      "canonical": "edit_by_lsp",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to edit."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to replace."
+          },
+          "new_content": {
+            "type": "string",
+            "description": "New code to replace the entire symbol body/definition with (use empty string to delete)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional explanation for the change."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol",
+          "new_content"
+        ]
+      },
+      "policy_lisp": "(:modes (agent) :available-p kargu-lsp-edit-unavailable-reason)"
+    },
+    {
+      "name": "edit_file",
+      "canonical": "edit_file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to edit."
+          },
+          "old_string": {
+            "type": "string",
+            "description": "The exact unique string to replace, copied from read_file without the line-number prefix."
+          },
+          "new_string": {
+            "type": "string",
+            "description": "The replacement string."
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-sentence justification of the edit, shown to the human during review."
+          }
+        },
+        "required": [
+          "file_path",
+          "old_string",
+          "new_string"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "edit_symbol",
+      "canonical": "edit_by_lsp",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to edit."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to replace."
+          },
+          "new_content": {
+            "type": "string",
+            "description": "New code to replace the entire symbol body/definition with (use empty string to delete)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional explanation for the change."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol",
+          "new_content"
+        ]
+      },
+      "policy_lisp": "(:modes (agent) :available-p kargu-lsp-edit-unavailable-reason)"
+    },
+    {
+      "name": "edit_with_lsp",
+      "canonical": "edit_by_lsp",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to edit."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to replace."
+          },
+          "new_content": {
+            "type": "string",
+            "description": "New code to replace the entire symbol body/definition with (use empty string to delete)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional explanation for the change."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol",
+          "new_content"
+        ]
+      },
+      "policy_lisp": "(:modes (agent) :available-p kargu-lsp-edit-unavailable-reason)"
+    },
+    {
+      "name": "eval",
+      "canonical": "debug_eval",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "Expression to evaluate."
+          },
+          "context": {
+            "type": "string",
+            "description": "Evaluation context: 'repl' (default), 'hover', or 'watch'."
+          }
+        },
+        "required": [
+          "expression"
+        ]
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_eval\"))])"
+    },
+    {
+      "name": "fd",
+      "canonical": "find_files",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern such as **/*.rs or *.el."
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search (default: project root)."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "file_outline",
+      "canonical": "read_file_symbols",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to inspect."
+          }
+        }
+      },
+      "policy_lisp": "(:available-p kargu-lsp-symbols-unavailable-reason)"
+    },
+    {
+      "name": "file_symbols",
+      "canonical": "read_file_symbols",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to inspect."
+          }
+        }
+      },
+      "policy_lisp": "(:available-p kargu-lsp-symbols-unavailable-reason)"
+    },
+    {
+      "name": "find",
+      "canonical": "find_files",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern such as **/*.rs or *.el."
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search (default: project root)."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "find_files",
+      "canonical": "find_files",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern such as **/*.rs or *.el."
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search (default: project root)."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "find_files_by_glob",
+      "canonical": "find_files",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern such as **/*.rs or *.el."
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search (default: project root)."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "finish",
+      "canonical": "debug_step_out",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_step_out\"))])"
+    },
+    {
+      "name": "get_symbol",
+      "canonical": "read_symbol",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to read."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol"
+        ]
+      },
+      "policy_lisp": "(:available-p kargu-lsp-symbols-unavailable-reason)"
+    },
+    {
+      "name": "git_blame",
+      "canonical": "git_blame",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "File path to blame."
+          },
+          "start_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional start line, defaults to 1."
+          },
+          "end_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional end line, defaults to end of file."
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "git_branch",
+      "canonical": "git_branch",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Action: list, create, switch, or delete."
+          },
+          "name": {
+            "type": "string",
+            "description": "Branch name."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "git_branches",
+      "canonical": "git_branches",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "git_commit",
+      "canonical": "git_commit",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Commit message."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "If true, automatically stage all modified tracked files."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "git_diff",
+      "canonical": "git_diff",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "staged": {
+            "type": "boolean",
+            "description": "If true, show staged changes (--cached)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Optional file or directory path to diff."
+          },
+          "commit": {
+            "type": "string",
+            "description": "Optional commit hash or reference."
+          }
+        },
+        "required": []
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "git_log",
+      "canonical": "git_log",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "max_count": {
+            "type": "integer",
+            "description": "Maximum commits to show (default 10)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Optional file path to limit history to."
+          }
+        },
+        "required": []
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "git_stage",
+      "canonical": "git_stage",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "string",
+            "description": "File path or pattern to stage (e.g. '.' for all)."
+          }
+        },
+        "required": [
+          "paths"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "git_stash",
+      "canonical": "git_stash",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Action: push, apply, or list. Pop/drop are unsupported.",
+            "enum": [
+              "push",
+              "apply",
+              "list"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Optional stash message for push."
+          },
+          "stash": {
+            "type": "string",
+            "description": "Required for apply: explicit stash@{N} reference, for example stash@{1}."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "git_stashes",
+      "canonical": "git_stashes",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "git_status",
+      "canonical": "git_status",
+      "parameters": {
+        "type": "object",
+        "properties": null
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "git_unstage",
+      "canonical": "git_unstage",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "string",
+            "description": "File path to unstage."
+          }
+        },
+        "required": [
+          "paths"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "glob",
+      "canonical": "find_files",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern such as **/*.rs or *.el."
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search (default: project root)."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "grep",
+      "canonical": "workspace_grep",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Search pattern (regex or literal)."
+          },
+          "path": {
+            "type": "string",
+            "description": "File or directory to search (default: project root)."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Optional file glob, e.g. *.el or **/*.rs."
+          },
+          "max_matches": {
+            "type": "integer",
+            "description": "Maximum hits to return (default 50)."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "kill",
+      "canonical": "debug_kill",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_kill\"))])"
+    },
+    {
+      "name": "list_files",
+      "canonical": "list_files",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory path to list (default: project root)."
+          }
+        },
+        "required": []
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "ls",
+      "canonical": "list_files",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory path to list (default: project root)."
+          }
+        },
+        "required": []
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "lsp_diagnostics",
+      "canonical": "lsp_diagnostics",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Optional. Absolute or project-relative path of a specific file to check. When omitted or empty, runs a project-wide diagnostic scan across all project files."
+          }
+        }
+      },
+      "policy_lisp": "(:available-p kargu-lsp-unavailable-reason)"
+    },
+    {
+      "name": "lsp_find_symbol",
+      "canonical": "lsp_find_symbol",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "symbol_name": {
+            "type": "string",
+            "description": "Name of the symbol to look up, e.g. the function or type name."
+          }
+        },
+        "required": [
+          "symbol_name"
+        ]
+      },
+      "policy_lisp": "(:available-p kargu-lsp-symbols-unavailable-reason)"
+    },
+    {
+      "name": "lsp_project_skeleton",
+      "canonical": "lsp_project_skeleton",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:available-p kargu-lsp-unavailable-reason)"
+    },
+    {
+      "name": "modules",
+      "canonical": "debug_modules",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_modules\"))])"
+    },
+    {
+      "name": "next",
+      "canonical": "debug_step_over",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_step_over\"))])"
+    },
+    {
+      "name": "out",
+      "canonical": "debug_step_out",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_step_out\"))])"
+    },
+    {
+      "name": "outline",
+      "canonical": "read_file_symbols",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to inspect."
+          }
+        }
+      },
+      "policy_lisp": "(:available-p kargu-lsp-symbols-unavailable-reason)"
+    },
+    {
+      "name": "patch",
+      "canonical": "apply_patch",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "patch": {
+            "type": "string",
+            "description": "Standard Unified Diff patch text (--- a/file, +++ b/file, @@ -L,C +L,C @@)."
+          }
+        },
+        "required": [
+          "patch"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "pause",
+      "canonical": "debug_pause",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_pause\"))])"
+    },
+    {
+      "name": "quit",
+      "canonical": "debug_quit",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_quit\"))])"
+    },
+    {
+      "name": "read",
+      "canonical": "read_file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file (or output buffer) to read. Must be a valid file path, NOT a search pattern or regex."
+          },
+          "from_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "First 1-based line to return (inclusive)."
+          },
+          "to_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Last 1-based line to return (inclusive)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum number of lines to return from from_line."
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "read_file",
+      "canonical": "read_file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file (or output buffer) to read. Must be a valid file path, NOT a search pattern or regex."
+          },
+          "from_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "First 1-based line to return (inclusive)."
+          },
+          "to_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Last 1-based line to return (inclusive)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum number of lines to return from from_line."
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "read_file_outline",
+      "canonical": "read_file_symbols",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to inspect."
+          }
+        }
+      },
+      "policy_lisp": "(:available-p kargu-lsp-symbols-unavailable-reason)"
+    },
+    {
+      "name": "read_file_symbols",
+      "canonical": "read_file_symbols",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to inspect."
+          }
+        }
+      },
+      "policy_lisp": "(:available-p kargu-lsp-symbols-unavailable-reason)"
+    },
+    {
+      "name": "read_symbol",
+      "canonical": "read_symbol",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to read."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol"
+        ]
+      },
+      "policy_lisp": "(:available-p kargu-lsp-symbols-unavailable-reason)"
+    },
+    {
+      "name": "read_symbol_body",
+      "canonical": "read_symbol",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to read."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol"
+        ]
+      },
+      "policy_lisp": "(:available-p kargu-lsp-symbols-unavailable-reason)"
+    },
+    {
+      "name": "replace_symbol",
+      "canonical": "edit_by_lsp",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to edit."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to replace."
+          },
+          "new_content": {
+            "type": "string",
+            "description": "New code to replace the entire symbol body/definition with (use empty string to delete)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional explanation for the change."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol",
+          "new_content"
+        ]
+      },
+      "policy_lisp": "(:modes (agent) :available-p kargu-lsp-edit-unavailable-reason)"
+    },
+    {
+      "name": "restart",
+      "canonical": "debug_restart",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_restart\"))])"
+    },
+    {
+      "name": "rg",
+      "canonical": "workspace_grep",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Search pattern (regex or literal)."
+          },
+          "path": {
+            "type": "string",
+            "description": "File or directory to search (default: project root)."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Optional file glob, e.g. *.el or **/*.rs."
+          },
+          "max_matches": {
+            "type": "integer",
+            "description": "Maximum hits to return (default 50)."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "scope",
+      "canonical": "debug_scope",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "variable_name": {
+            "type": "string",
+            "description": "Name of variable to expand child fields for (e.g. 'frame', 'landmarks_2d')."
+          },
+          "scope_index": {
+            "type": "integer",
+            "description": "Index of scope to list (0-based)."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_scope\"))])"
+    },
+    {
+      "name": "set_breakpoint",
+      "canonical": "debug_set_breakpoint",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the source file."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number to set breakpoint on."
+          }
+        },
+        "required": [
+          "file_path",
+          "line"
+        ]
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_set_breakpoint\"))])"
+    },
+    {
+      "name": "skill",
+      "canonical": "skill",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Skill name from available_skills."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "sources",
+      "canonical": "debug_sources",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_sources\"))])"
+    },
+    {
+      "name": "stack",
+      "canonical": "debug_stack",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "levels": {
+            "type": "integer",
+            "description": "Maximum frame depth to report (default 20)."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_stack\"))])"
+    },
+    {
+      "name": "step",
+      "canonical": "debug_step_in",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_step_in\"))])"
+    },
+    {
+      "name": "step_in",
+      "canonical": "debug_step_in",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_step_in\"))])"
+    },
+    {
+      "name": "step_out",
+      "canonical": "debug_step_out",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_step_out\"))])"
+    },
+    {
+      "name": "step_over",
+      "canonical": "debug_step_over",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_step_over\"))])"
+    },
+    {
+      "name": "symbol_body",
+      "canonical": "read_symbol",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to read."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol"
+        ]
+      },
+      "policy_lisp": "(:available-p kargu-lsp-symbols-unavailable-reason)"
+    },
+    {
+      "name": "threads",
+      "canonical": "debug_threads",
+      "parameters": {
+        "type": "object",
+        "properties": "json-empty-object"
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_threads\"))])"
+    },
+    {
+      "name": "toggle_breakpoint",
+      "canonical": "debug_toggle_breakpoint",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the source file."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number."
+          }
+        },
+        "required": [
+          "file_path",
+          "line"
+        ]
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_toggle_breakpoint\"))])"
+    },
+    {
+      "name": "up",
+      "canonical": "debug_up",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of stack frames to navigate up (default 1)."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_up\"))])"
+    },
+    {
+      "name": "watch",
+      "canonical": "debug_watch",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "Expression to add or remove from watch list."
+          },
+          "remove": {
+            "type": "boolean",
+            "description": "Set true to remove expression instead of adding."
+          }
+        }
+      },
+      "policy_lisp": "(:modes (debug agent) :available-p #[nil ((kargu-dape-tool-refusal name)) ((name . \"debug_watch\"))])"
+    },
+    {
+      "name": "webfetch",
+      "canonical": "webfetch",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute http or https URL."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "workspace_grep",
+      "canonical": "workspace_grep",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Search pattern (regex or literal)."
+          },
+          "path": {
+            "type": "string",
+            "description": "File or directory to search (default: project root)."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Optional file glob, e.g. *.el or **/*.rs."
+          },
+          "max_matches": {
+            "type": "integer",
+            "description": "Maximum hits to return (default 50)."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "write",
+      "canonical": "write_file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to write or create."
+          },
+          "contents": {
+            "type": "string",
+            "description": "Complete contents of the file."
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-sentence justification, shown during review."
+          }
+        },
+        "required": [
+          "file_path",
+          "contents"
+        ]
+      },
+      "policy_lisp": "nil"
+    },
+    {
+      "name": "write_file",
+      "canonical": "write_file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to write or create."
+          },
+          "contents": {
+            "type": "string",
+            "description": "Complete contents of the file."
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-sentence justification, shown during review."
+          }
+        },
+        "required": [
+          "file_path",
+          "contents"
+        ]
+      },
+      "policy_lisp": "nil"
+    }
+  ]
+}
