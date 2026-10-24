@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "id": "migration-v2",
+  "mode": "plan",
+  "provider": "fixture-provider",
+  "model": "fixture-model",
+  "effort": {"kind": "off"},
+  "tokens_in": 24,
+  "tokens_out": 10,
+  "requests": 2,
+  "project_root": "/fixture/workspace/",
+  "transcript": "ğ — schema v2 transcript\n",
+  "messages": [
+    {"role": "user", "content": [{"type": "text", "text": "Plan the change 🦀"}]},
+    {"role": "assistant", "content": "A fixture plan"}
+  ]
+}
