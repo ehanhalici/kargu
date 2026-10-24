@@ -32,14 +32,20 @@ pub struct Workspace {
 impl TryFrom<PathBuf> for Workspace {
     type Error = CoreError;
     fn try_from(path: PathBuf) -> Result<Self, CoreError> {
+        use nix::fcntl::{OFlag, open};
+        use nix::sys::stat::Mode as FileMode;
         let path = path.canonicalize()?;
-        let directory = File::open(&path)?;
-        if !directory.metadata()?.is_dir() {
-            return Err(CoreError::InvalidValue { field: "Workspace" });
-        }
+        // O_DIRECTORY rejects FIFOs/devices before opening for IO; O_NOFOLLOW
+        // also rejects replacement of the canonical root with a symlink.
+        let directory = open(
+            &path,
+            OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+            FileMode::empty(),
+        )
+        .map_err(std::io::Error::from)?;
         Ok(Self {
             path,
-            directory: Arc::new(directory),
+            directory: Arc::new(File::from(directory)),
         })
     }
 }
@@ -47,6 +53,36 @@ impl Workspace {
     /// Canonical captured directory; no fallback to the process cwd.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Capture a directory by walking canonical components from the held root.
+    /// Each open is relative to an owned fd and refuses symlink substitution.
+    pub(crate) fn open_read_directory(&self, input: &Path) -> Result<ReadDirectory, CoreError> {
+        use nix::fcntl::{OFlag, openat};
+        use nix::sys::stat::Mode as FileMode;
+        self.revalidate()?;
+        if input.is_absolute() && !input.starts_with(&self.path) {
+            return Err(CoreError::Rejected);
+        }
+        let path = self.path.join(input).canonicalize()?;
+        let relative = path
+            .strip_prefix(&self.path)
+            .map_err(|_| CoreError::Rejected)?;
+        let mut file = self.directory.try_clone()?;
+        for component in relative.components() {
+            let next = openat(
+                &file,
+                Path::new(component.as_os_str()),
+                OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+                FileMode::empty(),
+            )
+            .map_err(std::io::Error::from)?;
+            file = File::from(next);
+        }
+        let directory = ReadDirectory { path, file };
+        self.revalidate()?;
+        directory.revalidate()?;
+        Ok(directory)
     }
     /// Compare current path identity to the held directory, before side effects.
     pub fn revalidate(&self) -> Result<(), CoreError> {
@@ -58,6 +94,34 @@ impl Workspace {
         if !current.is_dir()
             || held.dev() != current.dev()
             || held.ino() != current.ino()
+            || self
+                .path
+                .canonicalize()
+                .map_err(|_| CoreError::WorkspaceChanged)?
+                != self.path
+        {
+            return Err(CoreError::WorkspaceChanged);
+        }
+        Ok(())
+    }
+}
+
+/// Directory identity and owned descriptor; never reconstructed from a numeric fd.
+pub(crate) struct ReadDirectory {
+    pub(crate) path: PathBuf,
+    pub(crate) file: File,
+}
+
+impl ReadDirectory {
+    pub(crate) fn revalidate(&self) -> Result<(), CoreError> {
+        let held = self.file.metadata()?;
+        let current = self
+            .path
+            .metadata()
+            .map_err(|_| CoreError::WorkspaceChanged)?;
+        if held.dev() != current.dev()
+            || held.ino() != current.ino()
+            || !current.is_dir()
             || self
                 .path
                 .canonicalize()

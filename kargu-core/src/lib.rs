@@ -9,9 +9,11 @@ pub mod domain;
 pub mod error;
 pub mod host;
 pub mod ipc;
+pub mod listing;
 pub mod process;
 pub mod search;
 pub mod security;
+mod workspace_read;
 
 /// Package version advertised during negotiation.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

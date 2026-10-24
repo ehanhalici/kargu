@@ -63,6 +63,12 @@ impl Peer {
         assert!(self.read()?.get("result").is_some());
         self.send(json!({"jsonrpc":"2.0","method":"initialized"}))
     }
+    fn scope(&mut self) -> Result<Value, Box<dyn std::error::Error>> {
+        self.send(json!({"jsonrpc":"2.0","id":1,"method":"application/create"}))?;
+        let app = self.read()?["result"].clone();
+        self.send(json!({"jsonrpc":"2.0","id":2,"method":"session/create","params":app}))?;
+        Ok(self.read()?["result"].clone())
+    }
     fn wait(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
@@ -81,6 +87,108 @@ impl Drop for Peer {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+#[test]
+fn native_listing_uses_the_same_owner_and_nonblocking_mailbox() -> TestResult {
+    let root = tempfile::tempdir()?;
+    std::fs::create_dir(root.path().join("sub"))?;
+    std::fs::write(root.path().join("top.el"), "fixture")?;
+    std::fs::write(root.path().join("sub/inner.el"), "fixture")?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let arguments =
+        json!({"root":root.path(),"path":null,"skip_directories":[],"max_entries":2000});
+    peer.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"workspace/listFiles",
+        "params":{"scope":scope,"arguments":arguments}}),
+    )?;
+    peer.send(json!({"jsonrpc":"2.0","id":4,"method":"ping"}))?;
+    let replies = [peer.read()?, peer.read()?];
+    let listing = replies
+        .iter()
+        .find(|reply| reply["id"] == 3)
+        .ok_or("listing missing")?;
+    assert_eq!(listing["result"]["text"], "[DIR]  sub\n[FILE] top.el");
+    assert_eq!(
+        listing["result"]["entries"]
+            .as_array()
+            .ok_or("entries missing")?
+            .len(),
+        2
+    );
+    assert!(
+        replies
+            .iter()
+            .any(|reply| reply["id"] == 4 && reply["result"]["status"] == "ok")
+    );
+    peer.send(json!({"jsonrpc":"2.0","id":5,"method":"session/close","params":scope}))?;
+    assert_eq!(peer.read()?["result"]["status"], "closed");
+    peer.send(
+        json!({"jsonrpc":"2.0","id":6,"method":"workspace/listFiles",
+        "params":{"scope":scope,"arguments":arguments}}),
+    )?;
+    assert_eq!(peer.read()?["error"]["data"]["status"], "stale_owner");
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn listing_invalid_dto_and_foreign_owner_are_rejected_before_io() -> TestResult {
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut arguments = json!({"root":"/kargu-nonexistent-fixture-root","path":null,
+        "skip_directories":[],"max_entries":2000});
+    arguments["unexpected"] = json!(true);
+    peer.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"workspace/listFiles",
+        "params":{"scope":scope,"arguments":arguments}}),
+    )?;
+    assert_eq!(peer.read()?["error"]["code"], -32602);
+    arguments
+        .as_object_mut()
+        .ok_or("not an object")?
+        .remove("unexpected");
+    let mut foreign = scope;
+    foreign["application_id"] = json!(kargu_core::domain::ApplicationId::new());
+    peer.send(
+        json!({"jsonrpc":"2.0","id":4,"method":"workspace/listFiles",
+        "params":{"scope":foreign,"arguments":arguments}}),
+    )?;
+    assert_eq!(peer.read()?["error"]["data"]["status"], "stale_owner");
+    peer.send(json!({"jsonrpc":"2.0","id":5,"method":"ping"}))?;
+    assert_eq!(peer.read()?["result"]["status"], "ok");
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn oversized_listing_is_a_scoped_error_and_ping_survives() -> TestResult {
+    let root = tempfile::tempdir()?;
+    for n in 0..100 {
+        std::fs::write(root.path().join(format!("file-{n:04}.el")), "fixture")?;
+    }
+    let mut peer = Peer::start()?;
+    peer.send(
+        json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+        "protocol_major":1,"protocol_minor":0,"client_version":"test","capabilities":[],
+        "limits":{"max_frame_bytes":1024}}}),
+    )?;
+    assert!(peer.read()?.get("result").is_some());
+    peer.send(json!({"jsonrpc":"2.0","method":"initialized"}))?;
+    let scope = peer.scope()?;
+    peer.send(json!({"jsonrpc":"2.0","id":3,"method":"workspace/listFiles","params":{
+        "scope":scope,"arguments":{"root":root.path(),"path":null,"skip_directories":[],"max_entries":2000}}}))?;
+    assert_eq!(peer.read()?["error"]["data"]["status"], "resource_limit");
+    peer.send(json!({"jsonrpc":"2.0","id":4,"method":"ping"}))?;
+    assert_eq!(peer.read()?["result"]["status"], "ok");
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
 }
 
 #[test]

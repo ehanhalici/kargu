@@ -5,7 +5,7 @@ use crate::{
     constants::{limits, protocol, timeouts},
     error::CoreError,
     host::{Host, ReadScope},
-    search::{FindFilesInput, FindFilesPlan, FindFilesResult},
+    workspace_read::{ReadResult, WorkspaceRead},
 };
 use serde_json::Value;
 use std::{collections::HashMap, time::Instant};
@@ -21,7 +21,7 @@ struct PendingRead {
 
 pub(super) struct ReadTools {
     requests: HashMap<RpcId, PendingRead>,
-    workers: JoinSet<(RpcId, Result<FindFilesResult, CoreError>)>,
+    workers: JoinSet<(RpcId, Result<ReadResult, CoreError>)>,
     root: CancellationToken,
     _cancel_on_drop: DropGuard,
 }
@@ -50,7 +50,7 @@ impl ReadTools {
         &mut self,
         id: RpcId,
         scope: ReadScope,
-        input: FindFilesInput,
+        input: WorkspaceRead,
     ) -> Result<(), Fault> {
         if self.root.is_cancelled() {
             return Err(fault(CoreError::Cancelled));
@@ -72,11 +72,7 @@ impl ReadTools {
             },
         );
         self.workers.spawn_blocking(move || {
-            let result = if cancel.is_cancelled() {
-                Err(CoreError::Cancelled)
-            } else {
-                FindFilesPlan::try_from(input).and_then(|plan| plan.execute(&cancel, deadline))
-            };
+            let result = input.execute(&cancel, deadline);
             (id, result)
         });
         Ok(())
@@ -181,6 +177,7 @@ fn fault(error: CoreError) -> Fault {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{listing::ListFilesInput, search::FindFilesInput};
     use serde_json::json;
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -208,15 +205,60 @@ mod tests {
         Ok((host, serde_json::from_value(session)?))
     }
 
-    fn arguments(root: &std::path::Path) -> FindFilesInput {
-        FindFilesInput {
+    fn arguments(root: &std::path::Path) -> WorkspaceRead {
+        WorkspaceRead::FindFiles(FindFilesInput {
             root: root.to_owned(),
             path: None,
             pattern: "*.el".into(),
             skip_directories: vec![],
             max_files: 2000,
             max_directories: 2000,
+        })
+    }
+
+    fn listing_arguments(root: &std::path::Path) -> WorkspaceRead {
+        WorkspaceRead::ListFiles(ListFilesInput {
+            root: root.to_owned(),
+            path: None,
+            skip_directories: vec![],
+            max_entries: 2000,
+        })
+    }
+
+    #[tokio::test]
+    async fn listing_shares_capacity_with_discovery_and_cancel_is_request_scoped() -> TestResult {
+        let root = tempfile::tempdir()?;
+        let (host, scope) = owner()?;
+        let mut tools = ReadTools::default();
+        for n in 0..4 {
+            let input = if n % 2 == 0 {
+                arguments(root.path())
+            } else {
+                listing_arguments(root.path())
+            };
+            tools
+                .start(RpcId::Integer(n), scope.clone(), input)
+                .map_err(|_| "start failed")?;
         }
+        tools.cancel(&RpcId::Integer(1));
+        assert!(
+            tools
+                .start(RpcId::Integer(4), scope, listing_arguments(root.path()))
+                .is_err()
+        );
+        let mut completed = 0_usize;
+        while let Some(reply) = tools.next(&host).await {
+            let reply = reply?;
+            if reply["id"] == 1 {
+                assert_eq!(reply["error"]["data"]["status"], "cancelled");
+            } else {
+                assert!(reply.get("result").is_some());
+            }
+            completed = completed.saturating_add(1);
+        }
+        assert_eq!(completed, 4);
+        assert!(tools.is_empty());
+        Ok(())
     }
 
     #[tokio::test]
@@ -262,12 +304,20 @@ mod tests {
     async fn expired_and_closed_owners_cannot_publish_success_even_after_worker_completed()
     -> TestResult {
         let root = tempfile::tempdir()?;
-        for expired in [true, false] {
+        for (expired, listing) in [(true, false), (false, false), (true, true), (false, true)] {
             let (mut host, scope) = owner()?;
             let mut tools = ReadTools::default();
             let id = RpcId::Integer(1);
             tools
-                .start(id.clone(), scope.clone(), arguments(root.path()))
+                .start(
+                    id.clone(),
+                    scope.clone(),
+                    if listing {
+                        listing_arguments(root.path())
+                    } else {
+                        arguments(root.path())
+                    },
+                )
                 .map_err(|_| "start failed")?;
             if expired {
                 tools

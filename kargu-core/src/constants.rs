@@ -64,6 +64,8 @@ pub mod limits {
     pub const SEARCH_PATTERN_BYTES: usize = 1024;
     /// Bytes in a client-supplied path.
     pub const SEARCH_PATH_BYTES: usize = 4096;
+    /// Visible entries retained by one direct directory listing.
+    pub const LIST_RESULTS: usize = 200;
 }
 
 /// Timeouts are typed durations, never shared unlabelled numbers.
@@ -96,11 +98,12 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented wire capabilities; arbitrary command execution is not exposed.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 4] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 5] = [
         "application_lifecycle",
         "session_lifecycle",
         methods::PING,
         "workspace_find_files",
+        "workspace_list_files",
     ];
 
     /// JSON-RPC and host error codes, kept separate from human error messages.
@@ -150,6 +153,8 @@ pub mod protocol {
         pub const SESSION_CLOSE: &str = "session/close";
         /// Bounded, read-only native file discovery.
         pub const FIND_FILES: &str = "workspace/findFiles";
+        /// Bounded direct directory listing without following entry symlinks.
+        pub const LIST_FILES: &str = "workspace/listFiles";
         /// Cancel pending request.
         pub const CANCEL: &str = "rpc/cancel";
         /// Drain host.

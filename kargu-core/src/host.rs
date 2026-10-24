@@ -21,9 +21,9 @@ pub(crate) struct ReadScope {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FindFilesRequest {
+struct ReadRequest<T> {
     scope: ReadScope,
-    arguments: crate::search::FindFilesInput,
+    arguments: T,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -115,19 +115,32 @@ impl Host {
                 .is_some_and(|actor| actor.owns_session(&scope.session_id))
     }
 
-    pub(crate) fn prepare_find_files(
+    pub(crate) fn prepare_workspace_read(
         &self,
+        method: &str,
         params: Value,
-    ) -> Result<(ReadScope, crate::search::FindFilesInput), Fault> {
+    ) -> Result<(ReadScope, crate::workspace_read::WorkspaceRead), Fault> {
+        use crate::workspace_read::WorkspaceRead;
         if self.phase != Phase::Ready {
             return Err(state_fault());
         }
-        let request: FindFilesRequest =
-            serde_json::from_value(params).map_err(|_| Fault::params())?;
-        if !self.owns_read_scope(&request.scope) {
+        let (scope, input) = match method {
+            methods::FIND_FILES => {
+                let request: ReadRequest<crate::search::FindFilesInput> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                (request.scope, WorkspaceRead::FindFiles(request.arguments))
+            }
+            methods::LIST_FILES => {
+                let request: ReadRequest<crate::listing::ListFilesInput> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                (request.scope, WorkspaceRead::ListFiles(request.arguments))
+            }
+            _ => return Err(Fault::params()),
+        };
+        if !self.owns_read_scope(&scope) {
             return Err(owner_fault());
         }
-        Ok((request.scope, request.arguments))
+        Ok((scope, input))
     }
 
     pub(crate) fn matches_epoch(&self, scope: &RequestScope) -> bool {
