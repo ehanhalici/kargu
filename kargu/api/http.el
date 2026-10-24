@@ -319,6 +319,7 @@ GEN identifies the request; ON-DELTA and ATTEMPT are retained for retries."
     (kargu-http--log-request request 'plain)
     (kargu-http--track-process
      request (kargu-transport-request 'post url
+                  :application (kargu-application-context)
                   :auth auth :body (kargu-json-encode-record payload)
                   :wire (kargu-api-wire-record (kargu-api-active-format))
                   :tuning (kargu-api-request-tuning (kargu--provider-name) (kargu--model))
@@ -350,6 +351,7 @@ ATTEMPT is the retry count."
    request
    (kargu-transport-request
     'post (kargu-http--request-url request)
+    :application (kargu-application-context)
     :auth (kargu-http--request-auth request)
     :wire (kargu-api-wire-record (kargu-api-active-format))
     :tuning (kargu-api-request-tuning (kargu--provider-name) (kargu--model))

@@ -544,6 +544,7 @@ An explicit true flag is sufficient even without an API effort list."
       (error "No API key for provider %s" provider))
     (let ((request
            (kargu-transport-request 'get url :auth (kargu-api-auth-intent key provider)
+                :application (kargu-application-context)
                 :wire (if (kargu-connection-current) (kargu-connection-setting :wire)
                         (kargu-provider-format-record (kargu-provider-format provider)))
                 :provider provider

@@ -60,6 +60,9 @@ Request policy de native'ye taşınıp eski seçim/merge motorları silindi (.co
 Credential/header assembly de native'ye taşınıp Elisp üretim motorları silindi
 (.codex/33); credential lookup editör portudur. Retry/circuit ve model metadata
 normalization hâlâ açık olduğu için tüm API göçü tamamlandı sayılmaz.
+API tüketicileri application-owned native service lease kullanır (.codex/34–35);
+bu henüz native agent run/history sahipliği değildir. Normal loop'un optional
+budget constructor'ını bağlamadığı da doğrulandı; G08 native bağlantıyı kapsar.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
 output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan read/
 Git/skill/webfetch, egress/context ve global tüketiciler aşağıdaki gruplarda

@@ -107,20 +107,23 @@ Kaynak: [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server)
 
 ## 4. Google Antigravity
 
-Belgelenmiş başlangıç noktası MCP üzerinden Kargu araçlarını sunmaktır.
-`/tmp/antigravity.sock` veya belli bir WebSocket portu varsayılmaz. MCP desteği,
-Antigravity konuşmasını Emacs'ten başlatma ya da plan olaylarını alma API'sinin
-kanıtı değildir. **Hedef Antigravity'nin de provider alanından seçilerek
-konuşma backend'i olarak çalışmasıdır; yalnız MCP sunumu yeterli teslim değildir.**
-Konuşma/turn kontrolü sağlayan desteklenen entegrasyon yolu ve sürüm, adapter
-yazılmadan önce araştırılıp doğrulanır; uçtan uca fixture ve gerçek ürün smoke
-testi zorunludur. Bu doğrulanana kadar kurulu kayıt `InstalledUnverified` veya
-kanıtlanan nedene göre `UnsupportedProtocol` gösterilir; `Ready` ilan edilmez.
-Uygun yol bulunamazsa engel ve araştırma kanıtı kaydedilir, kapsamdan sessizce
-çıkarılmaz veya MCP desteği chat desteği diye yeniden adlandırılmaz.
+2026-10-25 güncellemesi: resmî Antigravity CLI (`agy`) headless dokümanı bulundu.
+Konuşma adayı stdin/stdout stream-json'dur; `/tmp/antigravity.sock` veya keyfî port
+varsayılmaz. `init`/`step_update`/`result` ayrımı, explicit conversation kimliği ve
+session-cumulative usage için per-turn fark hesabı fixture'la sabitlenir. `agy`
+bu makinenin PATH'inde yoktur; desktop kurulumu CLI/auth/protokol kanıtı değildir.
+
+Headless input `control_request`/`control_response` kabul etmez. Onay isteyen
+araçlar soft-deny olabilirken workspace yazıları varsayılan olarak izinlidir;
+exit 0 tek başına başarı/yan-etkisizlik değildir. Ask/Plan güvenliği ve interaktif
+review bağlantısı ayrıca doğrulanmalıdır. `--dangerously-skip-permissions`
+otomatik eklenmez; kullanıcı ayarları sessizce değiştirilmez. Sürüm, model/auth,
+izin profili, cancellation/drain ve gerçek ürün smoke kabulü bitmeden `Ready`
+ilan edilmez. MCP-only destek yine konuşma backend'i teslimi sayılmaz.
 
 Kaynak: [Google Antigravity MCP](https://antigravity.google/docs/mcp)
-(2026-10-24 kontrolü).
+(2026-10-24 kontrolü); [resmî CLI headless](https://www.antigravity.google/docs/cli/headless/)
+(2026-10-25 kontrolü). Dört backend kapsamı daraltılmadı.
 
 ## 5. OpenCode
 

@@ -1,5 +1,31 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Editor application lease API consumer cutover
+
+POST ve model GET artık editor application'a ait native service scope'uyla
+çalışır; root standalone scope'una sessiz fallback yoktur. Thin lease portu
+coalescing, detached strings, late acquisition/close, reentrant observer ve owner
+startup cancellation sınırlarını korur. Cyclic owner graph DTO gibi deep-copy
+edilmez; nested startup cleanup'ları stack'te tutulur. Detaylar 35'tedir. Bu,
+henüz native user-history/run import'u değildir; diğer tool service tüketicileri
+eski explicit standalone scope'ta kalır.
+
+**1169/1169 full source ERT**, 0 unexpected, **125.41 s**; son reentrant failure
+guard'ı sonrası **47/47** focused source ERT geçer. Touched checkdoc ve
+warning-as-error bytecompile temiz; geçici .elc kaldırıldı. Rust baseline aynı
+**148 + 2 compile-fail**'dır. Real stdio API scope isolation ve drain kabulü
+dahildir. Canlı hesap/ücretli CLI/kurulum yok. Antigravity resmî `agy` headless
+protokol dokümanı bulundu; güncel izin/cumulative-usage/Ready koşulu 03 bölüm 4'e
+eklendi. PATH'te codex/opencode var, agy/antigravity/claude görünmedi; bu yalnız
+read-only presence kontrolüdür, sürüm/auth/Ready kanıtı değildir.
+
+Bütçe ön incelemesi yeni bir wiring açığını doğruladı: budget.el constructor/
+seal normal loop tarafından çağrılmıyor; HTTP/tool'da yalnız optional context
+tüketicileri ve testler var. Native API budget geçişi canonical sayacı gerçek
+run'a bağlamalı; helper testlerini taşımak tek başına kapanış değildir. Native
+genel claim/budget/retry/breaker, model store ve agent/history hâlâ açıktır.
+Kullanıcı shell.nix/07 değişiklikleri commit dışındadır.
+
 ## 2026-10-25 — Drain-before-release application close ve API fairness
 
 Native `application/close` public stdio consumer'a bağlandı. Host `Live`/

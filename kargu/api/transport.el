@@ -16,6 +16,7 @@
 (require 'kargu/json)
 (require 'kargu/core/custom)
 (require 'kargu/providers/projection)
+(require 'kargu/bridge/application)
 
 (defvar kargu-api-timeout)
 (defvar kargu-api-connect-timeout)
@@ -30,16 +31,33 @@
 
 (cl-defstruct (kargu-transport-handle (:constructor kargu-transport--handle))
   "An editor delivery lease, not an OS process."
-  connection id startup chunks (bytes 0) (state :pending))
+  connection id startup chunks owner owner-cleanup (bytes 0) (state :pending))
+
+(defun kargu-transport--detach-owner (handle)
+  "Detach HANDLE's startup and delivery lifecycle hooks exactly once."
+  (when-let* ((cleanup (kargu-transport-handle-owner-cleanup handle)))
+    (setf (kargu-transport-handle-owner-cleanup handle) nil)
+    (when (buffer-live-p (kargu-transport-handle-owner handle))
+      (with-current-buffer (kargu-transport-handle-owner handle)
+        (remove-hook 'kill-buffer-hook cleanup t)
+        (remove-hook 'change-major-mode-hook cleanup t)))))
+
+(defun kargu-transport--drain-startup (handle)
+  "Release HANDLE's independently acquired startup waiters once."
+  (let ((cleanups (kargu-transport-handle-startup handle)))
+    (setf (kargu-transport-handle-startup handle) nil)
+    (dolist (cleanup cleanups)
+      (condition-case nil (funcall cleanup)
+        ((error quit) (message "Kargu API startup cleanup failed"))))))
 
 (defun kargu-transport-cancel (handle)
   "Revoke only HANDLE's callbacks and cancel its captured core attempt."
   (when (and (kargu-transport-handle-p handle)
              (eq (kargu-transport-handle-state handle) :pending))
     (setf (kargu-transport-handle-state handle) :cancelled)
+    (kargu-transport--detach-owner handle)
     (setf (kargu-transport-handle-chunks handle) nil)
-    (when-let* ((cleanup (kargu-transport-handle-startup handle))) (funcall cleanup))
-    (setf (kargu-transport-handle-startup handle) nil)
+    (kargu-transport--drain-startup handle)
     (when (kargu-transport-handle-id handle)
       (kargu-bridge-cancel (kargu-transport-handle-connection handle)
                            (kargu-transport-handle-id handle)))))
@@ -73,14 +91,15 @@ PARTIAL prevents retries after any published response event."
   (when (eq (kargu-transport-handle-state handle) :pending)
     (let ((chunks (kargu-transport-handle-chunks handle)))
       (setf (kargu-transport-handle-state handle) :finished
-            (kargu-transport-handle-chunks handle) nil
-            (kargu-transport-handle-startup handle) nil)
+            (kargu-transport-handle-chunks handle) nil)
+      (kargu-transport--drain-startup handle)
+      (kargu-transport--detach-owner handle)
       (cond
-        (failure (funcall (plist-get options :else)
-                          ;; Local IPC/admission/consumer failures are not an
-                          ;; upstream outage and must not trip its circuit.
-                          (make-plz-error :message (gethash "message" failure "Rust API request failed")
-                                          :response (make-plz-response :status 400 :body ""))))
+       (failure (funcall (plist-get options :else)
+                         ;; Local IPC/admission/consumer failures are not an
+                         ;; upstream outage and must not trip its circuit.
+                         (make-plz-error :message (gethash "message" failure "Rust API request failed")
+                                         :response (make-plz-response :status 400 :body ""))))
        ((not (hash-table-p result))
 	(funcall (plist-get options :else) (make-plz-error :message "Invalid Rust API result")))
        ((gethash "failure" result)
@@ -91,12 +110,61 @@ PARTIAL prevents retries after any published response event."
           (funcall (plist-get options :then) body)))
        (t (funcall (plist-get options :else) (make-plz-error :message "Invalid Rust API result")))))))
 
+(defun kargu-transport--startup (handle cleanup)
+  "Attach startup CLEANUP to HANDLE or release an acquisition delivered late."
+  (if (eq (kargu-transport-handle-state handle) :pending)
+      (push cleanup (kargu-transport-handle-startup handle))
+    (funcall cleanup)))
+
+(defun kargu-transport--post (handle options arguments connection scope failure)
+  "Send captured ARGUMENTS on CONNECTION under SCOPE for HANDLE and OPTIONS.
+FAILURE ends only this editor delivery."
+  (when (eq (kargu-transport-handle-state handle) :pending)
+    (cond
+     (failure (kargu-transport--deliver handle options nil failure))
+     ((not (buffer-live-p (kargu-transport-handle-owner handle))) (kargu-transport-cancel handle))
+     (t
+      (setf (kargu-transport-handle-connection handle) connection
+            (kargu-transport-handle-id handle)
+            (kargu-bridge-call
+             connection "api/request" (kargu-bridge--object "scope" scope "arguments" arguments)
+             (lambda (result error-data) (kargu-transport--deliver handle options result error-data))
+             :owner (kargu-transport-handle-owner handle) :timeout :unlimited
+             :on-body (lambda (chunk)
+                        (when (eq (kargu-transport-handle-state handle) :pending)
+                          (unless (and (stringp chunk)
+                                       (<= (+ (kargu-transport-handle-bytes handle) (string-bytes chunk)) (* 8 1024 1024)))
+                            (error "Invalid or oversized core API body"))
+                          (cl-incf (kargu-transport-handle-bytes handle) (string-bytes chunk))
+                          (push chunk (kargu-transport-handle-chunks handle))))
+             :on-delta (lambda (event)
+                         (when (eq (kargu-transport-handle-state handle) :pending)
+                           (when-let* ((delta (plist-get options :on-delta)))
+                             (funcall delta (kargu-json-to-record event)))))))))))
+
+(defun kargu-transport--ready (handle options arguments connection failure)
+  "Advance HANDLE after startup using OPTIONS, ARGUMENTS, CONNECTION and FAILURE."
+  (when (eq (kargu-transport-handle-state handle) :pending)
+    (let* ((capabilities (and connection (append (kargu-bridge-connection-capabilities connection) nil)))
+           (required (plist-get options :required)))
+      (cond
+       ((or failure (not (cl-every (lambda (capability) (member capability capabilities)) required)))
+        (kargu-transport--deliver handle options nil (or failure (kargu-bridge--fault "unsupported_api"))))
+       ((plist-get options :application)
+        (kargu-transport--startup
+         handle (kargu-bridge-application-ensure
+                 connection (plist-get options :application)
+                 (lambda (scope error-data)
+                   (kargu-transport--post handle options arguments connection scope error-data)))))
+       (t (kargu-transport--post handle options arguments connection
+                                 (kargu-bridge-connection-read-scope connection) nil))))))
+
 (defun kargu-transport-request (method url &rest options)
   "Send METHOD to captured URL via Rust, returning an owned delivery handle.
 OPTIONS contain captured :auth/:wire/:tuning, :body, :timeout, :stream,
 :on-delta, :then and :else; raw :headers are reserved for explicit callers.
 No network request or subprocess is ever started by Elisp."
-  (let* ((options (copy-tree options t))
+  (let* ((application (plist-get options :application))
          (url (copy-sequence url))
          (handle (kargu-transport--handle))
          (owner (current-buffer))
@@ -110,7 +178,7 @@ No network request or subprocess is ever started by Elisp."
            "stream" (if stream t :json-false)
            "wire" (kargu-providers-wire-object (plist-get options :wire))
            "provider" (if-let* ((provider (plist-get options :provider)))
-                           (copy-sequence provider) :json-null)
+                          (copy-sequence provider) :json-null)
            "cache_markers" (if (plist-get options :cache-markers) t :json-false)
            "tuning" (kargu-providers-wire-object (plist-get options :tuning))
            "auth" (kargu-providers-wire-object (plist-get options :auth))
@@ -124,45 +192,31 @@ No network request or subprocess is ever started by Elisp."
                        "connect_ms" (kargu-transport--milliseconds kargu-api-connect-timeout)
                        "first_byte_ms" (kargu-transport--milliseconds kargu-api-first-byte-timeout)
                        "idle_ms" (kargu-transport--milliseconds (and stream kargu-api-stall-timeout))
-                       "deadline_ms" (kargu-transport--milliseconds (if stream kargu-api-stream-ceiling timeout))))))
+                       "deadline_ms" (kargu-transport--milliseconds (if stream kargu-api-stream-ceiling timeout)))))
+         ;; Owner records/closures form cyclic graphs. Preserve their identity;
+         ;; copy only DTO authority through the explicit encoders above.
+         (delivery-options
+          (list :application application :then (plist-get options :then)
+                :else (plist-get options :else) :on-delta (plist-get options :on-delta)
+                :required (append '("api_request")
+                                  (when (or (not (eq (gethash "wire" arguments) :json-null))
+                                            (eq (gethash "cache_markers" arguments) t)) '("api_wire"))
+                                  (unless (eq (gethash "tuning" arguments) :json-null) '("api_request_policy"))
+                                  (unless (eq (gethash "auth" arguments) :json-null) '("api_auth"))))))
     ;; copy-tree does not copy mutable strings: copy every authority-bearing
     ;; string before waiting for startup, not only the surrounding cons cells.
     (dolist (pair (plist-get options :headers))
       (puthash (copy-sequence (car pair)) (copy-sequence (cdr pair)) headers))
-    (setf (kargu-transport-handle-startup handle)
-          (kargu-bridge-ensure
-           (lambda (connection failure)
-             (when (eq (kargu-transport-handle-state handle) :pending)
-               (if (or failure
-                       (not (member "api_request" (append (kargu-bridge-connection-capabilities connection) nil)))
-                       (and (or (plist-get options :wire) (plist-get options :cache-markers))
-                            (not (member "api_wire" (append (kargu-bridge-connection-capabilities connection) nil))))
-                       (and (plist-get options :tuning)
-                            (not (member "api_request_policy" (append (kargu-bridge-connection-capabilities connection) nil))))
-                       (and (plist-get options :auth)
-                            (not (member "api_auth" (append (kargu-bridge-connection-capabilities connection) nil)))))
-                   (kargu-transport--deliver handle options nil
-                                             (or failure (kargu-bridge--fault "unsupported_api")))
-                 (setf (kargu-transport-handle-connection handle) connection
-                       (kargu-transport-handle-id handle)
-                       (kargu-bridge-call
-                        connection "api/request"
-                        (kargu-bridge--object "scope" (kargu-bridge-connection-read-scope connection)
-                                              "arguments" arguments)
-                        (lambda (result error-data) (kargu-transport--deliver handle options result error-data))
-                        :owner owner :timeout :unlimited
-                        :on-body (lambda (chunk)
-                                   (when (eq (kargu-transport-handle-state handle) :pending)
-                                     (unless (and (stringp chunk)
-                                                  (<= (+ (kargu-transport-handle-bytes handle) (string-bytes chunk))
-                                                      (* 8 1024 1024)))
-                                       (error "Invalid or oversized core API body"))
-                                     (cl-incf (kargu-transport-handle-bytes handle) (string-bytes chunk))
-                                     (push chunk (kargu-transport-handle-chunks handle))))
-                        :on-delta (lambda (event)
-                                    (when (eq (kargu-transport-handle-state handle) :pending)
-                                      (when-let* ((delta (plist-get options :on-delta)))
-                                        (funcall delta (kargu-json-to-record event))))))))))))
+    (let ((cleanup (lambda () (kargu-transport-cancel handle))))
+      (setf (kargu-transport-handle-owner handle) owner
+            (kargu-transport-handle-owner-cleanup handle) cleanup)
+      (with-current-buffer owner
+        (add-hook 'kill-buffer-hook cleanup nil t)
+        (add-hook 'change-major-mode-hook cleanup nil t)))
+    (kargu-transport--startup
+     handle (kargu-bridge-ensure
+             (lambda (connection failure)
+               (kargu-transport--ready handle delivery-options arguments connection failure))))
     handle))
 
 (provide 'kargu/api/transport)

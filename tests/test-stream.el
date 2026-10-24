@@ -348,5 +348,39 @@ Send the request body to CAPTURE and its headers to CAPTURE-HEADERS."
                 (should (string-search "x-custom: explicit-value" headers))))
           (delete-process server))))))
 
+(ert-deftest kargu-stream-native-applications-have-isolated-api-scope-and-close-test ()
+  "Real API leases use distinct native owners and close only their own scope."
+  (kargu-bridge-test--with-core
+    (let* ((first (kargu-application-create)) (second (kargu-application-create))
+           scope-first scope-second binding-failure posted closed failure result
+           (server (kargu-stream-test--server "" nil t (lambda (_) (setq posted t)))))
+      (unwind-protect
+          (progn
+            (kargu-bridge-application-ensure conn first (lambda (scope err) (setq scope-first scope binding-failure err)))
+            (kargu-bridge-application-ensure conn second (lambda (scope err) (setq scope-second scope binding-failure err)))
+            (kargu-bridge-test--wait (lambda () (or binding-failure (and scope-first scope-second))))
+            (should-not binding-failure)
+            (should-not (equal (gethash "application_id" scope-first) (gethash "application_id" scope-second)))
+            (should-not (equal (gethash "application_id" scope-first)
+                               (gethash "application_id" (kargu-bridge-connection-read-scope conn))))
+            (kargu-transport-request
+             'post (format "http://127.0.0.1:%d/chat" (process-contact server :service)) :body "{}" :timeout 3
+             :application first :then (lambda (value) (setq result value)) :else (lambda (err) (setq failure err)))
+            (kargu-bridge-test--wait (lambda () posted))
+            (kargu-bridge-application-close first (lambda (_ err) (should-not err) (setq closed t)))
+            (kargu-bridge-test--wait (lambda () (and closed failure)))
+            (should-not result)
+            (let ((snapshot (kargu-bridge-test--call conn "session/snapshot" scope-second)))
+              (should-not (cadr snapshot))
+              (should (equal (gethash "state" (car snapshot)) "idle")))
+            (should (cadr (kargu-bridge-test--call conn "session/snapshot" scope-first)))
+            (let (refused)
+              (kargu-bridge-application-ensure conn first (lambda (scope err) (should-not scope) (setq refused err)))
+              (should refused))
+            (setq closed nil)
+            (kargu-bridge-application-close second (lambda (_ err) (should-not err) (setq closed t)))
+            (kargu-bridge-test--wait (lambda () closed)))
+        (delete-process server)))))
+
 (provide 'tests/test-stream)
 ;;; test-stream.el ends here
