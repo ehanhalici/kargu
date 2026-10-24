@@ -1,9 +1,12 @@
 //! Strict command DTO capture. Filesystem preparation runs off the mailbox.
 
 use crate::{
-    application::{Mode, RunSettings},
+    application::{Mode, RunPurpose, RunSettings},
     constants::{limits, timeouts},
-    domain::{ConfigRevision, PolicyRevision, ToolCallLimit, ToolName},
+    domain::{
+        ConfigRevision, ExecutionTimeout, OutputLimit, OutputRetention, PolicyRevision,
+        ToolCallLimit, ToolName,
+    },
     error::CoreError,
     security::{CommandEnvironment, CommandInput, CommandSpec, Workspace},
 };
@@ -24,23 +27,27 @@ pub(super) struct ExecuteInput {
     arguments: Vec<String>,
     cwd: Option<PathBuf>,
     timeout_ms: CommandTimeout,
+    #[serde(default)]
+    output_bytes: OutputLimit,
     environment: BTreeMap<String, String>,
     config_revision: ConfigRevision,
     policy_revision: PolicyRevision,
 }
 
 #[derive(Deserialize)]
-#[serde(try_from = "u64")]
-struct CommandTimeout(Duration);
-impl TryFrom<u64> for CommandTimeout {
+#[serde(try_from = "Option<u64>")]
+struct CommandTimeout(ExecutionTimeout);
+impl TryFrom<Option<u64>> for CommandTimeout {
     type Error = CoreError;
-    fn try_from(value: u64) -> Result<Self, CoreError> {
-        if value == 0 || value > 86_400_000 {
+    fn try_from(value: Option<u64>) -> Result<Self, CoreError> {
+        if value.is_some_and(|n| n == 0 || n > 86_400_000) {
             return Err(CoreError::InvalidValue {
                 field: "CommandTimeout",
             });
         }
-        Ok(Self(Duration::from_millis(value)))
+        Ok(Self(ExecutionTimeout::try_from(
+            value.map(Duration::from_millis),
+        )?))
     }
 }
 
@@ -51,7 +58,7 @@ pub(super) struct Prepared {
 }
 
 impl ExecuteInput {
-    pub fn prepare(self) -> Result<Prepared, CoreError> {
+    pub fn prepare(self, purpose: RunPurpose) -> Result<Prepared, CoreError> {
         if self.mode != Mode::Agent {
             return Err(CoreError::Rejected);
         }
@@ -66,17 +73,32 @@ impl ExecuteInput {
         if !cwd.starts_with(workspace.path()) {
             return Err(CoreError::Rejected);
         }
-        let timeout = self.timeout_ms.0;
-        let settings = RunSettings::new(
-            Mode::Agent,
-            workspace,
-            ToolCallLimit::default(),
-            timeout
-                .checked_add(timeouts::APPROVAL)
-                .ok_or(CoreError::ArithmeticOverflow)?,
-            self.config_revision,
-            self.policy_revision,
-        )?;
+        let timeout = self.timeout_ms.0.duration();
+        if timeout.is_none() && purpose == RunPurpose::AgentTurn {
+            return Err(CoreError::InvalidValue {
+                field: "CommandTimeout",
+            });
+        }
+        let settings = if let Some(timeout) = timeout {
+            RunSettings::new(
+                Mode::Agent,
+                workspace,
+                ToolCallLimit::default(),
+                timeout
+                    .checked_add(timeouts::APPROVAL)
+                    .ok_or(CoreError::ArithmeticOverflow)?,
+                self.config_revision,
+                self.policy_revision,
+            )?
+        } else {
+            RunSettings::persistent(
+                Mode::Agent,
+                workspace,
+                ToolCallLimit::default(),
+                self.config_revision,
+                self.policy_revision,
+            )
+        };
         let environment: BTreeMap<OsString, OsString> = self
             .environment
             .into_iter()
@@ -86,9 +108,15 @@ impl ExecuteInput {
             program: self.program,
             arguments: self.arguments.into_iter().map(OsString::from).collect(),
             working_directory: cwd,
-            timeout: Some(timeout),
+            timeout,
             environment: CommandEnvironment::try_from(environment)?,
-        })?;
+        })?
+        .with_retention(if purpose == RunPurpose::ProcessJob {
+            OutputRetention::Tail
+        } else {
+            OutputRetention::Prefix
+        })
+        .with_output_limit(self.output_bytes);
         if command.program.to_str().is_none() || command.cwd.path().to_str().is_none() {
             return Err(CoreError::InvalidValue {
                 field: "CommandPathEncoding",

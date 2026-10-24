@@ -4,7 +4,7 @@ use super::OutputPage;
 use crate::{
     application::RunHandle,
     constants::limits,
-    domain::{ByteLimit, ByteOffset, OutputRetention},
+    domain::{ByteLimit, ByteOffset, OutputLimit, OutputRetention},
     error::CoreError,
 };
 use std::collections::VecDeque;
@@ -13,22 +13,26 @@ pub(super) struct Archive {
     bytes: VecDeque<u8>,
     seen: ByteOffset,
     retention: OutputRetention,
+    limit: OutputLimit,
     truncated: bool,
     pub(super) eof: bool,
 }
 impl Archive {
-    pub fn new(retention: OutputRetention) -> Self {
+    pub fn new(retention: OutputRetention, limit: OutputLimit) -> Self {
         Self {
             bytes: VecDeque::new(),
             seen: ByteOffset::ZERO,
             retention,
+            limit,
             truncated: false,
             eof: false,
         }
     }
     pub fn push(&mut self, input: &[u8], run: &RunHandle) -> Result<(), CoreError> {
         self.seen = self.seen.checked_add(offset(input.len())?)?;
-        let room = limits::PROCESS_OUTPUT_BYTES
+        let room = self
+            .limit
+            .as_usize()
             .saturating_sub(self.bytes.len())
             .min(input.len());
         let growth = if room == 0 {
@@ -79,6 +83,13 @@ impl Archive {
         )
     }
     pub fn page(&self, cursor: ByteOffset) -> Result<OutputPage, CoreError> {
+        self.page_limit(cursor, ByteLimit::try_from(limits::PROCESS_PAGE_BYTES)?)
+    }
+    pub fn page_limit(
+        &self,
+        cursor: ByteOffset,
+        limit: ByteLimit,
+    ) -> Result<OutputPage, CoreError> {
         if cursor > self.seen {
             return Err(CoreError::InvalidValue {
                 field: "OutputCursor",
@@ -99,7 +110,7 @@ impl Archive {
             .bytes
             .iter()
             .skip(start)
-            .take(limits::PROCESS_PAGE_BYTES)
+            .take(limit.as_usize().min(limits::PROCESS_PAGE_BYTES))
             .copied()
             .collect();
         let end = start

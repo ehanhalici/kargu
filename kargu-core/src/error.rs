@@ -21,6 +21,9 @@ pub enum CoreError {
     /// Publication and execution rights were revoked.
     #[error("operation cancelled")]
     Cancelled,
+    /// Queued stdin may already have reached the child; cancellation cannot undo it.
+    #[error("stdin delivery unconfirmed; do not replay automatically")]
+    InputOutcomeUnknown,
     /// Run or operation deadline expired.
     #[error("deadline exceeded")]
     Deadline,

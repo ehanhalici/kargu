@@ -1,6 +1,7 @@
 //! Single-writer command admission, reverse approval and nonblocking completion.
 
 pub(crate) mod input;
+mod jobs;
 
 use super::{
     pending::{PendingOutcome, PendingRequests},
@@ -8,7 +9,7 @@ use super::{
 };
 use crate::{
     application::{
-        RunHandle,
+        RunHandle, RunPurpose,
         host::{Host, ReadScope},
     },
     constants::{
@@ -55,6 +56,7 @@ enum Stage {
     },
 }
 struct Operation {
+    purpose: RunPurpose,
     scope: ReadScope,
     stage: Option<Stage>,
     terminal: Option<CoreError>,
@@ -70,6 +72,7 @@ pub(super) struct Commands {
     registry: ToolRegistry,
     supervisor: ProcessSupervisor,
     sequence: RequestSequence,
+    jobs: jobs::Jobs,
 }
 impl Commands {
     pub fn new() -> Result<Self, CoreError> {
@@ -82,23 +85,38 @@ impl Commands {
             registry,
             supervisor: ProcessSupervisor::new(CleanupPolicy::default())?,
             sequence: RequestSequence::ZERO,
+            jobs: jobs::Jobs::default(),
         })
     }
     pub fn contains(&self, id: &RpcId) -> bool {
-        self.operations.contains_key(id)
+        self.operations.contains_key(id) || self.jobs.contains_request(id)
     }
     pub fn is_empty(&self) -> bool {
-        self.operations.is_empty()
+        self.operations.is_empty() && self.jobs.is_idle()
     }
     pub fn start(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
+        self.start_kind(host, id, params, RunPurpose::AgentTurn)
+    }
+    pub fn start_job(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
+        self.start_kind(host, id, params, RunPurpose::ProcessJob)
+    }
+    fn start_kind(
+        &mut self,
+        host: &Host,
+        id: RpcId,
+        params: Value,
+        purpose: RunPurpose,
+    ) -> Result<(), Fault> {
         let request: ExecuteRequest =
             serde_json::from_value(params).map_err(|_| Fault::params())?;
-        self.admit(host, id, request.scope, move || request.arguments.prepare())
+        self.admit(host, id, request.scope, purpose, move || {
+            request.arguments.prepare(purpose)
+        })
     }
     pub fn start_listing(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
         let request: ListingRequest =
             serde_json::from_value(params).map_err(|_| Fault::params())?;
-        self.admit(host, id, request.scope, move || {
+        self.admit(host, id, request.scope, RunPurpose::AgentTurn, move || {
             let (command, settings) = request.arguments.prepare()?;
             Ok(Prepared {
                 command,
@@ -112,6 +130,7 @@ impl Commands {
         host: &Host,
         id: RpcId,
         scope: ReadScope,
+        purpose: RunPurpose,
         prepare: impl FnOnce() -> Result<Prepared, CoreError> + Send + 'static,
     ) -> Result<(), Fault> {
         if !host.owns_read_scope(&scope) {
@@ -121,16 +140,32 @@ impl Commands {
             return Err(fault(CoreError::Limit));
         }
         // Reserve application ownership before off-mailbox filesystem preparation.
-        if self
-            .operations
-            .values()
-            .any(|op| op.scope.application_id == scope.application_id)
-        {
+        if self.operations.values().any(|op| {
+            op.scope.application_id == scope.application_id
+                && op.purpose == RunPurpose::AgentTurn
+                && purpose == RunPurpose::AgentTurn
+        }) {
             return Err(fault(CoreError::Busy));
+        }
+        if purpose == RunPurpose::ProcessJob {
+            self.jobs.admission(&scope.application_id).map_err(fault)?;
+            if self
+                .operations
+                .values()
+                .filter(|op| {
+                    op.scope.application_id == scope.application_id
+                        && op.purpose == RunPurpose::ProcessJob
+                })
+                .count()
+                >= limits::APPLICATION_JOBS
+            {
+                return Err(fault(CoreError::Limit));
+            }
         }
         self.operations.insert(
             id,
             Operation {
+                purpose,
                 scope,
                 stage: Some(Stage::Preparing(tokio::task::spawn_blocking(prepare))),
                 terminal: None,
@@ -139,11 +174,13 @@ impl Commands {
         Ok(())
     }
     pub fn cancel(&mut self, id: &RpcId) {
+        self.jobs.cancel_request(id);
         if let Some(op) = self.operations.get_mut(id) {
             op.terminal = Some(CoreError::Cancelled);
         }
     }
     pub fn cancel_all(&mut self) {
+        self.jobs.cancel_all();
         for op in self.operations.values_mut() {
             op.terminal = Some(CoreError::Cancelled);
         }
@@ -154,7 +191,7 @@ impl Commands {
         pending: &mut PendingRequests,
     ) -> Result<Vec<Value>, CoreError> {
         let ids: Vec<_> = self.operations.keys().cloned().collect();
-        let mut messages = Vec::new();
+        let mut messages = self.jobs.tick(host, &mut self.supervisor)?;
         for id in ids {
             let mut op = self
                 .operations
@@ -200,7 +237,7 @@ impl Commands {
                     Ok(_) => return Ok(Progress::Done(Err(CoreError::Cancelled))),
                     Err(error) => return Ok(Progress::Done(Err(error))),
                 };
-                self.prepare(host, pending, id, &op.scope, prepared, messages)
+                self.prepare(host, pending, id, op, prepared, messages)
             }
             Stage::Review {
                 run,
@@ -249,12 +286,17 @@ impl Commands {
         host: &mut Host,
         pending: &mut PendingRequests,
         id: &RpcId,
-        scope: &ReadScope,
+        operation: &Operation,
         prepared: Prepared,
         messages: &mut Vec<Value>,
     ) -> Result<Progress, CoreError> {
+        let scope = &operation.scope;
         let actor = host.actor_mut(scope)?;
-        let run = match actor.admit(&scope.session_id, prepared.settings) {
+        let admitted = match operation.purpose {
+            RunPurpose::AgentTurn => actor.admit(&scope.session_id, prepared.settings),
+            RunPurpose::ProcessJob => actor.admit_job(&scope.session_id, prepared.settings),
+        };
+        let run = match admitted {
             Ok(run) => Box::new(run),
             Err(error) => return Ok(Progress::Done(Err(error))),
         };
@@ -284,6 +326,7 @@ impl Commands {
         ));
         let message = json!({"jsonrpc":"2.0","id":reverse.value(),"method":methods::REQUEST_APPROVAL,
             "params":{"request_id":id.value(),"approval_id":request.id(),"scope":request.scope(),"program":request.program(),"invocation":request.invocation(),
+            "retention":request.retention(),"output_bytes":request.output_limit(),"timeout_ms":request.execution_timeout().duration().map(|duration| duration.as_millis()),
             "arguments":request.arguments().iter().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>(),"cwd":request.working_directory(),
             "environment":request.environment().entries().map(|(k,v)| (k.to_string_lossy().into_owned(),v.to_string_lossy().into_owned())).collect::<std::collections::BTreeMap<_,_>>()}});
         if message.to_string().len() > host.frame_limit().as_usize() {
@@ -334,6 +377,12 @@ impl Commands {
         };
         match self.supervisor.start(actor, grant) {
             Ok(job) => {
+                if run.scope().purpose() == RunPurpose::ProcessJob {
+                    return self
+                        .jobs
+                        .register(scope.clone(), run, job, &self.supervisor)
+                        .map(|value| Progress::Done(Ok(value)));
+                }
                 if let Err(error) = self.supervisor.close_input(&run, &job) {
                     actor.cancel(&run)?;
                     return Err(error);
@@ -380,10 +429,25 @@ impl Commands {
             "text":format!("{stdout}{stderr}{notice}")}),
         )))
     }
+    pub fn job_rpc(
+        &mut self,
+        host: &Host,
+        id: RpcId,
+        method: &str,
+        params: Value,
+    ) -> Result<Option<Value>, Fault> {
+        self.jobs
+            .rpc(host, &mut self.supervisor, id, method, params)
+    }
 }
 
 pub(super) fn fault(error: CoreError) -> Fault {
     let (code, message, status) = match error {
+        CoreError::InputOutcomeUnknown => (
+            codes::OUTCOME_UNKNOWN,
+            "Stdin delivery is unconfirmed; do not retry automatically",
+            "outcome_unknown",
+        ),
         CoreError::InvalidValue { .. } => (
             codes::INVALID_PARAMS,
             "Invalid command arguments",

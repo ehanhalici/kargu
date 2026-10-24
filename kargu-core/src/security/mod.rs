@@ -163,6 +163,7 @@ pub struct CommandSpec {
     pub(crate) cwd: Workspace,
     pub(crate) timeout: ExecutionTimeout,
     pub(crate) retention: OutputRetention,
+    pub(crate) output_limit: OutputLimit,
     executable: File,
     revision: ExecutableRevision,
     pub(crate) environment: CommandEnvironment,
@@ -215,6 +216,7 @@ impl TryFrom<CommandInput> for CommandSpec {
             cwd: Workspace::try_from(input.working_directory)?,
             timeout,
             retention: OutputRetention::Prefix,
+            output_limit: OutputLimit::default(),
             revision: ExecutableRevision::from(&metadata),
             executable,
             environment: input.environment,
@@ -225,6 +227,11 @@ impl CommandSpec {
     /// Capture output retention before approval; it is included in the action digest.
     pub fn with_retention(mut self, retention: OutputRetention) -> Self {
         self.retention = retention;
+        self
+    }
+    /// Capture a bounded output capacity before requesting approval.
+    pub fn with_output_limit(mut self, limit: OutputLimit) -> Self {
+        self.output_limit = limit;
         self
     }
     /// Only the trusted fixed-argv listing adapter can request this class.
@@ -405,6 +412,11 @@ fn digest(
         OutputRetention::Prefix => 0,
         OutputRetention::Tail => 1,
     }]);
+    hash.update(
+        u64::try_from(command.output_limit.as_usize())
+            .map_err(|_| CoreError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
     Ok(ActionDigest(hash.finalize().into()))
 }
 
@@ -419,6 +431,9 @@ pub enum UserDecision {
 
 /// Immutable review data; command text is accessible only through explicit getters.
 pub struct ApprovalRequest {
+    retention: OutputRetention,
+    output_limit: OutputLimit,
+    timeout: ExecutionTimeout,
     id: ApprovalId,
     scope: RunScope,
     digest: ActionDigest,
@@ -431,6 +446,18 @@ pub struct ApprovalRequest {
     environment: CommandEnvironment,
 }
 impl ApprovalRequest {
+    /// Captured output policy shown to the reviewer.
+    pub fn retention(&self) -> OutputRetention {
+        self.retention
+    }
+    /// Captured per-stream retention capacity.
+    pub fn output_limit(&self) -> OutputLimit {
+        self.output_limit
+    }
+    /// Captured execution duration, not the independent approval lifetime.
+    pub fn execution_timeout(&self) -> ExecutionTimeout {
+        self.timeout
+    }
     /// One-time approval identity, not an executable capability.
     pub fn id(&self) -> &ApprovalId {
         &self.id
@@ -571,6 +598,9 @@ impl ExecutionGate {
         actor.register_call(run, call_id.clone(), descriptor.name().clone())?;
         let id = ApprovalId::new();
         let request = ApprovalRequest {
+            retention: command.retention,
+            output_limit: command.output_limit,
+            timeout: command.timeout,
             id: id.clone(),
             scope: run.scope().clone(),
             digest: action_digest.clone(),

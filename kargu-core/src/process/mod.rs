@@ -7,7 +7,7 @@
 use crate::{
     application::{ApplicationActor, RunHandle, RunLease, ToolOutcome},
     constants::{limits, timeouts},
-    domain::{ByteLimit, ByteOffset, JobId, ToolCallId},
+    domain::{ByteLimit, ByteOffset, JobId, ProcessId, ToolCallId},
     error::CoreError,
     security::AuthorizedCommand,
 };
@@ -96,7 +96,8 @@ impl TryFrom<Vec<u8>> for InputChunk {
 }
 
 /// Which independently archived byte stream to read.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OutputStream {
     /// Standard output.
     Stdout,
@@ -131,7 +132,7 @@ enum InputMessage {
 }
 
 /// Typed process terminal data. Output remains in separately bounded archives.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct ProcessResult {
     /// Success/failure/cancel/timeout/unknown, independent of the message text.
     pub outcome: ToolOutcome,
@@ -166,6 +167,7 @@ impl JobCompletion {
 }
 
 struct Job {
+    pid: ProcessId,
     run: RunHandle,
     cancel: CancellationToken,
     input: mpsc::Sender<InputMessage>,
@@ -227,8 +229,10 @@ impl ProcessSupervisor {
             }
         };
         let cancel = authorized.run().cancel_token();
-        let stdout = Arc::new(Mutex::new(Archive::new(authorized.command().retention)));
-        let stderr = Arc::new(Mutex::new(Archive::new(authorized.command().retention)));
+        let pid = ProcessId::try_from(child.id().ok_or(CoreError::CleanupFailed)?)?;
+        let spec = authorized.command();
+        let stdout = Arc::new(Mutex::new(Archive::new(spec.retention, spec.output_limit)));
+        let stderr = Arc::new(Mutex::new(Archive::new(spec.retention, spec.output_limit)));
         let (input, rx) = mpsc::channel(limits::PROCESS_INPUT_QUEUE);
         let job_id = JobId::new();
         let run = authorized.run().clone();
@@ -247,6 +251,7 @@ impl ProcessSupervisor {
         self.jobs.insert(
             job_id.clone(),
             Job {
+                pid,
                 run,
                 cancel,
                 input,
@@ -315,6 +320,48 @@ impl ProcessSupervisor {
             Some(_) if job.cancel.is_cancelled() => JobStatus::Cancelling,
             Some(_) => JobStatus::Running,
         })
+    }
+    /// Captured process identifier for presentation, never for caller-supplied signals.
+    pub fn process_id(&self, run: &RunHandle, id: &JobId) -> Result<ProcessId, CoreError> {
+        Ok(self.job(run, id)?.pid)
+    }
+    /// Poll an archive without waiting on a pipe or holding the actor mailbox.
+    pub(crate) fn try_read(
+        &self,
+        run: &RunHandle,
+        id: &JobId,
+        stream: OutputStream,
+        cursor: ByteOffset,
+        limit: ByteLimit,
+    ) -> Result<Option<OutputPage>, CoreError> {
+        let job = self.job(run, id)?;
+        let archive = match stream {
+            OutputStream::Stdout => &job.stdout,
+            OutputStream::Stderr => &job.stderr,
+        };
+        let Ok(archive) = archive.try_lock() else {
+            return Ok(None);
+        };
+        archive.page_limit(cursor, limit).map(Some)
+    }
+    /// Enqueue bounded stdin; acknowledgement is polled outside external I/O.
+    pub(crate) fn queue_input(
+        &self,
+        run: &RunHandle,
+        id: &JobId,
+        input: Option<InputChunk>,
+    ) -> Result<oneshot::Receiver<Result<(), CoreError>>, CoreError> {
+        run.check_live()?;
+        let (tx, rx) = oneshot::channel();
+        let message = match input {
+            Some(chunk) => InputMessage::Write(chunk, tx),
+            None => InputMessage::Eof(tx),
+        };
+        self.job(run, id)?
+            .input
+            .try_send(message)
+            .map_err(|_| CoreError::Limit)?;
+        Ok(rx)
     }
     /// Read a bounded page without requiring the job to have exited.
     pub async fn read(

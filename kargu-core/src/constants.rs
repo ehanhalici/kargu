@@ -28,10 +28,14 @@ pub mod limits {
     pub const TOOL_CALLS: u64 = 25;
     /// Concurrent subprocesses per run.
     pub const RUN_PROCESSES: usize = 4;
+    /// Persistent/draining process-job scopes per application, independent of its turn.
+    pub const APPLICATION_JOBS: usize = 4;
     /// Concurrent subprocesses across the supervisor.
     pub const HOST_PROCESSES: usize = 16;
     /// Retained stdout or stderr per job.
     pub const PROCESS_OUTPUT_BYTES: usize = 1024 * 1024;
+    /// Configurable retained bytes per stream for persistent logs (zero is allowed).
+    pub const PROCESS_OUTPUT_MAX_BYTES: usize = 4 * 1024 * 1024;
     /// Retained process output across a run.
     pub const RUN_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
     /// Input or output page length.
@@ -75,6 +79,8 @@ pub mod timeouts {
     pub const PENDING_SWEEP: Duration = Duration::from_millis(50);
     /// Non-reaping process-state observation interval.
     pub const PROCESS_POLL: Duration = Duration::from_millis(20);
+    /// Maximum wait for stdin acceptance or a contended output page.
+    pub const INPUT_ACK: Duration = Duration::from_secs(10);
     /// Human approval lifetime.
     pub const APPROVAL: Duration = Duration::from_secs(300);
     /// TERM before KILL grace.
@@ -96,13 +102,14 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 6] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 7] = [
         "application_lifecycle",
         "session_lifecycle",
         methods::PING,
         "workspace_find_files",
         "workspace_list_files_ls",
         "command_execute",
+        "process_jobs",
     ];
 
     /// JSON-RPC and host error codes, kept separate from human error messages.
@@ -133,9 +140,27 @@ pub mod protocol {
         pub const WORKSPACE_CHANGED: i64 = -32008;
         /// Sanitized filesystem failure.
         pub const IO: i64 = -32009;
+        /// A side-effecting continuation may already have been accepted.
+        pub const OUTCOME_UNKNOWN: i64 = -32010;
     }
     /// Canonical method names.
     pub mod methods {
+        /// Approved persistent process startup; returns identity, not completion.
+        pub const JOB_START: &str = "job/start";
+        /// Owner/project-scoped job snapshots.
+        pub const JOB_LIST: &str = "job/list";
+        /// Inspect startup/running/terminal state.
+        pub const JOB_STATUS: &str = "job/status";
+        /// Lossless bounded stdout/stderr byte page.
+        pub const JOB_READ: &str = "job/read";
+        /// Bounded UTF-8 stdin, acknowledged after actual acceptance.
+        pub const JOB_WRITE: &str = "job/write";
+        /// Close stdin once and retain drain ownership.
+        pub const JOB_EOF: &str = "job/eof";
+        /// Cancel one owned process group.
+        pub const JOB_CANCEL: &str = "job/cancel";
+        /// Release only a drained terminal archive.
+        pub const JOB_FORGET: &str = "job/forget";
         /// Standalone approved program/argv execution during the migration.
         pub const EXECUTE: &str = "tool/execute";
         /// Exact-action asynchronous command approval presenter.

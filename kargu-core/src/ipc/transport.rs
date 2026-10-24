@@ -240,10 +240,15 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     // Two responses with the same live id would be ambiguous.
                     return Err(TransportError::Framing);
                 }
-                if matches!(method.as_str(), methods::EXECUTE | methods::LIST_FILES) {
+                if matches!(
+                    method.as_str(),
+                    methods::EXECUTE | methods::LIST_FILES | methods::JOB_START
+                ) {
                     if let Some(id) = id.as_ref() {
                         let admitted = if method == methods::LIST_FILES {
                             commands.start_listing(host, id.clone(), params)
+                        } else if method == methods::JOB_START {
+                            commands.start_job(host, id.clone(), params)
                         } else {
                             commands.start(host, id.clone(), params)
                         };
@@ -260,6 +265,28 @@ async fn read_messages<R: AsyncRead + Unpin>(
                             .and_then(|(scope, input)| reads.start(id.clone(), scope, input));
                         if let Err(fault) = admitted {
                             queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
+                    }
+                    continue;
+                }
+                if matches!(
+                    method.as_str(),
+                    methods::JOB_LIST
+                        | methods::JOB_STATUS
+                        | methods::JOB_READ
+                        | methods::JOB_WRITE
+                        | methods::JOB_EOF
+                        | methods::JOB_CANCEL
+                        | methods::JOB_FORGET
+                ) {
+                    if let Some(id) = id.as_ref() {
+                        let reply = match commands.job_rpc(host, id.clone(), &method, params) {
+                            Ok(Some(value)) => Some(protocol::success(id, value)),
+                            Ok(None) => None,
+                            Err(fault) => Some(fault.response(Some(id))),
+                        };
+                        if let Some(reply) = reply {
+                            queue_reply(reply, host.frame_limit(), tx, permits)?;
                         }
                     }
                     continue;

@@ -1,6 +1,7 @@
 //! Single-writer admission, claims, tool ledger and revoke/drain/release lifecycle.
 
 pub mod host;
+mod jobs;
 
 use crate::{constants::limits, domain::*, error::CoreError, security::Workspace};
 use serde::{Deserialize, Serialize};
@@ -78,9 +79,20 @@ impl RunSettings {
     }
 }
 
+/// Whether execution occupies the foreground turn or a separate owned job lifetime.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunPurpose {
+    /// The application's one foreground agent/standalone-command claim.
+    AgentTurn,
+    /// An explicitly owned process service job, not another concurrent agent turn.
+    ProcessJob,
+}
+
 /// Identity and revision evidence, serialized without granting execution rights.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct RunScope {
+    purpose: RunPurpose,
     application_id: ApplicationId,
     session_id: SessionId,
     run_id: RunId,
@@ -90,6 +102,10 @@ pub struct RunScope {
     policy_revision: PolicyRevision,
 }
 impl RunScope {
+    /// Execution lifetime category, included in exact-action approval identity.
+    pub fn purpose(&self) -> RunPurpose {
+        self.purpose
+    }
     /// Captured application.
     pub fn application_id(&self) -> &ApplicationId {
         &self.application_id
@@ -270,6 +286,7 @@ pub struct ApplicationActor {
     sessions: HashSet<SessionId>,
     generation: Generation,
     active: Option<ActiveRun>,
+    job_runs: HashMap<RunId, ActiveRun>,
 }
 impl ApplicationActor {
     /// Create an empty application; composition owns this handle.
@@ -279,6 +296,7 @@ impl ApplicationActor {
             sessions: HashSet::new(),
             generation: Generation::ZERO,
             active: None,
+            job_runs: HashMap::new(),
         }
     }
     /// Register a new conversation without admitting a run.
@@ -299,8 +317,9 @@ impl ApplicationActor {
     pub fn close_session(&mut self, session: &SessionId) -> Result<(), CoreError> {
         if self
             .active
-            .as_ref()
-            .is_some_and(|run| &run.handle.scope.session_id == session)
+            .iter()
+            .chain(self.job_runs.values())
+            .any(|run| &run.handle.scope.session_id == session)
         {
             return Err(CoreError::Busy);
         }
@@ -315,10 +334,10 @@ impl ApplicationActor {
         if !self.sessions.remove(session) {
             return Err(CoreError::StaleOwner);
         }
-        if let Some(run) = &self.active
-            && run.handle.scope.session_id() == session
-        {
-            run.handle.resources.cancellation.cancel();
+        for run in self.active.iter().chain(self.job_runs.values()) {
+            if run.handle.scope.session_id() == session {
+                run.handle.resources.cancellation.cancel();
+            }
         }
         Ok(())
     }
@@ -331,6 +350,18 @@ impl ApplicationActor {
         if self.active.is_some() {
             return Err(CoreError::Busy);
         }
+        self.check_admission()?;
+        let run = self.capture_run(session, settings, RunPurpose::AgentTurn)?;
+        let handle = run.handle.clone();
+        self.active = Some(run);
+        Ok(handle)
+    }
+    fn capture_run(
+        &mut self,
+        session: &SessionId,
+        settings: RunSettings,
+        purpose: RunPurpose,
+    ) -> Result<ActiveRun, CoreError> {
         if !self.owns_session(session) {
             return Err(CoreError::StaleOwner);
         }
@@ -339,6 +370,7 @@ impl ApplicationActor {
         let deadline = settings.timeout.start()?;
         let handle = RunHandle {
             scope: RunScope {
+                purpose,
                 application_id: self.id.clone(),
                 session_id: session.clone(),
                 run_id: RunId::new(),
@@ -357,14 +389,13 @@ impl ApplicationActor {
             }),
         };
         self.generation = generation;
-        self.active = Some(ActiveRun {
-            handle: handle.clone(),
+        Ok(ActiveRun {
+            handle,
             calls: HashMap::new(),
             call_order: Vec::new(),
             spent: StepCount::ZERO,
             cleanup_failed: false,
-        });
-        Ok(handle)
+        })
     }
     /// Validate current ownership without permitting a different actor to release it.
     pub fn validate(&self, handle: &RunHandle) -> Result<(), CoreError> {
@@ -378,12 +409,22 @@ impl ApplicationActor {
         self.active
             .as_ref()
             .filter(|r| r.handle.same_owner(handle))
+            .or_else(|| {
+                self.job_runs
+                    .get(handle.scope.run_id())
+                    .filter(|r| r.handle.same_owner(handle))
+            })
             .ok_or(CoreError::StaleOwner)
     }
     fn owned_mut(&mut self, handle: &RunHandle) -> Result<&mut ActiveRun, CoreError> {
         self.active
             .as_mut()
             .filter(|r| r.handle.same_owner(handle))
+            .or_else(|| {
+                self.job_runs
+                    .get_mut(handle.scope.run_id())
+                    .filter(|r| r.handle.same_owner(handle))
+            })
             .ok_or(CoreError::StaleOwner)
     }
     pub(crate) fn register_call(
@@ -496,13 +537,18 @@ impl ApplicationActor {
             tool_results: results,
         };
         handle.resources.cancellation.cancel();
-        self.active = None;
+        match handle.scope.purpose() {
+            RunPurpose::AgentTurn => self.active = None,
+            RunPurpose::ProcessJob => {
+                self.job_runs.remove(handle.scope.run_id());
+            }
+        }
         Ok(completion)
     }
 }
 impl Drop for ApplicationActor {
     fn drop(&mut self) {
-        if let Some(run) = &self.active {
+        for run in self.active.iter().chain(self.job_runs.values()) {
             run.handle.resources.cancellation.cancel();
         }
     }

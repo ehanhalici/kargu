@@ -12,6 +12,44 @@ use serde::{Deserialize, Serialize};
 mod deadline;
 pub use deadline::{Deadline, ExecutionTimeout};
 
+/// Positive OS process identity, for display only; never accepted as signal authority.
+#[derive(Clone, Copy, Serialize)]
+pub struct ProcessId(u32);
+impl TryFrom<u32> for ProcessId {
+    type Error = CoreError;
+    fn try_from(value: u32) -> Result<Self, CoreError> {
+        if value == 0 {
+            return Err(CoreError::InvalidValue { field: "ProcessId" });
+        }
+        Ok(Self(value))
+    }
+}
+
+/// Retained process output capacity, distinct from nonempty transport/page limits.
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(try_from = "usize")]
+pub struct OutputLimit(usize);
+impl Default for OutputLimit {
+    fn default() -> Self {
+        Self(limits::PROCESS_OUTPUT_BYTES)
+    }
+}
+impl TryFrom<usize> for OutputLimit {
+    type Error = CoreError;
+    fn try_from(value: usize) -> Result<Self, CoreError> {
+        if value > limits::PROCESS_OUTPUT_MAX_BYTES {
+            return Err(CoreError::Limit);
+        }
+        Ok(Self(value))
+    }
+}
+impl OutputLimit {
+    /// Exact retained capacity; zero disables retention without stopping pipe drain.
+    pub fn as_usize(self) -> usize {
+        self.0
+    }
+}
+
 /// Which bounded process output interval remains available after truncation.
 #[derive(Clone, Copy, Default, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

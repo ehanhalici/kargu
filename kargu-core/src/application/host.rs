@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 
 /// Owner of a standalone read service, not an agent run or execution grant.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadScope {
     pub application_id: ApplicationId,

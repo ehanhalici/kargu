@@ -283,6 +283,43 @@ fn changing_retention_requires_a_different_exact_action_approval() -> TestResult
     Ok(())
 }
 
+#[tokio::test]
+async fn completing_a_service_job_cannot_release_an_active_agent_turn() -> TestResult {
+    let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+    let job_run = f.actor.admit_job(
+        &f.session,
+        settings(&f.root, Mode::Agent, Duration::from_secs(2))?,
+    )?;
+    let request = f.gate.prepare(
+        &mut f.actor,
+        &job_run,
+        &f.registry,
+        &name("bash")?,
+        ToolCallId::new(),
+        command(&f.root, "printf service", Duration::from_secs(1))?,
+    )?;
+    let grant = f
+        .gate
+        .decide(&mut f.actor, &job_run, &request, UserDecision::Approved)?;
+    let job = f.supervisor.start(&mut f.actor, grant)?;
+    f.supervisor
+        .wait(&job_run, &job)
+        .await?
+        .deliver(&mut f.actor)?;
+    f.actor.finish(&job_run)?;
+    f.actor.validate(&f.run)?;
+    assert!(matches!(
+        f.actor.admit(
+            &f.session,
+            settings(&f.root, Mode::Agent, Duration::from_secs(1))?
+        ),
+        Err(CoreError::Busy)
+    ));
+    f.actor.cancel(&f.run)?;
+    f.actor.finish(&f.run)?;
+    Ok(())
+}
+
 #[test]
 fn mode_alias_owner_and_replay_gates_are_fail_closed() -> TestResult {
     let mut f = Fixture::new(Mode::Agent, Duration::from_secs(10))?;
