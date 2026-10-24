@@ -3,7 +3,7 @@
 use super::Archive;
 use crate::{
     application::RunHandle,
-    domain::{CaptureStop, OutputRecords, RecordLimit},
+    domain::{CapturePolicy, CaptureStop, OutputRecords, RecordLimit},
     error::CoreError,
 };
 use tokio::sync::watch;
@@ -13,6 +13,14 @@ pub(super) enum StreamCapture {
     Bytes(ByteCapture),
 }
 impl StreamCapture {
+    pub fn stderr(&self) -> Self {
+        match self {
+            Self::Records(capture) => capture.stderr(),
+            Self::Bytes(capture) => Self::Bytes(ByteCapture {
+                event: capture.event.clone(),
+            }),
+        }
+    }
     pub fn push(
         &mut self,
         archive: &mut Archive,
@@ -91,6 +99,21 @@ impl RecordCapture {
 
 pub(super) struct RecordMonitor(Option<watch::Receiver<Option<CaptureStop>>>);
 impl RecordMonitor {
+    pub fn for_policy(policy: CapturePolicy) -> (Option<StreamCapture>, Self) {
+        match policy {
+            CapturePolicy::Complete => {
+                let (tx, rx) = watch::channel(None);
+                (
+                    Some(StreamCapture::Bytes(ByteCapture { event: tx })),
+                    Self(Some(rx)),
+                )
+            }
+            _ => {
+                let (capture, monitor) = Self::new(policy.records());
+                (capture.map(StreamCapture::Records), monitor)
+            }
+        }
+    }
     pub fn new(limit: Option<RecordLimit>) -> (Option<RecordCapture>, Self) {
         match limit {
             Some(limit) => {

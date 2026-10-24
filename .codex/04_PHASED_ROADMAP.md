@@ -96,7 +96,9 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
     Önceki fd-rooted metadata/no-follow garantisi güncel ls'e atfedilmez.
   - [x] `workspace_grep`: rg/GNU grep + aynı execution/gate, global record cap,
     explicit no-match status, owned bridge ve eski Elisp grep engine kaldırma (26–27).
-  - [ ] read/Git/skill/webfetch kalan portları.
+  - [x] `git_status`: fixed-argv Git + complete-output policy, scoped read bridge,
+    index/fsmonitor/worktree policy ve eski Elisp status engine kaldırma (28).
+  - [ ] read/diğer Git/skill/webfetch kalan portları.
 - [ ] Diff parser/generator + revision'lı proposal/journal ve Emacs transaction
   adapter'ı 06'ya göre kurulsun; review callback'i placeholder kalmasın.
 - [ ] Eski Elisp loop opt-in adapter üzerinden `tool/execute` çağırabilsin.

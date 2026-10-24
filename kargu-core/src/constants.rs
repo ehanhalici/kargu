@@ -107,13 +107,14 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 9] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 10] = [
         "application_lifecycle",
         "session_lifecycle",
         methods::PING,
         "workspace_find_files",
         "workspace_list_files_ls",
         "workspace_grep",
+        "git_status",
         "command_execute",
         "process_jobs",
         "process_idle_timeout",
@@ -194,6 +195,8 @@ pub mod protocol {
         pub const LIST_FILES: &str = "workspace/listFiles";
         /// Bounded rg/GNU grep composition through the shared process owner.
         pub const GREP: &str = "workspace/grep";
+        /// Fixed-argv, complete-output read-only Git status report.
+        pub const GIT_STATUS: &str = "git/status";
         /// Cancel pending request.
         pub const CANCEL: &str = "rpc/cancel";
         /// Drain host.

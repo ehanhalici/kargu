@@ -20,7 +20,17 @@ impl Peer {
     pub(super) fn start_with_path(
         path: Option<&std::path::Path>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::start_with_path_and_environment(path, &[])
+    }
+    pub(super) fn start_with_path_and_environment(
+        path: Option<&std::path::Path>,
+        environment: &[(&str, &std::ffi::OsStr)],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut command = Command::new(env!("CARGO_BIN_EXE_kargu-core"));
+        command
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+        command.envs(environment.iter().copied());
         if let Some(path) = path {
             command.env("PATH", path);
         }

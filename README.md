@@ -64,7 +64,7 @@ Clone the repository and add it to your Emacs `load-path`:
 
 The Rust core provides bounded JSON-RPC IPC, application/session lifecycle,
 native `find_files`, GNU `ls` listing, `rg`/GNU `grep` search (including aliases),
-and Bash/interactive jobs. The Elisp
+`git_status`, and Bash/interactive jobs. The Elisp
 agent still owns prompts and model requests; this is not yet a Rust agent backend.
 
 The Rust library now includes typed run admission, single-use approvals and a
@@ -345,6 +345,11 @@ Git commands use a separate `kargu-git-timeout` (nil by default), allowing
 hooks and signing to finish. Stop cancels Git work owned by the agent and
 prevents cancelled callbacks from launching fallback commands. An interrupted
 Git write may leave a lock file; check for another Git process before recovery.
+`git_status` uses Rust's owned, complete-output service and preserves its
+Magit-style sections. It disables optional index writes and executable
+fsmonitor config, honors host ignore settings, and supports linked worktrees.
+Incomplete/malformed/non-UTF-8 status data fails explicitly; no Elisp status
+engine is kept as fallback. Other Git commands are not yet migrated.
 `git_branches` and `git_stashes` are read-only in all modes. Stash `apply`
 requires an explicit `stash@{N}` entry from `git_stashes`; its immutable object
 ID is resolved before approval, and applying never deletes the stash. `pop`

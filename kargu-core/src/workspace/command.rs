@@ -1,7 +1,34 @@
 //! Shared host executable lookup and literal exclusion arguments, not traversal.
 
 use crate::error::CoreError;
+use crate::{constants::timeouts, domain::ExecutionTimeout};
+use serde::Deserialize;
+use std::time::Duration;
 use std::{os::unix::fs::PermissionsExt, path::PathBuf};
+
+/// Missing uses the bounded read default; explicit null disables the deadline.
+#[derive(Default, Deserialize)]
+#[serde(try_from = "Option<u64>")]
+pub(super) struct ReadTimeout(Option<ExecutionTimeout>);
+impl TryFrom<Option<u64>> for ReadTimeout {
+    type Error = CoreError;
+    fn try_from(value: Option<u64>) -> Result<Self, CoreError> {
+        if value.is_some_and(|value| value > 86_400_000) {
+            return Err(CoreError::InvalidValue {
+                field: "ReadTimeout",
+            });
+        }
+        Ok(Self(Some(ExecutionTimeout::try_from(
+            value.map(Duration::from_millis),
+        )?)))
+    }
+}
+impl ReadTimeout {
+    pub(super) fn duration(self) -> Option<Duration> {
+        self.0
+            .map_or(Some(timeouts::WORKSPACE_READ), |timeout| timeout.duration())
+    }
+}
 
 pub(super) fn executable(name: &str) -> Result<PathBuf, CoreError> {
     let paths = std::env::var_os("PATH").ok_or(CoreError::Unavailable)?;

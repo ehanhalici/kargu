@@ -4,7 +4,8 @@ Durum: **Rust modülleri sorumluluk klasörlerine ayrıldı; IPC/Emacs bridge,
 tek kullanımlık onaylı program/argv, GNU `ls` listing ve `rg`/GNU grep adapter'ı
 bağlandı. `find_files` şimdilik native; Bash/interactive session Rust job
 portunda, eski Elisp glob/listing/grep/Bash/session engine'leri kaldırıldı**
-(2026-10-24). Diğer read/Git/skill/webfetch tüketicileri hâlâ açıktır.
+(2026-10-24). `git_status` da native Git adapter'ındadır; diğer
+read/Git/skill/webfetch tüketicileri hâlâ açıktır.
 Uygulama kanıtı ve kalan işler: [12_MIGRATION_PROGRESS.md](12_MIGRATION_PROGRESS.md).
 Hedef, mevcut Kargu yeteneklerini ve güvenlik/sahiplik sözleşmelerini koruyarak
 agent motorunu Rust'a taşımak; Emacs'i canlı editör adapter'ı ve UI olarak

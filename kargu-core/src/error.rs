@@ -12,6 +12,9 @@ pub enum CoreError {
     /// A checked counter or value overflowed.
     #[error("arithmetic overflow")]
     ArithmeticOverflow,
+    /// A successful process produced malformed/incomplete structured tool output.
+    #[error("invalid structured tool output")]
+    InvalidToolOutput,
     /// Application already owns an active or draining run.
     #[error("application busy")]
     Busy,

@@ -94,6 +94,7 @@
                          (puthash "idle_timeout_ms" 101 wrong)
                          (should-not (funcall validate connection wrong entry)))
                        (dolist (pair '(("stdout_records" . 2)
+                                       ("stop_on_bytes" . t)
                                        ("success_codes" . "zero_or_one")))
                          (let ((wrong (kargu-bridge-approval--copy params)))
                            (puthash (car pair) (cdr pair) wrong)

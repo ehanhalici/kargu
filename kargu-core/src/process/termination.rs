@@ -49,6 +49,34 @@ mod tests {
     use std::os::unix::process::ExitStatusExt;
 
     #[test]
+    fn invalid_output_downgrades_success_before_delivery_without_reviving_terminal_failure() {
+        for outcome in [
+            ToolOutcome::Ok,
+            ToolOutcome::Failed,
+            ToolOutcome::Cancelled,
+            ToolOutcome::Timeout,
+            ToolOutcome::OutcomeUnknown,
+        ] {
+            let mut result = crate::process::ProcessResult {
+                outcome,
+                exit_code: Some(0),
+                signal: None,
+                cleanup_complete: true,
+                capture_stop: None,
+            };
+            result.reject_output();
+            assert_eq!(
+                result.outcome,
+                if outcome == ToolOutcome::Ok {
+                    ToolOutcome::Failed
+                } else {
+                    outcome
+                }
+            );
+        }
+    }
+
+    #[test]
     fn late_capture_cannot_revive_cancel_timeout_failure_or_unknown_cleanup() {
         let success = ExitStatus::from_raw(0);
         let failure = ExitStatus::from_raw(2 << 8);

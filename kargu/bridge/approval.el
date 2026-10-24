@@ -71,6 +71,7 @@
              (equal (gethash "timeout_ms" params) (gethash "timeout_ms" args))
              (equal (gethash "idle_timeout_ms" params :json-null) (gethash "idle_timeout_ms" args :json-null))
              (equal (gethash "stdout_records" params :json-null) (gethash "stdout_records" args :json-null))
+             (equal (gethash "stop_on_bytes" params :json-false) (gethash "stop_on_bytes" args :json-false))
              (equal (gethash "success_codes" params "zero") (gethash "success_codes" args "zero"))
              (equal (gethash "output_bytes" params) (gethash "output_bytes" args 1048576))
              (equal (gethash "stderr" params) (gethash "stderr" args "separate"))
@@ -99,10 +100,11 @@
   "Format exact PARAMS for the trusted approval UI, not for logs."
   (let (environment)
     (maphash (lambda (key _value) (push key environment)) (gethash "environment" params))
-    (format "Invocation (argv[0]): %S\nExecutable: %S\nArguments: %S\nDirectory: %S\nOutput: %s, %s bytes/stream, stderr=%s\nStdout records: %S; success codes: %s\nTimeout: %S ms; idle: %S ms\nExplicit environment keys (values withheld): %s"
+    (format "Invocation (argv[0]): %S\nExecutable: %S\nArguments: %S\nDirectory: %S\nOutput: %s, %s bytes/stream, stderr=%s\nStdout records: %S; stop on bytes: %S; success codes: %s\nTimeout: %S ms; idle: %S ms\nExplicit environment keys (values withheld): %s"
             (gethash "invocation" params) (gethash "program" params) (gethash "arguments" params)
             (gethash "cwd" params) (gethash "retention" params) (gethash "output_bytes" params)
             (gethash "stderr" params) (gethash "stdout_records" params)
+            (gethash "stop_on_bytes" params :json-false)
             (gethash "success_codes" params "zero")
             (gethash "timeout_ms" params) (gethash "idle_timeout_ms" params)
             (string-join (sort environment #'string<) ", "))))

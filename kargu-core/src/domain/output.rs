@@ -34,6 +34,8 @@ impl RecordLimit {
 pub enum CapturePolicy {
     /// Retain bounded output without ending the process when retention fills.
     Retain(OutputRetention),
+    /// Require complete bounded streams; overflow terminates the producer as failure.
+    Complete,
     /// Freeze a complete-record prefix, then terminate and drain the producer.
     Records(RecordLimit),
 }
@@ -47,25 +49,29 @@ impl CapturePolicy {
     pub fn retention(self) -> OutputRetention {
         match self {
             Self::Retain(retention) => retention,
-            Self::Records(_) => OutputRetention::Prefix,
+            Self::Records(_) | Self::Complete => OutputRetention::Prefix,
         }
     }
     /// Optional producer-stop budget, separate from retained byte capacity.
     pub fn records(self) -> Option<RecordLimit> {
         match self {
-            Self::Retain(_) => None,
+            Self::Retain(_) | Self::Complete => None,
             Self::Records(limit) => Some(limit),
         }
     }
+    /// Whether byte exhaustion actively stops the producer rather than rolling/dropping.
+    pub fn stop_on_bytes(self) -> bool {
+        !matches!(self, Self::Retain(_))
+    }
 }
 
-/// Why explicit record capture stopped accepting stdout, not an OS exit code.
+/// Why bounded capture stopped the producer, not an OS exit code.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CaptureStop {
     /// The requested complete-record prefix was captured.
     Records,
-    /// Byte retention filled before that prefix was available.
+    /// Stream/shared byte retention exhausted before complete capture.
     Bytes,
 }
 

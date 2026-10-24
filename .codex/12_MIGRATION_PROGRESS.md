@@ -1,5 +1,29 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-24 — Native Git status ve complete-output portu
+
+`0cbd4a5` ardından `git_status` fixed-argv Git/Rust portuna bağlandı; Elisp
+porcelain parser, file-status struct ve section formatter kaldırıldı. Mevcut
+Magit-tarzı rapor/Unicode/NUL/rename/conflict davranışı Rust'a taşındı. Diğer
+Git komutları/mutation ve shared process runner henüz kaldırılmaz. Search ve
+Git için owned editor read task `bridge/read.el` içinde tekleştirildi.
+
+Complete capture iki stream'de byte overflow'u Failed yapar; malformed NUL/UTF-8
+InvalidToolOutput'tur ve completion actor'a teslim edilmeden success düşürülür.
+Stop-on-bytes exact digest/review'a bağlıdır. Optional index locks kapalı,
+executable fsmonitor disabled, worktree root explicit; host-global ignore ve
+linked worktree korunur. Detay/öğrenim/sınırlar 28_NATIVE_GIT_STATUS.md'dedir.
+
+**105 Rust testi + 2 compile-fail**, locked build/test, fmt ve strict Clippy
+temiz. İndeks byte/inode/mtime değişmeme testi + ordinary-status pozitif
+kontrolü, fsmonitor marker ve external core.worktree scope fixture'ları dahil.
+**1185/1185 full source ERT**, 0 unexpected, **121.68 s**; 17 odaklı integration
+ve 2 yeni capture/parent-cancel testi. Warning-as-error bytecompile/checkdoc
+temiz, geçici .elc kaldırıldı. Bounded TLC process-session 129/42/depth7,
+approval 8194/1536/depth11, transport 1810/693/depth12 hatasız; yeni concrete
+Git/complete-output hattı için refinement ispatı değildir. API + dört app
+backend kapsamı açık; kullanıcı shell.nix/07 değişiklikleri commit dışında.
+
 ## 2026-10-24 — workspace_grep native consumer cutover
 
 `6506899` record-budget prerequisite ardından rg/GNU grep adapter, scoped

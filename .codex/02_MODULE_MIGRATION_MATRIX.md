@@ -52,7 +52,9 @@ portuna bağlandı; Elisp spawn/signal/idle timer kodları silindi. Editor view 
 source/runtime revalidation adapter'ları korunur. Shared process.el, diğer
 Git/diff/webfetch tüketicileri taşınmadığı için henüz kaldırılmaz.
 26–27 ardından `workspace_grep` rg/GNU grep adapter'ına bağlandı; eski Elisp
-grep argv/runner/formatter engine'i kaldırıldı. Diğer `fs.el` tüketicileri ve kalan
+grep argv/runner/formatter engine'i kaldırıldı. 28'de `git_status` da native Git
+adapter'ına bağlandı; eski status parser/runner/formatter kaldırıldı. Diğer Git
+komutları, `fs.el` tüketicileri ve kalan
 aileler henüz taşınmış sayılmaz. Ayrıntı: 15_NATIVE_FIND_FILES.md.
 
 Davranış kanıtları: architecture-contracts.md, docs/modularity.md,

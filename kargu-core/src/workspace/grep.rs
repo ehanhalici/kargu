@@ -3,10 +3,10 @@
 use super::command;
 use crate::{
     application::{Mode, RunSettings},
-    constants::{limits, timeouts},
+    constants::limits,
     domain::{
-        CapturePolicy, ConfigRevision, ExecutionTimeout, OutputLimit, PolicyRevision, RecordLimit,
-        SuccessCodes, ToolCallLimit,
+        CapturePolicy, ConfigRevision, OutputLimit, PolicyRevision, RecordLimit, SuccessCodes,
+        ToolCallLimit,
     },
     error::CoreError,
     security::{CommandEnvironment, CommandInput, CommandSpec, Workspace},
@@ -16,7 +16,6 @@ use std::{
     collections::BTreeMap,
     ffi::OsString,
     path::{Component, Path, PathBuf},
-    time::Duration,
 };
 
 /// Search request, never an arbitrary program/argv or effect-class override.
@@ -32,7 +31,7 @@ pub struct GrepInput {
     #[serde(default)]
     output_bytes: OutputLimit,
     #[serde(default)]
-    timeout_ms: SearchTimeout,
+    timeout_ms: command::ReadTimeout,
 }
 
 /// Nonempty bounded regex/glob expression, interpreted only by the Unix tool.
@@ -69,29 +68,6 @@ impl TryFrom<u64> for MatchLimit {
 impl MatchLimit {
     fn probe(self) -> Result<RecordLimit, CoreError> {
         RecordLimit::try_from(self.0.checked_add(1).ok_or(CoreError::ArithmeticOverflow)?)
-    }
-}
-
-#[derive(Default, Deserialize)]
-#[serde(try_from = "Option<u64>")]
-struct SearchTimeout(Option<ExecutionTimeout>);
-impl TryFrom<Option<u64>> for SearchTimeout {
-    type Error = CoreError;
-    fn try_from(value: Option<u64>) -> Result<Self, CoreError> {
-        if value.is_some_and(|value| value > 86_400_000) {
-            return Err(CoreError::InvalidValue {
-                field: "SearchTimeout",
-            });
-        }
-        Ok(Self(Some(ExecutionTimeout::try_from(
-            value.map(Duration::from_millis),
-        )?)))
-    }
-}
-impl SearchTimeout {
-    fn duration(self) -> Option<Duration> {
-        self.0
-            .map_or(Some(timeouts::WORKSPACE_READ), |timeout| timeout.duration())
     }
 }
 
@@ -235,6 +211,7 @@ impl GrepInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::timeouts;
     use serde_json::json;
 
     #[test]
@@ -273,10 +250,10 @@ mod tests {
     #[test]
     fn omitted_timeout_is_bounded_but_explicit_null_remains_unlimited()
     -> Result<(), Box<dyn std::error::Error>> {
-        let unlimited: SearchTimeout = serde_json::from_value(serde_json::Value::Null)?;
+        let unlimited: command::ReadTimeout = serde_json::from_value(serde_json::Value::Null)?;
         assert_eq!(unlimited.duration(), None);
         assert_eq!(
-            SearchTimeout::default().duration(),
+            command::ReadTimeout::default().duration(),
             Some(timeouts::WORKSPACE_READ)
         );
         Ok(())

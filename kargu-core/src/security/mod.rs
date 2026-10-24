@@ -277,6 +277,12 @@ impl CommandSpec {
         command.safety = ToolSafetyLevel::SafeReadOnly;
         Ok(command)
     }
+    /// Trusted status adapter disables optional writes and executable fsmonitor config.
+    pub(crate) fn git_status(input: CommandInput) -> Result<Self, CoreError> {
+        let mut command = Self::try_from(input)?;
+        command.safety = ToolSafetyLevel::SafeReadOnly;
+        Ok(command)
+    }
     pub(crate) fn with_read_target(mut self, target: PathBuf) -> Result<Self, CoreError> {
         self.read_target = Some(ReadTarget::try_from(target)?);
         Ok(self)
@@ -347,6 +353,13 @@ impl ToolRegistry {
     pub(crate) fn register_grep(&mut self) -> Result<(), CoreError> {
         self.register(
             ToolName::try_from("workspace_grep".to_owned())?,
+            vec![],
+            ToolSafetyLevel::SafeReadOnly,
+        )
+    }
+    pub(crate) fn register_git_status(&mut self) -> Result<(), CoreError> {
+        self.register(
+            ToolName::try_from("git_status".to_owned())?,
             vec![],
             ToolSafetyLevel::SafeReadOnly,
         )
@@ -484,11 +497,13 @@ fn digest(
         OutputRetention::Prefix => 0,
         OutputRetention::Tail => 1,
     }]);
-    if let Some(limit) = command.capture.records() {
-        hash.update([1]);
-        hash.update(limit.as_u64().to_le_bytes());
-    } else {
-        hash.update([0]);
+    match command.capture {
+        CapturePolicy::Retain(_) => hash.update([0]),
+        CapturePolicy::Records(limit) => {
+            hash.update([1]);
+            hash.update(limit.as_u64().to_le_bytes());
+        }
+        CapturePolicy::Complete => hash.update([2]),
     }
     hash.update([match command.success_codes {
         SuccessCodes::Zero => 0,
@@ -519,6 +534,7 @@ pub enum UserDecision {
 pub struct ApprovalRequest {
     retention: OutputRetention,
     stdout_records: Option<RecordLimit>,
+    stop_on_bytes: bool,
     success_codes: SuccessCodes,
     output_limit: OutputLimit,
     timeout: ExecutionTimeout,
@@ -539,6 +555,10 @@ impl ApprovalRequest {
     /// Exact stdout producer-stop budget, separate from retained byte capacity.
     pub fn stdout_records(&self) -> Option<RecordLimit> {
         self.stdout_records
+    }
+    /// Byte overflow is an active producer stop/failure, not ordinary archive truncation.
+    pub fn stop_on_bytes(&self) -> bool {
+        self.stop_on_bytes
     }
     /// Exact accepted exit semantics.
     pub fn success_codes(&self) -> SuccessCodes {
@@ -706,6 +726,7 @@ impl ExecutionGate {
         let request = ApprovalRequest {
             retention: command.capture.retention(),
             stdout_records: command.capture.records(),
+            stop_on_bytes: command.capture.stop_on_bytes(),
             success_codes: command.success_codes,
             output_limit: command.output_limit,
             timeout: command.timeout,

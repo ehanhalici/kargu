@@ -130,7 +130,7 @@
   (let ((result '(:code 0 :output "partial" :truncated t)))
     (should (= (car (kargu-git--result result)) -1))
     (let (received)
-      (kargu-search--native-result
+      (kargu-bridge-read--result
        (kargu-async-start (lambda (_text failure) (setq received failure)))
        (kargu-bridge--object "outcome" "failed" "capture_stop" "bytes"
                             "text" "output limit") nil)
@@ -330,7 +330,7 @@
   "Typed failure cannot be normalized by a late record-limit observation."
   (dolist (outcome '("failed" "timeout" "cancelled" "outcome_unknown"))
     (let (received)
-      (kargu-search--native-result
+      (kargu-bridge-read--result
        (kargu-async-start (lambda (_text failure) (setq received failure)))
        (kargu-bridge--object "outcome" outcome "capture_stop" "records"
                             "text" "partial\n") nil)
@@ -359,6 +359,7 @@
 
 (ert-deftest kargu-git-tool-needs-a-callback-and-answers-by-it-test ()
   "Git tools never run while Emacs waits; with a callback they answer."
+  (kargu-bridge-test--with-core
   (kargu-git-register-tools)
   (kargu-test-with-git-repo '(("a.txt" . "x\n"))
                             (let ((executor (kargu-tool-definition-executor
@@ -366,7 +367,7 @@
                               (should (string-prefix-p "ERROR:" (funcall executor nil)))
                               (let ((out (kargu-test-await
                                           (lambda (cb) (funcall executor nil cb)))))
-                                (should (string-search "Head:" out))))))
+                                (should (string-search "Head:" out)))))))
 
 (ert-deftest kargu-search-grep-runs-asynchronously-test ()
   "The workspace_grep tool finds a string and answers by callback."

@@ -51,6 +51,13 @@ struct GrepRequest {
     arguments: crate::workspace::grep::GrepInput,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GitStatusRequest {
+    scope: ReadScope,
+    arguments: crate::workspace::git::GitStatusInput,
+}
+
 enum Stage {
     Preparing(JoinHandle<Result<Prepared, CoreError>>),
     Review {
@@ -90,6 +97,7 @@ impl Commands {
         registry.register_process(ToolName::try_from("bash".to_owned())?, vec![])?;
         registry.register_listing()?;
         registry.register_grep()?;
+        registry.register_git_status()?;
         Ok(Self {
             operations: HashMap::new(),
             gate: ExecutionGate::default(),
@@ -146,6 +154,19 @@ impl Commands {
                 settings,
                 tool: ToolName::try_from("workspace_grep".to_owned())?,
                 reply: Reply::Grep(report),
+            })
+        })
+    }
+    pub fn start_git_status(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
+        let request: GitStatusRequest =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        self.admit(host, id, request.scope, RunPurpose::AgentTurn, move || {
+            let (command, settings, report) = request.arguments.prepare()?;
+            Ok(Prepared {
+                command,
+                settings,
+                tool: ToolName::try_from("git_status".to_owned())?,
+                reply: Reply::GitStatus(report),
             })
         })
     }
@@ -339,7 +360,10 @@ impl Commands {
                 return Ok(Progress::Done(Err(error)));
             }
         };
-        if matches!(prepared.tool.as_str(), "list_files" | "workspace_grep") {
+        if matches!(
+            prepared.tool.as_str(),
+            "list_files" | "workspace_grep" | "git_status"
+        ) {
             return self.launch(
                 host,
                 scope,
@@ -360,6 +384,7 @@ impl Commands {
             "retention":request.retention(),"output_bytes":request.output_limit(),"timeout_ms":request.execution_timeout().duration().map(|duration| duration.as_millis()),"stderr":request.stderr(),
             "idle_timeout_ms":request.idle_timeout().duration().map(|duration| duration.as_millis()),
             "stdout_records":request.stdout_records(),"success_codes":request.success_codes(),
+            "stop_on_bytes":request.stop_on_bytes(),
             "arguments":request.arguments().iter().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>(),"cwd":request.working_directory(),
             "environment":request.environment().entries().map(|(k,v)| (k.to_string_lossy().into_owned(),v.to_string_lossy().into_owned())).collect::<std::collections::BTreeMap<_,_>>()}});
         if message.to_string().len() > host.frame_limit().as_usize() {
@@ -445,13 +470,17 @@ impl Commands {
         let Some(output) = self.supervisor.capture(&run, &job, limit)? else {
             return Ok(Progress::Pending(Stage::Running { run, job, reply }));
         };
-        let Some(completion) = self.supervisor.try_wait(&run, &job)? else {
+        let Some(mut completion) = self.supervisor.try_wait(&run, &job)? else {
             return Ok(Progress::Pending(Stage::Running { run, job, reply }));
         };
-        let result = completion.deliver(host.actor_mut(scope)?)?;
+        let result = reply.render(completion.result(), &output);
+        if result.is_err() {
+            completion.reject_output();
+        }
+        completion.deliver(host.actor_mut(scope)?)?;
         self.supervisor.forget(&run, &job)?;
         host.actor_mut(scope)?.finish(&run)?;
-        Ok(Progress::Done(reply.render(result, output)))
+        Ok(Progress::Done(result))
     }
     pub fn job_rpc(
         &mut self,
@@ -467,6 +496,11 @@ impl Commands {
 
 pub(super) fn fault(error: CoreError) -> Fault {
     let (code, message, status) = match error {
+        CoreError::InvalidToolOutput => (
+            codes::INVALID_STATE,
+            "Invalid or incomplete structured tool output",
+            "invalid_output",
+        ),
         CoreError::InputOutcomeUnknown => (
             codes::OUTCOME_UNKNOWN,
             "Stdin delivery is unconfirmed; do not retry automatically",

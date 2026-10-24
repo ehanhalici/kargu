@@ -322,6 +322,7 @@ fn record_capture_and_success_codes_are_validated_and_bound_to_approval() -> Tes
     let mut digests = Vec::new();
     for (capture, success) in [
         (CapturePolicy::default(), SuccessCodes::Zero),
+        (CapturePolicy::Complete, SuccessCodes::Zero),
         (
             CapturePolicy::Records(RecordLimit::try_from(1)?),
             SuccessCodes::Zero,
@@ -343,6 +344,7 @@ fn record_capture_and_success_codes_are_validated_and_bound_to_approval() -> Tes
         assert!(!digests.contains(request.digest()));
         digests.push(request.digest().clone());
         assert!(matches!(request.retention(), OutputRetention::Prefix));
+        assert_eq!(request.stop_on_bytes(), capture.stop_on_bytes());
         assert_eq!(
             request.stdout_records().map(RecordLimit::as_u64),
             capture.records().map(RecordLimit::as_u64)
@@ -468,6 +470,42 @@ async fn search_stderr_byte_exhaustion_also_stops_and_fails_the_owned_producer()
         (b"to".to_vec(), true)
     );
     f.actor.finish(&f.run)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn complete_capture_stops_on_either_stream_without_a_record_budget() -> TestResult {
+    for (script, stream) in [
+        ("printf abcdef; read value", OutputStream::Stdout),
+        ("printf abcdef >&2; read value", OutputStream::Stderr),
+    ] {
+        let mut f = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+        let request = f.request_spec(
+            command(&f.root, script, Duration::from_secs(2))?
+                .with_capture(CapturePolicy::Complete)
+                .with_output_limit(OutputLimit::try_from(3_usize)?),
+        )?;
+        assert!(request.stop_on_bytes());
+        assert!(request.stdout_records().is_none());
+        let approved = f
+            .gate
+            .decide(&mut f.actor, &f.run, &request, UserDecision::Approved)?;
+        let job = f.supervisor.start(&mut f.actor, approved)?;
+        let result = f
+            .supervisor
+            .wait(&f.run, &job)
+            .await?
+            .deliver(&mut f.actor)?;
+        assert!(result.cleanup_complete);
+        assert_eq!(result.capture_stop, Some(CaptureStop::Bytes));
+        assert_eq!(result.outcome, ToolOutcome::Failed);
+        assert_eq!(f.output(&job, stream).await?, (b"abc".to_vec(), true));
+        let summary = f.actor.finish(&f.run)?;
+        assert_eq!(
+            summary.tool_results.first().map(|result| result.outcome),
+            Some(ToolOutcome::Failed)
+        );
+    }
     Ok(())
 }
 

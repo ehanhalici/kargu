@@ -40,7 +40,7 @@ mod termination;
 use activity::IdleMonitor;
 use archive::Archive;
 use io::{drain, input_loop};
-use records::{RecordCapture, RecordMonitor, StreamCapture};
+use records::{RecordMonitor, StreamCapture};
 use termination::StopCause;
 
 /// Configuration DTO for bounded cleanup; independent of command/run deadlines.
@@ -145,8 +145,15 @@ pub struct ProcessResult {
     pub signal: Option<i32>,
     /// All tracked tasks and the direct child were drained/reaped.
     pub cleanup_complete: bool,
-    /// Explicit stdout capture stop, independent of the actual OS exit status.
+    /// Explicit capture stop, independent of the actual OS exit status.
     pub capture_stop: Option<CaptureStop>,
+}
+impl ProcessResult {
+    fn reject_output(&mut self) {
+        if self.outcome == ToolOutcome::Ok {
+            self.outcome = ToolOutcome::Failed;
+        }
+    }
 }
 
 /// Single-delivery completion. Its run lease stays live until the actor consumes it.
@@ -157,6 +164,10 @@ pub struct JobCompletion {
     _lease: RunLease,
 }
 impl JobCompletion {
+    /// Output decoding failure is a failed tool, not a successful ledger entry.
+    pub(crate) fn reject_output(&mut self) {
+        self.result.reject_output();
+    }
     /// Inspect typed terminal data before handing it to the owner actor.
     pub fn result(&self) -> &ProcessResult {
         &self.result
@@ -587,14 +598,14 @@ async fn supervise_child(
         return unknown_result();
     };
     let (activity, mut idle) = IdleMonitor::new(command.idle_timeout);
-    let (capture, mut records) = RecordMonitor::new(command.capture.records());
-    let stderr_capture = capture.as_ref().map(RecordCapture::stderr);
+    let (capture, mut records) = RecordMonitor::for_policy(command.capture);
+    let stderr_capture = capture.as_ref().map(StreamCapture::stderr);
     let mut out_task = AbortOnDropHandle::new(tokio::spawn(drain(
         stdout,
         streams.stdout,
         run.clone(),
         activity.clone(),
-        capture.map(StreamCapture::Records),
+        capture,
     )));
     let err_run = run.clone();
     let err_activity = activity.clone();

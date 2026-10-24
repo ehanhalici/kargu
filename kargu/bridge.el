@@ -253,11 +253,22 @@ CALLBACK receives the native (RESULT ERROR).  Never scan directories in Elisp."
 (cl-defun kargu-bridge-grep (connection arguments callback &key owner)
   "Search with captured ARGUMENTS on CONNECTION for OWNER using native Unix tools.
 CALLBACK receives (RESULT ERROR); no Elisp process fallback is executed."
-  (let ((timeout (gethash "timeout_ms" arguments 30000)))
-    (kargu-bridge--workspace-read
+  (kargu-bridge--workspace-read
      connection arguments callback :owner owner :method "workspace/grep"
      :capability "workspace_grep"
-     :timeout (if (eq timeout :json-null) :unlimited (+ 11 (/ timeout 1000.0))))))
+     :timeout (kargu-bridge--read-timeout arguments)))
+
+(defun kargu-bridge--read-timeout (arguments)
+  "Native read ARGUMENTS' deadline with eleven seconds for actual cleanup."
+  (let ((timeout (gethash "timeout_ms" arguments 30000)))
+    (if (eq timeout :json-null) :unlimited (+ 11 (/ timeout 1000.0)))))
+
+(cl-defun kargu-bridge-git-status (connection arguments callback &key owner)
+  "Read Git status with captured ARGUMENTS on CONNECTION for OWNER.
+CALLBACK receives the native (RESULT ERROR); there is no Elisp fallback."
+  (kargu-bridge--workspace-read
+   connection arguments callback :owner owner :method "git/status" :capability "git_status"
+   :timeout (kargu-bridge--read-timeout arguments)))
 
 (cl-defun kargu-bridge-execute (connection arguments callback &key owner)
   "Execute explicit program/argv ARGUMENTS on CONNECTION after user approval.
@@ -451,7 +462,7 @@ Raw stderr is deliberately discarded: future backends may put secrets there."
 This is an adapter service identity, not an imported user conversation or run."
   (if (not (cl-some (lambda (capability)
                      (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
-                   '("workspace_find_files" "workspace_list_files_ls" "workspace_grep" "command_execute")))
+                   '("workspace_find_files" "workspace_list_files_ls" "workspace_grep" "git_status" "command_execute")))
       (kargu-bridge--start-finish connection callback nil)
     (setf (kargu-bridge-connection-state connection) 'binding)
     (kargu-bridge-call

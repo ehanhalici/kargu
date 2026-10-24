@@ -31,7 +31,7 @@
 (require 'kargu/tools/process)
 (require 'kargu/fs)
 (require 'kargu/async)
-(require 'kargu/bridge)
+(require 'kargu/bridge/read)
 
 (defgroup kargu-search nil
   "Workspace grep and glob tools."
@@ -84,7 +84,7 @@ caps the number of hits returned."
     (puthash "output_bytes" kargu-process-max-bytes arguments)
     (puthash "timeout_ms" (if kargu-process-timeout
                               (max 1 (ceiling (* 1000 kargu-process-timeout))) :json-null) arguments)
-    (kargu-search--native-call callback arguments #'kargu-bridge-grep)))
+    (kargu-bridge-read-task callback arguments #'kargu-bridge-grep)))
 
 ;;;; Glob -----------------------------------------------------------------
 
@@ -118,7 +118,7 @@ wait for Rust or run the removed synchronous directory scanner."
     (let* ((root (kargu-search--root))
            (target (kargu-search--resolve path root))
            (arguments (kargu-search--native-arguments root target)))
-      (kargu-search--native-call callback arguments #'kargu-bridge-list-files))))
+      (kargu-bridge-read-task callback arguments #'kargu-bridge-list-files))))
 
 (defun kargu-search--native-arguments (root target)
   "Capture the shared immutable read arguments for ROOT and TARGET."
@@ -138,47 +138,7 @@ Return an owned async task; Stop cancels its pending RPC, not sibling work."
     (puthash "pattern" (copy-sequence pattern) arguments)
     (puthash "max_files" kargu-fs-max-listed-files arguments)
     (puthash "max_directories" kargu-fs-max-visited-directories arguments)
-    (kargu-search--native-call callback arguments #'kargu-bridge-find-files)))
-
-(defun kargu-search--native-result (task result error-data)
-  "Finish TASK from one native RESULT or ERROR-DATA without parsing display text."
-  (cond
-   (error-data (kargu-async-finish task nil (gethash "message" error-data "Native read failed")))
-   ((and (hash-table-p result) (gethash "outcome" result)
-         (not (equal (gethash "outcome" result) "ok")))
-    (kargu-async-finish task nil (format "Native read failed (%s): %s"
-                                       (gethash "outcome" result) (gethash "text" result ""))))
-   ((not (and (hash-table-p result) (stringp (gethash "text" result))))
-    (kargu-async-finish task nil "Invalid native read result"))
-   (t (kargu-async-finish task (gethash "text" result)))))
-
-(cl-defun kargu-search--native-dispatch (task &key owner arguments request connection failure)
-  "Dispatch REQUEST with ARGUMENTS on CONNECTION for TASK and OWNER.
-FAILURE is a startup error; a failed start never invokes a fallback."
-  (if failure (kargu-async-finish task nil "Rust core unavailable; check kargu-bridge-binary-path")
-    (let ((id (funcall request connection arguments
-                       (kargu-async-wrap task (lambda (result error-data)
-                                                (kargu-search--native-result task result error-data)))
-                       :owner owner)))
-      (when id
-        (kargu-async-add-cleanup task (lambda () (kargu-bridge-cancel connection id)))))))
-
-(defun kargu-search--native-call (callback arguments request)
-  "Deliver CALLBACK through native REQUEST with captured ARGUMENTS.
-Use the existing parent task, owner buffer and take-once RPC cleanup."
-  (let* ((owner (current-buffer))
-         (task (kargu-async-start
-                (lambda (text error-data)
-                  (funcall callback (if error-data (concat "ERROR: " error-data) text))))))
-    (kargu-async-add-cleanup
-     task
-     (kargu-bridge-ensure
-      (kargu-async-wrap
-       task
-       (lambda (connection failure)
-         (kargu-search--native-dispatch task :owner owner :arguments arguments
-                                        :request request :connection connection :failure failure)))))
-    task))
+    (kargu-bridge-read-task callback arguments #'kargu-bridge-find-files)))
 
 ;;;; Tool registration -----------------------------------------------------
 

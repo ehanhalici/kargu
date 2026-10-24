@@ -50,6 +50,8 @@ ortak Rust process/gate üzerinden GNU ls çıktısı verir (.codex/17–19).
 reverse approval + Emacs presenter bağlıdır; Bash/job ve interactive session
 consumer'ları native porttadır (.codex/20–25). `workspace_grep` de rg/GNU grep
 adapter'ına bağlandı; eski Elisp grep engine'i kaldırıldı (.codex/26–27).
+`git_status` native Git + complete-output portundadır; eski Elisp status
+engine'i silindi (.codex/28). Diğer Git komutları henüz taşınmadı.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
 output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan read/
 Git/skill/webfetch, egress/context ve global tüketiciler aşağıdaki gruplarda
