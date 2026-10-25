@@ -49,6 +49,22 @@ and its three generated .elc files were removed. **1187/1187 full ERT**,
 0 unexpected, **165.14 s**, passed while the main TLC scan ran.
 User shell.nix/07 edits remain untouched; no remote account/API/CLI turn ran.
 
+## 2026-10-25 — Native terminal failure vocabulary
+
+Added the closed Rust FailureCategory vocabulary and additive api_failure
+capability. ApiError exhaustively produces a stable category in its snapshot;
+the original code/status/Retry-After metadata remain separate and unchanged.
+Logical run deadline is budget-exhausted with reason deadline, not a physical
+HTTP timeout. Category labels are display projections, never replay/probe rights.
+There is no string/status guessing policy in the editor in this slice: the
+default editor consumer is not switched yet and ignores the additive field.
+
+**215 native tests + 10 compile-fail**, locked build/fmt/strict Clippy passed.
+After strengthening the live run-deadline wire assertion, **7/7 budget stdio**
+and **16/16 native retry/circuit/connection GUI regressions** passed with the
+rebuilt binary. Last full ERT remains the preceding loop slice (1187/1187),
+not misreported as a fresh full run for this DTO addition.
+
 ## Next consumers
 
 Default plain/stream HTTP must capture native retry/circuit preferences once,

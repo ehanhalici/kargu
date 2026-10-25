@@ -1,5 +1,16 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Native terminal hata kategorileri
+
+Rust ApiError artık kapalı FailureCategory üzerinden additive category üretir;
+api_failure capability eklendi. Code/status metadata korunur; logical run
+deadline budget-exhausted/reason=deadline, fiziksel timeout'tan ayrıdır. Kategori
+yalnız UI projection'dır; retry/probe hakkı vermez. Elisp default consumer henüz
+bu dilimde değiştirilmedi. **215 native + 10 compile-fail**, fmt/build/strict
+Clippy; son wire assertion ile **7/7 budget stdio**, güncel binary ile **16/16
+focused native GUI** geçti. Son full ERT önceki loop dilimindeki 1187/1187'dir.
+Detay ve kalan consumer adımları 40'ta; kullanıcı shell.nix/07 korunur.
+
 ## 2026-10-25 — Default resilience: ikinci loop retry motoru silindi
 
 Loop'un upstream sınıflandırma/handler/timer/sayaç/cleanup motoru kaldırıldı.

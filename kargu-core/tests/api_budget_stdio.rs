@@ -263,6 +263,8 @@ fn run_deadline_interrupts_an_active_socket_independently_of_attempt_timeout() -
     )?;
     let reply = peer.read()?;
     assert_eq!(reply["result"]["failure"]["code"], "run_deadline");
+    assert_eq!(reply["result"]["failure"]["category"], "budget-exhausted");
+    assert_eq!(reply["result"]["failure"]["reason"], "deadline");
     assert_eq!(reply["result"]["budget"]["refusal"], "deadline");
     assert_eq!(reply["result"]["budget"]["requests_spent"], 1);
     assert_eq!(reply["result"]["budget"]["tokens_unknown"], true);

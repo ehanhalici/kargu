@@ -5,12 +5,14 @@ mod authority;
 pub(crate) use authority::ApiAuthority;
 pub mod cache;
 mod domain;
+mod failure;
 mod http;
 pub mod policy;
 pub mod resilience;
 pub mod stream;
 pub mod wire;
 pub use domain::{HttpRequest, ModelId, SecretString};
+pub use failure::FailureCategory;
 pub use http::{execute, execute_captured};
 
 use serde_json::{Map, Value, json};
@@ -94,10 +96,17 @@ impl ApiError {
         };
         let mut result = Map::from_iter([
             ("code".to_owned(), json!(code)),
+            ("category".to_owned(), json!(self.category())),
             ("message".to_owned(), json!(self.to_string())),
         ]);
         if let Self::BudgetRefused(reason) = self {
             result.insert("reason".to_owned(), json!(reason));
+        }
+        if matches!(self, Self::RunDeadline) {
+            result.insert(
+                "reason".to_owned(),
+                json!(crate::application::budget::Refusal::Deadline),
+            );
         }
         if let Self::Http {
             status,
