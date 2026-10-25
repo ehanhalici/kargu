@@ -58,8 +58,10 @@ Elisp parser/accumulator/watchdog silindi (.codex/30). Credential/UI portları
 kalır; wire ve prompt-cache engine'leri de native'ye taşınıp silindi (.codex/31).
 Request policy de native'ye taşınıp eski seçim/merge motorları silindi (.codex/32).
 Credential/header assembly de native'ye taşınıp Elisp üretim motorları silindi
-(.codex/33); credential lookup editör portudur. Genel run/history ve katalog
-credential discovery portu açık olduğu için tüm API göçü tamamlandı sayılmaz.
+(.codex/33); credential lookup editör portudur. Katalogun eski senkron credential
+discovery yolu da owned async connection portuna geçirildi (.codex/44); genel
+run/history ve native config/endpoint policy açık olduğu için tüm API göçü
+tamamlandı sayılmaz.
 API tüketicileri application-owned native service lease kullanır (.codex/34–35);
 bu henüz native agent run/history sahipliği değildir. Native budget HTTP
 admission/drain ve gerçek root-run consumer'a bağlandı; eski Elisp debit/token
@@ -89,8 +91,10 @@ Elisp record/alias/override/refusal ve field/capability/fiyat engine'leri silind
 Setter'lar artık async ticket + completion callback döndürür; UI yalnız son
 committed görünümü okur. İlk hazırlık native head'i readonly alır; offline
 unknown-model asset'i canlı lease veya başarılı commit yerine kullanılamaz.
-Genel run/history, katalog credential discovery portu ve G08 hard monetary
-reservation hâlâ açıktır; tüm API/Rust göçü tamamlandı sayılmaz.
+Katalog credential hazırlığı cancellable child/connection portuna bağlıdır;
+eski senkron anahtar/auth-source çözümleyicileri silindi. Genel run/history,
+native config/endpoint policy ve G08 hard monetary reservation hâlâ açıktır;
+tüm API/Rust göçü tamamlandı sayılmaz.
 01 uyum denetimi ve kalan kaynak-sahipliği bulguları .codex/39'da tutulur;
 testlerin yeşil olması bütün Rust ağacının mimari uyum sertifikası değildir.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
@@ -408,3 +412,98 @@ bu başlıklarla opsiyonel ilan edilemez.
 - ARCH-05: sıfırdan DAP istemcisi; mevcut Dape adapter'ını bitirmekten farklıdır.
 - ARCH-02 / DEEP-11: gerçek OS sandbox platform matrisi ve power-loss journal.
   Desteklenen garanti sınırının dürüst bildirimi G10/G11'de zaten zorunludur.
+
+## Rust geçişinde kalan adımlar — kapanış takip listesi
+
+Güncelleme: 2026-10-25, `2a2c2cd`. Son tamamlanan dilim katalog credential
+consumer cutover'ı ve kullanılmayan senkron Elisp'in silinmesidir. Kanıt:
+1226/1226 full source ERT, 259 native + 16 compile-fail; ayrıntılar .codex/12/44.
+
+Bu liste .codex/04'teki onaylı göçün kalan **tüketici taşıma/kaldırma sırasını**
+özetler; G03–G13'ün yerine geçen ikinci kapsam veya yeni ürün kararı değildir.
+Kutular ancak gerçek tüketici Rust'a bağlanıp eşdeğer testler geçtikten ve eski
+Elisp motoru silindikten sonra kapanır. Her doğrulanmış küçük dilim ayrı commit
+olur; bağımsız işler önkoşulları sağlanınca öne alınabilir. Emacs'in canlı buffer,
+undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
+
+- [ ] **1. Config ve bağlantı hazırlığının kalan native politikası** —
+  TOML/schema/precedence/env/keyless ve endpoint/model seçim kararlarını typed,
+  revision-bound native portta birleştir. Katalog URL türetmesi ve public kararının
+  kalan editor politikası da bu sınırda ele alınsın. UI yalnız yayınlanmış DTO'yu
+  tüketsin; auth-source/callable credential yalnız sahipli Emacs interop portu
+  olsun. Setup'ın async facade'ını son tüketicisiyle birleştirip artık kullanılmayan
+  Elisp parser/dispatch/precedence yollarını sil. Cold config, custom/local provider,
+  malformed refresh, stale revision, cancel ve iki application fixture'larını koru.
+  Kaynak: Aşama 4, G09/G13; .codex/10, 42, 44.
+
+- [ ] **2. Kalan native araçlar ve tek izin kapısı** — `read_file`, diğer Git
+  işlemleri, skill/toolchain ve webfetch tüketicilerini ortak owner/process/path/
+  egress/approval portuna taşı. Mevcut `ls`/`rg`/`git` motorlarını yeniden yazma.
+  Registry/alias/mode ve doğrudan çağrıda aynı gate'i kullan; job/foreground/global
+  köprüleri ancak son tüketici geçince kaldır. Gerçek cancel/drain, bounded çıktı,
+  foreign owner, missing adapter ve unknown effect kabulünü doğrula. Kaynak: Aşama 2,
+  G04/G05/G11; .codex/17–28.
+
+- [ ] **3. Edit/proposal/review motoru** — diff/proposal/revision/journal kararlarını
+  Rust'a taşı; Emacs'te yalnız canlı belge kontrolü, transaction/undo/save ve review
+  etkileşimi kalsın. Tek typed sonuç kullan; dirty buffer, coding/EOL, save-hook,
+  conflict, partial/unknown ve foreign rollback davranışını koru. Son consumer'dan
+  sonra Elisp stage/review/pending-plan/global edit motorlarını sil. Kaynak: Aşama 2,
+  G04/G10; .codex/06 ve 08.
+
+- [ ] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
+  revision/connection/thread/frame-bound reverse RPC'ye bağla. Mention/folder/
+  attachment/provenance ve byte/token/egress kararlarını native'a taşı; canlı
+  buffer snapshot'ı Emacs'te kalsın. Stale/unavailable tanı veya debugger bağlantısı
+  başarı sayılmasın. Eşdeğer consumer testlerinden sonra eski context/domain
+  formatlama yollarını sil. Kaynak: Aşama 3, G06/G07/G11; .codex/05 ve 09.
+
+- [ ] **5. Genel Rust run/session/history motoru** — native servis lease'i ile
+  gerçek agent run'ını ayır; tek claim/writer altında loop FSM, tool-call/result
+  protokolü, mode/plan dispatch, history repair ve terminal raporu bağla. Stop/reset/
+  EOF'ta revoke → gerçek drain → repair → admit sırasını kanıtla. Headless/fake
+  provider ve gerçek pipe UI uçtan uca geçince Elisp loop/history/domain state
+  motorlarını tüketici tüketici sil; aynı yan etkiyi iki backend'de oynatma.
+  Kaynak: Aşama 4, G08/G12/G13; .codex/00, 07, 11.
+
+- [ ] **6. Bütçe, compaction, healing ve verification birliği** — mevcut native
+  budget/metadata tiplerini kullanarak normal/retry/continue/compaction/healing
+  çağrılarını aynı run handle'ına bağla. Exact fiyatla hard monetary reservation
+  ve unknown usage/pricing davranışını tamamla; float veya tahmini gerçek harcama
+  diye sunma. Tek compaction sınırı, ikinci overflow, başarısız özet, stale verify
+  ve geç usage fixture'ları geçince eski Elisp orchestration'ını sil. Kaynak: G08,
+  Aşama 4; .codex/10–11, 36, 41–43.
+
+- [ ] **7. Session persistence ve restart** — schema_version=2/legacy import,
+  revision'lı journal/snapshot, restore/accounting/selection ve outcome_unknown
+  recovery'yi native tek yazıcıya bağla. Kesilmiş yazı, eski epoch, yarım tool/edit
+  ve restart'ta replay etmeme kabulü geçince eski Elisp persistence motorunu sil.
+  Gerçek kullanıcı session dosyasını test girdisi yapma; power-loss garantisini
+  seçilen journal'ın kanıtını aşacak şekilde genişletme. Kaynak: Aşama 4, G10;
+  .codex/08.
+
+- [ ] **8. İnce UI ve son application/global köprüleri** — chat/session routing,
+  draft, provider/model/effort seçimi, stream/backpressure, plan ve confirmation
+  UI'larını explicit native handle/DTO tüketicisi yap. Aktif run'ın backend/
+  connection snapshot'ı sabit kalsın. Son consumer geçince compatibility circuit/
+  catalog/job/edit/async tablolarını kaldır; passive UI yeni domain authority
+  yaratmasın. Kaynak: Aşama 3/6, G09/G13; docs/connection-ownership.md.
+
+- [ ] **9. Dört kurulu uygulama backend'i ve ayrı MCP portu** — API desteğini
+  koruyarak Codex, Antigravity, Claude Code ve OpenCode'u aynı GUI provider alanına
+  bağla. Her birinde bounded kurulum/sürüm/protokol/auth discovery, readiness nedeni,
+  gerçek turn/stream/terminal/Stop/session ve destekleniyorsa resume/usage/model/
+  effort capability'sini ayrı doğrula. Önce offline fixture; resmi entegrasyon yolu
+  doğrulanmadan CLI bayrağı/port uydurma. MCP-only Antigravity backend teslimi
+  sayılmaz; biri engelliyse kendi kabul kutusu açık kalır. Canlı hesap/model turu,
+  login, kurulum ve credential taşıma ayrıca onay ister. Kaynak: Aşama 5, G12;
+  .codex/03'ün dört ayrı backend kabulü ve MCP topolojisi.
+
+- [ ] **10. Son kabul, varsayılan cutover ve paketleme** — G03/G11 log gizliliği,
+  retention/egress ve .codex/01/39 uyum açıklarını gerçek consumer'larda kapat.
+  Missing-module, version mismatch, clean-machine startup, release binary/asset
+  paketi ve export/geri dönüş sınırını doğrula. Tüm ERT, locked native test,
+  compile-fail, fmt, strict Clippy, uyarısız değişen Elisp ve etkilenen exhaustive
+  modeller geçsin. Uçtan uca eşdeğerlikten sonra Rust agent default olsun; yalnız
+  o zaman son legacy backend/engine kaynaklarını sil. Thin editor adapter'ları
+  kalır; merge/push ayrıca onay ister. Kaynak: Aşama 6, G03/G11/G13.
