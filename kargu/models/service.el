@@ -5,18 +5,13 @@
 
 ;;; Commentary:
 
-;; One application owns catalog generations, model records, refusals and
-;; circuit records.  Legacy tables remain bridges for detached consumers.
+;; One application owns UI catalog generations, cache and prefetch state.
+;; Model records, overrides, capabilities and refusals live only in Rust.
+;; Detached UI tables remain compatibility projections, not model authorities.
 
 ;;; Code:
 
 (require 'kargu/application/coordinator)
-
-(defun kargu-metadata-assert-legacy-writer ()
-  "Refuse a legacy write after this application enters native publication.
-The default producer cutover is separate; never silently run two writers."
-  (when (gethash :native-models (kargu-application-services (kargu-application-context)))
-    (user-error "Kargu: native metadata publication owns this application")))
 
 (defun kargu-metadata-table (name legacy)
   "Return the application's table NAME, or detached compatibility table LEGACY."

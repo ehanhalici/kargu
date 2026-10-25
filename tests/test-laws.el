@@ -27,17 +27,16 @@
 (require 'kargu/chat/session)
 
 (defmacro kargu-laws--with-catalog (&rest body)
-  "Run BODY with an empty metadata table and no recorded refusals."
+  "Run BODY in the fresh native metadata owner provided by test isolation."
   (declare (indent 0))
-  `(let ((kargu--model-metadata-table (make-hash-table :test 'equal))
-         (kargu--tools-refused (make-hash-table :test 'equal)))
+  `(progn
      ,@body))
 
 (ert-deftest kargu-law-a-toolless-model-is-refused-and-the-prompt-stays-test ()
   "Agent mode with a model that cannot call tools is refused, the input stays."
   (kargu-laws--with-catalog
     (kargu-test-mode 'agent)
-    (kargu-model-set-metadata "no-tools-model" '(("supports_tools" . :json-false)) "p")
+   (kargu-test-set-model-metadata "no-tools-model" '(("supports_tools" . :json-false)) "p")
     (let ((kargu-session--context
            (kargu-test-session-with-history :model "no-tools-model"))
           (kargu--loop-run nil)
@@ -64,7 +63,7 @@
   (kargu-laws--with-catalog
     (let ((kargu--loop-run nil))
       (should (kargu-model-supports-tools-p "never-seen"))
-      (kargu-model-set-metadata "bare" '(("id" . "bare")))
+     (kargu-test-set-model-metadata "bare" '(("id" . "bare")))
       (should (kargu-model-supports-tools-p "bare"))
       (let ((kargu-session--context
              (kargu-test-session-with-history :model "never-seen")))
@@ -74,12 +73,12 @@
   "An explicit off in the metadata, a provider refusal, or a run flag closes tools."
   (kargu-laws--with-catalog
     (let ((kargu--loop-run nil))
-      (kargu-model-set-metadata "off" '(("supports_tools" . :json-false)))
+     (kargu-test-set-model-metadata "off" '(("supports_tools" . :json-false)))
       (should-not (kargu-model-supports-tools-p "off"))
       (let ((kargu-session--context
              (kargu-test-session-with-history :model "refused-later")))
         (should (kargu-tools-enabled-p))
-        (kargu-model-mark-tools-refused "refused-later")
+       (kargu-test-mark-tools-refused "refused-later")
         (should-not (kargu-tools-enabled-p)))
       (let ((kargu-session--context
              (kargu-test-session-with-history :model "plain")))

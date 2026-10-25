@@ -233,6 +233,7 @@
           (progn
             (kargu--catalog-receive task "fixture" 1
               "{\"models\":[{\"id\":\"m1\"},{\"id\":\"m2\"},{\"id\":\"m3\"}]}")
+            (kargu-test-drain-model-publishers)
             (should (equal (mapcar (lambda (model) (kargu-aget model "id")) result)
                            '("m1" "m2" "m3")))
             (should (equal (gethash "fixture" kargu--live-models-cache) '("m1" "m2" "m3"))))
@@ -245,7 +246,7 @@
   (let ((kargu-reasoning-effort nil)
         (kargu-session--context
          (kargu-test-session-with-history :model "test/cycle-model")))
-    (kargu-model-set-metadata "test/cycle-model"
+    (kargu-test-set-model-metadata "test/cycle-model"
                               '(:id "cycle-model"
                                     :reasoning-efforts ("low" "medium" "high")))
     (kargu-tune-cycle-reasoning-effort)

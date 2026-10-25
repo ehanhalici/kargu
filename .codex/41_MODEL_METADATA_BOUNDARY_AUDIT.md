@@ -1,5 +1,15 @@
 # Model metadata: next native boundary
 
+## Current consumer status — 2026-10-25
+
+The default public setter/catalog/UI cutover and corresponding Lisp semantic
+engine deletion are now implemented; see 43_DEFAULT_MODEL_METADATA_CUTOVER.md
+and the latest progress entry in 12. Earlier pending-cutover descriptions below
+are chronological evidence, not a remaining approval question or active second
+writer. Public setters are asynchronous; UI reads committed native DTOs. Initial
+preparation reads the actual native head and cannot use the packaged unknown UI
+snapshot as a successful lease or repair. Whole migration/G08 remain open.
+
 ## Discovery source precision and first-intent startup — 2026-10-25
 
 Discovery now shares RawMetadata's exact snapshot projection rather than a

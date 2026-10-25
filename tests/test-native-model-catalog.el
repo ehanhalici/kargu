@@ -57,7 +57,7 @@
     (dolist (source '("{}" "{\"data\":null}" "{\"data\":42}" "[42]"
                       "{\"data\":[],\"error\":\"synthetic-provider-secret\"}" "{\"data\":[]}"))
       (kargu-model-catalog-test--with-server source
-        (kargu--catalog-cache-live-models provider '((("id" . "kept") ("context_length" . 100))))
+					    (kargu-test-cache-model-catalog provider '((("id" . "kept") ("context_length" . 100))))
         (let (done result failure)
           (kargu-api-fetch-model-ids provider
            (lambda (ids) (setq result ids done t))
@@ -77,7 +77,7 @@
   "A real bare-ID provider response replaces stale capabilities and fields."
   (kargu-bridge-test--with-core
     (kargu-model-catalog-test--with-server "[\"kept\"]"
-      (kargu--catalog-cache-live-models provider
+					  (kargu-test-cache-model-catalog provider
        '((("id" . "kept") ("context_length" . 100) ("supports_tools" . :json-false))))
       (should-not (kargu-model-supports-tools-p "kept" provider))
       (let (done result)

@@ -19,9 +19,9 @@
 
 (ert-deftest kargu-parameters-capture-exact-model-metadata-without-fuzzy-borrow-test ()
   "A foreign provider or short alias never controls captured request policy."
-  (let ((kargu--model-metadata-table (make-hash-table :test #'equal)))
-    (kargu-model-set-metadata "same" '(("supported_parameters" . ["max_completion_tokens"])) "other")
-    (kargu-model-set-metadata "vendor/alias" '(("supported_parameters" . ["max_completion_tokens"])) "openrouter")
+  (progn
+    (kargu-test-set-model-metadata "same" '(("supported_parameters" . ["max_completion_tokens"])) "other")
+    (kargu-test-set-model-metadata "vendor/alias" '(("supported_parameters" . ["max_completion_tokens"])) "openrouter")
     (dolist (model '("same" "alias"))
       (should (eq (kargu-aget (kargu-api-request-tuning "openrouter" model) "supported_parameters") :json-null)))
     (should (equal (kargu-aget (kargu-api-request-tuning "other" "same") "supported_parameters") ["max_completion_tokens"]))))

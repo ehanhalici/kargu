@@ -1,0 +1,38 @@
+{
+  "revision": 0,
+  "records": [],
+  "aliases": [],
+  "catalogs": [],
+  "refusals": [],
+  "defaults": {
+    "metadata": null,
+    "fields": {
+      "context_window": {"state": "missing"},
+      "max_output": {"state": "missing"},
+      "input_cost": {"state": "missing"},
+      "output_cost": {"state": "missing"},
+      "cache_read_cost": {"state": "missing"},
+      "cache_write_cost": {"state": "missing"},
+      "supports_tools": {"state": "missing"},
+      "supports_reasoning": {"state": "missing"},
+      "supported_parameters": {"state": "missing"},
+      "reasoning_efforts": {"state": "missing"},
+      "vision": {"state": "missing"},
+      "free": {"state": "missing"},
+      "params": {"state": "missing"}
+    },
+    "display": {
+      "context-window": null,
+      "max-output": null,
+      "reasoning-efforts": null,
+      "vision": false,
+      "free": false,
+      "params": null,
+      "input-cost": null,
+      "price-label": null
+    },
+    "tools": true,
+    "reasoning": false,
+    "input_zero": false
+  }
+}

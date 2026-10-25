@@ -250,10 +250,10 @@ An action that never posts runs once."
   "Apply TOOLS (`on' or `off') to the active model's metadata.
 An earlier tool rejection is remembered by the metadata service;
 each row starts with that record cleared so it cannot leak."
-  (kargu-model-forget-tools-refusals)
+  (kargu-test-forget-tools-refusals)
   (let ((id (kargu--model)))
     (when (and (stringp id) (not (string-empty-p id)))
-      (kargu-model-set-metadata
+      (kargu-test-set-model-metadata
        id (list :supports-tools (eq tools 'on))))))
 
 (defun kargu-fake--type (text)
@@ -473,10 +473,9 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
          (saved-mode (kargu-state-mode))
          (saved-key (and (boundp 'kargu-api-key) kargu-api-key))
          (saved-history (copy-tree (kargu-history-messages) t))
-         (saved-meta (copy-hash-table kargu--model-metadata-table))
          (saved-models (and (hash-table-p kargu--live-models-cache)
                             (copy-hash-table kargu--live-models-cache)))
-         (kargu--tools-refused (make-hash-table :test #'equal))
+
          (kargu-api-key "sk-fake")
          (kargu-loop-empty-retries 0)
          (kargu-api-retry-max 0)
@@ -520,11 +519,6 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
             kargu--loop-run nil
             kargu--busy nil)
       (ignore-errors (kargu-set-mode saved-mode))
-      (when (hash-table-p kargu--model-metadata-table)
-        (clrhash kargu--model-metadata-table)
-        (maphash (lambda (key value)
-                   (puthash key value kargu--model-metadata-table))
-                 saved-meta))
       (when (and saved-models (hash-table-p kargu--live-models-cache))
         (clrhash kargu--live-models-cache)
         (maphash (lambda (key value)

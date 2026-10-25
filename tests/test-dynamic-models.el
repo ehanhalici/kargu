@@ -32,6 +32,7 @@
                    (should (eq (kargu-aget (plist-get options :auth) "key") :json-null))
                    (funcall (plist-get options :then) "{\"models\":[{\"id\":\"live-model\"}]}"))))
         (kargu-api-fetch-model-ids provider (lambda (ids) (setq result ids)))
+        (kargu-test-drain-model-publishers)
         (should (equal seen (kargu-provider-models-api provider)))
         (should (equal result '("live-model")))))
     (should-not (kargu-provider-public-models-p "opencode" "https://private.example/models"))))
@@ -47,8 +48,11 @@
       (kargu-api-fetch-model-ids "opencode-go" (lambda (ids) (push (cons 'other ids) results)))
       (kargu-api-fetch-model-ids "opencode" (lambda (ids) (push (cons 'new ids) results)))
       (funcall (plist-get (nth 0 pending) :then) "{\"models\":[{\"id\":\"new\"}]}")
+      (kargu-test-drain-model-publishers)
       (funcall (plist-get (nth 1 pending) :then) "{\"models\":[{\"id\":\"other\"}]}")
+      (kargu-test-drain-model-publishers)
       (funcall (plist-get (nth 2 pending) :then) "{\"models\":[{\"id\":\"old\"}]}")
+      (kargu-test-drain-model-publishers)
       (funcall (plist-get (nth 2 pending) :else) 'late-error)
       (should (= (length results) 3))
       (should (equal (gethash "opencode" kargu--live-models-cache) '("new")))
@@ -97,6 +101,7 @@
                (lambda (_method _url &rest options) (setq pending options) nil)))
       (setq task (kargu-api-list-models #'ignore "opencode"))
       (funcall (plist-get pending :then) "{\"models\":[]}")
+      (kargu-test-drain-model-publishers)
       (should-not (gethash "opencode" kargu--live-models-cache))
       (should-not (kargu-async-task-timer task))
       (kargu--prefetch-models-once "opencode")
@@ -105,11 +110,12 @@
       (should-not (gethash "opencode" kargu--models-prefetched))
       (kargu--prefetch-models-once "opencode")
       (funcall (plist-get pending :then) "{\"models\":[]}")
+      (kargu-test-drain-model-publishers)
       (should (eq (gethash "opencode" kargu--models-prefetched) :ready)))))
 
 (ert-deftest kargu-dynamic-models-openrouter-metadata-test ()
   "Test parsing and metadata extraction from OpenRouter /models schema."
-  (let ((kargu--model-metadata-table (make-hash-table :test 'equal))
+  (let (
         (models-json
          '((("id" . "deepseek/deepseek-r1")
             ("context_length" . 131072)
@@ -124,7 +130,7 @@
                            ("completion" . "0"))))
             ("top_provider" . ((("max_completion_tokens" . 4096))))
             ("architecture" . ((("modality" . "text+image->text"))))))))
-    (kargu--record-models-metadata models-json "openrouter")
+    (kargu-test-publish-model-catalog models-json "openrouter")
     ;; The store keeps the raw alist.  One reader extracts the fields.
     (let ((fields (kargu-model-read "deepseek/deepseek-r1" "openrouter")))
       (should (consp (kargu-model-get-metadata "deepseek/deepseek-r1" "openrouter")))
@@ -147,7 +153,7 @@
 
 (ert-deftest kargu-dynamic-models-ollama-schema-test ()
   "Test parsing Ollama /api/tags schema with details and parameter sizes."
-  (let ((kargu--model-metadata-table (make-hash-table :test 'equal))
+  (let (
         (ollama-json
          '((("name" . "llama3.3:70b")
             ("details" . ((("parameter_size" . "70.6B")
@@ -156,7 +162,7 @@
            (("name" . "deepseek-r1:32b")
             ("details" . ((("parameter_size" . "32.8B")
                            ("quantization_level" . "Q4_K_M"))))))))
-    (kargu--record-models-metadata ollama-json "ollama")
+    (kargu-test-publish-model-catalog ollama-json "ollama")
     (let ((llama (kargu-model-read "llama3.3:70b" "ollama"))
           (r1 (kargu-model-read "deepseek-r1:32b" "ollama")))
       (should (equal (plist-get llama :params) "70.6B Q4_K_M"))
@@ -171,7 +177,7 @@
 
 (ert-deftest kargu-dynamic-models-google-gemini-schema-test ()
   "Test parsing Google Gemini inputTokenLimit & outputTokenLimit schema."
-  (let ((kargu--model-metadata-table (make-hash-table :test 'equal))
+  (let (
         (gemini-json
          '((("name" . "models/gemini-1.5-pro")
             ("inputTokenLimit" . 2097152)
@@ -181,7 +187,7 @@
             ("inputTokenLimit" . 1048576)
             ("outputTokenLimit" . 8192)
             ("description" . "Fast next-gen model")))))
-    (kargu--record-models-metadata gemini-json "google")
+    (kargu-test-publish-model-catalog gemini-json "google")
     (let ((pro (kargu-model-read "gemini-1.5-pro" "google"))
           (flash (kargu-model-read "gemini-2.0-flash" "google")))
       (should (= (plist-get pro :context-window) 2097152))

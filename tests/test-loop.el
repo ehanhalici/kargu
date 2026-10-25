@@ -24,7 +24,7 @@
   "Tool refusal belongs to the sent model/provider, not a newer selection."
   (should-not (kargu--error-no-tools-support-p "Try disabling your VPN"))
   (let* ((run (list :state 'request)) (kargu--loop-run run)
-         (kargu--tools-refused (make-hash-table :test #'equal))
+
          (provider "old-provider") (model "old-model"))
     (cl-letf (((symbol-function 'kargu--provider-name) (lambda () provider))
               ((symbol-function 'kargu--model) (lambda () model))
@@ -34,8 +34,9 @@
       (kargu-loop--send-model run "hello")
       (setq provider "new-provider" model "new-model")
       (kargu-loop--handle-tools-unsupported run "Tools are not supported")
-      (should (gethash '("old-provider" . "old-model") kargu--tools-refused))
-      (should-not (gethash '("new-provider" . "new-model") kargu--tools-refused)))))
+      (kargu-test-drain-model-publishers)
+      (should-not (kargu-model-supports-tools-p "old-model" "old-provider"))
+      (should (kargu-model-supports-tools-p "new-model" "new-provider")))))
 
 (ert-deftest kargu-loop-thought-callback-error-never-redelivers-test ()
   "Callback arity is inspected before delivery, not guessed from its errors."
@@ -420,8 +421,8 @@
 
     ;; 2. In ask mode: falls back to :no-tools t and retries
     (let* ((_ (kargu-test-mode 'ask))
-           (kargu--model-metadata-table (make-hash-table :test 'equal))
-           (kargu--tools-refused (make-hash-table :test 'equal))
+
+
            (kargu-session--context
             (kargu-test-session-with-history :model "openrouter/free-model" :provider "openrouter"))
 
@@ -437,12 +438,13 @@
         (should retry-called)
         (should-not finish-called)
         (should (plist-get run :no-tools))
+        (kargu-test-drain-model-publishers)
         (should-not (kargu-model-supports-tools-p "openrouter/free-model"))))
 
     ;; 3. In agent mode: finishes with descriptive error
     (let* ((_ (kargu-test-mode 'agent))
-           (kargu--model-metadata-table (make-hash-table :test 'equal))
-           (kargu--tools-refused (make-hash-table :test 'equal))
+
+
            (kargu-session--context
             (kargu-test-session-with-history :model "openrouter/free-model" :provider "openrouter"))
 
@@ -600,17 +602,17 @@
 
 (ert-deftest kargu-tools-enabled-single-decision-test ()
   "One function answers whether tools are usable; a refusal is per provider/model."
-  (let ((kargu--tools-refused (make-hash-table :test #'equal))
-        (kargu--model-metadata-table (make-hash-table :test #'equal))
+  (let (
+
         (kargu-session--context
          (kargu-test-session-with-history :provider "openrouter" :model "m/one")))
     (should (kargu-tools-enabled-p))
     (should-not (kargu-tools-enabled-p (list :no-tools t)))
-    (kargu-model-mark-tools-refused "m/one")
+    (kargu-test-mark-tools-refused "m/one")
     (should-not (kargu-tools-enabled-p))
     (should-not (kargu-model-supports-tools-p "m/one"))
     (should (kargu-model-supports-tools-p "m/two"))
-    (kargu-model-forget-tools-refusals)
+    (kargu-test-forget-tools-refusals)
     (should (kargu-tools-enabled-p))))
 
 (ert-deftest kargu-loop-status-shows-the-runs-own-cap-test ()

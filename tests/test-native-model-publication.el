@@ -483,18 +483,21 @@
      (should (zerop (kargu-bridge-models-bytes (kargu-bridge-model-ticket-service active))))
      (should-not (kargu-bridge-models-snapshot app)))))
 
-(ert-deftest kargu-native-model-publication-cannot-run-alongside-a-legacy-writer-test ()
-  "An application's native revision cannot silently ignore subsequent Lisp writes."
+(ert-deftest kargu-native-model-publication-public-writers-share-the-existing-actor-test ()
+  "Public put/override/catalog/refusal writes all join the exact native writer."
   (kargu-bridge-test--with-core
    (let* ((kargu-application--bound (kargu-application-create))
-          (ticket (kargu-model-publication-test--submit conn kargu-application--bound 10)))
-     (kargu-bridge-test--wait (lambda () (eq (kargu-bridge-model-ticket-status ticket) :committed)))
-     (should-error (kargu-model-set-metadata "Model" '(:context-window 99) "a") :type 'user-error)
-     (should-error (kargu-model-set-prop "Model" :context-window 99 :provider "a") :type 'user-error)
-     (should-error (kargu-model-store-retain "a" nil) :type 'user-error)
-     (should-error (kargu-model-mark-tools-refused "Model" "a") :type 'user-error)
-     (should (= (kargu-model-publication-test--capacity
-                 (kargu-bridge-models-snapshot kargu-application--bound)) 10)))))
+          (first (kargu-model-publication-test--submit conn kargu-application--bound 10)))
+     (kargu-test-await-model-ticket first)
+     (kargu-test-set-model-metadata "Model" '(:context-window 99) "a")
+     (kargu-test-set-model-prop "Model" :context-window 100 :provider "a")
+     (kargu-test-cache-model-catalog "a" '((("id" . "Model") ("context_length" . 200))))
+     (kargu-test-mark-tools-refused "Model" "a")
+     (should (= (gethash "revision" (kargu-bridge-models-snapshot kargu-application--bound)) 5))
+     (should (= (kargu-model-context-window "Model" "a") 100))
+     (should-not (kargu-model-supports-tools-p "Model" "a"))
+     (should-not (fboundp 'kargu-model-store-retain))
+     (should-not (fboundp 'kargu-model-store--effective)))))
 
 (ert-deftest kargu-native-model-publication-projection-keeps-request-parameters-exact-test ()
   "A native display alias cannot lend its canonical request parameter policy."

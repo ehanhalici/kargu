@@ -25,7 +25,7 @@
 (cl-defstruct (kargu-bridge-model-ticket (:constructor kargu-bridge-model-ticket--make))
   "One captured submission and its immutable committed-revision receipt."
   service provider source specs callback valid-p owner cleanup startup-cleanup timer waiters
-  upload chunks view-cell failure cancel-reason reconcile
+  upload chunks view-cell failure cancel-reason reconcile observe
   (status :pending) (phase :queued) (offset 0) (position 0) (max-chunk 0)
   (bytes 0) revision total (read-bytes 0) commit-sent released)
 

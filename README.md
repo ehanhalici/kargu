@@ -116,10 +116,12 @@ atomic commit; stale revisions cannot mix snapshot pages. The editor bridge
 supports bounded asynchronous publication tickets, detached committed views
 and explicit same-lease reconciliation. Connection preparation captures one
 ticket and freezes that exact revision; failed native publication never falls
-back to legacy data. The default public setters, catalog publisher and general
-UI readers still await their coordinated consumer cutover. An application that
-explicitly enters native publication rejects legacy metadata writes, so the
-two engines cannot silently run together for that owner.
+back to legacy data. Public setters, catalog publication and UI readers now use
+this native store; the old Lisp record/override/capability/price engines are
+removed. Package `kargu-core/assets/models-empty.json` alongside the provider
+asset: Rust tests verify this offline unknown-model UI snapshot matches the
+actual initial store. Real preparation always reads a native receipt, never
+uses that bootstrap as a live lease or silently rebinds an old application.
 Wider agent run/history migration also remains open.
 
 Chat retries stay within one native logical exchange, with a fresh budget debit
@@ -291,16 +293,26 @@ transaction cannot undo arbitrary external effects of user mode hooks. Schema
 version 2 stores effort as inherited, explicitly off, or an API value; legacy
 records migrate in memory without rewriting storage. Unknown versions refuse.
 
-Model metadata now has one owner in `kargu/models/store.el`, indexed by the
-provider/model pair. Provider IDs normalize case; opaque model IDs retain it.
+Model metadata has one owner in the Rust application actor, indexed by the
+provider/model pair. `kargu/models/store.el` is only an asynchronous command
+facade and detached projection reader. Provider IDs normalize case; opaque IDs
+retain it.
 Readers default to the active provider, or take an explicit provider argument.
 Short display aliases must be unique within that provider; request parameter
 policy always requires the exact model ID. Local property overrides belong to
 that same identity and survive catalog refreshes during the Emacs session.
 They are not written to disk. Metadata inspectors retain their captured provider
 when chats switch. Model APIs such as `kargu-model-set-metadata` accept an
-explicit provider; `kargu-model-set-prop` uses `:provider`. Restart Emacs to rebuild
-the in-memory catalog after updating from the old global cache.
+explicit provider; `kargu-model-set-prop` uses `:provider`. Both now return an
+asynchronous publication ticket. `kargu-model-set-metadata` accepts an optional
+fourth CALLBACK; `kargu-model-set-prop` accepts `:callback`. Callbacks receive
+`(VIEW FAILURE)` after native completion. Submission is not success: UI getters
+keep the last committed revision, and connection preparation waits for the exact
+ticket it captured. Do not busy-wait in editor code. Price and capacity inputs
+must be exact decimal strings or integers, not already-rounded floats;
+`:input-cost` is now an exact decimal string and `:price-label` is native text.
+Inspectors report completion only after commit. Restart Emacs when updating from
+the removed global metadata store.
 
 A successful catalog refresh removes raw metadata for models no longer
 advertised by that provider; local property overrides remain. An ID-only

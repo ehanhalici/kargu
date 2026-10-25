@@ -107,7 +107,7 @@
 
 (ert-deftest kargu-chat-context-usage-footer-test ()
   "Test that context usage is accurately calculated and rendered."
-  (kargu-model-set-metadata "gemini-2.5-flash" '(("context_length" . 1000000)))
+  (kargu-test-set-model-metadata "gemini-2.5-flash" '(("context_length" . 1000000)))
   (let ((kargu-session--context
          (kargu-session-create :id-value (kargu-session-id)
                                :usage-value (list :last-prompt-tokens 32000)

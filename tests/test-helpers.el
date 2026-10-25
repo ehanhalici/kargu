@@ -56,6 +56,55 @@ selector integration tests keep the real worker and file publication."
     (kargu-async-finish task (kargu-ok (kargu-config-current-snapshot)))
     task))
 
+(defvar kargu-test--model-apps nil
+  "Native metadata owners created by this test's explicit producer fixtures.")
+
+(defun kargu-test-await-model-ticket (ticket)
+  "Await real native TICKET in fixtures, never make the product API synchronous."
+  (cl-pushnew (kargu-bridge-models-app (kargu-bridge-model-ticket-service ticket)) kargu-test--model-apps)
+  (let ((deadline (+ (float-time) 10)))
+    (while (and (eq (kargu-bridge-model-ticket-status ticket) :pending) (< (float-time) deadline))
+      (accept-process-output nil 0.01)))
+  (unless (eq (kargu-bridge-model-ticket-status ticket) :committed)
+    (user-error "Native fixture publication failed: %S" (kargu-bridge-model-ticket-failure ticket)))
+  (kargu-bridge-model-ticket-view ticket))
+
+(defun kargu-test-set-model-metadata (&rest args)
+  "Publish model metadata ARGS through the real public asynchronous setter."
+  (kargu-test-await-model-ticket (apply #'kargu-model-set-metadata args)))
+
+(defun kargu-test-set-model-prop (&rest args)
+  "Publish model property ARGS through the real public asynchronous setter."
+  (kargu-test-await-model-ticket (apply #'kargu-model-set-prop args)))
+
+(defun kargu-test-mark-tools-refused (&rest args)
+  "Await native refusal observation ARGS in a fixture."
+  (kargu-test-await-model-ticket (apply #'kargu-model-mark-tools-refused args)))
+
+(defun kargu-test-forget-tools-refusals ()
+  "Await clearing native refusal observations in a fixture."
+  (kargu-test-await-model-ticket (kargu-model-forget-tools-refusals)))
+
+(defun kargu-test-cache-model-catalog (provider models)
+  "Publish PROVIDER's MODELS as a real atomic native catalog fixture."
+  (kargu-test-await-model-ticket (kargu--catalog-cache-live-models provider models)))
+
+(defun kargu-test-publish-model-catalog (models &optional provider)
+  "Publish MODELS for explicit PROVIDER or the fixture's active provider."
+  (kargu-test-cache-model-catalog (or provider (kargu--provider-name)) models))
+
+(defun kargu-test-drain-model-publishers ()
+  "Wait for pending fixture publications without changing their captured intent."
+  (when-let* ((ticket (kargu-bridge-models-capture (kargu-application-context))))
+    (when (eq (kargu-bridge-model-ticket-status ticket) :pending)
+      (kargu-test-await-model-ticket ticket))))
+
+(defun kargu-test-efforts-from-specs (data specs)
+  "Read DATA through real native publication with explicitly captured SPECS."
+  (cl-letf (((symbol-function 'kargu-provider-effort-specs) (lambda (_) specs)))
+    (kargu-test-set-model-metadata "effort-fixture" data "effort-fixture"))
+  (kargu-model-reasoning-efforts "effort-fixture" "effort-fixture"))
+
 ;;;; Temporary repositories ----------------------------------------------------
 
 (defvar kargu-permission--override-root)
@@ -116,8 +165,6 @@ PROVIDER, MODEL and EFFORT default to the current owner's explicit values."
 (defvar kargu--busy)
 (defvar kargu--generation)
 (defvar kargu-application--context)
-(defvar kargu--tools-refused)
-(defvar kargu--model-metadata-table)
 (defvar kargu--state-store)
 (defvar kargu-session--context)
 (defvar kargu--session-id)
@@ -193,8 +240,8 @@ Tests never see the working tree of Kargu as their project."
               :active-run kargu--loop-run
               :generation (or (bound-and-true-p kargu--generation) 0))
            (bound-and-true-p kargu-application--context)))
-        (kargu--tools-refused (copy-hash-table kargu--tools-refused))
-        (kargu--model-metadata-table (copy-hash-table kargu--model-metadata-table))
+        (kargu-test--model-apps nil)
+        (kargu-bridge-binary-path (or (getenv "KARGU_CORE_TEST_BINARY") kargu-bridge-binary-path))
         (kargu-diff--changed (if (and (boundp 'kargu-diff--changed)
                                       (hash-table-p kargu-diff--changed))
                                  (copy-hash-table kargu-diff--changed)
@@ -204,8 +251,24 @@ Tests never see the working tree of Kargu as their project."
                                    (copy-hash-table kargu-diff--snapshots)
                                  (make-hash-table :test #'equal)))
         (kargu-diff--run-modified-files (bound-and-true-p kargu-diff--run-modified-files)))
-    (cl-letf (((symbol-function 'kargu-api-prepare-connection) #'kargu-test-prepare-connection))
-      (apply run-test args))))
+    (unwind-protect
+        (let ((submit (symbol-function 'kargu-bridge-models-submit)))
+          (cl-letf (((symbol-function 'kargu-api-prepare-connection) #'kargu-test-prepare-connection)
+                    ((symbol-function 'kargu-bridge-models-submit)
+                     (lambda (connection app &rest options)
+                       (cl-pushnew app kargu-test--model-apps)
+                       (apply submit connection app options))))
+            (apply run-test args)))
+      (dolist (app kargu-test--model-apps)
+        (when-let* ((service (gethash :native-models (kargu-application-services app))))
+          (dolist (ticket (cons (kargu-bridge-models-active service) (copy-sequence (kargu-bridge-models-queue service))))
+            (when ticket (kargu-bridge-models-cancel ticket))))
+        (when-let* ((binding (gethash :native-core (kargu-application-services app)))
+                    ((eq (kargu-bridge-status (kargu-bridge-application-connection binding)) 'ready)))
+          (let (done)
+            (kargu-bridge-application-close app (lambda (&rest _) (setq done t)))
+            (let ((deadline (+ (float-time) 5)))
+              (while (and (not done) (< (float-time) deadline)) (accept-process-output nil 0.01)))))))))
 
 (advice-add 'ert-run-test :around #'kargu-test--isolate)
 

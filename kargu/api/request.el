@@ -16,7 +16,7 @@
 (require 'kargu/config)
 (require 'kargu/history)
 (require 'kargu/api/tools)
-(require 'kargu/models/projection)
+(require 'kargu/models/store)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-extra-headers "kargu/providers/registry" (id))
@@ -46,24 +46,18 @@ No parameter is selected or wire-shaped in the editor."
                   (or (plist-get (kargu-provider-get provider) :request) :json-empty-object))))))
 
 (defun kargu-api-connection-settings (provider model &optional metadata-view)
-  "Capture PROVIDER/MODEL settings, using immutable METADATA-VIEW when supplied."
-  (let ((format (kargu-provider-format provider)))
-    (if metadata-view
-        (let* ((projection (kargu-model-projection-connection metadata-view provider model))
+  "Capture PROVIDER/MODEL settings from immutable native METADATA-VIEW.
+Without an explicit view, only the last committed UI observation is read.
+Real connection preparation supplies its captured native ticket's receipt."
+  (let* ((format (kargu-provider-format provider))
+         (projection (kargu-model-store-settings provider model metadata-view))
                (tuning (kargu-config-copy (kargu-api-request-tuning
                                            provider model (plist-get projection :supported-parameters)))))
           (setcdr (assoc "supported_parameters" tuning) (plist-get projection :supported-parameters))
           (append projection
                   (list :format format :wire (kargu-provider-format-record format)
                         :cache-marker (kargu-provider-cache-marker-p provider)
-                        :tuning tuning :header-overrides (kargu-provider-extra-headers provider))))
-      (list :format format :wire (kargu-provider-format-record format)
-            :metadata (and model (kargu-model-get-metadata model provider))
-            :fields (kargu-model-read model provider)
-            :tools (kargu-model-supports-tools-p model provider)
-            :cache-marker (kargu-provider-cache-marker-p provider)
-            :tuning (kargu-api-request-tuning provider model)
-            :header-overrides (kargu-provider-extra-headers provider)))))
+                  :tuning tuning :header-overrides (kargu-provider-extra-headers provider)))))
 
 (defun kargu--payload-merge (payload extra)
   "Merge EXTRA entries into PAYLOAD, replacing keys already present."

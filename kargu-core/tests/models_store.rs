@@ -10,6 +10,13 @@ use kargu_core::{
 use serde_json::{Value, json};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+#[test]
+fn offline_unknown_projection_is_exactly_the_native_initial_snapshot() -> TestResult {
+    let bootstrap: Value = serde_json::from_str(include_str!("../assets/models-empty.json"))?;
+    assert_eq!(&bootstrap, ModelStore::new().snapshot());
+    Ok(())
+}
+
 fn update(store: &mut ModelStore, provider: &str, source: &str) -> TestResult {
     let prepared = store.prepare(
         ApiProviderId::try_from(provider.to_owned())?,

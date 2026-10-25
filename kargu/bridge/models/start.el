@@ -42,7 +42,7 @@
       (when owned
         (setf (kargu-bridge-models-fault service) failure))
       (kargu-bridge-models--complete ticket nil failure))
-     ((kargu-bridge-models-scope service) (kargu-bridge-models--begin ticket))
+     ((kargu-bridge-models-scope service) (kargu-bridge-models--ready ticket))
      (t
       (setf (kargu-bridge-model-ticket-phase ticket) :leasing)
       (let (delivered)
@@ -55,7 +55,13 @@
                  (progn (setf (kargu-bridge-models-fault service) failure)
                         (kargu-bridge-models--complete ticket nil failure))
                (setf (kargu-bridge-models-scope service) (kargu-bridge-application--copy-scope scope))
-               (kargu-bridge-models--begin ticket))))))))))
+               (kargu-bridge-models--ready ticket))))))))))
+
+(defun kargu-bridge-models--ready (ticket)
+  "Start TICKET's explicit read or update after acquiring its exact lease."
+  (if (kargu-bridge-model-ticket-observe ticket)
+      (kargu-bridge-models--head ticket)
+    (kargu-bridge-models--begin ticket)))
 
 (defun kargu-bridge-models--connect (ticket)
   "Acquire a first connection for already registered TICKET, never reconnect."

@@ -23,16 +23,26 @@ publications or garbage collector memory. Custom headers and configured keys
 remain configuration data for the lifetime of their owner; no secure physical
 erasure guarantee is made.
 
-`models/service.el` selects the application's single `:metadata` service.
-It owns the model records, catalog generations and cache, prefetch state, tool
-refusals and circuit registry. `models/store.el` alone writes model entries.
+The Rust application actor exclusively owns model records, overrides, refusal
+observations and capability/price/count normalization. `models/store.el` now
+only submits async native commands and reads detached committed DTOs. Public
+setters return tickets, not synchronous success; callbacks receive `(VIEW FAILURE)`.
+The inspector waits for completion. There is no Lisp alias/override/field engine.
+`models/service.el` selects application UI catalog generations, ID cache and
+prefetch state; these are observations rather than model authorities.
 Catalog callbacks retain the initiating application even when another buffer or
 application becomes current. G09 must consume this service rather than create
-another metadata store. A run captures its metadata service selection before
-yielding and retains it through callbacks and retries.
+another metadata store. A run captures an exact publication ticket before
+yielding and retains its immutable receipt through callbacks and retries. With
+no earlier publication, preparation explicitly acquires its first lease and
+reads native head/pages without a mutation. Passive UI getters use last-committed
+data or Rust's packaged unknown-model bootstrap and never start a core. Bootstrap
+equality is tested against `ModelStore::new()`; it never authorizes a live lease.
+Failed/uncertain publications cannot fall back to that offline snapshot for
+preparation. Reconciliation stays explicit and bound to the same live lease.
 
 Compatibility tables remain for callers without an explicit application owner.
-Their consumers are `api/catalog.el`, `api/circuit.el`, `models/store.el`,
+Their consumers are `api/catalog.el`, `api/circuit.el`,
 `selection.el` and provider selection in `config/schema.el`; default native
 execution captures that compatibility choice too. The circuit default-state
 mirrors and these detached tables are G13 cleanup bridges. G09 still owns the
@@ -40,7 +50,16 @@ catalog/selection UI migration, including catalog discovery's legacy credential
 entry point. Native send, setup check and connection test use asynchronous
 credential preparation now.
 
-Offline evidence is in `tests/test-connection-native.el` and the existing config,
+Catalog publication is one atomic native replace operation. Stale responses still
+deliver to their own callers but cannot overwrite newer state. A new generation
+may revoke an uncommitted upload; it cannot undo an issued commit. The single
+writer completes that revision before the newer publication. Scope/owner loss
+still revokes delivery; an uncertain commit requires explicit reconciliation.
+Prices/capacities reach Rust as exact source text, never recovered Lisp floats.
+The UI uses native price labels; an invalid price is unknown, not free.
+
+Offline evidence is in `tests/test-native-model-consumers.el`,
+`tests/test-native-model-publication.el`, `tests/test-connection-native.el` and the existing config,
 snapshot, model-store, parameter and application suites. It includes real child
 workers, real loopback curl redirects for Bearer and x-api-key, Stop and draft
 restoration, immutable retries, late selection rejection, two application owners

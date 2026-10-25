@@ -6,8 +6,8 @@
 
 ;;; Commentary:
 
-;; Dynamic /models catalog querying, caching, and model metadata extraction.
-;; Extracts context windows, pricing, reasoning/thinking support, and multimodal capabilities.
+;; Native model publications and passive UI fields.  The editor captures requests
+;; and presents canonical DTOs; Rust owns metadata parsing and policy decisions.
 
 ;;; Code:
 
@@ -46,12 +46,14 @@
 (defvar kargu--live-models-cache (make-hash-table :test 'equal)
   "Session cache of live model ID lists, keyed by provider name.")
 
-(defun kargu-model-set-metadata (id data &optional provider)
-  "Register model ID's DATA for PROVIDER, defaulting to its recorded owner.
-Without an explicit or recorded provider, use the active provider."
-  (when (and (stringp id) (not (string-empty-p id)))
-    (kargu-model-store-put (or provider (kargu--record-get data "provider")
-                               (kargu--provider-name)) id data)))
+(defun kargu-model-set-metadata (id data &optional provider callback)
+  "Capture ID's DATA for PROVIDER and return an asynchronous publication ticket.
+CALLBACK receives (VIEW FAILURE) only after native completion; passive getters
+retain the previous committed view meanwhile.  Decimal rates/limits must not
+arrive as already-rounded floats.  No Elisp metadata store is maintained."
+  (kargu-model-store-put (or provider
+                             (and data (gethash "provider" (kargu-model-encode-value data)))
+                             (kargu--provider-name)) id data callback))
 
 (defun kargu-model-get-metadata (id &optional provider)
   "Read model ID's metadata for PROVIDER, defaulting to the active provider.
@@ -68,342 +70,76 @@ Only unambiguous short aliases in that provider are accepted."
     ("supports-tools" . "supports_tools") ("supports-reasoning" . "supports_reasoning"))
   "Canonical API fields for the inspector's capability property names.")
 
-(defun kargu--model-property-name (property)
-  "Return the string name of a string, symbol or keyword PROPERTY."
-  (cond ((keywordp property) (substring (symbol-name property) 1))
-        ((symbolp property) (symbol-name property))
-        ((stringp property) property)
-        (t (user-error "Kargu: invalid metadata property name"))))
+(defalias 'kargu--model-property-name #'kargu-model-encode-name)
 
 (defun kargu-model-get-prop (model-id prop-key &optional provider)
-  "Retrieve PROP-KEY from MODEL-ID's metadata owned by PROVIDER."
+  "Detach PROP-KEY from MODEL-ID's native metadata owned by PROVIDER."
   (let* ((data (kargu-model-get-metadata model-id provider))
          (key (kargu--model-property-name prop-key)))
-    (or (kargu--record-get data (or (cdr (assoc key kargu--model-property-aliases)) key))
-        (kargu--record-get data key))))
+    (or (kargu-aget data (or (cdr (assoc key kargu--model-property-aliases)) key))
+        (kargu-aget data key))))
 
-(cl-defun kargu-model-set-prop (model-id prop-key prop-value &key provider)
-  "Override PROP-KEY with PROP-VALUE for MODEL-ID at PROVIDER.
-The override survives subsequent catalog refreshes for that identity."
-  (let* ((key (kargu--model-property-name prop-key))
-         (canonical (or (cdr (assoc key kargu--model-property-aliases)) key))
-         (value (if (and (null prop-value)
-                         (member canonical '("supports_tools" "supports_reasoning")))
-                    :json-false prop-value)))
+(cl-defun kargu-model-set-prop (model-id prop-key prop-value &key provider callback owner)
+  "Capture PROP-KEY/PROP-VALUE for MODEL-ID at PROVIDER.
+Return a native publication ticket; CALLBACK receives (VIEW FAILURE).  OWNER
+may bind an inspector's lifetime.  Rust alone resolves aliases and overrides."
     (kargu-model-store-set-property
      (or provider (kargu--provider-name)) (or model-id (kargu--model) "")
-     :property canonical :value value)))
-
-(defun kargu--record-models-metadata (models &optional provider-name)
-  "Record raw MODELS metadata for the optional PROVIDER-NAME."
-  (let ((pname (or provider-name (kargu--provider-name))))
-    (dolist (m models)
-      (when (stringp m) (setq m (list (cons "id" m))))
-      (when (listp m)
-        (let* ((id (or (kargu-aget m "id") (kargu-aget m "name")))
-               (clean-id (if (and (stringp id) (string-prefix-p "models/" id))
-                             (substring id 7)
-                           id)))
-          (when (and (stringp clean-id) (not (string-empty-p clean-id)))
-            (let ((entry (if (consp m)
-                             (cons (cons "provider" pname) m)
-                           m)))
-              (kargu-model-set-metadata clean-id entry pname))))))))
-
-(defun kargu--unwrap-alist (value)
-  "Return VALUE when it is an alist.
-A one-element list whose car is an alist is unwrapped."
-  (if (and (consp value)
-           (consp (car-safe value))
-           (consp (car-safe (car-safe value))))
-      (car value)
-    value))
-
-(defun kargu--record-get (data key)
-  "Return KEY from raw alist or plist DATA, or nil."
-  (when (listp data)
-    (let ((name (if (stringp key) key (format "%s" key))))
-      (or (kargu-aget data name)
-          (plist-get data (intern (concat ":" name)))
-          (plist-get data (intern (concat ":" (replace-regexp-in-string "_" "-" name))))
-          (plist-get data (intern (concat ":" (replace-regexp-in-string "-" "_" name))))))))
-
-(defun kargu--nested-get (data key subkey)
-  "Return SUBKEY inside KEY of DATA."
-  (kargu--record-get (kargu--unwrap-alist (kargu--record-get data key)) subkey))
-
-(defun kargu--read-number (value)
-  "Return VALUE as an integer, or nil when it is not a number."
-  (cond
-   ((null value) nil)
-   ((integerp value) value)
-   ((numberp value) (round value))
-   ((and (stringp value) (not (string-empty-p (string-trim value))))
-    (kargu-to-int value))
-   (t nil)))
-
-(defun kargu--read-context-window (data)
-  "Context window from DATA, or nil when the record omits it."
-  (kargu--read-number
-   (or (kargu--record-get data "context_length")
-       (kargu--record-get data "context_window")
-       (kargu--record-get data "inputTokenLimit")
-       (kargu--record-get data "context-window"))))
-
-(defun kargu--read-max-output (data)
-  "Max output tokens from DATA, or nil when the record omits it."
-  (kargu--read-number
-   (or (kargu--record-get data "max_output")
-       (kargu--record-get data "outputTokenLimit")
-       (kargu--record-get data "max_completion_tokens")
-       (kargu--nested-get data "top_provider" "max_completion_tokens")
-       (kargu--record-get data "max-output"))))
-
-(defun kargu--read-input-cost (data)
-  "Prompt price from DATA as a number, or nil."
-  (let ((raw (or (kargu--nested-get data "pricing" "prompt")
-                 (kargu--record-get data "input-cost"))))
-    (cond
-     ((numberp raw) raw)
-     ((and (stringp raw) (not (string-empty-p raw)))
-      (ignore-errors (string-to-number raw)))
-     (t nil))))
-
-(defun kargu--zero-price-p (value)
-  "Non-nil when VALUE is a numeric zero price."
-  (cond
-   ((numberp value) (= value 0))
-   ((and (stringp value) (string-match-p "[0-9]" value))
-    (let ((n (ignore-errors (string-to-number value))))
-      (and (numberp n) (= n 0))))
-   (t nil)))
-
-(defun kargu--read-free-p (data)
-  "Return non-nil for a free model described by DATA."
-  (or (and (listp data) (plist-get data :free))
-      (kargu--zero-price-p (kargu--nested-get data "pricing" "prompt"))
-      (kargu--zero-price-p (kargu--record-get data "input-cost"))))
-
-(defun kargu--read-vision-p (data)
-  "Return non-nil for image support declared in DATA."
-  (or (and (listp data) (plist-get data :vision))
-      (let ((modality (or (kargu--nested-get data "architecture" "modality")
-                          (kargu--record-get data "modality"))))
-        (and (stringp modality) (string-match-p "image" modality) t))))
-
-(defun kargu--read-params (data)
-  "Parameter-size label from DATA, or nil."
-  (or (let ((stored (and (listp data) (plist-get data :params))))
-        (and (stringp stored) (not (string-empty-p stored)) stored))
-      (let* ((details (kargu--unwrap-alist (kargu--record-get data "details")))
-             (size (kargu--record-get details "parameter_size"))
-             (quant (kargu--record-get details "quantization_level")))
-        (cond
-         ((and (stringp size) (not (string-empty-p size))
-               (stringp quant) (not (string-empty-p quant)))
-          (format "%s %s" size quant))
-         ((and (stringp size) (not (string-empty-p size))) size)))))
-
-(defun kargu--effort-name-list (value)
-  "Effort names in list or vector VALUE, or nil.
-A bare string is not a list."
-  (cond
-   ((vectorp value) (kargu--effort-name-list (append value nil)))
-   ((and (proper-list-p value)
-         value
-         (cl-every (lambda (item)
-                     (or (stringp item)
-                         (and (symbolp item) (not (keywordp item)))))
-                   value))
-    (delq nil
-          (mapcar (lambda (item)
-                    (let ((name (if (stringp item) item (symbol-name item))))
-                      (and (not (string-empty-p name)) name)))
-                  value)))
-   (t nil)))
-
-(defun kargu--effort-csv (value)
-  "Effort names in comma-separated string VALUE, or nil."
-  (when (and (stringp value) (not (string-empty-p (string-trim value))))
-    (delq nil
-          (mapcar (lambda (part)
-                    (let ((name (string-trim part)))
-                      (and (not (string-empty-p name)) name)))
-                  (split-string value ",")))))
-
-(defun kargu--effort-names (value type)
-  "Effort names in VALUE of TYPE (`list' or `csv'), or nil."
-  (cond
-   ((eq type 'list) (kargu--effort-name-list value))
-   ((eq type 'csv) (kargu--effort-csv value))
-   (t nil)))
-
-(defun kargu--path-get (data key)
-  "KEY inside DATA.
-A list of objects is searched for KEY.  A missing key is nil."
-  (or (kargu--record-get data key)
-      (and (vectorp data) (kargu--path-get (append data nil) key))
-      (and (consp data)
-           (consp (car data))
-           (consp (caar data))
-           (cl-some (lambda (item) (kargu--path-get item key)) data))))
-
-(defun kargu--read-path (data path)
-  "Value at PATH of string keys in DATA, or nil."
-  (if (null path)
-      data
-    (kargu--read-path (kargu--path-get data (car path)) (cdr path))))
-
-(defun kargu--efforts-from-specs (data specs)
-  "Effort names in DATA at the first matching spec in SPECS, or nil.
-Each spec is `:path' and `:type'."
-  (when (and data specs)
-    (cl-some (lambda (spec)
-               (kargu--effort-names
-                (kargu--read-path data (plist-get spec :path))
-                (plist-get spec :type)))
-             specs)))
-
-(defun kargu--read-efforts (data &optional provider)
-  "Effort names from DATA, or nil when the record has none.
-A stored `:reasoning-efforts' list is that list.  Otherwise the
-PROVIDER's declared paths are read, defaulting to the active provider.
-An undeclared key yields nothing."
-  (cond
-   ((null data) nil)
-   ((kargu--reasoning-disabled-p data) nil)
-   ((and (listp data)
-         (kargu--effort-name-list (plist-get data :reasoning-efforts))))
-   (t (and (fboundp 'kargu-provider-effort-specs)
-           (kargu--efforts-from-specs
-            data
-            (kargu-provider-effort-specs
-             (or provider (kargu--provider-name))))))))
+   :property prop-key :value prop-value :callback callback :owner owner))
 
 (defun kargu-model-read (&optional model-id provider)
-  "Read catalog fields for MODEL-ID from its raw API record.
-The plist keys are `:context-window', `:max-output', `:reasoning-efforts',
-`:vision', `:free', `:params', and `:input-cost'.  A missing field is nil.
-PROVIDER defaults to the active provider.  No catalog fields are guessed."
+  "Detach native catalog display fields for MODEL-ID at PROVIDER.
+Unknown/invalid fields remain nil.  This passive reader does no parsing or IO."
   (if (and (fboundp 'kargu-connection-matches-p) (kargu-connection-matches-p model-id provider))
       (kargu-config-copy (kargu-connection-setting :fields))
-    (let* ((provider (or provider (kargu--provider-name)))
-         (data (kargu-model-get-metadata (or model-id (kargu--model) "") provider)))
-    (list :context-window (kargu--read-context-window data)
-          :max-output (kargu--read-max-output data)
-          :reasoning-efforts (kargu--read-efforts data provider)
-          :vision (kargu--read-vision-p data)
-          :free (kargu--read-free-p data)
-          :params (kargu--read-params data)
-          :input-cost (kargu--read-input-cost data)))))
+    (plist-get (kargu-model-store-settings (or provider (kargu--provider-name))
+                                           (or model-id (kargu--model) "") nil t) :fields)))
 
 (defun kargu-model-context-window (&optional model-id provider)
-  "Return MODEL-ID's context window for PROVIDER, or nil when unknown."
+  "Return MODEL-ID's native context capacity for PROVIDER, or nil if unknown."
   (plist-get (kargu-model-read model-id provider) :context-window))
 
-(defun kargu--supported-parameters (data)
-  "Return DATA's supported_parameters as a list, or nil when absent."
-  (let ((raw (or (kargu-aget data "supported_parameters")
-                 (kargu-aget data "supportedParameters")
-                 (and (listp data) (plist-get data :supported-parameters)))))
-    (cond
-     ((vectorp raw) (append raw nil))
-     ((consp raw) raw)
-     (t nil))))
-
 (defun kargu-model-request-parameters (model-id provider)
-  "Return known supported parameters for exact MODEL-ID at PROVIDER.
-Never borrow a fuzzy alias or another provider's record for request policy.
-Manually installed metadata belongs to the provider selected when installed.
-An absent or empty list means unknown, as in the tool capability contract."
-  (when (and (stringp model-id) (not (string-empty-p (string-trim model-id))))
-    (let* ((data (kargu-model-store-get provider model-id :exact t))
-           (parameters (kargu--supported-parameters data)))
-      (when (cl-every #'stringp parameters) parameters))))
+  "Detach known exact-ID request parameters for MODEL-ID at PROVIDER.
+Display aliases never lend request policy to a different model identity."
+  (let ((parameters (plist-get (kargu-model-store-settings provider model-id nil t) :supported-parameters)))
+    (when (vectorp parameters) (append parameters nil))))
 
-(defun kargu--tools-explicitly-disabled-p (data)
-  "Return non-nil for an explicit tool disable in DATA.
-Missing metadata leaves tool support enabled."
-  (or (let ((flag (or (kargu--record-get data "supports_tools")
-                      (kargu--record-get data "supports-tools"))))
-        (or (eq flag :json-false) (equal flag "false")))
-      (and (listp data)
-           (plist-member data :supports-tools)
-           (not (plist-get data :supports-tools)))
-      (let ((params (kargu--supported-parameters data)))
-        (and params (not (member "tools" params))))))
+(defun kargu-model-mark-tools-refused (&optional model-id provider callback)
+  "Capture a refusal for MODEL-ID/PROVIDER; CALLBACK receives (VIEW FAILURE).
+Return the asynchronous native publication ticket, not an optimistic success."
+  (kargu-model-store-submit
+   (or provider (kargu--provider-name))
+   (kargu-bridge--object "operation" "refuse_tools" "model" (or model-id (kargu--model) ""))
+   callback))
 
-(defvar kargu--tools-refused (make-hash-table :test #'equal)
-  "Provider/model pairs whose endpoint answered that it cannot use tools.
-This is what the endpoint said in this session; it is not catalog data.")
-
-(defun kargu--tools-refusal-key (model-id &optional provider)
-  "Key of MODEL-ID at PROVIDER, defaulting to the active provider."
-  (cons (downcase (string-trim (format "%s" (or provider (kargu--provider-name)))))
-        (string-trim (or model-id ""))))
-
-(defun kargu-model-mark-tools-refused (&optional model-id provider)
-  "Remember a tool refusal for MODEL-ID at PROVIDER, or the active pair."
-  (kargu-metadata-assert-legacy-writer)
-  (puthash (kargu--tools-refusal-key (or model-id (kargu--model) "") provider) t
-           (kargu-metadata-table :refusals kargu--tools-refused)))
-
-(defun kargu-model-forget-tools-refusals ()
-  "Forget every provider refusal of tool use."
-  (kargu-metadata-assert-legacy-writer)
-  (clrhash (kargu-metadata-table :refusals kargu--tools-refused)))
+(defun kargu-model-forget-tools-refusals (&optional callback)
+  "Asynchronously clear all provider refusals; report completion in CALLBACK."
+  (kargu-model-store-submit (kargu--provider-name)
+                            (kargu-bridge--object "operation" "clear_tool_refusals") callback))
 
 (defun kargu-model-supports-tools-p (&optional model-id provider)
-  "Return non-nil unless tools are ruled out for MODEL-ID.
-Ruled out means the API metadata explicitly disables them or the provider
-refused tool use in this session.  Missing metadata and a missing field
-both leave tools available.  PROVIDER defaults to the active provider."
+  "Read native tool permission for MODEL-ID/PROVIDER without starting a core."
   (if (and (fboundp 'kargu-connection-matches-p) (kargu-connection-matches-p model-id provider))
       (kargu-connection-setting :tools)
-    (let* ((mid (or model-id (kargu--model) ""))
-         (data (kargu-model-get-metadata mid provider)))
-    (not (or (gethash (kargu--tools-refusal-key mid provider)
-                     (kargu-metadata-table :refusals kargu--tools-refused))
-             (and data (kargu--tools-explicitly-disabled-p data)))))))
-
-(defun kargu--reasoning-support-flag (data)
-  "Return the supports-reasoning flag in DATA, or nil when it is absent."
-  (and data
-       (or (kargu--record-get data "supports_reasoning")
-           (kargu--record-get data "supports-reasoning"))))
-
-(defun kargu--reasoning-disabled-p (data)
-  "Return non-nil for an explicit reasoning disable in DATA."
-  (let ((flag (kargu--reasoning-support-flag data)))
-    (or (eq flag :json-false) (equal flag "false"))))
+    (plist-get (kargu-model-store-settings (or provider (kargu--provider-name))
+                                           (or model-id (kargu--model) "") nil t) :tools)))
 
 (defun kargu-model-reasoning-efforts (&optional model-id provider-name)
-  "Return reasoning effort names for MODEL-ID from its API metadata.
-When metadata is missing, PROVIDER-NAME is queried in the background (once)
-and nil is returned until the answer arrives.
-A false `supports_reasoning' flag returns nil.  A missing list returns nil."
-  (let* ((mid (or model-id (kargu--model) ""))
-         (pname (or provider-name (kargu--provider-name)))
-         (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname ""))))
-         (data (kargu-model-get-metadata mid pname)))
-    (when (and (null data) (not (string-empty-p pname-str)))
-      (kargu--prefetch-models-once pname-str))
-    (plist-get (kargu-model-read mid pname) :reasoning-efforts)))
+  "Detach native reasoning efforts for MODEL-ID at PROVIDER-NAME, without IO."
+  (plist-get (kargu-model-read model-id provider-name) :reasoning-efforts))
 
 (defun kargu-model-supports-reasoning-p (&optional model-id provider-name)
-  "Return reasoning support for MODEL-ID and optional PROVIDER-NAME.
-An explicit true flag is sufficient even without an API effort list."
-  (let* ((data (kargu-model-get-metadata (or model-id (kargu--model) "") provider-name))
-         (flag (kargu--reasoning-support-flag data)))
-    (and (not (kargu--reasoning-disabled-p data))
-         (or (memq flag '(t :json-true))
-             (equal flag "true")
-             (and (kargu-model-reasoning-efforts model-id provider-name) t)))))
+  "Read native reasoning permission for MODEL-ID at PROVIDER-NAME."
+  (if (and (fboundp 'kargu-connection-matches-p) (kargu-connection-matches-p model-id provider-name))
+      (kargu-connection-setting :reasoning)
+    (plist-get (kargu-model-store-settings (or provider-name (kargu--provider-name))
+                                           (or model-id (kargu--model) "") nil t) :reasoning)))
 
 (defun kargu-model--context-label (ctx)
   "Inspector label for context size CTX."
   (if (numberp ctx)
-      (format "%d tokens (~%d chars)" ctx (round (* ctx 3.5)))
+      (format "%d tokens (~%d chars)" ctx (/ (* ctx 7) 2))
     "unknown"))
 
 (defun kargu-model--format-context (ctx)
@@ -425,12 +161,9 @@ An explicit true flag is sufficient even without an API effort list."
         "🧠 think: low..high"
       (format "🧠 think: %s" (mapconcat #'identity efforts ",")))))
 
-(defun kargu-model--format-price (cost free)
-  "Format input COST, or a badge when FREE is non-nil."
-  (cond
-   (free "⚡ free")
-   ((and (numberp cost) (> cost 0))
-    (format "$%.2f/1M" (* cost 1000000.0)))))
+(defun kargu-model--format-price (label free)
+  "Display native exact price LABEL, or a badge when FREE is non-nil."
+  (if free "⚡ free" (and (stringp label) label)))
 
 (defun kargu-model--annotation-badges (fields)
   "Badge strings for catalog FIELDS read by `kargu-model-read'."
@@ -447,7 +180,7 @@ An explicit true flag is sufficient even without an API effort list."
     (when (plist-get fields :vision)
       (push "👁 vision" parts))
     (when-let* ((price (kargu-model--format-price
-                        (plist-get fields :input-cost)
+                        (plist-get fields :price-label)
                         (plist-get fields :free))))
       (push price parts))
     (nreverse parts)))
@@ -485,36 +218,49 @@ An explicit true flag is sufficient even without an API effort list."
      (t (concat api-base "/models")))))
 
 (defun kargu--catalog-clean-model-ids (models)
-  "Return IDs from normalized catalog MODELS records or plain ID strings."
-  (delete-dups
-   (delq nil
-         (mapcar
-          (lambda (model)
-            (let ((id (if (consp model)
-                          (or (kargu-aget model "id") (kargu-aget model "name"))
-                        model)))
-              (when (and (stringp id) (not (string-empty-p (string-trim id))))
-                (if (string-prefix-p "models/" id) (substring id 7) id))))
-          (kargu-seq-to-list models)))))
+  "Detach canonical native IDs in MODELS, preserving first-advertised order.
+Provider envelopes, identity normalization and invalid records are Rust's job."
+  (delete-dups (mapcar (lambda (model) (copy-sequence (kargu-aget model "id"))) models)))
 
-(defun kargu--catalog-cache-live-models (provider models)
-  "Record metadata and ID lists for PROVIDER from MODELS, including emptiness."
-  (let ((ids (kargu--catalog-clean-model-ids models)))
-    (kargu--record-models-metadata models provider)
-    (kargu-model-store-retain provider ids)
-    (puthash provider ids (kargu-metadata-table :catalog kargu--live-models-cache))))
-
+(cl-defun kargu--catalog-cache-live-models (provider models &optional callback &key valid-p)
+  "Publish MODELS atomically for PROVIDER; CALLBACK receives (VIEW FAILURE).
+The native catalog's IDs become the UI cache only after committed completion."
+  (let ((provider (kargu-model-store--provider provider)))
+    (kargu-model-store-submit
+     provider
+     (kargu-bridge--object "operation" "replace_catalog" "catalog"
+                           (kargu-bridge--object "models" (vconcat (mapcar #'kargu-model-encode-value models))))
+     (lambda (view failure)
+       (unless failure
+         (let ((catalog (cl-find-if (lambda (entry) (equal (gethash "provider" entry) provider))
+                                    (gethash "catalogs" view))))
+           (puthash provider (append (kargu-bridge-models--copy (gethash "models" catalog)) nil)
+                    (kargu-metadata-table :catalog kargu--live-models-cache))))
+       (when callback (funcall callback view failure)))
+     :valid-p valid-p)))
 
 (defun kargu--catalog-receive (task provider generation body)
-  "Deliver canonical native BODY to TASK; project PROVIDER only for GENERATION."
-  (let* ((projection (kargu--json-decode-safe body))
-         (records (kargu-aget projection "models")))
+  "Deliver canonical native BODY to TASK; atomically publish fresh GENERATION."
+  (let* ((projection (kargu-json-decode body))
+         (records (gethash "models" projection)))
     (unless (and (vectorp records) (<= (length records) 20000))
       (error "Invalid native model catalog projection"))
-    (let ((models (kargu-json-to-record (append records nil))))
-      (when (= generation (gethash provider (kargu-metadata-table :generations kargu--catalog-generations)))
-        (kargu--catalog-cache-live-models provider models))
-      (kargu-async-finish task models))))
+    (let ((models (kargu-json-to-record (append records nil))) ticket)
+      (if (/= generation (gethash provider (kargu-metadata-table :generations kargu--catalog-generations)))
+          (kargu-async-finish task models)
+        (setq ticket
+              (kargu--catalog-cache-live-models
+               provider models
+               (lambda (_view failure)
+                 (if (and failure (= generation (gethash provider (kargu-metadata-table :generations kargu--catalog-generations))))
+                     (kargu-async-finish task nil "Native model catalog publication failed")
+                   (kargu-async-finish task models)))
+               ;; Generation may revoke an upload, not undo an issued commit.
+               ;; The single writer completes that revision before newer writes.
+               :valid-p (lambda ()
+                          (or (and ticket (kargu-bridge-model-ticket-commit-sent ticket))
+                              (= generation (gethash provider (kargu-metadata-table :generations kargu--catalog-generations)))))))
+        (kargu-async-add-cleanup task (lambda () (kargu-bridge-models-cancel ticket)))))))
 
 (defun kargu--catalog-request (task provider generation)
   "Start catalog TASK for PROVIDER and cache GENERATION."
@@ -540,8 +286,7 @@ An explicit true flag is sufficient even without an API effort list."
                        task (lambda (error)
                               (kargu-async-finish task nil (kargu-result-err-message error)))))))
       (when (kargu-async-pending-p task)
-        (setf (kargu-async-task-cancel task)
-              (lambda () (kargu-transport-cancel request)))))))
+        (kargu-async-add-cleanup task (lambda () (kargu-transport-cancel request)))))))
 
 (defun kargu-api-list-models (&optional callback provider-name)
   "Fetch PROVIDER-NAME's live catalog asynchronously, delivering once.
@@ -715,9 +460,15 @@ An inspector retains the provider/model it originally displayed."
                                 nil nil))
           (curr-val (kargu-model-get-prop mid key provider))
           (val-str (read-string (format "New value for %s (current: %S): " key curr-val))))
-     (list mid key (read val-str) :provider provider)))
-  (kargu-model-set-prop model-id prop-key prop-value :provider provider)
-  (message "kargu: Property '%s' for model '%s' updated to %S" prop-key model-id prop-value))
+     (list mid key
+           (cond ((member val-str '("nil" "false")) :json-false)
+                 ((member val-str '("t" "true")) t)
+                 (t val-str)) :provider provider)))
+  (kargu-model-set-prop
+   model-id prop-key prop-value :provider provider :owner (current-buffer)
+   :callback (lambda (_view failure)
+               (if failure (message "Kargu: native metadata property update failed")
+                 (message "kargu: Property '%s' for model '%s' updated" prop-key model-id)))))
 
 (provide 'kargu/api/catalog)
 

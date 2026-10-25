@@ -1,5 +1,52 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Public metadata writer/UI consumer cutover ve Elisp engine silme
+
+Public metadata put/property/refusal/clear setter'ları mevcut native actor'e
+bağlandı; artık async publication ticket döndürür, callback (VIEW FAILURE) alır.
+Katalog tek native replace_catalog ile atomik yayınlanır. Genel UI reader,
+request settings ve inspector native DTO tüketir; Elisp entry/table, alias
+arama, override merge, retain/prune writer, refusal hash ve field/effort/
+capability/fiyat parse engine'leri kaldırıldı. Property inspector commit ACK'i
+gelmeden başarı mesajı vermez. Float fiyat/kapasite girdisi reddedilir; native
+exact fiyat etiketi kullanılır ve invalid9 artık free olmaz.
+
+Önceki ticket yoksa gerçek connection preparation başlangıçta readonly observe
+ticket'ını yakalar, native head/pages alır; metadata update yapmadan revision 0
+gözlenebilir. Passive UI için küçük Rust-owned models-empty.json asset'i eklendi;
+bir native test bu dosyayı ModelStore::new() görünümüyle bire bir karşılaştırır.
+Bu bootstrap canlı lease veya başarısız native hazırlık yerine kullanılamaz.
+Kaybolan epoch yeniden bağlanmaz, belirsiz commit explicit reconcile gerektirir.
+DTO-only weak indexes büyük kataloglarda her UI satırı için bütün vektörü tekrar
+taramaz; field-only okuyucular büyük inspector açıklamasını kopyalamaz.
+
+Katalog generation değişimi commit öncesi upload'ı revoke/abort/drain eder;
+gönderilmiş commit'i geri alınmış saymaz. Eski revision tek writer'da tamamlanır,
+ardından yeni katalog uygulanır. Her GET kendi callback'ini alır, stale reply
+yeni cache'i diriltemez. Kaynak/lease kaybı sonrası fail-closed kuralı korunur.
+
+Dört yeni gerçek public consumer fixture ve native bootstrap equality testi
+eklendi. Eski senkron fixture'lar gerçek Rust public işlemlerini açıkça bekler;
+üretim API'si bloklanmadı, metadata engine mock'la değiştirilmedi. Native owner'lar
+test sonunda iptal/drain/close edilir; eski hash snapshot assertion'ları detached
+native receipt'e taşındı. Simüle circuit peer ile gerçek metadata yazılamadığı
+için birleşik ownership fixture'ı gerçek core lease kullanır. Hiçbir module
+baseline veya davranış assertion'ı yeşil sonuç uğruna düşürülmedi.
+
+Son gate: **1220/1220 full source ERT**, 0 unexpected, **136.26 s**, 23:01:46
+Europe/Istanbul geçti. Önceki 1220 taramaları da geçti; ilk diagnostic taramadaki
+dört eski sync/fake-peer fixture hatası düzeltilip tam suite yeniden çalıştırıldı.
+**259 native + 16 compile-fail**, fmt, strict all-targets Clippy ve locked build
+temiz. On üretim Elisp dosyası Werror bytecompile/checkdoc temiz; çıktılar
+/tmp/kargu-public-cutover-bytecompile.CVaC11 altına yönlendirildi, kaynakta elc yok.
+Somut metadata protokolü için yeni TLC refinement kanıtı iddia edilmez; mevcut
+abstract modeller bu revision/queue ayrıntılarını içermiyor. Detay 43'te.
+
+Bu public metadata dilimi tamamlandı; genel run/history, katalog credential
+discovery portu, G08 hard monetary reservation ve dış uygulama backend'leri
+açık. Tüm Rust/API göçü tamamlandı iddiası yoktur. Kullanıcının shell.nix/07 ve
+01'i korunur; harici hesap/API/CLI model turu, kurulum, merge veya push yapılmadı.
+
 ## 2026-10-25 — Config sağlayıcı listesinin gerçek UI girişinde yenilenmesi
 
 Kullanıcının raporu yeniden üretildi: ortamda config.yaml yok, asıl dosya

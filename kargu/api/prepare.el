@@ -91,7 +91,8 @@ PROVIDER and MODEL override session defaults; PUBLIC is a verified catalog flag.
                        :app app :origin (current-buffer) :session (kargu-session-context)
                        :selection (kargu-selection-context) :provider provider :model model
                        :public public
-                       :metadata-ticket (kargu-bridge-models-capture app)
+                       :metadata-ticket (or (kargu-bridge-models-capture app)
+                                            (kargu-bridge-models-observe app #'ignore))
                        :tuning (list :temperature kargu-temperature :max-tokens kargu-max-tokens
                                      :thinking-budget kargu-thinking-budget
                                      :default-effort kargu-reasoning-effort)))

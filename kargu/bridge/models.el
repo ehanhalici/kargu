@@ -92,13 +92,14 @@ An issued commit cannot be undone; uncertainty refuses further publication."
        (t (kargu-bridge-models--lease ticket))))))
 
 (cl-defun kargu-bridge-models-submit (connection application provider source specs callback
-						 &key owner valid-p reconcile)
+						 &key owner valid-p reconcile observe)
   "Submit SOURCE and SPECS for PROVIDER using CONNECTION and APPLICATION.
 Return a publication ticket; CALLBACK receives (VIEW FAILURE) once.  OWNER's
 closure cancels only this submission.  VALID-P guards captured revisions.
 Nil CONNECTION permits first startup, never a replacement of an acquired lease.
 No fallback, reconnect or speculative publication occurs.  RECONCILE selects
-read-only repair of the existing lease; see `kargu-bridge-models-reconcile'."
+read-only repair of the existing lease; see `kargu-bridge-models-reconcile'.
+OBSERVE reads the initial/current head without a metadata mutation."
   (unless (and (stringp provider) (stringp source) (functionp callback)
                (vectorp specs)
                (or (null owner) (buffer-live-p owner)) (or (null valid-p) (functionp valid-p))
@@ -112,7 +113,7 @@ read-only repair of the existing lease; see `kargu-bridge-models-reconcile'."
          (ticket (kargu-bridge-model-ticket--make
                   :service service :provider (copy-sequence provider) :source (copy-sequence source)
                   :specs (kargu-bridge-models--copy specs) :callback callback :owner owner :valid-p valid-p
-                  :bytes (string-bytes source) :reconcile reconcile))
+                  :bytes (string-bytes source) :reconcile reconcile :observe observe))
          (failure (cond
                    ((and connection (not (eq connection (kargu-bridge-models-connection service))))
                     (kargu-bridge--fault "metadata_epoch_lost"))
@@ -142,19 +143,26 @@ read-only repair of the existing lease; see `kargu-bridge-models-reconcile'."
       (kargu-bridge-models--pump service))
     ticket))
 
-(cl-defun kargu-bridge-models-publish (application provider source specs callback &key owner valid-p)
+(cl-defun kargu-bridge-models-publish (application provider source specs callback &key owner valid-p observe)
   "Capture a publication for APPLICATION before first startup can yield.
 SOURCE, SPECS, PROVIDER and OWNER are captured by `kargu-bridge-models-submit'.
 CALLBACK receives (VIEW FAILURE).  Return the exact preparation-barrier ticket.
 An existing native application connection is reused, never replaced.  VALID-P
-guards the originating revision; passive readers never call this operation."
+guards the originating revision; passive readers never call this operation.
+OBSERVE selects an explicit read without publishing a fabricated revision."
   (let* ((services (kargu-application-services application))
          (service (gethash :native-models services))
          (binding (gethash :native-core services))
          (connection (if service (kargu-bridge-models-connection service)
                        (and binding (kargu-bridge-application-connection binding)))))
     (kargu-bridge-models-submit connection application provider source specs callback
-                                :owner owner :valid-p valid-p)))
+                                :owner owner :valid-p valid-p :observe observe)))
+
+(defun kargu-bridge-models-observe (application callback)
+  "Read APPLICATION's actual native head for CALLBACK, acquiring its first lease.
+This explicit preparation operation is not a passive getter or a repair of an
+uncertain commit.  It never issues a metadata update or replaces a lost lease."
+  (kargu-bridge-models-publish application "" "" [] callback :observe t))
 
 (defun kargu-bridge-models-snapshot (application)
   "Return APPLICATION's detached last committed view without IO or core startup."

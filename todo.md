@@ -58,8 +58,8 @@ Elisp parser/accumulator/watchdog silindi (.codex/30). Credential/UI portları
 kalır; wire ve prompt-cache engine'leri de native'ye taşınıp silindi (.codex/31).
 Request policy de native'ye taşınıp eski seçim/merge motorları silindi (.codex/32).
 Credential/header assembly de native'ye taşınıp Elisp üretim motorları silindi
-(.codex/33); credential lookup editör portudur. Model metadata normalization
-ve genel run/history geçişi açık olduğu için tüm API göçü tamamlandı sayılmaz.
+(.codex/33); credential lookup editör portudur. Genel run/history ve katalog
+credential discovery portu açık olduğu için tüm API göçü tamamlandı sayılmaz.
 API tüketicileri application-owned native service lease kullanır (.codex/34–35);
 bu henüz native agent run/history sahipliği değildir. Native budget HTTP
 admission/drain ve gerçek root-run consumer'a bağlandı; eski Elisp debit/token
@@ -78,15 +78,19 @@ Native field/capability/rate normalizasyonu ve owner/revision-bound atomik store
 override temeli eklendi. Application actor'ündeki model_metadata RPC bounded
 upload/commit/abort ve immutable snapshot paging sağlar. Asenkron editor bridge,
 detached native görünüm, exact-ticket preparation bariyeri ve explicit same-lease
-reconciliation eklendi. Native publication'a giren application legacy metadata
-writer'ını reddeder; native failure sonrası legacy fallback yoktur.
+reconciliation eklendi. Public model writer'ları tek native actor'e bağlandı;
+native failure sonrası legacy fallback yoktur.
 Discovery capacity lexeme'leri de ortak native RawMetadata snapshot sınırında
 kayıpsız taşınır. İlk explicit metadata yazımı sidecar startup yield'inden önce
 ticket'ını kaydeder; hazırlık bu intent'i yakalar, passive getter core başlatmaz.
 Kullanıcı async setter + son committed UI snapshot sözleşmesini onayladı.
-Public setter/catalog producer ve genel UI reader cutover'ı, ardından eski
-Elisp semantic writer/reader silme hâlâ açıktır; mevcut public
-setter'ların senkron davranışı bu native temel dilimlerinde değiştirilmedi.
+Public setter/catalog producer ve genel UI reader native store'a geçirildi;
+Elisp record/alias/override/refusal ve field/capability/fiyat engine'leri silindi.
+Setter'lar artık async ticket + completion callback döndürür; UI yalnız son
+committed görünümü okur. İlk hazırlık native head'i readonly alır; offline
+unknown-model asset'i canlı lease veya başarılı commit yerine kullanılamaz.
+Genel run/history, katalog credential discovery portu ve G08 hard monetary
+reservation hâlâ açıktır; tüm API/Rust göçü tamamlandı sayılmaz.
 01 uyum denetimi ve kalan kaynak-sahipliği bulguları .codex/39'da tutulur;
 testlerin yeşil olması bütün Rust ağacının mimari uyum sertifikası değildir.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,

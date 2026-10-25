@@ -197,13 +197,17 @@
 
 (ert-deftest kargu-connection-metadata-and-circuits-belong-to-application-test ()
   "Two applications isolate catalogs, metadata, refusals and circuit resets."
-  (kargu-circuit-test--with-peer
-   (let ((first application) (second (kargu-application-create)))
+  (kargu-bridge-test--with-core
+   (let ((first (kargu-application-create)) (second (kargu-application-create))
+         (connection conn) scope ready)
+     (kargu-bridge-application-ensure connection first
+				      (lambda (value failure) (should-not failure) (setq scope value ready t)))
+     (kargu-bridge-test--wait (lambda () ready))
     (kargu-bridge-circuit-observe first connection scope
       (kargu-circuit-test--view :provider "g02" :failures 1) t)
     (let ((kargu-application--bound first))
-      (kargu--catalog-cache-live-models "g02" '((("id" . "shared") ("context_length" . 123))))
-      (kargu-model-mark-tools-refused "shared" "g02")
+       (kargu-test-cache-model-catalog "g02" '((("id" . "shared") ("context_length" . 123))))
+       (kargu-test-mark-tools-refused "shared" "g02")
       (puthash "g02" 7 (kargu-metadata-table :generations kargu--catalog-generations)))
     (let ((kargu-application--bound second))
       (should-not (kargu-model-get-metadata "shared" "g02"))
@@ -244,6 +248,7 @@
         (funcall callback "{\"models\":[{\"id\":\"owned-model\"}]}")
         (should-not (kargu-selection-models-known-p "openrouter")))
       (let ((kargu-application--bound first))
+        (kargu-test-drain-model-publishers)
         (should (equal (kargu-selection-model-candidates "openrouter") '("owned-model")))))))
 
 (provide 'tests/test-connection-native)

@@ -25,7 +25,7 @@
 (require 'kargu/chat)
 (require 'kargu/chat/prompt)
 
-(declare-function kargu--efforts-from-specs "kargu/api/catalog" (data specs))
+(declare-function kargu-test-efforts-from-specs "kargu/api/catalog" (data specs))
 (declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
 (declare-function kargu-provider-models "kargu/providers/registry" (id))
 (declare-function kargu-register-provider "kargu/providers/registry" (&rest plist))
@@ -33,9 +33,9 @@
 (ert-deftest kargu-metadata-context-window-heuristics-test ()
   "Test that `kargu-model-context-window' dynamically resolves metadata."
   ;; Custom registered metadata
-  (kargu-model-set-metadata "anthropic/claude-3.5-sonnet" '(:id "anthropic/claude-3.5-sonnet" :context-window 200000))
-  (kargu-model-set-metadata "google/gemini-1.5-pro" '(:id "google/gemini-1.5-pro" :context-window 1000000))
-  (kargu-model-set-metadata "my-custom-model" '(:id "my-custom-model" :context-window 32768))
+  (kargu-test-set-model-metadata "anthropic/claude-3.5-sonnet" '(:id "anthropic/claude-3.5-sonnet" :context-window 200000))
+  (kargu-test-set-model-metadata "google/gemini-1.5-pro" '(:id "google/gemini-1.5-pro" :context-window 1000000))
+  (kargu-test-set-model-metadata "my-custom-model" '(:id "my-custom-model" :context-window 32768))
   (should (= (kargu-model-context-window "anthropic/claude-3.5-sonnet") 200000))
   (should (= (kargu-model-context-window "google/gemini-1.5-pro") 1000000))
   (should (= (kargu-model-context-window "my-custom-model") 32768))
@@ -78,18 +78,18 @@
 
 (ert-deftest kargu-model-supports-tools-default-test ()
   "Tools stay available unless the API explicitly disables them."
-  (let ((kargu--model-metadata-table (make-hash-table :test 'equal))
+  (let (
         (kargu-session--context
          (kargu-test-session-with-history :model "unknown-model")))
     (should (kargu-model-supports-tools-p "unknown-model"))
-    (kargu-model-set-metadata "plain-model" '(("id" . "plain-model")))
+    (kargu-test-set-model-metadata "plain-model" '(("id" . "plain-model")))
     (should (kargu-model-supports-tools-p "plain-model"))
-    (kargu-model-set-metadata "flagged-off" '(("supports_tools" . :json-false)))
+    (kargu-test-set-model-metadata "flagged-off" '(("supports_tools" . :json-false)))
     (should-not (kargu-model-supports-tools-p "flagged-off"))
-    (kargu-model-set-metadata "params-without-tools"
+    (kargu-test-set-model-metadata "params-without-tools"
                               '(("supported_parameters" . ["temperature" "max_tokens"])))
     (should-not (kargu-model-supports-tools-p "params-without-tools"))
-    (kargu-model-set-metadata "params-with-tools"
+    (kargu-test-set-model-metadata "params-with-tools"
                               '(("supported_parameters" . ["temperature" "tools"])))
     (should (kargu-model-supports-tools-p "params-with-tools"))))
 
@@ -102,7 +102,7 @@
             ("description" . "A 1M context model with reasoning")
             ("supports_reasoning" . t)
             ("pricing" . (("prompt" . "0.000001") ("completion" . "0.000002")))))))
-    (kargu--record-models-metadata raw-models)
+    (kargu-test-publish-model-catalog raw-models)
     (let ((meta (kargu-model-get-metadata "advanced-reasoner")))
       (should meta)
       (should (= (kargu-model-context-window "advanced-reasoner") 1000000))
@@ -113,7 +113,7 @@
       (should (equal (kargu-aget (kargu-model-get-prop "advanced-reasoner" "pricing") "completion") "0.000002"))
       (should (string-match-p "1M context" (kargu-model-get-prop "advanced-reasoner" "description")))
       ;; Setting and overriding properties dynamically
-      (kargu-model-set-prop "advanced-reasoner" "custom_param" "custom-val")
+      (kargu-test-set-model-prop "advanced-reasoner" "custom_param" "custom-val")
       (should (equal (kargu-model-get-prop "advanced-reasoner" "custom_param") "custom-val")))
     ;; Model info output test
     (let ((info-msg (kargu-model-info "advanced-reasoner")))
@@ -205,7 +205,7 @@
          (kargu-reasoning-effort 'low))
     (setf (kargu-selection-provider) "opencode")
     (setf (kargu-selection-model) "gemini-3.7-flash")
-    (kargu-model-set-metadata "gemini-3.7-flash" '(:id "gemini-3.7-flash" :context-window 1000000))
+    (kargu-test-set-model-metadata "gemini-3.7-flash" '(:id "gemini-3.7-flash" :context-window 1000000))
     (let ((footer (kargu-chat--footer-string)))
       ;; Check structure
       (should (string-match-p "provider: " footer))
@@ -250,7 +250,7 @@
               ((symbol-function 'kargu-api-list-models)
                (lambda (cb &optional _p)
                  ;; The real catalog owns metadata writes, not its ID wrapper.
-                 (kargu--record-models-metadata
+                 (kargu-test-publish-model-catalog
                   '((("id" . "llama3.1-70b") ("context_length" . 128000)
                      ("supports_reasoning" . t)
                      ("reasoning" . (("supported_efforts" . ["low" "medium" "high"])))))
@@ -365,37 +365,37 @@
   "Declared effort paths yield names.  An undeclared key does not."
   (let ((specs (kargu-provider-effort-specs "openai")))
     (let ((m1 '((("type" . "effort") ("values" . ("low" "medium"))))))
-      (should (equal (kargu--efforts-from-specs `(("reasoning_options" . ,m1)) specs)
+      (should (equal (kargu-test-efforts-from-specs `(("reasoning_options" . ,m1)) specs)
                      '("low" "medium"))))
     (let ((m2 '((("type" . "effort") ("values" . ["none" "low" "medium" "high" "max"]))
                 (("type" . "budget_tokens")))))
-      (should (equal (kargu--efforts-from-specs `(("reasoning_options" . ,m2)) specs)
+      (should (equal (kargu-test-efforts-from-specs `(("reasoning_options" . ,m2)) specs)
                      '("none" "low" "medium" "high" "max"))))
-    (should (equal (kargu--efforts-from-specs '(("reasoning_efforts" . ("low" "high"))) specs)
+    (should (equal (kargu-test-efforts-from-specs '(("reasoning_efforts" . ("low" "high"))) specs)
                    '("low" "high")))
-    (should (equal (kargu--efforts-from-specs '(("effort_levels" . ["minimal" "medium" "max"])) specs)
+    (should (equal (kargu-test-efforts-from-specs '(("effort_levels" . ["minimal" "medium" "max"])) specs)
                    '("minimal" "medium" "max")))
-    (should (null (kargu--efforts-from-specs
+    (should (null (kargu-test-efforts-from-specs
                    '(("reasoning" . (("effort" . ("low" "medium")))))
                    specs)))
-    (should (null (kargu--efforts-from-specs
+    (should (null (kargu-test-efforts-from-specs
                    '(("variants" . (("low" . 1) ("medium" . 2))))
                    specs)))
-    (should (null (kargu--efforts-from-specs
+    (should (null (kargu-test-efforts-from-specs
                    '(("reasoning_efforts" . "low, high"))
                    specs)))
-    (should (null (kargu--efforts-from-specs
+    (should (null (kargu-test-efforts-from-specs
                    '(("reasoning_options" . ((("type" . "toggle")))))
                    specs)))
     (let ((m3 '(("mandatory" . :json-false)
                 ("supported_efforts" . ["low" "medium" "high"])
                 ("default_effort" . "medium"))))
-      (should (equal (kargu--efforts-from-specs `(("reasoning" . ,m3)) specs)
+      (should (equal (kargu-test-efforts-from-specs `(("reasoning" . ,m3)) specs)
                      '("low" "medium" "high"))))
     (let ((m4 '(:mandatory :json-false
                 :supported_efforts ["low" "medium" "high"]
                 :default_effort "medium")))
-      (should (equal (kargu--efforts-from-specs `(("reasoning" . ,m4)) specs)
+      (should (equal (kargu-test-efforts-from-specs `(("reasoning" . ,m4)) specs)
                      '("low" "medium" "high"))))))
 
 (ert-deftest kargu-effort-csv-override-test ()
@@ -407,29 +407,29 @@
    :format 'openapi
    :models '(:reasoning-efforts (:path ("reasoning_effort") :type csv)))
   (should-not (kargu-provider-models "effort-csv"))
-  (should (equal (kargu--efforts-from-specs
+  (should (equal (kargu-test-efforts-from-specs
                   '(("reasoning_effort" . "low, high"))
                   (kargu-provider-effort-specs "effort-csv"))
                  '("low" "high")))
-  (should (null (kargu--efforts-from-specs
+  (should (null (kargu-test-efforts-from-specs
                  '(("reasoning_effort" . ("low" "high")))
                  (kargu-provider-effort-specs "effort-csv")))))
 
 (ert-deftest kargu-model-reasoning-efforts-resolution-test ()
   "Test resolving reasoning effort options from API metadata only."
   ;; 1. Explicit model metadata
-  (kargu-model-set-metadata "test/two-level-model"
+  (kargu-test-set-model-metadata "test/two-level-model"
                             '(:id "two-level-model" :reasoning-efforts ("low" "medium")))
   (should (equal (kargu-model-reasoning-efforts "two-level-model")
                  '("low" "medium")))
 
   ;; 2. Explicitly disabled reasoning
-  (kargu-model-set-metadata "test/no-reasoning-model"
+  (kargu-test-set-model-metadata "test/no-reasoning-model"
                             '(:id "no-reasoning-model" :supports-reasoning :json-false))
   (should (null (kargu-model-reasoning-efforts "no-reasoning-model")))
 
   ;; 3. A supports-reasoning flag without a level list is not a list
-  (kargu-model-set-metadata "my-reasoner" '(:id "my-reasoner" :supports-reasoning t))
+  (kargu-test-set-model-metadata "my-reasoner" '(:id "my-reasoner" :supports-reasoning t))
   (should (null (kargu-model-reasoning-efforts "my-reasoner"))))
 
 (ert-deftest kargu-company-dynamic-effort-selection-test ()
@@ -439,7 +439,7 @@
         (kargu-session--context
          (kargu-test-session-with-history :model "test/two-level-reasoner")))
     ;; Register model with only low and medium
-    (kargu-model-set-metadata "test/two-level-reasoner"
+    (kargu-test-set-model-metadata "test/two-level-reasoner"
                               '(:id "two-level-reasoner" :reasoning-efforts ("low" "medium")))
     (cl-letf (((symbol-function 'kargu--completing-read-with-company)
                (lambda (_prompt cands &optional _def _ann)
@@ -456,7 +456,7 @@
         (captured-cands nil)
         (kargu-session--context
          (kargu-test-session-with-history :model "test/pure-chat-model")))
-    (kargu-model-set-metadata "test/pure-chat-model"
+    (kargu-test-set-model-metadata "test/pure-chat-model"
                               '(:id "pure-chat-model" :supports-reasoning :json-false))
     (cl-letf (((symbol-function 'kargu--completing-read-with-company)
                (lambda (_prompt cands &optional _def _ann)
@@ -473,7 +473,7 @@
   (let ((kargu-reasoning-effort nil)
         (kargu-session--context
          (kargu-test-session-with-history :model "test/dual-model")))
-    (kargu-model-set-metadata "test/dual-model"
+    (kargu-test-set-model-metadata "test/dual-model"
                               '(:id "dual-model" :reasoning-efforts ("low" "medium")))
     ;; nil -> low -> medium -> nil
     (kargu-tune-cycle-reasoning-effort)

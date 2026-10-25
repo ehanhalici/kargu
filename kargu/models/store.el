@@ -1,135 +1,73 @@
-;;; store.el --- Provider-owned model metadata storage -*- lexical-binding: t; -*-
+;;; store.el --- Native model publication facade -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
-;; Part of kargu.
 
 ;;; Commentary:
 
-;; This module alone owns metadata records and explicit property overrides.
-;; Providers are normalized; opaque model IDs retain their case.  A short
-;; alias resolves only within one provider and only when it is unambiguous.
+;; Explicit updates capture one application's async native publication ticket.
+;; Readers select detached fields from its last committed view, never a second
+;; model store, alias resolver or override engine.
 
 ;;; Code:
 
-(require 'cl-lib)
-(require 'subr-x)
-(require 'kargu/json)
-(require 'kargu/models/service)
+(require 'kargu/bridge/models)
+(require 'kargu/models/projection)
+(require 'kargu/models/encode)
 
-(cl-defstruct (kargu-model-entry (:constructor kargu-model-store--entry))
-  "One provider's canonical model data and persistent local overrides."
-  provider id data overrides)
-
-(defvar kargu--model-metadata-table (make-hash-table :test #'equal)
-  "Owned metadata entries keyed by (PROVIDER . MODEL-ID).
-Only this module writes the table.  Updates replace entries, never mutate
-records retained by snapshots or another reader.")
+(declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
 
 (defun kargu-model-store--provider (provider)
-  "Return the canonical identity of explicit PROVIDER."
+  "Encode explicit PROVIDER for its native identity boundary."
   (unless (and provider (or (stringp provider) (symbolp provider)))
     (user-error "Kargu: model metadata requires a provider"))
-  (let ((provider (downcase (string-trim (format "%s" provider)))))
-    (when (string-empty-p provider)
-      (user-error "Kargu: model metadata requires a nonempty provider"))
-    provider))
+  (downcase (string-trim (format "%s" provider))))
 
-(defun kargu-model-store--key (provider id)
-  "Return the storage identity for explicit PROVIDER and model ID."
-  (unless (and (stringp id) (not (string-empty-p (string-trim id))))
-    (user-error "Kargu: model metadata requires a model identifier"))
-  (cons (kargu-model-store--provider provider) (copy-sequence (string-trim id))))
+(defun kargu-model-store--report (_view failure)
+  "Report asynchronous publication FAILURE without echoing metadata."
+  (when failure (message "Kargu: native model metadata update failed")))
 
-(defun kargu-model-store--find (key exact)
-  "Resolve KEY, allowing a unique short alias unless EXACT is non-nil."
-  (or (gethash key (kargu-metadata-table :records kargu--model-metadata-table))
-      (unless (or exact (string-search "/" (cdr key)))
-        (let ((suffix (concat "/" (cdr key))) found)
-          (maphash
-           (lambda (candidate entry)
-             (when (and (consp candidate) (kargu-model-entry-p entry)
-                        (equal (car candidate) (car key))
-                        (string-suffix-p suffix (cdr candidate)))
-               (setq found (if found :ambiguous entry))))
-           (kargu-metadata-table :records kargu--model-metadata-table))
-          found))))
-
-(defun kargu-model-store--effective (entry)
-  "Return a native record applying ENTRY's overrides to a copy of its data."
-  (let* ((raw (kargu-json-to-record (kargu-model-entry-data entry)))
-         (data (if (hash-table-p raw) nil raw))
-         (plist-p (and (consp data) (keywordp (car data)))))
-    (dolist (pair (kargu-model-entry-overrides entry))
-      (setq data
-            (if plist-p
-                (plist-put data (intern (concat ":" (car pair)))
-                           (copy-tree (cdr pair) t))
-              (cons (copy-tree pair t)
-                    (cl-remove-if (lambda (cell) (equal (car-safe cell) (car pair))) data)))))
-    data))
+(cl-defun kargu-model-store-submit (provider command &optional callback &key owner valid-p)
+  "Capture COMMAND for PROVIDER and return its native publication ticket.
+CALLBACK receives (VIEW FAILURE) once.  OWNER and VALID-P guard the producer."
+  (let* ((provider (kargu-model-store--provider provider))
+         (specs (and (fboundp 'kargu-provider-effort-specs) (kargu-provider-effort-specs provider))))
+    (kargu-bridge-models-publish
+     (kargu-application-context) provider (kargu-model-encode-command command)
+     (if specs (kargu-model-encode-value specs) [])
+     (kargu-application-wrap (kargu-application-context) (or callback #'kargu-model-store--report))
+     :owner owner :valid-p valid-p)))
 
 (cl-defun kargu-model-store-get (provider id &key exact)
-  "Read ID's metadata under explicit PROVIDER, or nil when unavailable.
-EXACT refuses aliases; ambiguous short names always return nil."
-  (let ((entry (kargu-model-store--find (kargu-model-store--key provider id) exact)))
-    (when (kargu-model-entry-p entry) (kargu-model-store--effective entry))))
+  "Detach ID's last committed metadata under PROVIDER; EXACT refuses aliases."
+  (when (and (stringp id) (not (string-empty-p (string-trim id))))
+    (when-let* ((entry (kargu-model-projection--entry
+                        (kargu-model-projection--view) (kargu-model-store--provider provider)
+                        (string-trim id) exact)))
+      (kargu-json-to-record (kargu-bridge-models--copy (gethash "metadata" entry))))))
 
-(defun kargu-model-store-put (provider id data)
-  "Publish DATA for PROVIDER's canonical ID, preserving local overrides."
-  (kargu-metadata-assert-legacy-writer)
-  (let* ((key (kargu-model-store--key provider id))
-         (old (gethash key (kargu-metadata-table :records kargu--model-metadata-table)))
-         (entry (kargu-model-store--entry
-                 :provider (car key) :id (cdr key)
-                 :data (kargu-json-to-record data)
-                 :overrides (and old (kargu-model-entry-overrides old)))))
-    (puthash key entry (kargu-metadata-table :records kargu--model-metadata-table))
-    (kargu-model-store--effective entry)))
+(defun kargu-model-store-settings (provider id &optional view omit-metadata)
+  "Detach PROVIDER/ID's fields from immutable VIEW or its UI observation.
+OMIT-METADATA avoids copying inspector text in frequently read UI fields."
+  (kargu-model-projection-connection (or view (kargu-model-projection--view))
+                                     (kargu-model-store--provider provider) id omit-metadata))
 
-(defun kargu-model-store-retain (provider ids)
-  "Retain catalog metadata only for PROVIDER's freshly advertised IDS.
-Removed models lose raw catalog data, but keep explicit local overrides.
-An empty successful catalog clears all raw data for that provider alone."
-  (kargu-metadata-assert-legacy-writer)
-  (let ((provider (kargu-model-store--provider provider))
-        (keep (make-hash-table :test #'equal)))
-    (dolist (id ids) (puthash id t keep))
-    (maphash
-     (lambda (key entry)
-       (when (and (kargu-model-entry-p entry)
-                  (equal (kargu-model-entry-provider entry) provider)
-                  (not (gethash (kargu-model-entry-id entry) keep)))
-         (if (kargu-model-entry-overrides entry)
-             (puthash key (kargu-model-store--entry
-                           :provider provider :id (kargu-model-entry-id entry)
-                           :overrides (kargu-model-entry-overrides entry))
-                      (kargu-metadata-table :records kargu--model-metadata-table))
-           (remhash key (kargu-metadata-table :records kargu--model-metadata-table)))))
-     (kargu-metadata-table :records kargu--model-metadata-table))))
+(defun kargu-model-store-put (provider id data &optional callback)
+  "Capture DATA for PROVIDER's ID; CALLBACK receives (VIEW FAILURE)."
+  (kargu-model-store-submit
+   provider (kargu-bridge--object "operation" "put" "model" id "metadata"
+                                  (if data (kargu-model-encode-value data) (make-hash-table :test #'equal)))
+   callback))
 
-(cl-defun kargu-model-store-set-property (provider id &key property value)
-  "Override PROPERTY with VALUE for PROVIDER's ID across catalog refreshes.
-A unique alias updates its canonical record; ambiguous aliases are refused."
-  (kargu-metadata-assert-legacy-writer)
-  (unless (and (stringp property) (not (string-empty-p property)))
-    (user-error "Kargu: metadata property must be a nonempty string"))
-  (when (equal property "provider")
-    (user-error "Kargu: a metadata property cannot transfer provider ownership"))
-  (let* ((key (kargu-model-store--key provider id))
-         (old (kargu-model-store--find key nil)))
-    (when (eq old :ambiguous)
-      (user-error "Kargu: ambiguous model alias; use its full catalog identifier"))
-    (when old (setq key (cons (kargu-model-entry-provider old) (kargu-model-entry-id old))))
-    (let ((entry (kargu-model-store--entry
-                  :provider (car key) :id (cdr key)
-                  :data (and old (kargu-model-entry-data old))
-                  :overrides (cons (cons property (copy-tree value t))
-                                   (cl-remove-if
-                                    (lambda (pair) (equal (car pair) property))
-                                    (and old (kargu-model-entry-overrides old)))))))
-      (puthash key entry (kargu-metadata-table :records kargu--model-metadata-table))
-      (kargu-model-store--effective entry))))
+(cl-defun kargu-model-store-set-property (provider id &key property value callback owner)
+  "Capture PROPERTY/VALUE override for PROVIDER's ID; report via CALLBACK.
+Rust resolves aliases and preserves overrides across refreshes.
+OWNER guards the inspector's lifetime."
+  (let ((property (kargu-model-encode-name property)))
+    (kargu-model-store-submit
+     provider (kargu-bridge--object "operation" "override" "model" id "property" property
+                                    "value" (kargu-model-encode-value value property))
+     callback :owner owner)))
 
 (provide 'kargu/models/store)
 ;;; store.el ends here
