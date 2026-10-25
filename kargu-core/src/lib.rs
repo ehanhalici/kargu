@@ -10,6 +10,7 @@ pub mod constants;
 pub mod domain;
 pub mod error;
 pub mod ipc;
+pub mod models;
 pub mod process;
 pub mod providers;
 pub mod security;

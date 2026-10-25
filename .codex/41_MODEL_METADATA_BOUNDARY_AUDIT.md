@@ -89,5 +89,35 @@ hard monetary cap is still open; do not claim the UI badge enforces money.
   document intentional strict numeric corrections, then commit the verified
   consumer cutover. No updated baseline may hide missing assertions.
 
-No production metadata change was made by this audit. 01, user shell.nix and
-07 edits remain untouched. No external API/account/application turn ran.
+No production metadata change was made by the initial audit above. 01, user
+shell.nix and 07 edits remain untouched. No external API/account/application
+turn ran.
+
+## Exact numeric foundation
+
+Added private ContextCapacity/OutputCapacity and InputTokenRate/OutputTokenRate
+domain types under models/numeric, closed NumericError and constructor/serde
+boundaries. Rates use u128 coefficient and bounded decimal scale (0–38), with
+128-byte input bound and checked coefficient/exponent arithmetic; unsupported
+precision/overflow is an error, never underflow-to-free or saturation. Prices
+serialize as exact decimal strings. Capacities require positive integral u64;
+1.5 is rejected, exact 1.0/2e3 may parse without rounding. Input/output rates,
+context/output capacities and billed MicroUsd cannot be interchanged.
+
+Six native numeric fixture tests and three new compile-fail unit/private-field
+proofs passed. Full native gate: **221 tests + 13 compile-fail**, locked build,
+fmt and strict all-targets Clippy passed. This foundation alone does NOT switch
+the current Elisp metadata readers/store or fix their invalid9/free behavior.
+
+Important integration finding: globally enabling serde_json/arbitrary_precision
+passed native fixtures but real GUI/stdio tests exposed an incompatibility with
+the custom duplicate-key visitor (a number arrives through serde's private
+number-map representation). That experiment was removed, not worked around by
+weakening IPC key rejection. Only scoped serde_json/raw_value is enabled;
+RawValue keeps metadata number lexemes before exact parsing without changing
+ordinary IPC Value deserialization or numeric identity/admission semantics.
+Cargo.lock/dependency versions are unchanged. Catalog numeric source text must
+cross this scoped boundary before any generic JSON number conversion.
+The rebuilt scoped-feature binary passed **1186/1186 full source ERT**,
+0 unexpected, **124.97 s**. The failed global-feature experiment is not counted
+as a passing gate; existing IPC/admission tests were retained unchanged.

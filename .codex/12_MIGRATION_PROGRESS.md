@@ -1,5 +1,21 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Metadata için kesin native sayısal alan tipleri
+
+models/numeric altında ayrı context/output capacity ve input/output USD/token
+rate tipleri eklendi. Parse/serde sınırları, checked u128 ondalık katsayı,
+0–38 scale ve 128-byte literal sınırı vardır; float/yuvarlanan token veya
+underflow-to-free yoktur. Altı fixture + üç yeni compile-fail; toplam **221
+native + 13 compile-fail**, locked build/fmt/strict Clippy ve yeni binary ile
+**1186/1186 full source ERT**, 0 unexpected, **124.97 s** geçti.
+
+Global arbitrary_precision deneyi gerçek IPC duplicate-key visitor ile
+uyumsuz çıktı ve kaldırıldı; key denetimi gevşetilmedi. Yalnız metadata
+RawValue sınırı için raw_value feature açılır; lock/version değişmedi. Bu
+domain temeli mevcut Elisp field/store consumer'ının taşındığı veya invalid9
+fiyat hatasının üretimde kapandığı anlamına gelmez. Ayrıntı/öğrenimler 41'de.
+Kullanıcı 01/shell.nix/07 değişmedi; gerçek hesap/API/CLI model turu yok.
+
 ## 2026-10-25 — Sonraki metadata sınırının kanıtlı incelemesi
 
 Metadata extraction/store/request snapshot tüketicileri incelendi. Fresh Emacs
