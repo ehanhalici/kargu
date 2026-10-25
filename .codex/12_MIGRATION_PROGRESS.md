@@ -1,5 +1,17 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Sonraki metadata sınırının kanıtlı incelemesi
+
+Metadata extraction/store/request snapshot tüketicileri incelendi. Fresh Emacs
+salt-okuma deneyi "invalid9" fiyatının 0/free, 1.5 token değerinin 2 olduğunu;
+geçerli fiyatın float'a gittiğini doğruladı. Bunlar henüz düzeltilmiş değildir.
+Senkron custom setter/UI getter sözleşmesi nedeniyle yalnız parser RPC'si
+eklemek yeterli değildir: revision'lı native publication, detached UI okuması
+ve preparation bariyeri birlikte tasarlanmalıdır. 41'de somut owner/tüketici,
+kesin rate/amount birim ayrımı ve fixture/kabul sırası kaydedildi. Üretim kodu
+71dc32d'den beri değişmez; full ERT 1186/1186 kanıtı geçerlidir. 01 ve kullanıcı
+shell.nix/07 değişmedi; bu not metadata göçü tamamlandı iddiası değildir.
+
 ## 2026-10-25 — Default API resilience native; legacy motorlar silindi
 
 Plain/stream chat tek native logical exchange, captured retry/circuit/budget
