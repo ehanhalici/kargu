@@ -19,6 +19,8 @@
 (require 'kargu/config/service)
 (require 'kargu/models/service)
 
+(autoload 'kargu-check-setup "kargu/config/setup" nil t)
+
 (defun kargu-config-revision ()
   "Return current monotonic integer revision of the configuration."
   (kargu-config-service-revision (kargu-config-service-context)))
@@ -139,7 +141,7 @@ the native UI's separate model-selection step."
      ((kargu--api-key-placeholder-p key)
       (push (if (string-empty-p key)
                 "API key is empty; requests will omit Authorization"
-              (format "API key looks like a placeholder (%s)" key))
+              "API key looks like a placeholder")
             warnings)))
     (dolist (tool missing-tools)
       (push (format "missing %s %s: %s (%s)"
@@ -187,15 +189,6 @@ the native UI's separate model-selection step."
                            (string-join (nreverse warnings) "; ")
                            ")")
                  "")))))
-
-(defun kargu-check-setup ()
-  "Check configuration and credentials asynchronously, then report dependencies."
-  (interactive)
-  (kargu-config-refresh-async
-   (lambda (result)
-     (if (kargu-err-p result)
-         (message "Kargu: %s" (kargu-result-err-message result))
-       (kargu-config-resolve-api-key-async nil #'kargu-config--report-setup)))))
 
 (provide 'kargu/config/schema)
 

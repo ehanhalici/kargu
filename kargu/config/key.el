@@ -6,8 +6,8 @@
 
 ;;; Commentary:
 
-;; API key and base endpoint resolution across custom variables, TOML tables,
-;; environment variables, and auth-source.
+;; Memory-only key and endpoint selection from published config and environment.
+;; Auth-source belongs to the shared asynchronous connection interop port.
 
 ;;; Code:
 
@@ -15,10 +15,7 @@
 (require 'subr-x)
 (require 'rx)
 (require 'kargu/core)
-(require 'kargu/async)
-(require 'kargu/contract/result)
 (require 'kargu/providers)
-(require 'kargu/config/worker)
 
 (defvar kargu-config-credential-adapter nil
   "Optional function (PROVIDER HOST TASK) for cancellable secret resolution.")
@@ -27,7 +24,6 @@
 (declare-function kargu--config-plist "kargu/config/schema" ())
 (declare-function url-host "url-parse")
 (declare-function url-generic-parse-url "url-parse")
-(declare-function kargu-config-revision "kargu/config/schema" ())
 (declare-function kargu-connection-current "kargu/config/connection" ())
 (declare-function kargu-connection-snapshot-provider "kargu/config/connection" (snapshot))
 (declare-function kargu-connection-snapshot-model "kargu/config/connection" (snapshot))
@@ -166,50 +162,6 @@ Return nil for non-strings or unset/empty references; log only missing names."
   "Return PROVIDER-NAME's key without invoking secret functions or pinentry.
 Reads purely from in-memory configuration without triggering auth-source search."
   (kargu--resolve-direct-api-key provider-name))
-
-(defun kargu-config--deliver-key-result (callback value error)
-  "Deliver resolved credential VALUE or ERROR to CALLBACK as a `kargu-result'."
-  (cond
-   ((or (kargu-ok-p value) (kargu-err-p value)) (funcall callback value))
-   (error (funcall callback (kargu-err error 'failed)))
-   ((stringp value) (funcall callback (kargu-ok value)))
-   (t (funcall callback (kargu-err "Credential resolution failed" 'failed)))))
-
-(defun kargu-config--dispatch-key (provider endpoint task)
-  "Resolve PROVIDER's key into TASK using only its captured ENDPOINT."
-  (let ((direct (kargu--resolve-direct-api-key provider)))
-    (cond
-     (direct (kargu-async-finish task (kargu-ok direct)))
-     ((kargu-provider-keyless-p provider) (kargu-async-finish task (kargu-ok "")))
-     ((functionp kargu-config-credential-adapter)
-      (funcall kargu-config-credential-adapter provider (kargu--url-host endpoint) task))
-     (t (kargu-config-worker-resolve provider (kargu--url-host endpoint) task)))))
-
-(cl-defun kargu-config-resolve-api-key-async
-    (provider-name callback &key timeout origin)
-  "Resolve PROVIDER-NAME's credential into CALLBACK within TIMEOUT seconds.
-ORIGIN, endpoint and configuration revision must still match on delivery."
-  (kargu-contract-assert #'functionp callback)
-  (let* ((origin (or origin (current-buffer)))
-         (session (kargu-session-context origin))
-         (provider (downcase (string-trim (format "%s" (or provider-name (kargu--provider-name))))))
-         (endpoint (kargu--api-base provider))
-         (revision (kargu-config-revision))
-         (valid-p (lambda ()
-                    (and (buffer-live-p origin)
-                         (with-current-buffer origin
-                           (and (eq session (kargu-session-context))
-                                (= revision (kargu-config-revision))
-                                (equal endpoint (kargu--api-base provider)))))))
-         (task (kargu-async-start
-                (lambda (value error)
-                  (when (funcall valid-p)
-                    (kargu-config--deliver-key-result callback value error)))
-                :owner nil :parent nil :buffer origin
-                :timeout (or timeout kargu-config-worker-default-timeout) :valid-p valid-p)))
-    (funcall (kargu-async-wrap task
-                              (lambda () (kargu-config--dispatch-key provider endpoint task))))
-    task))
 
 (provide 'kargu/config/key)
 

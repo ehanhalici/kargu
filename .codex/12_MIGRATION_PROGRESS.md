@@ -1,5 +1,37 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Setup ortak connection portu ve duplicate async facade silme
+
+Todo 1'in setup alt işi tamamlandı: command dar autoload `config/setup.el`
+adapter'ında config + credential için tek origin-owned root/deadline kullanır.
+Mevcut connection resolver'ına bağlandı; son tüketicisi taşındığı için eski
+key-only async facade/dispatch/delivery ve onlara özel imports kaldırıldı.
+Kill/mode/timeout/replacement child'ları bırakır; stale selection sonucu yeni
+provider'la eski key'i raporlayamaz. Başka application veya bound chat snapshot'ı
+kontrolü yönlendiremez. Callback hata verse/discard edilse bile owned scope ve
+raporun key kopyası temizlenir. Setup model/metadata isteği veya sidecar başlatmaz.
+
+Yeni güvenlik bulgusu da kapatıldı: placeholder warning sonu `...` olan key'in
+kendisini logluyordu; yalnız generic uyarı kaldı. Todo'da iki alt madde `[x]`,
+native config/endpoint üst grubu açık; kalan consumer alt işleri ayrıldı.
+Setup `ready` raporunun native readiness olmadığını release kabulünde doğrulamak
+için todo 10'a bir alt iş eklendi. Ayrıntılar .codex/45'te.
+
+10 yeni setup testi ve **1236/1236 full source ERT**, 0 unexpected, **137.45 s**,
+**00:12:44 Europe/Istanbul** geçti. **259 native + 16 compile-fail**, fmt,
+strict all-targets Clippy temiz. Üç üretim Elisp ve yeni test dosyası Werror
+bytecompile/checkdoc temiz; bytecode yalnız task-specific /tmp dizininde.
+Mevcut connection TLC exhaustive tekrar **602836 generated / 101708 distinct**,
+queue 0, depth 22 ile 00:12:58'de hatasız tamamlandı. Bu bounded modele aittir;
+somut yeni setup UI/refinement/secure-erasure ispatı değildir. Rust üretim
+kaynağı değişmedi; native testleri yeni Rust config özelliği diye sunulmaz.
+
+Kullanıcının tamamlananları silmek yerine `[x]` tutma isteği todo çalışma
+kuralına işlendi. 01, shell.nix/07 kullanıcı değişiklikleri ve module baseline
+korundu; kurulum, gerçek uzak API/CLI model turu, login/credential taşıma,
+merge/push yapılmadı. Genel native config/endpoint, run/history, hard monetary
+reservation ve dört backend hâlâ açık.
+
 ## 2026-10-25 — Katalog credential consumer cutover ve senkron Elisp temizliği
 
 Katalog GET hazırlığı `api/catalog/request.el` altında ayrıldı ve mevcut owned

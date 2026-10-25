@@ -196,6 +196,14 @@ catalog URL skips authentication. The old synchronous credential functions
 `kargu-connection-resolve-async`; `kargu-config-api-key-fast` never searches
 auth-source and is only a memory-backed check.
 
+`M-x kargu-check-setup` uses the same connection resolver, with a separate
+buffer-owned task covering config refresh and credential resolution. Closing
+the buffer, changing its mode or replacing its check cancels only that check.
+Reports use the captured provider/model and wipe their private credential scope
+afterward, even if reporting fails. The duplicate
+`kargu-config-resolve-api-key-async` key-only facade was also removed; custom
+consumers should use the connection port and wipe their snapshot when done.
+
 Project walks and searches exclude names in `kargu-fs-skip-dirs` at every
 directory depth. Customize this list when names such as `build` or `vendor`
 contain your source code; the same setting applies to fallback traversal.

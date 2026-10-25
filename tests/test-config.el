@@ -293,7 +293,7 @@
               ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
               ((symbol-function 'kargu-provider-env) (lambda (_) nil)))
       (let ((res (kargu-test-await
-                  (lambda (callback) (kargu-config-resolve-api-key-async "beta" callback)))))
+                  (lambda (callback) (kargu-connection-resolve-async "beta" "" :callback callback)))))
         (should (kargu-err-p res))
         (should (eq (kargu-result-err-code res) :auth-unavailable)))
       ;; Async adapter cancellation and owner validation
@@ -303,8 +303,8 @@
                 (setq pending-task task)
                 (kargu-async-add-cleanup
                  task (lambda () (setq canceled-adapter t))))))
-        (let ((task (kargu-config-resolve-api-key-async
-                     "beta" (lambda (r) (setq delivered r)))))
+        (let ((task (kargu-connection-resolve-async
+                     "beta" "" :callback (lambda (r) (setq delivered r)))))
           (kargu-async-cancel task)
           (should canceled-adapter)
           (kargu-async-finish pending-task (kargu-ok "late-secret"))

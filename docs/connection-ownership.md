@@ -60,10 +60,16 @@ key copy are wiped on closure; this is not complete physical memory erasure.
 
 The obsolete synchronous credential entry points and editor auth-source search
 were removed. `kargu-config-api-key-fast` is a memory-only availability check,
-not an auth-source resolver. Setup's existing async credential facade remains a
-consumer; its last-consumer consolidation and native config/endpoint policy are
-still open. The default local plaintext auth-source child remains an editor
-interop port, not a newly implemented Rust credential reader.
+not an auth-source resolver. Setup now uses the shared connection resolver too;
+the duplicate async key facade/dispatch/delivery helpers were removed. Its
+buffer-owned root covers config and credential resolution with one deadline,
+independent of an agent run. Closing/changing mode or replacing that origin's
+check cancels its children; stale session/selection results cannot report a new
+provider with an old key. Reports borrow the frozen snapshot, then wipe both
+the private scope and report key copy, including callback failures and discarded
+late results. Placeholder warnings never print the key itself. Native
+config/endpoint policy remains open. The default local plaintext auth-source
+child remains an editor interop port, not a newly implemented Rust credential reader.
 
 Catalog publication is one atomic native replace operation. Stale responses still
 deliver to their own callers but cannot overwrite newer state. A new generation
@@ -75,7 +81,7 @@ The UI uses native price labels; an invalid price is unknown, not free.
 
 Offline evidence is in `tests/test-native-model-consumers.el`,
 `tests/test-native-model-publication.el`, `tests/test-connection-native.el`,
-`tests/test-catalog-connection.el` and the existing config,
+`tests/test-catalog-connection.el`, `tests/test-setup.el` and the existing config,
 snapshot, model-store, parameter and application suites. It includes real child
 workers, real loopback curl redirects for Bearer and x-api-key, Stop and draft
 restoration, immutable retries, late selection rejection, two application owners

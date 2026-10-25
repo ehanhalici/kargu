@@ -106,6 +106,7 @@
 (require 'tests/test-security)
 (require 'tests/test-process)
 (require 'tests/test-config)
+(require 'tests/test-setup)
 (require 'tests/test-connection-snapshot)
 (require 'tests/test-laws)
 (require 'tests/test-compact)

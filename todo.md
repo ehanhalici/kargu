@@ -3,9 +3,9 @@
 İnceleme tabanı: 32e917b, 2026-10-22. İnceleme ERT baseline'ı: 1116/1116,
 2026-10-23. Rust göçünün güncel uygulama/test kaydı: .codex/12_MIGRATION_PROGRESS.md.
 G02 bağlantı/metadata sözleşmesi ve kalan köprüler: docs/connection-ownership.md.
-Yalnız açık işler tutulur; tamamlanan alt maddeler ve tekrarlanan iş tarifleri
-çıkarılmıştır. Bir çekirdeğin testinin geçmesi, native tüketicilerin ona
-bağlandığı anlamına gelmez. Eski ARCH/MOD/DEEP/RISK kimlikleri kaynak
+Tamamlanan geçiş alt maddeleri takip için `[x]`, kalan işler `[ ]` ile tutulur;
+tekrarlanan iş tarifleri birleştirilir. Bir çekirdeğin testinin geçmesi,
+native tüketicilerin ona bağlandığı anlamına gelmez. Eski ARCH/MOD/DEEP/RISK kimlikleri kaynak
 eşlemesidir; yeniden numaralanmaz ve bağımsız ikinci iş listesi oluşturmaz.
 
 K = kod yolu doğrulandı; Y = kontrollü yeniden üretildi; D = ek kanıt/ölçüm
@@ -24,7 +24,7 @@ Bu belge gruplamadır; aşağıdaki uygulamalar henüz onaylanmış sayılmaz.
 2. Default mode: onaylanan grubu regresyon → düzeltme/refactor → ilgili/tam ERT
    → derleme/checkdoc → etkilenen exhaustive TLC → commit sırasıyla uygula.
    Her grup tek dev commit olmak zorunda değildir.
-3. Kapanan maddeyi sil. Kısmen kapanan grubun yalnız kalan kapsamını bırak.
+3. Kapanan maddeyi `[x]` ile işaretle; kısmen kapanan üst grup açık kalsın.
    Yeni bulguyu aynı kök nedense mevcut gruba, değilse ilgili grubun sonuna ekle.
    Kanıtsız risk, yalnız yeşil tekrarlarla kapatılmaz.
 4. Bir grubun ortak sözleşmesini sonraki grup yeniden tasarlamaz. Gerekli dar
@@ -415,9 +415,10 @@ bu başlıklarla opsiyonel ilan edilemez.
 
 ## Rust geçişinde kalan adımlar — kapanış takip listesi
 
-Güncelleme: 2026-10-25, `2a2c2cd`. Son tamamlanan dilim katalog credential
-consumer cutover'ı ve kullanılmayan senkron Elisp'in silinmesidir. Kanıt:
-1226/1226 full source ERT, 259 native + 16 compile-fail; ayrıntılar .codex/12/44.
+Güncelleme: 2026-10-26, uygulama tabanı `c5e25e9`. Son tamamlanan dilim setup'ın
+ortak connection portuna bağlanması, duplicate async key facade'ının silinmesi
+ve placeholder log sızıntısının giderilmesidir. Kanıt: 1236/1236 full source ERT,
+259 native + 16 compile-fail; bounded connection TLC temiz. Ayrıntılar .codex/12/45.
 
 Bu liste .codex/04'teki onaylı göçün kalan **tüketici taşıma/kaldırma sırasını**
 özetler; G03–G13'ün yerine geçen ikinci kapsam veya yeni ürün kararı değildir.
@@ -431,10 +432,23 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   revision-bound native portta birleştir. Katalog URL türetmesi ve public kararının
   kalan editor politikası da bu sınırda ele alınsın. UI yalnız yayınlanmış DTO'yu
   tüketsin; auth-source/callable credential yalnız sahipli Emacs interop portu
-  olsun. Setup'ın async facade'ını son tüketicisiyle birleştirip artık kullanılmayan
-  Elisp parser/dispatch/precedence yollarını sil. Cold config, custom/local provider,
-  malformed refresh, stale revision, cancel ve iki application fixture'larını koru.
-  Kaynak: Aşama 4, G09/G13; .codex/10, 42, 44.
+  olsun. Artık kullanılmayan Elisp parser/precedence yollarını sil. Cold config,
+  custom/local provider, malformed refresh, stale revision, cancel ve iki
+  application fixture'larını koru. Kaynak: Aşama 4, G09/G13; .codex/10, 42, 44–45.
+
+  - [x] Setup'ın son credential tüketicisini ortak connection resolver'ına bağla;
+    ayrı `config-resolve-api-key-async`/dispatch/delivery facade'ını sil.
+    Config + credential tek origin-owned root/deadline altında; cancel, close,
+    mode/selection değişimi, iki application ve repeated-check izolasyonu testli.
+    Rapor sonrası, stale sonuçta ve callback hatasında scope/key kopyası temizlenir.
+  - [x] Geçişte bulunan ek güvenlik işi: placeholder uyarısı anahtarın kendisini
+    loglamasın. `secret-prefix...` sentetik regresyonu UI ve log sınırını denetler.
+  - [ ] Native config/schema/precedence/env/keyless consumer cutover'ı ve eski
+    Elisp TOML/selection politikasının silinmesi. Salt editor credential interop
+    portu kalmalı; yukarıdaki setup temizliği bu maddeyi kapatmaz.
+  - [ ] Katalog URL türetme/public-auth kararını native typed endpoint portuna
+    taşı; custom/private/dedicated/native-models path ve missing capability
+    fixture'ları geçince `api/catalog/request.el`/registry politika dallarını sil.
 
 - [ ] **2. Kalan native araçlar ve tek izin kapısı** — `read_file`, diğer Git
   işlemleri, skill/toolchain ve webfetch tüketicilerini ortak owner/process/path/
@@ -507,3 +521,9 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   modeller geçsin. Uçtan uca eşdeğerlikten sonra Rust agent default olsun; yalnız
   o zaman son legacy backend/engine kaynaklarını sil. Thin editor adapter'ları
   kalır; merge/push ayrıca onay ister. Kaynak: Aşama 6, G03/G11/G13.
+
+  - [ ] Setup raporunun kapsamını native readiness'den açıkça ayır: şu an
+    `kargu ready` config/credential/dependency kontrolüdür, binary/protokol veya
+    uzak model sağlığı testi değildir. Release kabulünde missing/incompatible
+    configured binary ile bu ayrımı ve gerçek startup'ın fail-closed hatasını
+    birlikte doğrula; passive reader'a gizli core/model isteği ekleme.
