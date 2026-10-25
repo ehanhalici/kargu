@@ -64,9 +64,7 @@ where
         let retry_after = response
             .headers()
             .get(reqwest::header::RETRY_AFTER)
-            .and_then(|value| value.to_str().ok())
-            .filter(|value| value.len() <= 128)
-            .map(str::to_owned);
+            .map(super::resilience::RetryAfter::from);
         if matches!(status.as_u16(), 400 | 413 | 422) && context_overflow(&mut response).await {
             return Err(ApiError::ContextOverflow { status });
         }

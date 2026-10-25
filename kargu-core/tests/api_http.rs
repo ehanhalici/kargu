@@ -146,6 +146,37 @@ async fn redirects_and_http_failures_never_echo_credentials_or_upstream_body() -
 }
 
 #[tokio::test]
+async fn oversized_or_invalid_retry_after_is_typed_and_never_echoes_header_text() -> TestResult {
+    for (header, exceeded) in [
+        ("9".repeat(129), true),
+        ("18446744073709551616".to_owned(), true),
+        ("synthetic-private-key".to_owned(), false),
+    ] {
+        let (url, thread) = server(move |mut socket| {
+            let reply = format!(
+                "HTTP/1.1 503 Failure\r\nRetry-After: {header}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            let _ = socket.write_all(reply.as_bytes());
+        })?;
+        let error = execute(
+            request(&url, false, timers())?,
+            |_| async { Ok(()) },
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .ok_or("expected HTTP failure")?;
+        let snapshot = error.snapshot();
+        assert_eq!(snapshot["status"], 503);
+        assert!(snapshot["retry_after"].is_null());
+        assert_eq!(snapshot.get("retry_after_exceeded").is_some(), exceeded);
+        assert!(!snapshot.to_string().contains("synthetic-private-key"));
+        thread.join().map_err(|_| "fixture failed")?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn independent_timeouts_and_cancellation_drop_socket_before_returning() -> TestResult {
     for case in ["first", "idle", "deadline", "cancel"] {
         let (url, thread) = server(move |mut socket| {

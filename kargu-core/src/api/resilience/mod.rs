@@ -17,6 +17,8 @@
 mod breaker;
 mod domain;
 mod retry;
+mod retry_after;
 pub use breaker::{Circuit, CircuitLease, CircuitOutcome, CircuitPhase, CircuitRefusal};
 pub use domain::{CircuitPolicy, Publication, RetryDelay};
 pub use retry::{RetryDecision, RetryPolicy, RetryStop};
+pub use retry_after::RetryAfter;

@@ -50,6 +50,7 @@ whole API migration or full native agent is complete.
   bytes. Before live cutover, replace that loss with typed overflow handling;
   otherwise a very large valid delay could accidentally become early jitter.
   Do not expose raw oversized headers or synthesize sentinel error strings.
+  This capture-loss obligation is resolved by the following typed IO slice.
 - Native result/error DTOs must replace the temporary plz/curl projection;
   delete legacy retry/breaker decisions only with matching live tests.
 
@@ -75,3 +76,31 @@ Protocol/library evidence checked on 2026-10-25:
   locked registry source. It was already transitive and is now an explicit
   dependency; only httpdate 1.0.3 adds a newly resolved package. No external app,
   login, account turn or paid API call was invoked.
+
+## 2026-10-25 — Typed Retry-After IO capture
+
+The real HTTP port now captures `RetryAfter` as parsed seconds, parsed date,
+invalid metadata or a typed exceeded bound. Raw header text is not retained.
+The retry policy consumes the same parsed value instead of parsing again.
+Only canonical valid protocol values enter the temporary editor error DTO;
+oversized/numeric-overflow values carry `retry_after_exceeded: true` rather than
+vanishing as an absent header. Invalid short values cannot echo arbitrary text
+or credentials into diagnostics. No sentinel string drives a control decision.
+
+The legacy compatibility adapter refuses automatic replay for the exceeded
+bound. Core DTO retains the original HTTP status; the temporary plz projection
+treats that refusal as local policy so its old retry path cannot bypass the
+typed limit. This is not full native retry cutover: legacy valid-value wait
+clamping remains until the new policy/actor consumer replaces that engine.
+
+One new real HTTP Rust test covers oversized/numeric-overflow/invalid secret
+header values; one real editor -> core -> HTTP 503 test proves a single POST
+and no scheduled early replay. The stream fixture now accepts explicit response
+status/headers, without changing default success behavior.
+
+Verification: **183 Rust tests + 5 compile-fail**, locked build/fmt/strict
+Clippy; **1171/1171 full source ERT**, 0 unexpected, **124.03 s**, including
+26 focused stream/budget tests. Touched bytecompile/checkdoc pass; generated
+bytecode removed. A full Rust run first exposed the separate record-output
+scheduling assumption; its corrected observed-cursor contract is committed and
+explained in 26, and the complete Rust suite then passed.

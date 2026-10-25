@@ -3,6 +3,7 @@
 use super::{
     Publication, RetryDelay,
     domain::{BackoffBase, BackoffCap, RetryDto, RetryLimit, RetryStatus, ServerWaitLimit},
+    retry_after::ServerWait,
 };
 use crate::{api::ApiError, constants::limits, domain::RetryAttempt, error::CoreError};
 use serde::Deserialize;
@@ -91,9 +92,9 @@ impl RetryPolicy {
         }
         let server = match error {
             ApiError::Http {
-                retry_after: Some(raw),
+                retry_after: Some(header),
                 ..
-            } => server_wait(raw, now, self.server_limit.duration()),
+            } => header.wait(now, self.server_limit.duration()),
             _ => ServerWait::Absent,
         };
         let minimum = match server {
@@ -140,37 +141,6 @@ impl RetryPolicy {
             )
     }
 }
-enum ServerWait {
-    Absent,
-    Delay(Duration),
-    TooLong,
-}
-fn server_wait(raw: &str, now: SystemTime, limit: Duration) -> ServerWait {
-    let raw = raw.trim_matches([' ', '\t']);
-    if raw.len() > 128 {
-        return ServerWait::TooLong;
-    }
-    if raw.is_empty() {
-        return ServerWait::Absent;
-    }
-    let delay = if raw.bytes().all(|byte| byte.is_ascii_digit()) {
-        match raw.parse::<u64>() {
-            Ok(seconds) => Duration::from_secs(seconds),
-            Err(_) => return ServerWait::TooLong,
-        }
-    } else {
-        match httpdate::parse_http_date(raw) {
-            Ok(at) => at.duration_since(now).unwrap_or(Duration::ZERO),
-            Err(_) => return ServerWait::Absent,
-        }
-    };
-    if delay > limit {
-        ServerWait::TooLong
-    } else {
-        ServerWait::Delay(delay)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,7 +152,7 @@ mod tests {
     fn upstream(header: Option<&str>) -> ApiError {
         ApiError::Http {
             status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
-            retry_after: header.map(str::to_owned),
+            retry_after: header.map(super::super::RetryAfter::from),
         }
     }
     fn wait(value: RetryDecision) -> Result<Duration, Box<dyn std::error::Error>> {

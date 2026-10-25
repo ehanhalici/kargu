@@ -1,5 +1,20 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Retry-After typed IO capture ve erken replay koruması
+
+Native HTTP header'ı tek kez typed seconds/date/invalid/exceeded olarak ayrıştırır;
+ham header metni tutulmaz. Numeric overflow veya capture sınırı artık yokmuş gibi
+kaybolmaz. Native policy aynı değeri tüketir; geçici legacy adapter exceeded
+bound için erken replay'i reddeder. Tam native retry/circuit consumer portu
+değildir; valid Retry-After legacy clamp motoru henüz açıktır. Detay 37'dedir.
+
+**183 Rust testi + 5 compile-fail**, locked build/fmt/strict Clippy geçer.
+**1171/1171 full source ERT**, 0 unexpected, **124.03 s**; yeni gerçek HTTP ve
+Emacs→core→503 regresyonları dahildir. Touched Werror bytecompile/checkdoc temiz;
+geçici .elc kaldırıldı. Full native önce 26'daki scheduling varsayımını yakaladı;
+bu ayrı test-contract düzeltmesinden sonra bütün native suite geçti. Kullanıcı
+shell.nix/07 değişiklikleri yine korunmuştur; hesap/ücretli/kurulum çağrısı yok.
+
 ## 2026-10-25 — Record-output testindeki scheduling varsayımı
 
 Tam native koşuda prefix doğruyken omission flag'i beklenenden farklı geldi.

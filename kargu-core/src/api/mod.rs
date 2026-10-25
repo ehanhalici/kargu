@@ -48,8 +48,8 @@ pub enum ApiError {
     Http {
         /// Upstream status code, never inferred from free text.
         status: reqwest::StatusCode,
-        /// Allowlisted bounded Retry-After value only.
-        retry_after: Option<String>,
+        /// Parsed bounded protocol metadata; no arbitrary upstream header text.
+        retry_after: Option<resilience::RetryAfter>,
     },
     /// An allowlisted provider code identified input/context overflow.
     #[error("API context length exceeded")]
@@ -89,7 +89,14 @@ impl ApiError {
         } = self
         {
             result["status"] = json!(status.as_u16());
-            result["retry_after"] = json!(retry_after);
+            result["retry_after"] =
+                json!(retry_after.as_ref().and_then(resilience::RetryAfter::wire));
+            if retry_after
+                .as_ref()
+                .is_some_and(resilience::RetryAfter::exceeded)
+            {
+                result["retry_after_exceeded"] = json!(true);
+            }
         }
         if let Self::ContextOverflow { status } = self {
             result["status"] = json!(status.as_u16());

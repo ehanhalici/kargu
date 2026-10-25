@@ -15,9 +15,10 @@
 (require 'tests/test-bridge)
 (require 'kargu/api/transport)
 
-(defun kargu-stream-test--server (body stream &optional hold capture capture-headers)
+(defun kargu-stream-test--server (body stream &optional hold capture capture-headers status headers)
   "Serve BODY as SSE when STREAM; keep open if HOLD.
-Send the request body to CAPTURE and its headers to CAPTURE-HEADERS."
+Send the request body to CAPTURE and its headers to CAPTURE-HEADERS.
+STATUS defaults to 200; HEADERS adds explicit response fixture fields."
   (make-network-process
    :name "kargu-native-api-fixture" :server t :host "127.0.0.1" :service t
    :noquery t :coding 'binary
@@ -36,11 +37,33 @@ Send the request body to CAPTURE and its headers to CAPTURE-HEADERS."
            (when capture-headers (funcall capture-headers (substring raw 0 end)))
            (let ((bytes (encode-coding-string body 'utf-8)))
              (process-send-string
-              client (format "HTTP/1.1 200 OK\r\nContent-Type: %s\r\n%sConnection: close\r\n\r\n"
+              client (format "HTTP/1.1 %d Fixture\r\nContent-Type: %s\r\n%s%sConnection: close\r\n\r\n"
+                             (or status 200)
                              (if stream "text/event-stream" "application/json")
-                             (if hold "" (format "Content-Length: %d\r\n" (length bytes)))))
+                             (if hold "" (format "Content-Length: %d\r\n" (length bytes)))
+                             (or headers "")))
              (process-send-string client bytes))
            (unless hold (delete-process client))))))))
+
+(ert-deftest kargu-stream-native-oversized-retry-after-never-schedules-early-replay-test ()
+  "A real oversized provider wait cannot vanish into the legacy retry path."
+  (kargu-bridge-test--with-core
+    (let* ((posts 0)
+           (server (kargu-stream-test--server
+                    "" nil nil (lambda (_) (cl-incf posts)) nil 503
+                    (concat "Retry-After: " (make-string 129 ?9) "\r\n")))
+           (url (format "http://127.0.0.1:%d/chat" (process-contact server :service)))
+           (kargu-stream nil) result)
+      (unwind-protect
+          (progn
+            (kargu--api-post url nil '(("messages" . [(("role" . "user") ("content" . "hi"))]))
+                             (kargu-application-current-generation) (lambda (value) (setq result value)))
+            (kargu-bridge-test--wait (lambda () result))
+            (should (= posts 1))
+            (should (string-match-p "automatic retry refused" (kargu-response-error-message result)))
+            (should-not (kargu-application-current-request)))
+        (kargu-http-cancel)
+        (delete-process server)))))
 
 (ert-deftest kargu-stream-native-round-trip-and-model-get-test ()
   "Chat plain/SSE and model discovery GET all use Rust, never plz/curl."

@@ -71,11 +71,13 @@
   "Project sanitized core FAILURE into the current editor error DTO.
 PARTIAL prevents retries after any published response event."
   (let* ((code (gethash "code" failure))
-         (status (or (gethash "status" failure)
+         (exceeded (eq (gethash "retry_after_exceeded" failure) t))
+         (status (or (and exceeded 400) (gethash "status" failure)
                      (and (member code '("invalid_request" "resource_limit" "cancelled"
                                          "protocol_error" "incomplete_stream" "redirect_refused" "run_deadline")) 400)))
          (retry (gethash "retry_after" failure))
-         (message (gethash "message" failure "Rust API request failed")))
+         (message (if exceeded "Provider Retry-After exceeds supported wait; automatic retry refused"
+                    (gethash "message" failure "Rust API request failed"))))
     (if partial
         (make-plz-error :message "Partial API response failed; automatic replay refused"
                         :response (make-plz-response :status 400 :body ""))
