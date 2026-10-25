@@ -532,6 +532,7 @@ pub enum UserDecision {
 
 /// Immutable review data; command text is accessible only through explicit getters.
 pub struct ApprovalRequest {
+    safety: ToolSafetyLevel,
     retention: OutputRetention,
     stdout_records: Option<RecordLimit>,
     stop_on_bytes: bool,
@@ -552,6 +553,18 @@ pub struct ApprovalRequest {
     environment: CommandEnvironment,
 }
 impl ApprovalRequest {
+    /// Captured executor effect class, verified against the registry and command.
+    /// A display/canonical tool name is never an automatic-approval authority.
+    /// Callers cannot relabel a captured review:
+    /// ```compile_fail
+    /// use kargu_core::{security::ApprovalRequest, domain::ToolSafetyLevel};
+    /// fn relabel(mut request: ApprovalRequest) {
+    ///     request.safety = ToolSafetyLevel::SafeReadOnly;
+    /// }
+    /// ```
+    pub fn safety(&self) -> ToolSafetyLevel {
+        self.safety
+    }
     /// Exact stdout producer-stop budget, separate from retained byte capacity.
     pub fn stdout_records(&self) -> Option<RecordLimit> {
         self.stdout_records
@@ -724,6 +737,7 @@ impl ExecutionGate {
         actor.register_call(run, call_id.clone(), descriptor.name().clone())?;
         let id = ApprovalId::new();
         let request = ApprovalRequest {
+            safety: descriptor.safety,
             retention: command.capture.retention(),
             stdout_records: command.capture.records(),
             stop_on_bytes: command.capture.stop_on_bytes(),

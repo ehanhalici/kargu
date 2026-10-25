@@ -3,32 +3,34 @@
 pub(crate) mod input;
 mod jobs;
 mod reply;
+mod state;
 
 use super::{
-    pending::{PendingOutcome, PendingRequests},
+    pending::PendingRequests,
     protocol::{self, Fault, RpcId},
 };
 use crate::{
     application::{
-        RunHandle, RunPurpose,
+        RunPurpose,
         host::{Host, ReadScope},
     },
     constants::{
         limits,
         protocol::{error_codes as codes, methods},
     },
-    domain::{JobId, RequestSequence, ToolCallId, ToolName},
+    domain::{RequestSequence, ToolCallId, ToolName, ToolSafetyLevel},
     error::CoreError,
     process::{CleanupPolicy, JobStatus, ProcessSupervisor},
-    security::{ApprovalRequest, ExecutionGate, ToolRegistry, UserDecision},
+    security::{ExecutionGate, ToolRegistry, UserDecision},
 };
 use futures_util::FutureExt;
 use input::{ExecuteInput, Prepared};
 use reply::Reply;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use state::{ApprovalReady, Operation, Owner, Preparing, Progress, Reviewing, Running, Stage};
 use std::collections::HashMap;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::sync::oneshot;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -58,33 +60,8 @@ struct GitStatusRequest {
     arguments: crate::workspace::git::GitStatusInput,
 }
 
-enum Stage {
-    Preparing(JoinHandle<Result<Prepared, CoreError>>),
-    Review {
-        run: Box<RunHandle>,
-        request: Box<ApprovalRequest>,
-        reverse: RpcId,
-        receiver: oneshot::Receiver<PendingOutcome>,
-    },
-    Running {
-        run: Box<RunHandle>,
-        job: JobId,
-        reply: Reply,
-    },
-}
-struct Operation {
-    purpose: RunPurpose,
-    scope: ReadScope,
-    stage: Option<Stage>,
-    terminal: Option<CoreError>,
-}
-enum Progress {
-    Pending(Stage),
-    Done(Result<Value, CoreError>),
-}
-
 pub(super) struct Commands {
-    operations: HashMap<RpcId, Operation>,
+    operations: HashMap<RpcId, Stage>,
     gate: ExecutionGate,
     registry: ToolRegistry,
     supervisor: ProcessSupervisor,
@@ -95,7 +72,7 @@ impl Commands {
     pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
         self.operations
             .values()
-            .any(|operation| &operation.scope.application_id == id)
+            .any(|stage| &stage.owner().scope.application_id == id)
             || self.jobs.owns_application(id)
     }
     pub fn new() -> Result<Self, CoreError> {
@@ -191,7 +168,7 @@ impl Commands {
             return Err(fault(CoreError::Limit));
         }
         // Reserve application ownership before off-mailbox filesystem preparation.
-        if self.operations.values().any(|op| {
+        if self.operations.values().map(Stage::owner).any(|op| {
             op.scope.application_id == scope.application_id
                 && op.purpose == RunPurpose::AgentTurn
                 && purpose == RunPurpose::AgentTurn
@@ -203,6 +180,7 @@ impl Commands {
             if self
                 .operations
                 .values()
+                .map(Stage::owner)
                 .filter(|op| {
                     op.scope.application_id == scope.application_id
                         && op.purpose == RunPurpose::ProcessJob
@@ -215,25 +193,29 @@ impl Commands {
         }
         self.operations.insert(
             id,
-            Operation {
-                purpose,
-                scope,
-                stage: Some(Stage::Preparing(tokio::task::spawn_blocking(prepare))),
-                terminal: None,
-            },
+            Stage::Preparing(Operation {
+                owner: Owner {
+                    purpose,
+                    scope,
+                    terminal: None,
+                },
+                phase: Preparing {
+                    task: tokio::task::spawn_blocking(prepare),
+                },
+            }),
         );
         Ok(())
     }
     pub fn cancel(&mut self, id: &RpcId) {
         self.jobs.cancel_request(id);
         if let Some(op) = self.operations.get_mut(id) {
-            op.terminal = Some(CoreError::Cancelled);
+            op.owner_mut().terminal = Some(CoreError::Cancelled);
         }
     }
     pub fn cancel_all(&mut self) {
         self.jobs.cancel_all();
         for op in self.operations.values_mut() {
-            op.terminal = Some(CoreError::Cancelled);
+            op.owner_mut().terminal = Some(CoreError::Cancelled);
         }
     }
     pub fn tick(
@@ -244,22 +226,21 @@ impl Commands {
         let ids: Vec<_> = self.operations.keys().cloned().collect();
         let mut messages = self.jobs.tick(host, &mut self.supervisor)?;
         for id in ids {
-            let mut op = self
+            let mut stage = self
                 .operations
                 .remove(&id)
                 .ok_or(CoreError::CleanupFailed)?;
-            if !host.owns_read_scope(&op.scope) && op.terminal.is_none() {
-                op.terminal = Some(CoreError::StaleOwner);
+            let owner = stage.owner_mut();
+            if !host.owns_read_scope(&owner.scope) && owner.terminal.is_none() {
+                owner.terminal = Some(CoreError::StaleOwner);
             }
-            let stage = op.stage.take().ok_or(CoreError::CleanupFailed)?;
-            let progress = self.advance(host, pending, &id, &mut op, stage, &mut messages)?;
+            let progress = self.advance(host, pending, &id, stage, &mut messages)?;
             match progress {
                 Progress::Pending(stage) => {
-                    op.stage = Some(stage);
-                    self.operations.insert(id, op);
+                    self.operations.insert(id, stage);
                 }
-                Progress::Done(result) => {
-                    let result = op.terminal.map_or(result, Err);
+                Progress::Done(owner, result) => {
+                    let result = owner.terminal.map_or(result, Err);
                     messages.push(match result {
                         Ok(value) => protocol::success(&id, value),
                         Err(error) => fault(error).response(Some(&id)),
@@ -274,82 +255,93 @@ impl Commands {
         host: &mut Host,
         pending: &mut PendingRequests,
         id: &RpcId,
-        op: &mut Operation,
         stage: Stage,
         messages: &mut Vec<Value>,
     ) -> Result<Progress, CoreError> {
         match stage {
-            Stage::Preparing(mut task) => {
-                let Some(result) = (&mut task).now_or_never() else {
-                    return Ok(Progress::Pending(Stage::Preparing(task)));
-                };
-                let prepared = match result.map_err(|_| CoreError::CleanupFailed)? {
-                    Ok(prepared) if op.terminal.is_none() => prepared,
-                    Ok(_) => return Ok(Progress::Done(Err(CoreError::Cancelled))),
-                    Err(error) => return Ok(Progress::Done(Err(error))),
-                };
-                self.prepare(host, pending, id, op, prepared, messages)
+            Stage::Preparing(operation) => {
+                self.advance_preparing(host, pending, id, operation, messages)
             }
-            Stage::Review {
-                run,
-                request,
-                reverse,
-                mut receiver,
-            } => {
-                let actor = host.actor_mut(&op.scope)?;
-                if op.terminal.is_none()
-                    && let Err(error) = run.check_live()
-                {
-                    op.terminal = Some(error);
+            Stage::Review(operation) => self.advance_review(host, pending, operation, messages),
+            Stage::Running(operation) => {
+                if operation.owner.terminal.is_some() {
+                    host.actor_mut(&operation.owner.scope)?
+                        .cancel(&operation.phase.run)?;
                 }
-                if op.terminal.is_some() || run.check_live().is_err() {
-                    actor.cancel(&run)?;
-                    self.gate.dismiss_run(actor, &run)?;
-                    pending.cancel(&reverse, &host.request_scope()?);
-                    messages.push(json!({"jsonrpc":"2.0","method":methods::CANCEL,"params":{"request_id":reverse.value(),"scope":host.request_scope()?.as_str()}}));
-                    host.actor_mut(&op.scope)?.finish(&run)?;
-                    return Ok(Progress::Done(Err(CoreError::Cancelled)));
-                }
-                let decision = match receiver.try_recv() {
-                    Err(oneshot::error::TryRecvError::Empty) => {
-                        return Ok(Progress::Pending(Stage::Review {
-                            run,
-                            request,
-                            reverse,
-                            receiver,
-                        }));
-                    }
-                    Ok(Ok(value)) if value == json!({"approved":true}) => UserDecision::Approved,
-                    _ => UserDecision::Rejected,
-                };
-                self.launch(host, &op.scope, run, request, decision, Reply::Command)
-            }
-            Stage::Running { run, job, reply } => {
-                if op.terminal.is_some() {
-                    host.actor_mut(&op.scope)?.cancel(&run)?;
-                }
-                self.collect(host, &op.scope, run, job, reply)
+                self.collect(host, operation)
             }
         }
+    }
+    fn advance_preparing(
+        &mut self,
+        host: &mut Host,
+        pending: &mut PendingRequests,
+        id: &RpcId,
+        mut operation: Operation<Preparing>,
+        messages: &mut Vec<Value>,
+    ) -> Result<Progress, CoreError> {
+        let Some(result) = (&mut operation.phase.task).now_or_never() else {
+            return Ok(Progress::Pending(Stage::Preparing(operation)));
+        };
+        let prepared = match result.map_err(|_| CoreError::CleanupFailed)? {
+            Ok(prepared) if operation.owner.terminal.is_none() => prepared,
+            Ok(_) => return Ok(operation.owner.complete(Err(CoreError::Cancelled))),
+            Err(error) => return Ok(operation.owner.complete(Err(error))),
+        };
+        self.prepare(host, pending, id, operation.prepared(prepared), messages)
+    }
+    fn advance_review(
+        &mut self,
+        host: &mut Host,
+        pending: &mut PendingRequests,
+        mut operation: Operation<Reviewing>,
+        messages: &mut Vec<Value>,
+    ) -> Result<Progress, CoreError> {
+        let run = &operation.phase.prepared.run;
+        let actor = host.actor_mut(&operation.owner.scope)?;
+        if operation.owner.terminal.is_none()
+            && let Err(error) = run.check_live()
+        {
+            operation.owner.terminal = Some(error);
+        }
+        if operation.owner.terminal.is_some() {
+            actor.cancel(run)?;
+            self.gate.dismiss_run(actor, run)?;
+            pending.cancel(&operation.phase.reverse, &host.request_scope()?);
+            messages.push(json!({"jsonrpc":"2.0","method":methods::CANCEL,"params":{"request_id":operation.phase.reverse.value(),"scope":host.request_scope()?.as_str()}}));
+            host.actor_mut(&operation.owner.scope)?.finish(run)?;
+            return Ok(operation.owner.complete(Err(CoreError::Cancelled)));
+        }
+        let decision = match operation.phase.receiver.try_recv() {
+            Err(oneshot::error::TryRecvError::Empty) => {
+                return Ok(Progress::Pending(Stage::Review(operation)));
+            }
+            Ok(Ok(value)) if value == json!({"approved":true}) => UserDecision::Approved,
+            _ => UserDecision::Rejected,
+        };
+        self.launch(host, operation.reviewed(), decision)
     }
     fn prepare(
         &mut self,
         host: &mut Host,
         pending: &mut PendingRequests,
         id: &RpcId,
-        operation: &Operation,
-        prepared: Prepared,
+        operation: Operation<Prepared>,
         messages: &mut Vec<Value>,
     ) -> Result<Progress, CoreError> {
-        let scope = &operation.scope;
+        let Operation {
+            owner,
+            phase: prepared,
+        } = operation;
+        let scope = &owner.scope;
         let actor = host.actor_mut(scope)?;
-        let admitted = match operation.purpose {
+        let admitted = match owner.purpose {
             RunPurpose::AgentTurn => actor.admit(&scope.session_id, prepared.settings),
             RunPurpose::ProcessJob => actor.admit_job(&scope.session_id, prepared.settings),
         };
         let run = match admitted {
             Ok(run) => Box::new(run),
-            Err(error) => return Ok(Progress::Done(Err(error))),
+            Err(error) => return Ok(owner.complete(Err(error))),
         };
         let request = match self.gate.prepare(
             actor,
@@ -363,21 +355,24 @@ impl Commands {
             Err(error) => {
                 actor.cancel(&run)?;
                 actor.finish(&run)?;
-                return Ok(Progress::Done(Err(error)));
+                return Ok(owner.complete(Err(error)));
             }
         };
-        if matches!(
-            prepared.tool.as_str(),
-            "list_files" | "workspace_grep" | "git_status"
-        ) {
-            return self.launch(
-                host,
-                scope,
+        let automatic = request.safety() == ToolSafetyLevel::SafeReadOnly;
+        let operation = Operation {
+            owner,
+            phase: ApprovalReady {
                 run,
-                Box::new(request),
-                UserDecision::Approved,
-                prepared.reply,
-            );
+                request: Box::new(request),
+                reply: if automatic {
+                    prepared.reply
+                } else {
+                    Reply::Command
+                },
+            },
+        };
+        if automatic {
+            return self.launch(host, operation, UserDecision::Approved);
         }
         self.sequence = self.sequence.next()?;
         let reverse = RpcId::String(format!(
@@ -385,6 +380,7 @@ impl Commands {
             host.request_scope()?.as_str(),
             self.sequence.as_u64()
         ));
+        let request = &operation.phase.request;
         let message = json!({"jsonrpc":"2.0","id":reverse.value(),"method":methods::REQUEST_APPROVAL,
             "params":{"request_id":id.value(),"approval_id":request.id(),"scope":request.scope(),"program":request.program(),"invocation":request.invocation(),
             "retention":request.retention(),"output_bytes":request.output_limit(),"timeout_ms":request.execution_timeout().duration().map(|duration| duration.as_millis()),"stderr":request.stderr(),
@@ -394,42 +390,45 @@ impl Commands {
             "arguments":request.arguments().iter().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>(),"cwd":request.working_directory(),
             "environment":request.environment().entries().map(|(k,v)| (k.to_string_lossy().into_owned(),v.to_string_lossy().into_owned())).collect::<std::collections::BTreeMap<_,_>>()}});
         if message.to_string().len() > host.frame_limit().as_usize() {
-            return self.reject_review(host, scope, &run);
+            return self.reject_review(host, operation);
         }
         let receiver =
             match pending.register(reverse.clone(), host.request_scope()?, request.deadline()) {
                 Ok(receiver) => receiver,
-                Err(_) => return self.reject_review(host, scope, &run),
+                Err(_) => return self.reject_review(host, operation),
             };
         messages.push(message);
-        Ok(Progress::Pending(Stage::Review {
-            run,
-            request: Box::new(request),
-            reverse,
-            receiver,
-        }))
+        Ok(Progress::Pending(Stage::Review(
+            operation.review(reverse, receiver),
+        )))
     }
     fn reject_review(
         &mut self,
         host: &mut Host,
-        scope: &ReadScope,
-        run: &RunHandle,
+        operation: Operation<ApprovalReady>,
     ) -> Result<Progress, CoreError> {
-        let actor = host.actor_mut(scope)?;
-        actor.cancel(run)?;
-        self.gate.dismiss_run(actor, run)?;
-        actor.finish(run)?;
-        Ok(Progress::Done(Err(CoreError::Limit)))
+        let actor = host.actor_mut(&operation.owner.scope)?;
+        actor.cancel(&operation.phase.run)?;
+        self.gate.dismiss_run(actor, &operation.phase.run)?;
+        actor.finish(&operation.phase.run)?;
+        Ok(operation.owner.complete(Err(CoreError::Limit)))
     }
     fn launch(
         &mut self,
         host: &mut Host,
-        scope: &ReadScope,
-        run: Box<RunHandle>,
-        request: Box<ApprovalRequest>,
+        operation: Operation<ApprovalReady>,
         decision: UserDecision,
-        reply: Reply,
     ) -> Result<Progress, CoreError> {
+        let Operation {
+            owner,
+            phase:
+                ApprovalReady {
+                    run,
+                    request,
+                    reply,
+                },
+        } = operation;
+        let scope = &owner.scope;
         let actor = host.actor_mut(scope)?;
         let grant = match self.gate.decide(actor, &run, &request, decision) {
             Ok(grant) => grant,
@@ -437,7 +436,7 @@ impl Commands {
                 actor.cancel(&run)?;
                 self.gate.dismiss_run(actor, &run)?;
                 actor.finish(&run)?;
-                return Ok(Progress::Done(Err(error)));
+                return Ok(owner.complete(Err(error)));
             }
         };
         match self.supervisor.start(actor, grant) {
@@ -446,47 +445,48 @@ impl Commands {
                     return self
                         .jobs
                         .register(scope.clone(), run, job, &self.supervisor)
-                        .map(|value| Progress::Done(Ok(value)));
+                        .map(|value| owner.complete(Ok(value)));
                 }
                 if let Err(error) = self.supervisor.close_input(&run, &job) {
                     actor.cancel(&run)?;
                     return Err(error);
                 }
-                Ok(Progress::Pending(Stage::Running { run, job, reply }))
+                Ok(Progress::Pending(Stage::Running(Operation {
+                    owner,
+                    phase: Running { run, job, reply },
+                })))
             }
             Err(error) => {
                 actor.cancel(&run)?;
                 actor.finish(&run)?;
-                Ok(Progress::Done(Err(error)))
+                Ok(owner.complete(Err(error)))
             }
         }
     }
     fn collect(
         &mut self,
         host: &mut Host,
-        scope: &ReadScope,
-        run: Box<RunHandle>,
-        job: JobId,
-        reply: Reply,
+        operation: Operation<Running>,
     ) -> Result<Progress, CoreError> {
-        if self.supervisor.status(&run, &job)? != JobStatus::CompletionReady {
-            return Ok(Progress::Pending(Stage::Running { run, job, reply }));
+        let phase = &operation.phase;
+        if self.supervisor.status(&phase.run, &phase.job)? != JobStatus::CompletionReady {
+            return Ok(Progress::Pending(Stage::Running(operation)));
         }
-        let limit = reply.capture_limit()?;
-        let Some(output) = self.supervisor.capture(&run, &job, limit)? else {
-            return Ok(Progress::Pending(Stage::Running { run, job, reply }));
+        let limit = phase.reply.capture_limit()?;
+        let Some(output) = self.supervisor.capture(&phase.run, &phase.job, limit)? else {
+            return Ok(Progress::Pending(Stage::Running(operation)));
         };
-        let Some(mut completion) = self.supervisor.try_wait(&run, &job)? else {
-            return Ok(Progress::Pending(Stage::Running { run, job, reply }));
+        let Some(mut completion) = self.supervisor.try_wait(&phase.run, &phase.job)? else {
+            return Ok(Progress::Pending(Stage::Running(operation)));
         };
-        let result = reply.render(completion.result(), &output);
+        let result = phase.reply.render(completion.result(), &output);
         if result.is_err() {
             completion.reject_output();
         }
-        completion.deliver(host.actor_mut(scope)?)?;
-        self.supervisor.forget(&run, &job)?;
-        host.actor_mut(scope)?.finish(&run)?;
-        Ok(Progress::Done(result))
+        completion.deliver(host.actor_mut(&operation.owner.scope)?)?;
+        self.supervisor.forget(&phase.run, &phase.job)?;
+        host.actor_mut(&operation.owner.scope)?.finish(&phase.run)?;
+        Ok(operation.owner.complete(result))
     }
     pub fn job_rpc(
         &mut self,

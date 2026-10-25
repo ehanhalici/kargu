@@ -87,10 +87,42 @@ strict all-target scan passes. Final frozen sources passed **211 native tests +
 9 compile-fail**, locked build/fmt and strict Clippy. Full source ERT against
 that final binary: **1185/1185**, 0 unexpected, **124.52 s**.
 
-## Remaining findings — not claimed fixed
+## 2026-10-25 — Typed command preparation / approval / running phases
 
-- `ipc/execution/mod.rs`: another `Option<Stage>` deserves the same ownership
-  review after the API retry audit; passing tests are not typestate evidence.
+`ipc/execution/state.rs` replaces the second `Option<Stage>` registry. Entries
+are exhaustive variants of `Operation<Preparing>`, `Operation<Reviewing>` or
+`Operation<Running>`. Preparing retains its actual blocking task until joined;
+Reviewing retains the captured approval-ready command, correlation and receiver;
+Running retains the actual owned run/job/reply. Terminal intent is in the common
+owner and survives every transition, including pending polls and error results.
+
+Mailbox methods accept only the proper concrete phase: prepare requires joined
+Prepared data, launch requires ApprovalReady, collect requires Running. Internal
+generic transition helpers are private; callers use only the allowed consuming
+prepared/review/reviewed methods. API retry similarly exposes named valid phase
+methods rather than a public generic phase switch. No state is temporarily None.
+There is no new actor await, blocking IO, early release or name-derived authority.
+
+Automatic review no longer matches tool names. `ExecutionGate::prepare` captures
+the explicit executor `ToolSafetyLevel`, already checked against both registry
+and command, in immutable ApprovalRequest metadata. Only SafeReadOnly skips UI;
+arbitrary execution still needs the same exact approval gate. This removes a
+policy smell, not evidence that today's fixed registry admitted an exploit.
+
+A regression registers arbitrary executors named list_files/workspace_grep/
+git_status: all remain ExecutesArbitraryCode and rejection never becomes an
+execution grant. A compile-fail contract prevents relabeling a captured review.
+All **212 native tests + 10 compile-fail**, locked build/fmt/strict Clippy pass.
+The final binary's full source ERT: **1185/1185**, 0 unexpected, **123.99 s**.
+
+## Audit boundary and remaining migration
+
+The concrete findings recorded above have been addressed; this does not prove
+the whole project's domain units, lifecycle and adapter boundaries correct.
+High-level API/loop default native retry/circuit cutover and deletion of their
+legacy Elisp engines remain open, as do the agent/run/history and external
+application backend obligations in the approved roadmap. Continue auditing
+their real consumers; do not treat passing tests or capabilities as a cutover.
 
 HTTP source reference:
 [versioned ClientBuilder docs](https://docs.rs/reqwest/0.12.28/reqwest/struct.ClientBuilder.html#method.retry).

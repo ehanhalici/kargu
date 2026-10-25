@@ -1,5 +1,23 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — 01 audit: command typestate ve açık effect sınıfı
+
+Command registry'deki ikinci Option<Stage> kaldırıldı; modüler execution/state
+altında Preparing/Reviewing/Running kaynak sahibi tiplerdir. Prepare/launch/
+collect doğru concrete phase'i tüketir; genel transition helper private kalır,
+yalnız izin verilen named geçiş metotları açılır (API retry'de de aynı kural).
+Owner terminal intent join/poll/geçiş boyunca taşınır; mailbox'a yeni await veya
+erken slot release eklenmedi. Otomatik onay tool adına değil, gate'in registry
+ve command ile doğruladığı immutable ToolSafetyLevel'a bağlıdır. Read-only adı
+taşıyan arbitrary executor regresyonu ve safety relabel compile-fail eklendi.
+
+Son kaynaklar **212 native test + 10 compile-fail**, locked build/fmt/strict
+Clippy ve son binary ile **1185/1185 full source ERT**, 0 unexpected,
+**123.99 s** geçti. 39'daki somut audit bulguları giderildi; bütün Rust ağacı
+veya migration için tam uyum/tamamlanma sertifikası değildir. Sonraki asıl geçiş
+high-level API/loop default retry/circuit consumer ve legacy Elisp silmesidir.
+Kullanıcının 01 kuralları, shell.nix ve 07 değişiklikleri korunmuştur.
+
 ## 2026-10-25 — 01 audit: checked indexing ve üretim lint kapısı
 
 Cache'teki iki raw string range erişimi checked get oldu; Unicode/tekrarlanan

@@ -170,6 +170,38 @@ fn command(root: &Path, script: &str, timeout: Duration) -> Result<CommandSpec, 
 }
 
 #[test]
+fn read_only_spelling_cannot_relabel_an_arbitrary_executor_for_automatic_approval() -> TestResult {
+    let mut fixture = Fixture::new(Mode::Agent, Duration::from_secs(5))?;
+    for spelling in ["list_files", "workspace_grep", "git_status"] {
+        let tool = name(spelling)?;
+        fixture.registry.register_process(tool.clone(), vec![])?;
+        let command = command(&fixture.root, "printf must-not-run", Duration::from_secs(1))?;
+        let request = fixture.gate.prepare(
+            &mut fixture.actor,
+            &fixture.run,
+            &fixture.registry,
+            &tool,
+            ToolCallId::new(),
+            command,
+        )?;
+        assert_eq!(request.tool_name(), &tool);
+        assert_eq!(request.safety(), ToolSafetyLevel::ExecutesArbitraryCode);
+        assert!(matches!(
+            fixture.gate.decide(
+                &mut fixture.actor,
+                &fixture.run,
+                &request,
+                UserDecision::Rejected
+            ),
+            Err(CoreError::Rejected)
+        ));
+    }
+    fixture.actor.cancel(&fixture.run)?;
+    fixture.actor.finish(&fixture.run)?;
+    Ok(())
+}
+
+#[test]
 fn validated_values_reject_invalid_input_and_overflow() -> TestResult {
     assert!(LineNumber::try_from(0_usize).is_err());
     assert!(serde_json::from_str::<LineNumber>("0").is_err());

@@ -47,11 +47,39 @@ pub(super) struct Operation<Phase> {
     pub phase: Phase,
 }
 impl<Phase> Operation<Phase> {
-    pub fn transition<Next>(self, consume: impl FnOnce(Phase) -> Next) -> Operation<Next> {
+    fn transition<Next>(self, consume: impl FnOnce(Phase) -> Next) -> Operation<Next> {
         Operation {
             intent: self.intent,
             phase: consume(self.phase),
         }
+    }
+}
+impl Operation<exchange::Retired> {
+    fn wait(self) -> Operation<exchange::Backoff> {
+        self.transition(exchange::Retired::wait)
+    }
+}
+impl Operation<exchange::Backoff> {
+    fn retired(self) -> Operation<exchange::ObserverReady> {
+        self.transition(exchange::Backoff::retire)
+    }
+}
+impl Operation<exchange::ObserverReady> {
+    fn headless(self) -> Operation<exchange::ReplayReady> {
+        self.transition(exchange::ObserverReady::headless)
+    }
+    fn observe(self, correlation: RpcId) -> Operation<exchange::Observing<RpcId>> {
+        self.transition(|phase| phase.observe(correlation))
+    }
+}
+impl Operation<exchange::Observed> {
+    fn accepted(self) -> Operation<exchange::ReplayReady> {
+        self.transition(exchange::Observed::accepted)
+    }
+}
+impl Operation<exchange::ReplayReady> {
+    fn admitted(self, charge: budget::Charge) -> Operation<exchange::Attempt<budget::Charge>> {
+        self.transition(|phase| phase.admit(charge))
     }
 }
 enum Collected {
@@ -106,7 +134,7 @@ impl ApiRequests {
                 )
             }
             (Flight::Backoff(operation), Completion::Backoff(result)) => {
-                Collected::Backoff(operation.transition(exchange::Backoff::retire), result)
+                Collected::Backoff(operation.retired(), result)
             }
             (Flight::Observing(operation), Completion::Observed(result)) => {
                 let (correlation, phase) = operation.phase.retire();
@@ -135,12 +163,7 @@ impl ApiRequests {
                 self.retry_backoff_retired(host, reverse, id, pending, operation, result)
             }
             Collected::Observed(operation, result) => match result {
-                Ok(true) => self.retry_grant(
-                    host,
-                    id,
-                    pending,
-                    operation.transition(exchange::Observed::accepted),
-                ),
+                Ok(true) => self.retry_grant(host, id, pending, operation.accepted()),
                 Ok(false) => self.finish(host, id, pending, Err(ApiError::Cancelled)),
                 Err(error) => self.finish(host, id, pending, Err(error)),
             },
@@ -217,7 +240,7 @@ impl ApiRequests {
         if let Err(error) = self.retry_preflight(host, &mut pending, &operation.intent.reference) {
             return self.finish(host, id, pending, Err(error));
         }
-        let operation = operation.transition(exchange::Retired::wait);
+        let operation = operation.wait();
         let deadline = operation.intent.deadline;
         let cancel = pending.cancel.clone();
         let work_id = id.clone();
@@ -256,12 +279,7 @@ impl ApiRequests {
             return self.finish(host, id, pending, Err(error));
         }
         match operation.intent.configuration.observer {
-            Observer::None => self.retry_grant(
-                host,
-                id,
-                pending,
-                operation.transition(exchange::ObserverReady::headless),
-            ),
+            Observer::None => self.retry_grant(host, id, pending, operation.headless()),
             Observer::Editor => self.retry_observe(host, reverse, id, pending, operation),
         }
     }
@@ -297,7 +315,7 @@ impl ApiRequests {
                 Err(error) => return self.finish(host, id, pending, Err(admission_failure(error))),
             };
         operation.intent.attempt = attempt;
-        let operation = operation.transition(|phase| phase.admit(charge));
+        let operation = operation.admitted(charge);
         self.workers.spawn(
             worker::Attempt {
                 id: id.clone(),
@@ -357,7 +375,7 @@ impl ApiRequests {
             Ok(receiver) => receiver,
             Err(_) => return self.finish(host, id, pending, Err(ApiError::RetryUnavailable)),
         };
-        let operation = operation.transition(|phase| phase.observe(correlation));
+        let operation = operation.observe(correlation);
         let budget_deadline = operation.intent.deadline;
         let cancel = pending.cancel.clone();
         let work_id = id.clone();
