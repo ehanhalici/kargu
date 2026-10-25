@@ -259,7 +259,9 @@ fn tool_refusal_identity_is_scoped_and_does_not_mutate_detached_snapshots() -> T
     )?;
     assert_eq!(
         store.snapshot().get("refusals"),
-        Some(&json!([{"provider":"a","id":"Model"},{"provider":"a","id":"missing"}]))
+        Some(
+            &json!([{"provider":"a","id":"Model","tools":false},{"provider":"a","id":"missing","tools":false}])
+        )
     );
     update(
         &mut store,
@@ -321,6 +323,58 @@ fn refusal_observations_do_not_reinterpret_captured_provider_effort_paths() -> T
     assert_eq!(
         record(&store, "a", "Model").and_then(|record| record.pointer("/fields/reasoning_efforts")),
         Some(&original)
+    );
+    Ok(())
+}
+
+#[test]
+fn display_and_alias_permissions_are_native_and_unknown_defaults_do_not_invent_prices() -> TestResult
+{
+    let mut store = ModelStore::new();
+    assert_eq!(
+        store.snapshot().pointer("/defaults/tools"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        store.snapshot().pointer("/defaults/display/input-cost"),
+        Some(&Value::Null)
+    );
+    update(
+        &mut store,
+        "a",
+        r#"{"operation":"put","model":"vendor/shared","metadata":{"pricing":{"prompt":"invalid9"},"supported_parameters":["tools"]}}"#,
+    )?;
+    update(
+        &mut store,
+        "a",
+        r#"{"operation":"refuse_tools","model":"shared"}"#,
+    )?;
+    assert_eq!(
+        store.snapshot().pointer("/aliases/0/tools"),
+        Some(&json!(false))
+    );
+    assert_eq!(
+        record(&store, "a", "vendor/shared").and_then(|record| record.get("tools")),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        record(&store, "a", "vendor/shared").and_then(|record| record.pointer("/display/free")),
+        Some(&json!(false))
+    );
+    assert_eq!(
+        record(&store, "a", "vendor/shared")
+            .and_then(|record| record.pointer("/display/input-cost")),
+        Some(&Value::Null)
+    );
+    update(
+        &mut store,
+        "a",
+        r#"{"operation":"put","model":"vendor/shared","metadata":{"input-cost":1e-38}}"#,
+    )?;
+    assert_eq!(
+        record(&store, "a", "vendor/shared")
+            .and_then(|record| record.pointer("/display/price-label")),
+        Some(&json!("$0.00000000000000000000000000000001/1M"))
     );
     Ok(())
 }

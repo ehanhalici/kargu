@@ -9,7 +9,7 @@ use serde::{
 use serde_json::{Value, value::RawValue};
 use std::{collections::BTreeMap, fmt};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct RawMetadata(BTreeMap<String, Box<RawValue>>);
 impl<'de> Deserialize<'de> for RawMetadata {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

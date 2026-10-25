@@ -97,7 +97,7 @@ impl Default for ModelStore {
 impl ModelStore {
     /// Construct an empty, uniquely owned publication lifetime.
     pub fn new() -> Self {
-        let snapshot = json!({"revision":0,"records":[],"aliases":[],"catalogs":[],"refusals":[]});
+        let snapshot = json!({"revision":0,"records":[],"aliases":[],"catalogs":[],"refusals":[],"defaults":unknown_view()});
         let snapshot_json = snapshot.to_string();
         Self {
             owner: StoreId(uuid::Uuid::new_v4()),
@@ -241,9 +241,9 @@ fn projection(
     for (id, provider) in providers {
         catalogs.push(json!({"provider":id,"models":provider.advertised}));
         for model in &provider.refused {
-            refusals.push(json!({"provider":id,"id":model}));
+            refusals.push(json!({"provider":id,"id":model,"tools":false}));
         }
-        let mut short: BTreeMap<&str, Option<&ModelId>> = BTreeMap::new();
+        let mut short: BTreeMap<&str, Option<(&ModelId, bool)>> = BTreeMap::new();
         for (model, record) in &provider.entries {
             let raw = record.effective()?;
             let fields = ModelFields::from_raw(&raw, &provider.specs);
@@ -251,7 +251,7 @@ fn projection(
             let object = metadata.as_object_mut().ok_or(StoreError::Invalid)?;
             object.insert("provider".to_owned(), json!(id));
             object.insert("id".to_owned(), json!(model));
-            records.push(json!({"provider":id,"id":model,"metadata":metadata,"fields":fields,
+            records.push(json!({"provider":id,"id":model,"metadata":metadata,"fields":fields,"display":fields.display_snapshot(),
                 "tools":fields.allows_tools() && !provider.refused.contains(model),"reasoning":fields.allows_reasoning(),"input_zero":fields.input_is_zero()}));
             if let Some((_, basename)) = model.as_str().rsplit_once('/')
                 && !basename.is_empty()
@@ -259,16 +259,28 @@ fn projection(
                 short
                     .entry(basename)
                     .and_modify(|value| *value = None)
-                    .or_insert(Some(model));
+                    .or_insert(Some((
+                        model,
+                        fields.allows_tools()
+                            && !provider
+                                .refused
+                                .iter()
+                                .any(|refused| refused.as_str() == basename),
+                    )));
             }
         }
         for (name, model) in short {
-            if let Some(model) = model {
-                aliases.push(json!({"provider":id,"alias":name,"id":model}));
+            if let Some((model, tools)) = model {
+                aliases.push(json!({"provider":id,"alias":name,"id":model,"tools":tools}));
             }
         }
     }
     Ok(
-        json!({"revision":revision,"records":records,"aliases":aliases,"catalogs":catalogs,"refusals":refusals}),
+        json!({"revision":revision,"records":records,"aliases":aliases,"catalogs":catalogs,"refusals":refusals,"defaults":unknown_view()}),
     )
+}
+
+fn unknown_view() -> Value {
+    let fields = ModelFields::default();
+    json!({"metadata":null,"fields":fields,"display":fields.display_snapshot(),"tools":fields.allows_tools(),"reasoning":fields.allows_reasoning(),"input_zero":false})
 }

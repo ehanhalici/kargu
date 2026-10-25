@@ -86,6 +86,18 @@ Europe/Istanbul. Production Lisp was not changed or bytecompiled by these
 native foundations, and no elc files were generated. No abstract TLC result is
 presented as a proof of this concrete metadata revision/publication refinement.
 
+## Canonical UI projection, before the public producer cutover
+
+model_metadata_projection additionally advertises native display/default/alias
+permission DTOs. Unknown fields remain unknown and missing/invalid prices never
+produce a zero/free label. USD per million input-token display uses exact decimal
+text shifting, not f64 or overflowing rate * 1M arithmetic, including 1e-38 and
+u128::MAX fixtures. Native aliases carry their own request-identity refusal
+permission; request parameters still require an exact model record. The initial
+and committed snapshots both include native unknown-model defaults. Gate:
+**256 native + 16 compile-fail**, fmt, locked build and strict all-targets Clippy.
+This DTO foundation is not yet the default Lisp setter/catalog/UI cutover.
+
 ## Status and observed evidence — 2026-10-25
 
 Default HTTP resilience is native at 71dc32d (40); live-model metadata is NOT

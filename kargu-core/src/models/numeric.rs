@@ -185,6 +185,37 @@ rate!(
     CacheWriteTokenRate,
     "Exact USD per cache-write token, not a cache-read rate."
 );
+impl InputTokenRate {
+    /// Exact UI USD/one-million-input-tokens label, never a billed amount.
+    /// Decimal shifting uses text, so even u128::MAX cannot overflow on * 1M.
+    pub fn per_million_label(&self) -> String {
+        if self.is_zero() {
+            return "$0.00/1M".to_owned();
+        }
+        let coefficient = self.0.coefficient.to_string();
+        let scale = usize::from(self.0.scale);
+        let (integer, fraction) = if scale <= 6 {
+            (
+                format!("{coefficient}{}", "0".repeat(6_usize.saturating_sub(scale))),
+                String::new(),
+            )
+        } else {
+            let scale = scale.saturating_sub(6);
+            let digits = format!(
+                "{}{}",
+                "0".repeat(scale.saturating_add(1).saturating_sub(coefficient.len())),
+                coefficient
+            );
+            let position = digits.len().saturating_sub(scale);
+            (
+                digits.chars().take(position).collect(),
+                digits.chars().skip(position).collect(),
+            )
+        };
+        let padding = "0".repeat(2_usize.saturating_sub(fraction.len()));
+        format!("${integer}.{fraction}{padding}/1M")
+    }
+}
 
 macro_rules! capacity {
     ($name:ident, $doc:literal) => {

@@ -1,5 +1,20 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Canonical native UI ve bilinmeyen model projection'ı
+
+model_metadata_projection capability; display/defaults/alias/refusal permission
+DTO'ları eklendi. UI için exact fiyat etiketi native üretilir: 1e-38 sıfıra
+yuvarlanmaz, u128::MAX rate'in 1M etiketi de integer multiplication taşması
+olmadan decimal text shift ile hazırlanır. Missing/invalid fiyat label/badge
+üretmez; input-zero etiketi monetary hard-cap kanıtı değildir.
+
+Unknown model defaults ve alias tools permission native üretilir; request
+parameters için exact model şartı korunur. İki yeni fixture ile **256 native +
+16 compile-fail**, fmt, locked build ve strict all-targets Clippy geçti. Bu native
+DTO dilimi tek başına mevcut public Elisp setter/UI reader cutover'ı değildir;
+o tüketicinin invalid9/free düzeltmesi tamamlandı iddiası yoktur. 01 ve kullanıcı
+shell.nix/07 korunur. Dış hesap/API/uygulama model turu çalıştırılmadı.
+
 ## 2026-10-25 — Application-owned native metadata publication RPC
 
 model_metadata capability ve models/begin/append/commit/abort/snapshot/read

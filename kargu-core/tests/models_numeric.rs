@@ -8,6 +8,24 @@ use serde_json::Value;
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
+fn input_price_labels_are_exact_and_do_not_overflow_or_round_sub_micro_rates_into_zero()
+-> TestResult {
+    for (source, label) in [
+        ("0", "$0.00/1M"),
+        ("0.0000001", "$0.10/1M"),
+        ("0.00000123", "$1.23/1M"),
+        ("1e-38", "$0.00000000000000000000000000000001/1M"),
+        (
+            "340282366920938463463374607431768211455",
+            "$340282366920938463463374607431768211455000000.00/1M",
+        ),
+    ] {
+        assert_eq!(source.parse::<InputTokenRate>()?.per_million_label(), label);
+    }
+    Ok(())
+}
+
+#[test]
 fn exact_prices_keep_sub_micro_values_and_normalize_only_trailing_zeroes() -> TestResult {
     for (source, expected) in [
         ("0", "0"),

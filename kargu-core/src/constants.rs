@@ -137,7 +137,7 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 22] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 23] = [
         "api_request",
         "api_wire",
         "api_request_policy",
@@ -148,6 +148,7 @@ pub mod protocol {
         "api_failure",
         "api_model_catalog",
         "model_metadata",
+        "model_metadata_projection",
         "application_lifecycle",
         "application_close",
         "session_lifecycle",

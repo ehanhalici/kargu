@@ -143,6 +143,18 @@ fn parameters(value: Option<&str>) -> Field<Vec<ParameterName>> {
     }
 }
 impl ModelFields {
+    /// Detached UI values; absent/invalid observations remain unknown. The tagged
+    /// fields remain available separately for inspectors and exact policy ports.
+    pub fn display_snapshot(&self) -> Value {
+        serde_json::json!({
+            "context-window":self.context_window.known(), "max-output":self.max_output.known(),
+            "reasoning-efforts":self.reasoning_efforts.known(),
+            "vision":self.vision == Field::Known(true),
+            "free":self.free == Field::Known(true) || self.input_is_zero(),
+            "params":self.params.known(), "input-cost":self.input_cost.known(),
+            "price-label":self.input_cost.known().filter(|rate| !rate.is_zero()).map(InputTokenRate::per_million_label)
+        })
+    }
     pub(crate) fn from_raw(raw: &RawMetadata, specs: &EffortSpecs) -> Self {
         let context_window = numeric(raw.first(&[
             "context_length",
@@ -239,5 +251,10 @@ impl ModelFields {
                     .reasoning_efforts
                     .known()
                     .is_some_and(|values| !values.is_empty()))
+    }
+}
+impl Default for ModelFields {
+    fn default() -> Self {
+        Self::from_raw(&RawMetadata::default(), &EffortSpecs::default())
     }
 }
