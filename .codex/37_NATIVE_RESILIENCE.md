@@ -182,3 +182,31 @@ editor retry observer adapter is the next slice. Legacy Elisp retry/circuit
 engines have not been removed prematurely. Native circuit registry/lease
 composition with logical retry, UI error projection and full agent/run claims
 remain open; no full API/backend migration claim follows.
+
+## 2026-10-25 — Editor-owned retry observer port
+
+The bridge now routes `editor/api_retry` only to the exact live forward waiter,
+connection epoch, detached native application/session scope and source-buffer
+lifetime. It rechecks ownership after callback reentry and ACKs false after
+cancel, waiter replacement or consumer failure. A bounded per-waiter delivery
+sequence prevents duplicate observer invocation; it is not a billing/retry policy
+counter. Unknown/late observers receive no authority. No new singleton or timer
+was added to Elisp.
+
+The transport adapter accepts explicitly captured `:retry` policy and
+`:on-retry` presentation callback, negotiates `api_retry`, projects the exact
+native budget before notification and sends the owned ACK afterwards. Defaults
+still preserve the existing high-level API while its remaining consumers are
+being cut over. Six new editor tests include real two-socket success and real
+callback cancellation followed by native budget drain, plus duplicate, foreign,
+stale, failed/replaced waiter and detached-scope regressions.
+
+Verification: **1178/1178 full source ERT**, 0 unexpected, **125.46 s**;
+**197 Rust tests + 5 compile-fail** rerun on the committed native implementation.
+Touched warning-as-error byte compilation and checkdoc pass; temporary bytecode
+removed. No module-boundary baseline change or paid/external application turn.
+
+Consumer audit found a second retry engine in `loop/machine.el`, which calls
+the same legacy jitter helper. High-level API cutover must remove/replace that
+consumer as well; simply deleting `api/retry.el` or enabling two retry engines
+would not satisfy the plan. This remains an explicit next-step obligation.

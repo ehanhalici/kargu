@@ -1,5 +1,18 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — GUI native retry observer köprüsü
+
+Bridge exact forward/scope/epoch/owner'a observer teslim eder, callback sonrası
+yeniden kontrol edip ACK verir. Duplicate/stale/reentrant cancel veya consumer
+hatası replay yetkisi vermez. Transport :retry/:on-retry ile native policy ve
+budget projection'ını bağlar; yeni Elisp retry timer/karar motoru yoktur.
+
+**1178/1178 full source ERT**, 0 unexpected, **125.46 s**, touched Werror
+bytecompile/checkdoc temiz ve .elc kaldırıldı. Native son kaynaklarıyla tam
+**197 test + 5 compile-fail** yeniden geçti. High-level API varsayılan cutover
+ve loop/machine'deki ikinci retry consumer henüz açıktır; 37'ye not edildi.
+Kullanıcı shell.nix/07 değişiklikleri korunmuştur.
+
 ## 2026-10-25 — Native retry actor ve reverse observer consumer
 
 Gerçek api/request retry consumer eklendi; api_retry capability ilan edilir.

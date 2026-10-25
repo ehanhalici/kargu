@@ -15,10 +15,11 @@
 (require 'tests/test-bridge)
 (require 'kargu/api/transport)
 
-(defun kargu-stream-test--server (body stream &optional hold capture capture-headers status headers)
+(defun kargu-stream-test--server (body stream &optional hold capture capture-headers status headers script)
   "Serve BODY as SSE when STREAM; keep open if HOLD.
 Send the request body to CAPTURE and its headers to CAPTURE-HEADERS.
-STATUS defaults to 200; HEADERS adds explicit response fixture fields."
+STATUS defaults to 200; HEADERS adds explicit response fixture fields.
+SCRIPT optionally supplies per-request :body/:status/:headers response plists."
   (make-network-process
    :name "kargu-native-api-fixture" :server t :host "127.0.0.1" :service t
    :noquery t :coding 'binary
@@ -35,6 +36,10 @@ STATUS defaults to 200; HEADERS adds explicit response fixture fields."
            (process-put client :answered t)
            (when capture (funcall capture (substring raw (+ end 4))))
            (when capture-headers (funcall capture-headers (substring raw 0 end)))
+           (when script
+             (let ((reply (pop script)))
+               (setq body (plist-get reply :body) status (plist-get reply :status)
+                     headers (plist-get reply :headers))))
            (let ((bytes (encode-coding-string body 'utf-8)))
              (process-send-string
               client (format "HTTP/1.1 %d Fixture\r\nContent-Type: %s\r\n%s%sConnection: close\r\n\r\n"

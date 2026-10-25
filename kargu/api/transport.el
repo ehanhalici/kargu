@@ -74,7 +74,8 @@ PARTIAL prevents retries after any published response event."
          (exceeded (eq (gethash "retry_after_exceeded" failure) t))
          (status (or (and exceeded 400) (gethash "status" failure)
                      (and (member code '("invalid_request" "resource_limit" "cancelled"
-                                         "protocol_error" "incomplete_stream" "redirect_refused" "run_deadline")) 400)))
+                                         "protocol_error" "incomplete_stream" "redirect_refused" "run_deadline"
+                                         "budget_exhausted" "retry_unavailable")) 400)))
          (retry (gethash "retry_after" failure))
          (message (if exceeded "Provider Retry-After exceeds supported wait; automatic retry refused"
                     (gethash "message" failure "Rust API request failed"))))
@@ -150,12 +151,20 @@ HANDLE and OPTIONS own delivery on CONNECTION."
   (when (eq (kargu-transport-handle-state handle) :pending)
     (let ((params (kargu-bridge--object "scope" scope "arguments" arguments)))
       (when budget (puthash "budget" budget params))
+      (when-let* ((policy (plist-get options :retry)))
+        (puthash "retry" (kargu-bridge--object "policy" policy "observer" "editor") params))
       (setf (kargu-transport-handle-connection handle) connection
             (kargu-transport-handle-id handle)
             (kargu-bridge-call
              connection "api/request" params
              (lambda (result error-data) (kargu-transport--deliver handle options result error-data))
              :owner (kargu-transport-handle-owner handle) :timeout :unlimited
+             :on-retry (when (plist-get options :retry)
+                         (lambda (observation)
+                           (when-let* ((meter (plist-get options :budget)))
+                             (kargu-bridge-budget-observe meter (gethash "budget" observation)))
+                           (when-let* ((observer (plist-get options :on-retry)))
+                             (funcall observer observation))))
              :on-body (lambda (chunk)
                         (when (eq (kargu-transport-handle-state handle) :pending)
                           (unless (and (stringp chunk)
@@ -189,6 +198,7 @@ HANDLE and OPTIONS own delivery on CONNECTION."
   "Send METHOD to captured URL via Rust, returning an owned delivery handle.
 OPTIONS contain captured :auth/:wire/:tuning, :body, :timeout, :stream,
 :on-delta, :then and :else; raw :headers are reserved for explicit callers.
+:retry captures native policy; :on-retry observes it before native replay ACK.
 No network request or subprocess is ever started by Elisp."
   (let* ((application (plist-get options :application))
          (url (copy-sequence url))
@@ -223,12 +233,16 @@ No network request or subprocess is ever started by Elisp."
          ;; copy only DTO authority through the explicit encoders above.
          (delivery-options
           (list :application application :budget (plist-get options :budget)
+                :retry (when (plist-get options :retry)
+                         (kargu-providers-wire-object (plist-get options :retry)))
+                :on-retry (plist-get options :on-retry)
                 :debit-kind (replace-regexp-in-string "-" "_"
                                                       (substring (symbol-name (or (plist-get options :debit-kind) :normal-request)) 1))
                 :then (plist-get options :then)
                 :else (plist-get options :else) :on-delta (plist-get options :on-delta)
                 :required (append '("api_request")
                                   (when (plist-get options :budget) '("api_budget"))
+                                  (when (plist-get options :retry) '("api_retry"))
                                   (when (or (not (eq (gethash "wire" arguments) :json-null))
                                             (eq (gethash "cache_markers" arguments) t)) '("api_wire"))
                                   (unless (eq (gethash "tuning" arguments) :json-null) '("api_request_policy"))

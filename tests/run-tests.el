@@ -35,6 +35,7 @@
 (require 'tests/test-native-ownership)
 (require 'tests/test-connection-native)
 (require 'tests/test-run-budget)
+(require 'tests/test-native-retry)
 (require 'tests/test-wave1-empirical-challenge)
 (require 'tests/test-tool-execution-contract)
 (require 'tests/test-transport-contract)

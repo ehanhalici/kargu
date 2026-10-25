@@ -54,7 +54,10 @@
 
 (cl-defstruct (kargu-bridge--pending (:constructor kargu-bridge--pending-create))
   "Take-once request waiter and its owner cleanup."
-  callback timer deadline owner owner-cleanup review on-delta on-body)
+  callback timer deadline owner owner-cleanup review on-delta on-body on-retry api-scope
+  (retry-delivery 0))
+
+(declare-function kargu-bridge-api-retry "kargu/bridge/api" (connection id params))
 
 (defun kargu-bridge--dismiss-reverse (connection &optional forward-id)
   "Dismiss CONNECTION's reverse requests, optionally only for FORWARD-ID."
@@ -163,18 +166,28 @@
                                                     "scope" (kargu-bridge-connection-epoch connection))))
       (error nil))))
 
-(cl-defun kargu-bridge-call (connection method params callback &key owner timeout on-delta on-body)
+(defun kargu-bridge--capture-api-scope (params)
+  "Detach PARAMS' native API identity for later observer correlation."
+  (let* ((scope (gethash "scope" params))
+         (app (and (hash-table-p scope) (gethash "application_id" scope)))
+         (session (and (hash-table-p scope) (gethash "session_id" scope))))
+    (unless (and (stringp app) (stringp session)) (error "Invalid API observer scope"))
+    (kargu-bridge--object "application_id" (copy-sequence app) "session_id" (copy-sequence session))))
+
+(cl-defun kargu-bridge-call (connection method params callback &key owner timeout on-delta on-body on-retry)
   "Call METHOD with PARAMS on CONNECTION and asynchronously deliver CALLBACK.
 CALLBACK receives (RESULT ERROR).  OWNER is an optional live source buffer;
 its closure or major-mode change cancels delivery.  TIMEOUT overrides the
 default deadline; :unlimited disables only this forward-request timer.
 ON-DELTA receives core API events while this exact waiter remains owned.
 ON-BODY receives bounded final JSON body fragments, not provider events.
+ON-RETRY observes an owned native retry before ACK, never schedules its IO.
 Return the correlation id, or nil on local rejection."
   (let ((deadline (or timeout kargu-bridge-request-timeout)))
     (unless (and (functionp callback) (stringp method) (hash-table-p params)
                  (or (null on-delta) (functionp on-delta))
                  (or (null on-body) (functionp on-body))
+                 (or (null on-retry) (and (equal method "api/request") (functionp on-retry)))
                  (or (eq deadline :unlimited) (and (numberp deadline) (> deadline 0)))
                  (or (null owner) (buffer-live-p owner)))
       (error "Invalid Rust request arguments"))
@@ -194,6 +207,8 @@ Return the correlation id, or nil on local rejection."
              (entry (kargu-bridge--pending-create :callback callback :owner owner
                                                   :on-delta on-delta
                                                   :on-body on-body
+                                                  :on-retry on-retry
+                                                  :api-scope (and on-retry (kargu-bridge--capture-api-scope params))
                                                   :deadline (when (numberp deadline) (+ (float-time) deadline))
                                                   :owner-cleanup cleanup)))
         (puthash id entry (kargu-bridge-connection-pending connection))
@@ -367,6 +382,9 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
            ((and (not (eq id :missing)) (equal method "editor/request_approval"))
             (require 'kargu/bridge/approval)
             (kargu-bridge-approval-request connection id (gethash "params" msg)))
+           ((and (not (eq id :missing)) (equal method "editor/api_retry"))
+            (require 'kargu/bridge/api)
+            (kargu-bridge-api-retry connection id (gethash "params" msg)))
            ((not (eq id :missing))
             (kargu-bridge--send
              connection (kargu-bridge--object
