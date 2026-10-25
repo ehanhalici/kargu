@@ -1,5 +1,50 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Native katalog URL/public-auth policy consumer cutover
+
+Katalog hedefi artık `providers/catalog_target` typed Rust domain'inde çözülür.
+Özel alanlı CapturedApiBase/ModelsPath/CompatibleSuffix/ConfigurationRevision,
+serde/TryFrom, closed auth enum ve consuming resolve(self) kullanılır.
+Global ready host'taki epoch-bound `provider/catalogTarget` salt okunurdur:
+IO/credential beklemez, app/session/config/model state'i yaratmaz veya değiştirmez.
+UI revision echo'su native config authority değildir. Provider raw registry
+facts'ı yalnız DTO'dur; Elisp URL/public/native-path karar fonksiyonları silindi.
+
+Küçük bounded/cancellable `bridge/catalog.el` portu eklendi. Intent DTO'su ilk
+startup yield'inden önce ayrılır. Config/base/session/known native lease guard'ı
+credential öncesi tekrar kontrol edilir. GET hedefi hesaplayan connection'a
+pinlidir; kayıp/değişmiş epoch'ta ensure/reconnect/rebinding veya legacy replay
+yoktur. Missing capability credential veya application startup'tan önce reddeder.
+Kapalı parent'la çağrılan port startup başlatmaz. Credential interop, auth/header
+assembly, HTTP ve metadata publication mevcut tek port/actor'lerinde kalır.
+
+String concat'ın query içine path ekleme hatası giderildi: native URL path'i
+değişir, query korunur. Public comparison query sonundaki slash'ı yutmaz; custom
+base derived URL'si public endpoint'le aynı olsa bile provider-auth dalındadır.
+Kalan `config/key.el` raw trailing-slash base selector'ı native'den önce query
+sonunu hâlâ değiştirebilir; somut takip alt işi todo 1'e eklendi. Target cutover
+ve query/path düzeltmesi `[x]`; genel native config/base/precedence üst işi açık.
+
+7 yeni native policy/host + 9 yeni ERT fixture eklendi. Eski callback fixture'ları
+yalnız test helper'ında gerçek native target portunu açıkça bekler; engine mock'u,
+production busy wait, module baseline genişletme veya eski assert silerek geçiş
+yoktur. Yeni native target/URI facts gerçek pipe ve loopback GET ile doğrulanır.
+Detay .codex/46'da. Final **1245/1245 full source ERT**, 0 unexpected, **137.00 s**,
+**00:51:37 Europe/Istanbul** geçti. Önceki 1243/1244 taramaları da geçti; son
+capture/closed-parent fixture'ları sonrası kaynak yeniden tamamen tarandı.
+**266 native + 16 compile-fail**, fmt, locked build, strict all-targets Clippy
+temiz. Dört üretim Elisp, test helper ve yeni test Werror bytecompile/checkdoc
+temiz; bytecode task-specific /tmp dizinindedir, kaynakta elc yoktur.
+
+Mevcut connection TLC **602836 generated / 101708 distinct**, queue 0, depth 22;
+transport TLC **1810 / 693**, queue 0, depth 12 ile 00:45:17'de hatasız tamamlandı.
+Bu bounded modellerin regression taramasıdır; yeni somut target DTO/epoch pinning
+refinement'ı veya tüm 01 uyumluluk ispatı değildir. Genel run/history, native
+config/base, hard monetary reservation ve dört application backend'i açık.
+01 ve shell.nix/07 kullanıcı değişiklikleri korunur. Yeni dependency, harici
+model/hesap/CLI turu, login, credential taşıma, kurulum, merge/push yoktur.
+Yeni core capability'si gerekir; kullanıcının canlı Emacs/core'u reload edilmedi.
+
 ## 2026-10-26 — Setup ortak connection portu ve duplicate async facade silme
 
 Todo 1'in setup alt işi tamamlandı: command dar autoload `config/setup.el`

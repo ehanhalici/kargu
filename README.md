@@ -187,7 +187,12 @@ See [connection ownership](docs/connection-ownership.md) for service boundaries
 and compatibility consumers.
 
 Model catalog discovery also resolves credentials asynchronously before its
-native GET, using the published configuration. Closing/changing the origin
+native GET, using the published configuration. Rust derives its target and
+public/provider-auth decision before credential lookup, from captured registry
+and config facts. The core must advertise `provider_catalog_target`; rebuild and
+restart an older core instead of falling back to editor policy. The chosen
+connection epoch is pinned through the GET and never reconnected for that intent.
+Closing/changing the origin
 buffer or cancelling discovery releases its worker and request; agent Stop does
 not cancel independent discovery. Only a provider's exact declared public
 catalog URL skips authentication. The old synchronous credential functions

@@ -49,14 +49,27 @@ mirrors and these detached tables are G13 cleanup bridges. G09 still owns the
 remaining catalog/selection UI migration. Catalog discovery now resolves through
 the same cancellable connection credential port as native sends. It consumes
 already-published configuration; explicit configuration/UI refresh owns file IO.
-Only the exact declared public catalog URL skips credentials. Provider, URL,
-wire record, raw header bindings and application are captured before yielding;
+The readonly native `provider/catalogTarget` port derives the URL and public/
+provider-auth decision from captured API-base/default/dedicated/native-path facts.
+Only an explicitly public dedicated endpoint without a base override skips
+provider credentials. Provider, base, config revision, wire record, raw header
+bindings and application are captured before yielding;
 another chat's bound connection cannot lend its wire or credential. Credential
 completion checks the initiating application's config revision and endpoint,
 even when another application is current. Discovery is independent of agent
 Stop/selection changes, but origin close/mode change, cancellation or deadline
 release its children and transport. Its private credential scope and request's
 key copy are wiped on closure; this is not complete physical memory erasure.
+
+The target projection is not a native config publication or an execution grant:
+its revision echoes the editor's captured publication. The port creates no
+application actor/lease, performs no network/credential IO and is bound to the
+existing connection epoch. Before credentials the editor rechecks config/base
+and known lease ownership. GET uses that same connection; lost/replaced epochs
+never cause replay or automatic rebinding. Missing target capability fails
+before credentials or HTTP. Rust modifies only URL paths and retains query
+contents. The older API-base selector can still strip a query's terminal slash
+before the port; its native cutover/regression remains tracked in todo 1.
 
 The obsolete synchronous credential entry points and editor auth-source search
 were removed. `kargu-config-api-key-fast` is a memory-only availability check,
@@ -81,7 +94,8 @@ The UI uses native price labels; an invalid price is unknown, not free.
 
 Offline evidence is in `tests/test-native-model-consumers.el`,
 `tests/test-native-model-publication.el`, `tests/test-connection-native.el`,
-`tests/test-catalog-connection.el`, `tests/test-setup.el` and the existing config,
+`tests/test-catalog-connection.el`, `tests/test-catalog-target.el`,
+`tests/test-setup.el` and the existing config,
 snapshot, model-store, parameter and application suites. It includes real child
 workers, real loopback curl redirects for Bearer and x-api-key, Stop and draft
 restoration, immutable retries, late selection rejection, two application owners

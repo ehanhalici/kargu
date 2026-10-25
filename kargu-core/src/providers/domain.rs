@@ -166,6 +166,12 @@ impl From<CatalogEndpoint> for String {
         endpoint.0
     }
 }
+impl CatalogEndpoint {
+    /// Validated metadata spelling; unresolved templates are not HTTP targets.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 /// A variable name only; environment values and secrets are never catalog data.
 #[derive(Clone, Deserialize, Serialize)]

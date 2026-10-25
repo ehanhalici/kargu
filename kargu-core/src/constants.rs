@@ -137,7 +137,7 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 23] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 24] = [
         "api_request",
         "api_wire",
         "api_request_policy",
@@ -158,6 +158,7 @@ pub mod protocol {
         "workspace_grep",
         "git_status",
         "provider_catalog",
+        "provider_catalog_target",
         "command_execute",
         "process_jobs",
         "process_idle_timeout",
@@ -210,6 +211,8 @@ pub mod protocol {
         pub const MODEL_READ: &str = "models/read";
         /// Credential-free embedded provider definitions for editor projection.
         pub const PROVIDER_CATALOG: &str = "provider/catalog";
+        /// Pure epoch-bound catalog target projection before credential discovery.
+        pub const PROVIDER_CATALOG_TARGET: &str = "provider/catalogTarget";
         /// Owned HTTP attempt with bounded SSE deltas and explicit cancellation.
         pub const API_REQUEST: &str = "api/request";
         /// Allocate one shared, application-bound accounting lifetime.

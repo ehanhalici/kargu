@@ -1,5 +1,6 @@
 //! Versioned embedded API provider catalog and credential-free UI snapshots.
 
+pub mod catalog_target;
 mod domain;
 use domain::SourceDate;
 pub use domain::{

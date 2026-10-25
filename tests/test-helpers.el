@@ -59,6 +59,21 @@ selector integration tests keep the real worker and file publication."
 (defvar kargu-test--model-apps nil
   "Native metadata owners created by this test's explicit producer fixtures.")
 
+(defun kargu-test-await-catalog-start (function &rest args)
+  "Call catalog FUNCTION with ARGS and await its real native target projection.
+Only fixtures wait; no target/URL/auth engine is mocked or made synchronous."
+  (let ((target (symbol-function 'kargu-bridge-catalog-target)) started done result
+        (deadline (+ (float-time) 10)))
+    (cl-letf (((symbol-function 'kargu-bridge-catalog-target)
+               (lambda (arguments callback &rest options)
+                 (setq started t)
+                 (apply target arguments
+                        (lambda (&rest values) (setq done t) (apply callback values)) options))))
+      (setq result (apply function args))
+      (while (and started (not done) (< (float-time) deadline)) (accept-process-output nil 0.01))
+      (when (and started (not done)) (error "Catalog target fixture timed out")))
+    result))
+
 (defun kargu-test-await-model-ticket (ticket)
   "Await real native TICKET in fixtures, never make the product API synchronous."
   (cl-pushnew (kargu-bridge-models-app (kargu-bridge-model-ticket-service ticket)) kargu-test--model-apps)

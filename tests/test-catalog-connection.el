@@ -45,7 +45,7 @@
                       (lambda (parent connection &rest arguments)
                         (setq snapshot connection) (apply send parent connection arguments))))
              (with-current-buffer origin
-               (setq task (kargu-api-list-models (lambda (value) (setq result value)) provider)
+               (setq task (kargu-test-await-catalog-start #'kargu-api-list-models (lambda (value) (setq result value)) provider)
                      hook (car kill-buffer-hook)))
              ,@body))
        (when task (kargu-async-cancel task))
@@ -120,7 +120,7 @@
            (kargu-connection-snapshot--create
             :provider "opencode" :endpoint "https://foreign.invalid/v1"
             :settings '(:wire (:auth x-api-key) :header-overrides (("x-tenant" . "foreign"))))))
-      (with-current-buffer origin (setq task (kargu-api-list-models #'ignore "opencode"))))
+      (with-current-buffer origin (setq task (kargu-test-await-catalog-start #'kargu-api-list-models #'ignore "opencode"))))
     (should (= posts 1))
     (should (equal (plist-get options :provider) "opencode"))
     (should (equal (plist-get options :wire) (kargu-provider-format-record 'openapi)))
@@ -168,7 +168,7 @@
         (cl-letf (((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) nil))
                   ((symbol-function 'kargu-transport-request)
                    (lambda (&rest _) (ert-fail "No GET before credential completion"))))
-          (with-current-buffer origin (setq task (kargu-api-list-models #'ignore "openrouter")))
+          (with-current-buffer origin (setq task (kargu-test-await-catalog-start #'kargu-api-list-models #'ignore "openrouter")))
           (setq process (get-process "kargu-catalog-slow-worker") buffer (process-buffer process))
           (should (process-live-p process))
           (kill-buffer origin)

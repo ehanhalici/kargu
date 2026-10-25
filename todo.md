@@ -415,10 +415,10 @@ bu başlıklarla opsiyonel ilan edilemez.
 
 ## Rust geçişinde kalan adımlar — kapanış takip listesi
 
-Güncelleme: 2026-10-26, uygulama tabanı `c5e25e9`. Son tamamlanan dilim setup'ın
-ortak connection portuna bağlanması, duplicate async key facade'ının silinmesi
-ve placeholder log sızıntısının giderilmesidir. Kanıt: 1236/1236 full source ERT,
-259 native + 16 compile-fail; bounded connection TLC temiz. Ayrıntılar .codex/12/45.
+Güncelleme: 2026-10-26, uygulama tabanı `64ad772`. Son tamamlanan dilim katalog
+URL/public-auth kararının gerçek Rust portuna bağlanması ve eski Elisp karar
+fonksiyonlarının silinmesidir. Kanıt: 1245/1245 full source ERT, 266 native +
+16 compile-fail; bounded connection/transport TLC temiz. Ayrıntılar .codex/12/46.
 
 Bu liste .codex/04'teki onaylı göçün kalan **tüketici taşıma/kaldırma sırasını**
 özetler; G03–G13'ün yerine geçen ikinci kapsam veya yeni ürün kararı değildir.
@@ -429,12 +429,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
 
 - [ ] **1. Config ve bağlantı hazırlığının kalan native politikası** —
   TOML/schema/precedence/env/keyless ve endpoint/model seçim kararlarını typed,
-  revision-bound native portta birleştir. Katalog URL türetmesi ve public kararının
-  kalan editor politikası da bu sınırda ele alınsın. UI yalnız yayınlanmış DTO'yu
+  revision-bound native portta birleştir. Katalog hedef/public kararı aşağıda
+  kapandı; API-base seçiminin kalan editor politikası hâlâ bu kapsamdadır.
+  UI yalnız yayınlanmış DTO'yu
   tüketsin; auth-source/callable credential yalnız sahipli Emacs interop portu
   olsun. Artık kullanılmayan Elisp parser/precedence yollarını sil. Cold config,
   custom/local provider, malformed refresh, stale revision, cancel ve iki
-  application fixture'larını koru. Kaynak: Aşama 4, G09/G13; .codex/10, 42, 44–45.
+  application fixture'larını koru. Kaynak: Aşama 4, G09/G13; .codex/10, 42, 44–46.
 
   - [x] Setup'ın son credential tüketicisini ortak connection resolver'ına bağla;
     ayrı `config-resolve-api-key-async`/dispatch/delivery facade'ını sil.
@@ -446,9 +447,19 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] Native config/schema/precedence/env/keyless consumer cutover'ı ve eski
     Elisp TOML/selection politikasının silinmesi. Salt editor credential interop
     portu kalmalı; yukarıdaki setup temizliği bu maddeyi kapatmaz.
-  - [ ] Katalog URL türetme/public-auth kararını native typed endpoint portuna
-    taşı; custom/private/dedicated/native-models path ve missing capability
-    fixture'ları geçince `api/catalog/request.el`/registry politika dallarını sil.
+  - [x] Katalog URL türetme/public-auth kararı native typed endpoint portunda.
+    `provider/catalogTarget` salt okunur/epoch-bound; custom/private/dedicated/
+    native-models path ve missing-capability fixture'ları geçti, eski Elisp URL/
+    public/native-path karar fonksiyonları silindi. GET aynı connection'a bağlıdır;
+    kayıp epoch'ta reconnect/fallback yoktur. Ayrıntı .codex/46.
+  - [x] Geçişte bulunan ek düzeltme: `/models` ve native path ekleri query'ye
+    değil URL path'ine uygulansın; public karşılaştırması query sonundaki `/`yi
+    yutmasın. Native ve gerçek loopback GET fixture'ları query'yi korur.
+  - [ ] API-base seçiminin kalan Elisp `kargu--strip-trailing-slashes` adımı
+    query değeri sonundaki `/`yi native porttan önce silebiliyor. Native config/
+    base consumer cutover'ında yalnız path sonunu normalize et; query sonundaki
+    slash ve encoded değeri gerçek UI → GET regression'ıyla koru. Native target
+    verilen query'yi koruyor; upstream base selector açığı bundan dolayı kapanmaz.
 
 - [ ] **2. Kalan native araçlar ve tek izin kapısı** — `read_file`, diğer Git
   işlemleri, skill/toolchain ve webfetch tüketicilerini ortak owner/process/path/

@@ -108,6 +108,13 @@ struct SessionScope {
     session_id: SessionId,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CatalogTargetRequest {
+    connection_epoch: String,
+    arguments: crate::providers::catalog_target::CatalogTargetInput,
+}
+
 impl Default for Host {
     fn default() -> Self {
         Self::new()
@@ -338,6 +345,7 @@ impl Host {
                     status: "invalid_catalog",
                 }),
             methods::PROVIDER_CATALOG => Err(Fault::params()),
+            methods::PROVIDER_CATALOG_TARGET => self.catalog_target(params),
             methods::APPLICATION_CREATE => {
                 if !empty_params(&params) {
                     return Err(Fault::params());
@@ -408,6 +416,18 @@ impl Host {
                 status: "unavailable",
             }),
         }
+    }
+
+    fn catalog_target(&self, params: Value) -> Result<Value, Fault> {
+        let request: CatalogTargetRequest =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        let epoch =
+            RequestScope::try_from(request.connection_epoch).map_err(|_| Fault::params())?;
+        if !self.matches_epoch(&epoch) {
+            return Err(owner_fault());
+        }
+        let target = request.arguments.resolve().map_err(|_| Fault::params())?;
+        serde_json::to_value(target).map_err(|_| Fault::params())
     }
 }
 

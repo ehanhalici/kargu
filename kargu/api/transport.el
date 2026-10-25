@@ -168,10 +168,15 @@ HANDLE and OPTIONS own delivery on CONNECTION."
   "Advance HANDLE after startup using OPTIONS, ARGUMENTS, CONNECTION and FAILURE."
   (when (eq (kargu-transport-handle-state handle) :pending)
     (let* ((capabilities (and connection (append (kargu-bridge-connection-capabilities connection) nil)))
-           (required (plist-get options :required)))
+           (required (plist-get options :required))
+           (binding (when-let* ((app (plist-get options :application)))
+                      (gethash :native-core (kargu-application-services app)))))
       (cond
        ((or failure (not (cl-every (lambda (capability) (member capability capabilities)) required)))
         (kargu-transport--deliver handle options nil (or failure (kargu-bridge--fault "unsupported_api"))))
+       ((and (plist-get options :connection) binding
+             (not (eq connection (kargu-bridge-application-connection binding))))
+        (kargu-transport--deliver handle options nil (kargu-bridge--fault "owner_closed")))
        ((plist-get options :application)
         (kargu-transport--startup
          handle (kargu-bridge-application-ensure
@@ -188,6 +193,7 @@ OPTIONS contain captured :auth/:wire/:tuning, :body, :timeout, :stream,
 :retry captures native policy; :on-retry observes it before native replay ACK.
 :circuit captures native policy and requires :application and :retry.
 :model-catalog selects native GET-only discovery envelope normalization.
+:connection pins an existing native epoch, without startup or reconnect.
 No network request or subprocess is ever started by Elisp."
   (let* ((application (plist-get options :application))
          (url (copy-sequence url))
@@ -231,6 +237,7 @@ No network request or subprocess is ever started by Elisp."
                                                       (substring (symbol-name (or (plist-get options :debit-kind) :normal-request)) 1))
                 :then (plist-get options :then)
                 :else (plist-get options :else) :on-delta (plist-get options :on-delta)
+                :connection (plist-get options :connection)
                 :required (append '("api_request" "api_failure")
                                   (when (plist-get options :budget) '("api_budget"))
                                   (when (plist-get options :retry) '("api_retry"))
@@ -254,10 +261,14 @@ No network request or subprocess is ever started by Elisp."
       (with-current-buffer owner
         (add-hook 'kill-buffer-hook cleanup nil t)
         (add-hook 'change-major-mode-hook cleanup nil t)))
-    (kargu-transport--startup
-     handle (kargu-bridge-ensure
-             (lambda (connection failure)
-               (kargu-transport--ready handle delivery-options arguments connection failure))))
+    (if-let* ((connection (plist-get options :connection)))
+        (kargu-transport--ready handle delivery-options arguments connection
+                                (unless (eq (kargu-bridge-status connection) 'ready)
+                                  (kargu-bridge--fault "disconnected")))
+      (kargu-transport--startup
+       handle (kargu-bridge-ensure
+               (lambda (connection failure)
+                 (kargu-transport--ready handle delivery-options arguments connection failure)))))
     handle))
 
 (provide 'kargu/api/transport)

@@ -137,15 +137,6 @@ The provider must enable prompt caching and its format must place markers."
                   :cache-marker)
        t))
 
-(defun kargu-provider-native-models-path (id api-base)
-  "Models path of ID's own API when API-BASE is not OpenAI-compatible, or nil."
-  (let* ((spec (plist-get (kargu-provider-format-record (kargu-provider-format id))
-                          :native-models))
-         (suffix (plist-get spec :unless-suffix)))
-    (and spec
-         (not (and suffix (string-suffix-p suffix api-base)))
-         (plist-get spec :path))))
-
 (defun kargu-provider-format-field (id field)
   "FIELD of provider ID's format record, or nil."
   (plist-get (kargu-provider-format-record (kargu-provider-format id)) field))
@@ -177,12 +168,6 @@ A missing format record streams.  An explicit `:stream' nil does not."
   "Return default base URL for provider ID, or nil if unknown."
   (let ((info (kargu-provider-get id)))
     (and info (kargu-nonempty (plist-get info :api)))))
-
-(defun kargu-provider-public-models-p (id url)
-  "Return non-nil if provider ID declares URL an unauthenticated catalog.
-Custom API overrides do not inherit public access from the default endpoint."
-  (and (eq (plist-get (kargu-provider-get id) :models-auth) 'none)
-       (equal url (kargu-provider-models-api id))))
 
 (defun kargu-provider-models-api (id)
   "Return dedicated models list URL for provider ID, or nil to use default."

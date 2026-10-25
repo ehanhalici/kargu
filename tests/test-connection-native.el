@@ -243,7 +243,7 @@
                (lambda (_method _url &rest options)
                  (setq callback (plist-get options :then)) nil)))
       (let ((kargu-application--bound first))
-        (kargu-api-list-models #'ignore "openrouter"))
+        (kargu-test-await-catalog-start #'kargu-api-list-models #'ignore "openrouter"))
       (let ((kargu-application--bound second))
         (funcall callback "{\"models\":[{\"id\":\"owned-model\"}]}")
         (should-not (kargu-selection-models-known-p "openrouter")))
