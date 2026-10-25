@@ -27,15 +27,11 @@
 (declare-function kargu-loop--wrap "kargu/loop" (run function))
 
 (defvar kargu-loop-empty-retries)
-(defvar kargu-loop-upstream-retries)
 (defvar kargu-max-iterations)
 
 (defvar kargu-loop-model-stream-hook nil
   "Observers called with RUN and EVENT at model stream boundaries.
 EVENT is `start' for a new model turn or `retry' before replaying its stream.")
-
-(declare-function kargu--api-error-looks-retryable-p "kargu/api/retry" (message))
-(declare-function kargu--api-retry-delay "kargu/api/retry" (attempt err))
 
 (declare-function kargu-loop--live-p "kargu/loop" (run))
 (declare-function kargu-loop--set-state "kargu/loop" (run state))
@@ -202,7 +198,7 @@ PROMPT nil means continue from the existing history."
 
 (defun kargu-loop--classify-response (run response)
   "Event for RESPONSE inside RUN.
-Order: stale, overflow, tools-unsupported, upstream-retry, error,
+Order: stale, overflow, tools-unsupported, error,
 content-filter, tools, length, answer, thought, empty.
 A truncated reply with no answer stays `length'.  Reasoning with no
 answer and no tools is `thought', never a successful answer.  Either
@@ -221,10 +217,6 @@ A truncated reply that already has answer text continues once."
      ((and err (kargu--error-no-tools-support-p err)
            (kargu-tools-enabled-p run))
       'tools-unsupported)
-     ((and err (kargu--api-error-looks-retryable-p err)
-           (< (or (plist-get run :upstream-retries) 0)
-              (or kargu-loop-upstream-retries 0)))
-      'upstream-retry)
      (err 'error)
      ((member reason '("content-filter" "content_filter")) 'content-filter)
      ((and (listp calls) calls (kargu-tools-enabled-p run)) 'tools)
@@ -237,7 +229,6 @@ A truncated reply that already has answer text continues once."
   '((stale    . ignore)
     (overflow . kargu-loop--on-overflow)
     (tools-unsupported . kargu-loop--on-tools-unsupported)
-    (upstream-retry . kargu-loop--on-upstream-retry)
     (error    . kargu-loop--on-error)
     (content-filter . kargu-loop--on-content-filter)
     (tools    . kargu-loop--on-tools)
@@ -258,33 +249,6 @@ A truncated reply that already has answer text continues once."
        run
        (or (kargu-response-error-message response)
            "context overflow")))))
-
-(defun kargu-loop--retry-upstream (run err)
-  "Resend RUN from current history after retryable upstream error ERR.
-The HTTP layer already recorded the failure in the circuit breaker; if
-the circuit is open, prompt the user to retry or abort instead."
-  (let* ((n (1+ (or (plist-get run :upstream-retries) 0)))
-         (cap (or kargu-loop-upstream-retries 0))
-         (delay (kargu--api-retry-delay (1- n) nil)))
-    (plist-put run :upstream-retries n)
-    (if (kargu-circuit-open-p)
-        (progn
-          (kargu-log 'error "loop: circuit breaker OPEN after %d upstream failures; prompting recovery: %s"
-                     n err)
-          (kargu-loop--recover-or-finish
-           run
-           (format "circuit breaker tripped (upstream: %s)" err)))
-      (kargu-log 'warn "loop: upstream error; retry %d/%d in %.1fs: %s"
-                 n cap delay err)
-      (when-let* ((old (plist-get run :retry-timer)))
-        (when (timerp old)
-          (cancel-timer old)))
-      (plist-put run :retry-timer
-                 (run-at-time delay nil
-                              (kargu-loop--wrap run (lambda ()
-                                                      (plist-put run :retry-timer nil)
-                                                      (when (kargu-loop--live-p run)
-                                                        (kargu-loop--retry-model run)))))))))
 
 (defun kargu-loop--retry-model (run)
   "Discard RUN's failed partial stream before retrying the model request."
@@ -333,7 +297,6 @@ remembers the refusal and retries without tools."
     (kargu-log 'info "loop: user requested retry after error: %s" err)
     (when (fboundp 'kargu-circuit-reset)
       (kargu-circuit-reset))
-    (plist-put run :upstream-retries 0)
     (kargu-loop--set-state run 'request)
     (kargu-loop--retry-model run))
    (t
@@ -370,10 +333,6 @@ remembers the refusal and retries without tools."
 (defun kargu-loop--on-tools-unsupported (run response)
   "Handle unsupported tools in RESPONSE and retry RUN when allowed."
   (kargu-loop--handle-tools-unsupported run (kargu-loop--response-error response)))
-
-(defun kargu-loop--on-upstream-retry (run response)
-  "Retry RUN after a retryable upstream error in RESPONSE."
-  (kargu-loop--retry-upstream run (kargu-loop--response-error response)))
 
 (defun kargu-loop--on-content-filter (run _response)
   "Offer recovery for RUN after a content-filter block."

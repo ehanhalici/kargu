@@ -490,22 +490,27 @@ The script needs `tlc`; without it in `PATH` it enters `nix-shell ../shell.nix`.
 | `MaxIterations` | 3 (also the size of one `Continue`) |
 | `MaxHealing` | 2 |
 | `MaxEmptyRetries` | 1 |
-| `MaxUpstreamRetries` | 1 |
 | `CompactionThreshold` | 4 |
 | `CompactKeepCount` | 3 |
 | `CircuitFailureThreshold` | 3 |
 
 `StateConstraint` limits the search to two generations (runs and resets), a history of at most 12 messages and a turn cap of at most `2 * MaxIterations`.
 
+The loop does not have an additional upstream retry counter. A terminal
+transport failure enters RECOVER; only an explicit user recovery may open a
+new logical request. Physical retries belong to the transport owner. The main
+model still abstracts that transport/circuit boundary: it is not a refinement
+proof of the native HTTP worker, reverse observer or circuit registry.
+
 ### Result of the last run
 
-Run on 2026-10-18 with TLC 2.19, 24 workers:
+Run on 2026-10-25, 24 workers, after removing the second loop retry authority:
 
 ```
 Model checking completed. No error has been found.
-729094900 states generated, 85318093 distinct states found, 0 states left on queue.
-The depth of the complete state graph search is 43.
-Finished in 10min 02s
+537324349 states generated, 63188083 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 45.
+Finished in 07min 42s at (2026-10-25 11:32:39 Europe/Istanbul)
 ```
 
 Changing a guard breaks the check: with the `~noTools` guard removed from `ModelReceiveToolCalls`, a simulation reports `Safety_ToolsOffMeansNoToolWork` violated within a second. The numbers above are those of a real run; repeat it after every change to the specification and replace them.

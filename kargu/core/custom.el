@@ -95,8 +95,12 @@ Set to an integer (e.g. 2048, 4096) or nil for model default."
   "Captured Rust argument byte limit per streamed call, at most 512 KiB."
   :type 'natnum :group 'kargu)
 
+(define-obsolete-variable-alias 'kargu-loop-upstream-retries 'kargu-api-retry-max "2026-10-25")
+
 (defcustom kargu-api-retry-max 5
-  "How many times to retry a chat request after HTTP 429/5xx."
+  "How many times the transport may retry a chat request after HTTP 429/5xx.
+There is no additional automatic loop replay.  The obsolete loop setting
+aliases this same limit; an explicit user retry starts a new logical request."
   :type 'natnum
   :group 'kargu)
 

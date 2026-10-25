@@ -49,14 +49,13 @@ CircuitCooldownCanary(cState, cFailures) ==
 (*   stale             the run was stopped meanwhile: nothing happens      *)
 (*   overflow          context window exceeded: compact once, else recover *)
 (*   tools-unsupported the provider refused tool use                       *)
-(*   upstream-retry    retryable error with retries left                   *)
-(*   error             any other error: the user decides                   *)
+(*   error             terminal transport/other error: the user decides     *)
 (*   content-filter    the provider blocked the reply: the user decides    *)
 (*   tools / length / answer / empty                                       *)
 (***************************************************************************)
 
 ClassificationEvents == {
-    "stale", "overflow", "tools-unsupported", "upstream-retry", "error",
+    "stale", "overflow", "tools-unsupported", "error",
     "content-filter", "tools", "length", "answer", "thought", "empty"
 }
 

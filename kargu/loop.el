@@ -66,13 +66,6 @@ They are advertised and executable in debug and agent modes."
   :type 'natnum
   :group 'kargu-loop)
 
-(defcustom kargu-loop-upstream-retries 3
-  "How many times to resend after a retryable provider 502/overload.
-History is left unchanged; no System Notice is injected.  This is
-on top of HTTP-layer retries (`kargu-api-retry-max')."
-  :type 'natnum
-  :group 'kargu-loop)
-
 (defvar kargu--loop-run nil
   "Plist of the run in progress; nil when idle.
 Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
@@ -176,13 +169,6 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
 (defun kargu-loop-running-p ()
   "Return non-nil while an agent run is in progress."
   (not (null (kargu-application-current-run))))
-
-(defun kargu-loop--cancel-retry-timer (run)
-  "Cancel any pending upstream retry timer on RUN."
-  (when-let* ((timer (plist-get run :retry-timer)))
-    (when (timerp timer)
-      (cancel-timer timer))
-    (plist-put run :retry-timer nil)))
 
 (defun kargu-loop-stop (&optional reason)
   "Stop the current agent run, optionally recording REASON."
@@ -289,7 +275,7 @@ the diff run files and the UI as they were."
           :on-ready on-ready :request-started nil
           :on-finish (or on-finish #'kargu-loop--message-report)
           :iterations 0 :healing 0 :verifications 0 :empty-retries 0
-          :upstream-retries 0 :compactions 0 :length-continues 0
+          :compactions 0 :length-continues 0
           :doom-sigs nil :no-tools no-tools)))
 
 (defun kargu-loop--start-run (run prompt)
@@ -442,7 +428,6 @@ INITIALIZED is nil when preparation failed before history or edits were touched.
       (when (eq budget (kargu-application-budget-get (kargu-execution-app context)))
         (kargu-application-set-budget nil (kargu-execution-app context))))
     (kargu-loop--cleanup-step #'kargu-loop--detach-origin run)
-    (kargu-loop--cleanup-step #'kargu-loop--cancel-retry-timer run)
     (if context
         (progn
           (when-let* ((task (kargu-execution-task context)))

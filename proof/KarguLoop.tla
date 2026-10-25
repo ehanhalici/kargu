@@ -30,7 +30,6 @@ CONSTANTS
     MaxIterations,          \* Turns per batch; also the size of one `Continue'
     MaxHealing,             \* Cap on self-healing rounds (`kargu-max-healing-steps')
     MaxEmptyRetries,        \* Cap on empty-reply retries (`kargu-loop-empty-retries')
-    MaxUpstreamRetries,     \* Cap on upstream retries (`kargu-loop-upstream-retries')
     CompactionThreshold,    \* History length that makes compaction due
     CompactKeepCount,       \* Messages kept after compaction
     CircuitFailureThreshold \* Consecutive failures that trip the breaker
@@ -89,7 +88,6 @@ VARIABLES
     healing,                \* Self-healing rounds used
     verifications,          \* Verifications performed
     emptyRetries,           \* Empty-reply retries used
-    upstreamRetries,        \* Upstream retries used
     compactions,            \* Compactions this run (0..1)
     lengthContinues,        \* Truncation continues this run (0..1)
     doomSigs,               \* Last two tool signatures, newest first
@@ -105,7 +103,7 @@ VARIABLES
     circuitFailures         \* Consecutive failures
 
 Counters == <<iterations, turnCap, healing, verifications, emptyRetries,
-              upstreamRetries, compactions, lengthContinues>>
+              compactions, lengthContinues>>
 ToolVars == <<doomSigs, pendingToolQueue, pendingToolCall, pendingVerifyFiles>>
 Flags    == <<noTools, savedNoTools, compacting>>
 Circuit  == <<circuitState, circuitFailures>>
@@ -128,7 +126,6 @@ Init ==
     /\ healing            = 0
     /\ verifications      = 0
     /\ emptyRetries       = 0
-    /\ upstreamRetries    = 0
     /\ compactions        = 0
     /\ lengthContinues    = 0
     /\ doomSigs           = << >>
@@ -153,7 +150,6 @@ FreshRun ==
     /\ healing            ' = 0
     /\ verifications      ' = 0
     /\ emptyRetries       ' = 0
-    /\ upstreamRetries    ' = 0
     /\ compactions        ' = 0
     /\ lengthContinues    ' = 0
     /\ doomSigs           ' = << >>
@@ -250,7 +246,7 @@ RequestCompact ==
     /\ CompactDue
     /\ StartCompaction
     /\ UNCHANGED <<history, activeMode, healing, verifications, emptyRetries,
-                   upstreamRetries, lengthContinues, turnCap, ToolVars,
+                   lengthContinues, turnCap, ToolVars,
                    runStatus, generation, Circuit>>
 
 (* `kargu-loop--request-send' at the cap: ask the user instead of sending *)
@@ -275,7 +271,7 @@ RequestSend ==
     /\ iterations ' = iterations + 1
     /\ circuitState ' = CircuitClaimProbe(circuitState)
     /\ UNCHANGED <<activeMode, healing, verifications, emptyRetries,
-                   upstreamRetries, compactions, lengthContinues, turnCap,
+                   compactions, lengthContinues, turnCap,
                    ToolVars, Flags, runStatus, generation, circuitFailures>>
 
 (* An open breaker turns the send into an error answer (`kargu--api-post') *)
@@ -295,7 +291,7 @@ RequestBlocked ==
     /\ state      ' = "RECOVER"
     /\ iterations ' = iterations + 1
     /\ UNCHANGED <<history, activeMode, healing, verifications, emptyRetries,
-                   upstreamRetries, compactions, lengthContinues, turnCap,
+                   compactions, lengthContinues, turnCap,
                    ToolVars, Flags, runStatus, generation, Circuit>>
 
 (***************************************************************************)
@@ -341,7 +337,7 @@ ModelReceiveLengthTruncated ==
     /\ circuitState    ' = "CLOSED"
     /\ circuitFailures ' = 0
     /\ UNCHANGED <<activeMode, iterations, turnCap, healing,
-                   verifications, emptyRetries, upstreamRetries, compactions,
+                   verifications, emptyRetries, compactions,
                    ToolVars, Flags, generation>>
 
 (* Reasoning-only replies consume the same global turn budget.             *)
@@ -351,7 +347,7 @@ ModelReceiveThought ==
     /\ circuitState ' = "CLOSED"
     /\ circuitFailures ' = 0
     /\ UNCHANGED <<history, activeMode, iterations, turnCap, healing,
-                   verifications, emptyRetries, upstreamRetries, compactions,
+                   verifications, emptyRetries, compactions,
                    lengthContinues, ToolVars, Flags, runStatus, generation>>
 
 (* overflow: compact once; if that is not possible the user decides *)
@@ -363,7 +359,7 @@ ModelReceiveOverflow ==
        ELSE /\ state ' = "RECOVER"
             /\ UNCHANGED <<compactions, iterations, compacting, savedNoTools, noTools>>
     /\ UNCHANGED <<history, activeMode, healing, verifications, emptyRetries,
-                   upstreamRetries, lengthContinues, turnCap, ToolVars,
+                   lengthContinues, turnCap, ToolVars,
                    runStatus, generation, circuitFailures>>
 
 (* empty *)
@@ -379,24 +375,19 @@ ModelReceiveEmpty ==
             /\ runStatus    ' = "error"
             /\ UNCHANGED emptyRetries
     /\ UNCHANGED <<history, activeMode, iterations, turnCap, healing,
-                   verifications, upstreamRetries, compactions, lengthContinues,
+                   verifications, compactions, lengthContinues,
                    ToolVars, Flags, generation>>
 
-(* upstream-retry / retryable error: the HTTP layer has already recorded the *)
-(* failure in the breaker.  With retries left the run retries unless the     *)
-(* breaker is open; without retries the user decides.                        *)
+(* Terminal transport failure: the HTTP owner has exhausted its own retry   *)
+(* policy and recorded one logical outcome. The loop never replays it; only *)
+(* an explicit RecoverRetry decision may request another logical exchange.  *)
 ModelReceiveUpstreamError ==
     /\ state = "WAIT_MODEL"
     /\ LET cb == CircuitRecordFailure(circuitState, circuitFailures, CircuitFailureThreshold)
        IN /\ circuitState    ' = cb.state
           /\ circuitFailures ' = cb.failures
-          /\ IF upstreamRetries < MaxUpstreamRetries
-             THEN /\ upstreamRetries ' = upstreamRetries + 1
-                  /\ state           ' = IF cb.state = "OPEN" THEN "RECOVER" ELSE "REQUEST"
-             ELSE /\ state           ' = "RECOVER"
-                  /\ UNCHANGED upstreamRetries
-    /\ UNCHANGED <<history, activeMode, iterations, turnCap, healing,
-                   verifications, emptyRetries, compactions, lengthContinues,
+          /\ state ' = "RECOVER"
+    /\ UNCHANGED <<history, activeMode, Counters,
                    ToolVars, Flags, runStatus, generation>>
 
 (* Other failures release the canary without declaring upstream healthy. *)
@@ -430,7 +421,6 @@ ModelReceiveToolsUnsupported ==
 RecoverRetry ==
     /\ state = "RECOVER"
     /\ state           ' = "REQUEST"
-    /\ upstreamRetries ' = 0
     /\ circuitState    ' = "CLOSED"
     /\ circuitFailures ' = 0
     /\ UNCHANGED <<history, activeMode, iterations, turnCap, healing,
@@ -517,7 +507,7 @@ VerifyFiles(diagnosticError) ==
     /\ healing            ' = IF diagnosticError /\ healing < MaxHealing
                               THEN healing + 1 ELSE healing
     /\ UNCHANGED <<history, activeMode, iterations, turnCap, emptyRetries,
-                   upstreamRetries, compactions, lengthContinues, doomSigs,
+                   compactions, lengthContinues, doomSigs,
                    pendingToolQueue, Flags, runStatus, generation, Circuit>>
 
 (***************************************************************************)
@@ -580,7 +570,7 @@ PauseDecisionContinue ==
     /\ state     ' = "REQUEST"
     /\ turnCap   ' = turnCap + MaxIterations
     /\ UNCHANGED <<history, activeMode, iterations, healing, verifications,
-                   emptyRetries, upstreamRetries, compactions, lengthContinues,
+                   emptyRetries, compactions, lengthContinues,
                    ToolVars, Flags, runStatus, generation, Circuit>>
 
 (* :stop *)
@@ -612,7 +602,6 @@ TypeOK ==
     /\ healing \in 0..MaxHealing
     /\ verifications \in Nat
     /\ emptyRetries \in 0..MaxEmptyRetries
-    /\ upstreamRetries \in 0..MaxUpstreamRetries
     /\ compactions \in 0..1       \* one compaction per run
     /\ lengthContinues \in 0..1   \* one `Continue.' per truncation
     /\ Len(doomSigs) <= 2

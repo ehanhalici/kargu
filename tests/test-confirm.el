@@ -205,9 +205,7 @@
   "Ensure kargu-loop--recover-or-finish resets circuit and retries request on :retry."
   (with-temp-buffer
     (let* ((chat-buf (current-buffer))
-           (run (list :state 'wait
-                      :chat-buffer chat-buf
-                      :upstream-retries 3))
+           (run (list :state 'wait :chat-buffer chat-buf))
            (kargu--loop-run run)
            (kargu-confirm--mock-decision :retry)
            (request-called nil)
@@ -220,7 +218,7 @@
         (kargu-loop--recover-or-finish run err)
         (should circuit-reset-called)
         (should request-called)
-        (should (eq (plist-get run :upstream-retries) 0))
+        (should-not (plist-member run :upstream-retries))
         (should (eq (plist-get run :state) 'request))
         (let ((content (buffer-string)))
           (should (string-match-p "Request Interrupted / Network Error" content))
@@ -232,9 +230,7 @@
   "Ensure kargu-loop--recover-or-finish finishes run with error on :stop."
   (with-temp-buffer
     (let* ((chat-buf (current-buffer))
-           (run (list :state 'wait
-                      :chat-buffer chat-buf
-                      :upstream-retries 2))
+           (run (list :state 'wait :chat-buffer chat-buf))
            (kargu--loop-run run)
            (kargu-confirm--mock-decision :stop)
            (finished-status nil)
@@ -252,9 +248,7 @@
   "Ensure kargu-loop--on-error routes curl 28 timeout through recovery prompt."
   (with-temp-buffer
     (let* ((chat-buf (current-buffer))
-           (run (list :state 'wait
-                      :chat-buffer chat-buf
-                      :upstream-retries 0))
+           (run (list :state 'wait :chat-buffer chat-buf))
            (kargu--loop-run run)
            (kargu-confirm--mock-decision :retry)
            (retried nil)
@@ -272,22 +266,46 @@
   "Ensure tripped circuit breaker prompts for recovery rather than aborting immediately."
   (with-temp-buffer
     (let* ((chat-buf (current-buffer))
-           (run (list :state 'wait
-                      :chat-buffer chat-buf
-                      :upstream-retries 4))
+           (run (list :state 'wait :chat-buffer chat-buf))
            (kargu--loop-run run)
            (kargu-confirm--mock-decision :retry)
            (retried nil))
       (cl-letf (((symbol-function 'kargu-circuit-open-p)
-                 (lambda () t))
+                 (lambda () (ert-fail "Loop must not re-evaluate circuit admission")))
                 ((symbol-function 'kargu-circuit-reset)
                  (lambda () nil))
                 ((symbol-function 'kargu--loop-request)
                  (lambda (_r _p) (setq retried t))))
-        (kargu-loop--retry-upstream run "HTTP 502: Bad Gateway")
+        (kargu--loop-handle-response run (kargu-err "Circuit breaker OPEN: synthetic refusal" :connection-failed))
         (should retried)
         (let ((content (buffer-string)))
-          (should (string-match-p "circuit breaker tripped" content)))))))
+          (should (string-match-p "Circuit breaker OPEN" content)))))))
+
+(ert-deftest kargu-confirm-terminal-upstream-errors-never-create-a-loop-replay-test ()
+  "Exhausted transport errors go to recovery, never another timer or request."
+  (with-temp-buffer
+    (let* ((run (list :state 'wait :chat-buffer (current-buffer)))
+           (kargu--loop-run run) recovered)
+      (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) (ert-fail "Loop retry timer")))
+                ((symbol-function 'kargu--loop-request) (lambda (&rest _) (ert-fail "Loop replay")))
+                ((symbol-function 'kargu--api-error-looks-retryable-p)
+                 (lambda (&rest _) (ert-fail "Loop inferred HTTP retryability")))
+                ((symbol-function 'kargu-loop--recover-or-finish)
+                 (lambda (_owner error-data) (push error-data recovered))))
+        (dolist (message '("HTTP 429: rate limited" "HTTP 503: overloaded" "upstream error"))
+          (let ((response (kargu-err message :server-error)))
+            (should (eq (kargu-loop--classify-response run response) 'error))
+            (kargu--loop-handle-response run response)))
+        (should (= (length recovered) 3))
+        (should-not (plist-member run :retry-timer))
+        (should-not (plist-member run :upstream-retries))))))
+
+(ert-deftest kargu-loop-obsolete-retry-option-is-the-single-transport-limit-test ()
+  "Legacy configuration cannot create a second loop retry budget."
+  (let ((kargu-api-retry-max 5))
+    (set 'kargu-loop-upstream-retries 2)
+    (should (= kargu-api-retry-max 2))
+    (should (eq (indirect-variable 'kargu-loop-upstream-retries) 'kargu-api-retry-max))))
 
 (provide 'tests/test-confirm)
 ;;; test-confirm.el ends here

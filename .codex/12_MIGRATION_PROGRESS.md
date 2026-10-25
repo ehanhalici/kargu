@@ -1,5 +1,21 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Default resilience: ikinci loop retry motoru silindi
+
+Loop'un upstream sınıflandırma/handler/timer/sayaç/cleanup motoru kaldırıldı.
+Terminal HTTP hatası yeni otomatik istek açmaz; açık kullanıcı recovery kararı
+korunur. Eski loop retry ayarı tek API retry limitinin obsolete alias'ıdır;
+çarpan etkisi kaldırıldı ve config assignment semantiği 40'a yazıldı. Native
+default API cutover henüz bu dilimde yapılmadı; sıradaki typed failure/consumer
+bağlantısına hazırlıktır. Eski compatibility testleri public dispatch/manual
+recovery sınırına eşlendi; assertion veya modül baseline'ı gevşetilmedi.
+
+**1187/1187 full ERT**, 0 unexpected, **165.14 s**; Werror bytecompile temiz,
+üç geçici elc kaldırıldı. Güncellenen ana bounded TLA+ taraması **537324349
+generated / 63188083 distinct / depth45**, 7m42s, 0 queue ile hatasız tamamlandı.
+Bound ve bütün safety invariant'lar korunur; native retry refinement kanıtı
+değildir. Rust business kodu bu dilimde değişmez; shell.nix/07 korunmuştur.
+
 ## 2026-10-25 — 01 audit: command typestate ve açık effect sınıfı
 
 Command registry'deki ikinci Option<Stage> kaldırıldı; modüler execution/state

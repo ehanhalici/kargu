@@ -479,7 +479,7 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
          (kargu--tools-refused (make-hash-table :test #'equal))
          (kargu-api-key "sk-fake")
          (kargu-loop-empty-retries 0)
-         (kargu-loop-upstream-retries 0)
+         (kargu-api-retry-max 0)
          (kargu-confirm--mock-decision :stop)
          (kargu-session-auto-save nil)
          (kargu-mode-prepare-functions nil)
