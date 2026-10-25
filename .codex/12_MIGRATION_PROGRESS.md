@@ -1,5 +1,23 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Atomik revisioned native metadata store
+
+models/store artık private MetadataRevision, parse-once ModelUpdate ve tüketilen
+PreparedUpdate ile tek writer domain'i sağlar. Commit token hem özgün store
+sahibine hem base revision'a bağlıdır; speculative veri snapshot'a çıkmaz.
+Provider-local unique alias, canonical override, explicit false, opaque ID case,
+last-record/first-ID sırası, provider-only prune ve override-only kayıt korunur.
+Refusal tuple'ları ayrı kalır; ham metadata provider/id ile sahiplik değiştiremez.
+Numeric source orijinal RawValue'dan gelir; tek-object legacy wrapper dahil fiyat
+ve fractional token inspector projection'ı float'a gitmez. Güncelleme/aggregate
+record/byte ve snapshot sınırları taşmada atomik hata verir.
+
+Yedi store fixture'ı + consuming-commit compile-fail; **245 native + 16 compile-
+fail**, fmt ve strict all-targets Clippy geçti. Bu saf domain diliminde editor
+consumer hâlâ eski store'u kullanır; native actor/RPC ve async publication henüz
+cutover edilmedi. Bu nedenle Elisp writer/reader silinmedi. ERT'nin son full
+1191/1191 sonucu yeni bir rerun olarak sunulmaz. 01/shell.nix/07 korunur.
+
 ## 2026-10-25 — Async metadata sözleşmesi onayı ve canonical field temeli
 
 Kullanıcı async setter + son committed UI snapshot sözleşmesini onayladı;

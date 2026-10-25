@@ -64,6 +64,7 @@ fn price_literal(value: &RawValue) -> Result<Value, CatalogError> {
 struct Record {
     id: ModelId,
     fields: Map<String, Value>,
+    source: Box<RawValue>,
 }
 impl TryFrom<&RawValue> for Record {
     type Error = CatalogError;
@@ -101,7 +102,12 @@ impl TryFrom<&RawValue> for Record {
             };
             fields.insert(key, value);
         }
-        Ok(Self { id, fields })
+        let source = if source.starts_with('"') {
+            RawValue::from_string("{}".to_owned()).map_err(|_| CatalogError::Shape)?
+        } else {
+            value.to_owned()
+        };
+        Ok(Self { id, fields, source })
     }
 }
 
@@ -142,6 +148,9 @@ impl TryFrom<&str> for ModelCatalog {
     }
 }
 impl ModelCatalog {
+    pub(crate) fn into_records(self) -> impl Iterator<Item = (ModelId, Box<RawValue>)> {
+        self.0.into_iter().map(|record| (record.id, record.source))
+    }
     /// One stable wire shape. Price lexemes stay decimal strings; remaining
     /// semantic capability/override decisions belong to their subsequent cutover.
     pub fn into_snapshot(self) -> Value {

@@ -70,6 +70,16 @@ fn numeric_capacities_never_round_an_intermediate_float() -> TestResult {
         fields(r#"{"context_length":18446744073709551615}"#)?.get("context_window"),
         Some(&json!({"state":"known","value":u64::MAX}))
     );
+    let raw = ModelMetadata::parse(r#"{"context_length":9007199254740992.5,"top_provider":[{"max_completion_tokens":9007199254740992.5}],"pricing":[{"prompt":1e-38}]}"#, &EffortSpecs::default())?.raw_snapshot()?;
+    assert_eq!(
+        raw.get("context_length"),
+        Some(&json!("9007199254740992.5"))
+    );
+    assert_eq!(
+        raw.pointer("/top_provider/0/max_completion_tokens"),
+        Some(&json!("9007199254740992.5"))
+    );
+    assert_eq!(raw.pointer("/pricing/0/prompt"), Some(&json!("1e-38")));
     assert_eq!(
         fields(r#"{"inputTokenLimit":"2e3","outputTokenLimit":1024.0}"#)?.get("max_output"),
         Some(&json!({"state":"known","value":1024}))

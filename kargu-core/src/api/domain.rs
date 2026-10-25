@@ -8,7 +8,7 @@ use std::{collections::BTreeMap, fmt, time::Duration};
 use zeroize::Zeroizing;
 
 /// Open model namespace; never confused with a provider or external thread ID.
-#[derive(Clone, Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, serde::Serialize)]
 #[serde(try_from = "String")]
 pub struct ModelId(String);
 impl TryFrom<String> for ModelId {
@@ -18,6 +18,12 @@ impl TryFrom<String> for ModelId {
             return Err(ApiError::InvalidRequest);
         }
         Ok(Self(value))
+    }
+}
+impl ModelId {
+    /// Borrow its opaque, case-sensitive wire identity without provider folding.
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 

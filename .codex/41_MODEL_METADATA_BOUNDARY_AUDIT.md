@@ -22,6 +22,23 @@ two new compile-fail proofs passed: **238 native + 15 compile-fail**, fmt and
 strict all-targets Clippy. No editor consumer changed in this foundation slice;
 the existing full ERT result above is not a fresh run for these new modules.
 
+The native store foundation now has consuming PreparedUpdate -> commit, a private
+MetadataRevision and an unforgeable original-store UUID binding in addition to
+base-revision comparison. A candidate cannot publish into a sibling store even
+when both revisions match. Refresh pruning/overrides/unique aliases/refusals/
+opaque identity and exact original-number fixtures pass; full gate is **245
+native + 16 compile-fail**, fmt/strict Clippy. Store snapshots are detached
+projections, not staging, and raw provider/id cannot rewrite canonical ownership.
+This is not yet the actor/RPC/editor cutover; retaining the legacy consumer until
+that boundary is verified is intentional.
+
+Additional parser finding: serde internally-tagged enum deserialization buffers
+through Content and cannot retain Box<RawValue> source spans. Update commands
+therefore first decode a closed operation tag, then its direct deny_unknown_fields
+DTO from the original source. Do not replace this with Value/from_value or an
+internally-tagged raw DTO that loses exact source support. Numeric and store
+fixtures exercise the actual source path; no global serde feature is enabled.
+
 ## Status and observed evidence — 2026-10-25
 
 Default HTTP resilience is native at 71dc32d (40); live-model metadata is NOT

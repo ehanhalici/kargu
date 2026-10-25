@@ -143,7 +143,7 @@ fn parameters(value: Option<&str>) -> Field<Vec<ParameterName>> {
     }
 }
 impl ModelFields {
-    fn from_raw(raw: &RawMetadata, specs: &EffortSpecs) -> Self {
+    pub(crate) fn from_raw(raw: &RawMetadata, specs: &EffortSpecs) -> Self {
         let context_window = numeric(raw.first(&[
             "context_length",
             "context_window",

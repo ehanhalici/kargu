@@ -62,7 +62,7 @@ impl TryFrom<&str> for RawMetadata {
     }
 }
 impl RawMetadata {
-    pub(super) fn first(&self, keys: &[&str]) -> Option<&str> {
+    pub(crate) fn first(&self, keys: &[&str]) -> Option<&str> {
         keys.iter()
             .filter_map(|key| self.0.get(*key).map(|value| value.get()))
             .find(|source| *source != "null")
@@ -86,25 +86,89 @@ impl RawMetadata {
             .map(|value| value.get())
             .filter(|source| *source != "null")
     }
-    pub(super) fn snapshot(&self) -> Result<Value, MetadataError> {
+    pub(crate) fn snapshot(&self) -> Result<Value, MetadataError> {
         let mut fields = serde_json::Map::new();
         for (key, value) in &self.0 {
-            let value = if key == "pricing" && value.get().starts_with('{') {
-                let pricing: Self =
-                    serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?;
-                let mut fields = serde_json::Map::new();
-                for (key, value) in pricing.0 {
-                    fields.insert(key, exact_literal(value.get())?);
+            let value = if key == "pricing" {
+                pricing_snapshot(value.get())?
+            } else if matches!(
+                key.as_str(),
+                "input-cost"
+                    | "output-cost"
+                    | "context_length"
+                    | "context_window"
+                    | "inputTokenLimit"
+                    | "context-window"
+                    | "max_output"
+                    | "outputTokenLimit"
+                    | "max_completion_tokens"
+                    | "max-output"
+            ) {
+                // Integral JSON quantities keep their exact integer kind. Other
+                // numeric lexemes stay strings, never rounded JSON floats.
+                if !matches!(key.as_str(), "input-cost" | "output-cost")
+                    && value.get().parse::<u64>().is_ok()
+                {
+                    serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?
+                } else {
+                    exact_literal(value.get())?
                 }
-                Value::Object(fields)
-            } else if matches!(key.as_str(), "input-cost" | "output-cost") {
-                exact_literal(value.get())?
+            } else if key == "top_provider" && value.get().starts_with('{') {
+                let nested: Self =
+                    serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?;
+                nested.snapshot()?
+            } else if key == "top_provider" && value.get().starts_with('[') {
+                let values: Vec<Box<RawValue>> =
+                    serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?;
+                if let [value] = values.as_slice()
+                    && value.get().starts_with('{')
+                {
+                    let nested: Self =
+                        serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?;
+                    Value::Array(vec![nested.snapshot()?])
+                } else {
+                    serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?
+                }
             } else {
                 serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?
             };
             fields.insert(key.clone(), value);
         }
         Ok(Value::Object(fields))
+    }
+    pub(crate) fn set(&mut self, key: &str, value: Box<RawValue>) {
+        self.0.insert(key.to_owned(), value);
+    }
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.0.iter().fold(0_usize, |bytes, (key, value)| {
+            bytes
+                .saturating_add(key.len())
+                .saturating_add(value.get().len())
+        })
+    }
+}
+
+fn pricing_snapshot(source: &str) -> Result<Value, MetadataError> {
+    if source.starts_with('{') {
+        let pricing: RawMetadata =
+            serde_json::from_str(source).map_err(|_| MetadataError::Shape)?;
+        let mut fields = serde_json::Map::new();
+        for (key, value) in pricing.0 {
+            fields.insert(key, exact_literal(value.get())?);
+        }
+        Ok(Value::Object(fields))
+    } else if source.starts_with('[') {
+        let values: Vec<Box<RawValue>> =
+            serde_json::from_str(source).map_err(|_| MetadataError::Shape)?;
+        if let [value] = values.as_slice()
+            && value.get().starts_with('{')
+        {
+            Ok(Value::Array(vec![pricing_snapshot(value.get())?]))
+        } else {
+            serde_json::from_str(source).map_err(|_| MetadataError::Shape)
+        }
+    } else {
+        serde_json::from_str(source).map_err(|_| MetadataError::Shape)
     }
 }
 
