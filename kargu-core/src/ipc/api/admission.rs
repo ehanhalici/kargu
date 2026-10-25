@@ -7,7 +7,7 @@ use crate::{
         host::{Host, ReadScope},
     },
     constants::limits,
-    domain::RetryAttempt,
+    domain::{ApiPageBytes, RetryAttempt},
 };
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ struct Captured {
     arguments: Arc<HttpRequest>,
     budget: Option<budget::BudgetRef>,
     retry: Option<retry::Configuration>,
-    page_bytes: usize,
+    page_bytes: ApiPageBytes,
 }
 #[must_use = "Admitted charges and leases must be retained until worker collection"]
 pub(super) struct Admitted {
@@ -25,7 +25,7 @@ pub(super) struct Admitted {
     pub charge: Option<budget::Charge>,
     pub retry: Option<retry::Operation>,
     pub circuit: Option<circuit::Grant>,
-    pub page_bytes: usize,
+    pub page_bytes: ApiPageBytes,
 }
 impl ApiRequests {
     pub(super) fn admit_request(
@@ -48,12 +48,8 @@ impl ApiRequests {
             arguments: Arc::new(request.arguments),
             budget: request.budget,
             retry: request.retry,
-            page_bytes: host
-                .frame_limit()
-                .as_usize()
-                .saturating_sub(512)
-                .saturating_div(6)
-                .min(32 * 1024),
+            page_bytes: ApiPageBytes::try_from(host.frame_limit())
+                .map_err(|_| fault("resource_limit", "API framing capacity unavailable"))?,
         };
         self.admit_capture(host, capture)
     }

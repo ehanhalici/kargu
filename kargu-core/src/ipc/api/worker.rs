@@ -4,7 +4,7 @@ use super::{Completion, Event, EventValue, Outcome, publish_body};
 use crate::{
     api::{ApiError, HttpRequest, resilience::RetryEntropy},
     application::budget::ObservedUsage,
-    domain::Deadline,
+    domain::{ApiPageBytes, Deadline},
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ pub(super) struct Attempt {
     pub sender: mpsc::Sender<Event>,
     pub cancel: CancellationToken,
     pub deadline: Option<Deadline>,
-    pub page_bytes: usize,
+    pub page_bytes: ApiPageBytes,
     pub observe_entropy: bool,
     pub expectation: ResponseExpectation,
 }

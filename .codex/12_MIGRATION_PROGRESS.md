@@ -1,5 +1,14 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — 01 audit: API sayfa boyutu alan tipi
+
+Raw usize ve tekrarlanan zero/progress kontrolü kaldırıldı; `ApiPageBytes`
+TryFrom sınırında framing rezervi, üst limit ve UTF-8 ilerlemesini garanti eder.
+Yanlış birim compile-fail ve minimum sayfada kayıpsız Unicode regresyonu eklendi.
+**208 native test + 6 compile-fail**, fmt/strict Clippy geçti; son bağımsız full
+ERT **1185/1185**. Diğer somut audit bulguları ve açık sınırlar 39'a kaydedildi;
+01 değiştirilmedi, kullanıcı shell.nix/07 değişiklikleri korunuyor.
+
 ## 2026-10-25 — Native circuit GUI projection/reset köprüsü
 
 GUI yalnız exact application/connection/scope altındaki bounded, detached native

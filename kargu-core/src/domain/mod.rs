@@ -9,6 +9,8 @@
 use crate::{constants::limits, error::CoreError};
 use serde::{Deserialize, Serialize};
 
+mod api;
+pub use api::ApiPageBytes;
 mod deadline;
 pub use deadline::{Deadline, ExecutionTimeout, IdleTimeout};
 mod output;

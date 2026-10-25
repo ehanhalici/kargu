@@ -7,7 +7,7 @@ use super::{
 use crate::{
     api::resilience::{Publication, RetryDecision, RetryPolicy},
     application::host::Host,
-    domain::{Deadline, RetryAttempt},
+    domain::{ApiPageBytes, Deadline, RetryAttempt},
     error::CoreError,
 };
 use serde::Deserialize;
@@ -45,7 +45,7 @@ pub(super) struct Operation {
     pub deadline: Deadline,
     pub attempt: RetryAttempt,
     pub stage: Option<Stage>,
-    pub page_bytes: usize,
+    pub page_bytes: ApiPageBytes,
 }
 
 impl ApiRequests {

@@ -332,19 +332,17 @@ async fn publish_body(
     id: &RpcId,
     value: Value,
     cancel: &CancellationToken,
-    page_bytes: usize,
+    page_bytes: crate::domain::ApiPageBytes,
 ) -> Result<Value, ApiError> {
     let body = value.to_string();
-    if body.len() > 8 * 1024 * 1024 || page_bytes == 0 {
+    if body.len() > 8 * 1024 * 1024 {
         return Err(ApiError::Limit);
     }
     let publish = async {
         let mut offset = 0usize;
         while offset < body.len() {
-            let end = body.floor_char_boundary(offset.saturating_add(page_bytes).min(body.len()));
-            if end <= offset {
-                return Err(ApiError::Limit);
-            }
+            let end = body
+                .floor_char_boundary(offset.saturating_add(page_bytes.as_usize()).min(body.len()));
             let chunk = body.get(offset..end).ok_or(ApiError::Protocol)?.to_owned();
             sender
                 .send(Event {
@@ -375,6 +373,27 @@ fn fault(status: &'static str, message: &'static str) -> Fault {
 mod tests {
     use super::*;
     type TestResult = Result<(), Box<dyn std::error::Error>>;
+    #[tokio::test]
+    async fn minimum_page_capacity_publishes_unicode_without_loss() -> TestResult {
+        let (sender, mut receiver) = mpsc::channel(limits::API_EVENTS);
+        let page = crate::domain::ApiPageBytes::try_from(crate::domain::ByteLimit::try_from(536)?)?;
+        let id = RpcId::parse(&json!("unicode-page")).ok_or("id")?;
+        let value = json!({"text":"🦀aé"});
+        let result =
+            publish_body(&sender, &id, value.clone(), &CancellationToken::new(), page).await?;
+        assert_eq!(result, json!({"body_ready":true}));
+        drop(sender);
+        let mut body = String::new();
+        while let Some(event) = receiver.recv().await {
+            let EventValue::Body(chunk) = event.value else {
+                return Err("unexpected delta".into());
+            };
+            assert!(chunk.len() <= page.as_usize());
+            body.push_str(&chunk);
+        }
+        assert_eq!(serde_json::from_str::<Value>(&body)?, value);
+        Ok(())
+    }
     #[tokio::test]
     async fn continuous_foreign_deltas_cannot_starve_join_or_overtake_body() -> TestResult {
         let mut host = Host::new();
