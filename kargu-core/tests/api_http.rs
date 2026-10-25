@@ -15,6 +15,12 @@ fn server(
     reply: impl FnOnce(TcpStream) + Send + 'static,
 ) -> Result<(String, std::thread::JoinHandle<()>), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
+    server_on(listener, reply)
+}
+fn server_on(
+    listener: TcpListener,
+    reply: impl FnOnce(TcpStream) + Send + 'static,
+) -> Result<(String, std::thread::JoinHandle<()>), Box<dyn std::error::Error>> {
     let url = format!("http://{}/chat/completions", listener.local_addr()?);
     let thread = std::thread::spawn(move || {
         if let Ok((mut stream, _)) = listener.accept() {
@@ -60,6 +66,45 @@ fn request(url: &str, stream: bool, timers: Value) -> Result<HttpRequest, serde_
 }
 fn timers() -> Value {
     json!({"connect_ms":500,"first_byte_ms":1000,"idle_ms":1000,"deadline_ms":2000})
+}
+
+#[tokio::test]
+async fn one_physical_grant_never_replays_http_failure_or_ambiguous_connection_loss() -> TestResult
+{
+    for status in [None, Some(503)] {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let probe = listener.try_clone()?;
+        let (url, task) = server_on(listener, move |mut socket| {
+            // The fixture has read the complete POST body before this callback.
+            // Dropping without headers is an ambiguous upstream-side effect,
+            // not permission for a free second model request.
+            if let Some(status) = status {
+                let _ = write!(
+                    socket,
+                    "HTTP/1.1 {status} Failure\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+            }
+        })?;
+        let result = execute(
+            request(&url, false, timers())?,
+            |_| async { Ok(()) },
+            CancellationToken::new(),
+        )
+        .await;
+        task.join().map_err(|_| "fixture failed")?;
+        match (status, result) {
+            (None, Err(ApiError::Connection)) => {}
+            (Some(expected), Err(ApiError::Http { status, .. })) => {
+                assert_eq!(status.as_u16(), expected)
+            }
+            _ => return Err("a raw physical exchange changed failure or replayed".into()),
+        }
+        probe.set_nonblocking(true)?;
+        assert!(
+            matches!(probe.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+    }
+    Ok(())
 }
 
 #[tokio::test]

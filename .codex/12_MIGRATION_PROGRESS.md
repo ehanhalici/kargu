@@ -1,5 +1,15 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — 01 audit: HTTP altında ikinci replay politikası kapatıldı
+
+Reqwest retry::never explicit ayarlandı; replay actor/budget/observer dışında
+yetkilendirilemez. Manifest minimumu zaten locked olan 0.12.28'i beyan eder;
+lock/feature değişmedi. Bugünkü build h2/h3 kullanmadığı için gözlenen gizli
+replay hatası iddiası yoktur. Tam POST sonrası 503 veya belirsiz bağlantı
+kopuşunda ikinci socket olmadığı gerçek fixture ile doğrulanır. **25 focused
+HTTP/retry/circuit testi** ve strict Clippy geçti; son full native **209+9** ve
+ERT **1185/1185**, önceki typestate dilimindendir. Kanıt/sınırlar 39'da.
+
 ## 2026-10-25 — 01 audit: kaynak sahibi retry typestate
 
 Independent retry/stage/charge Options ve optional admission tuple kaldırıldı.

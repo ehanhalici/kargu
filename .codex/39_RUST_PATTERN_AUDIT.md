@@ -46,6 +46,23 @@ deadline, budget, no-visible-replay and sole-probe regressions. Full native:
 passed all 15 live retry/circuit tests and strict Clippy. Locked build/fmt pass.
 Full source ERT against that binary: **1185/1185**, 0 unexpected, **128.51 s**.
 
+## 2026-10-25 — One explicit HTTP replay authority
+
+The HTTP builder now sets `reqwest::retry::never()` explicitly, independently of
+the dependency's protocol-NACK defaults. The manifest minimum is the already
+locked **0.12.28**; Cargo.lock and the enabled rustls/stream features did not
+change. Verified against the locked source, versioned official builder docs and
+`cargo tree --locked -e features -i reqwest`: today's build has neither http2 nor
+http3, so this is defense against implicit policy/future feature unification,
+NOT a claim that an unmetered replay was observed under the current build.
+
+A real HTTP fixture reads the complete POST body, then either returns 503 or
+drops ambiguously without response headers. A retained listening socket proves
+no second connection was queued; the original typed failure must be preserved.
+All **25 HTTP/live retry/circuit tests** and all-target strict Clippy pass. This
+does not exercise an HTTP/2 NACK (that feature is not enabled). Last full native
+and source ERT evidence remains the preceding typestate slice, above.
+
 ## Remaining findings — not claimed fixed
 
 - `ipc/execution/mod.rs`: another `Option<Stage>` deserves the same ownership
@@ -53,11 +70,9 @@ Full source ERT against that binary: **1185/1185**, 0 unexpected, **128.51 s**.
 - `api/cache.rs`: two raw string range-index operations are safe by their
   preceding find today, but still violate 01's no-bare-index rule. Replace with
   checked access and preserve multibyte cache-boundary behavior.
-- HTTP client's implicit reqwest protocol-NACK retry policy must be explicitly
-  disabled so future feature unification cannot create a second replay authority.
-  Locked 0.12.28 currently has neither http2 nor http3 enabled: do NOT report an
-  observed hidden replay under today's features. Check the locked source and
-  [versioned ClientBuilder docs](https://docs.rs/reqwest/0.12.28/reqwest/struct.ClientBuilder.html#method.retry).
+
+HTTP source reference:
+[versioned ClientBuilder docs](https://docs.rs/reqwest/0.12.28/reqwest/struct.ClientBuilder.html#method.retry).
 
 This audit is incremental, not certification that the whole migrated tree now
 conforms to every 01 directive. Do not relax 01 or remove legacy consumers until

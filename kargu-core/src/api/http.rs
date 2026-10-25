@@ -55,6 +55,10 @@ where
 {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
+        // Every physical exchange needs its own actor admission and observer
+        // barrier. Do not let dependency feature unification enable a second
+        // protocol-NACK replay policy beneath that authority.
+        .retry(reqwest::retry::never())
         .connect_timeout(request.connect_timeout())
         .referer(false)
         .build()
