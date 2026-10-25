@@ -40,6 +40,12 @@ pub enum ApiError {
     /// Owner budget expired, not evidence of an unhealthy upstream service.
     #[error("Run budget deadline exceeded")]
     RunDeadline,
+    /// A later native attempt was refused without opening its socket.
+    #[error("Run budget refused another API attempt")]
+    BudgetRefused(crate::application::budget::Refusal),
+    /// Bounded local retry coordination could not safely authorize replay.
+    #[error("API retry coordination unavailable")]
+    RetryUnavailable,
     /// HTTP redirect was refused before any target request or credential replay.
     #[error("API redirect refused; configure the final endpoint")]
     Redirect,
@@ -76,6 +82,8 @@ impl ApiError {
             Self::IdleTimeout => "idle_timeout",
             Self::Deadline => "deadline",
             Self::RunDeadline => "run_deadline",
+            Self::BudgetRefused(_) => "budget_exhausted",
+            Self::RetryUnavailable => "retry_unavailable",
             Self::Redirect => "redirect_refused",
             Self::Http { .. } => "http",
             Self::ContextOverflow { .. } => "context_overflow",
@@ -83,6 +91,9 @@ impl ApiError {
             Self::Incomplete => "incomplete_stream",
         };
         let mut result = json!({"code":code,"message":self.to_string()});
+        if let Self::BudgetRefused(reason) = self {
+            result["reason"] = json!(reason);
+        }
         if let Self::Http {
             status,
             retry_after,

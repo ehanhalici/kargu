@@ -1,6 +1,9 @@
 //! A single mailbox writer owns API admission, publication and drained release.
 
 mod budget;
+mod retry;
+mod worker;
+use super::pending::PendingRequests;
 use super::protocol::{self, Fault, RpcId};
 use crate::constants::limits;
 use crate::{
@@ -23,6 +26,8 @@ struct Request {
     arguments: HttpRequest,
     #[serde(default)]
     budget: Option<budget::BudgetRef>,
+    #[serde(default)]
+    retry: Option<retry::Configuration>,
 }
 struct Pending {
     scope: ReadScope,
@@ -31,6 +36,8 @@ struct Pending {
     terminal: Option<ApiError>,
     charge: Option<budget::Charge>,
     budget_id: Option<crate::domain::BudgetId>,
+    retry: Option<retry::Operation>,
+    snapshot: Option<Value>,
 }
 struct Event {
     id: RpcId,
@@ -43,22 +50,29 @@ enum EventValue {
 
 enum Ready {
     Event(Event),
-    Completed(RpcId, Outcome),
+    Completed(RpcId, Completion),
+}
+enum Completion {
+    Attempt(Outcome),
+    Backoff(Result<(), ApiError>),
+    Observed(Result<bool, ApiError>),
 }
 struct Outcome {
     result: Result<Value, ApiError>,
     usage: ObservedUsage,
+    entropy: Option<Result<crate::api::resilience::RetryEntropy, CoreError>>,
 }
 
 pub(super) struct ApiRequests {
     pending: HashMap<RpcId, Pending>,
-    workers: JoinSet<(RpcId, Outcome)>,
+    workers: JoinSet<(RpcId, Completion)>,
     sender: mpsc::Sender<Event>,
     events: mpsc::Receiver<Event>,
     ready: VecDeque<Ready>,
     root: CancellationToken,
     _guard: DropGuard,
     budgets: budget::Budgets,
+    sequence: crate::domain::RequestSequence,
 }
 impl Default for ApiRequests {
     fn default() -> Self {
@@ -73,6 +87,7 @@ impl Default for ApiRequests {
             _guard: root.clone().drop_guard(),
             root,
             budgets: budget::Budgets::default(),
+            sequence: crate::domain::RequestSequence::ZERO,
         }
     }
 }
@@ -125,14 +140,49 @@ impl ApiRequests {
         if self.root.is_cancelled() || self.pending.len() >= limits::API_REQUESTS {
             return Err(fault("resource_limit", "API admission limit reached"));
         }
-        let charge = self.budgets.admit(
-            host,
-            &request.scope,
-            request.budget.as_ref(),
-            request.arguments.generative(),
-        )?;
-        let budget_deadline = charge.as_ref().map(|charge| charge.deadline);
+        if request.retry.is_some() && (request.budget.is_none() || !request.arguments.generative())
+        {
+            return Err(Fault::params());
+        }
         let cancel = self.root.child_token();
+        let page_bytes = host
+            .frame_limit()
+            .as_usize()
+            .saturating_sub(512)
+            .saturating_div(6)
+            .min(32 * 1024);
+        let arguments = Arc::new(request.arguments);
+        let (charge, retry) = if let Some(configuration) = request.retry {
+            let reference = request.budget.as_ref().ok_or_else(Fault::params)?;
+            let charge = self
+                .budgets
+                .admit_metered(host, &request.scope, reference)?;
+            let operation = retry::Operation {
+                configuration,
+                arguments: arguments.clone(),
+                reference: budget::BudgetRef {
+                    budget_id: reference.budget_id.clone(),
+                    kind: crate::application::budget::DebitKind::RetryAttempt,
+                },
+                deadline: charge.deadline,
+                attempt: crate::domain::RetryAttempt::ZERO,
+                stage: Some(retry::Stage::Attempt),
+                page_bytes,
+            };
+            (Some(charge), Some(operation))
+        } else {
+            (
+                self.budgets.admit(
+                    host,
+                    &request.scope,
+                    request.budget.as_ref(),
+                    arguments.generative(),
+                )?,
+                None,
+            )
+        };
+        let budget_deadline = charge.as_ref().map(|charge| charge.deadline);
+        let observe_entropy = retry.is_some();
         self.pending.insert(
             id.clone(),
             Pending {
@@ -145,69 +195,19 @@ impl ApiRequests {
                     .budget
                     .as_ref()
                     .map(|reference| reference.budget_id.clone()),
+                retry,
+                snapshot: None,
             },
         );
-        let sender = self.sender.clone();
-        let page_bytes = host
-            .frame_limit()
-            .as_usize()
-            .saturating_sub(512)
-            .saturating_div(6)
-            .min(32 * 1024);
-        let arguments = Arc::new(request.arguments);
-        self.workers.spawn(async move {
-            let event_id = id.clone();
-            let event_sender = sender.clone();
-            let exchange = crate::api::execute_captured(
-                arguments.as_ref(),
-                move |value| {
-                    let sender = event_sender.clone();
-                    let id = event_id.clone();
-                    async move {
-                        sender
-                            .send(Event {
-                                id,
-                                value: EventValue::Delta(value),
-                            })
-                            .await
-                            .map_err(|_| ApiError::Cancelled)
-                    }
-                },
-                cancel.clone(),
-            );
-            let result = if let Some(deadline) = budget_deadline {
-                tokio::select! {
-                    biased;
-                    _ = deadline.elapsed() => Err(ApiError::RunDeadline),
-                    result = exchange => result,
-                }
-            } else {
-                exchange.await
-            };
-            let (result, usage) = match result {
-                Ok(value) => match ObservedUsage::try_from(&value) {
-                    Ok(usage) => (Ok(value), usage),
-                    Err(_) => (Err(ApiError::Protocol), ObservedUsage::default()),
-                },
-                Err(error) => (Err(error), ObservedUsage::default()),
-            };
-            let result = match result {
-                Ok(value) => {
-                    let publish = publish_body(&sender, &id, value, &cancel, page_bytes);
-                    if let Some(deadline) = budget_deadline {
-                        tokio::select! {
-                            biased;
-                            _ = deadline.elapsed() => Err(ApiError::RunDeadline),
-                            result = publish => result,
-                        }
-                    } else {
-                        publish.await
-                    }
-                }
-                Err(error) => Err(error),
-            };
-            (id, Outcome { result, usage })
-        });
+        self.workers.spawn(worker::attempt(
+            id,
+            arguments,
+            self.sender.clone(),
+            cancel,
+            budget_deadline,
+            page_bytes,
+            observe_entropy,
+        ));
         Ok(())
     }
     pub fn cancel(&mut self, id: &RpcId) {
@@ -231,9 +231,13 @@ impl ApiRequests {
             }
         }
     }
-    pub async fn next(&mut self, host: &Host) -> Result<Option<Value>, CoreError> {
+    pub async fn next(
+        &mut self,
+        host: &Host,
+        reverse: &mut PendingRequests,
+    ) -> Result<Option<Value>, CoreError> {
         if let Some(ready) = self.ready.pop_front() {
-            return self.deliver(host, ready);
+            return self.deliver(host, reverse, ready);
         }
         tokio::select! {
             biased;
@@ -249,21 +253,35 @@ impl ApiRequests {
                 }
                 self.ready.push_back(Ready::Completed(id,result));
                 let ready = self.ready.pop_front().ok_or(CoreError::CleanupFailed)?;
-                self.deliver(host,ready)
+                self.deliver(host,reverse,ready)
             }
             event = self.events.recv() => {
                 let event=event.ok_or(CoreError::CleanupFailed)?;
-                self.deliver(host,Ready::Event(event))
+                self.deliver(host,reverse,Ready::Event(event))
             }
         }
     }
-    fn deliver(&mut self, host: &Host, ready: Ready) -> Result<Option<Value>, CoreError> {
+    fn deliver(
+        &mut self,
+        host: &Host,
+        reverse: &mut PendingRequests,
+        ready: Ready,
+    ) -> Result<Option<Value>, CoreError> {
         match ready {
             Ready::Event(event) => {
                 let Some(pending) = self.pending.get_mut(&event.id) else {
                     return Ok(None);
                 };
                 if pending.cancel.is_cancelled() || !host.owns_read_scope(&pending.scope) {
+                    return Ok(None);
+                }
+                if pending
+                    .charge
+                    .as_ref()
+                    .is_some_and(|charge| charge.deadline.expired())
+                {
+                    pending.terminal = Some(ApiError::RunDeadline);
+                    pending.cancel.cancel();
                     return Ok(None);
                 }
                 let notification = match event.value {
@@ -285,25 +303,7 @@ impl ApiRequests {
             }
             Ready::Completed(id, outcome) => {
                 let pending = self.pending.remove(&id).ok_or(CoreError::CleanupFailed)?;
-                let snapshot = pending
-                    .charge
-                    .map(|charge| self.budgets.finish(charge, outcome.usage))
-                    .transpose()?;
-                let result = if let Some(error) = pending.terminal {
-                    Err(error)
-                } else if pending.cancel.is_cancelled() || !host.owns_read_scope(&pending.scope) {
-                    Err(ApiError::Cancelled)
-                } else {
-                    outcome.result
-                };
-                let mut payload = match result {
-                    Ok(value) => value,
-                    Err(error) => json!({"failure":error.snapshot(),"partial":pending.published}),
-                };
-                if let Some(snapshot) = snapshot {
-                    payload["budget"] = snapshot;
-                }
-                Ok(Some(protocol::success(&id, payload)))
+                self.completed(host, reverse, id, pending, outcome)
             }
         }
     }
@@ -312,11 +312,11 @@ impl ApiRequests {
         self.events.close();
         while let Some(result) = self.workers.join_next().await {
             let (id, outcome) = result.map_err(|_| CoreError::CleanupFailed)?;
-            self.collect_usage(&id, outcome.usage)?;
+            self.collect_usage(&id, outcome)?;
         }
         while let Some(ready) = self.ready.pop_front() {
             if let Ready::Completed(id, outcome) = ready {
-                self.collect_usage(&id, outcome.usage)?;
+                self.collect_usage(&id, outcome)?;
             }
         }
         for pending in self.pending.values_mut() {
@@ -329,11 +329,12 @@ impl ApiRequests {
         while self.events.try_recv().is_ok() {}
         Ok(())
     }
-    fn collect_usage(&mut self, id: &RpcId, usage: ObservedUsage) -> Result<(), CoreError> {
-        if let Some(pending) = self.pending.get_mut(id)
+    fn collect_usage(&mut self, id: &RpcId, completion: Completion) -> Result<(), CoreError> {
+        if let Completion::Attempt(outcome) = completion
+            && let Some(pending) = self.pending.get_mut(id)
             && let Some(charge) = pending.charge.take()
         {
-            self.budgets.finish(charge, usage)?;
+            self.budgets.finish(charge, outcome.usage)?;
         }
         Ok(())
     }
@@ -415,6 +416,8 @@ mod tests {
                     terminal: None,
                     charge: None,
                     budget_id: None,
+                    retry: None,
+                    snapshot: None,
                 },
             );
         }
@@ -448,17 +451,19 @@ mod tests {
         api.workers.spawn(async move {
             (
                 completed,
-                Outcome {
+                Completion::Attempt(Outcome {
                     result: Ok(json!({"body_ready":true})),
                     usage: ObservedUsage::default(),
-                },
+                    entropy: None,
+                }),
             )
         });
         tokio::task::yield_now().await;
         let mut body = false;
         let mut terminal = false;
+        let mut reverse = PendingRequests::default();
         for _ in 0..limits::API_EVENTS.saturating_add(2) {
-            if let Some(reply) = api.next(&host).await? {
+            if let Some(reply) = api.next(&host, &mut reverse).await? {
                 if reply["method"] == "api/body" && reply["params"]["request_id"] == first.value() {
                     body = true;
                 }

@@ -230,7 +230,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 let bytes = u32::try_from(host.frame_limit().as_usize()).map_err(|_| TransportError::Overloaded)?;
                 let permit = permits.clone().acquire_many_owned(bytes).await.map_err(|_| TransportError::Writer)?;
                 drop(permit);
-                api.next(host).await.map_err(|_| TransportError::ReadWorker)
+                api.next(host, pending).await.map_err(|_| TransportError::ReadWorker)
             }, if !api.is_empty() => {
                 if let Some(reply) = completion? {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;

@@ -139,3 +139,46 @@ boundary. Future retry control need not branch on fault/status strings.
 Verification: **187 Rust tests + 5 compile-fail**, locked build/fmt/strict
 Clippy. The independently verified UI suite remains **1172/1172**. Native retry
 and its observer/circuit consumers are still open; no retry capability advertised.
+
+## 2026-10-25 — Native retry mailbox / owned observer handshake
+
+`api/request` now accepts an explicit captured `retry` object with `policy`
+and mandatory `observer` (`editor` or explicit headless `none`). The implemented
+`api_retry` capability is advertised. Retry requires a generative request and
+an owned native budget; malformed policy/observer, missing budget and GET
+relabeling fail before charging or opening a socket. Omission remains exactly
+one attempt, preserving raw service callers during UI cutover.
+
+The parent actor alone chooses replay, advances attempt count and admits each
+socket. IO executes one granted capture, reports usage/entropy, and joins before
+another attempt. Bounded entropy observations are captured outside the mailbox;
+an unavailable RNG cannot produce zero jitter and cannot override a policy stop
+that needs no sample. Backoff and observer are separate cancellable worker
+resources; their logical slot, immutable request Arc, original monotonic budget
+deadline and budget identity stay retained through actual join. Budget preflight
+is checked before waiting, after waiting and again after observation; admission
+is still the authoritative debit. Unknown capped usage fails closed.
+
+Editor observation is a bounded reverse `editor/api_retry` call correlated with
+the exact forward request, owner scope and connection epoch. No payload/auth/URL
+is exposed. Only a typed `{accepted: true}` response can grant the next attempt;
+negative/malformed/unknown/late ACKs cannot authorize IO. The observer has its
+own ten-second timeout capped by the original run deadline. Forward cancel,
+budget/application close, shutdown and EOF revoke and join both waiting phases
+before release. The finite event/join prefix barrier remains intact, including
+partial deltas; queued egress also rechecks the budget deadline.
+
+Evidence: nine real stdio/loopback tests cover identical two-attempt authority,
+exact charges, observer-before-socket, negative/malformed/late ACKs, exhausted/
+unknown budgets, server wait overflow, deadline during wait, visible partial
+failure and both waiting phases under four teardown modes. A deterministic
+entropy-failure test covers stop-before-draw semantics. **197 Rust tests + 5
+compile-fail** passed; after readability-only function extraction, all **55
+focused native tests** and strict Clippy pass again. Locked build/fmt pass.
+Last independently verified full editor baseline is **1172/1172**.
+
+This is a real native retry consumer, not yet the default GUI cutover: the
+editor retry observer adapter is the next slice. Legacy Elisp retry/circuit
+engines have not been removed prematurely. Native circuit registry/lease
+composition with logical retry, UI error projection and full agent/run claims
+remain open; no full API/backend migration claim follows.

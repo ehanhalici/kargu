@@ -1,5 +1,20 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Native retry actor ve reverse observer consumer
+
+Gerçek api/request retry consumer eklendi; api_retry capability ilan edilir.
+Her socket actor budget gate'inden geçer; backoff/observer kaynakları gerçek
+join'e kadar slot/owner tutar. Observer ACK yeni IO'dan önce zorunludur; yanlış/
+geç yanıt, owner close, shutdown/EOF, deadline ve unknown capped usage fail-closed.
+Typed policy + immutable request yeniden parse edilmez. Detay ve açık sınırlar
+37'dedir. Bu kesimde GUI henüz retry seçeneğini kullanmaz; eski Elisp motoru
+native circuit/UI consumers taşınmadan silinmedi.
+
+**197 Rust testi + 5 compile-fail** geçti; son okunabilirlik-only extraction
+sonrasında **55 focused native test**, locked build/fmt/strict Clippy yeniden
+geçti. Son bağımsız full editor baseline **1172/1172**. Gerçek dış uygulama,
+hesap/login/ücretli API veya kurulum çağrısı yok; yalnız loopback fixture'ları.
+
 ## 2026-10-25 — Mantıksal budget retention ve typed admission
 
 Native API kaydı budget kimliğini fiziksel ticket'tan bağımsız tutar. Close,

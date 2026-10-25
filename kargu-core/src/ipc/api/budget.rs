@@ -287,25 +287,55 @@ impl Budgets {
         if !generative {
             return Err(AdmissionFailure::NonGenerative);
         }
-        self.admission_owner(host, scope, &reference.budget_id)?;
+        self.admit_metered(host, scope, reference).map(Some)
+    }
+    pub fn admit_metered(
+        &mut self,
+        host: &Host,
+        scope: &ReadScope,
+        reference: &BudgetRef,
+    ) -> Result<Charge, AdmissionFailure> {
+        let budget = self.open_meter(host, scope, &reference.budget_id)?;
+        let charge = budget.admit(reference.kind)?;
+        Ok(Charge {
+            id: reference.budget_id.clone(),
+            ticket: charge,
+            deadline: budget.deadline(),
+        })
+    }
+    fn open_meter(
+        &mut self,
+        host: &Host,
+        scope: &ReadScope,
+        id: &BudgetId,
+    ) -> Result<&mut Budget, AdmissionFailure> {
+        self.admission_owner(host, scope, id)?;
         let entry = self
             .entries
-            .get_mut(&reference.budget_id)
+            .get_mut(id)
             .ok_or(AdmissionFailure::StaleOwner)?;
         let Meter::Open(budget) = &mut entry.meter else {
             return Err(AdmissionFailure::Closed);
         };
-        // One physical attempt at a time; token bounds are observation-based,
-        // and UI retries must not race another request under the same budget.
         if !budget.drained() {
             return Err(AdmissionFailure::Busy);
         }
-        let charge = budget.admit(reference.kind)?;
-        Ok(Some(Charge {
-            id: reference.budget_id.clone(),
-            ticket: charge,
-            deadline: budget.deadline(),
-        }))
+        Ok(budget)
+    }
+    pub fn preflight(
+        &mut self,
+        host: &Host,
+        scope: &ReadScope,
+        reference: &BudgetRef,
+    ) -> Result<(), AdmissionFailure> {
+        self.open_meter(host, scope, &reference.budget_id)?
+            .preflight(reference.kind)?;
+        Ok(())
+    }
+    pub fn snapshot(&self, id: &BudgetId) -> Option<Value> {
+        self.entries
+            .get(id)
+            .map(|entry| json!(entry.meter.snapshot()))
     }
     pub fn finish(&mut self, charge: Charge, usage: ObservedUsage) -> Result<Value, CoreError> {
         let entry = self

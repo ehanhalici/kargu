@@ -29,6 +29,19 @@ pub enum RetryDecision {
     /// Wait without releasing the logical operation's owned resource slot.
     Wait(RetryDelay),
 }
+
+/// Bounded IO observation. The actor consumes entropy without making RNG calls.
+pub struct RetryEntropy(Box<[u64; limits::API_RANDOM_DRAWS]>);
+impl RetryEntropy {
+    /// Capture outside the single-writer mailbox, without a deterministic fallback.
+    pub fn capture() -> Result<Self, CoreError> {
+        let mut samples = [0; limits::API_RANDOM_DRAWS];
+        for sample in &mut samples {
+            *sample = getrandom::u64().map_err(|_| CoreError::Unavailable)?;
+        }
+        Ok(Self(Box::new(samples)))
+    }
+}
 /// Immutable policy captured before asynchronous admission.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize)]
 #[serde(try_from = "RetryDto")]
@@ -57,6 +70,24 @@ impl TryFrom<RetryDto> for RetryPolicy {
     }
 }
 impl RetryPolicy {
+    /// Pure actor decision from a bounded entropy observation captured by IO.
+    pub fn after_failure_observed(
+        &self,
+        attempt: RetryAttempt,
+        error: &ApiError,
+        publication: Publication,
+        now: SystemTime,
+        entropy: Result<RetryEntropy, CoreError>,
+    ) -> Result<RetryDecision, CoreError> {
+        let mut samples = entropy.map(|entropy| (*entropy.0).into_iter());
+        self.decide_with(attempt, error, publication, now, || {
+            samples
+                .as_mut()
+                .map_err(|_| CoreError::Unavailable)?
+                .next()
+                .ok_or(CoreError::Unavailable)
+        })
+    }
     /// Whether a classified HTTP failure may be retried; no body/URL matching.
     pub fn retryable(&self, error: &ApiError) -> bool {
         matches!(error, ApiError::Http { status, .. } if self.statuses.iter().any(|candidate| candidate.matches(*status)))
@@ -160,6 +191,53 @@ mod tests {
             RetryDecision::Wait(delay) => Ok(delay.duration()),
             _ => Err("expected wait".into()),
         }
+    }
+    #[test]
+    fn observed_entropy_failure_is_only_relevant_when_policy_actually_needs_a_draw() -> TestResult {
+        let policy = policy(json!({}))?;
+        let now = SystemTime::now();
+        for (attempt, publication, header, stop) in [
+            (
+                RetryAttempt::ZERO,
+                Publication::Visible,
+                None,
+                RetryStop::Published,
+            ),
+            (
+                RetryAttempt::try_from(5)?,
+                Publication::Silent,
+                None,
+                RetryStop::Attempts,
+            ),
+            (
+                RetryAttempt::ZERO,
+                Publication::Silent,
+                Some("999999"),
+                RetryStop::ServerWait,
+            ),
+        ] {
+            assert_eq!(
+                policy.after_failure_observed(
+                    attempt,
+                    &upstream(header),
+                    publication,
+                    now,
+                    Err(CoreError::Unavailable)
+                )?,
+                RetryDecision::Stop(stop)
+            );
+        }
+        assert!(matches!(
+            policy.after_failure_observed(
+                RetryAttempt::ZERO,
+                &upstream(None),
+                Publication::Silent,
+                now,
+                Err(CoreError::Unavailable)
+            ),
+            Err(CoreError::Unavailable)
+        ));
+        Ok(())
     }
     #[test]
     fn full_jitter_includes_zero_and_upper_bound_without_a_half_second_floor() -> TestResult {
