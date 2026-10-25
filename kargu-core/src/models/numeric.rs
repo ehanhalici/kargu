@@ -6,6 +6,12 @@
 //! fn output(_: OutputTokenRate) {}
 //! fn wrong(input: InputTokenRate) { output(input); }
 //! ```
+//! Cache write pricing cannot substitute for cache read pricing:
+//! ```compile_fail
+//! use kargu_core::models::{CacheReadTokenRate, CacheWriteTokenRate};
+//! fn read(_: CacheReadTokenRate) {}
+//! fn wrong(write: CacheWriteTokenRate) { read(write); }
+//! ```
 //! Context and output capacities are not interchangeable:
 //! ```compile_fail
 //! use kargu_core::models::{ContextCapacity, OutputCapacity};
@@ -170,6 +176,14 @@ rate!(
 rate!(
     OutputTokenRate,
     "Exact USD per output token, distinct from input pricing."
+);
+rate!(
+    CacheReadTokenRate,
+    "Exact USD per cached input token read, not an ordinary input rate."
+);
+rate!(
+    CacheWriteTokenRate,
+    "Exact USD per cache-write token, not a cache-read rate."
 );
 
 macro_rules! capacity {

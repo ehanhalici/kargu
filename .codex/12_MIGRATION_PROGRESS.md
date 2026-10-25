@@ -1,5 +1,22 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Async metadata sözleşmesi onayı ve canonical field temeli
+
+Kullanıcı async setter + son committed UI snapshot sözleşmesini onayladı;
+önceki bekleyen karar çözüldü. models/metadata altında exact RawValue sınırı,
+Missing/Invalid/Known gözlemleri, ayrı cache-read/cache-write rate tipleri,
+kapasite/flag/parameter/vision/label ve declared effort path normalizasyonu
+eklendi. Path/list sınırları ve duplicate semantic key reddi korunur; model
+adından yetenek çıkarılmaz. Fractional >2^53 token ve invalid9/submicro fiyat
+fixture'ları dahil yedi native test; iki yeni compile-fail birim kanıtı vardır.
+**238 native + 15 compile-fail**, fmt ve strict all-targets Clippy geçti.
+
+Bu dilim domain temelidir: default editor setter/store/field consumer henüz
+değişmedi, üretimdeki legacy invalid9/free hatasının kapandığı iddiası yoktur.
+Native revisioned owner, async publication/preparation barrier ve ardından
+Elisp semantic writer/reader silme işi devam eder. 01, kullanıcının shell.nix
+ve 07 değişiklikleri korunur; dış hesap/API/uygulama model turu çalıştırılmadı.
+
 ## 2026-10-25 — Metadata JSON feature etkileşimi için native regresyon kapısı
 
 Gerçek strict IPC decoder üzerinden yeni test ordinary float temperature,

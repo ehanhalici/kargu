@@ -1,5 +1,27 @@
 # Model metadata: next native boundary
 
+## Approved publication contract — 2026-10-25
+
+The user approved asynchronous setters and synchronous last-committed UI reads
+("tamam devam et, uygundur"). Submission is not publication: setters must
+return owned asynchronous work, and failure must preserve the last committed
+projection. Connection preparation must await its captured metadata intent.
+Getters must not start the core, block on RPC, or merge speculative overrides.
+The earlier pending-decision notes below are historical, not a current blocker.
+Implementation proceeds in independently verified native/domain and consumer
+cutover slices; legacy readers are removed only after their consumers move.
+
+Native field foundation now lives in models/metadata (raw/effort/text modules).
+Missing/Invalid/Known distinguishes malformed rates from exact zero. Context,
+output and cache rates have separate units. Exact RawValue fixtures include
+9007199254740992.5 (invalid capacity, never rounded), 1e-38, invalid9 and duplicate
+declared reasoning keys. Only declared effort paths are followed, with bounded
+names/path lengths/list sizes and explicit disable precedence. Raw inspector
+pricing retains exact strings, not floating-point prices. Seven fixtures and
+two new compile-fail proofs passed: **238 native + 15 compile-fail**, fmt and
+strict all-targets Clippy. No editor consumer changed in this foundation slice;
+the existing full ERT result above is not a fresh run for these new modules.
+
 ## Status and observed evidence — 2026-10-25
 
 Default HTTP resilience is native at 71dc32d (40); live-model metadata is NOT
