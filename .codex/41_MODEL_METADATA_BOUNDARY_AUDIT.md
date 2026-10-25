@@ -121,3 +121,58 @@ cross this scoped boundary before any generic JSON number conversion.
 The rebuilt scoped-feature binary passed **1186/1186 full source ERT**,
 0 unexpected, **124.97 s**. The failed global-feature experiment is not counted
 as a passing gate; existing IPC/admission tests were retained unchanged.
+
+## Native discovery envelope consumer cutover
+
+Default /models now captures the GET-only model_catalog response profile. The
+api_model_catalog capability is required before application startup or request
+delivery. Ordinary raw GET/POST keeps its prior contract; a missing capability
+does not cause a raw fallback after network side effects. A generative POST
+cannot select the discovery profile. Unexpected SSE/sniffed non-JSON never
+publishes a discovery event.
+
+models/catalog parses bounded raw JSON once at the heterogeneous boundary and
+returns only {models: [...]} with canonical typed ModelId identity. data/models/
+items/bare-array and string ID records converge here; Google models/ prefix is
+removed, opaque case/namespaces and input order survive. Duplicate envelope,
+record and pricing-object keys fail, rather than last-key-wins admission.
+Repeated model IDs retain existing ordered-record/last metadata behavior; this
+slice does not add another alias/override store. Other opaque nested objects
+are not advertised as a universal duplicate-key rejection boundary.
+
+Malformed/missing/null lists and provider errors are NOT successful emptiness;
+only an explicit empty array clears the corresponding owned cache. Unknown/
+invalid record identity fails the whole response before publication, not a
+silent filtered-empty success. Limits are 8 MiB raw discovery / 20,000 records,
+in addition to captured HTTP raw limits and the existing paged body/1 MiB frame
+gate. Known pricing object/direct input/output-cost numeric lexemes become
+lossless strings before generic JSON decoding. No f64 money calculation is
+introduced. This preserves source precision for the subsequent rate parser;
+it does not yet fix legacy field-reader invalid9/free classification.
+
+Deleted kargu--extract-models-from-json and kargu--catalog-response. The editor
+now decodes the single canonical vector, checks its projection shape and keeps
+the existing captured provider/generation/application callback. It does not
+recognize provider envelopes or echo raw error bodies. Existing mock callback
+fixtures now supply canonical DTOs; original raw envelope assertions moved to
+native pure/socket tests and real public GUI -> core -> loopback cases. No old
+assertions, module baseline or cache/pruning/freshness requirements were dropped.
+
+Six native catalog fixtures + three HTTP profile tests cover envelopes,
+identity, duplicate keys, malformed/null/error, exact price lexemes, hard bounds,
+GET-only/SSE refusal. Five new real editor tests cover public provider discovery,
+unchanged cache on errors versus explicit empty prune, bare-ID refresh clearing
+old capabilities, >1 MiB paging/exact price strings, and missing capability
+before owner/GET startup. **230 native + 13 compile-fail**, fmt/strict Clippy
+passed; **90/90 focused ERT** passed. Touched two production Elisp files passed
+Werror compilation; their two generated elc artifacts were removed before the
+full source rerun. Checkdoc is clean apart from environment OpenPGP autoload.
+Final source rerun passed **1191/1191 full ERT**, 0 unexpected, **126.19 s**
+at 12:23:42 Europe/Istanbul. One legacy application-owner callback fixture
+also needed the canonical envelope; its actual owner assertions were retained.
+
+Still open: full typed field/capability/rate normalization, native revisioned
+store/overrides and preparation barrier. The existing synchronous custom setter
+contract is unchanged in this slice. The user was asked whether an explicit
+async completion plus last-committed UI snapshot contract is acceptable for that
+next cutover; no silent setter semantic change has been implemented.

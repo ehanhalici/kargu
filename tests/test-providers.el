@@ -221,16 +221,22 @@
       (should (equal (kargu-aget tuning "effort") "medium")))))
 
 (ert-deftest kargu-providers-extract-models-test ()
-  "`kargu--extract-models-from-json' handles data, models, and bare vectors."
-  ;; OpenAI / standard style: {"data": [{"id": "m1"}]}
-  (let ((res1 (kargu--extract-models-from-json '(("data" . [(("id" . "m1"))])))))
-    (should (equal (kargu-aget (aref res1 0) "id") "m1")))
-  ;; Gemini / Ollama style: {"models": [{"id": "m2"}]}
-  (let ((res2 (kargu--extract-models-from-json '(("models" . [(("id" . "m2"))])))))
-    (should (equal (kargu-aget (aref res2 0) "id") "m2")))
-  ;; Bare vector style: [(("id" . "m3"))]
-  (let ((res3 (kargu--extract-models-from-json [(("id" . "m3"))])))
-    (should (equal (kargu-aget (car res3) "id") "m3"))))
+  "Editor reads only native canonical records; provider envelopes live in Rust."
+  ;; Raw data/models/items/bare-array cases are actual native models_catalog.rs
+  ;; fixtures and public GUI socket cases in test-native-model-catalog.el.
+  (let ((kargu--catalog-generations (make-hash-table :test #'equal))
+        (kargu--live-models-cache (make-hash-table :test #'equal)) result)
+    (puthash "fixture" 1 kargu--catalog-generations)
+    (let ((task (kargu-async-start (lambda (models failure)
+                                    (should-not failure) (setq result models)))))
+      (unwind-protect
+          (progn
+            (kargu--catalog-receive task "fixture" 1
+              "{\"models\":[{\"id\":\"m1\"},{\"id\":\"m2\"},{\"id\":\"m3\"}]}")
+            (should (equal (mapcar (lambda (model) (kargu-aget model "id")) result)
+                           '("m1" "m2" "m3")))
+            (should (equal (gethash "fixture" kargu--live-models-cache) '("m1" "m2" "m3"))))
+        (kargu-async-cancel task)))))
 
 (ert-deftest kargu-providers-tuning-cycle-test ()
   "`kargu-tune-cycle-reasoning-effort' cycles the model's API effort list."

@@ -1,5 +1,27 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — /models discovery envelope native consumer cutover
+
+Default katalog GET'i api_model_catalog capability ve GET-only response profile
+ister. data/models/items/bare liste/string ID dönüşümü, typed ModelId, explicit
+boşluk, duplicate control key ve resource sınırları models/catalog altındadır.
+Bilinen fiyat lexeme'leri generic float decode öncesinde kayıpsız string olur.
+Eski Elisp extract-models/catalog-response parser'ları silindi; editör yalnız
+canonical vector DTO ve captured provider/generation/owner teslimi yapar.
+
+**230 native + 13 compile-fail**, fmt/locked build/strict Clippy; **90/90 focused
+ERT**, iki üretim dosyası Werror bytecompile/checkdoc ve iki geçici elc silme
+sonrası **1191/1191 full source ERT**, 0 unexpected, **126.19 s** geçti. Ham
+envelope assertion'ları native pure/socket ve beş gerçek public GUI testine
+eşlendi; cache/override/freshness/owner assertion'ları korunur. 1 MiB frame limiti
+artmadı; büyük katalog paging ve exact-price text gerçek hatta doğrulandı.
+
+Tam field/rate/capability normalizasyonu, native revisioned store/override ve
+preparation bariyeri açıktır; invalid9/free legacy reader hatası kapandı iddiası
+yoktur. Senkron setter sözleşmesi bu dilimde değiştirilmedi; sonraki async
+completion/UI last-committed snapshot kararı kullanıcıya soruldu. Detay 41'de;
+01, kullanıcı shell.nix/07 korunur. Gerçek hesap/API/CLI model turu yoktur.
+
 ## 2026-10-25 — Metadata için kesin native sayısal alan tipleri
 
 models/numeric altında ayrı context/output capacity ve input/output USD/token

@@ -88,6 +88,14 @@ enum HttpMethod {
     Post,
 }
 
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ResponseProfile {
+    #[default]
+    Raw,
+    ModelCatalog,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RequestDto {
@@ -96,6 +104,8 @@ struct RequestDto {
     headers: BTreeMap<String, SecretString>,
     body: Option<String>,
     stream: bool,
+    #[serde(default)]
+    response_profile: ResponseProfile,
     timeouts: Timeouts,
     #[serde(default)]
     limits: super::stream::StreamLimits,
@@ -120,11 +130,17 @@ pub struct HttpRequest {
     timeouts: Timeouts,
     pub(super) limits: super::stream::StreamLimits,
     pub(super) wire: super::wire::WireCodec,
+    pub(super) response_profile: ResponseProfile,
 }
 
 impl TryFrom<RequestDto> for HttpRequest {
     type Error = ApiError;
     fn try_from(dto: RequestDto) -> Result<Self, ApiError> {
+        if matches!(dto.response_profile, ResponseProfile::ModelCatalog)
+            && !matches!(dto.method, HttpMethod::Get)
+        {
+            return Err(ApiError::InvalidRequest);
+        }
         if dto.headers.len() > 64
             || dto
                 .body
@@ -201,6 +217,7 @@ impl TryFrom<RequestDto> for HttpRequest {
             timeouts: dto.timeouts,
             limits: dto.limits,
             wire,
+            response_profile: dto.response_profile,
         })
     }
 }

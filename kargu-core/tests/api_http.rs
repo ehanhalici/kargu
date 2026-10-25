@@ -11,6 +11,91 @@ use std::{
 use tokio_util::sync::CancellationToken;
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+#[tokio::test]
+async fn catalog_profile_normalizes_real_gets_and_preserves_price_lexemes() -> TestResult {
+    for source in [
+        r#"{"data":[{"id":"m","pricing":{"prompt":0.000000000000000000123456789012345678}}]}"#,
+        r#"{"models":[{"name":"models/m"}]}"#,
+        r#"{"items":["m"]}"#,
+        r#"["m"]"#,
+    ] {
+        let body = source.to_owned();
+        let (url, thread) = server(move |mut socket| {
+            let _ = write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+        })?;
+        let input: HttpRequest =
+            serde_json::from_value(json!({"url":url,"method":"get","headers":{},
+            "body":null,"stream":false,"response_profile":"model_catalog","timeouts":timers()}))?;
+        let result = execute(
+            input,
+            |_| async { Err(ApiError::Protocol) },
+            CancellationToken::new(),
+        )
+        .await?;
+        assert_eq!(result.pointer("/models/0/id"), Some(&json!("m")));
+        if source.contains("pricing") {
+            assert_eq!(
+                result.pointer("/models/0/pricing/prompt"),
+                Some(&json!("0.000000000000000000123456789012345678"))
+            );
+        }
+        thread.join().map_err(|_| "fixture failed")?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn catalog_profile_rejects_malformed_and_streaming_before_any_event() -> TestResult {
+    for (content_type, body) in [
+        ("application/json", "{}"),
+        ("application/json", "{\"data\":null}"),
+        (
+            "application/json",
+            "{\"data\":[],\"error\":\"synthetic-secret\"}",
+        ),
+        ("text/event-stream", "data: [DONE]\n\n"),
+        ("text/plain", "data: [DONE]\n\n"),
+    ] {
+        let (url, thread) = server(move |mut socket| {
+            let _ = write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        })?;
+        let input: HttpRequest =
+            serde_json::from_value(json!({"url":url,"method":"get","headers":{},
+            "body":null,"stream":false,"response_profile":"model_catalog","timeouts":timers()}))?;
+        let events = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observer = events.clone();
+        let result = execute(
+            input,
+            move |_| {
+                observer.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                async { Ok(()) }
+            },
+            CancellationToken::new(),
+        )
+        .await;
+        assert!(matches!(result, Err(ApiError::Protocol)));
+        assert_eq!(events.load(std::sync::atomic::Ordering::Relaxed), 0);
+        thread.join().map_err(|_| "fixture failed")?;
+    }
+    Ok(())
+}
+
+#[test]
+fn catalog_profile_cannot_be_used_for_a_generative_post() {
+    let input = json!({"url":"http://127.0.0.1:1","method":"post","headers":{},
+        "body":"{}","stream":false,"response_profile":"model_catalog","timeouts":timers()});
+    assert!(serde_json::from_value::<HttpRequest>(input).is_err());
+}
+
 fn server(
     reply: impl FnOnce(TcpStream) + Send + 'static,
 ) -> Result<(String, std::thread::JoinHandle<()>), Box<dyn std::error::Error>> {

@@ -37,6 +37,7 @@
 (require 'tests/test-run-budget)
 (require 'tests/test-native-retry)
 (require 'tests/test-native-circuit)
+(require 'tests/test-native-model-catalog)
 (require 'tests/test-wave1-empirical-challenge)
 (require 'tests/test-tool-execution-contract)
 (require 'tests/test-transport-contract)

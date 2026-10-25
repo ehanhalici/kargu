@@ -187,6 +187,7 @@ OPTIONS contain captured :auth/:wire/:tuning, :body, :timeout, :stream,
 :on-delta, :then and :else; raw :headers are reserved for explicit callers.
 :retry captures native policy; :on-retry observes it before native replay ACK.
 :circuit captures native policy and requires :application and :retry.
+:model-catalog selects native GET-only discovery envelope normalization.
 No network request or subprocess is ever started by Elisp."
   (let* ((application (plist-get options :application))
          (url (copy-sequence url))
@@ -234,12 +235,15 @@ No network request or subprocess is ever started by Elisp."
                                   (when (plist-get options :budget) '("api_budget"))
                                   (when (plist-get options :retry) '("api_retry"))
                                   (when (plist-get options :circuit) '("api_circuit"))
+                                  (when (plist-get options :model-catalog) '("api_model_catalog"))
                                   (when (or (not (eq (gethash "wire" arguments) :json-null))
                                             (eq (gethash "cache_markers" arguments) t)) '("api_wire"))
                                   (unless (eq (gethash "tuning" arguments) :json-null) '("api_request_policy"))
                                   (unless (eq (gethash "auth" arguments) :json-null) '("api_auth"))))))
     (when (and (plist-get options :circuit) (not (and application (plist-get options :retry))))
       (error "Native circuit requires an application and retry profile"))
+    (when (plist-get options :model-catalog)
+      (puthash "response_profile" "model_catalog" arguments))
     ;; copy-tree does not copy mutable strings: copy every authority-bearing
     ;; string before waiting for startup, not only the surrounding cons cells.
     (dolist (pair (plist-get options :headers))

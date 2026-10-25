@@ -58,19 +58,6 @@ Only unambiguous short aliases in that provider are accepted."
       (kargu-model-store-get (or provider (kargu--provider-name)) id))))
 
 
-(defun kargu--extract-models-from-json (data)
-  "Extract a list of model alists or IDs from decoded JSON DATA."
-  (cond
-   ((null data) nil)
-   ((vectorp data) (append data nil))
-   ((or (listp data) (hash-table-p data))
-    (or (kargu-aget data "data")
-        (kargu-aget data "models")
-        (kargu-aget data "items")
-        (and (consp data) (consp (car data))
-             (or (kargu-aget (car data) "id")
-                 (kargu-aget (car data) "name"))
-             data)))))
 
 (defconst kargu--model-property-aliases
   '(("context-window" . "context_length") ("max-output" . "max_output")
@@ -511,27 +498,17 @@ An explicit true flag is sufficient even without an API effort list."
     (kargu-model-store-retain provider ids)
     (puthash provider ids (kargu-metadata-table :catalog kargu--live-models-cache))))
 
-(defun kargu--catalog-response (body)
-  "Return the model list in BODY, rejecting malformed and provider errors."
-  (let* ((data (kargu-json-to-record (kargu--json-decode-safe body)))
-         (error (kargu-aget data "error"))
-         (models (kargu--extract-models-from-json data)))
-    (when (and error (not (memq error '(:json-null :json-false))))
-      (error "%s" (or (kargu-aget error "message") error)))
-    (unless (or models (vectorp data) (equal (string-trim body) "[]")
-                (and (consp data)
-                     (seq-some (lambda (key) (assoc key data)) '("data" "models" "items"))))
-      (error "Unexpected /models response: %s" (truncate-string-to-width (or body "") 200)))
-    (unless (or (null models) (listp models) (vectorp models))
-      (error "Invalid model list"))
-    (kargu-seq-to-list models)))
 
 (defun kargu--catalog-receive (task provider generation body)
-  "Complete TASK with BODY, updating PROVIDER cache only for GENERATION."
-  (let ((models (kargu--catalog-response body)))
-    (when (= generation (gethash provider (kargu-metadata-table :generations kargu--catalog-generations)))
-      (kargu--catalog-cache-live-models provider models))
-    (kargu-async-finish task models)))
+  "Deliver canonical native BODY to TASK; project PROVIDER only for GENERATION."
+  (let* ((projection (kargu--json-decode-safe body))
+         (records (kargu-aget projection "models")))
+    (unless (and (vectorp records) (<= (length records) 20000))
+      (error "Invalid native model catalog projection"))
+    (let ((models (kargu-json-to-record (append records nil))))
+      (when (= generation (gethash provider (kargu-metadata-table :generations kargu--catalog-generations)))
+        (kargu--catalog-cache-live-models provider models))
+      (kargu-async-finish task models))))
 
 (defun kargu--catalog-request (task provider generation)
   "Start catalog TASK for PROVIDER and cache GENERATION."
@@ -542,6 +519,7 @@ An explicit true flag is sufficient even without an API effort list."
       (error "No API key for provider %s" provider))
     (let ((request
            (kargu-transport-request 'get url :auth (kargu-api-auth-intent key provider)
+                :model-catalog t
                 :application (kargu-application-context)
                 :wire (if (kargu-connection-current) (kargu-connection-setting :wire)
                         (kargu-provider-format-record (kargu-provider-format provider)))

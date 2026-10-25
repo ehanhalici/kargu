@@ -241,7 +241,7 @@
       (let ((kargu-application--bound first))
         (kargu-api-list-models #'ignore "openrouter"))
       (let ((kargu-application--bound second))
-        (funcall callback "{\"data\":[{\"id\":\"owned-model\"}]}")
+        (funcall callback "{\"models\":[{\"id\":\"owned-model\"}]}")
         (should-not (kargu-selection-models-known-p "openrouter")))
       (let ((kargu-application--bound first))
         (should (equal (kargu-selection-model-candidates "openrouter") '("owned-model")))))))

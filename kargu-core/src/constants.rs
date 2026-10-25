@@ -71,6 +71,10 @@ pub mod limits {
     pub const API_CIRCUITS: usize = 256;
     /// Bounded entropy rejection attempts; failure never becomes zero jitter.
     pub const API_RANDOM_DRAWS: usize = 32;
+    /// Maximum raw discovery response accepted by the model envelope boundary.
+    pub const MODEL_CATALOG_BYTES: usize = 8 * 1024 * 1024;
+    /// Maximum explicit model records in one complete discovery response.
+    pub const MODEL_CATALOG_RECORDS: usize = 20_000;
     /// Retained charges in one API accounting lifetime.
     pub const API_BUDGET_ATTEMPTS: u64 = 10_000;
     /// Accepted logical compactions per accounting lifetime.
@@ -127,7 +131,7 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 20] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 21] = [
         "api_request",
         "api_wire",
         "api_request_policy",
@@ -136,6 +140,7 @@ pub mod protocol {
         "api_retry",
         "api_circuit",
         "api_failure",
+        "api_model_catalog",
         "application_lifecycle",
         "application_close",
         "session_lifecycle",

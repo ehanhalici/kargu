@@ -105,8 +105,12 @@ The editor reads it for synchronous startup, then receives the validated
 core revision before the connection becomes ready. Explicit user provider
 registrations survive refresh. Credentials remain in the editor's auth port.
 Wire/request policy, credential/header assembly and default chat retry/circuit
-decisions are native. Live-model metadata normalization and the wider agent
-run/history migration remain separate work.
+decisions are native. Default live-model discovery also normalizes provider
+envelopes in Rust (requiring `api_model_catalog`) before the editor sees a
+canonical list. Explicit empty catalogs prune that provider; malformed/null/error
+responses retain its last good cache. Price number lexemes cross this boundary
+as lossless decimal strings. Semantic model-field normalization, the metadata
+store/override cutover and wider agent run/history migration remain open.
 
 Chat retries stay within one native logical exchange, with a fresh budget debit
 before every physical attempt. `kargu-api-retry-max` is the single retry limit

@@ -102,6 +102,13 @@ where
                 .next()
                 .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"))
         });
+    let catalog = matches!(
+        request.response_profile,
+        super::domain::ResponseProfile::ModelCatalog
+    );
+    if catalog && explicit_sse {
+        return Err(ApiError::Protocol);
+    }
     let mut stream = response.bytes_stream();
     let mut decoder = if explicit_sse {
         Some(StreamDecoder::new(request.limits))
@@ -130,6 +137,9 @@ where
         if !sniffed && let Some(first) = chunk.iter().find(|byte| !byte.is_ascii_whitespace()) {
             sniffed = true;
             if *first != b'{' && *first != b'[' {
+                if catalog {
+                    return Err(ApiError::Protocol);
+                }
                 decoder = Some(StreamDecoder::new(request.limits));
                 json.clear();
             }
@@ -145,6 +155,16 @@ where
         publish(deltas, &events).await?;
         request.wire.decode(result)
     } else {
+        if catalog {
+            let source = std::str::from_utf8(&json).map_err(|_| ApiError::Protocol)?;
+            return crate::models::catalog::ModelCatalog::try_from(source)
+                .map(crate::models::catalog::ModelCatalog::into_snapshot)
+                .map_err(|error| match error {
+                    crate::models::catalog::CatalogError::Limit => ApiError::Limit,
+                    crate::models::catalog::CatalogError::Shape
+                    | crate::models::catalog::CatalogError::Identity => ApiError::Protocol,
+                });
+        }
         let value: Value = serde_json::from_slice(&json).map_err(|_| ApiError::Protocol)?;
         if value
             .get("error")

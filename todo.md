@@ -71,6 +71,11 @@ varsayılanı bu portlara geçirildi; Elisp retry/backoff/timer ve circuit admis
 sayaç/probe motorları silindi (.codex/40). Native terminal kategoriler Result
 olarak gelir; plz DTO/bağımlılığı kaldırıldı. Manuel recovery, verilen native
 reset'in ACK'ini bekler; UI görünümü admission kararı vermez.
+Model metadata için kesin rate/context/output alan tipleri ve scoped RawValue
+sınırı eklendi (.codex/41). Default /models discovery envelope normalizasyonu
+native profile'a taşındı; Elisp sağlayıcı yanıt ayıklama parser'ları silindi.
+Tam field/capability/rate normalizasyonu, revision'lı store/override ve hazırlık
+bariyeri hâlâ açıktır; senkron custom setter sözleşmesi henüz değiştirilmedi.
 01 uyum denetimi ve kalan kaynak-sahipliği bulguları .codex/39'da tutulur;
 testlerin yeşil olması bütün Rust ağacının mimari uyum sertifikası değildir.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
