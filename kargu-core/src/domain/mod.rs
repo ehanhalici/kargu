@@ -128,6 +128,12 @@ identity!(
     "Single-use, server-held approval identity."
 );
 identity!(JobId, "job_", "One supervised subprocess identity.");
+identity!(ProbeId, "probe_", "One circuit half-open probe lease.");
+identity!(
+    CircuitId,
+    "circuit_",
+    "One non-reusable circuit accounting owner."
+);
 identity!(
     BudgetId,
     "budget_",
@@ -202,6 +208,14 @@ counter!(
     "Reasoning usage; not automatically added to output usage."
 );
 counter!(StepCount, "Tool execution steps, never a token quantity.");
+counter!(
+    UpstreamFailures,
+    "Consecutive classified upstream failures."
+);
+counter!(
+    CircuitRevision,
+    "Circuit lease revision, independent of run generations."
+);
 counter!(
     RetryAttempt,
     "Request retry count, independent of tool steps."

@@ -5,6 +5,7 @@ pub mod cache;
 mod domain;
 mod http;
 pub mod policy;
+pub mod resilience;
 pub mod stream;
 pub mod wire;
 pub use domain::{HttpRequest, ModelId, SecretString};

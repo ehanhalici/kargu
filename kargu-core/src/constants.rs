@@ -59,6 +59,16 @@ pub mod limits {
     pub const API_REQUESTS: usize = 8;
     /// Network events waiting for the mailbox; a completion batch adds one barrier.
     pub const API_EVENTS: usize = 16;
+    /// Automatic physical retries per logical API operation.
+    pub const API_RETRIES: u64 = 10;
+    /// Largest captured exponential jitter window.
+    pub const API_BACKOFF_MS: u64 = 60_000;
+    /// Maximum supported server wait or circuit cooldown.
+    pub const API_SERVER_WAIT_MS: u64 = 86_400_000;
+    /// Largest accepted circuit failure threshold.
+    pub const API_CIRCUIT_FAILURES: u64 = 1_000;
+    /// Bounded entropy rejection attempts; failure never becomes zero jitter.
+    pub const API_RANDOM_DRAWS: usize = 32;
     /// Retained charges in one API accounting lifetime.
     pub const API_BUDGET_ATTEMPTS: u64 = 10_000;
     /// Accepted logical compactions per accounting lifetime.

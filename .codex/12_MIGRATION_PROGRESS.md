@@ -1,5 +1,21 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Typed retry / single-probe circuit domain foundation
+
+`api/resilience/` typed policy, bounded unbiased Full Jitter, RFC Retry-After ve
+move-only circuit outcome lease uygular. Foreign same-revision lease, pre-reset/
+pre-open geç sonuç ve probe cancel sınırları testlidir. Bu kesim henüz canlı
+consumer portu değildir; capability ilan edilmedi, legacy retry/circuit hâlâ
+canlıdır. Mailbox budget/observer/probe kompozisyon yükümlülükleri 37'dedir.
+
+**182 Rust testi + 5 compile-fail**, locked build/fmt/strict Clippy geçer.
+**1170/1170 full source ERT**, 0 unexpected, **124.27 s**; 36'daki deadline
+regresyonu da bu full koşuya dahildir. getrandom 0.4.3 mevcut transitive'den
+explicit dependency oldu; yeni tek çözümlenen paket httpdate 1.0.3'tür. Resmî
+protokol/kütüphane ve yerel lock kaynakları kontrol edildi; ücretli/harici
+uygulama çağrısı yok. Büyük Retry-After alanının mevcut IO capture'da kaybı,
+canlı port öncesi düzeltilmesi gereken açık yükümlülük olarak 37'ye eklendi.
+
 ## 2026-10-25 — Budget deadline / upstream timeout ayrımı
 
 Native `run_deadline`, fiziksel attempt `deadline`'ından ayrıldı. Owner budget
