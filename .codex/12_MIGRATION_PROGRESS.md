@@ -1,5 +1,17 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — 01 audit: kaynak sahibi retry typestate
+
+Independent retry/stage/charge Options ve optional admission tuple kaldırıldı.
+DTO TryFrom'da Single/Retry intent'e ayrılır; her phase kendine ait ticket veya
+reverse correlation taşır ve geçiş önceki phase'i tüketir. Mailbox heterojen
+saklama enum'u korunur, boş stage yoktur. Yeni compile-fail örnekleri yanlış
+aşamada replay/observer ve aynı replay hakkının tekrar kullanımını reddeder.
+IO, budget/owner/ACK kararları ve gerçek drain actor sınırında korunur; 39'da
+detaylar vardır. **209 native + 9 compile-fail**, fmt/build/strict Clippy ve
+**1185/1185 full source ERT**, 0 unexpected, **128.51 s** geçti. 01 ve kullanıcı
+shell.nix/07 değişiklikleri değiştirilmedi.
+
 ## 2026-10-25 — 01 audit: API sayfa boyutu alan tipi
 
 Raw usize ve tekrarlanan zero/progress kontrolü kaldırıldı; `ApiPageBytes`

@@ -3,6 +3,7 @@
 mod admission;
 mod budget;
 mod circuit;
+mod flight;
 mod retry;
 mod worker;
 use super::pending::PendingRequests;
@@ -35,11 +36,13 @@ struct Pending {
     cancel: CancellationToken,
     published: bool,
     terminal: Option<ApiError>,
-    charge: Option<budget::Charge>,
     budget_id: Option<crate::domain::BudgetId>,
-    retry: Option<retry::Operation>,
     snapshot: Option<Value>,
     circuit: Option<circuit::Grant>,
+}
+struct Active {
+    pending: Pending,
+    flight: flight::Flight,
 }
 struct Event {
     id: RpcId,
@@ -66,7 +69,7 @@ struct Outcome {
 }
 
 pub(super) struct ApiRequests {
-    pending: HashMap<RpcId, Pending>,
+    pending: HashMap<RpcId, Active>,
     workers: JoinSet<(RpcId, Completion)>,
     sender: mpsc::Sender<Event>,
     events: mpsc::Receiver<Event>,
@@ -102,7 +105,7 @@ impl ApiRequests {
             || self
                 .pending
                 .values()
-                .any(|pending| &pending.scope.application_id == id)
+                .any(|active| &active.pending.scope.application_id == id)
     }
     pub fn contains(&self, id: &RpcId) -> bool {
         self.pending.contains_key(id) || self.budgets.contains(id)
@@ -124,7 +127,7 @@ impl ApiRequests {
         self.budgets.rpc(host, method, id, params, |application| {
             pending
                 .values()
-                .any(|request| &request.scope.application_id == application)
+                .any(|active| &active.pending.scope.application_id == application)
         })
     }
     pub fn collect(&mut self, host: &Host) -> Vec<Value> {
@@ -133,7 +136,7 @@ impl ApiRequests {
         let replies = self.budgets.collect(host, |id| {
             pending
                 .values()
-                .any(|request| request.budget_id.as_ref() == Some(id))
+                .any(|active| active.pending.budget_id.as_ref() == Some(id))
         });
         self.sweep(host);
         replies
@@ -151,15 +154,14 @@ impl ApiRequests {
         let admission::Admitted {
             scope,
             arguments,
-            charge,
-            retry,
+            flight,
             circuit,
             page_bytes,
         } = self.admit_request(host, request)?;
-        let deadline = charge.as_ref().map(|charge| charge.deadline);
-        let budget_id = charge.as_ref().map(|charge| charge.id.clone());
+        let deadline = flight.deadline();
+        let budget_id = flight.charge().map(|charge| charge.id.clone());
         let cancel = self.root.child_token();
-        let observe_entropy = retry.is_some();
+        let observe_entropy = flight.retrying();
         let expectation = if circuit.is_some() {
             worker::ResponseExpectation::Model
         } else {
@@ -167,16 +169,17 @@ impl ApiRequests {
         };
         self.pending.insert(
             id.clone(),
-            Pending {
-                scope,
-                cancel: cancel.clone(),
-                published: false,
-                terminal: None,
-                charge,
-                budget_id,
-                retry,
-                snapshot: None,
-                circuit,
+            Active {
+                pending: Pending {
+                    scope,
+                    cancel: cancel.clone(),
+                    published: false,
+                    terminal: None,
+                    budget_id,
+                    snapshot: None,
+                    circuit,
+                },
+                flight,
             },
         );
         self.workers.spawn(
@@ -196,15 +199,16 @@ impl ApiRequests {
     }
     pub fn cancel(&mut self, id: &RpcId) {
         self.budgets.cancel_waiter(id);
-        if let Some(pending) = self.pending.get(id) {
-            pending.cancel.cancel();
+        if let Some(active) = self.pending.get(id) {
+            active.pending.cancel.cancel();
         }
     }
     pub fn cancel_all(&mut self) {
         self.root.cancel();
     }
     pub fn sweep(&mut self, host: &Host) {
-        for pending in self.pending.values() {
+        for active in self.pending.values() {
+            let pending = &active.pending;
             if !host.owns_read_scope(&pending.scope)
                 || pending
                     .budget_id
@@ -253,16 +257,17 @@ impl ApiRequests {
     ) -> Result<Option<Value>, CoreError> {
         match ready {
             Ready::Event(event) => {
-                let Some(pending) = self.pending.get_mut(&event.id) else {
+                let Some(active) = self.pending.get_mut(&event.id) else {
                     return Ok(None);
                 };
+                let pending = &mut active.pending;
                 if pending.cancel.is_cancelled() || !host.owns_read_scope(&pending.scope) {
                     return Ok(None);
                 }
-                if pending
-                    .charge
-                    .as_ref()
-                    .is_some_and(|charge| charge.deadline.expired())
+                if active
+                    .flight
+                    .deadline()
+                    .is_some_and(|deadline| deadline.expired())
                 {
                     pending.terminal = Some(ApiError::RunDeadline);
                     pending.cancel.cancel();
@@ -294,20 +299,26 @@ impl ApiRequests {
     pub async fn drain(&mut self) -> Result<(), CoreError> {
         self.cancel_all();
         self.events.close();
+        let mut drained = Vec::with_capacity(self.pending.len());
         while let Some(result) = self.workers.join_next().await {
             let (id, outcome) = result.map_err(|_| CoreError::CleanupFailed)?;
-            self.collect_usage(&id, outcome)?;
+            drained.push(self.collect_usage(&id, outcome)?);
         }
         while let Some(ready) = self.ready.pop_front() {
             if let Ready::Completed(id, outcome) = ready {
-                self.collect_usage(&id, outcome)?;
+                drained.push(self.collect_usage(&id, outcome)?);
             }
         }
-        for pending in self.pending.values_mut() {
-            if let Some(charge) = pending.charge.take() {
+        for (_, active) in self.pending.drain() {
+            if let Some(charge) = active.flight.drained() {
                 self.budgets.finish(charge, ObservedUsage::default())?;
             }
-            if let Some(grant) = pending.circuit.take() {
+            drained.push(active.pending);
+        }
+        // Even completed requests retain their logical circuit grants until
+        // every IO/wait/reverse worker in this connection has been joined.
+        for pending in drained {
+            if let Some(grant) = pending.circuit {
                 self.circuits.finish(grant, None)?;
             }
         }
@@ -316,14 +327,13 @@ impl ApiRequests {
         while self.events.try_recv().is_ok() {}
         Ok(())
     }
-    fn collect_usage(&mut self, id: &RpcId, completion: Completion) -> Result<(), CoreError> {
-        if let Completion::Attempt(outcome) = completion
-            && let Some(pending) = self.pending.get_mut(id)
-            && let Some(charge) = pending.charge.take()
-        {
-            self.budgets.finish(charge, outcome.usage)?;
+    fn collect_usage(&mut self, id: &RpcId, completion: Completion) -> Result<Pending, CoreError> {
+        let active = self.pending.remove(id).ok_or(CoreError::CleanupFailed)?;
+        let (charge, usage) = active.flight.collect_during_drain(completion)?;
+        if let Some(charge) = charge {
+            self.budgets.finish(charge, usage)?;
         }
-        Ok(())
+        Ok(active.pending)
     }
 }
 
@@ -415,16 +425,17 @@ mod tests {
                 .map_err(|_| "session")?;
             api.pending.insert(
                 id.clone(),
-                Pending {
-                    scope: serde_json::from_value(scope)?,
-                    cancel: api.root.child_token(),
-                    published: false,
-                    terminal: None,
-                    charge: None,
-                    budget_id: None,
-                    retry: None,
-                    snapshot: None,
-                    circuit: None,
+                Active {
+                    pending: Pending {
+                        scope: serde_json::from_value(scope)?,
+                        cancel: api.root.child_token(),
+                        published: false,
+                        terminal: None,
+                        budget_id: None,
+                        snapshot: None,
+                        circuit: None,
+                    },
+                    flight: flight::Flight::Single(None),
                 },
             );
         }

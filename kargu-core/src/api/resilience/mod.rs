@@ -16,6 +16,7 @@
 
 mod breaker;
 mod domain;
+pub mod exchange;
 mod retry;
 mod retry_after;
 pub use breaker::{

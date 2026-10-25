@@ -1,7 +1,11 @@
 //! Captured intent -> admitted logical operation. No IO starts in this module.
 
-use super::{ApiRequests, Fault, HttpRequest, Request, budget, circuit, fault, retry};
+use super::{
+    ApiError, ApiRequests, Fault, HttpRequest, Request, budget, circuit, fault, flight::Flight,
+    retry,
+};
 use crate::{
+    api::resilience::exchange,
     application::{
         budget::DebitKind,
         host::{Host, ReadScope},
@@ -14,16 +18,40 @@ use std::sync::Arc;
 struct Captured {
     scope: ReadScope,
     arguments: Arc<HttpRequest>,
-    budget: Option<budget::BudgetRef>,
-    retry: Option<retry::Configuration>,
-    page_bytes: ApiPageBytes,
+    mode: Mode,
+}
+enum Mode {
+    Single(Option<budget::BudgetRef>),
+    Retry {
+        configuration: retry::Configuration,
+        reference: budget::BudgetRef,
+    },
+}
+impl TryFrom<Request> for Captured {
+    type Error = ApiError;
+    fn try_from(request: Request) -> Result<Self, ApiError> {
+        let mode = match (request.retry, request.budget) {
+            (None, budget) => Mode::Single(budget),
+            (Some(configuration), Some(reference)) if request.arguments.generative() => {
+                Mode::Retry {
+                    configuration,
+                    reference,
+                }
+            }
+            _ => return Err(ApiError::InvalidRequest),
+        };
+        Ok(Self {
+            scope: request.scope,
+            arguments: Arc::new(request.arguments),
+            mode,
+        })
+    }
 }
 #[must_use = "Admitted charges and leases must be retained until worker collection"]
 pub(super) struct Admitted {
     pub scope: ReadScope,
     pub arguments: Arc<HttpRequest>,
-    pub charge: Option<budget::Charge>,
-    pub retry: Option<retry::Operation>,
+    pub flight: Flight,
     pub circuit: Option<circuit::Grant>,
     pub page_bytes: ApiPageBytes,
 }
@@ -39,23 +67,28 @@ impl ApiRequests {
         if self.root.is_cancelled() || self.pending.len() >= limits::API_REQUESTS {
             return Err(fault("resource_limit", "API admission limit reached"));
         }
-        if request.retry.is_some() && (request.budget.is_none() || !request.arguments.generative())
-        {
-            return Err(Fault::params());
-        }
-        let capture = Captured {
-            scope: request.scope,
-            arguments: Arc::new(request.arguments),
-            budget: request.budget,
-            retry: request.retry,
-            page_bytes: ApiPageBytes::try_from(host.frame_limit())
-                .map_err(|_| fault("resource_limit", "API framing capacity unavailable"))?,
-        };
-        self.admit_capture(host, capture)
+        let page_bytes = ApiPageBytes::try_from(host.frame_limit())
+            .map_err(|_| fault("resource_limit", "API framing capacity unavailable"))?;
+        self.admit_capture(
+            host,
+            Captured::try_from(request).map_err(|_| Fault::params())?,
+            page_bytes,
+        )
     }
-    fn admit_capture(&mut self, host: &Host, mut capture: Captured) -> Result<Admitted, Fault> {
+    fn admit_capture(
+        &mut self,
+        host: &Host,
+        capture: Captured,
+        page_bytes: ApiPageBytes,
+    ) -> Result<Admitted, Fault> {
         let circuit = self.capture_circuit(host, &capture)?;
-        let (charge, retry) = match self.capture_charge(host, &mut capture) {
+        let flight = match self.capture_flight(
+            host,
+            &capture.scope,
+            &capture.arguments,
+            capture.mode,
+            page_bytes,
+        ) {
             Ok(admitted) => admitted,
             Err(error) => {
                 if let Some(grant) = circuit {
@@ -69,10 +102,9 @@ impl ApiRequests {
         Ok(Admitted {
             scope: capture.scope,
             arguments: capture.arguments,
-            charge,
-            retry,
+            flight,
             circuit,
-            page_bytes: capture.page_bytes,
+            page_bytes,
         })
     }
     fn capture_circuit(
@@ -80,59 +112,58 @@ impl ApiRequests {
         host: &Host,
         capture: &Captured,
     ) -> Result<Option<circuit::Grant>, Fault> {
-        match capture
-            .retry
-            .as_ref()
-            .and_then(|config| config.circuit.map(|policy| (policy, &config.policy)))
-        {
-            Some((policy, classification)) => self
+        let Mode::Retry { configuration, .. } = &capture.mode else {
+            return Ok(None);
+        };
+        match configuration.circuit {
+            Some(policy) => self
                 .circuits
                 .acquire(
                     host,
                     &capture.scope,
                     &capture.arguments,
                     policy,
-                    classification,
+                    &configuration.policy,
                 )
                 .map(Some),
             None => Ok(None),
         }
     }
-    fn capture_charge(
+    fn capture_flight(
         &mut self,
         host: &Host,
-        capture: &mut Captured,
-    ) -> Result<(Option<budget::Charge>, Option<retry::Operation>), budget::AdmissionFailure> {
-        let Some(configuration) = capture.retry.take() else {
-            return self
-                .budgets
-                .admit(
-                    host,
-                    &capture.scope,
-                    capture.budget.as_ref(),
-                    capture.arguments.generative(),
-                )
-                .map(|charge| (charge, None));
+        scope: &ReadScope,
+        arguments: &Arc<HttpRequest>,
+        mode: Mode,
+        page_bytes: ApiPageBytes,
+    ) -> Result<Flight, budget::AdmissionFailure> {
+        let (configuration, reference) = match mode {
+            Mode::Retry {
+                configuration,
+                reference,
+            } => (configuration, reference),
+            Mode::Single(budget) => {
+                return self
+                    .budgets
+                    .admit(host, scope, budget.as_ref(), arguments.generative())
+                    .map(Flight::Single);
+            }
         };
-        let reference = capture
-            .budget
-            .as_ref()
-            .ok_or(budget::AdmissionFailure::Required)?;
-        let charge = self
-            .budgets
-            .admit_metered(host, &capture.scope, reference)?;
-        let operation = retry::Operation {
+        let charge = self.budgets.admit_metered(host, scope, &reference)?;
+        let intent = retry::Intent {
             configuration,
-            arguments: capture.arguments.clone(),
+            arguments: arguments.clone(),
             reference: budget::BudgetRef {
-                budget_id: reference.budget_id.clone(),
+                budget_id: reference.budget_id,
                 kind: DebitKind::RetryAttempt,
             },
             deadline: charge.deadline,
             attempt: RetryAttempt::ZERO,
-            stage: Some(retry::Stage::Attempt),
-            page_bytes: capture.page_bytes,
+            page_bytes,
         };
-        Ok((Some(charge), Some(operation)))
+        Ok(Flight::Attempt(retry::Operation {
+            intent,
+            phase: exchange::Attempt::charged(charge),
+        }))
     }
 }
