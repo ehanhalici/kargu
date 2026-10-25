@@ -155,16 +155,27 @@ fn reset_during_observation_invalidates_late_failure_without_releasing_its_slot(
     let reset = fixture.rpc("api/circuit/reset", json!({"circuit_id":id}))?;
     assert_eq!(reset["result"]["circuits"][0]["state"], "closed");
     fixture.send("new-regular")?;
-    assert_eq!(
-        fixture.terminal("new-regular")?["result"]["circuit"]["failures"],
-        0
-    );
+    let regular = fixture.terminal("new-regular")?;
+    assert_eq!(regular["result"]["circuit"]["failures"], 0);
+    let reset_sequence = reset["result"]["circuits"][0]["sequence"]
+        .as_u64()
+        .ok_or("reset sequence")?;
+    let regular_sequence = regular["result"]["circuit"]["sequence"]
+        .as_u64()
+        .ok_or("regular sequence")?;
+    assert!(regular_sequence > reset_sequence);
     fixture.acknowledge(&observation)?;
     let reply = fixture.terminal("old-probe")?;
     assert_eq!(reply["result"]["failure"]["status"], 503);
     assert_eq!(reply["result"]["circuit"]["state"], "closed");
     assert_eq!(reply["result"]["circuit"]["failures"], 0);
     assert_eq!(reply["result"]["budget"]["requests_spent"], 5);
+    assert!(
+        reply["result"]["circuit"]["sequence"]
+            .as_u64()
+            .ok_or("late sequence")?
+            > regular_sequence
+    );
     fixture.finish()
 }
 
@@ -215,6 +226,14 @@ fn same_model_namespace_shares_circuit_but_auth_endpoint_and_application_do_not(
     let reply = fixture.terminal("other-auth")?;
     assert_eq!(reply["result"]["circuit"]["state"], "closed");
     assert_ne!(reply["result"]["circuit"]["circuit_id"], original_id);
+    assert!(
+        reply["result"]["circuit"]["sequence"]
+            .as_u64()
+            .ok_or("auth sequence")?
+            > tripped["result"]["circuit"]["sequence"]
+                .as_u64()
+                .ok_or("first sequence")?
+    );
     fixture.params["arguments"]["headers"]["Authorization"] = json!("Bearer synthetic-captured");
     let other = fixture.peer.scope()?;
     let other_budget = open(&mut fixture.peer, &other, json!({}), None)?;

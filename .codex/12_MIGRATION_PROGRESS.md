@@ -1,5 +1,20 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Native circuit GUI projection/reset köprüsü
+
+GUI yalnız exact application/connection/scope altındaki bounded, detached native
+görünümü tutar; connection sequence eski snapshot'ın reset'i geri almasını
+engeller. Reset mevcut lease üzerinden explicit RPC'dir; core başlatmaz. Yeni
+Elisp admission/counter/probe motoru yoktur. High-level varsayılan cutover henüz
+açıktır. **1185/1185 full source ERT**, 0 unexpected, **126.66 s**; touched Werror
+bytecompile/checkdoc ve **206 native + 5 compile-fail**/fmt/build/strict Clippy
+geçti. Ana eski bounded TLC de 84.273.208 distinct state/depth45 ile hatasız
+tamamlandı; Rust refinement kanıtı değildir. Ayrıntılar 38'de.
+
+Kullanıcının yeni 01 uyarısı önceliklendirildi: retry phase/charge Option
+kombinasyonları ve raw page-byte birimi somut audit bulgularıdır; sonraki dilim
+bunları düzeltir, kurallar gevşetilmez. shell.nix/07 kullanıcı değişiklikleri korunur.
+
 ## 2026-10-25 — Native circuit registry / logical retry lease composition
 
 api_circuit capability, owned snapshot/reset ve bounded native registry eklendi.

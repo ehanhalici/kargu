@@ -85,3 +85,35 @@ circuit cutover, and deletion of both legacy API and loop retry decision paths
 with explicitly mapped consumer tests. General foreground native claims, full
 agent/history, reservation/pricing and four external application backends remain
 open roadmap obligations. No account/paid API/external application turn ran.
+
+## 2026-10-25 — Detached GUI projection and explicit reset
+
+`bridge/circuit.el` stores bounded display-only observations under the exact
+live application/connection/scope. Native projections carry a connection-owned
+`CircuitProjectionSequence`, distinct from lease revisions and failure counts.
+The UI rejects old observations, including after display-cache eviction; reset
+may legitimately decrease failures without allowing an older view to undo it.
+Returned scope/view strings are detached. Replacement/closing owners cannot
+retarget observations or hide a genuine native cancellation with a DTO error.
+
+Transport captures optional `:circuit` alongside `:retry` and requires a native
+application lease. Explicit reset uses that existing lease only: no core startup,
+reconnect, local failure counter, admission decision or probe grant. The default
+high-level API and loop retry engines have NOT yet been switched or deleted.
+
+Seven new ERT contracts include real Emacs -> core -> HTTP 503 -> circuit refusal
+without socket/debit -> explicit reset -> HTTP 200. **1185/1185 full source ERT**,
+0 unexpected, **126.66 s**, passed against the native binary; focused capture/
+circuit tests and touched Werror bytecompile/checkdoc also passed. Existing native
+**206 tests + 5 compile-fail**, fmt/build/strict Clippy passed with the sequence
+changes. No unrelated user shell.nix/07 change was staged.
+
+The previously pending main bounded TLC regression completed successfully:
+**718447752 generated / 84273208 distinct states, depth 45, 0 queued**, **10m27s**,
+2026-10-25 08:28:02 Europe/Istanbul. This remains evidence about the unchanged
+abstract loop model, NOT a concrete Rust circuit/retry refinement proof.
+
+Next priority from the user's review: audit 01 strictly. In particular, replace
+independent retry-stage/charge Options with resource-owning typed phases and
+replace raw API page-byte sizes with a validated domain unit. Passing Clippy
+alone does not establish these architecture contracts. Do not weaken 01.

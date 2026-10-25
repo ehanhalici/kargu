@@ -10,7 +10,7 @@ use crate::{
     },
     application::host::{Host, ReadScope},
     constants::{limits, protocol::methods},
-    domain::{ApplicationId, CircuitId},
+    domain::{ApplicationId, CircuitId, CircuitProjectionSequence},
     error::CoreError,
     providers::ApiProviderId,
 };
@@ -56,6 +56,7 @@ pub(super) struct Grant {
 #[derive(Default)]
 pub(super) struct Circuits {
     entries: HashMap<CircuitId, Owned>,
+    sequence: CircuitProjectionSequence,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -174,7 +175,7 @@ impl Circuits {
         };
         entry.active = active;
         entry.circuit.record(grant.lease, outcome, Instant::now())?;
-        projection(entry)
+        self.projection(&grant.id)
     }
     pub fn rpc(&mut self, host: &Host, method: &str, params: Value) -> Result<Value, Fault> {
         let request: Request = serde_json::from_value(params).map_err(|_| Fault::params())?;
@@ -192,9 +193,18 @@ impl Circuits {
             if method == methods::API_CIRCUIT_RESET {
                 entry.circuit.reset().map_err(|_| exhausted())?;
             }
-            snapshots.push(projection(entry).map_err(|_| exhausted())?);
+            snapshots.push(self.projection(&id).map_err(|_| exhausted())?);
         }
         Ok(json!({"circuits":snapshots}))
+    }
+    fn projection(&mut self, id: &CircuitId) -> Result<Value, CoreError> {
+        let sequence = self.sequence.next()?;
+        let entry = self.entries.get(id).ok_or(CoreError::CleanupFailed)?;
+        let mut snapshot = json!(entry.circuit.snapshot(Instant::now())?);
+        snapshot["provider"] = json!(entry.provider.as_ref().map(ApiProviderId::as_str));
+        snapshot["sequence"] = json!(sequence);
+        self.sequence = sequence;
+        Ok(snapshot)
     }
     fn selected(&self, request: &Request) -> Result<Vec<CircuitId>, Fault> {
         if let Some(id) = &request.circuit_id {
@@ -216,11 +226,6 @@ impl Circuits {
             .map(|(id, _)| id.clone())
             .collect())
     }
-}
-fn projection(entry: &Owned) -> Result<Value, CoreError> {
-    let mut snapshot = json!(entry.circuit.snapshot(Instant::now())?);
-    snapshot["provider"] = json!(entry.provider.as_ref().map(ApiProviderId::as_str));
-    Ok(snapshot)
 }
 fn stale() -> Fault {
     fault(

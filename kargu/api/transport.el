@@ -18,6 +18,7 @@
 (require 'kargu/providers/projection)
 (require 'kargu/bridge/application)
 (require 'kargu/bridge/budget)
+(require 'kargu/bridge/circuit)
 
 (defvar kargu-api-timeout)
 (defvar kargu-api-connect-timeout)
@@ -32,7 +33,7 @@
 
 (cl-defstruct (kargu-transport-handle (:constructor kargu-transport--handle))
   "An editor delivery lease, not an OS process."
-  connection id startup chunks owner owner-cleanup (bytes 0) (state :pending))
+  connection id native-scope startup chunks owner owner-cleanup (bytes 0) (state :pending))
 
 (defun kargu-transport--detach-owner (handle)
   "Detach HANDLE's startup and delivery lifecycle hooks exactly once."
@@ -93,6 +94,15 @@ PARTIAL prevents retries after any published response event."
 (defun kargu-transport--deliver (handle options result failure)
   "Deliver core RESULT or FAILURE once for HANDLE using captured OPTIONS."
   (when (eq (kargu-transport-handle-state handle) :pending)
+    (when-let* ((snapshot (and (hash-table-p result) (gethash "circuit" result)))
+                ((kargu-bridge-circuit-current-p
+                  (plist-get options :application) (kargu-transport-handle-connection handle)
+                  (kargu-transport-handle-native-scope handle))))
+      (condition-case nil
+          (kargu-bridge-circuit-observe
+           (plist-get options :application) (kargu-transport-handle-connection handle)
+           (kargu-transport-handle-native-scope handle) snapshot t)
+        (error (setq failure (kargu-bridge--fault "invalid_circuit_projection")))))
     (when-let* ((budget (plist-get options :budget)))
       (condition-case nil
           (when-let* ((snapshot (and (hash-table-p result) (gethash "budget" result))))
@@ -152,8 +162,12 @@ HANDLE and OPTIONS own delivery on CONNECTION."
     (let ((params (kargu-bridge--object "scope" scope "arguments" arguments)))
       (when budget (puthash "budget" budget params))
       (when-let* ((policy (plist-get options :retry)))
-        (puthash "retry" (kargu-bridge--object "policy" policy "observer" "editor") params))
+        (let ((configuration (kargu-bridge--object "policy" policy "observer" "editor")))
+          (when-let* ((circuit (plist-get options :circuit))) (puthash "circuit" circuit configuration))
+          (puthash "retry" configuration params)))
       (setf (kargu-transport-handle-connection handle) connection
+            (kargu-transport-handle-native-scope handle)
+            (when (plist-get options :circuit) (kargu-bridge-application--copy-scope scope))
             (kargu-transport-handle-id handle)
             (kargu-bridge-call
              connection "api/request" params
@@ -199,6 +213,7 @@ HANDLE and OPTIONS own delivery on CONNECTION."
 OPTIONS contain captured :auth/:wire/:tuning, :body, :timeout, :stream,
 :on-delta, :then and :else; raw :headers are reserved for explicit callers.
 :retry captures native policy; :on-retry observes it before native replay ACK.
+:circuit captures native policy and requires :application and :retry.
 No network request or subprocess is ever started by Elisp."
   (let* ((application (plist-get options :application))
          (url (copy-sequence url))
@@ -236,6 +251,8 @@ No network request or subprocess is ever started by Elisp."
                 :retry (when (plist-get options :retry)
                          (kargu-providers-wire-object (plist-get options :retry)))
                 :on-retry (plist-get options :on-retry)
+                :circuit (when (plist-get options :circuit)
+                           (kargu-providers-wire-object (plist-get options :circuit)))
                 :debit-kind (replace-regexp-in-string "-" "_"
                                                       (substring (symbol-name (or (plist-get options :debit-kind) :normal-request)) 1))
                 :then (plist-get options :then)
@@ -243,10 +260,13 @@ No network request or subprocess is ever started by Elisp."
                 :required (append '("api_request")
                                   (when (plist-get options :budget) '("api_budget"))
                                   (when (plist-get options :retry) '("api_retry"))
+                                  (when (plist-get options :circuit) '("api_circuit"))
                                   (when (or (not (eq (gethash "wire" arguments) :json-null))
                                             (eq (gethash "cache_markers" arguments) t)) '("api_wire"))
                                   (unless (eq (gethash "tuning" arguments) :json-null) '("api_request_policy"))
                                   (unless (eq (gethash "auth" arguments) :json-null) '("api_auth"))))))
+    (when (and (plist-get options :circuit) (not (and application (plist-get options :retry))))
+      (error "Native circuit requires an application and retry profile"))
     ;; copy-tree does not copy mutable strings: copy every authority-bearing
     ;; string before waiting for startup, not only the surrounding cons cells.
     (dolist (pair (plist-get options :headers))

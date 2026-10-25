@@ -153,6 +153,23 @@ Return a waiter cleanup; cancelling one waiter cannot revoke a sibling lease."
         (_ (kargu-bridge--callback callback nil (or (kargu-bridge-application-fault binding)
                                                     (kargu-bridge--fault "owner_closed"))) #'ignore))))))
 
+(defun kargu-bridge-application-scope-equal-p (left right)
+  "Compare detached native scope fields in LEFT and RIGHT, not hash identity."
+  (and (hash-table-p left) (hash-table-p right)
+       (cl-every (lambda (key)
+                   (and (stringp (gethash key left)) (stringp (gethash key right))
+                        (equal (gethash key left) (gethash key right))))
+                 '("application_id" "session_id"))))
+
+(defun kargu-bridge-application-current-scope (application connection)
+  "Read APPLICATION's live scope on exact CONNECTION without starting a core.
+The returned identifiers are detached; nil means the lease is not current."
+  (let ((binding (gethash :native-core (kargu-application-services application))))
+    (when (and binding (eq connection (kargu-bridge-application-connection binding))
+               (eq (kargu-bridge-status connection) 'ready)
+               (eq (kargu-bridge-application-state binding) :ready))
+      (kargu-bridge-application--copy-scope (kargu-bridge-application-scope binding)))))
+
 (defun kargu-bridge-application-close (application &optional callback)
   "Revoke APPLICATION's native lease; invoke CALLBACK only after core drain.
 No replacement core is started to close an old lease."

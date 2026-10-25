@@ -217,6 +217,10 @@ counter!(
     "Circuit lease revision, independent of run generations."
 );
 counter!(
+    CircuitProjectionSequence,
+    "Connection-ordered circuit UI observations, distinct from lease revisions."
+);
+counter!(
     RetryAttempt,
     "Request retry count, independent of tool steps."
 );
