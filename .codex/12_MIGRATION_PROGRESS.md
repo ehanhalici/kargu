@@ -1,5 +1,16 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Mantıksal budget retention ve typed admission
+
+Native API kaydı budget kimliğini fiziksel ticket'tan bağımsız tutar. Close,
+sıfır HTTP charge olsa da mantıksal referans tahliye olmadan ack vermez. Open
+budget preflight sayaç tüketmeden ortak gate'i kullanır; reservation değildir,
+admit tekrar kontrol eder. IPC hata enum'u yalnız wire sınırında Fault'a döner.
+Detay 37'dedir; henüz native retry consumer veya capability açılmadı.
+
+**187 Rust testi + 5 compile-fail**, locked build/fmt/strict Clippy geçti.
+Bağımsız son UI regresyonu **1172/1172**. Kullanıcı shell.nix/07 korunmuştur.
+
 ## 2026-10-25 — Root tool budget projection / pre-start lease kapanışı
 
 Run.:budget artık context/application ile aynı projection nesnesidir; gerçek

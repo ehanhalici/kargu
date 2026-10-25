@@ -30,6 +30,7 @@ struct Pending {
     published: bool,
     terminal: Option<ApiError>,
     charge: Option<budget::Charge>,
+    budget_id: Option<crate::domain::BudgetId>,
 }
 struct Event {
     id: RpcId,
@@ -107,7 +108,12 @@ impl ApiRequests {
         })
     }
     pub fn collect(&mut self, host: &Host) -> Vec<Value> {
-        let replies = self.budgets.collect(host);
+        let pending = &self.pending;
+        let replies = self.budgets.collect(host, |id| {
+            pending
+                .values()
+                .any(|request| request.budget_id.as_ref() == Some(id))
+        });
         self.sweep(host);
         replies
     }
@@ -135,6 +141,10 @@ impl ApiRequests {
                 published: false,
                 terminal: None,
                 charge,
+                budget_id: request
+                    .budget
+                    .as_ref()
+                    .map(|reference| reference.budget_id.clone()),
             },
         );
         let sender = self.sender.clone();
@@ -213,9 +223,9 @@ impl ApiRequests {
         for pending in self.pending.values() {
             if !host.owns_read_scope(&pending.scope)
                 || pending
-                    .charge
+                    .budget_id
                     .as_ref()
-                    .is_some_and(|charge| self.budgets.revoked(&charge.id))
+                    .is_some_and(|id| self.budgets.revoked(id))
             {
                 pending.cancel.cancel();
             }
@@ -404,6 +414,7 @@ mod tests {
                     published: false,
                     terminal: None,
                     charge: None,
+                    budget_id: None,
                 },
             );
         }

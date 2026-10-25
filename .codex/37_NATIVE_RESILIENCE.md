@@ -119,3 +119,23 @@ Verification: **184 Rust tests + 5 compile-fail**, locked build/fmt/strict
 Clippy; **26/26 focused source stream/budget ERT**. The previous full source ERT
 is **1171/1171**; it was not rerun for this borrowing-only slice. Existing run
 deadline, cancellation and application-close tests pass unchanged.
+
+## 2026-10-25 — Logical retention and non-charging preflight
+
+Budget lifetime is retained by the logical API record, independently of its
+current physical attempt ticket. Revocation checks use that captured identity;
+budget collection additionally waits for all logical references to disappear.
+Zero outstanding HTTP charges alone cannot acknowledge close while an operation
+still owns a backoff/observer resource. A mailbox regression proves revoke,
+retained zero-charge close, refusal and exactly-once release after logical drain.
+
+The open domain budget exposes a non-charging preflight using the same gate as
+`admit`; it is explicitly not a reservation. Final admission rechecks after any
+wait/handoff. Tests prove no counter mutation and terminal expiry without a
+fictional physical request. IPC admission returns a closed typed taxonomy,
+including exact domain refusal, and maps to static RPC faults only at the wire
+boundary. Future retry control need not branch on fault/status strings.
+
+Verification: **187 Rust tests + 5 compile-fail**, locked build/fmt/strict
+Clippy. The independently verified UI suite remains **1172/1172**. Native retry
+and its observer/circuit consumers are still open; no retry capability advertised.

@@ -4,7 +4,8 @@ use super::{Fault, RpcId, fault, protocol};
 use crate::{
     application::{
         budget::{
-            AttemptCharge, Budget, BudgetLimits, BudgetSnapshot, DebitKind, ObservedUsage, Sealed,
+            AttemptCharge, Budget, BudgetLimits, BudgetSnapshot, DebitKind, ObservedUsage, Refusal,
+            Sealed,
         },
         host::{Host, ReadScope},
     },
@@ -69,6 +70,40 @@ pub(super) struct Charge {
     pub id: BudgetId,
     pub ticket: AttemptCharge,
     pub deadline: Deadline,
+}
+
+/// Internal admission taxonomy. RPC strings exist only in the wire projection.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum AdmissionFailure {
+    #[error("application budget required")]
+    Required,
+    #[error("budget cannot meter a non-generative request")]
+    NonGenerative,
+    #[error("accounting owner is stale")]
+    StaleOwner,
+    #[error("budget admission revoked")]
+    Closed,
+    #[error("previous charged attempt is draining")]
+    Busy,
+    #[error(transparent)]
+    Exhausted(#[from] Refusal),
+}
+impl From<AdmissionFailure> for Fault {
+    fn from(value: AdmissionFailure) -> Self {
+        match value {
+            AdmissionFailure::Required => fault(
+                "budget_required",
+                "Application requests must share its captured budget",
+            ),
+            AdmissionFailure::NonGenerative => Self::params(),
+            AdmissionFailure::StaleOwner => stale(),
+            AdmissionFailure::Closed => fault("budget_closed", "Budget admission was revoked"),
+            AdmissionFailure::Busy => {
+                fault("budget_busy", "Previous charged attempt is still draining")
+            }
+            AdmissionFailure::Exhausted(_) => fault("budget_exhausted", "Run budget exhausted"),
+        }
+    }
 }
 
 enum Meter {
@@ -213,13 +248,21 @@ impl Budgets {
         Ok(None)
     }
     fn owner(&self, host: &Host, scope: &ReadScope, id: &BudgetId) -> Result<(), Fault> {
+        self.admission_owner(host, scope, id).map_err(Into::into)
+    }
+    fn admission_owner(
+        &self,
+        host: &Host,
+        scope: &ReadScope,
+        id: &BudgetId,
+    ) -> Result<(), AdmissionFailure> {
         if !host.owns_read_scope(scope)
             || !self
                 .entries
                 .get(id)
                 .is_some_and(|entry| &entry.scope == scope)
         {
-            return Err(stale());
+            return Err(AdmissionFailure::StaleOwner);
         }
         Ok(())
     }
@@ -229,7 +272,7 @@ impl Budgets {
         scope: &ReadScope,
         reference: Option<&BudgetRef>,
         generative: bool,
-    ) -> Result<Option<Charge>, Fault> {
+    ) -> Result<Option<Charge>, AdmissionFailure> {
         let Some(reference) = reference else {
             if generative
                 && self
@@ -237,35 +280,27 @@ impl Budgets {
                     .values()
                     .any(|entry| entry.scope.application_id == scope.application_id)
             {
-                return Err(fault(
-                    "budget_required",
-                    "Application requests must share its captured budget",
-                ));
+                return Err(AdmissionFailure::Required);
             }
             return Ok(None);
         };
         if !generative {
-            return Err(Fault::params());
+            return Err(AdmissionFailure::NonGenerative);
         }
-        self.owner(host, scope, &reference.budget_id)?;
+        self.admission_owner(host, scope, &reference.budget_id)?;
         let entry = self
             .entries
             .get_mut(&reference.budget_id)
-            .ok_or_else(stale)?;
+            .ok_or(AdmissionFailure::StaleOwner)?;
         let Meter::Open(budget) = &mut entry.meter else {
-            return Err(fault("budget_closed", "Budget admission was revoked"));
+            return Err(AdmissionFailure::Closed);
         };
         // One physical attempt at a time; token bounds are observation-based,
         // and UI retries must not race another request under the same budget.
         if !budget.drained() {
-            return Err(fault(
-                "budget_busy",
-                "Previous charged attempt is still draining",
-            ));
+            return Err(AdmissionFailure::Busy);
         }
-        let charge = budget
-            .admit(reference.kind)
-            .map_err(|_| fault("budget_exhausted", "Run budget exhausted"))?;
+        let charge = budget.admit(reference.kind)?;
         Ok(Some(Charge {
             id: reference.budget_id.clone(),
             ticket: charge,
@@ -284,7 +319,7 @@ impl Budgets {
             Err(error) => Err(error),
         }
     }
-    pub fn collect(&mut self, host: &Host) -> Vec<Value> {
+    pub fn collect(&mut self, host: &Host, retained: impl Fn(&BudgetId) -> bool) -> Vec<Value> {
         let stale_ids: Vec<_> = self
             .entries
             .iter()
@@ -306,7 +341,9 @@ impl Budgets {
         let drained: Vec<_> = self
             .entries
             .iter()
-            .filter(|(_, entry)| matches!(entry.meter, Meter::Sealed(_)) && entry.meter.drained())
+            .filter(|(id, entry)| {
+                matches!(entry.meter, Meter::Sealed(_)) && entry.meter.drained() && !retained(id)
+            })
             .map(|(id, _)| id.clone())
             .collect();
         let mut replies = Vec::new();
@@ -376,7 +413,7 @@ mod tests {
         )?;
         budgets.cancel_waiter(&RpcId::Integer(2));
         assert!(budgets.contains(&RpcId::Integer(2)));
-        assert!(budgets.collect(&host).is_empty());
+        assert!(budgets.collect(&host, |_| false).is_empty());
         assert!(budgets.revoked(&budget_id));
         assert!(
             budgets
@@ -395,7 +432,7 @@ mod tests {
                 .is_err()
         );
         budgets.finish(charge, ObservedUsage::default())?;
-        assert!(budgets.collect(&host).is_empty());
+        assert!(budgets.collect(&host, |_| false).is_empty());
         assert!(!budgets.contains(&RpcId::Integer(2)));
         assert!(budgets.entries.is_empty());
         let next = budgets
@@ -413,6 +450,52 @@ mod tests {
                 .admit(&host, &typed, Some(&reference), true)
                 .is_err()
         );
+        Ok(())
+    }
+    #[test]
+    fn zero_outstanding_charges_do_not_release_a_retained_logical_operation() -> TestResult {
+        let (host, scope, typed) = host()?;
+        let mut budgets = Budgets::default();
+        let opened = budgets
+            .rpc(
+                &host,
+                methods::API_BUDGET_OPEN,
+                RpcId::Integer(1),
+                json!({"scope":scope}),
+                |_| false,
+            )?
+            .ok_or("open")?;
+        let budget_id: BudgetId = serde_json::from_value(opened["budget_id"].clone())?;
+        let reference = BudgetRef {
+            budget_id: budget_id.clone(),
+            kind: DebitKind::NormalRequest,
+        };
+        let charge = budgets
+            .admit(&host, &typed, Some(&reference), true)?
+            .ok_or("charge")?;
+        budgets.finish(charge, ObservedUsage::default())?;
+        budgets.rpc(
+            &host,
+            methods::API_BUDGET_CLOSE,
+            RpcId::Integer(2),
+            json!({"scope":scope,"budget_id":budget_id}),
+            |_| false,
+        )?;
+        assert!(budgets.collect(&host, |id| id == &budget_id).is_empty());
+        assert!(budgets.contains(&RpcId::Integer(2)));
+        assert!(budgets.revoked(&budget_id));
+        assert!(matches!(
+            budgets.admit(&host, &typed, Some(&reference), true),
+            Err(AdmissionFailure::Closed)
+        ));
+        let replies = budgets.collect(&host, |_| false);
+        assert_eq!(replies.len(), 1);
+        assert_eq!(
+            replies.first().ok_or("close")?["result"]["status"],
+            "closed"
+        );
+        assert!(budgets.entries.is_empty());
+        assert!(budgets.collect(&host, |_| false).is_empty());
         Ok(())
     }
     #[test]

@@ -120,8 +120,9 @@ impl Budget<Open> {
             state: PhantomData,
         }
     }
-    /// Charge one physical attempt before IO. Refusal never increments counters.
-    pub fn admit(&mut self, kind: DebitKind) -> Result<AttemptCharge, Refusal> {
+    /// Check the next attempt without charging it or reserving future admission.
+    /// The actor must call `admit` again after backoff/observer handoff.
+    pub fn preflight(&mut self, kind: DebitKind) -> Result<(), Refusal> {
         if let Some(refusal) = self.refusal {
             return Err(refusal);
         }
@@ -152,6 +153,11 @@ impl Budget<Open> {
             self.refusal = Some(refusal);
             return Err(refusal);
         }
+        Ok(())
+    }
+    /// Charge one physical attempt before IO. Refusal never increments counters.
+    pub fn admit(&mut self, kind: DebitKind) -> Result<AttemptCharge, Refusal> {
+        self.preflight(kind)?;
         // Compute the entire transition first. Neither counter may partially commit.
         let requests = self.requests.next().map_err(|_| Refusal::Accounting)?;
         let compactions = if matches!(kind, DebitKind::CompactionTurn) {

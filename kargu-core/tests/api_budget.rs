@@ -51,6 +51,48 @@ fn limits_parse_once_and_defaults_are_bounded() -> TestResult {
 }
 
 #[test]
+fn preflight_neither_debits_nor_reserves_and_admission_rechecks() -> TestResult {
+    let mut budget = budget(json!({"requests":1,"compactions":1}))?;
+    let before = snapshot(&budget)?;
+    for _ in 0..3 {
+        budget.preflight(DebitKind::CompactionTurn)?;
+    }
+    assert_eq!(snapshot(&budget)?, before);
+    let charge = budget.admit(DebitKind::NormalRequest)?;
+    budget.finish(charge, known(1, 1)?)?;
+    assert_eq!(
+        budget.preflight(DebitKind::RetryAttempt),
+        Err(Refusal::Requests)
+    );
+    assert!(matches!(
+        budget.admit(DebitKind::RetryAttempt),
+        Err(Refusal::Requests)
+    ));
+    assert_eq!(snapshot(&budget)?["requests_spent"], 1);
+    assert_eq!(snapshot(&budget)?["compactions_spent"], 0);
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn preflight_expiry_is_terminal_without_inventing_an_attempt() -> TestResult {
+    let timeout = ExecutionTimeout::try_from(Duration::from_millis(10))?;
+    let mut budget = Budget::new(BudgetLimits::default(), timeout.start()?);
+    budget.preflight(DebitKind::RetryAttempt)?;
+    tokio::time::advance(Duration::from_millis(10)).await;
+    assert_eq!(
+        budget.preflight(DebitKind::RetryAttempt),
+        Err(Refusal::Deadline)
+    );
+    assert!(matches!(
+        budget.admit(DebitKind::RetryAttempt),
+        Err(Refusal::Deadline)
+    ));
+    assert_eq!(snapshot(&budget)?["requests_spent"], 0);
+    assert_eq!(snapshot(&budget)?["refusal"], "deadline");
+    Ok(())
+}
+
+#[test]
 fn all_attempt_kinds_share_one_irreversible_gate() -> TestResult {
     let mut budget = budget(json!({"requests":5}))?;
     for kind in [
