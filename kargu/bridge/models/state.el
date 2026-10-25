@@ -24,7 +24,7 @@
 
 (cl-defstruct (kargu-bridge-model-ticket (:constructor kargu-bridge-model-ticket--make))
   "One captured submission and its immutable committed-revision receipt."
-  service provider source specs callback valid-p owner cleanup timer waiters
+  service provider source specs callback valid-p owner cleanup startup-cleanup timer waiters
   upload chunks view-cell failure cancel-reason reconcile
   (status :pending) (phase :queued) (offset 0) (position 0) (max-chunk 0)
   (bytes 0) revision total (read-bytes 0) commit-sent released)
@@ -56,11 +56,22 @@
   "Check SERVICE's exact live native owner without starting or rebinding it."
   (and (eq service (gethash :native-models
                             (kargu-application-services (kargu-bridge-models-app service))))
+       (kargu-bridge-models-connection service)
        (eq (kargu-bridge-status (kargu-bridge-models-connection service)) 'ready)
        (when-let* ((scope (kargu-bridge-application-current-scope
                            (kargu-bridge-models-app service)
                            (kargu-bridge-models-connection service))))
          (kargu-bridge-application-scope-equal-p scope (kargu-bridge-models-scope service)))))
+
+(defun kargu-bridge-models--owned-p (ticket)
+  "Check TICKET's captured editor owner before acquiring native resources."
+  (and (null (kargu-bridge-model-ticket-cancel-reason ticket))
+       (or (null (kargu-bridge-model-ticket-owner ticket))
+           (buffer-live-p (kargu-bridge-model-ticket-owner ticket)))
+       (condition-case nil
+           (or (null (kargu-bridge-model-ticket-valid-p ticket))
+               (funcall (kargu-bridge-model-ticket-valid-p ticket)))
+         ((error quit) nil))))
 
 (defun kargu-bridge-models--notify (ticket value failure)
   "Finish TICKET's user deliveries exactly once with VALUE or FAILURE."

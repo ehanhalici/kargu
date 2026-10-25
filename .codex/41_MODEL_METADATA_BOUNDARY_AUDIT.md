@@ -1,5 +1,40 @@
 # Model metadata: next native boundary
 
+## Discovery source precision and first-intent startup — 2026-10-25
+
+Discovery now shares RawMetadata's exact snapshot projection rather than a
+second price-only converter. Every recognized capacity alias and top_provider
+object/one-object wrapper retains non-u64 numeric lexemes as strings; ordinary
+u64 literals retain their integer kind. Canonical GET -> metadata parse round
+trips therefore preserve invalid fractional/overflow observations instead of
+rounding them into admitted capacities. Known nested control duplicate keys
+are rejected using the same boundary. Two native tests, the extended real HTTP
+fixture and a new public editor GET test cover this; **258 native + 16 compile-
+fail**, fmt, strict all-targets Clippy, locked build and **6/6 focused ERT** passed.
+
+The explicit bridge publisher registers/copies its ticket before first sidecar
+startup can yield. Preparation captures that ticket immediately, even with no
+native lease yet. Startup acquisition is a separate bridge/models/start module;
+it does not parse metadata or introduce a second store/queue. Only the writer
+may initiate first startup; snapshot/capture/reconcile stay passive. An existing
+application API lease is captured instead of replaced, even before its first
+metadata publication. Closed/lost leases and unsupported capabilities cannot
+allocate a replacement owner or retry a zero revision.
+
+Cancelling before lease acquisition detaches only that shared-startup waiter,
+releases the ticket and permits its successor; a late/duplicate ready callback
+cannot allocate a cancelled owner. Once allocation begins, the existing late
+upload abort/ACK/drain rules still apply. Five additional actual editor tests
+cover cold process startup, captured first intent through real preparation,
+shared-startup cancellation/duplicate delivery, startup/capability failure and
+an earlier lost API lease. **20/20 focused publication ERT** passed. Full source
+gate is recorded in the progress log after completion, not inferred here.
+
+This closes two prerequisites, not the public setter/catalog/UI cutover. Those
+default legacy producers/readers remain active and are not safe to delete yet.
+No statement below about that pending cutover is superseded. No native run,
+monetary hard-cap or external application/backend completion is claimed.
+
 ## Approved publication contract — 2026-10-25
 
 The user approved asynchronous setters and synchronous last-committed UI reads

@@ -80,6 +80,9 @@ upload/commit/abort ve immutable snapshot paging sağlar. Asenkron editor bridge
 detached native görünüm, exact-ticket preparation bariyeri ve explicit same-lease
 reconciliation eklendi. Native publication'a giren application legacy metadata
 writer'ını reddeder; native failure sonrası legacy fallback yoktur.
+Discovery capacity lexeme'leri de ortak native RawMetadata snapshot sınırında
+kayıpsız taşınır. İlk explicit metadata yazımı sidecar startup yield'inden önce
+ticket'ını kaydeder; hazırlık bu intent'i yakalar, passive getter core başlatmaz.
 Kullanıcı async setter + son committed UI snapshot sözleşmesini onayladı.
 Public setter/catalog producer ve genel UI reader cutover'ı, ardından eski
 Elisp semantic writer/reader silme hâlâ açıktır; mevcut public

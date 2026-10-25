@@ -38,14 +38,8 @@
 
 (defun kargu-bridge-models--valid-p (ticket)
   "Check TICKET's captured resources and exact lease before another operation."
-  (and (null (kargu-bridge-model-ticket-cancel-reason ticket))
-       (kargu-bridge-models--current-p (kargu-bridge-model-ticket-service ticket))
-       (or (null (kargu-bridge-model-ticket-owner ticket))
-           (buffer-live-p (kargu-bridge-model-ticket-owner ticket)))
-       (condition-case nil
-           (or (null (kargu-bridge-model-ticket-valid-p ticket))
-               (funcall (kargu-bridge-model-ticket-valid-p ticket)))
-         ((error quit) nil))))
+  (and (kargu-bridge-models--owned-p ticket)
+       (kargu-bridge-models--current-p (kargu-bridge-model-ticket-service ticket))))
 
 (defun kargu-bridge-models--abort (ticket failure)
   "Drain TICKET's exact upload before reporting FAILURE to the queue."

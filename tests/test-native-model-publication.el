@@ -30,6 +30,130 @@
                               (kargu-model-publication-test--source capacity) []
                               (or callback #'ignore)))
 
+(ert-deftest kargu-native-model-publication-first-intent-starts-real-core-test ()
+  "A first publication is visible to barriers before native startup completes."
+  (let* ((binary (getenv "KARGU_CORE_TEST_BINARY"))
+         (kargu-bridge-binary-path binary) (kargu-bridge--connection nil)
+         (app (kargu-application-create)) ticket)
+    (skip-unless (and binary (file-executable-p binary)))
+    (unwind-protect
+        (progn
+          (setq ticket (kargu-bridge-models-publish
+                        app "a" (kargu-model-publication-test--source 10) [] #'ignore))
+          (should (eq ticket (kargu-bridge-models-capture app)))
+          (should-not (kargu-bridge-models-snapshot app))
+          (should (eq (kargu-bridge-model-ticket-status ticket) :pending))
+          (let (received failure)
+            (kargu-bridge-models-await ticket (lambda (view fault) (setq received view failure fault)))
+            (kargu-bridge-test--wait (lambda () received))
+            (should-not failure)
+            (should (= (gethash "revision" received) 1))
+            (should (= (kargu-model-publication-test--capacity received) 10))))
+      (when kargu-bridge--connection
+        (kargu-bridge--close kargu-bridge--connection "fixture_cleanup")
+        (when (buffer-live-p (kargu-bridge-connection-stderr-buffer kargu-bridge--connection))
+          (kill-buffer (kargu-bridge-connection-stderr-buffer kargu-bridge--connection)))))))
+
+(ert-deftest kargu-native-model-publication-startup-captures-intent-before-real-preparation-test ()
+  "Preparation waits for the first registered intent, not an empty legacy view."
+  (kargu-bridge-test--with-core
+   (kargu-test-with-real-connection
+    (let ((original (symbol-function 'kargu-bridge-ensure)) held ticket second result
+          (source (copy-sequence "{\"operation\":\"put\",\"model\":\"m\",\"metadata\":{\"context_length\":100,\"supports_tools\":false}}")))
+      (cl-letf (((symbol-function 'kargu-bridge-ensure)
+                 (lambda (callback)
+                   (should (kargu-bridge-models-capture kargu-application--bound))
+                   (setq held callback) #'ignore)))
+        (setq ticket (kargu-bridge-models-publish kargu-application--bound "g02" source [] #'ignore))
+        (aset source 0 ?x)
+        (should (eq ticket (kargu-bridge-models-capture kargu-application--bound)))
+        (kargu-api-prepare-connection (lambda (value) (setq result value)) :provider "g02" :model "m")
+        ;; A later queued update cannot replace the intent captured by preparation.
+        (setq second (kargu-bridge-models-publish kargu-application--bound "g02"
+                     "{\"operation\":\"put\",\"model\":\"m\",\"metadata\":{\"context_length\":200}}" [] #'ignore)))
+      (accept-process-output nil 0.03)
+      (should-not result)
+      (funcall original (lambda (connection failure) (funcall held connection failure)))
+      (kargu-bridge-test--wait (lambda () result))
+      (kargu-bridge-test--wait (lambda () (eq (kargu-bridge-model-ticket-status second) :committed)))
+      (should (kargu-ok-p result))
+      (let ((snapshot (kargu-result-value result)))
+        (unwind-protect
+            (let ((settings (kargu-connection-snapshot-settings snapshot)))
+              (should (= (plist-get settings :metadata-revision) 1))
+              (should (= (plist-get (plist-get settings :fields) :context-window) 100))
+              (should-not (plist-get settings :tools)))
+          (kargu-connection-snapshot-wipe snapshot)))
+      (should (= (gethash "revision" (kargu-bridge-model-ticket-view second)) 2))))))
+
+(ert-deftest kargu-native-model-publication-cancel-startup-detaches-only-one-waiter-test ()
+  "Cancellation releases one cold-start waiter, never a sibling or shared core."
+  (kargu-bridge-test--with-core
+   (let ((app (kargu-application-create)) held first next
+         (cleanups 0) (deliveries 0) (begins 0)
+         (original (symbol-function 'kargu-bridge-call)))
+     (cl-letf (((symbol-function 'kargu-bridge-ensure)
+                (lambda (callback) (push callback held) (lambda () (cl-incf cleanups))))
+               ((symbol-function 'kargu-bridge-call)
+                (lambda (connection method params callback &rest options)
+                  (when (equal method "models/begin") (cl-incf begins))
+                  (apply original connection method params callback options))))
+       (setq first (kargu-bridge-models-publish app "a" (kargu-model-publication-test--source 10) []
+                     (lambda (_view failure) (should failure) (cl-incf deliveries))))
+       (kargu-bridge-models-cancel first)
+       (should (kargu-bridge-model-ticket-released first))
+       (should (= cleanups 1))
+       (setq next (kargu-bridge-models-publish app "a" (kargu-model-publication-test--source 20) [] #'ignore))
+       (funcall (cadr held) conn nil)
+       (should (= begins 0))
+       (should-not (kargu-bridge-models-snapshot app))
+       (funcall (car held) conn nil)
+       (funcall (car held) conn nil)
+       (kargu-bridge-test--wait (lambda () (eq (kargu-bridge-model-ticket-status next) :committed)))
+       (should (= begins 1))
+       (should (= deliveries 1))
+       (should (= cleanups 2))
+       (should (eq (kargu-bridge-status conn) 'ready))
+       (should (= (gethash "revision" (kargu-bridge-models-snapshot app)) 1))))))
+
+(ert-deftest kargu-native-model-publication-first-startup-failure-or-old-core-is-closed-test ()
+  "Startup and capability failure cannot allocate an owner, replay or fall back."
+  (dolist (reason '(:startup :capability))
+    (let ((app (kargu-application-create)) (starts 0) first next failure)
+      (cl-letf (((symbol-function 'kargu-bridge-ensure)
+                 (lambda (callback)
+                   (cl-incf starts)
+                   (funcall callback
+                            (unless (eq reason :startup)
+                              (kargu-bridge--connection-create :state 'ready :capabilities ["model_metadata"]))
+                            (when (eq reason :startup) (kargu-bridge--fault "startup_failed")))
+                   #'ignore))
+                ((symbol-function 'kargu-bridge-application-ensure)
+                 (lambda (&rest _) (ert-fail "No owner allocation before capability"))))
+        (setq first (kargu-bridge-models-publish app "a" (kargu-model-publication-test--source 10) []
+                      (lambda (_view fault) (setq failure fault))))
+        (should failure)
+        (should (eq (kargu-bridge-model-ticket-status first) :failed))
+        (setq next (kargu-bridge-models-publish app "a" (kargu-model-publication-test--source 20) [] #'ignore))
+        (should (eq (kargu-bridge-model-ticket-status next) :failed))
+        (should (= starts 1))
+        (should-not (kargu-bridge-models-snapshot app))))))
+
+(ert-deftest kargu-native-model-publication-first-intent-respects-existing-lost-lease-test ()
+  "The first metadata write cannot replace an application's earlier API lease."
+  (kargu-bridge-test--with-core
+   (let ((app (kargu-application-create)) ready)
+     (kargu-bridge-application-ensure conn app (lambda (_scope failure) (should-not failure) (setq ready t)))
+     (kargu-bridge-test--wait (lambda () ready))
+     (kargu-bridge--close conn "fixture_epoch_loss")
+     (cl-letf (((symbol-function 'kargu-bridge-ensure)
+                (lambda (&rest _) (ert-fail "No replacement connection for an existing owner")))
+               ((symbol-function 'kargu-bridge-application-ensure)
+                (lambda (&rest _) (ert-fail "No replacement application lease"))))
+       (let ((ticket (kargu-bridge-models-publish app "a" (kargu-model-publication-test--source 10) [] #'ignore)))
+         (should (eq (kargu-bridge-model-ticket-status ticket) :failed))
+         (should-not (kargu-bridge-models-snapshot app)))))))
+
 (ert-deftest kargu-native-model-publication-committed-reads-and-exact-ticket-barrier-test ()
   "A preparation receipt cannot borrow a later submission's model fields."
   (kargu-bridge-test--with-core

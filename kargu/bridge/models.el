@@ -7,16 +7,20 @@
 
 ;; One exact native lease, serial bounded publications and passive detached UI
 ;; reads.  Barriers retain a particular submission, never the current queue tail.
-;; This module does not parse model metadata, merge overrides or start a core.
+;; This module does not parse metadata or merge overrides.  Only an explicit
+;; publication may acquire a first core connection; getters remain passive.
 
 ;;; Code:
 
-(require 'kargu/bridge/models/transfer)
+(require 'kargu/bridge/models/start)
 
 (defun kargu-bridge-models--release (ticket)
   "Release TICKET's captured buffers exactly once after native drain."
   (unless (kargu-bridge-model-ticket-released ticket)
     (setf (kargu-bridge-model-ticket-released ticket) t)
+    (when-let* ((cleanup (kargu-bridge-model-ticket-startup-cleanup ticket)))
+      (setf (kargu-bridge-model-ticket-startup-cleanup ticket) nil)
+      (funcall cleanup))
     (let ((service (kargu-bridge-model-ticket-service ticket)))
       (cl-decf (kargu-bridge-models-bytes service) (kargu-bridge-model-ticket-bytes ticket))
       (setf (kargu-bridge-model-ticket-source ticket) nil
@@ -58,42 +62,41 @@ An issued commit cannot be undone; uncertainty refuses further publication."
             (kargu-bridge-model-ticket-failure ticket) failure
             (kargu-bridge-model-ticket-status ticket) :cancelled)
       (kargu-bridge-models--notify ticket nil failure)
-      (unless (eq ticket (kargu-bridge-models-active service))
+      (cond
+       ((not (eq ticket (kargu-bridge-models-active service)))
         (setf (kargu-bridge-models-queue service) (delq ticket (kargu-bridge-models-queue service)))
-        (kargu-bridge-models--release ticket)))))
+        (kargu-bridge-models--release ticket))
+       ((eq (kargu-bridge-model-ticket-phase ticket) :connecting)
+        ;; No application resource was acquired; detach only this startup waiter.
+        (kargu-bridge-models--complete ticket nil failure))))))
 
 (defun kargu-bridge-models--pump (service)
-  "Start at most one queued publication on SERVICE's existing native lease."
+  "Start at most one queued publication on SERVICE's single native lease."
   (unless (kargu-bridge-models-active service)
     (when-let* ((ticket (pop (kargu-bridge-models-queue service))))
       (setf (kargu-bridge-models-active service) ticket)
       (cond
        ((and (kargu-bridge-models-fault service) (not (kargu-bridge-model-ticket-reconcile ticket)))
         (kargu-bridge-models--complete ticket nil (kargu-bridge-models-fault service)))
-       ((not (eq (kargu-bridge-status (kargu-bridge-models-connection service)) 'ready))
-        (setf (kargu-bridge-models-fault service) (kargu-bridge--fault "metadata_epoch_lost"))
-        (kargu-bridge-models--complete ticket nil (kargu-bridge-models-fault service)))
+       ((not (kargu-bridge-models--owned-p ticket))
+        (kargu-bridge-models--complete ticket nil (or (kargu-bridge-model-ticket-cancel-reason ticket)
+                                                    (kargu-bridge--fault "stale_metadata_owner"))))
        ((kargu-bridge-model-ticket-reconcile ticket)
         (if (kargu-bridge-models--current-p service) (kargu-bridge-models--head ticket)
           (kargu-bridge-models--complete ticket nil (kargu-bridge--fault "metadata_epoch_lost"))))
-       ((kargu-bridge-models-scope service)
-        (kargu-bridge-models--begin ticket))
-       (t
-        (setf (kargu-bridge-model-ticket-phase ticket) :leasing)
-        (kargu-bridge-application-ensure
-         (kargu-bridge-models-connection service) (kargu-bridge-models-app service)
-         (lambda (scope failure)
-           (if failure
-               (progn (setf (kargu-bridge-models-fault service) failure)
-                      (kargu-bridge-models--complete ticket nil failure))
-             (setf (kargu-bridge-models-scope service) (kargu-bridge-application--copy-scope scope))
-             (kargu-bridge-models--begin ticket)))))))))
+       ((null (kargu-bridge-models-connection service))
+        (kargu-bridge-models--connect ticket))
+       ((not (eq (kargu-bridge-status (kargu-bridge-models-connection service)) 'ready))
+        (setf (kargu-bridge-models-fault service) (kargu-bridge--fault "metadata_epoch_lost"))
+        (kargu-bridge-models--complete ticket nil (kargu-bridge-models-fault service)))
+       (t (kargu-bridge-models--lease ticket))))))
 
 (cl-defun kargu-bridge-models-submit (connection application provider source specs callback
 						 &key owner valid-p reconcile)
   "Submit SOURCE and SPECS for PROVIDER using CONNECTION and APPLICATION.
 Return a publication ticket; CALLBACK receives (VIEW FAILURE) once.  OWNER's
 closure cancels only this submission.  VALID-P guards captured revisions.
+Nil CONNECTION permits first startup, never a replacement of an acquired lease.
 No fallback, reconnect or speculative publication occurs.  RECONCILE selects
 read-only repair of the existing lease; see `kargu-bridge-models-reconcile'."
   (unless (and (stringp provider) (stringp source) (functionp callback)
@@ -111,11 +114,9 @@ read-only repair of the existing lease; see `kargu-bridge-models-reconcile'."
                   :specs (kargu-bridge-models--copy specs) :callback callback :owner owner :valid-p valid-p
                   :bytes (string-bytes source) :reconcile reconcile))
          (failure (cond
-                   ((not (eq connection (kargu-bridge-models-connection service)))
+                   ((and connection (not (eq connection (kargu-bridge-models-connection service))))
                     (kargu-bridge--fault "metadata_epoch_lost"))
-                   ((not (cl-every (lambda (capability)
-                                     (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
-                                   '("model_metadata" "model_metadata_projection")))
+                   ((and connection (not (kargu-bridge-models--capable-p connection)))
                     (kargu-bridge--fault "unsupported_model_metadata"))
                    ((or (>= (length (kargu-bridge-models-queue service)) 32)
                         (> (+ (kargu-bridge-models-bytes service) (string-bytes source))
@@ -140,6 +141,20 @@ read-only repair of the existing lease; see `kargu-bridge-models-reconcile'."
       (setf (kargu-bridge-models-queue service) (nconc (kargu-bridge-models-queue service) (list ticket)))
       (kargu-bridge-models--pump service))
     ticket))
+
+(cl-defun kargu-bridge-models-publish (application provider source specs callback &key owner valid-p)
+  "Capture a publication for APPLICATION before first startup can yield.
+SOURCE, SPECS, PROVIDER and OWNER are captured by `kargu-bridge-models-submit'.
+CALLBACK receives (VIEW FAILURE).  Return the exact preparation-barrier ticket.
+An existing native application connection is reused, never replaced.  VALID-P
+guards the originating revision; passive readers never call this operation."
+  (let* ((services (kargu-application-services application))
+         (service (gethash :native-models services))
+         (binding (gethash :native-core services))
+         (connection (if service (kargu-bridge-models-connection service)
+                       (and binding (kargu-bridge-application-connection binding)))))
+    (kargu-bridge-models-submit connection application provider source specs callback
+                                :owner owner :valid-p valid-p)))
 
 (defun kargu-bridge-models-snapshot (application)
   "Return APPLICATION's detached last committed view without IO or core startup."

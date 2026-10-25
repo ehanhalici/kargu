@@ -1,5 +1,32 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — İlk publication intent'i ve owned startup
+
+Explicit bridge publisher artık ilk sidecar startup yield'inden önce captured
+ticket'ı application'a kaydeder. Gerçek connection preparation bu ilk intent'i
+bekler; sonradan kuyruğa giren yazım onu değiştirmez. Startup/lease acquisition
+ayrı bridge/models/start modülündedir; metadata semantiği veya ikinci queue/store
+yoktur. Mevcut API lease'i ilk metadata yazımında bile değiştirilmez; kayıp epoch
+ve eksik capability yeni owner/revision-zero/replay yolunu açmaz.
+
+Lease öncesi iptal yalnız o startup waiter'ını söker, belleği bırakır ve sıradaki
+işe izin verir; ortak core/sibling startup kapatılmaz. Geç/duplicate ready callback
+iptal edilmiş owner yaratamaz. Allocation başladıktan sonraki mevcut abort/ACK/
+drain sözleşmesi korunur. Snapshot/capture/reconcile core başlatmaz.
+
+Beş yeni gerçek editor/native fixture dahil **1212/1212 full source ERT**,
+0 unexpected, **128.38 s**, 18:41:34 Europe/Istanbul geçti. Bu sayı discovery
+hassasiyet regression'ını da içerir. Dört dokunulan üretim Elisp dosyası Werror
+bytecompile/checkdoc temiz; geçici elc'ler kaynakta bırakılmaz. Native gate bu
+turn'de **258 native + 16 compile-fail**, fmt, strict Clippy ve locked build geçti.
+İlk focused catalog denemesi eksik test bootstrap'ı nedeniyle başlayamadı;
+require kargu ile 6/6 yeniden geçti, hiçbir assertion zayıflatılmadı.
+
+Public setter/catalog producer + genel UI reader consumer cutover ve onların
+Elisp semantic engine'lerini silme hâlâ açıktır. Bunlar tamamlanmadığından tüm
+metadata/API göçü bitti iddiası yoktur. 01, module baseline ve kullanıcının
+shell.nix/07 değişiklikleri korunur; harici API/CLI hesabı kullanılmadı.
+
 ## 2026-10-25 — Discovery kapasite lexeme kaybının kapatılması
 
 Native discovery snapshot artık ayrı fiyat dönüştürücü yerine metadata'nın
