@@ -198,6 +198,9 @@ impl<State> Budget<State> {
         if charge.budget != self.id || !self.outstanding.remove(&charge.sequence) {
             return Err(CoreError::StaleOwner);
         }
+        if self.deadline.expired() && self.refusal.is_none() {
+            self.refusal = Some(Refusal::Deadline);
+        }
         self.unknown |= usage.unknown();
         let total = usage
             .total()

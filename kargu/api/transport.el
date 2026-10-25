@@ -73,7 +73,7 @@ PARTIAL prevents retries after any published response event."
   (let* ((code (gethash "code" failure))
          (status (or (gethash "status" failure)
                      (and (member code '("invalid_request" "resource_limit" "cancelled"
-                                         "protocol_error" "incomplete_stream" "redirect_refused")) 400)))
+                                         "protocol_error" "incomplete_stream" "redirect_refused" "run_deadline")) 400)))
          (retry (gethash "retry_after" failure))
          (message (gethash "message" failure "Rust API request failed")))
     (if partial

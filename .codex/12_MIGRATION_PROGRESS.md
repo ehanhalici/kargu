@@ -1,5 +1,14 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Budget deadline / upstream timeout ayrımı
+
+Native `run_deadline`, fiziksel attempt `deadline`'ından ayrıldı. Owner budget
+süresinin dolması artık provider circuit failure sayılmaz; collection sırasında
+deadline refusal hemen project edilir. Real held-socket editor regresyonu bu
+sızıntıyı kapsar. 13 focused budget ERT + 20 native budget testi, locked build,
+strict Clippy ve touched bytecompile/checkdoc geçer. Önceki full ERT 1169/1169;
+bu yeni regresyon ayrıca geçti. Retry/circuit motoru henüz taşınmış değildir.
+
 ## 2026-10-25 — Gerçek root-run budget cutover ve legacy motor kaldırma
 
 Root run budget intent'i async hazırlıktan önce yakalar; logical API/retry aynı

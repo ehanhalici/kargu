@@ -36,6 +36,9 @@ pub enum ApiError {
     /// The absolute per-attempt deadline expired.
     #[error("API deadline exceeded")]
     Deadline,
+    /// Owner budget expired, not evidence of an unhealthy upstream service.
+    #[error("Run budget deadline exceeded")]
+    RunDeadline,
     /// HTTP redirect was refused before any target request or credential replay.
     #[error("API redirect refused; configure the final endpoint")]
     Redirect,
@@ -71,6 +74,7 @@ impl ApiError {
             Self::FirstByteTimeout => "first_byte_timeout",
             Self::IdleTimeout => "idle_timeout",
             Self::Deadline => "deadline",
+            Self::RunDeadline => "run_deadline",
             Self::Redirect => "redirect_refused",
             Self::Http { .. } => "http",
             Self::ContextOverflow { .. } => "context_overflow",

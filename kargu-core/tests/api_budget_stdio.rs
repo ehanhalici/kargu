@@ -262,7 +262,8 @@ fn run_deadline_interrupts_an_active_socket_independently_of_attempt_timeout() -
         params(&scope, &budget, &url, "normal_request"),
     )?;
     let reply = peer.read()?;
-    assert_eq!(reply["result"]["failure"]["code"], "deadline");
+    assert_eq!(reply["result"]["failure"]["code"], "run_deadline");
+    assert_eq!(reply["result"]["budget"]["refusal"], "deadline");
     assert_eq!(reply["result"]["budget"]["requests_spent"], 1);
     assert_eq!(reply["result"]["budget"]["tokens_unknown"], true);
     closed_rx.recv_timeout(Duration::from_secs(1))?;

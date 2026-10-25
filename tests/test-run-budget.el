@@ -232,5 +232,29 @@ REFUSAL and SEALED describe native terminal policy."
             (lambda () (eq (kargu-bridge-budget-state (kargu-run-budget-native budget)) :closed))))
        (delete-process server)))))
 
+(ert-deftest kargu-budget-run-deadline-does-not-trip-provider-circuit-test ()
+  "A real owner-budget timeout is not charged as an upstream failure."
+  (kargu-bridge-test--with-core
+    (let* ((budget (kargu-budget-create :timeout 0.2))
+           (kargu-application--context (kargu-application-create :budget budget))
+           (provider (kargu--provider-name))
+           (server (kargu-stream-test--server "" nil t))
+           (url (format "http://127.0.0.1:%d/chat" (process-contact server :service)))
+           (kargu-stream nil) result)
+      (unwind-protect
+          (progn
+            (kargu-circuit-reset provider)
+            (kargu--api-post url nil '(("messages" . [(("role" . "user") ("content" . "hi"))]))
+                             (kargu-application-current-generation) (lambda (value) (setq result value)))
+            (kargu-bridge-test--wait (lambda () result))
+            (should (kargu-response-error-message result))
+            (should (eq (kargu-run-budget-status budget) :exhausted-deadline))
+            (should (= (kargu-run-budget-requests-spent budget) 1))
+            (should (= (kargu-circuit-breaker-failure-count (kargu-circuit-get provider)) 0))
+            (kargu-budget-seal budget)
+            (kargu-bridge-test--wait
+             (lambda () (eq (kargu-bridge-budget-state (kargu-run-budget-native budget)) :closed))))
+        (delete-process server)))))
+
 (provide 'tests/test-run-budget)
 ;;; test-run-budget.el ends here

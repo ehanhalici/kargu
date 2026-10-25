@@ -166,7 +166,7 @@ impl ApiRequests {
             let result = if let Some(deadline) = budget_deadline {
                 tokio::select! {
                     biased;
-                    _ = deadline.elapsed() => Err(ApiError::Deadline),
+                    _ = deadline.elapsed() => Err(ApiError::RunDeadline),
                     result = exchange => result,
                 }
             } else {
@@ -185,7 +185,7 @@ impl ApiRequests {
                     if let Some(deadline) = budget_deadline {
                         tokio::select! {
                             biased;
-                            _ = deadline.elapsed() => Err(ApiError::Deadline),
+                            _ = deadline.elapsed() => Err(ApiError::RunDeadline),
                             result = publish => result,
                         }
                     } else {
