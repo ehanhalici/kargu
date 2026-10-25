@@ -98,12 +98,15 @@
       (setf (kargu-bridge-budget-state binding) :ready)
       (kargu-bridge-budget--notify binding nil)))))
 
-(defun kargu-bridge-budget-ensure (budget connection scope callback)
+(cl-defun kargu-bridge-budget-ensure (budget connection scope callback)
   "Bind BUDGET once on CONNECTION and SCOPE; asynchronously deliver CALLBACK.
 Return a detachable waiter cleanup, never admission or billing authority."
   (let* ((binding (kargu-run-budget-native budget))
          (ticket (list callback))
          (start (null binding)))
+    (when (and start (not (kargu-budget-live-p budget)))
+      (kargu-bridge--callback callback nil (kargu-bridge--fault "budget_closed"))
+      (cl-return-from kargu-bridge-budget-ensure #'ignore))
     (when start
       (setq binding (kargu-bridge-budget--make
                      :connection connection :budget budget

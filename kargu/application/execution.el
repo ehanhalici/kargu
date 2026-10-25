@@ -44,6 +44,7 @@
   "Capture CONTEXT's one API budget before any asynchronous run preparation."
   (let ((budget (kargu-budget-create :run-id (plist-get (kargu-execution-run context) :id))))
     (setf (kargu-execution-budget context) budget)
+    (plist-put (kargu-execution-run context) :budget budget)
     (kargu-application-set-budget budget (kargu-execution-app context))))
 
 (defun kargu-execution-request-started ()

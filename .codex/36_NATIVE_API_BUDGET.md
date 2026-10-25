@@ -141,3 +141,24 @@ All 13 focused editor budget tests, 20 native budget tests, locked build, strict
 Clippy, touched bytecompile/checkdoc pass. Last full ERT before this correction
 was 1169/1169; the newly added regression has separately passed. No claim of
 complete retry/breaker migration follows from this targeted correction.
+
+## 2026-10-25 — Root tool projection and pre-start revocation
+
+Root execution now installs its exact captured budget projection in the run
+record as well as the execution/application. The tool-context constructor was
+already reading that run field; leaving it unset made its local lifetime check
+see no budget. The real root-run regression now also traverses the actual tool
+context constructor and asserts object identity, without executing a tool.
+There is still one native API ledger, not a second Elisp meter. Native tools
+sharing a general foreground run/claim remain a separate open obligation.
+
+A sealed/expired intent before the first `ensure` now refuses delivery without
+creating a phantom `starting` native binding. Previously no allocation RPC was
+sent, leaving no callback that could ever complete the later local close. The
+existing late-allocation/reentrant/epoch tests remain, and a new test covers
+both pre-sealed and pre-expired intent with zero RPCs and zero installed lease.
+
+Verification: **1172/1172 full source ERT**, 0 unexpected, **127.16 s**;
+touched warning-as-error byte compilation/checkdoc pass, temporary bytecode
+removed. Native baseline at the start of this UI-only slice was **184 + 5
+compile-fail**. No claim of full native tool/run cutover follows.

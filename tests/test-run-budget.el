@@ -111,6 +111,22 @@ REFUSAL and SEALED describe native terminal policy."
                                (kargu-bridge--object "status" "closed" "budget" (kargu-budget-test--snapshot 0 0 nil nil t)))
      (should (eq (kargu-bridge-budget-state (kargu-run-budget-native budget)) :closed)))))
 
+(ert-deftest kargu-budget-closed-before-ensure-does-not-create-a-phantom-lease-test ()
+  "Sealed or expired intent never installs an unallocated starting lease."
+  (kargu-budget-test--with-peer
+    (dolist (budget (list (kargu-budget-seal (kargu-budget-create))
+                         (kargu-budget-create :deadline 0)))
+      (let ((failed 0))
+        (funcall (kargu-bridge-budget-ensure
+                  budget connection scope
+                  (lambda (id failure)
+                    (should-not id) (should failure) (cl-incf failed))))
+        (should (= failed 1))
+        (should-not calls)
+        (should-not (kargu-run-budget-native budget))
+        (kargu-budget-seal budget)
+        (should-not (kargu-run-budget-native budget))))))
+
 (ert-deftest kargu-budget-close-before-allocation-closes-late-id-test ()
   "Canceled startup cannot publish or leak a late native ledger."
   (kargu-budget-test--with-peer
@@ -220,7 +236,14 @@ REFUSAL and SEALED describe native terminal policy."
                     (lambda (context)
                       (funcall prepare context)
                       (setq budget (kargu-execution-budget context))
-                      (should (eq budget (kargu-application-budget-get (kargu-execution-app context)))))))
+                      (should (eq budget (kargu-application-budget-get (kargu-execution-app context))))
+                      (should (eq budget (plist-get (kargu-execution-run context) :budget)))
+                      (let ((kargu--loop-run (kargu-execution-run context)))
+                        (cl-letf (((symbol-function 'kargu-tool-gate-execute-sync)
+                                   (lambda (_registry tool-context _name _arguments)
+                                     (should (eq budget (kargu-tool-execution-context-budget-scope tool-context)))
+                                     "captured")))
+                          (should (equal (kargu-execute-tool "budget-fixture" "{}") "captured")))))))
            (kargu-loop-send "hello" nil (lambda (value) (setq report value)))
            (kargu-bridge-test--wait (lambda () report))
            (should (eq (plist-get report :status) :done))

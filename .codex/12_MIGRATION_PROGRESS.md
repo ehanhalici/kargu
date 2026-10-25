@@ -1,5 +1,17 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Root tool budget projection / pre-start lease kapanışı
+
+Run.:budget artık context/application ile aynı projection nesnesidir; gerçek
+root-run testi tool-context constructor'ından da geçer. Native tool/run claim
+birleştirme hâlâ açıktır; bu UI lifetime bağlantısı ikinci ledger değildir.
+İlk ensure öncesi sealed/expired budget RPC veya phantom starting lease yaratmaz.
+Late/reentrant allocation davranışı korunur. Detay ve kapsam 36'dadır.
+
+**1172/1172 full source ERT**, 0 unexpected, **127.16 s**; touched Werror
+bytecompile/checkdoc temiz ve .elc kaldırıldı. Native baseline bu UI-only kesim
+başında **184 + 5 compile-fail** idi. Kullanıcı shell.nix/07 korunmuştur.
+
 ## 2026-10-25 — Değişmez HTTP attempt snapshot paylaşımı
 
 HTTP port captured request'i ödünç alabilir; IPC worker aynı immutable Arc'ı
