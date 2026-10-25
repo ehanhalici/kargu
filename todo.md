@@ -58,16 +58,19 @@ Elisp parser/accumulator/watchdog silindi (.codex/30). Credential/UI portları
 kalır; wire ve prompt-cache engine'leri de native'ye taşınıp silindi (.codex/31).
 Request policy de native'ye taşınıp eski seçim/merge motorları silindi (.codex/32).
 Credential/header assembly de native'ye taşınıp Elisp üretim motorları silindi
-(.codex/33); credential lookup editör portudur. Retry/circuit ve model metadata
-normalization hâlâ açık olduğu için tüm API göçü tamamlandı sayılmaz.
+(.codex/33); credential lookup editör portudur. Model metadata normalization
+ve genel run/history geçişi açık olduğu için tüm API göçü tamamlandı sayılmaz.
 API tüketicileri application-owned native service lease kullanır (.codex/34–35);
 bu henüz native agent run/history sahipliği değildir. Native budget HTTP
 admission/drain ve gerçek root-run consumer'a bağlandı; eski Elisp debit/token
 toplama motoru silindi (.codex/36). G08 hard reservation/pricing ve genel native
 claim/tool/run birliği hâlâ açıktır; yalnız gözlenen token tavanı harcama garantisi değildir.
 Native retry/circuit actor, charged replay, owned observer ACK ve detached GUI
-projection/reset portları eklendi (.codex/37–38). High-level API/loop varsayılan
-cutover ve eski Elisp retry/circuit motorlarının silinmesi henüz açıktır.
+projection/reset portları eklendi (.codex/37–38). High-level plain/stream chat
+varsayılanı bu portlara geçirildi; Elisp retry/backoff/timer ve circuit admission/
+sayaç/probe motorları silindi (.codex/40). Native terminal kategoriler Result
+olarak gelir; plz DTO/bağımlılığı kaldırıldı. Manuel recovery, verilen native
+reset'in ACK'ini bekler; UI görünümü admission kararı vermez.
 01 uyum denetimi ve kalan kaynak-sahipliği bulguları .codex/39'da tutulur;
 testlerin yeşil olması bütün Rust ağacının mimari uyum sertifikası değildir.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,

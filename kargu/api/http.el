@@ -6,9 +6,8 @@
 
 ;;; Commentary:
 
-;; Asynchronous HTTP for chat completions.  Retry on 429/5xx with a
-;; 0.5s floor.  Circuit/retry policy remains here until its native cutover.
-;; Native budgets admit every attempt; Elisp only captures their delivery owner.
+;; Rust owns all HTTP attempts, retry/circuit decisions and budget admission.
+;; Elisp captures preferences, delivery ownership and presentation callbacks.
 ;; Public internals used by `kargu/api': `kargu--api-post',
 ;; `kargu-busy-p', `kargu-api-cancel'.
 
@@ -34,7 +33,6 @@
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-extra-auth "kargu/providers/registry" (id))
-(declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
 (declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
 (declare-function kargu--provider-name "kargu/config/key" ())
 
@@ -123,26 +121,19 @@ SESSION and ORIGIN identify the owner; DEBIT-KIND labels the logical turn."
           (add-hook 'change-major-mode-hook cleanup nil t))))))
 
 (defun kargu-http-clear-busy ()
-  "Release transport busy/probe ownership without changing application state."
-  (let ((scope (kargu-http-request-scope))
-        (owned (kargu-application-current-request)))
-    (when-let* ((req (kargu-application-current-request)))
-      (when (= (kargu-logical-request-generation req) (kargu-application-current-generation))
-        (kargu-logical-request-finish req)
-        (kargu-application-set-active-request nil)))
-    (setq kargu--busy nil)
-    (when (or owned (null kargu-application--bound))
-      (kargu-circuit-release-probe scope))))
+  "Release editor delivery ownership without mutating native circuit state."
+  (when-let* ((req (kargu-application-current-request)))
+    (when (= (kargu-logical-request-generation req) (kargu-application-current-generation))
+      (kargu-logical-request-finish req)
+      (kargu-application-set-active-request nil)))
+  (setq kargu--busy nil))
 
 (defun kargu-http-cancel ()
   "Cancel transport resources and invalidate stale request generations.
 Application status, loop ownership and UI belong to the caller."
-  (let ((req (kargu-application-current-request))
-        (scope (kargu-http-request-scope)))
+  (let ((req (kargu-application-current-request)))
     (when (or req (null kargu-application--bound))
       (kargu-application-next-generation)
-      (kargu-circuit-release-probe scope)
-
       (when req
         (kargu-logical-request-cancel req)
         (when (eq (kargu-application-current-request) req)
@@ -156,37 +147,18 @@ Application status, loop ownership and UI belong to the caller."
       (setq kargu--busy nil)
       (kargu-log 'warn "request cancelled"))))
 
-(defun kargu--api-post (url auth payload gen callback &optional on-delta attempt)
+(defun kargu--api-post (url auth payload gen callback &optional on-delta)
   "POST PAYLOAD to URL with AUTH and dispatch the result to CALLBACK.
-GEN is the cancellation generation.  ON-DELTA enables SSE streaming;
-ATTEMPT is the zero-based retry count.
-Enforces provider circuit breakers and unified run budget (Contract 6)."
-  (cl-block kargu--api-post
-    (let* ((attempt (or attempt 0))
-           (_logical (kargu-http--ensure-logical-request gen))
-           (scope (kargu-http-request-scope gen)))
-      ;; 1. Circuit breaker gate
-      (unless (or (> attempt 0)
-                  (kargu-circuit-allow-request-p scope))
-        (kargu-http-clear-busy)
-        (let ((err-msg (format "Circuit breaker OPEN: upstream provider degraded; %s"
-                               (kargu-circuit-status-string scope))))
-          (kargu-log 'warn "%s" err-msg)
-          (funcall callback (kargu-err err-msg :connection-failed
-                                       (list :scope scope :side-effect :none))))
-        (cl-return-from kargu--api-post nil))
-
-      ;; Every physical attempt is charged by Rust before opening network IO.
-
-      (if (and on-delta kargu-stream)
-          (kargu--api-post-streaming url auth payload gen callback
-                                     on-delta attempt)
-        (kargu--api-post-plain url auth payload gen callback
-                               on-delta attempt)))))
+GEN is the cancellation generation; ON-DELTA enables SSE streaming.
+The native owner alone admits, charges, retries and retires physical attempts."
+  (kargu-http--ensure-logical-request gen)
+  (if (and on-delta kargu-stream)
+      (kargu--api-post-streaming url auth payload gen callback on-delta)
+    (kargu--api-post-plain url auth payload gen callback on-delta)))
 
 (cl-defstruct (kargu-http--request (:constructor kargu-http--make-request))
-  "One HTTP attempt and its asynchronous resources."
-  url auth payload generation callback on-delta attempt process
+  "One logical native exchange and its editor delivery lease."
+  url auth payload generation callback on-delta process
   (app (and (kargu-application-current-request) (kargu-application-context)))
   (logical (kargu-application-current-request))
   (state :pending))
@@ -222,8 +194,7 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
     (when-let* ((logical (kargu-http--request-logical request)))
       (when (eq (kargu-logical-request-process logical)
                 (kargu-http--request-process request))
-        (setf (kargu-logical-request-process logical) nil
-              (kargu-logical-request-stream-timer logical) nil)))
+        (setf (kargu-logical-request-process logical) nil)))
     t))
 
 (defun kargu-http--release-process (request)
@@ -234,8 +205,7 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
       (setq kargu--current-process nil))
     (when-let* ((logical (kargu-http--request-logical request)))
       (when (eq (kargu-logical-request-process logical) process)
-        (setf (kargu-logical-request-process logical) nil
-              (kargu-logical-request-stream-timer logical) nil)))
+        (setf (kargu-logical-request-process logical) nil)))
     (when (and (processp process) (process-live-p process))
       (delete-process process))))
 
@@ -258,14 +228,11 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
 
 (defun kargu-http--log-request (request transport)
   "Log REQUEST metadata and its TRANSPORT without credentials."
-  (kargu-log 'request "POST model API (model=%s, %d messages, %d tools, %s%s)"
+  (kargu-log 'request "POST model API (model=%s, %d messages, %d tools, %s)"
              (kargu--model)
              (length (kargu-aget (kargu-http--request-payload request) "messages"))
              (kargu-registered-tool-count)
-             transport
-             (if (> (kargu-http--request-attempt request) 0)
-                 (format ", retry %d" (kargu-http--request-attempt request))
-               ""))
+             transport)
   (kargu--log-out-payload
    (if (eq transport 'streaming)
        (append (kargu-http--request-payload request) '(("stream" . t)))
@@ -274,14 +241,7 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
 (defun kargu-http--handle-body (request body)
   "Decode BODY and deliver the response for REQUEST."
   (save-match-data
-    (kargu--api-handle-body
-     body (kargu-http--request-callback request)
-     (kargu-http--request-url request)
-     (kargu-http--request-auth request)
-     (kargu-http--request-payload request)
-     (kargu-http--request-generation request)
-     (kargu-http--request-on-delta request)
-     (kargu-http--request-attempt request))))
+    (kargu--api-handle-body body (kargu-http--request-callback request))))
 
 (defun kargu-http--finish-plain (request body)
   "Deliver BODY for a current, unfinished plain REQUEST."
@@ -289,13 +249,10 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
     (kargu-http--handle-body request body)))
 
 (defun kargu-http--fail-request (request err)
-  "Deliver sanitized ERR for the current REQUEST, retaining retry ownership."
+  "Deliver terminal typed ERR for the current REQUEST exactly once."
   (when (kargu-http--claim-response request)
-    (kargu--api-on-transport-error
-     (kargu-http--request-url request) (kargu-http--request-auth request)
-     (kargu-http--request-payload request) (kargu-http--request-generation request)
-     (kargu-http--request-callback request) (kargu-http--request-on-delta request)
-     (kargu-http--request-attempt request) err)))
+    (kargu-http-clear-busy)
+    (funcall (kargu-http--request-callback request) err)))
 
 (defun kargu-http--live-delta (request)
   "Return a callback forwarding deltas only while REQUEST is live."
@@ -304,147 +261,75 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
       (when-let* ((on-delta (kargu-http--request-on-delta request)))
         (funcall on-delta event)))))
 
-(defun kargu--api-post-plain (url auth payload gen callback &optional on-delta attempt)
-  "POST PAYLOAD to URL with AUTH and deliver it to CALLBACK.
-GEN identifies the request; ON-DELTA and ATTEMPT are retained for retries."
+(defun kargu--api-post-plain (url auth payload gen callback &optional on-delta)
+  "Deliver native plain PAYLOAD at URL with AUTH for GEN to CALLBACK.
+ON-DELTA identifies the original UI consumer for native retry observations."
   (let ((request (kargu-http--make-request
                   :url url :auth auth :payload payload :generation gen
-                  :callback callback :on-delta on-delta :attempt (or attempt 0))))
+                  :callback callback :on-delta on-delta)))
     (kargu-http--log-request request 'plain)
-    (kargu-http--track-process
-     request (kargu-transport-request 'post url
-				      :application (kargu-application-context)
-				      :budget (kargu-http-request-budget gen)
-                  :debit-kind (if (> (or attempt 0) 0) :retry-attempt
-                                (if-let* ((logical (kargu-http--request-logical request)))
-                                    (kargu-logical-request-debit-kind logical) :normal-request))
-				      :auth auth :body (kargu-json-encode-record payload)
-				      :wire (kargu-api-wire-record (kargu-api-active-format))
-				      :tuning (kargu-api-request-tuning (kargu--provider-name) (kargu--model))
-				      :provider (kargu--provider-name)
-				      :cache-markers (if (kargu-connection-current)
-							 (kargu-connection-setting :cache-marker)
-						       (kargu-provider-cache-marker-p (kargu--provider-name)))
-				      :as 'string :timeout kargu-api-timeout
-				      :then (kargu-http--wrap request
-							      (lambda (body) (kargu-http--finish-plain request body)))
-				      :else (kargu-http--wrap request
-							      (lambda (err) (kargu-http--fail-request request err)))))))
+    (kargu-http--start request nil)))
 
-(defun kargu--api-post-streaming (url auth payload gen callback on-delta
-                                      &optional attempt)
-  "Stream PAYLOAD to URL with AUTH for request generation GEN.
-Deliver events to ON-DELTA and the final response to CALLBACK.
-ATTEMPT is the retry count."
+(defun kargu--api-post-streaming (url auth payload gen callback on-delta)
+  "Deliver native streaming PAYLOAD at URL with AUTH for GEN.
+CALLBACK receives the terminal result and ON-DELTA receives owned UI events."
   (let ((request (kargu-http--make-request
-                  :url url :auth auth
-                  :payload payload :generation gen
-                  :callback callback :on-delta on-delta :attempt (or attempt 0))))
+                  :url url :auth auth :payload payload :generation gen
+                  :callback callback :on-delta on-delta)))
     (kargu-http--log-request request 'streaming)
-    (kargu-http--start-stream request)))
+    (kargu-http--start request t)))
 
-(defun kargu-http--start-stream (request)
-  "Start REQUEST's Rust stream; Elisp only forwards owned presentation events."
+(defun kargu-http--observe-retry (request _observation)
+  "Notify REQUEST's captured UI consumer before the native retry ACK."
+  (unless (kargu-http--live-request-p request) (error "Obsolete API retry owner"))
+  (kargu-run-observers 'kargu-api-retry-hook
+                       (kargu-http--request-generation request)
+                       (kargu-http--request-on-delta request))
+  ;; A hook may cancel, replace the owner or change generation reentrantly.
+  ;; Throwing refuses the reverse ACK; it never creates another forward call.
+  (unless (kargu-http--live-request-p request) (error "Revoked API retry owner")))
+
+(defun kargu-http--start (request stream)
+  "Start REQUEST's logical native exchange, optionally with STREAM delivery."
   (kargu-http--track-process
    request
    (kargu-transport-request
     'post (kargu-http--request-url request)
-    :application (kargu-application-context)
+    :application (or (kargu-http--request-app request) (kargu-application-context))
     :budget (kargu-http-request-budget (kargu-http--request-generation request))
-    :debit-kind (if (> (kargu-http--request-attempt request) 0) :retry-attempt
-                  (if-let* ((logical (kargu-http--request-logical request)))
-                      (kargu-logical-request-debit-kind logical) :normal-request))
+    :debit-kind (if-let* ((logical (kargu-http--request-logical request)))
+                    (kargu-logical-request-debit-kind logical) :normal-request)
+    :retry (kargu-api-retry-preferences)
+    :circuit (kargu-circuit-preferences)
+    :on-retry (kargu-http--wrap request (lambda (observation)
+                                        (kargu-http--observe-retry request observation)))
     :auth (kargu-http--request-auth request)
     :wire (kargu-api-wire-record (kargu-api-active-format))
     :tuning (kargu-api-request-tuning (kargu--provider-name) (kargu--model))
-    :provider (kargu--provider-name)
+    :provider (kargu-http-request-scope (kargu-http--request-generation request))
     :cache-markers (if (kargu-connection-current)
                        (kargu-connection-setting :cache-marker)
                      (kargu-provider-cache-marker-p (kargu--provider-name)))
     :body (kargu-json-encode-record
-           (append (kargu-http--request-payload request) '(("stream" . t))))
-    :as 'string :timeout nil :stream t
-    :on-delta (kargu-http--wrap request (kargu-http--live-delta request))
+           (if stream (append (kargu-http--request-payload request) '(("stream" . t)))
+             (kargu-http--request-payload request)))
+    :as 'string :timeout (unless stream kargu-api-timeout) :stream stream
+    :on-delta (when stream (kargu-http--wrap request (kargu-http--live-delta request)))
     :then (kargu-http--wrap request (lambda (body) (kargu-http--finish-plain request body)))
     :else (kargu-http--wrap request (lambda (err) (kargu-http--fail-request request err))))))
 
-(defun kargu--api-handle-success (response callback)
-  "Record success metrics and dispatch CALLBACK with valid RESPONSE."
-  (let ((scope (kargu-http-request-scope)))
+(defun kargu--api-handle-body (body callback)
+  "Decode native canonical BODY for CALLBACK; never infer replay from prose.
+Rust has already validated the terminal completion.  Invalid editor delivery
+is a protocol failure, not a reason to open another socket."
+  (let ((response (and (stringp body) (kargu--json-decode-safe body))))
+    (kargu--log-block "IN HTTP body" (or body "") (kargu--log-looks-json-p body))
     (kargu-http-clear-busy)
-    (kargu-circuit-record-success scope)
-    (funcall callback response)))
-
-(defun kargu--api-dispatch-error (callback msg)
-  "Mark kargu as not busy and invoke CALLBACK with an error alist for MSG.
-An upstream-unavailable MSG counts against the circuit breaker here, so
-the loop never has to record it again."
-  (let ((scope (kargu-http-request-scope)))
-    (kargu-http-clear-busy)
-    (if (kargu--api-error-looks-retryable-p msg)
-        (kargu-circuit-record-failure msg scope)
-      (kargu-circuit-release-probe scope))
-    (funcall callback (kargu--api-error-alist msg))))
-
-(defun kargu--api-handle-no-choices (response trimmed url auth payload gen
-                                              callback on-delta attempt)
-  "Handle RESPONSE without choices, using TRIMMED for error details.
-Retry URL with AUTH and PAYLOAD for GEN and ATTEMPT when appropriate.
-CALLBACK receives the result; ON-DELTA receives streaming events."
-  (let ((parsed (kargu--provider-error-text response)))
-    (if (and parsed
-             (kargu--api-error-looks-retryable-p parsed)
-             (kargu--api-schedule-retry
-              url auth payload gen callback on-delta attempt
-              (format "HTTP 200: %s" parsed)))
-        nil
-      (kargu--api-dispatch-error
-       callback
-       (if parsed
-           (format "HTTP 200: %s" parsed)
-         (format "HTTP 200: response contained no choices%s"
-                 (if (and trimmed (not (string-empty-p trimmed)))
-                     (concat ": " (truncate-string-to-width trimmed 200))
-                   "")))))))
-
-(defun kargu--api-handle-body (body callback &optional url auth payload gen
-                                    on-delta attempt)
-  "Decode BODY and deliver its result to CALLBACK.
-URL, AUTH and PAYLOAD retain request data for retries.  GEN identifies
-the request, ON-DELTA receives events and ATTEMPT counts retries.
-Streaming bodies are already completion-gated and reconstructed by Rust."
-  (let* ((trimmed (and (stringp body) (string-trim body)))
-         (attempt (or attempt 0)))
-    (kargu--log-block "IN HTTP body" (or body "")
-                      (kargu--log-looks-json-p trimmed))
-    (let* ((response (and (stringp body) (kargu--json-decode-safe body)))
-           (err (and response (kargu-response-error-message response))))
-      (when (and kargu-log-wire response)
-        (kargu--log-block "IN reconstructed JSON"
-                          (kargu-json-encode-record response)
-                          t))
-      (cond
-       ((and err
-             (kargu--api-error-looks-retryable-p err)
-             (kargu--api-schedule-retry
-              url auth payload gen callback on-delta attempt
-              (format "HTTP 200: %s" err)))
-        nil)
-       ((null response)
-        (kargu--api-dispatch-error
-         callback
-         (format "HTTP 200: empty or invalid response body: %s"
-                 (truncate-string-to-width (or body "") 200))))
-       (err
-        (kargu--api-dispatch-error
-         callback
-         (format "HTTP 200: %s" err)))
-       ((null (kargu-aget response "choices"))
-        (kargu--api-handle-no-choices
-         response trimmed url auth payload gen callback on-delta attempt))
-       (t
-        (kargu--api-handle-success response callback))))))
+    (funcall callback
+             (if (and response (kargu-aget response "choices")
+                      (not (kargu-response-error-message response)))
+                 response
+               (kargu-err "Invalid native API completion" :protocol-error)))))
 
 (provide 'kargu/api/http)
-
 ;;; http.el ends here

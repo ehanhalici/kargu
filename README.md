@@ -37,8 +37,8 @@ Rather than running heavy external daemons or separate browser windows, Kargu tu
 ### Prerequisites
 - GNU Emacs 29.1 or newer
 - Required for model connections: the built `kargu-core` binary (see below).
-  `plz` remains a temporary error-record dependency until retry policy migrates;
-  it no longer performs model HTTP or SSE. Curl is only needed by webfetch.
+  Model HTTP, SSE and terminal errors do not require `plz`.
+  Curl is only needed by webfetch.
 - Optional interface packages: `transient` (menu), `company` (completion),
   `magit` (Git interface).
 - Optional integrations: `eglot` and a language server for LSP tools; `dape` and a configured debug adapter for debug mode. Kargu works without LSP.
@@ -92,7 +92,7 @@ starts and negotiates a shared connection asynchronously. Configure the binary
 path above or install `kargu-core` on PATH. Missing binaries/capabilities are
 reported explicitly; there is no duplicate Elisp glob implementation or silent
 fallback. `kargu/bridge` can also be loaded independently of the agent, UI
-packages, credentials, and `plz`.
+packages or credentials.
 
 Model chat GET/POST and model discovery now use Rust HTTP/TLS, with redirects
 refused, separate connect/first-byte/idle/total bounds, bounded SSE parsing,
@@ -104,8 +104,19 @@ package this asset alongside the Lisp sources at the same relative location.
 The editor reads it for synchronous startup, then receives the validated
 core revision before the connection becomes ready. Explicit user provider
 registrations survive refresh. Credentials remain in the editor's auth port.
-Wire/request policy, retry/circuit and live-model metadata normalization are
-still separate migration work, not a second HTTP/SSE implementation.
+Wire/request policy, credential/header assembly and default chat retry/circuit
+decisions are native. Live-model metadata normalization and the wider agent
+run/history migration remain separate work.
+
+Chat retries stay within one native logical exchange, with a fresh budget debit
+before every physical attempt. `kargu-api-retry-max` is the single retry limit
+(0–10); the obsolete `kargu-loop-upstream-retries` aliases it, not a multiplier.
+`kargu-http-retry-statuses` must be a subset of 429/500/502/503/504/529.
+Rust uses full jitter and honors Retry-After as a minimum: a server wait above
+`kargu-api-retry-after-max` refuses replay instead of retrying early. Zero is
+preserved. Published deltas forbid automatic replay; error prose never authorizes
+it. Circuit admission/probes also belong to Rust. Editor views are observations,
+not admission gates; manual recovery waits for an issued native reset ACK.
 
 Native discovery includes hidden sources, honors `kargu-fs-skip-dirs`, and skips
 compiled/backup artifacts. It does not depend on fd/rg or machine-global Git

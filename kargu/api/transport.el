@@ -11,7 +11,7 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'plz)
+(require 'kargu/api/failure)
 (require 'kargu/bridge)
 (require 'kargu/json)
 (require 'kargu/core/custom)
@@ -68,29 +68,6 @@
   "Translate positive SECONDS to wire milliseconds, otherwise explicit null."
   (if (and (numberp seconds) (> seconds 0)) (max 1 (ceiling (* seconds 1000))) :json-null))
 
-(defun kargu-transport--error (failure &optional partial)
-  "Project sanitized core FAILURE into the current editor error DTO.
-PARTIAL prevents retries after any published response event."
-  (let* ((code (gethash "code" failure))
-         (exceeded (eq (gethash "retry_after_exceeded" failure) t))
-         (status (or (and exceeded 400) (gethash "status" failure)
-                     (and (member code '("invalid_request" "resource_limit" "cancelled"
-                                         "protocol_error" "incomplete_stream" "redirect_refused" "run_deadline"
-                                         "budget_exhausted" "retry_unavailable")) 400)))
-         (retry (gethash "retry_after" failure))
-         (message (if exceeded "Provider Retry-After exceeds supported wait; automatic retry refused"
-                    (gethash "message" failure "Rust API request failed"))))
-    (if partial
-        (make-plz-error :message "Partial API response failed; automatic replay refused"
-                        :response (make-plz-response :status 400 :body ""))
-      (make-plz-error
-       :message message
-       :curl-error (cond ((member code '("deadline" "first_byte_timeout" "idle_timeout")) '(28 . "API timeout"))
-                         ((equal code "connection_failed") '(7 . "API connection failed")))
-       :response (when (integerp status)
-                   (make-plz-response :status status :body ""
-                                      :headers (when (stringp retry) (list (cons "retry-after" retry)))))))))
-
 (defun kargu-transport--deliver (handle options result failure)
   "Deliver core RESULT or FAILURE once for HANDLE using captured OPTIONS."
   (when (eq (kargu-transport-handle-state handle) :pending)
@@ -117,20 +94,16 @@ PARTIAL prevents retries after any published response event."
       (kargu-transport--drain-startup handle)
       (kargu-transport--detach-owner handle)
       (cond
-       (failure (funcall (plist-get options :else)
-                         ;; Local IPC/admission/consumer failures are not an
-                         ;; upstream outage and must not trip its circuit.
-                         (make-plz-error :message (gethash "message" failure "Rust API request failed")
-                                         :response (make-plz-response :status 400 :body ""))))
+       (failure (funcall (plist-get options :else) (kargu-api-failure-ipc-result failure)))
        ((not (hash-table-p result))
-	(funcall (plist-get options :else) (make-plz-error :message "Invalid Rust API result")))
+	(funcall (plist-get options :else) (kargu-err "Invalid Rust API result" :protocol-error)))
        ((gethash "failure" result)
 	(funcall (plist-get options :else)
-		 (kargu-transport--error (gethash "failure" result) (eq (gethash "partial" result) t))))
+		 (kargu-api-failure-result (gethash "failure" result) (eq (gethash "partial" result) t))))
        ((eq (gethash "body_ready" result) t)
 	(let ((body (mapconcat #'identity (nreverse chunks) "")))
           (funcall (plist-get options :then) body)))
-       (t (funcall (plist-get options :else) (make-plz-error :message "Invalid Rust API result")))))))
+       (t (funcall (plist-get options :else) (kargu-err "Invalid Rust API result" :protocol-error)))))))
 
 (defun kargu-transport--startup (handle cleanup)
   "Attach startup CLEANUP to HANDLE or release an acquisition delivered late."
@@ -257,7 +230,7 @@ No network request or subprocess is ever started by Elisp."
                                                       (substring (symbol-name (or (plist-get options :debit-kind) :normal-request)) 1))
                 :then (plist-get options :then)
                 :else (plist-get options :else) :on-delta (plist-get options :on-delta)
-                :required (append '("api_request")
+                :required (append '("api_request" "api_failure")
                                   (when (plist-get options :budget) '("api_budget"))
                                   (when (plist-get options :retry) '("api_retry"))
                                   (when (plist-get options :circuit) '("api_circuit"))

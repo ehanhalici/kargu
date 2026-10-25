@@ -38,7 +38,7 @@
   :prefix "kargu-deps-")
 
 (defcustom kargu-deps-mandatory-packages
-  '(plz)
+  nil
   "Packages required before starting a native model run.
 UI and editor integrations are optional.  Explicit additions still block
 run admission when absent; existing user customization is not rewritten."
@@ -46,11 +46,7 @@ run admission when absent; existing user customization is not rewritten."
   :group 'kargu-deps)
 
 (defcustom kargu-deps-package-metadata
-  '((plz
-     :name "plz"
-     :purpose "Temporary error DTO compatibility while retry policy is migrated"
-     :hint "M-x package-install RET plz")
-    (transient
+  '((transient
      :name "transient"
      :purpose "Keyboard-driven interactive menu and control panel interface"
      :hint "M-x package-install RET transient")

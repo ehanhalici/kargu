@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (plz "0.9"))
+;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, convenience, ai, lsp, debug
 ;; URL: https://github.com/kargu/kargu
 
@@ -25,7 +25,7 @@
 ;;   * ediff     -> hunk-by-hunk human approval of every AI edit,
 ;;                  with full rollback
 ;;   * transient -> the interactive command menu
-;;   * plz       -> fully asynchronous HTTP (with SSE streaming);
+;;   * Rust core -> owned asynchronous HTTP, SSE, retry and circuit policy;
 ;;                  the UI thread is never blocked
 ;;
 ;; Entry point is `(require 'kargu)' / `M-x kargu-menu'.  Nested

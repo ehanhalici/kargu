@@ -110,8 +110,7 @@ the native UI's separate model-selection step."
     (find-file path)))
 
 (defconst kargu--dependencies
-  '((plz . "temporary API error DTO compatibility")
-    (transient . "menu interface (mandatory)")
+  '((transient . "menu interface (mandatory)")
     (magit . "Git interface (mandatory)")
     (ediff . "diff approval engine (built into Emacs)"))
   "Feature -> purpose map checked by `kargu-check-setup'.")

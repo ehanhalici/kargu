@@ -116,7 +116,7 @@
   "Synchronous connection readiness cannot overwrite a pending scope ticket."
   (kargu-native-app-test--with-peer
    (setf (kargu-bridge-connection-capabilities connection)
-         (vconcat ["api_request"] (kargu-bridge-connection-capabilities connection)))
+         (vconcat ["api_request" "api_failure"] (kargu-bridge-connection-capabilities connection)))
    (let ((app (kargu-application-create)) (cleaned 0))
      (cl-letf (((symbol-function 'kargu-bridge-ensure)
                 (lambda (callback) (funcall callback connection nil) (lambda () (cl-incf cleaned)))))
@@ -147,7 +147,7 @@
                                                     :else (lambda (_) (cl-incf deliveries)))))
             (if (eq mode 'kill) (kill-buffer owner) (with-current-buffer owner (text-mode)))
             (should (eq (kargu-transport-handle-state handle) :cancelled))
-            (funcall ready (kargu-bridge--connection-create :state 'ready :capabilities ["api_request"]) nil)
+            (funcall ready (kargu-bridge--connection-create :state 'ready :capabilities ["api_request" "api_failure"]) nil)
             (should (= removed 1))
             (should (zerop posts))
             (should (zerop deliveries)))

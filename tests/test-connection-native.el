@@ -13,6 +13,7 @@
 (require 'ert)
 (require 'kargu)
 (require 'tests/test-helpers)
+(require 'tests/test-native-circuit)
 
 (defmacro kargu-test-with-real-connection (&rest body)
   "Run BODY with real preparation and a synthetic temporary config file."
@@ -90,38 +91,41 @@
          (should-not (kargu-loop-running-p)))))))
 
 (ert-deftest kargu-connection-native-retry-retains-target-policy-and-key-test ()
-  "The real retry keeps captured endpoint, key, model and wire policy."
-  (kargu-test-with-real-connection
-   (let ((kargu-api-retry-max 1) calls callbacks report snapshot run)
-     (cl-letf (((symbol-function 'kargu-transport-request)
-                (lambda (_method url &rest options)
-                  (push (list url (plist-get options :auth) (plist-get options :body)) calls)
-                  (push (plist-get options :then) callbacks) nil))
-               ((symbol-function 'kargu--api-retry-delay) (lambda (&rest _) 0.5)))
-       (kargu-test-await
-        (lambda (done)
-          (setq run (kargu-loop-send "hello" nil (lambda (value) (setq report value))))
-          (let ((deadline (+ (float-time) 5)))
-            (while (and (null calls) (< (float-time) deadline)) (accept-process-output nil 0.02)))
-          (funcall done calls)))
-       (should (= (length calls) 1))
-       (setq snapshot (kargu-execution-connection (plist-get run :context)))
-       (should (plist-get run :request-started))
-       (kargu-register-provider :id "g02" :format 'blocks
-                                :request '(:max-output-key "max_completion_tokens"))
-       (kargu-config-publish (kargu-config-service-context)
-                             '(:providers (("g02" :api "https://other.invalid/New" :apikey "changed")))
-                             "/fake" "changed")
-       (funcall (car callbacks) "{\"error\":{\"message\":\"HTTP 503 temporarily unavailable\"}}")
-       (let ((deadline (+ (float-time) 3)))
-         (while (and (< (length calls) 2) (< (float-time) deadline)) (accept-process-output nil 0.02)))
-       (should (= (length calls) 2))
-       (should (equal (car calls) (cadr calls)))
-       (should (equal (caar calls) "https://example.invalid/Original/chat/completions"))
-       (should (equal (kargu-aget (cadar calls) "key") "synthetic-native-key"))
-       (funcall (car callbacks) "{\"choices\":[{\"message\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}")
-       (should (eq (plist-get report :status) :done))
-       (should-not (kargu-connection-snapshot-secret snapshot))))))
+  "Real native replay retains endpoint, key, model and policy across config edits."
+  (kargu-bridge-test--with-core
+    (kargu-test-with-real-connection
+      (let* ((kargu-api-retry-max 1) calls headers report snapshot run
+             (server (kargu-stream-test--server
+                      "" nil nil (lambda (body) (push body calls))
+                      (lambda (value) (push value headers)) nil nil
+                      (list (list :status 503 :body "" :headers "Retry-After: 0\r\n")
+                            (list :status 200 :body "{\"choices\":[{\"message\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3}}"))))
+             (endpoint (format "http://127.0.0.1:%d/Original" (process-contact server :service)))
+             (kargu-api-retry-hook
+              (list (lambda (&rest _)
+                      (should (= (length calls) 1))
+                      (kargu-register-provider :id "g02" :format 'blocks
+                                               :request '(:max-output-key "max_completion_tokens"))
+                      (kargu-config-publish
+                       (kargu-config-service-context)
+                       '(:providers (("g02" :api "https://other.invalid/New" :apikey "changed")))
+                       "/fake" "changed")))))
+        (unwind-protect
+            (progn
+              (write-region (format "[providers.g02]\napi = \"%s\"\napikey = \"synthetic-native-key\"\nmodel = \"m\"\n" endpoint)
+                            nil config-file nil 'silent)
+              (setq run (kargu-loop-send "hello" nil (lambda (value) (setq report value))))
+              (kargu-bridge-test--wait (lambda () report))
+              (setq snapshot (kargu-execution-connection (plist-get run :context)))
+              (should (plist-get run :request-started))
+              (should (= (length calls) 2))
+              (should (equal (car calls) (cadr calls)))
+              (should (equal (kargu-aget (kargu--json-decode (car calls)) "model") "m"))
+              (should (cl-every (lambda (value) (string-search "POST /Original/chat/completions " value)) headers))
+              (should (cl-every (lambda (value) (string-search "synthetic-native-key" value)) headers))
+              (should (eq (plist-get report :status) :done))
+              (should-not (kargu-connection-snapshot-secret snapshot)))
+          (delete-process server))))))
 
 (ert-deftest kargu-connection-preparation-rejects-replaced-selection-test ()
   "A credential result cannot enter a replaced selection or session."
@@ -181,8 +185,9 @@
 				'post (format "http://127.0.0.1:%d/source" (process-contact source :service))
 				:headers (list (cons header "synthetic-redirect-secret"))
 				:body "{}" :timeout 3 :then done :else done)))))
-		(should (plz-error-p result))
-		(should (string-search "redirect refused" (plz-error-message result))))
+		(should (kargu-err-p result))
+		(should (eq (kargu-result-err-code result) :redirect-refused))
+		(should (string-search "redirect refused" (kargu-result-err-message result))))
               (should (string-search "synthetic-redirect-secret" received))
               (should-not clients))
           (dolist (process (append clients (list source target)))
@@ -192,11 +197,13 @@
 
 (ert-deftest kargu-connection-metadata-and-circuits-belong-to-application-test ()
   "Two applications isolate catalogs, metadata, refusals and circuit resets."
-  (let ((first (kargu-application-create)) (second (kargu-application-create)))
+  (kargu-circuit-test--with-peer
+   (let ((first application) (second (kargu-application-create)))
+    (kargu-bridge-circuit-observe first connection scope
+      (kargu-circuit-test--view :provider "g02" :failures 1) t)
     (let ((kargu-application--bound first))
       (kargu--catalog-cache-live-models "g02" '((("id" . "shared") ("context_length" . 123))))
       (kargu-model-mark-tools-refused "shared" "g02")
-      (kargu-circuit-record-failure "synthetic failure" "g02")
       (puthash "g02" 7 (kargu-metadata-table :generations kargu--catalog-generations)))
     (let ((kargu-application--bound second))
       (should-not (kargu-model-get-metadata "shared" "g02"))
@@ -208,7 +215,7 @@
       (should (= (kargu-model-context-window "shared" "g02") 123))
       (should-not (kargu-model-supports-tools-p "shared" "g02"))
       (should (kargu-selection-models-known-p "g02"))
-      (should (= (kargu-circuit-breaker-failure-count (kargu-circuit-get "g02")) 1)))))
+      (should (= (gethash "failures" (kargu-circuit-get "g02")) 1))))))
 
 (ert-deftest kargu-connection-conditional-reasoning-fixture-test ()
   "Conditional rules are captured unchanged for the native policy engine."

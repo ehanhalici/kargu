@@ -31,7 +31,7 @@
 
 (cl-defstruct (kargu-logical-request
                (:constructor kargu-logical-request--create))
-  "One logical API request owning its attempt process, retry timer and watch."
+  "One logical API request owning its editor delivery and native cancel lease."
   (id nil :read-only t)
   (generation 0)
   (session nil)
@@ -43,8 +43,6 @@
   (claim nil :read-only t)
   (state :pending)
   (process nil)
-  (retry-timer nil)
-  (stream-timer nil)
   connection preparation cleanups owner-cleanup)
 
 (defun kargu-logical-request-add-cleanup (request cleanup)
@@ -72,17 +70,16 @@
 
 (cl-defun kargu-logical-request-create (&key id (generation 0) session origin
                                              (state :pending) process
-                                             retry-timer stream-timer circuit-scope budget app claim
+                                             circuit-scope budget app claim
                                              (debit-kind :normal-request))
   "Create a validated `kargu-logical-request' record.
-ID, GENERATION, SESSION, ORIGIN, STATE, PROCESS, RETRY-TIMER and
-STREAM-TIMER initialize the owned fields.
+ID, GENERATION, SESSION, ORIGIN, STATE and PROCESS initialize the owned fields.
 CIRCUIT-SCOPE and BUDGET retain accounting owners; APP and CLAIM own delivery.
 DEBIT-KIND identifies the captured logical turn category."
   (kargu-contract-assert #'integerp generation
                          "GENERATION must be an integer: %S" generation)
   (kargu-contract-assert (lambda (s)
-                           (memq s '(:pending :in-flight :retrying :finished :cancelled)))
+                           (memq s '(:pending :in-flight :finished :cancelled)))
                          state "Invalid logical request state: %S" state)
   (kargu-logical-request--create
    :id (or id (format "req-%d" generation))
@@ -91,72 +88,33 @@ DEBIT-KIND identifies the captured logical turn category."
    :origin origin
    :circuit-scope circuit-scope :budget budget :app app :claim claim :debit-kind debit-kind
    :state state
-   :process process
-   :retry-timer retry-timer
-   :stream-timer stream-timer))
+   :process process))
 
 (defun kargu-logical-request-live-p (request &optional current-generation)
   "Return non-nil when REQUEST is active in CURRENT-GENERATION."
   (and (kargu-logical-request-p request)
-       (memq (kargu-logical-request-state request) '(:pending :in-flight :retrying))
+       (memq (kargu-logical-request-state request) '(:pending :in-flight))
        (or (null current-generation)
            (= (kargu-logical-request-generation request) current-generation))))
 
-(defun kargu-logical-request-cancel-retry-timer (request)
-  "Cancel and clear REQUEST's retry backoff timer, if any."
-  (when (kargu-logical-request-p request)
-    (let ((timer (kargu-logical-request-retry-timer request)))
-      (setf (kargu-logical-request-retry-timer request) nil)
-      (when (timerp timer)
-        (cancel-timer timer)))))
-
-(defun kargu-logical-request-set-retry-timer (request timer)
-  "Attach retry TIMER to REQUEST after cancelling any previous retry timer."
-  (if (kargu-logical-request-live-p request)
-      (progn
-        (kargu-logical-request-cancel-retry-timer request)
-        (setf (kargu-logical-request-retry-timer request) timer
-              (kargu-logical-request-state request) :retrying)
-        timer)
-    (when (timerp timer) (cancel-timer timer))
-    nil))
-
-(defun kargu-logical-request-cancel-stream-timer (request)
-  "Cancel and clear REQUEST's stream watchdog timer, if any."
-  (when (kargu-logical-request-p request)
-    (let ((timer (kargu-logical-request-stream-timer request))
-          (process (kargu-logical-request-process request)))
-      (setf (kargu-logical-request-stream-timer request) nil)
-      (when (timerp timer)
-        (cancel-timer timer))
-      (when (processp process)
-        (when-let* ((ptimer (process-get process :kargu-stream-timer)))
-          (when (timerp ptimer)
-            (cancel-timer ptimer))
-          (process-put process :kargu-stream-timer nil))))))
-
 (defun kargu-logical-request-cancel (request)
-  "Idempotently cancel REQUEST and release its timers and transport process."
+  "Idempotently revoke REQUEST's editor delivery and native cancel lease."
   (when (kargu-logical-request-p request)
     (setf (kargu-logical-request-state request) :cancelled)
     (kargu-logical-request-clean-resources request)
     (kargu-logical-request-detach-owner request)
-    (kargu-logical-request-cancel-retry-timer request)
-    (kargu-logical-request-cancel-stream-timer request)
     (let ((process (kargu-logical-request-process request)))
       (setf (kargu-logical-request-process request) nil)
       (when (and (processp process) (process-live-p process))
         (ignore-errors (delete-process process))))))
 
 (defun kargu-logical-request-finish (request)
-  "Mark REQUEST finished and release any remaining timers."
+  "Mark REQUEST finished and release its editor delivery resources."
   (when (kargu-logical-request-p request)
     (kargu-logical-request-detach-owner request)
     (unless (eq (kargu-logical-request-state request) :cancelled)
       (setf (kargu-logical-request-state request) :finished))
     (kargu-logical-request-clean-resources request)
-    (kargu-logical-request-cancel-retry-timer request)
-    (kargu-logical-request-cancel-stream-timer request)
     (setf (kargu-logical-request-process request) nil)))
 
 ;;;; Application coordinator -----------------------------------------------

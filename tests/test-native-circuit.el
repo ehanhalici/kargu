@@ -125,9 +125,10 @@ ID and PROVIDER identify only its UI observation."
       (setf (kargu-bridge-application-state binding) :closing)
       (kargu-transport--deliver
        handle (list :application application :else (lambda (error-data) (setq failure error-data)))
-       (kargu-bridge--object "failure" (kargu-bridge--object "code" "cancelled" "message" "synthetic-cancelled")
+       (kargu-bridge--object "failure" (kargu-bridge--object "code" "cancelled" "category" "cancelled" "message" "synthetic-cancelled")
                              "circuit" (kargu-circuit-test--view)) nil)
-      (should (equal (plz-error-message failure) "synthetic-cancelled"))
+      (should (eq (kargu-result-err-code failure) :cancelled))
+      (should (equal (kargu-result-err-message failure) "synthetic-cancelled"))
       (should (eq (kargu-transport-handle-state handle) :finished))
       (should-not (gethash :native-circuits (kargu-application-services application))))))
 

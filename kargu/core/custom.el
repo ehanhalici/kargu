@@ -105,13 +105,14 @@ aliases this same limit; an explicit user retry starts a new logical request."
   :group 'kargu)
 
 (defcustom kargu-http-retry-statuses '(429 500 502 503 504 529)
-  "HTTP statuses that are retried with backoff and count against the breaker.
-Error text from a 200 response that names one of these is treated the same."
+  "Native retry statuses, a subset of 429, 500, 502, 503, 504 and 529.
+Free-form error text never authorizes automatic replay."
   :type '(repeat integer)
   :group 'kargu)
 
 (defcustom kargu-api-retry-after-max 60
-  "Longest wait in seconds honoured from a Retry-After header."
+  "Maximum native Retry-After wait in seconds; zero permits only zero wait.
+A larger server minimum refuses automatic replay rather than retrying early."
   :type 'natnum
   :group 'kargu)
 

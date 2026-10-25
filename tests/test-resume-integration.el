@@ -9,6 +9,8 @@
 
 ;;; Code:
 
+(require 'tests/test-native-circuit)
+
 (require 'ert)
 (require 'tests/test-helpers)
 (require 'kargu)
@@ -197,15 +199,16 @@
         (kargu-async-cancel task)))))
 
 (ert-deftest kargu-resume-circuit-provider-switch-does-not-copy-state-test ()
-  "Selecting another provider does not import the previous provider's breaker."
-  (let ((kargu-circuit--registry (make-hash-table :test #'equal))
-        (kargu-circuit--state :closed) (kargu-circuit--failure-count 0)
-        (kargu-circuit-failure-threshold 1) (provider "first"))
-    (cl-letf (((symbol-function 'kargu--provider-name) (lambda () provider)))
-      (kargu-circuit-record-failure "Synthetic failure" "first")
-      (setq provider "second")
-      (should-not (kargu-circuit-open-p "second"))
-      (should (kargu-circuit-open-p "first")))))
+  "Provider selection does not import a previous native display view."
+  (kargu-circuit-test--with-peer
+    (let ((kargu-application--bound application) (provider "first"))
+      (kargu-bridge-circuit-observe application connection scope
+        (kargu-circuit-test--view :provider "first" :state "open") t)
+      (cl-letf (((symbol-function 'kargu--provider-name) (lambda () provider)))
+        (should (equal (gethash "state" (kargu-circuit-get)) "open"))
+        (setq provider "second")
+        (should-not (kargu-circuit-get))
+        (should (equal (gethash "state" (kargu-circuit-get "first")) "open"))))))
 
 (ert-deftest kargu-resume-canonical-lsp-write-blocked-in-ask-test ()
   "Canonical LSP writes remain forbidden when a custom mutating list is empty."
@@ -259,15 +262,18 @@
       (should (eq (kargu-http-request-budget 42) first)))))
 
 (ert-deftest kargu-resume-budget-refusal-is-handled-once-test ()
-  "A body-level retry refusal must not fall through to a second callback."
-  (let* ((budget (kargu-budget-create))
-         (kargu-application--context (kargu-application-create :budget budget))
-         (calls 0))
-    (kargu-budget-seal budget)
-    (should (kargu--api-schedule-retry
-             "https://fixture.invalid" nil nil 42
-             (lambda (_value) (cl-incf calls)) nil 0 "Synthetic failure"))
-    (should (= calls 1))))
+  "A terminal native budget refusal cannot fall through or redeliver."
+  (let ((kargu--generation 42) held (calls 0))
+    (cl-letf (((symbol-function 'kargu-transport-request)
+               (lambda (_method _url &rest options)
+                 (setq held (plist-get options :else)) nil)))
+      (kargu--api-post "https://fixture.invalid" nil nil 42
+                       (lambda (result)
+                         (cl-incf calls)
+                         (should (eq (kargu-result-err-code result) :budget-exhausted))))
+      (funcall held (kargu-err "Native budget refused" :budget-exhausted))
+      (funcall held (kargu-err "Duplicate" :budget-exhausted))
+      (should (= calls 1)))))
 
 (ert-deftest kargu-resume-worker-preserves-credential-whitespace-test ()
   "The actual background worker parses its private JSON without trimming secrets."

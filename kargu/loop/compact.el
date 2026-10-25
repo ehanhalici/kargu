@@ -25,7 +25,7 @@
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
 (declare-function kargu--loop-request "kargu/loop/machine" (run prompt))
 (declare-function kargu-loop--turn-cap "kargu/loop/machine" (run))
-(declare-function kargu-circuit-reset "kargu/api/circuit" ())
+(declare-function kargu-loop--reset-before-retry "kargu/loop/machine" (run continuation))
 
 (defun kargu--loop-compact-allowed-p (run)
   "Non-nil when RUN may start at most one compaction turn."
@@ -79,24 +79,13 @@ Count one iteration and return non-nil if started."
    ((null (kargu-nonempty (kargu-response-text response))) 'empty)
    (t 'ok)))
 
-(defun kargu--loop-timeout-error-p (err)
-  "Non-nil when ERR is a curl, stall, or stream-ceiling timeout."
-  (and (stringp err)
-       (let ((s (downcase err)))
-         (or (string-match-p "curl 28" s)
-             (string-match-p "operation timeout" s)
-             (string-match-p "stream stalled" s)
-             (string-match-p "stream exceeded ceiling" s)))))
-
 (defun kargu-loop--compaction-apply-retry (run err decision)
   "Apply DECISION to retry RUN's compaction, or finish it with ERR."
   (cond
    ((not (kargu-loop--live-p run)) nil)
    ((eq decision :retry)
     (kargu-log 'info "loop: user requested compaction retry after: %s" err)
-    (when (fboundp 'kargu-circuit-reset)
-      (kargu-circuit-reset))
-    (kargu--loop-begin-compaction run))
+    (kargu-loop--reset-before-retry run (lambda () (kargu--loop-begin-compaction run))))
    (t
     (kargu-log 'info "loop: user stopped run after compaction error: %s" err)
     (kargu--loop-finish run :error err))))
@@ -130,7 +119,7 @@ A timeout asks whether to retry the compaction.  Other errors end the run."
   (let ((err (format "compaction failed: %s"
                      (kargu-response-error-message response))))
     (kargu--history-drop-trailing-compaction)
-    (if (kargu--loop-timeout-error-p err)
+    (if (and (kargu-err-p response) (eq (kargu-result-err-code response) :timeout))
         (kargu-loop--compaction-prompt-retry run err)
       (kargu--loop-finish run :error err))))
 

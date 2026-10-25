@@ -240,7 +240,6 @@ A truncated reply that already has answer text continues once."
 
 (defun kargu-loop--on-overflow (run response)
   "Handle the context overflow RESPONSE by compacting RUN."
-  (kargu-circuit-release-probe)
   (kargu-run-observers 'kargu-loop-model-stream-hook run 'retry)
   (when (kargu-loop--live-p run)
     (if (kargu--loop-start-compact run nil)
@@ -289,16 +288,36 @@ remembers the refusal and retries without tools."
         (kargu-run-observers 'kargu-loop-model-stream-hook run 'retry)
         (kargu--loop-request run nil)))))
 
+(defun kargu-loop--reset-before-retry (run continuation)
+  "Reset RUN's observed native circuit before calling CONTINUATION once.
+An unavailable view is not an admission refusal: the next native request still
+decides admission.  A reset that was issued must actually acknowledge first."
+  (let ((provider (or (plist-get run :request-provider) (plist-get run :provider)
+                      (kargu--provider-name)))
+        delivered)
+    (if (not (kargu-circuit-get provider))
+        (when (kargu-loop--live-p run) (funcall continuation))
+      (kargu-circuit-reset
+       provider
+       (kargu-loop--wrap
+        run (lambda (_result failure)
+              (unless delivered
+                (setq delivered t)
+                (when (kargu-loop--live-p run)
+                  (if failure
+                      (kargu--loop-finish run :error "Native circuit reset failed; request not retried")
+                    (funcall continuation))))))))))
+
 (defun kargu-loop--apply-recovery (run err decision)
   "Retry RUN or finish it with ERR according to DECISION, if RUN still lives."
   (cond
    ((not (kargu-loop--live-p run)) nil)
    ((eq decision :retry)
     (kargu-log 'info "loop: user requested retry after error: %s" err)
-    (when (fboundp 'kargu-circuit-reset)
-      (kargu-circuit-reset))
-    (kargu-loop--set-state run 'request)
-    (kargu-loop--retry-model run))
+    (kargu-loop--reset-before-retry
+     run (lambda ()
+           (kargu-loop--set-state run 'request)
+           (kargu-loop--retry-model run))))
    (t
     (kargu-log 'info "loop: user stopped run after error: %s" err)
     (kargu--loop-finish run :error err))))

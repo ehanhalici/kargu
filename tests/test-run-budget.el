@@ -266,14 +266,15 @@ REFUSAL and SEALED describe native terminal policy."
            (kargu-stream nil) result)
       (unwind-protect
           (progn
-            (kargu-circuit-reset provider)
             (kargu--api-post url nil '(("messages" . [(("role" . "user") ("content" . "hi"))]))
                              (kargu-application-current-generation) (lambda (value) (setq result value)))
             (kargu-bridge-test--wait (lambda () result))
             (should (kargu-response-error-message result))
             (should (eq (kargu-run-budget-status budget) :exhausted-deadline))
             (should (= (kargu-run-budget-requests-spent budget) 1))
-            (should (= (kargu-circuit-breaker-failure-count (kargu-circuit-get provider)) 0))
+            (should (eq (kargu-result-err-code result) :budget-exhausted))
+            (should (equal (plist-get (kargu-result-err-data result) :reason) "deadline"))
+            (should (= (gethash "failures" (kargu-circuit-get provider)) 0))
             (kargu-budget-seal budget)
             (kargu-bridge-test--wait
              (lambda () (eq (kargu-bridge-budget-state (kargu-run-budget-native budget)) :closed))))

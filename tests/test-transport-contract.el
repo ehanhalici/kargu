@@ -21,69 +21,62 @@
 (require 'kargu/api/circuit)
 (require 'kargu/api/http)
 (require 'kargu/api/retry)
+(require 'tests/test-native-circuit)
 
 (ert-deftest kargu-transport-logical-handle-owns-all-resources-test ()
-  "Single logical handle owns process, retry timer and stream watchdog."
+  "A logical handle revokes its captured native delivery exactly once."
   (let* ((app (kargu-application-create :status :idle))
-         (req (kargu-logical-request-create :generation 1 :state :in-flight)))
+         (req (kargu-logical-request-create :generation 1 :state :in-flight))
+         (cancelled 0))
     (kargu-application-set-active-request req app)
     (should (eq (kargu-application-current-request app) req))
     (should (kargu-logical-request-live-p req 1))
-
-    ;; Attach mock timer and cancel
-    (let ((timer (run-at-time 60 nil #'ignore)))
-      (kargu-logical-request-set-retry-timer req timer)
-      (should (eq (kargu-logical-request-state req) :retrying))
-      (should (eq (kargu-logical-request-retry-timer req) timer))
-
-      ;; Idempotent cancellation releases all
-      (kargu-logical-request-cancel req)
-      (should (eq (kargu-logical-request-state req) :cancelled))
-      (should-not (kargu-logical-request-retry-timer req))
-      (should-not (kargu-logical-request-process req)))))
+    (kargu-logical-request-add-cleanup req (lambda () (cl-incf cancelled)))
+    (kargu-logical-request-cancel req)
+    (kargu-logical-request-cancel req)
+    (should (eq (kargu-logical-request-state req) :cancelled))
+    (should (= cancelled 1))
+    (should-not (kargu-logical-request-cleanups req))
+    (should-not (kargu-logical-request-process req))))
 
 ;; Native request/retry/usage policy equivalents: Rust api_budget.rs and
 ;; api_budget_stdio.rs; real editor consumer: test-run-budget.el.
 
 (ert-deftest kargu-transport-scoped-circuit-breaker-isolation-test ()
-  "Failures on provider A trip circuit A without affecting provider B."
-  (kargu-circuit-reset 'all)
-  (unwind-protect
-      (progn
-        ;; Initially both allow requests
-        (should (kargu-circuit-allow-request-p "provider-a"))
-        (should (kargu-circuit-allow-request-p "provider-b"))
-
-        ;; Fail provider-a 4 times (threshold)
-        (dotimes (_ 4)
-          (kargu-circuit-record-failure "500 Internal Error" "provider-a"))
-
-        ;; Provider A is now open
-        (should (kargu-circuit-open-p "provider-a"))
-        (should-not (kargu-circuit-allow-request-p "provider-a"))
-
-        ;; Provider B remains healthy and closed
-        (should-not (kargu-circuit-open-p "provider-b"))
-        (should (kargu-circuit-allow-request-p "provider-b")))
-    (kargu-circuit-reset 'all)))
+  "Display facade isolates native providers without granting admission."
+  (kargu-circuit-test--with-peer
+    (let ((kargu-application--bound application))
+      (kargu-bridge-circuit-observe application connection scope
+        (kargu-circuit-test--view :id "circuit_a" :provider "a" :state "open") t)
+      (kargu-bridge-circuit-observe application connection scope
+        (kargu-circuit-test--view :id "circuit_b" :provider "b" :sequence 2 :state "closed") t)
+      (should (equal (gethash "state" (kargu-circuit-get "a")) "open"))
+      (should (equal (gethash "state" (kargu-circuit-get "b")) "closed"))
+      (should-not (kargu-circuit-get "unknown")))))
 
 (ert-deftest kargu-transport-circuit-scoped-reset-test ()
-  "Resetting provider A leaves provider B undisturbed."
-  (kargu-circuit-reset 'all)
-  (unwind-protect
-      (progn
-        (dotimes (_ 4)
-          (kargu-circuit-record-failure "500 Internal Error" "provider-a"))
-        (dotimes (_ 4)
-          (kargu-circuit-record-failure "500 Internal Error" "provider-b"))
-        (should (kargu-circuit-open-p "provider-a"))
-        (should (kargu-circuit-open-p "provider-b"))
-
-        ;; Reset only provider-a
-        (kargu-circuit-reset "provider-a")
-        (should-not (kargu-circuit-open-p "provider-a"))
-        (should (kargu-circuit-open-p "provider-b")))
-    (kargu-circuit-reset 'all)))
+  "Facade reset changes display only after the native ACK for that provider."
+  (kargu-circuit-test--with-peer
+    (let ((kargu-application--bound application) reply done)
+      (kargu-bridge-circuit-observe application connection scope
+        (kargu-circuit-test--view :id "circuit_a" :provider "a" :state "open") t)
+      (kargu-bridge-circuit-observe application connection scope
+        (kargu-circuit-test--view :id "circuit_b" :provider "b" :sequence 2 :state "open") t)
+      (cl-letf (((symbol-function 'kargu-bridge-call)
+                 (lambda (peer method params callback &rest _)
+                   (should (eq peer connection))
+                   (should (equal method "api/circuit/reset"))
+                   (should (equal (gethash "provider" params) "a"))
+                   (setq reply callback))))
+        (kargu-circuit-reset "a" (lambda (_ error-data) (should-not error-data) (setq done t)))
+        (should-not done)
+        (should (equal (gethash "state" (kargu-circuit-get "a")) "open"))
+        (funcall reply
+                 (kargu-bridge--object "circuits"
+                   (vector (kargu-circuit-test--view :id "circuit_a" :provider "a" :sequence 3 :state "closed" :failures 0))) nil)
+        (should done)
+        (should (equal (gethash "state" (kargu-circuit-get "a")) "closed"))
+        (should (equal (gethash "state" (kargu-circuit-get "b")) "open"))))))
 
 (ert-deftest kargu-transport-typed-results-contract-test ()
   "Transport returns canonical kargu-result-err types with side-effect status."
@@ -107,19 +100,25 @@
 
 
 (ert-deftest kargu-transport-error-classification-canonical-test ()
-  "Classifies error codes and checks retryability using canonical codes without string parsing."
-  ;; 429 and 503 are retryable
-  (should (eq (kargu-api-classify-error-code 429) :rate-limit-exceeded))
-  (should (kargu--api-error-looks-retryable-p :rate-limit-exceeded))
-  (should (eq (kargu-api-classify-error-code 503) :server-error))
-  (should (kargu--api-error-looks-retryable-p :server-error))
-  (should (kargu--api-error-looks-retryable-p :timeout))
-
-  ;; 400 and 401 are client errors and NOT retryable
-  (should (eq (kargu-api-classify-error-code 400) :bad-request))
-  (should-not (kargu--api-error-looks-retryable-p :bad-request))
-  (should (eq (kargu-api-classify-error-code 401) :authentication-failed))
-  (should-not (kargu--api-error-looks-retryable-p :authentication-failed)))
+  "UI translates native semantic labels, never HTTP, curl or message guesses."
+  (dolist (case '(("rate-limit-exceeded" . :rate-limit-exceeded)
+                  ("server-error" . :server-error) ("timeout" . :timeout)
+                  ("bad-request" . :bad-request) ("authentication-failed" . :authentication-failed)
+                  ("budget-exhausted" . :budget-exhausted) ("context-overflow" . :context-overflow)))
+    (let ((result (kargu-api-failure-result
+                   (kargu-bridge--object "category" (car case) "code" "synthetic"
+                                         "message" "HTTP 503 curl 28 context_length_exceeded"
+                                         "status" 418))))
+      (should (kargu-err-p result))
+      (should (eq (kargu-result-err-code result) (cdr case)))
+      (should (= (plist-get (kargu-result-err-data result) :status) 418))
+      (should (eq (not (null (kargu-response-overflow-p result)))
+                  (eq (cdr case) :context-overflow)))))
+  (let ((result (kargu-api-failure-result
+                 (kargu-bridge--object "category" "new-untrusted-kind" "code" "http"
+                                       "message" "secret fixture" "status" 503))))
+    (should (eq (kargu-result-err-code result) :protocol-error))
+    (should-not (string-search "secret fixture" (kargu-result-err-message result)))))
 
 (provide 'tests/test-transport-contract)
 ;;; test-transport-contract.el ends here

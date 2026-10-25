@@ -121,6 +121,12 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
 
 ## Aşama 4: Rust core run, provider ağı ve persistence
 
+2026-10-25 default chat resilience cutover (40): plain/stream artık native retry,
+circuit, budget ve owned observer ACK kullanır. Eski Elisp retry timer/backoff/
+sınıflandırma ve circuit admission/sayaç/probe motorları, logical timer alanları
+ve plz DTO/bağımlılığı silindi. Bu, aşağıdaki bütün API/run/history/metadata veya
+dört uygulama backend kabul kutularının kapanması değildir.
+
 - [ ] Mevcut doğrudan API desteği, custom/yerel sağlayıcılar ve wire aileleri
   korunarak Elisp'ten Rust'a taşınsın; uygulama backend'leri API'nin yerine geçmesin.
 - [ ] application claim/single-run, session actor, mode preparation, immutable

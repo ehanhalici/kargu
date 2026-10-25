@@ -1,5 +1,26 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Default API resilience native; legacy motorlar silindi
+
+Plain/stream chat tek native logical exchange, captured retry/circuit/budget
+ve owned UI observer ACK kullanır. Retry timer/backoff/Retry-After parser ve
+HTTP/curl/metin sınıflandırması; circuit admission/sayaç/legacy mirror/probe
+motoru ve logical retry/stream timer alanları silindi. plz DTO/require/paket ve
+run bağımlılığı kaldırıldı. Terminal native category/code/status/reason/partial
+Result'a çevrilir; run deadline budget-exhausted kalır. Manuel model/compaction
+retry, verilen native reset'in ACK'ini bekler; cache admission hakkı vermez.
+
+Son kaynaklarla **1186/1186 full source ERT**, 0 unexpected, **127.48 s** geçti;
+önceki geçiş taraması 1183/1183, ardından 8/8 focused native default/reset testi
+de geçti. 16 üretim dosyası Werror bytecompile temiz; 16 geçici elc kaldırıldı.
+Checkdoc temiz (ortam OpenPGP autoload mesajı hariç); locked strict all-targets
+Clippy tekrar geçti. Native kaynaklar 1f8de6f'ten beri değişmedi: son native
+gate **215 + 10 compile-fail**. Dokuz silinen engine-özel ERT'nin native policy/
+stdio ve gerçek GUI socket/debit/ACK test eşlemesi 40'ta; assertion/baseline
+gevşetilmedi. README/todo/roadmap güncellendi. Model metadata ve genel run/history/
+uygulama backend geçişi açık; tüm göç tamamlandı iddiası yok. 01 ile kullanıcının
+shell.nix/07 değişiklikleri korunur; gerçek hesap/API/CLI model turu çalışmadı.
+
 ## 2026-10-25 — Native terminal hata kategorileri
 
 Rust ApiError artık kapalı FailureCategory üzerinden additive category üretir;

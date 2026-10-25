@@ -52,15 +52,16 @@
     (should (= count 2))))
 
 (ert-deftest kargu-loop-overflow-preserves-circuit-failures-test ()
-  "A context rejection releases a canary but is not an upstream success."
-  (dolist (state '(:closed :half-open))
-    (let ((kargu-circuit--state state) (kargu-circuit--failure-count 2)
-          (kargu-circuit--probe-inflight t))
-      (cl-letf (((symbol-function 'kargu--loop-start-compact) (lambda (&rest _) t)))
-        (kargu-loop--on-overflow nil nil)
-        (should (eq kargu-circuit--state state))
-        (should (= kargu-circuit--failure-count 2))
-        (should-not kargu-circuit--probe-inflight)))))
+  "The loop does not mutate native circuit accounting on context overflow."
+  (let* ((run (list :state 'wait)) (kargu--loop-run run) compacted)
+    (cl-letf (((symbol-function 'kargu--loop-start-compact)
+               (lambda (&rest _) (setq compacted t)))
+              ((symbol-function 'kargu-bridge-circuit-reset)
+               (lambda (&rest _) (ert-fail "Overflow cannot reset circuit")))
+              ((symbol-function 'kargu-circuit-release-probe)
+               (lambda (&rest _) (ert-fail "No editor probe authority"))))
+      (kargu-loop--on-overflow run (kargu-err "Context full" :context-overflow))
+      (should compacted))))
 
 (ert-deftest kargu-loop-response-continuation-failure-closes-only-its-run-test ()
   "A failing response continuation ends its run but never cancels a new owner."
@@ -478,26 +479,21 @@
                    ("finish_reason" . ,reason))))))
 
 (ert-deftest kargu-loop-success-is-recorded-only-by-http-test ()
-  "A healthy HTTP response resets the breaker once, regardless of loop event."
+  "Editor completion and loop classification never mutate circuit accounting."
   (dolist (response (list (kargu-test--reasoning-response "stop" "answer")
                           (kargu-test--reasoning-response "length" "partial")
                           (kargu-test--reasoning-response "stop" nil "reasoning")))
     (let* ((run (list :state 'wait :iterations 1 :max-iterations 3 :no-tools t))
-           (kargu--loop-run run) (successes 0)
-           (kargu-circuit--state :half-open) (kargu-circuit--probe-inflight t)
-           (kargu-circuit--failure-count 3)
-           (record (symbol-function 'kargu-circuit-record-success)))
+           (kargu--loop-run run) (delivered 0))
       (cl-letf (((symbol-function 'kargu-circuit-record-success)
-                 (lambda (&optional scope) (cl-incf successes) (funcall record scope)))
+                 (lambda (&rest _) (ert-fail "No editor circuit accounting")))
                 ((symbol-function 'kargu--record-usage) #'ignore)
                 ((symbol-function 'kargu--loop-request) #'ignore)
                 ((symbol-function 'kargu--loop-finish) #'ignore))
-        (kargu--api-handle-success
-         response (lambda (value) (kargu--loop-handle-response run value)))
-        (should (= successes 1))
-        (should (eq kargu-circuit--state :closed))
-        (should-not kargu-circuit--probe-inflight)
-        (should (zerop kargu-circuit--failure-count))))))
+        (kargu--api-handle-body
+         (kargu-json-encode-record response)
+         (lambda (value) (cl-incf delivered) (kargu--loop-handle-response run value)))
+        (should (= delivered 1))))))
 
 (ert-deftest kargu-loop-delta-delivery-supports-optional-and-rest-test ()
   "The declared callback arity chooses one or two arguments without retries."

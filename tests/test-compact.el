@@ -166,7 +166,7 @@
            (kargu-confirm--mock-decision :retry)
            (sent nil)
            (finished nil)
-           (resp '(("error" . (("message" . "plz error: curl 28: Operation timeout."))))))
+           (resp (kargu-err "Native API timeout" :timeout)))
       (cl-letf (((symbol-function 'kargu-api-send)
                  (lambda (&rest _) (setq sent t)))
                 ((symbol-function 'kargu--loop-finish)
@@ -177,7 +177,7 @@
         (should-not finished)
         (should (plist-get run :compacting))
         (should (string-match-p "Retry Compaction" (buffer-string)))
-        (should (string-match-p "curl 28: Operation timeout" (buffer-string)))))))
+        (should (string-match-p "Native API timeout" (buffer-string)))))))
 
 (ert-deftest kargu-loop-compaction-timeout-stop-finishes-the-run-test ()
   "Stopping after a compaction timeout ends the run and drops the request."
@@ -195,9 +195,9 @@
       (cl-letf (((symbol-function 'kargu--loop-finish)
                  (lambda (_run status text) (setq finished (cons status text)))))
         (kargu--loop-handle-compaction
-         run '(("error" . (("message" . "plz error: curl 28: Operation timeout.")))))
+         run (kargu-err "Native API timeout" :timeout))
         (should (eq (car finished) :error))
-        (should (string-search "curl 28" (cdr finished)))
+        (should (string-search "Native API timeout" (cdr finished)))
         (should (equal (kargu-aget (car (last (kargu-history-messages))) "content")
                        "answer 1"))))))
 

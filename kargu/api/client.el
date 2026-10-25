@@ -259,10 +259,6 @@ Build the payload in an isolated history; never store the reply."
              (kargu-loop-running-p))
     (user-error
      "An agent run is in progress; stop it first (M-x kargu-loop-stop)"))
-  ;; Guard Clause 2: Circuit breaker status
-  (when (kargu-circuit-open-p)
-    (user-error "Circuit breaker is %s; cannot ping until cooldown"
-                (kargu-circuit-status-string)))
   (let ((history (kargu-history-create))
         (kargu--tools-visible-p #'ignore)
         (kargu-temperature nil)

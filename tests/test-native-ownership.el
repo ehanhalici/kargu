@@ -221,14 +221,14 @@
                   (should (= (hash-table-count (kargu-edit-service-reviews foreign)) 1))))))))
 
 (ert-deftest kargu-native-terminal-request-refuses-late-retry-test ()
-  "A timer registered after request cancellation cannot resurrect its state."
-  (let* ((request (kargu-logical-request-create))
-         (timer (run-at-time 60 nil #'ignore)))
+  "A late native lease acquisition is revoked immediately, never retained."
+  (let ((request (kargu-logical-request-create)) (released 0))
     (kargu-logical-request-cancel request)
-    (kargu-logical-request-set-retry-timer request timer)
+    (kargu-logical-request-add-cleanup request (lambda () (cl-incf released)))
+    (kargu-logical-request-cancel request)
     (should (eq (kargu-logical-request-state request) :cancelled))
-    (should-not (kargu-logical-request-retry-timer request))
-    (should-not (memq timer timer-list))))
+    (should (= released 1))
+    (should-not (kargu-logical-request-cleanups request))))
 
 (ert-deftest kargu-native-cleanup-failure-still-finishes-once-test ()
   "Failure in an optional editing cleanup cannot leak the claim or callback."
@@ -261,25 +261,22 @@
       (should (eq new (kargu-application-current-request app))))))
 
 (ert-deftest kargu-native-http-retry-reenters-its-application-test ()
-  "An owned retry resumes in its origin, not the caller's application/buffer."
+  "A native observation reenters its origin, never the caller's application."
   (with-temp-buffer
     (setq-local kargu-application-owner (kargu-application-create :generation 7))
-    (let* ((app kargu-application-owner)
-           (origin (current-buffer))
-           (request (kargu-logical-request-create :app app :generation 7))
-           (kargu-api-retry-max 1) held posted)
-      (kargu-application-set-active-request request app)
-      (cl-letf (((symbol-function 'run-at-time)
-                 (lambda (_time _repeat function &rest _) (setq held function)))
-                ((symbol-function 'kargu--api-post)
-                 (lambda (&rest _)
-                   (setq posted (list (kargu-application-context) (current-buffer))))))
-               (kargu--api-schedule-retry "https://example.invalid" nil nil 7 #'ignore nil 0 "offline")
-               (with-temp-buffer
-                 (setq-local kargu-application-owner (kargu-application-create :generation 7))
-                 (funcall held))
-               (should (equal posted (list app origin)))
-               (kargu-logical-request-cancel request)))))
+    (let* ((app kargu-application-owner) (origin (current-buffer)) held observed
+           (kargu-api-retry-hook
+            (list (lambda (&rest _)
+                    (setq observed (list (kargu-application-context) (current-buffer)))))))
+      (cl-letf (((symbol-function 'kargu-transport-request)
+                 (lambda (_method _url &rest options)
+                   (setq held (plist-get options :on-retry)) nil)))
+        (kargu--api-post "https://example.invalid" nil nil 7 #'ignore)
+        (with-temp-buffer
+          (setq-local kargu-application-owner (kargu-application-create :generation 7))
+          (funcall held nil))
+        (should (equal observed (list app origin)))
+        (kargu-http-cancel)))))
 
 (ert-deftest kargu-native-standalone-owner-close-cancels-request-test ()
   "A standalone transport cannot keep admission after its origin closes."

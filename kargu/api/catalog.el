@@ -13,7 +13,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'plz)
 (require 'kargu/core)
 (require 'kargu/contract)
 (require 'kargu/json)
@@ -29,7 +28,6 @@
 (declare-function kargu-provider-keyless-p "kargu/providers/registry" (provider))
 (declare-function kargu-provider-format "kargu/providers/registry" (provider))
 (declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
-(declare-function kargu--plz-error-message "kargu/api/retry" (err))
 (declare-function kargu-api-auth-intent "kargu/api/request" (key &optional provider))
 (declare-function kargu-history-context-threshold "kargu/history/compact" (ctx-tokens))
 
@@ -556,7 +554,7 @@ An explicit true flag is sufficient even without an API effort list."
                                (kargu--catalog-receive task provider generation body))))
                 :else (kargu-async-wrap
                        task (lambda (error)
-                              (kargu-async-finish task nil (kargu--plz-error-message error)))))))
+                              (kargu-async-finish task nil (kargu-result-err-message error)))))))
       (when (kargu-async-pending-p task)
         (setf (kargu-async-task-cancel task)
               (lambda () (kargu-transport-cancel request)))))))

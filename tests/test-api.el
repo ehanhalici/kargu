@@ -18,51 +18,11 @@
 (defvar kargu-api-stall-timeout)
 (defvar kargu-api-stream-ceiling)
 
-(ert-deftest kargu-api-retry-after-supports-dates-and-bounds-test ()
-  "Retry-After accepts HTTP dates, clamps delays and preserves match data."
-  (let* ((now (date-to-time "Sun, 18 Oct 2026 12:00:00 GMT"))
-         (kargu-api-retry-after-max 120))
-    (dolist (case '((" 10 " . 10) ("999" . 120)
-                    ("Sun, 18 Oct 2026 12:01:00 GMT" . 60)
-                    ("Sun, 18 Oct 2026 13:00:00 GMT" . 120)
-                    ("Sun, 18 Oct 2026 11:00:00 GMT" . 0)
-                    ("invalid" . nil)))
-      (cl-letf (((symbol-function 'kargu--plz-header) (lambda (&rest _) (car case)))
-                ((symbol-function 'current-time) (lambda () now)))
-        (string-match "keep" "keep")
-        (let ((match (match-data)))
-          (if (cdr case)
-              (should (= (kargu--api-retry-after-seconds 'error) (cdr case)))
-            (should-not (kargu--api-retry-after-seconds 'error)))
-          (should (equal (match-data) match)))))))
+;; Native policy equivalents: api_retry_stdio.rs, api_retry/circuit.rs and
+;; api/resilience/retry{,_after}.rs.  Real default editor replay, ACK/cancel,
+;; capture and typed terminal contracts are in test-native-retry.el.
 
-(ert-deftest kargu-api-retry-observers-cannot-post-after-cancellation-test ()
-  "Retry observers run once, and cancellation during notification prevents POST."
-  (let* ((kargu--generation 100) (posts 0) (observations 0)
-         (kargu-api-retry-hook
-          (list (lambda (&rest _) (error "Bad observer"))
-                (lambda (&rest _) (cl-incf observations) (setq kargu--generation 200)))))
-    (cl-letf (((symbol-function 'kargu--api-post) (lambda (&rest _) (cl-incf posts))))
-      (kargu-api--retry-post 100 :url "https://example.invalid" :attempt 1)
-      (should (= observations 1))
-      (should (zerop posts))
-      (kargu-api--retry-post 100)
-      (should (= observations 1)))))
 
-(ert-deftest kargu-api-scheduled-retry-publishes-boundary-only-when-starting-test ()
-  "A scheduled retry announces its original event consumer only when it starts."
-  (let* ((kargu--generation 100) (kargu-api-retry-max 2) scheduled seen
-         (consumer #'ignore)
-         (kargu-api-retry-hook (list (lambda (generation delta)
-                                       (push (cons generation delta) seen)))))
-    (cl-letf (((symbol-function 'run-at-time)
-               (lambda (_time _repeat function &rest _) (setq scheduled function)))
-              ((symbol-function 'kargu--api-post) #'ignore))
-      (should (kargu--api-schedule-retry "https://example.invalid" nil nil 100
-                                         #'ignore consumer 0 "overloaded"))
-      (should-not seen)
-      (funcall scheduled)
-      (should (equal seen (list (cons 100 consumer)))))))
 
 (ert-deftest kargu-api-overflow-does-not-confuse-token-rate-limits-test ()
   "Only explicit context or input-length errors request compaction."
@@ -224,7 +184,6 @@
 (declare-function kargu-api-normalize-response "kargu/api/wire" (response))
 (declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
 (declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
-(declare-function kargu--api-error-looks-retryable-p "kargu/api/http" (message))
 
 (ert-deftest kargu-api-response-vector-choices-test ()
   "Ensure `kargu--response-choice' handles vector choices (Bug 2 regression)."
@@ -242,58 +201,8 @@
     (should (equal (kargu-response-finish-reason resp-list) "stop"))))
 
 
-(ert-deftest kargu-api-circuit-breaker-lifecycle-test ()
-  "Test circuit breaker state machine transitions."
-  (kargu-circuit-reset)
-  (should (eq kargu-circuit--state :closed))
-  (should (kargu-circuit-allow-request-p))
-  ;; Trigger failures up to threshold
-  (dotimes (_ 4)
-    (kargu-circuit-record-failure "500 upstream"))
-  ;; State must be :open
-  (should (eq kargu-circuit--state :open))
-  (should-not (kargu-circuit-allow-request-p))
-  ;; Reset back to :closed
-  (kargu-circuit-record-success)
-  (should (eq kargu-circuit--state :closed))
-  (should (kargu-circuit-allow-request-p)))
 
-(ert-deftest kargu-circuit-cancel-and-rejection-release-canary-test ()
-  "Cancellation and terminal rejections free the canary without resetting failures."
-  (dolist (outcome '(cancel http-error body-error startup-error))
-    (let ((kargu-circuit--state :half-open)
-          (kargu-circuit--probe-inflight nil)
-          (kargu-circuit--failure-count 4)
-          (kargu--current-process nil)
-          (kargu--generation 50)
-          (kargu-application--context (kargu-application-create :generation 50))
-          (kargu--busy t) responses)
-      (should (kargu-circuit-allow-request-p))
-      (should-not (kargu-circuit-allow-request-p))
-      (pcase outcome
-        ('cancel (kargu-api-cancel))
-        ('startup-error (kargu-api-clear-busy))
-        ('body-error (kargu--api-dispatch-error (lambda (value) (push value responses)) "Invalid request"))
-        ('http-error
-         (cl-letf (((symbol-function 'kargu--plz-http-status) (lambda (_) 401))
-                   ((symbol-function 'kargu--plz-error-message) (lambda (_) "Unauthorized")))
-           (kargu--api-on-transport-error nil nil nil 50
-                                          (lambda (value) (push value responses)) nil 0 'mock-error))))
-      (should-not kargu-circuit--probe-inflight)
-      (should (eq kargu-circuit--state :half-open))
-      (should (= kargu-circuit--failure-count 4))
-      (should (kargu-circuit-allow-request-p)))))
 
-(ert-deftest kargu-circuit-retry-keeps-exclusive-canary-test ()
-  "A scheduled transport retry retains its canary until actual completion."
-  (let ((kargu-circuit--state :half-open)
-        (kargu-circuit--probe-inflight t)
-        (kargu--generation 70) (kargu-api-retry-max 1) scheduled)
-    (cl-letf (((symbol-function 'kargu--plz-http-status) (lambda (_) 503))
-              ((symbol-function 'run-at-time) (lambda (&rest _) (setq scheduled t))))
-      (kargu--api-on-transport-error nil nil nil 70 #'ignore nil 0 'mock-error)
-      (should scheduled)
-      (should-not (kargu-circuit-allow-request-p)))))
 
 
 (ert-deftest kargu-api-timeout-config-test ()
@@ -385,57 +294,3 @@
 
 (provide 'tests/test-api)
 ;;; test-api.el ends here
-
-(ert-deftest kargu-circuit-half-open-lets-one-probe-through-test ()
-  "After the cooldown a single probe passes; asking whether it is open changes nothing."
-  (kargu-circuit-reset)
-  (let ((kargu-circuit-cooldown-seconds 0.0))
-    (dotimes (_ kargu-circuit-failure-threshold)
-      (kargu-circuit-record-failure "500"))
-    (should (eq kargu-circuit--state :open))
-    (should-not (kargu-circuit-open-p))
-    (should (eq kargu-circuit--state :open))
-    (should (kargu-circuit-allow-request-p))
-    (should (eq kargu-circuit--state :half-open))
-    (should-not (kargu-circuit-allow-request-p))
-    (should (kargu-circuit-open-p))
-    (kargu-circuit-record-success)
-    (should (kargu-circuit-allow-request-p)))
-  (kargu-circuit-reset))
-
-(ert-deftest kargu-retry-statuses-have-one-list-test ()
-  (let ((kargu-http-retry-statuses '(418)))
-    (should (kargu--api-error-looks-retryable-p "HTTP 418: teapot"))
-    (should-not (kargu--api-error-looks-retryable-p "HTTP 502: bad gateway"))))
-
-
-(ert-deftest kargu-logical-request-cancel-clears-scheduled-retry-timer-test ()
-  "Cancelling a logical request cancels its pending retry timer and blocks repost."
-  (let ((kargu--generation 100)
-        (kargu-api-retry-max 2)
-        (reposted nil)
-        (cancelled-timers nil))
-    (kargu-http--ensure-logical-request 100)
-    (cl-letf (((symbol-function 'kargu--plz-http-status) (lambda (_) 503))
-              ((symbol-function 'cancel-timer)
-               (lambda (timer)
-                 (push timer cancelled-timers)))
-              ((symbol-function 'kargu--api-post)
-               (lambda (&rest _) (setq reposted t))))
-      (funcall #'kargu--api-on-transport-error
-       "https://example.invalid/v1/chat/completions" nil '(("model" . "m"))
-       100 #'ignore nil 0 'mock-error)
-      (let* ((req (kargu-application-current-request))
-             (timer (and req (kargu-logical-request-retry-timer req))))
-        (should (kargu-logical-request-p req))
-        (should (eq (kargu-logical-request-state req) :retrying))
-        (should (timerp timer))
-        (kargu-http-cancel)
-        (should (memq timer cancelled-timers))
-        (should (eq (kargu-logical-request-state req) :cancelled))
-        (should-not (kargu-logical-request-retry-timer req))
-        ;; Even if the timer callback runs late, it is a no-op
-        (kargu-api--retry-post
-         100 :url "https://example.invalid/v1/chat/completions"
-         :auth nil :payload '(("model" . "m")) :callback #'ignore :attempt 1)
-        (should-not reposted)))))

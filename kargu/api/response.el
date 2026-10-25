@@ -112,8 +112,7 @@ Nested `error.message' and `error.metadata' fields are flattened."
   (cond
    ((kargu-err-p response)
     (or (eq (kargu-result-err-code response) :context-overflow)
-        (plist-get (kargu-result-err-data response) :overflow)
-        (kargu--overflow-message-p (kargu-result-err-message response))))
+        (plist-get (kargu-result-err-data response) :overflow)))
    (t
     (or (kargu-aget response "overflow")
         (kargu--overflow-message-p (kargu-response-error-message response))))))

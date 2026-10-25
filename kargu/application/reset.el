@@ -23,7 +23,6 @@
 (declare-function kargu-busy-p "kargu/api/http" ())
 (declare-function kargu-api-cancel "kargu/api/client" ())
 (declare-function kargu-history-reset "kargu/history/protocol" ())
-(declare-function kargu-circuit-reset "kargu/api/circuit" ())
 (declare-function kargu-state-reset "kargu/state/transitions" ())
 (declare-function kargu-prompt-clear-cache "kargu/prompt" ())
 
