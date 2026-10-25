@@ -92,7 +92,7 @@
          '((("role" . "assistant")
             ("tool_calls" . [(("id" . "provider-id"))]))))
         (setq snapshot (kargu-history-snapshot)))
-      (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda () "test"))
+      (cl-letf (((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "test"))
                 ((symbol-function 'kargu--api-base) (lambda () "https://example.invalid"))
                 ((symbol-function 'kargu-transport-request)
                  (lambda (_method _url &rest options)
@@ -114,7 +114,7 @@
     (let ((kargu--loop-run nil) (kargu--busy nil) run callback-owner snapshot)
       (cl-letf (((symbol-function 'kargu-state-mode) (lambda () 'ask))
                 ((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
-                ((symbol-function 'kargu--resolve-api-key) (lambda () "test"))
+                ((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "test"))
                 ((symbol-function 'kargu--api-base) (lambda () "https://example.invalid"))
                 ((symbol-function 'kargu--api-post) #'ignore))
         (with-current-buffer a

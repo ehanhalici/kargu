@@ -738,7 +738,7 @@
            (kargu-circuit--state :closed)
            (kargu-circuit--probe-inflight nil)
            held payload)
-      (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) "test-key"))
+      (cl-letf (((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "test-key"))
                 ((symbol-function 'kargu--api-base) (lambda (&rest _) "https://example.invalid"))
                 ((symbol-function 'kargu-transport-request)
                  (lambda (_method _url &rest options)

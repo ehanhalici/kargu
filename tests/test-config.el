@@ -231,14 +231,14 @@
       (setenv "KARGU_TEST_ENV" "from-env")
       (unwind-protect
           (progn
-            (should (equal (kargu--resolve-api-key "alpha") "from-ref"))
-            (should (equal (kargu--resolve-api-key "beta") ""))
-            (should (equal (kargu--resolve-api-key "gamma") "from-env"))
+            (should (equal (kargu-config-api-key-fast "alpha") "from-ref"))
+            (should (equal (kargu-config-api-key-fast "beta") ""))
+            (should (equal (kargu-config-api-key-fast "gamma") "from-env"))
             (setenv "KARGU_TEST_KEY" nil)
-            (should (equal (kargu--resolve-api-key "alpha") "from-env"))
+            (should (equal (kargu-config-api-key-fast "alpha") "from-env"))
             (let ((kargu-api-key "global"))
-              (should (equal (kargu--resolve-api-key "alpha") "global"))
-              (should (equal (kargu--resolve-api-key "gamma") "from-env"))))
+              (should (equal (kargu-config-api-key-fast "alpha") "global"))
+              (should (equal (kargu-config-api-key-fast "gamma") "from-env"))))
         (setenv "KARGU_TEST_KEY" nil)
         (setenv "KARGU_TEST_ENV" nil)))))
 
@@ -252,11 +252,10 @@
     (cl-letf (((symbol-function 'kargu--config-providers)
                (lambda () '(("alpha") ("beta" :apikey "${KARGU_ABSENT_PROVIDER_KEY}"))))
               ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
-              ((symbol-function 'kargu-provider-env) (lambda (_) nil))
-              ((symbol-function 'kargu--auth-source-api-key) (lambda (_) nil)))
+              ((symbol-function 'kargu-provider-env) (lambda (_) nil)))
       (should (kargu-provider-authenticated-p "alpha"))
       (should-not (kargu-provider-authenticated-p "beta"))
-      (should-not (kargu--resolve-api-key "beta")))))
+      (should-not (kargu-config-api-key-fast "beta")))))
 
 (ert-deftest kargu-provider-discovery-never-invokes-secret-function-or-gpg-test ()
   "Provider discovery never calls auth-source `:secret' functions or unlocks GPG."
@@ -293,9 +292,10 @@
                (lambda () '(("beta" :api "https://beta.example/v1"))))
               ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
               ((symbol-function 'kargu-provider-env) (lambda (_) nil)))
-      (let ((res (kargu-config-resolve-api-key-result "beta")))
+      (let ((res (kargu-test-await
+                  (lambda (callback) (kargu-config-resolve-api-key-async "beta" callback)))))
         (should (kargu-err-p res))
-        (should (eq (kargu-result-err-code res) 'unavailable)))
+        (should (eq (kargu-result-err-code res) :auth-unavailable)))
       ;; Async adapter cancellation and owner validation
       (let* (pending-task delivered canceled-adapter
              (kargu-config-credential-adapter

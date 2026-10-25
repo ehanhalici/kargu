@@ -38,6 +38,7 @@
 (require 'tests/test-native-retry)
 (require 'tests/test-native-circuit)
 (require 'tests/test-native-model-catalog)
+(require 'tests/test-catalog-connection)
 (require 'tests/test-native-model-publication)
 (require 'tests/test-native-model-consumers)
 (require 'tests/test-wave1-empirical-challenge)

@@ -24,7 +24,6 @@
 
 (declare-function kargu--url-host "kargu/config/key")
 (declare-function kargu--config-providers "kargu/config/schema")
-(declare-function kargu-config-api-key "kargu/config/key" (&optional provider-name))
 (declare-function kargu-config-api-key-fast "kargu/config/key" (&optional provider-name))
 
 (defvar kargu-providers--table (make-hash-table :test 'equal)

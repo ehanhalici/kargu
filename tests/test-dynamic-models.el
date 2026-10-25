@@ -22,7 +22,7 @@
   "Only the declared public endpoint skips authentication, not custom URLs."
   (dolist (provider '("opencode" "opencode-go"))
     (let ((kargu--live-models-cache (make-hash-table :test #'equal)) seen result)
-      (cl-letf (((symbol-function 'kargu--resolve-api-key)
+      (cl-letf (((symbol-function 'kargu--resolve-direct-api-key)
                  (lambda (_) (error "Secret lookup must not run")))
                 ((symbol-function 'kargu-transport-request)
                  (lambda (_method url &rest options)
@@ -63,7 +63,10 @@
   "A private override cannot inherit public access from the standard catalog."
   (let (requested result)
     (cl-letf (((symbol-function 'kargu--api-base) (lambda (_) "https://private.example/v1"))
-              ((symbol-function 'kargu--resolve-api-key) (lambda (_) nil))
+              ((symbol-function 'kargu--resolve-direct-api-key) (lambda (_) nil))
+              ((symbol-function 'kargu-config-worker-resolve)
+               (lambda (_provider _host task &rest _options)
+                 (kargu-async-finish task (kargu-err "No synthetic key" :auth-unavailable))))
               ((symbol-function 'kargu-transport-request) (lambda (&rest _) (setq requested t))))
       (kargu-api-list-models (lambda (value) (setq result value)) "opencode")
       (should-not requested)

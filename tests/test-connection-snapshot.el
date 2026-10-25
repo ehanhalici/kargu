@@ -147,11 +147,11 @@
         (should (listp report))
         (should (= called-count 0)))
 
-      ;; 3. Synchronous result resolution must refuse callable secret functions
-      (let ((res (kargu-config-resolve-api-key-result "remote-mock")))
-        (should (kargu-err-p res))
-        (should (eq (kargu-result-err-code res) 'unavailable))
-        (should (= called-count 0)))
+      ;; 3. The synchronous secret-unlocking entry points no longer exist.
+      (should-not (fboundp 'kargu-config-resolve-api-key-result))
+      (should-not (fboundp 'kargu--resolve-api-key))
+      (should-not (fboundp 'kargu-config-api-key))
+      (should (= called-count 0))
 
       ;; 4. Asynchronous connection resolution must return task immediately without calling secret on UI thread
       (let* (async-delivered

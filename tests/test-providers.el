@@ -78,7 +78,7 @@
             ;; Model should resolve from TOML configured model:
             (should (equal (kargu--model) "deepseek-chat"))
             ;; API key should resolve to the configured key:
-            (should (equal (kargu--resolve-api-key) "sk-test-deepseek-12345"))))
+            (should (equal (kargu-config-api-key-fast) "sk-test-deepseek-12345"))))
       (delete-file temp-config))))
 
 (ert-deftest kargu-providers-custom-url-override-test ()
@@ -100,7 +100,7 @@
             (should (equal (kargu--provider-name) "deepseek"))
             ;; User-provided API base must take precedence:
             (should (equal (kargu--api-base) "https://my-custom-proxy.internal/v1"))
-            (should (equal (kargu--resolve-api-key) "sk-test-custom-key"))))
+            (should (equal (kargu-config-api-key-fast) "sk-test-custom-key"))))
       (delete-file temp-config))))
 
 (ert-deftest kargu-providers-env-key-resolution-test ()
@@ -122,7 +122,7 @@
                 (progn
                   (should (equal (kargu--provider-name) "groq"))
                   (should (equal (kargu--api-base) "https://api.groq.com/openai/v1"))
-                  (should (equal (kargu--resolve-api-key) "gsk_test_groq_env_key")))
+                  (should (equal (kargu-config-api-key-fast) "gsk_test_groq_env_key")))
               (setenv "GROQ_API_KEY" nil))))
       (delete-file temp-config))))
 

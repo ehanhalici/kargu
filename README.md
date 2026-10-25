@@ -186,6 +186,16 @@ Authenticated HTTP requests refuse redirects and keep TLS verification enabled.
 See [connection ownership](docs/connection-ownership.md) for service boundaries
 and compatibility consumers.
 
+Model catalog discovery also resolves credentials asynchronously before its
+native GET, using the published configuration. Closing/changing the origin
+buffer or cancelling discovery releases its worker and request; agent Stop does
+not cancel independent discovery. Only a provider's exact declared public
+catalog URL skips authentication. The old synchronous credential functions
+(`kargu--resolve-api-key`, `kargu-config-api-key` and
+`kargu-config-resolve-api-key-result`) were removed. Custom consumers should use
+`kargu-connection-resolve-async`; `kargu-config-api-key-fast` never searches
+auth-source and is only a memory-backed check.
+
 Project walks and searches exclude names in `kargu-fs-skip-dirs` at every
 directory depth. Customize this list when names such as `build` or `vendor`
 contain your source code; the same setting applies to fallback traversal.

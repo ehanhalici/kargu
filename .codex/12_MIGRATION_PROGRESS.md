@@ -1,5 +1,46 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Katalog credential consumer cutover ve senkron Elisp temizliği
+
+Katalog GET hazırlığı `api/catalog/request.el` altında ayrıldı ve mevcut owned
+async connection/credential portuna bağlandı. HTTP/header assembly ve canonical
+catalog/metadata motorları native kalır. Provider/URL/public kararı/wire/header
+binding/application credential yield'inden önce yakalanır; yabancı chat snapshot'ı
+ödünç alınmaz. Public URL ile custom override ayrımı korunur. Katalog published
+config'i okur; explicit UI/config refresh dışında gizli disk okuması yapılmaz.
+
+Origin kill/mode change, cancel ve deadline child/transport/publication cleanup'ını
+kapatır; GET yalnız kalan root süresini kullanır. Provider selection/agent Stop
+bağımsız discovery'yi kapatmaz. Genel connection resolver'ın revision kontrolü
+ve callback'i initiating application'a sabitlendi; current başka application veya
+foreign bound connection sonucu yönlendiremez. Raw adapter hatası UI'a sızmaz;
+kapanış private scope ve request'e ait key kopyasını siler, tüm bellek kopyaları
+için fiziksel erasure garantisi iddia edilmez.
+
+Artık üretim tüketicisi kalmayan sync `resolve-api-key`/`config-api-key`/
+`config-resolve-api-key-result`, UI auth-source search/callable secret yolu,
+nonblocking flag ve onlara özel yardımcılar kaldırıldı. Fixture'lar memory-only
+precedence veya gerçek async credential portunu kullanır. Setup'ın tükettiği async
+facade ve Emacs auth-source interop child'ı gereksizmiş gibi silinmedi. Detay 44'te.
+
+Altı yeni test gerçek plaintext child -> Rust -> loopback GET, gerçek slow child
+kill, iki application, frozen wire/header, foreign chat, stale config/session,
+cancel/timeout/late callback ve cleanup'ı kapsar. **1226/1226 full source ERT**,
+0 unexpected, **137.18 s**, **23:49:13 Europe/Istanbul** geçti. **259 native +
+16 compile-fail**, fmt ve strict all-targets Clippy temiz. Beş üretim Elisp
+dosyası ve yeni test dosyası Werror bytecompile/checkdoc temiz; elc çıktıları
+yalnız task-specific /tmp dizinindedir. Rust üretim kodu değişmedi; native gate
+yeni Rust özelliği kanıtı değil mevcut core'un yeniden çalıştırılmış regresyonudur.
+Yeni TLC/refinement ispatı iddia edilmez. İlk yeni testte inherited Emacs hook'larına
+fazla geniş assertion düzeltildi; lint/docstring ve test syntax hataları final
+gate'ten önce giderildi. Assertions veya module baseline gevşetilmedi.
+
+Katalogun senkron credential discovery portu kapandı. Genel run/history, native
+config/endpoint policy, setup facade son-tüketici birleştirmesi, G08 hard monetary
+reservation ve dört uygulama backend'i açık; tüm Rust/API göçü tamamlanmadı.
+Kullanıcının shell.nix/07 değişiklikleri ve 01 korunur. Harici hesap/API/CLI model
+turu, login, credential taşıma, kurulum, merge/push yapılmadı.
+
 ## 2026-10-25 — Public metadata writer/UI consumer cutover ve Elisp engine silme
 
 Public metadata put/property/refusal/clear setter'ları mevcut native actor'e

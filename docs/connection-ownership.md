@@ -46,9 +46,24 @@ Their consumers are `api/catalog.el`, `api/circuit.el`,
 `selection.el` and provider selection in `config/schema.el`; default native
 execution captures that compatibility choice too. The circuit default-state
 mirrors and these detached tables are G13 cleanup bridges. G09 still owns the
-catalog/selection UI migration, including catalog discovery's legacy credential
-entry point. Native send, setup check and connection test use asynchronous
-credential preparation now.
+remaining catalog/selection UI migration. Catalog discovery now resolves through
+the same cancellable connection credential port as native sends. It consumes
+already-published configuration; explicit configuration/UI refresh owns file IO.
+Only the exact declared public catalog URL skips credentials. Provider, URL,
+wire record, raw header bindings and application are captured before yielding;
+another chat's bound connection cannot lend its wire or credential. Credential
+completion checks the initiating application's config revision and endpoint,
+even when another application is current. Discovery is independent of agent
+Stop/selection changes, but origin close/mode change, cancellation or deadline
+release its children and transport. Its private credential scope and request's
+key copy are wiped on closure; this is not complete physical memory erasure.
+
+The obsolete synchronous credential entry points and editor auth-source search
+were removed. `kargu-config-api-key-fast` is a memory-only availability check,
+not an auth-source resolver. Setup's existing async credential facade remains a
+consumer; its last-consumer consolidation and native config/endpoint policy are
+still open. The default local plaintext auth-source child remains an editor
+interop port, not a newly implemented Rust credential reader.
 
 Catalog publication is one atomic native replace operation. Stale responses still
 deliver to their own callers but cannot overwrite newer state. A new generation
@@ -59,7 +74,8 @@ Prices/capacities reach Rust as exact source text, never recovered Lisp floats.
 The UI uses native price labels; an invalid price is unknown, not free.
 
 Offline evidence is in `tests/test-native-model-consumers.el`,
-`tests/test-native-model-publication.el`, `tests/test-connection-native.el` and the existing config,
+`tests/test-native-model-publication.el`, `tests/test-connection-native.el`,
+`tests/test-catalog-connection.el` and the existing config,
 snapshot, model-store, parameter and application suites. It includes real child
 workers, real loopback curl redirects for Bearer and x-api-key, Stop and draft
 restoration, immutable retries, late selection rejection, two application owners

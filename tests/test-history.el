@@ -232,7 +232,7 @@
           (should (cl-some (lambda (m) (equal (kargu-aget m "role") "tool")) (kargu-history-messages)))
           ;; 5. Next continuation turn (prompt nil) must pass history validation without error
           (let ((posted nil) (err-msg nil))
-            (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda () "mock-key"))
+            (cl-letf (((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "mock-key"))
                       ((symbol-function 'kargu--api-post)
                        (lambda (_url _headers payload &rest _) (setq posted payload))))
               (kargu-api-send nil (lambda (resp)

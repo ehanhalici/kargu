@@ -21,14 +21,9 @@
 (require 'kargu/async)
 (require 'kargu/models/store)
 (require 'kargu/api/transport)
+(require 'kargu/api/catalog/request)
 
-(declare-function kargu-provider-models-api "kargu/providers/registry" (provider))
-(declare-function kargu-provider-public-models-p "kargu/providers/registry" (id url))
-(declare-function kargu-provider-native-models-path "kargu/providers/registry" (id api-base))
-(declare-function kargu-provider-keyless-p "kargu/providers/registry" (provider))
-(declare-function kargu-provider-format "kargu/providers/registry" (provider))
 (declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
-(declare-function kargu-api-auth-intent "kargu/api/request" (key &optional provider))
 (declare-function kargu-history-context-threshold "kargu/history/compact" (ctx-tokens))
 (declare-function kargu-connection-current "kargu/config/connection" (&optional buffer))
 (declare-function kargu-connection-setting "kargu/config/connection" (name &optional snapshot))
@@ -192,31 +187,6 @@ Return the asynchronous native publication ticket, not an optimistic success."
         (format "  [%s]" (mapconcat #'identity parts " · "))
       "")))
 
-(defun kargu--catalog-models-url (pname-lower api-base)
-  "Determine the models endpoint URL for PNAME-LOWER and API-BASE."
-  (let* ((default-api (and (fboundp 'kargu-provider-api) (kargu-provider-api pname-lower)))
-         (custom-models-url (and (fboundp 'kargu-provider-models-api)
-                                 (kargu-provider-models-api pname-lower))))
-    (cond
-     ;; If user configured a custom api-base different from default catalog api, derive from api-base:
-     ((and (kargu-nonempty api-base)
-           default-api
-           (not (equal (kargu--strip-trailing-slashes api-base)
-                       (kargu--strip-trailing-slashes default-api))))
-      (cond
-       ((string-suffix-p "/models" api-base) api-base)
-       ((kargu-provider-native-models-path pname-lower api-base)
-        (concat api-base (kargu-provider-native-models-path pname-lower api-base)))
-       (t (concat api-base "/models"))))
-     ;; If catalog specified a dedicated models-api (and user didn't override api), use it:
-     (custom-models-url custom-models-url)
-     ;; Otherwise derive from api-base:
-     ((kargu-provider-native-models-path pname-lower api-base)
-      (concat api-base (kargu-provider-native-models-path pname-lower api-base)))
-     ((string-suffix-p "/models" api-base)
-      api-base)
-     (t (concat api-base "/models")))))
-
 (defun kargu--catalog-clean-model-ids (models)
   "Detach canonical native IDs in MODELS, preserving first-advertised order.
 Provider envelopes, identity normalization and invalid records are Rust's job."
@@ -262,32 +232,6 @@ The native catalog's IDs become the UI cache only after committed completion."
                               (= generation (gethash provider (kargu-metadata-table :generations kargu--catalog-generations)))))))
         (kargu-async-add-cleanup task (lambda () (kargu-bridge-models-cancel ticket)))))))
 
-(defun kargu--catalog-request (task provider generation)
-  "Start catalog TASK for PROVIDER and cache GENERATION."
-  (let* ((url (kargu--catalog-models-url provider (kargu--api-base provider)))
-         (public (kargu-provider-public-models-p provider url))
-         (key (unless public (kargu--resolve-api-key provider))))
-    (when (and (not public) (not key) (not (kargu-provider-keyless-p provider)))
-      (error "No API key for provider %s" provider))
-    (let ((request
-           (kargu-transport-request 'get url :auth (kargu-api-auth-intent key provider)
-                :model-catalog t
-                :application (kargu-application-context)
-                :wire (if (kargu-connection-current) (kargu-connection-setting :wire)
-                        (kargu-provider-format-record (kargu-provider-format provider)))
-                :provider provider
-                :as 'string :timeout kargu-models-timeout
-                :then (kargu-async-wrap
-                       task (kargu-application-wrap
-                             (kargu-application-context)
-                             (lambda (body)
-                               (kargu--catalog-receive task provider generation body))))
-                :else (kargu-async-wrap
-                       task (lambda (error)
-                              (kargu-async-finish task nil (kargu-result-err-message error)))))))
-      (when (kargu-async-pending-p task)
-        (kargu-async-add-cleanup task (lambda () (kargu-transport-cancel request)))))))
-
 (defun kargu-api-list-models (&optional callback provider-name)
   "Fetch PROVIDER-NAME's live catalog asynchronously, delivering once.
 CALLBACK receives model alists or an error alist.  Concurrent requests do
@@ -306,7 +250,9 @@ not suppress each other's callbacks; only the newest updates shared cache."
                 :timeout kargu-models-timeout)))
     (puthash provider generation (kargu-metadata-table :generations kargu--catalog-generations))
     (funcall (kargu-async-wrap task
-                              (lambda () (kargu--catalog-request task provider generation))))
+                              (lambda ()
+                                (kargu-catalog-request-start
+                                 task provider (lambda (body) (kargu--catalog-receive task provider generation body))))))
     task))
 
 (defun kargu-api-prefetch-models (&optional provider-name)

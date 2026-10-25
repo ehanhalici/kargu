@@ -703,7 +703,7 @@ Initialize installed PACKAGES only when requested."
                        ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil))
                        ((symbol-function 'kargu--provider-name) (lambda (&rest _) "openai"))
                        ((symbol-function 'kargu--model) (lambda (&rest _) "fake-model"))
-                       ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) "fake-key"))
+                       ((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "fake-key"))
                        ((symbol-function 'kargu--api-base) (lambda (&rest _) "https://example.invalid"))
                        ((symbol-function 'kargu--api-post)
                         (lambda (_url _headers _payload _gen done &rest _) (setq callback done))))
@@ -746,7 +746,7 @@ Initialize installed PACKAGES only when requested."
                      ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil))
                      ((symbol-function 'kargu--provider-name) (lambda (&rest _) "openai"))
                      ((symbol-function 'kargu--model) (lambda (&rest _) "fake-model"))
-                     ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) "fake-key"))
+                     ((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "fake-key"))
                      ((symbol-function 'kargu--api-base) (lambda (&rest _) "https://example.invalid"))
                      ((symbol-function 'kargu--api-post) (lambda (&rest _) (cl-incf posted))))
              (with-current-buffer origin

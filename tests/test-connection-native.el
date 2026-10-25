@@ -238,7 +238,7 @@
 (ert-deftest kargu-connection-catalog-callback-keeps-application-owner-test ()
   "A delayed catalog response publishes only to its original application."
   (let ((first (kargu-application-create)) (second (kargu-application-create)) callback)
-    (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) "synthetic"))
+    (cl-letf (((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "synthetic"))
               ((symbol-function 'kargu-transport-request)
                (lambda (_method _url &rest options)
                  (setq callback (plist-get options :then)) nil)))

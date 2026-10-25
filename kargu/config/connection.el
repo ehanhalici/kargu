@@ -251,7 +251,8 @@ ORIGIN retains session ownership; TIMEOUT bounds credential resolution.
 CAPABILITIES and SETTINGS are detached; PARENT and OWNER own preparation.
 PUBLIC skips authentication only for an independently verified public endpoint."
   (kargu-contract-assert #'functionp callback)
-  (let* ((origin (or origin (current-buffer)))
+  (let* ((app (kargu-application-context))
+         (origin (or origin (current-buffer)))
          (session (kargu-session-context origin))
          (provider (downcase (string-trim (format "%s" (or provider (kargu--provider-name))))))
          (format (or (kargu-provider-format provider) 'openai))
@@ -262,14 +263,18 @@ PUBLIC skips authentication only for an independently verified public endpoint."
                  :capabilities (or capabilities (kargu-connection--default-capabilities provider))
                  :settings settings
                  :config-revision (kargu-config-revision)))
-         (valid (lambda () (kargu-connection--current-p draft origin session)))
+         (valid (kargu-application-wrap
+                 app (lambda ()
+                       (let ((kargu-connection--bound nil))
+                         (kargu-connection--current-p draft origin session)))))
          (task (kargu-async-start
-                (lambda (value error)
-                  (funcall callback
-                           (cond
-                            ((not (funcall valid)) (kargu-err "Stale connection discarded" :stale-discard))
-                            ((or (kargu-ok-p value) (kargu-err-p value)) value)
-                            (t (kargu-err (or error "Connection resolution failed") :auth-unavailable)))))
+                (kargu-application-wrap
+                 app (lambda (value error)
+                       (funcall callback
+                                (cond
+                                 ((not (funcall valid)) (kargu-err "Stale connection discarded" :stale-discard))
+                                 ((or (kargu-ok-p value) (kargu-err-p value)) value)
+                                 (t (kargu-err (or error "Connection resolution failed") :auth-unavailable))))))
                 :owner owner :parent parent :buffer origin
                 :timeout (or timeout kargu-config-worker-default-timeout) :valid-p valid)))
     (if (kargu-contract-url-p (kargu-connection-snapshot-endpoint draft))

@@ -29,7 +29,7 @@
            (kargu-register-provider :id provider :api url :models-api url
                                     :format 'openapi :keyless t)
            (cl-letf (((symbol-function 'kargu--api-base) (lambda (&optional _) url))
-                     ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) nil)))
+                     ((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) nil)))
              ,@forms))
        (delete-process server))))
 

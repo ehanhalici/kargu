@@ -150,7 +150,7 @@
           (kargu--live-models-cache (make-hash-table :test #'equal))
           (kargu-session--context
            (kargu-test-session-with-history :provider "openrouter")) pending)
-      (cl-letf (((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) "fake-key"))
+      (cl-letf (((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "fake-key"))
                 ((symbol-function 'kargu-transport-request)
                  (lambda (_method url &rest options)
                    (push (cons (if (string-search "openrouter" url) "openrouter" "cerebras")

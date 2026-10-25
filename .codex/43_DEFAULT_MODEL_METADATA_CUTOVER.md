@@ -75,7 +75,8 @@ provider-only prune, override-only records, alias ambiguity, case identity and
 exact-ID request-parameter contracts are retained. Canonical GET bodies still
 cross the editor before the owned native publication; no direct worker-to-store
 or zero-copy HTTP commit claim is made. Discovery's synchronous credential entry
-point remains a separate open port (docs/connection-ownership, G09/G13).
+point was a separate open port at this slice. It is now closed by 44's owned
+async connection cutover; native config/endpoint policy remains separate work.
 
 ## Verification and fixture migration
 

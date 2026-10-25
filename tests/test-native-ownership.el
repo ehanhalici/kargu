@@ -20,7 +20,7 @@
   `(cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
              ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) t))
              ((symbol-function 'kargu-prompt-wrap-user) #'identity)
-             ((symbol-function 'kargu--resolve-api-key) (lambda () "offline"))
+             ((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "offline"))
              ((symbol-function 'kargu--api-base) (lambda () "https://example.invalid")))
      ,@body))
 
