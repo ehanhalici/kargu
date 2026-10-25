@@ -51,6 +51,10 @@ core restart gerekir. Kullanıcının canlı Emacs'i otomatik reload edilmedi.
 
 ## Yeni bulgu ve kalan alt iş
 
+Takip: aşağıdaki tarihsel upstream base-selector bulgusu sonraki dar tüketici
+geçişinde kapatıldı; ham base ve native chat hedefi ayrıntıları .codex/47'de.
+Genel native config/schema/precedence üst işi yine açıktır.
+
 Eski string concat, query içeren base'e `/models` ekini query içinde ekliyordu.
 Native URL path operation query'yi korur; gerçek loopback GET bunu denetler.
 Bir başka sınır da görünür oldu: `config/key.el` içindeki eski base selector

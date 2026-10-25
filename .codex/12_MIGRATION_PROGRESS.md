@@ -1,5 +1,41 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Ham API-base ve native sohbet hedefi tüketici geçişi
+
+Önceki dilimde açılan upstream query kaybı kapatıldı. `kargu--api-base` artık
+ham spelling'i korur; tüm URL sonunu kırpan `kargu--strip-trailing-slashes`
+silindi. Ham base üstüne chat path concat eden `kargu-api-chat-url` da silindi;
+normal client yalnız base + chat intent taşır. Path türetme Rust wire katmanında
+özel alanlı bounded/serde-TryFrom `ChatPath` ve kapalı POST-only `RequestTarget`
+ile yapılır. Yalnız URL path değişir; origin/query/encoded değerler korunur.
+Final endpoint continuation ve HTTP authority capture'ından önce oluşturulur;
+immutable request retry'larda aynı hedefi taşır, path tekrar eklenmez.
+
+Normal send `api_chat_target` capability'si ister; eski core owner startup/HTTP
+öncesi reddedilir, Elisp fallback yoktur. Explicit low-level URL istekleri Exact
+semantiğinde, katalog GET önceki native target/auth + epoch pinning portunda
+kalır. Yeni actor/senkron sorgu/config writer/IO engine veya dependency yoktur.
+
+Üç native test packaged/default/custom path, encoded base path/query, malformed
+path/profile ve final uzunluk sınırını denetler. Dört ERT gerçek geçici TOML
+refresh + mock'lanmamış base reader + native port + loopback GET/OpenAPI/Anthropic
+POST zincirini, old-core rejection/cleanup ve silinen helper'ları kapsar. Mevcut
+gerçek retry fixture'ı query'li base ile güçlendirildi; config/wire sonradan
+değişse bile iki attempt ilk hedef/key/body'yi korur. Ayrıntılar .codex/47'de.
+
+**1249/1249 full source ERT**, 0 unexpected, **137.84 s**, **01:06:43
+Europe/Istanbul** geçti. **269 native + 16 compile-fail**, fmt, locked build,
+strict all-targets Clippy temiz. Beş üretim + üç test dosyası Werror bytecompile/
+checkdoc temiz; elc yalnız task-specific /tmp dizininde. Mevcut connection TLC
+**602836 / 101708**, queue 0, depth 22; transport **1810 / 693**, queue 0, depth 12
+ile 01:04:27/28'de hatasızdır. Bunlar bounded lifecycle regression'ıdır; yeni URL
+policy/refinement veya tüm 01 uyumluluk ispatı değildir.
+
+Todo'da iki URL consumer alt işi `[x]`; native config/schema/precedence/env/keyless,
+genel run/history ve dört application backend'i açık. Kullanıcının 01/07/shell.nix
+değişiklikleri korunur; kurulum, gerçek uzak API/hesap/CLI turu, credential taşıma,
+merge/push veya canlı Emacs/core reload yapılmadı.
+
 ## 2026-10-26 — Native katalog URL/public-auth policy consumer cutover
 
 Katalog hedefi artık `providers/catalog_target` typed Rust domain'inde çözülür.

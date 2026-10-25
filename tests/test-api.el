@@ -180,7 +180,6 @@
 
 
 
-(declare-function kargu-api-chat-url "kargu/api/wire" (base format))
 (declare-function kargu-api-normalize-response "kargu/api/wire" (response))
 (declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
 (declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
@@ -216,12 +215,10 @@
   (should (> kargu-api-stream-ceiling kargu-api-timeout)))
 
 
-(ert-deftest kargu-api-anthropic-url-and-response-test ()
+(ert-deftest kargu-api-anthropic-wire-metadata-test ()
   "Editor reads native format metadata without duplicating its codec."
-  (should (equal (kargu-api-chat-url "https://api.anthropic.com/v1" 'anthropic)
-                 "https://api.anthropic.com/v1/messages"))
-  (should (equal (kargu-api-chat-url "https://api.openai.com/v1" 'openapi)
-                 "https://api.openai.com/v1/chat/completions"))
+  ;; Chat endpoint assertions live at the native path/HTTP boundary now.
+  (should-not (fboundp 'kargu-api-chat-url))
   (should-not (kargu-provider-format-stream-p 'anthropic))
   (should (eq (kargu-provider-format-auth 'anthropic) 'x-api-key))
   ;; System lifting, tool conversion and finish/usage cases moved to api_wire.rs.

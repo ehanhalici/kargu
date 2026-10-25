@@ -96,6 +96,14 @@ enum HttpMethod {
 
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
+enum RequestTarget {
+    #[default]
+    Exact,
+    Chat,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum ResponseProfile {
     #[default]
     Raw,
@@ -106,6 +114,8 @@ pub(super) enum ResponseProfile {
 #[serde(deny_unknown_fields)]
 struct RequestDto {
     url: ApiEndpoint,
+    #[serde(default)]
+    target: RequestTarget,
     method: HttpMethod,
     headers: BTreeMap<String, SecretString>,
     body: Option<String>,
@@ -142,6 +152,12 @@ pub struct HttpRequest {
 impl TryFrom<RequestDto> for HttpRequest {
     type Error = ApiError;
     fn try_from(dto: RequestDto) -> Result<Self, ApiError> {
+        if matches!(dto.target, RequestTarget::Chat)
+            && (!matches!(dto.method, HttpMethod::Post)
+                || !matches!(dto.response_profile, ResponseProfile::Raw))
+        {
+            return Err(ApiError::InvalidRequest);
+        }
         if matches!(dto.response_profile, ResponseProfile::ModelCatalog)
             && !matches!(dto.method, HttpMethod::Get)
         {
@@ -178,10 +194,12 @@ impl TryFrom<RequestDto> for HttpRequest {
             .map(|value| serde_json::from_value::<ModelId>(value.clone()))
             .transpose()
             .map_err(|_| ApiError::InvalidRequest)?;
-        let wire =
-            dto.wire
-                .unwrap_or_default()
-                .bind(&dto.url, model.as_ref(), dto.provider.as_ref())?;
+        let spec = dto.wire.unwrap_or_default();
+        let url = match dto.target {
+            RequestTarget::Exact => dto.url,
+            RequestTarget::Chat => spec.chat_endpoint(dto.url)?,
+        };
+        let wire = spec.bind(&url, model.as_ref(), dto.provider.as_ref())?;
         let headers = wire.headers(headers, dto.auth)?;
         let wire = wire.capture_headers(&headers)?;
         let body = if let Some(mut value) = value {
@@ -209,11 +227,11 @@ impl TryFrom<RequestDto> for HttpRequest {
             }
             None
         };
-        let authority = super::ApiAuthority::capture(&dto.url, dto.provider.as_ref(), &headers)?;
+        let authority = super::ApiAuthority::capture(&url, dto.provider.as_ref(), &headers)?;
         Ok(Self {
             authority,
             provider: dto.provider,
-            url: dto.url,
+            url,
             method: match dto.method {
                 HttpMethod::Get => Method::GET,
                 HttpMethod::Post => Method::POST,

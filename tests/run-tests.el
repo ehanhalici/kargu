@@ -109,6 +109,7 @@
 (require 'tests/test-config)
 (require 'tests/test-setup)
 (require 'tests/test-connection-snapshot)
+(require 'tests/test-chat-target)
 (require 'tests/test-laws)
 (require 'tests/test-compact)
 (require 'tests/test-heal)

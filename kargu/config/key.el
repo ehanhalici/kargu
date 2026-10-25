@@ -54,16 +54,11 @@
                 (and default-models
                      (list :models default-models)))))))
 
-(defun kargu--strip-trailing-slashes (url)
-  "Return URL without a trailing slash."
-  (if (and (stringp url) (not (string-empty-p url)))
-      (replace-regexp-in-string "/+\\'" "" url)
-    url))
-
 (defun kargu--api-base (&optional provider-name)
   "Return endpoint base URL.
 Use active or specified PROVIDER-NAME `api' from TOML config if set,
-otherwise provider's catalog default URL, else `kargu-api-base'."
+otherwise provider's catalog default URL, else `kargu-api-base'.
+Return the captured spelling unchanged; Rust owns endpoint path derivation."
   (let* ((pname (or provider-name (kargu--provider-name)))
          (pname-str (if (symbolp pname) (symbol-name pname) (format "%s" (or pname ""))))
          (pname-lower (downcase (string-trim pname-str)))
@@ -75,14 +70,13 @@ otherwise provider's catalog default URL, else `kargu-api-base'."
                           (plist-get (kargu--provider-plist) :api)))
          (catalog-api (and (fboundp 'kargu-provider-api)
                            (kargu-provider-api pname-lower))))
-    (kargu--strip-trailing-slashes
-     (or (and (fboundp 'kargu-connection-current) (kargu-connection-current)
-              (equal pname-lower (kargu-connection-snapshot-provider (kargu-connection-current)))
-              (kargu-connection-snapshot-endpoint (kargu-connection-current)))
-         (and (kargu-nonempty toml-api) toml-api)
-         (and (kargu-nonempty active-api) active-api)
-         (and (kargu-nonempty catalog-api) catalog-api)
-         kargu-api-base))))
+    (or (and (fboundp 'kargu-connection-current) (kargu-connection-current)
+             (equal pname-lower (kargu-connection-snapshot-provider (kargu-connection-current)))
+             (kargu-connection-snapshot-endpoint (kargu-connection-current)))
+        (and (kargu-nonempty toml-api) toml-api)
+        (and (kargu-nonempty active-api) active-api)
+        (and (kargu-nonempty catalog-api) catalog-api)
+        kargu-api-base)))
 
 (defun kargu--model ()
   "Return the owning session's model, or an explicit provider/config fallback."

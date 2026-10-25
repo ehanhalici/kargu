@@ -3,6 +3,7 @@
 mod domain;
 mod request;
 mod response;
+mod target;
 use super::{ApiError, ModelId};
 use crate::providers::{ApiEndpoint, ApiProviderId};
 pub(super) use domain::OutputLimit;
@@ -108,6 +109,11 @@ impl WireCodec {
 }
 
 impl WireSpec {
+    /// Derive a chat target by modifying only the path of a captured base URL.
+    pub fn chat_endpoint(&self, base: ApiEndpoint) -> Result<ApiEndpoint, ApiError> {
+        self.chat_path.append_to(base)
+    }
+
     /// Bind metadata before IO; a different model/provider/endpoint cannot borrow signatures.
     pub fn bind(
         self,

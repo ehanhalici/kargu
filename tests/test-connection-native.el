@@ -100,7 +100,7 @@
                       (lambda (value) (push value headers)) nil nil
                       (list (list :status 503 :body "" :headers "Retry-After: 0\r\n")
                             (list :status 200 :body "{\"choices\":[{\"message\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3}}"))))
-             (endpoint (format "http://127.0.0.1:%d/Original" (process-contact server :service)))
+             (endpoint (format "http://127.0.0.1:%d/Original///?tenant=a%%2Fb/" (process-contact server :service)))
              (kargu-api-retry-hook
               (list (lambda (&rest _)
                       (should (= (length calls) 1))
@@ -121,7 +121,7 @@
               (should (= (length calls) 2))
               (should (equal (car calls) (cadr calls)))
               (should (equal (kargu-aget (kargu--json-decode (car calls)) "model") "m"))
-              (should (cl-every (lambda (value) (string-search "POST /Original/chat/completions " value)) headers))
+              (should (cl-every (lambda (value) (string-search "POST /Original/chat/completions?tenant=a%2Fb/ " value)) headers))
               (should (cl-every (lambda (value) (string-search "synthetic-native-key" value)) headers))
               (should (eq (plist-get report :status) :done))
               (should-not (kargu-connection-snapshot-secret snapshot)))

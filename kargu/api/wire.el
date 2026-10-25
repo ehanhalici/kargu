@@ -34,14 +34,6 @@
       (kargu-provider-format
        (downcase (string-trim (format "%s" (or pname "")))))))))
 
-(defun kargu-api-chat-url (base format)
-  "Chat endpoint for BASE and catalog FORMAT.
-The path comes from the format record.  A missing record uses
-`/chat/completions'."
-  (let ((path (or (plist-get (kargu-api-wire-record format) :chat-path)
-                  "/chat/completions")))
-    (concat base path)))
-
 (defun kargu-api-normalize-response (response)
   "Normalize canonical RESPONSE's identities for the current history store.
 Provider-specific wire normalization has already completed inside Rust."

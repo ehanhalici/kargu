@@ -182,6 +182,12 @@ credentials.
 Native sends and connection tests prepare configuration and credentials in
 cancellable workers. Stop also cancels preparation. Each run captures its
 endpoint, model, wire policy and credentials once; retries retain that target.
+API bases retain their configured spelling, including query values. Rust derives
+chat paths from captured wire metadata by changing only the URL path; the normal
+send requires `api_chat_target`. Rebuild and restart an older core. Custom
+`chat-path` metadata must be a static absolute path made of ASCII letters,
+digits, `/`, `-`, `.`, `_`, or `~`, without empty interior or dot segments;
+query parameters belong to the API base, not the chat path.
 Authenticated HTTP requests refuse redirects and keep TLS verification enabled.
 See [connection ownership](docs/connection-ownership.md) for service boundaries
 and compatibility consumers.

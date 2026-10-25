@@ -147,18 +147,19 @@ Application status, loop ownership and UI belong to the caller."
       (setq kargu--busy nil)
       (kargu-log 'warn "request cancelled"))))
 
-(defun kargu--api-post (url auth payload gen callback &optional on-delta)
+(defun kargu--api-post (url auth payload gen callback &optional on-delta chat-target)
   "POST PAYLOAD to URL with AUTH and dispatch the result to CALLBACK.
 GEN is the cancellation generation; ON-DELTA enables SSE streaming.
+CHAT-TARGET means URL is a base; Rust appends the captured wire's chat path.
 The native owner alone admits, charges, retries and retires physical attempts."
   (kargu-http--ensure-logical-request gen)
   (if (and on-delta kargu-stream)
-      (kargu--api-post-streaming url auth payload gen callback on-delta)
-    (kargu--api-post-plain url auth payload gen callback on-delta)))
+      (kargu--api-post-streaming url auth payload gen callback on-delta chat-target)
+    (kargu--api-post-plain url auth payload gen callback on-delta chat-target)))
 
 (cl-defstruct (kargu-http--request (:constructor kargu-http--make-request))
   "One logical native exchange and its editor delivery lease."
-  url auth payload generation callback on-delta process
+  url auth payload generation callback on-delta process chat-target
   (app (and (kargu-application-current-request) (kargu-application-context)))
   (logical (kargu-application-current-request))
   (state :pending))
@@ -261,20 +262,22 @@ The native owner alone admits, charges, retries and retires physical attempts."
       (when-let* ((on-delta (kargu-http--request-on-delta request)))
         (funcall on-delta event)))))
 
-(defun kargu--api-post-plain (url auth payload gen callback &optional on-delta)
+(defun kargu--api-post-plain (url auth payload gen callback &optional on-delta chat-target)
   "Deliver native plain PAYLOAD at URL with AUTH for GEN to CALLBACK.
-ON-DELTA identifies the original UI consumer for native retry observations."
+ON-DELTA identifies the original UI consumer for native retry observations.
+CHAT-TARGET selects native chat path derivation from URL as a base."
   (let ((request (kargu-http--make-request
-                  :url url :auth auth :payload payload :generation gen
+                  :url url :auth auth :payload payload :generation gen :chat-target chat-target
                   :callback callback :on-delta on-delta)))
     (kargu-http--log-request request 'plain)
     (kargu-http--start request nil)))
 
-(defun kargu--api-post-streaming (url auth payload gen callback on-delta)
+(defun kargu--api-post-streaming (url auth payload gen callback on-delta &optional chat-target)
   "Deliver native streaming PAYLOAD at URL with AUTH for GEN.
-CALLBACK receives the terminal result and ON-DELTA receives owned UI events."
+CALLBACK receives the terminal result and ON-DELTA receives owned UI events.
+CHAT-TARGET selects native chat path derivation from URL as a base."
   (let ((request (kargu-http--make-request
-                  :url url :auth auth :payload payload :generation gen
+                  :url url :auth auth :payload payload :generation gen :chat-target chat-target
                   :callback callback :on-delta on-delta)))
     (kargu-http--log-request request 'streaming)
     (kargu-http--start request t)))
@@ -295,6 +298,7 @@ CALLBACK receives the terminal result and ON-DELTA receives owned UI events."
    request
    (kargu-transport-request
     'post (kargu-http--request-url request)
+    :chat-target (kargu-http--request-chat-target request)
     :application (or (kargu-http--request-app request) (kargu-application-context))
     :budget (kargu-http-request-budget (kargu-http--request-generation request))
     :debit-kind (if-let* ((logical (kargu-http--request-logical request)))

@@ -193,6 +193,7 @@ OPTIONS contain captured :auth/:wire/:tuning, :body, :timeout, :stream,
 :retry captures native policy; :on-retry observes it before native replay ACK.
 :circuit captures native policy and requires :application and :retry.
 :model-catalog selects native GET-only discovery envelope normalization.
+:chat-target derives the chat path from URL as a base inside Rust.
 :connection pins an existing native epoch, without startup or reconnect.
 No network request or subprocess is ever started by Elisp."
   (let* ((application (plist-get options :application))
@@ -239,6 +240,7 @@ No network request or subprocess is ever started by Elisp."
                 :else (plist-get options :else) :on-delta (plist-get options :on-delta)
                 :connection (plist-get options :connection)
                 :required (append '("api_request" "api_failure")
+                                  (when (plist-get options :chat-target) '("api_chat_target"))
                                   (when (plist-get options :budget) '("api_budget"))
                                   (when (plist-get options :retry) '("api_retry"))
                                   (when (plist-get options :circuit) '("api_circuit"))
@@ -251,6 +253,8 @@ No network request or subprocess is ever started by Elisp."
       (error "Native circuit requires an application and retry profile"))
     (when (plist-get options :model-catalog)
       (puthash "response_profile" "model_catalog" arguments))
+    (when (plist-get options :chat-target)
+      (puthash "target" "chat" arguments))
     ;; copy-tree does not copy mutable strings: copy every authority-bearing
     ;; string before waiting for startup, not only the surrounding cons cells.
     (dolist (pair (plist-get options :headers))

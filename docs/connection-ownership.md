@@ -68,8 +68,21 @@ existing connection epoch. Before credentials the editor rechecks config/base
 and known lease ownership. GET uses that same connection; lost/replaced epochs
 never cause replay or automatic rebinding. Missing target capability fails
 before credentials or HTTP. Rust modifies only URL paths and retains query
-contents. The older API-base selector can still strip a query's terminal slash
-before the port; its native cutover/regression remains tracked in todo 1.
+contents. The older API-base selector stripped a query's terminal slash before
+the port; this was fixed by removing that editor normalizer. Base readers
+now retain the exact captured spelling, including path slashes and opaque query
+values. Config/schema/precedence/env selection is still an open native cutover.
+
+Normal chat sends pass that base and a chat-target intent, not a concatenated
+endpoint, through the existing transport. Native `RequestTarget::Chat` is a
+closed POST-only profile; `WireSpec` parses a bounded private `ChatPath` and
+changes only the base URL's path. Origin and query remain captured. The final
+endpoint is bounded and used for continuation identity and HTTP authority before
+admission/replay/IO. Retries therefore never append the path again or consult
+new metadata. The editor chat URL helper was deleted, with no Lisp fallback.
+Missing `api_chat_target` support fails before owner startup or HTTP. Explicit
+low-level URL requests retain their exact-target semantics; catalog GET retains
+its separate native target/auth projection and connection pinning.
 
 The obsolete synchronous credential entry points and editor auth-source search
 were removed. `kargu-config-api-key-fast` is a memory-only availability check,

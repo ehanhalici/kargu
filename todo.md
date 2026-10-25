@@ -415,10 +415,10 @@ bu başlıklarla opsiyonel ilan edilemez.
 
 ## Rust geçişinde kalan adımlar — kapanış takip listesi
 
-Güncelleme: 2026-10-26, uygulama tabanı `64ad772`. Son tamamlanan dilim katalog
-URL/public-auth kararının gerçek Rust portuna bağlanması ve eski Elisp karar
-fonksiyonlarının silinmesidir. Kanıt: 1245/1245 full source ERT, 266 native +
-16 compile-fail; bounded connection/transport TLC temiz. Ayrıntılar .codex/12/46.
+Güncelleme: 2026-10-26, uygulama tabanı `5071428`. Son tamamlanan dilim ham
+API-base/query'nin korunması, sohbet hedefinin Rust'ta türetilmesi ve iki eski
+Elisp URL fonksiyonunun silinmesidir. Kanıt: 1249/1249 full source ERT, 269 native +
+16 compile-fail; bounded connection/transport TLC temiz. Ayrıntılar .codex/12/47.
 
 Bu liste .codex/04'teki onaylı göçün kalan **tüketici taşıma/kaldırma sırasını**
 özetler; G03–G13'ün yerine geçen ikinci kapsam veya yeni ürün kararı değildir.
@@ -455,11 +455,17 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [x] Geçişte bulunan ek düzeltme: `/models` ve native path ekleri query'ye
     değil URL path'ine uygulansın; public karşılaştırması query sonundaki `/`yi
     yutmasın. Native ve gerçek loopback GET fixture'ları query'yi korur.
-  - [ ] API-base seçiminin kalan Elisp `kargu--strip-trailing-slashes` adımı
-    query değeri sonundaki `/`yi native porttan önce silebiliyor. Native config/
-    base consumer cutover'ında yalnız path sonunu normalize et; query sonundaki
-    slash ve encoded değeri gerçek UI → GET regression'ıyla koru. Native target
-    verilen query'yi koruyor; upstream base selector açığı bundan dolayı kapanmaz.
+  - [x] API-base okuyucusu ham adresi korur; query değeri sonundaki `/`yi silen
+    `kargu--strip-trailing-slashes` kaldırıldı. Gerçek geçici TOML refresh →
+    published config → base reader → native target → loopback GET regresyonu
+    path slash/query slash/encoded değeri korur; base reader mock'lanmaz.
+  - [x] Bu cutover'ın açığa çıkardığı sohbet tüketicisi de taşındı: Elisp
+    `kargu-api-chat-url` concat motoru silindi. Native kapalı POST-only chat target
+    profili, bounded/typed ChatPath ve final endpoint'i authority/continuation
+    capture'ından önce üretir. Gerçek OpenAPI/Anthropic POST ve config/wire
+    değişimi sonrası retry aynı query'yi korur. Missing capability HTTP/owner
+    startup öncesi reddeder; doğrudan exact URL semantiği korunur. .codex/47.
+    Bu iki URL alt işi genel config/schema/precedence/env/keyless üst işini kapatmaz.
 
 - [ ] **2. Kalan native araçlar ve tek izin kapısı** — `read_file`, diğer Git
   işlemleri, skill/toolchain ve webfetch tüketicilerini ortak owner/process/path/
