@@ -176,3 +176,25 @@ store/overrides and preparation barrier. The existing synchronous custom setter
 contract is unchanged in this slice. The user was asked whether an explicit
 async completion plus last-committed UI snapshot contract is acceptable for that
 next cutover; no silent setter semantic change has been implemented.
+
+## Executable feature-interaction regression gate
+
+Added a native protocol test through the actual duplicate-key decoder, not
+serde_json::from_value alone. It proves ordinary temperature numbers remain
+numbers and deserialize into the bounded request-tuning type, u64 quantities
+retain their integer kind, a literal private-number-key object remains an
+object, and nested duplicate keys still fail. This covers the interaction
+missed by the original pure HTTP/domain fixtures.
+
+Negative control: explicitly enabling serde_json/arbitrary_precision makes
+this exact new test fail (expected exit 101 at the number-kind assertion).
+The production manifest remains scoped raw_value only; no decoder exception
+or third-party private-key handling was introduced to force a green result.
+Default locked gates are rerun afterward and the normal binary is rebuilt.
+This is a test-only guard, not another production migration or a new feature.
+Default final gate passed **231 native + 13 compile-fail**, fmt/strict Clippy
+and locked build. With the restored normal binary **12/12 real default chat/
+catalog ERT** passed. Production sources are unchanged since 8331fd5; the full
+1191/1191 source ERT above remains its gate, not a newly claimed full rerun for
+this test-only addition. The optional negative-control feature is not present
+in the shipped manifest or the final binary. No generated elc files remain.

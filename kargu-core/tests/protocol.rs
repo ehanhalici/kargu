@@ -9,6 +9,26 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 #[test]
+fn scoped_raw_metadata_support_does_not_change_ipc_numeric_or_object_kinds()
+-> Result<(), Box<dyn std::error::Error>> {
+    let envelope = r#"{"jsonrpc":"2.0","id":"fixture","method":"ping","params":{"tuning":{"temperature":0.2},"count":18446744073709551615,"opaque":{"$serde_json::private::Number":"0.2"}}}"#;
+    let Message::Call { params, .. } = decode(envelope)? else {
+        return Err("expected a call".into());
+    };
+    assert!(
+        params
+            .pointer("/tuning/temperature")
+            .is_some_and(Value::is_number)
+    );
+    assert_eq!(params.get("count").and_then(Value::as_u64), Some(u64::MAX));
+    assert!(params.get("opaque").is_some_and(Value::is_object));
+    let _: kargu_core::api::policy::RequestTuning =
+        serde_json::from_value(params.get("tuning").ok_or("missing tuning")?.clone())?;
+    assert!(decode(r#"{"jsonrpc":"2.0","method":"ping","params":{"tuning":{"temperature":0.2,"temperature":0.3}}}"#).is_err());
+    Ok(())
+}
+
+#[test]
 fn strict_envelopes_and_null_results() -> Result<(), Box<dyn std::error::Error>> {
     match decode(r#"{"jsonrpc":"2.0","id":0,"result":null}"#)? {
         Message::Response { id, outcome } => {

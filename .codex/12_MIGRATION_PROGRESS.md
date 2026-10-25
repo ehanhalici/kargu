@@ -1,5 +1,19 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Metadata JSON feature etkileşimi için native regresyon kapısı
+
+Gerçek strict IPC decoder üzerinden yeni test ordinary float temperature,
+u64 quantity, literal private-number-key nesnesi ve nested duplicate-key
+reddinin ayrı kaldığını doğrular. Global arbitrary_precision açık negatif
+kontrolde test beklendiği gibi başarısız olur; decoder esnetilmez. Ardından
+normal feature setiyle **231 native + 13 compile-fail**, fmt/strict Clippy ve
+locked build; restore edilen normal binary ile **12/12 gerçek default chat/
+catalog ERT** geçti. Son üretim kaynağı 8331fd5; onun **1191/1191 full source
+ERT** kanıtı geçerlidir, bu test-only dilim için yeni full ERT iddiası yoktur.
+Scoped raw_value manifest'te kalır; Cargo.lock/version değişmez. 01 ve kullanıcı
+shell.nix/07 korunur. Tam metadata store geçişi için sorulan async setter/UI
+last-committed snapshot kararı bekleniyor; mevcut senkron davranış değişmedi.
+
 ## 2026-10-25 — /models discovery envelope native consumer cutover
 
 Default katalog GET'i api_model_catalog capability ve GET-only response profile
