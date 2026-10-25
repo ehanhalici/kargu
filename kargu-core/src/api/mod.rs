@@ -1,6 +1,8 @@
 //! Owned model HTTP boundary. No shell, redirects, logs or ambient auth lookup.
 
 mod auth;
+mod authority;
+pub(crate) use authority::ApiAuthority;
 pub mod cache;
 mod domain;
 mod http;

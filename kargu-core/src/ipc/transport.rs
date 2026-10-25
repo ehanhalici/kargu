@@ -339,6 +339,19 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 }
                 if matches!(
                     method.as_str(),
+                    methods::API_CIRCUIT_SNAPSHOT | methods::API_CIRCUIT_RESET
+                ) {
+                    if let Some(id) = id.as_ref() {
+                        let reply = match api.circuit_rpc(host, &method, params) {
+                            Ok(value) => protocol::success(id, value),
+                            Err(fault) => fault.response(Some(id)),
+                        };
+                        queue_reply(reply, host.frame_limit(), tx, permits)?;
+                    }
+                    continue;
+                }
+                if matches!(
+                    method.as_str(),
                     methods::EXECUTE
                         | methods::LIST_FILES
                         | methods::GREP

@@ -1,5 +1,19 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Native circuit registry / logical retry lease composition
+
+api_circuit capability, owned snapshot/reset ve bounded native registry eklendi.
+Probe tüm mantıksal retry boyunca tutulur; her fiziksel attempt ayrıca debit
+edilir. Model değişimi circuit'i sıfırlamaz; auth/endpoint/app değişimleri
+izole kalır. Reset geç sonuçları etkisizleştirir; capacity unsafe eviction yapmaz.
+Malformed model HTTP 200 probe'u healthy yapmaz. Admission/worker modüler ayrıldı.
+
+**206 Rust testi + 5 compile-fail**, locked build/fmt/strict Clippy ve **1178/1178
+full source ERT**, 0 unexpected, **164.26 s** geçti. Ana eski bounded TLC scan
+bu commit sırasında sürüyor; henüz verdict yok, native registry refinement
+kanıtı sayılmayacak. Detay, kalan GUI/loop cutover ve sınırlar 38'dedir.
+Kullanıcı shell.nix/07 değişiklikleri korunmuştur; gerçek dış hesap çağrısı yok.
+
 ## 2026-10-25 — GUI native retry observer köprüsü
 
 Bridge exact forward/scope/epoch/owner'a observer teslim eder, callback sonrası

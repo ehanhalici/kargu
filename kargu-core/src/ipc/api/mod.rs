@@ -1,6 +1,8 @@
 //! A single mailbox writer owns API admission, publication and drained release.
 
+mod admission;
 mod budget;
+mod circuit;
 mod retry;
 mod worker;
 use super::pending::PendingRequests;
@@ -15,7 +17,6 @@ use crate::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
@@ -38,6 +39,7 @@ struct Pending {
     budget_id: Option<crate::domain::BudgetId>,
     retry: Option<retry::Operation>,
     snapshot: Option<Value>,
+    circuit: Option<circuit::Grant>,
 }
 struct Event {
     id: RpcId,
@@ -73,6 +75,7 @@ pub(super) struct ApiRequests {
     _guard: DropGuard,
     budgets: budget::Budgets,
     sequence: crate::domain::RequestSequence,
+    circuits: circuit::Circuits,
 }
 impl Default for ApiRequests {
     fn default() -> Self {
@@ -88,12 +91,14 @@ impl Default for ApiRequests {
             root,
             budgets: budget::Budgets::default(),
             sequence: crate::domain::RequestSequence::ZERO,
+            circuits: circuit::Circuits::default(),
         }
     }
 }
 impl ApiRequests {
     pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
         self.budgets.owns_application(id)
+            || self.circuits.owns_application(id)
             || self
                 .pending
                 .values()
@@ -123,6 +128,7 @@ impl ApiRequests {
         })
     }
     pub fn collect(&mut self, host: &Host) -> Vec<Value> {
+        self.circuits.collect(host);
         let pending = &self.pending;
         let replies = self.budgets.collect(host, |id| {
             pending
@@ -132,82 +138,60 @@ impl ApiRequests {
         self.sweep(host);
         replies
     }
+    pub fn circuit_rpc(
+        &mut self,
+        host: &Host,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, Fault> {
+        self.circuits.rpc(host, method, params)
+    }
     pub fn start(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
         let request: Request = serde_json::from_value(params).map_err(|_| Fault::params())?;
-        if !host.owns_read_scope(&request.scope) {
-            return Err(fault("stale_owner", "API owner is no longer live"));
-        }
-        if self.root.is_cancelled() || self.pending.len() >= limits::API_REQUESTS {
-            return Err(fault("resource_limit", "API admission limit reached"));
-        }
-        if request.retry.is_some() && (request.budget.is_none() || !request.arguments.generative())
-        {
-            return Err(Fault::params());
-        }
+        let admission::Admitted {
+            scope,
+            arguments,
+            charge,
+            retry,
+            circuit,
+            page_bytes,
+        } = self.admit_request(host, request)?;
+        let deadline = charge.as_ref().map(|charge| charge.deadline);
+        let budget_id = charge.as_ref().map(|charge| charge.id.clone());
         let cancel = self.root.child_token();
-        let page_bytes = host
-            .frame_limit()
-            .as_usize()
-            .saturating_sub(512)
-            .saturating_div(6)
-            .min(32 * 1024);
-        let arguments = Arc::new(request.arguments);
-        let (charge, retry) = if let Some(configuration) = request.retry {
-            let reference = request.budget.as_ref().ok_or_else(Fault::params)?;
-            let charge = self
-                .budgets
-                .admit_metered(host, &request.scope, reference)?;
-            let operation = retry::Operation {
-                configuration,
-                arguments: arguments.clone(),
-                reference: budget::BudgetRef {
-                    budget_id: reference.budget_id.clone(),
-                    kind: crate::application::budget::DebitKind::RetryAttempt,
-                },
-                deadline: charge.deadline,
-                attempt: crate::domain::RetryAttempt::ZERO,
-                stage: Some(retry::Stage::Attempt),
-                page_bytes,
-            };
-            (Some(charge), Some(operation))
-        } else {
-            (
-                self.budgets.admit(
-                    host,
-                    &request.scope,
-                    request.budget.as_ref(),
-                    arguments.generative(),
-                )?,
-                None,
-            )
-        };
-        let budget_deadline = charge.as_ref().map(|charge| charge.deadline);
         let observe_entropy = retry.is_some();
+        let expectation = if circuit.is_some() {
+            worker::ResponseExpectation::Model
+        } else {
+            worker::ResponseExpectation::Raw
+        };
         self.pending.insert(
             id.clone(),
             Pending {
-                scope: request.scope,
+                scope,
                 cancel: cancel.clone(),
                 published: false,
                 terminal: None,
                 charge,
-                budget_id: request
-                    .budget
-                    .as_ref()
-                    .map(|reference| reference.budget_id.clone()),
+                budget_id,
                 retry,
                 snapshot: None,
+                circuit,
             },
         );
-        self.workers.spawn(worker::attempt(
-            id,
-            arguments,
-            self.sender.clone(),
-            cancel,
-            budget_deadline,
-            page_bytes,
-            observe_entropy,
-        ));
+        self.workers.spawn(
+            worker::Attempt {
+                id,
+                arguments,
+                sender: self.sender.clone(),
+                cancel,
+                deadline,
+                page_bytes,
+                observe_entropy,
+                expectation,
+            }
+            .run(),
+        );
         Ok(())
     }
     pub fn cancel(&mut self, id: &RpcId) {
@@ -323,6 +307,9 @@ impl ApiRequests {
             if let Some(charge) = pending.charge.take() {
                 self.budgets.finish(charge, ObservedUsage::default())?;
             }
+            if let Some(grant) = pending.circuit.take() {
+                self.circuits.finish(grant, None)?;
+            }
         }
         self.pending.clear();
         self.ready.clear();
@@ -418,6 +405,7 @@ mod tests {
                     budget_id: None,
                     retry: None,
                     snapshot: None,
+                    circuit: None,
                 },
             );
         }

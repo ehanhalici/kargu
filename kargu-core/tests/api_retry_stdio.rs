@@ -1,5 +1,7 @@
 //! Real native logical retries: each socket is charged and observers precede IO.
 
+#[path = "api_retry/circuit.rs"]
+mod circuit;
 mod support;
 use serde_json::{Value, json};
 use std::{

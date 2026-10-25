@@ -146,6 +146,10 @@ impl Host {
                 })
     }
 
+    pub(crate) fn owns_application(&self, id: &ApplicationId) -> bool {
+        self.phase == Phase::Ready && self.applications.get(id).is_some_and(Application::is_live)
+    }
+
     pub(crate) fn actor_mut(
         &mut self,
         scope: &ReadScope,

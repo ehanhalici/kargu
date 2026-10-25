@@ -1,5 +1,9 @@
 # Native retry/circuit foundation
 
+Current live circuit registry/composition and scope limits are recorded in
+`38_NATIVE_CIRCUITS.md`. The dated sections below retain earlier slice evidence;
+their historical "not yet advertised" statements are not the latest status.
+
 ## 2026-10-25 — Domain implementation, not yet consumer cutover
 
 `api/resilience/{domain,retry,breaker}.rs` provides captured typed policy,

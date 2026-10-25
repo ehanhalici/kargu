@@ -30,6 +30,8 @@ pub(super) enum Observer {
 pub(super) struct Configuration {
     pub policy: RetryPolicy,
     pub observer: Observer,
+    #[serde(default)]
+    pub circuit: Option<crate::api::resilience::CircuitPolicy>,
 }
 pub(super) enum Stage {
     Attempt,
@@ -75,7 +77,7 @@ impl ApiRequests {
             reverse.cancel(correlation, &host.request_scope()?);
         }
         if let Some(error) = self.retry_revoked(host, &mut pending) {
-            return Ok(finish(id, pending, Err(error)));
+            return self.finish(host, id, pending, Err(error));
         }
         match (stage, completion) {
             (None | Some(Stage::Attempt), Completion::Attempt(outcome)) => {
@@ -86,8 +88,8 @@ impl ApiRequests {
             }
             (Some(Stage::Observing { .. }), Completion::Observed(result)) => match result {
                 Ok(true) => self.retry_grant(host, id, pending),
-                Ok(false) => Ok(finish(id, pending, Err(ApiError::Cancelled))),
-                Err(error) => Ok(finish(id, pending, Err(error))),
+                Ok(false) => self.finish(host, id, pending, Err(ApiError::Cancelled)),
+                Err(error) => self.finish(host, id, pending, Err(error)),
             },
             _ => Err(CoreError::CleanupFailed),
         }
@@ -120,13 +122,13 @@ impl ApiRequests {
         outcome: super::Outcome,
     ) -> Result<Option<Value>, CoreError> {
         let Err(error) = outcome.result else {
-            return Ok(finish(id, pending, outcome.result));
+            return self.finish(host, id, pending, outcome.result);
         };
         let Some(operation) = &pending.retry else {
-            return Ok(finish(id, pending, Err(error)));
+            return self.finish(host, id, pending, Err(error));
         };
         if !operation.configuration.policy.retryable(&error) {
-            return Ok(finish(id, pending, Err(error)));
+            return self.finish(host, id, pending, Err(error));
         }
         let decision = operation.configuration.policy.after_failure_observed(
             operation.attempt,
@@ -141,8 +143,8 @@ impl ApiRequests {
         );
         match decision {
             Ok(RetryDecision::Wait(delay)) => self.retry_wait(host, id, pending, delay),
-            Ok(RetryDecision::Stop(_)) => Ok(finish(id, pending, Err(error))),
-            Err(_) => Ok(finish(id, pending, Err(ApiError::RetryUnavailable))),
+            Ok(RetryDecision::Stop(_)) => self.finish(host, id, pending, Err(error)),
+            Err(_) => self.finish(host, id, pending, Err(ApiError::RetryUnavailable)),
         }
     }
 
@@ -154,7 +156,7 @@ impl ApiRequests {
         delay: crate::api::resilience::RetryDelay,
     ) -> Result<Option<Value>, CoreError> {
         if let Err(error) = self.retry_preflight(host, &mut pending) {
-            return Ok(finish(id, pending, Err(error)));
+            return self.finish(host, id, pending, Err(error));
         }
         let operation = pending.retry.as_mut().ok_or(CoreError::CleanupFailed)?;
         operation.stage = Some(Stage::Backoff);
@@ -183,10 +185,10 @@ impl ApiRequests {
         result: Result<(), ApiError>,
     ) -> Result<Option<Value>, CoreError> {
         if let Err(error) = result {
-            return Ok(finish(id, pending, Err(error)));
+            return self.finish(host, id, pending, Err(error));
         }
         if let Err(error) = self.retry_preflight(host, &mut pending) {
-            return Ok(finish(id, pending, Err(error)));
+            return self.finish(host, id, pending, Err(error));
         }
         match pending
             .retry
@@ -216,7 +218,7 @@ impl ApiRequests {
         mut pending: Pending,
     ) -> Result<Option<Value>, CoreError> {
         if let Err(error) = self.retry_preflight(host, &mut pending) {
-            return Ok(finish(id, pending, Err(error)));
+            return self.finish(host, id, pending, Err(error));
         }
         let operation = pending.retry.as_mut().ok_or(CoreError::CleanupFailed)?;
         let attempt = operation.attempt.next()?;
@@ -225,20 +227,28 @@ impl ApiRequests {
             .admit_metered(host, &pending.scope, &operation.reference)
         {
             Ok(charge) => charge,
-            Err(error) => return Ok(finish(id, pending, Err(admission_failure(error)))),
+            Err(error) => return self.finish(host, id, pending, Err(admission_failure(error))),
         };
         operation.attempt = attempt;
         operation.stage = Some(Stage::Attempt);
         pending.charge = Some(charge);
-        self.workers.spawn(worker::attempt(
-            id.clone(),
-            operation.arguments.clone(),
-            self.sender.clone(),
-            pending.cancel.clone(),
-            Some(operation.deadline),
-            operation.page_bytes,
-            true,
-        ));
+        self.workers.spawn(
+            worker::Attempt {
+                id: id.clone(),
+                arguments: operation.arguments.clone(),
+                sender: self.sender.clone(),
+                cancel: pending.cancel.clone(),
+                deadline: Some(operation.deadline),
+                page_bytes: operation.page_bytes,
+                observe_entropy: true,
+                expectation: if operation.configuration.circuit.is_some() {
+                    worker::ResponseExpectation::Model
+                } else {
+                    worker::ResponseExpectation::Raw
+                },
+            }
+            .run(),
+        );
         self.pending.insert(id, pending);
         Ok(None)
     }
@@ -263,7 +273,7 @@ impl ApiRequests {
                 "connection_epoch":host.request_scope()?.as_str(),
                 "attempt":operation.attempt.next()?,"budget":pending.snapshot}});
         if message.to_string().len().saturating_add(1) > host.frame_limit().as_usize() {
-            return Ok(finish(id, pending, Err(ApiError::RetryUnavailable)));
+            return self.finish(host, id, pending, Err(ApiError::RetryUnavailable));
         }
         let deadline = operation.deadline.cap(
             Instant::now()
@@ -273,7 +283,7 @@ impl ApiRequests {
         let receiver = match reverse.register(correlation.clone(), host.request_scope()?, deadline)
         {
             Ok(receiver) => receiver,
-            Err(_) => return Ok(finish(id, pending, Err(ApiError::RetryUnavailable))),
+            Err(_) => return self.finish(host, id, pending, Err(ApiError::RetryUnavailable)),
         };
         operation.stage = Some(Stage::Observing {
             reverse: correlation,
@@ -317,13 +327,30 @@ fn admission_failure(error: budget::AdmissionFailure) -> ApiError {
         _ => ApiError::RetryUnavailable,
     }
 }
-fn finish(id: RpcId, pending: Pending, result: Result<Value, ApiError>) -> Option<Value> {
-    let mut payload = match result {
-        Ok(value) => value,
-        Err(error) => json!({"failure":error.snapshot(),"partial":pending.published}),
-    };
-    if let Some(snapshot) = pending.snapshot {
-        payload["budget"] = snapshot;
+impl ApiRequests {
+    fn finish(
+        &mut self,
+        host: &Host,
+        id: RpcId,
+        mut pending: Pending,
+        result: Result<Value, ApiError>,
+    ) -> Result<Option<Value>, CoreError> {
+        let circuit = pending
+            .circuit
+            .take()
+            .map(|grant| self.circuits.finish(grant, Some(&result)))
+            .transpose()?;
+        let mut payload = match result {
+            Ok(value) => value,
+            Err(error) => json!({"failure":error.snapshot(),"partial":pending.published}),
+        };
+        if let Some(snapshot) = pending.snapshot {
+            payload["budget"] = snapshot;
+        }
+        if let Some(circuit) = circuit {
+            payload["circuit"] = circuit;
+        }
+        self.circuits.collect(host);
+        Ok(Some(protocol::success(&id, payload)))
     }
-    Some(protocol::success(&id, payload))
 }

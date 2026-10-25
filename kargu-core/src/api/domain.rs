@@ -111,6 +111,8 @@ struct RequestDto {
 #[derive(Deserialize)]
 #[serde(try_from = "RequestDto")]
 pub struct HttpRequest {
+    pub(crate) authority: super::ApiAuthority,
+    pub(crate) provider: Option<crate::providers::ApiProviderId>,
     pub(super) url: ApiEndpoint,
     pub(super) method: Method,
     pub(super) headers: HeaderMap,
@@ -185,7 +187,10 @@ impl TryFrom<RequestDto> for HttpRequest {
             }
             None
         };
+        let authority = super::ApiAuthority::capture(&dto.url, dto.provider.as_ref(), &headers)?;
         Ok(Self {
+            authority,
+            provider: dto.provider,
             url: dto.url,
             method: match dto.method {
                 HttpMethod::Get => Method::GET,

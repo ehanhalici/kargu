@@ -67,6 +67,8 @@ pub mod limits {
     pub const API_SERVER_WAIT_MS: u64 = 86_400_000;
     /// Largest accepted circuit failure threshold.
     pub const API_CIRCUIT_FAILURES: u64 = 1_000;
+    /// Captured provider circuits per connection; unhealthy entries are not evicted.
+    pub const API_CIRCUITS: usize = 256;
     /// Bounded entropy rejection attempts; failure never becomes zero jitter.
     pub const API_RANDOM_DRAWS: usize = 32;
     /// Retained charges in one API accounting lifetime.
@@ -125,13 +127,14 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 18] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 19] = [
         "api_request",
         "api_wire",
         "api_request_policy",
         "api_auth",
         "api_budget",
         "api_retry",
+        "api_circuit",
         "application_lifecycle",
         "application_close",
         "session_lifecycle",
@@ -189,6 +192,10 @@ pub mod protocol {
         pub const API_BUDGET_SNAPSHOT: &str = "api/budget/snapshot";
         /// Revoke admission and cancel/drain all charged attempts before replying.
         pub const API_BUDGET_CLOSE: &str = "api/budget/close";
+        /// Read only the caller application's captured circuit projections.
+        pub const API_CIRCUIT_SNAPSHOT: &str = "api/circuit/snapshot";
+        /// Explicitly reset owned circuit revisions without replaying requests.
+        pub const API_CIRCUIT_RESET: &str = "api/circuit/reset";
         /// Approved persistent process startup; returns identity, not completion.
         pub const JOB_START: &str = "job/start";
         /// Confirm that the client installed its owner-close cleanup after startup.

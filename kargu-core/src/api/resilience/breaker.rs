@@ -25,7 +25,8 @@ pub struct CircuitLease {
     kind: Lease,
 }
 /// Display phase; a half-open circuit may have an available or occupied probe.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CircuitPhase {
     /// Normal admission.
     Closed,
@@ -62,7 +63,38 @@ pub struct Circuit {
     failures: UpstreamFailures,
     revision: CircuitRevision,
 }
+/// Detached UI projection. Neither a probe nor an execution capability.
+#[derive(serde::Serialize)]
+pub struct CircuitSnapshot {
+    circuit_id: CircuitId,
+    state: CircuitPhase,
+    failures: UpstreamFailures,
+    cooldown_remaining_ms: u64,
+    probe_inflight: bool,
+}
 impl Circuit {
+    /// Opaque registry identity, never an upstream/auth fingerprint.
+    pub fn id(&self) -> &CircuitId {
+        &self.id
+    }
+    /// Display elapsed cooldown without acquiring/mutating the sole probe.
+    pub fn snapshot(&self, now: Instant) -> Result<CircuitSnapshot, CoreError> {
+        let (state, remaining) = match self.state {
+            State::Open { retry_at } if retry_at > now => {
+                (CircuitPhase::Open, retry_at.duration_since(now))
+            }
+            State::Open { .. } => (CircuitPhase::HalfOpen, std::time::Duration::ZERO),
+            _ => (self.phase(), std::time::Duration::ZERO),
+        };
+        Ok(CircuitSnapshot {
+            circuit_id: self.id.clone(),
+            state,
+            failures: self.failures,
+            cooldown_remaining_ms: u64::try_from(remaining.as_millis())
+                .map_err(|_| CoreError::ArithmeticOverflow)?,
+            probe_inflight: matches!(self.state, State::Probing { .. }),
+        })
+    }
     /// Capture one immutable policy; no global mutable default is consulted later.
     pub fn new(policy: CircuitPolicy) -> Self {
         Self {
