@@ -104,3 +104,18 @@ Clippy; **1171/1171 full source ERT**, 0 unexpected, **124.03 s**, including
 bytecode removed. A full Rust run first exposed the separate record-output
 scheduling assumption; its corrected observed-cursor contract is committed and
 explained in 26, and the complete Rust suite then passed.
+
+## 2026-10-25 — Shared immutable attempt authority
+
+The HTTP port can execute a borrowed captured request. The IPC worker retains
+one `Arc<HttpRequest>` rather than consuming the authority on its first use.
+No `Clone` implementation was added to the secret-bearing request or secret
+type. A real two-connection test proves that reusing the same capture preserves
+the exact request bytes, endpoint and authorization; no live preference lookup
+or reparsing is involved. Each execution still performs exactly one physical
+attempt: this prerequisite does not enable automatic native retries.
+
+Verification: **184 Rust tests + 5 compile-fail**, locked build/fmt/strict
+Clippy; **26/26 focused source stream/budget ERT**. The previous full source ERT
+is **1171/1171**; it was not rerun for this borrowing-only slice. Existing run
+deadline, cancellation and application-close tests pass unchanged.

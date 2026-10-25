@@ -16,6 +16,21 @@ where
     F: Fn(Value) -> Fut,
     Fut: std::future::Future<Output = Result<(), ApiError>>,
 {
+    execute_captured(&request, events, cancel).await
+}
+
+/// Execute one attempt against an immutable, already parsed request snapshot.
+/// A logical owner may retain this snapshot without cloning secret-bearing
+/// request policy or retargeting it. Each call still needs its own admission.
+pub async fn execute_captured<F, Fut>(
+    request: &HttpRequest,
+    events: F,
+    cancel: CancellationToken,
+) -> Result<Value, ApiError>
+where
+    F: Fn(Value) -> Fut,
+    Fut: std::future::Future<Output = Result<(), ApiError>>,
+{
     let deadline = request.deadline();
     let run = exchange(request, events, &cancel);
     tokio::pin!(run);
@@ -30,7 +45,7 @@ where
 }
 
 async fn exchange<F, Fut>(
-    request: HttpRequest,
+    request: &HttpRequest,
     events: F,
     _cancel: &CancellationToken,
 ) -> Result<Value, ApiError>
@@ -48,8 +63,8 @@ where
     let idle = request.idle_timeout();
     let mut call = client
         .request(request.method.clone(), request.url.as_url().clone())
-        .headers(request.headers);
-    if let Some(body) = request.body {
+        .headers(request.headers.clone());
+    if let Some(body) = request.body.as_ref() {
         call = call.body(body.as_bytes().to_vec());
     }
     let mut response = timeout(first_byte, call.send())

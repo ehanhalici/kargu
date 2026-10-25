@@ -12,6 +12,7 @@ use crate::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
@@ -143,11 +144,12 @@ impl ApiRequests {
             .saturating_sub(512)
             .saturating_div(6)
             .min(32 * 1024);
+        let arguments = Arc::new(request.arguments);
         self.workers.spawn(async move {
             let event_id = id.clone();
             let event_sender = sender.clone();
-            let exchange = crate::api::execute(
-                request.arguments,
+            let exchange = crate::api::execute_captured(
+                arguments.as_ref(),
                 move |value| {
                     let sender = event_sender.clone();
                     let id = event_id.clone();

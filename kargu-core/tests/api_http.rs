@@ -1,6 +1,6 @@
 //! Real local HTTP sockets: no credentials, accounts or remote model calls.
 
-use kargu_core::api::{ApiError, HttpRequest, SecretString, execute};
+use kargu_core::api::{ApiError, HttpRequest, SecretString, execute, execute_captured};
 use serde_json::{Value, json};
 use std::{
     io::{Read, Write},
@@ -79,6 +79,56 @@ async fn real_http_body_and_model_discovery_get_work_without_elisp_io() -> TestR
         assert_eq!(result["data"][0]["id"], "local");
         thread.join().map_err(|_| "fixture failed")?;
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn shared_captured_request_reuses_exact_authority_without_cloning_the_snapshot() -> TestResult
+{
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let url = format!("http://{}/frozen", listener.local_addr()?);
+    let thread = std::thread::spawn(move || -> std::io::Result<Vec<Vec<u8>>> {
+        let mut observed = Vec::new();
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept()?;
+            socket.set_read_timeout(Some(Duration::from_secs(2)))?;
+            let mut request = Vec::new();
+            while request.len() < 16384 && !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                socket.read_exact(&mut byte)?;
+                request.extend_from_slice(&byte);
+            }
+            observed.push(request);
+            socket.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}",
+            )?;
+        }
+        Ok(observed)
+    });
+    let snapshot: HttpRequest = serde_json::from_value(
+        json!({"url":url,"method":"get","headers":{
+        "Authorization":"Bearer synthetic-frozen-key"},"body":null,"stream":false,"timeouts":timers()}),
+    )?;
+    let snapshot = Arc::new(snapshot);
+    for _ in 0..2 {
+        let result = execute_captured(
+            snapshot.as_ref(),
+            |_| async { Ok(()) },
+            CancellationToken::new(),
+        )
+        .await?;
+        assert_eq!(result["ok"], true);
+        assert_eq!(Arc::strong_count(&snapshot), 1);
+    }
+    let observed = thread.join().map_err(|_| "fixture failed")??;
+    let first = observed.first().ok_or("missing first request")?;
+    assert_eq!(Some(first), observed.get(1));
+    let text = String::from_utf8(first.clone())?;
+    assert!(text.starts_with("GET /frozen HTTP/1.1\r\n"));
+    assert!(
+        text.to_ascii_lowercase()
+            .contains("authorization: bearer synthetic-frozen-key\r\n")
+    );
     Ok(())
 }
 

@@ -1,5 +1,17 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Değişmez HTTP attempt snapshot paylaşımı
+
+HTTP port captured request'i ödünç alabilir; IPC worker aynı immutable Arc'ı
+tutar. Secret-bearing request/secret için Clone eklenmedi. Gerçek iki socket
+testi aynı endpoint/auth/request byte'larını kanıtlar. Her execute hâlâ tek
+fiziksel attempt'tir; native retry consumer henüz açılmadı. Detay 37'dedir.
+
+**184 Rust testi + 5 compile-fail**, locked build/fmt/strict Clippy ve **26/26
+focused source stream/budget ERT** geçer. Son full ERT **1171/1171** önceki
+dilimindir; bu borrowing-only kesimde yeniden çalıştırılmadı. Kullanıcı
+shell.nix/07 değişiklikleri kapsam dışı korundu.
+
 ## 2026-10-25 — Retry-After typed IO capture ve erken replay koruması
 
 Native HTTP header'ı tek kez typed seconds/date/invalid/exceeded olarak ayrıştırır;

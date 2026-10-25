@@ -9,7 +9,7 @@ pub mod resilience;
 pub mod stream;
 pub mod wire;
 pub use domain::{HttpRequest, ModelId, SecretString};
-pub use http::execute;
+pub use http::{execute, execute_captured};
 
 use serde_json::{Value, json};
 
