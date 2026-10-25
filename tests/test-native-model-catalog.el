@@ -122,5 +122,20 @@
                                :else (lambda (error-data) (setq failure error-data)))
       (should (eq (kargu-result-err-code failure) :service-unavailable)))))
 
+(ert-deftest kargu-native-model-catalog-capacities-survive-real-http-and-editor-decode-test ()
+  "Capacity lexemes reach the public consumer without float rounding."
+  (kargu-bridge-test--with-core
+    (kargu-model-catalog-test--with-server
+        "{\"data\":[{\"id\":\"exact\",\"context_length\":9007199254740992.5,\"outputTokenLimit\":18446744073709551615,\"top_provider\":[{\"max_completion_tokens\":1e999}],\"pricing\":[{\"prompt\":1e-38}]}]}"
+      (let (done result)
+        (kargu-api-list-models (lambda (models) (setq result models done t)) provider)
+        (kargu-bridge-test--wait (lambda () done))
+        (should (= posts 1))
+        (let ((record (car result)))
+          (should (equal (kargu-aget record "context_length") "9007199254740992.5"))
+          (should (= (kargu-aget record "outputTokenLimit") 18446744073709551615))
+          (should (equal (kargu-aget (aref (kargu-aget record "top_provider") 0) "max_completion_tokens") "1e999"))
+          (should (equal (kargu-aget (aref (kargu-aget record "pricing") 0) "prompt") "1e-38")))))))
+
 (provide 'tests/test-native-model-catalog)
 ;;; test-native-model-catalog.el ends here

@@ -2,7 +2,10 @@
 
 use kargu_core::{
     constants::limits,
-    models::catalog::{CatalogError, ModelCatalog},
+    models::{
+        catalog::{CatalogError, ModelCatalog},
+        metadata::{EffortSpecs, ModelMetadata},
+    },
 };
 use serde_json::{Value, json};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -117,11 +120,92 @@ fn prices_are_not_rounded_by_an_intermediate_json_number() -> TestResult {
 }
 
 #[test]
+fn canonical_catalog_round_trip_preserves_every_capacity_alias_before_normalization() -> TestResult
+{
+    for (keys, field) in [
+        (
+            vec![
+                "context_length",
+                "context_window",
+                "inputTokenLimit",
+                "context-window",
+            ],
+            "context_window",
+        ),
+        (
+            vec![
+                "max_output",
+                "outputTokenLimit",
+                "max_completion_tokens",
+                "max-output",
+            ],
+            "max_output",
+        ),
+    ] {
+        for key in keys {
+            for (literal, expected, state) in [
+                ("9007199254740992.5", json!("9007199254740992.5"), "invalid"),
+                (
+                    "18446744073709551616",
+                    json!("18446744073709551616"),
+                    "invalid",
+                ),
+                ("1e999", json!("1e999"), "invalid"),
+                ("-1", json!("-1"), "invalid"),
+                ("2e3", json!("2e3"), "known"),
+                ("1024.0", json!("1024.0"), "known"),
+                ("18446744073709551615", json!(u64::MAX), "known"),
+            ] {
+                let source = format!(r#"[{{"id":"m","{key}":{literal}}}]"#);
+                let snapshot = ModelCatalog::try_from(source.as_str())?.into_snapshot();
+                let record = snapshot.pointer("/models/0").ok_or("missing record")?;
+                assert_eq!(record.get(key), Some(&expected), "{key}: {literal}");
+                let normalized =
+                    ModelMetadata::parse(&record.to_string(), &EffortSpecs::default())?;
+                let fields = serde_json::to_value(normalized.fields())?;
+                assert_eq!(
+                    fields.pointer(&format!("/{field}/state")),
+                    Some(&json!(state))
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn nested_wrappers_share_the_exact_metadata_boundary() -> TestResult {
+    for wrapper in [false, true] {
+        let top = r#"{"max_completion_tokens":9007199254740992.5}"#;
+        let price = r#"{"prompt":1e-38}"#;
+        let (top, price) = if wrapper {
+            (format!("[{top}]"), format!("[{price}]"))
+        } else {
+            (top.to_owned(), price.to_owned())
+        };
+        let source = format!(r#"[{{"id":"m","top_provider":{top},"pricing":{price}}}]"#);
+        let snapshot = ModelCatalog::try_from(source.as_str())?.into_snapshot();
+        let record = snapshot.pointer("/models/0").ok_or("missing record")?;
+        let normalized = ModelMetadata::parse(&record.to_string(), &EffortSpecs::default())?;
+        let fields = serde_json::to_value(normalized.fields())?;
+        assert_eq!(fields.pointer("/max_output/state"), Some(&json!("invalid")));
+        assert_eq!(
+            fields.pointer("/input_cost/value"),
+            Some(&json!("0.00000000000000000000000000000000000001"))
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn duplicate_control_keys_are_rejected_before_publication() {
     for source in [
         r#"{"data":[],"data":["a"]}"#,
         r#"[{"id":"a","id":"b"}]"#,
         r#"[{"id":"a","pricing":{"prompt":0,"prompt":1}}]"#,
+        r#"[{"id":"a","pricing":[{"prompt":0,"prompt":1}]}]"#,
+        r#"[{"id":"a","top_provider":{"max_completion_tokens":1,"max_completion_tokens":2}}]"#,
+        r#"[{"id":"a","top_provider":[{"max_completion_tokens":1,"max_completion_tokens":2}]}]"#,
     ] {
         assert!(matches!(
             ModelCatalog::try_from(source),

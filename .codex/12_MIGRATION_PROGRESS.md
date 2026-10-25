@@ -1,5 +1,22 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Discovery kapasite lexeme kaybının kapatılması
+
+Native discovery snapshot artık ayrı fiyat dönüştürücü yerine metadata'nın
+ortak RawMetadata sınırını kullanır. Bütün context/output alias'ları, nested
+top_provider ve tek-object wrapper'ları exact kalır: u64 literal integer türünü
+korur; fraction/exponent/overflow kaynak metni string taşınır. Böylece canonical
+GET cevabı tekrar native store'a verildiğinde 9007199254740992.5 geçerli integral
+kapasiteye yuvarlanamaz. Yinelenen price conversion kodu silindi; bilinen nested
+control object duplicate-key sözleşmesi discovery için de uygulanır.
+
+İki yeni native regression, genişletilen gerçek HTTP fixture ve bir yeni gerçek
+editor GET testi geçti. **258 native + 16 compile-fail**, fmt, locked build ve
+strict all-targets Clippy temiz. **6/6 focused real catalog ERT** geçti. Bu dilim
+için henüz yeni full ERT iddiası yok; önceki 1206 gate tarihsel kanıttır. Public
+setter/catalog writer ve genel UI reader cutover/silme hâlâ açıktır. Kullanıcı
+shell.nix/07 değişiklikleri korunur; 01 değiştirilmedi.
+
 ## 2026-10-25 — Owned async editor metadata ve captured-ticket hazırlık bariyeri
 
 bridge/models state/transfer/queue modülleri native RPC'yi gerçek editör hattında

@@ -1,5 +1,6 @@
 //! Bounded provider discovery envelope boundary, before any UI publication.
 
+use super::metadata::{MetadataError, RawMetadata};
 use crate::{api::ModelId, constants::limits};
 use serde::{
     Deserialize, Deserializer,
@@ -51,16 +52,6 @@ fn parse<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T, CatalogError> 
     serde_json::from_str(source).map_err(|_| CatalogError::Shape)
 }
 
-/// Preserve price lexemes before an opaque metadata value can enter a generic
-/// JSON decoder. No f64, price rounding or "free" decision occurs here.
-fn price_literal(value: &RawValue) -> Result<Value, CatalogError> {
-    let source = value.get();
-    if source.starts_with(|character: char| character.is_ascii_digit() || character == '-') {
-        Ok(Value::String(source.to_owned()))
-    } else {
-        parse(source)
-    }
-}
 struct Record {
     id: ModelId,
     fields: Map<String, Value>,
@@ -70,43 +61,37 @@ impl TryFrom<&RawValue> for Record {
     type Error = CatalogError;
     fn try_from(value: &RawValue) -> Result<Self, Self::Error> {
         let source = value.get();
-        let (id, source_fields) = if source.starts_with('"') {
-            (parse::<String>(source)?, BTreeMap::new())
+        let id = if source.starts_with('"') {
+            parse::<String>(source)?
         } else {
             let source_fields = parse::<RawObject>(source)?.0;
             let identity = source_fields
                 .get("id")
                 .or_else(|| source_fields.get("name"))
                 .ok_or(CatalogError::Identity)?;
-            let id = parse::<String>(identity.get()).map_err(|_| CatalogError::Identity)?;
-            (id, source_fields)
+            parse::<String>(identity.get()).map_err(|_| CatalogError::Identity)?
         };
         let id = id.trim();
         let id = id.strip_prefix("models/").unwrap_or(id);
         let id = ModelId::try_from(id.to_owned()).map_err(|_| CatalogError::Identity)?;
-        let mut fields = Map::new();
-        for (key, value) in source_fields {
-            if key == "id" {
-                continue;
-            }
-            let value = match key.as_str() {
-                "pricing" if value.get().starts_with('{') => {
-                    let mut pricing = Map::new();
-                    for (key, value) in parse::<RawObject>(value.get())?.0 {
-                        pricing.insert(key, price_literal(&value)?);
-                    }
-                    Value::Object(pricing)
-                }
-                "input-cost" | "output-cost" => price_literal(&value)?,
-                _ => parse(value.get())?,
-            };
-            fields.insert(key, value);
-        }
         let source = if source.starts_with('"') {
             RawValue::from_string("{}".to_owned()).map_err(|_| CatalogError::Shape)?
         } else {
             value.to_owned()
         };
+        // Use the same exact source boundary as put/override publications.
+        // In particular, a fractional token limit must not become a rounded
+        // integer before the editor can submit the canonical catalog again.
+        let snapshot = RawMetadata::try_from(source.get())
+            .and_then(|raw| raw.snapshot())
+            .map_err(|error| match error {
+                MetadataError::Shape => CatalogError::Shape,
+                MetadataError::Limit => CatalogError::Limit,
+            })?;
+        let Value::Object(mut fields) = snapshot else {
+            return Err(CatalogError::Shape);
+        };
+        fields.remove("id");
         Ok(Self { id, fields, source })
     }
 }
@@ -151,8 +136,8 @@ impl ModelCatalog {
     pub(crate) fn into_records(self) -> impl Iterator<Item = (ModelId, Box<RawValue>)> {
         self.0.into_iter().map(|record| (record.id, record.source))
     }
-    /// One stable wire shape. Price lexemes stay decimal strings; remaining
-    /// semantic capability/override decisions belong to their subsequent cutover.
+    /// One stable wire shape. Prices and non-u64 capacity lexemes remain exact
+    /// decimal strings; ordinary integral capacities keep their integer kind.
     pub fn into_snapshot(self) -> Value {
         let models: Vec<_> = self
             .0

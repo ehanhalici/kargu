@@ -14,7 +14,7 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 #[tokio::test]
 async fn catalog_profile_normalizes_real_gets_and_preserves_price_lexemes() -> TestResult {
     for source in [
-        r#"{"data":[{"id":"m","pricing":{"prompt":0.000000000000000000123456789012345678}}]}"#,
+        r#"{"data":[{"id":"m","context_length":9007199254740992.5,"outputTokenLimit":18446744073709551615,"top_provider":[{"max_completion_tokens":1e999}],"pricing":{"prompt":0.000000000000000000123456789012345678}}]}"#,
         r#"{"models":[{"name":"models/m"}]}"#,
         r#"{"items":["m"]}"#,
         r#"["m"]"#,
@@ -39,6 +39,18 @@ async fn catalog_profile_normalizes_real_gets_and_preserves_price_lexemes() -> T
         .await?;
         assert_eq!(result.pointer("/models/0/id"), Some(&json!("m")));
         if source.contains("pricing") {
+            assert_eq!(
+                result.pointer("/models/0/context_length"),
+                Some(&json!("9007199254740992.5"))
+            );
+            assert_eq!(
+                result.pointer("/models/0/outputTokenLimit"),
+                Some(&json!(u64::MAX))
+            );
+            assert_eq!(
+                result.pointer("/models/0/top_provider/0/max_completion_tokens"),
+                Some(&json!("1e999"))
+            );
             assert_eq!(
                 result.pointer("/models/0/pricing/prompt"),
                 Some(&json!("0.000000000000000000123456789012345678"))
