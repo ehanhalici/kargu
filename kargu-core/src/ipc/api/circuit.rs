@@ -201,8 +201,12 @@ impl Circuits {
         let sequence = self.sequence.next()?;
         let entry = self.entries.get(id).ok_or(CoreError::CleanupFailed)?;
         let mut snapshot = json!(entry.circuit.snapshot(Instant::now())?);
-        snapshot["provider"] = json!(entry.provider.as_ref().map(ApiProviderId::as_str));
-        snapshot["sequence"] = json!(sequence);
+        let object = snapshot.as_object_mut().ok_or(CoreError::CleanupFailed)?;
+        object.insert(
+            "provider".to_owned(),
+            json!(entry.provider.as_ref().map(ApiProviderId::as_str)),
+        );
+        object.insert("sequence".to_owned(), json!(sequence));
         self.sequence = sequence;
         Ok(snapshot)
     }

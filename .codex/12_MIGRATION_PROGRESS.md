@@ -1,5 +1,17 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — 01 audit: checked indexing ve üretim lint kapısı
+
+Cache'teki iki raw string range erişimi checked get oldu; Unicode/tekrarlanan
+marker/empty/start-boundary regresyonları eklendi. Yeni üretim indexing_slicing
+kapısı ayrıca 18 JSON IndexMut yazımını yakaladı: cache, stream, wire, error ve
+IPC projection'lar Map::insert/checked object erişimine geçirildi. Gate üretim
+kütüphanesinde zorunludur; unsafe forbid esnetilmedi. **211 native test + 9
+compile-fail**, locked build/fmt/strict Clippy ve son binary ile **1185/1185
+full source ERT**, 0 unexpected, **124.52 s** geçti. todo göç özeti güncellendi.
+Bulgu/kanıt ve kalan command phase audit'i 39'da; bütün göç tamamlandı iddiası
+yoktur. Kullanıcının shell.nix/07 değişiklikleri korunmuştur.
+
 ## 2026-10-25 — 01 audit: HTTP altında ikinci replay politikası kapatıldı
 
 Reqwest retry::never explicit ayarlandı; replay actor/budget/observer dışında

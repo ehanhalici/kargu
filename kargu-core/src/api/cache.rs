@@ -1,16 +1,28 @@
 //! Cache boundaries on an owned canonical request, never on stored history.
 
 use super::ApiError;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 const RUNTIME_BOUNDARY: &str = "<runtime_environment>\n";
 
 fn text_block(text: &str, marked: bool) -> Value {
-    let mut block = json!({"type":"text","text":text});
+    let mut block = Map::from_iter([
+        ("type".to_owned(), json!("text")),
+        ("text".to_owned(), json!(text)),
+    ]);
     if marked {
-        block["cache_control"] = json!({"type":"ephemeral"});
+        block.insert("cache_control".to_owned(), json!({"type":"ephemeral"}));
     }
-    block
+    Value::Object(block)
+}
+
+fn split_system(text: &str) -> Result<Option<(Value, Value)>, ApiError> {
+    let Some(offset) = text.find(RUNTIME_BOUNDARY).filter(|offset| *offset > 0) else {
+        return Ok(None);
+    };
+    let stable = text.get(..offset).ok_or(ApiError::InvalidRequest)?;
+    let runtime = text.get(offset..).ok_or(ApiError::InvalidRequest)?;
+    Ok(Some((text_block(stable, true), text_block(runtime, false))))
 }
 
 fn mark(message: &mut Value) -> Result<bool, ApiError> {
@@ -53,16 +65,9 @@ pub fn prepare(payload: &mut Value) -> Result<(), ApiError> {
             let split = first
                 .get("content")
                 .and_then(Value::as_str)
-                .and_then(|text| {
-                    text.find(RUNTIME_BOUNDARY)
-                        .filter(|offset| *offset > 0)
-                        .map(|offset| {
-                            (
-                                text_block(&text[..offset], true),
-                                text_block(&text[offset..], false),
-                            )
-                        })
-                });
+                .map(split_system)
+                .transpose()?
+                .flatten();
             if let Some((stable, runtime)) = split {
                 first
                     .as_object_mut()

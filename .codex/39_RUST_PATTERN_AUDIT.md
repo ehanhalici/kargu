@@ -63,13 +63,34 @@ All **25 HTTP/live retry/circuit tests** and all-target strict Clippy pass. This
 does not exercise an HTTP/2 NACK (that feature is not enabled). Last full native
 and source ERT evidence remains the preceding typestate slice, above.
 
+## 2026-10-25 — Checked indexing and an enforceable production gate
+
+Two raw string range accesses in prompt-cache splitting are now `.get()` calls
+in a small fallible boundary helper. Added UTF-8/repeated-marker, absent-marker,
+empty-content and marker-at-start regressions; original cache contracts remain.
+
+Enabling `clippy::indexing_slicing` also identified **18 production JSON index
+writes**, beyond those ranges. Even where today's preceding `json!` constructs
+an object, the panic-capable IndexMut form violates 01. These are now Map
+construction/insertion (cache, stream accumulation, wire request/response and
+safe error DTOs), or checked object access before attaching IPC budget/circuit
+projections. Missing fields are still inserted; `get_mut` was not misused as an
+insert operation. Unknown/null/false/absent usage semantics and safe errors stay
+unchanged. No observed production panic is claimed just from the lint findings.
+
+The library enables `deny(clippy::indexing_slicing)` under `not(test)`, so normal
+library compilation in the strict all-target Clippy gate enforces this for all
+production code. Unit/integration assertion fixtures retain their normal test
+semantics; there is no production per-function allow, and unsafe remains forbid.
+The first enabled production scan failed at all 18 writes; after correction the
+strict all-target scan passes. Final frozen sources passed **211 native tests +
+9 compile-fail**, locked build/fmt and strict Clippy. Full source ERT against
+that final binary: **1185/1185**, 0 unexpected, **124.52 s**.
+
 ## Remaining findings — not claimed fixed
 
 - `ipc/execution/mod.rs`: another `Option<Stage>` deserves the same ownership
   review after the API retry audit; passing tests are not typestate evidence.
-- `api/cache.rs`: two raw string range-index operations are safe by their
-  preceding find today, but still violate 01's no-bare-index rule. Replace with
-  checked access and preserve multibyte cache-boundary behavior.
 
 HTTP source reference:
 [versioned ClientBuilder docs](https://docs.rs/reqwest/0.12.28/reqwest/struct.ClientBuilder.html#method.retry).

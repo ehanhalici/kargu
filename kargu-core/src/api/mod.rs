@@ -13,7 +13,7 @@ pub mod wire;
 pub use domain::{HttpRequest, ModelId, SecretString};
 pub use http::{execute, execute_captured};
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 /// Payload-free failures: upstream bodies, URLs and credentials are not errors.
 #[derive(Debug, thiserror::Error)]
@@ -92,28 +92,33 @@ impl ApiError {
             Self::Protocol => "protocol_error",
             Self::Incomplete => "incomplete_stream",
         };
-        let mut result = json!({"code":code,"message":self.to_string()});
+        let mut result = Map::from_iter([
+            ("code".to_owned(), json!(code)),
+            ("message".to_owned(), json!(self.to_string())),
+        ]);
         if let Self::BudgetRefused(reason) = self {
-            result["reason"] = json!(reason);
+            result.insert("reason".to_owned(), json!(reason));
         }
         if let Self::Http {
             status,
             retry_after,
         } = self
         {
-            result["status"] = json!(status.as_u16());
-            result["retry_after"] =
-                json!(retry_after.as_ref().and_then(resilience::RetryAfter::wire));
+            result.insert("status".to_owned(), json!(status.as_u16()));
+            result.insert(
+                "retry_after".to_owned(),
+                json!(retry_after.as_ref().and_then(resilience::RetryAfter::wire)),
+            );
             if retry_after
                 .as_ref()
                 .is_some_and(resilience::RetryAfter::exceeded)
             {
-                result["retry_after_exceeded"] = json!(true);
+                result.insert("retry_after_exceeded".to_owned(), json!(true));
             }
         }
         if let Self::ContextOverflow { status } = self {
-            result["status"] = json!(status.as_u16());
+            result.insert("status".to_owned(), json!(status.as_u16()));
         }
-        result
+        Value::Object(result)
     }
 }

@@ -236,6 +236,43 @@ fn stable_cache_prefix_is_pure_and_runtime_is_not_marked() -> TestResult {
 }
 
 #[test]
+fn cache_boundary_uses_utf8_safe_checked_ranges_and_preserves_first_marker() -> TestResult {
+    let stable = "Yönergeler 🦀\n";
+    let runtime = "<runtime_environment>\ndosya: ğ\n<runtime_environment>\nsecond marker";
+    let source = json!({"messages":[{"role":"system","content":format!("{stable}{runtime}")}]});
+    let mut payload = source.clone();
+    cache::prepare(&mut payload)?;
+    let blocks = payload["messages"][0]["content"]
+        .as_array()
+        .ok_or("cache blocks")?;
+    assert_eq!(blocks.len(), 2);
+    let prefix = blocks.first().ok_or("stable block")?;
+    let suffix = blocks.get(1).ok_or("runtime block")?;
+    assert_eq!(prefix["text"], stable);
+    assert_eq!(prefix["cache_control"], json!({"type":"ephemeral"}));
+    assert_eq!(suffix["text"], runtime);
+    assert!(suffix.get("cache_control").is_none());
+    assert_eq!(
+        source["messages"][0]["content"],
+        format!("{stable}{runtime}")
+    );
+    for text in ["", "🦀 only", "<runtime_environment>\nno stable prefix"] {
+        let mut payload = json!({"messages":[{"role":"system","content":text}]});
+        cache::prepare(&mut payload)?;
+        if text.is_empty() {
+            assert_eq!(payload["messages"][0]["content"], text);
+        } else {
+            let blocks = payload["messages"][0]["content"]
+                .as_array()
+                .ok_or("whole block")?;
+            assert_eq!(blocks.len(), 1);
+            assert_eq!(blocks.first().ok_or("whole block")?["text"], text);
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn native_cache_boundaries_survive_tools_and_completed_tool_results() -> TestResult {
     let mut payload = json!({"model":"claude","messages":[{"role":"system","content":"Stable"},{"role":"user","content":"Question"},
         {"role":"assistant","content":"","tool_calls":[{"id":"c1","function":{"name":"read","arguments":"{}"}}]},

@@ -1,5 +1,5 @@
 use super::{ApiError, StreamLimits, parser::Event};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
@@ -164,19 +164,34 @@ impl Accumulator {
             return Err(ApiError::Incomplete);
         };
         let has_calls = !self.calls.is_empty();
-        let mut message = json!({"role":"assistant","content":self.text});
+        let mut message = Map::from_iter([
+            ("role".to_owned(), json!("assistant")),
+            ("content".to_owned(), json!(self.text)),
+        ]);
         if !self.reasoning.is_empty() {
-            message["reasoning_content"] = json!(self.reasoning);
+            message.insert("reasoning_content".to_owned(), json!(self.reasoning));
         }
         if has_calls {
-            message["tool_calls"] = self.calls.into_values().map(|call|
-            json!({"id":call.id,"type":"function","function":{"name":call.name,"arguments":call.arguments}})).collect();
+            let calls = self
+                .calls
+                .into_values()
+                .map(|call| {
+                    json!({"id":call.id,"type":"function",
+                    "function":{"name":call.name,"arguments":call.arguments}})
+                })
+                .collect();
+            message.insert("tool_calls".to_owned(), Value::Array(calls));
         }
-        let mut response = json!({"choices":[{"index":0,"message":message,"finish_reason":reason.unwrap_or_else(|| if has_calls {"tool_calls"} else {"stop"}.to_owned())}]});
+        let reason =
+            reason.unwrap_or_else(|| if has_calls { "tool_calls" } else { "stop" }.to_owned());
+        let mut response = Map::from_iter([(
+            "choices".to_owned(),
+            json!([{"index":0,"message":message,"finish_reason":reason}]),
+        )]);
         if let Some(usage) = self.usage {
-            response["usage"] = usage;
+            response.insert("usage".to_owned(), usage);
         }
-        Ok(response)
+        Ok(Value::Object(response))
     }
 }
 fn append_text(target: &mut String, value: Option<&Value>, limit: usize) -> Result<(), ApiError> {

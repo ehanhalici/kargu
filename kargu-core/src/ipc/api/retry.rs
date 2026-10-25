@@ -420,11 +420,12 @@ impl ApiRequests {
             Ok(value) => value,
             Err(error) => json!({"failure":error.snapshot(),"partial":pending.published}),
         };
+        let object = payload.as_object_mut().ok_or(CoreError::CleanupFailed)?;
         if let Some(snapshot) = pending.snapshot {
-            payload["budget"] = snapshot;
+            object.insert("budget".to_owned(), snapshot);
         }
         if let Some(circuit) = circuit {
-            payload["circuit"] = circuit;
+            object.insert("circuit".to_owned(), circuit);
         }
         self.circuits.collect(host);
         Ok(Some(protocol::success(&id, payload)))

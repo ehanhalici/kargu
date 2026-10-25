@@ -2,6 +2,7 @@
 //! Stdio exposes lifecycle, bounded reads and explicitly approved command execution.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), deny(clippy::indexing_slicing))]
 
 pub mod api;
 pub mod application;

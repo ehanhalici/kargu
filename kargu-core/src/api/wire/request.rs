@@ -144,12 +144,26 @@ pub(super) fn encode(payload: Value, rules: &RequestRules) -> Result<Value, ApiE
                 .and_then(Value::as_str)
                 .filter(|name| !name.is_empty())
                 .ok_or(ApiError::InvalidRequest)?;
-            let mut definition = json!({"name":name,"description":function.get("description").and_then(Value::as_str).unwrap_or(""),
-                rules.schema.as_str():function.get("parameters").cloned().unwrap_or(json!({}))});
+            let mut definition = Map::from_iter([
+                ("name".to_owned(), json!(name)),
+                (
+                    "description".to_owned(),
+                    json!(
+                        function
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                    ),
+                ),
+                (
+                    rules.schema.as_str().to_owned(),
+                    function.get("parameters").cloned().unwrap_or(json!({})),
+                ),
+            ]);
             if let Some(marker) = tool.get("cache_control") {
-                definition["cache_control"] = marker.clone();
+                definition.insert("cache_control".to_owned(), marker.clone());
             }
-            normalized.push(definition);
+            normalized.push(Value::Object(definition));
         }
         if !normalized.is_empty() {
             body.insert("tools".to_owned(), json!(normalized));

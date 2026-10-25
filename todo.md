@@ -65,6 +65,11 @@ bu henüz native agent run/history sahipliği değildir. Native budget HTTP
 admission/drain ve gerçek root-run consumer'a bağlandı; eski Elisp debit/token
 toplama motoru silindi (.codex/36). G08 hard reservation/pricing ve genel native
 claim/tool/run birliği hâlâ açıktır; yalnız gözlenen token tavanı harcama garantisi değildir.
+Native retry/circuit actor, charged replay, owned observer ACK ve detached GUI
+projection/reset portları eklendi (.codex/37–38). High-level API/loop varsayılan
+cutover ve eski Elisp retry/circuit motorlarının silinmesi henüz açıktır.
+01 uyum denetimi ve kalan kaynak-sahipliği bulguları .codex/39'da tutulur;
+testlerin yeşil olması bütün Rust ağacının mimari uyum sertifikası değildir.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
 output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan read/
 Git/skill/webfetch, egress/context ve global tüketiciler aşağıdaki gruplarda

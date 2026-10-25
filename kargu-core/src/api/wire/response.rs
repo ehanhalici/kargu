@@ -129,19 +129,25 @@ pub(super) fn decode(response: Value, rules: &ResponseRules) -> Result<Value, Ap
                 .map(|(_, finish)| finish)
         })
         .unwrap_or(&rules.finish_default);
-    let mut message = json!({"role":"assistant","content":text});
+    let mut message = Map::from_iter([
+        ("role".to_owned(), json!("assistant")),
+        ("content".to_owned(), json!(text)),
+    ]);
     if !thought.is_empty() {
-        message["reasoning_content"] = json!(thought);
+        message.insert("reasoning_content".to_owned(), json!(thought));
     }
     if !calls.is_empty() {
-        message["tool_calls"] = json!(calls);
+        message.insert("tool_calls".to_owned(), json!(calls));
     }
     if !opaque.is_empty() {
-        message["_kargu_opaque_content"] = json!(opaque);
+        message.insert("_kargu_opaque_content".to_owned(), json!(opaque));
     }
-    let mut result = json!({"choices":[{"message":message,"finish_reason":Field::as_str(finish)}]});
+    let mut result = Map::from_iter([(
+        "choices".to_owned(),
+        json!([{"message":message,"finish_reason":Field::as_str(finish)}]),
+    )]);
     if let Some(usage) = usage(&response, rules)? {
-        result["usage"] = usage;
+        result.insert("usage".to_owned(), usage);
     }
-    Ok(result)
+    Ok(Value::Object(result))
 }
