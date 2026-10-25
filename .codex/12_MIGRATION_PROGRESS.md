@@ -1,5 +1,15 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Record-output testindeki scheduling varsayımı
+
+Tam native koşuda prefix doğruyken omission flag'i beklenenden farklı geldi.
+26'daki OutputPage sözleşmesiyle incelendi: omission yalnız gerçekten gözlenen
+discard byte'ıdır; TERM üçüncü shell write'ından önce gelebilir. Production
+process/retention davranışı değiştirilmeden test daha güçlü cursor/EOF invariant'ına
+bağlandı; deterministik chunk sınırı false→true geçişini kanıtlar. 29 execution
+testi + 2 record testi + 15 tekrar ve strict Clippy geçti. Grep cap+1 aynıdır.
+Bu bir test silme, baseline değiştirme veya gerçek omission'ı gizleme değildir.
+
 ## 2026-10-25 — Typed retry / single-probe circuit domain foundation
 
 `api/resilience/` typed policy, bounded unbiased Full Jitter, RFC Retry-After ve

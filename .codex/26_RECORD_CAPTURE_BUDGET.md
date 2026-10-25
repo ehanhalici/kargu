@@ -48,3 +48,22 @@ byte-before-record failure, explicit no-match exit, UTF-8/record chunk split,
 freeze/discard cursor ve geç capture önceliklerini kapsar. Bounded eski TLC
 modelleri regresyondur; yeni record observer için formal refinement iddiası
 yoktur. Tam suite sayıları 12_MIGRATION_PROGRESS.md'de kaydedilir.
+
+## 2026-10-25 — Gözlenen omission / producer-stop ayrımı
+
+Tam Rust koşusu, live-producer testinde zamanlama varsayımı yakaladı: prefix
+doğruyken `truncated=false` geldi. `OutputPage.truncated` yalnız **gözlenen ve
+retention dışında kalan** byte'ları bildirir. Shell write'ı kayıt sınırında
+parçalanabilir; supervisor TERM'i üçüncü kayıt gerçekten yazılmadan gönderebilir.
+`capture_stop=records` yine bounded/intentional prefix'tir, tam tarama garantisi
+değildir. Okunmamış/üretilmemiş byte için omission veya raw cursor uydurulmaz.
+
+Production archive/supervisor davranışı değiştirilmedi. Live test artık aynı
+prefix, EOF, signal, grace ve reap kanıtını korurken `truncated` ile gözlenen
+absolute cursor ilişkisini doğrular. Deterministik UTF-8 chunk testi tam N'inci
+LF'de omission=false, sonradan gelen byte'ta true geçişini ayrıca sabitler.
+Grep'in cap+1 lookahead / exact-cap sözleşmesi değişmedi.
+
+29 execution testi, iki record testi, live-producer testinin 15 ardışık tekrarı
+ve strict Clippy geçer. Önceki hata yalnız yeniden koşularak örtülmedi; yanlış
+schedule beklentisi daha kesin gözlem/cursor assertions ile değiştirildi.

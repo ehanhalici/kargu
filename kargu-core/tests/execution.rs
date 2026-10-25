@@ -397,10 +397,18 @@ async fn record_budget_stops_a_live_producer_then_reaps_before_success() -> Test
     assert_eq!(result.capture_stop, Some(CaptureStop::Records));
     assert_eq!(result.outcome, ToolOutcome::Ok);
     assert_eq!(result.signal, Some(15));
-    assert_eq!(
-        f.output(&job, OutputStream::Stdout).await?,
-        (b"one\ntwo\n".to_vec(), true)
-    );
+    let page = f
+        .supervisor
+        .read(&f.run, &job, OutputStream::Stdout, ByteOffset::ZERO)
+        .await?;
+    assert_eq!(page.bytes, b"one\ntwo\n");
+    assert!(page.eof);
+    // Shell writes may split exactly at the record boundary. TERM can precede
+    // the third write, so omitted output must follow observed bytes, not a
+    // scheduling assumption about the remainder of the producer's printf.
+    let retained = u64::try_from(page.bytes.len())?;
+    assert!(page.next_cursor.as_u64() >= retained);
+    assert_eq!(page.truncated, page.next_cursor.as_u64() > retained);
     let summary = f.actor.finish(&f.run)?;
     assert_eq!(
         summary.tool_results.first().map(|result| result.outcome),

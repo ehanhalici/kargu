@@ -182,9 +182,23 @@ mod tests {
         let (capture, monitor) = RecordMonitor::new(Some(RecordLimit::try_from(2)?));
         let mut capture = capture.ok_or(CoreError::CleanupFailed)?;
         let mut archive = Archive::new(OutputRetention::Prefix, OutputLimit::try_from(64_usize)?);
-        let chunks: &[&[u8]] = &[b"first\n\xc3", b"\xbc", b"\nthird\n", b"fourth\n"];
-        for chunk in chunks {
+        let chunks: &[&[u8]] = &[b"first\n\xc3", b"\xbc", b"\n", b"third\n", b"fourth\n"];
+        for (index, chunk) in chunks.iter().enumerate() {
             capture.push(&mut archive, chunk, &run)?;
+            if index == 2 {
+                // A reached record boundary is a bounded prefix, not proof
+                // that the producer had emitted any extra bytes yet.
+                let exact = archive.page(ByteOffset::ZERO)?;
+                assert_eq!(exact.bytes, "first\nü\n".as_bytes());
+                assert_eq!(exact.next_cursor.as_u64(), 9);
+                assert!(!exact.truncated);
+                assert_eq!(monitor.current(), Some(CaptureStop::Records));
+            }
+            if index == 3 {
+                let omitted = archive.page(ByteOffset::ZERO)?;
+                assert_eq!(omitted.next_cursor.as_u64(), 15);
+                assert!(omitted.truncated);
+            }
         }
         let page = archive.page(ByteOffset::ZERO)?;
         assert_eq!(page.bytes, "first\nü\n".as_bytes());
