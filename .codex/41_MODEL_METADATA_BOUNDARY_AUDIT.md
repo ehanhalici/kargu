@@ -98,6 +98,70 @@ and committed snapshots both include native unknown-model defaults. Gate:
 **256 native + 16 compile-fail**, fmt, locked build and strict all-targets Clippy.
 This DTO foundation is not yet the default Lisp setter/catalog/UI cutover.
 
+## Owned editor publication and captured-ticket preparation
+
+kargu/bridge/models (state/transfer plus the queue facade) now consumes the
+native service. It does not normalize metadata or merge overrides. One existing
+connection/application lease owns a bounded serial queue: <=32 queued commands,
+<=16 MiB retained command bytes, <=8 MiB per command and a 60-second ticket bound.
+Each source/spec DTO is detached before yielding. UTF-8 append ACKs, committed
+revision/size receipts and exact-offset download pages are checked separately.
+The model_metadata_projection capability is required before owner allocation,
+not discovered after mutating an older core. Passive snapshot/capture calls do
+not start or reconnect the sidecar.
+
+Cancellation retains internal begin/append callbacks so a late upload ID can be
+aborted and acknowledged before the next queued publication. Duplicate callback
+delivery is latched per RPC. An already issued commit is not assumed undone:
+missing/cancelled/malformed receipts fail the service closed, keep the old UI
+observation and refuse subsequent preparation. Explicit reconcile reads the
+actual head and pages on the same lease; it neither replays the command nor
+resets native state/revision to zero. Lost epochs cannot reconcile or rebind an
+old application; an explicitly new application is independent.
+
+Private symbol cells protect committed DTO storage. Public snapshot, ticket
+receipt and waiter APIs detach strings and containers. A barrier captures a
+specific ticket, not the current queue tail. Connection preparation waits for
+that captured intent after config refresh and before credential resolution,
+under the existing owner/session/selection guards. Native projection settings
+freeze its revision/metadata/fields/tools and exact-ID supported parameters;
+newer queued publications cannot retarget that connection. Cancelling a
+preparation detaches its waiter rather than cancelling the shared publication.
+Failed native preparation never falls back to legacy metadata.
+
+The default public setters, catalog publisher and general UI readers are still
+legacy producers/consumers in this slice. They have NOT been silently converted
+to async, and their semantic code is not yet dead. A native-mode application
+explicitly rejects legacy record/override/prune/refusal writes, preventing two
+writers for one owner during this staged cutover. Native connection preparation
+uses its captured view only when that application has native publication intent;
+ordinary not-yet-migrated applications keep the previous contract. Do not enable
+the native producer by importing already-rounded legacy prices/counts. The next
+slice must port the public setter/catalog/selector contracts and then remove the
+legacy writer/readers, including GUI inspector completion and original source
+capacity preservation. Monetary hard-cap and full migration remain open.
+
+Fifteen new actual editor/native tests cover immutable captured receipts, later
+queue updates, old UI observations, late allocation/owner-close/duplicate ACK
+drain, guard revocation, malformed ACK, definite native validation failure,
+unknown commit + explicit repair without replay, source/spec detachment, >1 MiB
+Unicode and exact prices, capability/epoch refusal without startup, queue/byte
+bounds and cancelled-buffer release, mixed-writer refusal, exact request fields
+versus display aliases, and real config/credential preparation freeze/failure/
+waiter-only cancellation. No old assertions or module dependency baselines were
+removed to accommodate this port.
+
+Final consumer-slice gate: **1206/1206 full source ERT**, 0 unexpected,
+**127.77 s**, at 18:16:39 Europe/Istanbul. An earlier 1204/1204 scan preceded
+the final projection-exactness and preparation-cancellation cases; the final
+rerun includes all fifteen new fixtures. Nine touched production Lisp files
+passed Werror bytecompile and checkdoc. Their nine generated elc artifacts were
+moved to /tmp/kargu-publication-final-elc.2uFPX2 before the final source run;
+none remain in the source tree. Native production has not changed since
+8412d50, whose **256 native + 16 compile-fail**, fmt, locked build and strict
+all-targets Clippy gate remains applicable. No module baseline or legacy
+assertion was weakened; 01 and the user's shell.nix/07 edits remain untouched.
+
 ## Status and observed evidence — 2026-10-25
 
 Default HTTP resilience is native at 71dc32d (40); live-model metadata is NOT

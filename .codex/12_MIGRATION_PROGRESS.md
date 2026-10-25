@@ -1,5 +1,42 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Owned async editor metadata ve captured-ticket hazırlık bariyeri
+
+bridge/models state/transfer/queue modülleri native RPC'yi gerçek editör hattında
+tüketir. DTO'lar yield öncesi kopyalanır; 32 queued command/16 MiB queued byte,
+8 MiB source, bounded UTF-8 ACK/page ve ticket deadline sınırları vardır.
+İptalden sonra geç gelen upload exact ID ile abort edilir, ACK/drain olmadan
+sıradaki iş başlamaz. Per-RPC take-once latch duplicate callback'i etkisiz yapar.
+Gönderilmiş commit iptal edildi varsayılmaz: bilinmeyen sonuç eski UI görünümünü
+korur fakat yeni hazırlığı reddeder. Explicit reconcile yalnız aynı lease'teki
+gerçek head'i okur; update replay/reset/reconnect veya zero revision tahmini yok.
+
+Committed DTO'lar private symbol cell'dedir; snapshot/receipt/waiter getter'ları
+detached kopya verir. Connection preparation config sonrası, credential öncesi
+başlangıçta yakaladığı ticket'ı bekler; revision/fields/tools/metadata ve exact-ID
+request parameters o görünümden dondurulur. Daha yeni queue tail'ı ödünç alınmaz.
+Stop yalnız hazırlık waiter'ını söker; shared metadata publication devam eder.
+Native failure'da legacy fallback yoktur. Native publication'a giren application
+legacy record/override/prune/refusal writer'ını açıkça reddeder; iki engine aynı
+sahipte sessizce çalışamaz.
+
+**15 yeni gerçek editor/native fixture** dahil **1206/1206 full source ERT**,
+0 unexpected, **127.77 s** geçti (18:16:39 Europe/Istanbul). Önceki tarama
+1204/1204'tü; son iki fixture dahil yeni source rerun tamamlandı. Dokunulan dokuz
+üretim Elisp dosyası Werror bytecompile ve checkdoc temiz; dokuz geçici elc test
+öncesi /tmp/kargu-publication-final-elc.2uFPX2 altına taşındı, kaynakta elc yok.
+Native kaynak 8412d50'den beri değişmedi: **256 native + 16 compile-fail**,
+fmt/locked build/strict all-targets Clippy kanıtı geçerlidir. Module baseline ve
+eski assertion'lar değiştirilmedi; 01 ve kullanıcı shell.nix/07 korunur.
+
+Bu, default public producer cutover'ının tamamı değildir: public setter'lar,
+katalog publisher ve genel UI reader hâlâ legacy uygulamalar için eskidir.
+Native-intent application için hazırlık hattı bağlandı; native producer sonrası
+karşılık gelen public consumer'lar geçirilmeden çalışan Elisp semantic kodu
+silinmedi. Sonraki dilim bu public sözleşmeleri async completion'a geçirip
+capacity source lexeme kaybını önlemek ve legacy writer/readers'ı kaldırmaktır.
+G08 monetary hard-cap ve tüm Rust göçü açık; dış API/hesap/CLI model turu yok.
+
 ## 2026-10-25 — Canonical native UI ve bilinmeyen model projection'ı
 
 model_metadata_projection capability; display/defaults/alias/refusal permission

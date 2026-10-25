@@ -112,9 +112,14 @@ responses retain its last good cache. Price number lexemes cross this boundary
 as lossless decimal strings. Rust also contains exact model-field normalization
 and an application-owned revisioned metadata store, exposed by the paged
 `model_metadata` service. Its uploads are session-owned and invisible until
-atomic commit; stale revisions cannot mix snapshot pages. The editor still
-uses its existing metadata reader/writer pending the approved asynchronous
-setter, last-committed UI projection and connection-preparation cutover.
+atomic commit; stale revisions cannot mix snapshot pages. The editor bridge
+supports bounded asynchronous publication tickets, detached committed views
+and explicit same-lease reconciliation. Connection preparation captures one
+ticket and freezes that exact revision; failed native publication never falls
+back to legacy data. The default public setters, catalog publisher and general
+UI readers still await their coordinated consumer cutover. An application that
+explicitly enters native publication rejects legacy metadata writes, so the
+two engines cannot silently run together for that owner.
 Wider agent run/history migration also remains open.
 
 Chat retries stay within one native logical exchange, with a fresh budget debit

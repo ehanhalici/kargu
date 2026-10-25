@@ -12,6 +12,12 @@
 
 (require 'kargu/application/coordinator)
 
+(defun kargu-metadata-assert-legacy-writer ()
+  "Refuse a legacy write after this application enters native publication.
+The default producer cutover is separate; never silently run two writers."
+  (when (gethash :native-models (kargu-application-services (kargu-application-context)))
+    (user-error "Kargu: native metadata publication owns this application")))
+
 (defun kargu-metadata-table (name legacy)
   "Return the application's table NAME, or detached compatibility table LEGACY."
   (if (and (not kargu-metadata--legacy)

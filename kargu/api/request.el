@@ -16,14 +16,20 @@
 (require 'kargu/config)
 (require 'kargu/history)
 (require 'kargu/api/tools)
+(require 'kargu/models/projection)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-extra-headers "kargu/providers/registry" (id))
+(declare-function kargu-model-get-metadata "kargu/api/catalog" (id &optional provider))
+(declare-function kargu-model-read "kargu/api/catalog" (&optional model-id provider))
+(declare-function kargu-model-request-parameters "kargu/api/catalog" (model-id provider))
+(declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id provider))
 
 (declare-function kargu-provider-cache-marker-p "kargu/providers/registry" (id))
 
-(defun kargu-api-request-tuning (provider model)
+(defun kargu-api-request-tuning (provider model &optional supported-parameters)
   "Capture raw preferences and exact metadata for native PROVIDER/MODEL policy.
+SUPPORTED-PARAMETERS supplies metadata for a new settings capture.
 No parameter is selected or wire-shaped in the editor."
   (if (kargu-connection-current)
       (kargu-connection-setting :tuning)
@@ -33,21 +39,31 @@ No parameter is selected or wire-shaped in the editor."
             (cons "effort" (if effort (format "%s" effort) :json-null))
             (cons "thinking_budget" (or kargu-thinking-budget :json-null))
             (cons "supported_parameters"
-                  (if-let* ((parameters (kargu-model-request-parameters model provider)))
-                      (vconcat parameters) :json-null))
+                  (or supported-parameters
+                      (if-let* ((parameters (kargu-model-request-parameters model provider)))
+                          (vconcat parameters) :json-null)))
             (cons "provider_policy"
                   (or (plist-get (kargu-provider-get provider) :request) :json-empty-object))))))
 
-(defun kargu-api-connection-settings (provider model)
-  "Capture metadata and raw preferences once for PROVIDER and MODEL."
+(defun kargu-api-connection-settings (provider model &optional metadata-view)
+  "Capture PROVIDER/MODEL settings, using immutable METADATA-VIEW when supplied."
   (let ((format (kargu-provider-format provider)))
-    (list :format format :wire (kargu-provider-format-record format)
-          :metadata (and model (kargu-model-get-metadata model provider))
-          :fields (kargu-model-read model provider)
-          :tools (kargu-model-supports-tools-p model provider)
-          :cache-marker (kargu-provider-cache-marker-p provider)
-          :tuning (kargu-api-request-tuning provider model)
-          :header-overrides (kargu-provider-extra-headers provider))))
+    (if metadata-view
+        (let* ((projection (kargu-model-projection-connection metadata-view provider model))
+               (tuning (kargu-config-copy (kargu-api-request-tuning
+                                           provider model (plist-get projection :supported-parameters)))))
+          (setcdr (assoc "supported_parameters" tuning) (plist-get projection :supported-parameters))
+          (append projection
+                  (list :format format :wire (kargu-provider-format-record format)
+                        :cache-marker (kargu-provider-cache-marker-p provider)
+                        :tuning tuning :header-overrides (kargu-provider-extra-headers provider))))
+      (list :format format :wire (kargu-provider-format-record format)
+            :metadata (and model (kargu-model-get-metadata model provider))
+            :fields (kargu-model-read model provider)
+            :tools (kargu-model-supports-tools-p model provider)
+            :cache-marker (kargu-provider-cache-marker-p provider)
+            :tuning (kargu-api-request-tuning provider model)
+            :header-overrides (kargu-provider-extra-headers provider)))))
 
 (defun kargu--payload-merge (payload extra)
   "Merge EXTRA entries into PAYLOAD, replacing keys already present."

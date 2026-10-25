@@ -77,6 +77,7 @@ EXACT refuses aliases; ambiguous short names always return nil."
 
 (defun kargu-model-store-put (provider id data)
   "Publish DATA for PROVIDER's canonical ID, preserving local overrides."
+  (kargu-metadata-assert-legacy-writer)
   (let* ((key (kargu-model-store--key provider id))
          (old (gethash key (kargu-metadata-table :records kargu--model-metadata-table)))
          (entry (kargu-model-store--entry
@@ -90,6 +91,7 @@ EXACT refuses aliases; ambiguous short names always return nil."
   "Retain catalog metadata only for PROVIDER's freshly advertised IDS.
 Removed models lose raw catalog data, but keep explicit local overrides.
 An empty successful catalog clears all raw data for that provider alone."
+  (kargu-metadata-assert-legacy-writer)
   (let ((provider (kargu-model-store--provider provider))
         (keep (make-hash-table :test #'equal)))
     (dolist (id ids) (puthash id t keep))
@@ -109,6 +111,7 @@ An empty successful catalog clears all raw data for that provider alone."
 (cl-defun kargu-model-store-set-property (provider id &key property value)
   "Override PROPERTY with VALUE for PROVIDER's ID across catalog refreshes.
 A unique alias updates its canonical record; ambiguous aliases are refused."
+  (kargu-metadata-assert-legacy-writer)
   (unless (and (stringp property) (not (string-empty-p property)))
     (user-error "Kargu: metadata property must be a nonempty string"))
   (when (equal property "provider")

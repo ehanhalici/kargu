@@ -30,6 +30,10 @@
 (declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
 (declare-function kargu-api-auth-intent "kargu/api/request" (key &optional provider))
 (declare-function kargu-history-context-threshold "kargu/history/compact" (ctx-tokens))
+(declare-function kargu-connection-current "kargu/config/connection" (&optional buffer))
+(declare-function kargu-connection-setting "kargu/config/connection" (name &optional snapshot))
+(declare-function kargu-connection-matches-p "kargu/config/connection" (model provider))
+(declare-function kargu-config-copy "kargu/config/service" (value))
 
 (defvar kargu--catalog-generations (make-hash-table :test #'equal)
   "Latest request generation per provider; gates cache writes, not delivery.")
@@ -340,11 +344,13 @@ This is what the endpoint said in this session; it is not catalog data.")
 
 (defun kargu-model-mark-tools-refused (&optional model-id provider)
   "Remember a tool refusal for MODEL-ID at PROVIDER, or the active pair."
+  (kargu-metadata-assert-legacy-writer)
   (puthash (kargu--tools-refusal-key (or model-id (kargu--model) "") provider) t
            (kargu-metadata-table :refusals kargu--tools-refused)))
 
 (defun kargu-model-forget-tools-refusals ()
   "Forget every provider refusal of tool use."
+  (kargu-metadata-assert-legacy-writer)
   (clrhash (kargu-metadata-table :refusals kargu--tools-refused)))
 
 (defun kargu-model-supports-tools-p (&optional model-id provider)

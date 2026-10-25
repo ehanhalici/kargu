@@ -13,10 +13,12 @@
 (require 'kargu/config/connection)
 (require 'kargu/api/request)
 (require 'kargu/selection)
+(require 'kargu/bridge/models)
+(require 'kargu/models/projection)
 
 (cl-defstruct (kargu-connection-preparation (:constructor kargu-connection-preparation-create))
   "One target's preparation state, owner identity and pending root task."
-  task app origin session selection provider model public tuning (state :config))
+  task app origin session selection provider model public tuning metadata-ticket metadata-view (state :config))
 
 (defun kargu-api-prepare--current-p (preparation)
   "Check PREPARATION's captured session and selection without disk access."
@@ -32,10 +34,10 @@
       (kargu-async-finish (kargu-connection-preparation-task preparation) result)
     (when (kargu-ok-p result) (kargu-connection-snapshot-wipe (kargu-result-value result)))
     (kargu-async-finish (kargu-connection-preparation-task preparation)
-                       (kargu-err "Connection selection changed during preparation" :stale))))
+			(kargu-err "Connection selection changed during preparation" :stale))))
 
-(defun kargu-api-prepare--configured (preparation result)
-  "Advance PREPARATION after validated configuration RESULT."
+(defun kargu-api-prepare--credentials (preparation result)
+  "Advance PREPARATION after configuration and metadata RESULT barriers."
   (let ((task (kargu-connection-preparation-task preparation)))
     (cond
      ((kargu-err-p result) (kargu-async-finish task result))
@@ -50,12 +52,36 @@
              (kargu-reasoning-effort (plist-get tuning :default-effort))
              (provider (or (kargu-connection-preparation-provider preparation) (kargu--provider-name)))
              (model (or (kargu-connection-preparation-model preparation) (kargu--model)))
-             (settings (kargu-api-connection-settings provider model)))
+             (settings (if-let* ((view (kargu-connection-preparation-metadata-view preparation)))
+                           (kargu-api-connection-settings provider model view)
+                         (kargu-api-connection-settings provider model))))
         (kargu-connection-resolve-async
          provider model :parent task :origin (kargu-connection-preparation-origin preparation)
          :settings settings :capabilities (list :tools (plist-get settings :tools))
          :public (kargu-connection-preparation-public preparation)
          :callback (lambda (value) (kargu-api-prepare--resolved preparation value))))))))
+
+(defun kargu-api-prepare--configured (preparation result)
+  "Await PREPARATION's captured metadata intent after configuration RESULT."
+  (let ((task (kargu-connection-preparation-task preparation))
+        (ticket (kargu-connection-preparation-metadata-ticket preparation)))
+    (cond
+     ((kargu-err-p result) (kargu-async-finish task result))
+     ((not (kargu-api-prepare--current-p preparation))
+      (kargu-async-finish task (kargu-err "Connection owner changed during preparation" :stale)))
+     ((null ticket) (kargu-api-prepare--credentials preparation result))
+     (t
+      (setf (kargu-connection-preparation-state preparation) :metadata)
+      (kargu-async-add-cleanup
+       task
+       (kargu-bridge-models-await
+        ticket (kargu-application-wrap
+                (kargu-connection-preparation-app preparation)
+                (kargu-async-wrap task (lambda (view failure)
+					 (if failure
+					     (kargu-async-finish task (kargu-err "Native metadata publication unavailable" :metadata-unavailable))
+					   (setf (kargu-connection-preparation-metadata-view preparation) view)
+					   (kargu-api-prepare--credentials preparation result)))))))))))
 
 (cl-defun kargu-api-prepare-connection (callback &key parent owner provider model public)
   "Prepare a connection for CALLBACK under PARENT and OWNER.
@@ -65,6 +91,7 @@ PROVIDER and MODEL override session defaults; PUBLIC is a verified catalog flag.
                        :app app :origin (current-buffer) :session (kargu-session-context)
                        :selection (kargu-selection-context) :provider provider :model model
                        :public public
+                       :metadata-ticket (kargu-bridge-models-capture app)
                        :tuning (list :temperature kargu-temperature :max-tokens kargu-max-tokens
                                      :thinking-budget kargu-thinking-budget
                                      :default-effort kargu-reasoning-effort)))

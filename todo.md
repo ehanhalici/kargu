@@ -76,10 +76,13 @@ sınırı eklendi (.codex/41). Default /models discovery envelope normalizasyonu
 native profile'a taşındı; Elisp sağlayıcı yanıt ayıklama parser'ları silindi.
 Native field/capability/rate normalizasyonu ve owner/revision-bound atomik store/
 override temeli eklendi. Application actor'ündeki model_metadata RPC bounded
-upload/commit/abort ve immutable snapshot paging sağlar; UI henüz tüketmez.
+upload/commit/abort ve immutable snapshot paging sağlar. Asenkron editor bridge,
+detached native görünüm, exact-ticket preparation bariyeri ve explicit same-lease
+reconciliation eklendi. Native publication'a giren application legacy metadata
+writer'ını reddeder; native failure sonrası legacy fallback yoktur.
 Kullanıcı async setter + son committed UI snapshot sözleşmesini onayladı.
-Editor consumer ve captured-intent hazırlık bariyeriyle birlikte cutover,
-ardından eski Elisp semantic writer/reader silme hâlâ açıktır; mevcut public
+Public setter/catalog producer ve genel UI reader cutover'ı, ardından eski
+Elisp semantic writer/reader silme hâlâ açıktır; mevcut public
 setter'ların senkron davranışı bu native temel dilimlerinde değiştirilmedi.
 01 uyum denetimi ve kalan kaynak-sahipliği bulguları .codex/39'da tutulur;
 testlerin yeşil olması bütün Rust ağacının mimari uyum sertifikası değildir.
