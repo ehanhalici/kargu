@@ -274,8 +274,15 @@ Discovery never invokes secret functions or interactive pinentry."
       (kargu-provider-valid-key-p (kargu-config-api-key-fast id))))
 
 (defun kargu-connected-providers ()
-  "Return list of all registered provider IDs that are authenticated or keyless."
-  (cl-remove-if-not #'kargu-provider-authenticated-p (kargu-provider-list)))
+  "Return authenticated or keyless registered and custom configured providers.
+Only the current published config is read; no refresh or credential unlock."
+  (cl-remove-if-not
+   #'kargu-provider-authenticated-p
+   (sort (delete-dups
+          (append (and (fboundp 'kargu--config-providers)
+                       (mapcar #'car (kargu--config-providers)))
+                  (kargu-provider-list)))
+         #'string-lessp)))
 
 (provide 'kargu/providers/registry)
 

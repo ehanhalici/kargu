@@ -486,7 +486,8 @@ No Emacs window, no network, no Company popup, no `y-or-n-p'."
          (kargu-state-before-mode-change-hook nil)
          (failures nil))
     (unwind-protect
-        (cl-letf (((symbol-function 'kargu--api-post) #'kargu-fake--post)
+        (cl-letf (((symbol-function 'kargu-config-refresh-async) #'kargu-test-refresh-published-config)
+                  ((symbol-function 'kargu--api-post) #'kargu-fake--post)
                   ((symbol-function 'kargu-execute-tool)
                    (lambda (_name _arguments &optional callback)
                      (if callback (funcall callback "fake tool result")

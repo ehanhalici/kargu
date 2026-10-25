@@ -47,6 +47,15 @@ when it never arrives."
       (error "Kargu test await: no result within %ss" (or timeout 10)))
     result))
 
+(defun kargu-test-refresh-published-config (callback &rest _options)
+  "Deliver already-published synthetic config to CALLBACK without file IO.
+General UI workflow fixtures use this adapter explicitly; config-backed
+selector integration tests keep the real worker and file publication."
+  (let ((task (kargu-async-start (lambda (value _error) (funcall callback value))
+                                :owner nil :parent nil)))
+    (kargu-async-finish task (kargu-ok (kargu-config-current-snapshot)))
+    task))
+
 ;;;; Temporary repositories ----------------------------------------------------
 
 (defvar kargu-permission--override-root)

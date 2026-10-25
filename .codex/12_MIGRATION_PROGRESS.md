@@ -1,5 +1,30 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Config sağlayıcı listesinin gerçek UI girişinde yenilenmesi
+
+Kullanıcının raporu yeniden üretildi: ortamda config.yaml yok, asıl dosya
+~/.config/kargu/config.toml ve beş provider içeriyor. Dosya doğru okunuyor fakat
+footer provider selector ilk config refresh'i başlatmıyordu; memory-only reader
+bu yüzden boş publication görüyordu. Ayrıca config'te tanımlı özel provider ID'leri
+yalnız registered-ID listesinden üretilen authenticated adaylara giremiyordu.
+
+Explicit UI girişine ayrı küçük chat/select/config lifecycle portu bağlandı.
+Mevcut bounded worker asenkron yeniler; passive reader'a IO veya ikinci parser
+eklenmedi. Popup application/session/selection/generation/focus/draft/point ve
+idle guard'larıyla açılır. Tek view'in tekrar açılması/kill/mode change yalnız
+onun refresh/child'ını iptal eder. Custom configured ID'ler de fast credential/
+keyless filtresine girer; registry'ye yeni kalıcı kayıt veya auth unlock yoktur.
+
+Dört yeni fixture, 32/32 focused test ve **1216/1216 full source ERT**, 0 unexpected,
+**129.27 s**, 18:57:14 Europe/Istanbul geçti. Üç üretim dosyası Werror bytecompile/
+checkdoc temiz; geçici elc'ler full source öncesi /tmp altına taşındı. Kullanıcının
+gerçek dosyasıyla read-only UI doğrulaması beş provider'ı da döndürdü; dosyaya veya
+anahtarlara dokunulmadı. Detay 42'de. 01/module baseline/shell.nix/07 korunur.
+
+Bu bir config UI consumer düzeltmesidir; native config parser veya public model
+metadata setter/catalog/reader cutover'ı tamamlandı sayılmaz. Rust üretim kaynağı
+değişmediğinden önceki 258 native + 16 compile-fail kapısı yeni rerun diye sunulmaz.
+
 ## 2026-10-25 — İlk publication intent'i ve owned startup
 
 Explicit bridge publisher artık ilk sidecar startup yield'inden önce captured

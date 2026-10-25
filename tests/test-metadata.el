@@ -238,7 +238,8 @@
   "Test full workflow of selecting provider, model, and effort with company completion."
   (let ((kargu-reasoning-effort nil)
         (kargu-connected-mock '("cerebras" "groq")))
-    (cl-letf (((symbol-function 'kargu-connected-providers)
+    (cl-letf (((symbol-function 'kargu-config-refresh-async) #'kargu-test-refresh-published-config)
+              ((symbol-function 'kargu-connected-providers)
                (lambda () kargu-connected-mock))
               ((symbol-function 'kargu--completing-read-with-company)
                (lambda (prompt _cands &optional _def _ann)
@@ -346,7 +347,8 @@
         (progn
           (kargu-chat-mode)
           (kargu-chat--ensure-idle-prompt)
-          (cl-letf (((symbol-function 'kargu-connected-providers)
+          (cl-letf (((symbol-function 'kargu-config-refresh-async) #'kargu-test-refresh-published-config)
+                    ((symbol-function 'kargu-connected-providers)
                      (lambda () '("opencode" "cerebras" "groq")))
                     ((symbol-function 'kargu--config-providers)
                      (lambda () '(("opencode") ("cerebras") ("groq"))))

@@ -20,6 +20,7 @@
 (require 'kargu/config/key)
 (require 'kargu/api/catalog)
 (require 'kargu/chat/routing)
+(require 'kargu/chat/select/config)
 
 (declare-function company-mode "company" (&optional arg))
 (declare-function company-manual-begin "company" ())
@@ -448,17 +449,38 @@ The model stays empty until that next list confirms one."
      (lambda ()
        (kargu-chat-select-model-company nil nil chosen)))))
 
-(defun kargu-chat-select-provider-company (&optional _event)
-  "Select an authenticated provider with Company in the footer."
-  (interactive (list last-input-event))
-  (kargu-api-select--guard)
+(defun kargu-api-select--open-provider-selector ()
+  "Present authenticated provider candidates from the refreshed configuration."
   (let ((providers (kargu-api-select--provider-candidates)))
-    (unless providers
-      (user-error "Kargu: no providers with API keys found.  Add keys with M-x kargu-edit-config"))
-    (kargu-api-select
-     'provider providers
-     (mapcar (lambda (p) (cons p (kargu-api-select--provider-note p))) providers)
-     #'kargu-api-select--apply-provider)))
+    (if (null providers)
+        (message "Kargu: no providers with API keys found.  Add keys with M-x kargu-edit-config")
+      (kargu-api-select
+       'provider providers
+       (mapcar (lambda (p) (cons p (kargu-api-select--provider-note p))) providers)
+       #'kargu-api-select--apply-provider))))
+
+(defun kargu-chat-select-provider-company (&optional _event)
+  "Refresh config, then select an authenticated provider in the footer.
+Return the cancellable refresh task.  No popup opens if the captured view,
+session, selection, focus or draft changes while configuration is read."
+  (interactive (list last-input-event))
+  (with-current-buffer (kargu-api-select--owner-buffer)
+    (kargu-api-select--guard)
+    (let* ((origin (current-buffer))
+           (owner (kargu-session-context)) (selection (kargu-selection-context))
+           (generation (cl-incf kargu-api-select--catalog-generation))
+           (win (selected-window)) (win-buf (window-buffer win))
+           (pt (point)) (tick (buffer-chars-modified-tick)))
+      (kargu-select-config-refresh
+       (lambda (result)
+         (when (and (kargu-api-select--focus-unchanged-p origin win win-buf pt tick)
+                    (eq owner (kargu-session-context))
+                    (eq selection (kargu-selection-context))
+                    (= generation kargu-api-select--catalog-generation)
+                    (not (kargu-selection-busy-p)))
+           (if (kargu-err-p result)
+               (message "Kargu: %s" (kargu-result-err-message result))
+             (kargu-api-select--open-provider-selector))))))))
 
 ;;;; Public commands ------------------------------------------------------
 

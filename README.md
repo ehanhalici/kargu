@@ -170,6 +170,13 @@ partially applied and must be corrected before requests can use that config.
 
 Run `M-x kargu-edit-config` to generate or edit your configuration.
 
+Opening the footer provider selector refreshes this file asynchronously before
+listing providers, including custom provider IDs with configured credentials
+or an explicit empty key for local/keyless access. Reopen the selector after
+editing the file. An invalid refresh reports an error without replacing the
+last valid configuration; passive config readers do not read files or unlock
+credentials.
+
 Native sends and connection tests prepare configuration and credentials in
 cancellable workers. Stop also cancels preparation. Each run captures its
 endpoint, model, wire policy and credentials once; retries retain that target.
