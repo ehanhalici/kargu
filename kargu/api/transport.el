@@ -17,6 +17,7 @@
 (require 'kargu/core/custom)
 (require 'kargu/providers/projection)
 (require 'kargu/bridge/application)
+(require 'kargu/bridge/budget)
 
 (defvar kargu-api-timeout)
 (defvar kargu-api-connect-timeout)
@@ -89,6 +90,14 @@ PARTIAL prevents retries after any published response event."
 (defun kargu-transport--deliver (handle options result failure)
   "Deliver core RESULT or FAILURE once for HANDLE using captured OPTIONS."
   (when (eq (kargu-transport-handle-state handle) :pending)
+    (when-let* ((budget (plist-get options :budget)))
+      (condition-case nil
+          (when-let* ((snapshot (and (hash-table-p result) (gethash "budget" result))))
+            (kargu-bridge-budget-observe budget snapshot))
+        (error (setq failure (kargu-bridge--fault "invalid_budget_projection"))))
+      (when (and (hash-table-p failure)
+                 (equal (gethash "status" (gethash "data" failure)) "budget_exhausted"))
+        (setf (kargu-run-budget-status budget) :budget-exhausted)))
     (let ((chunks (kargu-transport-handle-chunks handle)))
       (setf (kargu-transport-handle-state handle) :finished
             (kargu-transport-handle-chunks handle) nil)
@@ -123,11 +132,26 @@ FAILURE ends only this editor delivery."
     (cond
      (failure (kargu-transport--deliver handle options nil failure))
      ((not (buffer-live-p (kargu-transport-handle-owner handle))) (kargu-transport-cancel handle))
-     (t
+     ((plist-get options :budget)
+      (kargu-transport--startup
+       handle (kargu-bridge-budget-ensure
+               (plist-get options :budget) connection scope
+               (lambda (id error-data)
+                 (if error-data (kargu-transport--deliver handle options nil error-data)
+                   (kargu-transport--invoke handle options arguments connection scope
+                                            (kargu-bridge--object "budget_id" id "kind" (plist-get options :debit-kind))))))))
+     (t (kargu-transport--invoke handle options arguments connection scope nil)))))
+
+(defun kargu-transport--invoke (handle options arguments connection scope budget)
+  "Invoke native HTTP with captured ARGUMENTS, SCOPE and optional BUDGET reference.
+HANDLE and OPTIONS own delivery on CONNECTION."
+  (when (eq (kargu-transport-handle-state handle) :pending)
+    (let ((params (kargu-bridge--object "scope" scope "arguments" arguments)))
+      (when budget (puthash "budget" budget params))
       (setf (kargu-transport-handle-connection handle) connection
             (kargu-transport-handle-id handle)
             (kargu-bridge-call
-             connection "api/request" (kargu-bridge--object "scope" scope "arguments" arguments)
+             connection "api/request" params
              (lambda (result error-data) (kargu-transport--deliver handle options result error-data))
              :owner (kargu-transport-handle-owner handle) :timeout :unlimited
              :on-body (lambda (chunk)
@@ -140,7 +164,7 @@ FAILURE ends only this editor delivery."
              :on-delta (lambda (event)
                          (when (eq (kargu-transport-handle-state handle) :pending)
                            (when-let* ((delta (plist-get options :on-delta)))
-                             (funcall delta (kargu-json-to-record event)))))))))))
+                             (funcall delta (kargu-json-to-record event))))))))))
 
 (defun kargu-transport--ready (handle options arguments connection failure)
   "Advance HANDLE after startup using OPTIONS, ARGUMENTS, CONNECTION and FAILURE."
@@ -196,9 +220,13 @@ No network request or subprocess is ever started by Elisp."
          ;; Owner records/closures form cyclic graphs. Preserve their identity;
          ;; copy only DTO authority through the explicit encoders above.
          (delivery-options
-          (list :application application :then (plist-get options :then)
+          (list :application application :budget (plist-get options :budget)
+                :debit-kind (replace-regexp-in-string "-" "_"
+                                                      (substring (symbol-name (or (plist-get options :debit-kind) :normal-request)) 1))
+                :then (plist-get options :then)
                 :else (plist-get options :else) :on-delta (plist-get options :on-delta)
                 :required (append '("api_request")
+                                  (when (plist-get options :budget) '("api_budget"))
                                   (when (or (not (eq (gethash "wire" arguments) :json-null))
                                             (eq (gethash "cache_markers" arguments) t)) '("api_wire"))
                                   (unless (eq (gethash "tuning" arguments) :json-null) '("api_request_policy"))

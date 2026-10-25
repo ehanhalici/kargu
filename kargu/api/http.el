@@ -7,8 +7,8 @@
 ;;; Commentary:
 
 ;; Asynchronous HTTP for chat completions.  Retry on 429/5xx with a
-;; 0.5s floor.  Enforces provider-scoped circuit breakers, unified run
-;; budget accounting, and single logical request handle ownership.
+;; 0.5s floor.  Circuit/retry policy remains here until its native cutover.
+;; Native budgets admit every attempt; Elisp only captures their delivery owner.
 ;; Public internals used by `kargu/api': `kargu--api-post',
 ;; `kargu-busy-p', `kargu-api-cancel'.
 
@@ -83,24 +83,28 @@ become no-ops.  OS/network resources are owned by Rust.")
         (kargu-logical-request-budget request)
       (kargu-application-budget-get))))
 
-(defun kargu-http--ensure-logical-request (gen &optional session origin)
+(defun kargu-http--ensure-logical-request (gen &optional session origin debit-kind)
   "Return or create the owned `kargu-logical-request' for GEN.
-SESSION and ORIGIN identify the request owner when starting a turn."
+SESSION and ORIGIN identify the owner; DEBIT-KIND labels the logical turn."
   (let ((current (kargu-application-current-request)))
     (if (and (kargu-logical-request-p current)
              (= (kargu-logical-request-generation current) gen)
              (not (eq (kargu-logical-request-state current) :cancelled)))
         current
-      (let ((created (kargu-logical-request-create
-                      :generation gen
-                      :session (or session (kargu-session-context))
-                      :origin (or origin (current-buffer))
-                      :circuit-scope (kargu--provider-name)
-                      :budget (kargu-application-budget-get)
-                      :app (kargu-application-context)
-                      :claim (kargu-application-active-claim-token (kargu-application-context))
-                      :state :in-flight)))
+      (let* ((shared (kargu-application-budget-get))
+             (budget (or shared (kargu-budget-create :run-id (format "request-%d" gen))))
+             (created (kargu-logical-request-create
+                       :generation gen
+                       :session (or session (kargu-session-context))
+                       :origin (or origin (current-buffer))
+                       :circuit-scope (kargu--provider-name)
+                       :budget budget :debit-kind (or debit-kind :normal-request)
+                       :app (kargu-application-context)
+                       :claim (kargu-application-active-claim-token (kargu-application-context))
+                       :state :in-flight)))
         (kargu-application-set-active-request created)
+        (unless shared
+          (kargu-logical-request-add-cleanup created (lambda () (kargu-budget-seal budget))))
         (when (or session origin) (kargu-http--attach-owner created))
         created))))
 
@@ -160,8 +164,7 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
   (cl-block kargu--api-post
     (let* ((attempt (or attempt 0))
            (_logical (kargu-http--ensure-logical-request gen))
-           (scope (kargu-http-request-scope gen))
-           (budget (kargu-http-request-budget gen)))
+           (scope (kargu-http-request-scope gen)))
       ;; 1. Circuit breaker gate
       (unless (or (> attempt 0)
                   (kargu-circuit-allow-request-p scope))
@@ -173,16 +176,7 @@ Enforces provider circuit breakers and unified run budget (Contract 6)."
                                        (list :scope scope :side-effect :none))))
         (cl-return-from kargu--api-post nil))
 
-      ;; 2. Run budget debit gate (Contract 6 & DEEP-09)
-      (when budget
-        (let* ((debit-type (if (> attempt 0) :retry-attempt :normal-request))
-               (debit-res (kargu-budget-debit budget debit-type :requests 1)))
-          (when (kargu-err-p debit-res)
-            (kargu-http-clear-busy)
-            (kargu-log 'warn "Run budget exhausted; refusing request (%s)"
-                       (kargu-result-err-message debit-res))
-            (funcall callback debit-res)
-            (cl-return-from kargu--api-post nil))))
+      ;; Every physical attempt is charged by Rust before opening network IO.
 
       (if (and on-delta kargu-stream)
           (kargu--api-post-streaming url auth payload gen callback
@@ -319,19 +313,23 @@ GEN identifies the request; ON-DELTA and ATTEMPT are retained for retries."
     (kargu-http--log-request request 'plain)
     (kargu-http--track-process
      request (kargu-transport-request 'post url
-                  :application (kargu-application-context)
-                  :auth auth :body (kargu-json-encode-record payload)
-                  :wire (kargu-api-wire-record (kargu-api-active-format))
-                  :tuning (kargu-api-request-tuning (kargu--provider-name) (kargu--model))
-                  :provider (kargu--provider-name)
-                  :cache-markers (if (kargu-connection-current)
-                                     (kargu-connection-setting :cache-marker)
-                                   (kargu-provider-cache-marker-p (kargu--provider-name)))
-                  :as 'string :timeout kargu-api-timeout
-                  :then (kargu-http--wrap request
-                                          (lambda (body) (kargu-http--finish-plain request body)))
-                  :else (kargu-http--wrap request
-                                          (lambda (err) (kargu-http--fail-request request err)))))))
+				      :application (kargu-application-context)
+				      :budget (kargu-http-request-budget gen)
+                  :debit-kind (if (> (or attempt 0) 0) :retry-attempt
+                                (if-let* ((logical (kargu-http--request-logical request)))
+                                    (kargu-logical-request-debit-kind logical) :normal-request))
+				      :auth auth :body (kargu-json-encode-record payload)
+				      :wire (kargu-api-wire-record (kargu-api-active-format))
+				      :tuning (kargu-api-request-tuning (kargu--provider-name) (kargu--model))
+				      :provider (kargu--provider-name)
+				      :cache-markers (if (kargu-connection-current)
+							 (kargu-connection-setting :cache-marker)
+						       (kargu-provider-cache-marker-p (kargu--provider-name)))
+				      :as 'string :timeout kargu-api-timeout
+				      :then (kargu-http--wrap request
+							      (lambda (body) (kargu-http--finish-plain request body)))
+				      :else (kargu-http--wrap request
+							      (lambda (err) (kargu-http--fail-request request err)))))))
 
 (defun kargu--api-post-streaming (url auth payload gen callback on-delta
                                       &optional attempt)
@@ -352,6 +350,10 @@ ATTEMPT is the retry count."
    (kargu-transport-request
     'post (kargu-http--request-url request)
     :application (kargu-application-context)
+    :budget (kargu-http-request-budget (kargu-http--request-generation request))
+    :debit-kind (if (> (kargu-http--request-attempt request) 0) :retry-attempt
+                  (if-let* ((logical (kargu-http--request-logical request)))
+                      (kargu-logical-request-debit-kind logical) :normal-request))
     :auth (kargu-http--request-auth request)
     :wire (kargu-api-wire-record (kargu-api-active-format))
     :tuning (kargu-api-request-tuning (kargu--provider-name) (kargu--model))

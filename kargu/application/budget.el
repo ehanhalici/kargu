@@ -1,4 +1,4 @@
-;;; budget.el --- Unified run budget accounting and debit gate -*- lexical-binding: t; -*-
+;;; budget.el --- Run budget intent and native accounting projection -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -6,175 +6,114 @@
 
 ;;; Commentary:
 
-;; Unified accounting record for requests, deadlines, and tokens per run.
-;; Guarantees a single debit gate for normal requests, retries, healing,
-;; and context compaction (ARCH-01, DEEP-09, Contract 6).
-;; Unknown usage is explicitly tracked and never coerced to zero.
+;; Capture UI preferences and display authoritative Rust snapshots.  Request
+;; admission, compaction limits and token accounting are exclusively native.
+;; No local debit or estimated tool-text accounting is permitted here.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'kargu/contract/assert)
-(require 'kargu/contract/result)
+
+(declare-function kargu-bridge-budget-close "kargu/bridge/budget" (budget))
 
 (defconst kargu-budget-default-max-requests 30
-  "Default maximum number of requests allowed per agent run.")
-
+  "Default physical API attempts per root run.")
 (defconst kargu-budget-default-max-compactions 1
-  "Default maximum number of context compaction turns allowed per agent run.")
+  "Default logical compactions per root run.")
 
-(cl-defstruct (kargu-run-budget
-               (:constructor kargu-run-budget--create))
-  "Unified accounting record for requests, deadlines, and tokens per run."
+(cl-defstruct (kargu-run-budget (:constructor kargu-run-budget--create))
+  "Captured preferences and detached native counters; never admission authority."
   (run-id nil :read-only t)
   (max-requests 30 :read-only t)
-  (requests-spent 0)
   (deadline nil :read-only t)
   (max-tokens nil :read-only t)
-  (tokens-spent 0)
-  (tokens-unknown-p nil)
   (max-compactions 1 :read-only t)
-  (compactions-spent 0)
-  (status :ok))
+  (requests-spent 0) (tokens-spent 0) (tokens-unknown-p nil)
+  (compactions-spent 0) (status :ok) native)
 
-(cl-defun kargu-budget-create (&key run-id (max-requests kargu-budget-default-max-requests)
-                                    timeout max-tokens
-                                    (max-compactions kargu-budget-default-max-compactions)
-                                    deadline)
-  "Create a fresh `kargu-run-budget' record for RUN-ID.
-MAX-REQUESTS bounds total HTTP turns and retries.
-TIMEOUT sets a deadline relative to current time in seconds.
-DEADLINE directly sets an absolute deadline timestamp (float-time).
-MAX-TOKENS optionally caps cumulative tokens.
-MAX-COMPACTIONS caps context compaction turns (defaults to 1)."
-  (when max-requests
-    (kargu-contract-assert (lambda (n) (and (integerp n) (> n 0)))
-                           max-requests "MAX-REQUESTS must be a positive integer: %S" max-requests))
+(cl-defun kargu-budget-create (&key run-id
+                                    (max-requests kargu-budget-default-max-requests)
+                                    timeout max-tokens deadline
+                                    (max-compactions kargu-budget-default-max-compactions))
+  "Capture RUN-ID's UI budget intent; Rust admits every actual attempt.
+MAX-REQUESTS and MAX-COMPACTIONS are bounded integer preferences.
+MAX-TOKENS is an optional observed-usage ceiling, not a spend reservation.
+TIMEOUT or absolute DEADLINE capture the original wall-clock expiry."
+  (kargu-contract-assert (lambda (n) (and (integerp n) (<= 1 n 10000))) max-requests)
+  (kargu-contract-assert (lambda (n) (and (integerp n) (<= 0 n 10000))) max-compactions)
   (when max-tokens
-    (kargu-contract-assert (lambda (n) (and (integerp n) (> n 0)))
-                           max-tokens "MAX-TOKENS must be a positive integer: %S" max-tokens))
-  (when max-compactions
-    (kargu-contract-assert (lambda (n) (and (integerp n) (>= n 0)))
-                           max-compactions "MAX-COMPACTIONS must be a non-negative integer: %S" max-compactions))
+    (kargu-contract-assert (lambda (n) (and (integerp n) (> n 0))) max-tokens))
   (when timeout
-    (kargu-contract-assert (lambda (n) (and (numberp n) (> n 0)))
-                           timeout "TIMEOUT must be a positive number: %S" timeout))
-  (when deadline
-    (kargu-contract-assert #'numberp deadline
-                           "DEADLINE must be a number: %S" deadline))
-  (let ((effective-deadline (or deadline
-                                (when (and timeout (> timeout 0))
-                                  (+ (float-time) timeout)))))
-    (kargu-run-budget--create
-     :run-id run-id
-     :max-requests (or max-requests kargu-budget-default-max-requests)
-     :requests-spent 0
-     :deadline effective-deadline
-     :max-tokens max-tokens
-     :tokens-spent 0
-     :tokens-unknown-p nil
-     :max-compactions (or max-compactions kargu-budget-default-max-compactions)
-     :compactions-spent 0
-     :status :ok)))
+    (kargu-contract-assert (lambda (n) (and (numberp n) (> n 0))) timeout))
+  (when deadline (kargu-contract-assert #'numberp deadline))
+  (kargu-run-budget--create
+   :run-id run-id :max-requests max-requests :max-compactions max-compactions
+   :max-tokens max-tokens :deadline (or deadline (and timeout (+ (float-time) timeout)))))
 
-(defun kargu-budget--refusal (budget type requests tokens)
-  "Classify BUDGET refusal for TYPE, REQUESTS and optional TOKENS without debit."
-  (cond
-   ((not (eq (kargu-run-budget-status budget) :ok)) (kargu-run-budget-status budget))
-   ((and (kargu-run-budget-deadline budget)
-         (>= (float-time) (kargu-run-budget-deadline budget))) :exhausted-deadline)
-   ((and (eq type :compaction-turn)
-         (>= (kargu-run-budget-compactions-spent budget)
-             (kargu-run-budget-max-compactions budget))) :exhausted-compactions)
-   ((> (+ requests (kargu-run-budget-requests-spent budget))
-       (kargu-run-budget-max-requests budget)) :exhausted-requests)
-   ((and (kargu-run-budget-max-tokens budget)
-         (> (+ (or tokens 0) (kargu-run-budget-tokens-spent budget))
-            (kargu-run-budget-max-tokens budget))) :exhausted-tokens)))
-
-(cl-defun kargu-budget-debit (budget debit-type &key (requests 1) tokens)
-  "Atomically debit REQUESTS and optional TOKENS from BUDGET for DEBIT-TYPE.
-Normal, retry, compaction, healing and continuation requests share this gate."
+(defun kargu-budget-project (budget snapshot)
+  "Install detached native SNAPSHOT counters in BUDGET without calculating usage."
   (kargu-contract-assert #'kargu-run-budget-p budget)
-  (kargu-contract-assert
-   (lambda (type) (memq type '(:normal-request :retry-attempt :compaction-turn
-                              :healing-turn :continuation)))
-   debit-type)
-  (kargu-contract-assert (lambda (n) (and (integerp n) (> n 0))) requests)
-  (when tokens (kargu-contract-assert #'natnump tokens))
-  (let ((refusal (kargu-budget--refusal budget debit-type requests tokens)))
-    (if refusal
-        (progn
-          (setf (kargu-run-budget-status budget) refusal)
-          (kargu-err "Run budget exhausted" :budget-exhausted
-                     (list :reason refusal :run-id (kargu-run-budget-run-id budget))))
-      (cl-incf (kargu-run-budget-requests-spent budget) requests)
-      (when tokens (cl-incf (kargu-run-budget-tokens-spent budget) tokens))
-      (when (eq debit-type :compaction-turn)
-        (cl-incf (kargu-run-budget-compactions-spent budget)))
-      (kargu-ok budget))))
-
-(defun kargu-budget-record-tokens (budget prompt-tokens completion-tokens)
-  "Record PROMPT-TOKENS and COMPLETION-TOKENS into BUDGET.
-If token counts are nil, sets `tokens-unknown-p' to t without coercing to zero.
-Returns BUDGET."
-  (kargu-contract-assert #'kargu-run-budget-p budget
-                         "BUDGET must be a kargu-run-budget: %S" budget)
-  (when prompt-tokens
-    (kargu-contract-assert (lambda (n) (and (integerp n) (>= n 0))) prompt-tokens
-                           "PROMPT-TOKENS must be a non-negative integer: %S" prompt-tokens))
-  (when completion-tokens
-    (kargu-contract-assert (lambda (n) (and (integerp n) (>= n 0))) completion-tokens
-                           "COMPLETION-TOKENS must be a non-negative integer: %S" completion-tokens))
-  (if (and (null prompt-tokens) (null completion-tokens))
-      (setf (kargu-run-budget-tokens-unknown-p budget) t)
-    (let ((p (or prompt-tokens 0))
-          (c (or completion-tokens 0)))
-      (when (or (null prompt-tokens) (null completion-tokens))
-        (setf (kargu-run-budget-tokens-unknown-p budget) t))
-      (cl-incf (kargu-run-budget-tokens-spent budget) (+ p c))
-      (when (and (kargu-run-budget-max-tokens budget)
-                 (> (kargu-run-budget-tokens-spent budget)
-                    (kargu-run-budget-max-tokens budget)))
-        (setf (kargu-run-budget-status budget) :exhausted-tokens))))
+  (unless (and (hash-table-p snapshot)
+               (cl-every (lambda (key) (natnump (gethash key snapshot)))
+                         '("requests_spent" "compactions_spent" "tokens_spent" "outstanding"))
+               (memq (gethash "tokens_unknown" snapshot :missing) '(t :json-false))
+               (memq (gethash "sealed" snapshot :missing) '(t :json-false))
+               (>= (gethash "requests_spent" snapshot) (kargu-run-budget-requests-spent budget))
+               (>= (gethash "compactions_spent" snapshot) (kargu-run-budget-compactions-spent budget))
+               (>= (gethash "tokens_spent" snapshot) (kargu-run-budget-tokens-spent budget))
+               (or (not (kargu-run-budget-tokens-unknown-p budget))
+                   (eq (gethash "tokens_unknown" snapshot) t)))
+    (error "Invalid native budget projection"))
+  (let* ((refusal (gethash "refusal" snapshot))
+         (status (cond ((equal refusal "requests") :exhausted-requests)
+                       ((equal refusal "compactions") :exhausted-compactions)
+                       ((equal refusal "deadline") :exhausted-deadline)
+                       ((equal refusal "tokens") :exhausted-tokens)
+                       ((equal refusal "unknown_usage") :usage-unknown)
+                       ((equal refusal "accounting") :accounting-failed)
+                       ((or (null refusal) (eq refusal :json-null))
+                        (if (eq (gethash "sealed" snapshot) t) :sealed :ok))
+                       (t (error "Invalid native budget refusal")))))
+    (setf (kargu-run-budget-requests-spent budget) (gethash "requests_spent" snapshot)
+          (kargu-run-budget-compactions-spent budget) (gethash "compactions_spent" snapshot)
+          (kargu-run-budget-tokens-spent budget) (gethash "tokens_spent" snapshot)
+          (kargu-run-budget-tokens-unknown-p budget) (eq (gethash "tokens_unknown" snapshot) t))
+    ;; A late observation cannot re-open a locally revoked delivery lifetime.
+    (when (eq (kargu-run-budget-status budget) :ok)
+      (setf (kargu-run-budget-status budget) status)))
   budget)
 
 (defun kargu-budget-seal (budget)
-  "Seal BUDGET against any further debits.
-Returns BUDGET."
-  (kargu-contract-assert #'kargu-run-budget-p budget
-                         "BUDGET must be a kargu-run-budget: %S" budget)
-  (unless (memq (kargu-run-budget-status budget)
-                '(:exhausted-requests :exhausted-deadline :exhausted-tokens :exhausted-compactions))
+  "Revoke BUDGET's editor ingress and request native drain on its existing lease."
+  (kargu-contract-assert #'kargu-run-budget-p budget)
+  (when (eq (kargu-run-budget-status budget) :ok)
     (setf (kargu-run-budget-status budget) :sealed))
+  (when (fboundp 'kargu-bridge-budget-close) (kargu-bridge-budget-close budget))
   budget)
 
 (defun kargu-budget-live-p (budget)
-  "Return non-nil if BUDGET can accept debits."
+  "Return whether BUDGET's display lease is live; Rust remains the debit gate."
   (and (kargu-run-budget-p budget)
        (eq (kargu-run-budget-status budget) :ok)
-       (let ((deadline (kargu-run-budget-deadline budget)))
-         (or (null deadline) (<= (float-time) deadline)))))
+       (or (null (kargu-run-budget-deadline budget))
+           (< (float-time) (kargu-run-budget-deadline budget)))))
 
 (defun kargu-budget-exhausted-p (budget)
-  "Return non-nil if BUDGET is exhausted, expired, or sealed."
+  "Return non-nil when BUDGET's display lease is not live."
   (not (kargu-budget-live-p budget)))
 
 (defun kargu-budget-remaining-requests (budget)
-  "Return remaining requests allowed on BUDGET."
-  (kargu-contract-assert #'kargu-run-budget-p budget)
-  (max 0 (- (kargu-run-budget-max-requests budget)
-            (kargu-run-budget-requests-spent budget))))
+  "Display remaining attempts from BUDGET's last native projection."
+  (max 0 (- (kargu-run-budget-max-requests budget) (kargu-run-budget-requests-spent budget))))
 
 (defun kargu-budget-remaining-time (budget)
-  "Return remaining seconds before deadline on BUDGET, or nil if no deadline."
-  (kargu-contract-assert #'kargu-run-budget-p budget)
+  "Display seconds before BUDGET's deadline, or nil when unlimited."
   (when-let* ((deadline (kargu-run-budget-deadline budget)))
     (max 0.0 (- deadline (float-time)))))
 
 (defun kargu-budget-summary (budget)
-  "Return an immutable summary plist of BUDGET."
-  (kargu-contract-assert #'kargu-run-budget-p budget)
+  "Return BUDGET's detached display summary."
   (list :run-id (kargu-run-budget-run-id budget)
         :status (kargu-run-budget-status budget)
         :requests-spent (kargu-run-budget-requests-spent budget)
@@ -187,5 +126,4 @@ Returns BUDGET."
         :live-p (kargu-budget-live-p budget)))
 
 (provide 'kargu/application/budget)
-
 ;;; budget.el ends here

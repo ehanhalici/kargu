@@ -102,12 +102,13 @@
          (kargu-session--context
           (kargu-test-session-with-history
            :messages (kargu-compact-test--history 3)))
-         (sent nil))
+         (sent nil) kind)
     (cl-letf (((symbol-function 'kargu-api-send)
-               (lambda (prompt _cb &optional _d) (setq sent prompt)))
+               (lambda (prompt _cb &optional _d debit-kind) (setq sent prompt kind debit-kind)))
               ((symbol-function 'kargu-loop--set-state) (lambda (r s) (plist-put r :state s))))
       (should (kargu--loop-start-compact run "go on"))
       (should sent)
+      (should (eq kind :compaction-turn))
       (should (plist-get run :compacting))
       (should (plist-get run :no-tools))
       (should (= (plist-get run :iterations) 2))

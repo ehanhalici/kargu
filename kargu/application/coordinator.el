@@ -38,6 +38,7 @@
   (origin nil)
   (circuit-scope nil :read-only t)
   (budget nil :read-only t)
+  (debit-kind :normal-request :read-only t)
   (app nil :read-only t)
   (claim nil :read-only t)
   (state :pending)
@@ -71,11 +72,13 @@
 
 (cl-defun kargu-logical-request-create (&key id (generation 0) session origin
                                              (state :pending) process
-                                             retry-timer stream-timer circuit-scope budget app claim)
+                                             retry-timer stream-timer circuit-scope budget app claim
+                                             (debit-kind :normal-request))
   "Create a validated `kargu-logical-request' record.
 ID, GENERATION, SESSION, ORIGIN, STATE, PROCESS, RETRY-TIMER and
 STREAM-TIMER initialize the owned fields.
-CIRCUIT-SCOPE and BUDGET retain accounting owners; APP and CLAIM own delivery."
+CIRCUIT-SCOPE and BUDGET retain accounting owners; APP and CLAIM own delivery.
+DEBIT-KIND identifies the captured logical turn category."
   (kargu-contract-assert #'integerp generation
                          "GENERATION must be an integer: %S" generation)
   (kargu-contract-assert (lambda (s)
@@ -86,7 +89,7 @@ CIRCUIT-SCOPE and BUDGET retain accounting owners; APP and CLAIM own delivery."
    :generation generation
    :session session
    :origin origin
-   :circuit-scope circuit-scope :budget budget :app app :claim claim
+   :circuit-scope circuit-scope :budget budget :app app :claim claim :debit-kind debit-kind
    :state state
    :process process
    :retry-timer retry-timer
@@ -479,6 +482,7 @@ Returns a `kargu-application-claim' token on success."
       (setf (kargu-application-active-run target) nil))
     (when (null (and (not app) kargu--busy))
       (setf (kargu-application-active-request target) nil))
+    (when-let* ((budget (kargu-application-budget target))) (kargu-budget-seal budget))
     (setf (kargu-application-budget target) nil)
     target))
 

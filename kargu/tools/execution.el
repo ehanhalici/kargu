@@ -378,7 +378,7 @@ NAME identifies the tool without including its arguments."
          (budget (kargu-tool-execution-context-budget-scope context)))
     (cond
      (refusal (kargu-err (if (stringp refusal) refusal
-                          (format "ERROR: tool %s unavailable" name)) :tool-unavailable))
+                           (format "ERROR: tool %s unavailable" name)) :tool-unavailable))
      ((and budget (not (kargu-budget-live-p budget)))
       (kargu-err "ERROR: Run budget exhausted before tool execution" :budget-exhausted)))))
 
@@ -433,10 +433,8 @@ Domain-specific fields remain the handler's validation responsibility."
   "Format, sanitize and deliver RESULT for INVOCATION once."
   (let* ((context (kargu-tool-invocation-context invocation))
          (text (kargu-tool-execution-redact
-                (kargu-tool-execution-format-result result)))
-         (budget (kargu-tool-execution-context-budget-scope context)))
-    ;; Tool text length is not observed provider usage.
-    (when budget (kargu-budget-record-tokens budget nil nil))
+                (kargu-tool-execution-format-result result))))
+    ;; Tool output is not a provider request or a provider usage measurement.
     (kargu-async-finish
      (kargu-tool-invocation-task invocation)
      (kargu-tool-execution-truncate-for-model
@@ -451,8 +449,8 @@ Domain-specific fields remain the handler's validation responsibility."
          (root (kargu-tool-execution-context-root
                 (kargu-tool-invocation-context invocation)))
          (done (kargu-async-wrap task
-                                (lambda (result)
-                                  (kargu-tool-execution--complete invocation result)))))
+                                 (lambda (result)
+                                   (kargu-tool-execution--complete invocation result)))))
     (funcall
      (kargu-async-wrap
       task

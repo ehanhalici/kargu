@@ -124,7 +124,7 @@
      :executor (lambda (_) "OK")
      :parameters '(("type" . "object") ("properties" . :json-empty-object))
      :policy '(:modes (agent ask)
-               :available-p (lambda () "LSP server not initialized")))
+		      :available-p (lambda () "LSP server not initialized")))
 
     (kargu-tool-gate-execute reg ctx "lsp_tool" nil
                              :callback (lambda (r) (setq result r)))
@@ -287,7 +287,7 @@
     (should (= (kargu-run-budget-tokens-spent budget) 0))
     (kargu-tool-gate-execute reg ctx "verbose_tool" nil :callback #'ignore)
     (should (= (kargu-run-budget-tokens-spent budget) 0))
-    (should (kargu-run-budget-tokens-unknown-p budget))))
+    (should-not (kargu-run-budget-tokens-unknown-p budget))))
 
 ;; 14. Output budget exhaustion halts tool execution
 (ert-deftest kargu-tool-gate-budget-exhaustion-rejection-test ()
@@ -298,8 +298,11 @@
          (ctx (kargu-tool-execution-context-create
                :root root :mode 'agent :budget-scope budget))
          (called nil) result)
-    (kargu-budget-debit budget :normal-request :requests 1)
-    (kargu-budget-debit budget :normal-request :requests 1)
+    (kargu-budget-project budget
+                          (kargu-bridge--object "requests_spent" 1 "compactions_spent" 0
+                                                "tokens_spent" 0 "outstanding" 0
+                                                "tokens_unknown" :json-false "sealed" :json-false
+                                                "refusal" "requests"))
     (should (kargu-budget-exhausted-p budget))
 
     (kargu-tool-registry-register
@@ -384,7 +387,7 @@
      :parameters schema)
 
     (let* ((def (kargu-tool-registry-find reg "schema_tool"))
-         (params (kargu-tool-definition-parameters def)))
+           (params (kargu-tool-definition-parameters def)))
       ;; Caller tries to mutate in-place
       (should (equal (alist-get "type" params nil nil #'equal) "object")))))
 

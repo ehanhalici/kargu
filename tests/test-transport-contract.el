@@ -42,58 +42,8 @@
       (should-not (kargu-logical-request-retry-timer req))
       (should-not (kargu-logical-request-process req)))))
 
-(ert-deftest kargu-transport-budget-debits-initial-request-test ()
-  "Initial transport attempt debits :normal-request from run budget."
-  (let* ((budget (kargu-budget-create :max-requests 2))
-         (app (kargu-application-create :budget budget)))
-    (should (eq (kargu-application-budget app) budget))
-    (should (= (kargu-run-budget-requests-spent budget) 0))
-
-    ;; Debit 1 normal request
-    (let ((res (kargu-budget-debit budget :normal-request :requests 1)))
-      (should (kargu-ok-p res))
-      (should (= (kargu-run-budget-requests-spent budget) 1)))
-
-    ;; Debit 2nd normal request -> reaches limit
-    (let ((res (kargu-budget-debit budget :normal-request :requests 1)))
-      (should (kargu-ok-p res))
-      (should (= (kargu-run-budget-requests-spent budget) 2)))
-
-    ;; Debit 3rd request -> budget exhausted error
-    (let ((res (kargu-budget-debit budget :normal-request :requests 1)))
-      (should (kargu-err-p res))
-      (should (eq (kargu-result-err-code res) :budget-exhausted))
-      (should (eq (kargu-run-budget-status budget) :exhausted-requests)))))
-
-(ert-deftest kargu-transport-retry-debits-run-budget-test ()
-  "Transport retry attempt debits :retry-attempt from run budget."
-  (let* ((budget (kargu-budget-create :max-requests 2))
-         (res-1 (kargu-budget-debit budget :normal-request :requests 1)))
-    (should (kargu-ok-p res-1))
-    (should (= (kargu-run-budget-requests-spent budget) 1))
-
-    ;; Retry attempt debits the 2nd slot
-    (let ((res-retry (kargu-budget-debit budget :retry-attempt :requests 1)))
-      (should (kargu-ok-p res-retry))
-      (should (= (kargu-run-budget-requests-spent budget) 2)))
-
-    ;; Subsequent retry denied
-    (let ((res-retry-fail (kargu-budget-debit budget :retry-attempt :requests 1)))
-      (should (kargu-err-p res-retry-fail))
-      (should (eq (kargu-result-err-code res-retry-fail) :budget-exhausted)))))
-
-(ert-deftest kargu-transport-records-token-usage-accurately-test ()
-  "Response token usage is attributed to budget; missing tokens mark unknown."
-  (let ((budget (kargu-budget-create :max-tokens 1000)))
-    ;; Normal tokens
-    (kargu-budget-record-tokens budget 100 250)
-    (should (= (kargu-run-budget-tokens-spent budget) 350))
-    (should-not (kargu-run-budget-tokens-unknown-p budget))
-
-    ;; Missing tokens set unknown without coercing to zero
-    (kargu-budget-record-tokens budget nil nil)
-    (should (kargu-run-budget-tokens-unknown-p budget))
-    (should (= (kargu-run-budget-tokens-spent budget) 350))))
+;; Native request/retry/usage policy equivalents: Rust api_budget.rs and
+;; api_budget_stdio.rs; real editor consumer: test-run-budget.el.
 
 (ert-deftest kargu-transport-scoped-circuit-breaker-isolation-test ()
   "Failures on provider A trip circuit A without affecting provider B."

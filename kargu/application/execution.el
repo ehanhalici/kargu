@@ -24,7 +24,7 @@
   "Captured APP, CLAIM, SESSION, ORIGIN, ROOT and RUN with their TASK lifetime."
   (app nil :read-only t) claim (session nil :read-only t)
   (origin nil :read-only t) (root nil :read-only t)
-  (run nil :read-only t) task enter connection
+  (run nil :read-only t) task enter connection budget
   (metadata-legacy (or kargu-metadata--legacy
                        (null (or kargu-application--bound kargu-application-owner))))
   (state :starting))
@@ -40,9 +40,11 @@
     (user-error "Kargu: execution session was replaced before admission"))
   (kargu-execution--create :app app :session session :origin origin :root root :run run))
 
-(defun kargu-execution-prepare (_context)
-  "Attach optional adapter bindings to execution CONTEXT at composition."
-  nil)
+(defun kargu-execution-prepare (context)
+  "Capture CONTEXT's one API budget before any asynchronous run preparation."
+  (let ((budget (kargu-budget-create :run-id (plist-get (kargu-execution-run context) :id))))
+    (setf (kargu-execution-budget context) budget)
+    (kargu-application-set-budget budget (kargu-execution-app context))))
 
 (defun kargu-execution-request-started ()
   "Publish first-request admission in the current execution, exactly once."

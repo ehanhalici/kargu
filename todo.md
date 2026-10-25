@@ -61,10 +61,10 @@ Credential/header assembly de native'ye taşınıp Elisp üretim motorları sili
 (.codex/33); credential lookup editör portudur. Retry/circuit ve model metadata
 normalization hâlâ açık olduğu için tüm API göçü tamamlandı sayılmaz.
 API tüketicileri application-owned native service lease kullanır (.codex/34–35);
-bu henüz native agent run/history sahipliği değildir. Normal loop'un optional
-budget constructor'ını bağlamadığı da doğrulandı; G08 native bağlantıyı kapsar.
-Native typed budget ve HTTP admission/drain servisi eklendi (.codex/36); editor
-root-run consumer bağlantısı tamamlanmadan legacy budget kaldırılmış sayılmaz.
+bu henüz native agent run/history sahipliği değildir. Native budget HTTP
+admission/drain ve gerçek root-run consumer'a bağlandı; eski Elisp debit/token
+toplama motoru silindi (.codex/36). G08 hard reservation/pricing ve genel native
+claim/tool/run birliği hâlâ açıktır; yalnız gözlenen token tavanı harcama garantisi değildir.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
 output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan read/
 Git/skill/webfetch, egress/context ve global tüketiciler aşağıdaki gruplarda

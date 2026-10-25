@@ -1,5 +1,22 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Gerçek root-run budget cutover ve legacy motor kaldırma
+
+Root run budget intent'i async hazırlıktan önce yakalar; logical API/retry aynı
+native ID'yi kullanır. Standalone API lifetime ayrı tutulur. Native sayaçlar
+tek kez project edilir; eski Elisp debit/refusal/token toplama motoru silindi.
+Tool text artık provider usage diye işaretlenmez. Epoch kaybında sıfır ledger
+ile yeniden açılma yoktur. Geç/reentrant allocation ve seal/drain korunur.
+
+**1169/1169 full source ERT**, 0 unexpected, **125.26 s**, touched Werror byte
+compile/checkdoc temiz; üretilen .elc kaldırıldı. 12 editor budget testi ve
+gerçek root-run/HTTP path dahildir. Native baseline **170 + 4 compile-fail**.
+Önceki policy testlerinin native karşılıkları ve private bulk/token-debit
+helper'ının sınırı 36'da açıkça eşlenmiştir; baseline tablosu değiştirilmedi.
+Constructor/seal normal-loop wiring açığı kapandı; G08 hard reservation/pricing,
+native genel claim/tool/run birliği, retry/breaker ve agent/history hâlâ açık.
+Kullanıcı shell.nix/07 değişiklikleri commit dışındadır.
+
 ## 2026-10-25 — Native HTTP budget admission ve drain
 
 `ipc/api/` modülerleştirildi; `api_budget` capability ve owned open/snapshot/

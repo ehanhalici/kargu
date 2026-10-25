@@ -437,6 +437,10 @@ Deliver events to ON-DELTA, completion to ON-FINISH, and admission to ON-READY."
 INITIALIZED is nil when preparation failed before history or edits were touched."
   (let ((context (plist-get run :context))
         (history (or (plist-get run :history) (kargu-history-context))))
+    (when-let* ((budget (and context (kargu-execution-budget context))))
+      (kargu-loop--cleanup-step #'kargu-budget-seal budget)
+      (when (eq budget (kargu-application-budget-get (kargu-execution-app context)))
+        (kargu-application-set-budget nil (kargu-execution-app context))))
     (kargu-loop--cleanup-step #'kargu-loop--detach-origin run)
     (kargu-loop--cleanup-step #'kargu-loop--cancel-retry-timer run)
     (if context

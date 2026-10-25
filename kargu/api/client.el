@@ -75,11 +75,12 @@
   (funcall callback `(("error" . (("message" . ,message)))))
   nil)
 
-(defun kargu-api-send (prompt callback &optional on-delta)
+(defun kargu-api-send (prompt callback &optional on-delta debit-kind)
   "Send the next conversation turn to the active provider asynchronously.
 PROMPT is the new user message (a string), or nil to continue from history.
 CALLBACK is called with one argument: the decoded response alist.
 ON-DELTA is called with each streaming SSE delta event.
+DEBIT-KIND optionally identifies compaction, healing or continuation intent.
 A busy client, a missing key, or a missing endpoint is refused first."
   (kargu-contract-assert #'kargu-contract-prompt-p prompt
                          "PROMPT must be a string or nil: %S" prompt)
@@ -87,36 +88,39 @@ A busy client, a missing key, or a missing endpoint is refused first."
                          "CALLBACK must be callable: %S" callback)
   (kargu-contract-assert #'kargu-contract-callback-p on-delta
                          "ON-DELTA must be callable or nil: %S" on-delta)
-  (kargu-api--send :prompt prompt :callback callback :on-delta on-delta))
+  (kargu-api--send :prompt prompt :callback callback :on-delta on-delta
+                   :debit-kind (or debit-kind :normal-request)))
 
 (cl-defstruct (kargu-api--delivery (:constructor kargu-api--make-delivery))
   "One turn's response owner, including a terminal single-delivery state."
-  callback generation record-turn request (app (kargu-application-context)) (state :pending)
+  callback generation record-turn request (debit-kind :normal-request)
+  (app (kargu-application-context)) (state :pending)
   (origin (current-buffer)) (session (kargu-session-context))
   (history (kargu-history-context)))
 
-(cl-defun kargu-api--send (&key prompt callback on-delta (record-turn t) history)
+(cl-defun kargu-api--send (&key prompt callback on-delta (record-turn t) history (debit-kind :normal-request))
   "Validate connection settings and send PROMPT to CALLBACK and ON-DELTA.
-RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts."
+RECORD-TURN permits reply storage.  HISTORY overrides the request's drafts.
+DEBIT-KIND labels the logical turn before asynchronous preparation."
   (cond
    ((kargu-busy-p) (kargu--api-refuse callback "request already in flight; cancel first"))
    ((kargu-connection-current)
     (kargu-api--send-turn
-     :prompt prompt :callback callback :on-delta on-delta :record-turn record-turn :history history
+     :prompt prompt :callback callback :on-delta on-delta :record-turn record-turn :history history :debit-kind debit-kind
      :key (kargu-connection-snapshot-secret (kargu-connection-current))
      :base (kargu-connection-snapshot-endpoint (kargu-connection-current))))
    (t (kargu-api--prepare-turn :prompt prompt :callback callback :on-delta on-delta
-                              :record-turn record-turn :history history))))
+                               :record-turn record-turn :history history :debit-kind debit-kind))))
 
-(cl-defun kargu-api--prepare-turn (&key prompt callback on-delta record-turn history)
+(cl-defun kargu-api--prepare-turn (&key prompt callback on-delta record-turn history (debit-kind :normal-request))
   "Reserve PROMPT's request before preparing CALLBACK, ON-DELTA and HISTORY.
 RECORD-TURN controls whether a successful response enters history."
   (let* ((delivery (kargu-api--make-delivery
-                    :callback callback :record-turn record-turn :history (kargu-history-context history)
+                    :callback callback :record-turn record-turn :history (kargu-history-context history) :debit-kind debit-kind
                     :generation (kargu-application-next-generation)))
          (request (kargu-http--ensure-logical-request
                    (kargu-api--delivery-generation delivery)
-                   (kargu-api--delivery-session delivery) (kargu-api--delivery-origin delivery))))
+                   (kargu-api--delivery-session delivery) (kargu-api--delivery-origin delivery) debit-kind)))
     (setf (kargu-api--delivery-request delivery) request)
     (kargu-state-transition-status :requesting)
     (when (kargu-api--delivery-owner-live-p delivery)
@@ -189,7 +193,7 @@ RECORD-TURN controls whether a successful response enters history."
       (kargu-api-store-assistant-turn response (kargu-api--delivery-history delivery))))
   response)
 
-(cl-defun kargu-api--send-turn (&key prompt callback on-delta key base (record-turn t) history delivery)
+(cl-defun kargu-api--send-turn (&key prompt callback on-delta key base (record-turn t) history delivery (debit-kind :normal-request))
   "Append PROMPT and start a request using KEY and BASE.
 Deliver events to ON-DELTA and the response to CALLBACK.
 RECORD-TURN permits reply storage; HISTORY supplies drafts.
@@ -198,8 +202,8 @@ DELIVERY retains the captured admission owner."
                     (kargu-history-context history)))
          (added-prompt-p (and prompt (not (string-empty-p prompt))))
          (delivery (or delivery (kargu-api--make-delivery :callback callback :record-turn record-turn
-                                             :history history
-                                             :generation (kargu-application-current-generation)))))
+							  :history history :debit-kind debit-kind
+							  :generation (kargu-application-current-generation)))))
     (when added-prompt-p
       (kargu-history-append `(("role" . "user") ("content" . ,prompt)) history))
     (condition-case-unless-debug err
@@ -228,7 +232,7 @@ Send events to ON-DELTA and the response through DELIVERY."
             (kargu-http--ensure-logical-request
              gen
              (kargu-api--delivery-session delivery)
-             (kargu-api--delivery-origin delivery)))
+             (kargu-api--delivery-origin delivery) (kargu-api--delivery-debit-kind delivery)))
       (setf (kargu-logical-request-connection (kargu-api--delivery-request delivery))
             (kargu-connection-current))
       (unless kargu-application-owner (setq kargu--busy t))
@@ -280,20 +284,17 @@ Build the payload in an isolated history; never store the reply."
                 (or (kargu-response-text response) "") 60)))))
 
 (defun kargu--record-usage (response &optional session)
-  "Accumulate RESPONSE usage in captured SESSION or the current owner.
-Also records usage into the active run budget (Contract 6 & DEEP-09)."
+  "Project RESPONSE usage into captured SESSION or the current UI owner.
+Native budget accounting already happened before response delivery."
   (setq session (or session (kargu-session-context)))
   (when-let* ((usage (kargu-aget response "usage")))
     (let ((in (kargu-aget usage "prompt_tokens"))
           (out (kargu-aget usage "completion_tokens")))
-      (when-let* ((app (ignore-errors (kargu-application-context)))
-                  (budget (and (kargu-application-p app) (kargu-application-budget app))))
-        (kargu-budget-record-tokens budget (and (numberp in) in) (and (numberp out) out)))
       (kargu-session-record-usage (and (numberp in) in) (and (numberp out) out) session)
       (let ((details (kargu-aget usage "prompt_tokens_details")))
         (kargu-session-record-cache-usage in (kargu-aget details "cached_tokens")
-                                           (kargu-aget details "cache_write_tokens")
-                                           :session session))
+                                          (kargu-aget details "cache_write_tokens")
+                                          :session session))
       (when (fboundp 'kargu-state-notify-tokens)
         (kargu-state-notify-tokens session))
       (force-mode-line-update t)

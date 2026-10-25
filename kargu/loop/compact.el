@@ -59,10 +59,12 @@ Count one iteration and return non-nil if started."
     ;; The request is its own user turn; it must never merge into a previous one.
     (when (equal (kargu--history-last-role) "user")
       (kargu--history-add "assistant" "Understood."))
-    (kargu-api-send
-     kargu-prompt-compaction-user
-     (kargu-loop--wrap run (lambda (response)
-                             (kargu--loop-handle-compaction run response))))))
+    (let ((kind (if (plist-get run :compact-attempted) :retry-attempt :compaction-turn)))
+      (plist-put run :compact-attempted t)
+      (kargu-api-send
+       kargu-prompt-compaction-user
+       (kargu-loop--wrap run (lambda (response)
+                               (kargu--loop-handle-compaction run response))) nil kind))))
 
 (defconst kargu-loop--on-compaction
   '((error . kargu-loop--compaction-fail)
@@ -106,15 +108,15 @@ Count one iteration and return non-nil if started."
    :details (format "Compaction failed or timed out:\n%s" err)
    :notice "Choose whether to retry compaction or stop the current agent run."
    :actions '((:key :retry
-               :label "[↻ Retry Compaction]"
-               :face (:inherit success :weight bold)
-               :help "Send the compaction request again"
-               :message "     -> [↻ Retrying compaction...]\n\n")
+		    :label "[↻ Retry Compaction]"
+		    :face (:inherit success :weight bold)
+		    :help "Send the compaction request again"
+		    :message "     -> [↻ Retrying compaction...]\n\n")
               (:key :stop
-               :label "[✗ Stop Run]"
-               :face (:inherit error :weight bold)
-               :help "Abort the current agent run with this error"
-               :message "     -> [✗ Stopped by user]\n\n"))
+		    :label "[✗ Stop Run]"
+		    :face (:inherit error :weight bold)
+		    :help "Abort the current agent run with this error"
+		    :message "     -> [✗ Stopped by user]\n\n"))
    :chat-buffer (plist-get run :chat-buffer)
    :fallback-prompt (format "Compaction timed out: %s. Retry compaction? " err)
    :default-action :stop

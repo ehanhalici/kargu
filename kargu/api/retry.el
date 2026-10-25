@@ -37,7 +37,7 @@ ON-DELTA identifies the original event consumer; no request secrets are exposed.
 (declare-function kargu--api-post "kargu/api/http"
                   (url auth payload gen callback &optional on-delta attempt))
 (declare-function kargu-http--ensure-logical-request "kargu/api/http"
-                  (gen &optional session origin))
+                  (gen &optional session origin debit-kind))
 (declare-function kargu-http-clear-busy "kargu/api/http" ())
 (declare-function kargu-http-request-budget "kargu/api/http" (&optional generation))
 (declare-function kargu-http-request-scope "kargu/api/http" (&optional generation))
