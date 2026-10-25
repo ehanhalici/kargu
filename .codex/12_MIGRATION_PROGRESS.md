@@ -1,5 +1,30 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Application-owned native metadata publication RPC
+
+model_metadata capability ve models/begin/append/commit/abort/snapshot/read
+metotları eklendi. Store application actor'ünün tek writer alanıdır; upload
+session'a, rastgele typed kimliğe ve base revision'a bağlıdır. Commit'e kadar
+veri görünmez. 60s absolute validity (sonraki çağrıda lazy reap), 8 MiB upload,
+16 KiB fragment ve 16 MiB snapshot sınırları vardır. Snapshot bir kez serialize
+edilir; escaped Unicode ve minimum 1 KiB negotiated frame dahil paged okunur.
+Yeni revision eski page isteğini reddeder; session/app close staging'i bırakmaz.
+
+Altı gerçek stdio testi ve iki deterministik expiry/cap testi eklendi. Refusal
+clear'ın all-provider scope'u ve effort-spec bağımsızlığı ayrıca doğrulandı.
+**254 native + 16 compile-fail**, fmt, locked build ve strict all-targets Clippy
+geçti. Güncel normal binary ile **1191/1191 full source ERT**, 0 unexpected,
+**125.91 s** geçti (17:17:56 Europe/Istanbul). Elisp üretim kaynağı değişmedi;
+bytecompile/semantik consumer cutover iddiası yoktur, .elc üretilmedi.
+
+Editor async setter/last-committed projection ve captured-intent preparation
+bariyeriyle gerçek consumer cutover sıradadır. HTTP discovery'nin capacity
+lexeme'lerini de o cutover'da kayıpsız taşı; generic decode'dan geçmiş fraction'ı
+native'a geri yükleyerek exact deneme. Aktif Elisp writer/reader'ı bu yüzden
+henüz silme. Mevcut UI invalid9/free hatası kapandı iddiası, monetary hard-cap
+veya model refinement kanıtı yoktur. Detay 41'de; 01 ve kullanıcı shell.nix/07
+korunur; dış API hesabı/uygulama/model turu çalıştırılmadı.
+
 ## 2026-10-25 — Atomik revisioned native metadata store
 
 models/store artık private MetadataRevision, parse-once ModelUpdate ve tüketilen

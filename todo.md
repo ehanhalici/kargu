@@ -74,8 +74,13 @@ reset'in ACK'ini bekler; UI görünümü admission kararı vermez.
 Model metadata için kesin rate/context/output alan tipleri ve scoped RawValue
 sınırı eklendi (.codex/41). Default /models discovery envelope normalizasyonu
 native profile'a taşındı; Elisp sağlayıcı yanıt ayıklama parser'ları silindi.
-Tam field/capability/rate normalizasyonu, revision'lı store/override ve hazırlık
-bariyeri hâlâ açıktır; senkron custom setter sözleşmesi henüz değiştirilmedi.
+Native field/capability/rate normalizasyonu ve owner/revision-bound atomik store/
+override temeli eklendi. Application actor'ündeki model_metadata RPC bounded
+upload/commit/abort ve immutable snapshot paging sağlar; UI henüz tüketmez.
+Kullanıcı async setter + son committed UI snapshot sözleşmesini onayladı.
+Editor consumer ve captured-intent hazırlık bariyeriyle birlikte cutover,
+ardından eski Elisp semantic writer/reader silme hâlâ açıktır; mevcut public
+setter'ların senkron davranışı bu native temel dilimlerinde değiştirilmedi.
 01 uyum denetimi ve kalan kaynak-sahipliği bulguları .codex/39'da tutulur;
 testlerin yeşil olması bütün Rust ağacının mimari uyum sertifikası değildir.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,

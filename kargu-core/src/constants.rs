@@ -75,6 +75,12 @@ pub mod limits {
     pub const MODEL_CATALOG_BYTES: usize = 8 * 1024 * 1024;
     /// Maximum explicit model records in one complete discovery response.
     pub const MODEL_CATALOG_RECORDS: usize = 20_000;
+    /// Complete canonical projection, transferred through bounded byte pages.
+    pub const MODEL_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
+    /// UTF-8 upload fragment and maximum unescaped snapshot page.
+    pub const MODEL_PAGE_BYTES: usize = 16 * 1024;
+    /// Pending model upload lifetime; unrelated to an agent turn's lifetime.
+    pub const MODEL_UPLOAD_SECONDS: u64 = 60;
     /// Retained charges in one API accounting lifetime.
     pub const API_BUDGET_ATTEMPTS: u64 = 10_000;
     /// Accepted logical compactions per accounting lifetime.
@@ -131,7 +137,7 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 21] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 22] = [
         "api_request",
         "api_wire",
         "api_request_policy",
@@ -141,6 +147,7 @@ pub mod protocol {
         "api_circuit",
         "api_failure",
         "api_model_catalog",
+        "model_metadata",
         "application_lifecycle",
         "application_close",
         "session_lifecycle",
@@ -188,6 +195,18 @@ pub mod protocol {
     }
     /// Canonical method names.
     pub mod methods {
+        /// Start a revision-bound, session-owned bounded metadata upload.
+        pub const MODEL_BEGIN: &str = "models/begin";
+        /// Append one exact-offset UTF-8 fragment, without publication.
+        pub const MODEL_APPEND: &str = "models/append";
+        /// Parse and atomically publish a complete metadata update.
+        pub const MODEL_COMMIT: &str = "models/commit";
+        /// Discard only the caller's exact pending upload.
+        pub const MODEL_ABORT: &str = "models/abort";
+        /// Read the current committed revision/byte descriptor.
+        pub const MODEL_SNAPSHOT: &str = "models/snapshot";
+        /// Read one immutable committed-revision UTF-8 page.
+        pub const MODEL_READ: &str = "models/read";
         /// Credential-free embedded provider definitions for editor projection.
         pub const PROVIDER_CATALOG: &str = "provider/catalog";
         /// Owned HTTP attempt with bounded SSE deltas and explicit cancellation.

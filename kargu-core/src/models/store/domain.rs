@@ -179,9 +179,12 @@ impl TryFrom<&str> for ModelUpdate {
             }
             Kind::ReplaceCatalog => {
                 let Catalog { catalog, .. } = decode(source)?;
-                Operation::ReplaceCatalog(
-                    ModelCatalog::try_from(catalog.get()).map_err(|_| StoreError::Invalid)?,
-                )
+                Operation::ReplaceCatalog(ModelCatalog::try_from(catalog.get()).map_err(
+                    |error| match error {
+                        crate::models::catalog::CatalogError::Limit => StoreError::Limit,
+                        _ => StoreError::Invalid,
+                    },
+                )?)
             }
             Kind::RefuseTools => {
                 let Refusal { model: id, .. } = decode(source)?;

@@ -49,6 +49,8 @@ struct Provider {
     refused: BTreeSet<ModelId>,
     specs: EffortSpecs,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct StoreId(uuid::Uuid);
 fn alias<'a>(
     entries: &'a BTreeMap<ModelId, Entry>,
     id: &'a ModelId,
@@ -72,18 +74,20 @@ fn alias<'a>(
 
 /// A completed pure preparation; consumed exactly once by its original writer.
 pub struct PreparedUpdate {
-    owner: uuid::Uuid,
+    owner: StoreId,
     base: MetadataRevision,
     revision: MetadataRevision,
     providers: BTreeMap<ApiProviderId, Provider>,
     snapshot: Value,
+    snapshot_json: String,
 }
 /// Authoritative application metadata state. No IO or independently mutable view.
 pub struct ModelStore {
-    owner: uuid::Uuid,
+    owner: StoreId,
     revision: MetadataRevision,
     providers: BTreeMap<ApiProviderId, Provider>,
     snapshot: Value,
+    snapshot_json: String,
 }
 impl Default for ModelStore {
     fn default() -> Self {
@@ -93,11 +97,14 @@ impl Default for ModelStore {
 impl ModelStore {
     /// Construct an empty, uniquely owned publication lifetime.
     pub fn new() -> Self {
+        let snapshot = json!({"revision":0,"records":[],"aliases":[],"catalogs":[],"refusals":[]});
+        let snapshot_json = snapshot.to_string();
         Self {
-            owner: uuid::Uuid::new_v4(),
+            owner: StoreId(uuid::Uuid::new_v4()),
             revision: MetadataRevision::default(),
             providers: BTreeMap::new(),
-            snapshot: json!({"revision":0,"records":[],"aliases":[],"catalogs":[],"refusals":[]}),
+            snapshot,
+            snapshot_json,
         }
     }
     /// Borrow the immutable last committed projection; never applies staging.
@@ -108,6 +115,9 @@ impl ModelStore {
     pub fn revision(&self) -> MetadataRevision {
         self.revision
     }
+    pub(crate) fn snapshot_json(&self) -> &str {
+        &self.snapshot_json
+    }
     /// Prepare a complete candidate without mutating live state or awaiting IO.
     pub fn prepare(
         &self,
@@ -117,7 +127,12 @@ impl ModelStore {
     ) -> Result<PreparedUpdate, StoreError> {
         let mut providers = self.providers.clone();
         let entry = providers.entry(provider).or_default();
-        entry.specs = specs;
+        if matches!(
+            &update.0,
+            Operation::Put { .. } | Operation::Override { .. } | Operation::ReplaceCatalog(_)
+        ) {
+            entry.specs = specs;
+        }
         match update.0 {
             Operation::Put { model, metadata } => {
                 entry.entries.entry(model).or_default().raw = Some(metadata)
@@ -157,7 +172,11 @@ impl ModelStore {
             Operation::RefuseTools(model) => {
                 entry.refused.insert(model);
             }
-            Operation::ClearToolRefusals => entry.refused.clear(),
+            Operation::ClearToolRefusals => {
+                for provider in providers.values_mut() {
+                    provider.refused.clear();
+                }
+            }
         }
         let count = providers.values().fold(0_usize, |count, provider| {
             count
@@ -186,11 +205,8 @@ impl ModelStore {
         }
         let revision = self.revision.next()?;
         let snapshot = projection(revision, &providers)?;
-        if serde_json::to_vec(&snapshot)
-            .map_err(|_| StoreError::Invalid)?
-            .len()
-            > limits::MODEL_CATALOG_BYTES.saturating_mul(2)
-        {
+        let snapshot_json = serde_json::to_string(&snapshot).map_err(|_| StoreError::Invalid)?;
+        if snapshot_json.len() > limits::MODEL_SNAPSHOT_BYTES {
             return Err(StoreError::Limit);
         }
         Ok(PreparedUpdate {
@@ -199,6 +215,7 @@ impl ModelStore {
             revision,
             providers,
             snapshot,
+            snapshot_json,
         })
     }
     /// Commit once, refusing another owner or a candidate superseded by a commit.
@@ -209,6 +226,7 @@ impl ModelStore {
         self.providers = update.providers;
         self.revision = update.revision;
         self.snapshot = update.snapshot;
+        self.snapshot_json = update.snapshot_json;
         Ok(self.revision)
     }
 }
@@ -235,7 +253,9 @@ fn projection(
             object.insert("id".to_owned(), json!(model));
             records.push(json!({"provider":id,"id":model,"metadata":metadata,"fields":fields,
                 "tools":fields.allows_tools() && !provider.refused.contains(model),"reasoning":fields.allows_reasoning(),"input_zero":fields.input_is_zero()}));
-            if let Some((_, basename)) = model.as_str().rsplit_once('/') {
+            if let Some((_, basename)) = model.as_str().rsplit_once('/')
+                && !basename.is_empty()
+            {
                 short
                     .entry(basename)
                     .and_modify(|value| *value = None)

@@ -261,9 +261,18 @@ fn tool_refusal_identity_is_scoped_and_does_not_mutate_detached_snapshots() -> T
         store.snapshot().get("refusals"),
         Some(&json!([{"provider":"a","id":"Model"},{"provider":"a","id":"missing"}]))
     );
+    update(
+        &mut store,
+        "b",
+        r#"{"operation":"refuse_tools","model":"Model"}"#,
+    )?;
     update(&mut store, "a", r#"{"operation":"clear_tool_refusals"}"#)?;
     assert_eq!(
         record(&store, "a", "Model").and_then(|record| record.get("tools")),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        record(&store, "b", "Model").and_then(|record| record.get("tools")),
         Some(&json!(true))
     );
     update(
@@ -278,6 +287,40 @@ fn tool_refusal_identity_is_scoped_and_does_not_mutate_detached_snapshots() -> T
     assert_eq!(
         record(&store, "a", "owned").and_then(|record| record.pointer("/metadata/id")),
         Some(&json!("owned"))
+    );
+    Ok(())
+}
+
+#[test]
+fn refusal_observations_do_not_reinterpret_captured_provider_effort_paths() -> TestResult {
+    let mut store = ModelStore::new();
+    let provider = ApiProviderId::try_from("a".to_owned())?;
+    let specs: EffortSpecs = serde_json::from_value(json!([{"path":["options"],"type":"list"}]))?;
+    let prepared = store.prepare(
+        provider,
+        ModelUpdate::try_from(
+            r#"{"operation":"put","model":"Model","metadata":{"options":["low","high"]}}"#,
+        )?,
+        specs,
+    )?;
+    store.commit(prepared)?;
+    let original = record(&store, "a", "Model")
+        .and_then(|record| record.pointer("/fields/reasoning_efforts"))
+        .ok_or("missing efforts")?
+        .clone();
+    update(
+        &mut store,
+        "a",
+        r#"{"operation":"refuse_tools","model":"Model"}"#,
+    )?;
+    assert_eq!(
+        record(&store, "a", "Model").and_then(|record| record.pointer("/fields/reasoning_efforts")),
+        Some(&original)
+    );
+    update(&mut store, "a", r#"{"operation":"clear_tool_refusals"}"#)?;
+    assert_eq!(
+        record(&store, "a", "Model").and_then(|record| record.pointer("/fields/reasoning_efforts")),
+        Some(&original)
     );
     Ok(())
 }

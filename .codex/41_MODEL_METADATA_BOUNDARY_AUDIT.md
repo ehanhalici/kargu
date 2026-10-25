@@ -39,6 +39,53 @@ DTO from the original source. Do not replace this with Value/from_value or an
 internally-tagged raw DTO that loses exact source support. Numeric and store
 fixtures exercise the actual source path; no global serde feature is enabled.
 
+## Native actor/RPC publication foundation
+
+The application actor now owns ModelService/ModelStore. model_metadata exposes
+models/begin, append, commit, abort, snapshot and read under the existing exact
+application/session ReadScope. One bounded upload per application has a random
+typed identity, captured provider/specs/base revision, exact typed byte offset
+and absolute 60-second validity. Expiry is reaped on the next call; no hidden
+timer or external await blocks the actor. Session/app close discards staging.
+Completed RPC calls are not pending executions: cancelling a client publication
+must explicitly abort its captured upload ID; a late begin response must be
+cleaned up rather than acquiring another owner or reconnecting silently.
+
+Input remains <=8 MiB, <=16 KiB UTF-8 append, <=20,000 records; the canonical
+projection is <=16 MiB and is serialized once per preparation. Pages honor the
+negotiated frame, including the 1 KiB minimum, with worst-case JSON escape room
+and UTF-8 boundaries. A read requires the exact committed revision, so a newer
+commit fails an old paged download instead of producing a mixed snapshot.
+Malformed/aborted/expired uploads never publish. A failed/unknown commit ACK must
+not authorize an old UI cache for connection preparation; reconciliation belongs
+to the upcoming owned async editor port, not a synchronous getter RPC.
+
+Six actual stdio fixtures cover staging/ping/commit/replay, sibling application
+and sibling session denial, invalid offsets/abort/invalid command atomicity,
+large escaped Unicode paging and old-revision rejection, the minimum negotiated
+frame, and session/application-close followed by actual shutdown/exit/reap.
+Two deterministic native tests cover absolute expiry and the 8 MiB upload bound.
+An additional store fixture verifies refusal observations cannot erase captured
+effort paths; clearing refusals retains the legacy all-provider scope.
+
+The editor is NOT cut over by advertising this capability. The original HTTP
+catalog record sources retained by ModelCatalog::into_records are exact only
+inside the native domain. The existing into_snapshot/default discovery path
+still needs its numeric-capacity source-preservation consumer cutover: do not
+re-upload a fraction already decoded through generic Value/Lisp floats and
+claim it is exact. UI setters must reject manual floating-point prices in favor
+of exact decimal text/integer input. Map existing synchronous tests to real owned
+async completion, keep synchronous getters as detached reads, await the captured
+submission (not a newer unrelated queue tail), and freeze that ticket's exact
+projection in connection settings before deleting legacy readers/writers.
+
+Final native actor/RPC gate: **254 native + 16 compile-fail**, fmt, locked build
+and strict all-targets Clippy passed. The rebuilt normal-feature binary passed
+**1191/1191 full source ERT**, 0 unexpected, **125.91 s**, at 17:17:56
+Europe/Istanbul. Production Lisp was not changed or bytecompiled by these
+native foundations, and no elc files were generated. No abstract TLC result is
+presented as a proof of this concrete metadata revision/publication refinement.
+
 ## Status and observed evidence — 2026-10-25
 
 Default HTTP resilience is native at 71dc32d (40); live-model metadata is NOT

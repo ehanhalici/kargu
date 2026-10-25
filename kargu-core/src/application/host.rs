@@ -303,6 +303,29 @@ impl Host {
 
     fn ready_call(&mut self, method: &str, params: Value) -> Result<Value, Fault> {
         match method {
+            methods::MODEL_BEGIN
+            | methods::MODEL_APPEND
+            | methods::MODEL_COMMIT
+            | methods::MODEL_ABORT
+            | methods::MODEL_SNAPSHOT
+            | methods::MODEL_READ => {
+                let request: ReadRequest<Value> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                if !self.owns_read_scope(&request.scope) {
+                    return Err(owner_fault());
+                }
+                let frame = self.frame_limit;
+                self.actor_mut(&request.scope)
+                    .map_err(|_| owner_fault())?
+                    .models
+                    .rpc(
+                        &request.scope.session_id,
+                        method,
+                        request.arguments,
+                        frame,
+                        std::time::Instant::now(),
+                    )
+            }
             methods::PING if empty_params(&params) => Ok(json!({"status":"ok"})),
             methods::PING => Err(Fault::params()),
             methods::PROVIDER_CATALOG if empty_params(&params) => self

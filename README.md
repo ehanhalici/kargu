@@ -109,8 +109,13 @@ decisions are native. Default live-model discovery also normalizes provider
 envelopes in Rust (requiring `api_model_catalog`) before the editor sees a
 canonical list. Explicit empty catalogs prune that provider; malformed/null/error
 responses retain its last good cache. Price number lexemes cross this boundary
-as lossless decimal strings. Semantic model-field normalization, the metadata
-store/override cutover and wider agent run/history migration remain open.
+as lossless decimal strings. Rust also contains exact model-field normalization
+and an application-owned revisioned metadata store, exposed by the paged
+`model_metadata` service. Its uploads are session-owned and invisible until
+atomic commit; stale revisions cannot mix snapshot pages. The editor still
+uses its existing metadata reader/writer pending the approved asynchronous
+setter, last-committed UI projection and connection-preparation cutover.
+Wider agent run/history migration also remains open.
 
 Chat retries stay within one native logical exchange, with a fresh budget debit
 before every physical attempt. `kargu-api-retry-max` is the single retry limit
