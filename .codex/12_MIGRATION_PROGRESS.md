@@ -1,5 +1,21 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-25 — Native HTTP budget admission ve drain
+
+`ipc/api/` modülerleştirildi; `api_budget` capability ve owned open/snapshot/
+close servisleri eklendi. API POST her fiziksel denemeyi IO öncesinde native
+kapıdan geçirir; mevcut budget'ı atlama, foreign ID, overlap ve yeniden canlanan
+closed ID reddedilir. Close yalnız charged HTTP işi join/collect olduktan sonra
+yanıtlanır. Deadline admission/network/final-body egress için ortaktır; gerçek
+usage bir kez toplanır. Ayrıntılı sınırlar ve kalan işler 36'dadır.
+
+**170 Rust testi + 4 compile-fail**, locked build, fmt ve strict Clippy geçer.
+**1170/1170 full source ERT**, 0 unexpected, **124.77 s**. Yedi yeni real
+stdio/socket ve iki mailbox testi dahildir. Yeni bağımlılık/ücretli çağrı yok.
+Henüz editor root-run consumer cutover değildir; eski Elisp budget motoru bir
+sonraki bağlantı kesimine kadar korunur. Native genel claim/agent/history,
+retry/breaker ve G08 reservation/pricing hâlâ açıktır.
+
 ## 2026-10-25 — Native API budget domain foundation
 
 Typed budget meter eklendi: bounded attempt/compaction limits, checked exact

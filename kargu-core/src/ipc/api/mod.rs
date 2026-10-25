@@ -1,9 +1,11 @@
 //! A single mailbox writer owns API admission, publication and drained release.
 
+mod budget;
 use super::protocol::{self, Fault, RpcId};
 use crate::constants::limits;
 use crate::{
     api::{ApiError, HttpRequest},
+    application::budget::ObservedUsage,
     application::host::{Host, ReadScope},
     error::CoreError,
 };
@@ -18,12 +20,15 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 struct Request {
     scope: ReadScope,
     arguments: HttpRequest,
+    #[serde(default)]
+    budget: Option<budget::BudgetRef>,
 }
 struct Pending {
     scope: ReadScope,
     cancel: CancellationToken,
     published: bool,
     terminal: Option<ApiError>,
+    charge: Option<budget::Charge>,
 }
 struct Event {
     id: RpcId,
@@ -36,17 +41,22 @@ enum EventValue {
 
 enum Ready {
     Event(Event),
-    Completed(RpcId, Result<Value, ApiError>),
+    Completed(RpcId, Outcome),
+}
+struct Outcome {
+    result: Result<Value, ApiError>,
+    usage: ObservedUsage,
 }
 
 pub(super) struct ApiRequests {
     pending: HashMap<RpcId, Pending>,
-    workers: JoinSet<(RpcId, Result<Value, ApiError>)>,
+    workers: JoinSet<(RpcId, Outcome)>,
     sender: mpsc::Sender<Event>,
     events: mpsc::Receiver<Event>,
     ready: VecDeque<Ready>,
     root: CancellationToken,
     _guard: DropGuard,
+    budgets: budget::Budgets,
 }
 impl Default for ApiRequests {
     fn default() -> Self {
@@ -60,20 +70,45 @@ impl Default for ApiRequests {
             ready: VecDeque::with_capacity(limits::API_EVENTS.saturating_add(1)),
             _guard: root.clone().drop_guard(),
             root,
+            budgets: budget::Budgets::default(),
         }
     }
 }
 impl ApiRequests {
     pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
-        self.pending
-            .values()
-            .any(|pending| &pending.scope.application_id == id)
+        self.budgets.owns_application(id)
+            || self
+                .pending
+                .values()
+                .any(|pending| &pending.scope.application_id == id)
     }
     pub fn contains(&self, id: &RpcId) -> bool {
-        self.pending.contains_key(id)
+        self.pending.contains_key(id) || self.budgets.contains(id)
     }
     pub fn is_empty(&self) -> bool {
-        self.workers.is_empty() && self.pending.is_empty() && self.ready.is_empty()
+        self.workers.is_empty()
+            && self.pending.is_empty()
+            && self.ready.is_empty()
+            && !self.budgets.closing()
+    }
+    pub fn budget_rpc(
+        &mut self,
+        host: &Host,
+        method: &str,
+        id: RpcId,
+        params: Value,
+    ) -> Result<Option<Value>, Fault> {
+        let pending = &self.pending;
+        self.budgets.rpc(host, method, id, params, |application| {
+            pending
+                .values()
+                .any(|request| &request.scope.application_id == application)
+        })
+    }
+    pub fn collect(&mut self, host: &Host) -> Vec<Value> {
+        let replies = self.budgets.collect(host);
+        self.sweep(host);
+        replies
     }
     pub fn start(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
         let request: Request = serde_json::from_value(params).map_err(|_| Fault::params())?;
@@ -83,6 +118,13 @@ impl ApiRequests {
         if self.root.is_cancelled() || self.pending.len() >= limits::API_REQUESTS {
             return Err(fault("resource_limit", "API admission limit reached"));
         }
+        let charge = self.budgets.admit(
+            host,
+            &request.scope,
+            request.budget.as_ref(),
+            request.arguments.generative(),
+        )?;
+        let budget_deadline = charge.as_ref().map(|charge| charge.deadline);
         let cancel = self.root.child_token();
         self.pending.insert(
             id.clone(),
@@ -91,6 +133,7 @@ impl ApiRequests {
                 cancel: cancel.clone(),
                 published: false,
                 terminal: None,
+                charge,
             },
         );
         let sender = self.sender.clone();
@@ -103,7 +146,7 @@ impl ApiRequests {
         self.workers.spawn(async move {
             let event_id = id.clone();
             let event_sender = sender.clone();
-            let result = crate::api::execute(
+            let exchange = crate::api::execute(
                 request.arguments,
                 move |value| {
                     let sender = event_sender.clone();
@@ -119,17 +162,44 @@ impl ApiRequests {
                     }
                 },
                 cancel.clone(),
-            )
-            .await;
+            );
+            let result = if let Some(deadline) = budget_deadline {
+                tokio::select! {
+                    biased;
+                    _ = deadline.elapsed() => Err(ApiError::Deadline),
+                    result = exchange => result,
+                }
+            } else {
+                exchange.await
+            };
+            let (result, usage) = match result {
+                Ok(value) => match ObservedUsage::try_from(&value) {
+                    Ok(usage) => (Ok(value), usage),
+                    Err(_) => (Err(ApiError::Protocol), ObservedUsage::default()),
+                },
+                Err(error) => (Err(error), ObservedUsage::default()),
+            };
             let result = match result {
-                Ok(value) => publish_body(&sender, &id, value, &cancel, page_bytes).await,
+                Ok(value) => {
+                    let publish = publish_body(&sender, &id, value, &cancel, page_bytes);
+                    if let Some(deadline) = budget_deadline {
+                        tokio::select! {
+                            biased;
+                            _ = deadline.elapsed() => Err(ApiError::Deadline),
+                            result = publish => result,
+                        }
+                    } else {
+                        publish.await
+                    }
+                }
                 Err(error) => Err(error),
             };
-            (id, result)
+            (id, Outcome { result, usage })
         });
         Ok(())
     }
     pub fn cancel(&mut self, id: &RpcId) {
+        self.budgets.cancel_waiter(id);
         if let Some(pending) = self.pending.get(id) {
             pending.cancel.cancel();
         }
@@ -139,7 +209,12 @@ impl ApiRequests {
     }
     pub fn sweep(&mut self, host: &Host) {
         for pending in self.pending.values() {
-            if !host.owns_read_scope(&pending.scope) {
+            if !host.owns_read_scope(&pending.scope)
+                || pending
+                    .charge
+                    .as_ref()
+                    .is_some_and(|charge| self.budgets.revoked(&charge.id))
+            {
                 pending.cancel.cancel();
             }
         }
@@ -196,19 +271,26 @@ impl ApiRequests {
                 }
                 Ok(Some(notification))
             }
-            Ready::Completed(id, result) => {
+            Ready::Completed(id, outcome) => {
                 let pending = self.pending.remove(&id).ok_or(CoreError::CleanupFailed)?;
+                let snapshot = pending
+                    .charge
+                    .map(|charge| self.budgets.finish(charge, outcome.usage))
+                    .transpose()?;
                 let result = if let Some(error) = pending.terminal {
                     Err(error)
                 } else if pending.cancel.is_cancelled() || !host.owns_read_scope(&pending.scope) {
                     Err(ApiError::Cancelled)
                 } else {
-                    result
+                    outcome.result
                 };
-                let payload = match result {
+                let mut payload = match result {
                     Ok(value) => value,
                     Err(error) => json!({"failure":error.snapshot(),"partial":pending.published}),
                 };
+                if let Some(snapshot) = snapshot {
+                    payload["budget"] = snapshot;
+                }
                 Ok(Some(protocol::success(&id, payload)))
             }
         }
@@ -217,11 +299,30 @@ impl ApiRequests {
         self.cancel_all();
         self.events.close();
         while let Some(result) = self.workers.join_next().await {
-            let _ = result.map_err(|_| CoreError::CleanupFailed)?;
+            let (id, outcome) = result.map_err(|_| CoreError::CleanupFailed)?;
+            self.collect_usage(&id, outcome.usage)?;
+        }
+        while let Some(ready) = self.ready.pop_front() {
+            if let Ready::Completed(id, outcome) = ready {
+                self.collect_usage(&id, outcome.usage)?;
+            }
+        }
+        for pending in self.pending.values_mut() {
+            if let Some(charge) = pending.charge.take() {
+                self.budgets.finish(charge, ObservedUsage::default())?;
+            }
         }
         self.pending.clear();
         self.ready.clear();
         while self.events.try_recv().is_ok() {}
+        Ok(())
+    }
+    fn collect_usage(&mut self, id: &RpcId, usage: ObservedUsage) -> Result<(), CoreError> {
+        if let Some(pending) = self.pending.get_mut(id)
+            && let Some(charge) = pending.charge.take()
+        {
+            self.budgets.finish(charge, usage)?;
+        }
         Ok(())
     }
 }
@@ -300,6 +401,7 @@ mod tests {
                     cancel: api.root.child_token(),
                     published: false,
                     terminal: None,
+                    charge: None,
                 },
             );
         }
@@ -330,8 +432,15 @@ mod tests {
             }
         });
         let completed = first.clone();
-        api.workers
-            .spawn(async move { (completed, Ok(json!({"body_ready":true}))) });
+        api.workers.spawn(async move {
+            (
+                completed,
+                Outcome {
+                    result: Ok(json!({"body_ready":true})),
+                    usage: ObservedUsage::default(),
+                },
+            )
+        });
         tokio::task::yield_now().await;
         let mut body = false;
         let mut terminal = false;

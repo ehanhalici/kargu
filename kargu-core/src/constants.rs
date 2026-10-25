@@ -115,11 +115,12 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 16] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 17] = [
         "api_request",
         "api_wire",
         "api_request_policy",
         "api_auth",
+        "api_budget",
         "application_lifecycle",
         "application_close",
         "session_lifecycle",
@@ -171,6 +172,12 @@ pub mod protocol {
         pub const PROVIDER_CATALOG: &str = "provider/catalog";
         /// Owned HTTP attempt with bounded SSE deltas and explicit cancellation.
         pub const API_REQUEST: &str = "api/request";
+        /// Allocate one shared, application-bound accounting lifetime.
+        pub const API_BUDGET_OPEN: &str = "api/budget/open";
+        /// Detached authoritative accounting observation.
+        pub const API_BUDGET_SNAPSHOT: &str = "api/budget/snapshot";
+        /// Revoke admission and cancel/drain all charged attempts before replying.
+        pub const API_BUDGET_CLOSE: &str = "api/budget/close";
         /// Approved persistent process startup; returns identity, not completion.
         pub const JOB_START: &str = "job/start";
         /// Confirm that the client installed its owner-close cleanup after startup.

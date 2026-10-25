@@ -199,6 +199,9 @@ async fn read_messages<R: AsyncRead + Unpin>(
     let mut expiry = tokio::time::interval(timeouts::PENDING_SWEEP);
     let mut shutdown_reply = None;
     loop {
+        for reply in api.collect(host) {
+            queue_reply(reply, host.frame_limit(), tx, permits)?;
+        }
         for reply in lifecycle
             .collect(host, |application| {
                 reads.owns_application(application)
@@ -312,6 +315,25 @@ async fn read_messages<R: AsyncRead + Unpin>(
                         && let Err(fault) = api.start(host, id.clone(), params)
                     {
                         queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                    }
+                    continue;
+                }
+                if matches!(
+                    method.as_str(),
+                    methods::API_BUDGET_OPEN
+                        | methods::API_BUDGET_CLOSE
+                        | methods::API_BUDGET_SNAPSHOT
+                ) {
+                    if let Some(id) = id.as_ref() {
+                        let reply = match api.budget_rpc(host, &method, id.clone(), params) {
+                            Ok(Some(value)) => Some(protocol::success(id, value)),
+                            Ok(None) => None,
+                            Err(fault) => Some(fault.response(Some(id))),
+                        };
+                        api.sweep(host);
+                        if let Some(reply) = reply {
+                            queue_reply(reply, host.frame_limit(), tx, permits)?;
+                        }
                     }
                     continue;
                 }

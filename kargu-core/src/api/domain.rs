@@ -200,6 +200,9 @@ impl TryFrom<RequestDto> for HttpRequest {
     }
 }
 impl HttpRequest {
+    pub(crate) fn generative(&self) -> bool {
+        self.method == Method::POST
+    }
     pub(super) fn connect_timeout(&self) -> Duration {
         self.timeouts.connect_ms.0
     }

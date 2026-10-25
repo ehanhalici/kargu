@@ -85,6 +85,10 @@ impl TryFrom<Duration> for ExecutionTimeout {
 #[derive(Clone, Copy)]
 pub struct Deadline(Option<Instant>);
 impl Deadline {
+    /// Capture an already absolute monotonic deadline, including an expired one.
+    pub const fn at(at: Instant) -> Self {
+        Self(Some(at))
+    }
     /// Whether a configured finite deadline has elapsed.
     pub fn expired(self) -> bool {
         self.0.is_some_and(|at| Instant::now() >= at)
