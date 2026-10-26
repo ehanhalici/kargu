@@ -62,6 +62,22 @@ enum Binding {
     Session,
 }
 impl ProviderDefinition {
+    /// Configuration policy reads names, never process environment values.
+    pub fn environment(&self) -> impl Iterator<Item = &str> {
+        self.env.iter().map(EnvironmentName::as_str)
+    }
+    /// Literal catalog endpoint spelling; policy validates the selected target.
+    pub fn endpoint_text(&self) -> &str {
+        self.api.as_str()
+    }
+    /// Declared keyless authentication profile.
+    pub fn keyless(&self) -> bool {
+        self.keyless
+    }
+    /// Local runner annotation, independent of authentication.
+    pub fn local(&self) -> bool {
+        self.local
+    }
     /// Canonical API namespace, never an installed-application backend ID.
     pub fn id(&self) -> &ApiProviderId {
         &self.id
@@ -139,6 +155,10 @@ impl TryFrom<&str> for ProviderCatalog {
     }
 }
 impl ProviderCatalog {
+    /// Bounded immutable baseline for configuration policy capture.
+    pub fn definitions(&self) -> impl Iterator<Item = &ProviderDefinition> {
+        self.providers.values()
+    }
     /// Parse the packaged versioned baseline without network/credential access.
     pub fn embedded() -> Result<Self, CoreError> {
         Self::try_from(EMBEDDED_MANIFEST)

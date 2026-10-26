@@ -447,6 +447,12 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] Native config authority/precedence/env/keyless/selection kalan
     consumer cutover'ı. Parser/schema dilimi aşağıda kapandı; salt editor
     credential interop portuna inmek için seçim ve publication motoru hâlâ açık.
+    - [x] Native typed config policy ve application actor publication temeli:
+      owner-bound expiring prepare/commit/abort ticket, native revision/snapshot,
+      exact-revision resolve; env/global/TOML/keyless/interop ve endpoint/model
+      policy native'de. Bu temel tek başına consumer cutover değildir. .codex/52.
+    - [ ] Gerçek config/connection/UI consumer cutover ve kalan Elisp publication/
+      precedence/env/keyless/eligibility/default-selection motorlarını sil.
   - [x] Gerçek config refresh tüketicisini `configuration/parse` native portuna
     bağla; TOML/schema/legacy-import ve content digest Rust'ta. Eski 221 satırlık
     `config/toml.el` silindi. Bounded source, safe line errors, legacy scalar

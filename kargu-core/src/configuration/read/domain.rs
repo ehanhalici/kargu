@@ -9,7 +9,12 @@ use std::{
 
 #[derive(Deserialize)]
 #[serde(try_from = "String")]
-pub(super) struct ConfigurationPath(pub(super) PathBuf);
+pub(crate) struct ConfigurationPath(pub(super) PathBuf);
+impl ConfigurationPath {
+    pub(crate) fn as_path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
 impl TryFrom<String> for ConfigurationPath {
     type Error = CoreError;
     fn try_from(value: String) -> Result<Self, Self::Error> {

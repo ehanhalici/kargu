@@ -5,6 +5,7 @@ mod file;
 use self::domain::{CandidatePaths, ReadTimeout};
 use super::{ConfigurationSource, ParseInput, RefreshGeneration};
 use crate::error::CoreError;
+pub(crate) use domain::ConfigurationPath;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};

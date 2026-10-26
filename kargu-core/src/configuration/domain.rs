@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 pub const MAX_SOURCE_BYTES: usize = 64 * 1024;
 
 /// Editor refresh ordering identity; an echo, not native publication authority.
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Deserialize, Serialize, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]
 pub struct RefreshGeneration(u64);
 
@@ -76,7 +76,7 @@ impl TryFrom<String> for ConfigurationSource {
 }
 
 /// Parsed field text may itself be an API key; generic serialization is absent.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(try_from = "String")]
 pub(super) struct ConfigText(Zeroizing<String>);
 impl TryFrom<String> for ConfigText {

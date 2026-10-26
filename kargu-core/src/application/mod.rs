@@ -289,6 +289,7 @@ pub struct ApplicationActor {
     active: Option<ActiveRun>,
     job_runs: HashMap<RunId, ActiveRun>,
     pub(crate) models: crate::models::service::ModelService,
+    pub(crate) configuration: crate::configuration::policy::ConfigurationService,
 }
 impl ApplicationActor {
     /// Create an empty application; composition owns this handle.
@@ -300,6 +301,7 @@ impl ApplicationActor {
             active: None,
             job_runs: HashMap::new(),
             models: crate::models::service::ModelService::default(),
+            configuration: crate::configuration::policy::ConfigurationService::default(),
         }
     }
     /// Register a new conversation without admitting a run.
@@ -328,6 +330,7 @@ impl ApplicationActor {
         }
         if self.sessions.remove(session) {
             self.models.close_session(session);
+            self.configuration.close_session(session);
             Ok(())
         } else {
             Err(CoreError::StaleOwner)
@@ -339,6 +342,7 @@ impl ApplicationActor {
             return Err(CoreError::StaleOwner);
         }
         self.models.close_session(session);
+        self.configuration.close_session(session);
         for run in self.active.iter().chain(self.job_runs.values()) {
             if run.handle.scope.session_id() == session {
                 run.handle.resources.cancellation.cancel();
@@ -349,6 +353,7 @@ impl ApplicationActor {
     /// Revoke application admission/publication while retaining live run ledgers.
     pub(crate) fn revoke_all(&mut self) {
         self.models.revoke();
+        self.configuration.revoke();
         self.sessions.clear();
         for run in self.active.iter().chain(self.job_runs.values()) {
             run.handle.resources.cancellation.cancel();

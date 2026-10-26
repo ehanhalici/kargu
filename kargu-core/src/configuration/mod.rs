@@ -16,6 +16,7 @@
 
 mod document;
 mod domain;
+pub mod policy;
 pub mod read;
 pub use domain::{
     ConfigurationError, ConfigurationSource, MAX_SOURCE_BYTES, RefreshGeneration, SourceLine,

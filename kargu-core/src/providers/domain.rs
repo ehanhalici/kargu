@@ -193,6 +193,12 @@ impl TryFrom<String> for EnvironmentName {
         Ok(Self(value))
     }
 }
+impl EnvironmentName {
+    /// Variable identity only; no associated value is stored in this type.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 /// Implemented wire families; provider IDs remain an open independent namespace.
 #[derive(Clone, Copy, Deserialize, Serialize)]

@@ -251,6 +251,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
             }
             _ = expiry.tick() => {
                 pending.expire(tokio::time::Instant::now());
+                host.sweep_configuration(std::time::Instant::now());
                 reads.sweep(host);
                 api.sweep(host);
                 for message in commands.tick(host, pending).map_err(|_| TransportError::Command)? {

@@ -136,6 +136,11 @@ impl Default for Host {
 }
 
 impl Host {
+    pub(crate) fn sweep_configuration(&mut self, now: std::time::Instant) {
+        for application in self.applications.values_mut() {
+            application.actor_mut().configuration.sweep(now);
+        }
+    }
     /// Start a host with a fresh, non-reusable connection epoch.
     pub fn new() -> Self {
         Self {
@@ -343,6 +348,31 @@ impl Host {
 
     fn ready_call(&mut self, method: &str, params: Value) -> Result<Value, Fault> {
         match method {
+            "configuration/prepare"
+            | "configuration/commit"
+            | "configuration/abort"
+            | "configuration/snapshot"
+            | "configuration/resolve" => {
+                let request: ReadRequest<Value> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                if !self.owns_read_scope(&request.scope) {
+                    return Err(owner_fault());
+                }
+                let catalog = self.providers.as_ref().map_err(|_| Fault::params())?;
+                let actor = self
+                    .applications
+                    .get_mut(&request.scope.application_id)
+                    .ok_or_else(owner_fault)?
+                    .actor_mut();
+                actor.configuration.rpc(
+                    &request.scope.session_id,
+                    method,
+                    request.arguments,
+                    catalog,
+                    self.frame_limit,
+                    std::time::Instant::now(),
+                )
+            }
             methods::MODEL_BEGIN
             | methods::MODEL_APPEND
             | methods::MODEL_COMMIT
