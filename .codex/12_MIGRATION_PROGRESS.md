@@ -1,5 +1,45 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Todo 2: native Git log/branch/stash ve ortak read ownership
+
+`d27e8b9` ile todo 2 gerçek tüketici dilimlerine ayrıldı. `git_log`,
+`git_branches`, `git_stashes` closed `git/read`/`git_read` portuyla mevcut native
+ExecutionGate ve PGID/process supervisor'a bağlandı. Eski Elisp log/list argv ve
+empty-report motorları silindi; mutation/diff/blame tüketicileri nedeniyle genel
+Git runner kaldı. `workspace/git/repository.rs` status ve query'nin aynı root,
+worktree, executable/env, complete-output ve RunSettings hazırlığını paylaşır;
+Git motoru/parser'ı yazılmadı. Ayrıntı .codex/53.
+
+Literal/deleted/missing path, typed CommitLimit, descriptor-bound .git + target,
+complete UTF-8/captured byte/IPC sınırları; no-pager/no-signature/no-lazy-fetch
+politikası gerçek Git ile testlendi. Unknown-field fixture serde unit variant'ın
+fazla alanları kabul ettiğini yakaladı; boş struct variant ile kapandı. 70 KiB
+subject testi adapter'ın genel 64 KiB command prefix'e düşmediğini doğrular.
+Origin buffer/session/application, DTO capture ve cleanup ortak read portunda
+sertleştirildi; closed/expired parent ve startup/cevap sonrası delayed timer
+yarışları core/RPC/başarı yayını başlamadan reddedilir.
+
+Ek açık alt iş: gerçek positive-control, `git diff --no-ext-diff --no-textconv`
+çağrısının `.gitattributes` clean filtresiyle executable çalıştırabildiğini gösterdi.
+Bu nedenle native read enum/registry'ye diff/blame eklenmedi; config/filter
+snapshot ve doğru execution sınıfı kurulmadan SafeReadOnly yetkisi verilmez.
+Fake-signed commit + GPG marker positive-control'ü signature engelini de sınar.
+
+Final **1274/1274 source ERT**, 0 unexpected, **148.078585 s**, **20:35:56**;
+**298 native + 24 compile-fail = 322** locked test / 32 suite temiz. Locked normal
+build/fmt/strict Clippy ve beş değişen Elisp dosyasında Werror bytecompile/checkdoc
+temiz; elc yalnız task-specific /tmp dizinlerinde. Kayıtlar
+`/tmp/kargu-git-queries-{verified-source-ert,native-verified,build-verified,
+clippy-verified,bytecompile-verified,checkdoc}.log` dosyalarında. Connection TLC
+**602836 / 101708**, queue 0, depth 22 (**20:33:28**); transport **1810 / 693**,
+queue 0, depth 13 (**20:33:29**) temiz. Bunlar bounded regresyon; somut Git/OS
+refinement veya tüm 01 uyumluluğunun formal ispatı değildir.
+
+Todo 2 üst grup açık; üç Git tüketicisi ve ortak read lifecycle alt işleri `[x]`.
+read_file/diff/blame/mutation/skill/toolchain/webfetch ve son global bridge cleanup
+açık kalır. Kullanıcı 07/shell.nix değişiklikleri korunur; canlı Emacs reload,
+gerçek kullanıcı repo/credential mutation, upstream/login/kurulum veya push yoktur.
+
 ## 2026-10-26 — Todo 1 tamamen kapandı: native config authority ve gerçek consumer cutover
 
 `ff96691` typed native temelinden sonra gerçek config/connection/setup/catalog ve

@@ -1,6 +1,6 @@
 //! Closed native read-operation boundary shared by host admission and IO workers.
 
-mod command;
+pub(crate) mod command;
 pub mod git;
 pub mod grep;
 pub mod listing;

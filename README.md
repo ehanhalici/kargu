@@ -66,7 +66,8 @@ Clone the repository and add it to your Emacs `load-path`:
 
 The Rust core provides bounded JSON-RPC IPC, application/session lifecycle,
 native `find_files`, GNU `ls` listing, `rg`/GNU `grep` search (including aliases),
-`git_status`, Bash/interactive jobs, the provider catalog and model HTTP/SSE.
+`git_status`, `git_log`, branch/stash listing, Bash/interactive jobs, the provider
+catalog and model HTTP/SSE.
 Elisp still owns prompts, request/wire policy and agent orchestration; this
 is not yet a complete Rust agent backend.
 
@@ -472,8 +473,20 @@ Git write may leave a lock file; check for another Git process before recovery.
 Magit-style sections. It disables optional index writes and executable
 fsmonitor config, honors host ignore settings, and supports linked worktrees.
 Incomplete/malformed/non-UTF-8 status data fails explicitly; no Elisp status
-engine is kept as fallback. Other Git commands are not yet migrated.
-`git_branches` and `git_stashes` are read-only in all modes. Stash `apply`
+engine is kept as fallback. `git_log`, `git_branches`, `git_stashes` now use the
+same native gate/supervisor through the closed `git_read` capability; there is
+no legacy read fallback. Log counts are 1..10000, and path filters are literal,
+workspace-contained names, including deleted paths. Complete output must fit
+the captured byte and IPC budgets; invalid UTF-8 is not silently replaced.
+Pager/signature programs and lazy promisor fetch are disabled. The installed
+Git must support `--no-lazy-fetch`; unsupported versions fail rather than retry
+without the safety flag. Native Git remains a live read, not an atomic repo
+snapshot or an OS sandbox. `git_diff`/`git_blame` and mutation commands remain
+separate migration work: clean/process filters require more than disabling
+external diff and textconv. The shared read port freezes inputs before startup,
+retains its initiating application/session, and rejects elapsed deadlines even
+before timer dispatch. `git_branches` and `git_stashes` are read-only in all
+modes. Stash `apply`
 requires an explicit `stash@{N}` entry from `git_stashes`; its immutable object
 ID is resolved before approval, and applying never deletes the stash. `pop`
 and `drop` are refused because an index may change while approval is pending.

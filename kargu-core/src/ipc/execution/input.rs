@@ -4,7 +4,7 @@ use super::reply::Reply;
 use crate::domain::StderrPolicy;
 use crate::{
     application::{Mode, RunPurpose, RunSettings},
-    constants::{limits, timeouts},
+    constants::timeouts,
     domain::{
         ConfigRevision, ExecutionTimeout, IdleTimeout, OutputLimit, OutputRetention,
         PolicyRevision, ToolCallLimit, ToolName,
@@ -16,7 +16,7 @@ use serde::Deserialize;
 use std::{
     collections::BTreeMap,
     ffi::OsString,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -140,11 +140,4 @@ impl ExecuteInput {
     }
 }
 
-pub(crate) fn validate_path(path: &Path) -> Result<(), CoreError> {
-    if path.as_os_str().len() > limits::SEARCH_PATH_BYTES
-        || path.components().any(|c| c == Component::ParentDir)
-    {
-        return Err(CoreError::Rejected);
-    }
-    Ok(())
-}
+pub(crate) use crate::workspace::command::validate_path;

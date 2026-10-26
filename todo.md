@@ -522,6 +522,20 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     fsmonitor/pager etkileri kapatılsın. Repository/worktree/path, exact argv,
     bounded complete output, alias/direct/mode, owner/cancel/drain ve missing
     capability testlerinden sonra eski Elisp argv/range/report yolları silinsin.
+    - [x] `git_log`, `git_branches`, `git_stashes`: closed `git/read` DTO,
+      ortak native gate/supervisor, literal/deleted path, no-pager/no-signature/
+      no-lazy-fetch ve complete UTF-8 çıktı. Eski Elisp log/list argv ve empty
+      report yolları silindi; mutation executor son tüketicileri için korunur.
+    - [ ] `git_diff`/`git_blame`: `--no-ext-diff`/`--no-textconv` tek başına
+      `filter.*.clean/process` yürütmesini kapatmıyor; gerçek marker fixture'ı
+      bunu doğruladı. Filtre/config snapshot ve safe classification sınırı
+      kurulmadan native SafeReadOnly diye yayınlama; corpus/positive-control,
+      config değişimi ve linked worktree kabulüyle gerçek tüketicileri taşı.
+  - [x] Ortak native read editor portunda bulunan ek lifecycle işleri: immutable
+    DTO capture, initiating application/session, origin kill/mode cleanup,
+    closed/expired parent öncesi startup reddi; startup/cevap yield'inden sonra
+    timer dispatch beklemeden absolute deadline kontrolü. Git/search/list/status
+    tüketicileri aynı portta; native kaynak admission'ı actual drain'e bağlıdır.
   - [ ] `read_file`: bounded disk capture/range/encoding/binary/numbering kararı
     typed native porta taşınsın; unsaved/dirty/live-output buffer snapshot ve
     revision kontrolü Emacs interop kalsın. FIFO/device, symlink/path replacement,

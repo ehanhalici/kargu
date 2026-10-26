@@ -132,17 +132,10 @@ and compare against COMMIT when specified."
 (defun kargu-git-log (callback &optional max-count path)
   "Pass recent commit log to CALLBACK.  MAX-COUNT caps results (default 10).
 PATH optionally filters by file path."
-  (let* ((root (kargu-permission-project-root))
-         (args (append (list "log" "-n" (number-to-string (max 1 (or max-count 10)))
-                             "--oneline" "--graph" "--decorate")
-                       (kargu-git--path-args path root "log path"))))
-    (kargu-git--run
-     args root
-     (lambda (res)
-       (kargu-process-deliver
-        callback
-        (lambda ()
-          (if (string-empty-p (cdr res)) "(no commits found)" (cdr res))))))))
+  (kargu-git-native-read
+   callback (kargu-permission-project-root) kargu-git-timeout kargu-process-max-bytes
+   (kargu-bridge--object "operation" "log" "max_count" (or max-count 10)
+                         "path" (or (kargu-nonempty path) :json-null))))
 
 ;;;; Changing commands ----------------------------------------------------
 
@@ -277,8 +270,8 @@ ALL optionally stages modified files."
          (act (downcase (string-trim (or action "list")))))
     (cond
      ((string= act "list")
-      (kargu-git--run '("branch" "-a") root
-                      (lambda (res) (funcall callback (cdr res)))))
+      (kargu-git-native-read callback root kargu-git-timeout kargu-process-max-bytes
+                             (kargu-bridge--object "operation" "branches")))
      ((assoc act kargu-git--branch-actions)
       (kargu-git--branch-change act name root callback))
      (t
@@ -339,12 +332,8 @@ before approval.  Pop/drop are refused; delete manually with Git/Magit."
          (act (downcase (string-trim (or action "list")))))
     (cond
      ((string= act "list")
-      (kargu-git--run '("stash" "list") root
-                      (lambda (res)
-                        (funcall callback
-                                 (if (string-empty-p (cdr res))
-                                     "(no stash entries)"
-                                   (cdr res))))))
+      (kargu-git-native-read callback root kargu-git-timeout kargu-process-max-bytes
+                             (kargu-bridge--object "operation" "stashes")))
      ((string= act "push")
       (kargu-git--stash-change act :message message :root root :callback callback))
      ((string= act "apply") (kargu-git--stash-apply stash root callback))

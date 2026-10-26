@@ -6,7 +6,7 @@ use crate::{
     domain::ByteLimit,
     error::CoreError,
     process::{CapturedOutput, ProcessResult},
-    workspace::git::StatusReport,
+    workspace::git::{GitReadReport, StatusReport},
     workspace::grep::GrepReport,
 };
 use serde_json::{Value, json};
@@ -15,6 +15,7 @@ pub(super) enum Reply {
     Command,
     Grep(GrepReport),
     GitStatus(StatusReport),
+    GitRead(GitReadReport),
 }
 impl Reply {
     pub fn capture_limit(&self) -> Result<ByteLimit, CoreError> {
@@ -22,6 +23,7 @@ impl Reply {
             Self::Command => limits::SEARCH_RESULT_BYTES,
             Self::Grep(report) => report.output_limit.as_usize().max(1),
             Self::GitStatus(report) => report.output_limit.as_usize().max(1),
+            Self::GitRead(report) => report.output_limit().as_usize().max(1),
         })
     }
     pub fn render(
@@ -37,6 +39,7 @@ impl Reply {
             ""
         };
         let text = match self {
+            Self::GitRead(report) => report.text(&output.stdout, &output.stderr, result.outcome)?,
             Self::GitStatus(report) if result.outcome == ToolOutcome::Ok => report.text(
                 std::str::from_utf8(&output.stdout).map_err(|_| CoreError::InvalidToolOutput)?,
             )?,

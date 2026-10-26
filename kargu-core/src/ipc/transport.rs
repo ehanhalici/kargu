@@ -357,6 +357,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                         | methods::LIST_FILES
                         | methods::GREP
                         | methods::GIT_STATUS
+                        | methods::GIT_READ
                         | methods::JOB_START
                 ) {
                     if let Some(id) = id.as_ref() {
@@ -366,6 +367,8 @@ async fn read_messages<R: AsyncRead + Unpin>(
                             commands.start_grep(host, id.clone(), params)
                         } else if method == methods::GIT_STATUS {
                             commands.start_git_status(host, id.clone(), params)
+                        } else if method == methods::GIT_READ {
+                            commands.start_git_read(host, id.clone(), params)
                         } else if method == methods::JOB_START {
                             commands.start_job(host, id.clone(), params)
                         } else {

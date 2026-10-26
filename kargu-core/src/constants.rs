@@ -137,7 +137,8 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 28] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 29] = [
+        "git_read",
         "configuration_policy",
         "configuration_read",
         "configuration_parse",
@@ -279,6 +280,8 @@ pub mod protocol {
         pub const GREP: &str = "workspace/grep";
         /// Fixed-argv, complete-output read-only Git status report.
         pub const GIT_STATUS: &str = "git/status";
+        /// Closed fixed-argv read-only Git query through shared execution policy.
+        pub const GIT_READ: &str = "git/read";
         /// Cancel pending request.
         pub const CANCEL: &str = "rpc/cancel";
         /// Drain host.

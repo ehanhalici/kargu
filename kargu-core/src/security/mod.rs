@@ -160,7 +160,7 @@ pub struct CommandInput {
 /// Validated immutable command; no Debug or Serialize can disclose its arguments.
 pub struct CommandSpec {
     safety: ToolSafetyLevel,
-    read_target: Option<ReadTarget>,
+    read_targets: Vec<ReadTarget>,
     pub(crate) invocation: PathBuf,
     pub(crate) program: PathBuf,
     pub(crate) arguments: Vec<OsString>,
@@ -217,7 +217,7 @@ impl TryFrom<CommandInput> for CommandSpec {
         }
         Ok(Self {
             safety: ToolSafetyLevel::ExecutesArbitraryCode,
-            read_target: None,
+            read_targets: Vec::new(),
             invocation: input.program,
             program,
             arguments: input.arguments,
@@ -277,21 +277,24 @@ impl CommandSpec {
         command.safety = ToolSafetyLevel::SafeReadOnly;
         Ok(command)
     }
-    /// Trusted status adapter disables optional writes and executable fsmonitor config.
-    pub(crate) fn git_status(input: CommandInput) -> Result<Self, CoreError> {
+    /// Trusted fixed-argv Git adapters disable optional writes and executable config.
+    pub(crate) fn git_read(input: CommandInput) -> Result<Self, CoreError> {
         let mut command = Self::try_from(input)?;
         command.safety = ToolSafetyLevel::SafeReadOnly;
         Ok(command)
     }
     pub(crate) fn with_read_target(mut self, target: PathBuf) -> Result<Self, CoreError> {
-        self.read_target = Some(ReadTarget::try_from(target)?);
+        if self.read_targets.len() >= 8 {
+            return Err(CoreError::Limit);
+        }
+        self.read_targets.push(ReadTarget::try_from(target)?);
         Ok(self)
     }
     fn revalidate(&self, run: &RunHandle) -> Result<(), CoreError> {
         run.check_live()?;
         run.settings().workspace.revalidate()?;
         self.cwd.revalidate()?;
-        if let Some(target) = &self.read_target {
+        for target in &self.read_targets {
             target.revalidate()?;
         }
         if !self.cwd.path.starts_with(run.settings().workspace.path()) {
@@ -364,6 +367,16 @@ impl ToolRegistry {
             ToolSafetyLevel::SafeReadOnly,
         )
     }
+    pub(crate) fn register_git_reads(&mut self) -> Result<(), CoreError> {
+        for name in ["git_log", "git_branches", "git_stashes"] {
+            self.register(
+                ToolName::try_from(name.to_owned())?,
+                vec![],
+                ToolSafetyLevel::SafeReadOnly,
+            )?;
+        }
+        Ok(())
+    }
     fn register(
         &mut self,
         name: ToolName,
@@ -414,8 +427,12 @@ fn digest(
 ) -> Result<ActionDigest, CoreError> {
     let mut hash = Sha256::new();
     hash.update(b"kargu-command-v1");
-    if let Some(target) = &command.read_target {
-        hash.update([1]);
+    hash.update(
+        u64::try_from(command.read_targets.len())
+            .map_err(|_| CoreError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    for target in &command.read_targets {
         let metadata = target.metadata()?;
         hash.update(metadata.dev().to_le_bytes());
         hash.update(metadata.ino().to_le_bytes());
@@ -426,8 +443,6 @@ fn digest(
                 .to_le_bytes(),
         );
         hash.update(path);
-    } else {
-        hash.update([0]);
     }
     let scope = serde_json::to_vec(run.scope())
         .map_err(|_| CoreError::InvalidValue { field: "RunScope" })?;

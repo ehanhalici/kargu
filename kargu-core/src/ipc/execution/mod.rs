@@ -60,6 +60,13 @@ struct GitStatusRequest {
     arguments: crate::workspace::git::GitStatusInput,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GitReadRequest {
+    scope: ReadScope,
+    arguments: crate::workspace::git::GitReadInput,
+}
+
 pub(super) struct Commands {
     operations: HashMap<RpcId, Stage>,
     gate: ExecutionGate,
@@ -81,6 +88,7 @@ impl Commands {
         registry.register_listing()?;
         registry.register_grep()?;
         registry.register_git_status()?;
+        registry.register_git_reads()?;
         Ok(Self {
             operations: HashMap::new(),
             gate: ExecutionGate::default(),
@@ -150,6 +158,19 @@ impl Commands {
                 settings,
                 tool: ToolName::try_from("git_status".to_owned())?,
                 reply: Reply::GitStatus(report),
+            })
+        })
+    }
+    pub fn start_git_read(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
+        let request: GitReadRequest =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        self.admit(host, id, request.scope, RunPurpose::AgentTurn, move || {
+            let (command, settings, tool, report) = request.arguments.prepare()?;
+            Ok(Prepared {
+                command,
+                settings,
+                tool,
+                reply: Reply::GitRead(report),
             })
         })
     }

@@ -123,8 +123,8 @@
       (kargu-bridge-job--disconnect job status))
     (kargu-bridge--dismiss-reverse connection)
     (dolist (timer (append (list (kargu-bridge-connection-dispatch-timer connection)
-                                (kargu-bridge-connection-stop-timer connection))
-                          (kargu-bridge-connection-reverse-timers connection)))
+                                 (kargu-bridge-connection-stop-timer connection))
+                           (kargu-bridge-connection-reverse-timers connection)))
       (when (timerp timer) (cancel-timer timer)))
     (setf (kargu-bridge-connection-dispatch-timer connection) nil
           (kargu-bridge-connection-stop-timer connection) nil
@@ -264,21 +264,21 @@ this waiter; it never kills a connection used by another task."
   "Run native file discovery with ARGUMENTS on CONNECTION for OWNER.
 CALLBACK receives the native (RESULT ERROR).  No Elisp fallback is executed."
   (kargu-bridge--workspace-read connection arguments callback :owner owner
-                               :method "workspace/findFiles" :capability "workspace_find_files"))
+				:method "workspace/findFiles" :capability "workspace_find_files"))
 
 (cl-defun kargu-bridge-list-files (connection arguments callback &key owner)
   "List a directory using ARGUMENTS on CONNECTION for OWNER.
 CALLBACK receives the native (RESULT ERROR).  Never scan directories in Elisp."
   (kargu-bridge--workspace-read connection arguments callback :owner owner
-                               :method "workspace/listFiles" :capability "workspace_list_files_ls"))
+				:method "workspace/listFiles" :capability "workspace_list_files_ls"))
 
 (cl-defun kargu-bridge-grep (connection arguments callback &key owner)
   "Search with captured ARGUMENTS on CONNECTION for OWNER using native Unix tools.
 CALLBACK receives (RESULT ERROR); no Elisp process fallback is executed."
   (kargu-bridge--workspace-read
-     connection arguments callback :owner owner :method "workspace/grep"
-     :capability "workspace_grep"
-     :timeout (kargu-bridge--read-timeout arguments)))
+   connection arguments callback :owner owner :method "workspace/grep"
+   :capability "workspace_grep"
+   :timeout (kargu-bridge--read-timeout arguments)))
 
 (defun kargu-bridge--read-timeout (arguments)
   "Native read ARGUMENTS' deadline with eleven seconds for actual cleanup."
@@ -290,6 +290,13 @@ CALLBACK receives (RESULT ERROR); no Elisp process fallback is executed."
 CALLBACK receives the native (RESULT ERROR); there is no Elisp fallback."
   (kargu-bridge--workspace-read
    connection arguments callback :owner owner :method "git/status" :capability "git_status"
+   :timeout (kargu-bridge--read-timeout arguments)))
+
+(cl-defun kargu-bridge-git-read (connection arguments callback &key owner)
+  "Query Git using captured ARGUMENTS on CONNECTION for OWNER.
+CALLBACK receives native (RESULT ERROR); no legacy process fallback exists."
+  (kargu-bridge--workspace-read
+   connection arguments callback :owner owner :method "git/read" :capability "git_read"
    :timeout (kargu-bridge--read-timeout arguments)))
 
 (cl-defun kargu-bridge-execute (connection arguments callback &key owner)
@@ -306,7 +313,7 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
                 (member capability (append (kargu-bridge-connection-capabilities connection) nil))
                 (hash-table-p (kargu-bridge-connection-read-scope connection))))
       (progn (kargu-bridge--callback callback nil
-                                    (kargu-bridge--fault "unavailable" "Native workspace read unavailable; rebuild kargu-core")) nil)
+                                     (kargu-bridge--fault "unavailable" "Native workspace read unavailable; rebuild kargu-core")) nil)
     (kargu-bridge-call
      connection method
      (kargu-bridge--object "scope" (kargu-bridge-connection-read-scope connection) "arguments" arguments)
@@ -367,8 +374,8 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
                    (request-id (and (hash-table-p params) (gethash "request_id" params)))
                    (entry (gethash request-id (kargu-bridge-connection-pending connection))))
               (when-let* ((consumer (and entry (if (equal method "api/delta")
-                                                  (kargu-bridge--pending-on-delta entry)
-                                                (kargu-bridge--pending-on-body entry)))))
+                                                   (kargu-bridge--pending-on-delta entry)
+                                                 (kargu-bridge--pending-on-body entry)))))
                 (condition-case nil
                     (funcall consumer (gethash (if (equal method "api/delta") "delta" "chunk") params))
                   ((error quit) (kargu-bridge--cancel connection request-id "consumer_failed"))))))
@@ -514,8 +521,8 @@ ERROR-DATA skips hydration; older peers retain the packaged projection."
   "Bind CONNECTION's read-service session before completing startup CALLBACK.
 This is an adapter service identity, not an imported user conversation or run."
   (if (not (cl-some (lambda (capability)
-                     (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
-                   '("workspace_find_files" "workspace_list_files_ls" "workspace_grep" "git_status" "command_execute" "api_request")))
+                      (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
+                    '("workspace_find_files" "workspace_list_files_ls" "workspace_grep" "git_status" "git_read" "command_execute" "api_request")))
       (kargu-bridge--start-finish connection callback nil)
     (setf (kargu-bridge-connection-state connection) 'binding)
     (kargu-bridge-call

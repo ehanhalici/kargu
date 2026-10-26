@@ -11,6 +11,18 @@
 
 (require 'kargu/bridge/read)
 
+(defun kargu-git-native-read (callback root timeout output-bytes query)
+  "Run closed native QUERY in ROOT into CALLBACK.
+Capture TIMEOUT and OUTPUT-BYTES; Git policy and argv belong to Rust."
+  (unless (or (null timeout) (and (numberp timeout) (> timeout 0)))
+    (error "Git timeout must be positive or nil"))
+  (kargu-bridge-read-task
+   callback
+   (kargu-bridge--object "root" (copy-sequence root) "output_bytes" output-bytes
+                         "timeout_ms" (if timeout (max 1 (ceiling (* 1000 timeout))) :json-null)
+                         "query" query)
+   #'kargu-bridge-git-read))
+
 (defun kargu-git-native-status (callback root timeout output-bytes)
   "Report native status in ROOT to CALLBACK with TIMEOUT and OUTPUT-BYTES.
 TIMEOUT is seconds or nil; no legacy process fallback is executed."
@@ -19,7 +31,7 @@ TIMEOUT is seconds or nil; no legacy process fallback is executed."
   (kargu-bridge-read-task
    callback
    (kargu-bridge--object "root" (copy-sequence root) "output_bytes" output-bytes
-                        "timeout_ms" (if timeout (max 1 (ceiling (* 1000 timeout))) :json-null))
+                         "timeout_ms" (if timeout (max 1 (ceiling (* 1000 timeout))) :json-null))
    #'kargu-bridge-git-status))
 
 (provide 'kargu/tools/git/native)
