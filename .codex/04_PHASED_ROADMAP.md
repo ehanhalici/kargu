@@ -101,8 +101,10 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
   - [ ] read/diğer Git/skill/webfetch kalan portları.
     - [x] `git_log`, `git_branches`, `git_stashes` closed native read portu ve
       ortak execution/process gate; legacy log/list argv/report kaldırma (53).
-    - [ ] Git diff/blame: clean/process filter audit ve config snapshot sınırı;
-      salt `--no-textconv`/`--no-ext-diff` ile SafeReadOnly sayılmaz (53).
+    - [x] `read_file`: fd capture/encoding/range/presentation native; live raw
+      snapshot/tick editor interop ve eski model reader/sync alias silme (54).
+    - [x] Git diff/blame + status clean-filter düzeltmesi: isolated config/layout,
+      owned preflight/drain ve private metadata cleanup; no unsafe fallback (56).
 - [ ] Diff parser/generator + revision'lı proposal/journal ve Emacs transaction
   adapter'ı 06'ya göre kurulsun; review callback'i placeholder kalmasın.
 - [ ] Eski Elisp loop opt-in adapter üzerinden `tool/execute` çağırabilsin.

@@ -1,17 +1,19 @@
 //! Shared Git repository capture, fixed safety flags and explicit environment.
 
 use super::super::command;
+use super::profile::CapturedProfile;
 use crate::{
     application::{Mode, RunSettings},
     domain::{CapturePolicy, ConfigRevision, OutputLimit, PolicyRevision, ToolCallLimit},
     error::CoreError,
-    security::{CommandEnvironment, CommandInput, CommandSpec, Workspace},
+    security::{CommandEnvironment, CommandInput, CommandSpec, ReadTarget, Workspace},
 };
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, time::Duration};
 
 pub(super) struct Repository {
     pub(super) workspace: Workspace,
     directory: PathBuf,
+    identity: ReadTarget,
 }
 impl TryFrom<PathBuf> for Repository {
     type Error = CoreError;
@@ -23,9 +25,15 @@ impl TryFrom<PathBuf> for Repository {
         let workspace = Workspace::try_from(root)?;
         // Git interprets linked-worktree gitfiles; never discover a parent repo.
         let directory = workspace.path().join(".git").canonicalize()?;
+        let identity = if directory.is_file() {
+            ReadTarget::snapshot(directory.clone())?
+        } else {
+            ReadTarget::try_from(directory.clone())?
+        };
         Ok(Self {
             workspace,
             directory,
+            identity,
         })
     }
 }
@@ -36,6 +44,26 @@ impl Repository {
         timeout: Option<Duration>,
         output: OutputLimit,
     ) -> Result<CommandSpec, CoreError> {
+        self.command_with_profile(arguments, timeout, output, None)
+    }
+    pub(super) fn isolated_command(
+        &self,
+        arguments: Vec<OsString>,
+        timeout: Option<Duration>,
+        output: OutputLimit,
+        profile: &CapturedProfile,
+    ) -> Result<CommandSpec, CoreError> {
+        self.command_with_profile(arguments, timeout, output, Some(profile))
+    }
+    fn command_with_profile(
+        &self,
+        arguments: Vec<OsString>,
+        timeout: Option<Duration>,
+        output: OutputLimit,
+        profile: Option<&CapturedProfile>,
+    ) -> Result<CommandSpec, CoreError> {
+        self.workspace.revalidate()?;
+        self.identity.revalidate()?;
         let program = command::executable("git")?;
         let binary_directory = program
             .parent()
@@ -43,7 +71,7 @@ impl Repository {
             .as_os_str()
             .to_os_string();
         let mut directory = OsString::from("--git-dir=");
-        directory.push(&self.directory);
+        directory.push(profile.map_or(self.directory.as_path(), CapturedProfile::worktree));
         let mut worktree = OsString::from("--work-tree=");
         worktree.push(self.workspace.path());
         let mut argv: Vec<OsString> = vec![
@@ -56,6 +84,12 @@ impl Repository {
             "core.fsmonitor=false".into(),
             "-c".into(),
             "core.untrackedCache=false".into(),
+            "-c".into(),
+            "diff.autoRefreshIndex=false".into(),
+            "-c".into(),
+            "submodule.recurse=false".into(),
+            "-c".into(),
+            "status.submoduleSummary=false".into(),
         ];
         argv.extend(arguments);
         let mut environment = BTreeMap::from([
@@ -75,22 +109,39 @@ impl Repository {
                 environment.insert(key.into(), value);
             }
         }
-        Ok(CommandSpec::git_read(CommandInput {
+        if let Some(profile) = profile {
+            environment.insert("GIT_CONFIG_NOSYSTEM".into(), "1".into());
+            environment.insert("GIT_CONFIG_GLOBAL".into(), "/dev/null".into());
+            environment.insert("GIT_ATTR_NOSYSTEM".into(), "1".into());
+            environment.insert(
+                "GIT_COMMON_DIR".into(),
+                profile.common().as_os_str().to_owned(),
+            );
+            environment.insert(
+                "GIT_INDEX_FILE".into(),
+                profile.index().as_os_str().to_owned(),
+            );
+        }
+        let mut command = CommandSpec::git_read(CommandInput {
             program,
             arguments: argv,
             working_directory: self.workspace.path().to_path_buf(),
             timeout,
             environment: CommandEnvironment::try_from(environment)?,
         })?
-        .with_read_target(self.directory.clone())?
+        .with_target_evidence(self.identity.duplicate()?)?
         .with_capture(CapturePolicy::Complete)
-        .with_output_limit(output))
+        .with_output_limit(output);
+        if let Some(profile) = profile {
+            command = profile.bind(command)?;
+        }
+        Ok(command)
     }
-    pub(super) fn settings(self, timeout: Option<Duration>) -> Result<RunSettings, CoreError> {
+    pub(super) fn settings(&self, timeout: Option<Duration>) -> Result<RunSettings, CoreError> {
         match timeout {
             Some(timeout) => RunSettings::new(
                 Mode::Ask,
-                self.workspace,
+                self.workspace.clone(),
                 ToolCallLimit::default(),
                 timeout,
                 ConfigRevision::ZERO,
@@ -98,7 +149,7 @@ impl Repository {
             ),
             None => Ok(RunSettings::persistent(
                 Mode::Ask,
-                self.workspace,
+                self.workspace.clone(),
                 ToolCallLimit::default(),
                 ConfigRevision::ZERO,
                 PolicyRevision::ZERO,

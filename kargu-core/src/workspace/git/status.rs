@@ -1,15 +1,14 @@
 //! Bounded porcelain-v1 presentation, not repository/index/diff mechanics.
 
-use crate::{domain::OutputLimit, error::CoreError};
+use crate::error::CoreError;
 use std::path::PathBuf;
 
 pub(crate) struct StatusReport {
     root: PathBuf,
-    pub(crate) output_limit: OutputLimit,
 }
 impl StatusReport {
-    pub(super) fn new(root: PathBuf, output_limit: OutputLimit) -> Self {
-        Self { root, output_limit }
+    pub(super) fn new(root: PathBuf) -> Self {
+        Self { root }
     }
     pub(crate) fn text(&self, stdout: &str) -> Result<String, CoreError> {
         let complete = stdout.strip_suffix('\0').ok_or(invalid())?;
@@ -241,7 +240,7 @@ impl<'a> Sections<'a> {
 mod tests {
     use super::*;
     fn report() -> StatusReport {
-        StatusReport::new(PathBuf::from("/fixture"), OutputLimit::default())
+        StatusReport::new(PathBuf::from("/fixture"))
     }
 
     #[test]

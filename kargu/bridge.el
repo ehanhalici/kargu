@@ -295,14 +295,16 @@ CALLBACK receives (RESULT ERROR); no Elisp process fallback is executed."
   "Read Git status with captured ARGUMENTS on CONNECTION for OWNER.
 CALLBACK receives the native (RESULT ERROR); there is no Elisp fallback."
   (kargu-bridge--workspace-read
-   connection arguments callback :owner owner :method "git/status" :capability "git_status"
+   connection arguments callback :owner owner :method "git/status" :capability "git_worktree_read"
    :timeout (kargu-bridge--read-timeout arguments)))
 
 (cl-defun kargu-bridge-git-read (connection arguments callback &key owner)
   "Query Git using captured ARGUMENTS on CONNECTION for OWNER.
 CALLBACK receives native (RESULT ERROR); no legacy process fallback exists."
   (kargu-bridge--workspace-read
-   connection arguments callback :owner owner :method "git/read" :capability "git_read"
+   connection arguments callback :owner owner :method "git/read"
+   :capability (if (member (gethash "operation" (gethash "query" arguments)) '("diff" "blame"))
+                   "git_worktree_read" "git_read")
    :timeout (kargu-bridge--read-timeout arguments)))
 
 (cl-defun kargu-bridge-execute (connection arguments callback &key owner)
@@ -528,7 +530,7 @@ ERROR-DATA skips hydration; older peers retain the packaged projection."
 This is an adapter service identity, not an imported user conversation or run."
   (if (not (cl-some (lambda (capability)
                       (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
-                    '("workspace_read_file" "workspace_find_files" "workspace_list_files_ls" "workspace_grep" "git_status" "git_read" "command_execute" "api_request")))
+                    '("git_worktree_read" "workspace_read_file" "workspace_find_files" "workspace_list_files_ls" "workspace_grep" "git_status" "git_read" "command_execute" "api_request")))
       (kargu-bridge--start-finish connection callback nil)
     (setf (kargu-bridge-connection-state connection) 'binding)
     (kargu-bridge-call

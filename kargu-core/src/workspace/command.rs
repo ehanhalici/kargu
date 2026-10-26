@@ -4,7 +4,40 @@ use crate::error::CoreError;
 use crate::{constants::timeouts, domain::ExecutionTimeout};
 use serde::Deserialize;
 use std::time::Duration;
+use std::time::Instant;
 use std::{os::unix::fs::PermissionsExt, path::PathBuf};
+use tokio_util::sync::CancellationToken;
+
+/// Bounded, cooperatively cancellable metadata preparation, never a run grant.
+pub(crate) struct Preparation {
+    started: Instant,
+    deadline: Instant,
+    cancel: CancellationToken,
+}
+impl Preparation {
+    pub(crate) fn new() -> Result<Self, CoreError> {
+        let started = Instant::now();
+        Ok(Self {
+            started,
+            deadline: started
+                .checked_add(timeouts::WORKSPACE_READ)
+                .ok_or(CoreError::ArithmeticOverflow)?,
+            cancel: CancellationToken::new(),
+        })
+    }
+    pub(crate) fn cancellation(&self) -> &CancellationToken {
+        &self.cancel
+    }
+    pub(crate) fn started(&self) -> Instant {
+        self.started
+    }
+    pub(crate) fn deadline(&self) -> Instant {
+        self.deadline
+    }
+    pub(crate) fn check(&self) -> Result<(), CoreError> {
+        crate::security::file::checkpoint(&self.cancel, self.deadline)
+    }
+}
 
 /// Missing uses the bounded read default; explicit null disables the deadline.
 #[derive(Default, Deserialize)]

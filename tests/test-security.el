@@ -151,7 +151,9 @@
 
 (ert-deftest kargu-git-refuses-option-shaped-references-test ()
   "A revision or branch name that starts with a dash is never passed to git."
-  (should-error (kargu-git-diff #'ignore nil nil "--output=/tmp/kargu-leak"))
+    (should (string-prefix-p "ERROR:"
+                             (kargu-test-await (lambda (done)
+                                                 (kargu-git-diff done nil nil "--output=/tmp/kargu-leak")))))
   (should-error (kargu-git-branch #'ignore "switch" "-f"))
   (should-error (kargu-git-branch #'ignore "delete" "--force")))
 

@@ -516,7 +516,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   foreign owner, missing adapter ve unknown effect kabulünü doğrula. Kaynak: Aşama 2,
   G04/G05/G11; .codex/17–28.
 
-  - [ ] Salt-okunur Git tüketicileri: `git_diff`, `git_log`, `git_blame`,
+  - [x] Salt-okunur Git tüketicileri: `git_diff`, `git_log`, `git_blame`,
     `git_branches`, `git_stashes` mevcut native execution gate/process supervisor'a
     bağlansın. Git motoru yeniden yazılmasın; external diff/textconv/signature/
     fsmonitor/pager etkileri kapatılsın. Repository/worktree/path, exact argv,
@@ -526,7 +526,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       ortak native gate/supervisor, literal/deleted path, no-pager/no-signature/
       no-lazy-fetch ve complete UTF-8 çıktı. Eski Elisp log/list argv ve empty
       report yolları silindi; mutation executor son tüketicileri için korunur.
-    - [ ] `git_diff`/`git_blame`: `--no-ext-diff`/`--no-textconv` tek başına
+    - [x] `git_diff`/`git_blame`: `--no-ext-diff`/`--no-textconv` tek başına
       `filter.*.clean/process` yürütmesini kapatmıyor; gerçek marker fixture'ı
       bunu doğruladı. Filtre/config snapshot ve safe classification sınırı
       kurulmadan native SafeReadOnly diye yayınlama; corpus/positive-control,
@@ -535,10 +535,16 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         main/linked-worktree gerçek Git status/diff/blame sonuçları; clean-helper
         positive-control var, isolated sorgu helper çalıştırmaz/index refresh
         etmez. Bu test tek başına yeni native capability değildir. .codex/55.
-      - [ ] Ek güvenlik düzeltmesi: aynı-boyutlu dosyada mevcut `git_status`
+      - [x] Ek güvenlik düzeltmesi: aynı-boyutlu dosyada mevcut `git_status`
         refresh'i de clean filtresi çalıştırabiliyor. Status da isolated profile'a
         alınsın; yalnız fsmonitor kapatmak yeterli değil. Native gate/scope altında
         config/layout preflight → actual drain → final query zinciri kurulsun.
+      - [x] `git_worktree_read` cap; private safe config/metadata, original index
+        koruma, typed argv/range ve prepared/issued resource lifecycle. Yeni unsafe
+        config sonradan eklense de final sorgu okumaz. Native alias/direct/mode,
+        cancel→actual PGID reap→cleanup→admit kabulü; eski Elisp yolları silindi.
+        Submodule working tree kapsamı text + coverage ile açıkça dışarıdadır;
+        legacy symlink HEAD/layout açık unavailable, unsafe fallback yok. .codex/56.
   - [x] Ortak native read editor portunda bulunan ek lifecycle işleri: immutable
     DTO capture, initiating application/session, origin kill/mode cleanup,
     closed/expired parent öncesi startup reddi; startup/cevap yield'inden sonra

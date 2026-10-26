@@ -63,6 +63,26 @@ pub(super) struct Prepared {
     pub settings: RunSettings,
     pub reply: Reply,
 }
+impl From<crate::workspace::git::GitPrepared> for Prepared {
+    fn from(value: crate::workspace::git::GitPrepared) -> Self {
+        Self {
+            tool: value.tool,
+            command: value.command,
+            settings: value.settings,
+            reply: match value.reply {
+                crate::workspace::git::GitReadReply::Report(report) => {
+                    Reply::GitRead(Box::new(report))
+                }
+                crate::workspace::git::GitReadReply::Prepare(prepare) => Reply::GitPrepare(prepare),
+            },
+        }
+    }
+}
+impl Prepared {
+    pub fn discard(self) -> Result<(), CoreError> {
+        self.reply.discard()
+    }
+}
 
 impl ExecuteInput {
     pub fn prepare(self, purpose: RunPurpose) -> Result<Prepared, CoreError> {

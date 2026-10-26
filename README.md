@@ -477,8 +477,12 @@ hooks and signing to finish. Stop cancels Git work owned by the agent and
 prevents cancelled callbacks from launching fallback commands. An interrupted
 Git write may leave a lock file; check for another Git process before recovery.
 `git_status` uses Rust's owned, complete-output service and preserves its
-Magit-style sections. It disables optional index writes and executable
-fsmonitor config, honors host ignore settings, and supports linked worktrees.
+Magit-style sections. Status, diff and blame require `git_worktree_read`:
+bounded layout/config preflights drain before a final query uses private,
+owned Git metadata and an immutable safe-config subset. Original filter,
+textconv, pager, signature and fsmonitor programs cannot be reopened by that
+final query. Optional index writes are disabled; host ignore settings and
+linked worktrees are supported. SHA-1/SHA-256 and files/reftable are tested.
 Incomplete/malformed/non-UTF-8 status data fails explicitly; no Elisp status
 engine is kept as fallback. `git_log`, `git_branches`, `git_stashes` now use the
 same native gate/supervisor through the closed `git_read` capability; there is
@@ -488,12 +492,15 @@ the captured byte and IPC budgets; invalid UTF-8 is not silently replaced.
 Pager/signature programs and lazy promisor fetch are disabled. The installed
 Git must support `--no-lazy-fetch`; unsupported versions fail rather than retry
 without the safety flag. Native Git remains a live read, not an atomic repo
-snapshot or an OS sandbox. `git_diff`/`git_blame` and mutation commands remain
-separate migration work: clean/process filters require more than disabling
-external diff and textconv. The shared read port freezes inputs before startup,
+snapshot or an OS sandbox. Worktree reads deliberately do not apply executable
+clean filters. Status/diff exclude submodule working trees and always report
+that scope in text and the `coverage` field; use explicitly approved Git/Bash or
+Magit for nested-repository state. Unsupported metadata layouts (including
+legacy symlink HEAD) fail explicitly, never by falling back to unsafe execution.
+Elisp diff/blame argv/range engines are removed. The shared read port freezes inputs before startup,
 retains its initiating application/session, and rejects elapsed deadlines even
 before timer dispatch. `git_branches` and `git_stashes` are read-only in all
-modes. Stash `apply`
+modes. Mutation commands remain a separate native cutover. Stash `apply`
 requires an explicit `stash@{N}` entry from `git_stashes`; its immutable object
 ID is resolved before approval, and applying never deletes the stash. `pop`
 and `drop` are refused because an index may change while approval is pending.

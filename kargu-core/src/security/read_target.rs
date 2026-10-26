@@ -3,9 +3,10 @@
 use crate::error::CoreError;
 use std::{fs::File, os::unix::fs::MetadataExt, path::PathBuf};
 
-pub(super) struct ReadTarget {
+pub(crate) struct ReadTarget {
     pub(super) path: PathBuf,
     held: File,
+    revision: Option<super::file::Revision>,
 }
 impl TryFrom<PathBuf> for ReadTarget {
     type Error = CoreError;
@@ -24,16 +25,41 @@ impl TryFrom<PathBuf> for ReadTarget {
         if !(metadata.is_file() || metadata.is_dir()) {
             return Err(CoreError::Rejected);
         }
-        Ok(Self { path, held })
+        Ok(Self {
+            path,
+            held,
+            revision: None,
+        })
     }
 }
 impl ReadTarget {
-    pub(super) fn revalidate(&self) -> Result<(), CoreError> {
+    pub(crate) fn snapshot(path: PathBuf) -> Result<Self, CoreError> {
+        let mut target = Self::try_from(path)?;
+        target.revision = Some(super::file::Revision::from(target.held.metadata()?));
+        Ok(target)
+    }
+    pub(crate) fn duplicate(&self) -> Result<Self, CoreError> {
+        Ok(Self {
+            path: self.path.clone(),
+            held: self.held.try_clone()?,
+            revision: self.revision.clone(),
+        })
+    }
+    pub(super) fn immutable(&self) -> bool {
+        self.revision.is_some()
+    }
+    pub(crate) fn revalidate(&self) -> Result<(), CoreError> {
         let held = self.held.metadata()?;
         let current = self
             .path
             .metadata()
             .map_err(|_| CoreError::WorkspaceChanged)?;
+        if self.revision.as_ref().is_some_and(|revision| {
+            *revision != super::file::Revision::from(held.clone())
+                || *revision != super::file::Revision::from(current.clone())
+        }) {
+            return Err(CoreError::WorkspaceChanged);
+        }
         if held.dev() != current.dev()
             || held.ino() != current.ino()
             || self
@@ -54,6 +80,28 @@ impl ReadTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn immutable_file_evidence_is_not_refreshed_by_duplicate_or_in_place_write()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let file = root.path().join("config");
+        std::fs::write(&file, "before")?;
+        let original = ReadTarget::snapshot(file.clone())?;
+        let duplicate = original.duplicate()?;
+        original.revalidate()?;
+        duplicate.revalidate()?;
+        std::fs::write(&file, "after with a different revision")?;
+        assert!(matches!(
+            original.revalidate(),
+            Err(CoreError::WorkspaceChanged)
+        ));
+        assert!(matches!(
+            duplicate.revalidate(),
+            Err(CoreError::WorkspaceChanged)
+        ));
+        Ok(())
+    }
 
     #[test]
     fn replaced_file_or_directory_cannot_borrow_the_captured_target_identity()

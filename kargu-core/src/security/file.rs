@@ -14,8 +14,8 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
-#[derive(PartialEq, Eq)]
-struct Revision {
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Revision {
     device: u64,
     inode: u64,
     size: u64,

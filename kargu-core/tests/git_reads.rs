@@ -105,6 +105,17 @@ fn isolated_git_configuration_disables_clean_helpers_without_reimplementing_diff
         vec!["--object-format=sha256", "--ref-format=reftable"],
     ] {
         let root = repository_format(&options)?;
+        let scratch = tempfile::tempdir()?;
+        let mut peer = Peer::start_with_path_and_environment(
+            None,
+            &[
+                ("TMPDIR", scratch.path().as_os_str()),
+                ("HOME", scratch.path().as_os_str()),
+                ("XDG_CONFIG_HOME", scratch.path().as_os_str()),
+            ],
+        )?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
         let linked = tempfile::tempdir()?;
         git(
             root.path(),
@@ -172,7 +183,42 @@ fn isolated_git_configuration_disables_clean_helpers_without_reimplementing_diff
                 }));
                 assert!(!marker.exists());
             }
+            for query in [
+                json!({"operation":"diff"}),
+                json!({"operation":"blame","path":"tracked.txt"}),
+            ] {
+                let reply = call(&mut peer, &scope, workspace, query, 65536)?;
+                assert_eq!(reply["result"]["outcome"], "ok");
+                assert_eq!(reply["result"]["cleanup_complete"], true);
+                assert!(
+                    reply["result"]["text"]
+                        .as_str()
+                        .ok_or("text")?
+                        .contains("other")
+                );
+                assert!(!marker.exists());
+                assert_eq!(
+                    fs::read_dir(scratch.path())?.count(),
+                    0,
+                    "private metadata must be released after actual completion"
+                );
+            }
+            peer.send(json!({"jsonrpc":"2.0","id":4,"method":"git/status","params":{"scope":scope,"arguments":{"root":workspace,"timeout_ms":null}}}))?;
+            let status = peer.read()?;
+            assert_eq!(status["result"]["outcome"], "ok");
+            assert!(
+                status["result"]["text"]
+                    .as_str()
+                    .ok_or("text")?
+                    .contains("tracked.txt")
+            );
+            assert!(
+                !marker.exists(),
+                "native status cannot execute clean filters"
+            );
+            assert_eq!(fs::read_dir(scratch.path())?.count(), 0);
         }
+        finish(&mut peer)?;
     }
     Ok(())
 }
@@ -420,17 +466,17 @@ fn executable_filters_are_not_licensed_by_the_read_query_port() -> TestResult {
             "ok"
         );
     }
-    for operation in ["diff", "blame"] {
+    for query in [
+        json!({"operation":"diff"}),
+        json!({"operation":"blame","path":"tracked.txt"}),
+    ] {
+        let reply = call(&mut peer, &scope, root.path(), query, 65536)?;
+        assert_eq!(reply["result"]["outcome"], "ok");
         assert!(
-            call(
-                &mut peer,
-                &scope,
-                root.path(),
-                json!({"operation":operation}),
-                65536
-            )?
-            .get("error")
-            .is_some()
+            reply["result"]["text"]
+                .as_str()
+                .ok_or("text")?
+                .contains("changed")
         );
     }
     assert!(!marker.exists());
@@ -446,6 +492,309 @@ fn executable_filters_are_not_licensed_by_the_read_query_port() -> TestResult {
         ],
     )?;
     assert!(marker.exists());
+    finish(&mut peer)
+}
+
+#[test]
+fn config_changed_after_capture_cannot_install_a_filter_into_the_final_query() -> TestResult {
+    let root = repository()?;
+    let wrappers = tempfile::tempdir()?;
+    let scratch = tempfile::tempdir()?;
+    let marker = root.path().join("late-filter-ran");
+    let helper = root.path().join("late-filter");
+    fs::write(
+        &helper,
+        format!(
+            "#!{}\nprintf invoked > '{}'\nexec '{}'\n",
+            executable("sh")?.display(),
+            marker.display(),
+            executable("cat")?.display()
+        ),
+    )?;
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700))?;
+    fs::write(root.path().join(".gitattributes"), "*.txt filter=late\n")?;
+    fs::write(root.path().join("tracked.txt"), "late worktree value\n")?;
+    let real = executable("git")?;
+    let wrapper = wrappers.path().join("git");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!{}\nfixture_config=0\nfor fixture_argument in \"$@\"; do if [ \"$fixture_argument\" = --get-regexp ]; then fixture_config=1; fi; done\nif [ \"$fixture_config\" = 1 ]; then\n '{}' \"$@\"\n fixture_status=$?\n '{}' -C '{}' config filter.late.clean '{}'\n exit \"$fixture_status\"\nfi\nexec '{}' \"$@\"\n",
+            executable("sh")?.display(),
+            real.display(),
+            real.display(),
+            root.path().display(),
+            helper.display(),
+            real.display()
+        ),
+    )?;
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700))?;
+    let mut peer = Peer::start_with_path_and_environment(
+        Some(wrappers.path()),
+        &[("TMPDIR", scratch.path().as_os_str())],
+    )?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let reply = call(
+        &mut peer,
+        &scope,
+        root.path(),
+        json!({"operation":"diff"}),
+        65536,
+    )?;
+    assert_eq!(reply["result"]["outcome"], "ok");
+    assert!(
+        reply["result"]["text"]
+            .as_str()
+            .ok_or("text")?
+            .contains("late worktree value")
+    );
+    assert!(!marker.exists());
+    assert_eq!(fs::read_dir(scratch.path())?.count(), 0);
+    // The newly configured helper exists and would execute in the original repo.
+    git(root.path(), &["diff", "--no-ext-diff", "--no-textconv"])?;
+    assert!(marker.exists());
+    finish(&mut peer)
+}
+
+#[test]
+fn isolated_final_query_retains_owner_and_metadata_until_real_group_drain() -> TestResult {
+    let root = repository()?;
+    let wrappers = tempfile::tempdir()?;
+    let scratch = tempfile::tempdir()?;
+    let leader_file = wrappers.path().join("leader");
+    let child_file = wrappers.path().join("child");
+    let wrapper = wrappers.path().join("git");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!{}\nfor fixture_argument in \"$@\"; do\n if [ \"$fixture_argument\" = diff ]; then\n  trap '' TERM\n  printf '%s' \"$$\" > '{}'\n  '{}' 300 &\n  printf '%s' \"$!\" > '{}'\n  wait\n  exit 0\n fi\ndone\nexec '{}' \"$@\"\n",
+            executable("sh")?.display(),
+            leader_file.display(),
+            executable("sleep")?.display(),
+            child_file.display(),
+            executable("git")?.display()
+        ),
+    )?;
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700))?;
+    let mut peer = Peer::start_with_path_and_environment(
+        Some(wrappers.path()),
+        &[("TMPDIR", scratch.path().as_os_str())],
+    )?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    peer.send(json!({"jsonrpc":"2.0","id":3,"method":"git/read","params":{"scope":scope,"arguments":{"root":root.path(),"query":{"operation":"diff"},"timeout_ms":null}}}))?;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !child_file.exists() && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let leader: u32 = fs::read_to_string(&leader_file)?.parse()?;
+    let child: u32 = fs::read_to_string(&child_file)?.parse()?;
+    assert_eq!(fs::read_dir(scratch.path())?.count(), 1);
+    peer.send(json!({"jsonrpc":"2.0","id":9,"method":"ping","params":{}}))?;
+    assert_eq!(peer.read()?["id"], 9);
+    peer.send(
+        json!({"jsonrpc":"2.0","method":"rpc/cancel","params":{"request_id":3,"scope":peer.epoch}}),
+    )?;
+    peer.send(json!({"jsonrpc":"2.0","id":4,"method":"git/read","params":{"scope":scope,"arguments":{"root":root.path(),"query":{"operation":"branches"}}}}))?;
+    let busy = peer.read()?;
+    assert_eq!(busy["id"], 4);
+    assert_eq!(busy["error"]["data"]["status"], "busy");
+    assert_eq!(
+        fs::read_dir(scratch.path())?.count(),
+        1,
+        "metadata cannot disappear at cancel signal"
+    );
+    let cancelled = peer.read()?;
+    assert_eq!(cancelled["id"], 3);
+    assert_eq!(cancelled["error"]["data"]["status"], "cancelled");
+    assert!(!PathBuf::from(format!("/proc/{leader}")).exists());
+    assert!(!PathBuf::from(format!("/proc/{child}")).exists());
+    assert_eq!(fs::read_dir(scratch.path())?.count(), 0);
+    assert_eq!(
+        call(
+            &mut peer,
+            &scope,
+            root.path(),
+            json!({"operation":"branches"}),
+            65536
+        )?["result"]["outcome"],
+        "ok"
+    );
+    finish(&mut peer)
+}
+
+#[test]
+fn diff_and_blame_options_are_domain_checked_before_any_git_process() -> TestResult {
+    let root = repository()?;
+    let wrappers = tempfile::tempdir()?;
+    let marker = wrappers.path().join("executed");
+    let wrapper = wrappers.path().join("git");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!{}\nprintf invoked > '{}'\nexit 99\n",
+            executable("sh")?.display(),
+            marker.display()
+        ),
+    )?;
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700))?;
+    let mut peer = Peer::start_with_path(Some(wrappers.path()))?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    for query in [
+        json!({"operation":"diff","commit":"--output=escape"}),
+        json!({"operation":"diff","staged":1}),
+        json!({"operation":"blame","path":"tracked.txt","from":3,"to":2}),
+        json!({"operation":"blame","path":"tracked.txt","from":0}),
+        json!({"operation":"blame","path":"tracked.txt","arguments":["--contents=private"]}),
+    ] {
+        assert!(
+            call(&mut peer, &scope, root.path(), query, 65536)?
+                .get("error")
+                .is_some()
+        );
+        assert!(!marker.exists());
+    }
+    finish(&mut peer)
+}
+
+#[test]
+fn native_staged_commit_literal_paths_and_single_ended_blame_keep_git_semantics() -> TestResult {
+    let root = repository()?;
+    fs::write(
+        root.path().join("*.txt"),
+        "literal first\nliteral second\nliteral third\n",
+    )?;
+    git(root.path(), &["add", "--", "*.txt"])?;
+    git(root.path(), &["commit", "-m", "literal fixture"])?;
+    fs::write(root.path().join("tracked.txt"), "unrelated staged\n")?;
+    git(root.path(), &["add", "--", "tracked.txt"])?;
+    fs::write(
+        root.path().join("*.txt"),
+        "literal changed\nliteral second\nliteral third\n",
+    )?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let literal = call(
+        &mut peer,
+        &scope,
+        root.path(),
+        json!({"operation":"diff","path":"*.txt"}),
+        65536,
+    )?;
+    let text = literal["result"]["text"].as_str().ok_or("text")?;
+    assert!(text.contains("literal changed"));
+    assert!(!text.contains("unrelated"));
+    let staged = call(
+        &mut peer,
+        &scope,
+        root.path(),
+        json!({"operation":"diff","staged":true,"commit":"HEAD"}),
+        65536,
+    )?;
+    let text = staged["result"]["text"].as_str().ok_or("text")?;
+    assert!(text.contains("unrelated staged"));
+    assert!(!text.contains("literal changed"));
+    for (from, to, first, third) in [(Some(2), None, false, true), (None, Some(2), true, false)] {
+        let blame = call(
+            &mut peer,
+            &scope,
+            root.path(),
+            json!({"operation":"blame","path":"*.txt","from":from,"to":to}),
+            65536,
+        )?;
+        let text = blame["result"]["text"].as_str().ok_or("text")?;
+        assert_eq!(text.contains("literal changed"), first);
+        assert!(text.contains("literal second"));
+        assert_eq!(text.contains("literal third"), third);
+    }
+    finish(&mut peer)
+}
+
+#[test]
+fn submodule_helpers_are_excluded_with_explicit_coverage_not_silent_clean_state() -> TestResult {
+    let root = repository()?;
+    let source = repository()?;
+    git(
+        root.path(),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            source.path().to_str().ok_or("source")?,
+            "nested",
+        ],
+    )?;
+    let nested = root.path().join("nested");
+    let marker = root.path().join("submodule-helper-ran");
+    let helper = root.path().join("submodule-helper");
+    fs::write(
+        &helper,
+        format!(
+            "#!{}\nprintf invoked > '{}'\nexec '{}'\n",
+            executable("sh")?.display(),
+            marker.display(),
+            executable("cat")?.display()
+        ),
+    )?;
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700))?;
+    git(
+        &nested,
+        &[
+            "config",
+            "filter.fixture.clean",
+            helper.to_str().ok_or("helper")?,
+        ],
+    )?;
+    fs::write(nested.join(".gitattributes"), "*.txt filter=fixture\n")?;
+    fs::write(nested.join("tracked.txt"), "other\n")?;
+    git(
+        root.path(),
+        &["status", "--ignore-submodules=none", "--porcelain"],
+    )?;
+    assert!(
+        marker.exists(),
+        "unrestricted parent status really runs the submodule clean helper"
+    );
+    fs::remove_file(&marker)?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    peer.send(json!({"jsonrpc":"2.0","id":4,"method":"git/status","params":{"scope":scope,"arguments":{"root":root.path()}}}))?;
+    let status = peer.read()?;
+    assert_eq!(status["result"]["outcome"], "ok");
+    assert_eq!(
+        status["result"]["coverage"],
+        "main_worktree_without_submodules"
+    );
+    assert!(
+        status["result"]["text"]
+            .as_str()
+            .ok_or("text")?
+            .contains("submodule working trees are not inspected")
+    );
+    assert!(!marker.exists());
+    let diff = call(
+        &mut peer,
+        &scope,
+        root.path(),
+        json!({"operation":"diff"}),
+        65536,
+    )?;
+    assert_eq!(
+        diff["result"]["coverage"],
+        "main_worktree_without_submodules"
+    );
+    assert!(
+        diff["result"]["text"]
+            .as_str()
+            .ok_or("text")?
+            .contains("submodule working trees are not inspected")
+    );
+    assert!(!marker.exists());
     finish(&mut peer)
 }
 

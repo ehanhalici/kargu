@@ -25,7 +25,7 @@ use tokio::time::Instant;
 
 pub(crate) mod file;
 mod read_target;
-use read_target::ReadTarget;
+pub(crate) use read_target::ReadTarget;
 
 /// Pinned directory identity used by settings and commands.
 #[derive(Clone)]
@@ -285,10 +285,17 @@ impl CommandSpec {
         Ok(command)
     }
     pub(crate) fn with_read_target(mut self, target: PathBuf) -> Result<Self, CoreError> {
+        self = self.with_target_evidence(ReadTarget::try_from(target)?)?;
+        Ok(self)
+    }
+    pub(crate) fn with_snapshot_target(self, target: PathBuf) -> Result<Self, CoreError> {
+        self.with_target_evidence(ReadTarget::snapshot(target)?)
+    }
+    pub(crate) fn with_target_evidence(mut self, target: ReadTarget) -> Result<Self, CoreError> {
         if self.read_targets.len() >= 8 {
             return Err(CoreError::Limit);
         }
-        self.read_targets.push(ReadTarget::try_from(target)?);
+        self.read_targets.push(target);
         Ok(self)
     }
     fn revalidate(&self, run: &RunHandle) -> Result<(), CoreError> {
@@ -369,7 +376,13 @@ impl ToolRegistry {
         )
     }
     pub(crate) fn register_git_reads(&mut self) -> Result<(), CoreError> {
-        for name in ["git_log", "git_branches", "git_stashes"] {
+        for name in [
+            "git_log",
+            "git_branches",
+            "git_stashes",
+            "git_diff",
+            "git_blame",
+        ] {
             self.register(
                 ToolName::try_from(name.to_owned())?,
                 vec![],
@@ -435,6 +448,15 @@ fn digest(
     );
     for target in &command.read_targets {
         let metadata = target.metadata()?;
+        hash.update([u8::from(target.immutable())]);
+        if target.immutable() {
+            hash.update(metadata.len().to_le_bytes());
+            hash.update(metadata.mode().to_le_bytes());
+            hash.update(metadata.mtime().to_le_bytes());
+            hash.update(metadata.mtime_nsec().to_le_bytes());
+            hash.update(metadata.ctime().to_le_bytes());
+            hash.update(metadata.ctime_nsec().to_le_bytes());
+        }
         hash.update(metadata.dev().to_le_bytes());
         hash.update(metadata.ino().to_le_bytes());
         let path = target.path.as_os_str().as_bytes();

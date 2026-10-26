@@ -137,7 +137,8 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 30] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 31] = [
+        "git_worktree_read",
         "workspace_read_file",
         "git_read",
         "configuration_policy",

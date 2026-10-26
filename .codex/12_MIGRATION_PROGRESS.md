@@ -1,5 +1,23 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Todo 2: native diff/blame ve status clean-filter güvenlik düzeltmesi
+
+`f2ef8e6` proof'u native consumer'a bağlandı: git_worktree_read cap'li owned
+layout/config→actual drain→final query; original executable config yerine
+private safe snapshot. Status'ın same-size clean-filter açığı da kapandı.
+SHA-1/SHA-256 × files/reftable × main/linked actual native pipe; late unsafe config,
+TERM-ignoring child/reap/reservation, output/invalid/foreign/missing kabulü geçti.
+Prepared/Running resource typestate, join edilen Finalizing/Discarding cleanup;
+eski Elisp diff/blame argv/range/report silindi. Submodule kapsamı açık text+
+coverage ile dışarıda; unsupported layout/symlink HEAD unsafe fallback yapmaz.
+Shared Peer artık EOF/graceful drain öncesi core'u öldürmez. Ayrıntı .codex/56.
+
+Final 1274/1274 source ERT, 0 unexpected, 155.077287 s (23:35:10); 315 native +24
+compile-fail =339 locked test. Build/fmt/strict Clippy ve dört Elisp Werror/checkdoc
+temiz; mevcut bounded TLC regresyonları temiz, Git/FS formal refinement iddiası yok.
+Todo 2 read-only Git alt grubu [x]; mutations/skill/toolchain/webfetch ve final bridge
+audit açık. Kullanıcı07/shell.nix korundu; canlı reload/credential/kurulum/push yok.
+
 ## 2026-10-26 — Todo 2: read_file disk/presentation ve LSP consumer cutover
 
 `workspace/readFile` / `workspace_read_file` kapalı typed domain'i ortak owned

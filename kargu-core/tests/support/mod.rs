@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -35,6 +36,7 @@ impl Peer {
             command.env("PATH", path);
         }
         let mut child = command
+            .process_group(0)
             .arg("--stdio")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -108,6 +110,19 @@ impl Peer {
 }
 impl Drop for Peer {
     fn drop(&mut self) {
+        // EOF lets the real supervisor TERM/KILL and reap its own child groups.
+        // Killing the core first would strand those independent PGID leaders.
+        self.input.take();
+        let deadline = Instant::now() + Duration::from_secs(12);
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                _ => break,
+            }
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

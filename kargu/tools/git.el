@@ -102,30 +102,13 @@ A name that starts with a dash would be read by git as an option."
 
 ;;;; Diff -----------------------------------------------------------------
 
-(defun kargu-git--path-args (path root what)
-  "Resolve optional PATH under ROOT, using WHAT in refusal messages."
-  (when (and (stringp path) (not (string-empty-p (string-trim path))))
-    (let ((abs (kargu-permission-assert-within-project path root what)))
-      (list "--" (file-relative-name abs root)))))
-
 (defun kargu-git-diff (callback &optional staged path commit)
-  "Deliver the Git diff to CALLBACK.
-Use the index when STAGED is non-nil, restrict to PATH when provided,
-and compare against COMMIT when specified."
-  (let* ((root (kargu-permission-project-root))
-         (args (append (list "diff" "--no-color")
-                       (and staged (list "--cached"))
-                       (and (stringp commit)
-                            (not (string-empty-p (string-trim commit)))
-                            (list (kargu-git--check-ref commit "commit")))
-                       (kargu-git--path-args path root "diff path"))))
-    (kargu-git--run
-     args root
-     (lambda (res)
-       (kargu-process-deliver
-        callback
-        (lambda ()
-          (if (string-empty-p (cdr res)) "(no diff output)" (cdr res))))))))
+  "Read a native Git diff into CALLBACK, optionally STAGED or for PATH/COMMIT."
+  (kargu-git-native-read
+   callback (kargu-permission-project-root) kargu-git-timeout kargu-process-max-bytes
+   (kargu-bridge--object "operation" "diff" "staged" (if staged t :json-false)
+                         "path" (or (kargu-nonempty path) :json-null)
+                         "commit" (or (kargu-nonempty commit) :json-null))))
 
 ;;;; Log ------------------------------------------------------------------
 
@@ -344,37 +327,14 @@ before approval.  Pop/drop are refused; delete manually with Git/Magit."
 
 ;;;; Blame ----------------------------------------------------------------
 
-(defun kargu-git--blame-range (start-line end-line)
-  "Build a validated blame range for START-LINE and END-LINE."
-  (let ((start (kargu-to-int start-line))
-        (end (kargu-to-int end-line)))
-    (unless (and (or (null start-line) (and start (> start 0)))
-                 (or (null end-line) (and end (> end 0))))
-      (error "Blame line numbers must be positive integers"))
-    (when (and start end (> start end))
-      (error "Blame start line must not exceed end line"))
-    (when (or start end)
-      (list (format "-L%d,%s" (or start 1) (or end ""))))))
-
 (defun kargu-git-blame (callback file-path &optional start-line end-line)
-  "Pass git blame for FILE-PATH between START-LINE and END-LINE to CALLBACK.
-An omitted start defaults to the first line; an omitted end means EOF."
-  (unless (and (stringp file-path) (not (string-empty-p (string-trim file-path))))
-    (error "File_path is required"))
-  (let* ((root (kargu-permission-project-root))
-         (abs (kargu-permission-assert-within-project file-path root "blame file"))
-         (args (append (list "blame" "--date=short")
-                       (kargu-git--blame-range start-line end-line)
-                       (list "--" (file-relative-name abs root)))))
-    (kargu-git--run
-     args root
-     (lambda (res)
-       (kargu-process-deliver
-        callback
-        (lambda ()
-          (if (eql (car res) 0)
-              (cdr res)
-            (error "Git blame failed: %s" (cdr res)))))))))
+  "Read native blame for FILE-PATH/START-LINE/END-LINE into CALLBACK.
+Range parsing, Git argv and executable configuration policy belong to Rust."
+  (kargu-git-native-read
+   callback (kargu-permission-project-root) kargu-git-timeout kargu-process-max-bytes
+   (kargu-bridge--object "operation" "blame" "path" file-path
+                         "from" (or start-line :json-null)
+                         "to" (or end-line :json-null))))
 
 ;;;; Interactive Magit launcher -------------------------------------------
 

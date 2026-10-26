@@ -261,7 +261,9 @@
 			      (should (string-search "blame-second" to))
 			      (should-not (string-search "blame-third" to)))
 			    (dolist (range '((0 nil) (nil -1) (3 2) ("bad" nil)))
-			      (should-error (kargu-git-blame #'ignore "range.txt" (car range) (cadr range))))))
+			      (should (string-prefix-p "ERROR:"
+                                                       (kargu-test-await (lambda (done)
+                                                                           (kargu-git-blame done "range.txt" (car range) (cadr range)))))))))
 
 (ert-deftest kargu-git-blame-test ()
   "Ensure kargu-git-blame returns line annotations for a project file."
@@ -443,6 +445,26 @@
             (should (string-prefix-p "ERROR:" result))
             (should-not (kargu-async-pending-p task)))
         (when task (kargu-async-cancel task))))))
+
+(ert-deftest kargu-git-worktree-read-requires-the-isolated-profile-capability-test ()
+  "Older cores cannot execute status/diff/blame through their weaker read capability."
+  (let ((connection (kargu-bridge--connection-create
+                     :state 'ready :capabilities ["git_read" "git_status"]
+                     :read-scope (kargu-bridge--object "application_id" "old" "session_id" "old"))))
+    (cl-letf (((symbol-function 'kargu-bridge-ensure)
+               (lambda (callback) (funcall callback connection nil) #'ignore))
+              ((symbol-function 'kargu-bridge-call) (lambda (&rest _) (ert-fail "Old unsafe RPC was sent")))
+              ((symbol-function 'kargu-git--run) (lambda (&rest _) (ert-fail "Legacy Git fallback"))))
+      (dolist (start (list #'kargu-git-status #'kargu-git-diff
+                          (lambda (done) (kargu-git-blame done "tracked.txt"))))
+        (let (result)
+          (funcall start (lambda (value) (setq result value)))
+          (should (string-prefix-p "ERROR:" result)))))))
+
+(ert-deftest kargu-git-readonly-argv-and-range-engines-are-removed-test ()
+  "Elisp only captures intents for the native read-only Git family."
+  (dolist (function '(kargu-git--path-args kargu-git--blame-range))
+    (should-not (fboundp function))))
 
 (provide 'tests/test-git)
 ;;; test-git.el ends here
