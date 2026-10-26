@@ -140,7 +140,7 @@
                   (lambda (key _) (push key events)
                     (should (equal (kargu-selection-provider) "p"))
                     (should-not (kargu-selection-model))))
-        (kargu-set-provider "p" t)
+        (should (kargu-ok-p (kargu-test-await (lambda (done) (kargu-set-provider "p" t done)))))
         (should (equal events '(:reasoning-effort :provider)))))))
 
 (ert-deftest kargu-selection-superseded-commit-does-not-continue-ui-chain-test ()
@@ -154,7 +154,8 @@
                   ((symbol-function 'kargu-api-prefetch-models)
                    (lambda (&rest _) (setq prefetched t))))
           (pcase action
-            ('provider (kargu-api-select--apply-provider "p"))
+            ('provider (let ((task (kargu-api-select--apply-provider "p")))
+                         (kargu-bridge-test--wait (lambda () (not (kargu-async-pending-p task))))))
             ('model (kargu-api-select--apply-model "m" "p"))
             ('effort (kargu-api-select--apply-effort "low")))
           (should-not continued)

@@ -18,81 +18,84 @@
   "Run BODY while a real native configuration file reply awaits delivery."
   (declare (indent 0) (debug t))
   `(kargu-bridge-test--with-core
-     (let* ((file (make-temp-file "kargu-native-parse-" nil ".toml"))
-            (kargu-application--bound (kargu-application-create))
-            (kargu-diff-review-mode 'auto)
-            (call (symbol-function 'kargu-bridge-call))
-            (task nil) (held nil) (source nil) (result nil) (next nil) (delivered 0))
-       (unwind-protect
-           (progn
-             (ignore task held source result next delivered)
-             (write-region "provider='parsed'\nreview_mode='blocking'\n[provider.parsed]\napikey='synthetic-native-secret'\n"
-                           nil file nil 'silent)
-             (kargu-config-publish (kargu-config-service-context) '(:provider "stable") "/fixture" "before")
-             (cl-letf (((symbol-function 'kargu-bridge-call)
-                        (lambda (connection method params callback &rest options)
-                          (when (equal method "configuration/read")
-                            (setq source (gethash "source" (gethash "arguments" params))))
-                          (apply call connection method params
-                                 (if (equal method "configuration/read")
-                                     (lambda (value failure) (setq held (lambda () (funcall callback value failure))))
-                                   callback) options))))
-               (setq task (kargu-config-refresh-async
-                           (lambda (value) (setq result value) (cl-incf delivered)) :paths (list file)))
-               (kargu-bridge-test--wait (lambda () held))
-               ,@body))
-         (when task (kargu-async-cancel task))
-         (when next (kargu-async-cancel next))
-         (delete-file file)))))
+    (let* ((file (make-temp-file "kargu-native-parse-" nil ".toml"))
+           (kargu-application--bound (kargu-application-create))
+           (kargu-diff-review-mode 'auto)
+           (call (symbol-function 'kargu-bridge-call))
+           (task nil) (held nil) (source nil) (result nil) (next nil) (delivered 0))
+      (unwind-protect
+          (progn
+            (ignore task held source result next delivered)
+            (write-region "provider='parsed'\nreview_mode='blocking'\n[provider.parsed]\napikey='synthetic-native-secret'\n"
+                          nil file nil 'silent)
+            (kargu-test-config-publish (kargu-config-service-context) '(:provider "stable") "/fixture" "before")
+            (cl-letf (((symbol-function 'kargu-bridge-call)
+                       (lambda (connection method params callback &rest options)
+                         (when (equal method "configuration/read")
+                           (setq source (gethash "source" (gethash "arguments" params))))
+                         (apply call connection method params
+                                (if (equal method "configuration/read")
+                                    (lambda (value failure) (setq held (lambda () (funcall callback value failure))))
+                                  callback) options))))
+              (setq task (kargu-config-refresh-async
+                          (lambda (value) (setq result value) (cl-incf delivered)) :paths (list file)))
+              (kargu-bridge-test--wait (lambda () held))
+              ,@body))
+        (when task (kargu-async-cancel task))
+        (when next (kargu-async-cancel next))
+        (delete-file file)))))
 
 (ert-deftest kargu-config-native-late-reply-cannot-publish-after-revocation-test ()
   "Cancel, deadline, supersession and a lost lease preserve the old publication."
   (dolist (ending '(cancel timeout deadline supersede owner-close))
     (kargu-config-native-test--held
-      (pcase ending
-        ('cancel (kargu-async-cancel task))
-        ('timeout (kargu-async-finish task nil "Configuration timed out"))
-        ('deadline (setf (kargu-async-task-deadline (car (kargu-async-task-children task))) (1- (float-time))))
-        ('supersede (cl-letf (((symbol-function 'kargu-bridge-config-read) #'ignore))
-                      (setq next (kargu-config-refresh-async #'ignore :paths (list file)))))
-        ('owner-close (puthash :native-core (kargu-bridge-application--make :connection conn :state :closed)
+     (pcase ending
+       ('cancel (kargu-async-cancel task))
+       ('timeout (kargu-async-finish task nil "Configuration timed out"))
+       ('deadline (setf (kargu-async-task-deadline (car (kargu-async-task-children task))) (1- (float-time))))
+       ('supersede (cl-letf (((symbol-function 'kargu-bridge-config-read) #'ignore))
+                     (setq next (kargu-config-refresh-async #'ignore :paths (list file)))))
+       ('owner-close (puthash :native-core (kargu-bridge-application--make :connection conn :state :closed)
                               (kargu-application-services kargu-application--bound))))
-      (funcall held)
-      (should (equal (plist-get (kargu--config-plist) :provider) "stable"))
-      (should (eq kargu-diff-review-mode 'auto))
-      (should (= delivered (if (eq ending 'cancel) 0 1)))
-      (when result (should (kargu-err-p result)))
-      (should-not (kargu-async-pending-p task))
-      (should-not (kargu-async-task-children task))
-      (should-not (kargu-async-task-timer task))
-      (should-not source)
-      (should (equal (gethash "status" (car (kargu-bridge-test--call conn "ping" (kargu-bridge--object)))) "ok")))))
+     (funcall held)
+     (when (kargu-async-pending-p task)
+       (kargu-bridge-test--wait (lambda () (not (kargu-async-pending-p task)))))
+     (should (equal (plist-get (kargu--config-plist) :provider) "stable"))
+     (should (eq kargu-diff-review-mode 'auto))
+     (should (= delivered (if (eq ending 'cancel) 0 1)))
+     (when result (should (kargu-err-p result)))
+     (should-not (kargu-async-pending-p task))
+     (should-not (kargu-async-task-children task))
+     (should-not (kargu-async-task-timer task))
+     (should-not source)
+     (should (equal (gethash "status" (car (kargu-bridge-test--call conn "ping" (kargu-bridge--object)))) "ok")))))
 
 (ert-deftest kargu-config-native-reply-publishes-only-to-initiating-application-test ()
   "A different current application cannot receive another owner's config."
   (kargu-config-native-test--held
-    (let ((kargu-application--bound (kargu-application-create)))
-      (funcall held)
-      (should-not (kargu--config-plist)))
-    (should (kargu-ok-p result))
-    (should (= delivered 1))
-    (should (equal (plist-get (kargu--config-plist) :provider) "parsed"))
-    (should (equal (plist-get (cdar (kargu--config-providers)) :apikey) "synthetic-native-secret"))
-    (should-not (string-search "synthetic-native-secret" (prin1-to-string (kargu-result-value result))))))
+   (let ((kargu-application--bound (kargu-application-create)))
+     (funcall held)
+     (kargu-bridge-test--wait (lambda () result))
+     (should-not (kargu--config-plist)))
+   (should (kargu-ok-p result))
+   (should (= delivered 1))
+   (should (equal (plist-get (kargu--config-plist) :provider) "parsed"))
+   (should (equal (plist-get (cdar (kargu--config-providers)) :apikey) "synthetic-native-secret"))
+   (should-not (string-search "synthetic-native-secret" (prin1-to-string (kargu-result-value result))))))
 
 (ert-deftest kargu-config-native-malformed-projection-cannot-publish-test ()
   "Foreign generation, invalid digest, bad config or unknown status fail closed."
   (dolist (field '("generation" "digest" "config" "status" "path"))
     (kargu-config-native-test--held
-      (let ((parsed (symbol-function 'kargu-config--parsed)))
-        (cl-letf (((symbol-function 'kargu-config--parsed)
-                   (lambda (root path generation value failure)
-                     (puthash field :json-null value)
-                     (funcall parsed root path generation value failure))))
-          (funcall held)))
-      (should (kargu-err-p result))
-      (should (equal (plist-get (kargu--config-plist) :provider) "stable"))
-      (should (eq kargu-diff-review-mode 'auto)))))
+     (let ((parsed (symbol-function 'kargu-config--parsed)))
+       (cl-letf (((symbol-function 'kargu-config--parsed)
+                  (lambda (root path generation value failure)
+                    (puthash field :json-null value)
+                    (funcall parsed root path generation value failure))))
+         (funcall held)))
+     (should (kargu-err-p result))
+     (should (equal (plist-get (kargu--config-plist) :provider) "stable"))
+     (should (eq kargu-diff-review-mode 'auto)))))
 
 (ert-deftest kargu-config-native-old-core-has-no-reader-fallback-or-owner-start-test ()
   "A missing capability never reads a file or creates an editor application lease."
@@ -105,78 +108,80 @@
               ((symbol-function 'insert-file-contents) (lambda (&rest _) (ert-fail "No editor fallback")))
               ((symbol-function 'kargu-bridge-application-ensure) (lambda (&rest _) (ert-fail "No owner startup"))))
       (let ((task (kargu-bridge-config-read '("/synthetic/config") 1 (lambda (_value error-data) (setq failure error-data))
-                                             :application (kargu-application-create))))
+                                            :application (kargu-application-create))))
         (should (equal (gethash "status" (gethash "data" failure)) "unsupported_configuration_read"))
         (should-not (kargu-async-task-timer task))))))
 
 (ert-deftest kargu-config-native-paths-are-captured-before-startup-yield-test ()
   "Mutating input during startup cannot change native configuration intent."
   (kargu-bridge-test--with-core
-    (let* ((file (make-temp-file "kargu-captured-path-"))
-           (paths (list (copy-sequence file))) release done result failure)
-      (unwind-protect
-          (progn
-            (write-region "provider='original'" nil file nil 'silent)
-            (cl-letf (((symbol-function 'kargu-bridge-ensure)
-                       (lambda (callback) (setq release (lambda () (funcall callback conn nil))) #'ignore)))
-              (kargu-bridge-config-read paths 7 (lambda (value error-data) (setq result value failure error-data done t))
-                                        :application (kargu-application-create)))
-            (aset (car paths) (1- (length file)) ?X)
-            (setcar paths "/different")
-            (funcall release)
-            (kargu-bridge-test--wait (lambda () done))
-            (should-not failure)
-            (should (equal (gethash "provider" (gethash "config" result)) "original")))
-        (delete-file file)))))
+   (let* ((file (make-temp-file "kargu-captured-path-"))
+          (paths (list (copy-sequence file))) release done result failure)
+     (unwind-protect
+         (progn
+           (write-region "provider='original'" nil file nil 'silent)
+           (cl-letf (((symbol-function 'kargu-bridge-ensure)
+                      (lambda (callback) (setq release (lambda () (funcall callback conn nil))) #'ignore)))
+             (kargu-bridge-config-read paths 7 (lambda (value error-data) (setq result value failure error-data done t))
+                                       :application (kargu-application-create)))
+           (aset (car paths) (1- (length file)) ?X)
+           (setcar paths "/different")
+           (funcall release)
+           (kargu-bridge-test--wait (lambda () done))
+           (should-not failure)
+           (should (equal (gethash "provider" (gethash "config" result)) "original")))
+       (delete-file file)))))
 
 (ert-deftest kargu-config-native-closed-parent-cannot-supersede-live-refresh-test ()
   "An unadmitted refresh cannot invalidate another pending native publication."
   (kargu-config-native-test--held
-    (let* ((service (kargu-config-service-context))
-           (generation (kargu-config-service-generation service))
-           (parent (kargu-async-start #'ignore :owner nil :parent nil)))
-      (kargu-async-cancel parent)
-      (cl-letf (((symbol-function 'kargu-bridge-config-read) (lambda (&rest _) (ert-fail "No read for revoked parent")))
-                ((symbol-function 'kargu-bridge-ensure) (lambda (&rest _) (ert-fail "No startup for revoked parent"))))
-        (let ((rejected (kargu-config-refresh-async
-                         (lambda (_) (ert-fail "No callback from unadmitted refresh"))
-                         :parent parent :paths (list file))))
-          (should-not (kargu-async-pending-p rejected))
-          (should-not (kargu-async-task-timer rejected))
-          (should-not (kargu-async-task-children parent)))
-        (let ((rejected (kargu-config-refresh-async
-                         (lambda (_) (ert-fail "No callback from inactive owner"))
-                         :owner (kargu-application-create) :paths (list file))))
-          (should (eq (kargu-async-task-state rejected) :cancelled))
-          (should-not (kargu-async-task-timer rejected))))
-      (should (= generation (kargu-config-service-generation service)))
-      (funcall held)
-      (should (kargu-ok-p result))
-      (should (= delivered 1))
-      (should (equal (plist-get (kargu--config-plist) :provider) "parsed")))))
+   (let* ((service (kargu-config-service-context))
+          (generation (kargu-config-service-generation service))
+          (parent (kargu-async-start #'ignore :owner nil :parent nil)))
+     (kargu-async-cancel parent)
+     (cl-letf (((symbol-function 'kargu-bridge-config-read) (lambda (&rest _) (ert-fail "No read for revoked parent")))
+               ((symbol-function 'kargu-bridge-ensure) (lambda (&rest _) (ert-fail "No startup for revoked parent"))))
+       (let ((rejected (kargu-config-refresh-async
+                        (lambda (_) (ert-fail "No callback from unadmitted refresh"))
+                        :parent parent :paths (list file))))
+         (should-not (kargu-async-pending-p rejected))
+         (should-not (kargu-async-task-timer rejected))
+         (should-not (kargu-async-task-children parent)))
+       (let ((rejected (kargu-config-refresh-async
+                        (lambda (_) (ert-fail "No callback from inactive owner"))
+                        :owner (kargu-application-create) :paths (list file))))
+         (should (eq (kargu-async-task-state rejected) :cancelled))
+         (should-not (kargu-async-task-timer rejected))))
+     (should (= generation (kargu-config-service-generation service)))
+     (funcall held)
+     (kargu-bridge-test--wait (lambda () result))
+     (should (kargu-ok-p result))
+     (should (= delivered 1))
+     (should (equal (plist-get (kargu--config-plist) :provider) "parsed")))))
 
 (ert-deftest kargu-config-native-expired-parent-cannot-read-or-supersede-test ()
   "An elapsed deadline is rejected before timer delivery, IO or generation change."
   (kargu-config-native-test--held
-    (let* ((service (kargu-config-service-context))
-           (generation (kargu-config-service-generation service)) failure
-           (parent (kargu-async-start #'ignore :timeout 5 :owner nil :parent nil)))
-      (unwind-protect
-          (progn
-            (setf (kargu-async-task-deadline parent) (1- (float-time)))
-            (cl-letf (((symbol-function 'kargu-bridge-config-read) (lambda (&rest _) (ert-fail "No expired IO")))
-                      ((symbol-function 'kargu-bridge-ensure) (lambda (&rest _) (ert-fail "No expired startup"))))
-              (let ((rejected (kargu-config-refresh-async (lambda (value) (setq failure value))
+   (let* ((service (kargu-config-service-context))
+          (generation (kargu-config-service-generation service)) failure
+          (parent (kargu-async-start #'ignore :timeout 5 :owner nil :parent nil)))
+     (unwind-protect
+         (progn
+           (setf (kargu-async-task-deadline parent) (1- (float-time)))
+           (cl-letf (((symbol-function 'kargu-bridge-config-read) (lambda (&rest _) (ert-fail "No expired IO")))
+                     ((symbol-function 'kargu-bridge-ensure) (lambda (&rest _) (ert-fail "No expired startup"))))
+             (let ((rejected (kargu-config-refresh-async (lambda (value) (setq failure value))
                                                          :parent parent :paths (list file))))
-                (should-not (kargu-async-pending-p rejected))
-                (should-not (kargu-async-task-timer rejected))
-                (should-not (kargu-async-task-children parent))))
-            (should (kargu-err-p failure))
-            (should (= generation (kargu-config-service-generation service)))
-            (funcall held)
-            (should (kargu-ok-p result))
-            (should (= delivered 1)))
-        (kargu-async-cancel parent)))))
+               (should-not (kargu-async-pending-p rejected))
+               (should-not (kargu-async-task-timer rejected))
+               (should-not (kargu-async-task-children parent))))
+           (should (kargu-err-p failure))
+           (should (= generation (kargu-config-service-generation service)))
+           (funcall held)
+           (kargu-bridge-test--wait (lambda () result))
+           (should (kargu-ok-p result))
+           (should (= delivered 1)))
+       (kargu-async-cancel parent)))))
 
 (ert-deftest kargu-config-native-refresh-timeout-cannot-disable-or-extend-bound-test ()
   "Invalid, zero or oversized timeout inputs cannot create an unbounded reader."
@@ -202,11 +207,11 @@
         (progn
           (skip-unless (and kargu-bridge-binary-path (file-executable-p kargu-bridge-binary-path)))
           (should (kargu-ok-p (kargu-test-await
-                              (lambda (done) (kargu-config-refresh-async done :paths (list (expand-file-name "absent.toml" root)))))))
+                               (lambda (done) (kargu-config-refresh-async done :paths (list (expand-file-name "absent.toml" root)))))))
           (should (eq (kargu-bridge-status kargu-bridge--connection) 'ready))
           (should-not (kargu--config-plist))
           (should (equal (kargu-config-file) (expand-file-name "absent.toml" root)))
-          (should-not (gethash :native-core (kargu-application-services kargu-application--bound))))
+          (should (eq (kargu-bridge-application-state (gethash :native-core (kargu-application-services kargu-application--bound))) :ready)))
       (when kargu-bridge--connection
         (kargu-bridge--close kargu-bridge--connection "test_cleanup")
         (when (buffer-live-p (kargu-bridge-connection-stderr-buffer kargu-bridge--connection))
@@ -216,33 +221,41 @@
 (ert-deftest kargu-config-native-oversized-file-and-deleted-editor-engines-test ()
   "Rust rejects oversized files and preserves the last successful publication."
   (kargu-bridge-test--with-core
-    (let ((file (make-temp-file "kargu-large-config-")))
-      (unwind-protect
-          (progn
-            (write-region (make-string 65537 ?x) nil file nil 'silent)
-            (kargu-config-publish (kargu-config-service-context) '(:provider "stable") "/fixture" "before")
-            (should (kargu-err-p (kargu-test-await (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
-            (should (equal (plist-get (kargu--config-plist) :provider) "stable")))
-        (delete-file file))))
+   (let ((file (make-temp-file "kargu-large-config-")))
+     (unwind-protect
+         (progn
+           (write-region (make-string 65537 ?x) nil file nil 'silent)
+           (kargu-test-config-publish (kargu-config-service-context) '(:provider "stable") "/fixture" "before")
+           (should (kargu-err-p (kargu-test-await (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
+           (should (equal (plist-get (kargu--config-plist) :provider) "stable")))
+       (delete-file file))))
   (dolist (symbol '(kargu--read-toml-config kargu--toml-read-entries kargu--toml-read-value
-                    kargu-config--file-script kargu-config--decode-file kargu-config--loaded
-                    kargu-bridge-config-parse))
+					    kargu-config--file-script kargu-config--decode-file kargu-config--loaded
+					    kargu-bridge-config-parse))
     (should-not (fboundp symbol))))
 
 (ert-deftest kargu-config-native-missing-core-and-remote-path-fail-closed-test ()
-  "No sidecar or a remote candidate cannot silently clear published config."
+  "A lost native epoch or remote candidate cannot clear a prior publication."
   (dolist (paths '(("/synthetic/missing") ("/ssh:fixture:/config")))
-    (let ((kargu-application--bound (kargu-application-create))
-          (kargu-bridge-binary-path "/synthetic/missing-kargu-core")
-          (kargu-bridge--connection nil) (starts 0)
-          (ensure (symbol-function 'kargu-bridge-ensure)))
-      (kargu-config-publish (kargu-config-service-context) '(:provider "stable") "/fixture" "before")
-      (cl-letf (((symbol-function 'kargu-bridge-ensure)
-                 (lambda (callback) (cl-incf starts) (funcall ensure callback)))
-                ((symbol-function 'insert-file-contents) (lambda (&rest _) (ert-fail "No editor file fallback"))))
-        (should (kargu-err-p (kargu-test-await (lambda (done) (kargu-config-refresh-async done :paths paths)))))
-        (should (equal (plist-get (kargu--config-plist) :provider) "stable"))
-        (should (= starts (if (file-remote-p (car paths)) 0 1)))))))
+    (kargu-bridge-test--with-core
+     (let ((kargu-application--bound (kargu-application-create)))
+       (kargu-test-config-publish (kargu-config-service-context) '(:provider "stable") "/fixture" "before")
+       (kargu-bridge--close conn "synthetic_epoch_loss")
+       (cl-letf (((symbol-function 'kargu-bridge-ensure) (lambda (&rest _) (ert-fail "No replacement for lost lease")))
+                 ((symbol-function 'insert-file-contents) (lambda (&rest _) (ert-fail "No editor fallback"))))
+         (should (kargu-err-p (kargu-test-await (lambda (done) (kargu-config-refresh-async done :paths paths)))))
+         (should (equal (plist-get (kargu--config-plist) :provider) "stable")))))))
+
+(ert-deftest kargu-config-native-cold-missing-binary-never-publishes-defaults-test ()
+  "A cold file refresh cannot substitute defaults when its reader is absent."
+  (let ((kargu-application--bound (kargu-application-create))
+        (kargu-bridge-binary-path "/synthetic/missing-kargu-core")
+        (kargu-bridge--connection nil))
+    (cl-letf (((symbol-function 'insert-file-contents) (lambda (&rest _) (ert-fail "No editor fallback"))))
+      (should (kargu-err-p (kargu-test-await (lambda (done) (kargu-config-refresh-async done :paths '("/synthetic/missing"))))))
+      (should-not (kargu-config-current-snapshot))
+      (should-not (kargu-config-native-view))
+      (should (= (kargu-config-revision) 0)))))
 
 (ert-deftest kargu-config-provider-switch-never-reports-private-endpoint-test ()
   "Provider switching preserves selection without reading/reporting URL secrets."
@@ -250,7 +263,7 @@
     (let ((kargu-application--bound (kargu-application-create))
           (kargu-session--context (kargu-test-session-with-history :provider "before" :model "old"))
           messages logs prefetched)
-      (kargu-config-publish
+      (kargu-test-config-publish
        (kargu-config-service-context)
        '(:providers (("private-switch" :api "https://fixture.invalid/v1?key=synthetic-query-secret&tenant=synthetic-tenant/"
                       :apikey "synthetic-config-key" :model "chosen-model"))) "/fixture" "private")
@@ -260,7 +273,7 @@
                  (lambda (format &rest args) (push (apply #'format format args) messages)))
                 ((symbol-function 'kargu-log)
                  (lambda (_level format &rest args) (push (apply #'format format args) logs))))
-        (should (equal (kargu-set-provider "private-switch" no-model) "private-switch"))
+        (should (kargu-ok-p (kargu-test-await (lambda (done) (kargu-set-provider "private-switch" no-model done)))))
         (should (equal (kargu-selection-provider) "private-switch"))
         (should (equal (kargu-selection-model) (unless no-model "chosen-model")))
         (should (equal prefetched '("private-switch")))

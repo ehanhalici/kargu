@@ -20,6 +20,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'tests/test-helpers)
+(require 'tests/test-bridge)
 (require 'kargu/core)
 (require 'kargu/config)
 (require 'kargu/config/connection)
@@ -50,9 +51,9 @@
     (should (eq (kargu-connection-snapshot-credential-scope snap) scope))
     (should (floatp (kargu-connection-snapshot-created-at snap)))
     ;; Verify read-only enforcement
-    (should-error (setf (kargu-connection-snapshot-provider snap) "mutated"))
-    (should-error (setf (kargu-connection-snapshot-endpoint snap) "https://mutated.com"))
-    (should-error (setf (kargu-connection-snapshot-config-revision snap) 99))))
+    (dolist (accessor '(kargu-connection-snapshot-provider kargu-connection-snapshot-endpoint
+							   kargu-connection-snapshot-config-revision))
+      (should-error (eval `(setf (,accessor ',snap) "mutated") t)))))
 
 (ert-deftest kargu-connection-redacted-summary-zero-secret-leakage-test ()
   "Redacted summaries must omit credentials and never leak secrets into prints."
@@ -104,148 +105,91 @@
     (should (equal secret-data "super-confidential-token-555"))))
 
 (ert-deftest kargu-connection-keyless-offline-mode-test ()
-  "Keyless providers resolve immediately without auth sources or network."
-  (let* ((kargu-session--context
-          (kargu-test-session-with-history :provider "ollama" :model "llama3"))
-         delivered-result)
-    (cl-letf (((symbol-function 'kargu--config-providers)
-               (lambda () '(("ollama" :api "http://localhost:11434/v1" :keyless t)))))
-      (let ((task (kargu-connection-resolve-async
-                   "ollama" "llama3"
-                   :callback (lambda (res) (setq delivered-result res)))))
-        (should (kargu-async-task-p task))
-        (should delivered-result)
-        (should (kargu-ok-p delivered-result))
-        (let ((snap (kargu-result-value delivered-result)))
-          (should (kargu-connection-snapshot-p snap))
-          (should (equal (kargu-connection-snapshot-provider snap) "ollama"))
-          (should (equal (kargu-connection-snapshot-endpoint snap) "http://localhost:11434/v1"))
-          (should (equal (kargu-connection-snapshot-secret snap) "")))))))
+  "Native keyless policy needs no auth-source or upstream request."
+  (let ((kargu-api-key nil))
+    (kargu-test-config-publish (kargu-config-service-context)
+                               '(:providers (("ollama" :api "http://localhost:11434/v1" :apikey ""))) "/fixture" "keyless")
+    (cl-letf (((symbol-function 'auth-source-search) (lambda (&rest _) (ert-fail "No keyless lookup"))))
+      (let ((result (kargu-test-await (lambda (done) (kargu-connection-resolve-async "ollama" "llama3" :callback done)))))
+        (should (kargu-ok-p result))
+        (let ((snapshot (kargu-result-value result)))
+          (should (equal (kargu-connection-snapshot-provider snapshot) "ollama"))
+          (should (equal (kargu-connection-snapshot-endpoint snapshot) "http://localhost:11434/v1"))
+          (should (equal (kargu-connection-snapshot-secret snapshot) ""))
+          (kargu-connection-snapshot-wipe snapshot))))))
 
 (ert-deftest kargu-connection-callable-secret-never-called-on-ui-thread-test ()
-  "Callable secrets must NEVER be invoked synchronously on UI thread (CONFIG-01)."
-  (let* ((called-count 0)
-         (secret-fn (lambda ()
-                      (setq called-count (1+ called-count))
-                      "secret-from-callable"))
-         (auth-sources '("~/.authinfo"))
-         (kargu-session--context
-          (kargu-test-session-with-history :provider "remote-mock" :model "m1")))
-    (cl-letf (((symbol-function 'kargu--config-providers)
-               (lambda () '(("remote-mock" :api "https://mock.example/v1"))))
-              ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
-              ((symbol-function 'kargu-provider-env) (lambda (_) nil))
-              ((symbol-function 'auth-source-search)
-               (lambda (&rest _)
-                 (list (list :host "mock.example" :secret secret-fn)))))
-      ;; 1. Discovery safety: checking authentication must not call secret function
+  "Discovery and native policy never invoke an editor callable secret."
+  (let ((called 0) (kargu-api-key nil)
+        (auth-sources '("~/.authinfo.gpg"))
+        (kargu-config-credential-adapter
+         (lambda (_provider _host child) (kargu-async-finish child (kargu-ok "deferred-token")))))
+    (cl-letf (((symbol-function 'auth-source-search)
+               (lambda (&rest _) (list (list :secret (lambda () (cl-incf called) "private-callable"))))))
+      (kargu-test-config-publish (kargu-config-service-context)
+                                 '(:providers (("remote-mock" :api "https://mock.example/v1"))) "/fixture" "callable")
       (should-not (kargu-provider-authenticated-p "remote-mock"))
-      (should (= called-count 0))
-
-      ;; 2. UI safety: setup check must not call secret function
-      (let ((report (kargu--setup-problems (kargu-config-api-key-fast "remote-mock") nil nil)))
-        (should (listp report))
-        (should (= called-count 0)))
-
-      ;; 3. The synchronous secret-unlocking entry points no longer exist.
-      (should-not (fboundp 'kargu-config-resolve-api-key-result))
-      (should-not (fboundp 'kargu--resolve-api-key))
-      (should-not (fboundp 'kargu-config-api-key))
-      (should (= called-count 0))
-
-      ;; 4. Asynchronous connection resolution must return task immediately without calling secret on UI thread
-      (let* (async-delivered
-             (kargu-config-credential-adapter
-              (lambda (_prov _host adapter-task)
-                ;; Adapter receives task without calling secret on initial invocation
-                (kargu-async-finish adapter-task (kargu-ok "deferred-token")))))
-        (let ((task (kargu-connection-resolve-async
-                     "remote-mock" "m1"
-                     :callback (lambda (r) (setq async-delivered r)))))
+      (should-not (kargu-config-api-key-fast "remote-mock"))
+      (should (= called 0))
+      (let (result)
+        (let ((task (kargu-connection-resolve-async "remote-mock" "m1" :callback (lambda (value) (setq result value)))))
           (should (kargu-async-task-p task))
-          ;; Callable secret was NEVER called on UI thread
-          (should (= called-count 0))
-          (should async-delivered)
-          (should (kargu-ok-p async-delivered)))))))
+          (should-not result)
+          (should (= called 0))
+          (kargu-bridge-test--wait (lambda () result))
+          (should (kargu-ok-p result))
+          (should (= called 0))
+          (kargu-connection-snapshot-wipe (kargu-result-value result)))))))
 
 (ert-deftest kargu-connection-stale-discard-on-config-revision-test ()
-  "Late discovery results after config revision changes must be discarded."
-  (let* ((kargu-session--context
-          (kargu-test-session-with-history :provider "beta" :model "m1"))
-         delivered-result
-         pending-adapter-task
-         (kargu-config-credential-adapter
-          (lambda (_prov _host task)
-            (setq pending-adapter-task task))))
-    (cl-letf (((symbol-function 'kargu--config-providers)
-               (lambda () '(("beta" :api "https://beta.example/v1"))))
-              ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
-              ((symbol-function 'kargu-provider-env) (lambda (_) nil)))
-      (let ((task (kargu-connection-resolve-async
-                   "beta" "m1"
-                   :callback (lambda (r) (setq delivered-result r)))))
-        (should (kargu-async-task-p task))
-        (should pending-adapter-task)
-        (should-not delivered-result)
-        ;; Config revision bumps while discovery was in flight:
-        (kargu-config-bump-revision)
-        ;; Adapter now finishes with late result:
-        (kargu-async-finish pending-adapter-task (kargu-ok "late-secret-token"))
-        ;; Result must be rejected as stale!
-        (should delivered-result)
-        (should (kargu-err-p delivered-result))
-        (should (eq (kargu-result-err-code delivered-result) :stale-discard))))))
+  "A real native publication invalidates credentials held at the interop port."
+  (let* ((kargu-api-key nil) pending result
+         (kargu-config-credential-adapter (lambda (_provider _host child) (setq pending child))))
+    (kargu-test-config-publish (kargu-config-service-context)
+                               '(:providers (("beta" :api "https://beta.example/v1"))) "/fixture" "first")
+    (let ((task (kargu-connection-resolve-async "beta" "m1" :callback (lambda (value) (setq result value)))))
+      (kargu-bridge-test--wait (lambda () pending))
+      (should-not result)
+      (kargu-test-config-invalidate)
+      (kargu-async-finish pending (kargu-ok "late-secret"))
+      (kargu-bridge-test--wait (lambda () result))
+      (should (kargu-err-p result))
+      (should (eq (kargu-result-err-code result) :stale-discard))
+      (should-not (kargu-async-task-children task)))))
 
 (ert-deftest kargu-connection-cancellation-cleans-up-worker-test ()
-  "Cancelling resolution terminates background worker and avoids delivering result."
-  (let* ((kargu-session--context
-          (kargu-test-session-with-history :provider "gamma" :model "m1"))
-         delivered-result
-         cleanup-invoked-p
-         pending-adapter-task
+  "Cancelling a native-prepared connection drains only its interop child."
+  (let* ((kargu-api-key nil) pending result cleaned
          (kargu-config-credential-adapter
-          (lambda (_prov _host task)
-            (setq pending-adapter-task task)
-            (kargu-async-add-cleanup
-             task (lambda () (setq cleanup-invoked-p t))))))
-    (cl-letf (((symbol-function 'kargu--config-providers)
-               (lambda () '(("gamma" :api "https://gamma.example/v1"))))
-              ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
-              ((symbol-function 'kargu-provider-env) (lambda (_) nil)))
-      (let ((task (kargu-connection-resolve-async
-                   "gamma" "m1"
-                   :callback (lambda (r) (setq delivered-result r)))))
-        (should (kargu-async-task-p task))
-        (should-not cleanup-invoked-p)
-        ;; Cancel the resolution task:
-        (kargu-async-cancel task)
-        (should cleanup-invoked-p)
-        ;; Late delivery after cancellation must be ignored:
-        (kargu-async-finish pending-adapter-task (kargu-ok "late-value"))
-        (should-not delivered-result)))))
+          (lambda (_provider _host child)
+            (setq pending child)
+            (kargu-async-add-cleanup child (lambda () (setq cleaned t))))))
+    (kargu-test-config-publish (kargu-config-service-context)
+                               '(:providers (("gamma" :api "https://gamma.example/v1"))) "/fixture" "first")
+    (let ((task (kargu-connection-resolve-async "gamma" "m1" :callback (lambda (value) (setq result value)))))
+      (kargu-bridge-test--wait (lambda () pending))
+      (should-not cleaned)
+      (kargu-async-cancel task)
+      (should cleaned)
+      (kargu-async-finish pending (kargu-ok "late-secret"))
+      (should-not result)
+      (should-not (kargu-async-task-children task)))))
 
 (ert-deftest kargu-connection-timeout-terminates-cleanly-test ()
-  "Hanging worker is timed out and task completes with auth-unavailable."
-  (let* ((kargu-session--context
-          (kargu-test-session-with-history :provider "delta" :model "m1"))
-         delivered-result
-         (kargu-config-credential-adapter
-          (lambda (_prov _host _task)
-            ;; Intentionally do nothing: simulate hanging worker
-            nil)))
-    (cl-letf (((symbol-function 'kargu--config-providers)
-               (lambda () '(("delta" :api "https://delta.example/v1"))))
-              ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
-              ((symbol-function 'kargu-provider-env) (lambda (_) nil)))
-      (let ((task (kargu-connection-resolve-async
-                   "delta" "m1"
-                   :timeout 0.05
-                   :callback (lambda (r) (setq delivered-result r)))))
-        (should (kargu-async-task-p task))
-        ;; Wait for timeout
-        (sleep-for 0.1)
-        (should delivered-result)
-        (should (kargu-err-p delivered-result))))))
+  "A real native decision admits interop; expiry drains that hanging child."
+  (let (delivered-result child
+			 (kargu-api-key nil))
+    (kargu-test-config-publish (kargu-config-service-context)
+                               '(:providers (("delta" :api "https://delta.invalid/v1"))) "/fixture" "timeout")
+    (let* ((kargu-config-credential-adapter (lambda (_provider _host task) (setq child task)))
+           (task (kargu-connection-resolve-async
+                  "delta" "m1" :timeout 0.2 :callback (lambda (result) (setq delivered-result result)))))
+      (kargu-bridge-test--wait (lambda () child))
+      (kargu-bridge-test--wait (lambda () delivered-result))
+      (should (kargu-err-p delivered-result))
+      (should-not (kargu-async-pending-p child))
+      (should-not (kargu-async-task-children task))
+      (should-not (kargu-async-task-timer task)))))
 
 (ert-deftest kargu-connection-retry-preserves-snapshot-test ()
   "A connection snapshot remains immutable across retries even if global config changes."
@@ -259,7 +203,7 @@
     (should (= (kargu-connection-snapshot-config-revision snap) 1))
     ;; Bump global configuration
     (let ((before (kargu-config-revision)))
-      (kargu-config-bump-revision)
+      (kargu-test-config-invalidate)
       (should (> (kargu-config-revision) before)))
     ;; Snapshot retained its bound revision and target
     (should (= (kargu-connection-snapshot-config-revision snap) 1))
@@ -267,20 +211,13 @@
     (should (equal (kargu-connection-snapshot-secret snap) "retry-secret"))))
 
 (ert-deftest kargu-connection-invalid-endpoint-rejected-test ()
-  "Malformed endpoint URLs must be rejected with typed :invalid-arguments error."
-  (let* ((kargu-session--context
-          (kargu-test-session-with-history :provider "bad-prov" :model "m1"))
-         delivered-result)
-    (cl-letf (((symbol-function 'kargu--config-providers)
-               (lambda () '(("bad-prov" :api "invalid://not-http"))))
-              ((symbol-function 'kargu--api-base) (lambda (&rest _) "invalid://not-http")))
-      (let ((task (kargu-connection-resolve-async
-                   "bad-prov" "m1"
-                   :callback (lambda (r) (setq delivered-result r)))))
-        (should (kargu-async-task-p task))
-        (should delivered-result)
-        (should (kargu-err-p delivered-result))
-        (should (eq (kargu-result-err-code delivered-result) :invalid-arguments))))))
+  "Native endpoint parsing rejects malformed config before any interop lookup."
+  (kargu-test-config-publish (kargu-config-service-context)
+                             '(:providers (("bad-prov" :api "invalid://not-http"))) "/fixture" "bad-endpoint")
+  (let ((kargu-config-credential-adapter (lambda (&rest _) (ert-fail "No invalid-target interop"))))
+    (let ((result (kargu-test-await (lambda (done) (kargu-connection-resolve-async "bad-prov" "m1" :callback done)))))
+      (should (kargu-err-p result))
+      (should (eq (kargu-result-err-code result) :invalid-arguments)))))
 
 (ert-deftest kargu-connection-worker-never-passes-secrets-in-argv-test ()
   "Worker command invocation arguments must never contain secret tokens."

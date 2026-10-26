@@ -260,3 +260,150 @@ fn foreign_session_and_revocation_cannot_publish_a_staged_configuration() -> Tes
     );
     Ok(())
 }
+
+fn publish(
+    host: &mut Host,
+    scope: &Value,
+    generation: u64,
+    source: &str,
+    context: Value,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let ticket = prepare(host, scope, generation, source)?;
+    call(
+        host,
+        scope,
+        "configuration/commit",
+        json!({"capture_id":ticket["capture_id"],"context":context}),
+    )
+}
+
+#[test]
+fn source_revision_ignores_other_sessions_choices_but_tracks_changed_credentials() -> TestResult {
+    let (mut host, scope) = host()?;
+    let first = publish(&mut host, &scope, 1, "provider='custom'", context())?;
+    let mut changed = context();
+    changed["selected_provider"] = json!("different");
+    changed["selected_model"] = json!("Other/CaseSensitive");
+    let second = publish(&mut host, &scope, 2, "provider='custom'", changed.clone())?;
+    assert_eq!(first["revision"], second["revision"]);
+    assert_eq!(second["default"]["provider"], "different");
+    assert_eq!(second["fallback"]["provider"], "custom");
+    changed["api_key"] = json!("changed-private");
+    assert_eq!(
+        publish(&mut host, &scope, 3, "provider='custom'", changed)?["revision"],
+        2
+    );
+    Ok(())
+}
+
+#[test]
+fn source_identity_frames_collection_boundaries_and_ignores_registry_order() -> TestResult {
+    let (mut host, scope) = host()?;
+    let mut captured = context();
+    captured["registry"] =
+        json!([{"id":"custom","models":["x","environment"],"env":["y"]},{"id":"other"}]);
+    assert_eq!(
+        publish(&mut host, &scope, 1, "", captured.clone())?["revision"],
+        1
+    );
+    captured["registry"] =
+        json!([{"id":"other"},{"id":"custom","models":["x","environment"],"env":["y"]}]);
+    assert_eq!(
+        publish(&mut host, &scope, 2, "", captured.clone())?["revision"],
+        1
+    );
+    captured["registry"] =
+        json!([{"id":"custom","models":["x"],"env":["environment","y"]},{"id":"other"}]);
+    assert_eq!(publish(&mut host, &scope, 3, "", captured)?["revision"], 2);
+    Ok(())
+}
+
+#[test]
+fn transient_context_and_provider_selection_are_revision_bound_not_publications() -> TestResult {
+    let (mut host, scope) = host()?;
+    publish(
+        &mut host,
+        &scope,
+        1,
+        "provider='custom'\n[providers.custom]\nmodel='Configured/Case'",
+        context(),
+    )?;
+    let mut transient = context();
+    transient["api_key"] = json!("transient-private");
+    let resolved = call(
+        &mut host,
+        &scope,
+        "configuration/resolve",
+        json!({"revision":1,"context":transient,"target":{}}),
+    )?;
+    assert_eq!(resolved["credential"]["secret"], "transient-private");
+    let select = |provider: &str, no_model, batch| json!({"revision":1,"provider":provider,"no_model":no_model,"batch":batch,"cached_models":["Cached/Case"]});
+    assert_eq!(
+        call(
+            &mut host,
+            &scope,
+            "configuration/select",
+            select("custom", false, true)
+        )?["model"],
+        "Configured/Case"
+    );
+    assert_eq!(
+        call(
+            &mut host,
+            &scope,
+            "configuration/select",
+            select("custom", true, true)
+        )?["model"],
+        Value::Null
+    );
+    assert_eq!(
+        call(
+            &mut host,
+            &scope,
+            "configuration/select",
+            select("other", false, true)
+        )?["model"],
+        "Cached/Case"
+    );
+    assert_eq!(
+        call(
+            &mut host,
+            &scope,
+            "configuration/select",
+            select("other", false, false)
+        )?["model"],
+        Value::Null
+    );
+    let snapshot = call(&mut host, &scope, "configuration/snapshot", json!({}))?;
+    assert_eq!(snapshot["revision"], 1);
+    assert_eq!(snapshot["default"]["credential"]["kind"], "interop");
+    Ok(())
+}
+
+#[test]
+fn invalid_model_identity_and_oversized_or_ambiguous_captures_fail_closed() -> TestResult {
+    for model in [" ".to_owned(), "x".repeat(513), "unsafe\nmodel".to_owned()] {
+        assert!(target("", context(), json!({"model":model})).is_err());
+    }
+    // Explicit empty is reserved for catalog connection preparation.
+    assert_eq!(target("", context(), json!({"model":""}))?["model"], "");
+    assert!(
+        serde_json::from_value::<ConfigurationDocument>(
+            json!({"providers":[{"name":"Custom","data":{}},{"name":"custom","data":{}}]})
+        )
+        .is_err()
+    );
+    let mut oversized = context();
+    oversized["environment"] = json!({"A":"x".repeat(65537)});
+    assert!(serde_json::from_value::<PolicyContext>(oversized).is_err());
+    let malformed = "${".repeat(12000);
+    assert_eq!(
+        target(
+            &format!("[providers.custom]\napikey='{malformed}'"),
+            context(),
+            json!({})
+        )?["credential"]["secret"],
+        malformed
+    );
+    Ok(())
+}

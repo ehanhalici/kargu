@@ -1,5 +1,47 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Todo 1 tamamen kapandı: native config authority ve gerçek consumer cutover
+
+`ff96691` typed native temelinden sonra gerçek config/connection/setup/catalog ve
+provider picker `configuration_policy` portuna geçti. Application actor tek
+publication/revision writer; Elisp yalnız committed private DTO gözlemi, UI niyeti
+ve owned credential interop taşır. Elisp config publication/revision increment,
+credential/env/endpoint precedence ve eligibility/default-selection motorları
+silindi; eski parser/file reader zaten kaldırılmıştı. Memory-only UI reader'da
+gizli RPC/env/file IO veya credential unlock yoktur. `kargu-set-provider` async
+task/optional Result callback sözleşmesine geçti; UI modeli native ACK'ten sonra
+seçer. Current README ve connection ownership belgesi güncellendi; ayrıntı .codex/52.
+
+Expiring owner/session ticket ve exact-revision resolve/select; geç prepare
+acquisition abort; lost commit ACK'te rollback/retry yerine fail-closed eski
+receipt ve explicit refresh reconciliation; aynı epoch'ta replaced session ret
+testlendi. Source identity artık başka session'ın seçimini revision değişikliği
+saymaz; count/length framing collection ambiguity'sini engeller. Ortam/options
+ilk yield öncesi bounded private capture'dır; yalnız native-requested env değerleri
+IPC'ye gider, capture completion/cancel'da temizlenir. Profile -> ReadyProfile
+consuming typed sınırı endpoint/model uygunluğunu credential interop'tan önce
+kurar; domain içinde JSON alanları tekrar okunup karar üretilmez.
+
+Full source **1268/1268 ERT**, 0 unexpected, **147.335395 s**, **19:54:29
+Europe/Istanbul** geçti (`/tmp/kargu-policy-verified-source-ert.log`). Altı yeni
+authority regresyonu ayrıca geçti (`/tmp/kargu-policy-authority-verified.log`).
+**291 native + 24 compile-fail = 315** locked test / 31 suite temiz
+(`/tmp/kargu-policy-cutover-native-all.log`); locked normal build, fmt ve strict
+Clippy sıfır uyarı (`...-final-build.log`, `...-cutover-clippy.log`). Değişen
+**26 Elisp** üretim/test dosyasında Werror bytecompile/checkdoc temiz
+(`/tmp/kargu-policy-bytecompile-verified.log`, `...-checkdoc-verified.log`);
+elc yalnız task-specific /tmp dizinlerinde. Connection TLC **602836 generated /
+101708 distinct**, queue 0, depth 22 (**12:50:48**); transport **1810 / 693**,
+queue 0, depth 13 (**12:50:49**) temiz. Bunlar bounded lifecycle regresyonudur;
+somut config actor refinement veya tüm 01 standartlarının formal ispatı değildir.
+
+Todo 1 ve alt kutuları `[x]`; todo 2 ve diğer göç/G03/G05 işleri açık kalır.
+Auth-source/callable worker editor interop olarak gereklidir; genel process
+PGID/drain ve log-egress denetimleri bu dar cutover ile kapatılmaz. IPC/JSON/GC
+kopyalarında fiziksel erasure garantisi yoktur. Kullanıcının 07/shell.nix
+değişiklikleri korunur; canlı Emacs reload, gerçek credential dosyalarına erişim,
+hesap/ücretli upstream, kurulum, credential migration, merge/push yapılmadı.
+
 ## 2026-10-26 — Gerçek config dosya okumasının native tüketici geçişi
 
 Candidate selection, bounded regular-file capture ve parser/digest aynı

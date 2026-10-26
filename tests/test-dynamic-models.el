@@ -62,6 +62,8 @@
 (ert-deftest kargu-catalog-custom-url-still-requires-auth-test ()
   "A private override cannot inherit public access from the standard catalog."
   (let (requested result)
+    (kargu-test-config-publish (kargu-config-service-context)
+                               '(:providers (("opencode" :api "https://private.example/v1"))) "/fixture" "private-target")
     (cl-letf (((symbol-function 'kargu--api-base) (lambda (_) "https://private.example/v1"))
               ((symbol-function 'kargu--resolve-direct-api-key) (lambda (_) nil))
               ((symbol-function 'kargu-config-worker-resolve)

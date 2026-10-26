@@ -71,7 +71,7 @@
                     "model = \"deepseek-chat\"\n"))
           (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
             (should (kargu-ok-p (kargu-test-await
-                                (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
+                                 (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
             (should (equal (kargu--provider-name) "deepseek"))
             ;; API base should resolve to DeepSeek's default URL automatically:
             (should (equal (kargu--api-base) "https://api.deepseek.com/v1"))
@@ -96,7 +96,7 @@
                     "apikey = \"sk-test-custom-key\"\n"))
           (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
             (should (kargu-ok-p (kargu-test-await
-                                (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
+                                 (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
             (should (equal (kargu--provider-name) "deepseek"))
             ;; User-provided API base must take precedence:
             (should (equal (kargu--api-base) "https://my-custom-proxy.internal/v1"))
@@ -116,8 +116,10 @@
             (insert "provider = \"groq\"\n"))
           (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
             (should (kargu-ok-p (kargu-test-await
-                                (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
+                                 (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
             (setenv "GROQ_API_KEY" "gsk_test_groq_env_key")
+            (should (kargu-ok-p (kargu-test-await
+                                 (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
             (unwind-protect
                 (progn
                   (should (equal (kargu--provider-name) "groq"))
@@ -144,13 +146,14 @@
   (let ((kargu-session--context
          (kargu-test-session-with-history :provider nil :model nil)))
     (puthash "cerebras" '("llama3.1-70b") kargu--live-models-cache)
-    (kargu-set-provider "cerebras")
+    (should (kargu-ok-p (kargu-test-await (lambda (done) (kargu-set-provider "cerebras" nil done)))))
     (should (equal (kargu-selection-provider) "cerebras"))
     (should (equal (kargu--api-base) "https://api.cerebras.ai/v1"))
     (should (equal (kargu-selection-model) "llama3.1-70b"))))
 
 (ert-deftest kargu-providers-generic-catalog-test ()
   "Keyless and local properties are driven by catalog.el and lookup is exact."
+  (kargu-test-config-publish (kargu-config-service-context) nil "/fixture" "catalog")
   ;; Keyless runners
   (should (kargu-provider-keyless-p "ollama"))
   (should (kargu-provider-keyless-p "lmstudio"))
@@ -183,6 +186,7 @@
 
 (ert-deftest kargu-providers-authentication-detection-test ()
   "Keyless local runners and env-configured providers report authenticated."
+  (kargu-test-config-publish (kargu-config-service-context) nil "/fixture" "eligibility")
   ;; Ollama and llama_cpp are keyless local runners
   (should (kargu-provider-authenticated-p "ollama"))
   (should (kargu-provider-authenticated-p "llama_cpp"))
@@ -198,6 +202,7 @@
           (should-not (kargu-provider-authenticated-p "groq"))
           ;; When env var is set, it becomes authenticated
           (setenv "GROQ_API_KEY" "gsk_test")
+          (kargu-test-config-publish (kargu-config-service-context) nil "/fixture" "env")
           (should (kargu-provider-authenticated-p "groq"))
           (should (member "groq" (kargu-connected-providers))))
       (setenv "GROQ_API_KEY" nil)
@@ -209,7 +214,7 @@
         (kargu-max-tokens 8192) (kargu-temperature 0.5)
         (kargu-session--context
          (kargu-test-session-with-history :messages '((("role" . "user") ("content" . "hello")))
-                                         :provider "deepseek" :model "deepseek-chat")))
+                                          :provider "deepseek" :model "deepseek-chat")))
     (let ((payload (kargu--build-payload))
           (tuning (kargu-api-request-tuning "deepseek" "deepseek-chat")))
       (should (equal (kargu-aget payload "model") "deepseek-chat"))
@@ -228,11 +233,11 @@
         (kargu--live-models-cache (make-hash-table :test #'equal)) result)
     (puthash "fixture" 1 kargu--catalog-generations)
     (let ((task (kargu-async-start (lambda (models failure)
-                                    (should-not failure) (setq result models)))))
+                                     (should-not failure) (setq result models)))))
       (unwind-protect
           (progn
             (kargu--catalog-receive task "fixture" 1
-              "{\"models\":[{\"id\":\"m1\"},{\"id\":\"m2\"},{\"id\":\"m3\"}]}")
+				    "{\"models\":[{\"id\":\"m1\"},{\"id\":\"m2\"},{\"id\":\"m3\"}]}")
             (kargu-test-drain-model-publishers)
             (should (equal (mapcar (lambda (model) (kargu-aget model "id")) result)
                            '("m1" "m2" "m3")))
@@ -247,8 +252,8 @@
         (kargu-session--context
          (kargu-test-session-with-history :model "test/cycle-model")))
     (kargu-test-set-model-metadata "test/cycle-model"
-                              '(:id "cycle-model"
-                                    :reasoning-efforts ("low" "medium" "high")))
+				   '(:id "cycle-model"
+					 :reasoning-efforts ("low" "medium" "high")))
     (kargu-tune-cycle-reasoning-effort)
     (should (eq (kargu-selection-effort) 'low))
     (kargu-tune-cycle-reasoning-effort)

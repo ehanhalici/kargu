@@ -87,10 +87,10 @@
     (kargu-test-set-model-metadata "flagged-off" '(("supports_tools" . :json-false)))
     (should-not (kargu-model-supports-tools-p "flagged-off"))
     (kargu-test-set-model-metadata "params-without-tools"
-                              '(("supported_parameters" . ["temperature" "max_tokens"])))
+				   '(("supported_parameters" . ["temperature" "max_tokens"])))
     (should-not (kargu-model-supports-tools-p "params-without-tools"))
     (kargu-test-set-model-metadata "params-with-tools"
-                              '(("supported_parameters" . ["temperature" "tools"])))
+				   '(("supported_parameters" . ["temperature" "tools"])))
     (should (kargu-model-supports-tools-p "params-with-tools"))))
 
 (ert-deftest kargu-metadata-extended-fields-and-info-test ()
@@ -238,6 +238,7 @@
   "Test full workflow of selecting provider, model, and effort with company completion."
   (let ((kargu-reasoning-effort nil)
         (kargu-connected-mock '("cerebras" "groq")))
+    (kargu-test-config-publish (kargu-config-service-context) nil "/fixture" "company")
     (cl-letf (((symbol-function 'kargu-config-refresh-async) #'kargu-test-refresh-published-config)
               ((symbol-function 'kargu-connected-providers)
                (lambda () kargu-connected-mock))
@@ -262,6 +263,7 @@
                                  (("supported_efforts" .
                                    ["low" "medium" "high"])))))))))
       (kargu-chat-select-provider-company)
+      (kargu-bridge-test--wait (lambda () (eq (kargu-selection-effort) 'medium)))
       (should (string= (kargu--provider-name) "cerebras"))
       (should (string= (kargu--model) "llama3.1-70b"))
       (should (eq (kargu-selection-effort) 'medium)))))
@@ -393,8 +395,8 @@
       (should (equal (kargu-test-efforts-from-specs `(("reasoning" . ,m3)) specs)
                      '("low" "medium" "high"))))
     (let ((m4 '(:mandatory :json-false
-                :supported_efforts ["low" "medium" "high"]
-                :default_effort "medium")))
+			   :supported_efforts ["low" "medium" "high"]
+			   :default_effort "medium")))
       (should (equal (kargu-test-efforts-from-specs `(("reasoning" . ,m4)) specs)
                      '("low" "medium" "high"))))))
 
@@ -419,13 +421,13 @@
   "Test resolving reasoning effort options from API metadata only."
   ;; 1. Explicit model metadata
   (kargu-test-set-model-metadata "test/two-level-model"
-                            '(:id "two-level-model" :reasoning-efforts ("low" "medium")))
+				 '(:id "two-level-model" :reasoning-efforts ("low" "medium")))
   (should (equal (kargu-model-reasoning-efforts "two-level-model")
                  '("low" "medium")))
 
   ;; 2. Explicitly disabled reasoning
   (kargu-test-set-model-metadata "test/no-reasoning-model"
-                            '(:id "no-reasoning-model" :supports-reasoning :json-false))
+				 '(:id "no-reasoning-model" :supports-reasoning :json-false))
   (should (null (kargu-model-reasoning-efforts "no-reasoning-model")))
 
   ;; 3. A supports-reasoning flag without a level list is not a list
@@ -440,7 +442,7 @@
          (kargu-test-session-with-history :model "test/two-level-reasoner")))
     ;; Register model with only low and medium
     (kargu-test-set-model-metadata "test/two-level-reasoner"
-                              '(:id "two-level-reasoner" :reasoning-efforts ("low" "medium")))
+				   '(:id "two-level-reasoner" :reasoning-efforts ("low" "medium")))
     (cl-letf (((symbol-function 'kargu--completing-read-with-company)
                (lambda (_prompt cands &optional _def _ann)
                  (setq captured-cands cands)
@@ -457,7 +459,7 @@
         (kargu-session--context
          (kargu-test-session-with-history :model "test/pure-chat-model")))
     (kargu-test-set-model-metadata "test/pure-chat-model"
-                              '(:id "pure-chat-model" :supports-reasoning :json-false))
+				   '(:id "pure-chat-model" :supports-reasoning :json-false))
     (cl-letf (((symbol-function 'kargu--completing-read-with-company)
                (lambda (_prompt cands &optional _def _ann)
                  (setq captured-cands cands)
@@ -474,7 +476,7 @@
         (kargu-session--context
          (kargu-test-session-with-history :model "test/dual-model")))
     (kargu-test-set-model-metadata "test/dual-model"
-                              '(:id "dual-model" :reasoning-efforts ("low" "medium")))
+				   '(:id "dual-model" :reasoning-efforts ("low" "medium")))
     ;; nil -> low -> medium -> nil
     (kargu-tune-cycle-reasoning-effort)
     (should (eq (kargu-selection-effort) 'low))

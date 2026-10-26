@@ -25,7 +25,7 @@
           (dolist (mode '("blocking" "async" "auto"))
             (write-region (format "review_mode = %S\n" mode) nil file)
             (should (kargu-ok-p (kargu-test-await
-                                (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
+                                 (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
             (should (eq kargu-diff-review-mode (intern mode))))
           (cl-letf (((symbol-function 'kargu--config-plist)
                      (lambda () '(:review-mode 42))))
@@ -34,18 +34,22 @@
       (delete-file file))))
 
 (ert-deftest kargu-config-missing-environment-reference-is-actionable-test ()
-  "Missing references warn by name without exposing credential text or matches."
-  (let ((process-environment (cons "KARGU_ENV_TEST_SECRET=ok" process-environment)) notices)
+  "Native missing-reference diagnostics contain names, never the source literal."
+  (let ((process-environment (copy-sequence process-environment))
+        (kargu-api-key nil) (kargu-application--bound (kargu-application-create)) notices)
+    (setenv "KARGU_ENV_TEST_SECRET" "ok")
     (setenv "KARGU_ENV_TEST_ABSENT" nil)
     (cl-letf (((symbol-function 'kargu-log)
                (lambda (level format &rest arguments)
                  (push (cons level (apply #'format format arguments)) notices))))
-      (string-match "keep" "keep")
-      (let ((match (match-data)))
-        (should (equal (kargu--expand-env-refs "prefix-${KARGU_ENV_TEST_SECRET}-suffix")
-                       "prefix-ok-suffix"))
-        (should-not (kargu--expand-env-refs "private-literal-${KARGU_ENV_TEST_ABSENT}"))
-        (should (equal (match-data) match)))
+      (kargu-test-config-publish
+       (kargu-config-service-context)
+       '(:providers (("custom" :apikey "prefix-${KARGU_ENV_TEST_SECRET}-suffix"))) "/fixture" "first")
+      (should (equal (kargu-config-api-key-fast "custom") "prefix-ok-suffix"))
+      (kargu-test-config-publish
+       (kargu-config-service-context)
+       '(:providers (("custom" :apikey "private-literal-${KARGU_ENV_TEST_ABSENT}"))) "/fixture" "second")
+      (should-not (kargu-config-api-key-fast "custom"))
       (should (= (length notices) 1))
       (should (eq (caar notices) 'warn))
       (should (string-search "KARGU_ENV_TEST_ABSENT" (cdar notices)))
@@ -54,8 +58,8 @@
 (ert-deftest kargu-setup-reports-all-mandatory-dependencies-test ()
   "CLI and package failures appear together; optional integrations do not block."
   (let ((problems (car (kargu--setup-problems
-                       "real-key" '((:type "CLI" :name "curl" :purpose "HTTP" :install-hint "install curl"))
-                       '((plz . "HTTP client"))))))
+			"real-key" '((:type "CLI" :name "curl" :purpose "HTTP" :install-hint "install curl"))
+			'((plz . "HTTP client"))))))
     (should (= (length problems) 2))
     (should (seq-some (lambda (text) (string-search "curl" text)) problems))
     (should (seq-some (lambda (text) (string-search "plz" text)) problems)))
@@ -69,7 +73,7 @@
         (progn
           (write-region "[providers.302ai]\napi = \"https://a.example/v1\"\n\n[providers.\"my.proxy\"] # local\napi = \"http://localhost:1\"\nmodels = [\"m1\"]\n" nil file)
           (should (kargu-ok-p (kargu-test-await
-                              (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
+                               (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
           (let ((providers (kargu--config-providers)))
             (should (equal (plist-get (cdr (assoc "302ai" providers)) :api) "https://a.example/v1"))
             (should (equal (plist-get (cdr (assoc "my.proxy" providers)) :models) '("m1")))
@@ -116,7 +120,7 @@
            "provider = 'a' # comment\n[providers.a]\napikey = 'literal#value'\nmodels = [\n  \"a]#b\", # not the end\n  '\\literal',\n  \"\\u00e7\\U0001F642\",\n]\n"
            nil file)
           (should (kargu-ok-p (kargu-test-await
-                              (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
+                               (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
           (let ((provider (cdar (kargu--config-providers))))
             (should (equal (plist-get provider :apikey) "literal#value"))
             (should (equal (plist-get provider :models) '("a]#b" "\\literal" "ç🙂")))))
@@ -131,11 +135,11 @@
         (progn
           (write-region "provider = \"stable\"\nreview_mode = \"auto\"\n" nil file)
           (should (kargu-ok-p (kargu-test-await
-                              (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
+                               (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
           (let ((before (kargu--config-plist)))
             (write-region "review_mode = \"blocking\"\nmodel = 42\n" nil file)
             (should (kargu-err-p (kargu-test-await
-                                 (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
+                                  (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
             (should (eq (kargu--config-plist) before))
             (should (eq kargu-diff-review-mode 'auto))))
       (delete-file file))))
@@ -170,9 +174,9 @@
   (let ((kargu-application--bound (kargu-application-create))
         (native-comp-enable-subr-trampolines nil)
         (kargu-api-key nil))
-    (kargu-config-publish (kargu-config-service-context)
-                         '(:provider "alpha" :providers (("alpha" :apikey "" :api "http://a/v1")))
-                         "/nonexistent/config" "digest")
+    (kargu-test-config-publish (kargu-config-service-context)
+                               '(:provider "alpha" :providers (("alpha" :apikey "" :api "http://a/v1")))
+                               "/nonexistent/config" "digest")
     (cl-letf (((symbol-function 'file-readable-p) (lambda (&rest _) (ert-fail "UI file read")))
               ((symbol-function 'file-attributes) (lambda (&rest _) (ert-fail "UI stat")))
               ((symbol-function 'file-exists-p) (lambda (&rest _) (ert-fail "UI exists"))))
@@ -195,7 +199,7 @@
              (value (kargu-bridge--object
                      "status" "ok" "path" "/fake" "generation" 2 "digest" (make-string 64 ?a)
                      "config" (kargu-bridge--object "provider" "new" "model" :json-null
-                                                   "review-mode" :json-null "providers" []))))
+                                                    "review-mode" :json-null "providers" []))))
         (should (eq (kargu-async-task-parent second-reader) second))
         (should (eq (kargu-async-task-parent first-reader) first))
         (kargu-async-finish second-reader value)
@@ -218,7 +222,7 @@
     (let ((copy (kargu-config-snapshot-data snapshot)))
       (aset (plist-get (cdar (plist-get copy :providers)) :apikey) 0 ?Y))
     (should (equal (plist-get (cdar (plist-get (kargu-config-snapshot-data snapshot)
-                                             :providers)) :apikey)
+                                               :providers)) :apikey)
                    "synthetic-config-secret"))))
 
 (ert-deftest kargu-config-worker-yields-and-cancellation-kills-child-test ()
@@ -240,69 +244,54 @@
       (kargu-async-cancel task))))
 
 (ert-deftest kargu-api-key-resolution-order-test ()
-  "An empty TOML key means keyless, ${VAR} expands, and the global key stays with the active provider."
-  (let ((kargu-session--context
-         (kargu-test-session-with-history :provider "alpha"))
-        (kargu-api-key nil))
-    (cl-letf (((symbol-function 'kargu--config-providers)
-               (lambda () '(("alpha" :apikey "${KARGU_TEST_KEY}")
-                            ("beta" :apikey "")
-                            ("gamma"))))
-              ((symbol-function 'kargu-provider-env) (lambda (_p) '("KARGU_TEST_ENV"))))
-      (setenv "KARGU_TEST_KEY" "from-ref")
-      (setenv "KARGU_TEST_ENV" "from-env")
-      (unwind-protect
-          (progn
-            (should (equal (kargu-config-api-key-fast "alpha") "from-ref"))
-            (should (equal (kargu-config-api-key-fast "beta") ""))
-            (should (equal (kargu-config-api-key-fast "gamma") "from-env"))
-            (setenv "KARGU_TEST_KEY" nil)
-            (should (equal (kargu-config-api-key-fast "alpha") "from-env"))
-            (let ((kargu-api-key "global"))
-              (should (equal (kargu-config-api-key-fast "alpha") "global"))
-              (should (equal (kargu-config-api-key-fast "gamma") "from-env"))))
-        (setenv "KARGU_TEST_KEY" nil)
-        (setenv "KARGU_TEST_ENV" nil)))))
+  "Native publications choose global/file/env/keyless sources; readers stay cached."
+  (let ((kargu-session--context (kargu-test-session-with-history :provider "alpha"))
+        (kargu-application--bound (kargu-application-create))
+        (kargu-providers--table (copy-hash-table kargu-providers--table))
+        (kargu-api-key nil)
+        (data '(:providers (("alpha" :apikey "${KARGU_TEST_KEY}") ("beta" :apikey "") ("gamma" :api "https://fixture.invalid")))))
+    (dolist (id '("alpha" "beta" "gamma"))
+      (kargu-register-provider :id id :api "https://fixture.invalid" :env '("KARGU_TEST_ENV")))
+    (setenv "KARGU_TEST_KEY" "from-ref")
+    (setenv "KARGU_TEST_ENV" "from-env")
+    (kargu-test-config-publish (kargu-config-service-context) data "/fixture" "first")
+    (should (equal (kargu-config-api-key-fast "alpha") "from-ref"))
+    (should (equal (kargu-config-api-key-fast "beta") ""))
+    (should (equal (kargu-config-api-key-fast "gamma") "from-env"))
+    (setenv "KARGU_TEST_KEY" nil)
+    (should (equal (kargu-config-api-key-fast "alpha") "from-ref"))
+    (kargu-test-config-publish (kargu-config-service-context) data "/fixture" "second")
+    (should (equal (kargu-config-api-key-fast "alpha") "from-env"))
+    (let ((kargu-api-key "global"))
+      (kargu-test-config-publish (kargu-config-service-context) data "/fixture" "third")
+      (should (equal (kargu-config-api-key-fast "alpha") "global"))
+      (should (equal (kargu-config-api-key-fast "gamma") "from-env")))))
 
 (ert-deftest kargu-provider-detection-respects-credential-owner-test ()
-  "Only the active provider can use the global credential override."
-  (let ((kargu-session--context
-         (kargu-test-session-with-history :provider "alpha"))
-        (kargu-api-key "active-only")
-        (process-environment (copy-sequence process-environment)))
+  "Only the native captured active provider can receive a global credential."
+  (let ((kargu-session--context (kargu-test-session-with-history :provider "alpha"))
+        (kargu-api-key "active-only"))
     (setenv "KARGU_ABSENT_PROVIDER_KEY" nil)
-    (cl-letf (((symbol-function 'kargu--config-providers)
-               (lambda () '(("alpha") ("beta" :apikey "${KARGU_ABSENT_PROVIDER_KEY}"))))
-              ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
-              ((symbol-function 'kargu-provider-env) (lambda (_) nil)))
-      (should (kargu-provider-authenticated-p "alpha"))
-      (should-not (kargu-provider-authenticated-p "beta"))
-      (should-not (kargu-config-api-key-fast "beta")))))
+    (kargu-test-config-publish (kargu-config-service-context)
+                               '(:providers (("alpha") ("beta" :apikey "${KARGU_ABSENT_PROVIDER_KEY}"))) "/fixture" "owner")
+    (should (kargu-provider-authenticated-p "alpha"))
+    (should-not (kargu-provider-authenticated-p "beta"))
+    (should-not (kargu-config-api-key-fast "beta"))))
 
 (ert-deftest kargu-provider-discovery-never-invokes-secret-function-or-gpg-test ()
-  "Provider discovery never calls auth-source `:secret' functions or unlocks GPG."
-  (let ((kargu-session--context
-         (kargu-test-session-with-history :provider "alpha"))
+  "Native eligibility publication and readers never unlock editor auth sources."
+  (let ((kargu-session--context (kargu-test-session-with-history :provider "alpha"))
         (kargu-api-key nil)
-        (auth-sources '("~/.authinfo.gpg" "secrets:Login" macos-keychain-internet))
-        (secret-called nil)
-        (searched-sources nil))
-    (cl-letf (((symbol-function 'kargu--config-providers)
-               (lambda () '(("alpha" :apikey "configured-key")
-                            ("beta" :api "https://beta.example/v1"))))
-              ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
-              ((symbol-function 'kargu-provider-env) (lambda (_) nil))
-              ((symbol-function 'auth-source-search)
-               (lambda (&rest _)
-                 (setq searched-sources auth-sources)
-                 (list (list :host "beta.example"
-                             :secret (lambda ()
-                                       (setq secret-called t)
-                                       "unlocked-secret"))))))
+        (auth-sources '("~/.authinfo.gpg" "secrets:Login" macos-keychain-internet)) searched secret-called)
+    (cl-letf (((symbol-function 'auth-source-search)
+               (lambda (&rest _) (setq searched t)
+                 (list (list :secret (lambda () (setq secret-called t) "unlocked-secret"))))))
+      (kargu-test-config-publish (kargu-config-service-context)
+                                 '(:providers (("alpha" :apikey "configured-key") ("beta" :api "https://beta.example/v1"))) "/fixture" "discovery")
       (should (kargu-provider-authenticated-p "alpha"))
       (should-not (kargu-provider-authenticated-p "beta"))
-      (should-not secret-called)
-      (should-not searched-sources))))
+      (should-not searched)
+      (should-not secret-called))))
 
 (ert-deftest kargu-config-resolve-api-key-async-cancel-and-unavailable-backend-test ()
   "Explicit key resolution reports unavailable backends and supports async cancel."
@@ -310,6 +299,8 @@
          (kargu-test-session-with-history :provider "beta"))
         (kargu-api-key nil)
         (auth-sources '("~/.authinfo.gpg" macos-keychain-internet)))
+    (kargu-test-config-publish (kargu-config-service-context)
+                               '(:providers (("beta" :api "https://beta.example/v1"))) "/fixture" "interop")
     (cl-letf (((symbol-function 'kargu--config-providers)
                (lambda () '(("beta" :api "https://beta.example/v1"))))
               ((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
@@ -320,13 +311,14 @@
         (should (eq (kargu-result-err-code res) :auth-unavailable)))
       ;; Async adapter cancellation and owner validation
       (let* (pending-task delivered canceled-adapter
-             (kargu-config-credential-adapter
-              (lambda (_provider _host task)
-                (setq pending-task task)
-                (kargu-async-add-cleanup
-                 task (lambda () (setq canceled-adapter t))))))
+			  (kargu-config-credential-adapter
+			   (lambda (_provider _host task)
+			     (setq pending-task task)
+			     (kargu-async-add-cleanup
+			      task (lambda () (setq canceled-adapter t))))))
         (let ((task (kargu-connection-resolve-async
                      "beta" "" :callback (lambda (r) (setq delivered r)))))
+          (kargu-bridge-test--wait (lambda () pending-task))
           (kargu-async-cancel task)
           (should canceled-adapter)
           (kargu-async-finish pending-task (kargu-ok "late-secret"))

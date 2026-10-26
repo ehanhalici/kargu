@@ -6,15 +6,7 @@ use std::collections::BTreeSet;
 use zeroize::Zeroizing;
 
 fn reference(rest: &str) -> Option<(EnvironmentVariable, &str)> {
-    let (name, tail) = rest.split_once('}')?;
-    if !name
-        .chars()
-        .next()
-        .is_some_and(|ch| ch.is_alphabetic() || ch == '_')
-    {
-        return None;
-    }
-    Some((EnvironmentVariable::try_from(name.to_owned()).ok()?, tail))
+    EnvironmentVariable::parse_reference(rest)
 }
 pub(super) fn names(source: &str, names: &mut BTreeSet<EnvironmentVariable>) {
     let mut rest = source;

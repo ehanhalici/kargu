@@ -42,8 +42,6 @@
 (declare-function kargu--provider-name "kargu/config/key" ())
 (declare-function kargu--model "kargu/config/key" ())
 (declare-function kargu--api-base "kargu/config/key" (&optional provider-name))
-(declare-function kargu--url-host "kargu/config/key" (url))
-(declare-function kargu--resolve-direct-api-key "kargu/config/key" (&optional provider-name))
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
 (declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
 (declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
@@ -217,76 +215,129 @@ The result is borrowed read-only data for trusted internal consumers."
      (t (kargu-async-finish
          task (kargu-err "Credential adapter returned an invalid result" :auth-unavailable))))))
 
-(defun kargu-connection--resolve-secret (task draft timeout)
-  "Resolve DRAFT's credential under TASK and TIMEOUT, preserving its endpoint."
-  (let* ((provider (kargu-connection-snapshot-provider draft))
-         (direct (kargu--resolve-direct-api-key provider))
-         (host (kargu--url-host (kargu-connection-snapshot-endpoint draft)))
-         (accept (kargu-async-wrap
-                  task (lambda (result) (kargu-connection--accept-secret task draft result)))))
-    (cond
-     ((or direct (kargu-provider-keyless-p provider)) (funcall accept (or direct "")))
-     (t
-      (let ((child (kargu-async-start
-                    (lambda (value error)
-                      (funcall accept (or value (kargu-err error :auth-unavailable))))
-                    :owner nil :parent task :timeout timeout)))
-        (if (functionp kargu-config-credential-adapter)
-            (funcall kargu-config-credential-adapter provider host child)
-          (kargu-config-worker-resolve provider host child :timeout timeout)))))))
+(defun kargu-connection--sources-current-p (captured names)
+  "Compare raw source CAPTURED against current editor inputs for NAMES.
+Explicit session intent is frozen by the request; callers own selection guards."
+  (condition-case nil
+      (let ((current (kargu-bridge-config-context names)))
+        (dolist (field '("selected_provider" "selected_model"))
+          (puthash field (gethash field captured) current))
+        (kargu-config-json-equal captured current))
+    (error nil)))
 
-(defun kargu-connection--current-p (draft origin session)
-  "Check DRAFT's captured configuration and SESSION in ORIGIN."
-  (and (buffer-live-p origin)
-       (with-current-buffer origin
-         (and (eq session (kargu-session-context))
-              (= (kargu-connection-snapshot-config-revision draft) (kargu-config-revision))
-              (equal (kargu-connection-snapshot-endpoint draft)
-                     (kargu--api-base (kargu-connection-snapshot-provider draft)))))))
+(defun kargu-connection--start-interop (provider host child timeout)
+  "Start CHILD's editor credential interop for PROVIDER/HOST under TIMEOUT."
+  (if (functionp kargu-config-credential-adapter)
+      (funcall kargu-config-credential-adapter provider host child)
+    (kargu-config-worker-resolve provider host child :timeout timeout)))
 
 (cl-defun kargu-connection-resolve-async
-    (provider model &key callback timeout origin capabilities parent owner settings public)
-  "Resolve PROVIDER and MODEL into CALLBACK as a captured connection result.
-ORIGIN retains session ownership; TIMEOUT bounds credential resolution.
-CAPABILITIES and SETTINGS are detached; PARENT and OWNER own preparation.
-PUBLIC skips authentication only for an independently verified public endpoint."
+    (provider model &key callback timeout origin capabilities parent owner settings public expected-endpoint)
+  "Resolve PROVIDER/MODEL natively into CALLBACK under PARENT and OWNER.
+ORIGIN captures session ownership; TIMEOUT bounds native policy and interop.
+CAPABILITIES/SETTINGS are captured DTOs.  PUBLIC is a verified catalog flag.
+EXPECTED-ENDPOINT pins a previously verified catalog base before any lookup."
   (kargu-contract-assert #'functionp callback)
   (let* ((app (kargu-application-context))
+         (timeout (if (and (numberp timeout) (> timeout 0))
+                      (min timeout kargu-config-worker-default-timeout)
+                    kargu-config-worker-default-timeout))
          (origin (or origin (current-buffer)))
          (session (kargu-session-context origin))
-         (provider (downcase (string-trim (format "%s" (or provider (kargu--provider-name))))))
-         (format (or (kargu-provider-format provider) 'openai))
-         (draft (kargu-connection-snapshot--create
-                 :provider provider :model (copy-sequence (or model (kargu--model) ""))
-                 :endpoint (copy-sequence (kargu--api-base provider))
-                 :wire-format (if (keywordp format) format (intern (concat ":" (symbol-name format))))
-                 :capabilities (or capabilities (kargu-connection--default-capabilities provider))
-                 :settings settings
-                 :config-revision (kargu-config-revision)))
-         (valid (kargu-application-wrap
-                 app (lambda ()
-                       (let ((kargu-connection--bound nil))
-                         (kargu-connection--current-p draft origin session)))))
-         (task (kargu-async-start
-                (kargu-application-wrap
-                 app (lambda (value error)
-                       (funcall callback
-                                (cond
-                                 ((not (funcall valid)) (kargu-err "Stale connection discarded" :stale-discard))
-                                 ((or (kargu-ok-p value) (kargu-err-p value)) value)
-                                 (t (kargu-err (or error "Connection resolution failed") :auth-unavailable))))))
-                :owner owner :parent parent :buffer origin
-                :timeout (or timeout kargu-config-worker-default-timeout) :valid-p valid)))
-    (if (kargu-contract-url-p (kargu-connection-snapshot-endpoint draft))
-        (funcall (kargu-async-wrap task
-                                  (lambda ()
-                                    (if public
-                                        (kargu-connection--accept-secret task draft (kargu-ok ""))
-                                      (kargu-connection--resolve-secret
-                                       task draft (or timeout kargu-config-worker-default-timeout))))))
-      (kargu-async-finish task (kargu-err "Invalid endpoint URL" :invalid-arguments)))
+         (private (make-symbol "kargu-connection-policy"))
+         (inputs (kargu-bridge-config-policy--inputs))
+         draft revision names task pending-secret)
+    (cl-labels
+        ((valid ()
+           (and (buffer-live-p origin)
+                (with-current-buffer origin (eq session (kargu-session-context)))
+                (or (null revision)
+                    (and (= revision (kargu-config-revision))
+                         (kargu-connection--sources-current-p (get private 'value) names)))))
+         (finish (value error-data)
+           (unwind-protect
+               (funcall callback
+                        (cond
+                         ((not (valid)) (kargu-err "Stale connection discarded" :stale-discard))
+                         ((or (kargu-ok-p value) (kargu-err-p value)) value)
+                         (t (kargu-err (or error-data "Native connection resolution failed") :auth-unavailable))))
+             (kargu-bridge-config-policy--release-inputs private)))
+         (validated (value failure)
+           (if (or failure (not (hash-table-p value))
+                   (not (equal (gethash "endpoint" value) (kargu-connection-snapshot-endpoint draft))))
+               (kargu-async-finish task (kargu-err "Native configuration changed during credential lookup" :stale-discard))
+             (kargu-connection--accept-secret task draft
+                                              (kargu-ok (kargu-credential-scope-secret pending-secret)))))
+         (accept (result)
+           (cond
+            ((kargu-err-p result) (kargu-async-finish task result))
+            ((not (and (kargu-ok-p result) (stringp (kargu-result-value result))))
+             (kargu-async-finish task (kargu-err "Invalid credential interop result" :auth-unavailable)))
+            (t
+             (setq pending-secret (kargu-credential-scope--create :raw-secret (kargu-result-value result)))
+             (kargu-async-add-cleanup task (lambda () (kargu-credential-scope-wipe pending-secret)))
+             ;; Recheck the native head after the external credential yield.
+             (kargu-bridge-config-resolve
+              (kargu-connection-snapshot-provider draft) (kargu-connection-snapshot-model draft)
+              (kargu-async-wrap task #'validated)
+              :parent task :application app :revision revision :context (get private 'value)))))
+         (resolved (value failure)
+           (if (or failure (not (hash-table-p value))
+                   (and expected-endpoint (not (equal expected-endpoint (gethash "endpoint" value)))))
+               (kargu-async-finish task (kargu-err "Native connection policy unavailable"
+                                                   (if (and failure (equal (gethash "code" failure) -32602))
+                                                       :invalid-arguments :config-unavailable)))
+             (let* ((name (gethash "provider" value))
+                    (chosen (gethash "model" value))
+                    (format (or (kargu-provider-format name) 'openai))
+                    (credential (gethash "credential" value)))
+               (unless (and (stringp name) (stringp (gethash "endpoint" value))
+                            (equal revision (gethash "revision" value)) (hash-table-p credential)
+                            (or (stringp chosen) (eq chosen :json-null)))
+                 (error "Invalid native connection projection"))
+               (setq draft (kargu-connection-snapshot--create
+                            :provider name :model (if (stringp chosen) chosen "")
+                            :endpoint (gethash "endpoint" value)
+                            :wire-format (if (keywordp format) format (intern (concat ":" (symbol-name format))))
+                            :capabilities (or capabilities (kargu-connection--default-capabilities name))
+                            :settings settings :config-revision revision))
+               (cond
+                (public (kargu-connection--accept-secret task draft (kargu-ok "")))
+                ((equal (gethash "kind" credential) "direct")
+                 (kargu-connection--accept-secret task draft (kargu-ok (gethash "secret" credential))))
+                ((equal (gethash "kind" credential) "keyless")
+                 (kargu-connection--accept-secret task draft (kargu-ok "")))
+                ((equal (gethash "kind" credential) "interop")
+                 (let ((child (kargu-async-start
+                               (kargu-application-wrap app
+						       (lambda (result error-data)
+							 (funcall (kargu-async-wrap task #'accept)
+								  (or result (kargu-err error-data :auth-unavailable)))))
+                               :parent task :owner nil)))
+                   (kargu-connection--start-interop name (gethash "host" value) child
+                                                    (or timeout kargu-config-worker-default-timeout))))
+                (t (kargu-async-finish task (kargu-err "Invalid native credential policy" :auth-unavailable)))))))
+         (configured (result)
+           (if (kargu-err-p result) (kargu-async-finish task result)
+             (setq names (gethash "environment_names" (kargu-config-native-view)))
+             (put private 'value (kargu-bridge-config-policy--captured-context inputs names))
+             (kargu-bridge-config-policy--release-inputs inputs)
+             (setq revision (kargu-config-revision))
+             (kargu-bridge-config-resolve provider model (kargu-async-wrap task #'resolved)
+                                          :parent task :application app :revision revision :context (get private 'value)))))
+      (setq task (kargu-async-start (kargu-application-wrap app #'finish)
+                                    :owner owner :parent parent :buffer origin :valid-p (kargu-application-wrap app #'valid)
+                                    :timeout (or timeout kargu-config-worker-default-timeout)))
+      (kargu-async-add-cleanup task (lambda () (kargu-bridge-config-policy--release-inputs inputs)))
+      (kargu-async-add-cleanup task (lambda ()
+                                      (when (eq (kargu-async-task-state task) :cancelled)
+					(kargu-bridge-config-policy--release-inputs private))))
+      (cond
+       ((not (kargu-async-pending-p task)) (kargu-async-cancel task))
+       ((<= (kargu-async-task-deadline task) (float-time))
+        (kargu-async-finish task (kargu-err "Connection deadline elapsed" :deadline)))
+       (t (kargu-config-ensure-native-async (kargu-async-wrap task #'configured) :parent task))))
     task))
 
 (provide 'kargu/config/connection)
-
 ;;; connection.el ends here

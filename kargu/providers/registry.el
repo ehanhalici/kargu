@@ -22,9 +22,10 @@
 (require 'kargu/core)
 (require 'auth-source)
 
-(declare-function kargu--url-host "kargu/config/key")
 (declare-function kargu--config-providers "kargu/config/schema")
 (declare-function kargu-config-api-key-fast "kargu/config/key" (&optional provider-name))
+(declare-function kargu-config-profile-field "kargu/config/key" (name &optional provider))
+(declare-function kargu-config-native-view "kargu/config/service" ())
 
 (defvar kargu-providers--table (make-hash-table :test 'equal)
   "Hash table mapping provider ID strings to provider metadata plists.")
@@ -220,53 +221,25 @@ A `:models' field-spec plist is not a model list."
     (sort ids #'string-lessp)))
 
 (defun kargu-provider-keyless-p (id)
-  "Return non-nil if provider ID is keyless.
-Checks provider metadata in registry and TOML config."
-  (let* ((info (kargu-provider-get id))
-         (id-str (if (symbolp id) (symbol-name id) (format "%s" (or id ""))))
-         (id-lower (downcase (string-trim id-str)))
-         (entry (assoc id-lower (and (fboundp 'kargu--config-providers)
-                                     (kargu--config-providers))))
-         (toml-plist (and entry (cdr entry))))
-    (or (and info (plist-get info :keyless))
-        (and toml-plist (plist-get toml-plist :keyless))
-        (and toml-plist (equal (plist-get toml-plist :apikey) "")))))
+  "Read provider ID's last committed native keyless flag."
+  (require 'kargu/config/key)
+  (kargu-config-profile-field "keyless" id))
 
 (defun kargu-provider-local-p (id)
-  "Return non-nil if provider ID is marked as local runner in catalog or config."
-  (let* ((info (kargu-provider-get id))
-         (id-str (if (symbolp id) (symbol-name id) (format "%s" (or id ""))))
-         (id-lower (downcase (string-trim id-str)))
-         (entry (assoc id-lower (and (fboundp 'kargu--config-providers)
-                                     (kargu--config-providers))))
-         (toml-plist (and entry (cdr entry))))
-    (or (and info (plist-get info :local))
-        (and toml-plist (plist-get toml-plist :local)))))
-
-(defun kargu-provider-valid-key-p (key)
-  "Return non-nil if KEY is a valid, non-placeholder API key string."
-  (and (stringp key)
-       (let ((trimmed (string-trim key)))
-         (and (not (string-empty-p trimmed))
-              (not (string-suffix-p "..." trimmed))))))
+  "Read provider ID's last committed native local-runner annotation."
+  (require 'kargu/config/key)
+  (kargu-config-profile-field "local" id))
 
 (defun kargu-provider-authenticated-p (id)
-  "Non-nil if provider ID has a nonblocking API key available or is keyless.
-Discovery never invokes secret functions or interactive pinentry."
-  (require 'kargu/config)
-  (or (kargu-provider-keyless-p id)
-      (kargu-provider-valid-key-p (kargu-config-api-key-fast id))))
+  "Read provider ID's committed native eligibility, without credential lookup."
+  (require 'kargu/config/key)
+  (kargu-config-profile-field "authenticated" id))
 
 (defun kargu-connected-providers ()
-  "Return authenticated or keyless registered and custom configured providers.
-Only the current published config is read; no refresh or credential unlock."
-  (cl-remove-if-not
-   #'kargu-provider-authenticated-p
-   (sort (delete-dups
-          (append (and (fboundp 'kargu--config-providers)
-                       (mapcar #'car (kargu--config-providers)))
-                  (kargu-provider-list)))
-         #'string-lessp)))
+  "Read the native committed eligible provider IDs without IO or unlock."
+  (require 'kargu/config/service)
+  (when-let* ((view (kargu-config-native-view)))
+    (append (gethash "connected" view) nil)))
 
 (provide 'kargu/providers/registry)
 

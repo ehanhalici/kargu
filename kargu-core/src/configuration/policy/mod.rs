@@ -1,7 +1,31 @@
 //! Native configuration selection and credential-source policy, with no IO.
+//!
+//! Captured configuration and resolved targets are not diagnostic/serialization
+//! surfaces.  Secrets leave only through the explicit private editor handoff.
+//! ```compile_fail
+//! fn print(value: kargu_core::configuration::policy::ConfigurationDocument) {
+//!     println!("{value:?}");
+//! }
+//! ```
+//! ```compile_fail
+//! fn serialize(value: kargu_core::configuration::policy::ConfigurationDocument) {
+//!     let _ = serde_json::to_string(&value);
+//! }
+//! ```
+//! ```compile_fail
+//! fn print(value: kargu_core::configuration::policy::PolicyTarget) {
+//!     println!("{value:?}");
+//! }
+//! ```
+//! ```compile_fail
+//! fn serialize(value: kargu_core::configuration::policy::PolicyTarget) {
+//!     let _ = serde_json::to_string(&value);
+//! }
+//! ```
 
 mod domain;
 mod environment;
+mod identity;
 mod resolve;
 mod service;
 use crate::{
@@ -42,11 +66,11 @@ pub fn environment_names(
 }
 
 /// Explicit private result; intentionally no Serialize or Debug implementation.
-pub struct PolicyTarget(Value);
+pub struct PolicyTarget(resolve::ReadyProfile);
 impl PolicyTarget {
     /// Private editor credential handoff. Callers must never log this projection.
     pub fn into_editor_value(self) -> Value {
-        self.0
+        self.0.into_editor_value()
     }
 }
 
@@ -62,11 +86,9 @@ pub fn resolve(
 
 pub(super) fn default_provider(
     config: &ConfigurationDocument,
-    context: &PolicyContext,
+    selected: Option<&ApiProviderId>,
 ) -> Result<ApiProviderId, CoreError> {
-    context
-        .selected_provider
-        .as_ref()
+    selected
         .or(config.provider.as_ref())
         .or_else(|| config.providers.first().map(|provider| &provider.name))
         .cloned()

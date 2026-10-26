@@ -352,7 +352,8 @@ impl Host {
             | "configuration/commit"
             | "configuration/abort"
             | "configuration/snapshot"
-            | "configuration/resolve" => {
+            | "configuration/resolve"
+            | "configuration/select" => {
                 let request: ReadRequest<Value> =
                     serde_json::from_value(params).map_err(|_| Fault::params())?;
                 if !self.owns_read_scope(&request.scope) {

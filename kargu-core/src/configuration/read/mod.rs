@@ -6,6 +6,7 @@ use self::domain::{CandidatePaths, ReadTimeout};
 use super::{ConfigurationSource, ParseInput, RefreshGeneration};
 use crate::error::CoreError;
 pub(crate) use domain::ConfigurationPath;
+pub(crate) use domain::ReadTimeout as ConfigurationTimeout;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};

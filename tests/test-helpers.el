@@ -52,26 +52,72 @@ when it never arrives."
 General UI workflow fixtures use this adapter explicitly; config-backed
 selector integration tests keep the real worker and file publication."
   (let ((task (kargu-async-start (lambda (value _error) (funcall callback value))
-                                :owner nil :parent nil)))
+                                 :owner nil :parent nil)))
     (kargu-async-finish task (kargu-ok (kargu-config-current-snapshot)))
     task))
 
 (defvar kargu-test--model-apps nil
-  "Native metadata owners created by this test's explicit producer fixtures.")
+  "Native owners created by this test's explicit producer fixtures.")
+
+(defun kargu-test-config-document (data)
+  "Construct a synthetic normalized DTO from fixture DATA, without policy."
+  (let (providers)
+    (dolist (entry (plist-get data :providers))
+      (let ((fields (make-hash-table :test #'equal)))
+        (dolist (pair '((:api . "api") (:apikey . "apikey") (:model . "model") (:models . "models")))
+          (when (plist-member (cdr entry) (car pair))
+            (puthash (cdr pair) (if (eq (car pair) :models)
+                                    (vconcat (plist-get (cdr entry) (car pair)))
+                                  (plist-get (cdr entry) (car pair))) fields)))
+        (push (kargu-bridge--object "name" (car entry) "data" fields) providers)))
+    (kargu-bridge--object "provider" (or (plist-get data :provider) :json-null)
+                          "model" (or (plist-get data :model) :json-null)
+                          "review-mode" (or (plist-get data :review-mode) :json-null)
+                          "providers" (vconcat (nreverse providers)))))
+
+(defun kargu-test-config-publish (service data path digest)
+  "Publish synthetic DATA/PATH/DIGEST through the real native owner of SERVICE."
+  (should (eq service (kargu-config-service-context)))
+  (let ((generation (cl-incf (kargu-config-service-generation service))) result failure)
+    (cl-pushnew (kargu-application-context) kargu-test--model-apps)
+    (let ((captured (kargu-bridge--object
+                     "status" "ok" "generation" generation "path" path
+                     "digest" (secure-hash 'sha256 digest) "config" (kargu-test-config-document data))))
+      (kargu-test-await
+       (lambda (done)
+         (kargu-bridge-config-publish
+          captured generation (lambda (view error-data) (setq result view failure error-data) (funcall done t))
+          :application (kargu-application-context)))))
+    (should-not failure)
+    (kargu-config--observe service result)))
+
+(defun kargu-test-config-invalidate ()
+  "Advance the real native revision with another explicit synthetic publication."
+  (let ((snapshot (kargu-config-current-snapshot)))
+    (kargu-test-config-publish
+     (kargu-config-service-context) (and snapshot (kargu-config-snapshot-data snapshot))
+     (if snapshot (kargu-config-snapshot-path snapshot) "/synthetic/config")
+     (format "invalidate-%d" (kargu-config-revision)))))
 
 (defun kargu-test-await-catalog-start (function &rest args)
-  "Call catalog FUNCTION with ARGS and await its real native target projection.
-Only fixtures wait; no target/URL/auth engine is mocked or made synchronous."
-  (let ((target (symbol-function 'kargu-bridge-catalog-target)) started done result
-        (deadline (+ (float-time) 10)))
-    (cl-letf (((symbol-function 'kargu-bridge-catalog-target)
-               (lambda (arguments callback &rest options)
-                 (setq started t)
-                 (apply target arguments
-                        (lambda (&rest values) (setq done t) (apply callback values)) options))))
+  "Call catalog FUNCTION with ARGS and await native policy or interop admission.
+Only fixtures wait; no target, credential or URL policy engine is mocked."
+  (let ((resolve (symbol-function 'kargu-connection-resolve-async))
+        (interop (symbol-function 'kargu-connection--start-interop))
+        settled result (deadline (+ (float-time) 10)))
+    (cl-letf (((symbol-function 'kargu-connection--start-interop)
+               (lambda (&rest options) (setq settled t) (apply interop options)))
+              ((symbol-function 'kargu-connection-resolve-async)
+               (lambda (provider model &rest options)
+                 (let ((callback (plist-get options :callback)))
+                   (apply resolve provider model
+                          :callback (lambda (value) (setq settled t) (funcall callback value))
+                          (cl-loop for (key value) on options by #'cddr
+                                   unless (eq key :callback) append (list key value)))))))
       (setq result (apply function args))
-      (while (and started (not done) (< (float-time) deadline)) (accept-process-output nil 0.01))
-      (when (and started (not done)) (error "Catalog target fixture timed out")))
+      (while (and (not settled) (kargu-async-pending-p result) (< (float-time) deadline))
+        (accept-process-output nil 0.01))
+      (when (and (not settled) (kargu-async-pending-p result)) (error "Native catalog policy fixture timed out")))
     result))
 
 (defun kargu-test-await-model-ticket (ticket)
@@ -167,7 +213,7 @@ PROVIDER, MODEL and EFFORT default to the current owner's explicit values."
           (kargu-history-overlay history) overlay)
     (kargu-session--create :id-value (kargu-session-id)
                            :usage-value (copy-tree (kargu-session-usage-value
-                                                   (kargu-session-context)))
+                                                    (kargu-session-context)))
                            :history-value history
                            :mode-value (kargu-session-mode-value (kargu-session-context))
                            :selection-value (kargu-selection-create
@@ -239,6 +285,8 @@ the previous mode when the test ends."
   "Run RUN-TEST with ARGS in a scratch root and isolated session/state data.
 Tests never see the working tree of Kargu as their project."
   (let ((default-directory (kargu-test-scratch-root))
+        (process-environment (copy-sequence process-environment))
+        (auth-sources nil)
         (kargu-permission--override-root (kargu-test-scratch-root))
         (kargu--state-store (copy-tree kargu--state-store))
         (kargu-session--context (kargu-test-session-with-history))
@@ -266,9 +314,16 @@ Tests never see the working tree of Kargu as their project."
                                    (copy-hash-table kargu-diff--snapshots)
                                  (make-hash-table :test #'equal)))
         (kargu-diff--run-modified-files (bound-and-true-p kargu-diff--run-modified-files)))
+    (dolist (provider (kargu-provider-list))
+      (dolist (name (kargu-provider-env provider)) (setenv name nil)))
     (unwind-protect
-        (let ((submit (symbol-function 'kargu-bridge-models-submit)))
+        (let ((submit (symbol-function 'kargu-bridge-models-submit))
+              (ensure (symbol-function 'kargu-bridge-application-ensure)))
           (cl-letf (((symbol-function 'kargu-api-prepare-connection) #'kargu-test-prepare-connection)
+                    ((symbol-function 'kargu-bridge-application-ensure)
+                     (lambda (connection app callback)
+                       (cl-pushnew app kargu-test--model-apps)
+                       (funcall ensure connection app callback)))
                     ((symbol-function 'kargu-bridge-models-submit)
                      (lambda (connection app &rest options)
                        (cl-pushnew app kargu-test--model-apps)

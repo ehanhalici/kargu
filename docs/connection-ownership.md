@@ -24,7 +24,7 @@ before startup yields, expanding editor `~` paths without filesystem IO. Rust
 selects the first existing candidate and reads/parses it in one blocking worker,
 outside the actor loop. A malformed/unreadable/oversized/non-regular first existing
 candidate never falls through to another file. Missing candidates return `absent`
-with the first path; the editor publishes the empty projection. An explicit
+with the first path; native policy commits the empty projection. An explicit
 refresh therefore starts the shared core even for absence. Missing core or read
 capability fails closed; passive getters still never start a core or perform IO.
 The old editor file script, decoder, source handoff and parser bridge were deleted;
@@ -48,14 +48,39 @@ actually joins. Shutdown/EOF drain actual completions; cancellation is cooperati
 between OS calls and cannot interrupt a kernel-blocked filesystem syscall.
 No config child process or new subprocess lifecycle was introduced.
 
-The editor service remains the sole latest-generation publication writer. One root
-deadline covers core startup, native capture and parsing. Cancel/supersession/owner
-loss cannot publish a late reply; known native leases, generation, selected path
-and absolute deadline are rechecked at delivery. Raw file source no longer crosses
-the editor IPC port; native buffers use Zeroizing wrappers. Parsed credentials
-still deliberately enter the private editor config projection. This is not
-physical erasure of IPC/JSON/GC copies. Native config publication ownership and
-environment/keyless/selection precedence remain explicit open cutovers.
+The application actor is the sole configuration publication/revision writer.
+`configuration_policy` supplies owner/session-bound prepare/commit/abort tickets,
+snapshot, exact-revision resolve and default-model selection. One fixed root
+deadline covers startup, file capture, parsing, staging and commit observation.
+Only a live ticket can commit; newer generations supersede older staging and
+unclaimed tickets expire within five seconds, including transport-tick cleanup.
+Closed owners cannot adopt late replies. Cancel before commit aborts an acquired
+ticket, including a late prepare reply. An issued commit is not rolled back on
+lost acknowledgement: the stale editor revision cannot authorize a connection;
+explicit refresh with a newer generation reconciles it. No blind commit retry.
+
+Rust owns global/config/env/keyless/interop precedence and provider/model/endpoint
+defaults. Editor globals and literal registry data are inputs, not a policy engine.
+Before yielding, the editor freezes at most 2 MiB of environment data behind a
+private capability; only names requested by native policy cross IPC. Capture is
+cleared on completion/cancel. Native environment capture is separately bounded
+to 2048 names / 256 KiB; reference expansion is bounded and single-pass. Native
+source identity hashes count/length-framed config, endpoint/key options, registry
+and requested environment values, never another session's UI selection. Unchanged
+sources reuse the revision; explicit per-request selection remains captured input.
+Typed preview profiles may describe invalid endpoints, but consuming conversion
+to a ready target requires a parsed HTTP(S) endpoint and valid nonempty model
+identity (explicit empty model is the catalog preparation sentinel).
+
+Elisp only observes committed DTOs and retains UI intent. Passive getters never
+start RPC/IO, unlock credentials or read environment values; eligibility changes
+become visible on explicit refresh. Direct requests capture fresh inputs and
+resolve against the native head, rechecking it after external credential yields.
+Cold standalone catalog/selection bootstrap can commit defaults without file IO;
+its empty projection is not a filesystem absence claim. Normal send/setup performs
+the explicit file refresh. Raw file source no longer crosses editor IPC; native
+buffers use Zeroizing wrappers. Parsed credentials still deliberately enter private
+editor projections; physical erasure of IPC/JSON/GC copies is not guaranteed.
 Only an admitted live refresh advances the editor generation: closed/inactive
 parents or elapsed deadlines cannot invalidate another in-flight publication.
 The root checks elapsed time before starting its native read, without waiting
@@ -116,7 +141,7 @@ release its children and transport. Its private credential scope and request's
 key copy are wiped on closure; this is not complete physical memory erasure.
 
 The target projection is not a native config publication or an execution grant:
-its revision echoes the editor's captured publication. The port creates no
+its revision echoes the observed native config publication. The target port creates no
 application actor/lease, performs no network/credential IO and is bound to the
 existing connection epoch. Before credentials the editor rechecks config/base
 and known lease ownership. GET uses that same connection; lost/replaced epochs
@@ -125,7 +150,9 @@ before credentials or HTTP. Rust modifies only URL paths and retains query
 contents. The older API-base selector stripped a query's terminal slash before
 the port; this was fixed by removing that editor normalizer. Base readers
 now retain the exact captured spelling, including path slashes and opaque query
-values. Config/schema/precedence/env selection is still an open native cutover.
+values. API-base selection itself now comes from the exact-revision native config
+resolver, before this separate catalog target projection. The expected base is
+checked again before credential interop, not only after the lookup.
 
 Normal chat sends pass that base and a chat-target intent, not a concatenated
 endpoint, through the existing transport. Native `RequestTarget::Chat` is a
@@ -148,12 +175,13 @@ check cancels its children; stale session/selection results cannot report a new
 provider with an old key. Reports borrow the frozen snapshot, then wipe both
 the private scope and report key copy, including callback failures and discarded
 late results. Placeholder warnings never print the key itself. Native
-configuration parsing may start the readonly native core, but setup does not
-perform model/metadata discovery, acquire an editor application's native lease or
-test upstream health. A cold shared bridge still creates its own standalone
+configuration refresh starts the native core and acquires the application's config
+lease, but setup does not perform model/metadata discovery or test upstream health.
+A cold shared bridge still creates its own standalone
 read-service application/session during bootstrap, independently of the parser.
-Native config ownership/selection policy remains open. The local plaintext auth-source
-child remains an editor interop port, not a newly implemented Rust credential reader.
+The local plaintext auth-source child remains an editor interop port, not a newly
+implemented Rust credential reader. The broader credential-process lifecycle and
+general log-egress audits remain separate migration work, not certified by this cutover.
 
 Catalog publication is one atomic native replace operation. Stale responses still
 deliver to their own callers but cannot overwrite newer state. A new generation

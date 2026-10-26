@@ -2,6 +2,7 @@
 
 use super::{default_provider, domain::*, environment};
 use crate::{
+    api::ModelId,
     configuration::domain::ConfigText,
     error::CoreError,
     providers::{ApiEndpoint, ProviderCatalog},
@@ -9,8 +10,86 @@ use crate::{
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CredentialSource {
+    Global,
+    Configuration,
+    Environment,
+    Keyless,
+    Interop,
+}
+
 fn nonempty(value: Option<&ConfigText>) -> Option<&ConfigText> {
     value.filter(|value| !value.as_str().is_empty())
+}
+
+// A preview may describe an incomplete/invalid configuration.  Only a consumed
+// ReadyProfile can cross the connection boundary; JSON is never domain state.
+pub(super) struct Profile {
+    provider: crate::providers::ApiProviderId,
+    model: Option<ConfigText>,
+    endpoint: Option<ConfigText>,
+    checked_endpoint: Option<ApiEndpoint>,
+    credential: Credential,
+    source: CredentialSource,
+    missing: BTreeSet<EnvironmentVariable>,
+    authenticated: bool,
+    keyless: bool,
+    configured_model: Option<ConfigText>,
+    models: Vec<ConfigText>,
+    local: bool,
+}
+enum Credential {
+    Direct(ConfigText),
+    Keyless,
+    Interop,
+}
+pub(super) struct ReadyProfile(Profile);
+impl TryFrom<Profile> for ReadyProfile {
+    type Error = CoreError;
+    fn try_from(profile: Profile) -> Result<Self, Self::Error> {
+        if profile.checked_endpoint.is_none() {
+            return Err(CoreError::InvalidValue {
+                field: "configuration_endpoint",
+            });
+        }
+        if let Some(model) = &profile.model {
+            // Empty is an explicit catalog target, not an API model identity.
+            if !model.as_str().is_empty() {
+                ModelId::try_from(model.as_str().to_owned()).map_err(|_| {
+                    CoreError::InvalidValue {
+                        field: "configuration_model",
+                    }
+                })?;
+            }
+        }
+        Ok(Self(profile))
+    }
+}
+impl ReadyProfile {
+    pub(super) fn into_editor_value(self) -> Value {
+        self.0.into_editor_value()
+    }
+}
+impl Profile {
+    pub(super) fn authenticated(&self) -> bool {
+        self.authenticated
+    }
+    pub(super) fn into_editor_value(self) -> Value {
+        let credential = match self.credential {
+            Credential::Direct(secret) => json!({"kind":"direct","secret":secret.editor_value()}),
+            Credential::Keyless => json!({"kind":"keyless"}),
+            Credential::Interop => json!({"kind":"interop"}),
+        };
+        json!({"provider":self.provider,"model":self.model.as_ref().map(ConfigText::editor_value),
+            "endpoint":self.endpoint.as_ref().map(ConfigText::editor_value),
+            "host":self.checked_endpoint.as_ref().and_then(|endpoint|endpoint.as_url().host_str()),
+            "credential":credential,"credential_source":self.source,"missing_environment":self.missing,
+            "authenticated":self.authenticated,"keyless":self.keyless,
+            "configured_model":self.configured_model.as_ref().map(ConfigText::editor_value),
+            "models":self.models.iter().map(ConfigText::editor_value).collect::<Vec<_>>(),"local":self.local})
+    }
 }
 
 pub(super) fn target(
@@ -18,17 +97,8 @@ pub(super) fn target(
     context: &PolicyContext,
     input: TargetInput,
     catalog: &ProviderCatalog,
-) -> Result<Value, CoreError> {
-    let value = profile(config, context, input, catalog)?;
-    let endpoint =
-        value
-            .get("endpoint")
-            .and_then(Value::as_str)
-            .ok_or(CoreError::InvalidValue {
-                field: "configuration_endpoint",
-            })?;
-    ApiEndpoint::try_from(endpoint.to_owned())?;
-    Ok(value)
+) -> Result<ReadyProfile, CoreError> {
+    profile(config, context, input, catalog)?.try_into()
 }
 
 pub(super) fn profile(
@@ -36,8 +106,18 @@ pub(super) fn profile(
     context: &PolicyContext,
     input: TargetInput,
     catalog: &ProviderCatalog,
-) -> Result<Value, CoreError> {
-    let active = default_provider(config, context)?;
+) -> Result<Profile, CoreError> {
+    let selected_provider = input
+        .selection
+        .as_ref()
+        .map(|selection| selection.provider.as_ref())
+        .unwrap_or(context.selected_provider.as_ref());
+    let selected_model = input
+        .selection
+        .as_ref()
+        .map(|selection| selection.model.as_ref())
+        .unwrap_or(context.selected_model.as_ref());
+    let active = default_provider(config, selected_provider)?;
     let provider = input.provider.unwrap_or_else(|| active.clone());
     let fields = config.provider(&provider);
     let registered = context.registry.get(&provider);
@@ -52,10 +132,12 @@ pub(super) fn profile(
         .or_else(|| nonempty(context.api_base.as_ref()));
     let checked =
         endpoint.and_then(|endpoint| ApiEndpoint::try_from(endpoint.as_str().to_owned()).ok());
-    let model = nonempty(input.model.as_ref())
-        .or_else(|| nonempty(context.selected_model.as_ref()))
+    let model = input
+        .model
+        .as_ref()
+        .or_else(|| nonempty(selected_model))
         .or_else(|| {
-            if context.selected_provider.is_none() {
+            if selected_provider.is_none() {
                 nonempty(config.model.as_ref())
             } else {
                 None
@@ -83,17 +165,29 @@ pub(super) fn profile(
     let metadata_keyless = registered
         .map(|entry| entry.keyless)
         .unwrap_or_else(|| baseline.is_some_and(|entry| entry.keyless()));
-    let direct = nonempty(if provider == active {
+    let global = nonempty(if provider == active {
         context.api_key.as_ref()
     } else {
         None
-    })
-    .or_else(|| nonempty(expanded.as_ref()))
-    .or(if explicit_keyless { None } else { env_key });
+    });
+    let configured = nonempty(expanded.as_ref());
+    let (source, direct) = if global.is_some() {
+        (CredentialSource::Global, global)
+    } else if configured.is_some() {
+        (CredentialSource::Configuration, configured)
+    } else if explicit_keyless {
+        (CredentialSource::Keyless, None)
+    } else if env_key.is_some() {
+        (CredentialSource::Environment, env_key)
+    } else if metadata_keyless {
+        (CredentialSource::Keyless, None)
+    } else {
+        (CredentialSource::Interop, None)
+    };
     let credential = match direct {
-        Some(secret) => json!({"kind":"direct","secret":secret.editor_value()}),
-        None if explicit_keyless || metadata_keyless => json!({"kind":"keyless"}),
-        None => json!({"kind":"interop"}),
+        Some(secret) => Credential::Direct(secret.clone()),
+        None if explicit_keyless || metadata_keyless => Credential::Keyless,
+        None => Credential::Interop,
     };
     let authenticated = explicit_keyless
         || metadata_keyless
@@ -105,13 +199,20 @@ pub(super) fn profile(
         .and_then(|fields| fields.models.as_ref())
         .filter(|models| !models.is_empty())
         .or_else(|| registered.map(|entry| &entry.models));
-    Ok(
-        json!({"provider":provider,"model":model.map(ConfigText::editor_value),
-        "endpoint":endpoint.map(ConfigText::editor_value),"host":checked.as_ref().and_then(|endpoint|endpoint.as_url().host_str()),
-        "credential":credential,"missing_environment":missing,
-        "authenticated":authenticated,"keyless":explicit_keyless || metadata_keyless,
-        "configured_model":fields.and_then(|fields|fields.model.as_ref()).map(ConfigText::editor_value),
-        "models":models.map(|models| models.iter().map(ConfigText::editor_value).collect::<Vec<_>>()).unwrap_or_default(),
-        "local":registered.map(|entry|entry.local).unwrap_or_else(||baseline.is_some_and(|entry|entry.local()))}),
-    )
+    Ok(Profile {
+        provider,
+        model: model.cloned(),
+        endpoint: endpoint.cloned(),
+        checked_endpoint: checked,
+        credential,
+        source,
+        missing,
+        authenticated,
+        keyless: explicit_keyless || metadata_keyless,
+        configured_model: nonempty(fields.and_then(|fields| fields.model.as_ref())).cloned(),
+        models: models.cloned().unwrap_or_default(),
+        local: registered
+            .map(|entry| entry.local)
+            .unwrap_or_else(|| baseline.is_some_and(|entry| entry.local())),
+    })
 }

@@ -415,10 +415,11 @@ bu başlıklarla opsiyonel ilan edilemez.
 
 ## Rust geçişinde kalan adımlar — kapanış takip listesi
 
-Güncelleme: 2026-10-26, native parser tabanı `0fc7cf6`, privacy tabanı `c497004`.
-Son dilimde refresh admission/generation ve sabit deadline açıkları da kapatıldı.
-Kanıt: 1260/1260 full source ERT; native parser tabanı 274 native + 18 compile-fail,
-fmt/strict Clippy ve bounded lifecycle TLC temiz. Ayrıntılar .codex/12/48–50.
+Güncelleme: 2026-10-26, native config authority temeli `ff96691`.
+Son dilimde config publication/policy gerçek connection/UI tüketicileriyle Rust'a
+geçti; eski Elisp karar/yazım motorları silindi. Kanıt: 1268/1268 full source ERT;
+291 native + 24 compile-fail = 315 locked test, fmt/strict Clippy, Elisp Werror/
+checkdoc ve bounded lifecycle TLC temiz. Ayrıntılar .codex/12/52.
 
 Bu liste .codex/04'teki onaylı göçün kalan **tüketici taşıma/kaldırma sırasını**
 özetler; G03–G13'ün yerine geçen ikinci kapsam veya yeni ürün kararı değildir.
@@ -427,10 +428,10 @@ Elisp motoru silindikten sonra kapanır. Her doğrulanmış küçük dilim ayrı
 olur; bağımsız işler önkoşulları sağlanınca öne alınabilir. Emacs'in canlı buffer,
 undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
 
-- [ ] **1. Config ve bağlantı hazırlığının kalan native politikası** —
+- [x] **1. Config ve bağlantı hazırlığının kalan native politikası** —
   TOML/schema/precedence/env/keyless ve endpoint/model seçim kararlarını typed,
   revision-bound native portta birleştir. Katalog hedef/public kararı aşağıda
-  kapandı; API-base seçiminin kalan editor politikası hâlâ bu kapsamdadır.
+  kapandı; API-base seçimi de exact-revision native resolver'a geçti.
   UI yalnız yayınlanmış DTO'yu
   tüketsin; auth-source/callable credential yalnız sahipli Emacs interop portu
   olsun. Artık kullanılmayan Elisp parser/precedence yollarını sil. Cold config,
@@ -444,14 +445,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Rapor sonrası, stale sonuçta ve callback hatasında scope/key kopyası temizlenir.
   - [x] Geçişte bulunan ek güvenlik işi: placeholder uyarısı anahtarın kendisini
     loglamasın. `secret-prefix...` sentetik regresyonu UI ve log sınırını denetler.
-  - [ ] Native config authority/precedence/env/keyless/selection kalan
-    consumer cutover'ı. Parser/schema dilimi aşağıda kapandı; salt editor
-    credential interop portuna inmek için seçim ve publication motoru hâlâ açık.
+  - [x] Native config authority/precedence/env/keyless/selection gerçek
+    consumer cutover'ı; editor yalnız UI gözlemi ve credential interop portudur.
     - [x] Native typed config policy ve application actor publication temeli:
       owner-bound expiring prepare/commit/abort ticket, native revision/snapshot,
       exact-revision resolve; env/global/TOML/keyless/interop ve endpoint/model
-      policy native'de. Bu temel tek başına consumer cutover değildir. .codex/52.
-    - [ ] Gerçek config/connection/UI consumer cutover ve kalan Elisp publication/
+      policy native'de. Temel commit `ff96691`; consumer kapanışı .codex/52'de.
+    - [x] Gerçek config/connection/UI consumer cutover ve kalan Elisp publication/
       precedence/env/keyless/eligibility/default-selection motorlarını sil.
   - [x] Gerçek config refresh tüketicisini `configuration/parse` native portuna
     bağla; TOML/schema/legacy-import ve content digest Rust'ta. Eski 221 satırlık
@@ -465,11 +465,18 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     epoch/cancel/deadline/late reply, fd-rooted regular inode/revision, symlink,
     özel dosya ve malformed-first-no-fallback testli. Cold absent explicit refresh
     artık core başlatır; missing core/capability fail-closed, passive UI memory-only.
-    Editor tek publication writer'ıdır; generation echo native authority değildir.
+    Read portunun generation echo'su native authority değildir; son publication
+    writer'ı artık application actor'dır (consumer cutover .codex/52).
     OS syscall iptali cooperative'dir, hard filesystem kill garantisi yok. .codex/51.
-  - [ ] Env/keyless/credential precedence ve provider/model seçimini native
+  - [x] Env/keyless/credential precedence ve provider/model seçimini native
     publication/DTO tüketicisine bağla; memory-only UI reader'a gizli RPC/IO
     ekleme, eski Elisp karar fonksiyonlarını son consumer geçince kaldır.
+  - [x] Cutover'da bulunan ek lifecycle/snapshot işleri: geç prepare acquisition'ı
+    cancel sonrası abort; lost commit ACK'te rollback varsaymadan exact-revision
+    ret ve explicit refresh ile reconciliation; aynı epoch'ta session replacement
+    ret; foreign application callback guard'ı ve legacy UI metadata scope koruması.
+    Env/options ilk yield öncesi bounded private capture; source fingerprint'te
+    UI selection bağımsızlığı ve collection count/length framing testli. .codex/52.
   - [x] Geçişte bulunan ek log hijyeni: `kargu-set-provider` artık tam API-base'i
     log/message'a yazmaz, raporlama için endpoint'i okumaz. Provider/model/no-model
     seçimi ve prefetch hedefi korunur. Sentetik endpoint/query-secret/key/tenant
@@ -498,7 +505,8 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     capture'ından önce üretir. Gerçek OpenAPI/Anthropic POST ve config/wire
     değişimi sonrası retry aynı query'yi korur. Missing capability HTTP/owner
     startup öncesi reddeder; doğrudan exact URL semantiği korunur. .codex/47.
-    Bu iki URL alt işi genel config/schema/precedence/env/keyless üst işini kapatmaz.
+    Bu iki URL alt işi tek başına üst işi kapatmadı; kalan authority/precedence/
+    selection consumer cutover'ı .codex/52'de ayrıca tamamlandı.
 
 - [ ] **2. Kalan native araçlar ve tek izin kapısı** — `read_file`, diğer Git
   işlemleri, skill/toolchain ve webfetch tüketicilerini ortak owner/process/path/

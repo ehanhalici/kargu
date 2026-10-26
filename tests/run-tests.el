@@ -25,6 +25,7 @@
 (require 'ert)
 (require 'kargu)
 (require 'tests/test-helpers)
+(require 'tests/test-config-policy)
 (require 'tests/test-bridge)
 (require 'tests/test-native-application)
 (require 'tests/test-bridge-jobs)
@@ -124,8 +125,11 @@
   (interactive)
   (ert "^kargu-"))
 
+(defvar kargu-test-selector "^kargu-"
+  "ERT selector for batch verification; defaults to the complete suite.")
+
 (when noninteractive
-  (ert-run-tests-batch-and-exit "^kargu-"))
+  (ert-run-tests-batch-and-exit kargu-test-selector))
 
 (provide 'tests/run-tests)
 ;;; run-tests.el ends here

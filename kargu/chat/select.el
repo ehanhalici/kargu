@@ -30,7 +30,8 @@
 (declare-function kargu-connected-providers "kargu/providers/registry" ())
 (declare-function kargu-provider-env "kargu/providers/registry" (provider))
 (declare-function kargu-provider-local-p "kargu/providers/registry" (provider))
-(declare-function kargu-set-provider "kargu/config/schema" (provider &optional no-model))
+(declare-function kargu-config-profile-field "kargu/config/key" (name &optional provider))
+(declare-function kargu-set-provider "kargu/config/schema" (provider &optional no-model callback))
 (declare-function kargu--config-providers "kargu/config/schema" ())
 (declare-function kargu-chat-goto-footer-field "kargu/chat/prompt" (field))
 (declare-function kargu-chat--goto-prompt "kargu/chat/prompt" ())
@@ -432,9 +433,7 @@ opens when the answer arrives, and Emacs stays usable meanwhile."
   (cond
    ((and (fboundp 'kargu-provider-local-p) (kargu-provider-local-p provider))
     " [local]")
-   ((and (fboundp 'kargu-provider-env)
-         (cl-some (lambda (v) (kargu-nonempty (getenv v)))
-                  (kargu-provider-env provider)))
+   ((equal (kargu-config-profile-field "credential_source" provider) "environment")
     " [env key]")
    (t " [configured]")))
 
@@ -442,12 +441,12 @@ opens when the answer arrives, and Emacs stays usable meanwhile."
   "Switch to provider CHOSEN, then select one of its models.
 The model stays empty until that next list confirms one."
   (cl-incf kargu-api-select--catalog-generation)
-  (when (kargu-set-provider chosen t)
-    (when (fboundp 'kargu-chat-refresh-footer)
-      (kargu-chat-refresh-footer))
-    (kargu-api-select--continue
-     (lambda ()
-       (kargu-chat-select-model-company nil nil chosen)))))
+  (kargu-set-provider
+   chosen t (lambda (result)
+              (when (kargu-ok-p result)
+                (when (fboundp 'kargu-chat-refresh-footer) (kargu-chat-refresh-footer))
+                (kargu-api-select--continue
+                 (lambda () (kargu-chat-select-model-company nil nil chosen)))))))
 
 (defun kargu-api-select--open-provider-selector ()
   "Present authenticated provider candidates from the refreshed configuration."

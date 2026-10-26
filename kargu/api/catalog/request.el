@@ -44,28 +44,31 @@ CONNECTION pins the native epoch through credential resolution and GET."
             (when (stringp key) (clear-string key)))
           (kargu-connection-snapshot-wipe snapshot)))
   (let ((request
-         (kargu-transport-request
-          'get url :auth auth :model-catalog t :application app :provider provider :connection connection
-          :wire (kargu-connection-setting :wire snapshot)
-          :as 'string :timeout (when-let* ((deadline (kargu-async-task-deadline task)))
-                                (max 0.001 (- deadline (float-time))))
-          :then (kargu-application-wrap app (kargu-async-wrap task callback))
-          :else (kargu-application-wrap
-                 app (kargu-async-wrap
-                      task (lambda (failure)
-                             (kargu-async-finish task nil (kargu-result-err-message failure))))))))
+          (kargu-transport-request
+           'get url :auth auth :model-catalog t :application app :provider provider :connection connection
+           :wire (kargu-connection-setting :wire snapshot)
+           :as 'string :timeout (when-let* ((deadline (kargu-async-task-deadline task)))
+                                  (max 0.001 (- deadline (float-time))))
+           :then (kargu-application-wrap app (kargu-async-wrap task callback))
+           :else (kargu-application-wrap
+                  app (kargu-async-wrap
+                       task (lambda (failure)
+                              (kargu-async-finish task nil (kargu-result-err-message failure))))))))
     (kargu-async-add-cleanup task (lambda () (kargu-transport-cancel request)))))
 
-(cl-defun kargu-catalog-request--resolved (task result &key url provider public auth callback app connection)
+(cl-defun kargu-catalog-request--resolved (task result &key url base provider public auth callback app connection)
   "Advance TASK after credential RESULT.
-Retain URL, PROVIDER, PUBLIC, AUTH, CALLBACK, APP and CONNECTION."
+Retain URL, BASE, PROVIDER, PUBLIC, AUTH, CALLBACK, APP and CONNECTION."
   (if (kargu-err-p result)
       (kargu-async-finish task nil "No API key or valid connection for model catalog")
     (let ((snapshot (kargu-result-value result)))
-      (unless public
-        (setcdr (assoc "key" auth) (or (kargu-connection-snapshot-secret snapshot) :json-null)))
-      (kargu-catalog-request--send
-       task snapshot :url url :provider provider :auth auth :callback callback :app app :connection connection))))
+      (if (not (equal base (kargu-connection-snapshot-endpoint snapshot)))
+          (progn (kargu-connection-snapshot-wipe snapshot)
+                 (kargu-async-finish task nil "Catalog endpoint changed during preparation"))
+        (unless public
+          (setcdr (assoc "key" auth) (or (kargu-connection-snapshot-secret snapshot) :json-null)))
+        (kargu-catalog-request--send
+         task snapshot :url url :provider provider :auth auth :callback callback :app app :connection connection)))))
 
 (cl-defun kargu-catalog-request--targeted
     (task result failure connection &key provider base revision auth settings callback app)
@@ -81,7 +84,7 @@ PROVIDER, BASE, REVISION, AUTH, SETTINGS, CALLBACK and APP are captured inputs."
                 (stringp (gethash "url" result))
                 (member (gethash "authentication" result) '("public" "provider"))))
       (kargu-async-finish task nil "Invalid native catalog target"))
-     ((not (and (= revision (kargu-config-revision)) (equal base (kargu--api-base provider))))
+     ((/= revision (kargu-config-revision))
       (kargu-async-finish task nil "Catalog configuration changed during preparation"))
      (t
       (let ((url (copy-sequence (gethash "url" result)))
@@ -89,40 +92,55 @@ PROVIDER, BASE, REVISION, AUTH, SETTINGS, CALLBACK and APP are captured inputs."
         (kargu-connection-resolve-async
          provider "" :parent task :owner nil :origin (kargu-async-task-buffer task)
          :settings settings :capabilities nil :public public
+         :expected-endpoint base
          :callback (kargu-application-wrap
                     app (kargu-async-wrap
                          task (lambda (value)
                                 (kargu-catalog-request--resolved
-                                 task value :url url :provider provider :public public :auth auth
+                                 task value :url url :base base :provider provider :public public :auth auth
                                  :callback callback :app app :connection connection))))))))))
 
 (defun kargu-catalog-request-start (task provider callback)
-  "Resolve TASK's PROVIDER and deliver a native canonical body to CALLBACK.
-Use already-published config; explicit UI/config refresh owns disk reads.
-Only the exact declared public URL skips credentials.  Capture wire/header
-bindings before yielding, independently of a bound chat connection."
+  "Resolve TASK's native config target for PROVIDER and deliver CALLBACK.
+No config file is probed here; a cold request bootstraps native defaults.
+Wire/header inputs are captured before yielding, independently of bound chat."
   (let* ((kargu-connection--bound nil)
          (app (kargu-application-context))
-         (base (kargu-config-copy (kargu--api-base provider)))
-         (revision (kargu-config-revision))
          (auth (kargu-config-copy (kargu-api-auth-intent nil provider)))
          (settings (list :wire (kargu-config-copy
-                                (kargu-provider-format-record (kargu-provider-format provider))))))
+                                (kargu-provider-format-record (kargu-provider-format provider)))))
+         (target-input (kargu-bridge--object
+                        "provider" provider
+                        "default_api" (or (kargu-config-copy (kargu-provider-api provider)) :json-null)
+                        "models_api" (or (kargu-config-copy (kargu-provider-models-api provider)) :json-null)
+                        "models_auth" (kargu-providers-wire-object (plist-get (kargu-provider-get provider) :models-auth))
+                        "native_models" (kargu-providers-wire-object (plist-get (plist-get settings :wire) :native-models)))))
     (kargu-catalog-request--bind-origin task)
-    (kargu-bridge-catalog-target
-     (kargu-bridge--object
-      "provider" provider "configuration_revision" revision "api_base" base
-      "default_api" (or (kargu-config-copy (kargu-provider-api provider)) :json-null)
-      "models_api" (or (kargu-config-copy (kargu-provider-models-api provider)) :json-null)
-      "models_auth" (kargu-providers-wire-object (plist-get (kargu-provider-get provider) :models-auth))
-      "native_models" (kargu-providers-wire-object (plist-get (plist-get settings :wire) :native-models)))
-     (kargu-application-wrap
-      app (kargu-async-wrap task
-                           (lambda (result failure connection)
-                             (kargu-catalog-request--targeted
-                              task result failure connection :provider provider :base base :revision revision
-                              :auth auth :settings settings :callback callback :app app))))
-     :parent task :application app)))
+    (cl-labels
+        ((resolved (value failure)
+           (if failure (kargu-async-finish task nil "Native config target unavailable")
+             (let ((base (gethash "endpoint" value)) (revision (gethash "revision" value)))
+               (puthash "api_base" base target-input)
+               (puthash "configuration_revision" revision target-input)
+               (kargu-bridge-catalog-target
+                target-input
+                (kargu-application-wrap
+                 app (kargu-async-wrap task (lambda (result fault connection)
+                                              (kargu-catalog-request--targeted
+                                               task result fault connection :provider provider :base base :revision revision
+                                               :auth auth :settings settings :callback callback :app app))))
+                :parent task :application app))))
+         (configured (result)
+           (if (kargu-err-p result) (kargu-async-finish task nil "Native configuration unavailable")
+             (kargu-bridge-config-resolve provider "" (kargu-async-wrap task #'resolved) :parent task :application app)))
+         (ready (connection failure)
+           (if (or failure (not (kargu-bridge-application-current-p app connection))
+                   (not (member "provider_catalog_target" (append (kargu-bridge-connection-capabilities connection) nil))))
+               (kargu-async-finish task nil "Native catalog target unavailable; check/rebuild kargu-core")
+             (kargu-config-ensure-native-async (kargu-async-wrap task #'configured) :parent task))))
+      (if-let* ((binding (gethash :native-core (kargu-application-services app))))
+          (funcall (kargu-async-wrap task #'ready) (kargu-bridge-application-connection binding) nil)
+        (kargu-async-add-cleanup task (kargu-bridge-ensure (kargu-application-wrap app (kargu-async-wrap task #'ready))))))))
 
 (provide 'kargu/api/catalog/request)
 ;;; request.el ends here

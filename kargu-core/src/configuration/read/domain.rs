@@ -51,7 +51,12 @@ impl TryFrom<Vec<ConfigurationPath>> for CandidatePaths {
 
 #[derive(Deserialize)]
 #[serde(try_from = "u64")]
-pub(super) struct ReadTimeout(Duration);
+pub(crate) struct ReadTimeout(Duration);
+impl Default for ReadTimeout {
+    fn default() -> Self {
+        Self(Duration::from_secs(5))
+    }
+}
 impl TryFrom<u64> for ReadTimeout {
     type Error = CoreError;
     fn try_from(millis: u64) -> Result<Self, Self::Error> {
@@ -64,7 +69,7 @@ impl TryFrom<u64> for ReadTimeout {
     }
 }
 impl ReadTimeout {
-    pub(super) fn duration(&self) -> Duration {
+    pub(crate) fn duration(&self) -> Duration {
         self.0
     }
 }

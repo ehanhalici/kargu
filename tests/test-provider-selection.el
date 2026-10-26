@@ -121,12 +121,14 @@
           (should (eq (kargu-async-task-state first) :cancelled))
           (should (cl-some (lambda (child) (eq (kargu-async-task-parent child) first)) cleaned))
           (should (kargu-async-pending-p other))
-          (kargu-async-finish first (kargu-ok '(:data nil :path "/stale" :digest "old")))
+          (kargu-async-finish first (kargu-err "stale fixture" :stale))
           (should (= opened 0))
-          (kargu-async-finish next (kargu-ok '(:data nil :path "/current" :digest "next")))
+          (kargu-async-finish next (kargu-ok (kargu-bridge--object
+                                              "revision" 1 "path" "/current" "digest" :json-null "absent" t)))
           (should (= opened 1))
           (should (kargu-async-pending-p other))
-          (kargu-async-finish other (kargu-ok '(:data nil :path "/other" :digest "other")))
+          (kargu-async-finish other (kargu-ok (kargu-bridge--object
+                                               "revision" 1 "path" "/other" "digest" :json-null "absent" t)))
           (should (= opened 2)))
       (when (buffer-live-p first-view) (kill-buffer first-view))
       (when (buffer-live-p other-view) (kill-buffer other-view)))))
@@ -135,35 +137,35 @@
   "Closing or repurposing a view revokes its real reply, not the shared core."
   (dolist (close '(kill mode))
     (kargu-bridge-test--with-core
-      (let ((view (generate-new-buffer " *kargu-provider-owner*"))
-            (file (make-temp-file "kargu-provider-owner-")) task held
-            (read (symbol-function 'kargu-bridge-config-read))
-            (call (symbol-function 'kargu-bridge-call)))
-        (unwind-protect
-            (cl-letf (((symbol-function 'kargu-bridge-config-read)
-                       (lambda (_paths generation callback &rest options)
-                         (apply read (list file) generation callback options)))
-                      ((symbol-function 'kargu-bridge-call)
-                       (lambda (connection method params callback &rest options)
-                         (apply call connection method params
-                                (if (equal method "configuration/read")
-                                    (lambda (value failure) (setq held (lambda () (funcall callback value failure))))
-                                  callback) options)))
-                      ((symbol-function 'kargu-api-select--open-provider-selector)
-                       (lambda () (ert-fail "Closed owner cannot open a selector"))))
-              (with-current-buffer view
-                (setq-local kargu-application-owner (kargu-application-create))
-                (setq task (kargu-chat-select-provider-company)))
-              (kargu-bridge-test--wait (lambda () held))
-              (with-current-buffer view
-                (pcase close ('kill (kill-buffer view)) ('mode (fundamental-mode))))
-              (should (eq (kargu-async-task-state task) :cancelled))
-              (should-not (kargu-async-task-children task))
-              (funcall held)
-              (should (equal (gethash "status" (car (kargu-bridge-test--call conn "ping" (kargu-bridge--object)))) "ok")))
-          (when (and task (kargu-async-pending-p task)) (kargu-async-cancel task))
-          (when (buffer-live-p view) (kill-buffer view))
-          (delete-file file))))))
+     (let ((view (generate-new-buffer " *kargu-provider-owner*"))
+           (file (make-temp-file "kargu-provider-owner-")) task held
+           (read (symbol-function 'kargu-bridge-config-read))
+           (call (symbol-function 'kargu-bridge-call)))
+       (unwind-protect
+           (cl-letf (((symbol-function 'kargu-bridge-config-read)
+                      (lambda (_paths generation callback &rest options)
+                        (apply read (list file) generation callback options)))
+                     ((symbol-function 'kargu-bridge-call)
+                      (lambda (connection method params callback &rest options)
+                        (apply call connection method params
+                               (if (equal method "configuration/read")
+                                   (lambda (value failure) (setq held (lambda () (funcall callback value failure))))
+                                 callback) options)))
+                     ((symbol-function 'kargu-api-select--open-provider-selector)
+                      (lambda () (ert-fail "Closed owner cannot open a selector"))))
+             (with-current-buffer view
+               (setq-local kargu-application-owner (kargu-application-create))
+               (setq task (kargu-chat-select-provider-company)))
+             (kargu-bridge-test--wait (lambda () held))
+             (with-current-buffer view
+               (pcase close ('kill (kill-buffer view)) ('mode (fundamental-mode))))
+             (should (eq (kargu-async-task-state task) :cancelled))
+             (should-not (kargu-async-task-children task))
+             (funcall held)
+             (should (equal (gethash "status" (car (kargu-bridge-test--call conn "ping" (kargu-bridge--object)))) "ok")))
+         (when (and task (kargu-async-pending-p task)) (kargu-async-cancel task))
+         (when (buffer-live-p view) (kill-buffer view))
+         (delete-file file))))))
 
 (provide 'tests/test-provider-selection)
 ;;; test-provider-selection.el ends here

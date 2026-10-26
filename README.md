@@ -183,8 +183,12 @@ unreadable first existing candidate fails without clearing the last good config.
 Only explicitly supplied local regular files are read; symlink targets are pinned
 and file identity/revision changes reject the result. Filesystem cancellation is
 cooperative between OS calls, not a hard interruption of a stalled filesystem.
-Environment/key precedence and the final native configuration publication
-authority remain migration work.
+The `configuration_policy` capability is also required. The native application
+actor owns publication, revisions, environment/keyless/credential precedence,
+endpoint selection and provider/model defaults. Elisp only observes committed
+private DTOs; an older core has no editor policy fallback. A lost commit reply
+does not roll back Rust: requests using the old revision fail closed until an
+explicit refresh reconciles the native head.
 
 Run `M-x kargu-edit-config` to generate or edit your configuration.
 
@@ -194,6 +198,13 @@ or an explicit empty key for local/keyless access. Reopen the selector after
 editing the file. An invalid refresh reports an error without replacing the
 last valid configuration; passive config readers do not read files or unlock
 credentials.
+Environment availability in that UI is captured at refresh, not reread by passive
+getters. Explicit requests capture fresh editor inputs and resolve against the
+exact native revision. With no committed config, standalone catalog/selection
+calls may bootstrap native defaults without probing a file; this is not evidence
+that a config file is absent. Normal sends/setup explicitly refresh the file.
+`kargu-set-provider` is now asynchronous and returns a cancellable task; its
+optional third argument receives a Result after native selection completes.
 
 Native sends and connection tests prepare configuration and credentials in
 cancellable workers. Stop also cancels preparation. Each run captures its
@@ -241,7 +252,14 @@ The API key of the active provider is looked up in this order:
 2. `apikey` in the provider's TOML table; `${VAR}` is replaced by the environment variable `VAR`
 3. an explicit empty `apikey = ""` means "no key needed" and ends the search
 4. the environment variable the provider catalog names (for example `OPENAI_API_KEY`)
-5. `auth-source`, by the host of the provider's API URL
+5. a provider explicitly declared keyless by its catalog metadata
+6. `auth-source`, by the host of the provider's API URL, through owned editor interop
+
+Rust expands `${VAR}` once, never recursively. Missing/empty referenced values
+discard that configured credential and try remaining sources; warnings contain
+only variable names, never the configured key. Endpoint precedence is the
+configured provider API, runtime registry API, built-in catalog API, then the
+global `kargu-api-base`. Unsafe/non-HTTP endpoints are rejected before interop.
 
 ```toml
 provider = "openrouter"

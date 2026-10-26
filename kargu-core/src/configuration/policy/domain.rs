@@ -158,6 +158,35 @@ impl TryFrom<String> for EnvironmentVariable {
         Ok(Self(value))
     }
 }
+impl EnvironmentVariable {
+    pub(super) fn as_str(&self) -> &str {
+        &self.0
+    }
+    pub(super) fn parse_reference(rest: &str) -> Option<(Self, &str)> {
+        if !rest
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_alphabetic() || ch == '_')
+        {
+            return None;
+        }
+        for (offset, ch) in rest.char_indices() {
+            if offset > 256 {
+                return None;
+            }
+            if ch == '}' {
+                return Some((
+                    Self(rest.get(..offset)?.to_owned()),
+                    rest.get(offset.saturating_add(1)..)?,
+                ));
+            }
+            if !(ch.is_alphanumeric() || ch == '_') {
+                return None;
+            }
+        }
+        None
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(try_from = "BTreeMap<EnvironmentVariable, Option<ConfigText>>")]
@@ -183,6 +212,9 @@ impl TryFrom<BTreeMap<EnvironmentVariable, Option<ConfigText>>> for EnvironmentS
     }
 }
 impl EnvironmentSnapshot {
+    pub(super) fn entries(&self) -> &BTreeMap<EnvironmentVariable, Option<ConfigText>> {
+        &self.0
+    }
     pub(super) fn get(&self, name: &EnvironmentVariable) -> Option<&ConfigText> {
         self.0
             .get(name)
@@ -265,6 +297,14 @@ pub struct PolicyContext {
 #[serde(deny_unknown_fields)]
 /// Explicit request overrides, distinct from session selection intent.
 pub struct TargetInput {
+    pub(super) provider: Option<ApiProviderId>,
+    pub(super) model: Option<ConfigText>,
+    pub(super) selection: Option<SelectionInput>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SelectionInput {
     pub(super) provider: Option<ApiProviderId>,
     pub(super) model: Option<ConfigText>,
 }

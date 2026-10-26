@@ -18,13 +18,13 @@
   "Context, tools, price and efforts for the same ID never cross providers."
   (progn
     (kargu-test-set-model-metadata "shared"
-                              '(("context_length" . 32000) ("supports_tools" . :json-false)
-                                ("supports_reasoning" . :json-false)
-                                ("pricing" . (("prompt" . "0.000001")))) "openrouter")
+				   '(("context_length" . 32000) ("supports_tools" . :json-false)
+                                     ("supports_reasoning" . :json-false)
+                                     ("pricing" . (("prompt" . "0.000001")))) "openrouter")
     (kargu-test-set-model-metadata "shared"
-                              '(("context_length" . 128000) ("supports_tools" . t)
-                                ("reasoning" . (("supported_efforts" . ["low" "high"])))
-                                ("pricing" . (("prompt" . "0.000002")))) "cerebras")
+				   '(("context_length" . 128000) ("supports_tools" . t)
+                                     ("reasoning" . (("supported_efforts" . ["low" "high"])))
+                                     ("pricing" . (("prompt" . "0.000002")))) "cerebras")
     (should (= (kargu-model-context-window "shared" "OPENROUTER") 32000))
     (should (= (kargu-model-context-window "shared" "cerebras") 128000))
     (should-not (kargu-model-supports-tools-p "shared" "openrouter"))
@@ -75,7 +75,7 @@
     (kargu-test-set-model-prop "shared" "context-window" 99 :provider "a")
     (kargu-test-set-model-prop "shared" "supports-tools" nil :provider "a")
     (kargu-test-set-model-metadata "shared" '(("context_length" . 30) ("description" . "new")
-                                        ("supports_tools" . t)) "a")
+                                              ("supports_tools" . t)) "a")
     (should (= (kargu-model-context-window "shared" "a") 99))
     (should (= (kargu-model-get-prop "shared" :context-window "a") 99))
     (should-not (kargu-model-supports-tools-p "shared" "a"))
@@ -126,7 +126,7 @@
   "Request fields remain exact even when display helpers accept a unique alias."
   (progn
     (kargu-test-set-model-metadata "vendor/shared"
-                              '(("supported_parameters" . ["max_tokens"])) "a")
+				   '(("supported_parameters" . ["max_tokens"])) "a")
     (should (kargu-model-get-metadata "shared" "a"))
     (should-not (kargu-model-request-parameters "shared" "a"))
     (should (equal (kargu-model-request-parameters "vendor/shared" "a") '("max_tokens")))
@@ -150,13 +150,15 @@
           (kargu--live-models-cache (make-hash-table :test #'equal))
           (kargu-session--context
            (kargu-test-session-with-history :provider "openrouter")) pending)
-      (cl-letf (((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "fake-key"))
+      (cl-letf (((symbol-function 'kargu-config-worker-resolve)
+                 (lambda (_provider _host child &rest _) (kargu-async-finish child (kargu-ok "fake-key"))))
                 ((symbol-function 'kargu-transport-request)
                  (lambda (_method url &rest options)
                    (push (cons (if (string-search "openrouter" url) "openrouter" "cerebras")
                                (plist-get options :then)) pending))))
         (kargu-test-await-catalog-start #'kargu-api-list-models #'ignore "openrouter")
         (kargu-test-await-catalog-start #'kargu-api-list-models #'ignore "cerebras")
+        (kargu-bridge-test--wait (lambda () (= (length pending) 2)))
         (setf (kargu-selection-provider) "cerebras")
         (dolist (provider order)
           (funcall (cdr (assoc provider pending))
