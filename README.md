@@ -459,6 +459,26 @@ alias are removed. LSP symbol reading now also requires a callback. Remote reads
 remain explicitly unavailable. Full edit snapshots and Dape's separate source
 worker remain separate consumers, not model-read fallbacks.
 
+Skill discovery and named loading require `workspace_skills`. Rust owns the
+metadata-first project/user search, pinned regular-file reads, strict UTF-8,
+frontmatter string parsing and presentation. The editor grants the project and
+optional `$XDG_CONFIG_HOME/kargu/skills` (default `~/.config/kargu/skills`) roots;
+the model supplies only a skill name. Discovered symlinks are not followed.
+Project skills take precedence over duplicate user names. Skipped invalid files
+and incomplete traversal are reported explicitly. Each request shares the four
+native read slots and a 30-second deadline; source capture is limited to 4 MiB
+in total, catalogs to 128 names, and presentation to 128 KiB.
+
+Tool-capable runs await their owned catalog refresh before the first model
+request; Stop also cancels that preparation. Passive `kargu-skill-list` and
+`kargu-skill-format-catalog` only observe the last completed buffer/session
+catalog, without filesystem IO or starting the core. Metadata plists no longer
+contain bodies. Explicit `kargu-skill-refresh` takes a Result callback;
+`(kargu-skill-load name callback)` rereads instructions asynchronously. The old
+global eight-second cache and synchronous Lisp scanner/parser are removed.
+Missing capabilities fail explicitly; rebuild/restart an older core. Native
+filesystem cancellation remains cooperative between OS calls.
+
 `workspace_grep` enforces `max_matches` across the whole search, not per
 file. Both ripgrep and GNU grep use line-buffered output; Kargu stops the
 producer after at most one extra captured record to detect omitted hits.

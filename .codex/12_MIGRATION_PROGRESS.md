@@ -1,5 +1,30 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-27 — Todo 2: native skill discovery/read ve owned run preparation
+
+`workspace/skills` / `workspace_skills` ortak actual-join read havuzuna bağlandı.
+Editor explicit project/user grant ve callback/owner adapter'ıdır; no-follow
+metadata-first scan, pinned regular UTF-8 capture, string frontmatter ve render
+Rust'tadır. Tool-capable run connection→skill preparation bekler; Stop/owner/
+root/session/settings/deadline ve newest-intent guard'ları eski metni yayınlatmaz.
+Passive catalog/list yalnız buffer/session last-completed observation okur;
+named load native'den yeniden okur. Eski Elisp scanner/parser/read/render ve
+TTL global cache silindi. Loop runtime autoload ile modül sınırlarını korur.
+Tool-free prompt skill rehberi içermez. Ayrıntı [57_NATIVE_SKILLS.md](57_NATIVE_SKILLS.md).
+
+Final **1286/1286 source ERT**, 0 unexpected, **152.532591 s**, **02:40:09 +0300**;
+**324 native + 24 compile-fail = 348** locked test / 34 suite temiz. Locked build,
+fmt/strict Clippy ve değişen Elisp Werror bytecompile/production checkdoc temiz.
+Application TLC connection→skills barrier'larıyla **13099/3481**, queue0, depth33;
+RunningPrepared/PreparationOrder temiz. Connection **602836/101708**, queue0,
+depth22; transport **1810/693**, queue0, depth12 temiz. Bounded soyut modellerdir;
+concrete FS/parser/worker formal refinement veya tam Rust göçü iddiası yoktur.
+
+Todo 2 skill alt işi [x]; Git mutations/toolchain/webfetch/son bridge audit'i
+ve diğer göç grupları açık. Kullanıcı07/shell.nix korundu. Testler yalnız geçici
+project/user root ve synthetic config kullanır; user skill dizini/canlı hesap,
+Emacs reload/kurulum/credential migration/merge/push yoktur.
+
 ## 2026-10-26 — Todo 2: native diff/blame ve status clean-filter güvenlik düzeltmesi
 
 `f2ef8e6` proof'u native consumer'a bağlandı: git_worktree_read cap'li owned

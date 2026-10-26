@@ -19,8 +19,8 @@
   (when-let* ((deadline (kargu-async-task-deadline task)))
     (<= deadline (float-time))))
 
-(defun kargu-bridge-read--result (task result error-data)
-  "Finish TASK from typed native RESULT or ERROR-DATA, never display prefixes."
+(defun kargu-bridge-read--result (task result error-data &optional decode)
+  "Finish TASK from native RESULT or ERROR-DATA, optionally applying DECODE."
   (cond
    ((kargu-bridge-read--elapsed-p task) (kargu-async-finish task nil "Native read deadline expired"))
    (error-data (kargu-async-finish task nil (gethash "message" error-data "Native read failed")))
@@ -30,11 +30,12 @@
 					 (gethash "outcome" result) (gethash "text" result ""))))
    ((not (and (hash-table-p result) (stringp (gethash "text" result))))
     (kargu-async-finish task nil "Invalid native read result"))
-   (t (kargu-async-finish task (gethash "text" result)))))
+   (t (kargu-async-finish task (if decode (funcall decode result) (gethash "text" result))))))
 
-(defun kargu-bridge-read-task (callback arguments request)
+(defun kargu-bridge-read-task (callback arguments request &optional decode)
   "Deliver CALLBACK through native REQUEST with captured ARGUMENTS.
-Keep the parent task, owner buffer and take-once RPC cleanup."
+Keep the parent task, owner buffer and take-once RPC cleanup.
+DECODE optionally converts a successful native DTO before delivery."
   (let* ((arguments (json-parse-string
                      (json-serialize arguments :null-object :json-null :false-object :json-false)
                      :object-type 'hash-table :array-type 'array :null-object :json-null :false-object :json-false))
@@ -68,18 +69,18 @@ Keep the parent task, owner buffer and take-once RPC cleanup."
           (kargu-application-wrap app
 				  (kargu-async-wrap
 				   task (lambda (connection failure)
-					  (kargu-bridge-read--dispatch task owner arguments request connection failure))))))))
+					  (kargu-bridge-read--dispatch task owner arguments request connection failure decode))))))))
     task))
 
-(defun kargu-bridge-read--dispatch (task owner arguments request connection failure)
+(defun kargu-bridge-read--dispatch (task owner arguments request connection failure &optional decode)
   "Dispatch REQUEST with ARGUMENTS on CONNECTION for TASK and OWNER.
-FAILURE is a startup error; a failed start never invokes a fallback."
+FAILURE is a startup error; DECODE converts successful DTOs."
   (cond
    ((kargu-bridge-read--elapsed-p task) (kargu-async-finish task nil "Native read deadline expired"))
    (failure (kargu-async-finish task nil "Rust core unavailable; check kargu-bridge-binary-path"))
    (t (let ((id (funcall request connection arguments
 			 (kargu-async-wrap task (lambda (result error-data)
-                                                  (kargu-bridge-read--result task result error-data)))
+                                                  (kargu-bridge-read--result task result error-data decode)))
 			 :owner owner)))
 	(when id
           (kargu-async-add-cleanup task (lambda () (kargu-bridge-cancel connection id))))))))

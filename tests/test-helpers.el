@@ -11,6 +11,17 @@
 
 (require 'cl-lib)
 (require 'kargu/api/prepare)
+(require 'kargu/tools/skill)
+
+(defconst kargu-test-real-skill-refresh (symbol-function 'kargu-skill-refresh)
+  "Real skill preparation used by native consumer and lifecycle fixtures.")
+
+(defun kargu-test-refresh-skills (callback)
+  "Supply CALLBACK an empty offline catalog for general loop fixtures."
+  (let ((task (kargu-async-start
+               (lambda (value _error) (funcall callback value)))))
+    (kargu-async-finish task (kargu-ok ""))
+    task))
 
 (defconst kargu-test-real-prepare-connection
   (symbol-function 'kargu-api-prepare-connection)
@@ -329,6 +340,9 @@ Tests never see the working tree of Kargu as their project."
         (let ((submit (symbol-function 'kargu-bridge-models-submit))
               (ensure (symbol-function 'kargu-bridge-application-ensure)))
           (cl-letf (((symbol-function 'kargu-api-prepare-connection) #'kargu-test-prepare-connection)
+                    ((symbol-function 'kargu-skill-refresh) #'kargu-test-refresh-skills)
+                    ;; Skill fixtures supply explicit temporary user grants.
+                    ((symbol-function 'kargu-skill--user-dir) #'ignore)
                     ((symbol-function 'kargu-bridge-application-ensure)
                      (lambda (connection app callback)
                        (cl-pushnew app kargu-test--model-apps)

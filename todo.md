@@ -573,6 +573,14 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] Skill discovery/read ve toolchain/dependency probe tüketicileri native
     portlara geçsin; trusted search roots, byte/item/deadline ve executable sınıfı
     açık olsun. Yerel araç eksikliği kurulum veya gizli shell başlatmasın.
+    - [x] Skill discovery/read: `workspace/skills` / `workspace_skills`, açık
+      editor project/user root grant'leri, no-follow/pinned regular UTF-8 capture,
+      bounded metadata-first scan/parser/render ve ortak actual-join read pool.
+      Prompt öncesi owned async refresh; buffer/session observation, newest intent,
+      stale root/settings/deadline/Stop ve alias/direct/mode gerçek consumer testli.
+      Eski Elisp scanner/parser/global TTL cache silindi. Ayrıntı .codex/57.
+    - [ ] Toolchain/dependency probe tüketicileri; executable sınıfı ve bounded
+      discovery mevcut shared process/gate'e bağlansın. Kurulum başlatılmaz.
   - [ ] Webfetch DNS/redirect/address/egress/body/timeout kararları ortak native
     HTTP/security portuna taşınsın. Her hop'ta numeric policy/pinned address,
     cancellation ve bounded body testli olsun; ağ testi yalnız kontrollü fixture.

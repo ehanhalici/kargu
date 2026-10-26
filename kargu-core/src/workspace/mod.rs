@@ -6,6 +6,7 @@ pub mod git;
 pub mod grep;
 pub mod listing;
 pub mod search;
+pub(crate) mod skills;
 
 use self::search::{FindFilesInput, FindFilesPlan, FindFilesResult};
 use crate::error::CoreError;
@@ -16,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 pub(crate) enum WorkspaceRead {
     FindFiles(FindFilesInput),
     ReadFile(file::ReadFileInput),
+    Skills(skills::SkillInput),
 }
 
 #[derive(Serialize)]
@@ -23,6 +25,7 @@ pub(crate) enum WorkspaceRead {
 pub(crate) enum ReadResult {
     FindFiles(FindFilesResult),
     File(file::FileExcerpt),
+    Skills(skills::SkillResult),
 }
 
 impl WorkspaceRead {
@@ -38,6 +41,7 @@ impl WorkspaceRead {
             return Err(CoreError::Deadline);
         }
         match self {
+            Self::Skills(input) => input.execute(cancel, deadline).map(ReadResult::Skills),
             Self::ReadFile(input) => input.execute(cancel, deadline).map(ReadResult::File),
             Self::FindFiles(input) => FindFilesPlan::try_from(input)?
                 .execute(cancel, deadline)

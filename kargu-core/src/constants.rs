@@ -101,6 +101,24 @@ pub mod limits {
     pub const SEARCH_PATTERN_BYTES: usize = 1024;
     /// Bytes in a client-supplied path.
     pub const SEARCH_PATH_BYTES: usize = 4096;
+    /// Skill metadata records in one catalog.
+    pub const SKILL_RECORDS: usize = 128;
+    /// Largest individual SKILL.md input.
+    pub const SKILL_FILE_BYTES: usize = 1024 * 1024;
+    /// Aggregate skill source bytes captured by one request.
+    pub const SKILL_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+    /// Unescaped catalog or loaded body presentation.
+    pub const SKILL_OUTPUT_BYTES: usize = 128 * 1024;
+    /// Maximum loaded body character budget.
+    pub const SKILL_BODY_CHARS: usize = 32768;
+    /// UTF-8 bytes in a parsed skill name.
+    pub const SKILL_NAME_BYTES: usize = 1024;
+    /// UTF-8 bytes in one skill description.
+    pub const SKILL_DESCRIPTION_BYTES: usize = 8192;
+    /// Ordinary project asset files before declining deeper traversal.
+    pub const SKILL_PROJECT_ASSETS: usize = 400;
+    /// Ordinary user asset files before declining deeper traversal.
+    pub const SKILL_USER_ASSETS: usize = 100;
 }
 
 /// Timeouts are typed durations, never shared unlabelled numbers.
@@ -137,7 +155,8 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 31] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 32] = [
+        "workspace_skills",
         "git_worktree_read",
         "workspace_read_file",
         "git_read",
@@ -278,6 +297,8 @@ pub mod protocol {
         pub const FIND_FILES: &str = "workspace/findFiles";
         /// Bounded regular-file or revision-bound editor text excerpt.
         pub const READ_FILE: &str = "workspace/readFile";
+        /// Bounded skill discovery and named instruction loading.
+        pub const SKILLS: &str = "workspace/skills";
         /// Bounded fixed-argv GNU ls listing, through the shared command service.
         pub const LIST_FILES: &str = "workspace/listFiles";
         /// Bounded rg/GNU grep composition through the shared process owner.

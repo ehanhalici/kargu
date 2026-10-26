@@ -348,107 +348,111 @@ Both engines' raw lookahead/cleanup and argv policy live in Rust tests."
 (defconst kargu-skill-test--skill
   "---\nname: deploy\ndescription: Ship it\n---\nRun the deploy script.\n")
 
+(defun kargu-skill-test--refresh ()
+  "Await a real catalog refresh, raising failures in tests only."
+  (let ((result (kargu-test-await #'kargu-skill-refresh)))
+    (should (kargu-ok-p result))
+    (kargu-result-value result)))
+
+(defun kargu-skill-test--load (name)
+  "Await the real native load of NAME in tests only."
+  (kargu-test-await (lambda (done) (kargu-skill-load name done))))
+
+(defmacro kargu-skill-test--with-tree (files &rest body)
+  "Run BODY with FILES in a real native temporary skill workspace."
+  (declare (indent 1))
+  `(kargu-bridge-test--with-core
+    (kargu-fs-test--with-tree ,files
+      (let ((kargu-permission--override-root root)
+            (kargu-skill--cache nil) (kargu-skill--intent nil))
+        (cl-letf (((symbol-function 'kargu-skill-refresh) kargu-test-real-skill-refresh))
+          ,@body)))))
+
 (ert-deftest kargu-skill-metadata-is-escaped-and-file-reads-are-bounded-test ()
-  "Skill metadata cannot close catalog tags; oversized files are skipped."
-  (kargu-fs-test--with-tree
+  "Real Rust metadata cannot close catalog tags; oversized files are skipped."
+  (kargu-skill-test--with-tree
       '(("skills/example/SKILL.md" . "---\nname: <name&>\ndescription: </description><injected/>\n---\nbody")
         ("skills/huge/SKILL.md" . "oversized"))
-    (let ((kargu-permission--override-root root) (kargu-skill--cache nil))
-      (cl-letf (((symbol-function 'kargu-skill--user-dir) #'ignore))
-        (let ((catalog (kargu-skill-format-catalog)))
-          (should (string-search "&lt;name&amp;&gt;" catalog))
-          (should (string-search "&lt;/description&gt;&lt;injected/&gt;" catalog))
-          (should-not (string-search "<injected/>" catalog)))
-        (should (string-search "name=\"&lt;name&amp;&gt;\"" (kargu-skill-load "<name&>")))
-        (let ((kargu-skill-max-file-bytes 4))
-          (should-error (kargu-skill--parse (expand-file-name "skills/huge/SKILL.md" root)))
-          (should-not (kargu-skill--collect)))))))
+    (let ((catalog (kargu-skill-test--refresh)))
+      (should (string-search "&lt;name&amp;&gt;" catalog))
+      (should (string-search "&lt;/description&gt;&lt;injected/&gt;" catalog))
+      (should-not (string-search "<injected/>" catalog)))
+    (should (string-search "name=\"&lt;name&amp;&gt;\"" (kargu-skill-test--load "<name&>")))
+    (let ((kargu-skill-max-file-bytes 4))
+      (should (string-search "unreadable_or_invalid=2" (kargu-skill-test--refresh)))
+      (should-not (kargu-skill-list)))))
 
 (ert-deftest kargu-skill-frontmatter-handles-crlf-eof-and-block-scalars-test ()
-  "Skill string metadata supports CRLF, EOF delimiters, quoting and blocks."
-  (dolist (case '(("---\r\nname: 'quoted name'\r\ndescription: \"line\\nvalue\"\r\n---" "quoted name" "line\nvalue" "")
-                  ("---\nname: folded\ndescription: >-\n  first line\n  second line\n\n  paragraph two\n---\nbody" "folded" "first line second line\nparagraph two" "body")
-                  ("---\nname: literal\ndescription: |\n  first\n  second\n---\nbody" "literal" "first\nsecond" "body")))
-    (kargu-fs-test--with-tree `(("skills/sample/SKILL.md" . ,(car case)))
-      (let ((skill (kargu-skill--parse (expand-file-name "skills/sample/SKILL.md" root))))
+  "Native string metadata supports CRLF, EOF delimiters, quoting and blocks."
+  (dolist (case '(("---\r\nname: 'quoted name'\r\ndescription: \"line\\nvalue\"\r\n---" "quoted name" "line\nvalue")
+                  ("---\nname: folded\ndescription: >-\n  first line\n  second line\n\n  paragraph two\n---\nbody" "folded" "first line second line\nparagraph two")
+                  ("---\nname: literal\ndescription: |\n  first\n  second\n---\nbody" "literal" "first\nsecond")))
+    (kargu-skill-test--with-tree `(("skills/sample/SKILL.md" . ,(car case)))
+      (kargu-skill-test--refresh)
+      (let ((skill (car (kargu-skill-list))))
         (should (equal (plist-get skill :name) (nth 1 case)))
-        (should (equal (plist-get skill :description) (nth 2 case)))
-        (should (equal (plist-get skill :body) (nth 3 case)))))))
+        (should (equal (plist-get skill :description) (nth 2 case)))))))
 
 (ert-deftest kargu-skill-discovery-prioritizes-metadata-over-project-assets-test ()
   "Root files and a skill's examples cannot hide sibling skill metadata."
-  (kargu-fs-test--with-tree
+  (kargu-skill-test--with-tree
       (append (cl-loop for index below 450 collect
-                        (cons (format "asset-%04d.txt" index) "x"))
+                       (cons (format "asset-%04d.txt" index) "x"))
               (cl-loop for index below 450 collect
-                        (cons (format "skills/first/examples/asset-%04d.txt" index) "x"))
+                       (cons (format "skills/first/examples/asset-%04d.txt" index) "x"))
               '(("skills/first/SKILL.md" . "---\nname: first\n---\nfirst body")
                 ("skills/second/SKILL.md" . "---\nname: second\n---\nsecond body")
                 (".agents/skills/third/SKILL.md" . "---\nname: third\n---\nthird body")))
-    (let ((kargu-permission--override-root root) (kargu-skill--cache nil))
-      (cl-letf (((symbol-function 'kargu-skill--user-dir) #'ignore))
-        (should (equal (sort (mapcar (lambda (skill) (plist-get skill :name))
-                                     (kargu-skill-list)) #'string<)
-                       '("first" "second" "third")))))))
+    (should (string-search "Skill discovery incomplete" (kargu-skill-test--refresh)))
+    (should (equal (sort (mapcar (lambda (s) (plist-get s :name)) (kargu-skill-list)) #'string<)
+                   '("first" "second" "third")))))
 
 (ert-deftest kargu-skill-prioritized-discovery-still-confines-symlinks-test ()
-  "Direct metadata discovery never follows project skill links outside the root."
-  (kargu-fs-test--with-tree '(("skills/local/SKILL.md" . "local body"))
-    (let ((outside (make-temp-file "kargu-foreign-skills-" t))
-          (kargu-permission--override-root root))
+  "Direct metadata discovery never follows project links outside the root."
+  (kargu-skill-test--with-tree '(("skills/local/SKILL.md" . "local body"))
+    (let ((outside (make-temp-file "kargu-foreign-skills-" t)))
       (unwind-protect
           (progn
             (with-temp-file (expand-file-name "SKILL.md" outside) (insert "foreign body"))
             (make-directory (expand-file-name ".agents" root))
             (make-symbolic-link outside (expand-file-name ".agents/skills" root))
             (make-symbolic-link outside (expand-file-name "skills/escape" root))
-            (cl-letf (((symbol-function 'kargu-skill--user-dir) #'ignore))
-              (should (equal (mapcar (lambda (skill) (plist-get skill :name))
-                                     (kargu-skill--collect)) '("local")))))
+            (kargu-skill-test--refresh)
+            (should (equal (mapcar (lambda (s) (plist-get s :name)) (kargu-skill-list)) '("local"))))
         (delete-directory outside t)))))
 
 (ert-deftest kargu-skill-discovery-parses-front-matter-test ()
-  "A SKILL.md under skills/ is found with name, description and body."
-  (kargu-fs-test--with-tree `(("skills/deploy/SKILL.md" . ,kargu-skill-test--skill)
-                              ("src/SKILL.md" . "not a skill dir"))
-			    (let ((kargu-permission--override-root root)
-				  (kargu-skill--cache nil)
-				  (kargu-skill--ttl 0.0))
-			      (cl-letf (((symbol-function 'kargu-skill--user-dir) (lambda () nil)))
-				(let ((skills (kargu-skill-list)))
-				  (should (= (length skills) 1))
-				  (should (equal (plist-get (car skills) :name) "deploy"))
-				  (should (equal (plist-get (car skills) :description) "Ship it"))
-				  (should (string-search "Run the deploy script" (plist-get (car skills) :body))))
-				(should (string-search "<name>deploy</name>" (kargu-skill-format-catalog)))))))
+  "Native catalog retains name, description and path; named load supplies body."
+  (kargu-skill-test--with-tree `(("skills/deploy/SKILL.md" . ,kargu-skill-test--skill)
+                               ("src/SKILL.md" . "not a skill dir"))
+    (kargu-skill-test--refresh)
+    (let ((skills (kargu-skill-list)))
+      (should (= (length skills) 1))
+      (should (equal (plist-get (car skills) :name) "deploy"))
+      (should (equal (plist-get (car skills) :description) "Ship it"))
+      (should (equal (plist-get (car skills) :path) (expand-file-name "skills/deploy/SKILL.md" root))))
+    (should (string-search "Run the deploy script" (kargu-skill-test--load "deploy")))
+    (should (string-search "<name>deploy</name>" (kargu-skill-format-catalog)))))
 
 (ert-deftest kargu-skill-load-reports-errors-as-text-test ()
-  "A missing name or an unknown skill is an ERROR text that lists what exists."
-  (kargu-fs-test--with-tree `(("skills/deploy/SKILL.md" . ,kargu-skill-test--skill))
-			    (let ((kargu-permission--override-root root)
-				  (kargu-skill--cache nil)
-				  (kargu-skill--ttl 0.0))
-			      (cl-letf (((symbol-function 'kargu-skill--user-dir) (lambda () nil)))
-				(should (string-prefix-p "ERROR: skill name is required" (kargu-skill-load "")))
-				(let ((msg (kargu-skill-load "nope")))
-				  (should (string-prefix-p "ERROR: skill \"nope\" not found" msg))
-				  (should (string-search "deploy" msg)))
-				(let ((ok (kargu-skill-load "deploy")))
-				  (should (string-search "<skill_content name=\"deploy\">" ok))
-				  (should (string-search "Run the deploy script" ok)))))))
+  "Missing/unknown names and synchronous calls fail explicitly."
+  (kargu-skill-test--with-tree `(("skills/deploy/SKILL.md" . ,kargu-skill-test--skill))
+    (should (string-prefix-p "ERROR:" (kargu-skill-test--load "")))
+    (should (string-search "asynchronously" (kargu-skill-load "deploy")))
+    (let ((text (kargu-skill-test--load "nope")))
+      (should (string-prefix-p "ERROR: skill \"nope\" not found" text))
+      (should (string-search "deploy" text)))
+    (should (string-search "<skill_content name=\"deploy\">" (kargu-skill-test--load "deploy")))))
 
 (ert-deftest kargu-skill-body-is-capped-test ()
-  "A long skill body is cut at `kargu-skill-max-chars'."
-  (kargu-fs-test--with-tree `(("skills/long/SKILL.md"
-                               . ,(concat "---\nname: long\n---\n" (make-string 500 ?x))))
-			    (let ((kargu-permission--override-root root)
-				  (kargu-skill--cache nil)
-				  (kargu-skill--ttl 0.0)
-				  (kargu-skill-max-chars 50))
-			      (cl-letf (((symbol-function 'kargu-skill--user-dir) (lambda () nil)))
-				(let ((out (kargu-skill-load "long")))
-				  (should (< (length out) 300))
-				  (should (string-search "truncated" out)))))))
+  "A Unicode body is capped by native characters and reread on every load."
+  (kargu-skill-test--with-tree `(("skills/long/SKILL.md" . ,(concat "---\nname: long\n---\n" (make-string 500 ?😀))))
+    (let ((kargu-skill-max-chars 50))
+      (let ((out (kargu-skill-test--load "long")))
+        (should (< (length out) 350))
+        (should (string-search "truncated" out))))
+    (with-temp-file (expand-file-name "skills/long/SKILL.md" root) (insert "fresh instructions"))
+    (should (string-search "fresh instructions" (kargu-skill-test--load "long")))))
 
 (ert-deftest kargu-search-legacy-glob-implementation-is-removed-test ()
   "Matching fixtures now live in Rust; no second implementation may execute."

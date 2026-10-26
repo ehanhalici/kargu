@@ -28,6 +28,7 @@
 (require 'kargu/history/compact)
 (require 'kargu/api)
 (require 'kargu/api/prepare)
+(autoload 'kargu-skill-refresh "kargu/tools/skill")
 (require 'kargu/edit)
 (require 'kargu/tools/deps nil t)
 (require 'kargu/confirm)
@@ -321,7 +322,19 @@ the diff run files and the UI as they were."
       (setf (kargu-execution-connection context) snapshot)
       (kargu-async-add-cleanup (kargu-execution-task context)
                                (lambda () (kargu-connection-snapshot-wipe snapshot)))
-      (kargu-execution-call context #'kargu-loop--send-ready run prompt))))
+      (kargu-execution-call context #'kargu-loop--prepare-skills run prompt))))
+
+(defun kargu-loop--prepare-skills (run prompt)
+  "Await RUN's skill catalog before dispatching its first PROMPT."
+  (let ((kargu-async--current-task (kargu-execution-task (plist-get run :context))))
+    (if (not (kargu-model-supports-tools-p))
+        (kargu-loop--send-ready run prompt)
+      (kargu-skill-refresh
+       (kargu-loop--wrap
+        run (lambda (catalog)
+              (if (kargu-err-p catalog)
+                  (kargu--loop-finish run :error (kargu-result-err-message catalog))
+                (kargu-loop--send-ready run prompt))))))))
 
 (defun kargu-loop--send-ready (run prompt)
   "Initialize RUN's algorithm state and send PROMPT after preparation."

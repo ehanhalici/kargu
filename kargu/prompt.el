@@ -299,7 +299,7 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
 
 (defun kargu-prompt--skills-block ()
   "Skills catalog for the system prompt, or nil."
-  (when (fboundp 'kargu-skill-format-catalog)
+  (when (and (not (kargu-prompt--tools-off-p)) (fboundp 'kargu-skill-format-catalog))
     (kargu-skill-format-catalog)))
 
 (defun kargu-prompt--mode-block ()
@@ -329,6 +329,7 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
         (format-time-string "%Y-%m-%d")
         (kargu-prompt--cached-env (kargu-prompt--workspace))
         (kargu-advertised-tools)
+        (kargu-prompt--skills-block)
         kargu-low-usage-mode))
 
 (defun kargu--get-system-prompt (&optional history)

@@ -105,6 +105,9 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
       snapshot/tick editor interop ve eski model reader/sync alias silme (54).
     - [x] Git diff/blame + status clean-filter düzeltmesi: isolated config/layout,
       owned preflight/drain ve private metadata cleanup; no unsafe fallback (56).
+    - [x] Skill discovery/read: bounded shared read worker, explicit project/user
+      grants, pinned UTF-8 metadata capture ve native parser/render; gerçek owned
+      run preparation ve async tool consumer. Eski Elisp motorları silindi (57).
 - [ ] Diff parser/generator + revision'lı proposal/journal ve Emacs transaction
   adapter'ı 06'ya göre kurulsun; review callback'i placeholder kalmasın.
 - [ ] Eski Elisp loop opt-in adapter üzerinden `tool/execute` çağırabilsin.

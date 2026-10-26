@@ -231,6 +231,11 @@ impl Host {
             return Err(state_fault());
         }
         let (scope, input) = match method {
+            methods::SKILLS => {
+                let request: ReadRequest<crate::workspace::skills::SkillInput> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                (request.scope, WorkspaceRead::Skills(request.arguments))
+            }
             methods::READ_FILE => {
                 let request: ReadRequest<crate::workspace::file::ReadFileInput> =
                     serde_json::from_value(params).map_err(|_| Fault::params())?;

@@ -117,6 +117,7 @@
 (require 'tests/test-heal)
 (require 'tests/test-attach)
 (require 'tests/test-fs)
+(require 'tests/test-skill-native)
 (require 'tests/test-webfetch)
 (require 'tests/test-address)
 

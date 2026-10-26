@@ -309,6 +309,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn skill_workers_share_capacity_and_cannot_publish_after_revocation() -> TestResult {
+        let root = tempfile::tempdir()?;
+        std::fs::create_dir_all(root.path().join("skills/test"))?;
+        std::fs::write(root.path().join("skills/test/SKILL.md"), "instructions")?;
+        for ending in ["cancelled", "timeout", "stale_owner"] {
+            let (mut host, scope) = owner()?;
+            let mut tools = ReadTools::default();
+            for id in 0..4 {
+                let input = serde_json::from_value(json!({"root":root.path(),"user_root":null,
+                    "skip_directories":[],"max_directories":2000,"max_file_bytes":262144,
+                    "body_chars":12000,"query":{"operation":"catalog"}}))?;
+                tools
+                    .start(
+                        RpcId::Integer(id),
+                        scope.clone(),
+                        WorkspaceRead::Skills(input),
+                    )
+                    .map_err(|_| "skill admission")?;
+            }
+            assert!(
+                tools
+                    .start(RpcId::Integer(4), scope.clone(), arguments(root.path()))
+                    .is_err()
+            );
+            if ending == "cancelled" {
+                for id in 0..4 {
+                    tools.cancel(&RpcId::Integer(id));
+                }
+            } else if ending == "timeout" {
+                for pending in tools.requests.values_mut() {
+                    pending.deadline = Instant::now();
+                }
+            } else {
+                host.dispatch(
+                    "session/close",
+                    json!({"application_id":scope.application_id,
+                    "session_id":scope.session_id}),
+                    true,
+                )
+                .result
+                .map_err(|_| "close")?;
+            }
+            tools.sweep(&host);
+            // Signal is not drain: admission stays occupied until actual join.
+            assert!(
+                tools
+                    .start(RpcId::Integer(4), scope, arguments(root.path()))
+                    .is_err()
+            );
+            let mut count = 0usize;
+            while let Some(reply) = tools.next(&host).await {
+                assert_eq!(reply?["error"]["data"]["status"], ending);
+                count = count.saturating_add(1);
+            }
+            assert_eq!(count, 4);
+            assert!(tools.is_empty());
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn file_reads_retain_shared_worker_capacity_until_cancelled_completion_is_joined()
     -> TestResult {
         let root = tempfile::tempdir()?;

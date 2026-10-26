@@ -6,6 +6,15 @@ The check is exhaustive over a bounded model. It is a proof for those bounds, no
 
 ## Interrupted-package integration checks (2026-10-22)
 
+The 2026-10-27 application model also checks sequential connection and skill
+preparation under the captured claim. `RunningPrepared` and `PreparationOrder`
+prevent first-request admission before both barriers (tool-free runs complete
+the skill barrier without IO). Late claims, Stop and reset retain the existing
+drain/release boundary. The exhaustive scan completed with 13,099 generated /
+3,481 distinct states, depth 33, queue empty. This abstraction does not prove
+filesystem capture, metadata parsing, editor catalog revisions or concrete
+worker joins; native and ERT tests cover those bounded implementation obligations.
+
 ### Configuration preparation (G02)
 
 The connection model separates `config-reading` from credential resolution.
