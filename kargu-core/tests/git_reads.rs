@@ -11,6 +11,172 @@ use std::{
 use support::Peer;
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+fn isolated_query(root: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
+    let layout = git(
+        root,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+            "--git-common-dir",
+            "--show-object-format",
+            "--show-ref-format",
+        ],
+    )?;
+    let mut fields = layout.lines();
+    let directory = PathBuf::from(fields.next().ok_or("git directory")?);
+    let original_common = PathBuf::from(fields.next().ok_or("common directory")?);
+    let object_format = fields.next().ok_or("object format")?;
+    let ref_format = fields.next().ok_or("reference format")?;
+    if !matches!(object_format, "sha1" | "sha256")
+        || !matches!(ref_format, "files" | "reftable")
+        || fields.next().is_some()
+    {
+        return Err("unsupported fixture layout".into());
+    }
+    let isolated = tempfile::tempdir()?;
+    let common = isolated.path().join("common");
+    let worktree = isolated.path().join("worktree");
+    fs::create_dir(&common)?;
+    fs::create_dir(&worktree)?;
+    // The ref backend reads physical commondir, not only GIT_COMMON_DIR.
+    fs::write(worktree.join("commondir"), "../common\n")?;
+    fs::write(
+        common.join("config"),
+        format!(
+            "[core]\nrepositoryformatversion = 1\nbare = false\n[extensions]\nobjectformat = {object_format}\nrefstorage = {ref_format}\n"
+        ),
+    )?;
+    for entry in ["objects", "refs", "packed-refs", "shallow", "reftable"] {
+        std::os::unix::fs::symlink(original_common.join(entry), common.join(entry))?;
+    }
+    std::os::unix::fs::symlink(directory.join("refs"), worktree.join("refs"))?;
+    std::os::unix::fs::symlink(directory.join("reftable"), worktree.join("reftable"))?;
+    // Absolute HEAD symlinks are not valid Git repository signatures.
+    fs::copy(directory.join("HEAD"), worktree.join("HEAD"))?;
+    let index = directory.join("index");
+    let before = fs::read(&index)?;
+    let output = Command::new(executable("git")?)
+        .process_group(0)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").ok_or("PATH")?)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_ATTR_NOSYSTEM", "1")
+        .env("GIT_COMMON_DIR", &common)
+        .env("GIT_INDEX_FILE", &index)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .args(["--no-pager", "--no-lazy-fetch", "--literal-pathspecs"])
+        .arg(format!("--git-dir={}", worktree.display()))
+        .arg(format!("--work-tree={}", root.display()))
+        .args([
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.attributesFile=/dev/null",
+            "-c",
+            "diff.autoRefreshIndex=false",
+        ])
+        .args(arguments)
+        .current_dir(root)
+        .output()?;
+    if !output.status.success() {
+        return Err(format!(
+            "isolated query: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+    assert_eq!(
+        fs::read(&index)?,
+        before,
+        "queries cannot refresh the original index"
+    );
+    Ok(String::from_utf8(output.stdout)?)
+}
+
+#[test]
+fn isolated_git_configuration_disables_clean_helpers_without_reimplementing_diff_or_blame()
+-> TestResult {
+    for options in [
+        vec![],
+        vec!["--object-format=sha256"],
+        vec!["--ref-format=reftable"],
+        vec!["--object-format=sha256", "--ref-format=reftable"],
+    ] {
+        let root = repository_format(&options)?;
+        let linked = tempfile::tempdir()?;
+        git(
+            root.path(),
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "linked",
+                linked.path().to_str().ok_or("linked path")?,
+            ],
+        )?;
+        let marker = root.path().join("helper-ran");
+        let filter = root.path().join("clean-helper");
+        fs::write(
+            &filter,
+            format!("#!/bin/sh\nprintf ran > '{}'\ncat\n", marker.display()),
+        )?;
+        fs::set_permissions(&filter, fs::Permissions::from_mode(0o700))?;
+        git(
+            root.path(),
+            &[
+                "config",
+                "filter.fixture.clean",
+                filter.to_str().ok_or("filter path")?,
+            ],
+        )?;
+        for workspace in [root.path(), linked.path()] {
+            fs::write(workspace.join(".gitattributes"), "*.txt filter=fixture\n")?;
+            fs::write(workspace.join("tracked.txt"), "other\n")?;
+            git(workspace, &["diff", "--no-ext-diff", "--no-textconv"])?;
+            assert!(
+                marker.is_file(),
+                "positive control must execute the clean helper"
+            );
+            fs::remove_file(&marker)?;
+            git(workspace, &["status", "--porcelain=v1"])?;
+            assert!(
+                marker.exists(),
+                "same-size status refresh also executes clean filters"
+            );
+            fs::remove_file(&marker)?;
+            for arguments in [
+                vec![
+                    "diff",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "--no-color",
+                    "--",
+                    "tracked.txt",
+                ],
+                vec![
+                    "blame",
+                    "--no-textconv",
+                    "--date=short",
+                    "--",
+                    "tracked.txt",
+                ],
+                vec!["status", "--porcelain=v1", "-b", "-z"],
+            ] {
+                let result = isolated_query(workspace, &arguments)?;
+                assert!(result.contains(if arguments.first() == Some(&"status") {
+                    "tracked.txt"
+                } else {
+                    "other"
+                }));
+                assert!(!marker.exists());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn executable(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     std::env::split_paths(&std::env::var_os("PATH").ok_or("PATH")?)
         .map(|directory| directory.join(name))
@@ -38,8 +204,13 @@ fn git(root: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::error::Er
     Ok(String::from_utf8(output.stdout)?)
 }
 fn repository() -> Result<tempfile::TempDir, Box<dyn std::error::Error>> {
+    repository_format(&[])
+}
+fn repository_format(options: &[&str]) -> Result<tempfile::TempDir, Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
-    git(root.path(), &["init", "--initial-branch=main"])?;
+    let mut init = vec!["init", "--initial-branch=main"];
+    init.extend(options);
+    git(root.path(), &init)?;
     git(root.path(), &["config", "user.name", "Offline Fixture"])?;
     git(
         root.path(),

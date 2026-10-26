@@ -531,6 +531,14 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       bunu doğruladı. Filtre/config snapshot ve safe classification sınırı
       kurulmadan native SafeReadOnly diye yayınlama; corpus/positive-control,
       config değişimi ve linked worktree kabulüyle gerçek tüketicileri taşı.
+      - [x] İzole Git config proof fixture: SHA-1/SHA-256 × files/reftable ×
+        main/linked-worktree gerçek Git status/diff/blame sonuçları; clean-helper
+        positive-control var, isolated sorgu helper çalıştırmaz/index refresh
+        etmez. Bu test tek başına yeni native capability değildir. .codex/55.
+      - [ ] Ek güvenlik düzeltmesi: aynı-boyutlu dosyada mevcut `git_status`
+        refresh'i de clean filtresi çalıştırabiliyor. Status da isolated profile'a
+        alınsın; yalnız fsmonitor kapatmak yeterli değil. Native gate/scope altında
+        config/layout preflight → actual drain → final query zinciri kurulsun.
   - [x] Ortak native read editor portunda bulunan ek lifecycle işleri: immutable
     DTO capture, initiating application/session, origin kill/mode cleanup,
     closed/expired parent öncesi startup reddi; startup/cevap yield'inden sonra
