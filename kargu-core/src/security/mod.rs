@@ -23,6 +23,7 @@ use std::{
 };
 use tokio::time::Instant;
 
+pub(crate) mod file;
 mod read_target;
 use read_target::ReadTarget;
 

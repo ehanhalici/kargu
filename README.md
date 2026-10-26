@@ -443,14 +443,21 @@ Malformed, null and conflicting bounds are rejected. Explicit windows still
 obey `kargu-diff-read-max-chars`; totals remain `unknown` when counting the
 unrequested tail would require more scanning.
 
-After project context is resolved, native reads delegate target path lookup and
-disk reads to an owned helper process. Input is bounded cumulatively by
-`kargu-file-read-max-bytes`; decoded snapshots also respect
-`kargu-file-read-max-scan-chars`. Narrow live-buffer ranges are sliced in place,
-including unsaved text, without copying or splitting the whole buffer. Batch
-callers retain the synchronous `kargu-file-read` compatibility entrypoint;
-native tool calls use callbacks. Remote reads require a separate adapter and
-currently return unavailable. The helper ignores file transformation handlers.
+Disk capture, decoding and numbered presentation run in Rust through
+`workspace/readFile` (`workspace_read_file` capability). The shared bounded read
+pool retains each worker slot until its actual join, including cancellation.
+Only pinned regular files are read; inode/content revisions are checked before
+and after capture. Input respects `kargu-file-read-max-bytes` and decoded scans
+respect `kargu-file-read-max-scan-chars`. UTF-8 (optional BOM) and BOM-marked
+UTF-16LE/BE are decoded strictly, with CRLF normalization; unsupported/invalid
+encodings fail explicitly, without lossy fallback or file transformation hooks.
+Emacs supplies bounded raw unsaved/output-buffer snapshots; Rust uses the same
+renderer. A changed live-buffer tick rejects the reply, and a newly opened live
+buffer supersedes a delayed disk result. The asynchronous entrypoint is
+`(kargu-file-read-async path window callback)`; the old synchronous read and diff
+alias are removed. LSP symbol reading now also requires a callback. Remote reads
+remain explicitly unavailable. Full edit snapshots and Dape's separate source
+worker remain separate consumers, not model-read fallbacks.
 
 `workspace_grep` enforces `max_matches` across the whole search, not per
 file. Both ripgrep and GNU grep use line-buffered output; Kargu stops the

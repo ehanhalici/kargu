@@ -309,6 +309,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn file_reads_retain_shared_worker_capacity_until_cancelled_completion_is_joined()
+    -> TestResult {
+        let root = tempfile::tempdir()?;
+        std::fs::write(root.path().join("source"), "live source\n")?;
+        let (host, scope) = owner()?;
+        let mut tools = ReadTools::default();
+        let arguments = || -> Result<WorkspaceRead, serde_json::Error> {
+            serde_json::from_value(
+                json!({"display_path":"source","window":{"from":1,"to":null},
+                "max_bytes":65536,"scan_chars":65536,"output_chars":15000,
+                "source":{"kind":"disk","root":root.path(),"path":"source"}}),
+            )
+            .map(WorkspaceRead::ReadFile)
+        };
+        for id in 0..4 {
+            tools
+                .start(RpcId::Integer(id), scope.clone(), arguments()?)
+                .map_err(|_| "admission")?;
+        }
+        tools.cancel(&RpcId::Integer(0));
+        assert!(
+            tools
+                .start(RpcId::Integer(4), scope.clone(), arguments()?)
+                .is_err()
+        );
+        let mut seen = std::collections::HashSet::new();
+        while let Some(reply) = tools.next(&host).await {
+            let reply = reply?;
+            assert!(seen.insert(reply["id"].as_i64().ok_or("id")?));
+            if reply["id"] == 0 {
+                assert_eq!(reply["error"]["data"]["status"], "cancelled");
+            } else {
+                assert!(
+                    reply["result"]["text"]
+                        .as_str()
+                        .ok_or("text")?
+                        .contains("1 | live source")
+                );
+            }
+        }
+        assert_eq!(seen.len(), 4);
+        tools
+            .start(RpcId::Integer(4), scope, arguments()?)
+            .map_err(|_| "readmission")?;
+        assert!(
+            tools
+                .next(&host)
+                .await
+                .ok_or("completion")??
+                .get("result")
+                .is_some()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn configuration_shares_capacity_and_revokes_late_results_before_publication()
     -> TestResult {
         let root = tempfile::tempdir()?;

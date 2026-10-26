@@ -144,7 +144,7 @@
   (with-current-buffer (get-buffer-create "*secret-scratch*")
     (insert "top secret"))
   (unwind-protect
-      (should-error (kargu-diff-read-file "*secret-scratch*"))
+      (should-error (kargu-test-read-file "*secret-scratch*"))
     (kill-buffer "*secret-scratch*")))
 
 ;;;; git and webfetch ----------------------------------------------------

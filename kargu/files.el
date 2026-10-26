@@ -38,77 +38,10 @@ snapshots use their separate explicit API."
   "Maximum decoded characters scanned from one file or live-buffer snapshot."
   :type 'natnum :group 'kargu)
 
-(defconst kargu-file--read-initial-bytes 65536
-  "Initial bounded disk prefix; geometric growth keeps total work linear.")
-
-(define-error 'kargu-file-prefix-incomplete "Read scan budget exhausted before from_line")
-
-(cl-defstruct (kargu-file-excerpt (:constructor kargu-file--make-excerpt))
-  "One bounded numbered excerpt; nil TOTAL means the tail was not scanned."
-  (from nil :read-only t) (to nil :read-only t) (total nil :read-only t)
-  (body nil :read-only t) (truncated nil :read-only t) (needs-more nil :read-only t))
-
 (cl-defstruct (kargu-file-revision (:constructor kargu-file--make-revision))
   "Filesystem identity and content revision of one disk snapshot."
   (inode nil :read-only t) (device nil :read-only t)
   (bytes nil :read-only t) (mtime nil :read-only t))
-
-(defun kargu-file--line-piece (line remaining)
-  "Take LINE's numbered text at point using at most REMAINING characters."
-  (let* ((prefix (format "%d | " line))
-         (space (max 0 (- remaining (length prefix))))
-         (end (min (line-end-position) (+ (point) space))))
-    (cons (substring (concat prefix (buffer-substring-no-properties (point) end))
-                     0 (min remaining (+ (length prefix) (- end (point)))))
-          (or (< remaining (length prefix)) (< end (line-end-position))))))
-
-(defun kargu-file--buffer-excerpt (window complete)
-  "Format WINDOW from the current widened snapshot, respecting COMPLETE.
-COMPLETE is nil when only a bounded prefix of the file was read."
-  (save-excursion
-    (save-restriction
-      (widen)
-      (when (> (buffer-size) kargu-file-read-max-scan-chars)
-        (narrow-to-region (point-min) (+ (point-min) kargu-file-read-max-scan-chars))
-        (setq complete nil))
-      (let* ((from (kargu-file-window-from window)) (to (kargu-file-window-to window))
-             (remaining kargu-diff-read-max-chars) (line from) (last from)
-             (boundary (eq (char-before (point-max)) ?\n))
-             pieces total truncated needs-more (more t))
-        (when (eq (char-before (point-max)) ?\n)
-          (narrow-to-region (point-min) (1- (point-max))))
-        (goto-char (point-min))
-        (when (or (> (forward-line (1- from)) 0)
-                  (and (> from 1) (eobp) (not (eq (char-before) ?\n))))
-          (if complete (error "From_line exceeds file line count")
-            (signal 'kargu-file-prefix-incomplete nil)))
-        (while (and more (or (null to) (<= line to)))
-          (let* ((end (line-end-position))
-                 (piece (kargu-file--line-piece line remaining)))
-            (push (car piece) pieces)
-            (setq last line remaining (max 0 (- remaining (length (car piece)) 1)))
-            (cond
-             ((cdr piece) (setq truncated t more nil))
-             ((= end (point-max))
-              (setq total (and complete line) more nil
-                    needs-more (and (not complete)
-                                    (or (null to) (< line to) (not boundary)))
-                    truncated needs-more))
-             ((zerop remaining) (setq truncated (or (null to) (< line to)) more nil))
-             (t (forward-line 1) (cl-incf line)))))
-        (kargu-file--make-excerpt
-         :from from :to last :total total :truncated truncated :needs-more needs-more
-         :body (string-join (nreverse pieces) "\n"))))))
-
-(defun kargu-file--describe-excerpt (path excerpt)
-  "Render the bounded EXCERPT belonging to PATH."
-  (format "(file %s, lines %d-%d of %s%s)\n%s%s"
-          path (kargu-file-excerpt-from excerpt) (kargu-file-excerpt-to excerpt)
-          (or (kargu-file-excerpt-total excerpt) "unknown")
-          (if (kargu-file-excerpt-truncated excerpt) ", truncated" "")
-          (kargu-file-excerpt-body excerpt)
-          (if (kargu-file-excerpt-truncated excerpt)
-              "\n... [truncated; request a smaller line range]" "")))
 
 (defun kargu-file--resolve-read-target (file-path)
   "Resolve FILE-PATH to (PATH . TEXT).
@@ -174,72 +107,6 @@ not visiting a file on disk, or unreadable."
                    :mtime (file-attribute-modification-time attrs))))))
         (error nil)))))
 
-(defun kargu-file--file-revision (path)
-  "Capture PATH's filesystem identity, size and content modification time."
-  (or (kargu-file-current-revision path)
-      (error "File disappeared while reading its snapshot")))
-
-(defun kargu-file--checked-excerpt (window complete)
-  "Read text WINDOW from the current snapshot described by COMPLETE."
-  (save-excursion
-    (goto-char (point-min))
-    (when (search-forward (string 0) (min (point-max) (+ (point-min) 1000)) t)
-      (error "Binary data is unavailable through read_file")))
-  (kargu-file--buffer-excerpt window complete))
-
-(defun kargu-file--disk-excerpt (path window)
-  "Read a bounded prefix of PATH sufficient for WINDOW, or report truncation."
-  (when (file-remote-p path) (user-error "Kargu: asynchronous remote file reading is unavailable"))
-  (unless (file-exists-p path)
-    (error "No such file: '%s'; use find_files or list_files inside the project" path))
-  (unless (file-regular-p path) (error "Read_file requires a regular file"))
-  (unless (and (natnump kargu-file-read-max-bytes) (> kargu-file-read-max-bytes 0))
-    (error "Read_file disk scan budget must be positive"))
-  (let* ((before (kargu-file--file-revision path))
-         (bytes (min kargu-file-read-max-bytes kargu-file--read-initial-bytes))
-         (spent 0) excerpt done)
-    (while (not done)
-      (setq excerpt
-            (with-temp-buffer
-              (let ((file-name-handler-alist nil) (format-alist nil)
-                    (after-insert-file-functions nil))
-                (insert-file-contents path nil 0 bytes))
-              (condition-case nil
-                  (kargu-file--checked-excerpt window (<= (kargu-file-revision-bytes before) bytes))
-                (kargu-file-prefix-incomplete nil))))
-      (cl-incf spent bytes)
-      (let ((next (min (* 2 bytes) (- kargu-file-read-max-bytes spent))))
-        (setq done (or (and excerpt (not (kargu-file-excerpt-needs-more excerpt))) (<= next bytes)))
-        (unless done (setq bytes next))))
-    (unless (equal before (kargu-file--file-revision path))
-      (error "File changed while its snapshot was being read"))
-    (or excerpt (signal 'kargu-file-prefix-incomplete nil))))
-
-(defun kargu-file-read-window (file-path window)
-  "Read FILE-PATH using the validated inclusive line WINDOW.
-Prefer unsaved visiting buffers without copying their full contents."
-  (kargu-contract-assert #'kargu-contract-filepath-p file-path)
-  (kargu-contract-assert #'kargu-file-window-p window)
-  (when (file-remote-p file-path)
-    (user-error "Kargu: remote read_file requires an asynchronous remote adapter"))
-  (save-match-data
-    (let* ((output (kargu-tool-output-buffer file-path))
-           (path (if output file-path (kargu-permission-resolve file-path "file")))
-           (visiting (or output (find-buffer-visiting path))))
-      (kargu-file--describe-excerpt
-       path (if (buffer-live-p visiting)
-                (with-current-buffer visiting
-                  (save-restriction (widen) (kargu-file--checked-excerpt window t)))
-              (kargu-file--disk-excerpt path window))))))
-
-(defun kargu-file-read (file-path &optional from-line to-line)
-  "Return a bounded numbered excerpt of FILE-PATH, preferring unsaved buffers.
-FROM-LINE and TO-LINE are positive 1-based inclusive integers.  Explicit
-ranges still respect the output and scan budgets.  Report an unknown total
-instead of scanning the remaining file just to count its lines."
-  (kargu-file-read-window
-   file-path (kargu-file-window-create :from from-line :to to-line)))
-
 (defun kargu-file--bound-argument (args keys)
   "Read integer aliases KEYS in ARGS, rejecting null and conflicting values."
   (let ((missing (make-symbol "missing")) value seen)
@@ -269,10 +136,7 @@ instead of scanning the remaining file just to count its lines."
     (cond
      ((stringp request) (if callback (funcall callback request) request))
      (callback (kargu-file-read-async (car request) (cdr request) callback))
-     ((not noninteractive) "ERROR: read_file requires an asynchronous callback")
-     (t (condition-case-unless-debug error
-            (kargu-file-read-window (car request) (cdr request))
-          (error (format "ERROR: %s" (error-message-string error))))))))
+     (t "ERROR: read_file requires an asynchronous callback"))))
 
 (defconst kargu-file--tool-specs
   (list

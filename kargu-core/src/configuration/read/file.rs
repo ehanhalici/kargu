@@ -1,46 +1,23 @@
-//! Linux fd-rooted regular-file capture. No unsafe, special-file open or raw logs.
+//! Configuration-sized facade over the shared fd-rooted regular-file reader.
 
-use super::checkpoint;
-use crate::{configuration::MAX_SOURCE_BYTES, error::CoreError};
-use nix::fcntl::{OFlag, open, openat};
-use nix::sys::stat::Mode;
+use crate::{
+    configuration::MAX_SOURCE_BYTES,
+    error::CoreError,
+    security::file::{PinnedFile, checkpoint},
+};
 use std::{
-    fs::{File, Metadata},
-    io::Read,
-    os::{fd::AsRawFd, unix::fs::MetadataExt},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     time::Instant,
 };
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
-#[derive(PartialEq, Eq)]
-struct FileRevision {
-    device: u64,
-    inode: u64,
-    size: u64,
-    mode: u32,
-    modified: (i64, i64),
-    changed: (i64, i64),
-}
-impl From<Metadata> for FileRevision {
-    fn from(value: Metadata) -> Self {
-        Self {
-            device: value.dev(),
-            inode: value.ino(),
-            size: value.len(),
-            mode: value.mode(),
-            modified: (value.mtime(), value.mtime_nsec()),
-            changed: (value.ctime(), value.ctime_nsec()),
-        }
+pub(super) struct CapturedFile(PinnedFile);
+fn configuration_error(error: CoreError) -> CoreError {
+    match error {
+        CoreError::WorkspaceChanged => CoreError::ConfigurationChanged,
+        other => other,
     }
-}
-
-pub(super) struct CapturedFile {
-    original: PathBuf,
-    canonical: PathBuf,
-    pinned: File,
-    revision: FileRevision,
 }
 impl CapturedFile {
     pub(super) fn open(
@@ -49,105 +26,23 @@ impl CapturedFile {
         cancel: &CancellationToken,
         deadline: Instant,
     ) -> Result<Self, CoreError> {
-        checkpoint(cancel, deadline)?;
-        let initial = canonical.metadata()?;
-        if !initial.is_file() {
-            return Err(CoreError::Rejected);
-        }
-        if initial.len() > MAX_SOURCE_BYTES as u64 {
+        let file =
+            PinnedFile::open(original, canonical, cancel, deadline).map_err(configuration_error)?;
+        if file.size() > MAX_SOURCE_BYTES as u64 {
             return Err(CoreError::Limit);
         }
-        let flags = OFlag::O_PATH | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
-        let parent = canonical.parent().ok_or(CoreError::Rejected)?;
-        let mut directory = open(Path::new("/"), flags | OFlag::O_DIRECTORY, Mode::empty())
-            .map_err(std::io::Error::from)?;
-        for part in parent.components() {
-            checkpoint(cancel, deadline)?;
-            match part {
-                Component::RootDir => {}
-                Component::Normal(name) => {
-                    directory = openat(
-                        &directory,
-                        Path::new(name),
-                        flags | OFlag::O_DIRECTORY,
-                        Mode::empty(),
-                    )
-                    .map_err(|_| CoreError::ConfigurationChanged)?;
-                }
-                _ => return Err(CoreError::Rejected),
-            }
-        }
-        let name = canonical.file_name().ok_or(CoreError::Rejected)?;
-        checkpoint(cancel, deadline)?;
-        let pinned = File::from(
-            openat(&directory, Path::new(name), flags, Mode::empty())
-                .map_err(|_| CoreError::ConfigurationChanged)?,
-        );
-        let metadata = pinned.metadata()?;
-        if !metadata.is_file() {
-            return Err(CoreError::ConfigurationChanged);
-        }
-        let revision = FileRevision::from(metadata);
-        if FileRevision::from(initial) != revision {
-            return Err(CoreError::ConfigurationChanged);
-        }
-        checkpoint(cancel, deadline)?;
-        Ok(Self {
-            original: original.to_owned(),
-            canonical,
-            pinned,
-            revision,
-        })
+        Ok(Self(file))
     }
-
-    fn revalidate(&self, reader: &File) -> Result<(), CoreError> {
-        let same = self
-            .original
-            .canonicalize()
-            .map_err(|_| CoreError::ConfigurationChanged)?
-            == self.canonical
-            && FileRevision::from(
-                self.canonical
-                    .metadata()
-                    .map_err(|_| CoreError::ConfigurationChanged)?,
-            ) == self.revision
-            && FileRevision::from(self.pinned.metadata()?) == self.revision
-            && FileRevision::from(reader.metadata()?) == self.revision;
-        if same {
-            Ok(())
-        } else {
-            Err(CoreError::ConfigurationChanged)
-        }
-    }
-
     pub(super) fn read(
         self,
         cancel: &CancellationToken,
         deadline: Instant,
     ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
-        checkpoint(cancel, deadline)?;
-        // Reopen the pinned regular inode, not its potentially replaced pathname.
-        // Linux /proc is already a platform prerequisite of the native core.
-        let fd_path = PathBuf::from(format!("/proc/self/fd/{}", self.pinned.as_raw_fd()));
-        let mut reader = File::from(
-            open(
-                &fd_path,
-                OFlag::O_RDONLY | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
-                Mode::empty(),
-            )
-            .map_err(std::io::Error::from)?,
-        );
-        self.revalidate(&reader)?;
+        let mut reader = self.0.reader().map_err(configuration_error)?;
         let mut output = Zeroizing::new(Vec::with_capacity(MAX_SOURCE_BYTES));
         let mut chunk = Zeroizing::new([0_u8; 4096]);
         loop {
-            checkpoint(cancel, deadline)?;
-            let count = match reader.read(chunk.as_mut()) {
-                Ok(count) => count,
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(error.into()),
-            };
-            checkpoint(cancel, deadline)?;
+            let count = reader.read(chunk.as_mut(), cancel, deadline)?;
             if count == 0 {
                 break;
             }
@@ -156,7 +51,7 @@ impl CapturedFile {
             }
             output.extend_from_slice(chunk.get(..count).ok_or(CoreError::Limit)?);
         }
-        self.revalidate(&reader)?;
+        reader.finish().map_err(configuration_error)?;
         checkpoint(cancel, deadline)?;
         Ok(output)
     }

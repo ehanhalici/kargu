@@ -15,7 +15,7 @@
 ;; - `kargu/tools/diff/review': ediff interaction, session management, and finalization
 ;;
 ;; Public: `kargu-diff-apply-replace', `kargu-diff-apply-proposal',
-;; `kargu-diff-rollback', `kargu-diff-changed-files', `kargu-diff-read-file',
+;; `kargu-diff-rollback', `kargu-diff-changed-files',
 ;; `kargu-diff-apply-patch', `kargu-diff-review'.
 
 ;;; Code:
@@ -109,8 +109,6 @@ diagnostics verification."
 (require 'kargu/tools/diff/track)
 (require 'kargu/tools/diff/stage)
 (require 'kargu/tools/diff/review)
-
-(defalias 'kargu-diff-read-file #'kargu-file-read)
 
 ;;;; Tool registration -----------------------------------------------------
 

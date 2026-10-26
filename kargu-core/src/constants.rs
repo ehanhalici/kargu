@@ -137,7 +137,8 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 29] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 30] = [
+        "workspace_read_file",
         "git_read",
         "configuration_policy",
         "configuration_read",
@@ -274,6 +275,8 @@ pub mod protocol {
         pub const SESSION_CLOSE: &str = "session/close";
         /// Bounded, read-only native file discovery.
         pub const FIND_FILES: &str = "workspace/findFiles";
+        /// Bounded regular-file or revision-bound editor text excerpt.
+        pub const READ_FILE: &str = "workspace/readFile";
         /// Bounded fixed-argv GNU ls listing, through the shared command service.
         pub const LIST_FILES: &str = "workspace/listFiles";
         /// Bounded rg/GNU grep composition through the shared process owner.

@@ -69,7 +69,7 @@
     (let ((buf-name (match-string 1 truncated)))
       (should (get-buffer buf-name))
       ;; `kargu-diff-read-file' can read line ranges from this live buffer!
-      (let ((read-back (kargu-diff-read-file buf-name 1 2)))
+      (let ((read-back (kargu-test-read-file buf-name 1 2)))
         (should (string-match-p "1 | AAAAA" read-back))
         (should (string-match-p "2 | BBBBB" read-back))
         (should-not (string-match-p "CCCCC" read-back)))

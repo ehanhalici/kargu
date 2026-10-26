@@ -231,6 +231,11 @@ impl Host {
             return Err(state_fault());
         }
         let (scope, input) = match method {
+            methods::READ_FILE => {
+                let request: ReadRequest<crate::workspace::file::ReadFileInput> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                (request.scope, WorkspaceRead::ReadFile(request.arguments))
+            }
             methods::FIND_FILES => {
                 let request: ReadRequest<crate::workspace::search::FindFilesInput> =
                     serde_json::from_value(params).map_err(|_| Fault::params())?;

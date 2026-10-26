@@ -400,16 +400,17 @@
       (insert "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"))
     (unwind-protect
         (cl-letf (((symbol-function 'kargu-lsp-get-file-symbols)
-                   (lambda (_path)
-                     (list (list :name "add" :kind "Function" :start-line 1 :end-line 2 :detail nil :children nil)
-                           (list :name "sub" :kind "Function" :start-line 4 :end-line 5 :detail nil :children nil)))))
+                   (lambda (_path callback)
+                     (funcall callback
+                              (list (list :name "add" :kind "Function" :start-line 1 :end-line 2 :detail nil :children nil)
+                                    (list :name "sub" :kind "Function" :start-line 4 :end-line 5 :detail nil :children nil)) nil))))
           ;; 1. Found symbol
-          (let ((res (kargu-lsp-read-symbol tmp "add")))
+          (let ((res (kargu-test-await (lambda (done) (kargu-lsp-read-symbol tmp "add" nil done)))))
             (should (string-search "1 | def add(a, b):" res))
             (should (string-search "2 |     return a + b" res))
             (should-not (string-search "sub" res)))
           ;; 2. Missing symbol
-          (let ((err-res (kargu-lsp-read-symbol tmp "multiply")))
+          (let ((err-res (kargu-test-await (lambda (done) (kargu-lsp-read-symbol tmp "multiply" nil done)))))
             (should (string-search "ERROR: Symbol 'multiply' not found" err-res))
             (should (string-search "• Function add [lines 1-2]" err-res))
             (should (string-search "• Function sub [lines 4-5]" err-res))))

@@ -536,11 +536,22 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     closed/expired parent öncesi startup reddi; startup/cevap yield'inden sonra
     timer dispatch beklemeden absolute deadline kontrolü. Git/search/list/status
     tüketicileri aynı portta; native kaynak admission'ı actual drain'e bağlıdır.
-  - [ ] `read_file`: bounded disk capture/range/encoding/binary/numbering kararı
+  - [x] `read_file`: bounded disk capture/range/encoding/binary/numbering kararı
     typed native porta taşınsın; unsaved/dirty/live-output buffer snapshot ve
     revision kontrolü Emacs interop kalsın. FIFO/device, symlink/path replacement,
     scan/output bütçesi, unknown total, stale buffer ve remote unavailable testli
     olsun. Dape source worker tüketicisi geçmeden ortak worker dosyası silinmesin.
+    - [x] `workspace/readFile` / `workspace_read_file`: typed canonical window,
+      byte/scan/output bütçeleri, fd-rooted regular capture ve revision recheck.
+      UTF-8/BOM UTF-16LE/BE strict decode + CRLF; diğer encoding'ler açık hata,
+      lossy/Elisp fallback yok. Ortak dört read slotu actual join'e kadar tutulur.
+    - [x] Canlı buffer yalnız bounded raw snapshot/tick verir; numbering/render
+      Rust'ta. Yeni live buffer gecikmiş disk sonucunu geçersiz kılar; değişen
+      tick/owner/session/root/strict/mode/cancel sonucu yayınlayamaz.
+    - [x] Son senkron tüketici `read_symbol` callback'e geçti. Eski disk/geometric
+      reader, numbered formatter, sync read/diff alias ve model worker yolu
+      silindi. Tam edit snapshot API'si (madde 3) ve Dape source worker'ı (madde 4)
+      kendi tüketicileri için kalır; model read fallback'i değildir. .codex/54.
   - [ ] Git mutation tüketicileri: stage/unstage/commit/branch/stash ortak native
     approval ledger'a geçsin. Exact immutable action/object ve repo/index scope,
     reject/timeout/cancel, hook/signing child drain ve partial/unknown sonuçları

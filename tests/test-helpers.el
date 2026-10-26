@@ -56,6 +56,15 @@ selector integration tests keep the real worker and file publication."
     (kargu-async-finish task (kargu-ok (kargu-config-current-snapshot)))
     task))
 
+(defun kargu-test-read-file (path &optional from to)
+  "Await the real native read of PATH/FROM/TO in tests only.
+Raise native failures so negative fixtures can use `should-error'."
+  (let ((text (kargu-test-await
+               (lambda (done)
+                 (kargu-file-read-async path (kargu-file-window-create :from from :to to) done)))))
+    (when (string-prefix-p "ERROR:" text) (error "%s" text))
+    text))
+
 (defvar kargu-test--model-apps nil
   "Native owners created by this test's explicit producer fixtures.")
 

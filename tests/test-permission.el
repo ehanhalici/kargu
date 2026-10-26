@@ -69,8 +69,8 @@
   (let ((_ (kargu-test-mode 'agent))
         (kargu-diff-review-mode 'auto))
     ;; read_file on /etc/passwd
-    (should-error (kargu-diff-read-file "/etc/passwd") :type 'error)
-    (should-error (kargu-diff-read-file "../outside.txt") :type 'error)
+    (should-error (kargu-test-read-file "/etc/passwd") :type 'error)
+    (should-error (kargu-test-read-file "../outside.txt") :type 'error)
     ;; write_file outside project
     (let ((res (kargu-diff--write-file-tool
                 '(("file_path" . "/tmp/should-never-be-written.txt")

@@ -131,16 +131,20 @@ Initialize installed PACKAGES only when requested."
                   (list (concat "kargu/tools/" name ".el")
                         (concat "kargu/tools/" name "/"))) families)
      '((require 'kargu)
+       (setq kargu-bridge-binary-path (getenv "KARGU_CORE_TEST_BINARY"))
        (dolist (name '("debug_start" "lsp_diagnostics" "workspace_grep"
                        "bash" "git_status" "skill" "webfetch"))
          (cl-assert (not (kargu-find-tool name))))
        (cl-assert (kargu-find-tool "edit_file"))
        (with-temp-file "remaining.txt" (insert "Readable without adapters"))
        (let ((kargu-permission--override-root default-directory))
-         (let ((result (kargu-execute-tool
-                        "read_file" '(("file_path" . "remaining.txt")))))
-           (cl-assert (string-search "Readable without adapters" result) nil
-                      "Reading without adapters returned: %s" result)))
+         (let (result (deadline (+ (float-time) 10)))
+           (kargu-execute-tool "read_file" '(("file_path" . "remaining.txt"))
+                               (lambda (text) (setq result text)))
+           (while (and (not result) (< (float-time) deadline))
+             (accept-process-output nil 0.02))
+           (cl-assert (and result (string-search "Readable without adapters" result)) nil
+                      "Native reading without adapters returned: %s" result)))
        (with-temp-buffer (kargu-chat-mode) (kargu-chat-stop))))))
 
 (ert-deftest kargu-module-contract-is-independent-test ()
@@ -231,8 +235,8 @@ Initialize installed PACKAGES only when requested."
      (with-temp-file "read-only.txt" (insert "Read-only service"))
      (let ((kargu-permission--override-root default-directory))
        (cl-assert (equal (kargu-file-text "read-only.txt") "Read-only service"))
-       (cl-assert (string-search "1 | Read-only service"
-                                 (kargu-file-read "read-only.txt")))))))
+       (cl-assert (not (fboundp 'kargu-file-read)))
+       (cl-assert (not (fboundp 'kargu-file--disk-excerpt)))))))
 
 (ert-deftest kargu-module-plan-invalidated-dispatch-does-not-announce-approval-test ()
   "An invalidated owner cannot receive a false approval presentation."
@@ -289,12 +293,16 @@ Initialize installed PACKAGES only when requested."
      (kargu-state-set-mode 'agent)
      (let ((tool "edit_by_lsp")) (cl-assert (kargu-tool-policy-error tool)))
      (with-temp-file "symbol.el" (insert "(defun kept () t)\n"))
+     (setq kargu-bridge-binary-path (getenv "KARGU_CORE_TEST_BINARY"))
      (let ((kargu-permission--override-root default-directory))
        (cl-letf (((symbol-function 'kargu-lsp-get-file-symbols)
-                  (lambda (_) '((:name "kept" :kind "Function"
-                                 :start-line 1 :end-line 1)))))
-         (cl-assert (string-search "defun kept"
-                                   (kargu-lsp-read-symbol "symbol.el" "kept"))))
+                  (lambda (_ callback)
+                    (funcall callback '((:name "kept" :kind "Function"
+                                       :start-line 1 :end-line 1)) nil))))
+         (let (result (deadline (+ (float-time) 10)))
+           (kargu-lsp-read-symbol "symbol.el" "kept" nil (lambda (text) (setq result text)))
+           (while (and (not result) (< (float-time) deadline)) (accept-process-output nil 0.02))
+           (cl-assert (and result (string-search "defun kept" result)))))
        (cl-assert (string-prefix-p "ERROR:"
                                   (kargu-lsp-edit-symbol "symbol.el" "kept" "")))
        (cl-assert (equal (kargu-file-text "symbol.el") "(defun kept () t)\n")))

@@ -483,29 +483,26 @@ A kind does not widen the search to every symbol of that kind."
        named))
      (t named))))
 
-(cl-defun kargu-lsp--read-symbol (path symbols &key name kind)
-  "Read NAME of KIND from the SYMBOLS snapshot in PATH."
+(cl-defun kargu-lsp--read-symbol (path symbols &key name kind callback)
+  "Read NAME of KIND from SYMBOLS in PATH asynchronously into CALLBACK."
   (let* ((flat (kargu-lsp--flatten-symbols symbols))
          (matches (kargu-lsp--find-symbol-in-list flat name kind)))
     (if (null matches)
-        (kargu-lsp--format-missing-symbol-error name path flat kind)
+        (funcall callback (kargu-lsp--format-missing-symbol-error name path flat kind))
       (let ((sym (car matches)))
-        (kargu-file-read path (plist-get sym :start-line)
-                              (plist-get sym :end-line))))))
+        (kargu-file-read-async
+         path (kargu-file-window-create :from (plist-get sym :start-line)
+                                        :to (plist-get sym :end-line)) callback)))))
 
 (defun kargu-lsp-read-symbol (file-path symbol-name &optional kind callback)
-  "Read SYMBOL-NAME in FILE-PATH, optionally filtered by KIND.
-With CALLBACK, fetch symbols asynchronously and deliver the text once."
+  "Read SYMBOL-NAME in FILE-PATH, filtered by KIND, asynchronously into CALLBACK."
+  (unless (functionp callback) (error "Read_symbol requires an asynchronous callback"))
   (let ((path (kargu-permission-resolve file-path "lsp path")))
-    (if callback
-        (kargu-lsp-get-file-symbols
+    (kargu-lsp-get-file-symbols
          path (lambda (symbols error)
-                (funcall callback
-                         (if error (concat "ERROR: " error)
-                           (kargu-lsp--read-symbol path symbols
-                                                  :name symbol-name :kind kind)))))
-      (kargu-lsp--read-symbol path (kargu-lsp-get-file-symbols path)
-                             :name symbol-name :kind kind))))
+                (if error (funcall callback (concat "ERROR: " error))
+                  (kargu-lsp--read-symbol path symbols :name symbol-name :kind kind
+                                        :callback callback))))))
 
 (defun kargu-lsp--format-missing-symbol-error (symbol-name path flat kind)
   "Describe a missing SYMBOL-NAME in PATH using FLAT candidates and KIND."

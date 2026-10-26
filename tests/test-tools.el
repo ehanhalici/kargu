@@ -28,10 +28,10 @@
 (ert-deftest kargu-diff-read-file-counts-logical-lines-test ()
   "A terminal newline ends the last line instead of inventing another line."
   (kargu-test-with-git-repo '(("one.txt" . "one\n") ("two.txt" . "one\n\n"))
-    (should (string-search "lines 1-1 of 1" (kargu-diff-read-file "one.txt")))
-    (should-not (string-search "2 |" (kargu-diff-read-file "one.txt")))
-    (should (string-search "lines 1-2 of 2" (kargu-diff-read-file "two.txt")))
-    (should-error (kargu-diff-read-file "one.txt" 2 2))))
+    (should (string-search "lines 1-1 of 1" (kargu-test-read-file "one.txt")))
+    (should-not (string-search "2 |" (kargu-test-read-file "one.txt")))
+    (should (string-search "lines 1-2 of 2" (kargu-test-read-file "two.txt")))
+    (should-error (kargu-test-read-file "one.txt" 2 2))))
 
 (ert-deftest kargu-tool-output-buffer-is-owned-and-collision-safe-test ()
   "A buffer name alone grants neither overwrite authority nor read access."
@@ -41,7 +41,7 @@
     (unwind-protect
         (progn
           (with-current-buffer fake (insert "user draft"))
-          (should-error (kargu-diff-read-file (buffer-name fake)))
+          (should-error (kargu-test-read-file (buffer-name fake)))
           (let ((text (kargu--truncate-for-model "complete tool output")))
             (should (string-match "buffer '\\([^']+\\)'" text))
             (setq output (get-buffer (match-string 1 text))))
@@ -50,10 +50,10 @@
           (should (with-current-buffer fake (buffer-modified-p)))
           (should (eq (kargu-tool-output-buffer (buffer-name output)) output))
           (should (string-search "complete tool output"
-                                 (kargu-diff-read-file (buffer-name output))))
+                                 (kargu-test-read-file (buffer-name output))))
           (let ((kargu-permission--override-root other-root))
             (should-not (kargu-tool-output-buffer (buffer-name output)))
-            (should-error (kargu-diff-read-file (buffer-name output))))
+            (should-error (kargu-test-read-file (buffer-name output))))
           (with-current-buffer output
             (setq-local buffer-file-name (expand-file-name "converted.txt" other-root)))
           (should-not (kargu-tool-output-buffer (buffer-name output))))
@@ -153,7 +153,7 @@
             (insert "first\nunsaved\nlast\n")
             (narrow-to-region 7 14)
             (goto-char 9)
-            (let ((text (kargu-diff-read-file path)))
+            (let ((text (kargu-test-read-file path)))
               (should (string-search "lines 1-3 of 3" text))
               (should (string-search "1 | first" text))
               (should (string-search "2 | unsaved" text))
@@ -175,7 +175,7 @@
             (dotimes (i 2500)
               (insert (format "Line %04d: this is a test line with padding text\n" (1+ i)))))
           ;; Request window near the end (lines 2000-2010)
-          (let ((out (kargu-diff-read-file temp 2000 2010)))
+          (let ((out (kargu-test-read-file temp 2000 2010)))
             (should (stringp out))
             (should (string-search "lines 2000-2010 of" out))
             (should (string-search "2000 | Line 2000:" out))
@@ -735,8 +735,6 @@
              :messages original))
            (stored-original (kargu-history-messages))
            (kargu--loop-run nil) (kargu--busy nil)
-           (kargu-circuit--state :closed)
-           (kargu-circuit--probe-inflight nil)
            held payload)
       (cl-letf (((symbol-function 'kargu--resolve-direct-api-key) (lambda (&rest _) "test-key"))
                 ((symbol-function 'kargu--api-base) (lambda (&rest _) "https://example.invalid"))

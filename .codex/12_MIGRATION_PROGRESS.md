@@ -1,5 +1,25 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Todo 2: read_file disk/presentation ve LSP consumer cutover
+
+`workspace/readFile` / `workspace_read_file` kapalı typed domain'i ortak owned
+ReadTools pool'una bağlandı. Regular-file fd capture config reader ile paylaşıldı;
+byte/scan/output bounds, revision recheck, strict UTF-8/BOM UTF-16, CRLF, binary
+probe ve numbered/unknown-total presentation native. Elisp yalnız bounded raw
+live snapshot/tick ve owner interop'u taşır. Gecikmiş disk sonucuna yeni unsaved
+buffer üstün gelir; değişmiş live revision ve foreign/stale owner yayınlanmaz.
+Son sync consumer read_symbol async'e geçti; eski file/diff sync API, disk reader,
+numbered formatter ve model worker yolu silindi. Edit snapshot / Dape source
+tüketicileri kendi todo 3/4 işleri için kaldı. Ayrıntı .codex/54.
+
+Final 1272/1272 source ERT, 0 unexpected, 148.064004 s (22:06:56); 305 native +
+24 compile-fail =329 locked test. Normal locked build/fmt/strict Clippy, 14 değişen
+Elisp dosyasında Werror bytecompile/checkdoc temiz. Mevcut connection/transport
+bounded TLC regresyonları temiz; file/OS formal refinement iddiası yoktur.
+Read_file alt işi [x]; todo 2 üst grubu ve diğer aileler açık. Kullanıcı07/shell.nix
+korundu; canlı Emacs reload, gerçek kullanıcı dosyası/credential mutation veya
+kurulum/uzak API/push yoktur.
+
 ## 2026-10-26 — Todo 2: native Git log/branch/stash ve ortak read ownership
 
 `d27e8b9` ile todo 2 gerçek tüketici dilimlerine ayrıldı. `git_log`,

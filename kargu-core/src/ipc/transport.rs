@@ -393,7 +393,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     }
                     continue;
                 }
-                if method == methods::FIND_FILES {
+                if matches!(method.as_str(), methods::FIND_FILES | methods::READ_FILE) {
                     if let Some(id) = id.as_ref() {
                         let admitted = host
                             .prepare_workspace_read(&method, params)
