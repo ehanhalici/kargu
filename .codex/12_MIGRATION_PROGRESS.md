@@ -1,5 +1,26 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Provider switch endpoint/query log sızıntısının kapatılması
+
+Native parser cutover'ında bulunan todo 1 güvenlik alt işi kapandı:
+`kargu-set-provider` artık tam API-base'i log/echo message'a yazmaz ve raporlama
+için endpoint'i okumaz. Provider/model/no-model seçimi, endpoint/config ve
+prefetch hedefi aynı kalır. Yeni URL redaction/parser engine eklenmedi.
+
+Sentetik query key/tenant regresyonu eski kodda endpoint okumasında kırıldı,
+düzeltmeden sonra geçti. Seçim açık/kapalı model dalında gerçek fonksiyondan
+geçer; doğru prefetch hedefi offline stub ile sayılır, gerçek upstream yoktur.
+**1257/1257 full source ERT**, 0 unexpected, **139.06 s**, **08:25:10
+Europe/Istanbul** geçti. İki değişen Elisp Werror bytecompile/checkdoc temiz,
+elc yalnız task-specific /tmp dizininde. Rust kaynağı değişmedi; önceki
+`0fc7cf6` native parser tabanındaki 274 native + 18 compile-fail/fmt/Clippy
+kanıtları yeni Rust özelliği diye sunulmaz. Ayrıntı .codex/49'da.
+
+Native file IO/publication/precedence/env/keyless/provider/model selection ve
+genel log-egress kabulü açık; bu dar düzeltme onları kapatmaz. Kullanıcı
+01/07/shell.nix ve gerçek config/credential dosyaları korunur; kurulum, uzak
+API/hesap turu, canlı Emacs reload, merge/push yoktur.
+
 ## 2026-10-26 — Native TOML/schema/legacy-import tüketici geçişi
 
 Gerçek config refresh artık `configuration/parse` portunu kullanır. Native

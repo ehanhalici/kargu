@@ -415,10 +415,10 @@ bu başlıklarla opsiyonel ilan edilemez.
 
 ## Rust geçişinde kalan adımlar — kapanış takip listesi
 
-Güncelleme: 2026-10-26, uygulama tabanı `72803ef`. Son tamamlanan dilim gerçek
-config refresh'in native TOML/schema/legacy-import portuna bağlanması ve eski
-Elisp parser'ın silinmesidir. Kanıt: 1256/1256 full source ERT, 274 native +
-18 compile-fail; bounded connection/transport TLC temiz. Ayrıntılar .codex/12/48.
+Güncelleme: 2026-10-26, native parser uygulama tabanı `0fc7cf6`. Son dilimde
+provider switch'in endpoint/query değerini log/UI'a sızdırması da kapatıldı.
+Kanıt: 1257/1257 full source ERT; native parser tabanı 274 native + 18 compile-fail,
+fmt/strict Clippy ve bounded lifecycle TLC temiz. Ayrıntılar .codex/12/48/49.
 
 Bu liste .codex/04'teki onaylı göçün kalan **tüketici taşıma/kaldırma sırasını**
 özetler; G03–G13'ün yerine geçen ikinci kapsam veya yeni ürün kararı değildir.
@@ -462,10 +462,10 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] Env/keyless/credential precedence ve provider/model seçimini native
     publication/DTO tüketicisine bağla; memory-only UI reader'a gizli RPC/IO
     ekleme, eski Elisp karar fonksiyonlarını son consumer geçince kaldır.
-  - [ ] Geçişte bulunan ek log hijyeni: `kargu-set-provider` tam API-base'i
-    log/message'a yazıyor; query içine konan credential/tenant değerini sızdırma.
-    Provider/model seçimini koruyup endpoint içeriğini log ve UI raporundan çıkar;
-    sentetik query-secret ile regresyon ekle.
+  - [x] Geçişte bulunan ek log hijyeni: `kargu-set-provider` artık tam API-base'i
+    log/message'a yazmaz, raporlama için endpoint'i okumaz. Provider/model/no-model
+    seçimi ve prefetch hedefi korunur. Sentetik endpoint/query-secret/key/tenant
+    regresyonu önce kırılıp düzeltmeden sonra geçti. Ayrıntılar .codex/49.
   - [x] Katalog URL türetme/public-auth kararı native typed endpoint portunda.
     `provider/catalogTarget` salt okunur/epoch-bound; custom/private/dedicated/
     native-models path ve missing-capability fixture'ları geçti, eski Elisp URL/

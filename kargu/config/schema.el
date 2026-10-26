@@ -76,10 +76,10 @@ the native UI's separate model-selection step."
 				  :effort nil)
       (when (fboundp 'kargu-api-prefetch-models)
 	(kargu-api-prefetch-models name))
-      (kargu-log 'info "provider set to %s (model %s, api %s)"
-		 name (or (kargu--model) "none") (kargu--api-base))
-      (message "kargu provider: %s (model %s, api %s)"
-               name (or (kargu--model) "none") (kargu--api-base))
+      (kargu-log 'info "provider set to %s (model %s)"
+		 name (or (kargu--model) "none"))
+      (message "kargu provider: %s (model %s)"
+               name (or (kargu--model) "none"))
       name)))
 
 (defun kargu--example-config-path ()

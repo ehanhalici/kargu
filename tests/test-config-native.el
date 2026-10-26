@@ -150,5 +150,30 @@
   (dolist (symbol '(kargu--read-toml-config kargu--toml-read-entries kargu--toml-read-value))
     (should-not (fboundp symbol))))
 
+(ert-deftest kargu-config-provider-switch-never-reports-private-endpoint-test ()
+  "Provider switching preserves selection without reading/reporting URL secrets."
+  (dolist (no-model '(nil t))
+    (let ((kargu-application--bound (kargu-application-create))
+          (kargu-session--context (kargu-test-session-with-history :provider "before" :model "old"))
+          messages logs prefetched)
+      (kargu-config-publish
+       (kargu-config-service-context)
+       '(:providers (("private-switch" :api "https://fixture.invalid/v1?key=synthetic-query-secret&tenant=synthetic-tenant/"
+                      :apikey "synthetic-config-key" :model "chosen-model"))) "/fixture" "private")
+      (cl-letf (((symbol-function 'kargu-api-prefetch-models) (lambda (provider) (push provider prefetched)))
+                ((symbol-function 'kargu--api-base) (lambda (&rest _) (ert-fail "Reports must not read the endpoint")))
+                ((symbol-function 'message)
+                 (lambda (format &rest args) (push (apply #'format format args) messages)))
+                ((symbol-function 'kargu-log)
+                 (lambda (_level format &rest args) (push (apply #'format format args) logs))))
+        (should (equal (kargu-set-provider "private-switch" no-model) "private-switch"))
+        (should (equal (kargu-selection-provider) "private-switch"))
+        (should (equal (kargu-selection-model) (unless no-model "chosen-model")))
+        (should (equal prefetched '("private-switch")))
+        (should (cl-some (lambda (text) (string-search "private-switch" text)) messages))
+        (should (cl-some (lambda (text) (string-search "private-switch" text)) logs))
+        (dolist (secret '("fixture.invalid" "synthetic-query-secret" "synthetic-tenant" "synthetic-config-key"))
+          (should-not (string-search secret (prin1-to-string (append messages logs)))))))))
+
 (provide 'tests/test-config-native)
 ;;; test-config-native.el ends here
