@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 
-;; Real XDG file -> bounded child -> application publication -> provider UI.
+;; Real XDG file -> bounded native read -> application publication -> provider UI.
 ;; Synthetic credentials only; provider discovery never calls an upstream API.
 
 ;;; Code:
@@ -42,7 +42,7 @@
                      (lambda (format &rest arguments)
                        (push (apply #'format format arguments) messages))))
             (should-not (kargu--config-providers))
-            ;; All file reading must happen in the child, not the editor thread.
+            ;; All config file reading happens in Rust, not the editor thread.
             (cl-letf (((symbol-function 'insert-file-contents)
                        (lambda (&rest _) (ert-fail "No synchronous UI config read"))))
               (setq request (kargu-chat-select-provider-company)))
@@ -81,7 +81,7 @@
             (previous-buffer (window-buffer (selected-window))) task opened busy)
         (kargu-selection-update :provider "before")
         (unwind-protect
-            (cl-letf (((symbol-function 'kargu-config-worker-start) #'ignore)
+            (cl-letf (((symbol-function 'kargu-bridge-config-read) #'ignore)
                       ((symbol-function 'kargu-selection-busy-p) (lambda () busy))
                       ((symbol-function 'kargu-api-select--open-provider-selector)
                        (lambda () (setq opened t))))
@@ -100,14 +100,15 @@
           (set-window-buffer (selected-window) previous-buffer))))))
 
 (ert-deftest kargu-provider-selector-newest-refresh-cancels-only-its-predecessor-test ()
-  "Repeated opens revoke the old task, not another view's config worker."
+  "Repeated opens revoke the old task, not another view's native read."
   (let ((first-view (generate-new-buffer " *kargu-first-provider-view*"))
         (other-view (generate-new-buffer " *kargu-other-provider-view*"))
         first next other (opened 0) cleaned)
     (unwind-protect
-        (cl-letf (((symbol-function 'kargu-config-worker-start)
-                   (lambda (task &rest _)
-                     (kargu-async-add-cleanup task (lambda () (push task cleaned)))))
+        (cl-letf (((symbol-function 'kargu-bridge-config-read)
+                   (lambda (_paths _generation callback &rest options)
+                     (let ((task (kargu-async-start callback :parent (plist-get options :parent) :owner nil)))
+                       (kargu-async-add-cleanup task (lambda () (push task cleaned))))))
                   ((symbol-function 'kargu-api-select--open-provider-selector)
                    (lambda () (cl-incf opened))))
           (with-current-buffer first-view
@@ -130,23 +131,39 @@
       (when (buffer-live-p first-view) (kill-buffer first-view))
       (when (buffer-live-p other-view) (kill-buffer other-view)))))
 
-(ert-deftest kargu-provider-selector-owner-close-kills-real-worker-test ()
-  "Closing or repurposing a view kills only its actual pending child."
+(ert-deftest kargu-provider-selector-owner-close-revokes-real-native-read-test ()
+  "Closing or repurposing a view revokes its real reply, not the shared core."
   (dolist (close '(kill mode))
-    (let ((view (generate-new-buffer " *kargu-provider-owner*")) task process)
-      (unwind-protect
-          (cl-letf (((symbol-function 'kargu-config--file-script) (lambda () "(sleep-for 10)"))
-                    ((symbol-function 'kargu-api-select--open-provider-selector)
-                     (lambda () (ert-fail "Closed owner cannot open a selector"))))
-            (with-current-buffer view
-              (setq task (kargu-chat-select-provider-company))
-              (setq process (get-process "kargu-config-worker"))
-              (should (process-live-p process))
-              (pcase close ('kill (kill-buffer view)) ('mode (fundamental-mode))))
-            (should (eq (kargu-async-task-state task) :cancelled))
-            (should-not (process-live-p process)))
-        (when (and task (kargu-async-pending-p task)) (kargu-async-cancel task))
-        (when (buffer-live-p view) (kill-buffer view))))))
+    (kargu-bridge-test--with-core
+      (let ((view (generate-new-buffer " *kargu-provider-owner*"))
+            (file (make-temp-file "kargu-provider-owner-")) task held
+            (read (symbol-function 'kargu-bridge-config-read))
+            (call (symbol-function 'kargu-bridge-call)))
+        (unwind-protect
+            (cl-letf (((symbol-function 'kargu-bridge-config-read)
+                       (lambda (_paths generation callback &rest options)
+                         (apply read (list file) generation callback options)))
+                      ((symbol-function 'kargu-bridge-call)
+                       (lambda (connection method params callback &rest options)
+                         (apply call connection method params
+                                (if (equal method "configuration/read")
+                                    (lambda (value failure) (setq held (lambda () (funcall callback value failure))))
+                                  callback) options)))
+                      ((symbol-function 'kargu-api-select--open-provider-selector)
+                       (lambda () (ert-fail "Closed owner cannot open a selector"))))
+              (with-current-buffer view
+                (setq-local kargu-application-owner (kargu-application-create))
+                (setq task (kargu-chat-select-provider-company)))
+              (kargu-bridge-test--wait (lambda () held))
+              (with-current-buffer view
+                (pcase close ('kill (kill-buffer view)) ('mode (fundamental-mode))))
+              (should (eq (kargu-async-task-state task) :cancelled))
+              (should-not (kargu-async-task-children task))
+              (funcall held)
+              (should (equal (gethash "status" (car (kargu-bridge-test--call conn "ping" (kargu-bridge--object)))) "ok")))
+          (when (and task (kargu-async-pending-p task)) (kargu-async-cancel task))
+          (when (buffer-live-p view) (kill-buffer view))
+          (delete-file file))))))
 
 (provide 'tests/test-provider-selection)
 ;;; test-provider-selection.el ends here

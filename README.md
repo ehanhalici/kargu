@@ -170,14 +170,21 @@ Unknown keys/tables, duplicate definitions, wrong types and unsupported TOML
 constructs are rejected with a file/line error. A malformed reload is not
 partially applied and must be corrected before requests can use that config.
 
-TOML parsing, schema validation and legacy import run in Rust through the bounded
-`configuration/parse` port (`configuration_parse` capability). The old Elisp
-parser was removed. Sources are limited to 64 KiB of UTF-8, with at most 512
+File candidate selection, reading, TOML parsing, schema validation and legacy
+import run in Rust through the bounded `configuration/read` port
+(`configuration_read` capability). The old Elisp file reader and parser were
+removed. Sources are limited to 64 KiB of UTF-8, with at most 512
 provider tables and 4096 models per provider. Existing `[provider.NAME]` legacy
 headers remain supported alongside a top-level provider choice. An older core
-must be rebuilt/restarted; there is no editor parser fallback. File candidate
-selection and reading still use a cancellable editor worker; environment/key
-precedence and the final native configuration authority remain migration work.
+must be rebuilt/restarted; there is no editor file-reader/parser fallback.
+An explicit refresh starts the core even to establish that all candidates are
+absent; passive UI getters remain memory-only. Missing core/read capability or an
+unreadable first existing candidate fails without clearing the last good config.
+Only explicitly supplied local regular files are read; symlink targets are pinned
+and file identity/revision changes reject the result. Filesystem cancellation is
+cooperative between OS calls, not a hard interruption of a stalled filesystem.
+Environment/key precedence and the final native configuration publication
+authority remain migration work.
 
 Run `M-x kargu-edit-config` to generate or edit your configuration.
 

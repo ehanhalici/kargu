@@ -3,25 +3,81 @@
 use super::protocol::{Fault, RpcId};
 use crate::{
     application::host::{Host, ReadScope},
+    configuration::read::{ReadInput, ReadOutput},
     constants::{limits, protocol, timeouts},
+    domain::RequestScope,
     error::CoreError,
     workspace::{ReadResult, WorkspaceRead},
 };
 use serde_json::Value;
-use std::{collections::HashMap, time::Instant};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use tokio::task::JoinSet;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 struct PendingRead {
-    scope: ReadScope,
+    scope: ReadOwner,
     cancel: CancellationToken,
     deadline: Instant,
     terminal: Option<CoreError>,
 }
 
+enum ReadOwner {
+    Session(ReadScope),
+    Connection(RequestScope),
+}
+impl ReadOwner {
+    fn is_live(&self, host: &Host) -> bool {
+        match self {
+            Self::Session(scope) => host.owns_read_scope(scope),
+            Self::Connection(scope) => host.owns_connection_read(scope),
+        }
+    }
+}
+enum ReadOperation {
+    Workspace(WorkspaceRead),
+    Configuration(ReadInput),
+}
+enum ReadCompletion {
+    Workspace(ReadResult),
+    Configuration(ReadOutput),
+}
+impl ReadOperation {
+    fn timeout(&self) -> Duration {
+        match self {
+            Self::Workspace(_) => timeouts::WORKSPACE_READ,
+            Self::Configuration(input) => input.timeout(),
+        }
+    }
+    fn execute(
+        self,
+        cancel: &CancellationToken,
+        deadline: Instant,
+    ) -> Result<ReadCompletion, CoreError> {
+        match self {
+            Self::Workspace(input) => input
+                .execute(cancel, deadline)
+                .map(ReadCompletion::Workspace),
+            Self::Configuration(input) => input
+                .execute(cancel, deadline)
+                .map(ReadCompletion::Configuration),
+        }
+    }
+}
+impl ReadCompletion {
+    fn into_value(self) -> Result<Value, CoreError> {
+        match self {
+            Self::Workspace(value) => serde_json::to_value(value).map_err(|_| CoreError::Limit),
+            Self::Configuration(value) => Ok(value.into_editor_value()),
+        }
+    }
+}
+
 pub(super) struct ReadTools {
     requests: HashMap<RpcId, PendingRead>,
-    workers: JoinSet<(RpcId, Result<ReadResult, CoreError>)>,
+    workers: JoinSet<(RpcId, Result<ReadCompletion, CoreError>)>,
     root: CancellationToken,
     _cancel_on_drop: DropGuard,
 }
@@ -42,7 +98,7 @@ impl ReadTools {
     pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
         self.requests
             .values()
-            .any(|pending| &pending.scope.application_id == id)
+            .any(|pending| matches!(&pending.scope, ReadOwner::Session(scope) if &scope.application_id == id))
     }
     pub fn contains(&self, id: &RpcId) -> bool {
         self.requests.contains_key(id)
@@ -57,6 +113,32 @@ impl ReadTools {
         scope: ReadScope,
         input: WorkspaceRead,
     ) -> Result<(), Fault> {
+        self.start_owned(
+            id,
+            ReadOwner::Session(scope),
+            ReadOperation::Workspace(input),
+        )
+    }
+
+    pub fn start_configuration(
+        &mut self,
+        id: RpcId,
+        scope: RequestScope,
+        input: ReadInput,
+    ) -> Result<(), Fault> {
+        self.start_owned(
+            id,
+            ReadOwner::Connection(scope),
+            ReadOperation::Configuration(input),
+        )
+    }
+
+    fn start_owned(
+        &mut self,
+        id: RpcId,
+        scope: ReadOwner,
+        input: ReadOperation,
+    ) -> Result<(), Fault> {
         if self.root.is_cancelled() {
             return Err(fault(CoreError::Cancelled));
         }
@@ -65,7 +147,7 @@ impl ReadTools {
         }
         let cancel = self.root.child_token();
         let deadline = Instant::now()
-            .checked_add(timeouts::WORKSPACE_READ)
+            .checked_add(input.timeout())
             .ok_or_else(|| fault(CoreError::ArithmeticOverflow))?;
         self.requests.insert(
             id.clone(),
@@ -93,7 +175,7 @@ impl ReadTools {
     pub fn sweep(&mut self, host: &Host) {
         for request in self.requests.values_mut() {
             if request.terminal.is_none() {
-                if !host.owns_read_scope(&request.scope) {
+                if !request.scope.is_live(host) {
                     request.terminal = Some(CoreError::StaleOwner);
                 } else if Instant::now() >= request.deadline {
                     request.terminal = Some(CoreError::Deadline);
@@ -123,7 +205,7 @@ impl ReadTools {
         };
         let result = if let Some(error) = request.terminal {
             Err(error)
-        } else if !host.owns_read_scope(&request.scope) {
+        } else if !request.scope.is_live(host) {
             Err(CoreError::StaleOwner)
         } else if Instant::now() >= request.deadline {
             Err(CoreError::Deadline)
@@ -131,7 +213,7 @@ impl ReadTools {
             result
         };
         Some(Ok(match result {
-            Ok(result) => match serde_json::to_value(result) {
+            Ok(result) => match result.into_value() {
                 Ok(value) => super::protocol::success(&id, value),
                 Err(_) => fault(CoreError::Limit).response(Some(&id)),
             },
@@ -145,30 +227,35 @@ fn fault(error: CoreError) -> Fault {
     let (code, message, status) = match error {
         CoreError::InvalidValue { .. } => (
             codes::INVALID_PARAMS,
-            "Invalid search arguments",
+            "Invalid read arguments",
             "invalid_params",
         ),
         CoreError::Rejected => (
             codes::REJECTED,
-            "Search path is outside the workspace or unsupported",
+            "Read path is outside its grant or unsupported",
             "rejected",
         ),
         CoreError::StaleOwner => (
             codes::STALE_OWNER,
-            "Search owner is no longer live",
+            "Read owner is no longer live",
             "stale_owner",
         ),
-        CoreError::Cancelled => (codes::CANCELLED, "Search cancelled", "cancelled"),
-        CoreError::Deadline => (codes::TIMEOUT, "Search deadline exceeded", "timeout"),
+        CoreError::Cancelled => (codes::CANCELLED, "Read cancelled", "cancelled"),
+        CoreError::Deadline => (codes::TIMEOUT, "Read deadline exceeded", "timeout"),
         CoreError::WorkspaceChanged => (
             codes::WORKSPACE_CHANGED,
-            "Search workspace changed",
+            "Read workspace changed",
             "workspace_changed",
         ),
-        CoreError::Io(_) => (codes::IO, "Search filesystem operation failed", "io_error"),
+        CoreError::ConfigurationChanged => (
+            codes::WORKSPACE_CHANGED,
+            "Configuration file changed",
+            "configuration_changed",
+        ),
+        CoreError::Io(_) => (codes::IO, "Read filesystem operation failed", "io_error"),
         _ => (
             codes::RESOURCE_LIMIT,
-            "Search resource limit reached",
+            "Read resource limit reached",
             "resource_limit",
         ),
     };
@@ -219,6 +306,55 @@ mod tests {
             max_files: 2000,
             max_directories: 2000,
         })
+    }
+
+    #[tokio::test]
+    async fn configuration_shares_capacity_and_revokes_late_results_before_publication()
+    -> TestResult {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("config");
+        std::fs::write(&path, "provider='private'")?;
+        for ending in ["cancelled", "timeout", "stale_owner"] {
+            let (mut host, workspace_scope) = owner()?;
+            let scope = host.request_scope()?;
+            let mut tools = ReadTools::default();
+            for n in 0..limits::READ_WORKERS {
+                let input = serde_json::from_value(
+                    json!({"paths":[path], "generation":1, "timeout_ms":5000}),
+                )?;
+                tools
+                    .start_configuration(RpcId::String(n.to_string()), scope.clone(), input)
+                    .map_err(|_| "start failed")?;
+            }
+            assert!(!tools.owns_application(&workspace_scope.application_id));
+            assert!(
+                tools
+                    .start(RpcId::Integer(9), workspace_scope, arguments(root.path()))
+                    .is_err()
+            );
+            for pending in tools.requests.values_mut() {
+                match ending {
+                    "cancelled" => {
+                        pending.terminal = Some(CoreError::Cancelled);
+                        pending.cancel.cancel();
+                    }
+                    "timeout" => pending.deadline = Instant::now(),
+                    _ => {}
+                }
+            }
+            if ending == "stale_owner" {
+                host.dispatch("shutdown", json!({}), true)
+                    .result
+                    .map_err(|_| "shutdown failed")?;
+            }
+            tools.sweep(&host);
+            assert_eq!(tools.requests.len(), limits::READ_WORKERS);
+            while let Some(reply) = tools.next(&host).await {
+                assert_eq!(reply?["error"]["data"]["status"], ending);
+            }
+            assert!(tools.is_empty());
+        }
+        Ok(())
     }
 
     #[tokio::test]

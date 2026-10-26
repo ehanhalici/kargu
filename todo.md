@@ -444,7 +444,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Rapor sonrası, stale sonuçta ve callback hatasında scope/key kopyası temizlenir.
   - [x] Geçişte bulunan ek güvenlik işi: placeholder uyarısı anahtarın kendisini
     loglamasın. `secret-prefix...` sentetik regresyonu UI ve log sınırını denetler.
-  - [ ] Native config authority/file IO/precedence/env/keyless/selection kalan
+  - [ ] Native config authority/precedence/env/keyless/selection kalan
     consumer cutover'ı. Parser/schema dilimi aşağıda kapandı; salt editor
     credential interop portuna inmek için seçim ve publication motoru hâlâ açık.
   - [x] Gerçek config refresh tüketicisini `configuration/parse` native portuna
@@ -452,13 +452,15 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     `config/toml.el` silindi. Bounded source, safe line errors, legacy scalar
     provider + singular table uyumu, provider sırası, cold startup, parent cancel,
     deadline, stale generation, iki application ve lost lease testli. .codex/48.
-  - [ ] Candidate-path seçimi ve bounded regular-file capture'ını native owned
-    IO portuna taşı; editor file worker ancak son tüketicisi geçince silinsin.
-    Path authority, last-open/TOCTOU, gerçek cancel/deadline ve tek config
-    publication writer/revision korunmalı; parser generation echo'su authority
-    sayılmasın. Mevcut dosya için shared bridge bootstrap'ı ile uygulama lease'i
-    ayrıdır; native IO cutover'ının cold/absent-file/missing-core davranışı
-    ayrıca kabul testine bağlansın.
+  - [x] Candidate-path seçimi ve bounded regular-file capture gerçek config
+    refresh tüketicisiyle `configuration/read` native owned IO portuna geçti.
+    Eski editor file script/decoder/source handoff/parse bridge silindi; credential
+    interop worker kaldı. Dört ortak read slotu actual join'e kadar tutulur;
+    epoch/cancel/deadline/late reply, fd-rooted regular inode/revision, symlink,
+    özel dosya ve malformed-first-no-fallback testli. Cold absent explicit refresh
+    artık core başlatır; missing core/capability fail-closed, passive UI memory-only.
+    Editor tek publication writer'ıdır; generation echo native authority değildir.
+    OS syscall iptali cooperative'dir, hard filesystem kill garantisi yok. .codex/51.
   - [ ] Env/keyless/credential precedence ve provider/model seçimini native
     publication/DTO tüketicisine bağla; memory-only UI reader'a gizli RPC/IO
     ekleme, eski Elisp karar fonksiyonlarını son consumer geçince kaldır.

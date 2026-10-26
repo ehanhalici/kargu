@@ -45,6 +45,9 @@ pub enum CoreError {
     /// Captured filesystem identity no longer matches.
     #[error("workspace changed")]
     WorkspaceChanged,
+    /// Captured configuration file identity or content revision no longer matches.
+    #[error("configuration file changed")]
+    ConfigurationChanged,
     /// Tool invocation budget, expressed in tool steps rather than tokens.
     #[error("tool-call budget exhausted")]
     BudgetExceeded {

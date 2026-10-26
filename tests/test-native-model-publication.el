@@ -63,7 +63,7 @@
       (cl-letf (((symbol-function 'kargu-bridge-ensure)
                  (lambda (callback)
                    (should (kargu-bridge-models-capture kargu-application--bound))
-                   (setq held callback) #'ignore)))
+                   (push callback held) #'ignore)))
         (setq ticket (kargu-bridge-models-publish kargu-application--bound "g02" source [] #'ignore))
         (aset source 0 ?x)
         (should (eq ticket (kargu-bridge-models-capture kargu-application--bound)))
@@ -73,7 +73,10 @@
                      "{\"operation\":\"put\",\"model\":\"m\",\"metadata\":{\"context_length\":200}}" [] #'ignore)))
       (accept-process-output nil 0.03)
       (should-not result)
-      (funcall original (lambda (connection failure) (funcall held connection failure)))
+      ;; Native config IO and metadata both own a shared-startup waiter.
+      ;; A single callback cell would discard metadata's first intent waiter.
+      (should (= (length held) 2))
+      (dolist (waiter (nreverse held)) (funcall original waiter))
       (kargu-bridge-test--wait (lambda () result))
       (kargu-bridge-test--wait (lambda () (eq (kargu-bridge-model-ticket-status second) :committed)))
       (should (kargu-ok-p result))

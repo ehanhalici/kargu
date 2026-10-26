@@ -1,4 +1,4 @@
-//! Readonly native configuration parsing; IO and publication remain owner ports.
+//! Readonly native configuration parsing and IO; publication remains an owner port.
 //!
 //! Raw source never gains a generic serialization or diagnostic surface.
 //! ```compile_fail
@@ -16,6 +16,7 @@
 
 mod document;
 mod domain;
+pub mod read;
 pub use domain::{
     ConfigurationError, ConfigurationSource, MAX_SOURCE_BYTES, RefreshGeneration, SourceLine,
 };

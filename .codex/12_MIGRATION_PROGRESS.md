@@ -1,5 +1,49 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Gerçek config dosya okumasının native tüketici geçişi
+
+Candidate selection, bounded regular-file capture ve parser/digest aynı
+`configuration/read` işinde Rust'a geçti. Modüler `configuration/read` domain/
+file/entry katmanları mevcut parser'ı ve dört slotlu read worker havuzunu kullanır.
+Connection epoch-bound typed completion actor'den yayınlanır; editor config
+service tek publication/revision writer'ı olarak kalır. Native config actor/
+authority ve env/keyless/credential precedence/provider/model seçim politikaları
+todo 1'de açık. Yeni framework/subprocess veya ikinci parser yoktur.
+
+Root-anchored no-follow fd walk + pinned regular inode/read descriptor, bounded
+UTF-8, before/after file revision, late owner/cancel/deadline ve gerçek join'de
+slot release kontrolleri eklendi. Linux/procfs bağımlılığı açıktır. Dosya IO
+cooperative'dir; kernel-blocked syscall hard interruption garantisi verilmez.
+Ham source artık editor child/argv/IPC'ye taşınmaz; Zeroizing source/chunk ve
+generic Debug/Serialize'sız private editor handoff korunur. Parsed config key'leri
+mevcut private editor projection'a girer; fiziksel erasure iddiası yoktur.
+
+Gerçek refresh native porta bağlandıktan sonra Elisp file script/decoder/loaded
+handoff/parse bridge ve file-only stdout override silindi. Credential interop
+worker son tüketicileri nedeniyle kaldı. Cold absent explicit refresh core
+başlatır; passive UI getter sıfır IO/RPC'dir. Missing core/capability veya ilk
+mevcut invalid/unreadable dosya last-good publication'ı temizlemez. Ayrıntı .codex/51.
+
+Gerçek provider picker testi `~/.emacs.d` fallback spelling'ini yakaladı:
+path editor capture sınırında genişletildi, native absolute-path kuralı esnetilmedi.
+İlk full ERT'de tek callback tutan metadata startup test double'ı kırıldı; iki
+gerçek startup waiter'ını koruyacak şekilde uyarlandı. Exact captured metadata
+revision assertion'ları ve üretim hazırlık yolu aynı kaldı.
+
+Final **1261/1261 full source ERT**, 0 unexpected, **137.224415 s**, **09:50:38
+Europe/Istanbul** geçti (`/tmp/kargu-config-read-verified-source-ert.log`).
+**280 native + 20 compile-fail = 300** test, locked build/fmt ve strict Clippy
+temiz (`/tmp/kargu-config-read-native-verified.log`, `...-clippy-verified.log`).
+Değişen dokuz Elisp üretim/test dosyasında Werror bytecompile/checkdoc temiz;
+elc yalnız task-specific /tmp dizinlerine çıktı. Connection TLC **602836 generated
+/ 101708 distinct**, queue 0, depth 22 (**09:42:10**); transport **1810 / 693**,
+queue 0, depth 13 (**09:42:11**) temiz. Mevcut bounded lifecycle modelleridir;
+concrete filesystem refinement veya tüm 01 uyumluluk ispatı sayılmaz.
+
+Todo 1'de native file IO alt işi `[x]`, kısmi üst grup açık. Kullanıcının
+07/shell.nix değişiklikleri korunur; canlı Emacs reload, hesap/ücretli upstream,
+kurulum, credential migration, merge/push yoktur.
+
 ## 2026-10-26 — Config refresh admission/generation ve sabit deadline
 
 Native parser concurrency incelemesinde bulunan race kapandı: kapalı parent

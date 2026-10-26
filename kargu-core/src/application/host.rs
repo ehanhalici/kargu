@@ -122,6 +122,13 @@ struct ConfigurationParseRequest {
     arguments: crate::configuration::ParseInput,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfigurationReadRequest {
+    connection_epoch: String,
+    arguments: crate::configuration::read::ReadInput,
+}
+
 impl Default for Host {
     fn default() -> Self {
         Self::new()
@@ -234,6 +241,25 @@ impl Host {
 
     pub(crate) fn matches_epoch(&self, scope: &RequestScope) -> bool {
         scope.as_str() == self.epoch
+    }
+    pub(crate) fn owns_connection_read(&self, scope: &RequestScope) -> bool {
+        self.phase == Phase::Ready && self.matches_epoch(scope)
+    }
+    pub(crate) fn prepare_configuration_read(
+        &self,
+        params: Value,
+    ) -> Result<(RequestScope, crate::configuration::read::ReadInput), Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let request: ConfigurationReadRequest =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        let scope =
+            RequestScope::try_from(request.connection_epoch).map_err(|_| Fault::params())?;
+        if !self.owns_connection_read(&scope) {
+            return Err(owner_fault());
+        }
+        Ok((scope, request.arguments))
     }
     pub(crate) fn request_scope(&self) -> Result<RequestScope, crate::error::CoreError> {
         RequestScope::try_from(self.epoch.clone())

@@ -13,8 +13,10 @@
 (require 'cl-lib)
 (require 'kargu/application/coordinator)
 (require 'kargu/async)
-(require 'kargu/config/worker)
 (require 'kargu/bridge/config)
+
+(defconst kargu-config-refresh-default-timeout 5.0
+  "Maximum editor deadline for native file capture and configuration parsing.")
 
 (cl-defstruct (kargu-config-snapshot (:constructor kargu-config--snapshot))
   "One validated configuration publication, without filesystem readers."
@@ -90,39 +92,6 @@
         ("blocking" (setq kargu-diff-review-mode 'blocking))))
     (kargu-config-service-snapshot service)))
 
-(defun kargu-config--file-script ()
-  "Return the fixed child entry point for bounded configuration reading."
-  (prin1-to-string
-   '(progn
-      (require 'json)
-      (require 'seq)
-      (when (equal (car command-line-args-left) "--") (pop command-line-args-left))
-      (let* ((paths (json-parse-string (pop command-line-args-left) :array-type 'list))
-             (path (or (seq-find #'file-exists-p paths) (car paths))))
-        (condition-case nil
-            (let* ((exists (file-exists-p path))
-                   (text (and exists (with-temp-buffer
-                                       (unless (file-regular-p path) (error "Not a regular file"))
-                                       (insert-file-contents path nil 0 65537)
-                                       (buffer-string)))))
-              (princ (json-serialize (list :path path :source text))))
-          (error (princ "{\"error\":\"config-unavailable\"}")))))))
-
-(defun kargu-config--decode-file (process buffer)
-  "Decode PROCESS's bounded captured file text from BUFFER, without parsing TOML."
-  (condition-case nil
-      (let* ((result (and (= 0 (process-exit-status process))
-                          (with-current-buffer buffer
-                            (json-parse-string (buffer-string) :object-type 'plist
-                                               :array-type 'list :null-object nil))))
-             (source (plist-get result :source)))
-        (unless (and (stringp (plist-get result :path)) (not (plist-get result :error)))
-          (error "Invalid configuration response"))
-        (unless (or (null source) (stringp source)) (error "Invalid configuration source"))
-        (kargu-ok (list :source source :path (plist-get result :path))))
-    (error (kargu-err "Configuration is unreadable or invalid; check the TOML file"
-                       :config-unavailable))))
-
 (defun kargu-config--editor-data (value)
   "Translate native VALUE into the existing read-only plist/alist UI projection."
   (let (data)
@@ -151,9 +120,12 @@
   "Complete TASK with native VALUE for PATH/GENERATION or sanitized FAILURE."
   (condition-case nil
       (cond
-       (failure (kargu-async-finish task (kargu-err "Native config parser unavailable; check/rebuild kargu-core" :config-unavailable)))
-       ((not (and (hash-table-p value) (equal generation (gethash "generation" value))))
+       (failure (kargu-async-finish task (kargu-err "Native config read failed; check TOML and rebuild kargu-core if outdated" :config-unavailable)))
+       ((not (and (hash-table-p value) (equal generation (gethash "generation" value))
+                  (stringp path) (equal path (gethash "path" value))))
         (error "Invalid config generation"))
+       ((equal (gethash "status" value) "absent")
+        (kargu-async-finish task (kargu-ok (list :data nil :path path :digest nil))))
        ((equal (gethash "status" value) "invalid")
         (let ((line (gethash "line" value)))
           (unless (and (integerp line) (> line 0)) (error "Invalid source line"))
@@ -166,26 +138,11 @@
        (t (error "Invalid config result")))
     (error (kargu-async-finish task (kargu-err "Invalid or oversized native configuration result" :config-unavailable)))))
 
-(defun kargu-config--loaded (task application generation value)
-  "Parse captured file VALUE for TASK/APPLICATION/GENERATION before publication."
-  (let* ((data (and (kargu-ok-p value) (kargu-result-value value)))
-         (source (plist-get data :source)) (path (plist-get data :path)))
-    (unwind-protect
-        (cond
-         ((kargu-err-p value) (kargu-async-finish task value))
-         ((/= generation (kargu-config-service-generation (kargu-config-service-context)))
-          (kargu-async-finish task (kargu-err "Configuration refresh was superseded" :stale)))
-         ((null source) (kargu-async-finish task (kargu-ok (list :data nil :path path :digest nil))))
-         (t (kargu-bridge-config-parse
-             source generation
-             (kargu-async-wrap task (lambda (result failure) (kargu-config--parsed task path generation result failure)))
-             :parent task :application application)))
-      (when (stringp source) (clear-string source)))))
-
 (cl-defun kargu-config-refresh-async (callback &key paths timeout parent owner)
   "Refresh configuration into CALLBACK without UI file I/O.
 PATHS overrides candidate names; TIMEOUT, PARENT and OWNER bound the task.
-Positive TIMEOUT may shorten the fixed worker deadline, never disable/extend it."
+Positive TIMEOUT may shorten the fixed refresh deadline.
+It cannot disable or extend that deadline."
   (let* ((service (kargu-config-service-context))
          (generation nil)
          (app (kargu-application-context))
@@ -204,8 +161,8 @@ Positive TIMEOUT may shorten the fixed worker deadline, never disable/extend it.
                            (funcall callback (kargu-ok (kargu-config-current-snapshot))))))))
                 :owner owner :parent parent
                 :timeout (if (and (numberp timeout) (> timeout 0))
-                             (min timeout kargu-config-worker-default-timeout)
-                           kargu-config-worker-default-timeout))))
+                             (min timeout kargu-config-refresh-default-timeout)
+                           kargu-config-refresh-default-timeout))))
     (cond
      ((not (kargu-async-pending-p task)) (kargu-async-cancel task))
      ((<= (kargu-async-task-deadline task) (float-time))
@@ -213,18 +170,12 @@ Positive TIMEOUT may shorten the fixed worker deadline, never disable/extend it.
      (t
       (setq generation (1+ (kargu-config-service-generation service)))
       (setf (kargu-config-service-generation service) generation)
-      (let ((reader (kargu-async-start
-                     (kargu-application-wrap
-                      app (kargu-async-wrap task (lambda (value error-data)
-                                                  (kargu-config--loaded task app generation
-                                                                        (or value (kargu-err error-data :config-unavailable))))))
-                     :parent task :owner nil)))
-        (kargu-config-worker-start
-         reader (kargu-config--file-script)
-         (list (json-serialize (vconcat (or paths (list (kargu--xdg-config-file)
-                                                       (locate-user-emacs-file "kargu.toml"))))))
-         :max-bytes (+ (* 6 kargu-bridge-config-max-source-bytes) 8192)
-         :decode #'kargu-config--decode-file :name "config"))))
+      (kargu-bridge-config-read
+       (or paths (list (kargu--xdg-config-file) (locate-user-emacs-file "kargu.toml"))) generation
+       (kargu-async-wrap task (lambda (value failure)
+                                (kargu-config--parsed task (and (hash-table-p value) (gethash "path" value))
+                                                      generation value failure)))
+       :parent task :application app)))
     task))
 
 (declare-function kargu--xdg-config-file "kargu/config/schema" ())

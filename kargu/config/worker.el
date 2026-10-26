@@ -96,24 +96,22 @@
           (kargu-err "Credential worker returned no usable credential" :auth-unavailable)))
     (error (kargu-err "Invalid credential worker response" :auth-unavailable))))
 
-(defun kargu-config-worker--filter (task buffer maximum)
-  "Build a byte-bounded output filter for TASK and BUFFER with MAXIMUM bytes."
+(defun kargu-config-worker--filter (task buffer)
+  "Build a byte-bounded credential output filter for TASK and BUFFER."
   (let ((received 0))
     (lambda (_process chunk)
       (when (and (kargu-async-pending-p task) (buffer-live-p buffer))
         (cl-incf received (string-bytes chunk))
-        (if (> received maximum)
+        (if (> received kargu-config-worker-max-bytes)
             (kargu-async-finish
              task (kargu-err "Credential worker output exceeded its bound" :auth-unavailable))
           (with-current-buffer buffer
             (goto-char (point-max))
             (insert chunk)))))))
 
-(cl-defun kargu-config-worker-start (task script args &key decode (name "credential")
-                                        (max-bytes kargu-config-worker-max-bytes))
+(cl-defun kargu-config-worker-start (task script args &key decode (name "credential"))
   "Start TASK's bounded child running fixed SCRIPT with ARGS.
-DECODE reads a finished child response; NAME identifies the operation.
-MAX-BYTES bounds stdout independently of the credential worker default."
+DECODE reads a finished child response; NAME identifies the operation."
   (let ((buffer (generate-new-buffer " *kargu-credential-worker*")) process)
     (with-current-buffer buffer (buffer-disable-undo))
     (kargu-async-add-cleanup
@@ -129,7 +127,7 @@ MAX-BYTES bounds stdout independently of the credential worker default."
                    :command (append (list (expand-file-name invocation-name invocation-directory)
                                           "-Q" "--batch" "--eval" script "--") args)
                    :connection-type 'pipe :coding 'utf-8-unix :noquery t
-                   :filter (kargu-config-worker--filter task buffer max-bytes)
+                   :filter (kargu-config-worker--filter task buffer)
                    :sentinel (lambda (child _event)
                                (unless (process-live-p child)
                                  (kargu-async-finish

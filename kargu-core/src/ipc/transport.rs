@@ -376,6 +376,19 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     }
                     continue;
                 }
+                if method == methods::CONFIGURATION_READ {
+                    if let Some(id) = id.as_ref() {
+                        let admitted =
+                            host.prepare_configuration_read(params)
+                                .and_then(|(scope, input)| {
+                                    reads.start_configuration(id.clone(), scope, input)
+                                });
+                        if let Err(fault) = admitted {
+                            queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
+                    }
+                    continue;
+                }
                 if method == methods::FIND_FILES {
                     if let Some(id) = id.as_ref() {
                         let admitted = host

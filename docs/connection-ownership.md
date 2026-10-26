@@ -1,9 +1,9 @@
 # Connection and metadata ownership
 
 Native admission claims the application before asynchronous configuration and
-credential preparation. Configuration file selection, stat, auth-source and
-callable secrets run in cancellable child workers. TOML/schema/legacy import
-uses a bounded, readonly native parser port after file capture. Readers consume the
+credential preparation. Configuration file selection, stat, capture and
+TOML/schema/legacy import run in the bounded native read pool. Auth-source and
+callable secrets remain cancellable editor interop workers. Readers consume the
 validated in-memory configuration publication. Stop and the preparation deadline
 cancel children; failures before admission preserve existing history, edits and
 the unsent draft. A changed session, selection, endpoint or config revision
@@ -18,17 +18,47 @@ The old Elisp TOML engine was deleted. Header normalization preserves the legacy
 top-level `provider` plus `[provider.NAME]` combination before standard TOML
 parsing; it does not rewrite values or line boundaries.
 
-The current editor service still owns candidate-path selection, bounded file
-capture and latest-generation publication. One root deadline covers file child,
-core startup and native parsing. Cancel/supersession/owner loss cannot publish a
-late reply; known native leases are rechecked at delivery. A missing file needs
-no core startup, while a missing parser capability fails without a fallback or
-partial publication. Captured parser source is private and wiped on task cleanup;
-this is not physical erasure of IPC/JSON copies. File IO, native config ownership
-and environment/keyless/selection precedence remain explicit open cutovers.
+The actual editor refresh now uses `configuration/read` (`configuration_read`
+capability): it captures at most eight explicit local absolute candidate names
+before startup yields, expanding editor `~` paths without filesystem IO. Rust
+selects the first existing candidate and reads/parses it in one blocking worker,
+outside the actor loop. A malformed/unreadable/oversized/non-regular first existing
+candidate never falls through to another file. Missing candidates return `absent`
+with the first path; the editor publishes the empty projection. An explicit
+refresh therefore starts the shared core even for absence. Missing core or read
+capability fails closed; passive getters still never start a core or perform IO.
+The old editor file script, decoder, source handoff and parser bridge were deleted;
+the native pure parser remains a shared implementation, not a second parser.
+
+Candidate names are narrow editor configuration read grants, not workspace/model
+tool paths. Rust rejects relative/traversing/control-bearing/oversized paths.
+Canonical targets support legitimate symlinks. A root-anchored `openat` walk uses
+no-follow directory descriptors and an `O_PATH` final descriptor: devices, FIFOs
+and directories are rejected without opening them for data IO. Linux
+`/proc/self/fd` reopens only that pinned regular inode. Device/inode, size, mode,
+mtime/ctime and current path are checked before/after bounded UTF-8 capture.
+This depends on the existing Linux/procfs platform, not portable path-only APIs.
+It detects observed identity/revision changes; it is not a filesystem transaction
+against a privileged adversary or a hard realtime network-filesystem deadline.
+
+Connection epoch owns native readonly IO, not an editor application lease or a
+native config actor. Config and workspace reads share four slots. Cancel/expiry/
+shutdown suppress late success; a slot remains occupied until its blocking worker
+actually joins. Shutdown/EOF drain actual completions; cancellation is cooperative
+between OS calls and cannot interrupt a kernel-blocked filesystem syscall.
+No config child process or new subprocess lifecycle was introduced.
+
+The editor service remains the sole latest-generation publication writer. One root
+deadline covers core startup, native capture and parsing. Cancel/supersession/owner
+loss cannot publish a late reply; known native leases, generation, selected path
+and absolute deadline are rechecked at delivery. Raw file source no longer crosses
+the editor IPC port; native buffers use Zeroizing wrappers. Parsed credentials
+still deliberately enter the private editor config projection. This is not
+physical erasure of IPC/JSON/GC copies. Native config publication ownership and
+environment/keyless/selection precedence remain explicit open cutovers.
 Only an admitted live refresh advances the editor generation: closed/inactive
 parents or elapsed deadlines cannot invalidate another in-flight publication.
-The root checks elapsed time before starting its file worker, without waiting
+The root checks elapsed time before starting its native read, without waiting
 for a timer callback. Its fixed five-second bound cannot be disabled or extended
 by the optional timeout; positive shorter values and earlier parent deadlines win.
 

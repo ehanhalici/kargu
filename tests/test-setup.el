@@ -207,8 +207,8 @@
     (should-not (string-search "synthetic-sensitive-prefix" (prin1-to-string (append logs messages))))
     (should-not (kargu-connection-snapshot-secret snapshot))))
 
-(ert-deftest kargu-setup-real-config-worker-reports-and-cleans-without-native-request-test ()
-  "The public setup command uses a real config child but no model/metadata request."
+(ert-deftest kargu-setup-real-config-read-reports-and-cleans-without-api-request-test ()
+  "The public setup command uses native config IO but no model/metadata request."
   (kargu-test-with-real-connection
    (let ((kargu-bridge--connection nil) messages snapshot
          (resolve (symbol-function 'kargu-connection-resolve-async))
@@ -227,7 +227,7 @@
                       (when (member method '("application/create" "session/create"))
 			(should (eq (kargu-bridge-status connection) 'binding))
 			(when (equal method "application/create") (cl-incf bootstraps)))
-                      (when (equal method "configuration/parse") (cl-incf parses))
+                      (when (equal method "configuration/read") (cl-incf parses))
                       (apply call connection method options)))
                    ((symbol-function 'kargu-connection-resolve-async)
                     (lambda (provider model &rest options)
