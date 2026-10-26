@@ -14,11 +14,7 @@
 (require 'kargu/application/coordinator)
 (require 'kargu/async)
 (require 'kargu/config/worker)
-(require 'kargu/config/toml)
-
-(defconst kargu-config--parser-file
-  (expand-file-name "toml.el" (file-name-directory (or load-file-name buffer-file-name)))
-  "Parser library loaded by the isolated configuration worker.")
+(require 'kargu/bridge/config)
 
 (cl-defstruct (kargu-config-snapshot (:constructor kargu-config--snapshot))
   "One validated configuration publication, without filesystem readers."
@@ -87,7 +83,11 @@
             (kargu-config-snapshot-create
              :data data :path path :digest digest
              :revision (kargu-config-service-revision service))))
-    (kargu--toml-apply-review-mode (plist-get data :review-mode))
+    (when (boundp 'kargu-diff-review-mode)
+      (pcase (plist-get data :review-mode)
+        ("auto" (setq kargu-diff-review-mode 'auto))
+        ("async" (setq kargu-diff-review-mode 'async))
+        ("blocking" (setq kargu-diff-review-mode 'blocking))))
     (kargu-config-service-snapshot service)))
 
 (defun kargu-config--file-script ()
@@ -97,42 +97,90 @@
       (require 'json)
       (require 'seq)
       (when (equal (car command-line-args-left) "--") (pop command-line-args-left))
-      (load (pop command-line-args-left) nil t)
       (let* ((paths (json-parse-string (pop command-line-args-left) :array-type 'list))
              (path (or (seq-find #'file-exists-p paths) (car paths))))
         (condition-case nil
             (let* ((exists (file-exists-p path))
                    (text (and exists (with-temp-buffer
-                                       (insert-file-contents path) (buffer-string))))
-                   (data (and exists (kargu--read-toml-config path text)))
-                   (digest (and exists (secure-hash 'sha256 text))))
-              (when data
-                (setq data (plist-put data :providers
-                                      (vconcat (mapcar (lambda (entry)
-                                                         (list :name (car entry) :data (cdr entry)))
-                                                       (plist-get data :providers))))))
-              (princ (json-serialize (list :path path :digest digest :config data))))
+                                       (unless (file-regular-p path) (error "Not a regular file"))
+                                       (insert-file-contents path nil 0 65537)
+                                       (buffer-string)))))
+              (princ (json-serialize (list :path path :source text))))
           (error (princ "{\"error\":\"config-unavailable\"}")))))))
 
 (defun kargu-config--decode-file (process buffer)
-  "Decode PROCESS's validated JSON configuration from BUFFER."
+  "Decode PROCESS's bounded captured file text from BUFFER, without parsing TOML."
   (condition-case nil
       (let* ((result (and (= 0 (process-exit-status process))
                           (with-current-buffer buffer
                             (json-parse-string (buffer-string) :object-type 'plist
                                                :array-type 'list :null-object nil))))
-             (data (plist-get result :config)))
+             (source (plist-get result :source)))
         (unless (and (stringp (plist-get result :path)) (not (plist-get result :error)))
           (error "Invalid configuration response"))
-        (when data
-          (setq data (plist-put data :providers
-                                (mapcar (lambda (entry)
-                                          (cons (plist-get entry :name) (plist-get entry :data)))
-                                        (plist-get data :providers)))))
-        (kargu-ok (list :data data :path (plist-get result :path)
-                        :digest (plist-get result :digest))))
+        (unless (or (null source) (stringp source)) (error "Invalid configuration source"))
+        (kargu-ok (list :source source :path (plist-get result :path))))
     (error (kargu-err "Configuration is unreadable or invalid; check the TOML file"
                        :config-unavailable))))
+
+(defun kargu-config--editor-data (value)
+  "Translate native VALUE into the existing read-only plist/alist UI projection."
+  (let (data)
+    (dolist (name '("provider" "model" "review-mode"))
+      (let ((item (gethash name value)))
+        (unless (or (stringp item) (eq item :json-null)) (error "Invalid config projection"))
+        (setq data (plist-put data (intern (concat ":" name)) (unless (eq item :json-null) item)))))
+    (let ((providers (gethash "providers" value)) entries)
+      (unless (vectorp providers) (error "Invalid provider projection"))
+      (mapc (lambda (entry)
+              (let ((name (gethash "name" entry)) (fields (gethash "data" entry)) attributes)
+                (unless (and (stringp name) (hash-table-p fields)) (error "Invalid provider projection"))
+                (dolist (field '("api" "apikey" "model" "models"))
+                  (when (gethash field fields)
+                    (let ((item (gethash field fields)))
+                      (if (equal field "models")
+                          (progn
+                            (unless (and (vectorp item) (cl-every #'stringp item)) (error "Invalid models projection"))
+                            (setq item (append item nil)))
+                        (unless (stringp item) (error "Invalid provider projection")))
+                      (setq attributes (plist-put attributes (intern (concat ":" field)) item)))))
+                (push (cons name attributes) entries))) providers)
+      (plist-put data :providers (nreverse entries)))))
+
+(defun kargu-config--parsed (task path generation value failure)
+  "Complete TASK with native VALUE for PATH/GENERATION or sanitized FAILURE."
+  (condition-case nil
+      (cond
+       (failure (kargu-async-finish task (kargu-err "Native config parser unavailable; check/rebuild kargu-core" :config-unavailable)))
+       ((not (and (hash-table-p value) (equal generation (gethash "generation" value))))
+        (error "Invalid config generation"))
+       ((equal (gethash "status" value) "invalid")
+        (let ((line (gethash "line" value)))
+          (unless (and (integerp line) (> line 0)) (error "Invalid source line"))
+          (kargu-async-finish task (kargu-err (format "TOML %s:%d: Invalid configuration" path line) :config-unavailable))))
+       ((equal (gethash "status" value) "ok")
+        (let ((digest (gethash "digest" value)) (config (gethash "config" value)))
+          (unless (and (stringp digest) (string-match-p "\\`[0-9a-f]\\{64\\}\\'" digest)
+                       (hash-table-p config)) (error "Invalid config projection"))
+          (kargu-async-finish task (kargu-ok (list :data (kargu-config--editor-data config) :path path :digest digest)))))
+       (t (error "Invalid config result")))
+    (error (kargu-async-finish task (kargu-err "Invalid or oversized native configuration result" :config-unavailable)))))
+
+(defun kargu-config--loaded (task application generation value)
+  "Parse captured file VALUE for TASK/APPLICATION/GENERATION before publication."
+  (let* ((data (and (kargu-ok-p value) (kargu-result-value value)))
+         (source (plist-get data :source)) (path (plist-get data :path)))
+    (unwind-protect
+        (cond
+         ((kargu-err-p value) (kargu-async-finish task value))
+         ((/= generation (kargu-config-service-generation (kargu-config-service-context)))
+          (kargu-async-finish task (kargu-err "Configuration refresh was superseded" :stale)))
+         ((null source) (kargu-async-finish task (kargu-ok (list :data nil :path path :digest nil))))
+         (t (kargu-bridge-config-parse
+             source generation
+             (kargu-async-wrap task (lambda (result failure) (kargu-config--parsed task path generation result failure)))
+             :parent task :application application)))
+      (when (stringp source) (clear-string source)))))
 
 (cl-defun kargu-config-refresh-async (callback &key paths timeout parent owner)
   "Refresh configuration into CALLBACK without UI file I/O.
@@ -155,12 +203,19 @@ PATHS overrides candidate names; TIMEOUT, PARENT and OWNER bound the task."
                            (funcall callback (kargu-ok (kargu-config-current-snapshot))))))))
                 :owner owner :parent parent
                 :timeout (or timeout kargu-config-worker-default-timeout))))
-    (kargu-config-worker-start
-     task (kargu-config--file-script)
-     (list kargu-config--parser-file
-           (json-serialize (vconcat (or paths (list (kargu--xdg-config-file)
-                                                   (locate-user-emacs-file "kargu.toml"))))))
-     :decode #'kargu-config--decode-file :name "config")
+    (when (kargu-async-pending-p task)
+      (let ((reader (kargu-async-start
+                     (kargu-application-wrap
+                      app (kargu-async-wrap task (lambda (value error-data)
+                                                  (kargu-config--loaded task app generation
+                                                                        (or value (kargu-err error-data :config-unavailable))))))
+                     :parent task :owner nil)))
+        (kargu-config-worker-start
+         reader (kargu-config--file-script)
+         (list (json-serialize (vconcat (or paths (list (kargu--xdg-config-file)
+                                                       (locate-user-emacs-file "kargu.toml"))))))
+         :max-bytes (+ (* 6 kargu-bridge-config-max-source-bytes) 8192)
+         :decode #'kargu-config--decode-file :name "config")))
     task))
 
 (declare-function kargu--xdg-config-file "kargu/config/schema" ())

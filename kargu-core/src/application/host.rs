@@ -115,6 +115,13 @@ struct CatalogTargetRequest {
     arguments: crate::providers::catalog_target::CatalogTargetInput,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfigurationParseRequest {
+    connection_epoch: String,
+    arguments: crate::configuration::ParseInput,
+}
+
 impl Default for Host {
     fn default() -> Self {
         Self::new()
@@ -346,6 +353,7 @@ impl Host {
                 }),
             methods::PROVIDER_CATALOG => Err(Fault::params()),
             methods::PROVIDER_CATALOG_TARGET => self.catalog_target(params),
+            methods::CONFIGURATION_PARSE => self.configuration_parse(params),
             methods::APPLICATION_CREATE => {
                 if !empty_params(&params) {
                     return Err(Fault::params());
@@ -428,6 +436,17 @@ impl Host {
         }
         let target = request.arguments.resolve().map_err(|_| Fault::params())?;
         serde_json::to_value(target).map_err(|_| Fault::params())
+    }
+
+    fn configuration_parse(&self, params: Value) -> Result<Value, Fault> {
+        let request: ConfigurationParseRequest =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        let epoch =
+            RequestScope::try_from(request.connection_epoch).map_err(|_| Fault::params())?;
+        if !self.matches_epoch(&epoch) {
+            return Err(owner_fault());
+        }
+        Ok(request.arguments.resolve())
     }
 }
 

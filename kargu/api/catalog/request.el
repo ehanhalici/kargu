@@ -74,7 +74,7 @@ PROVIDER, BASE, REVISION, AUTH, SETTINGS, CALLBACK and APP are captured inputs."
   (let ((kargu-connection--bound nil))
     (cond
      (failure (kargu-async-finish task nil "Native catalog target unavailable; check/rebuild kargu-core"))
-     ((not (kargu-bridge-catalog-current-p app connection))
+     ((not (kargu-bridge-application-current-p app connection))
       (kargu-async-finish task nil "Native catalog connection is no longer current"))
      ((not (and (hash-table-p result) (equal provider (gethash "provider" result))
                 (equal revision (gethash "configuration_revision" result))

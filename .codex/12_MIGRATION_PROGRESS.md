@@ -1,5 +1,55 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Native TOML/schema/legacy-import tüketici geçişi
+
+Gerçek config refresh artık `configuration/parse` portunu kullanır. Native
+`configuration/{mod,domain,document}.rs` typed/Zeroizing source, closed schema ve
+review enum, legacy import, digest ve payload-free line diagnostics sahibidir.
+221 satırlık Elisp `config/toml.el`, ilgili require'lar ve parser apply helper'ı
+silindi; UI review mode yalnız başarılı publication'da uyarlanır. TOML engine
+yeniden yazılmadı; locked toml crate'inin parse/serde/std feature'ları kullanılır.
+
+Eski parser'ın scalar `provider` + `[provider.NAME]` uyumu, standard TOML öncesi
+dar header spelling normalize ile korundu. Değerler/satır sınırları değişmez,
+digest orijinal source'tan gelir. Boş key/model fallback, sıralı provider ve
+quoting/Unicode/arrays korunur; malformed schema partial yayınlanmaz.
+
+Source 64 KiB, provider 512, provider models 4096, projection 512 KiB ile bounded.
+Private source/text'e genel Serialize/Debug yoktur; private editor credential
+handoff'u açıkça ayrıdır, IPC/GC için fiziksel erasure iddiası yoktur. Source'un
+Serialize/Debug olmayışı iki compile-fail fixture ile korunur. Native host saf
+epoch-bound parse sırasında IO/app/session/config actor yaratmaz; generation
+editor ordering echo'sudur, native config authority değildir.
+
+Editor root deadline file child + startup + parser'ı kapsar; source ilk yield
+öncesi ayrılır ve task cleanup'ta silinir. Timer henüz dispatch edilmemiş olsa
+bile mutlak parser deadline geçtiyse publication reddedilir. Stale generation,
+iki application, cancel, supersession, lost lease, malformed reply, missing
+capability, source mutation, absent file ve kapalı parent testlidir.
+
+Soğuk setup fixture'ı artık her seferinde yeni core açar: shared bridge'in bir
+standalone read-service application/session bootstrap'ını, editor application's
+native lease acquisition'ından ayırır. Bir readonly parse, sıfır editor lease/
+model/metadata/HTTP ve credential cleanup denetlenir; warm core'un eksik cold
+startup assertion'ını gizlemesine izin verilmez. .codex/48 ayrıntıları içerir.
+
+File candidate/IO ve publication service hâlâ editor portudur; native config
+authority/env/keyless/credential/provider/model seçim işi açık. Yeni bulgu:
+provider switch tam API-base/query'yi log/UI'a yazabiliyor; sentetik secret
+regresyonuyla kapatılacak ayrı alt iş todo 1'e eklendi. Kullanıcının 01/07/
+shell.nix değişiklikleri korunur; gerçek kullanıcı config/credential taşıma,
+uzak API/hesap turu, uygulama kurulumu, merge/push veya canlı Emacs reload yoktur.
+
+Final kaynak **1256/1256 full source ERT**, 0 unexpected, **140.65 s**,
+**08:21:18 Europe/Istanbul** geçti. Önceki warm-start 1256 taraması da geçti;
+son sürüm ayrıca zorunlu cold startup ve mutlak deadline regresyonunu içerir.
+Kesilen ara tarama başarı sayılmadı. **274 native + 18 compile-fail**, locked
+build, fmt, strict all-targets Clippy temiz. Sekiz üretim + dört test Elisp
+Werror bytecompile/checkdoc temiz; kaynakta elc yoktur. Connection TLC
+**602836 / 101708**, queue 0, depth 22, 01:27:37; transport **1810 / 693**, queue 0,
+depth 13, 01:27:38'de temiz. Bounded regression'dır; somut yeni parse/publication
+refinement'ı veya tüm 01 uyumluluk sertifikası değildir.
+
 ## 2026-10-26 — Ham API-base ve native sohbet hedefi tüketici geçişi
 
 Önceki dilimde açılan upstream query kaybı kapatıldı. `kargu--api-base` artık

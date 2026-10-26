@@ -14,7 +14,6 @@
 (require 'subr-x)
 (require 'kargu/core)
 (require 'kargu/state)
-(require 'kargu/config/toml)
 (require 'kargu/config/key)
 (require 'kargu/config/service)
 (require 'kargu/models/service)

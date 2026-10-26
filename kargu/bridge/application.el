@@ -161,6 +161,15 @@ Return a waiter cleanup; cancelling one waiter cannot revoke a sibling lease."
                         (equal (gethash key left) (gethash key right))))
                  '("application_id" "session_id"))))
 
+(defun kargu-bridge-application-current-p (application connection)
+  "Check APPLICATION has not lost or replaced the captured CONNECTION lease."
+  (let ((binding (gethash :native-core (kargu-application-services application))))
+    (and (kargu-bridge-connection-p connection)
+         (eq (kargu-bridge-status connection) 'ready)
+         (or (null binding)
+             (and (eq connection (kargu-bridge-application-connection binding))
+                  (memq (kargu-bridge-application-state binding) '(:starting :ready)))))))
+
 (defun kargu-bridge-application-current-scope (application connection)
   "Read APPLICATION's live scope on exact CONNECTION without starting a core.
 The returned identifiers are detached; nil means the lease is not current."

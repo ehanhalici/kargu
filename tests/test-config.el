@@ -3,24 +3,29 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
+;; Real native schema parsing and owned publication over synthetic local files.
+
 ;;; Code:
 
 (require 'ert)
 (require 'tests/test-helpers)
+(require 'tests/test-bridge)
 (require 'kargu/config)
 
 (defvar kargu-diff-review-mode)
 
 (ert-deftest kargu-config-review-mode-applies-on-reload-test ()
-  "Only validated publication changes review mode; parsing stays pure."
+  "Only successful native parsing and owned publication change review mode."
   (let ((file (make-temp-file "kargu-review-config-" nil ".toml"))
         (kargu-diff-review-mode 'auto))
     (unwind-protect
         (progn
           (dolist (mode '("blocking" "async" "auto"))
             (write-region (format "review_mode = %S\n" mode) nil file)
-            (let ((data (kargu--read-toml-config file)))
-              (kargu-config-publish (kargu-config-service-create) data file mode))
+            (should (kargu-ok-p (kargu-test-await
+                                (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
             (should (eq kargu-diff-review-mode (intern mode))))
           (cl-letf (((symbol-function 'kargu--config-plist)
                      (lambda () '(:review-mode 42))))
@@ -63,7 +68,9 @@
     (unwind-protect
         (progn
           (write-region "[providers.302ai]\napi = \"https://a.example/v1\"\n\n[providers.\"my.proxy\"] # local\napi = \"http://localhost:1\"\nmodels = [\"m1\"]\n" nil file)
-          (let ((providers (plist-get (kargu--read-toml-config file) :providers)))
+          (should (kargu-ok-p (kargu-test-await
+                              (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
+          (let ((providers (kargu--config-providers)))
             (should (equal (plist-get (cdr (assoc "302ai" providers)) :api) "https://a.example/v1"))
             (should (equal (plist-get (cdr (assoc "my.proxy" providers)) :models) '("m1")))
             (should (= (length providers) 2))))
@@ -90,7 +97,10 @@
                            "[provider.a]\nunknown = \"secret-value\"\n"
                            "[provider.a]\n[providers.a]\n"))
           (write-region (concat "review_mode = \"blocking\"\n" invalid) nil file)
-          (let ((message (error-message-string (should-error (kargu--read-toml-config file)))))
+          (let* ((result (kargu-test-await
+                          (lambda (done) (kargu-config-refresh-async done :paths (list file)))))
+                 (message (kargu-result-err-message result)))
+            (should (kargu-err-p result))
             (should (string-search file message))
             (should (string-match-p ":[0-9]+:" message))
             (should-not (string-search "secret-value" message)))
@@ -105,7 +115,9 @@
           (write-region
            "provider = 'a' # comment\n[providers.a]\napikey = 'literal#value'\nmodels = [\n  \"a]#b\", # not the end\n  '\\literal',\n  \"\\u00e7\\U0001F642\",\n]\n"
            nil file)
-          (let ((provider (cdar (plist-get (kargu--read-toml-config file) :providers))))
+          (should (kargu-ok-p (kargu-test-await
+                              (lambda (done) (kargu-config-refresh-async done :paths (list file))))))
+          (let ((provider (cdar (kargu--config-providers))))
             (should (equal (plist-get provider :apikey) "literal#value"))
             (should (equal (plist-get provider :models) '("a]#b" "\\literal" "ç🙂")))))
       (delete-file file))))
@@ -176,15 +188,20 @@
                  (push task tasks)
                  (kargu-async-add-cleanup task (lambda () (push task cleaned))))))
       (let* ((first (kargu-config-refresh-async (lambda (result) (push result results))))
+             (first-reader (car tasks))
              (second (kargu-config-refresh-async (lambda (result) (push result results))))
-             (value (kargu-ok '(:data (:provider "new") :path "/fake" :digest "new"))))
-        (kargu-async-finish second value)
-        (kargu-async-finish first (kargu-ok '(:data (:provider "old") :path "/fake" :digest "old")))
+             (second-reader (car tasks))
+             (value (kargu-ok (list :source (copy-sequence "provider='new'") :path "/fake"))))
+        (should (eq (kargu-async-task-parent second-reader) second))
+        (should (eq (kargu-async-task-parent first-reader) first))
+        (kargu-async-finish second-reader value)
+        (kargu-bridge-test--wait (lambda () results))
+        (kargu-async-finish first-reader (kargu-ok (list :source (copy-sequence "provider='old'") :path "/fake")))
         (should (kargu-err-p (car results)))
         (should (equal (plist-get (kargu--config-plist) :provider) "new"))
         (let ((third (kargu-config-refresh-async #'ignore)))
           (kargu-async-cancel third)
-          (should (memq third cleaned)))))))
+          (should (cl-some (lambda (child) (eq (kargu-async-task-parent child) third)) cleaned)))))))
 
 (ert-deftest kargu-config-snapshot-detaches-and-hides-credentials-test ()
   "Published data cannot be mutated through input or public snapshot reads."

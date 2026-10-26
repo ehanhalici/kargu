@@ -170,6 +170,15 @@ Unknown keys/tables, duplicate definitions, wrong types and unsupported TOML
 constructs are rejected with a file/line error. A malformed reload is not
 partially applied and must be corrected before requests can use that config.
 
+TOML parsing, schema validation and legacy import run in Rust through the bounded
+`configuration/parse` port (`configuration_parse` capability). The old Elisp
+parser was removed. Sources are limited to 64 KiB of UTF-8, with at most 512
+provider tables and 4096 models per provider. Existing `[provider.NAME]` legacy
+headers remain supported alongside a top-level provider choice. An older core
+must be rebuilt/restarted; there is no editor parser fallback. File candidate
+selection and reading still use a cancellable editor worker; environment/key
+precedence and the final native configuration authority remain migration work.
+
 Run `M-x kargu-edit-config` to generate or edit your configuration.
 
 Opening the footer provider selector refreshes this file asynchronously before

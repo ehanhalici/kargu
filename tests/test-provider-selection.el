@@ -118,7 +118,7 @@
             (setq other (kargu-chat-select-provider-company)))
           (with-current-buffer first-view (setq next (kargu-chat-select-provider-company)))
           (should (eq (kargu-async-task-state first) :cancelled))
-          (should (memq first cleaned))
+          (should (cl-some (lambda (child) (eq (kargu-async-task-parent child) first)) cleaned))
           (should (kargu-async-pending-p other))
           (kargu-async-finish first (kargu-ok '(:data nil :path "/stale" :digest "old")))
           (should (= opened 0))

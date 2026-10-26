@@ -415,10 +415,10 @@ bu başlıklarla opsiyonel ilan edilemez.
 
 ## Rust geçişinde kalan adımlar — kapanış takip listesi
 
-Güncelleme: 2026-10-26, uygulama tabanı `5071428`. Son tamamlanan dilim ham
-API-base/query'nin korunması, sohbet hedefinin Rust'ta türetilmesi ve iki eski
-Elisp URL fonksiyonunun silinmesidir. Kanıt: 1249/1249 full source ERT, 269 native +
-16 compile-fail; bounded connection/transport TLC temiz. Ayrıntılar .codex/12/47.
+Güncelleme: 2026-10-26, uygulama tabanı `72803ef`. Son tamamlanan dilim gerçek
+config refresh'in native TOML/schema/legacy-import portuna bağlanması ve eski
+Elisp parser'ın silinmesidir. Kanıt: 1256/1256 full source ERT, 274 native +
+18 compile-fail; bounded connection/transport TLC temiz. Ayrıntılar .codex/12/48.
 
 Bu liste .codex/04'teki onaylı göçün kalan **tüketici taşıma/kaldırma sırasını**
 özetler; G03–G13'ün yerine geçen ikinci kapsam veya yeni ürün kararı değildir.
@@ -444,9 +444,28 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Rapor sonrası, stale sonuçta ve callback hatasında scope/key kopyası temizlenir.
   - [x] Geçişte bulunan ek güvenlik işi: placeholder uyarısı anahtarın kendisini
     loglamasın. `secret-prefix...` sentetik regresyonu UI ve log sınırını denetler.
-  - [ ] Native config/schema/precedence/env/keyless consumer cutover'ı ve eski
-    Elisp TOML/selection politikasının silinmesi. Salt editor credential interop
-    portu kalmalı; yukarıdaki setup temizliği bu maddeyi kapatmaz.
+  - [ ] Native config authority/file IO/precedence/env/keyless/selection kalan
+    consumer cutover'ı. Parser/schema dilimi aşağıda kapandı; salt editor
+    credential interop portuna inmek için seçim ve publication motoru hâlâ açık.
+  - [x] Gerçek config refresh tüketicisini `configuration/parse` native portuna
+    bağla; TOML/schema/legacy-import ve content digest Rust'ta. Eski 221 satırlık
+    `config/toml.el` silindi. Bounded source, safe line errors, legacy scalar
+    provider + singular table uyumu, provider sırası, cold startup, parent cancel,
+    deadline, stale generation, iki application ve lost lease testli. .codex/48.
+  - [ ] Candidate-path seçimi ve bounded regular-file capture'ını native owned
+    IO portuna taşı; editor file worker ancak son tüketicisi geçince silinsin.
+    Path authority, last-open/TOCTOU, gerçek cancel/deadline ve tek config
+    publication writer/revision korunmalı; parser generation echo'su authority
+    sayılmasın. Mevcut dosya için shared bridge bootstrap'ı ile uygulama lease'i
+    ayrıdır; native IO cutover'ının cold/absent-file/missing-core davranışı
+    ayrıca kabul testine bağlansın.
+  - [ ] Env/keyless/credential precedence ve provider/model seçimini native
+    publication/DTO tüketicisine bağla; memory-only UI reader'a gizli RPC/IO
+    ekleme, eski Elisp karar fonksiyonlarını son consumer geçince kaldır.
+  - [ ] Geçişte bulunan ek log hijyeni: `kargu-set-provider` tam API-base'i
+    log/message'a yazıyor; query içine konan credential/tenant değerini sızdırma.
+    Provider/model seçimini koruyup endpoint içeriğini log ve UI raporundan çıkar;
+    sentetik query-secret ile regresyon ekle.
   - [x] Katalog URL türetme/public-auth kararı native typed endpoint portunda.
     `provider/catalogTarget` salt okunur/epoch-bound; custom/private/dedicated/
     native-models path ve missing-capability fixture'ları geçti, eski Elisp URL/

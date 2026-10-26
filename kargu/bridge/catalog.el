@@ -18,15 +18,6 @@
 (defconst kargu-bridge-catalog-timeout 5.0
   "Seconds allowed for startup and one readonly native target projection.")
 
-(defun kargu-bridge-catalog-current-p (application connection)
-  "Check APPLICATION has not lost or replaced the captured CONNECTION lease."
-  (let ((binding (gethash :native-core (kargu-application-services application))))
-    (and (kargu-bridge-connection-p connection)
-         (eq (kargu-bridge-status connection) 'ready)
-         (or (null binding)
-             (and (eq connection (kargu-bridge-application-connection binding))
-                  (memq (kargu-bridge-application-state binding) '(:starting :ready)))))))
-
 (defun kargu-bridge-catalog--ready (task arguments connection failure)
   "Project ARGUMENTS for TASK on CONNECTION, or deliver startup FAILURE."
   (cond
@@ -64,7 +55,7 @@ CALLBACK receives (DTO FAILURE CONNECTION).  No HTTP or credential IO occurs."
       (if binding
           (let ((captured (kargu-bridge-application-connection binding)))
             (funcall ready captured
-                     (unless (kargu-bridge-catalog-current-p application captured)
+                     (unless (kargu-bridge-application-current-p application captured)
                        (kargu-bridge--fault "owner_closed"))))
         (kargu-async-add-cleanup task (kargu-bridge-ensure ready))))
     task))

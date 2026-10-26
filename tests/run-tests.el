@@ -107,6 +107,7 @@
 (require 'tests/test-security)
 (require 'tests/test-process)
 (require 'tests/test-config)
+(require 'tests/test-config-native)
 (require 'tests/test-setup)
 (require 'tests/test-connection-snapshot)
 (require 'tests/test-chat-target)

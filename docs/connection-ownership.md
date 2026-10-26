@@ -1,12 +1,31 @@
 # Connection and metadata ownership
 
 Native admission claims the application before asynchronous configuration and
-credential preparation. Configuration file selection, stat, parsing, auth-source
-and callable secrets run in cancellable child workers. Readers consume the
+credential preparation. Configuration file selection, stat, auth-source and
+callable secrets run in cancellable child workers. TOML/schema/legacy import
+uses a bounded, readonly native parser port after file capture. Readers consume the
 validated in-memory configuration publication. Stop and the preparation deadline
 cancel children; failures before admission preserve existing history, edits and
 the unsent draft. A changed session, selection, endpoint or config revision
 invalidates a pending credential result.
+
+`configuration/parse` accepts captured bounded UTF-8 source and refresh generation
+on the exact ready connection epoch. It performs no filesystem, environment,
+credential or network IO and creates no application/session state. Generation is
+an editor-ordering echo, not native config authority. Rust owns the TOML parser,
+closed schema, legacy import, content digest and payload-free line diagnostics.
+The old Elisp TOML engine was deleted. Header normalization preserves the legacy
+top-level `provider` plus `[provider.NAME]` combination before standard TOML
+parsing; it does not rewrite values or line boundaries.
+
+The current editor service still owns candidate-path selection, bounded file
+capture and latest-generation publication. One root deadline covers file child,
+core startup and native parsing. Cancel/supersession/owner loss cannot publish a
+late reply; known native leases are rechecked at delivery. A missing file needs
+no core startup, while a missing parser capability fails without a fallback or
+partial publication. Captured parser source is private and wiped on task cleanup;
+this is not physical erasure of IPC/JSON copies. File IO, native config ownership
+and environment/keyless/selection precedence remain explicit open cutovers.
 
 The execution context owns one connection snapshot across every request and
 retry. It captures provider, model, endpoint, wire record, model metadata,
@@ -94,7 +113,11 @@ check cancels its children; stale session/selection results cannot report a new
 provider with an old key. Reports borrow the frozen snapshot, then wipe both
 the private scope and report key copy, including callback failures and discarded
 late results. Placeholder warnings never print the key itself. Native
-config/endpoint policy remains open. The default local plaintext auth-source
+configuration parsing may start the readonly native core, but setup does not
+perform model/metadata discovery, acquire an editor application's native lease or
+test upstream health. A cold shared bridge still creates its own standalone
+read-service application/session during bootstrap, independently of the parser.
+Native config ownership/selection policy remains open. The local plaintext auth-source
 child remains an editor interop port, not a newly implemented Rust credential reader.
 
 Catalog publication is one atomic native replace operation. Stale responses still
@@ -108,7 +131,7 @@ The UI uses native price labels; an invalid price is unknown, not free.
 Offline evidence is in `tests/test-native-model-consumers.el`,
 `tests/test-native-model-publication.el`, `tests/test-connection-native.el`,
 `tests/test-catalog-connection.el`, `tests/test-catalog-target.el`,
-`tests/test-setup.el` and the existing config,
+`tests/test-setup.el`, `tests/test-config-native.el` and the existing config,
 snapshot, model-store, parameter and application suites. It includes real child
 workers, real loopback curl redirects for Bearer and x-api-key, Stop and draft
 restoration, immutable retries, late selection rejection, two application owners

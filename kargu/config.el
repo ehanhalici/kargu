@@ -8,7 +8,7 @@
 
 ;; Facade module for the Kargu configuration subsystem.
 ;; Requires modular subcomponents under `kargu/config/`:
-;;   * `kargu/config/toml'       -> pure Elisp TOML parser
+;;   * `kargu/bridge/config'     -> bounded native TOML/schema parser port
 ;;   * `kargu/config/key'        -> multi-tier API key & endpoint resolution
 ;;   * `kargu/config/schema'     -> configuration caching & setup verification
 ;;   * `kargu/config/worker'     -> cancellable background credential worker
@@ -20,7 +20,6 @@
 
 ;;; Code:
 
-(require 'kargu/config/toml)
 (require 'kargu/config/key)
 (require 'kargu/config/schema)
 (require 'kargu/config/worker)

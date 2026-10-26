@@ -137,7 +137,8 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 25] = [
+    pub const LIFECYCLE_CAPABILITIES: [&str; 26] = [
+        "configuration_parse",
         "api_request",
         "api_chat_target",
         "api_wire",
@@ -198,6 +199,8 @@ pub mod protocol {
     }
     /// Canonical method names.
     pub mod methods {
+        /// Readonly epoch-bound parsing of one captured configuration source.
+        pub const CONFIGURATION_PARSE: &str = "configuration/parse";
         /// Start a revision-bound, session-owned bounded metadata upload.
         pub const MODEL_BEGIN: &str = "models/begin";
         /// Append one exact-offset UTF-8 fragment, without publication.

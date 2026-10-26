@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod application;
+pub mod configuration;
 pub mod constants;
 pub mod domain;
 pub mod error;
