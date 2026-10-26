@@ -516,6 +516,31 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   foreign owner, missing adapter ve unknown effect kabulünü doğrula. Kaynak: Aşama 2,
   G04/G05/G11; .codex/17–28.
 
+  - [ ] Salt-okunur Git tüketicileri: `git_diff`, `git_log`, `git_blame`,
+    `git_branches`, `git_stashes` mevcut native execution gate/process supervisor'a
+    bağlansın. Git motoru yeniden yazılmasın; external diff/textconv/signature/
+    fsmonitor/pager etkileri kapatılsın. Repository/worktree/path, exact argv,
+    bounded complete output, alias/direct/mode, owner/cancel/drain ve missing
+    capability testlerinden sonra eski Elisp argv/range/report yolları silinsin.
+  - [ ] `read_file`: bounded disk capture/range/encoding/binary/numbering kararı
+    typed native porta taşınsın; unsaved/dirty/live-output buffer snapshot ve
+    revision kontrolü Emacs interop kalsın. FIFO/device, symlink/path replacement,
+    scan/output bütçesi, unknown total, stale buffer ve remote unavailable testli
+    olsun. Dape source worker tüketicisi geçmeden ortak worker dosyası silinmesin.
+  - [ ] Git mutation tüketicileri: stage/unstage/commit/branch/stash ortak native
+    approval ledger'a geçsin. Exact immutable action/object ve repo/index scope,
+    reject/timeout/cancel, hook/signing child drain ve partial/unknown sonuçları
+    korunsun; issued mutation sonrası kör fallback/replay yapılmasın.
+  - [ ] Skill discovery/read ve toolchain/dependency probe tüketicileri native
+    portlara geçsin; trusted search roots, byte/item/deadline ve executable sınıfı
+    açık olsun. Yerel araç eksikliği kurulum veya gizli shell başlatmasın.
+  - [ ] Webfetch DNS/redirect/address/egress/body/timeout kararları ortak native
+    HTTP/security portuna taşınsın. Her hop'ta numeric policy/pinned address,
+    cancellation ve bounded body testli olsun; ağ testi yalnız kontrollü fixture.
+  - [ ] Son consumer sonrası legacy OS/job/foreground/global köprülerini kaldır;
+    ortak registry/alias/mode ve direct çağrının aynı native gate'i kullandığını,
+    foreign owner/missing adapter/unknown effect sınırlarını uçtan uca doğrula.
+
 - [ ] **3. Edit/proposal/review motoru** — diff/proposal/revision/journal kararlarını
   Rust'a taşı; Emacs'te yalnız canlı belge kontrolü, transaction/undo/save ve review
   etkileşimi kalsın. Tek typed sonuç kullan; dirty buffer, coding/EOL, save-hook,
