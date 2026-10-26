@@ -1,5 +1,32 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-26 — Config refresh admission/generation ve sabit deadline
+
+Native parser concurrency incelemesinde bulunan race kapandı: kapalı parent
+altında çağrılan refresh IO başlatmasa da generation'ı artırıp başka canlı
+refresh'in cevabını stale saydırabiliyordu. Generation artık yalnız admitted,
+canlı root için ayrılır; inactive owner task/timer cleanup'ı hemen yapılır.
+Mutlak parent deadline geçmişse timer dispatch beklenmeden ret verilir;
+worker/core/generation başlamaz. `timeout=0` ile dosya reader deadline'ını
+kaldırma yolu da kapandı: invalid/nonpositive default bound'a döner, büyük
+değer uzatamaz, kısa pozitif ve parent deadline kazanır.
+
+Üç yeni ERT gerçek native parse reply'ı bekleterek eski canlı publication'ın
+korunmasını, sıfır admission yan etkisini, expired parent error'ını ve timeout
+matrisini denetler. İlk regresyon eski kodda generation `1 -> 2` ile kırıldı.
+**1260/1260 full source ERT**, 0 unexpected, **137.91 s**, **08:32:36
+Europe/Istanbul** geçti. İki değişen Elisp Werror bytecompile/checkdoc temiz;
+elc yalnız task-specific /tmp dizininde. Connection TLC **602836 / 101708**,
+queue 0, depth 22; transport **1810 / 693**, queue 0, depth 13 ile **08:30:42**'de
+temiz. Bunlar bounded lifecycle regression'ıdır; somut admission/refinement
+veya tüm 01 ispatı değildir. Rust değişmedi; `0fc7cf6` tabanındaki 274 native +
+18 compile-fail/fmt/Clippy kanıtı korunur. Ayrıntı .codex/50'de.
+
+Todo 1'in ek admission alt işi `[x]`; native IO/config publication/precedence/
+env/keyless/selection üst işi açık. Kullanıcı 01/07/shell.nix ve gerçek config/
+credential dosyaları korunur; uzak API/hesap, kurulum, merge/push veya canlı
+Emacs reload yoktur.
+
 ## 2026-10-26 — Provider switch endpoint/query log sızıntısının kapatılması
 
 Native parser cutover'ında bulunan todo 1 güvenlik alt işi kapandı:

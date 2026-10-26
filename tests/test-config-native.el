@@ -124,6 +124,69 @@
       (should-not failure)
       (should (equal (gethash "provider" (gethash "config" result)) "original")))))
 
+(ert-deftest kargu-config-native-closed-parent-cannot-supersede-live-refresh-test ()
+  "An unadmitted refresh cannot invalidate another pending native publication."
+  (kargu-config-native-test--held
+    (let* ((service (kargu-config-service-context))
+           (generation (kargu-config-service-generation service))
+           (parent (kargu-async-start #'ignore :owner nil :parent nil)))
+      (kargu-async-cancel parent)
+      (cl-letf (((symbol-function 'kargu-config-worker-start) (lambda (&rest _) (ert-fail "No worker for revoked parent")))
+                ((symbol-function 'kargu-bridge-ensure) (lambda (&rest _) (ert-fail "No startup for revoked parent"))))
+        (let ((rejected (kargu-config-refresh-async
+                         (lambda (_) (ert-fail "No callback from unadmitted refresh"))
+                         :parent parent :paths (list file))))
+          (should-not (kargu-async-pending-p rejected))
+          (should-not (kargu-async-task-timer rejected))
+          (should-not (kargu-async-task-children parent)))
+        (let ((rejected (kargu-config-refresh-async
+                         (lambda (_) (ert-fail "No callback from inactive owner"))
+                         :owner (kargu-application-create) :paths (list file))))
+          (should (eq (kargu-async-task-state rejected) :cancelled))
+          (should-not (kargu-async-task-timer rejected))))
+      (should (= generation (kargu-config-service-generation service)))
+      (funcall held)
+      (should (kargu-ok-p result))
+      (should (= delivered 1))
+      (should (equal (plist-get (kargu--config-plist) :provider) "parsed")))))
+
+(ert-deftest kargu-config-native-expired-parent-cannot-read-or-supersede-test ()
+  "An elapsed deadline is rejected before timer delivery, IO or generation change."
+  (kargu-config-native-test--held
+    (let* ((service (kargu-config-service-context))
+           (generation (kargu-config-service-generation service)) failure
+           (parent (kargu-async-start #'ignore :timeout 5 :owner nil :parent nil)))
+      (unwind-protect
+          (progn
+            (setf (kargu-async-task-deadline parent) (1- (float-time)))
+            (cl-letf (((symbol-function 'kargu-config-worker-start) (lambda (&rest _) (ert-fail "No expired IO")))
+                      ((symbol-function 'kargu-bridge-ensure) (lambda (&rest _) (ert-fail "No expired startup"))))
+              (let ((rejected (kargu-config-refresh-async (lambda (value) (setq failure value))
+                                                         :parent parent :paths (list file))))
+                (should-not (kargu-async-pending-p rejected))
+                (should-not (kargu-async-task-timer rejected))
+                (should-not (kargu-async-task-children parent))))
+            (should (kargu-err-p failure))
+            (should (= generation (kargu-config-service-generation service)))
+            (funcall held)
+            (should (kargu-ok-p result))
+            (should (= delivered 1)))
+        (kargu-async-cancel parent)))))
+
+(ert-deftest kargu-config-native-refresh-timeout-cannot-disable-or-extend-bound-test ()
+  "Invalid, zero or oversized timeout inputs cannot create an unbounded reader."
+  (cl-letf (((symbol-function 'kargu-config-worker-start) #'ignore))
+    (dolist (timeout '(nil 0 -1 "invalid" 1000000000000000000 1))
+      (let* ((before (float-time)) (task (kargu-config-refresh-async #'ignore :timeout timeout)))
+        (unwind-protect
+            (progn
+              (should (kargu-async-pending-p task))
+              (should (numberp (kargu-async-task-deadline task)))
+              (should (> (kargu-async-task-deadline task) before))
+              (should (<= (kargu-async-task-deadline task) (+ before 5.1)))
+              (when (equal timeout 1) (should (<= (kargu-async-task-deadline task) (+ before 1.1)))))
+          (kargu-async-cancel task))))))
+
 (ert-deftest kargu-config-native-absent-file-and-closed-parent-never-start-core-test ()
   "No file means an empty publication; a revoked parent cannot start any child."
   (let ((root (make-temp-file "kargu-config-absent-" t)))

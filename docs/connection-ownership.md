@@ -26,6 +26,11 @@ no core startup, while a missing parser capability fails without a fallback or
 partial publication. Captured parser source is private and wiped on task cleanup;
 this is not physical erasure of IPC/JSON copies. File IO, native config ownership
 and environment/keyless/selection precedence remain explicit open cutovers.
+Only an admitted live refresh advances the editor generation: closed/inactive
+parents or elapsed deadlines cannot invalidate another in-flight publication.
+The root checks elapsed time before starting its file worker, without waiting
+for a timer callback. Its fixed five-second bound cannot be disabled or extended
+by the optional timeout; positive shorter values and earlier parent deadlines win.
 
 The execution context owns one connection snapshot across every request and
 retry. It captures provider, model, endpoint, wire record, model metadata,

@@ -184,15 +184,16 @@
 
 (cl-defun kargu-config-refresh-async (callback &key paths timeout parent owner)
   "Refresh configuration into CALLBACK without UI file I/O.
-PATHS overrides candidate names; TIMEOUT, PARENT and OWNER bound the task."
+PATHS overrides candidate names; TIMEOUT, PARENT and OWNER bound the task.
+Positive TIMEOUT may shorten the fixed worker deadline, never disable/extend it."
   (let* ((service (kargu-config-service-context))
-         (generation (cl-incf (kargu-config-service-generation service)))
+         (generation nil)
          (app (kargu-application-context))
          (task (kargu-async-start
                 (kargu-application-wrap
                  app (lambda (value error)
                        (cond
-                        ((/= generation (kargu-config-service-generation service))
+                        ((and generation (/= generation (kargu-config-service-generation service)))
                          (funcall callback (kargu-err "Configuration refresh was superseded" :stale)))
                         ((or error (kargu-err-p value))
                          (funcall callback (or value (kargu-err error :config-unavailable))))
@@ -202,8 +203,16 @@ PATHS overrides candidate names; TIMEOUT, PARENT and OWNER bound the task."
                                                  (plist-get data :path) (plist-get data :digest))
                            (funcall callback (kargu-ok (kargu-config-current-snapshot))))))))
                 :owner owner :parent parent
-                :timeout (or timeout kargu-config-worker-default-timeout))))
-    (when (kargu-async-pending-p task)
+                :timeout (if (and (numberp timeout) (> timeout 0))
+                             (min timeout kargu-config-worker-default-timeout)
+                           kargu-config-worker-default-timeout))))
+    (cond
+     ((not (kargu-async-pending-p task)) (kargu-async-cancel task))
+     ((<= (kargu-async-task-deadline task) (float-time))
+      (kargu-async-finish task nil "Configuration deadline expired"))
+     (t
+      (setq generation (1+ (kargu-config-service-generation service)))
+      (setf (kargu-config-service-generation service) generation)
       (let ((reader (kargu-async-start
                      (kargu-application-wrap
                       app (kargu-async-wrap task (lambda (value error-data)
@@ -215,7 +224,7 @@ PATHS overrides candidate names; TIMEOUT, PARENT and OWNER bound the task."
          (list (json-serialize (vconcat (or paths (list (kargu--xdg-config-file)
                                                        (locate-user-emacs-file "kargu.toml"))))))
          :max-bytes (+ (* 6 kargu-bridge-config-max-source-bytes) 8192)
-         :decode #'kargu-config--decode-file :name "config")))
+         :decode #'kargu-config--decode-file :name "config"))))
     task))
 
 (declare-function kargu--xdg-config-file "kargu/config/schema" ())
