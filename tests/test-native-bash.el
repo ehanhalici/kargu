@@ -21,13 +21,11 @@
      (with-temp-buffer
        (let* ((root (file-name-as-directory (file-truename (make-temp-file "kargu-bash-native-" t))))
               (default-directory root) (kargu-permission--override-root root)
-              (kargu-job--services (make-hash-table :test #'equal))
-              (kargu-bash--processes (make-hash-table :test #'equal))
-              (kargu-bash--counter 0) (kargu-bash--active-async-proc nil))
+              (kargu-job--services (make-hash-table :test #'equal)))
          (kargu-test-mode 'agent)
          (unwind-protect
              (cl-letf (((symbol-function 'kargu-present-confirmation) #'kargu-bridge-job-test--approve)) ,@body)
-           (let ((views (mapcar #'kargu-bash--job-buffer (hash-table-values kargu-bash--processes))))
+           (let ((views (mapcar #'kargu-bash--job-buffer (hash-table-values (kargu-job-service-jobs (kargu-job-service-for-project))))))
              (kargu-job-services-reset)
              (kargu-bridge-test--wait (lambda () (= 0 (hash-table-count (kargu-bridge-connection-jobs conn)))))
              (dolist (view views) (when (buffer-live-p view) (kill-buffer view))))
@@ -35,8 +33,8 @@
 
 (defun kargu-bash-test--job ()
   "Return the only registered shell view in this isolated fixture."
-  (should (= 1 (hash-table-count kargu-bash--processes)))
-  (car (hash-table-values kargu-bash--processes)))
+  (should (= 1 (hash-table-count (kargu-job-service-jobs (kargu-job-service-for-project)))))
+  (car (hash-table-values (kargu-job-service-jobs (kargu-job-service-for-project)))))
 
 (ert-deftest kargu-bash-native-environment-first-entry-and-unset-test ()
   "Explicit environment capture preserves Emacs duplicate/unset semantics."
@@ -105,9 +103,9 @@
       (should (string-search "exit 0" result))
       (should (string-search "completed" result))
       (should (string-search "output truncated" result))
-      (should-not kargu-bash--active-async-proc)
+      (should-not (kargu-job-service-active-async-proc (kargu-job-service-for-project)))
       (let* ((receipt (kargu-test-await (lambda (done) (kargu-bash-run command nil t done))))
-             (job (gethash "p2" kargu-bash--processes)))
+             (job (gethash "p2" (kargu-job-service-jobs (kargu-job-service-for-project)))))
         (should (string-search "ID=[p2]" receipt))
         (kargu-bridge-test--wait (lambda () (eq (kargu-bash--job-state job) :done)))
         (should (= (plist-get (kargu-bash--job-result job) :code) 0))
@@ -138,10 +136,10 @@
   (kargu-bash-test--with-core
     (let (result)
       (kargu-bash-run "sleep 30" nil nil (lambda (text) (setq result text)))
-      (kargu-bridge-test--wait (lambda () kargu-bash--active-async-proc))
-      (should (kargu-bridge-job-p kargu-bash--active-async-proc))
+      (kargu-bridge-test--wait (lambda () (kargu-job-service-active-async-proc (kargu-job-service-for-project))))
+      (should (kargu-bridge-job-p (kargu-job-service-active-async-proc (kargu-job-service-for-project))))
       (kargu-bash-kill-active-async)
-      (should-not kargu-bash--active-async-proc)
+      (should-not (kargu-job-service-active-async-proc (kargu-job-service-for-project)))
       (kargu-bridge-test--wait (lambda () result)))))
 
 (ert-deftest kargu-bash-native-always-asks-despite-legacy-optout-test ()
@@ -233,7 +231,39 @@
     (should-error (kargu-bash-run "printf never" nil t))
     (kargu-test-mode 'ask)
     (should-error (kargu-bash-run "printf never" nil nil #'ignore))
-    (should (= 0 (hash-table-count kargu-bash--processes)))))
+    (should (= 0 (hash-table-count (kargu-job-service-jobs (kargu-job-service-for-project)))))))
+
+
+(ert-deftest kargu-bash-same-project-chat-services-isolate-reused-job-ids-test ()
+  "The same project/session label in two source buffers grants separate jobs."
+  (kargu-bash-test--with-core
+    (let ((one (current-buffer)) (two (generate-new-buffer " *kargu-foreign-chat*"))
+          first second)
+      (unwind-protect
+          (progn
+            (kargu-test-await (lambda (done) (kargu-bash-run "printf one" nil t done)))
+            (setq first (kargu-bash-test--job))
+            (kargu-bridge-test--wait (lambda () (eq (kargu-bash--job-state first) :done)))
+            (with-current-buffer two
+              (setq default-directory root)
+              (setq-local kargu-permission--override-root root)
+              (setq-local kargu--session-id (with-current-buffer one (kargu-session-id)))
+              (kargu-test-mode 'agent)
+              (should-error (kargu-bash--find-job "p1"))
+              (kargu-test-await (lambda (done) (kargu-bash-run "printf two" nil t done)))
+              (setq second (kargu-bash-test--job))
+              (should (equal (kargu-bash--job-id first) (kargu-bash--job-id second)))
+              (should-not (eq (kargu-bash--job-service first) (kargu-bash--job-service second)))
+              (should-error (kargu-bash--find-job "p1" (kargu-bash--job-service first))))
+            (kill-buffer two)
+            (with-current-buffer one
+              (should (eq first (kargu-bash--find-job "p1"))))
+            (should-not (boundp 'kargu-bash--processes))
+            (should-not (boundp 'kargu-bash--counter))
+            (should-not (boundp 'kargu-bash--active-async-proc)))
+        (when (buffer-live-p two) (kill-buffer two))
+        (when (and second (buffer-live-p (kargu-bash--job-buffer second)))
+          (kill-buffer (kargu-bash--job-buffer second)))))))
 
 (provide 'tests/test-native-bash)
 ;;; test-native-bash.el ends here

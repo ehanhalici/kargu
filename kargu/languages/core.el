@@ -25,9 +25,8 @@
 (require 'subr-x)
 
 (require 'kargu/core)
-(require 'kargu/fs)
+(require 'kargu/project-probe)
 
-(declare-function kargu-fs-has-file-p "kargu/fs" (root filename))
 
 ;;;; Language Specification Structure ---------------------------------------
 
@@ -37,9 +36,8 @@
   name                          ; Human-readable string: "Rust", "C++"
   priority                      ; Integer priority for detection order (higher = earlier)
   extensions                    ; List of file extensions without dot: ("rs")
-  detectors                     ; List of filenames or functions taking ROOT -> non-nil
-  toolchain                     ; Plist :build-cmd :test-cmd :lint-cmd :notes, or a
-                                        ;   function of ROOT that returns such a plist
+  detectors                     ; Declarative paths or :any/:all/:extension forms.
+  toolchain                     ; Static command plist or (:native KIND).
   debugger                      ; Plist: :adapter, :supports-eval, :supports-method-calls,
                                         ;        :eval-guidance, :common-eval-pitfalls,
                                         ;        :variable-inspection-advice
@@ -77,30 +75,18 @@
 (defun kargu-language-toolchain (spec &optional root)
   "The toolchain plist of SPEC, resolved against ROOT when it is a function."
   (let ((tc (and spec (kargu-language-spec-toolchain spec))))
-    (if (functionp tc)
-        (funcall tc (or root default-directory))
+    (if (plist-get tc :native)
+        (kargu-project-probe-toolchain (kargu-language-spec-id spec) (or root default-directory))
       tc)))
 
 ;;;; Detection -------------------------------------------------------------
 
-(defalias 'kargu-languages--has-file-p #'kargu-fs-has-file-p)
-
 (defun kargu-language-detect (root)
-  "Detect the primary language spec for ROOT by evaluating registered specs.
-Returns matching `kargu-language-spec', or nil."
-  (let ((specs (kargu-language-list))
-        (matched nil))
-    (dolist (spec specs)
-      (unless matched
-        (let ((detectors (kargu-language-spec-detectors spec)))
-          (when (cl-some (lambda (d)
-                           (cond
-                            ((functionp d) (funcall d root))
-                            ((stringp d) (kargu-languages--has-file-p root d))
-                            (t nil)))
-                         detectors)
-            (setq matched spec)))))
-    matched))
+  "Return ROOT's completed native primary language observation, or nil."
+  (when-let* ((view (kargu-project-probe-view root))
+              ((eq (gethash "complete" view) t))
+              (id (gethash "language" view)) ((stringp id)))
+    (cl-find id (kargu-language-list) :key (lambda (spec) (symbol-name (kargu-language-spec-id spec))) :test #'equal)))
 
 (defun kargu-language-detect-by-extension (file-path)
   "Return language spec matching extension of FILE-PATH, or nil."

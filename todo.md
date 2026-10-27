@@ -51,7 +51,8 @@ reverse approval + Emacs presenter bağlıdır; Bash/job ve interactive session
 consumer'ları native porttadır (.codex/20–25). `workspace_grep` de rg/GNU grep
 adapter'ına bağlandı; eski Elisp grep engine'i kaldırıldı (.codex/26–27).
 `git_status` native Git + complete-output portundadır; eski Elisp status
-engine'i silindi (.codex/28). Diğer Git komutları henüz taşınmadı.
+engine'i silindi (.codex/28). Diğer read/mutation Git tüketicileri de native
+kapıya taşındı (.codex/53, 56, 58).
 Kullanıcının API önceliğiyle 162-provider catalog baseline Rust asset/core
 snapshot'a taşındı (.codex/29). Chat/model-list HTTP ve SSE motoru native'dir;
 Elisp parser/accumulator/watchdog silindi (.codex/30). Credential/UI portları
@@ -98,9 +99,10 @@ tüm API/Rust göçü tamamlandı sayılmaz.
 01 uyum denetimi ve kalan kaynak-sahipliği bulguları .codex/39'da tutulur;
 testlerin yeşil olması bütün Rust ağacının mimari uyum sertifikası değildir.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
-output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; kalan read/
-Git/skill/webfetch, egress/context ve global tüketiciler aşağıdaki gruplarda
-açık kalır. Yeni paralel iş listesi yoktur.
+output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; context/egress
+ve diğer global tüketiciler aşağıdaki gruplarda açık kalır.
+Todo 2 native araç consumer kapanışı ve kalan köprü envanteri .codex/58
+üzerindedir; edit/sensör/run göçlerinin yerine geçmez. Yeni paralel iş listesi yoktur.
 
 ## Gruplar ve önkoşullar
 
@@ -508,7 +510,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Bu iki URL alt işi tek başına üst işi kapatmadı; kalan authority/precedence/
     selection consumer cutover'ı .codex/52'de ayrıca tamamlandı.
 
-- [ ] **2. Kalan native araçlar ve tek izin kapısı** — `read_file`, diğer Git
+- [x] **2. Kalan native araçlar ve tek izin kapısı** — `read_file`, diğer Git
   işlemleri, skill/toolchain ve webfetch tüketicilerini ortak owner/process/path/
   egress/approval portuna taşı. Mevcut `ls`/`rg`/`git` motorlarını yeniden yazma.
   Registry/alias/mode ve doğrudan çağrıda aynı gate'i kullan; job/foreground/global
@@ -566,11 +568,11 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       reader, numbered formatter, sync read/diff alias ve model worker yolu
       silindi. Tam edit snapshot API'si (madde 3) ve Dape source worker'ı (madde 4)
       kendi tüketicileri için kalır; model read fallback'i değildir. .codex/54.
-  - [ ] Git mutation tüketicileri: stage/unstage/commit/branch/stash ortak native
+  - [x] Git mutation tüketicileri: stage/unstage/commit/branch/stash ortak native
     approval ledger'a geçsin. Exact immutable action/object ve repo/index scope,
     reject/timeout/cancel, hook/signing child drain ve partial/unknown sonuçları
     korunsun; issued mutation sonrası kör fallback/replay yapılmasın.
-  - [ ] Skill discovery/read ve toolchain/dependency probe tüketicileri native
+  - [x] Skill discovery/read ve toolchain/dependency probe tüketicileri native
     portlara geçsin; trusted search roots, byte/item/deadline ve executable sınıfı
     açık olsun. Yerel araç eksikliği kurulum veya gizli shell başlatmasın.
     - [x] Skill discovery/read: `workspace/skills` / `workspace_skills`, açık
@@ -579,14 +581,26 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       Prompt öncesi owned async refresh; buffer/session observation, newest intent,
       stale root/settings/deadline/Stop ve alias/direct/mode gerçek consumer testli.
       Eski Elisp scanner/parser/global TTL cache silindi. Ayrıntı .codex/57.
-    - [ ] Toolchain/dependency probe tüketicileri; executable sınıfı ve bounded
+    - [x] Toolchain/dependency probe tüketicileri; executable sınıfı ve bounded
       discovery mevcut shared process/gate'e bağlansın. Kurulum başlatılmaz.
-  - [ ] Webfetch DNS/redirect/address/egress/body/timeout kararları ortak native
+  - [x] Webfetch DNS/redirect/address/egress/body/timeout kararları ortak native
     HTTP/security portuna taşınsın. Her hop'ta numeric policy/pinned address,
     cancellation ve bounded body testli olsun; ağ testi yalnız kontrollü fixture.
-  - [ ] Son consumer sonrası legacy OS/job/foreground/global köprülerini kaldır;
+  - [x] Son consumer sonrası legacy OS/job/foreground/global köprülerini kaldır;
     ortak registry/alias/mode ve direct çağrının aynı native gate'i kullandığını,
     foreign owner/missing adapter/unknown effect sınırlarını uçtan uca doğrula.
+
+  Kapanış: `git/mutate` / `git_mutation`, `workspace/probe` /
+  `workspace_probe`, `workspace/webfetch` / `workspace_webfetch`; kapalı typed
+  input, actual drain ve ortak native capability admission. Probe metadata-only
+  SafeReadOnly portudur; executable çalıştırmaz. Project→connection→skills owned
+  preparation eksik mandatory CLI'da ilk POST/unsent-history tüketimini engeller.
+  Legacy Git runner/fallback, curl/resolver/policy/parser, toolchain FS seçimleri
+  ve job/foreground/counter global aynaları silindi. Detay/kabul .codex/58.
+  `tools/process.el` yalnız diff Git-apply (madde 3), Dape context/preflight
+  (madde 4) ve session listing worker'ı (madde 7) için kalır; native araç fallback'i
+  değildir. Dape file worker, credential/UI/package ve binary locator interop'u
+  kendi tüketicileri için korunur. G04–G13 ve tüm Rust göçü kapanmış sayılmaz.
 
 - [ ] **3. Edit/proposal/review motoru** — diff/proposal/revision/journal kararlarını
   Rust'a taşı; Emacs'te yalnız canlı belge kontrolü, transaction/undo/save ve review

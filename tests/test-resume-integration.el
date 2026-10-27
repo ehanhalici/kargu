@@ -319,42 +319,38 @@
         (kargu-async-cancel task)))))
 
 (ert-deftest kargu-resume-idle-project-cannot-cancel-foreign-job-test ()
-  "Foreground cancellation cannot borrow another project's legacy process."
+  "Foreground cancellation never scans another source's service."
   (let* ((service (kargu-job-service--create))
-         (kargu-bash--active-async-proc 'foreign) cancelled)
+         (foreign (kargu-job-service--create :active-async-proc 'foreign)) cancelled)
     (cl-letf (((symbol-function 'kargu-job-service-for-project) (lambda (&rest _) service))
               ((symbol-function 'kargu-bridge-job-cancel) (lambda (&rest _) (setq cancelled t))))
       (kargu-bash-kill-active-async)
       (should-not cancelled)
-      (should (eq kargu-bash--active-async-proc 'foreign)))))
+      (should (eq (kargu-job-service-active-async-proc foreign) 'foreign)))))
 
 (ert-deftest kargu-resume-pruning-cannot-remove-foreign-job-with-same-id-test ()
-  "Legacy aggregate pruning removes an ID only if it still names that exact job."
+  "Pruning uses one service table; equal foreign IDs remain untouched."
   (let* ((service (kargu-job-service--create :completed-limit 0))
-         (kargu-bash-completed-jobs 0)
-         (kargu-bash--processes (make-hash-table :test #'equal))
+         (other (kargu-job-service--create)) (kargu-bash-completed-jobs 0)
          (old (kargu-bash--make-job :id "p1" :state :done :started 1))
          (foreign (kargu-bash--make-job :id "p1" :state :running :started 2)))
     (puthash "p1" old (kargu-job-service-jobs service))
-    (puthash "p1" foreign kargu-bash--processes)
+    (puthash "p1" foreign (kargu-job-service-jobs other))
     (kargu-bash--prune-jobs service)
-    (should (eq foreign (gethash "p1" kargu-bash--processes)))))
+    (should (eq foreign (gethash "p1" (kargu-job-service-jobs other))))))
 
 (ert-deftest kargu-resume-job-service-close-cancels-only-owned-process-test ()
-  "Closing one job service cancels its processes but leaves foreign jobs intact."
-  (let* ((service (kargu-job-service--create))
-         (kargu-job--services (make-hash-table :test #'equal))
-         (kargu-bash--processes (make-hash-table :test #'equal))
+  "Closing one service cancels its handles once and leaves foreign jobs intact."
+  (let* ((service (kargu-job-service--create)) (other (kargu-job-service--create))
          (own (kargu-bash--make-job :id "p1" :handle 'own :state :running))
          (foreign (kargu-bash--make-job :id "p2" :handle 'foreign :state :running)) killed)
     (puthash "p1" own (kargu-job-service-jobs service))
-    (puthash "p2" foreign kargu-bash--processes)
+    (puthash "p2" foreign (kargu-job-service-jobs other))
     (cl-letf (((symbol-function 'kargu-bridge-job-cancel) #'ignore)
               ((symbol-function 'kargu-bridge-job-dispose) (lambda (handle) (push handle killed))))
-      (kargu-job-service-close service)
-      (kargu-job-service-close service))
+      (kargu-job-service-close service) (kargu-job-service-close service))
     (should (equal killed '(own)))
-    (should (eq foreign (gethash "p2" kargu-bash--processes)))))
+    (should (eq foreign (gethash "p2" (kargu-job-service-jobs other))))))
 
 (ert-deftest kargu-resume-async-patch-retains-edit-owner-test ()
   "A real asynchronous Git patch records its changes only in its captured service."

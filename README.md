@@ -38,7 +38,7 @@ Rather than running heavy external daemons or separate browser windows, Kargu tu
 - GNU Emacs 29.1 or newer
 - Required for model connections: the built `kargu-core` binary (see below).
   Model HTTP, SSE and terminal errors do not require `plz`.
-  Curl is only needed by webfetch.
+  Webfetch also uses native HTTP/TLS and needs no curl executable.
 - Optional interface packages: `transient` (menu), `company` (completion),
   `magit` (Git interface).
 - Optional integrations: `eglot` and a language server for LSP tools; `dape` and a configured debug adapter for debug mode. Kargu works without LSP.
@@ -66,9 +66,10 @@ Clone the repository and add it to your Emacs `load-path`:
 
 The Rust core provides bounded JSON-RPC IPC, application/session lifecycle,
 native `find_files`, GNU `ls` listing, `rg`/GNU `grep` search (including aliases),
-`git_status`, `git_log`, branch/stash listing, Bash/interactive jobs, the provider
+`read_file`, read-only Git and approved Git mutations, skill discovery/read,
+project/dependency probes, public webfetch, Bash/interactive jobs, the provider
 catalog and model HTTP/SSE.
-Elisp still owns prompts, request/wire policy and agent orchestration; this
+Elisp still owns editor interop, prompt assembly and agent orchestration; this
 is not yet a complete Rust agent backend.
 
 The Rust library now includes typed run admission, single-use approvals and a
@@ -479,6 +480,35 @@ global eight-second cache and synchronous Lisp scanner/parser are removed.
 Missing capabilities fail explicitly; rebuild/restart an older core. Native
 filesystem cancellation remains cooperative between OS calls.
 
+Project language/toolchain and CLI discovery use `workspace/probe`
+(`workspace_probe`). Runs await project probes, connection preparation and then
+skills before their first model request. Missing explicitly mandatory CLIs
+reject preparation without consuming the unsent prompt. Setup uses the same
+probe port. Rust checks executable file metadata against captured `exec-path`;
+it executes no version commands, package scripts or installers. Native probes
+choose JavaScript package managers/scripts, Java build systems and actual Elisp
+test runners. A project with no runner gets no fabricated successful test command.
+Scans share the bounded read pool and report incomplete observations explicitly.
+
+`(kargu-project-probe-refresh callback &optional root)` delivers a Result;
+passive language/toolchain/dependency readers observe only completed facts for
+the same buffer/session/root/settings. Unobserved executables are `:unknown`.
+Custom detectors are paths or `(:any ...)`, `(:all ...)`, `(:extension "go")`
+(recursive), and `(:root-extension "el")` forms. Custom commands are static
+plists; file-dependent built-ins use native profiles. Callable Elisp detectors
+and command resolvers must be converted to declarative metadata.
+
+Webfetch requires `workspace_webfetch`. Rust accepts unauthenticated HTTP(S)
+GETs to public numeric addresses, resolves and pins each hop independently,
+disables proxy inheritance and automatic redirects, and verifies HTTPS TLS.
+Private/special-use addresses, local names and URL credentials are refused.
+At most five redirects and 5 MB of strict UTF-8 body are accepted; character
+truncation is explicit. DNS and total deadlines are each positive and at most
+30 seconds. Cancelled/expired replies cannot publish or follow a redirect.
+System DNS and filesystem calls remain cooperatively cancellable: a stalled
+OS call retains its worker slot until actual join, even after its deadline.
+The editor remains asynchronous; it runs no resolver, curl or HTTP parser.
+
 `workspace_grep` enforces `max_matches` across the whole search, not per
 file. Both ripgrep and GNU grep use line-buffered output; Kargu stops the
 producer after at most one extra captured record to detect omitted hits.
@@ -520,11 +550,27 @@ legacy symlink HEAD) fail explicitly, never by falling back to unsafe execution.
 Elisp diff/blame argv/range engines are removed. The shared read port freezes inputs before startup,
 retains its initiating application/session, and rejects elapsed deadlines even
 before timer dispatch. `git_branches` and `git_stashes` are read-only in all
-modes. Mutation commands remain a separate native cutover. Stash `apply`
+modes. Stage/unstage/commit/branch/stash mutations require `git_mutation` and
+Agent mode, through the same native approval ledger and process supervisor.
+Rust resolves repository layout and object IDs before presenting the final
+argv; repository/index/ref/config evidence is checked again before launch.
+Paths are literal. Unstage selects either reset to the captured HEAD or, for
+a verified unborn branch, cached removal; a failed issued write never starts
+a fallback command. Hooks and signing are explicitly classified as arbitrary
+code and run only after approval. Failed/interrupted writes may have partial
+or unknown effects; cancellation after issuance returns `outcome_unknown`.
+Complete output limits apply to writes too. No automatic retry or rollback is
+implied. This evidence is not a filesystem lock or a whole-worktree snapshot.
+Stash `apply`
 requires an explicit `stash@{N}` entry from `git_stashes`; its immutable object
 ID is resolved before approval, and applying never deletes the stash. `pop`
 and `drop` are refused because an index may change while approval is pending.
 Delete entries manually through Git/Magit after reviewing the applied result.
+
+Shell job IDs such as `p1` belong to one source buffer/session/project service;
+another chat in the same project cannot list or cancel them. Closing a source
+releases only its owned views and native handles. Legacy global foreground,
+job-table and counter mirrors are removed.
 
 Git and Bash approvals capture their session, run, project, directory identity,
 environment and executable search path. A delayed answer cannot start a changed

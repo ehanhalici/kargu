@@ -69,7 +69,7 @@
     (setf (kargu-bash--job-handle job) handle (kargu-bash--job-state job) :running)
     (unless (kargu-bash--job-background job)
       (setf (kargu-job-service-active-async-proc (kargu-bash--job-service job)) handle)
-      (setq kargu-bash--active-async-proc handle))
+)
     (kargu-bridge-job-eof handle #'ignore)
     (setf (kargu-bash--job-reader job)
           (kargu-bridge-output-start
@@ -90,16 +90,14 @@
                    :output-bytes limit :stderr "merge"
                    :valid-p (lambda () (kargu-permission-validate-command command root directory) t))))
     (let* ((service (kargu-job-service-for-project root))
-           (id (format "p%d" (cl-incf kargu-bash--counter)))
+           (id (format "p%d" (cl-incf (kargu-job-service-counter service))))
            (buffer (generate-new-buffer (format "*kargu-proc-%s*" id)))
            (job (kargu-bash--make-job :id id :command command :directory directory :root root
                                      :service service :buffer buffer :started (float-time)
                                      :background background :limit limit))
            (task (kargu-async-start (lambda (value failure) (funcall callback (if failure (concat "ERROR: " failure) value))))))
       (setf (kargu-bash--job-task job) task)
-      (cl-incf (kargu-job-service-counter service))
       (puthash id job (kargu-job-service-jobs service))
-      (puthash id job kargu-bash--processes)
       (with-current-buffer buffer
         (kargu-bash-output-mode)
         (buffer-disable-undo)

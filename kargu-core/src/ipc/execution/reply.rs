@@ -1,5 +1,6 @@
 //! Captured adapter result formatting, separate from process lifecycle authority.
 
+use crate::workspace::git::mutation::{MutationPreparation, MutationReport};
 use crate::{
     application::ToolOutcome,
     constants::limits,
@@ -12,12 +13,20 @@ use crate::{
 use serde_json::{Value, json};
 
 pub(super) enum Reply {
+    GitMutationPrepare(Box<MutationPreparation>),
+    GitMutation(MutationReport),
     Command,
     Grep(GrepReport),
     GitRead(Box<GitReadReport>),
     GitPrepare(Box<GitReadPreparation>),
 }
 impl Reply {
+    pub fn approval_intent(&self) -> Option<&Value> {
+        match self {
+            Self::GitMutation(r) => Some(&r.intent),
+            _ => None,
+        }
+    }
     pub fn discard(self) -> Result<(), CoreError> {
         match self {
             Self::GitRead(report) => (*report).discard(),
@@ -26,6 +35,8 @@ impl Reply {
     }
     pub fn issued(self) -> RunningReply {
         match self {
+            Self::GitMutationPrepare(p) => RunningReply::GitMutationPrepare(p),
+            Self::GitMutation(r) => RunningReply::GitMutation(r),
             Self::Command => RunningReply::Command,
             Self::Grep(report) => RunningReply::Grep(report),
             Self::GitRead(report) => RunningReply::GitRead((*report).issued()),
@@ -34,6 +45,8 @@ impl Reply {
     }
 }
 pub(super) enum RunningReply {
+    GitMutationPrepare(Box<MutationPreparation>),
+    GitMutation(MutationReport),
     Command,
     Grep(GrepReport),
     GitRead(RunningGitReadReport),
@@ -43,24 +56,48 @@ pub(super) enum CompletedReply {
     Value(Value),
     Continue(Continuation),
 }
-pub(super) struct Continuation {
-    preparation: Box<GitReadPreparation>,
-    stdout: Vec<u8>,
-    outcome: ToolOutcome,
+pub(super) enum Continuation {
+    GitMutation {
+        preparation: Box<MutationPreparation>,
+        stdout: Vec<u8>,
+        outcome: ToolOutcome,
+        code: Option<i32>,
+    },
+    GitRead {
+        preparation: Box<GitReadPreparation>,
+        stdout: Vec<u8>,
+        outcome: ToolOutcome,
+    },
 }
 impl Continuation {
     pub fn prepare(
         self,
         context: &crate::workspace::command::Preparation,
     ) -> Result<super::input::Prepared, CoreError> {
-        (*self.preparation)
-            .next(self.stdout, self.outcome, context)
-            .map(super::input::Prepared::from)
+        match self {
+            Self::GitMutation {
+                preparation,
+                stdout,
+                outcome,
+                code,
+            } => preparation
+                .next(stdout, outcome, code, context)
+                .map(super::input::Prepared::from),
+            Self::GitRead {
+                preparation,
+                stdout,
+                outcome,
+            } => preparation
+                .next(stdout, outcome, context)
+                .map(super::input::Prepared::from),
+        }
     }
 }
 impl RunningReply {
     pub fn capture_limit(&self) -> Result<ByteLimit, CoreError> {
         ByteLimit::try_from(match self {
+            Self::GitMutationPrepare(_) => 65536,
+            Self::GitMutation(report) => report.output.as_usize().max(1),
             Self::Command => limits::SEARCH_RESULT_BYTES,
             Self::Grep(report) => report.output_limit.as_usize().max(1),
             Self::GitPrepare(preparation) => preparation.output_limit().as_usize().max(1),
@@ -76,10 +113,21 @@ impl RunningReply {
             if !result.cleanup_complete {
                 return Err(CoreError::CleanupFailed);
             }
-            return Ok(CompletedReply::Continue(Continuation {
+            return Ok(CompletedReply::Continue(Continuation::GitRead {
                 preparation,
                 stdout: output.stdout,
                 outcome: result.outcome,
+            }));
+        }
+        if let Self::GitMutationPrepare(preparation) = self {
+            if !result.cleanup_complete {
+                return Err(CoreError::CleanupFailed);
+            }
+            return Ok(CompletedReply::Continue(Continuation::GitMutation {
+                preparation,
+                stdout: output.stdout,
+                outcome: result.outcome,
+                code: result.exit_code,
             }));
         }
         let rendered = self.render(result, &output);
@@ -97,6 +145,10 @@ impl RunningReply {
             ""
         };
         let text = match self {
+            Self::GitMutation(report) => {
+                report.text(&output.stdout, &output.stderr, result.outcome)?
+            }
+            Self::GitMutationPrepare(_) => return Err(CoreError::InvalidToolOutput),
             Self::GitRead(report) => report.text(&output.stdout, &output.stderr, result.outcome)?,
             Self::GitPrepare(_) => return Err(CoreError::InvalidToolOutput),
             Self::Grep(report) if result.outcome == ToolOutcome::Ok => {

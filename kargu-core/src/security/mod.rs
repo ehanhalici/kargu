@@ -23,7 +23,9 @@ use std::{
 };
 use tokio::time::Instant;
 
+mod action_snapshot;
 pub(crate) mod file;
+pub(crate) use action_snapshot::ActionSnapshot;
 mod read_target;
 pub(crate) use read_target::ReadTarget;
 
@@ -160,6 +162,7 @@ pub struct CommandInput {
 
 /// Validated immutable command; no Debug or Serialize can disclose its arguments.
 pub struct CommandSpec {
+    action_snapshot: Option<Arc<ActionSnapshot>>,
     safety: ToolSafetyLevel,
     read_targets: Vec<ReadTarget>,
     pub(crate) invocation: PathBuf,
@@ -217,6 +220,7 @@ impl TryFrom<CommandInput> for CommandSpec {
             });
         }
         Ok(Self {
+            action_snapshot: None,
             safety: ToolSafetyLevel::ExecutesArbitraryCode,
             read_targets: Vec::new(),
             invocation: input.program,
@@ -236,6 +240,10 @@ impl TryFrom<CommandInput> for CommandSpec {
     }
 }
 impl CommandSpec {
+    pub(crate) fn with_action_snapshot(mut self, snapshot: Arc<ActionSnapshot>) -> Self {
+        self.action_snapshot = Some(snapshot);
+        self
+    }
     /// Select ordinary retention mode, replacing any record capture before approval.
     pub fn with_retention(mut self, retention: OutputRetention) -> Self {
         self.capture = CapturePolicy::Retain(retention);
@@ -299,6 +307,9 @@ impl CommandSpec {
         Ok(self)
     }
     fn revalidate(&self, run: &RunHandle) -> Result<(), CoreError> {
+        if let Some(snapshot) = &self.action_snapshot {
+            snapshot.revalidate()?;
+        }
         run.check_live()?;
         run.settings().workspace.revalidate()?;
         self.cwd.revalidate()?;
@@ -382,12 +393,25 @@ impl ToolRegistry {
             "git_stashes",
             "git_diff",
             "git_blame",
+            "git_mutation_prepare",
         ] {
             self.register(
                 ToolName::try_from(name.to_owned())?,
                 vec![],
                 ToolSafetyLevel::SafeReadOnly,
             )?;
+        }
+        Ok(())
+    }
+    pub(crate) fn register_git_mutations(&mut self) -> Result<(), CoreError> {
+        for name in [
+            "git_stage",
+            "git_unstage",
+            "git_commit",
+            "git_branch",
+            "git_stash",
+        ] {
+            self.register_process(ToolName::try_from(name.to_owned())?, vec![])?;
         }
         Ok(())
     }
@@ -441,6 +465,12 @@ fn digest(
 ) -> Result<ActionDigest, CoreError> {
     let mut hash = Sha256::new();
     hash.update(b"kargu-command-v1");
+    if let Some(snapshot) = &command.action_snapshot {
+        hash.update([1]);
+        hash.update(snapshot.digest());
+    } else {
+        hash.update([0]);
+    }
     hash.update(
         u64::try_from(command.read_targets.len())
             .map_err(|_| CoreError::ArithmeticOverflow)?
@@ -546,6 +576,7 @@ fn digest(
     hash.update([match command.success_codes {
         SuccessCodes::Zero => 0,
         SuccessCodes::ZeroOrOne => 1,
+        SuccessCodes::ZeroOrTwo => 2,
     }]);
     hash.update([match command.stderr {
         StderrPolicy::Separate => 0,

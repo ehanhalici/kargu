@@ -186,9 +186,8 @@
     (kargu-test-mode 'agent)
     (let ((foreign (kargu-bash--make-job :id "foreign" :state :running))
           (kargu-job--services (make-hash-table :test #'equal))
-          (kargu-bash--processes (make-hash-table :test #'equal)) cancelled)
+          cancelled)
       (puthash "foreign" foreign (kargu-job-service-jobs (kargu-job-service-for-project)))
-      (puthash "foreign" foreign kargu-bash--processes)
       (kargu-test-native-boundary
        (cl-letf (((symbol-function 'kargu-api-send) #'ignore)
                  ((symbol-function 'kargu-bridge-ensure) (lambda (&rest _) #'ignore))

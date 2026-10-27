@@ -33,7 +33,6 @@
 (require 'kargu/contract)
 (require 'kargu/api/tools)
 (require 'kargu/permission)
-(require 'kargu/permission/execute)
 (require 'kargu/tools/process)
 (require 'kargu/tools/git/native)
 (require 'kargu/async)
@@ -57,41 +56,6 @@ agent task still cancels the Git process."
   "Refresh Magit status buffers if Magit is loaded."
   (when (fboundp 'magit-refresh)
     (ignore-errors (magit-refresh))))
-
-(defun kargu-git--result (result)
-  "Convert process RESULT to an exit-code/output pair."
-  (let ((code (plist-get result :code))
-        (out (string-trim (or (plist-get result :output) ""))))
-    (cond
-     ((or (plist-get result :timed-out) (plist-get result :truncated))
-      (cons -1 (kargu-process-failure "Git" result)))
-     ((eql code 127) (cons 127 "Git executable not found on PATH"))
-     ((not (eql code 0)) (cons code (kargu-process-failure "Git" result)))
-     (t (cons code out)))))
-
-(defun kargu-git--run (args root callback)
-  "Run git with ARGS in project ROOT without waiting.
-CALLBACK receives (EXIT-CODE . TRIMMED-OUTPUT); a missing git or a timeout
-gives a nonzero code with the reason as output."
-  (let* ((task kargu-async--current-task)
-         (deliver (lambda (result) (funcall callback (kargu-git--result result))))
-         (process (kargu-process-run
-                   "git" args (if task (kargu-async-wrap task deliver) deliver)
-                   :dir (or root (kargu-permission-project-root)) :timeout kargu-git-timeout)))
-    (when (and task (processp process))
-      (kargu-async-add-cleanup task (lambda () (kargu-process-cancel process))))
-    process))
-
-(defun kargu-git--check-ref (value what)
-  "VALUE as a trimmed string, or an error when it cannot be a plain WHAT.
-A name that starts with a dash would be read by git as an option."
-  (let ((v (and (stringp value) (string-trim value))))
-    (cond
-     ((or (null v) (string-empty-p v))
-      (error "%s is required" what))
-     ((or (string-prefix-p "-" v) (string-match-p "[[:space:][:cntrl:]]" v))
-      (error "%s `%s' is not a plain reference (no leading dash, no whitespace)" what v))
-     (t v))))
 
 ;;;; Status ---------------------------------------------------------------
 
@@ -122,208 +86,41 @@ PATH optionally filters by file path."
 
 ;;;; Changing commands ----------------------------------------------------
 
-(defun kargu-git--change (args root callback ok-text fail-what)
-  "Approve changing git ARGS in ROOT and deliver the result to CALLBACK.
-OK-TEXT formats successful output; FAIL-WHAT names failure."
-  (let ((args (copy-tree args)))
-    (kargu-permission-execute
-     :command (mapconcat #'shell-quote-argument (cons "git" args) " ")
-     :directory root :callback callback
-     :start (lambda (done)
-              (kargu-git--commit-change args root done ok-text fail-what)))))
-
-(defun kargu-git--commit-change (args root callback ok-text fail-what)
-  "Run the changing git ARGS in ROOT and pass the outcome to CALLBACK.
-OK-TEXT is a function of the output giving the success text.  FAIL-WHAT
-names the operation in the error."
-  (kargu-git--run
-   args root
-   (lambda (res)
-     (kargu-git--refresh)
-     (kargu-process-deliver
-      callback
-      (lambda ()
-        (if (eql (car res) 0)
-            (funcall ok-text (cdr res))
-          (error "Git %s failed (exit %d): %s" fail-what (car res) (cdr res))))))))
+(defun kargu-git--mutate (callback query)
+  "Deliver approved native QUERY to CALLBACK and refresh the editor view."
+  (unless (functionp callback) (error "Native Git mutations require a callback"))
+  (kargu-git-native-mutate
+   (lambda (text) (kargu-git--refresh) (funcall callback text))
+   (kargu-permission-project-root) kargu-git-timeout kargu-process-max-bytes query))
 
 (defun kargu-git-commit (callback message &optional all)
-  "Create a git commit with MESSAGE and pass the outcome to CALLBACK.
-ALL optionally stages modified files."
-  (kargu-contract-assert #'kargu-contract-non-empty-string-p message
-                         "commit message is required: %S" message)
-  (let* ((root (kargu-permission-project-root))
-         (args (append (list "commit" "-m" (string-trim message))
-                       (and all (list "-a")))))
-    (kargu-git--change args root callback
-                       (lambda (out) (format "Commit successful:\n%s" out))
-                       "commit")))
-
-;;;; Stage & Unstage ------------------------------------------------------
-
-(defun kargu-git--relative-paths (paths action proj-root)
-  "Project-relative PATHS for ACTION under PROJ-ROOT, in input order.
-`.` stays `.'.  Empty entries are dropped."
-  (let (clean)
-    (dolist (p (kargu-seq-to-list paths))
-      (let ((trim (string-trim (format "%s" (or p "")))))
-        (unless (string-empty-p trim)
-          (push (if (string= trim ".")
-                    "."
-                  (file-relative-name
-                   (kargu-permission-assert-within-project trim proj-root action)
-                   proj-root))
-                clean))))
-    (nreverse clean)))
-
-(defun kargu-git--require-paths (paths action)
-  "PATHS, or an error naming ACTION."
-  (or paths
-      (error "At least one path must be specified to %s" action)))
+  "Create an approved native commit with MESSAGE and optional ALL to CALLBACK."
+  (kargu-git--mutate callback (kargu-bridge--object "operation" "commit" "message" message
+                                                 "all" (if all t :json-false))))
 
 (defun kargu-git-stage (callback paths)
-  "Stage PATHS (string or list of strings) via git add; report to CALLBACK."
-  (let* ((root (kargu-permission-project-root))
-         (clean (kargu-git--require-paths
-                 (kargu-git--relative-paths paths "stage path" root)
-                 "stage")))
-    (kargu-git--change (append '("add" "--") clean) root callback
-                       (lambda (_) (format "Staged: %s" (string-join clean ", ")))
-                       "add")))
+  "Stage literal PATHS through the native approval ledger into CALLBACK."
+  (kargu-git--mutate callback (kargu-bridge--object "operation" "stage" "paths" (vconcat (kargu-seq-to-list paths)))))
 
 (defun kargu-git-unstage (callback paths)
-  "Unstage PATHS and deliver the result to CALLBACK."
-  (let* ((root (kargu-permission-project-root))
-         (clean (kargu-git--require-paths
-                 (kargu-git--relative-paths paths "unstage path" root)
-                 "unstage")))
-    (kargu-permission-execute
-     :command (mapconcat #'shell-quote-argument (append '("git" "restore" "--staged" "--") clean) " ")
-     :directory root :callback callback
-     :start (lambda (done) (kargu-git--unstage-approved clean root done)))))
-
-(defun kargu-git--unstage-approved (paths root callback)
-  "Unstage approved PATHS in ROOT and deliver the result to CALLBACK."
-  (kargu-git--run
-   (append '("restore" "--staged" "--") paths) root
-   (lambda (res)
-     (if (eql (car res) 0)
-         (kargu-git--refresh-and-deliver callback (format "Unstaged: %s" (string-join paths ", ")))
-       (kargu-git--unstage-fallback paths :root root :callback callback)))))
-
-(cl-defun kargu-git--unstage-fallback (paths &key root callback)
-  "Unstage PATHS in ROOT even before the first commit; report to CALLBACK."
-  (kargu-git--run
-   '("rev-parse" "--verify" "HEAD") root
-   (lambda (result)
-     (let ((command (pcase (car result)
-                      (0 '("reset" "HEAD" "--"))
-                      (128 '("rm" "--cached" "-r" "--ignore-unmatch" "--")))))
-       (if command
-           (kargu-git--commit-change
-            (append command paths) root callback
-            (lambda (_) (format "Unstaged: %s" (string-join paths ", "))) "unstage")
-         (funcall callback (format "ERROR: Cannot inspect Git HEAD: %s" (cdr result))))))))
-
-(defun kargu-git--refresh-and-deliver (callback text)
-  "Refresh Magit and pass TEXT to CALLBACK."
-  (kargu-git--refresh)
-  (funcall callback text))
-
-;;;; Branch ---------------------------------------------------------------
-
-(defconst kargu-git--branch-actions
-  '(("create" ("checkout" "-b") "Created and switched to branch %s")
-    ("switch" ("checkout") "Switched to branch %s")
-    ("delete" ("branch" "-d") "Deleted branch %s"))
-  "Branch action -> (GIT-ARGS-BEFORE-NAME SUCCESS-FORMAT).")
-
-(defun kargu-git--branch-change (act name root callback)
-  "Run branch action ACT on NAME in ROOT and report to CALLBACK."
-  (let* ((spec (cdr (assoc act kargu-git--branch-actions)))
-         (branch (kargu-git--check-ref name "branch name"))
-         (args (append (nth 0 spec) (list branch))))
-    (kargu-git--change args root callback
-                       (lambda (_) (format (nth 1 spec) branch))
-                       (format "branch %s" act))))
+  "Unstage literal PATHS through one prepared native action into CALLBACK."
+  (kargu-git--mutate callback (kargu-bridge--object "operation" "unstage" "paths" (vconcat (kargu-seq-to-list paths)))))
 
 (defun kargu-git-branch (callback action &optional name)
-  "Perform branch ACTION on optional NAME and report to CALLBACK."
-  (let* ((root (kargu-permission-project-root))
-         (act (downcase (string-trim (or action "list")))))
-    (cond
-     ((string= act "list")
-      (kargu-git-native-read callback root kargu-git-timeout kargu-process-max-bytes
-                             (kargu-bridge--object "operation" "branches")))
-     ((assoc act kargu-git--branch-actions)
-      (kargu-git--branch-change act name root callback))
-     (t
-      (error "Unknown branch action: %s; use list, create, switch, or delete" action)))))
-
-;;;; Stash ----------------------------------------------------------------
-
-(cl-defun kargu-git--stash-change (act &key message root callback)
-  "Run stash ACT with MESSAGE in ROOT and report to CALLBACK.
-Only push is accepted; applying a stash has a separate identity-bound path."
-  (let ((args (append (list "stash" act)
-                      (and (equal act "push")
-                           (stringp message)
-                           (not (string-empty-p (string-trim message)))
-                           (list "-m" (string-trim message))))))
-    (kargu-git--change args root callback #'identity (format "stash %s" act))))
-
-(defconst kargu-git--object-id-regexp
-  (rx bos (or (= 40 xdigit) (= 64 xdigit)) eos)
-  "Full Git object IDs for the supported repository object formats.")
-
-(defun kargu-git--apply-stash-object (task root object)
-  "Ask to apply immutable stash OBJECT under ROOT, owned by TASK."
-  (kargu-git--change
-   (list "stash" "apply" object) root
-   (lambda (result) (kargu-async-finish task result))
-   (lambda (output)
-     (format "%s\nStash %s retained; delete manually with Git/Magit if desired." output object))
-   "stash apply"))
-
-(defun kargu-git--stash-apply (stash root callback)
-  "Resolve STASH in ROOT before approval; deliver its application to CALLBACK."
-  (unless (and (stringp stash)
-               (string-match-p (rx bos "stash@{" (+ digit) "}" eos) stash))
-    (user-error "Explicit stash@{N} reference required; list entries with git_stashes"))
-  (let* ((resolution-state :pending)
-         (task (kargu-async-start
-                (lambda (value error)
-                  (funcall callback (if error (concat "ERROR: " error) value)))))
-         (kargu-async--current-task task))
-    (kargu-git--run
-     (list "rev-parse" "--verify" (concat stash "^{commit}")) root
-     (kargu-async-wrap
-      task (lambda (result)
-             (when (eq resolution-state :pending)
-               (setq resolution-state :answered)
-               (let ((object (string-trim (cdr result))))
-                 (if (and (zerop (car result))
-                          (string-match-p kargu-git--object-id-regexp object))
-                     (kargu-git--apply-stash-object task root object)
-                   (kargu-async-finish task nil "Cannot resolve the selected stash")))))))))
+  "Perform branch ACTION on NAME through native Git into CALLBACK."
+  (if (equal (or action "list") "list")
+      (kargu-git-native-read callback (kargu-permission-project-root) kargu-git-timeout kargu-process-max-bytes
+                             (kargu-bridge--object "operation" "branches"))
+    (kargu-git--mutate callback (kargu-bridge--object "operation" (concat "branch_" action) "name" name))))
 
 (cl-defun kargu-git-stash (callback action &optional message &key stash)
-  "Perform stash ACTION with optional MESSAGE and report to CALLBACK.
-For apply, STASH must name a stash@{N} entry.  Its object ID is captured
-before approval.  Pop/drop are refused; delete manually with Git/Magit."
-  (let* ((root (kargu-permission-project-root))
-         (act (downcase (string-trim (or action "list")))))
-    (cond
-     ((string= act "list")
-      (kargu-git-native-read callback root kargu-git-timeout kargu-process-max-bytes
-                             (kargu-bridge--object "operation" "stashes")))
-     ((string= act "push")
-      (kargu-git--stash-change act :message message :root root :callback callback))
-     ((string= act "apply") (kargu-git--stash-apply stash root callback))
-     ((member act '("pop" "drop"))
-      (user-error "Stash pop/drop are unsafe across approval; use apply, then delete manually with Git/Magit"))
-     (t
-      (error "Unknown stash action: %s; use list, push, or apply" action)))))
+  "Perform stash ACTION with MESSAGE or explicit STASH through native CALLBACK."
+  (pcase (or action "list")
+    ("list" (kargu-git-native-read callback (kargu-permission-project-root) kargu-git-timeout kargu-process-max-bytes
+                                    (kargu-bridge--object "operation" "stashes")))
+    ("push" (kargu-git--mutate callback (kargu-bridge--object "operation" "stash_push" "message" (or (kargu-nonempty message) :json-null))))
+    ("apply" (kargu-git--mutate callback (kargu-bridge--object "operation" "stash_apply" "stash" stash)))
+    (_ (user-error "Use stash list, push or explicit apply; pop/drop require manual Git/Magit"))))
 
 ;;;; Blame ----------------------------------------------------------------
 
@@ -439,7 +236,7 @@ prepared arguments without replaying BODY."
     "Stage file(s) into git index (git add). Agent mode only."
     '(("type" . "object")
       ("properties" . (("paths" . (("type" . "string")
-                                   ("description" . "File path or pattern to stage (e.g. '.' for all).")))))
+                                   ("description" . "Literal file or directory path to stage (e.g. '.' for all).")))))
       ("required" . ["paths"]))
     (kargu-git--executor
      (lambda (args done)

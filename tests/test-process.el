@@ -127,14 +127,13 @@
 
 (ert-deftest kargu-structured-consumers-refuse-truncated-output-test ()
   "Quota-killed Git and search results cannot be parsed as complete records."
-  (let ((result '(:code 0 :output "partial" :truncated t)))
-    (should (= (car (kargu-git--result result)) -1))
-    (let (received)
+  (should-not (fboundp 'kargu-git--result))
+  (let (received)
       (kargu-bridge-read--result
        (kargu-async-start (lambda (_text failure) (setq received failure)))
        (kargu-bridge--object "outcome" "failed" "capture_stop" "bytes"
                             "text" "output limit") nil)
-      (should (string-search "output limit" received)))))
+      (should (string-search "output limit" received))))
 
 (ert-deftest kargu-bash-shell-selection-ignores-login-shell-test ()
   "The Bash tool never runs its commands through Fish or Nushell."

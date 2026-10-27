@@ -19,12 +19,7 @@
    :priority 70
    :extensions '("hs" "lhs")
    :modes '(haskell-mode literate-haskell-mode haskell-ts-mode)
-   :detectors
-   (list "stack.yaml"
-         (lambda (root)
-           (ignore-errors
-             (cl-some (lambda (f) (string-match-p "\\.cabal\\'" f))
-                      (directory-files root nil "\\.cabal$" t)))))
+   :detectors '("stack.yaml" (:root-extension "cabal"))
    :toolchain
    '(:build-cmd "cabal build || stack build"
      :test-cmd "cabal test || stack test"

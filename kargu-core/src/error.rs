@@ -27,6 +27,9 @@ pub enum CoreError {
     /// Queued stdin may already have reached the child; cancellation cannot undo it.
     #[error("stdin delivery unconfirmed; do not replay automatically")]
     InputOutcomeUnknown,
+    /// A Git write was issued; cancellation/transport failure cannot undo effects.
+    #[error("Git mutation outcome unconfirmed; do not replay automatically")]
+    MutationOutcomeUnknown,
     /// Run or operation deadline expired.
     #[error("deadline exceeded")]
     Deadline,

@@ -56,7 +56,6 @@
      kargu/tools/git
      kargu/tools/lsp/context
      kargu/tools/search
-     kargu/tools/webfetch
      kargu/ui/confirm
      kargu/ui/notify
      kargu/ui/transient)

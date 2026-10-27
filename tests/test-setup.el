@@ -186,8 +186,10 @@
   "A fresh schema-only process uses native config without loading the API facade."
   (kargu-module-test--evaluate
    '((require 'kargu/config/schema)
+     (defvar kargu-permission--override-root)
      (cl-assert (autoloadp (symbol-function 'kargu-check-setup)))
      (let ((kargu-api-key "synthetic-cold-key")
+           (kargu-permission--override-root default-directory)
            (kargu-bridge-binary-path (getenv "KARGU_CORE_TEST_BINARY"))
            (kargu-bridge--connection nil)
            (file (make-temp-file "kargu-schema-only-" nil ".toml"))

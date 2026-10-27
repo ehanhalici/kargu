@@ -16,51 +16,12 @@
 (require 'kargu/languages/core)
 (require 'json)
 
-(defconst kargu-language-js--metadata-max-bytes 262144
-  "Maximum package.json bytes read while discovering toolchain metadata.")
-
-(defun kargu-language-js--scripts (root)
-  "Return package scripts from ROOT without reading unbounded metadata."
-  (let ((file (expand-file-name "package.json" root)))
-    (when (file-readable-p file)
-      (condition-case err
-          (with-temp-buffer
-            (insert-file-contents file nil 0 kargu-language-js--metadata-max-bytes)
-            (let ((package (json-parse-buffer :object-type 'hash-table)))
-              (when (hash-table-p package)
-                (let ((scripts (gethash "scripts" package)))
-                  (and (hash-table-p scripts) scripts)))))
-        (error (kargu-log 'warn "Cannot read package scripts: %s"
-                          (error-message-string err)))))))
-
-(defun kargu-language-js--script-command (scripts manager name)
-  "Return MANAGER's command for NAME when present in SCRIPTS."
-  (when-let* ((script (and scripts (gethash name scripts))))
-    (when (and (stringp script) (not (string-empty-p (string-trim script))))
-      (if (equal name "test")
-          (format "%s test" manager)
-        (format "%s run %s" manager name)))))
-
 (defun kargu-language-js-package-manager (root)
-  "Package manager for the JavaScript project at ROOT, from its lock file."
-  (cond
-   ((kargu-languages--has-file-p root "pnpm-lock.yaml") "pnpm")
-   ((kargu-languages--has-file-p root "yarn.lock") "yarn")
-   ((or (kargu-languages--has-file-p root "bun.lockb")
-        (kargu-languages--has-file-p root "bun.lock"))
-    "bun")
-   (t "npm")))
-
+  "Return ROOT's observed native package manager, or nil."
+  (when-let* ((view (kargu-project-probe-view root))) (gethash "package_manager" view)))
 (defun kargu-language-js-toolchain (root &optional typescript)
-  "Return commands for ROOT, with optional TYPESCRIPT validation."
-  (let* ((pm (kargu-language-js-package-manager root))
-         (scripts (kargu-language-js--scripts root)))
-    (list :build-cmd (or (kargu-language-js--script-command scripts pm "build")
-                         (and typescript "npx tsc --noEmit"))
-          :test-cmd (kargu-language-js--script-command scripts pm "test")
-          :lint-cmd (kargu-language-js--script-command scripts pm "lint")
-          :notes (format "Package manager: %s. Only use scripts defined in package.json."
-                         pm))))
+  "Return ROOT's observed native commands, optionally for TYPESCRIPT."
+  (kargu-project-probe-toolchain (if typescript 'typescript 'javascript) root))
 
 (defconst kargu-language-javascript-spec
   (kargu-make-language-spec
@@ -70,7 +31,7 @@
    :extensions '("js" "jsx" "mjs" "cjs")
    :modes '(js-mode js-ts-mode js2-mode)
    :detectors '("package.json")
-   :toolchain #'kargu-language-js-toolchain
+   :toolchain '(:native "javascript")
    :debugger
    '(:adapter "js-debug"
      :supports-eval t

@@ -19,6 +19,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 pub(super) struct Owner {
+    pub mutation_issued: bool,
     pub purpose: RunPurpose,
     pub scope: ReadScope,
     pub terminal: Option<CoreError>,

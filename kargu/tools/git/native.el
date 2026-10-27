@@ -10,6 +10,20 @@
 ;;; Code:
 
 (require 'kargu/bridge/read)
+(require 'kargu/bridge/command)
+
+(defun kargu-git-native-mutate (callback root timeout output-bytes query)
+  "Approve closed native QUERY in ROOT into CALLBACK with TIMEOUT/OUTPUT-BYTES."
+  (let* ((capture (kargu-bridge-command-capture "git" nil root :timeout timeout :output-bytes output-bytes))
+         (arguments (kargu-bridge-command-arguments capture)))
+    (dolist (key '("program" "arguments" "cwd" "idle_timeout_ms" "stderr")) (remhash key arguments))
+    (puthash "query" query arguments)
+    (kargu-bridge-read-task
+     callback arguments
+     (lambda (connection args done &rest options)
+       (kargu-bridge-approval-execute connection args done :owner (plist-get options :owner)
+                                      :method "git/mutate" :capability "git_mutation"
+                                      :valid-p (kargu-bridge-command-valid-p capture))))))
 
 (defun kargu-git-native-read (callback root timeout output-bytes query)
   "Run closed native QUERY in ROOT into CALLBACK.

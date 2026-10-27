@@ -70,6 +70,12 @@ struct GitReadRequest {
     scope: ReadScope,
     arguments: crate::workspace::git::GitReadInput,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GitMutationRequest {
+    scope: ReadScope,
+    arguments: crate::workspace::git::mutation::MutationInput,
+}
 
 pub(super) struct Commands {
     operations: HashMap<RpcId, Stage>,
@@ -93,6 +99,7 @@ impl Commands {
         registry.register_grep()?;
         registry.register_git_status()?;
         registry.register_git_reads()?;
+        registry.register_git_mutations()?;
         Ok(Self {
             operations: HashMap::new(),
             gate: ExecutionGate::default(),
@@ -228,6 +235,7 @@ impl Commands {
             id,
             Stage::Preparing(Operation {
                 owner: Owner {
+                    mutation_issued: false,
                     purpose,
                     scope,
                     terminal: None,
@@ -236,6 +244,22 @@ impl Commands {
             }),
         );
         Ok(())
+    }
+    pub fn start_git_mutation(
+        &mut self,
+        host: &Host,
+        id: RpcId,
+        params: Value,
+    ) -> Result<(), Fault> {
+        let request: GitMutationRequest =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        self.admit(
+            host,
+            id,
+            request.scope,
+            RunPurpose::AgentTurn,
+            move |context| request.arguments.prepare(context).map(Prepared::from),
+        )
     }
     pub fn cancel(&mut self, id: &RpcId) {
         self.jobs.cancel_request(id);
@@ -278,6 +302,18 @@ impl Commands {
                 }
                 Progress::Done(owner, result) => {
                     let result = owner.terminal.map_or(result, Err);
+                    let result = if owner.mutation_issued
+                        && (result.is_err()
+                            || result.as_ref().is_ok_and(|v| {
+                                json!({"jsonrpc":"2.0","id":id.value(),"result":v})
+                                    .to_string()
+                                    .len()
+                                    > host.frame_limit().as_usize()
+                            })) {
+                        Err(CoreError::MutationOutcomeUnknown)
+                    } else {
+                        result
+                    };
                     messages.push(match result {
                         Ok(value) => protocol::success(&id, value),
                         Err(error) => fault(error).response(Some(&id)),
@@ -423,11 +459,7 @@ impl Commands {
             phase: ApprovalReady {
                 run,
                 request: Box::new(request),
-                reply: if automatic {
-                    prepared.reply
-                } else {
-                    Reply::Command
-                },
+                reply: prepared.reply,
             },
         };
         if automatic {
@@ -440,7 +472,7 @@ impl Commands {
             self.sequence.as_u64()
         ));
         let request = &operation.phase.request;
-        let message = json!({"jsonrpc":"2.0","id":reverse.value(),"method":methods::REQUEST_APPROVAL,
+        let mut message = json!({"jsonrpc":"2.0","id":reverse.value(),"method":methods::REQUEST_APPROVAL,
             "params":{"request_id":id.value(),"approval_id":request.id(),"scope":request.scope(),"program":request.program(),"invocation":request.invocation(),
             "retention":request.retention(),"output_bytes":request.output_limit(),"timeout_ms":request.execution_timeout().duration().map(|duration| duration.as_millis()),"stderr":request.stderr(),
             "idle_timeout_ms":request.idle_timeout().duration().map(|duration| duration.as_millis()),
@@ -448,6 +480,13 @@ impl Commands {
             "stop_on_bytes":request.stop_on_bytes(),
             "arguments":request.arguments().iter().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>(),"cwd":request.working_directory(),
             "environment":request.environment().entries().map(|(k,v)| (k.to_string_lossy().into_owned(),v.to_string_lossy().into_owned())).collect::<std::collections::BTreeMap<_,_>>()}});
+        if let Some(intent) = operation.phase.reply.approval_intent() {
+            message
+                .get_mut("params")
+                .and_then(Value::as_object_mut)
+                .ok_or(CoreError::InvalidToolOutput)?
+                .insert("intent".to_owned(), intent.clone());
+        }
         if message.to_string().len() > host.frame_limit().as_usize() {
             return self.reject_review(host, operation);
         }
@@ -483,7 +522,7 @@ impl Commands {
         decision: UserDecision,
     ) -> Result<Progress, CoreError> {
         let Operation {
-            owner,
+            mut owner,
             phase:
                 ApprovalReady {
                     run,
@@ -503,6 +542,7 @@ impl Commands {
         };
         match self.supervisor.start(actor, grant) {
             Ok(job) => {
+                owner.mutation_issued = matches!(&reply, Reply::GitMutation(_));
                 let reply = reply.issued();
                 if run.scope().purpose() == RunPurpose::ProcessJob {
                     return self
@@ -639,6 +679,11 @@ pub(super) fn fault(error: CoreError) -> Fault {
         CoreError::InputOutcomeUnknown => (
             codes::OUTCOME_UNKNOWN,
             "Stdin delivery is unconfirmed; do not retry automatically",
+            "outcome_unknown",
+        ),
+        CoreError::MutationOutcomeUnknown => (
+            codes::OUTCOME_UNKNOWN,
+            "Git mutation was issued; effects may be partial or unknown. Do not replay automatically",
             "outcome_unknown",
         ),
         CoreError::InvalidValue { .. } => (

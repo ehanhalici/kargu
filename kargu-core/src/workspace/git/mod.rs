@@ -1,5 +1,6 @@
 //! Git CLI adapters. Repository mechanics remain Git's responsibility.
 
+pub(crate) mod mutation;
 mod profile;
 mod query;
 mod repository;

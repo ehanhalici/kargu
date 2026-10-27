@@ -37,9 +37,10 @@
            (id (kargu-bridge-call
                 connection method
                 (kargu-bridge--object "scope" (kargu-bridge-connection-read-scope connection) "arguments" captured)
-                callback :owner owner :timeout (+ 311 (/ (if (numberp timeout) timeout 0) 1000.0)))))
+                callback :owner owner :timeout (if (eq timeout :json-null) :unlimited
+                                                  (+ 341 (/ (if (numberp timeout) timeout 0) 1000.0))))))
       (when-let* ((entry (and id (gethash id (kargu-bridge-connection-pending connection)))))
-        (setf (kargu-bridge--pending-review entry) (list captured session parent nil purpose valid-p))
+        (setf (kargu-bridge--pending-review entry) (list captured session parent nil purpose valid-p method))
         (when parent
           (kargu-async-add-cleanup parent (lambda () (kargu-bridge-cancel connection id)))))
       id)))
@@ -49,8 +50,25 @@
   (and (hash-table-p left) (hash-table-p right)
        (= (hash-table-count left) (hash-table-count right))
        (let ((same t))
-         (maphash (lambda (key value) (unless (equal value (gethash key right :missing)) (setq same nil))) left)
+         (maphash (lambda (key value) (unless (kargu-bridge-approval--equal-value value (gethash key right :missing)) (setq same nil))) left)
          same)))
+
+(defun kargu-bridge-approval--equal-value (left right)
+  "Compare bounded wire LEFT and RIGHT values without object identity."
+  (cond ((hash-table-p left) (kargu-bridge-approval--equal-map left right))
+        ((vectorp left) (and (vectorp right) (= (length left) (length right))
+                            (cl-every #'kargu-bridge-approval--equal-value left right)))
+        (t (equal left right))))
+
+(defun kargu-bridge-approval--git-intent-p (connection params args)
+  "Check native Git PARAMS against captured ARGS on CONNECTION."
+  (and (member "git_mutation" (append (kargu-bridge-connection-capabilities connection) nil))
+       (kargu-bridge-approval--equal-map
+        (gethash "intent" params)
+        (kargu-bridge--object "root" (gethash "root" args) "query" (gethash "query" args)))
+       (file-name-absolute-p (gethash "program" params))
+       (vectorp (gethash "arguments" params))
+       (hash-table-p (gethash "environment" params))))
 
 (defun kargu-bridge-approval--valid (connection params entry)
   "Verify PARAMS exactly match ENTRY and CONNECTION's captured live owner."
@@ -61,7 +79,8 @@
              (bound (kargu-bridge-connection-read-scope connection))
              (cwd (gethash "cwd" args)))
         (and review (buffer-live-p owner) (eq (kargu-bridge-status connection) 'ready)
-             (< (float-time) (kargu-bridge--pending-deadline entry))
+             (or (null (kargu-bridge--pending-deadline entry))
+                 (< (float-time) (kargu-bridge--pending-deadline entry)))
              (or (null (nth 2 review)) (kargu-async-pending-p (nth 2 review)))
              (eq (nth 1 review) (kargu-session-context owner))
              (or (null (nth 5 review)) (funcall (nth 5 review)))
@@ -71,7 +90,8 @@
              (equal (gethash "timeout_ms" params) (gethash "timeout_ms" args))
              (equal (gethash "idle_timeout_ms" params :json-null) (gethash "idle_timeout_ms" args :json-null))
              (equal (gethash "stdout_records" params :json-null) (gethash "stdout_records" args :json-null))
-             (equal (gethash "stop_on_bytes" params :json-false) (gethash "stop_on_bytes" args :json-false))
+             (equal (gethash "stop_on_bytes" params :json-false)
+                    (if (equal (nth 6 review) "git/mutate") t (gethash "stop_on_bytes" args :json-false)))
              (equal (gethash "success_codes" params "zero") (gethash "success_codes" args "zero"))
              (equal (gethash "output_bytes" params) (gethash "output_bytes" args 1048576))
              (equal (gethash "stderr" params) (gethash "stderr" args "separate"))
@@ -79,13 +99,15 @@
              (equal (gethash "session_id" scope) (gethash "session_id" bound))
              (equal (gethash "config_revision" scope) (gethash "config_revision" args))
              (equal (gethash "policy_revision" scope) (gethash "policy_revision" args))
-             (equal (gethash "invocation" params) (gethash "program" args))
-             (equal (gethash "program" params) (file-truename (gethash "program" args)))
-             (equal (gethash "arguments" params) (gethash "arguments" args))
              (equal (directory-file-name (gethash "cwd" params))
                     (directory-file-name (file-truename
                                           (expand-file-name (if (stringp cwd) cwd ".") (gethash "root" args)))))
-             (kargu-bridge-approval--equal-map (gethash "environment" params) (gethash "environment" args))))
+             (if (equal (nth 6 review) "git/mutate")
+                 (kargu-bridge-approval--git-intent-p connection params args)
+               (and (equal (gethash "invocation" params) (gethash "program" args))
+                    (equal (gethash "program" params) (file-truename (gethash "program" args)))
+                    (equal (gethash "arguments" params) (gethash "arguments" args))
+                    (kargu-bridge-approval--equal-map (gethash "environment" params) (gethash "environment" args))))))
     (error nil)))
 
 (defun kargu-bridge-approval--reply (connection id approved)

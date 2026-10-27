@@ -19,12 +19,7 @@
    :priority 60
    :extensions '("c" "h")
    :modes '(c-mode c-ts-mode)
-   :detectors
-   (list (lambda (root)
-           (and (or (kargu-languages--has-file-p root "Makefile")
-                    (kargu-languages--has-file-p root "CMakeLists.txt")
-                    (kargu-languages--has-file-p root "compile_commands.json"))
-                (kargu-fs-has-extension-p root '("c")))))
+   :detectors '((:all (:any "Makefile" "CMakeLists.txt" "compile_commands.json") (:extension "c")))
    :toolchain
    '(:build-cmd "cmake -B build && cmake --build build || make"
      :test-cmd "ctest --test-dir build || make test"

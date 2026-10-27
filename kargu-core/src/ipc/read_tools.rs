@@ -253,6 +253,16 @@ fn fault(error: CoreError) -> Fault {
             "configuration_changed",
         ),
         CoreError::Io(_) => (codes::IO, "Read filesystem operation failed", "io_error"),
+        CoreError::Unavailable => (
+            codes::METHOD_NOT_FOUND,
+            "Native read transport or resolver unavailable",
+            "unavailable",
+        ),
+        CoreError::InvalidToolOutput => (
+            codes::INVALID_STATE,
+            "Invalid native read response",
+            "invalid_output",
+        ),
         _ => (
             codes::RESOURCE_LIMIT,
             "Read resource limit reached",

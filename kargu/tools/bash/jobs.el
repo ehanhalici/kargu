@@ -27,8 +27,9 @@
   :type 'natnum :group 'kargu-bash)
 
 (cl-defstruct (kargu-job-service (:constructor kargu-job-service--create))
-  "Owned job management service per project root."
+  "Owned job views for one project, source buffer and session."
   (id (format "job-svc-%06x" (random #xffffff)) :read-only t)
+  key origin session cleanup
   (project-root nil)
   (counter 0)
   (jobs (make-hash-table :test #'equal))
@@ -36,47 +37,40 @@
   (completed-limit 20))
 
 (defvar kargu-job--services (make-hash-table :test #'equal)
-  "Table of `kargu-job-service' instances keyed by canonical project root.")
-
-(defvar kargu-job--default-service nil
-  "Default fallback `kargu-job-service' when no project root is set.")
+  "Job services keyed by canonical root, source buffer and session identity.")
 
 (defun kargu-job-service-for-project (&optional root)
-  "Get or create the `kargu-job-service' for ROOT (default: project root)."
-  (let* ((proj-root (or root (and (fboundp 'kargu-permission-project-root)
-                                  (kargu-permission-project-root))))
-         (canonical (and proj-root (file-name-as-directory (file-truename proj-root)))))
-    (if canonical
-        (or (gethash canonical kargu-job--services)
-            (let ((svc (kargu-job-service--create
-                        :project-root canonical
-                        :completed-limit kargu-bash-completed-jobs)))
-              (puthash canonical svc kargu-job--services)
-              svc))
-      (or kargu-job--default-service
-          (setq kargu-job--default-service
-                (kargu-job-service--create
-                 :project-root nil
-                 :completed-limit kargu-bash-completed-jobs))))))
+  "Return this source buffer/session's job service for explicit ROOT."
+  (let* ((root (or root (kargu-permission-project-root)))
+         (_valid (unless (stringp root) (user-error "An explicit project root is required for jobs")))
+         (canonical (file-name-as-directory (file-truename root)))
+         (session (kargu-session-context))
+         (key (list canonical (current-buffer) (copy-sequence (kargu-session-id session))))
+         (existing (gethash key kargu-job--services)))
+    (dolist (service (hash-table-values kargu-job--services))
+      (when (and (eq (current-buffer) (kargu-job-service-origin service))
+                 (not (eq session (kargu-job-service-session service))))
+        (kargu-job-service-close service)))
+    (when (and existing (not (eq session (kargu-job-service-session existing))))
+      (kargu-job-service-close existing) (setq existing nil))
+    (or existing
+        (let ((service (kargu-job-service--create :key key :project-root canonical
+                                                 :origin (current-buffer) :session session
+                                                 :completed-limit kargu-bash-completed-jobs)))
+          (let ((cleanup (lambda () (kargu-job-service-close service))))
+            (setf (kargu-job-service-cleanup service) cleanup)
+            (add-hook 'kill-buffer-hook cleanup nil t)
+            (add-hook 'change-major-mode-hook cleanup nil t))
+          (puthash key service kargu-job--services)
+          service))))
 
-;; Backwards compatibility bridge variables
-(defvar kargu-bash--counter 0 "Compatibility alias for monotonic shell job counter.")
-(defvar kargu-bash--processes (make-hash-table :test #'equal)
-  "Compatibility table of shell jobs keyed by stable identifiers.")
-(defvar kargu-bash--active-async-proc nil
-  "Compatibility handle for active foreground process.")
 (defvar-local kargu-bash--buffer-job nil "Job displayed in this output buffer.")
 
 (defun kargu-job-services-reset ()
-  "Cancel owned jobs before resetting registered services and legacy tables."
+  "Cancel and detach registered owned services without legacy mirror tables."
   (dolist (service (hash-table-values kargu-job--services))
     (kargu-job-service-close service))
-  (when kargu-job--default-service (kargu-job-service-close kargu-job--default-service))
-  (clrhash kargu-job--services)
-  (setq kargu-job--default-service nil)
-  (clrhash kargu-bash--processes)
-  (setq kargu-bash--counter 0)
-  (setq kargu-bash--active-async-proc nil))
+  (clrhash kargu-job--services))
 
 (cl-defstruct (kargu-bash--job (:constructor kargu-bash--make-job))
   "An editor view of a native job, not process or signal authority."
@@ -85,19 +79,23 @@
 
 (defun kargu-job-service-close (service)
   "Cancel and detach only SERVICE's registered jobs."
+  (when-let* ((cleanup (kargu-job-service-cleanup service))
+              (origin (kargu-job-service-origin service)) ((buffer-live-p origin)))
+    (with-current-buffer origin
+      (remove-hook 'kill-buffer-hook cleanup t)
+      (remove-hook 'change-major-mode-hook cleanup t))
+    (setf (kargu-job-service-cleanup service) nil))
   (maphash
-   (lambda (id job)
+   (lambda (_id job)
      (when (kargu-bash--job-p job)
        (kargu-job-cancel job)
        (when-let* ((handle (kargu-bash--job-handle job)))
-         (kargu-bridge-job-dispose handle))
-       (when (eq job (gethash id kargu-bash--processes))
-         (remhash id kargu-bash--processes))))
+         (kargu-bridge-job-dispose handle))))
    (kargu-job-service-jobs service))
   (clrhash (kargu-job-service-jobs service))
   (setf (kargu-job-service-active-async-proc service) nil)
-  (when (eq service (gethash (kargu-job-service-project-root service) kargu-job--services))
-    (remhash (kargu-job-service-project-root service) kargu-job--services)))
+  (when (eq service (gethash (kargu-job-service-key service) kargu-job--services))
+    (remhash (kargu-job-service-key service) kargu-job--services)))
 
 (defvar-keymap kargu-bash-output-mode-map
   :parent special-mode-map
@@ -120,14 +118,17 @@
 (defun kargu-bash--owned-job-p (job)
   "Return non-nil when JOB belongs to the current project."
   (and (kargu-bash--job-p job)
-       (equal (kargu-bash--job-root job) (kargu-permission-project-root))))
+       (equal (kargu-bash--job-root job) (kargu-permission-project-root))
+       (let ((service (kargu-bash--job-service job)))
+         (and service (eq (kargu-job-service-origin service) (current-buffer))
+              (eq (kargu-job-service-session service) (kargu-session-context))))))
 
 (defun kargu-bash--find-job (id &optional service)
   "Find job ID within the current project or SERVICE.
 Signal an actionable error if not found or not owned."
   (let* ((svc (or service (kargu-job-service-for-project)))
-         (table (if svc (kargu-job-service-jobs svc) kargu-bash--processes))
-         (job (or (gethash id table) (gethash id kargu-bash--processes))))
+         (table (kargu-job-service-jobs svc))
+         (job (gethash id table)))
     (unless (and job (kargu-bash--owned-job-p job))
       (error "No background process or foreground job found with ID '%s'" id))
     job))
@@ -150,16 +151,13 @@ Signal an actionable error if not found or not owned."
           (when (buffer-live-p buffer) (kill-buffer buffer))
           (when-let* ((handle (kargu-bash--job-handle job)))
             (kargu-bridge-job-dispose handle))
-          (remhash id table)
-          (when (eq job (gethash id kargu-bash--processes))
-            (remhash id kargu-bash--processes)))))))
+          (remhash id table))))))
 
 (defun kargu-bash--prune-jobs (&optional service)
-  "Prune only SERVICE's logs, or the legacy aggregate when SERVICE is nil."
-  (kargu-bash--prune-table
-   (if service (kargu-job-service-jobs service) kargu-bash--processes)
-   (if service (min (kargu-job-service-completed-limit service) kargu-bash-completed-jobs)
-     kargu-bash-completed-jobs)))
+  "Prune only SERVICE's owned views, defaulting to the current source."
+  (let ((service (or service (kargu-job-service-for-project))))
+    (kargu-bash--prune-table (kargu-job-service-jobs service)
+                            (min (kargu-job-service-completed-limit service) kargu-bash-completed-jobs))))
 
 (defun kargu-bash--job-finished (job result callback)
   "Complete JOB with RESULT, then deliver its formatted result to CALLBACK."
@@ -174,9 +172,7 @@ Signal an actionable error if not found or not owned."
   (let ((proc (kargu-bash--job-handle job))
         (svc (kargu-bash--job-service job)))
     (when (and svc (eq proc (kargu-job-service-active-async-proc svc)))
-      (setf (kargu-job-service-active-async-proc svc) nil))
-    (when (eq proc kargu-bash--active-async-proc)
-      (setq kargu-bash--active-async-proc nil)))
+      (setf (kargu-job-service-active-async-proc svc) nil)))
   (force-mode-line-update t)
   (when callback
     (funcall callback
@@ -218,43 +214,29 @@ CALLBACK receives the real BACKGROUND receipt or foreground terminal text."
                 (kargu-bash--job-result job) '(:failure "Startup cancelled; native receipt unconfirmed"))))
       (when-let* ((svc (kargu-bash--job-service job)))
         (when (eq (kargu-job-service-active-async-proc svc) proc)
-          (setf (kargu-job-service-active-async-proc svc) nil)))
-      (when (eq kargu-bash--active-async-proc proc)
-        (setq kargu-bash--active-async-proc nil)))))
+          (setf (kargu-job-service-active-async-proc svc) nil))))))
 
 (defun kargu-bash-kill-active-async ()
-  "Cancel the active foreground process and its child process group."
-  (let* ((svc (kargu-job-service-for-project))
-         (proc (kargu-job-service-active-async-proc svc)))
-    (when proc
-      (when svc
-        (maphash (lambda (_id job)
-                   (when (and (kargu-bash--job-p job)
-                              (eq (kargu-bash--job-handle job) proc))
-                     (kargu-job-cancel job)))
-                 (kargu-job-service-jobs svc))
-        (setf (kargu-job-service-active-async-proc svc) nil))
+  "Cancel only this source/session's active foreground job."
+  (let* ((service (kargu-job-service-for-project))
+         (handle (kargu-job-service-active-async-proc service)))
+    (when handle
       (maphash (lambda (_id job)
-                 (when (and (kargu-bash--job-p job)
-                            (eq (kargu-bash--job-handle job) proc))
-                   (kargu-job-cancel job)))
-               kargu-bash--processes)
-      (setq kargu-bash--active-async-proc nil))))
+                 (when (and (kargu-bash--job-p job) (eq handle (kargu-bash--job-handle job)))
+                   (kargu-job-cancel job))) (kargu-job-service-jobs service)))))
 
 (defun kargu-bash-show-process (id)
   "Display the bounded live output of job ID."
-  (interactive (list (completing-read "Shell job: " (hash-table-keys kargu-bash--processes) nil t)))
+  (interactive (list (completing-read "Shell job: " (hash-table-keys (kargu-job-service-jobs (kargu-job-service-for-project))) nil t)))
   (pop-to-buffer (kargu-bash--job-buffer (kargu-bash--find-job id))))
 
 (defun kargu-bash-cancel-process (&optional id)
-  "Cancel job ID, or the job displayed in the current output buffer."
+  "Cancel source-owned job ID, or the exact job displayed in its output view."
   (interactive)
-  (let* ((target (or id (and kargu-bash--buffer-job
-                             (kargu-bash--job-id kargu-bash--buffer-job))
-                     (completing-read "Cancel job: " (hash-table-keys kargu-bash--processes) nil t)))
-         (job (kargu-bash--find-job target)))
-    (kargu-job-cancel job)
-    (force-mode-line-update t)))
+  (let ((job (if (and (null id) kargu-bash--buffer-job) kargu-bash--buffer-job
+               (kargu-bash--find-job (or id (completing-read "Cancel job: "
+                  (hash-table-keys (kargu-job-service-jobs (kargu-job-service-for-project))) nil t))))))
+    (kargu-job-cancel job) (force-mode-line-update t)))
 
 (defun kargu-bash--job-status (job)
   "Describe JOB and its recent output without changing the selected buffer."
@@ -276,7 +258,7 @@ CALLBACK receives the real BACKGROUND receipt or foreground terminal text."
         (cond
          ((equal (string-trim command) "list")
           (let* ((svc (kargu-job-service-for-project))
-                 (table (if svc (kargu-job-service-jobs svc) kargu-bash--processes))
+                 (table (kargu-job-service-jobs svc))
                  lines)
             (maphash (lambda (_id job)
                        (when (kargu-bash--owned-job-p job)

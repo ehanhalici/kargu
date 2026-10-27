@@ -84,9 +84,13 @@ pub enum SuccessCodes {
     Zero,
     /// Search-style success including a no-match exit status.
     ZeroOrOne,
+    /// Git show-ref --exists reports a missing reference with exit status two.
+    ZeroOrTwo,
 }
 impl SuccessCodes {
     pub(crate) fn accepts(self, status: &std::process::ExitStatus) -> bool {
-        status.success() || (matches!(self, Self::ZeroOrOne) && status.code() == Some(1))
+        status.success()
+            || (matches!(self, Self::ZeroOrOne) && status.code() == Some(1))
+            || (matches!(self, Self::ZeroOrTwo) && status.code() == Some(2))
     }
 }

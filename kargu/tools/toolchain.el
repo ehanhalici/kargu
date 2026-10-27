@@ -34,6 +34,9 @@
 
 (defun kargu-toolchain-register (strategy)
   "Register a STRATEGY in `kargu-toolchain-strategies', maintaining priority order."
+  (when (or (functionp (kargu-toolchain-strategy-detector strategy))
+            (functionp (kargu-toolchain-strategy-resolver strategy)))
+    (user-error "Native toolchains require declarative detectors and command plists"))
   (setq kargu-toolchain-strategies
         (cl-remove (kargu-toolchain-strategy-name strategy)
                    kargu-toolchain-strategies
@@ -51,21 +54,11 @@
   "Detect the primary toolchain for ROOT.
 The language profile of ROOT answers first.  Strategies registered with
 `kargu-toolchain-register' cover projects no language profile claims."
-  (or (when-let* ((lang (and (fboundp 'kargu-language-detect)
-                             (kargu-language-detect root)))
-                  (tc (kargu-language-toolchain lang root)))
-        (list :language (kargu-language-spec-name lang)
-              :build-cmd (plist-get tc :build-cmd)
-              :test-cmd (plist-get tc :test-cmd)
-              :lint-cmd (plist-get tc :lint-cmd)
-              :notes (plist-get tc :notes)))
-      (let ((matched nil))
-        (dolist (strat kargu-toolchain-strategies)
-          (unless matched
-            (when (funcall (kargu-toolchain-strategy-detector strat) root)
-              (setq matched (funcall (kargu-toolchain-strategy-resolver strat) root)))))
-        matched)))
+  (when-let* ((view (kargu-project-probe-view root))
+              (id (gethash "language" view)) ((stringp id))
+              (commands (kargu-project-probe-toolchain id root)))
+    (append (list :language (gethash "language_name" view)) commands)))
 
 (provide 'kargu/tools/toolchain)
 
-;;; kargu/tools/toolchain.el ends here
+;;; toolchain.el ends here

@@ -21,7 +21,7 @@
    :extensions '("ts" "tsx" "mts" "cts")
    :modes '(typescript-mode typescript-ts-mode tsx-ts-mode)
    :detectors '("tsconfig.json")
-   :toolchain (lambda (root) (kargu-language-js-toolchain root t))
+   :toolchain '(:native "javascript")
    :debugger
    '(:adapter "js-debug"
      :supports-eval t
@@ -47,4 +47,4 @@
 
 (provide 'kargu/languages/typescript)
 
-;;; kargu/languages/typescript.el ends here
+;;; typescript.el ends here

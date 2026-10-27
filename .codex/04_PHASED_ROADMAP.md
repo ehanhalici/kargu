@@ -87,7 +87,7 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
   interactive stdin/poll/EOF/cancel ve TERM/KILL/reap uygulansın.
   Bash/session bu native portu kullanır; diğer eski OS tüketicileri aşağıdaki
   ayrı read/search/Git/skill/webfetch migration maddelerinde açık kalır.
-- [ ] Read/search/Git/skill/webfetch portları ve capability discovery taşınsın.
+- [x] Read/search/Git/skill/webfetch portları ve capability discovery taşınsın.
   Text reader diff adapter'ından bağımsız kalsın.
   - [x] Native `find_files`, bounded discovery, actual Emacs tool gate/alias/mode
     entegrasyonu ve eşdeğer testlerden sonra eski Elisp implementation kaldırma.
@@ -98,7 +98,7 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
     explicit no-match status, owned bridge ve eski Elisp grep engine kaldırma (26–27).
   - [x] `git_status`: fixed-argv Git + complete-output policy, scoped read bridge,
     index/fsmonitor/worktree policy ve eski Elisp status engine kaldırma (28).
-  - [ ] read/diğer Git/skill/webfetch kalan portları.
+  - [x] read/diğer Git/skill/webfetch kalan portları.
     - [x] `git_log`, `git_branches`, `git_stashes` closed native read portu ve
       ortak execution/process gate; legacy log/list argv/report kaldırma (53).
     - [x] `read_file`: fd capture/encoding/range/presentation native; live raw
@@ -108,6 +108,12 @@ silindi. Public tool şeması korunur, Lisp sonuç teslimi asenkrondur. Kanıt:
     - [x] Skill discovery/read: bounded shared read worker, explicit project/user
       grants, pinned UTF-8 metadata capture ve native parser/render; gerçek owned
       run preparation ve async tool consumer. Eski Elisp motorları silindi (57).
+    - [x] Git mutations: closed immutable native intent/object, repo/index evidence,
+      shared approval/process drain, no write replay ve hook/signing unknown outcome.
+    - [x] Native declarative project/toolchain/dependency probes ve public webfetch;
+      metadata-only executable sınıfı, per-hop numeric/DNS pin, bounded body/deadline.
+      Project→connection→skills prep, scoped job views ve legacy global aynaların
+      kaldırılmasıyla todo 2 kapandı; kalan OS consumer envanteri/testler (58).
 - [ ] Diff parser/generator + revision'lı proposal/journal ve Emacs transaction
   adapter'ı 06'ya göre kurulsun; review callback'i placeholder kalmasın.
 - [ ] Eski Elisp loop opt-in adapter üzerinden `tool/execute` çağırabilsin.

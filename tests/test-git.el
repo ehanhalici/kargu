@@ -18,63 +18,6 @@
 
 (defconst kargu-git-test--files '(("a.txt" . "one\ntwo\nthree\n") ("src/b.el" . "(message \"b\")\n")))
 
-(ert-deftest kargu-git-deadline-is-independent-of-the-generic-runner-test ()
-  "Git hooks/signing have no implicit 30-second process deadline."
-  (let ((kargu-process-timeout 30) options)
-    (cl-letf (((symbol-function 'kargu-process-run)
-               (lambda (_program _args _callback &rest opts) (setq options opts) nil)))
-      (let ((kargu-git-timeout nil))
-        (kargu-git--run '("status") default-directory #'ignore)
-        (should (plist-member options :timeout))
-        (should-not (plist-get options :timeout)))
-      (let ((kargu-git-timeout 12))
-        (kargu-git--run '("status") default-directory #'ignore)
-        (should (= (plist-get options :timeout) 12))))))
-
-(ert-deftest kargu-git-cancelled-task-kills-process-and-never-starts-fallback-test ()
-  "Cancelling an in-flight unstage cannot launch a second mutating Git command."
-  (kargu-test-with-git-repo kargu-git-test--files
-			    (let* ((run (list :state 'tools)) (kargu--loop-run run)
-				   (task (kargu-async-start #'ignore))
-				   (runner (symbol-function 'kargu-process-run))
-				   (kargu-permission--mock-decision :approve)
-				   (starts 0) process result settled)
-			      (unwind-protect
-				  (cl-letf (((symbol-function 'kargu-process-run)
-					     (lambda (_program _args callback &rest opts)
-					       (cl-incf starts)
-                                               (setq process
-						     (apply runner "sleep" '("30")
-                                                            (lambda (value) (setq settled t) (funcall callback value)) opts)))))
-				    (funcall (kargu-async-wrap
-					      task (lambda ()
-                                                     (kargu-git-unstage
-                                                      (lambda (text) (setq result text)) "a.txt"))))
-				    (should (process-live-p process))
-				    (kargu-async-cancel-owner run)
-				    (let ((deadline (+ (float-time) 2)))
-				      (while (and (not settled) (< (float-time) deadline))
-					(accept-process-output process 0.02)))
-				    (should settled)
-				    (should-not (process-live-p process))
-				    (should (= starts 1))
-				    (should-not result))
-				(kargu-async-cancel-owner run)
-				(when process (kargu-process-cancel process))))))
-
-(ert-deftest kargu-git-unstage-before-the-first-commit-preserves-files-test ()
-  "Unstaging an unborn branch clears its index without deleting working files."
-  (kargu-test-with-git-repo kargu-git-test--files
-			    (should (zerop (call-process "git" nil nil nil "checkout" "--orphan" "unborn")))
-			    (let ((kargu-permission--mock-decision :approve))
-			      (let ((result (kargu-test-await (lambda (callback) (kargu-git-unstage callback ".")))))
-				(should (string-search "Unstaged:" result)))
-			      (should (file-exists-p (expand-file-name "a.txt" repo)))
-			      (should (file-exists-p (expand-file-name "src/b.el" repo)))
-			      (with-temp-buffer
-				(should (zerop (call-process "git" nil t nil "ls-files")))
-				(should (string-empty-p (buffer-string)))))))
-
 (ert-deftest kargu-git-status-legacy-engine-is-removed-test ()
   "NUL parsing fixtures live in Rust; no second status engine remains in Elisp."
   (dolist (function '(kargu-git--parse-porcelain-status kargu-git--display-path
@@ -132,83 +75,11 @@
 				(should (string-search "main" branches))
 				(should (equal stashes "(no stash entries)"))))))
 
-(ert-deftest kargu-git-stash-mutations-require-an-explicit-entry-test ()
-  "No implicit top-of-stack mutation or option-shaped reference is accepted."
-  (let ((kargu-permission--mock-decision :approve))
-    (dolist (action '("apply" "pop" "drop"))
-      (dolist (stash '(nil "" "HEAD" "--all" "stash@{-1}" "stash@{1} --all"))
-        (should-error (kargu-git-stash #'ignore action nil :stash stash))))))
-
-(ert-deftest kargu-git-stash-apply-pins-approved-object-across-reordering-test ()
-  "Approval binds an immutable stash object without deleting any reflog entry."
-  (kargu-test-with-git-repo kargu-git-test--files
-			    (with-temp-file (expand-file-name "a.txt" repo) (insert "older stash\n"))
-			    (should (zerop (call-process "git" nil nil nil "stash" "push" "-m" "older")))
-			    (with-temp-file (expand-file-name "a.txt" repo) (insert "newer stash\n"))
-			    (should (zerop (call-process "git" nil nil nil "stash" "push" "-m" "newer")))
-			    (cl-letf (((symbol-function 'kargu-permission-request-approval-async)
-				       (lambda (command directory _risks decision)
-					 (should (string-search "git stash apply " command))
-					 (should (equal directory repo))
-					 (with-temp-file (expand-file-name "a.txt" repo) (insert "racing stash\n"))
-					 (should (zerop (call-process "git" nil nil nil "stash" "push" "-m" "racing")))
-					 (funcall decision t))))
-			      (let ((result (kargu-test-await
-					     (lambda (callback)
-					       (kargu-git-stash callback "apply" nil :stash "stash@{1}")))))
-				(should-not (string-prefix-p "ERROR:" result))
-				(should (string-search "retained" result)))
-			      (let ((entries (kargu-test-await (lambda (callback) (kargu-git-stash callback "list")))))
-				(should (string-search "newer" entries))
-				(should (string-search "older" entries))
-				(should (string-search "racing" entries)))
-			      (with-temp-buffer
-				(insert-file-contents (expand-file-name "a.txt" repo))
-				(should (equal (buffer-string) "older stash\n"))))))
-
 (ert-deftest kargu-git-stash-destructive-actions-are-explicitly-refused-test ()
   "Pop/drop are unavailable even when a selector and approval are supplied."
   (let ((kargu-permission--mock-decision :approve))
     (dolist (action '("pop" "drop"))
       (should-error (kargu-git-stash #'ignore action nil :stash "stash@{0}")))))
-
-(ert-deftest kargu-git-stash-apply-cancel-invalidates-late-approval-test ()
-  "An approval after cancellation cannot apply the captured stash object."
-  (let* ((run (list :state 'tools)) (kargu--loop-run run)
-         (kargu-async--pending nil) approval commands)
-    (cl-letf (((symbol-function 'kargu-git--run)
-               (lambda (args _root callback)
-                 (push args commands)
-                 (funcall callback (cons 0 (make-string 40 ?a)))))
-              ((symbol-function 'kargu-permission-request-approval-async)
-               (lambda (_command _root _risks callback) (setq approval callback))))
-      (kargu-git-stash (lambda (_) (ert-fail "Cancelled stash delivered a result"))
-                       "apply" nil :stash "stash@{0}")
-      (should approval)
-      (kargu-async-cancel-owner run)
-      (setq kargu--loop-run nil)
-      (funcall approval t)
-      (should (= (length commands) 1))
-      (should-not kargu-async--pending))))
-
-(ert-deftest kargu-git-stash-apply-claims-approval-before-starting-write-test ()
-  "A duplicated approval cannot start a second apply while the first is live."
-  (let ((kargu-async--pending nil) (writes 0) completion response)
-    (cl-letf (((symbol-function 'kargu-git--run)
-               (lambda (_args _root callback)
-                 (funcall callback (cons 0 (make-string 40 ?a)))
-                 (funcall callback (cons 0 (make-string 40 ?a)))))
-              ((symbol-function 'kargu-permission-request-approval-async)
-               (lambda (_command _root _risks callback)
-                 (funcall callback t) (funcall callback t)))
-              ((symbol-function 'kargu-git--change)
-               (lambda (_args _root callback _formatter _label)
-                 (cl-incf writes) (setq completion callback))))
-      (kargu-git-stash (lambda (value) (setq response value)) "apply" nil :stash "stash@{0}")
-      (should (= writes 1))
-      (funcall completion "done")
-      (should (equal response "done"))
-      (should-not kargu-async--pending))))
 
 (ert-deftest kargu-git-status-test ()
   "Ensure kargu-git-status returns formatted Magit-style sections."
@@ -225,13 +96,6 @@
 			       (should (string-search "Untracked files" out))
 			       (should (string-search "a.txt" out))
 			       (should (string-search "fresh.txt" out))))))
-
-(ert-deftest kargu-git-json-path-arrays-test ()
-  "Decoded JSON path arrays are accepted without converting them to text."
-  (kargu-test-with-git-repo kargu-git-test--files
-			    (should (equal (kargu-git--relative-paths
-					    (kargu--json-decode "[\"a.txt\",\"b.txt\"]") "stage" repo)
-					   '("a.txt" "b.txt")))))
 
 (ert-deftest kargu-git-diff-test ()
   "Ensure kargu-git-diff shows the working-tree change."
@@ -278,12 +142,6 @@
   (kargu-test-with-git-repo kargu-git-test--files
 			    (let ((out (kargu-test-await (lambda (cb) (kargu-git-branch cb "list")))))
 			      (should (string-search "main" out)))))
-
-(ert-deftest kargu-git-stage-outside-project-test ()
-  "Ensure kargu-git-stage rejects files outside the project root."
-  (kargu-test-with-git-repo kargu-git-test--files
-			    (should-error (kargu-git-stage #'ignore "/etc/passwd") :type 'error)
-			    (should-error (kargu-git-stage #'ignore "../outside.txt") :type 'error)))
 
 (ert-deftest kargu-git-mode-gating-test ()
   "Ensure mutating git tools are rejected in read-only ask mode."

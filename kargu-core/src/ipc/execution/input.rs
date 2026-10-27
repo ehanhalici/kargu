@@ -83,6 +83,20 @@ impl Prepared {
         self.reply.discard()
     }
 }
+impl From<crate::workspace::git::mutation::MutationPrepared> for Prepared {
+    fn from(value: crate::workspace::git::mutation::MutationPrepared) -> Self {
+        use crate::workspace::git::mutation::MutationReply;
+        Self {
+            tool: value.tool,
+            command: value.command,
+            settings: value.settings,
+            reply: match value.reply {
+                MutationReply::Prepare(p) => Reply::GitMutationPrepare(p),
+                MutationReply::Report(r) => Reply::GitMutation(r),
+            },
+        }
+    }
+}
 
 impl ExecuteInput {
     pub fn prepare(self, purpose: RunPurpose) -> Result<Prepared, CoreError> {

@@ -13,18 +13,8 @@
 (require 'kargu/languages/core)
 
 (defun kargu-language-java-toolchain (root)
-  "Toolchain plist for the Java project at ROOT: Gradle when it has a build file."
-  (if (or (kargu-languages--has-file-p root "build.gradle")
-          (kargu-languages--has-file-p root "build.gradle.kts"))
-      (let ((gw (if (kargu-languages--has-file-p root "gradlew") "./gradlew" "gradle")))
-        (list :build-cmd (format "%s build -x test" gw)
-              :test-cmd (format "%s test" gw)
-              :lint-cmd (format "%s check" gw)
-              :notes "Run Gradle build and test tasks using the `bash` tool."))
-    (list :build-cmd "mvn compile"
-          :test-cmd "mvn test"
-          :lint-cmd "mvn checkstyle:check"
-          :notes "Run Maven goals using the `bash` tool.")))
+  "Return ROOT's completed native Java command metadata."
+  (kargu-project-probe-toolchain 'java root))
 
 (defconst kargu-language-java-spec
   (kargu-make-language-spec
@@ -34,7 +24,7 @@
    :extensions '("java")
    :modes '(java-mode java-ts-mode)
    :detectors '("pom.xml" "build.gradle" "build.gradle.kts")
-   :toolchain #'kargu-language-java-toolchain
+   :toolchain '(:native "java")
    :debugger
    '(:adapter "java"
      :supports-eval t

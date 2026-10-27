@@ -5,8 +5,10 @@ pub mod file;
 pub mod git;
 pub mod grep;
 pub mod listing;
+pub(crate) mod probe;
 pub mod search;
 pub(crate) mod skills;
+pub(crate) mod webfetch;
 
 use self::search::{FindFilesInput, FindFilesPlan, FindFilesResult};
 use crate::error::CoreError;
@@ -18,6 +20,8 @@ pub(crate) enum WorkspaceRead {
     FindFiles(FindFilesInput),
     ReadFile(file::ReadFileInput),
     Skills(skills::SkillInput),
+    Webfetch(webfetch::FetchInput),
+    Probe(probe::ProbeInput),
 }
 
 #[derive(Serialize)]
@@ -26,6 +30,8 @@ pub(crate) enum ReadResult {
     FindFiles(FindFilesResult),
     File(file::FileExcerpt),
     Skills(skills::SkillResult),
+    Webfetch(webfetch::FetchResult),
+    Probe(probe::ProbeResult),
 }
 
 impl WorkspaceRead {
@@ -41,6 +47,8 @@ impl WorkspaceRead {
             return Err(CoreError::Deadline);
         }
         match self {
+            Self::Probe(input) => input.execute(cancel, deadline).map(ReadResult::Probe),
+            Self::Webfetch(input) => input.execute(cancel, deadline).map(ReadResult::Webfetch),
             Self::Skills(input) => input.execute(cancel, deadline).map(ReadResult::Skills),
             Self::ReadFile(input) => input.execute(cancel, deadline).map(ReadResult::File),
             Self::FindFiles(input) => FindFilesPlan::try_from(input)?

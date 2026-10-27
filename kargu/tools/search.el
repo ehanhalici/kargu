@@ -88,26 +88,18 @@ caps the number of hits returned."
 
 ;;;; Glob -----------------------------------------------------------------
 
-(defun kargu-search-fd-executable ()
-  "Return the path to fd (or fdfind) if available on PATH."
-  (or (executable-find "fd")
-      (executable-find "fdfind")))
-
-(defun kargu-search-rg-executable ()
-  "Return the path to rg if available on PATH."
-  (executable-find "rg"))
+(declare-function kargu-deps-executable-status "kargu/tools/deps" (exe &optional root))
 
 (defun kargu-search-tool-recommendations ()
-  "Return a human-readable recommendation string of installed search tools."
-  (let ((fd (kargu-search-fd-executable))
-        (rg (kargu-search-rg-executable)))
-    (concat
-     (if fd
-         "• `fd` is available and recommended for finding files (preferred over `find`).\n"
-       "• `find` is available for finding files.\n")
-     (if rg
-         "• `rg` (ripgrep) is available and recommended for searching code (preferred over `grep`).\n"
-       "• `grep` is available for searching code.\n"))))
+  "Describe only search executables observed by the native project probe."
+  (concat
+   (if (or (eq (kargu-deps-executable-status "fd") :present)
+           (eq (kargu-deps-executable-status "fdfind") :present))
+       "• `fd` is available for finding files.\n"
+     "• Use the native find_files tool; `fd` availability is unconfirmed.\n")
+   (if (eq (kargu-deps-executable-status "rg") :present)
+       "• `rg` (ripgrep) is available for searching code.\n"
+     "• Use workspace_grep; `rg` availability is unconfirmed.\n")))
 
 (defun kargu-search-list-files (&optional path callback)
   "Asynchronously list entries under PATH (default: project root) to CALLBACK.

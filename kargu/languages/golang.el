@@ -19,10 +19,7 @@
    :priority 90
    :extensions '("go")
    :modes '(go-mode go-ts-mode)
-   :detectors
-   (list "go.mod" "go.sum"
-         (lambda (root)
-           (kargu-fs-has-extension-p root '("go"))))
+   :detectors '("go.mod" "go.sum" (:extension "go"))
    :toolchain
    '(:build-cmd "go build ./..."
      :test-cmd "go test -v ./..."

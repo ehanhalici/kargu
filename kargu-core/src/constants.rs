@@ -55,6 +55,8 @@ pub mod limits {
     pub const JOBS: usize = 64;
     /// Concurrent native read workers on one connection, including draining work.
     pub const READ_WORKERS: usize = 4;
+    /// Files/directories qualified by one Git mutation approval.
+    pub const GIT_ACTION_ENTRIES: usize = 4096;
     /// Live/draining HTTP attempts on one connection.
     pub const API_REQUESTS: usize = 8;
     /// Network events waiting for the mailbox; a completion batch adds one barrier.
@@ -155,7 +157,10 @@ pub mod protocol {
     /// Canonical generic process tool; all subprocesses require approval.
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
-    pub const LIFECYCLE_CAPABILITIES: [&str; 32] = [
+    pub const LIFECYCLE_CAPABILITIES: &[&str] = &[
+        "workspace_probe",
+        "workspace_webfetch",
+        "git_mutation",
         "workspace_skills",
         "git_worktree_read",
         "workspace_read_file",
@@ -299,6 +304,10 @@ pub mod protocol {
         pub const READ_FILE: &str = "workspace/readFile";
         /// Bounded skill discovery and named instruction loading.
         pub const SKILLS: &str = "workspace/skills";
+        /// Public unauthenticated HTTP text read with per-hop egress admission.
+        pub const WEBFETCH: &str = "workspace/webfetch";
+        /// Declarative toolchain/executable discovery; never executes.
+        pub const PROBE: &str = "workspace/probe";
         /// Bounded fixed-argv GNU ls listing, through the shared command service.
         pub const LIST_FILES: &str = "workspace/listFiles";
         /// Bounded rg/GNU grep composition through the shared process owner.
@@ -307,6 +316,8 @@ pub mod protocol {
         pub const GIT_STATUS: &str = "git/status";
         /// Closed fixed-argv read-only Git query through shared execution policy.
         pub const GIT_READ: &str = "git/read";
+        /// Closed, explicitly approved Git write intents.
+        pub const GIT_MUTATION: &str = "git/mutate";
         /// Cancel pending request.
         pub const CANCEL: &str = "rpc/cancel";
         /// Drain host.

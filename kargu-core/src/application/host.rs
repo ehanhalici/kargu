@@ -231,6 +231,16 @@ impl Host {
             return Err(state_fault());
         }
         let (scope, input) = match method {
+            methods::PROBE => {
+                let request: ReadRequest<crate::workspace::probe::ProbeInput> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                (request.scope, WorkspaceRead::Probe(request.arguments))
+            }
+            methods::WEBFETCH => {
+                let request: ReadRequest<crate::workspace::webfetch::FetchInput> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                (request.scope, WorkspaceRead::Webfetch(request.arguments))
+            }
             methods::SKILLS => {
                 let request: ReadRequest<crate::workspace::skills::SkillInput> =
                     serde_json::from_value(params).map_err(|_| Fault::params())?;

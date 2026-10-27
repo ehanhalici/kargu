@@ -278,6 +278,16 @@ CALLBACK receives the native (RESULT ERROR).  No Elisp fallback is executed."
    connection arguments callback :owner owner
    :method "workspace/skills" :capability "workspace_skills"))
 
+(cl-defun kargu-bridge-webfetch (connection arguments callback &key owner)
+  "Fetch captured public URL ARGUMENTS on CONNECTION for OWNER into CALLBACK."
+  (kargu-bridge--workspace-read connection arguments callback :owner owner
+                                :method "workspace/webfetch" :capability "workspace_webfetch"))
+
+(cl-defun kargu-bridge-probe (connection arguments callback &key owner)
+  "Read declarative project ARGUMENTS on CONNECTION for OWNER into CALLBACK."
+  (kargu-bridge--workspace-read connection arguments callback :owner owner
+                                :method "workspace/probe" :capability "workspace_probe"))
+
 (cl-defun kargu-bridge-list-files (connection arguments callback &key owner)
   "List a directory using ARGUMENTS on CONNECTION for OWNER.
 CALLBACK receives the native (RESULT ERROR).  Never scan directories in Elisp."
@@ -536,7 +546,7 @@ ERROR-DATA skips hydration; older peers retain the packaged projection."
 This is an adapter service identity, not an imported user conversation or run."
   (if (not (cl-some (lambda (capability)
                       (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
-                    '("workspace_skills" "git_worktree_read" "workspace_read_file" "workspace_find_files" "workspace_list_files_ls" "workspace_grep" "git_status" "git_read" "command_execute" "api_request")))
+                    '("workspace_probe" "workspace_webfetch" "git_mutation" "workspace_skills" "git_worktree_read" "workspace_read_file" "workspace_find_files" "workspace_list_files_ls" "workspace_grep" "git_status" "git_read" "command_execute" "api_request")))
       (kargu-bridge--start-finish connection callback nil)
     (setf (kargu-bridge-connection-state connection) 'binding)
     (kargu-bridge-call

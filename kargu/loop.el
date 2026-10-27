@@ -29,12 +29,13 @@
 (require 'kargu/api)
 (require 'kargu/api/prepare)
 (autoload 'kargu-skill-refresh "kargu/tools/skill")
+(autoload 'kargu-project-probe-refresh "kargu/project-probe")
 (require 'kargu/edit)
 (require 'kargu/tools/deps nil t)
 (require 'kargu/confirm)
 
 (declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id provider))
-(declare-function kargu-deps-missing "kargu/tools/deps" (&optional root))
+(declare-function kargu-deps-missing "kargu/tools/deps" (&optional root include-optional packages-only))
 
 (defgroup kargu-loop nil
   "The autonomous agent loop."
@@ -250,7 +251,7 @@ the diff run files and the UI as they were."
     (user-error "Kargu: a run is already in progress (M-x kargu-loop-stop)"))
   (let ((missing (and (fboundp 'kargu-deps-missing)
                       (kargu-deps-missing
-                       (kargu-permission-project-root)))))
+                       (kargu-permission-project-root) nil t))))
     (when missing
       (user-error "Kargu: Run cannot start because mandatory tools are missing: %s"
                   (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", "))))
@@ -309,9 +310,19 @@ the diff run files and the UI as they were."
       (kargu-loop--attach-origin run)
       (kargu-state-transition-status :requesting)
       (when (kargu-loop--live-p run)
-        (kargu-api-prepare-connection
-         (kargu-loop--wrap run (lambda (result) (kargu-loop--connection-ready run prompt result)))
-         :parent (kargu-execution-task context) :owner (kargu-execution-app context))))))
+        (kargu-project-probe-refresh
+         (kargu-loop--wrap run (lambda (result) (kargu-loop--project-ready run prompt result)))
+         (plist-get run :project-root))))))
+
+(defun kargu-loop--project-ready (run prompt result)
+  "Check RUN's fresh project RESULT before preparing the connection for PROMPT."
+  (let ((missing (and (kargu-ok-p result) (kargu-deps-missing (plist-get run :project-root)))))
+    (cond ((kargu-err-p result) (kargu--loop-finish run :error (kargu-result-err-message result)))
+          (missing (kargu--loop-finish run :error (kargu-deps-format-missing-report missing)))
+          (t (let ((context (plist-get run :context)))
+               (kargu-api-prepare-connection
+                (kargu-loop--wrap run (lambda (value) (kargu-loop--connection-ready run prompt value)))
+                :parent (kargu-execution-task context) :owner (kargu-execution-app context)))))))
 
 (defun kargu-loop--connection-ready (run prompt result)
   "Start RUN's PROMPT only after its owned connection RESULT is ready."

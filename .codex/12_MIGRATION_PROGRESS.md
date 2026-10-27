@@ -1,5 +1,53 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-27 — Todo 2 tamamen kapandı: Git mutations, probes, webfetch ve son bridge audit
+
+Kullanıcı todo 2'nin tamamlanmasını istedi. Kalan mutation araçları closed
+`git/mutate` / `git_mutation` ile shared native approval/process portuna bağlandı.
+Layout→scope evidence→object resolution→review→single write zinciri kullanılır;
+index/HEAD/ref/config/selected path revision değişimi stale approval'ı reddeder.
+Unstage verified unborn/immutable HEAD arasında bir kez seçer, fallback yoktur.
+Hook/signing arbitrary-code approval ve actual descendant drain testli; issued
+cancel/frame/output/decode belirsizliği replay edilmez, outcome_unknown taşır.
+
+`workspace/probe` / `workspace_probe` executable metadata/access ve bounded
+project/toolchain seçimini yürütmesiz yapar. Declarative profile DSL, native
+JS/Java/Elisp kararları ve owned project→connection→skills preparation bağlandı.
+Eksik mandatory CLI model/connection/unsent-history öncesi reddedilir. Passive
+buffer/session/root/settings observation detached ve unknown-aware'dir. Eski
+Elisp filesystem/executable/script-choice motorları silindi.
+
+`workspace/webfetch` / `workspace_webfetch` aynı actual-join read pool'unda native
+DNS/numeric policy, per-hop address pin, no proxy/manual redirects, bounded strict
+UTF-8 body/deadline/cancellation yürütür. cfg(test) fixture dışında local egress
+bypass yoktur. Eski curl/getent/Emacs resolver, Elisp policy/HTTP/parser silindi.
+OS NSS/FS cancellation cooperative'dir; worker slotu actual join'e kadar kalır.
+
+Job service source buffer/session/project'a bağlandı; default service/global job,
+foreground/counter aynaları silindi. Same-project/reused-session-label foreign
+chat ID isolation gerçek native testlidir. Legacy process helper yalnız diff
+Git-apply (todo 3), Dape context/preflight/source (todo 4), session listing worker
+(todo 7) için kalır; native tool fallback'i değildir. Ayrıntı ve tüm kabul/sınırlar:
+[58_NATIVE_TOOLS_COMPLETE.md](58_NATIVE_TOOLS_COMPLETE.md).
+
+Final **1271/1271 full source ERT**, 0 unexpected/skip, **163.740942 s**,
+**08:09:15 +0300**. **344 native + 24 compile-fail = 368** locked test / 36 suite;
+normal locked build, fmt/strict Clippy ve 42 Elisp Werror bytecompile/production
+checkdoc temiz. Message whitespace regression eski core'da red, sonra **36/36 Git
+ERT** ve final full suite green; hook/signer actual drain native corpus'ta testli.
+Proxy env altında controlled HTTP corpus **6/6** geçti.
+
+Exhaustive application TLC project→connection→skills **17545/4624**, queue0,
+depth37; approval **8194/1536** depth11; process **535/179** depth9; connection
+**602836/101708** depth23; transport **1810/693** depth14; hepsi hata/queued state
+olmadan bitti. Bounded soyut model kanıtıdır; OS/Git/network formal refinement
+veya tüm 01 mimari uyum sertifikası değildir. Environment OpenPGP autoload uyarısı
+önceden vardı; byte compiler/checkdoc yeni uyarı üretmedi.
+
+Kullanıcı07/shell.nix korundu; canlı Emacs reload, hesap/credential migration,
+kurulum, merge/push yoktur. Todo 2 üstü ve bütün alt maddeleri [x]; diğer todo
+grupları açık kalır.
+
 ## 2026-10-27 — Todo 2: native skill discovery/read ve owned run preparation
 
 `workspace/skills` / `workspace_skills` ortak actual-join read havuzuna bağlandı.

@@ -338,13 +338,6 @@ Both engines' raw lookahead/cleanup and argv policy live in Rust tests."
             (should-not (string-search "broken" text))
             (should-not (string-search "src" text))))))))
 
-(ert-deftest kargu-fs-has-file-p-test ()
-  "Existence is checked under the given root only."
-  (kargu-fs-test--with-tree '(("Cargo.toml" . ""))
-			    (should (kargu-fs-has-file-p root "Cargo.toml"))
-			    (should-not (kargu-fs-has-file-p root "go.mod"))
-			    (should-not (kargu-fs-has-file-p nil "Cargo.toml"))))
-
 (defconst kargu-skill-test--skill
   "---\nname: deploy\ndescription: Ship it\n---\nRun the deploy script.\n")
 

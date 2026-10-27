@@ -4,7 +4,7 @@ EXTENDS Naturals, FiniteSets
 \* Labels may be reused; authority is the application/claim tuple instead.
 CONSTANT Apps
 Claims == Apps \X (1..2)
-PreparationParts == {"connection", "skills"}
+PreparationParts == {"project", "connection", "skills"}
 VARIABLES phase, epoch, request, resources, delivered, prepared
 vars == <<phase, epoch, request, resources, delivered, prepared>>
 
@@ -24,13 +24,14 @@ Claim(a) ==
     /\ prepared' = [prepared EXCEPT ![a] = {}]
     /\ UNCHANGED delivered
 
-\* Connection and skills complete under the same captured claim. A model
+\* Project probes, connection and skills complete under one captured claim. A model
 \* without tools uses a no-work skills completion with the same ordering.
 PreparationReady(c, part, caller) ==
     /\ caller \in Apps /\ part \in PreparationParts
     /\ phase[c[1]] = "preparing" /\ epoch[c[1]] = c[2]
     /\ request[c[1]] = c[2] /\ part \notin prepared[c[1]]
-    /\ part = "connection" \/ "connection" \in prepared[c[1]]
+    /\ (part = "project" \/ "project" \in prepared[c[1]])
+    /\ (part # "skills" \/ "connection" \in prepared[c[1]])
     /\ prepared' = [prepared EXCEPT ![c[1]] = @ \cup {part}]
     /\ UNCHANGED <<phase, epoch, request, resources, delivered>>
 
@@ -82,5 +83,7 @@ TypeOK == /\ phase \in [Apps -> {"idle", "preparing", "running", "closing", "res
 IdleOwnsNothing == \A a \in Apps : phase[a] = "idle" => resources[a] = {} /\ request[a] = 0
 CurrentRequest == \A a \in Apps : request[a] # 0 => request[a] = epoch[a]
 RunningPrepared == \A a \in Apps : phase[a] = "running" => prepared[a] = PreparationParts
-PreparationOrder == \A a \in Apps : "skills" \in prepared[a] => "connection" \in prepared[a]
+PreparationOrder == \A a \in Apps :
+    /\ ("skills" \in prepared[a] => "connection" \in prepared[a])
+    /\ ("connection" \in prepared[a] => "project" \in prepared[a])
 =============================================================================

@@ -358,6 +358,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                         | methods::GREP
                         | methods::GIT_STATUS
                         | methods::GIT_READ
+                        | methods::GIT_MUTATION
                         | methods::JOB_START
                 ) {
                     if let Some(id) = id.as_ref() {
@@ -369,6 +370,8 @@ async fn read_messages<R: AsyncRead + Unpin>(
                             commands.start_git_status(host, id.clone(), params)
                         } else if method == methods::GIT_READ {
                             commands.start_git_read(host, id.clone(), params)
+                        } else if method == methods::GIT_MUTATION {
+                            commands.start_git_mutation(host, id.clone(), params)
                         } else if method == methods::JOB_START {
                             commands.start_job(host, id.clone(), params)
                         } else {
@@ -395,7 +398,11 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 }
                 if matches!(
                     method.as_str(),
-                    methods::FIND_FILES | methods::READ_FILE | methods::SKILLS
+                    methods::FIND_FILES
+                        | methods::READ_FILE
+                        | methods::SKILLS
+                        | methods::WEBFETCH
+                        | methods::PROBE
                 ) {
                     if let Some(id) = id.as_ref() {
                         let admitted = host

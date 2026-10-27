@@ -158,21 +158,24 @@
   (should-error (kargu-git-branch #'ignore "delete" "--force")))
 
 (ert-deftest kargu-git-changes-need-approval-test ()
-  "commit, stage, stash and branch changes are rejected when not approved."
-  (let ((kargu-permission--mock-decision :reject))
-    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-commit done "msg")))))
-    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-stage done "kargu.el")))))
-    (should-error (kargu-git-stash #'ignore "drop"))
-    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-stash done "push")))))
-    (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-git-branch done "create" "kargu-test-branch")))))))
+  "Native Git mutation commands cannot run after a rejected reverse review."
+  (kargu-git-mutation-test--fixture
+    (cl-letf (((symbol-function 'kargu-present-confirmation)
+               (lambda (request) (when (eq (kargu-confirmation-operation request) :prompt)
+                 (funcall (plist-get (kargu-confirmation-options request) :on-decision) :reject)))))
+      (dolist (start (list (lambda (done) (kargu-git-commit done "msg"))
+                          (lambda (done) (kargu-git-stage done "a.txt"))
+                          (lambda (done) (kargu-git-stash done "push"))
+                          (lambda (done) (kargu-git-branch done "create" "denied"))))
+        (should (string-prefix-p "ERROR:" (kargu-test-await start)))))))
 
 (ert-deftest kargu-webfetch-refuses-local-addresses-test ()
-  "Loopback, private and link-local hosts are refused; public hosts pass."
-  (dolist (u '("http://127.0.0.1/" "http://localhost:8080/x" "http://10.1.2.3/"
-               "http://192.168.0.5/" "http://169.254.169.254/latest/meta-data"
-               "http://172.16.0.1/" "http://[::1]/" "http://printer.local/"))
-    (should-error (kargu-webfetch--check-url u)))
-  (should-not (kargu-webfetch--check-url "https://example.com/docs")))
+  "Native policy refuses local URLs before any HTTP request."
+  (kargu-bridge-test--with-core
+    (dolist (url '("http://127.0.0.1/" "http://localhost:8080/x" "http://10.1.2.3/"
+                   "http://192.168.0.5/" "http://169.254.169.254/latest/meta-data"
+                   "http://172.16.0.1/" "http://[::1]/" "http://printer.local/"))
+      (should (string-prefix-p "ERROR:" (kargu-test-await (lambda (done) (kargu-webfetch-url done url))))))))
 
 (provide 'tests/test-security)
 

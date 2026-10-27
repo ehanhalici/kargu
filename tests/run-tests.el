@@ -62,6 +62,7 @@
 (require 'tests/test-session-routing)
 (require 'tests/test-file-window)
 (require 'tests/test-git)
+(require 'tests/test-git-mutations-native)
 (require 'tests/test-history)
 (require 'tests/test-history-store)
 (require 'tests/test-api)
@@ -104,6 +105,7 @@
 (require 'tests/test-dape-readiness)
 (require 'tests/test-dape-compile)
 (require 'tests/test-deps)
+(require 'tests/test-project-probe)
 (require 'tests/test-fake-agent)
 (require 'tests/test-security)
 (require 'tests/test-process)
@@ -119,7 +121,6 @@
 (require 'tests/test-fs)
 (require 'tests/test-skill-native)
 (require 'tests/test-webfetch)
-(require 'tests/test-address)
 
 (defun kargu-run-all-tests ()
   "Run all Kargu ERT test suites."

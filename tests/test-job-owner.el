@@ -82,35 +82,27 @@
          (job (kargu-bash--make-job
                :id "p99" :root root :service svc :state :running)))
     (setf (kargu-job-service-active-async-proc svc) 'fake-proc)
-    (setq kargu-bash--active-async-proc 'fake-proc)
     (setf (kargu-bash--job-handle job) 'fake-proc)
     (cl-letf (((symbol-function 'kargu-bridge-job-cancel) #'ignore))
       (kargu-job-cancel job 0.01))
     (should (eq (kargu-bash--job-state job) :cancelling))
-    (should-not (kargu-job-service-active-async-proc svc))
-    (should-not kargu-bash--active-async-proc)))
+    (should-not (kargu-job-service-active-async-proc svc))))
 
 (ert-deftest kargu-job-service-fallback-global-test ()
-  "Fallback service is used consistently when project root is nil."
+  "A missing project cannot create a global job service."
   (cl-letf (((symbol-function 'kargu-permission-project-root) (lambda () nil)))
-    (let* ((svc1 (kargu-job-service-for-project nil))
-           (svc2 (kargu-job-service-for-project nil)))
-      (should (equal (kargu-job-service-id svc1) (kargu-job-service-id svc2)))
-      (should-not (kargu-job-service-project-root svc1)))))
+    (should-error (kargu-job-service-for-project nil) :type 'user-error)))
 
 (ert-deftest kargu-job-services-reset-test ()
-  "Reset clears all registered job services and compatibility tables."
+  "Reset clears all registered services and their owned views."
   (let* ((root (file-name-as-directory (make-temp-file "kargu-job-reset-" t)))
          (svc (kargu-job-service-for-project root)))
     (unwind-protect
         (progn
           (puthash "p1" 'dummy (kargu-job-service-jobs svc))
-          (puthash "p1" 'dummy kargu-bash--processes)
-          (setq kargu-bash--counter 42)
           (kargu-job-services-reset)
           (should (= (hash-table-count kargu-job--services) 0))
-          (should (= (hash-table-count kargu-bash--processes) 0))
-          (should (= kargu-bash--counter 0)))
+          (should (= (hash-table-count (kargu-job-service-jobs svc)) 0)))
       (delete-directory root t))))
 
 (provide 'tests/test-job-owner)

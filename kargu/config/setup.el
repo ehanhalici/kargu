@@ -12,6 +12,9 @@
 ;;; Code:
 
 (require 'kargu/config/connection)
+(require 'kargu/project-probe)
+(require 'kargu/languages)
+(require 'kargu/tools/deps)
 
 (defvar-local kargu-setup--task nil
   "This origin's current setup check, independent of an agent run.")
@@ -34,6 +37,12 @@
       (kargu-connection-snapshot-wipe (kargu-result-value result)))))
 
 (defun kargu-setup--configured (task result)
+  "Await TASK's project probes after committed configuration RESULT."
+  (if (kargu-err-p result) (kargu-async-finish task result)
+    (kargu-project-probe-refresh
+     (kargu-async-wrap task (lambda (value) (kargu-setup--project-ready task value))))))
+
+(defun kargu-setup--project-ready (task result)
   "Advance TASK from config RESULT through the existing connection resolver."
   (if (kargu-err-p result)
       (kargu-async-finish task result)

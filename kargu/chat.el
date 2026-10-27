@@ -488,7 +488,7 @@ PRESERVE-DRAFT keeps unsent input after completion; ON-READY reports admission."
 (defun kargu-chat--missing-tools (proj)
   "Missing mandatory tools for PROJ, or nil."
   (and (fboundp 'kargu-deps-missing)
-       (kargu-deps-missing proj)))
+       (kargu-deps-missing proj nil t)))
 
 (defun kargu-chat--signal-missing-tools (proj missing)
   "Show MISSING tools for PROJ and signal `user-error'."

@@ -70,7 +70,7 @@ run admission when absent; existing user customization is not rewritten."
   nil
   "Executables required before starting a native model run.
 The Rust bridge checks its own configured binary at connection startup.
-Feature-specific tools such as Git and webfetch's curl are checked when used,
+Feature-specific tools such as Git are checked when used,
 unless explicitly added as a global requirement."
   :type '(repeat string)
   :group 'kargu-deps)
@@ -82,7 +82,7 @@ unless explicitly added as a global requirement."
      :hint "Install git via your system package manager (e.g. apt install git / brew install git)")
     ("curl"
      :name "curl"
-     :purpose "Optional HTTP client for webfetch, not the model API transport"
+     :purpose "Optional user-configured HTTP command-line client"
      :hint "Install curl via your system package manager (e.g. apt install curl / brew install curl)"))
   "Metadata for mandatory CLI executables."
   :type 'alist
@@ -116,9 +116,15 @@ the defaults."
       (and (fboundp 'package-installed-p)
            (ignore-errors (package-installed-p pkg)))))
 
-(defun kargu-deps-executable-installed-p (exe)
-  "Return non-nil for EXE in the variable `exec-path'."
-  (not (null (executable-find exe))))
+(defun kargu-deps-executable-status (exe &optional root)
+  "Return native EXE observation for ROOT: :present, :missing or :unknown."
+  (let* ((view (kargu-project-probe-view root))
+         (value (and view (gethash exe (gethash "executables" view) :unknown))))
+    (cond ((eq value t) :present) ((eq value :json-false) :missing) (t :unknown))))
+
+(defun kargu-deps-executable-installed-p (exe &optional root)
+  "Return non-nil for a completed native EXE observation under ROOT."
+  (eq (kargu-deps-executable-status exe root) :present))
 
 (defun kargu-deps--active-eglot-server-p (&optional root)
   "Return non-nil if an active Eglot server is running for ROOT."
@@ -171,7 +177,7 @@ the defaults."
        ((kargu-deps--active-eglot-server-p root)
         nil)
        ;; Any candidate executable found satisfies the requirement
-       ((and candidates (cl-some #'executable-find candidates))
+       ((and candidates (cl-some (lambda (exe) (kargu-deps-executable-installed-p exe root)) candidates))
         nil)
        ;; Missing candidate: return report plist
        (candidates
@@ -208,18 +214,20 @@ the defaults."
         (let ((cmd (car contact)))
           (when (stringp cmd)
             (list :name cmd
-                  :installed (not (null (executable-find cmd)))
+                  :installed (kargu-deps-executable-installed-p cmd)
                   :hint (format "Executable '%s' not found on PATH" cmd)))))
        ((stringp contact)
         (list :name contact
-              :installed (not (null (executable-find contact)))
+              :installed (kargu-deps-executable-installed-p contact)
               :hint (format "Executable '%s' not found on PATH" contact)))))))
 
 ;;;; Main Validation Functions --------------------------------------------
 
-(defun kargu-deps-missing (&optional root include-optional)
+(defun kargu-deps-missing (&optional root include-optional packages-only)
   "Return a list of missing dependency plists for ROOT.
-Checks mandatory packages and CLI executables.  INCLUDE-OPTIONAL also
+Checks editor packages and completed native CLI observations.  PACKAGES-ONLY
+skips CLI observations for synchronous admission; owned preparation refreshes
+them before the first request.  INCLUDE-OPTIONAL also
 checks the project LSP server for setup diagnostics, not run admission.
 Each plist contains:
   :id           - Symbol or string identifying the tool
@@ -244,8 +252,8 @@ Each plist contains:
                 missing))))
 
     ;; 2. Check mandatory CLI executables
-    (dolist (exe kargu-deps-mandatory-executables)
-      (unless (kargu-deps-executable-installed-p exe)
+    (dolist (exe (unless packages-only kargu-deps-mandatory-executables))
+      (when (eq (kargu-deps-executable-status exe root) :missing)
         (let* ((meta (cdr (assoc exe kargu-deps-executable-metadata)))
                (name (or (and meta (plist-get meta :name)) exe))
                (purpose (or (and meta (plist-get meta :purpose)) "Required system executable"))
