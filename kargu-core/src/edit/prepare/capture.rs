@@ -238,8 +238,19 @@ impl Work {
         evidence.revalidate()?;
         let base_hash = base.hash();
         let proposed_hash = proposed.hash();
-        let unchanged =
-            (evidence.exists || self.input.live.is_some()) && base_hash == proposed_hash;
+        let kind = if evidence.existed() {
+            crate::edit::patch::OperationKind::Update
+        } else {
+            crate::edit::patch::OperationKind::Add
+        };
+        let unchanged = super::artifact::unchanged(
+            &evidence,
+            self.input.live.as_ref(),
+            kind,
+            self.input.save_policy,
+            base_hash,
+            proposed_hash,
+        );
         Ok(super::PreparationResult::Complete(super::Artifact::File(
             Box::new(Prepared {
                 base_hash,

@@ -324,13 +324,16 @@ impl RunningPatch {
                 _ => return Err(EditError::InvalidEvidence.into()),
             };
             budget.include(&proposed)?;
-            file.proposal.unchanged = if file.proposal.evidence.existed() {
-                file.kind != OperationKind::Delete
-                    && file.proposal.base.as_str() == proposed.as_str()
-            } else {
-                file.kind == OperationKind::Delete
-            };
-            file.proposal.proposed_hash = proposed.hash();
+            let proposed_hash = proposed.hash();
+            file.proposal.unchanged = super::artifact::unchanged(
+                &file.proposal.evidence,
+                file.proposal.live.as_ref(),
+                file.kind,
+                file.proposal.save_policy,
+                file.proposal.base_hash,
+                proposed_hash,
+            );
+            file.proposal.proposed_hash = proposed_hash;
             file.proposal.proposed = proposed.into();
             file.proposal.root.revalidate()?;
             file.proposal.evidence.revalidate()?;

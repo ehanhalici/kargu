@@ -453,3 +453,48 @@ fn two_source_services_can_retain_small_replacements_without_reserving_worst_cas
     );
     Ok(())
 }
+
+#[test]
+fn empty_live_write_noop_respects_disk_existence_and_save_policy() -> TestResult {
+    for exists in [false, true] {
+        for live in [false, true] {
+            for save in ["buffer_only", "save"] {
+                let root = tempfile::tempdir()?;
+                let path = root.path().join("empty");
+                if exists {
+                    std::fs::write(&path, "")?;
+                }
+                let state = if exists {
+                    disk(&path)?
+                } else {
+                    json!({"kind":"absent"})
+                };
+                let document = if live {
+                    json!({"id":"editor_document_12345678-1234-4234-8234-123456789abc","tick":1,"bytes":0,"coding":"utf-8-unix","dirty":false,"read_only":false,"disk":state})
+                } else {
+                    Value::Null
+                };
+                let mut peer = Peer::start()?;
+                peer.initialize()?;
+                let scope = peer.scope()?;
+                let id=call(&mut peer,&scope,"edit/begin",json!({"origin_id":ORIGIN,"root":root.path(),"mode":"agent","intent":{"kind":"write","path":"empty","new_bytes":0},"live":document,"config_revision":0,"policy_revision":0,"review_mode":"auto","save_policy":save}))?["result"]["preparation_id"].clone();
+                assert!(id.is_string());
+                let reply = call(&mut peer, &scope, "edit/prepare", ticket(&id))?;
+                let unchanged = exists || (live && save == "buffer_only");
+                assert_eq!(
+                    reply["result"]["unchanged"], unchanged,
+                    "exists={exists} live={live} save={save}: {reply}"
+                );
+                assert_eq!(reply["result"]["existed"], exists);
+                assert_eq!(
+                    reply["result"]["base_hash"],
+                    reply["result"]["proposed_hash"]
+                );
+                assert_eq!(path.exists(), exists);
+                peer.input.take();
+                assert!(peer.wait()?);
+            }
+        }
+    }
+    Ok(())
+}

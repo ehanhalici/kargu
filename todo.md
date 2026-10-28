@@ -734,12 +734,15 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     cleanup'a kadar tutulur. Filtresiz locked Rust 421/421 (29 compile-fail),
     strict Clippy/fmt ve preparation TLC (97.230 farklı durum) temiz.
 
-  - [ ] **3.13 Boş canlı yeni dosyanın save/no-op kararı (çalışırken bulundu):**
-    Diskte bulunmayan boş live buffer için full write boş ve policy `save` iken
-    native prepare `unchanged:true` dönüyor. Bu işlem boş dosya oluşturmalıdır;
-    `buffer_only` ise mevcut boş buffer'da gerçekten değişikliksiz kalabilir.
-    Save policy ve existence ayrımını native no-op kararına bağla; gerçek pipe'da
-    empty add/live-buffer/buffer_only/save regresyonunu doğrula.
+  - [x] **3.13 Boş canlı yeni dosyanın save/no-op kararı (çalışırken bulundu):**
+    Diskte bulunmayan boş live buffer için full write + `save` yanlışlıkla
+    `unchanged:true`, aynı durumdaki patch add + `buffer_only` ise tersine false
+    veriyordu. Save policy, disk existence, canlı belge ve operation tek native
+    no-op kararına bağlandı. Full write'ın sekiz existence/live/save birleşimi
+    ve gerçek Git empty add iki policy'de red→green pipe regresyonuyla doğrulandı.
+    Filtresiz locked Rust 429/429 (29 compile-fail), strict Clippy/fmt ve
+    preparation TLC (319.746 farklı durum) temiz. Gerçek editor create/save
+    uygulaması ve receipt 3.5–3.6'da açık kalır.
 
 - [ ] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
   revision/connection/thread/frame-bound reverse RPC'ye bağla. Mention/folder/

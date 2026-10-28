@@ -593,3 +593,47 @@ fn missing_git_is_explicit_and_unstarted_private_workspace_is_cleaned() -> TestR
     );
     Ok(())
 }
+
+#[test]
+fn empty_patch_add_with_live_buffer_is_an_effect_only_when_save_requires_creation() -> TestResult {
+    for save in ["save", "buffer_only"] {
+        let root = tempfile::tempdir()?;
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let patch = "--- /dev/null\n+++ b/empty\n";
+        let id=call(&mut peer,&scope,"edit/begin",json!({"origin_id":ORIGIN,"root":root.path(),"mode":"agent","intent":{"kind":"patch","patch_bytes":patch.len()},"live":null,"config_revision":0,"policy_revision":0,"review_mode":"auto","save_policy":save}))?["result"]["preparation_id"].clone();
+        assert!(id.is_string());
+        upload(&mut peer, &scope, &id, "patch", patch)?;
+        let inspected = call(&mut peer, &scope, "edit/inspect", ticket(&id))?;
+        assert_eq!(inspected["result"]["inspected"], true, "{inspected}");
+        let document = json!({"id":"editor_document_12345678-1234-4234-8234-123456789abc","tick":1,"bytes":0,"coding":"utf-8-unix","dirty":false,"read_only":false,"disk":{"kind":"absent"}});
+        let attached = call(
+            &mut peer,
+            &scope,
+            "edit/document",
+            json!({"origin_id":ORIGIN,"preparation_id":id,"path":"empty","document":document}),
+        )?;
+        assert!(attached.get("result").is_some(), "{attached}");
+        let prepared = call(&mut peer, &scope, "edit/prepare", ticket(&id))?;
+        assert_eq!(prepared["result"]["file_count"], 1, "{prepared}");
+        let page = call(
+            &mut peer,
+            &scope,
+            "edit/files",
+            json!({"origin_id":ORIGIN,"preparation_id":id,"offset":0}),
+        )?;
+        let file = &page["result"]["files"][0];
+        assert_eq!(file["operation"], "add");
+        assert_eq!(file["hunks_total"], 0);
+        assert_eq!(
+            file["unchanged"],
+            save == "buffer_only",
+            "save={save}: {page}"
+        );
+        assert!(!root.path().join("empty").exists());
+        peer.input.take();
+        assert!(peer.wait()?);
+    }
+    Ok(())
+}

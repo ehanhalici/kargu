@@ -413,3 +413,14 @@ recheck every live target before its first mutation.
 No editor write capability is advertised. The actual Emacs witness producer,
 journalled consuming issuance, editor transaction/receipt, revised-review
 measurement and native rollback/consumer cutover remain outstanding.
+
+No-op classification now has one native implementation for full writes and final
+Git batch proposals. Equal logical hashes do not make saving an absent target a
+no-op, even when an existing clean live buffer already has that text. A live-only
+buffer can satisfy `buffer_only` without creating a disk file. Actual deletion of
+an existing empty file remains an effect, while an absent add/delete net result
+remains unchanged. Real red→green pipe fixtures cover eight empty full-write
+existence/live/save combinations and empty Git adds under both save policies.
+Preparation still never writes originals. The unfiltered locked Rust suite passes
+429/429 (29 compile-fail), strict Clippy/fmt and preparation TLC pass. This closes
+3.13, not the outstanding actual editor create/save/receipt boundary.

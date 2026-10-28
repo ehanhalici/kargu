@@ -16,6 +16,24 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc};
+// Identical text is not enough for a no-op: saving an absent target creates a
+// file, while an existing live-only buffer may already satisfy buffer_only.
+pub(super) fn unchanged(
+    evidence: &capture::Evidence,
+    live: Option<&LiveDocument>,
+    kind: OperationKind,
+    save: SavePolicy,
+    base: ContentHash,
+    proposed: ContentHash,
+) -> bool {
+    match kind {
+        OperationKind::Delete => !evidence.existed(),
+        OperationKind::Add | OperationKind::Update => {
+            base == proposed
+                && (evidence.existed() || (live.is_some() && save == SavePolicy::BufferOnly))
+        }
+    }
+}
 /// Private immutable proposal and held evidence; serializing a descriptor cannot
 /// manufacture an execution grant or rewrite any of its contents.
 pub(crate) struct Prepared {
