@@ -82,7 +82,7 @@ sequence veya eski epoch event'i uygulanmaz. Aktif seçimden owner çıkarılmaz
 
 Normal akış örneği (handshake ve session/create sonrasında):
 
-```json
+```json lines
 {"jsonrpc":"2.0","id":"e:c1:4","method":"session/prompt","params":{"application_id":"a1","session_id":"s1","prompt":"Refactor this function","context":{"file":"src/main.rs","line":42,"col":0}}}
 {"jsonrpc":"2.0","id":"e:c1:4","result":{"status":"accepted","run_id":"run1","generation":1}}
 {"jsonrpc":"2.0","method":"event/chunk","params":{"connection_epoch":"c1","application_id":"a1","session_id":"s1","run_id":"run1","generation":1,"sequence":1,"delta":"Merhaba"}}
