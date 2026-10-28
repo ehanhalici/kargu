@@ -175,7 +175,9 @@ async fn read_loop<R: AsyncRead + Unpin>(
     // EOF/error revokes publication immediately, but worker slots are not released
     // early. Blocking filesystem calls cannot be safely aborted by dropping a task.
     while let Some(completion) = reads.next(&host).await {
-        completion.map_err(|_| TransportError::ReadWorker)?;
+        completion
+            .map_err(|_| TransportError::ReadWorker)?
+            .publish(&mut host);
     }
     result
 }
@@ -243,6 +245,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
             completion = reads.next(host), if !reads.is_empty() => {
                 let reply = completion.ok_or(TransportError::ReadWorker)?
                     .map_err(|_| TransportError::ReadWorker)?;
+                let reply = reply.publish(host);
                 queue_reply(reply, host.frame_limit(), tx, permits)?;
                 if reads.is_empty() && commands.is_empty() && api.is_empty() && lifecycle.is_empty() && let Some(reply) = shutdown_reply.take() {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
@@ -377,6 +380,46 @@ async fn read_messages<R: AsyncRead + Unpin>(
                         } else {
                             commands.start(host, id.clone(), params)
                         };
+                        if let Err(fault) = admitted {
+                            queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
+                    }
+                    continue;
+                }
+                if matches!(
+                    method.as_str(),
+                    methods::EDIT_PREPARE | methods::EDIT_INSPECT
+                ) {
+                    if let Some(id) = id.as_ref() {
+                        let admitted = host
+                            .prepare_edit(params, method == methods::EDIT_INSPECT)
+                            .and_then(|(scope, input)| {
+                                use crate::edit::prepare::PrepareWork;
+                                let ticket = match &input {
+                                    PrepareWork::Read(work) => work.id.clone(),
+                                    PrepareWork::Patch(work) => work.id.clone(),
+                                };
+                                let admitted = match input {
+                                    PrepareWork::Read(work) => {
+                                        reads.start_edit(id.clone(), scope.clone(), work)
+                                    }
+                                    PrepareWork::Patch(work) => commands.start_edit_patch(
+                                        host,
+                                        id.clone(),
+                                        scope.clone(),
+                                        work,
+                                    ),
+                                };
+                                if admitted.is_err() {
+                                    // Admission failed before a worker existed; release the staging slot.
+                                    let _ = host.finish_edit(
+                                        &scope,
+                                        &ticket,
+                                        Err(crate::error::CoreError::Limit),
+                                    );
+                                }
+                                admitted
+                            });
                         if let Err(fault) = admitted {
                             queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
                         }

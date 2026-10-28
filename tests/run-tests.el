@@ -79,6 +79,8 @@
 (require 'tests/test-patch)
 (require 'tests/test-edit-transaction)
 (require 'tests/test-edit-service)
+(require 'tests/test-native-edit-prepare)
+(require 'tests/test-native-edit-patch)
 (require 'tests/test-metadata)
 (require 'tests/test-model-store)
 (require 'tests/test-parameters)

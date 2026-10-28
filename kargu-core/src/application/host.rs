@@ -139,6 +139,7 @@ impl Host {
     pub(crate) fn sweep_configuration(&mut self, now: std::time::Instant) {
         for application in self.applications.values_mut() {
             application.actor_mut().configuration.sweep(now);
+            application.actor_mut().edits.sweep(now);
         }
     }
     /// Start a host with a fresh, non-reusable connection epoch.
@@ -264,6 +265,61 @@ impl Host {
         Ok((scope, input))
     }
 
+    pub(crate) fn prepare_edit(
+        &mut self,
+        params: Value,
+        inspect: bool,
+    ) -> Result<(ReadScope, crate::edit::prepare::PrepareWork), Fault> {
+        let request: ReadRequest<Value> =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&request.scope) {
+            return Err(owner_fault());
+        }
+        let work = self
+            .actor_mut(&request.scope)
+            .map_err(|_| owner_fault())?
+            .edits
+            .take(
+                &request.scope.session_id,
+                request.arguments,
+                std::time::Instant::now(),
+                inspect,
+            )?;
+        Ok((request.scope, work))
+    }
+    pub(crate) fn can_publish_edit(
+        &self,
+        scope: &ReadScope,
+        id: &crate::edit::prepare::PreparationId,
+    ) -> bool {
+        self.owns_read_scope(scope)
+            && self
+                .applications
+                .get(&scope.application_id)
+                .is_some_and(|app| {
+                    app.actor()
+                        .edits
+                        .can_publish(&scope.session_id, id, std::time::Instant::now())
+                })
+    }
+    pub(crate) fn finish_edit(
+        &mut self,
+        scope: &ReadScope,
+        id: &crate::edit::prepare::PreparationId,
+        result: Result<crate::edit::prepare::PreparationResult, crate::error::CoreError>,
+    ) -> Result<Value, Fault> {
+        // Retired sessions may still own a draining worker; settlement must release it.
+        let result = if self.owns_read_scope(scope) {
+            result
+        } else {
+            Err(crate::error::CoreError::StaleOwner)
+        };
+        self.actor_mut(scope)
+            .map_err(|_| owner_fault())?
+            .edits
+            .finish(&scope.session_id, id, result, std::time::Instant::now())
+    }
+
     pub(crate) fn matches_epoch(&self, scope: &RequestScope) -> bool {
         scope.as_str() == self.epoch
     }
@@ -368,6 +424,31 @@ impl Host {
 
     fn ready_call(&mut self, method: &str, params: Value) -> Result<Value, Fault> {
         match method {
+            methods::EDIT_BEGIN
+            | methods::EDIT_TARGETS
+            | methods::EDIT_DOCUMENT
+            | methods::EDIT_FILES
+            | methods::EDIT_APPEND
+            | methods::EDIT_READ
+            | methods::EDIT_ABORT
+            | methods::EDIT_CLOSE => {
+                let request: ReadRequest<Value> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                if !self.owns_read_scope(&request.scope) {
+                    return Err(owner_fault());
+                }
+                let frame = self.frame_limit;
+                self.actor_mut(&request.scope)
+                    .map_err(|_| owner_fault())?
+                    .edits
+                    .rpc(
+                        &request.scope.session_id,
+                        method,
+                        request.arguments,
+                        frame,
+                        std::time::Instant::now(),
+                    )
+            }
             "configuration/prepare"
             | "configuration/commit"
             | "configuration/abort"

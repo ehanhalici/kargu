@@ -30,8 +30,8 @@ use reply::{CompletedReply, Reply};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use state::{
-    ApprovalReady, Discarding, Finalizing, Operation, Owner, Preparing, Progress, Reviewing,
-    Running, Stage,
+    ApprovalReady, Discarding, Finalizing, Operation, OperationValue, Owner, Preparing, Progress,
+    Reviewing, Running, Stage,
 };
 use std::collections::HashMap;
 use tokio::sync::oneshot;
@@ -235,6 +235,7 @@ impl Commands {
             id,
             Stage::Preparing(Operation {
                 owner: Owner {
+                    edit: None,
                     mutation_issued: false,
                     purpose,
                     scope,
@@ -260,6 +261,28 @@ impl Commands {
             RunPurpose::AgentTurn,
             move |context| request.arguments.prepare(context).map(Prepared::from),
         )
+    }
+    pub fn start_edit_patch(
+        &mut self,
+        host: &Host,
+        id: RpcId,
+        scope: ReadScope,
+        input: crate::edit::prepare::PatchWork,
+    ) -> Result<(), Fault> {
+        let ticket = input.id.clone();
+        self.admit(
+            host,
+            id.clone(),
+            scope,
+            RunPurpose::AgentTurn,
+            move |context| input.prepare(context).map(Prepared::from),
+        )?;
+        self.operations
+            .get_mut(&id)
+            .ok_or_else(|| fault(CoreError::CleanupFailed))?
+            .owner_mut()
+            .edit = Some(ticket);
+        Ok(())
     }
     pub fn cancel(&mut self, id: &RpcId) {
         self.jobs.cancel_request(id);
@@ -295,6 +318,12 @@ impl Commands {
             if !host.owns_read_scope(&owner.scope) && owner.terminal.is_none() {
                 owner.terminal = Some(CoreError::StaleOwner);
             }
+            if let Some(ticket) = &owner.edit
+                && owner.terminal.is_none()
+                && !host.can_publish_edit(&owner.scope, ticket)
+            {
+                owner.terminal = Some(CoreError::Cancelled);
+            }
             let progress = self.advance(host, pending, &id, stage, &mut messages)?;
             match progress {
                 Progress::Pending(stage) => {
@@ -302,22 +331,38 @@ impl Commands {
                 }
                 Progress::Done(owner, result) => {
                     let result = owner.terminal.map_or(result, Err);
-                    let result = if owner.mutation_issued
-                        && (result.is_err()
-                            || result.as_ref().is_ok_and(|v| {
-                                json!({"jsonrpc":"2.0","id":id.value(),"result":v})
-                                    .to_string()
-                                    .len()
-                                    > host.frame_limit().as_usize()
-                            })) {
-                        Err(CoreError::MutationOutcomeUnknown)
+                    let reply = if let Some(ticket) = &owner.edit {
+                        let result = result.and_then(|value| match value {
+                            OperationValue::Edit(prepared) => Ok(*prepared),
+                            _ => Err(CoreError::CleanupFailed),
+                        });
+                        match host.finish_edit(&owner.scope, ticket, result) {
+                            Ok(value) => protocol::success(&id, value),
+                            Err(fault) => fault.response(Some(&id)),
+                        }
                     } else {
-                        result
+                        let result = result.and_then(|value| match value {
+                            OperationValue::Json(value) => Ok(value),
+                            _ => Err(CoreError::CleanupFailed),
+                        });
+                        let result = if owner.mutation_issued
+                            && (result.is_err()
+                                || result.as_ref().is_ok_and(|v| {
+                                    json!({"jsonrpc":"2.0","id":id.value(),"result":v})
+                                        .to_string()
+                                        .len()
+                                        > host.frame_limit().as_usize()
+                                })) {
+                            Err(CoreError::MutationOutcomeUnknown)
+                        } else {
+                            result
+                        };
+                        match result {
+                            Ok(value) => protocol::success(&id, value),
+                            Err(error) => fault(error).response(Some(&id)),
+                        }
                     };
-                    messages.push(match result {
-                        Ok(value) => protocol::success(&id, value),
-                        Err(error) => fault(error).response(Some(&id)),
-                    });
+                    messages.push(reply);
                 }
             }
         }
@@ -543,7 +588,7 @@ impl Commands {
         match self.supervisor.start(actor, grant) {
             Ok(job) => {
                 owner.mutation_issued = matches!(&reply, Reply::GitMutation(_));
-                let reply = reply.issued();
+                let reply = reply.issued(&run);
                 if run.scope().purpose() == RunPurpose::ProcessJob {
                     return self
                         .jobs
@@ -644,6 +689,7 @@ impl Commands {
         self.supervisor.forget(&run, &job)?;
         host.actor_mut(&operation.owner.scope)?.finish(&run)?;
         match result {
+            Ok(CompletedReply::Edit(result)) => Ok(operation.owner.complete_edit(result)),
             Ok(CompletedReply::Continue(next)) if operation.owner.terminal.is_none() => {
                 Ok(Progress::Pending(Stage::Preparing(Operation {
                     owner: operation.owner,

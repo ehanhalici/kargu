@@ -1,0 +1,258 @@
+# Native edit transaction ownership
+
+This is the contract and acceptance map for todo 3. The checkboxes and remaining
+implementation work live only under item 3 in `todo.md`. A native parser library
+is preparation evidence; it does not establish an editor consumer cutover.
+
+## Authority and the editor boundary
+
+Rust owns proposal text/hash, patch framing, hunk counts, review revisions,
+approval/issuance, batch/journal state, snapshot stacks and rollback eligibility.
+Emacs owns actual live buffers, document identities/ticks, atomic change groups,
+undo/markers/point/narrowing, file coding and save hooks, Ediff controls/windows,
+and notifications. All editor files, including closed files, go through the
+editor transaction adapter. There is no competing native disk edit path.
+
+A parsed patch, a content digest, a client-provided identifier and an editor UI
+projection are never apply capabilities. An issued editor operation comes from
+the shared native permission gate, under its actual application/session/run,
+generation and config/policy revisions. Editor edit approval must extend that
+gate with a closed edit action; it must not synthesize a fake command or create
+a second permission ledger. The edit service owns transaction/journal state,
+not an independent permission decision engine.
+
+Preparation captures a canonical root and explicit target scope, immutable
+base/proposed decoded text and hashes, disk identity/revision, and a live document
+identity/tick when present. New targets capture absence and the existing ancestor.
+All files are preflighted before the first buffer mutation. The native filesystem
+worker is bounded and cancellable between OS calls; actual worker/process joins
+retain their slot. Large uploads/captures must be chunked with backpressure before
+the native editor capability is advertised. No source text belongs in Debug/logs.
+
+The default tool contract preserves current dirty-buffer rejection without
+changing the buffer or disk. Live document evidence still uses actual widened
+buffer text, not a stale disk copy; an intervening tick, read-only state or disk
+revision is a conflict. This does not authorize erasing or saving unsent user edits.
+Save policy is an explicit `buffer_only` or `save` enum. Save hooks run in the
+editor and their actual final content/hash/revision and failure are reported.
+The currently recorded policy is frozen across asynchronous preparation/review.
+
+## Protocol and lifecycle requirements
+
+The intended owned transaction is:
+
+1. Capture/upload bounded editor source facts and native path/revision evidence.
+2. Prepare immutable native proposal. Literal replace is unique, case-sensitive
+   and non-overlapping; full writes do not acquire implicit save rights.
+3. For Unified Diff, validate framing and operation/path policy, then run real
+   Git against an owned isolated workspace through the shared supervisor.
+   Complete output and final targets become one immutable native proposal.
+4. Register the actual proposal with the shared permission ledger. Auto policy
+   is a captured native policy decision; interactive accept/reject/interrupt,
+   deadline, owner/config/document changes, and missing presenter are distinct.
+5. If Ediff changed the proposal, publish and validate a new native review
+   revision before granting its exact text. UI content hashes do not silently
+   rewrite the already reviewed action. A late button cannot approve a new revision.
+6. Commit the appropriate native journal records before issuing the consuming
+   `editor/apply_buffer_patch` capability. The adapter rechecks live evidence and
+   applies through atomic change groups, preserving editor state and coding/EOL.
+7. Accept the real per-file receipt, reconcile save-hook effects and journal the
+   terminal result. On partial batch failure, request rollback only against a
+   still-owned written revision. Foreign buffer/disk state is preserved.
+8. Cancel/close revokes new writes and reviews first, then retains issued work,
+   receipt/journal/rollback/process cleanup until actual drain. A lost receipt or
+   interrupted journal leaves explicit unknown effects; no automatic replay.
+
+The final implementation must use consuming typestates for prepare/review/issued/
+settled transitions. DTOs cannot construct an issued grant. Duplicate edit IDs
+return a recorded result or stale error, and never issue a second editor write.
+Passive UI views are detached, owner/revision-qualified observations; they cannot
+start IO, claim a service, or replace its canonical native state.
+
+## One typed result
+
+The native result has one edit identity and revision, canonical scope, and an
+ordered file result list. Every file has its path/action, status, base/proposed/
+accepted/final content evidence, actual document/disk post-revision, save state,
+hook transformation and rollback/write effect. Statuses must distinguish applied,
+partial, unchanged, rejected, interrupted, conflict, unavailable, failed,
+rolled-back and outcome-unknown. Pending/staged review is lifecycle state, not a
+terminal successful file result. Batch outcome derives from these actual records,
+not a string prefix. A multi-file patch must not be wrapped as a synthetic one-file
+`unknown` result or fabricate a one-hunk success.
+
+Hunk counts belong to the revision that was actually granted/applied. A human
+edited proposal is a new revision with its own measured preparation; original
+requested hunks are separate evidence. If evidence is incomplete, an exact count
+is unavailable rather than guessed. Save-hook transformation is measured against
+the granted text. A passive observer failure cannot turn a completed write into
+rollback, nor can a presenter error erase a recorded commit.
+
+The journal records issuance before effects and settlement afterward, with bounded
+records, sequence/integrity and explicit recovery. Started but unterminated work
+is recovered as unknown, without issuing it again. Process-local batch recovery
+is not a filesystem CAS, a filesystem lock, or multi-file crash atomicity.
+
+## Existing consumers and acceptance map
+
+| Current consumer/source | Native responsibility and acceptance evidence |
+| --- | --- |
+| `tools/diff.el` edit/write/patch tool executors and aliases | One registry/mode/gate path, real async callback and typed file/batch result. `test-tools`, `test-tool-gate`, `test-patch`, `test-security`. |
+| `tools/diff/stage.el` literal replace, proposal and pre-state decisions | Move pure preparation and revision decisions; retain only live transaction/save/undo interop. Missing/ambiguous/case-sensitive matches, unchanged, narrowed full snapshots, read-only and dirty conflicts. |
+| `tools/diff.el` parser, isolated Git staging and batch | Native framing/normalization, isolated Git through shared supervisor, preflight all targets, actual counts and partial/unknown results. `test-patch` and `test-edit-transaction`. |
+| `tools/diff/context.el` plans/outcome wrapper and resource registry | Native immutable plan/grant and owner lifecycle, exact typed result; no string summary conversion and no hidden default service. `test-edit-service`. |
+| `tools/diff/review.el` Ediff decision and pending state | Native review revision/decision; Emacs keeps controls and accepted text only. Stale/duplicate/foreign control, async/blocking/reject/C-g/missing presenter and active close. |
+| `tools/diff/track.el` snapshots/change/baseline/stats/rollback decisions | Native journal/snapshot stack and CAS-style eligibility; retain editor rollback mutation/undo adapter. Single-step restoration, foreign change guards, save-hook mutation/failure and final hashes. |
+| `edit.el` optional edit/change provider | Keep the optional port, one typed result and explicit unavailable; async native submission, no synchronous wait/fallback. |
+| `tools/lsp/symbols.el` and `tools/lsp/register.el` | Preserve captured symbol response revision and use the same edit service. Live LSP request/sensor behavior remains todo 4. |
+| `loop.el`, `loop/tools.el`, `loop/heal.el` | Read owner-qualified native change/baseline evidence and reset/consume/abort the same service. `test-edit-transaction`, verification and loop fixtures. |
+| `chat/render.el`, `ui/transient.el` | Passive native stats/review views and owned interactive rollback; no synchronous disk scan or default/global edit lookup. |
+| `tools/process.el` remaining diff consumer | Remove after isolated Git apply moves; Dape/session consumers remain outside todo 3. |
+
+The named suites above remain the acceptance corpus, including related UI and
+loop tests. Native integration tests complement rather than replace dirty/undo/
+save-hook/multi-file/foreign rollback evidence. The relevant
+bounded model is `proof/KarguEdit.tla` / `EditMC`, with application and approval
+models updated if shared claim/permission transitions change. Compile-fail tests
+must cover unit interchange and non-constructible/replayable apply authority.
+
+## Native preparation evidence so far
+
+`edit/types.rs`, `proposal.rs`, `review.rs` and `patch/` provide bounded text/hash/path units,
+unique literal replacement and complete hunk framing/normalization. Git remains
+the apply/matching engine. Quoted Git paths, including UTF-8 octal escapes, are
+normalized to escaped headers; binary, rename/copy, unsupported modes, absolute/
+traversing/reserved/control-bearing paths and incomplete/count-overflow framing
+fail explicitly. Source lines resembling `---`/`+++` stay hunk body text.
+
+The normalizer is checked against real Git add/update/delete/no-final-newline and
+quoted Unicode/backslash/quote path fixtures, with no user index. The format
+reference is Git's [diff-format](https://git-scm.com/docs/diff-format) documentation;
+acceptance is established by the installed Git fixture, not a claim to implement
+all of Git's diff formats. The `edit_preparation` capability advertises only
+read-only preparation, not permission to edit. Existing Elisp mutation consumers
+remain active until the complete native transaction boundary is ready.
+
+## Owned native preparation port
+
+`edit/begin`, `edit/append`, `edit/prepare`, `edit/read`, `edit/abort` and
+`edit/close` use the application/session lease plus a typed source origin ID.
+Begin freezes replace/write intent, root, policy/config revisions, review/save
+policies and optional live document identity/tick/coding/disk evidence. Dirty and
+read-only live captures refuse preparation. Text parts have declared UTF-8 byte
+lengths; exact-offset chunks are capped at 32 KiB and adjusted to the negotiated
+frame budget. The connection retains its 1 MiB ceiling, including control-byte
+escaping. Source bodies do not enter descriptors, errors or implicit Debug.
+
+One application actor owns at most two upload/inspection/collecting/preparing/ready
+entries and 16 MiB of text-byte reservations. Adoption shrinks ready reservations
+to actual base/proposed byte lengths, so small replacements do not retain their
+worst-case capture budget forever. A patch reserves the full budget during capture
+and Git preparation. Upload expires after 30 seconds; adopted immutable views
+expire after five minutes. Preparing work consumes owned input on the existing
+four-worker read pool, shared with file/configuration/skill reads. Workers return
+a typed completion to the stdio actor; only that writer adopts it before replying.
+Cancel, origin close, session/application close and expiry revoke publication;
+worker admission and staging reservations remain occupied until actual join.
+Pool admission failure releases the unstarted staging record.
+
+Native capture holds root, canonical path and stat evidence. It rejects outside
+or protected metadata targets, including symlink aliases into `.git`, broken
+symlinks, directories and special files before reading data. Missing targets pin
+the existing ancestor and preserve absence evidence. Disk decode reuses the
+shared file decoder and bounds raw/decoded content; CRLF maps to editor LF.
+A supplied clean live document permits editor-decoded content (including coding
+not supported by native decode), but its exact disk revision must still match.
+Both hashes are computed off the actor and retained with the immutable contents.
+Read pages perform no filesystem IO. No operation writes the original file,
+returns an apply grant, claims an applied hunk, or refreshes captured evidence.
+
+`kargu/bridge/edit.el` detaches metadata and owned UTF-8 text before its first
+yield, sends a single chunk until its exact ACK, and checks source/document guard,
+deadline and exact application lease at each boundary. It releases late native
+allocations even after task cancellation. A successful handle is transferred to
+the caller for explicit release; it only permits bounded base/proposed reads.
+Missing capability reports unavailable without editor file IO or a replacement
+engine. Public edit tool consumer cutover belongs to todo 3.8.
+
+## Supervised native patch preparation
+
+The `edit_patch_preparation` capability adds `edit/inspect`, `edit/targets`,
+`edit/document` and `edit/files`. Inspection parses the already uploaded patch on
+the shared read workers. Its actor-owned plan supplies bounded target pages;
+Elisp has no second target parser. Named live documents can be attached once to
+those exact targets, with native file-index upload parts and exact-offset ACKs.
+Dirty/read-only, foreign/duplicate document identities and incomplete uploads
+refuse preparation. Patch input and source lifetime stay captured throughout.
+
+Final `edit/prepare` consumes the plan into the existing command mailbox. A worker
+captures all canonical source pins and complete decoded bases, rejects target
+aliases and invalid add/update/delete preconditions, and checks zero-context
+ambiguity before Git. It creates a private repository/worktree with explicit
+config, index and patch paths. The existing shared ExecutionGate and
+ProcessSupervisor execute fixed Git argv. Git has no original file path in its
+command or environment; original pins remain in the result report and are
+revalidated off the actor before publication. No original project index is read
+or written. Global/system Git configuration is disabled; private highest-priority
+attributes neutralize filter/EOL/encoding effects even when `.gitattributes` is
+itself a patch target. Actual matching/application remains Git's work.
+
+The consuming `PatchPrepared → RunningPatch → immutable batch` states retain the
+private workspace until actual process-group/pipe drain and final snapshot IO.
+Cancellation, expiry or source/application close revoke publication while the
+command and preparation reservation remain held. Failure, missing Git, oversized
+or incomplete output, stale source pins and resource overflow publish no file
+prefix. The owned workspace closes explicitly on success, error or discard.
+Private output is read as exact bounded UTF-8, retaining literal BOM and final
+newline state. Original source coding/disk evidence remains separate.
+
+Batch descriptors contain actual parsed requested hunk counts and paged immutable
+file views with operation, hashes, source evidence and file index. Target and file
+metadata paging serializes each item once rather than repeatedly serializing an
+expanding page on the actor. Read-only preparation still issues no editor grant.
+Revised review text, effective save-hook results and actual editor outcomes belong
+to the later revision/gate/transaction/journal boundary, not these prepared counts.
+
+`kargu/bridge/edit/patch.el` supplies only inspected target/document transport,
+preparation and paged views. It detaches metadata/text and reuses the bounded
+ACK-driven uploader. It never calls the legacy parser or writes editor files.
+Oversized caller text is rejected before copying/encoding or native startup.
+
+## Current verification and next integration boundary
+
+Preparation/review domain: 9/9, including real isolated Git. Native file preparation
+pipe: 6/6, including two small same-path replacements with distinct source owners.
+Supervised patch pipe: 8/8, including 256 targets through 2 KiB metadata frames,
+CRLF/Unicode/literal BOM/no-final-newline, named live coding, aliases, ambiguity,
+source replacement during Git, private filter/config isolation, missing Git,
+aggregate/expanding output bounds and TERM/KILL/actual cleanup. Shared worker
+regressions: 8/8. Real Emacs file/patch transport: 8/8, including capture guards,
+late allocation release, metadata detach, old-core refusal and pre-copy bounds.
+Compile-fail: 26/26. Strict locked all-targets Clippy, fmt and changed Elisp
+warning-free bytecompile/checkdoc pass.
+
+After the filesystem/network sandbox restriction was removed, the unfiltered
+locked Cargo suite passed all 394 tests (67 library, 301 integration, 26
+compile-fail), and the full ERT suite passed 1,279/1,279 without skips. This includes
+the HTTP and Unix socket fixtures previously rejected at bind. These are full
+regression results for the preparation slice; actual native editor writes,
+save-hook settlement, native rollback and consumer cutover are still open.
+
+Standard BFS TLC now completes with an empty queue for Edit (560 distinct states),
+Application (4,624), Approval (1,536), Process (179) and native preparation (34,258).
+The earlier invariant-only DFID runs reached the same distinct-state counts.
+The native preparation model retains two preparation IDs and two separate
+source-owner IDs modulo identity-renaming symmetry. It models byte/worker
+reservations, inspector/command/process joins, cancellation/close/expiry and the
+full-capture/Git/drain publication order. A mutant dropping a live cancellation
+reservation violates `ActualJoinBeforeRelease`. A depth-limited EditMC run returning
+zero without a completed-exploration verdict is rejected by the hardened runner.
+This is bounded safety evidence, not a proof of concrete IO, content hashing,
+editor transactions or liveness. See `proof/README.md` for commands and counts.
+
+The next integration is the closed editor action branch of the shared permission
+gate and the actual Emacs transaction adapter. Its consuming issued state must
+retain the real editor settlement/drain barrier across cancellation; timing out a
+reverse RPC alone is not proof that a queued or executing editor write stopped.
+The old Elisp consumers remain active until that boundary and native journal/
+rollback are wired and tested, then are removed. Todo 3 remains open.

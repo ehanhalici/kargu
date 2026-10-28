@@ -394,6 +394,7 @@ impl ToolRegistry {
             "git_diff",
             "git_blame",
             "git_mutation_prepare",
+            "edit_patch_prepare",
         ] {
             self.register(
                 ToolName::try_from(name.to_owned())?,

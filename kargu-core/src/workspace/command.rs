@@ -63,7 +63,7 @@ impl ReadTimeout {
     }
 }
 
-pub(super) fn executable(name: &str) -> Result<PathBuf, CoreError> {
+pub(crate) fn executable(name: &str) -> Result<PathBuf, CoreError> {
     let paths = std::env::var_os("PATH").ok_or(CoreError::Unavailable)?;
     std::env::split_paths(&paths)
         .filter(|dir| dir.is_absolute())

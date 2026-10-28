@@ -19,6 +19,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 pub(super) struct Owner {
+    pub edit: Option<crate::edit::prepare::PreparationId>,
     pub mutation_issued: bool,
     pub purpose: RunPurpose,
     pub scope: ReadScope,
@@ -163,11 +164,18 @@ impl Stage {
 }
 pub(super) enum Progress {
     Pending(Stage),
-    Done(Owner, Result<Value, CoreError>),
+    Done(Owner, Result<OperationValue, CoreError>),
+}
+pub(super) enum OperationValue {
+    Json(Value),
+    Edit(Box<crate::edit::prepare::PreparationResult>),
 }
 impl Owner {
     pub fn complete(self, result: Result<Value, CoreError>) -> Progress {
-        Progress::Done(self, result)
+        Progress::Done(self, result.map(OperationValue::Json))
+    }
+    pub fn complete_edit(self, result: Box<crate::edit::prepare::PreparationResult>) -> Progress {
+        Progress::Done(self, Ok(OperationValue::Edit(result)))
     }
 }
 

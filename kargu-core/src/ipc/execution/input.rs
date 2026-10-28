@@ -78,6 +78,16 @@ impl From<crate::workspace::git::GitPrepared> for Prepared {
         }
     }
 }
+impl From<crate::edit::prepare::GitPreparation> for Prepared {
+    fn from(p: crate::edit::prepare::GitPreparation) -> Self {
+        Self {
+            tool: p.tool,
+            command: p.command,
+            settings: p.settings,
+            reply: Reply::EditPatch(Box::new(p.report)),
+        }
+    }
+}
 impl Prepared {
     pub fn discard(self) -> Result<(), CoreError> {
         self.reply.discard()

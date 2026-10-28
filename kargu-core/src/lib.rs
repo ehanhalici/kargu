@@ -9,6 +9,7 @@ pub mod application;
 pub mod configuration;
 pub mod constants;
 pub mod domain;
+pub mod edit;
 pub mod error;
 pub mod ipc;
 pub mod models;

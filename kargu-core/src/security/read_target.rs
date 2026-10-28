@@ -72,7 +72,7 @@ impl ReadTarget {
         }
         Ok(())
     }
-    pub(super) fn metadata(&self) -> Result<std::fs::Metadata, CoreError> {
+    pub(crate) fn metadata(&self) -> Result<std::fs::Metadata, CoreError> {
         Ok(self.held.metadata()?)
     }
 }

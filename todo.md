@@ -609,6 +609,87 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   sonra Elisp stage/review/pending-plan/global edit motorlarını sil. Kaynak: Aşama 2,
   G04/G10; .codex/06 ve 08.
 
+  - [x] **3.1 Sözleşme ve kabul envanteri:** mevcut public edit/LSP/patch/review/
+    rollback consumer'larını ve testlerini eşle; tek typed file/batch outcome,
+    save policy, revision/hash, owner ve cancellation sözleşmesini belirle.
+    `01_RUST_CORE_PATTERNS.md` newtype/TryFrom, tek writer, typestate, bounded
+    IPC/worker ve no-panic/unsafe kuralları her dilimin kabul kapısıdır.
+    Consumer/test eşlemesi ve sahiplik/result sözleşmesi:
+    `docs/native-edit-ownership.md`. Pure native prepare/review temeli 9 gerçek
+    Git/domain testiyle doğrulandı; IPC/editor cutover ayrı alt maddelerde açıktır.
+  - [x] **3.2 Native teklif hazırlığı:** literal replace/full write ve immutable
+    base/proposed content hash, document identity/tick, disk revision ve root/path
+    kapsamını bounded native prepare portuna taşı; büyük capture/upload sırasında
+    UI bloklanmasın, ilk yield öncesi input detach ve late-result guard korunsun.
+    `edit/{begin,append,prepare,read,abort,close}` ve `edit_preparation` capability
+    bağlı: 32 KiB/negotiated-frame parçaları, actor-owned immutable kayıt, ortak
+    worker kapasitesi ve gerçek join sonrası release. Native pipe 6/6,
+    Emacs prepare/patch pipe 8/8, ortak worker 8/8; Unicode/CRLF, stale disk/document guard, foreign owner,
+    late allocation abort ve minimum 1 KiB frame doğrulandı. Bu port yazma grant'i
+    vermez; transaction ve consumer cutover 3.4–3.8'de açık kalır.
+  - [x] **3.3 Native Unified Diff/Git adapter:** kapalı parser/normalizer, hunk
+    sayımı ve zero-context ambiguity kararlarını Rust'a taşı; gerçek apply mevcut
+    Git motoruyla isolated workspace'te ortak supervisor üzerinden yürüsün.
+    Index/attribute/filter/config etkileri ve temp/process cleanup testli olsun.
+    `edit/inspect → targets/document → prepare → files/read` native akışı ve
+    `edit_patch_preparation` capability bağlı; hedef ayrıştırma Elisp'te yapılmaz.
+    Ortak gate/supervisor yalnız özel Git workspace'ini çalıştırır. Native patch
+    pipe 8/8: 256 dosya, CRLF/Unicode/literal BOM/no-final-newline, canlı coding,
+    belirsizlik/alias, foreign disk değişimi, private attribute/config/filter,
+    expansion/aggregate limit, missing Git ve gerçek TERM/KILL/temp drain temiz.
+    Hazır teklif rezervasyonu gerçek içerik boyutuna iner; iki küçük replacement
+    servisinin aynı path'te ayrı tutulması ayrıca doğrulandı. Public tool cutover
+    3.8'de; bu port gerçek editor dosyasına yazma grant'i değildir.
+  - [ ] **3.4 Native edit/review ledger:** edit_id, owner/run/generation, root,
+    policy/config ve base/proposed/review revision'ına bağlı tek kullanımlık grant;
+    auto/async/blocking politikası, stale/foreign/missing presenter, duplicate apply,
+    timeout/reject/Stop ve revoke→actual drain→admit geçişleri native'de olsun.
+  - [ ] **3.5 Emacs transaction adapter:** bütün açık/kapalı dosyalar yetkili
+    native edit_id üzerinden canlı belge kontrolü, atomic change group, undo/point/
+    marker/narrowing, coding/EOL ve açık buffer_only/save policy ile uygulansın.
+    Save-hook final hash/revision ve failure/partial/unknown gerçek receipt taşısın;
+    Rust'ta paralel editor dosyası yazma veya legacy fallback açılmasın.
+  - [ ] **3.6 Native batch/journal/rollback:** bütün dosyalar preflight edilmeden
+    ilk yazma olmasın; gerçek file/batch durumları, hunk sayıları ve snapshot stack
+    tek kayıtta yaşasın. Rollback yalnız hâlâ kendi yazdığı revision'da; foreign
+    kullanıcı/disk değişimi korunur. Issued ama sonucu bilinmeyen işlem/journal
+    recovery açık unknown olsun; otomatik replay/crash-atomicity iddiası olmasın.
+  - [ ] **3.7 Review UI adapter:** Ediff yalnız edit_id/review revision'a bağlı
+    sunum ve kullanıcı metni sağlar; düzenlenmiş proposal yeniden native review
+    revision'ı alır. Core receipt olmadan applied yazılmaz; reject/timeout/C-g,
+    foreign control/window/buffer ve presenter hatası commit'i geri çevirmesin.
+  - [ ] **3.8 Consumer cutover:** edit_file/write_file/apply_patch, LSP symbol edit,
+    loop verification/change readers ve interactive rollback aynı native servis/
+    gate/typed sonucu kullansın; metin önekinden sonuç çıkaran wrapper kaldırılsın.
+    Passive UI projection kaynak sahibi yerine geçmesin; missing core/cap açık hata.
+  - [ ] **3.9 Son legacy temizliği:** son consumer sonrası Elisp patch/proposal/
+    stage/review/pending-plan/snapshot/change domain motorlarını ve default/global
+    edit aynalarını sil; yalnız canlı transaction/save/undo ve UI adapter'ları kalsın.
+    `tools/process.el` diff tüketicisi de kalksın; Dape/session consumer'ları korunur.
+  - [ ] **3.10 Bütünleşik kabul/kapanış:** dirty/CRLF/Unicode, save-hook mutation/
+    failure, stale review, iki servis aynı path, duplicate/late karar, multi-file
+    partial failure, foreign rollback ve active close gerçek native pipe/Emacs
+    fixture'larıyla doğrulansın. Full ERT, locked Rust/compile-fail, strict Clippy,
+    fmt, warning-free bytecompile/checkdoc ve etkilenen exhaustive TLC temizlensin;
+    tamamlanan alt maddeler kanıtlarıyla işaretlensin, üst madde en son kapansın.
+    2026-10-28 native prepare/patch dilimi: domain 9/9, prepare pipe 6/6,
+    patch pipe 8/8, Emacs pipe 8/8; filtresiz `cargo test --locked` toplam 394/394
+    (67 library, 301 integration, 26 compile-fail) ve full ERT 1.279/1.279 geçti.
+    Strict Clippy/fmt ve warning-free bytecompile/checkdoc temiz. Önceki socket
+    EPERM engeli izin değişikliğiyle kalktı; artık filtre veya skip yok.
+    Standart BFS tam verdict ve boş kuyrukla Edit (560), Application (4.624),
+    Approval (1.536), Process (179) ve yeni native preparation (34.258 farklı
+    durum) taramaları geçti. Yeni model actual-join, kapasite, cancel/expiry/close,
+    source değişimi ve Git öncesi tam capture'ı kapsar; erken-release mutantı
+    invariant ihlaliyle reddedildi. Bu test başarısı henüz native editor yazma,
+    save-hook/journal/rollback ve consumer cutover kanıtı değildir; 3.4–3.9 açık.
+  - [x] **3.11 TLC kapanış verdict'ini sağlamlaştırma (çalışırken bulundu):**
+    `Finished in` veya sıfır exit kodu tek başına tam tarama sayılmasın. Koşucu
+    model-check modunda açık tamamlanma verdict'i arar; `--dfid N` invariant-only
+    taramalar için RMI gerektirmeyen seçenektir, simulation ile karıştırılamaz.
+    Gerçek EditMC sığ DFID koşusu (9 durum, exit 0) artık reddediliyor; tam Edit,
+    Application, Approval, Process ve preparation taramaları kabul ediliyor.
+
 - [ ] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
   revision/connection/thread/frame-bound reverse RPC'ye bağla. Mention/folder/
   attachment/provenance ve byte/token/egress kararlarını native'a taşı; canlı

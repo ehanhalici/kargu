@@ -12,12 +12,12 @@ enum Encoding {
     Utf16Be,
 }
 #[derive(Default)]
-pub(super) struct Decoder {
+pub(crate) struct Decoder {
     encoding: Encoding,
     carry: Zeroizing<Vec<u8>>,
 }
 impl Decoder {
-    pub(super) fn decode(
+    pub(crate) fn decode(
         &mut self,
         bytes: &[u8],
         complete: bool,

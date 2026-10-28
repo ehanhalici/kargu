@@ -22,6 +22,7 @@ struct PendingRead {
     cancel: CancellationToken,
     deadline: Instant,
     terminal: Option<CoreError>,
+    edit: Option<crate::edit::prepare::PreparationId>,
 }
 
 enum ReadOwner {
@@ -39,16 +40,19 @@ impl ReadOwner {
 enum ReadOperation {
     Workspace(WorkspaceRead),
     Configuration(ReadInput),
+    Edit(crate::edit::prepare::Work),
 }
 enum ReadCompletion {
     Workspace(ReadResult),
     Configuration(ReadOutput),
+    Edit(Box<crate::edit::prepare::PreparationResult>),
 }
 impl ReadOperation {
     fn timeout(&self) -> Duration {
         match self {
             Self::Workspace(_) => timeouts::WORKSPACE_READ,
             Self::Configuration(input) => input.timeout(),
+            Self::Edit(_) => timeouts::WORKSPACE_READ,
         }
     }
     fn execute(
@@ -57,6 +61,9 @@ impl ReadOperation {
         deadline: Instant,
     ) -> Result<ReadCompletion, CoreError> {
         match self {
+            Self::Edit(input) => input
+                .execute(cancel, deadline)
+                .map(|value| ReadCompletion::Edit(Box::new(value))),
             Self::Workspace(input) => input
                 .execute(cancel, deadline)
                 .map(ReadCompletion::Workspace),
@@ -71,6 +78,33 @@ impl ReadCompletion {
         match self {
             Self::Workspace(value) => serde_json::to_value(value).map_err(|_| CoreError::Limit),
             Self::Configuration(value) => Ok(value.into_editor_value()),
+            Self::Edit(_) => Err(CoreError::CleanupFailed),
+        }
+    }
+}
+
+pub(super) enum ReadEvent {
+    Message(Value),
+    Edit {
+        id: RpcId,
+        scope: ReadScope,
+        ticket: crate::edit::prepare::PreparationId,
+        result: Result<Box<crate::edit::prepare::PreparationResult>, CoreError>,
+    },
+}
+impl ReadEvent {
+    pub(super) fn publish(self, host: &mut Host) -> Value {
+        match self {
+            Self::Message(value) => value,
+            Self::Edit {
+                id,
+                scope,
+                ticket,
+                result,
+            } => match host.finish_edit(&scope, &ticket, result.map(|prepared| *prepared)) {
+                Ok(value) => super::protocol::success(&id, value),
+                Err(fault) => fault.response(Some(&id)),
+            },
         }
     }
 }
@@ -133,6 +167,15 @@ impl ReadTools {
         )
     }
 
+    pub fn start_edit(
+        &mut self,
+        id: RpcId,
+        scope: ReadScope,
+        input: crate::edit::prepare::Work,
+    ) -> Result<(), Fault> {
+        self.start_owned(id, ReadOwner::Session(scope), ReadOperation::Edit(input))
+    }
+
     fn start_owned(
         &mut self,
         id: RpcId,
@@ -149,6 +192,10 @@ impl ReadTools {
         let deadline = Instant::now()
             .checked_add(input.timeout())
             .ok_or_else(|| fault(CoreError::ArithmeticOverflow))?;
+        let edit = match &input {
+            ReadOperation::Edit(work) => Some(work.id.clone()),
+            _ => None,
+        };
         self.requests.insert(
             id.clone(),
             PendingRead {
@@ -156,6 +203,7 @@ impl ReadTools {
                 cancel: cancel.clone(),
                 deadline,
                 terminal: None,
+                edit,
             },
         );
         self.workers.spawn_blocking(move || {
@@ -177,6 +225,11 @@ impl ReadTools {
             if request.terminal.is_none() {
                 if !request.scope.is_live(host) {
                     request.terminal = Some(CoreError::StaleOwner);
+                } else if let (ReadOwner::Session(scope), Some(ticket)) =
+                    (&request.scope, &request.edit)
+                    && !host.can_publish_edit(scope, ticket)
+                {
+                    request.terminal = Some(CoreError::Cancelled);
                 } else if Instant::now() >= request.deadline {
                     request.terminal = Some(CoreError::Deadline);
                 }
@@ -195,7 +248,7 @@ impl ReadTools {
     }
 
     // The select! caller is the only writer. No I/O worker holds a Host reference.
-    pub async fn next(&mut self, host: &Host) -> Option<Result<Value, CoreError>> {
+    pub async fn next(&mut self, host: &Host) -> Option<Result<ReadEvent, CoreError>> {
         let joined = self.workers.join_next().await?;
         let Ok((id, result)) = joined else {
             return Some(Err(CoreError::CleanupFailed));
@@ -212,13 +265,34 @@ impl ReadTools {
         } else {
             result
         };
-        Some(Ok(match result {
+        if let (ReadOwner::Session(scope), Some(ticket)) = (request.scope, request.edit) {
+            let result = result.and_then(|completion| match completion {
+                ReadCompletion::Edit(prepared) => Ok(prepared),
+                _ => Err(CoreError::CleanupFailed),
+            });
+            return Some(Ok(ReadEvent::Edit {
+                id,
+                scope,
+                ticket,
+                result,
+            }));
+        }
+        Some(Ok(ReadEvent::Message(match result {
             Ok(result) => match result.into_value() {
                 Ok(value) => super::protocol::success(&id, value),
                 Err(_) => fault(CoreError::Limit).response(Some(&id)),
             },
             Err(error) => fault(error).response(Some(&id)),
-        }))
+        })))
+    }
+    #[cfg(test)]
+    async fn next_message(&mut self, host: &Host) -> Option<Result<Value, CoreError>> {
+        self.next(host).await.map(|result| {
+            result.and_then(|event| match event {
+                ReadEvent::Message(value) => Ok(value),
+                ReadEvent::Edit { .. } => Err(CoreError::CleanupFailed),
+            })
+        })
     }
 }
 
@@ -319,6 +393,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn edit_workers_hold_shared_capacity_and_staging_until_actual_join() -> TestResult {
+        let root = tempfile::tempdir()?;
+        std::fs::write(root.path().join("source"), "before")?;
+        for terminal in ["cancelled", "stale_owner", "timeout"] {
+            let (mut host, scope) = owner()?;
+            let mut tools = ReadTools::default();
+            let origin = "editor_source_12345678-1234-4234-8234-123456789abc";
+            let request = |arguments: Value| {
+                json!({"scope": {"application_id":scope.application_id,
+                "session_id":scope.session_id}, "arguments":arguments})
+            };
+            let begin = || {
+                request(json!({"origin_id":origin,"root":root.path(),"mode":"agent",
+                "intent":{"kind":"write","path":"source","new_bytes":0},"live":null,
+                "config_revision":0,"policy_revision":0,"review_mode":"auto","save_policy":"save"}))
+            };
+            let id = host
+                .dispatch("edit/begin", begin(), true)
+                .result
+                .map_err(|_| "begin")?["preparation_id"]
+                .clone();
+            let ticket = request(json!({"origin_id":origin,"preparation_id":id}));
+            let (_, work) = host
+                .prepare_edit(ticket.clone(), false)
+                .map_err(|_| "prepare")?;
+            let crate::edit::prepare::PrepareWork::Read(work) = work else {
+                return Err("expected file work".into());
+            };
+            tools
+                .start_edit(RpcId::Integer(0), scope.clone(), work)
+                .map_err(|_| "start")?;
+            for n in 1..limits::READ_WORKERS {
+                tools
+                    .start(
+                        RpcId::String(n.to_string()),
+                        scope.clone(),
+                        arguments(root.path()),
+                    )
+                    .map_err(|_| "start read")?;
+            }
+            if terminal == "cancelled" {
+                host.dispatch("edit/abort", ticket, true)
+                    .result
+                    .map_err(|_| "abort")?;
+                // A revoked worker still owns one of the two staging records.
+                assert!(host.dispatch("edit/begin", begin(), true).result.is_ok());
+                assert!(host.dispatch("edit/begin", begin(), true).result.is_err());
+            } else if terminal == "timeout" {
+                tools
+                    .requests
+                    .get_mut(&RpcId::Integer(0))
+                    .ok_or("pending")?
+                    .deadline = Instant::now();
+            } else {
+                host.dispatch(
+                    "session/close",
+                    json!({"application_id":scope.application_id,"session_id":scope.session_id}),
+                    true,
+                )
+                .result
+                .map_err(|_| "close")?;
+            }
+            tools.sweep(&host);
+            assert!(
+                tools
+                    .start(RpcId::Integer(99), scope.clone(), arguments(root.path()))
+                    .is_err()
+            );
+            let mut edit_seen = false;
+            while let Some(event) = tools.next(&host).await {
+                let reply = event?.publish(&mut host);
+                if reply["id"] == 0 {
+                    assert_eq!(reply["error"]["data"]["status"], terminal, "{reply}");
+                    edit_seen = true;
+                }
+            }
+            assert!(edit_seen);
+            if terminal == "cancelled" {
+                assert!(host.dispatch("edit/begin", begin(), true).result.is_ok());
+            }
+            assert_eq!(
+                std::fs::read_to_string(root.path().join("source"))?,
+                "before"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn skill_workers_share_capacity_and_cannot_publish_after_revocation() -> TestResult {
         let root = tempfile::tempdir()?;
         std::fs::create_dir_all(root.path().join("skills/test"))?;
@@ -369,7 +532,7 @@ mod tests {
                     .is_err()
             );
             let mut count = 0usize;
-            while let Some(reply) = tools.next(&host).await {
+            while let Some(reply) = tools.next_message(&host).await {
                 assert_eq!(reply?["error"]["data"]["status"], ending);
                 count = count.saturating_add(1);
             }
@@ -406,7 +569,7 @@ mod tests {
                 .is_err()
         );
         let mut seen = std::collections::HashSet::new();
-        while let Some(reply) = tools.next(&host).await {
+        while let Some(reply) = tools.next_message(&host).await {
             let reply = reply?;
             assert!(seen.insert(reply["id"].as_i64().ok_or("id")?));
             if reply["id"] == 0 {
@@ -426,7 +589,7 @@ mod tests {
             .map_err(|_| "readmission")?;
         assert!(
             tools
-                .next(&host)
+                .next_message(&host)
                 .await
                 .ok_or("completion")??
                 .get("result")
@@ -476,7 +639,7 @@ mod tests {
             }
             tools.sweep(&host);
             assert_eq!(tools.requests.len(), limits::READ_WORKERS);
-            while let Some(reply) = tools.next(&host).await {
+            while let Some(reply) = tools.next_message(&host).await {
                 assert_eq!(reply?["error"]["data"]["status"], ending);
             }
             assert!(tools.is_empty());
@@ -502,7 +665,7 @@ mod tests {
                 .is_err()
         );
         let mut completed = 0_usize;
-        while let Some(reply) = tools.next(&host).await {
+        while let Some(reply) = tools.next_message(&host).await {
             let reply = reply?;
             if reply["id"] == 1 {
                 assert_eq!(reply["error"]["data"]["status"], "cancelled");
@@ -534,7 +697,7 @@ mod tests {
                 .is_err()
         );
         let mut completed = std::collections::HashSet::new();
-        while let Some(reply) = tools.next(&host).await {
+        while let Some(reply) = tools.next_message(&host).await {
             let reply = reply?;
             let id = reply.get("id").and_then(RpcId::parse).ok_or("missing id")?;
             assert!(completed.insert(id.clone()));
@@ -549,7 +712,7 @@ mod tests {
             .map_err(|_| "released slot missing")?;
         tools.cancel_all();
         assert_eq!(
-            tools.next(&host).await.ok_or("missing result")??["error"]["data"]["status"],
+            tools.next_message(&host).await.ok_or("missing result")??["error"]["data"]["status"],
             "cancelled"
         );
         Ok(())
@@ -583,7 +746,10 @@ mod tests {
                 .map_err(|_| "close failed")?;
             }
             tools.sweep(&host);
-            let reply = tools.next(&host).await.ok_or("missing completion")??;
+            let reply = tools
+                .next_message(&host)
+                .await
+                .ok_or("missing completion")??;
             assert_eq!(
                 reply["error"]["data"]["status"],
                 if expired { "timeout" } else { "stale_owner" }
@@ -613,7 +779,7 @@ mod tests {
         let mut tools = ReadTools::default();
         tools.cancel_all();
         assert!(tools.start(id, scope, arguments(root.path())).is_err());
-        assert!(tools.next(&host).await.is_none());
+        assert!(tools.next_message(&host).await.is_none());
         Ok(())
     }
 }

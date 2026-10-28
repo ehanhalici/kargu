@@ -13,6 +13,7 @@ use crate::{
 use serde_json::{Value, json};
 
 pub(super) enum Reply {
+    EditPatch(Box<crate::edit::prepare::PatchPrepared>),
     GitMutationPrepare(Box<MutationPreparation>),
     GitMutation(MutationReport),
     Command,
@@ -29,12 +30,14 @@ impl Reply {
     }
     pub fn discard(self) -> Result<(), CoreError> {
         match self {
+            Self::EditPatch(report) => (*report).discard(),
             Self::GitRead(report) => (*report).discard(),
             _ => Ok(()),
         }
     }
-    pub fn issued(self) -> RunningReply {
+    pub fn issued(self, run: &crate::application::RunHandle) -> RunningReply {
         match self {
+            Self::EditPatch(report) => RunningReply::EditPatch(Box::new((*report).issued(run))),
             Self::GitMutationPrepare(p) => RunningReply::GitMutationPrepare(p),
             Self::GitMutation(r) => RunningReply::GitMutation(r),
             Self::Command => RunningReply::Command,
@@ -45,6 +48,7 @@ impl Reply {
     }
 }
 pub(super) enum RunningReply {
+    EditPatch(Box<crate::edit::prepare::RunningPatch>),
     GitMutationPrepare(Box<MutationPreparation>),
     GitMutation(MutationReport),
     Command,
@@ -53,6 +57,7 @@ pub(super) enum RunningReply {
     GitPrepare(Box<GitReadPreparation>),
 }
 pub(super) enum CompletedReply {
+    Edit(Box<crate::edit::prepare::PreparationResult>),
     Value(Value),
     Continue(Continuation),
 }
@@ -96,6 +101,7 @@ impl Continuation {
 impl RunningReply {
     pub fn capture_limit(&self) -> Result<ByteLimit, CoreError> {
         ByteLimit::try_from(match self {
+            Self::EditPatch(_) => limits::EDIT_PATCH_OUTPUT_BYTES,
             Self::GitMutationPrepare(_) => 65536,
             Self::GitMutation(report) => report.output.as_usize().max(1),
             Self::Command => limits::SEARCH_RESULT_BYTES,
@@ -109,6 +115,11 @@ impl RunningReply {
         result: &ProcessResult,
         output: CapturedOutput,
     ) -> Result<CompletedReply, CoreError> {
+        if let Self::EditPatch(report) = self {
+            return (*report)
+                .complete(result, output)
+                .map(|result| CompletedReply::Edit(Box::new(result)));
+        }
         if let Self::GitPrepare(preparation) = self {
             if !result.cleanup_complete {
                 return Err(CoreError::CleanupFailed);
@@ -145,6 +156,7 @@ impl RunningReply {
             ""
         };
         let text = match self {
+            Self::EditPatch(_) => return Err(CoreError::InvalidToolOutput),
             Self::GitMutation(report) => {
                 report.text(&output.stdout, &output.stderr, result.outcome)?
             }

@@ -3,6 +3,9 @@
 /// Cross-service failure taxonomy. Display deliberately excludes command/input data.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    /// Closed edit preparation/review failure, without source text.
+    #[error(transparent)]
+    Edit(#[from] crate::edit::EditError),
     /// A DTO failed to produce a valid domain value.
     #[error("invalid domain value: {field}")]
     InvalidValue {

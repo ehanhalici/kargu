@@ -289,6 +289,7 @@ pub struct ApplicationActor {
     active: Option<ActiveRun>,
     job_runs: HashMap<RunId, ActiveRun>,
     pub(crate) models: crate::models::service::ModelService,
+    pub(crate) edits: crate::edit::prepare::EditPreparations,
     pub(crate) configuration: crate::configuration::policy::ConfigurationService,
 }
 impl ApplicationActor {
@@ -301,6 +302,7 @@ impl ApplicationActor {
             active: None,
             job_runs: HashMap::new(),
             models: crate::models::service::ModelService::default(),
+            edits: crate::edit::prepare::EditPreparations::default(),
             configuration: crate::configuration::policy::ConfigurationService::default(),
         }
     }
@@ -331,6 +333,7 @@ impl ApplicationActor {
         if self.sessions.remove(session) {
             self.models.close_session(session);
             self.configuration.close_session(session);
+            self.edits.close_session(session);
             Ok(())
         } else {
             Err(CoreError::StaleOwner)
@@ -343,6 +346,7 @@ impl ApplicationActor {
         }
         self.models.close_session(session);
         self.configuration.close_session(session);
+        self.edits.close_session(session);
         for run in self.active.iter().chain(self.job_runs.values()) {
             if run.handle.scope.session_id() == session {
                 run.handle.resources.cancellation.cancel();
@@ -354,6 +358,7 @@ impl ApplicationActor {
     pub(crate) fn revoke_all(&mut self) {
         self.models.revoke();
         self.configuration.revoke();
+        self.edits.revoke();
         self.sessions.clear();
         for run in self.active.iter().chain(self.job_runs.values()) {
             run.handle.resources.cancellation.cancel();

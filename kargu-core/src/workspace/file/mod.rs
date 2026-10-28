@@ -1,6 +1,6 @@
 //! Bounded numbered text excerpts; editor snapshots and disk share one renderer.
 
-mod decode;
+pub(crate) mod decode;
 mod read;
 mod render;
 

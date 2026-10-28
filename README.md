@@ -126,6 +126,16 @@ actual initial store. Real preparation always reads a native receipt, never
 uses that bootstrap as a live lease or silently rebinds an old application.
 Wider agent run/history migration also remains open.
 
+The `edit_preparation` capability exposes bounded native literal replacement and
+full-write proposal preparation. Its application/session/source-owned uploads and
+immutable paged base/proposed views retain native disk and live-document evidence;
+cancellation retains worker capacity until actual join. This port grants no
+editor writes. `edit_patch_preparation` adds native target inspection, named live
+captures and multi-file Git preparation through the shared process supervisor in
+an owned temporary worktree. Original files/index stay untouched; immutable file
+views and actual requested hunk counts are paged. The complete edit/review/journal
+migration and public edit-tool cutover remain in progress under task 3 in `todo.md`.
+
 Chat retries stay within one native logical exchange, with a fresh budget debit
 before every physical attempt. `kargu-api-retry-max` is the single retry limit
 (0–10); the obsolete `kargu-loop-upstream-retries` aliases it, not a multiplier.

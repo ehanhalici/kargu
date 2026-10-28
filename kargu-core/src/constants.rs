@@ -2,6 +2,24 @@
 
 /// Resource limits used by admission, transport and process supervision.
 pub mod limits {
+    /// Decoded text/patch bytes accepted by the native edit domain.
+    pub const EDIT_TEXT_BYTES: usize = 4 * 1024 * 1024;
+    /// Native disk bytes before strict decoding into bounded edit text.
+    pub const EDIT_DISK_BYTES: usize = 16 * 1024 * 1024;
+    /// Bounded Git diagnostics, never returned as edit source or success prose.
+    pub const EDIT_PATCH_OUTPUT_BYTES: usize = 64 * 1024;
+    /// Retained upload/prepare byte reservations per application.
+    pub const EDIT_BUFFER_BYTES: usize = 16 * 1024 * 1024;
+    /// Upload/prepare/ready records per application, including draining work.
+    pub const EDIT_PREPARATIONS: usize = 2;
+    /// UTF-8 source bytes per edit upload or immutable read page.
+    pub const EDIT_PAGE_BYTES: usize = 32 * 1024;
+    /// File operations in one fully preflighted edit transaction.
+    pub const EDIT_FILES: usize = 256;
+    /// Hunk records in one edit transaction.
+    pub const EDIT_HUNKS: usize = 4096;
+    /// Framing lines accepted before any Git preparation or editor effect.
+    pub const EDIT_PATCH_LINES: usize = 200_000;
     /// UTF-8 bytes per wire frame, excluding LF.
     pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
     /// Minimum frame size accepted by negotiation.
@@ -158,6 +176,8 @@ pub mod protocol {
     pub const BASH_TOOL: &str = "bash";
     /// Implemented standalone wire services, not yet a full agent backend.
     pub const LIFECYCLE_CAPABILITIES: &[&str] = &[
+        "edit_preparation",
+        "edit_patch_preparation",
         "workspace_probe",
         "workspace_webfetch",
         "git_mutation",
@@ -228,6 +248,26 @@ pub mod protocol {
     }
     /// Canonical method names.
     pub mod methods {
+        /// Parse an uploaded patch before requesting live document captures.
+        pub const EDIT_INSPECT: &str = "edit/inspect";
+        /// Read bounded native patch target pages.
+        pub const EDIT_TARGETS: &str = "edit/targets";
+        /// Attach one exact live document to an inspected patch target.
+        pub const EDIT_DOCUMENT: &str = "edit/document";
+        /// Read bounded immutable batch file descriptors.
+        pub const EDIT_FILES: &str = "edit/files";
+        /// Reserve a bounded source-owned proposal upload.
+        pub const EDIT_BEGIN: &str = "edit/begin";
+        /// Append one exact-offset source part, never an executable expression.
+        pub const EDIT_APPEND: &str = "edit/append";
+        /// Consume complete upload parts on an owned native I/O worker.
+        pub const EDIT_PREPARE: &str = "edit/prepare";
+        /// Read one immutable base/proposed UTF-8 page.
+        pub const EDIT_READ: &str = "edit/read";
+        /// Abort one preparation without affecting foreign sources.
+        pub const EDIT_ABORT: &str = "edit/abort";
+        /// Revoke only one editor source's preparations.
+        pub const EDIT_CLOSE: &str = "edit/close";
         /// Readonly epoch-bound parsing of one captured configuration source.
         pub const CONFIGURATION_PARSE: &str = "configuration/parse";
         /// Bounded readonly editor config file capture and parsing.
