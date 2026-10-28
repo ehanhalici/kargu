@@ -601,3 +601,23 @@ issuance, live preflight, actual save hooks, receipt settlement and rollback are
 outside this model. Native pipe tests cover source/session identity, stale revision,
 single-use decision, tiny frames, foreground-command coexistence and owner closure;
 a held blocking worker checks the actual join-before-capacity-release path.
+
+### Bounded native edit journal (2026-10-28)
+
+`proof/run_tlc.sh --edit-journal` checks `KarguEditJournal` / `EditJournalMC`.
+It models create-new ownership, at most three records, writes separated from sync,
+a synced-prefix crash abstraction, cancellation/failure, uncertainty, foreign
+binding/permission/integrity changes and detached read-only recovery. A recovery
+snapshot cannot become terminal from an issuance-only prefix, partial tail,
+invalid chain or missing receipt commitment. Exclusive writer ownership prevents
+recovery from observing an active writer as a completed journal.
+
+The exhaustive scan completed 4,077 generated / 1,116 distinct states, depth 14,
+with no states left on the queue. Removing the terminal-record predicate from
+recovery violates `NoPrematureResolution` after 49 distinct states. Synced-prefix
+persistence is an assumption; this does not prove filesystem/hardware durability,
+actual editor dispatch, receipt truth, source hashes, rollback or liveness. The
+Rust file fixtures independently check real locks, create-new behavior, private
+permissions, fd-rooted identity, special-file refusal, every terminal-record byte
+cut, source-free schema and bounded recovery. IPC issuance/receipt integration
+remains part of todo 3.

@@ -4,6 +4,13 @@
 pub mod limits {
     /// Decoded text/patch bytes accepted by the native edit domain.
     pub const EDIT_TEXT_BYTES: usize = 4 * 1024 * 1024;
+    /// Maximum encoded metadata-only record in an edit issuance journal.
+    pub const EDIT_JOURNAL_RECORD_BYTES: usize = 4 * 1024 * 1024;
+    /// Issue, optional uncertainty marker, and consuming terminal record.
+    pub const EDIT_JOURNAL_RECORDS: u8 = 3;
+    /// Total edit journal bytes, including newline framing.
+    pub const EDIT_JOURNAL_BYTES: usize =
+        (EDIT_JOURNAL_RECORD_BYTES + 1) * EDIT_JOURNAL_RECORDS as usize;
     /// Native disk bytes before strict decoding into bounded edit text.
     pub const EDIT_DISK_BYTES: usize = 16 * 1024 * 1024;
     /// Bounded Git diagnostics, never returned as edit source or success prose.

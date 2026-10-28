@@ -4,6 +4,7 @@
 //! patch or a content hash is evidence, never authority to apply an editor edit.
 
 pub mod intent;
+pub mod journal;
 pub mod patch;
 pub(crate) mod prepare;
 pub mod proposal;

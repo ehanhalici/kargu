@@ -317,3 +317,53 @@ cancellation; timing out a reverse RPC alone is not proof that a queued or
 executing editor write stopped. Revised Ediff text still needs a new measured
 native revision. The old Elisp consumers remain active until that boundary and
 native journal/rollback are wired and tested, then are removed. Todo 3 remains open.
+
+## Native journal storage boundary
+
+`edit/journal` now provides the bounded metadata-only issuance store. Its closed
+schema records the native edit ID, scope, review revision, ordered path/operation,
+base/proposed/capture hashes and frozen policies. Source text cannot deserialize
+into that schema. Recovered `RunScope` values remain data; only private live
+`RunHandle` ownership participates in permission checks.
+
+The caller supplies an existing private state directory outside the captured
+editor workspace. Worker IO pins that directory and requires effective-UID
+ownership and mode 0700. New journal files use fd-relative `O_EXCL`/`O_NOFOLLOW`,
+mode 0600, regular-file/single-link checks and an exclusive writer lock. Existing
+names are never truncated or replaced. Root/path replacement, changed file
+revision, symlinks/hardlinks, special files and permissive modes fail closed.
+Recovery first takes a metadata-only pin, so a FIFO/device never receives a data
+open. Advisory locks exclude cooperating writers/readers; they are not a sandbox
+against another process with the same user's write authority.
+
+The consuming `IssuedJournal → UncertainJournal → JournalCommit` types permit one
+issuance, an optional uncertainty marker, and one terminal receipt commitment,
+explicit no-dispatch record or unknown result. Direct issuance-to-commit is also
+valid. Every record is newline-framed, versioned, sequenced and SHA-256 chained;
+file and directory sync finish before a committed state is returned. Limits are
+4 MiB per encoded record, three records and 12 MiB plus framing per file. These
+are per-file bounds, not a store-wide retention policy.
+
+Recovery takes a shared lock and returns Busy while the real writer remains
+owned. Missing, cut, malformed, reordered, mismatched or corrupt records yield
+unconfirmed/unknown evidence rather than implicit success. Even a valid terminal
+record followed by junk becomes unknown. Recovery never creates a live run,
+constructs a grant, appends or replays an editor write. A receipt commitment means
+that receipt was recorded; actual file/batch status still comes from native
+receipt validation. Checksums detect inconsistent records; they do not authenticate
+against a same-user process capable of rewriting the complete chain.
+
+The unfiltered locked Rust suite passes 420/420, including 29 compile-fail cases;
+strict all-targets Clippy and fmt pass. Eight native tests exercise real
+file/lock/permission operations, every byte cut
+in a terminal record, lost receipt, late resolution, source-free schema, limits,
+cancellation, root replacement and foreign writes. The new `--edit-journal` TLC
+model completes 4,077 generated / 1,116 distinct states at depth 14 with an empty
+queue. Treating an issuance-only prefix as terminal violates
+`NoPrematureResolution` after 49 distinct states. The model assumes synced-prefix
+persistence and does not prove filesystem/hardware power-loss guarantees.
+
+This storage kernel still needs to be consumed by the actual IPC issuance and
+receipt worker stages. It does not enable the editor-write capability or close
+3.6: all-file live preflight, actual adapter receipts, native outcomes/counts,
+snapshot-stack/rollback ownership and consumer cutover remain outstanding.

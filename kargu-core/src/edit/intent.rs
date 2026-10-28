@@ -169,6 +169,10 @@ impl EditorAction {
     pub fn metadata(&self) -> &Value {
         &self.metadata
     }
+    /// Canonical workspace captured with this immutable intent.
+    pub fn workspace(&self) -> &Workspace {
+        &self.input.workspace
+    }
     /// The immutable review policy.
     pub fn review_mode(&self) -> ReviewMode {
         self.input.review_mode

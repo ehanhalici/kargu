@@ -672,6 +672,15 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     tek kayıtta yaşasın. Rollback yalnız hâlâ kendi yazdığı revision'da; foreign
     kullanıcı/disk değişimi korunur. Issued ama sonucu bilinmeyen işlem/journal
     recovery açık unknown olsun; otomatik replay/crash-atomicity iddiası olmasın.
+    Native journal storage çekirdeği eklendi: source-free kapalı metadata schema,
+    create-new fd-rooted dosya, UID/0700/0600/single-link ve writer lock kontrolü,
+    sequence/SHA-256 chain, file+directory sync ve consuming issue/unknown/commit
+    durumları. Kayıt 4 MiB, dosya üç kayıtla sınırlı. Recovery yalnız detached
+    unknown/resolved kanıtı verir; bozuk/yarım kayıt başarı veya replay üretmez.
+    8 gerçek dosya testi ve yeni journal TLC (1.116 farklı durum) temiz;
+    premature-resolution mutantı reddedildi. Filtresiz locked Rust 420/420
+    (29 compile-fail), strict Clippy/fmt temiz. Bu çekirdek henüz IPC issuance/
+    receipt worker'ına bağlı değil; batch/snapshot/rollback alt işi açık kalır.
   - [ ] **3.7 Review UI adapter:** Ediff yalnız edit_id/review revision'a bağlı
     sunum ve kullanıcı metni sağlar; düzenlenmiş proposal yeniden native review
     revision'ı alır. Core receipt olmadan applied yazılmaz; reject/timeout/C-g,

@@ -105,7 +105,7 @@ impl ApplicationActor {
 }
 
 /// Whether execution occupies the foreground turn or a separate owned job lifetime.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunPurpose {
     /// The application's one foreground agent/standalone-command claim.
@@ -117,7 +117,8 @@ pub enum RunPurpose {
 }
 
 /// Identity and revision evidence, serialized without granting execution rights.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunScope {
     purpose: RunPurpose,
     application_id: ApplicationId,

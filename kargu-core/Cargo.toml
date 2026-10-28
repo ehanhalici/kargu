@@ -15,7 +15,7 @@ httpdate = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
-nix = { version = "0.31", features = ["signal", "process", "fs"] }
+nix = { version = "0.31", features = ["signal", "process", "fs", "user"] }
 thiserror = "2"
 toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt-multi-thread", "sync", "time", "process"] }

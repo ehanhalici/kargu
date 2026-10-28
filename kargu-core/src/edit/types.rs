@@ -258,9 +258,10 @@ impl TryFrom<String> for CaptureDigest {
     }
 }
 
+/// Native editor operation identity. Deserializing an ID never grants a write.
 #[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]
-pub(crate) struct EditorEditId(uuid::Uuid);
+pub struct EditorEditId(uuid::Uuid);
 impl EditorEditId {
     pub(crate) fn new() -> Self {
         Self(uuid::Uuid::new_v4())
