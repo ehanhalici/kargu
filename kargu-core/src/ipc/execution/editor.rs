@@ -1,4 +1,5 @@
 //! Actual prepared editor admission, sharing Commands' gate and the actor's run ledger.
+mod issue;
 use crate::{
     application::{
         RunHandle,
@@ -7,8 +8,12 @@ use crate::{
     constants::limits,
     domain::{ApplicationId, ToolCallId, ToolName},
     edit::{
+        journal::JournalDirectory,
         prepare::{ClaimedAction, PreflightFile, PreflightSet, PreparationId, ReadyPreflight},
-        types::{EditorEditId, EditorRevision, EditorSourceId},
+        types::{
+            EditorEditId, EditorIssueToken, EditorRevision, EditorSourceId, NoDispatchReason,
+            QuiescentEffect,
+        },
     },
     error::CoreError,
     ipc::protocol::{self, Fault, RpcId},
@@ -53,6 +58,23 @@ struct Preflight {
     revision: EditorRevision,
     witness: PreflightFile,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Issue {
+    origin_id: EditorSourceId,
+    edit_id: EditorEditId,
+    revision: EditorRevision,
+    journal_directory: JournalDirectory,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Quiescent {
+    origin_id: EditorSourceId,
+    edit_id: EditorEditId,
+    revision: EditorRevision,
+    issued_token: EditorIssueToken,
+    effect: QuiescentEffect,
+}
 struct Preflighting {
     run: RunHandle,
     grant: AuthorizedEditorEdit,
@@ -68,6 +90,9 @@ struct Preparing {
     presenter: EditorPresenter,
 }
 enum Stage {
+    Issuing(issue::Recording),
+    Issued(Box<issue::Issued>),
+    Finishing(issue::Finishing),
     Preparing(Preparing),
     Review {
         run: RunHandle,
@@ -95,12 +120,22 @@ struct Operation {
 #[derive(Default)]
 pub(super) struct Editors {
     operations: HashMap<EditorEditId, Operation>,
+    disconnected: bool,
 }
 impl Editors {
-    pub(super) fn preparing_count(&self) -> usize {
+    pub(super) fn reserved_workers(&self) -> usize {
         self.operations
             .values()
-            .filter(|op| matches!(op.stage, Stage::Preparing(_) | Stage::Preflighting(_)))
+            .filter(|op| {
+                matches!(
+                    op.stage,
+                    Stage::Preparing(_)
+                        | Stage::Preflighting(_)
+                        | Stage::Issuing(_)
+                        | Stage::Issued(_)
+                        | Stage::Finishing(_)
+                )
+            })
             .count()
     }
     pub(super) fn is_empty(&self) -> bool {
@@ -115,6 +150,11 @@ impl Editors {
         self.operations.values().any(|op| match &op.stage {
             Stage::Preparing(p) => &p.request_id == id,
             Stage::Preflighting(p) => &p.request_id == id,
+            Stage::Issuing(p) => &p.request_id == id,
+            Stage::Finishing(p) => match &p.completion {
+                issue::Completion::Unissued { request_id, .. } => request_id == id,
+                issue::Completion::Quiescent { request_id, .. } => request_id.as_ref() == Some(id),
+            },
             _ => false,
         })
     }
@@ -133,6 +173,12 @@ impl Editors {
                     }
                     p.cancel.cancel();
                 }
+                Stage::Issuing(p) if &p.request_id == id => {
+                    if op.terminal.is_none() {
+                        op.terminal = Some(CoreError::Cancelled);
+                    }
+                    p.cancel.cancel();
+                }
                 _ => {}
             }
         }
@@ -145,9 +191,150 @@ impl Editors {
             match &op.stage {
                 Stage::Preparing(p) => p.cancel.cancel(),
                 Stage::Preflighting(p) => p.cancel.cancel(),
+                Stage::Issuing(p) => p.cancel.cancel(),
                 _ => {}
             }
         }
+    }
+    pub(super) fn disconnect(&mut self) {
+        self.disconnected = true;
+        self.cancel_all();
+    }
+    fn writer_reserved(&self) -> bool {
+        self.operations.values().any(|op| {
+            matches!(
+                op.stage,
+                Stage::Issuing(_) | Stage::Issued(_) | Stage::Finishing(_)
+            )
+        })
+    }
+    pub(super) fn issue(
+        &mut self,
+        host: &mut Host,
+        id: RpcId,
+        params: Value,
+        worker_available: bool,
+    ) -> Result<(), Fault> {
+        let request: Request<Issue> =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !host.owns_read_scope(&request.scope) {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        if !worker_available || self.writer_reserved() {
+            return Err(fault(CoreError::Busy));
+        }
+        let input = request.arguments;
+        let op = self
+            .operations
+            .get(&input.edit_id)
+            .ok_or_else(|| fault(CoreError::StaleOwner))?;
+        if op.scope != request.scope || op.origin != input.origin_id {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let Stage::Preflighted { grant, .. } = &op.stage else {
+            return Err(fault(CoreError::Rejected));
+        };
+        if grant.revision() != input.revision {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let actor = host.actor_mut(&op.scope).map_err(fault)?;
+        grant.revalidate(actor).map_err(fault)?;
+        let artifact = actor
+            .edits
+            .claimed_artifact(
+                &op.scope.session_id,
+                &op.origin,
+                &op.preparation,
+                Instant::now(),
+            )
+            .map_err(fault)?;
+        let op = self
+            .operations
+            .remove(&input.edit_id)
+            .ok_or_else(|| fault(CoreError::StaleOwner))?;
+        let Stage::Preflighted {
+            run,
+            grant,
+            preflight,
+        } = op.stage
+        else {
+            return Err(fault(CoreError::Rejected));
+        };
+        let stage = issue::Recording::start(issue::Start {
+            run,
+            grant,
+            preflight,
+            id: input.edit_id.clone(),
+            directory: input.journal_directory,
+            artifact,
+            request_id: id,
+        })
+        .map_err(fault)?;
+        self.operations.insert(
+            input.edit_id,
+            Operation {
+                stage: Stage::Issuing(stage),
+                ..op
+            },
+        );
+        Ok(())
+    }
+    pub(super) fn quiescent(
+        &mut self,
+        host: &mut Host,
+        id: RpcId,
+        params: Value,
+    ) -> Result<(), Fault> {
+        let request: Request<Quiescent> =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        let input = request.arguments;
+        let op = self
+            .operations
+            .get(&input.edit_id)
+            .ok_or_else(|| fault(CoreError::StaleOwner))?;
+        // Issued owners may be retired. Correlation still requires their exact original scope/token.
+        if op.scope != request.scope || op.origin != input.origin_id {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let Stage::Issued(issued) = &op.stage else {
+            return Err(fault(CoreError::AlreadyCompleted));
+        };
+        if issued.token != input.issued_token || issued.effect.revision() != input.revision {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        host.actor_mut(&op.scope)
+            .map_err(fault)?
+            .validate_owner(&issued.run)
+            .map_err(fault)?;
+        let op = self
+            .operations
+            .remove(&input.edit_id)
+            .ok_or_else(|| fault(CoreError::StaleOwner))?;
+        let Stage::Issued(issued) = op.stage else {
+            return Err(fault(CoreError::AlreadyCompleted));
+        };
+        let reason = match op.terminal {
+            Some(CoreError::Deadline | CoreError::ApprovalExpired) => NoDispatchReason::Timeout,
+            Some(_) => NoDispatchReason::Cancelled,
+            None => {
+                if Instant::now() >= issued.deadline || issued.run.deadline().expired() {
+                    NoDispatchReason::Timeout
+                } else {
+                    NoDispatchReason::Cancelled
+                }
+            }
+        };
+        let finishing = issued
+            .finish(Some(id), input.effect, reason)
+            .map_err(fault)?;
+        self.operations.insert(
+            input.edit_id,
+            Operation {
+                stage: Stage::Finishing(finishing),
+                ..op
+            },
+        );
+        Ok(())
     }
     pub(super) fn authorize(
         &mut self,
@@ -364,6 +551,203 @@ impl Editors {
                 }
             }
             match op.stage {
+                Stage::Issuing(mut recording) => {
+                    if op.terminal.is_none() {
+                        op.terminal = host.actor_mut(&op.scope)?.validate(&recording.run).err();
+                    }
+                    if op.terminal.is_none() && Instant::now() >= recording.deadline {
+                        op.terminal = Some(CoreError::Deadline);
+                    }
+                    if op.terminal.is_some() {
+                        recording.cancel.cancel();
+                    }
+                    if !recording.task.is_finished() {
+                        self.operations.insert(
+                            id,
+                            Operation {
+                                stage: Stage::Issuing(recording),
+                                ..op
+                            },
+                        );
+                        continue;
+                    }
+                    let recorded = (&mut recording.task)
+                        .now_or_never()
+                        .ok_or(CoreError::CleanupFailed)?
+                        .map_err(|_| CoreError::CleanupFailed)?;
+                    let journal = match recorded.journal {
+                        Ok(journal) => journal,
+                        Err(error) => {
+                            let terminal = op.terminal.take().unwrap_or(error);
+                            let timed_out = matches!(
+                                terminal,
+                                CoreError::Deadline | CoreError::ApprovalExpired
+                            );
+                            cleanup(
+                                host,
+                                gate,
+                                Operation {
+                                    stage: Stage::Authorized {
+                                        run: recording.run,
+                                        grant: recorded.grant,
+                                        witnesses: PreflightSet::default(),
+                                    },
+                                    terminal: Some(if timed_out {
+                                        CoreError::Deadline
+                                    } else {
+                                        CoreError::Cancelled
+                                    }),
+                                    ..op
+                                },
+                            )?;
+                            replies.push(fault(terminal).response(Some(&recording.request_id)));
+                            continue;
+                        }
+                    };
+                    let actor = host.actor_mut(&op.scope)?;
+                    let error = op
+                        .terminal
+                        .take()
+                        .or_else(|| recorded.grant.revalidate(actor).err());
+                    if let Some(error) = error {
+                        let finishing = issue::Finishing::start(
+                            recording.run,
+                            journal,
+                            issue::Completion::Unissued {
+                                grant: recorded.grant,
+                                request_id: recording.request_id,
+                                error,
+                            },
+                            crate::edit::journal::JournalResolution::NotDispatched,
+                        )?;
+                        self.operations.insert(
+                            id,
+                            Operation {
+                                stage: Stage::Finishing(finishing),
+                                ..op
+                            },
+                        );
+                        continue;
+                    }
+                    let effect = match recorded.grant.issue(actor) {
+                        Ok(effect) => effect,
+                        Err(failure) => {
+                            let (error, grant) = *failure;
+                            let finishing = issue::Finishing::start(
+                                recording.run,
+                                journal,
+                                issue::Completion::Unissued {
+                                    grant,
+                                    request_id: recording.request_id,
+                                    error,
+                                },
+                                crate::edit::journal::JournalResolution::NotDispatched,
+                            )?;
+                            self.operations.insert(
+                                id,
+                                Operation {
+                                    stage: Stage::Finishing(finishing),
+                                    ..op
+                                },
+                            );
+                            continue;
+                        }
+                    };
+                    let issued = Box::new(issue::Issued {
+                        run: recording.run,
+                        token: recording.token,
+                        effect,
+                        journal,
+                        preflight: recorded.preflight,
+                        deadline: Instant::now()
+                            .checked_add(crate::constants::timeouts::EDIT_RECEIPT)
+                            .ok_or(CoreError::ArithmeticOverflow)?,
+                        revoked: false,
+                    });
+                    let reply = protocol::success(&recording.request_id, issued.descriptor(&id));
+                    if reply.to_string().len() > host.frame_limit().as_usize() {
+                        let finishing = issued.finish(
+                            None,
+                            QuiescentEffect::NotDispatched,
+                            NoDispatchReason::Cancelled,
+                        )?;
+                        self.operations.insert(
+                            id,
+                            Operation {
+                                stage: Stage::Finishing(finishing),
+                                ..op
+                            },
+                        );
+                        replies.push(fault(CoreError::Limit).response(Some(&recording.request_id)));
+                    } else {
+                        self.operations.insert(
+                            id,
+                            Operation {
+                                stage: Stage::Issued(issued),
+                                ..op
+                            },
+                        );
+                        replies.push(reply);
+                    }
+                }
+                Stage::Issued(mut issued) => {
+                    if op.terminal.is_none() && Instant::now() >= issued.deadline {
+                        op.terminal = Some(CoreError::Deadline);
+                    }
+                    if op.terminal.is_some() {
+                        host.actor_mut(&op.scope)?.cancel(&issued.run)?;
+                        if !issued.revoked {
+                            issued.revoked = true;
+                            replies.push(json!({"jsonrpc":"2.0","method":crate::constants::protocol::methods::EDITOR_REVOKE_EDIT,"params":{"edit_id":id,"issued_token":issued.token,"origin_id":op.origin}}));
+                        }
+                    }
+                    if self.disconnected {
+                        let finishing = issued.finish(
+                            None,
+                            QuiescentEffect::OutcomeUnknown,
+                            NoDispatchReason::Cancelled,
+                        )?;
+                        self.operations.insert(
+                            id,
+                            Operation {
+                                stage: Stage::Finishing(finishing),
+                                ..op
+                            },
+                        );
+                    } else {
+                        self.operations.insert(
+                            id,
+                            Operation {
+                                stage: Stage::Issued(issued),
+                                ..op
+                            },
+                        );
+                    }
+                }
+                Stage::Finishing(mut finishing) => {
+                    if !finishing.task.is_finished() {
+                        self.operations.insert(
+                            id,
+                            Operation {
+                                stage: Stage::Finishing(finishing),
+                                ..op
+                            },
+                        );
+                        continue;
+                    }
+                    let result = (&mut finishing.task)
+                        .now_or_never()
+                        .ok_or(CoreError::CleanupFailed)?
+                        .map_err(|_| CoreError::CleanupFailed)
+                        .and_then(|value| value);
+                    replies.extend(finishing.publish(
+                        host,
+                        &op.scope,
+                        &op.preparation,
+                        &id,
+                        result,
+                    )?);
+                }
                 Stage::Preparing(preparing) => {
                     if op.terminal.is_some() {
                         preparing.cancel.cancel();
@@ -602,6 +986,8 @@ fn descriptor(id: &EditorEditId, op: &Operation) -> Value {
         } => {
             json!({"edit_id":id,"state":"preflighted","scope":run.scope(),"revision":grant.revision(),"preflight":preflight.descriptor(),"applied":false})
         }
+        Stage::Issued(issued) => issued.descriptor(id),
+        Stage::Issuing(_) | Stage::Finishing(_) => Value::Null,
         Stage::Preflighting(_) => Value::Null,
         Stage::Preparing(_) => Value::Null,
     }
@@ -635,7 +1021,11 @@ fn cleanup(
             }
             actor.finish(&run)?
         }
-        Stage::Preparing(_) | Stage::Preflighting(_) => return Err(CoreError::Busy),
+        Stage::Preparing(_)
+        | Stage::Preflighting(_)
+        | Stage::Issuing(_)
+        | Stage::Issued(_)
+        | Stage::Finishing(_) => return Err(CoreError::Busy),
     };
     actor
         .edits
@@ -804,6 +1194,270 @@ mod tests {
         Ok(())
     }
     #[tokio::test]
+    async fn issued_timeout_revokes_without_releasing_until_real_quiescence() -> TestResult {
+        use std::os::unix::fs::PermissionsExt;
+        let (_root, mut host, scope, work) = claimed("auto")?;
+        let preparation = work.id.clone();
+        let origin = work.origin.clone();
+        let prepared = work.execute(&CancellationToken::new())?;
+        let actor = host.actor_mut(&scope)?;
+        let run = actor.admit_editor(&scope.session_id, prepared.settings)?;
+        let mut registry = ToolRegistry::default();
+        let tool = ToolName::try_from("editor_edit".to_owned())?;
+        registry.register_editor(tool.clone(), vec![])?;
+        let mut gate = ExecutionGate::default();
+        let EditorAdmission::Authorized(grant) = gate.admit_editor(
+            actor,
+            &run,
+            &registry,
+            &tool,
+            EditorAdmissionInput {
+                call_id: ToolCallId::new(),
+                action: prepared.action,
+                presenter: EditorPresenter::Missing,
+            },
+        )?
+        else {
+            return Err("auto grant expected".into());
+        };
+        let artifact = actor.edits.claimed_artifact(
+            &scope.session_id,
+            &origin,
+            &preparation,
+            Instant::now(),
+        )?;
+        let fact: PreflightFile = serde_json::from_value(
+            json!({"file":0,"base_hash":crate::edit::types::EditText::try_from(String::new())?.hash(),"document":{"id":"editor_document_12345678-1234-4234-8234-123456789abc","tick":1,"bytes":0,"coding":"utf-8-unix","dirty":false,"read_only":false,"disk":{"kind":"absent"}}}),
+        )?;
+        let mut witnesses = PreflightSet::default();
+        witnesses.record(&artifact, fact)?;
+        let deadline = Instant::now()
+            .checked_add(Duration::from_secs(3))
+            .ok_or("deadline")?;
+        let preflight = witnesses
+            .into_work(artifact, deadline)?
+            .execute(&CancellationToken::new())?;
+        let directory = tempfile::tempdir()?;
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
+        let edit = EditorEditId::new();
+        let mut editors = Editors::default();
+        editors.operations.insert(
+            edit.clone(),
+            Operation {
+                scope: scope.clone(),
+                origin: origin.clone(),
+                preparation,
+                terminal: None,
+                stage: Stage::Preflighted {
+                    run: run.clone(),
+                    grant,
+                    preflight,
+                },
+            },
+        );
+        let scoped = |arguments: Value| json!({"scope":{"application_id":scope.application_id,"session_id":scope.session_id},"arguments":arguments});
+        editors.issue(&mut host,RpcId::String("issue".to_owned()),scoped(json!({"origin_id":origin,"edit_id":edit,"revision":1,"journal_directory":directory.path()})),true).map_err(|_|"issue")?;
+        let issued = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                for reply in editors.tick(&mut host, &mut gate, &registry)? {
+                    if reply["result"]["state"] == "issued" {
+                        return Ok::<Value, CoreError>(reply["result"].clone());
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await??;
+        let op = editors.operations.get_mut(&edit).ok_or("operation")?;
+        let Stage::Issued(state) = &mut op.stage else {
+            return Err("issued state expected".into());
+        };
+        state.deadline = Instant::now();
+        let notices = editors.tick(&mut host, &mut gate, &registry)?;
+        assert!(
+            notices
+                .iter()
+                .any(|notice| notice["method"] == "editor/revoke_edit")
+        );
+        assert_eq!(editors.reserved_workers(), 1);
+        assert!(matches!(
+            host.actor_mut(&scope)?.finish(&run),
+            Err(CoreError::Busy)
+        ));
+        assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
+        assert!(!editors.is_empty());
+        editors.quiescent(&mut host,RpcId::String("settle".to_owned()),scoped(json!({"origin_id":origin,"edit_id":edit,"revision":1,"issued_token":issued["issued_token"],"effect":"not_dispatched"}))).map_err(|_|"quiescent")?;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let replies = editors.tick(&mut host, &mut gate, &registry)?;
+                if editors.is_empty() {
+                    assert_eq!(replies.len(), 1);
+                    assert_eq!(
+                        replies
+                            .first()
+                            .and_then(|reply| reply.get("result"))
+                            .and_then(|result| result.get("stop_reason")),
+                        Some(&json!("timeout"))
+                    );
+                    return Ok::<(), CoreError>(());
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await??;
+        assert!(host.actor_mut(&scope)?.drained());
+        Ok(())
+    }
+    #[tokio::test]
+    async fn cancellation_after_journal_sync_waits_for_join_and_records_no_dispatch() -> TestResult
+    {
+        use crate::edit::journal::{
+            IssuedJournal, JournalDirectory, JournalIssue, JournalResolution, RecoveredJournal,
+        };
+        use std::os::unix::fs::PermissionsExt;
+        let (_root, mut host, scope, work) = claimed("auto")?;
+        let preparation = work.id.clone();
+        let origin = work.origin.clone();
+        let prepared = work.execute(&CancellationToken::new())?;
+        let actor = host.actor_mut(&scope)?;
+        let run = actor.admit_editor(&scope.session_id, prepared.settings)?;
+        let mut registry = ToolRegistry::default();
+        let tool = ToolName::try_from("editor_edit".to_owned())?;
+        registry.register_editor(tool.clone(), vec![])?;
+        let mut gate = ExecutionGate::default();
+        let EditorAdmission::Authorized(grant) = gate.admit_editor(
+            actor,
+            &run,
+            &registry,
+            &tool,
+            EditorAdmissionInput {
+                call_id: ToolCallId::new(),
+                action: prepared.action,
+                presenter: EditorPresenter::Missing,
+            },
+        )?
+        else {
+            return Err("auto grant expected".into());
+        };
+        let artifact = actor.edits.claimed_artifact(
+            &scope.session_id,
+            &origin,
+            &preparation,
+            Instant::now(),
+        )?;
+        let fact: PreflightFile = serde_json::from_value(
+            json!({"file":0,"base_hash":crate::edit::types::EditText::try_from(String::new())?.hash(),"document":{"id":"editor_document_12345678-1234-4234-8234-123456789abc","tick":1,"bytes":0,"coding":"utf-8-unix","dirty":false,"read_only":false,"disk":{"kind":"absent"}}}),
+        )?;
+        let mut witnesses = PreflightSet::default();
+        witnesses.record(&artifact, fact)?;
+        let deadline = Instant::now()
+            .checked_add(Duration::from_secs(3))
+            .ok_or("deadline")?;
+        let preflight = witnesses
+            .into_work(artifact, deadline)?
+            .execute(&CancellationToken::new())?;
+        let directory = tempfile::tempdir()?;
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
+        let journal_directory = JournalDirectory::try_from(directory.path().to_path_buf())?;
+        let edit = EditorEditId::new();
+        let worker_edit = edit.clone();
+        let token = EditorIssueToken::new();
+        let worker_token = token.clone();
+        let cancel = run.cancel_token();
+        let (ready, created) = mpsc::channel::<()>();
+        let (release, wait) = mpsc::channel::<()>();
+        let task = tokio::task::spawn_blocking(move || {
+            let journal = (|| {
+                let issue = JournalIssue::capture(worker_edit, grant.scope(), grant.action())?
+                    .for_issuance(worker_token, preflight.digest());
+                IssuedJournal::create(
+                    journal_directory,
+                    issue,
+                    &CancellationToken::new(),
+                    deadline,
+                )
+            })();
+            let _ = ready.send(());
+            let _ = wait.recv();
+            issue::Recorded {
+                grant,
+                preflight,
+                journal,
+            }
+        });
+        let request_id = RpcId::String("held-journal".to_owned());
+        let mut editors = Editors::default();
+        editors.operations.insert(
+            edit.clone(),
+            Operation {
+                scope: scope.clone(),
+                origin,
+                preparation,
+                terminal: None,
+                stage: Stage::Issuing(issue::Recording {
+                    run: run.clone(),
+                    token,
+                    task,
+                    cancel,
+                    deadline,
+                    request_id: request_id.clone(),
+                }),
+            },
+        );
+        created.recv_timeout(Duration::from_secs(3))?;
+        assert!(matches!(
+            crate::edit::journal::recover(
+                JournalDirectory::try_from(directory.path().to_path_buf())?,
+                edit.clone(),
+                &CancellationToken::new(),
+                deadline
+            ),
+            Err(CoreError::Busy)
+        ));
+        editors.cancel(&request_id);
+        assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
+        assert_eq!(editors.reserved_workers(), 1);
+        assert!(matches!(
+            host.actor_mut(&scope)?.finish(&run),
+            Err(CoreError::Busy)
+        ));
+        release.send(())?;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            let mut replies = Vec::new();
+            loop {
+                replies.extend(editors.tick(&mut host, &mut gate, &registry)?);
+                if editors.is_empty() {
+                    assert_eq!(replies.len(), 1);
+                    assert_eq!(
+                        replies
+                            .first()
+                            .and_then(|reply| reply.get("error"))
+                            .and_then(|error| error.get("data"))
+                            .and_then(|data| data.get("status")),
+                        Some(&json!("cancelled"))
+                    );
+                    return Ok::<(), CoreError>(());
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await??;
+        assert!(matches!(
+            crate::edit::journal::recover(
+                JournalDirectory::try_from(directory.path().to_path_buf())?,
+                edit,
+                &CancellationToken::new(),
+                deadline
+            )?,
+            RecoveredJournal::Resolved {
+                resolution: JournalResolution::NotDispatched,
+                ..
+            }
+        ));
+        assert!(host.actor_mut(&scope)?.drained());
+        Ok(())
+    }
+    #[tokio::test]
     async fn preflight_cancel_retains_native_grant_and_source_capacity_until_actual_join()
     -> TestResult {
         let (root, mut host, scope, work) = claimed("auto")?;
@@ -871,12 +1525,12 @@ mod tests {
                 }),
             },
         );
-        assert_eq!(editors.preparing_count(), 1);
+        assert_eq!(editors.reserved_workers(), 1);
         let begin = || json!({"scope":{"application_id":scope.application_id,"session_id":scope.session_id},"arguments":{"origin_id":"editor_source_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","root":root.path(),"mode":"agent","intent":{"kind":"write","path":"empty","new_bytes":0},"live":null,"config_revision":0,"policy_revision":0,"review_mode":"auto","save_policy":"buffer_only"}});
         assert!(host.dispatch("edit/begin", begin(), true).result.is_ok());
         editors.cancel(&request_id);
         assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
-        assert_eq!(editors.preparing_count(), 1);
+        assert_eq!(editors.reserved_workers(), 1);
         assert!(host.dispatch("edit/begin", begin(), true).result.is_err());
         assert!(matches!(
             host.actor_mut(&scope)?.finish(&run),

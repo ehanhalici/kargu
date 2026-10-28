@@ -24,6 +24,7 @@ use std::{
 use tokio::time::Instant;
 
 mod editor;
+pub(crate) use editor::IssuedEditorEdit;
 pub use editor::{
     AuthorizedEditorEdit, EditorAdmission, EditorAdmissionInput, EditorApprovalRequest,
     EditorDecision, EditorPresenter,

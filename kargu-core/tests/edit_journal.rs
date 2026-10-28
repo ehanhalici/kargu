@@ -396,3 +396,59 @@ fn source_bodies_duplicate_targets_and_foreign_revisions_cannot_enter_journal_me
     assert!(!f.path().exists());
     Ok(())
 }
+
+#[test]
+fn legacy_version_one_records_without_issuance_fields_keep_their_integrity() -> TestResult {
+    use serde::Deserialize;
+    use sha2::{Digest, Sha256};
+    #[derive(Deserialize)]
+    struct LegacyParts {
+        id: Box<serde_json::value::RawValue>,
+        scope: Box<serde_json::value::RawValue>,
+        revision: Box<serde_json::value::RawValue>,
+        workspace: Box<serde_json::value::RawValue>,
+        action: Box<serde_json::value::RawValue>,
+    }
+    let f = Fixture::new()?;
+    let parts: LegacyParts = serde_json::from_str(&serde_json::to_string(&f.issue()?)?)?;
+    // Original v1 field order and payload bytes, independently of the new encoder.
+    let old_issue = format!(
+        "{{\"id\":{},\"scope\":{},\"revision\":{},\"workspace\":{},\"action\":{}}}",
+        parts.id.get(),
+        parts.scope.get(),
+        parts.revision.get(),
+        parts.workspace.get(),
+        parts.action.get()
+    );
+    let payloads = [
+        format!("{{\"event\":\"issue\",\"issue\":{old_issue}}}"),
+        "{\"event\":\"resolved\",\"resolution\":{\"kind\":\"not_dispatched\"}}".to_owned(),
+    ];
+    let mut previous = vec![0_u8; 32];
+    let mut encoded = String::new();
+    for (index, payload) in payloads.iter().enumerate() {
+        let sequence = u8::try_from(index.checked_add(1).ok_or("sequence")?)?;
+        let mut checksum = Sha256::new();
+        checksum.update(b"kargu-edit-journal-v1");
+        checksum.update([sequence]);
+        checksum.update(&previous);
+        checksum.update(payload.as_bytes());
+        let digest = checksum.finalize().to_vec();
+        encoded.push_str(&serde_json::to_string(&json!({"version":1,"sequence":sequence,"previous":previous,"payload":serde_json::from_str::<Value>(payload)?,"digest":digest}))?);
+        encoded.push('\n');
+        previous = digest;
+    }
+    fs::write(f.path(), &encoded)?;
+    fs::set_permissions(f.path(), fs::Permissions::from_mode(0o600))?;
+    assert!(!encoded.contains("issuance"));
+    assert!(!encoded.contains("preflight"));
+    match f.recover()? {
+        RecoveredJournal::Resolved { issue, resolution } => {
+            assert!(issue.id() == &f.id);
+            assert!(resolution == JournalResolution::NotDispatched);
+        }
+        _ => return Err("legacy v1 integrity was not preserved".into()),
+    }
+    assert_eq!(fs::read_to_string(f.path())?, encoded);
+    Ok(())
+}

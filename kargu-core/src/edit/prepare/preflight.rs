@@ -151,6 +151,23 @@ impl PreflightWork {
     }
 }
 impl ReadyPreflight {
+    pub(crate) fn digest(&self) -> CaptureDigest {
+        self.digest
+    }
+    pub(crate) fn revalidate(
+        &self,
+        artifact: &Artifact,
+        cancel: &CancellationToken,
+        deadline: Instant,
+    ) -> Result<(), CoreError> {
+        for index in self.witnesses.files.keys() {
+            checkpoint(cancel, deadline)?;
+            let prepared = file(artifact, *index)?;
+            prepared.root.revalidate()?;
+            prepared.evidence.revalidate()?;
+        }
+        checkpoint(cancel, deadline)
+    }
     pub(crate) fn descriptor(&self) -> Value {
         json!({"ready":true,"files_checked":self.witnesses.checked,"files_total":self.total,"preflight_digest":self.digest})
     }

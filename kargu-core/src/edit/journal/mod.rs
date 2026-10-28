@@ -24,7 +24,8 @@ use tokio_util::sync::CancellationToken;
 
 /// Explicit existing private journal directory, separate from the editor workspace.
 /// Parsing performs no IO; the worker pins and checks the actual directory.
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(try_from = "PathBuf")]
 pub struct JournalDirectory(PathBuf);
 impl TryFrom<PathBuf> for JournalDirectory {
     type Error = CoreError;
@@ -52,6 +53,10 @@ pub struct JournalIssue {
     revision: EditorRevision,
     workspace: PathBuf,
     action: StoredAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    issuance: Option<crate::edit::types::EditorIssueToken>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preflight: Option<CaptureDigest>,
 }
 impl JournalIssue {
     /// Freeze supplied native scope and immutable intent metadata on the worker.
@@ -65,9 +70,20 @@ impl JournalIssue {
             scope: scope.clone(),
             revision: action.revision(),
             workspace: action.workspace().path().to_path_buf(),
+            issuance: None,
+            preflight: None,
             action: serde_json::from_value(action.metadata().clone())
                 .map_err(|_| CoreError::InvalidToolOutput)?,
         })
+    }
+    pub(crate) fn for_issuance(
+        mut self,
+        token: crate::edit::types::EditorIssueToken,
+        preflight: CaptureDigest,
+    ) -> Self {
+        self.issuance = Some(token);
+        self.preflight = Some(preflight);
+        self
     }
     /// Recorded native operation identity; never a capability.
     pub fn id(&self) -> &EditorEditId {
@@ -90,11 +106,18 @@ struct IssueInput {
     revision: EditorRevision,
     workspace: PathBuf,
     action: StoredAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    issuance: Option<crate::edit::types::EditorIssueToken>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preflight: Option<CaptureDigest>,
 }
 impl TryFrom<IssueInput> for JournalIssue {
     type Error = CoreError;
     fn try_from(input: IssueInput) -> Result<Self, CoreError> {
         JournalDirectory::try_from(input.workspace.clone())?;
+        if input.issuance.is_some() != input.preflight.is_some() {
+            return Err(EditError::InvalidEvidence.into());
+        }
         if input.workspace != input.action.root
             || input.revision != input.action.revision
             || input.scope.config_revision() != input.action.config_revision
@@ -108,6 +131,8 @@ impl TryFrom<IssueInput> for JournalIssue {
             revision: input.revision,
             workspace: input.workspace,
             action: input.action,
+            issuance: input.issuance,
+            preflight: input.preflight,
         })
     }
 }

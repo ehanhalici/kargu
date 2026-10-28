@@ -289,3 +289,42 @@ impl CaptureDigest {
         Self(ContentHash(Sha256::digest(bytes).into()))
     }
 }
+
+#[derive(Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(try_from = "String", into = "String")]
+pub(crate) struct EditorIssueToken(uuid::Uuid);
+impl EditorIssueToken {
+    pub(crate) fn new() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+impl TryFrom<String> for EditorIssueToken {
+    type Error = EditError;
+    fn try_from(value: String) -> Result<Self, EditError> {
+        uuid::Uuid::parse_str(
+            value
+                .strip_prefix("editor_issue_")
+                .ok_or(EditError::InvalidEvidence)?,
+        )
+        .map(Self)
+        .map_err(|_| EditError::InvalidEvidence)
+    }
+}
+impl From<EditorIssueToken> for String {
+    fn from(value: EditorIssueToken) -> Self {
+        format!("editor_issue_{}", value.0)
+    }
+}
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum QuiescentEffect {
+    NotDispatched,
+    OutcomeUnknown,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum NoDispatchReason {
+    Cancelled,
+    Timeout,
+}

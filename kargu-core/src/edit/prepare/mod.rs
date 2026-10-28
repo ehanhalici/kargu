@@ -108,6 +108,11 @@ pub(crate) fn fault(error: CoreError) -> crate::ipc::protocol::Fault {
             "rejected",
             "Edit preparation is not permitted",
         ),
+        CoreError::Busy => (
+            codes::RESOURCE_LIMIT,
+            "busy",
+            "Native editor activity is active or draining",
+        ),
         CoreError::Unavailable => (
             codes::METHOD_NOT_FOUND,
             "unavailable",

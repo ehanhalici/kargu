@@ -131,6 +131,25 @@ impl AuthorizedEditorEdit {
         }
         Ok(())
     }
+    pub(crate) fn check_worker(&self) -> Result<(), CoreError> {
+        self.run.check_live()?;
+        if Instant::now() >= self.deadline {
+            return Err(CoreError::ApprovalExpired);
+        }
+        Ok(())
+    }
+    pub(crate) fn issue(
+        self,
+        actor: &mut ApplicationActor,
+    ) -> Result<IssuedEditorEdit, Box<(CoreError, Self)>> {
+        if let Err(error) = self
+            .revalidate(actor)
+            .and_then(|()| actor.mark_started(&self.run, &self.call_id))
+        {
+            return Err(Box::new((error, self)));
+        }
+        Ok(IssuedEditorEdit(self))
+    }
     pub(crate) fn expire_unissued(self, actor: &mut ApplicationActor) -> Result<(), CoreError> {
         actor.validate_owner(&self.run)?;
         actor.complete_tool(&self.run, &self.call_id, ToolOutcome::Timeout)?;
@@ -150,6 +169,32 @@ impl AuthorizedEditorEdit {
         Ok(())
     }
 }
+/// Internal issued typestate. It cannot be cloned, deserialized or cancelled as unissued.
+pub(crate) struct IssuedEditorEdit(AuthorizedEditorEdit);
+impl IssuedEditorEdit {
+    pub(crate) fn revision(&self) -> EditorRevision {
+        self.0.revision()
+    }
+    pub(crate) fn complete_quiescent(
+        self,
+        actor: &mut ApplicationActor,
+        effect: crate::edit::types::QuiescentEffect,
+        reason: crate::edit::types::NoDispatchReason,
+    ) -> Result<(), CoreError> {
+        actor.validate_owner(&self.0.run)?;
+        let outcome = match effect {
+            crate::edit::types::QuiescentEffect::OutcomeUnknown => ToolOutcome::OutcomeUnknown,
+            crate::edit::types::QuiescentEffect::NotDispatched => match reason {
+                crate::edit::types::NoDispatchReason::Timeout => ToolOutcome::Timeout,
+                crate::edit::types::NoDispatchReason::Cancelled => ToolOutcome::Cancelled,
+            },
+        };
+        actor.complete_tool(&self.0.run, &self.0.call_id, outcome)?;
+        drop(self.0.lease);
+        Ok(())
+    }
+}
+
 fn digest(
     run: &RunHandle,
     name: &ToolName,

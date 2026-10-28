@@ -639,3 +639,25 @@ check document identity/tick/coding, dirty/read-only flags, base hash, disk revi
 duplicate file/document identities, earlier-target replacement and 1 KiB framing.
 A held worker verifies actual join-before-release in the controller. Journalled
 issuance, actual Emacs mutation and receipt/rollback remain outside this model.
+
+### Journalled native issuance and quiescence (2026-10-28)
+
+`proof/run_tlc.sh --edit-issuance` checks `KarguEditIssuance` / `EditIssuanceMC`.
+Two already authorized/preflighted edit identities share one writer fence.
+Recording, sync, actual joins, dispatch, revocation, explicit receipt/quiescence,
+settlement and connection retirement are distinct transitions. A signal alone
+cannot free issued ownership. Cleanup IO retains the reservation until its real
+join. After EOF no new token may be delivered, and unfinished external activity
+can remain unconfirmed while the native connection records unknown and retires.
+
+The exhaustive scan completes 1,631 generated / 440 distinct states, depth 15,
+with an empty queue. Releasing an issued claim on revoke violates
+`HoldIssuedUntilReceipt` after 53 distinct states; omitting sync evidence violates
+`JournalBeforeDispatch` after 24. This model composes native resource stages and
+assumes a truthful quiescence input. It does not prove an external Emacs handler
+stopped on EOF or a platform fence across connection epochs. Actual IO fixtures
+check cross-process file locks, sync-before-token, nonce/scope/revision/replay,
+retired-owner settlement, failed settlement and EOF unknown; held controller
+completions check real join and timeout retention. Existing v1 journal payloads
+without nonce/fingerprint fields retain their old integrity bytes, verified with
+an independently encoded legacy record chain.

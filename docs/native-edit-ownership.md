@@ -54,7 +54,7 @@ The intended owned transaction is:
    revision before granting its exact text. UI content hashes do not silently
    rewrite the already reviewed action. A late button cannot approve a new revision.
 6. Commit the appropriate native journal records before issuing the consuming
-   `editor/apply_buffer_patch` capability. The adapter rechecks live evidence and
+   native editor token. The adapter rechecks live evidence and
    applies through atomic change groups, preserving editor state and coding/EOL.
 7. Accept the real per-file receipt, reconcile save-hook effects and journal the
    terminal result. On partial batch failure, request rollback only against a
@@ -309,9 +309,8 @@ its actual join. Native preparation TLC now includes claim/review/authorization:
 reviewed claim on cancellation violates `ClaimOwnership` after 765 distinct
 states. Application and shared approval scans also complete without errors.
 
-This admission port has no editor-write capability or issuance method yet.
-The next integration is journalled issuance and the actual Emacs transaction
-adapter, including live all-file preflight and receipt settlement. Its consuming
+The admission branch now feeds consuming journalled issuance as described below.
+The actual Emacs transaction adapter and complete receipt settlement remain open. Its consuming
 issued state must retain the real editor settlement/drain barrier across
 cancellation; timing out a reverse RPC alone is not proof that a queued or
 executing editor write stopped. Revised Ediff text still needs a new measured
@@ -363,10 +362,9 @@ queue. Treating an issuance-only prefix as terminal violates
 `NoPrematureResolution` after 49 distinct states. The model assumes synced-prefix
 persistence and does not prove filesystem/hardware power-loss guarantees.
 
-This storage kernel still needs to be consumed by the actual IPC issuance and
-receipt worker stages. It does not enable the editor-write capability or close
-3.6: all-file live preflight, actual adapter receipts, native outcomes/counts,
-snapshot-stack/rollback ownership and consumer cutover remain outstanding.
+The storage kernel now feeds the actual IPC issuance/quiescence worker stages
+below. It does not close 3.6: complete actual adapter receipts, native outcomes/
+counts, snapshot-stack/rollback ownership and consumer cutover remain outstanding.
 
 Claim lifetime expiry uses a typed owner-scoped status rather than a boolean.
 The preparation/source deadline may precede the later gate/run deadline; this
@@ -410,9 +408,9 @@ resource/completeness model, not a filesystem CAS or an atomic observation of
 all Emacs buffers. Witnesses describe observed state; the actual adapter must
 recheck every live target before its first mutation.
 
-No editor write capability is advertised. The actual Emacs witness producer,
-journalled consuming issuance, editor transaction/receipt, revised-review
-measurement and native rollback/consumer cutover remain outstanding.
+No editor mutation capability is advertised to the product yet. The actual Emacs
+witness producer, editor transaction/complete receipt, revised-review measurement
+and native rollback/consumer cutover remain outstanding.
 
 No-op classification now has one native implementation for full writes and final
 Git batch proposals. Equal logical hashes do not make saving an absent target a
@@ -424,3 +422,57 @@ existence/live/save combinations and empty Git adds under both save policies.
 Preparation still never writes originals. The unfiltered locked Rust suite passes
 429/429 (29 compile-fail), strict Clippy/fmt and preparation TLC pass. This closes
 3.13, not the outstanding actual editor create/save/receipt boundary.
+
+## Actual native issuance and quiescence
+
+`edit/issue` accepts only a preflighted native edit/source/review revision plus the
+trusted editor's private journal directory. It consumes the unissued grant and
+rechecks every source pin on a bounded worker, then records the actual operation,
+scope, issuance nonce and immutable preflight fingerprint. File and directory sync
+finish before the actor can revalidate ownership and return `state:issued` with
+one opaque token. No root, proposal text, mode or policy can be replaced here.
+Existing v1 journals without issuance fields keep their original checksum bytes;
+a separately encoded legacy fixture verifies backward read compatibility.
+
+If cancellation wins before the IO completion is adopted, the native actor keeps
+the grant until the real join and records explicit no-dispatch before cleanup.
+After publication, a consuming `IssuedEditorEdit` owns the run lease. Source close,
+Stop, deadline and application/session retirement revoke execution first and emit
+`editor/revoke_edit`; none implies editor quiescence. The global editor writer
+fence and one cleanup-worker reservation stay held throughout issued activity and
+terminal journal IO. Other sources may prepare/review while this fence is held.
+
+`edit/quiescent` requires the exact original connection-owned scope, source,
+edit/review revision and issuance token, including after that session/application
+retires. It currently accepts only explicit `not_dispatched` or `outcome_unknown`
+facts. Claimed success strings are rejected: an ordinary applied receipt still
+needs bounded native text/evidence validation in the next integration. Quiescence
+ACKs are lifecycle facts, not synthesized file/batch success or hunk counts.
+Terminal journal append runs off the actor with its own cleanup lifetime. Only
+its actual join completes the native tool/run and releases the preparation.
+Settlement IO failure reports unknown, never success or automatic replay.
+
+EOF/writer failure closes admission for that connection and records terminal
+unknown before native IO drains. That does **not** prove an external editor handler
+stopped: the actual Emacs adapter must retain a local activity fence across
+connection replacement until its handler is truly quiescent. An issue acquisition
+observer must also survive UI cancellation long enough to handle a late token or
+failure; dropping that observer is not resource drain. The mutation capability
+remains unadvertised until those platform guards and full receipts are connected.
+
+Seven real pipe tests verify sync-before-token, cross-process journal locking,
+nonce/owner/revision/replay rejection, complete preflight, unusable journal/source
+change refusal, 1 KiB frames, global fence, retired-owner completion, failed
+settlement, EOF unknown and preservation of controlled editor/foreign effects.
+Two controller tests hold a synced journal completion and expire an issued timer,
+verifying that actual join/quiescence remains required. Unfiltered locked Rust:
+439/439 including 29 compile-fail; strict all-targets Clippy/fmt and existing Emacs
+prepare/patch pipe tests 8/8 pass.
+
+`--edit-issuance` checks the composition of complete preflight, journal worker
+sync/join, one writer, revocation, explicit quiescence, terminal IO and EOF without
+replay: 1,631 generated / 440 distinct states, depth 15, empty queue. Early release
+on revoke violates `HoldIssuedUntilReceipt` after 53 distinct states; omitting the
+sync evidence violates `JournalBeforeDispatch` after 24. The journal prefix model
+also remains clean. These bounded native models assume truthful quiescence and
+do not prove actual Emacs behavior or a fence spanning multiple connections.

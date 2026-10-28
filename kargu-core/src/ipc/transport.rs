@@ -164,7 +164,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
         ..
     } = &mut services;
     reads.cancel_all();
-    commands.cancel_all();
+    commands.disconnect();
     api.drain().await.map_err(|_| TransportError::ReadWorker)?;
     while !commands.is_empty() {
         commands
@@ -391,6 +391,19 @@ async fn read_messages<R: AsyncRead + Unpin>(
                         && let Err(fault) = commands.authorize_editor(host, id.clone(), params)
                     {
                         queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                    }
+                    continue;
+                }
+                if method == methods::EDIT_ISSUE || method == methods::EDIT_QUIESCENT {
+                    if let Some(id) = id.as_ref() {
+                        let result = if method == methods::EDIT_ISSUE {
+                            commands.issue_editor(host, id.clone(), params)
+                        } else {
+                            commands.quiescent_editor(host, id.clone(), params)
+                        };
+                        if let Err(fault) = result {
+                            queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
                     }
                     continue;
                 }

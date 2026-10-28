@@ -131,12 +131,32 @@ impl Commands {
         if self
             .operations
             .len()
-            .saturating_add(self.editors.preparing_count())
+            .saturating_add(self.editors.reserved_workers())
             >= limits::HOST_PROCESSES
         {
             return Err(fault(CoreError::Limit));
         }
         self.editors.authorize(host, id, params)
+    }
+    pub fn issue_editor(&mut self, host: &mut Host, id: RpcId, params: Value) -> Result<(), Fault> {
+        let available = self
+            .operations
+            .len()
+            .saturating_add(self.editors.reserved_workers())
+            < limits::HOST_PROCESSES;
+        self.editors.issue(host, id, params, available)
+    }
+    pub fn quiescent_editor(
+        &mut self,
+        host: &mut Host,
+        id: RpcId,
+        params: Value,
+    ) -> Result<(), Fault> {
+        self.editors.quiescent(host, id, params)
+    }
+    pub fn disconnect(&mut self) {
+        self.cancel_all();
+        self.editors.disconnect();
     }
     pub fn preflight_editor(
         &mut self,
@@ -147,7 +167,7 @@ impl Commands {
         let available = self
             .operations
             .len()
-            .saturating_add(self.editors.preparing_count())
+            .saturating_add(self.editors.reserved_workers())
             < limits::HOST_PROCESSES;
         self.editors.preflight(host, id, params, available)
     }
@@ -246,7 +266,7 @@ impl Commands {
         if self
             .operations
             .len()
-            .saturating_add(self.editors.preparing_count())
+            .saturating_add(self.editors.reserved_workers())
             >= limits::HOST_PROCESSES
             || self.contains(&id)
         {

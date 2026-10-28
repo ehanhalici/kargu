@@ -654,13 +654,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     paylaşılır; claimed rezervasyonu revoke sonrası gerçek worker join ve
     tool/run cleanup'a kadar korunur. 7 gerçek pipe ve held-worker testi;
     1 KiB frame, foreground command coexistence ve tüm close yolları temiz.
-    Canlı preflight/journal, revised review ve gerçek receipt tamamlanmadan
+    Actual Emacs preflight/receipt ve revised review tamamlanmadan
     bu alt madde kapanmaz. Approval TLC: 49.152 farklı durum; kind-confusion
     mutantı invariant ihlaliyle reddedildi. Bu adımda filtresiz locked Rust
     403/403 (28 compile-fail dahil), strict all-targets Clippy ve fmt temiz.
     Claim/review/authorization eklenen preparation TLC 97.230 farklı durumda
     tamamlandı; erken claim-release mutantı `ClaimOwnership` ile reddedildi.
-    Güncel filtresiz locked Rust 411/411 (28 compile-fail), Clippy/fmt temiz;
+    Admission diliminde filtresiz locked Rust 411/411 (28 compile-fail), Clippy/fmt temiz;
     mevcut Emacs prepare/patch gerçek pipe testleri 8/8 geçti.
   - [ ] **3.5 Emacs transaction adapter:** bütün açık/kapalı dosyalar yetkili
     native edit_id üzerinden canlı belge kontrolü, atomic change group, undo/point/
@@ -674,7 +674,8 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Native grant ve source rezervasyonu gerçek join'e kadar tutulur. 5 gerçek pipe
     ve held-worker testi; filtresiz Rust 427/427 (29 compile-fail), strict Clippy/
     fmt, preparation TLC (319.746 farklı durum) temiz. Bu henüz Emacs transaction
-    producer/actual-write adapter'ı veya journal issuance değildir; 3.5 açık kalır.
+    producer/actual-write adapter'ı değildir; native issuance aşağıda bağlandı,
+    gerçek Emacs mutasyonu/receipt tamamlanmadan 3.5 açık kalır.
   - [ ] **3.6 Native batch/journal/rollback:** bütün dosyalar preflight edilmeden
     ilk yazma olmasın; gerçek file/batch durumları, hunk sayıları ve snapshot stack
     tek kayıtta yaşasın. Rollback yalnız hâlâ kendi yazdığı revision'da; foreign
@@ -687,8 +688,17 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     unknown/resolved kanıtı verir; bozuk/yarım kayıt başarı veya replay üretmez.
     8 gerçek dosya testi ve yeni journal TLC (1.116 farklı durum) temiz;
     premature-resolution mutantı reddedildi. Filtresiz locked Rust 420/420
-    (29 compile-fail), strict Clippy/fmt temiz. Bu çekirdek henüz IPC issuance/
-    receipt worker'ına bağlı değil; batch/snapshot/rollback alt işi açık kalır.
+    (29 compile-fail), strict Clippy/fmt temiz. `edit/issue` artık complete
+    preflight → native pin recheck → journal sync → consuming issued nonce akışına
+    bağlı. Source/Stop/timeout sonrası fence ve lease gerçek quiescence'a kadar
+    tutulur; `edit/quiescent` retired scope/token ile no-dispatch/unknown kaydeder.
+    EOF terminal unknown ile native IO'yu tahliye eder; actual Emacs activity
+    fence'i yeni bağlantı boyunca korunmadan mutasyon capability'si açılmaz.
+    7 gerçek pipe, 2 controller ve legacy v1 integrity testi; filtresiz Rust
+    439/439, Emacs pipe 8/8, Clippy/fmt temiz. Issuance TLC 440 farklı durumda
+    tam taramayı geçti; erken release ve sync-siz dispatch mutantları reddedildi.
+    Olumlu file/batch receipt, gerçek sayımlar, snapshot/rollback ve consumer
+    cutover tamamlanmadan bu alt iş açık kalır.
   - [ ] **3.7 Review UI adapter:** Ediff yalnız edit_id/review revision'a bağlı
     sunum ve kullanıcı metni sağlar; düzenlenmiş proposal yeniden native review
     revision'ı alır. Core receipt olmadan applied yazılmaz; reject/timeout/C-g,

@@ -17,6 +17,7 @@
 #   ./run_tlc.sh --debug-watch   exhaustive debugger-watch ownership scan
 #   ./run_tlc.sh --debug-execution exhaustive debugger-execution ownership scan
 #   ./run_tlc.sh --verification  exhaustive changed-file ownership scan
+#   ./run_tlc.sh --edit-issuance  exhaustive journal/issuance/quiescence scan
 #   ./run_tlc.sh --edit-journal   exhaustive bounded journal/recovery scan
 #   ./run_tlc.sh --edit-preparation exhaustive native proposal/Git drain scan
 #   ./run_tlc.sh --edit-transaction exhaustive reviewed edit transaction scan
@@ -121,6 +122,10 @@ elif [[ "$1" == "--debug-execution" ]]; then
     MODE="exhaustive debugger-execution ownership scan"
     SPECIFICATION="DebugExecutionMC.tla (KarguDebugExecution)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config DebugExecutionMC.cfg DebugExecutionMC.tla)
+elif [[ "$1" == "--edit-issuance" ]]; then
+    MODE="exhaustive native edit issuance scan"
+    SPECIFICATION="EditIssuanceMC.tla (KarguEditIssuance)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config EditIssuanceMC.cfg EditIssuanceMC.tla)
 elif [[ "$1" == "--edit-journal" ]]; then
     MODE="exhaustive native edit journal scan"
     SPECIFICATION="EditJournalMC.tla (KarguEditJournal)"

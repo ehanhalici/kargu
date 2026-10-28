@@ -151,6 +151,10 @@ pub mod limits {
 /// Timeouts are typed durations, never shared unlabelled numbers.
 pub mod timeouts {
     use std::time::Duration;
+    /// Bounded journal IO worker lifetime; slots survive cancellation until join.
+    pub const EDIT_JOURNAL: Duration = Duration::from_secs(30);
+    /// Issued editor confirmation interval; expiry revokes but does not prove quiescence.
+    pub const EDIT_RECEIPT: Duration = Duration::from_secs(30);
     /// Bounded native all-file edit preflight worker lifetime.
     pub const EDIT_PREFLIGHT: Duration = Duration::from_secs(30);
     /// Stalled transport writer deadline.
@@ -259,6 +263,12 @@ pub mod protocol {
     pub mod methods {
         /// Consume a prepared artifact into the shared editor permission ledger.
         pub const EDIT_AUTHORIZE: &str = "edit/authorize";
+        /// Revoke one issued editor token without asserting quiescence.
+        pub const EDITOR_REVOKE_EDIT: &str = "editor/revoke_edit";
+        /// Consume a complete preflight and journal before returning one issuance token.
+        pub const EDIT_ISSUE: &str = "edit/issue";
+        /// Settle an issued token after actual editor quiescence, including retired owners.
+        pub const EDIT_QUIESCENT: &str = "edit/quiescent";
         /// Add one live preflight witness; the complete set is revalidated off-actor.
         pub const EDIT_PREFLIGHT: &str = "edit/preflight";
         /// Decide exactly one native editor review revision.
