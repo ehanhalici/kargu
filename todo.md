@@ -676,6 +676,19 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     fmt, preparation TLC (319.746 farklı durum) temiz. Bu henüz Emacs transaction
     producer/actual-write adapter'ı değildir; native issuance aşağıda bağlandı,
     gerçek Emacs mutasyonu/receipt tamamlanmadan 3.5 açık kalır.
+    Canlı belge primitive adapter'ı eklendi: bounded widened snapshot ve native
+    stat/tick/coding witness; tüketilen snapshot üzerinde atomic replacement,
+    undo/point/mark/marker/narrowing koruması ve gerçek save-hook gözlemi.
+    Yabancı disk/path değişimi save öncesi reddedilir; hook hatası veya aşırı
+    büyüyen/öldürülen tampon final observation failure taşır, kör restore yapılmaz.
+    15 belge testi ve iki gerçek pipe testi geçti: shared gate → preflight →
+    synced issue → gerçek Emacs CRLF/Unicode save → quiescent unknown; ayrıca
+    tick/byte sayısı aynı kalan stale clean buffer reddi. Witness base hash'i
+    canlı metinden hesaplanır; native proposal'dan kopyalanmaz. Bu primitive henüz
+    public tool consumer'ına bağlı değil; pozitif native receipt ve bağlantılar
+    arası activity fence olmadan applied sonucu veya mutation capability açılmaz.
+    Full ERT 1.294/1.294; son witness/read-only ekleriyle ilgili testler 17/17,
+    warning-as-error bytecompile/checkdoc temiz. Rust geçişleri değişmedi.
   - [ ] **3.6 Native batch/journal/rollback:** bütün dosyalar preflight edilmeden
     ilk yazma olmasın; gerçek file/batch durumları, hunk sayıları ve snapshot stack
     tek kayıtta yaşasın. Rollback yalnız hâlâ kendi yazdığı revision'da; foreign

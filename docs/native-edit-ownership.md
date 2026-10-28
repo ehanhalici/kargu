@@ -476,3 +476,33 @@ on revoke violates `HoldIssuedUntilReceipt` after 53 distinct states; omitting t
 sync evidence violates `JournalBeforeDispatch` after 24. The journal prefix model
 also remains clean. These bounded native models assume truthful quiescence and
 do not prove actual Emacs behavior or a fence spanning multiple connections.
+
+## Live editor document primitives
+
+`bridge/edit/document.el` captures bounded widened text, stable buffer identity,
+tick, coding, dirty/read-only state, canonical path and the same stat fields as
+native `DiskVersion` (excluding atime). A copied buffer cannot borrow the original
+document identity. Its native witness encoder preserves integer nanoseconds and
+hashes the actual captured text rather than echoing the proposal's base hash.
+
+A consuming replacement rechecks the clean snapshot immediately before entry,
+uses `atomic-change-group` and `replace-buffer-contents`, and preserves undo,
+point, mark, narrowing and markers in unchanged text. Explicit save retains the
+captured coding/EOL and invokes actual save hooks, including empty absent-file
+creation. It checks live issuance before replacement/save and disk/path identity
+again before save. Failed hooks retain actual observations; foreign disk changes
+are never blindly restored. A killed or oversized final buffer has explicit
+observation failure. Recorded primitive stages are not domain applied verdicts.
+
+Fifteen real-buffer tests cover these cases. One real native pipe test uses the
+shared gate and complete preflight, waits for synced issuance, performs a real
+CRLF/Unicode editor save and records terminal `outcome_unknown`. Positive receipt
+validation is still absent; the test deliberately does not fabricate success.
+A second pipe test proves that a stale clean buffer with unchanged tick and the
+same byte count cannot pass native preflight against different disk contents.
+These primitives are not connected to public tool consumers. The issued observer,
+cross-connection activity fence, full receipts, batch/rollback and consumer cutover
+remain required before advertising native mutation capability.
+Full ERT passed 1,294/1,294 before the final witness/read-only additions; the final
+affected suite passed 17/17. Changed Elisp sources compile with warnings treated
+as errors and pass checkdoc. Native Rust state transitions/models are unchanged.
