@@ -924,6 +924,21 @@ impl ExecutionGate {
         actor: &mut ApplicationActor,
         run: &RunHandle,
     ) -> Result<(), CoreError> {
+        self.dismiss_with(actor, run, ToolOutcome::Cancelled)
+    }
+    pub(crate) fn timeout_run(
+        &mut self,
+        actor: &mut ApplicationActor,
+        run: &RunHandle,
+    ) -> Result<(), CoreError> {
+        self.dismiss_with(actor, run, ToolOutcome::Timeout)
+    }
+    fn dismiss_with(
+        &mut self,
+        actor: &mut ApplicationActor,
+        run: &RunHandle,
+        outcome: ToolOutcome,
+    ) -> Result<(), CoreError> {
         actor.validate_owner(run)?;
         let ids: Vec<_> = self
             .pending
@@ -939,7 +954,7 @@ impl ExecutionGate {
                     if Instant::now() >= pending.deadline {
                         ToolOutcome::Timeout
                     } else {
-                        ToolOutcome::Cancelled
+                        outcome
                     },
                 )?;
             }

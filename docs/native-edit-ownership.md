@@ -367,3 +367,13 @@ This storage kernel still needs to be consumed by the actual IPC issuance and
 receipt worker stages. It does not enable the editor-write capability or close
 3.6: all-file live preflight, actual adapter receipts, native outcomes/counts,
 snapshot-stack/rollback ownership and consumer cutover remain outstanding.
+
+Claim lifetime expiry uses a typed owner-scoped status rather than a boolean.
+The preparation/source deadline may precede the later gate/run deadline; this
+must complete both pending reviews and accepted unissued authorizations as
+Timeout, without changing explicit cancellation or foreign-owner behavior.
+A real preparation/actor/gate regression covers auto and async policy, releases
+the native run and reservation through normal cleanup, and checks actual tool
+results. The unfiltered locked Rust suite passes 421/421 (29 compile-fail), with
+strict all-targets Clippy/fmt and the preparation TLC scan clean. This fixes todo
+3.12; it does not establish editor issuance or completion.

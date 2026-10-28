@@ -131,6 +131,12 @@ impl AuthorizedEditorEdit {
         }
         Ok(())
     }
+    pub(crate) fn expire_unissued(self, actor: &mut ApplicationActor) -> Result<(), CoreError> {
+        actor.validate_owner(&self.run)?;
+        actor.complete_tool(&self.run, &self.call_id, ToolOutcome::Timeout)?;
+        drop(self.lease);
+        Ok(())
+    }
     /// Cancel an authorization before any journalled issuance. No applied result is fabricated.
     pub fn cancel_unissued(self, actor: &mut ApplicationActor) -> Result<(), CoreError> {
         actor.validate_owner(&self.run)?;

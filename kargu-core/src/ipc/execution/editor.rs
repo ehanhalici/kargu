@@ -177,13 +177,11 @@ impl Editors {
         if review.revision() != input.revision {
             return Err(fault(CoreError::StaleOwner));
         }
-        if !host.actor_mut(&op.scope).map_err(fault)?.edits.claim_live(
-            &op.scope.session_id,
-            &op.preparation,
-            Instant::now(),
-        ) {
-            return Err(fault(CoreError::Cancelled));
-        }
+        host.actor_mut(&op.scope)
+            .map_err(fault)?
+            .edits
+            .claim_status(&op.scope.session_id, &op.preparation, Instant::now())
+            .map_err(fault)?;
         let op = self
             .operations
             .remove(&input.edit_id)
@@ -231,12 +229,12 @@ impl Editors {
             if op.terminal.is_none() {
                 if !host.owns_read_scope(&op.scope) {
                     op.terminal = Some(CoreError::StaleOwner);
-                } else if !host.actor_mut(&op.scope)?.edits.claim_live(
-                    &op.scope.session_id,
-                    &op.preparation,
-                    Instant::now(),
-                ) {
-                    op.terminal = Some(CoreError::Cancelled);
+                } else {
+                    op.terminal = host
+                        .actor_mut(&op.scope)?
+                        .edits
+                        .claim_status(&op.scope.session_id, &op.preparation, Instant::now())
+                        .err();
                 }
             }
             match op.stage {
@@ -364,25 +362,43 @@ fn descriptor(id: &EditorEditId, op: &Operation) -> Value {
         Stage::Preparing(_) => Value::Null,
     }
 }
-fn cleanup(host: &mut Host, gate: &mut ExecutionGate, op: Operation) -> Result<(), CoreError> {
+fn cleanup(
+    host: &mut Host,
+    gate: &mut ExecutionGate,
+    op: Operation,
+) -> Result<crate::application::RunCompletion, CoreError> {
     let actor = host.actor_mut(&op.scope)?;
-    match op.stage {
+    let timed_out = matches!(
+        op.terminal,
+        Some(CoreError::Deadline | CoreError::ApprovalExpired)
+    );
+    let completion = match op.stage {
         Stage::Review { run, .. } => {
             actor.cancel(&run)?;
-            gate.dismiss_run(actor, &run)?;
-            actor.finish(&run)?;
+            if timed_out {
+                gate.timeout_run(actor, &run)?;
+            } else {
+                gate.dismiss_run(actor, &run)?;
+            }
+            actor.finish(&run)?
         }
         Stage::Authorized { run, grant } => {
             actor.cancel(&run)?;
-            grant.cancel_unissued(actor)?;
-            actor.finish(&run)?;
+            if timed_out {
+                grant.expire_unissued(actor)?;
+            } else {
+                grant.cancel_unissued(actor)?;
+            }
+            actor.finish(&run)?
         }
         Stage::Preparing(_) => return Err(CoreError::Busy),
-    }
+    };
     actor
         .edits
-        .release_claim(&op.scope.session_id, &op.preparation)
+        .release_claim(&op.scope.session_id, &op.preparation)?;
+    Ok(completion)
 }
+
 fn fault(error: CoreError) -> Fault {
     crate::edit::prepare::fault(error)
 }
@@ -392,6 +408,156 @@ mod tests {
     use super::*;
     use std::{sync::mpsc, time::Duration};
     type TestResult = Result<(), Box<dyn std::error::Error>>;
+    fn claimed(
+        review: &str,
+    ) -> Result<
+        (
+            tempfile::TempDir,
+            Host,
+            ReadScope,
+            crate::edit::prepare::ClaimWork,
+        ),
+        Box<dyn std::error::Error>,
+    > {
+        let root = tempfile::tempdir()?;
+        let mut host = Host::new();
+        host.dispatch("initialize",json!({"protocol_major":1,"protocol_minor":0,"client_version":"claim-timeout-test","capabilities":[],"limits":{"max_frame_bytes":1048576}}),true).result.map_err(|_|"initialize")?;
+        host.dispatch("initialized", json!({}), false)
+            .result
+            .map_err(|_| "initialized")?;
+        let app = host
+            .dispatch("application/create", json!({}), true)
+            .result
+            .map_err(|_| "application")?;
+        let scope: ReadScope = serde_json::from_value(
+            host.dispatch("session/create", app, true)
+                .result
+                .map_err(|_| "session")?,
+        )?;
+        let scoped = |arguments: Value| json!({"scope":{"application_id":scope.application_id,"session_id":scope.session_id},"arguments":arguments});
+        let id = host.dispatch("edit/begin",scoped(json!({"origin_id":"editor_source_12345678-1234-4234-8234-123456789abc","root":root.path(),"mode":"agent","intent":{"kind":"write","path":"empty","new_bytes":0},"live":null,"config_revision":0,"policy_revision":0,"review_mode":review,"save_policy":"buffer_only"})),true).result.map_err(|_|"begin")?["preparation_id"].clone();
+        let ticket = json!({"origin_id":"editor_source_12345678-1234-4234-8234-123456789abc","preparation_id":id});
+        let (_, work) = host
+            .prepare_edit(scoped(ticket.clone()), false)
+            .map_err(|_| "take")?;
+        let crate::edit::prepare::PrepareWork::Read(work) = work else {
+            return Err("expected file work".into());
+        };
+        let cancel = CancellationToken::new();
+        let result = work.execute(
+            &cancel,
+            Instant::now()
+                .checked_add(Duration::from_secs(3))
+                .ok_or("deadline")?,
+        );
+        let preparation: PreparationId = serde_json::from_value(id)?;
+        host.finish_edit(&scope, &preparation, result)
+            .map_err(|_| "finish")?;
+        let work =
+            host.actor_mut(&scope)?
+                .edits
+                .claim(&scope.session_id, ticket, Instant::now())?;
+        Ok((root, host, scope, work))
+    }
+    #[test]
+    fn source_deadline_precedes_gate_deadline_and_preserves_timeout_in_both_ledgers() -> TestResult
+    {
+        for mode in ["auto", "async"] {
+            for reason in ["expired", "cancelled"] {
+                let (_root, mut host, scope, work) = claimed(mode)?;
+                let preparation = work.id.clone();
+                let origin = work.origin.clone();
+                let prepared = work.execute(&CancellationToken::new())?;
+                let actor = host.actor_mut(&scope)?;
+                let run = actor.admit_editor(&scope.session_id, prepared.settings)?;
+                let mut registry = ToolRegistry::default();
+                let tool = ToolName::try_from("editor_edit".to_owned())?;
+                registry.register_editor(tool.clone(), vec![])?;
+                let mut gate = ExecutionGate::default();
+                let admission = gate.admit_editor(
+                    actor,
+                    &run,
+                    &registry,
+                    &tool,
+                    EditorAdmissionInput {
+                        call_id: ToolCallId::new(),
+                        action: prepared.action,
+                        presenter: EditorPresenter::Available,
+                    },
+                )?;
+                let stage = match admission {
+                    EditorAdmission::Review(request) => Stage::Review {
+                        run: run.clone(),
+                        request,
+                    },
+                    EditorAdmission::Authorized(grant) => Stage::Authorized {
+                        run: run.clone(),
+                        grant,
+                    },
+                };
+                assert!(matches!(actor.finish(&run), Err(CoreError::Busy)));
+                assert!(matches!(
+                    actor.edits.claim_status(
+                        &crate::domain::SessionId::new(),
+                        &preparation,
+                        Instant::now()
+                    ),
+                    Err(CoreError::StaleOwner)
+                ));
+                let now = if reason == "expired" {
+                    let expiry = Instant::now()
+                        .checked_add(crate::constants::timeouts::APPROVAL)
+                        .and_then(|time| time.checked_add(Duration::from_secs(1)))
+                        .ok_or("expiry")?;
+                    actor.edits.sweep(expiry);
+                    expiry
+                } else {
+                    actor.edits.close_session(&scope.session_id);
+                    Instant::now()
+                };
+                let terminal = actor
+                    .edits
+                    .claim_status(&scope.session_id, &preparation, now)
+                    .err();
+                assert!(if reason == "expired" {
+                    matches!(terminal, Some(CoreError::Deadline))
+                } else {
+                    matches!(terminal, Some(CoreError::Cancelled))
+                });
+                let completion = cleanup(
+                    &mut host,
+                    &mut gate,
+                    Operation {
+                        scope: scope.clone(),
+                        origin,
+                        preparation: preparation.clone(),
+                        terminal,
+                        stage,
+                    },
+                )?;
+                assert_eq!(completion.tool_results.len(), 1);
+                assert_eq!(
+                    completion.tool_results.first().map(|result| result.outcome),
+                    Some(if reason == "expired" {
+                        crate::application::ToolOutcome::Timeout
+                    } else {
+                        crate::application::ToolOutcome::Cancelled
+                    })
+                );
+                assert_eq!(gate.pending_count(), 0);
+                assert!(matches!(
+                    host.actor_mut(&scope)?.edits.claim_status(
+                        &scope.session_id,
+                        &preparation,
+                        now
+                    ),
+                    Err(CoreError::StaleOwner)
+                ));
+                assert!(host.actor_mut(&scope)?.drained());
+            }
+        }
+        Ok(())
+    }
     #[tokio::test]
     async fn revoked_claim_keeps_preparation_capacity_until_the_actual_worker_joins() -> TestResult
     {

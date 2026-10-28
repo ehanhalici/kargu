@@ -394,12 +394,24 @@ impl EditPreparations {
             deadline: entry.expires,
         })
     }
-    pub(crate) fn claim_live(&self, session: &SessionId, id: &PreparationId, now: Instant) -> bool {
-        self.entries.get(id).is_some_and(|entry| {
-            &entry.owner.session == session
-                && now < entry.expires
-                && matches!(entry.phase, Phase::Claimed { revoked: false, .. })
-        })
+    pub(crate) fn claim_status(
+        &self,
+        session: &SessionId,
+        id: &PreparationId,
+        now: Instant,
+    ) -> Result<(), CoreError> {
+        let entry = self.entries.get(id).ok_or(CoreError::StaleOwner)?;
+        if &entry.owner.session != session {
+            return Err(CoreError::StaleOwner);
+        }
+        if now >= entry.expires {
+            return Err(CoreError::Deadline);
+        }
+        match entry.phase {
+            Phase::Claimed { revoked: false, .. } => Ok(()),
+            Phase::Claimed { revoked: true, .. } => Err(CoreError::Cancelled),
+            _ => Err(CoreError::StaleOwner),
+        }
     }
     pub(crate) fn release_claim(
         &mut self,

@@ -717,6 +717,15 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Gerçek EditMC sığ DFID koşusu (9 durum, exit 0) artık reddediliyor; tam Edit,
     Application, Approval, Process ve preparation taramaları kabul ediliyor.
 
+  - [x] **3.12 Claimed teklif deadline kategorisi (çalışırken bulundu):**
+    Native timer'da claimed teklif expiry'si boolean liveness üzerinden Cancelled
+    sayılıyordu. Typed claim status ve shared-gate/unissued-grant cleanup artık
+    source deadline'ını Timeout olarak korur; cancel ve foreign owner ayrı kalır.
+    Auto ve async modlarında source deadline native gate deadline'ından önce
+    dolduğunda actual tool ledger Timeout verir. Rezervasyon yine gerçek join/
+    cleanup'a kadar tutulur. Filtresiz locked Rust 421/421 (29 compile-fail),
+    strict Clippy/fmt ve preparation TLC (97.230 farklı durum) temiz.
+
 - [ ] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
   revision/connection/thread/frame-bound reverse RPC'ye bağla. Mention/folder/
   attachment/provenance ve byte/token/egress kararlarını native'a taşı; canlı
