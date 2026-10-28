@@ -59,14 +59,14 @@ impl Fixture {
         let file = if delete {
             EditorFileInput::Delete {
                 path,
-                base,
+                base: base.into(),
                 capture,
             }
         } else {
             EditorFileInput::Update {
                 path,
-                base,
-                proposed: EditText::try_from("private proposed body".to_owned())?,
+                base: base.into(),
+                proposed: EditText::try_from("private proposed body".to_owned())?.into(),
                 capture,
             }
         };

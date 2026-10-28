@@ -248,6 +248,10 @@ pub mod protocol {
     }
     /// Canonical method names.
     pub mod methods {
+        /// Consume a prepared artifact into the shared editor permission ledger.
+        pub const EDIT_AUTHORIZE: &str = "edit/authorize";
+        /// Decide exactly one native editor review revision.
+        pub const EDIT_DECISION: &str = "edit/decision";
         /// Parse an uploaded patch before requesting live document captures.
         pub const EDIT_INSPECT: &str = "edit/inspect";
         /// Read bounded native patch target pages.

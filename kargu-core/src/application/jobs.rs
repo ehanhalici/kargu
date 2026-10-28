@@ -25,6 +25,7 @@ impl ApplicationActor {
             .active
             .iter()
             .chain(self.job_runs.values())
+            .chain(self.editor_runs.values())
             .any(|run| run.cleanup_failed)
         {
             return Err(CoreError::CleanupFailed);

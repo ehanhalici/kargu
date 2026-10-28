@@ -257,3 +257,34 @@ impl TryFrom<String> for CaptureDigest {
         ContentHash::try_from(value).map(Self)
     }
 }
+
+#[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
+#[serde(try_from = "String", into = "String")]
+pub(crate) struct EditorEditId(uuid::Uuid);
+impl EditorEditId {
+    pub(crate) fn new() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+impl TryFrom<String> for EditorEditId {
+    type Error = EditError;
+    fn try_from(value: String) -> Result<Self, EditError> {
+        uuid::Uuid::parse_str(
+            value
+                .strip_prefix("editor_edit_")
+                .ok_or(EditError::InvalidEvidence)?,
+        )
+        .map(Self)
+        .map_err(|_| EditError::InvalidEvidence)
+    }
+}
+impl From<EditorEditId> for String {
+    fn from(value: EditorEditId) -> Self {
+        format!("editor_edit_{}", value.0)
+    }
+}
+impl CaptureDigest {
+    pub(crate) fn capture(bytes: &[u8]) -> Self {
+        Self(ContentHash(Sha256::digest(bytes).into()))
+    }
+}

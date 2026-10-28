@@ -80,6 +80,30 @@ impl RunSettings {
     }
 }
 
+pub(crate) struct PreparedEditorSettings(RunSettings);
+impl RunSettings {
+    pub(crate) fn prepare_editor(self) -> Result<PreparedEditorSettings, CoreError> {
+        self.workspace.revalidate()?;
+        Ok(PreparedEditorSettings(self))
+    }
+}
+impl ApplicationActor {
+    pub(crate) fn admit_editor(
+        &mut self,
+        session: &SessionId,
+        settings: PreparedEditorSettings,
+    ) -> Result<RunHandle, CoreError> {
+        self.check_admission()?;
+        if self.editor_runs.len() >= limits::EDIT_PREPARATIONS {
+            return Err(CoreError::Limit);
+        }
+        let run = self.capture_owned_run(session, settings.0, RunPurpose::EditorEdit)?;
+        let handle = run.handle.clone();
+        self.editor_runs.insert(handle.scope.run_id().clone(), run);
+        Ok(handle)
+    }
+}
+
 /// Whether execution occupies the foreground turn or a separate owned job lifetime.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -88,6 +112,8 @@ pub enum RunPurpose {
     AgentTurn,
     /// An explicitly owned process service job, not another concurrent agent turn.
     ProcessJob,
+    /// A prepared editor action, including asynchronous review and actual settlement.
+    EditorEdit,
 }
 
 /// Identity and revision evidence, serialized without granting execution rights.
@@ -296,6 +322,7 @@ pub struct ApplicationActor {
     generation: Generation,
     active: Option<ActiveRun>,
     job_runs: HashMap<RunId, ActiveRun>,
+    editor_runs: HashMap<RunId, ActiveRun>,
     pub(crate) models: crate::models::service::ModelService,
     pub(crate) edits: crate::edit::prepare::EditPreparations,
     pub(crate) configuration: crate::configuration::policy::ConfigurationService,
@@ -309,6 +336,7 @@ impl ApplicationActor {
             generation: Generation::ZERO,
             active: None,
             job_runs: HashMap::new(),
+            editor_runs: HashMap::new(),
             models: crate::models::service::ModelService::default(),
             edits: crate::edit::prepare::EditPreparations::default(),
             configuration: crate::configuration::policy::ConfigurationService::default(),
@@ -334,6 +362,7 @@ impl ApplicationActor {
             .active
             .iter()
             .chain(self.job_runs.values())
+            .chain(self.editor_runs.values())
             .any(|run| &run.handle.scope.session_id == session)
         {
             return Err(CoreError::Busy);
@@ -355,7 +384,12 @@ impl ApplicationActor {
         self.models.close_session(session);
         self.configuration.close_session(session);
         self.edits.close_session(session);
-        for run in self.active.iter().chain(self.job_runs.values()) {
+        for run in self
+            .active
+            .iter()
+            .chain(self.job_runs.values())
+            .chain(self.editor_runs.values())
+        {
             if run.handle.scope.session_id() == session {
                 run.handle.resources.cancellation.cancel();
             }
@@ -368,12 +402,17 @@ impl ApplicationActor {
         self.configuration.revoke();
         self.edits.revoke();
         self.sessions.clear();
-        for run in self.active.iter().chain(self.job_runs.values()) {
+        for run in self
+            .active
+            .iter()
+            .chain(self.job_runs.values())
+            .chain(self.editor_runs.values())
+        {
             run.handle.resources.cancellation.cancel();
         }
     }
     pub(crate) fn drained(&self) -> bool {
-        self.active.is_none() && self.job_runs.is_empty()
+        self.active.is_none() && self.job_runs.is_empty() && self.editor_runs.is_empty()
     }
     /// Claim before any async preparation, policy UI, spawn or view effect.
     pub fn admit(
@@ -400,6 +439,17 @@ impl ApplicationActor {
             return Err(CoreError::StaleOwner);
         }
         settings.workspace.revalidate()?;
+        self.capture_owned_run(session, settings, purpose)
+    }
+    fn capture_owned_run(
+        &mut self,
+        session: &SessionId,
+        settings: RunSettings,
+        purpose: RunPurpose,
+    ) -> Result<ActiveRun, CoreError> {
+        if !self.owns_session(session) {
+            return Err(CoreError::StaleOwner);
+        }
         let generation = self.generation.next()?;
         let deadline = settings.timeout.start()?;
         let handle = RunHandle {
@@ -448,6 +498,11 @@ impl ApplicationActor {
                     .get(handle.scope.run_id())
                     .filter(|r| r.handle.same_owner(handle))
             })
+            .or_else(|| {
+                self.editor_runs
+                    .get(handle.scope.run_id())
+                    .filter(|r| r.handle.same_owner(handle))
+            })
             .ok_or(CoreError::StaleOwner)
     }
     fn owned_mut(&mut self, handle: &RunHandle) -> Result<&mut ActiveRun, CoreError> {
@@ -456,6 +511,11 @@ impl ApplicationActor {
             .filter(|r| r.handle.same_owner(handle))
             .or_else(|| {
                 self.job_runs
+                    .get_mut(handle.scope.run_id())
+                    .filter(|r| r.handle.same_owner(handle))
+            })
+            .or_else(|| {
+                self.editor_runs
                     .get_mut(handle.scope.run_id())
                     .filter(|r| r.handle.same_owner(handle))
             })
@@ -576,13 +636,21 @@ impl ApplicationActor {
             RunPurpose::ProcessJob => {
                 self.job_runs.remove(handle.scope.run_id());
             }
+            RunPurpose::EditorEdit => {
+                self.editor_runs.remove(handle.scope.run_id());
+            }
         }
         Ok(completion)
     }
 }
 impl Drop for ApplicationActor {
     fn drop(&mut self) {
-        for run in self.active.iter().chain(self.job_runs.values()) {
+        for run in self
+            .active
+            .iter()
+            .chain(self.job_runs.values())
+            .chain(self.editor_runs.values())
+        {
             run.handle.resources.cancellation.cancel();
         }
     }

@@ -35,7 +35,7 @@ five models also completed without errors, with an empty queue:
 
 | Model | Generated | Distinct |
 |---|---:|---:|
-| Native preparation, identity symmetry | 151,744 | 34,258 |
+| Native preparation and editor admission, identity symmetry | 480,956 | 97,230 |
 | Edit transaction | 1,849 | 560 |
 | Application | 17,545 | 4,624 |
 | Approval, shared command/editor kinds | 360,452 | 49,152 |
@@ -583,3 +583,21 @@ Finished in 07min 42s at (2026-10-25 11:32:39 Europe/Istanbul)
 ```
 
 Changing a guard breaks the check: with the `~noTools` guard removed from `ModelReceiveToolCalls`, a simulation reports `Safety_ToolsOffMeansNoToolWork` violated within a second. The numbers above are those of a real run; repeat it after every change to the specification and replace them.
+
+### Prepared editor admission extension (2026-10-28)
+
+The native preparation model now includes consuming `ready → claim → review /
+authorized`, an actual claim-worker start/join, and explicit release of unissued
+editor actions. Claimed byte/record ownership survives source close, abort and
+expiry. `ClaimOwnership` prevents cancellation from silently removing a reviewed
+or authorized claim before native cleanup. Starts/joins still track actual IO
+workers, independently of whether a permission decision remains pending.
+
+The exhaustive BFS scan completed with 480,956 generated / 97,230 distinct states,
+depth 28 and no states left on the queue. Replacing retained-claim cancellation
+with the old worker-only release predicate violates `ClaimOwnership` after 765
+distinct states. These are admission/resource safety checks; journalled editor
+issuance, live preflight, actual save hooks, receipt settlement and rollback are
+outside this model. Native pipe tests cover source/session identity, stale revision,
+single-use decision, tiny frames, foreground-command coexistence and owner closure;
+a held blocking worker checks the actual join-before-capacity-release path.

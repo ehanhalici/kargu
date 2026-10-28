@@ -15,7 +15,8 @@ use sha2::{Digest, Sha256};
 use tokio::time::Instant;
 
 /// Actual review-presenter availability captured by the trusted editor adapter.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EditorPresenter {
     /// Interactive review can be presented.
     Available,
@@ -23,7 +24,8 @@ pub enum EditorPresenter {
     Missing,
 }
 /// Exact revision decision. Revised text requires a newly prepared native action.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EditorDecision {
     /// Accept exactly the indicated immutable revision.
     Accept,

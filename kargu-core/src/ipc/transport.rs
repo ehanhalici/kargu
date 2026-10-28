@@ -386,6 +386,24 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     }
                     continue;
                 }
+                if method == methods::EDIT_AUTHORIZE {
+                    if let Some(id) = id.as_ref()
+                        && let Err(fault) = commands.authorize_editor(host, id.clone(), params)
+                    {
+                        queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                    }
+                    continue;
+                }
+                if method == methods::EDIT_DECISION {
+                    if let Some(id) = id.as_ref() {
+                        let reply = match commands.decide_editor(host, params) {
+                            Ok(value) => protocol::success(id, value),
+                            Err(fault) => fault.response(Some(id)),
+                        };
+                        queue_reply(reply, host.frame_limit(), tx, permits)?;
+                    }
+                    continue;
+                }
                 if matches!(
                     method.as_str(),
                     methods::EDIT_PREPARE | methods::EDIT_INSPECT

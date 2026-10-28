@@ -239,8 +239,8 @@ regression results for the preparation slice; actual native editor writes,
 save-hook settlement, native rollback and consumer cutover are still open.
 
 Standard BFS TLC now completes with an empty queue for Edit (560 distinct states),
-Application (4,624), Approval (1,536), Process (179) and native preparation (34,258).
-The earlier invariant-only DFID runs reached the same distinct-state counts.
+Application (4,624), Approval (49,152), Process (179) and native preparation (97,230).
+The preparation/approval counts include the editor admission extension below.
 The native preparation model retains two preparation IDs and two separate
 source-owner IDs modulo identity-renaming symmetry. It models byte/worker
 reservations, inspector/command/process joins, cancellation/close/expiry and the
@@ -253,8 +253,8 @@ editor transactions or liveness. See `proof/README.md` for commands and counts.
 The shared `ExecutionGate` now has a closed `EditorAction` branch in the same
 bounded pending map as commands. It commits to ordered file operations, native
 source/review revision, base/proposed hashes, capture digest, pinned workspace,
-config/policy and review/save policy. Source bodies have no implicit Debug or
-Serialize. Native run settings must share the exact captured workspace handle;
+config/policy and review/save policy. Action types have no implicit Debug or
+Serialize implementation exposing source bodies. Native run settings must share the exact captured workspace handle;
 a separately recaptured directory at the same path cannot substitute for it.
 
 `EditorAdmission` returns either a pending review or a consuming
@@ -271,12 +271,49 @@ boundaries and command coexistence. The unfiltered locked Rust suite passes
 403/403, including 28 compile-fail cases; strict all-targets Clippy and fmt pass. The extended approval model checks both action
 kinds and twelve authority fields: 360,452 generated / 49,152 distinct states,
 empty queue, depth 15. Removing the kind guard violates `Safety_ExactActionKind`
-after 16 distinct states. This kernel is not yet connected to stdio or an editor
-write port; preparation IDs/capture hashes remain insufficient permission.
+after 16 distinct states. Preparation IDs/capture hashes remain insufficient
+permission; this does not establish an editor write port.
 
-The next integration is consuming an owned prepared artifact into this shared
-permission branch and the actual Emacs transaction adapter. Its consuming issued state must
-retain the real editor settlement/drain barrier across cancellation; timing out a
-reverse RPC alone is not proof that a queued or executing editor write stopped.
-The old Elisp consumers remain active until that boundary and native journal/
-rollback are wired and tested, then are removed. Todo 3 remains open.
+The actual `edit/authorize` RPC now consumes one ready preparation into that
+shared gate. It accepts only the preparation/source and presenter availability;
+callers cannot submit a replacement root, action text, policy, mode or config.
+`edit/decision` accepts one exact native edit ID/source/review revision and an
+explicit accept/reject/interrupt. Replies contain lifecycle state and the actual
+native run scope, always `applied:false`. Proposal text and per-file evidence stay
+available through the existing bounded preparation pages during review.
+
+A new `RunPurpose::EditorEdit` has an independently bounded actor-owned lifetime.
+It neither impersonates a process job nor holds the foreground turn during async
+review. File/root pin revalidation and action hashing run on bounded command
+preparation workers. The actor only adopts a consuming `PreparedEditorSettings`,
+without filesystem IO. Command and editor preparation share the same global
+worker admission bound; their actual permission entries share one `ExecutionGate`.
+
+Preparation records transition to a retained `Claimed` state before worker launch.
+Base/proposed `Arc<EditText>` references share immutable source allocations rather
+than duplicating reserved text. The original file/document evidence and source
+reservation remain owned while preparing, reviewing or authorized. Abort, expiry,
+source/session/application close, shutdown and EOF revoke publication first;
+only actual worker join and explicit native unissued-grant/tool/run cleanup
+release the record. Claiming or deciding twice cannot produce a second grant.
+
+Seven real pipe tests cover foreign source/session, stale revision, replay,
+missing presenter, rejection/interruption, 1 KiB frames, retained paging/capacity,
+source replacement, foreground command coexistence and all close paths. The
+unfiltered locked Rust suite passes 411/411 (28 compile-fail), strict all-targets
+Clippy and fmt pass, and the existing Emacs preparation/patch pipe tests pass 8/8.
+A held
+blocking-worker test verifies capacity remains occupied after cancellation until
+its actual join. Native preparation TLC now includes claim/review/authorization:
+480,956 generated / 97,230 distinct states, depth 28, empty queue. Freeing a
+reviewed claim on cancellation violates `ClaimOwnership` after 765 distinct
+states. Application and shared approval scans also complete without errors.
+
+This admission port has no editor-write capability or issuance method yet.
+The next integration is journalled issuance and the actual Emacs transaction
+adapter, including live all-file preflight and receipt settlement. Its consuming
+issued state must retain the real editor settlement/drain barrier across
+cancellation; timing out a reverse RPC alone is not proof that a queued or
+executing editor write stopped. Revised Ediff text still needs a new measured
+native revision. The old Elisp consumers remain active until that boundary and
+native journal/rollback are wired and tested, then are removed. Todo 3 remains open.

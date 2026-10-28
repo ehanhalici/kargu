@@ -142,8 +142,8 @@ fn capture_files(
                 proposed_hash: proposed.hash(),
                 evidence,
                 disk,
-                base,
-                proposed,
+                base: base.into(),
+                proposed: proposed.into(),
                 unchanged: false,
                 live,
                 config_revision: inspection.input.config_revision,
@@ -331,7 +331,7 @@ impl RunningPatch {
                 file.kind == OperationKind::Delete
             };
             file.proposal.proposed_hash = proposed.hash();
-            file.proposal.proposed = proposed;
+            file.proposal.proposed = proposed.into();
             file.proposal.root.revalidate()?;
             file.proposal.evidence.revalidate()?;
         }

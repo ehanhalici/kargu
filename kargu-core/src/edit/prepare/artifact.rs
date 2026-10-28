@@ -15,7 +15,7 @@ use crate::{
     security::Workspace,
 };
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 /// Private immutable proposal and held evidence; serializing a descriptor cannot
 /// manufacture an execution grant or rewrite any of its contents.
 pub(crate) struct Prepared {
@@ -24,8 +24,8 @@ pub(crate) struct Prepared {
     pub(super) relative: EditPath,
     pub(super) evidence: capture::Evidence,
     pub(super) disk: DiskState,
-    pub(super) base: EditText,
-    pub(super) proposed: EditText,
+    pub(super) base: Arc<EditText>,
+    pub(super) proposed: Arc<EditText>,
     pub(super) base_hash: ContentHash,
     pub(super) proposed_hash: ContentHash,
     pub(super) unchanged: bool,

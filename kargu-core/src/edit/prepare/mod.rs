@@ -1,5 +1,7 @@
 //! Session/source-owned bounded proposal staging. This port cannot grant editor writes.
 mod artifact;
+mod claim;
+pub(crate) use claim::{ClaimWork, ClaimedAction};
 mod capture;
 mod git;
 mod inspection;
@@ -110,7 +112,9 @@ pub(crate) fn fault(error: CoreError) -> crate::ipc::protocol::Fault {
             "Native edit preparation dependency is unavailable",
         ),
         CoreError::Cancelled => (codes::CANCELLED, "cancelled", "Edit preparation cancelled"),
-        CoreError::Deadline => (codes::TIMEOUT, "timeout", "Edit preparation expired"),
+        CoreError::Deadline | CoreError::ApprovalExpired => {
+            (codes::TIMEOUT, "timeout", "Edit preparation expired")
+        }
         CoreError::StaleOwner | CoreError::AlreadyCompleted => (
             codes::STALE_OWNER,
             "stale_owner",

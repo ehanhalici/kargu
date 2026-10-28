@@ -14,7 +14,7 @@ use crate::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 /// A closed file intent with decoded text and a captured-evidence commitment.
 /// No Debug/Serialize implementation can implicitly disclose source bodies.
@@ -24,7 +24,7 @@ pub enum EditorFileInput {
         /// Validated relative target.
         path: EditPath,
         /// Full proposed decoded text.
-        proposed: EditText,
+        proposed: Arc<EditText>,
         /// Commitment to captured absence/document evidence.
         capture: CaptureDigest,
     },
@@ -33,9 +33,9 @@ pub enum EditorFileInput {
         /// Validated relative target.
         path: EditPath,
         /// Full captured base text.
-        base: EditText,
+        base: Arc<EditText>,
         /// Full proposed decoded text.
-        proposed: EditText,
+        proposed: Arc<EditText>,
         /// Commitment to the captured source evidence.
         capture: CaptureDigest,
     },
@@ -44,7 +44,7 @@ pub enum EditorFileInput {
         /// Validated relative target.
         path: EditPath,
         /// Full captured base text.
-        base: EditText,
+        base: Arc<EditText>,
         /// Commitment to the captured source evidence.
         capture: CaptureDigest,
     },

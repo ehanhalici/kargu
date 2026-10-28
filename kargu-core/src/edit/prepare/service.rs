@@ -1,6 +1,6 @@
 //! One application-actor writer owns upload/adoption/expiry. Workers own only input.
 use super::{
-    Artifact, PartBuffer, PreparationResult, Work,
+    Artifact, ClaimWork, PartBuffer, PreparationResult, Work,
     inspection::{Inspection, PatchWork, PrepareWork},
     types::{self, Begin, Intent, OriginId, Part, PreparationId},
 };
@@ -16,6 +16,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap},
+    sync::Arc,
     time::Instant,
 };
 
@@ -41,6 +42,10 @@ enum Phase {
     },
     Collecting(Box<Inspection>),
     Ready(Box<Artifact>),
+    Claimed {
+        artifact: Arc<Artifact>,
+        revoked: bool,
+    },
 }
 /// Actor-only store. The separate states never contain optional worker handles.
 #[derive(Default)]
@@ -62,7 +67,7 @@ impl EditPreparations {
                 return true;
             }
             match &mut entry.phase {
-                Phase::Preparing { revoked } => {
+                Phase::Preparing { revoked } | Phase::Claimed { revoked, .. } => {
                     *revoked = true;
                     true
                 }
@@ -76,7 +81,7 @@ impl EditPreparations {
                 return true;
             }
             match &mut entry.phase {
-                Phase::Preparing { revoked } => {
+                Phase::Preparing { revoked } | Phase::Claimed { revoked, .. } => {
                     *revoked = true;
                     true
                 }
@@ -86,7 +91,7 @@ impl EditPreparations {
     }
     pub(crate) fn revoke(&mut self) {
         self.entries.retain(|_, entry| match &mut entry.phase {
-            Phase::Preparing { revoked } => {
+            Phase::Preparing { revoked } | Phase::Claimed { revoked, .. } => {
                 *revoked = true;
                 true
             }
@@ -134,10 +139,15 @@ impl EditPreparations {
             methods::EDIT_READ => {
                 let input: types::Read = decode(args)?;
                 let entry = self.owned(session, &input.origin_id, &input.preparation_id)?;
-                let Phase::Ready(artifact) = &entry.phase else {
-                    return Err(CoreError::AlreadyCompleted);
-                };
-                artifact.page(input.file, input.part, input.offset, frame)
+                match &entry.phase {
+                    Phase::Ready(artifact) => {
+                        artifact.page(input.file, input.part, input.offset, frame)
+                    }
+                    Phase::Claimed { artifact, .. } => {
+                        artifact.page(input.file, input.part, input.offset, frame)
+                    }
+                    _ => Err(CoreError::AlreadyCompleted),
+                }
             }
             methods::EDIT_TARGETS | methods::EDIT_FILES => {
                 let input: types::Targets = decode(args)?;
@@ -147,6 +157,9 @@ impl EditPreparations {
                         patch.targets(input.offset, frame)
                     }
                     (Phase::Ready(artifact), methods::EDIT_FILES) => {
+                        artifact.files(&input.preparation_id, input.offset, frame)
+                    }
+                    (Phase::Claimed { artifact, .. }, methods::EDIT_FILES) => {
                         artifact.files(&input.preparation_id, input.offset, frame)
                     }
                     _ => Err(CoreError::AlreadyCompleted),
@@ -163,7 +176,9 @@ impl EditPreparations {
             methods::EDIT_ABORT => {
                 let input: types::Ticket = decode(args)?;
                 let entry = self.owned(session, &input.origin_id, &input.preparation_id)?;
-                if let Phase::Preparing { revoked } = &mut entry.phase {
+                if let Phase::Preparing { revoked } | Phase::Claimed { revoked, .. } =
+                    &mut entry.phase
+                {
                     *revoked = true;
                 } else {
                     self.entries.remove(&input.preparation_id);
@@ -177,7 +192,7 @@ impl EditPreparations {
                         return true;
                     }
                     match &mut entry.phase {
-                        Phase::Preparing { revoked } => {
+                        Phase::Preparing { revoked } | Phase::Claimed { revoked, .. } => {
                             *revoked = true;
                             true
                         }
@@ -294,7 +309,10 @@ impl EditPreparations {
         if !entry.owner.matches(session, origin) {
             return Err(CoreError::StaleOwner);
         }
-        if matches!(entry.phase, Phase::Preparing { revoked: true }) {
+        if matches!(
+            entry.phase,
+            Phase::Preparing { revoked: true } | Phase::Claimed { revoked: true, .. }
+        ) {
             return Err(CoreError::Cancelled);
         }
         Ok(entry)
@@ -348,6 +366,53 @@ impl EditPreparations {
             _ => Err(CoreError::CleanupFailed),
         }
     }
+    pub(crate) fn claim(
+        &mut self,
+        session: &SessionId,
+        args: Value,
+        now: Instant,
+    ) -> Result<ClaimWork, CoreError> {
+        self.sweep(now);
+        let input: types::Ticket = decode(args)?;
+        let entry = self.owned(session, &input.origin_id, &input.preparation_id)?;
+        if !matches!(entry.phase, Phase::Ready(_)) {
+            return Err(CoreError::AlreadyCompleted);
+        }
+        let phase = std::mem::replace(&mut entry.phase, Phase::Preparing { revoked: false });
+        let Phase::Ready(artifact) = phase else {
+            return Err(CoreError::CleanupFailed);
+        };
+        let artifact = Arc::new(*artifact);
+        entry.phase = Phase::Claimed {
+            artifact: artifact.clone(),
+            revoked: false,
+        };
+        Ok(ClaimWork {
+            id: input.preparation_id,
+            origin: input.origin_id,
+            artifact,
+            deadline: entry.expires,
+        })
+    }
+    pub(crate) fn claim_live(&self, session: &SessionId, id: &PreparationId, now: Instant) -> bool {
+        self.entries.get(id).is_some_and(|entry| {
+            &entry.owner.session == session
+                && now < entry.expires
+                && matches!(entry.phase, Phase::Claimed { revoked: false, .. })
+        })
+    }
+    pub(crate) fn release_claim(
+        &mut self,
+        session: &SessionId,
+        id: &PreparationId,
+    ) -> Result<(), CoreError> {
+        let entry = self.entries.get(id).ok_or(CoreError::StaleOwner)?;
+        if &entry.owner.session != session || !matches!(entry.phase, Phase::Claimed { .. }) {
+            return Err(CoreError::StaleOwner);
+        }
+        self.entries.remove(id);
+        Ok(())
+    }
     pub(crate) fn can_publish(
         &self,
         session: &SessionId,
@@ -389,7 +454,10 @@ impl EditPreparations {
         if now >= entry.expires {
             return Err(CoreError::Deadline);
         }
-        if matches!(entry.phase, Phase::Preparing { revoked: true }) {
+        if matches!(
+            entry.phase,
+            Phase::Preparing { revoked: true } | Phase::Claimed { revoked: true, .. }
+        ) {
             return Err(CoreError::Cancelled);
         }
         let descriptor = match result? {

@@ -1,5 +1,6 @@
 //! Single-writer command admission, reverse approval and nonblocking completion.
 
+mod editor;
 pub(crate) mod input;
 mod jobs;
 mod reply;
@@ -84,6 +85,7 @@ pub(super) struct Commands {
     supervisor: ProcessSupervisor,
     sequence: RequestSequence,
     jobs: jobs::Jobs,
+    editors: editor::Editors,
 }
 impl Commands {
     pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
@@ -91,6 +93,7 @@ impl Commands {
             .values()
             .any(|stage| &stage.owner().scope.application_id == id)
             || self.jobs.owns_application(id)
+            || self.editors.owns_application(id)
     }
     pub fn new() -> Result<Self, CoreError> {
         let mut registry = ToolRegistry::default();
@@ -100,6 +103,7 @@ impl Commands {
         registry.register_git_status()?;
         registry.register_git_reads()?;
         registry.register_git_mutations()?;
+        registry.register_editor(ToolName::try_from("editor_edit".to_owned())?, vec![])?;
         Ok(Self {
             operations: HashMap::new(),
             gate: ExecutionGate::default(),
@@ -107,13 +111,35 @@ impl Commands {
             supervisor: ProcessSupervisor::new(CleanupPolicy::default())?,
             sequence: RequestSequence::ZERO,
             jobs: jobs::Jobs::default(),
+            editors: editor::Editors::default(),
         })
     }
     pub fn contains(&self, id: &RpcId) -> bool {
-        self.operations.contains_key(id) || self.jobs.contains_request(id)
+        self.operations.contains_key(id)
+            || self.jobs.contains_request(id)
+            || self.editors.contains(id)
     }
     pub fn is_empty(&self) -> bool {
-        self.operations.is_empty() && self.jobs.is_idle()
+        self.operations.is_empty() && self.jobs.is_idle() && self.editors.is_empty()
+    }
+    pub fn authorize_editor(
+        &mut self,
+        host: &mut Host,
+        id: RpcId,
+        params: Value,
+    ) -> Result<(), Fault> {
+        if self
+            .operations
+            .len()
+            .saturating_add(self.editors.preparing_count())
+            >= limits::HOST_PROCESSES
+        {
+            return Err(fault(CoreError::Limit));
+        }
+        self.editors.authorize(host, id, params)
+    }
+    pub fn decide_editor(&mut self, host: &mut Host, params: Value) -> Result<Value, Fault> {
+        self.editors.decision(host, &mut self.gate, params)
     }
     pub fn start(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
         self.start_kind(host, id, params, RunPurpose::AgentTurn)
@@ -204,7 +230,13 @@ impl Commands {
         if !host.owns_read_scope(&scope) {
             return Err(fault(CoreError::StaleOwner));
         }
-        if self.operations.len() >= limits::HOST_PROCESSES || self.contains(&id) {
+        if self
+            .operations
+            .len()
+            .saturating_add(self.editors.preparing_count())
+            >= limits::HOST_PROCESSES
+            || self.contains(&id)
+        {
             return Err(fault(CoreError::Limit));
         }
         // Reserve application ownership before off-mailbox filesystem preparation.
@@ -286,6 +318,7 @@ impl Commands {
     }
     pub fn cancel(&mut self, id: &RpcId) {
         self.jobs.cancel_request(id);
+        self.editors.cancel(id);
         if let Some(op) = self.operations.get_mut(id) {
             op.owner_mut().terminal = Some(CoreError::Cancelled);
             if let Stage::Preparing(operation) = op {
@@ -295,6 +328,7 @@ impl Commands {
     }
     pub fn cancel_all(&mut self) {
         self.jobs.cancel_all();
+        self.editors.cancel_all();
         for op in self.operations.values_mut() {
             op.owner_mut().terminal = Some(CoreError::Cancelled);
             if let Stage::Preparing(operation) = op {
@@ -309,6 +343,7 @@ impl Commands {
     ) -> Result<Vec<Value>, CoreError> {
         let ids: Vec<_> = self.operations.keys().cloned().collect();
         let mut messages = self.jobs.tick(host, &mut self.supervisor)?;
+        messages.extend(self.editors.tick(host, &mut self.gate, &self.registry)?);
         for id in ids {
             let mut stage = self
                 .operations
@@ -478,6 +513,7 @@ impl Commands {
         let admitted = match owner.purpose {
             RunPurpose::AgentTurn => actor.admit(&scope.session_id, prepared.settings),
             RunPurpose::ProcessJob => actor.admit_job(&scope.session_id, prepared.settings),
+            RunPurpose::EditorEdit => Err(CoreError::Rejected),
         };
         let run = match admitted {
             Ok(run) => Box::new(run),

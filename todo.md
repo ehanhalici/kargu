@@ -648,11 +648,20 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     fake command veya ikinci onay ledger'ı yok. Exact native run/root capture,
     config/policy/review revision, auto/async/blocking, missing presenter, yalnız
     auto delete, foreign/replay ve shared lease/drain sınırları 7/7 integration
-    testiyle doğrulandı. Grant henüz stdio/editor issuance'a bağlı değil;
-    artifact consumption, canlı preflight/journal ve gerçek receipt tamamlanmadan
+    testiyle doğrulandı. `edit/authorize` hazır teklifi tüketerek aynı gate'e
+    bağlıyor; `edit/decision` exact edit/source/review revision kararını tüketiyor.
+    Ayrı native `editor_edit` scope'u async onayda foreground'u tutmaz. Metin
+    paylaşılır; claimed rezervasyonu revoke sonrası gerçek worker join ve
+    tool/run cleanup'a kadar korunur. 7 gerçek pipe ve held-worker testi;
+    1 KiB frame, foreground command coexistence ve tüm close yolları temiz.
+    Canlı preflight/journal, revised review ve gerçek receipt tamamlanmadan
     bu alt madde kapanmaz. Approval TLC: 49.152 farklı durum; kind-confusion
     mutantı invariant ihlaliyle reddedildi. Bu adımda filtresiz locked Rust
     403/403 (28 compile-fail dahil), strict all-targets Clippy ve fmt temiz.
+    Claim/review/authorization eklenen preparation TLC 97.230 farklı durumda
+    tamamlandı; erken claim-release mutantı `ClaimOwnership` ile reddedildi.
+    Güncel filtresiz locked Rust 411/411 (28 compile-fail), Clippy/fmt temiz;
+    mevcut Emacs prepare/patch gerçek pipe testleri 8/8 geçti.
   - [ ] **3.5 Emacs transaction adapter:** bütün açık/kapalı dosyalar yetkili
     native edit_id üzerinden canlı belge kontrolü, atomic change group, undo/point/
     marker/narrowing, coding/EOL ve açık buffer_only/save policy ile uygulansın.
