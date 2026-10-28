@@ -4,6 +4,18 @@ This directory holds the TLA+ specification of Kargu's agent loop and protocol w
 
 The check is exhaustive over a bounded model. It is a proof for those bounds, not for every parameter value.
 
+## Receipt verification and cleanup audit (2026-10-29)
+
+`--edit-issuance` now includes the verification worker between editor quiescence
+and terminal journal IO. Both workers must actually join before releasing the
+claim/lease/reservation. Source revocation does not erase already verified effects.
+A positive committed result requires successful verification. BFS completes
+3,633 generated / 959 distinct states, depth 17, empty queue. Replacing verification
+with a quiescence flag violates `PositiveReceiptsVerified` in the mutant fixture.
+Disk/hash truth remains an explicit abstract input here; native real-file receipt
+regressions separately check the validation boundary. Cutover, native rollback and
+revised Ediff are still incomplete; see `docs/task3-audit-2026-10-29.md`.
+
 ## Native editor activity across connection replacement (2026-10-28)
 
 `proof/run_tlc.sh --editor-activity` checks `KarguEditorActivity` /

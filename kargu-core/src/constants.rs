@@ -17,6 +17,8 @@ pub mod limits {
     pub const EDIT_PATCH_OUTPUT_BYTES: usize = 64 * 1024;
     /// Retained upload/prepare byte reservations per application.
     pub const EDIT_BUFFER_BYTES: usize = 16 * 1024 * 1024;
+    /// Written and final editor observations for the single globally issued writer.
+    pub const EDIT_RECEIPT_BYTES: usize = 32 * 1024 * 1024;
     /// Upload/prepare/ready records per application, including draining work.
     pub const EDIT_PREPARATIONS: usize = 2;
     /// UTF-8 source bytes per edit upload or immutable read page.
@@ -269,6 +271,8 @@ pub mod protocol {
         pub const EDIT_ISSUE: &str = "edit/issue";
         /// Settle an issued token after actual editor quiescence, including retired owners.
         pub const EDIT_QUIESCENT: &str = "edit/quiescent";
+        /// Record raw editor observations and verify the final transaction outcome.
+        pub const EDIT_RECEIPT: &str = "edit/receipt";
         /// Add one live preflight witness; the complete set is revalidated off-actor.
         pub const EDIT_PREFLIGHT: &str = "edit/preflight";
         /// Decide exactly one native editor review revision.

@@ -193,6 +193,16 @@ impl IssuedEditorEdit {
         drop(self.0.lease);
         Ok(())
     }
+    pub(crate) fn complete(
+        self,
+        actor: &mut ApplicationActor,
+        outcome: ToolOutcome,
+    ) -> Result<(), CoreError> {
+        actor.validate_owner(&self.0.run)?;
+        actor.complete_tool(&self.0.run, &self.0.call_id, outcome)?;
+        drop(self.0.lease);
+        Ok(())
+    }
 }
 
 fn digest(

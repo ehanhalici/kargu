@@ -16,6 +16,7 @@ use crate::{
     },
     workspace::file::decode::Decoder,
 };
+use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
     time::Instant,
@@ -142,11 +143,22 @@ pub(super) fn evidence(
     evidence.revalidate()?;
     Ok((evidence, disk))
 }
+pub(super) struct DiskContents {
+    pub text: EditText,
+    pub raw_digest: crate::edit::types::CaptureDigest,
+}
 pub(super) fn disk_text(
     evidence: &Evidence,
     cancel: &CancellationToken,
     deadline: Instant,
 ) -> Result<EditText, CoreError> {
+    Ok(disk_contents(evidence, cancel, deadline)?.text)
+}
+pub(super) fn disk_contents(
+    evidence: &Evidence,
+    cancel: &CancellationToken,
+    deadline: Instant,
+) -> Result<DiskContents, CoreError> {
     let file = PinnedFile::open(
         &evidence.original,
         evidence.canonical.clone(),
@@ -158,6 +170,7 @@ pub(super) fn disk_text(
     }
     let mut reader = file.reader()?;
     let mut decoder = Decoder::default();
+    let mut digest = Sha256::new();
     let mut text = Zeroizing::new(String::new());
     let mut bytes = Zeroizing::new([0; 4096]);
     let mut consumed = 0usize;
@@ -167,6 +180,7 @@ pub(super) fn disk_text(
         if consumed > limits::EDIT_DISK_BYTES {
             return Err(CoreError::Limit);
         }
+        digest.update(bytes.get(..count).ok_or(CoreError::Limit)?);
         let decoded = decoder.decode(bytes.get(..count).ok_or(CoreError::Limit)?, count == 0)?;
         if text
             .len()
@@ -183,7 +197,13 @@ pub(super) fn disk_text(
     }
     reader.finish()?;
     // Editor decoded text represents CRLF by LF; original coding is separate evidence.
-    EditText::try_from(text.replace("\r\n", "\n")).map_err(CoreError::from)
+    Ok(DiskContents {
+        text: EditText::try_from(text.replace("\r\n", "\n"))?,
+        raw_digest: crate::edit::types::CaptureDigest::try_from(format!(
+            "{:x}",
+            digest.finalize()
+        ))?,
+    })
 }
 impl Work {
     pub(crate) fn execute(

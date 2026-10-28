@@ -39,7 +39,8 @@
           (kargu-bridge-binary-path binary)
           (kargu-bridge--connection nil)
           conn started startup-error)
-     (skip-unless (and binary (file-executable-p binary)))
+     (unless (and binary (file-executable-p binary))
+       (ert-skip "A configured native test binary is required"))
      (unwind-protect
          (progn
            (setq conn (kargu-bridge-start

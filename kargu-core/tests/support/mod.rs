@@ -95,6 +95,7 @@ impl Peer {
         self.send(json!({"jsonrpc":"2.0","id":2,"method":"session/create","params":app}))?;
         Ok(self.read()?["result"].clone())
     }
+    #[allow(dead_code)]
     pub(super) fn wait(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {

@@ -263,5 +263,36 @@
         (should (eq (kargu-bridge-edit-document-change-stage change) :not-entered))
         (should (kargu-bridge-edit-document-change-failure change))))))
 
+(ert-deftest kargu-native-edit-document-receipt-captures-actual-change-hook-text-test ()
+  (kargu-edit-document-test--with-file "old\n"
+    (let ((snapshot (kargu-bridge-edit-document-capture buffer)))
+      (add-hook 'after-change-functions
+                (lambda (&rest _) (goto-char (point-max)) (insert "hook\n")) nil t)
+      (let ((change (kargu-bridge-edit-document-replace
+                     snapshot "new\n" :check-issued (lambda () t))))
+        (should-not (kargu-bridge-edit-document-change-failure change))
+        (should (equal (kargu-bridge-edit-document-change-written change)
+                       (kargu-bridge-edit-document-text
+                        (kargu-bridge-edit-document-change-after change))))))))
+
+(ert-deftest kargu-native-edit-document-delete-rechecks-after-guard-test ()
+  (kargu-edit-document-test--with-file "old\n"
+    (let* ((snapshot (kargu-bridge-edit-document-capture buffer))
+           (change (kargu-bridge-edit-document-delete
+                    snapshot :check-issued
+                    (lambda () (write-region "foreign\n" nil file nil 'silent) t))))
+      (should (eq (kargu-bridge-edit-document-change-stage change) :not-entered))
+      (should (file-exists-p file))
+      (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "foreign\n")))))
+
+(ert-deftest kargu-native-edit-document-delete-does-not-invent-buffer-closure-test ()
+  (kargu-edit-document-test--with-file "old\n"
+    (let ((snapshot (kargu-bridge-edit-document-capture buffer))
+          (kill-buffer-query-functions (list (lambda () nil))))
+      (let ((change (kargu-bridge-edit-document-delete snapshot :check-issued (lambda () t))))
+        (should (buffer-live-p buffer))
+        (should-not (file-exists-p file))
+        (should (kargu-bridge-edit-document-p (kargu-bridge-edit-document-change-after change)))))))
+
 (provide 'tests/test-native-edit-document)
 ;;; test-native-edit-document.el ends here

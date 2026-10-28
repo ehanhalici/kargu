@@ -9,12 +9,14 @@
 ;; Acquisition/settlement observers outlive UI cancellation.  Revocation and EOF
 ;; cannot release a running handler: only its actual unwind proves quiescence.
 ;; This is IO ownership, not another permission gate.  Rust issues the authority.
-;; Positive receipts are not yet connected; entered handlers settle as unknown.
+;; Raw written/final facts stream under this fence.  Native verification and
+;; journal joins determine the result; handler failures settle as unknown.
 
 ;;; Code:
 
 (require 'map)
 (require 'kargu/bridge/edit)
+(require 'kargu/bridge/edit/document)
 
 (defconst kargu-bridge-edit-activity--timeout 30
   "Seconds before revoking activity, without dropping its acquisition observer.")
@@ -178,6 +180,200 @@
 	(kargu-bridge-edit-activity-disconnect (kargu-bridge-edit-activity-connection activity))
       (kargu-bridge-stop (kargu-bridge-edit-activity-connection activity)))))
 
+(defun kargu-bridge-edit-activity--receipt-changes (observation)
+  "Normalize OBSERVATION into a list of change structs, or nil."
+  (cond
+   ((kargu-bridge-edit-document-change-p observation)
+    (list observation))
+   ((and (proper-list-p observation)
+         (consp observation)
+         (cl-every #'kargu-bridge-edit-document-change-p observation))
+    observation)
+   ((and (vectorp observation)
+         (> (length observation) 0)
+         (cl-every #'kargu-bridge-edit-document-change-p observation))
+    (append observation nil))
+   (t nil)))
+
+(defconst kargu-bridge-edit-activity--receipt-bytes (* 32 1024 1024)
+  "Maximum detached written/final receipt bytes for the single physical writer.")
+(defconst kargu-bridge-edit-activity--receipt-part-bytes (* 4 1024 1024)
+  "Native byte ceiling for each receipt text part.")
+(defconst kargu-bridge-edit-activity--receipt-files 256
+  "Maximum native file observations per receipt.")
+(defconst kargu-bridge-edit-activity--receipt-chunk-bytes (* 32 1024)
+  "Native ceiling for an individual receipt append.")
+(defconst kargu-bridge-edit-activity--receipt-envelope-bytes 768
+  "Reserved frame bytes for correlation and receipt append metadata.")
+
+(cl-defstruct (kargu-bridge-edit-activity-file
+               (:constructor kargu-bridge-edit-activity-file--make))
+  "Detached receipt metadata and bounded UTF-8 text for one editor file."
+  observation written after)
+(cl-defstruct (kargu-bridge-edit-activity-stream
+               (:constructor kargu-bridge-edit-activity-stream--make))
+  "One ACK-driven receipt cursor; chunks are constructed only as sent."
+  files total (file 0) (stage :file) (offset 0))
+
+(defun kargu-bridge-edit-activity--receipt-bytes (text)
+  "Detach TEXT as bounded UTF-8 receipt bytes, allowing absent text parts."
+  (when text
+    (unless (and (stringp text)
+                 (<= (length text) kargu-bridge-edit-activity--receipt-part-bytes))
+      (error "Editor receipt text exceeds its limit"))
+    (let ((bytes (encode-coding-string text 'utf-8-unix)))
+      (when (> (length bytes) kargu-bridge-edit-activity--receipt-part-bytes)
+        (error "Editor receipt text exceeds its limit"))
+      bytes)))
+
+(defun kargu-bridge-edit-activity--build-receipt-queue (changes)
+  "Build a bounded receipt cursor.
+CHANGES supplies the detached platform observations."
+  (unless (<= (length changes) kargu-bridge-edit-activity--receipt-files)
+    (error "Editor receipt has too many files"))
+  (let ((total-bytes 0) (index 0) files)
+    (dolist (change changes)
+      (let* ((after (kargu-bridge-edit-document-change-after change))
+             (written (kargu-bridge-edit-activity--receipt-bytes
+                       (kargu-bridge-edit-document-change-written change)))
+             (final (kargu-bridge-edit-activity--receipt-bytes
+                     (and (kargu-bridge-edit-document-p after)
+                          (kargu-bridge-edit-document-text after)))))
+        (setq total-bytes (+ total-bytes (length written) (length final)))
+        (when (> total-bytes kargu-bridge-edit-activity--receipt-bytes)
+          (error "Editor receipt exceeds its aggregate byte limit"))
+        (push (kargu-bridge-edit-activity-file--make
+               :observation (kargu-bridge-edit-document-observation change index)
+               :written written :after final) files)
+        (setq index (1+ index))))
+    (kargu-bridge-edit-activity-stream--make :files (nreverse files) :total index)))
+
+(defun kargu-bridge-edit-activity--receipt-advance (stream)
+  "Advance STREAM after a metadata ACK or completed text part."
+  (setf (kargu-bridge-edit-activity-stream-offset stream) 0)
+  (pcase (kargu-bridge-edit-activity-stream-stage stream)
+    (:file (setf (kargu-bridge-edit-activity-stream-stage stream) :written))
+    (:written (setf (kargu-bridge-edit-activity-stream-stage stream) :after))
+    (:after
+     (setf (kargu-bridge-edit-activity-stream-files stream)
+           (cdr (kargu-bridge-edit-activity-stream-files stream))
+           (kargu-bridge-edit-activity-stream-file stream)
+           (1+ (kargu-bridge-edit-activity-stream-file stream))
+           (kargu-bridge-edit-activity-stream-stage stream)
+           (if (kargu-bridge-edit-activity-stream-files stream) :file :commit)))))
+
+(defun kargu-bridge-edit-activity--receipt-result-p (stream receipt)
+  "Check native RECEIPT's transport shape for STREAM without deriving outcomes."
+  (and (hash-table-p receipt)
+       (member (gethash "outcome" receipt)
+               '("applied_full" "applied_partial" "not_applied" "outcome_unknown"))
+       (eql (gethash "files_total" receipt) (kargu-bridge-edit-activity-stream-total stream))
+       (integerp (gethash "files_applied" receipt))
+       (<= 0 (gethash "files_applied" receipt) (gethash "files_total" receipt))
+       (vectorp (gethash "files" receipt))
+       (= (length (gethash "files" receipt)) (gethash "files_total" receipt))
+       (cl-loop for file across (gethash "files" receipt) for index from 0
+                always (and (hash-table-p file) (eql (gethash "file" file) index)
+                            (member (gethash "outcome" file)
+                                    '("applied" "unchanged" "partial" "not_applied" "outcome_unknown"))))))
+
+(defun kargu-bridge-edit-activity--receipt-ack-p (stream input native)
+  "Check NATIVE ACK against STREAM's exact outstanding INPUT."
+  (and (hash-table-p native)
+       (eql (gethash "file" native) (kargu-bridge-edit-activity-stream-file stream))
+       (pcase (gethash "action" input)
+         ("file" (and (eq (gethash "recorded" native) t)
+                      (eql (gethash "files_received" native)
+                           (1+ (kargu-bridge-edit-activity-stream-file stream)))
+                      (eql (gethash "files_total" native)
+                           (kargu-bridge-edit-activity-stream-total stream))))
+         ("append"
+          (let* ((file (car (kargu-bridge-edit-activity-stream-files stream)))
+                 (bytes (if (equal (gethash "part" input) "written")
+                            (kargu-bridge-edit-activity-file-written file)
+                          (kargu-bridge-edit-activity-file-after file)))
+                 (end (+ (gethash "offset" input)
+                         (string-bytes (encode-coding-string (gethash "text" input) 'utf-8-unix)))))
+            (and (equal (gethash "part" native) (gethash "part" input))
+                 (eql (gethash "next_offset" native) end)
+                 (eq (gethash "complete" native) (if (= end (length bytes)) t :json-false)))))
+         (_ nil))))
+
+(defun kargu-bridge-edit-activity--receipt-send (activity stream input)
+  "Send one receipt INPUT and retain ACTIVITY/STREAM through its exact ACK."
+  (let ((arguments (kargu-bridge-edit-activity--arguments activity)))
+    (puthash "issued_token" (kargu-bridge-edit-activity-token activity) arguments)
+    (puthash "input" input arguments)
+    (kargu-bridge-edit-activity--call
+     activity "edit/receipt" arguments
+     (lambda (native failure)
+       (when (eq (kargu-bridge-edit-activity-state activity) :settling)
+         (condition-case nil
+             (cond
+              (failure (kargu-bridge-edit-activity--drain activity))
+              ((equal (gethash "action" input) "commit")
+               (kargu-bridge-edit-activity--receipt-complete activity stream native))
+              ((kargu-bridge-edit-activity--receipt-ack-p stream input native)
+               (if (equal (gethash "action" input) "file")
+                   (kargu-bridge-edit-activity--receipt-advance stream)
+                 (setf (kargu-bridge-edit-activity-stream-offset stream) (gethash "next_offset" native)))
+               (kargu-bridge-edit-activity--pump-receipt activity stream))
+              (t (kargu-bridge-edit-activity--drain activity)))
+           ((error quit) (kargu-bridge-edit-activity--drain activity))))))))
+
+(defun kargu-bridge-edit-activity--receipt-complete (activity stream native)
+  "Adopt NATIVE receipt from STREAM for quiescent ACTIVITY."
+  (if (and (hash-table-p native)
+           (equal (gethash "edit_id" native) (kargu-bridge-edit-activity-edit activity))
+           (equal (gethash "state" native) "quiescent")
+           (eq (gethash "journal_committed" native) t)
+           (kargu-bridge-edit-activity--receipt-result-p stream (gethash "receipt" native)))
+      (progn
+        ;; UI cancellation cannot replace an authoritative completed-write result.
+        (setf (kargu-bridge-edit-activity-failure activity) nil)
+        (kargu-bridge-edit-activity--finish activity native nil))
+    (kargu-bridge-edit-activity--drain activity)))
+
+(defun kargu-bridge-edit-activity--receipt-append (activity stream)
+  "Send one bounded text append for ACTIVITY/STREAM, or advance an empty part."
+  (let* ((file (car (kargu-bridge-edit-activity-stream-files stream)))
+         (written (eq (kargu-bridge-edit-activity-stream-stage stream) :written))
+         (bytes (if written (kargu-bridge-edit-activity-file-written file)
+                  (kargu-bridge-edit-activity-file-after file)))
+         (offset (kargu-bridge-edit-activity-stream-offset stream))
+         (frame (kargu-bridge-connection-frame-limit (kargu-bridge-edit-activity-connection activity)))
+         (page (min kargu-bridge-edit-activity--receipt-chunk-bytes
+                    (/ (- frame kargu-bridge-edit-activity--receipt-envelope-bytes) 6))))
+    (unless (>= page 4) (error "Editor receipt frame is too small"))
+    (if (>= offset (length bytes))
+        (progn (kargu-bridge-edit-activity--receipt-advance stream)
+               (kargu-bridge-edit-activity--pump-receipt activity stream))
+      (let ((end (min (length bytes) (+ offset page))))
+        (while (and (< end (length bytes)) (= (logand (aref bytes end) #xc0) #x80))
+          (setq end (1- end)))
+        (kargu-bridge-edit-activity--receipt-send
+         activity stream (kargu-bridge-edit-activity--object
+                          `(("action" . "append") ("file" . ,(kargu-bridge-edit-activity-stream-file stream))
+                            ("part" . ,(if written "written" "after")) ("offset" . ,offset)
+                            ("text" . ,(decode-coding-string (substring bytes offset end) 'utf-8-unix)))))))))
+
+(defun kargu-bridge-edit-activity--pump-receipt (activity stream)
+  "Pump STREAM under ACTIVITY's fence, including after source revocation."
+  (unless (eq (kargu-bridge-edit-activity-state activity) :finished)
+    (if (or (not (eq (kargu-bridge-edit-activity-state activity) :settling))
+            (not (eq (kargu-bridge-status (kargu-bridge-edit-activity-connection activity)) 'ready)))
+        (kargu-bridge-edit-activity--drain activity)
+      (pcase (kargu-bridge-edit-activity-stream-stage stream)
+        (:file (kargu-bridge-edit-activity--receipt-send
+                activity stream (kargu-bridge-edit-activity--object
+                                 `(("action" . "file")
+                                   ("observation" . ,(kargu-bridge-edit-activity-file-observation
+                                                      (car (kargu-bridge-edit-activity-stream-files stream))))))))
+        ((or :written :after) (kargu-bridge-edit-activity--receipt-append activity stream))
+        (:commit (kargu-bridge-edit-activity--receipt-send
+                  activity stream (kargu-bridge-edit-activity--object '(("action" . "commit")))))
+        (_ (kargu-bridge-edit-activity--drain activity))))))
+
 (defun kargu-bridge-edit-activity--run (activity)
   "Run ACTIVITY's synchronous handler at most once under the physical fence."
   (setf (kargu-bridge-edit-activity-state activity) :running)
@@ -192,7 +388,17 @@
           ((error quit)
            (setf (kargu-bridge-edit-activity-failure activity)
                  (kargu-bridge-edit-activity--fault "outcome_unknown"))))
-      (kargu-bridge-edit-activity--settle activity effect))))
+      (let* ((obs (kargu-bridge-edit-activity-observation activity))
+             (changes (and (null (kargu-bridge-edit-activity-failure activity))
+                           (kargu-bridge-edit-activity--receipt-changes obs))))
+        (if changes
+            (progn
+              (setf (kargu-bridge-edit-activity-state activity) :settling)
+              (condition-case nil
+                  (kargu-bridge-edit-activity--pump-receipt
+                   activity (kargu-bridge-edit-activity--build-receipt-queue changes))
+                ((error quit) (kargu-bridge-edit-activity--drain activity))))
+          (kargu-bridge-edit-activity--settle activity effect))))))
 
 (defun kargu-bridge-edit-activity--acquired (activity result failure)
   "Adopt ACTIVITY's exact native RESULT or FAILURE, including after cancellation."

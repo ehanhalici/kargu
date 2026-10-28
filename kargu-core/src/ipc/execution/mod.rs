@@ -154,6 +154,14 @@ impl Commands {
     ) -> Result<(), Fault> {
         self.editors.quiescent(host, id, params)
     }
+    pub fn receipt_editor(
+        &mut self,
+        host: &mut Host,
+        id: RpcId,
+        params: Value,
+    ) -> Result<Option<Value>, Fault> {
+        self.editors.receipt(host, id, params)
+    }
     pub fn disconnect(&mut self) {
         self.cancel_all();
         self.editors.disconnect();

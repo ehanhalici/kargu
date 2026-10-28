@@ -544,3 +544,29 @@ These are bounded safety checks, not a liveness or arbitrary save-hook IO proof.
 Full ERT passed 1,306/1,306 before the final Stop/unwind addition; the final native
 edit suite passed 33/33. Changed Elisp files pass warning-as-error byte compilation
 and checkdoc. Native Rust sources and their original-file IO ownership are unchanged.
+
+## Receipt verification audit (2026-10-29)
+
+The receipt port is connected and reviewed, but task 3 remains incomplete.
+See [the requirement-by-requirement audit](task3-audit-2026-10-29.md).
+`edit/receipt` accepts bounded per-file written/final observations and validates
+actual pinned disk state on a worker. Saved success requires native decoded disk
+text to match the final editor text, optional encoded hash integrity, an exact
+written proposal, the captured save policy and a clean final buffer. Unsupported
+native disk decoding cannot yield hash-only saved success; buffer-only
+observations can still verify unchanged disk stat without decoding it.
+
+Revoked/retired issued owners may report final facts under the exact original
+scope/token. They gain no new write authority. Verification and terminal journal
+IO retain the claimed proposal and the reserved writer/worker through actual joins.
+The editor streams detached bounded text under negotiated frames, validates every
+ACK, and keeps acquisition/settlement ownership through source cancellation.
+
+Positive native file results and durable receipt digests are verified by real
+file fixtures; native hunk measurement, snapshot/rollback history, revised Ediff,
+public consumer cutover and legacy engine deletion remain outstanding. The
+current production edit tools still use the legacy implementation. A single-file
+receipt fixture, existing legacy tests or bounded safety models cannot prove
+those missing integrations. Final audit evidence: Rust 449/449, ERT 1,314/1,314,
+strict Clippy/fmt, warning-as-error byte compilation and checkdoc; five exhaustive
+models including the updated verification/journal-join model (959 distinct states).

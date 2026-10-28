@@ -6,7 +6,10 @@ use crate::{
         journal::{
             IssuedJournal, JournalCommit, JournalDirectory, JournalIssue, JournalResolution,
         },
-        prepare::{Artifact, ReadyPreflight},
+        prepare::{
+            Artifact, ReadyPreflight,
+            receipt::{ReceiptCollection, VerifiedReceipt},
+        },
         types::{EditorEditId, EditorIssueToken, NoDispatchReason, QuiescentEffect},
     },
     error::CoreError,
@@ -29,6 +32,7 @@ pub(super) struct Start {
     pub request_id: RpcId,
 }
 pub(super) struct Recorded {
+    pub artifact: Arc<Artifact>,
     pub grant: AuthorizedEditorEdit,
     pub preflight: ReadyPreflight,
     pub journal: Result<IssuedJournal, CoreError>,
@@ -42,6 +46,7 @@ pub(super) struct Recording {
     pub request_id: RpcId,
 }
 pub(super) struct Issued {
+    pub artifact: Arc<Artifact>,
     pub run: RunHandle,
     pub token: EditorIssueToken,
     pub effect: IssuedEditorEdit,
@@ -49,6 +54,7 @@ pub(super) struct Issued {
     pub preflight: ReadyPreflight,
     pub deadline: Instant,
     pub revoked: bool,
+    pub receipts: ReceiptCollection,
 }
 pub(super) enum Completion {
     Unissued {
@@ -61,6 +67,11 @@ pub(super) enum Completion {
         request_id: Option<RpcId>,
         observed: QuiescentEffect,
         reason: NoDispatchReason,
+    },
+    Receipt {
+        effect: IssuedEditorEdit,
+        request_id: Option<RpcId>,
+        receipt: Box<VerifiedReceipt>,
     },
 }
 pub(super) struct Finishing {
@@ -93,6 +104,7 @@ impl Recording {
                 IssuedJournal::create(input.directory, issue, &worker_cancel, deadline)
             })();
             Recorded {
+                artifact: input.artifact,
                 grant: input.grant,
                 preflight: input.preflight,
                 journal,
@@ -136,6 +148,26 @@ impl Issued {
     }
 }
 impl Finishing {
+    pub(super) fn finish_receipt(
+        run: RunHandle,
+        journal: IssuedJournal,
+        effect: IssuedEditorEdit,
+        request_id: Option<RpcId>,
+        receipt: Box<VerifiedReceipt>,
+    ) -> Result<Self, CoreError> {
+        let digest = receipt.digest()?;
+        let resolution = JournalResolution::Receipt { digest };
+        Finishing::start(
+            run,
+            journal,
+            Completion::Receipt {
+                effect,
+                request_id,
+                receipt,
+            },
+            resolution,
+        )
+    }
     pub(super) fn start(
         run: RunHandle,
         journal: IssuedJournal,
@@ -172,6 +204,9 @@ impl Finishing {
                 observed: QuiescentEffect::OutcomeUnknown,
                 ..
             } => JournalResolution::OutcomeUnknown,
+            Completion::Receipt { receipt, .. } => JournalResolution::Receipt {
+                digest: receipt.digest()?,
+            },
         };
         let durable = result
             .as_ref()
@@ -204,6 +239,38 @@ impl Finishing {
                 effect.complete_quiescent(actor, observed, reason)?;
                 if let Some(request_id) = request_id {
                     replies.push(if durable {protocol::success(&request_id,json!({"edit_id":id,"state":"quiescent","effect":observed,"stop_reason":reason,"journal_committed":true}))}else{crate::ipc::protocol::Fault {code:crate::constants::protocol::error_codes::OUTCOME_UNKNOWN,status:"outcome_unknown",message:"Editor journal settlement failed; do not replay this operation"}.response(Some(&request_id))});
+                }
+            }
+            Completion::Receipt {
+                effect,
+                request_id,
+                receipt,
+            } => {
+                let outcome = if durable {
+                    receipt.outcome()
+                } else {
+                    crate::application::ToolOutcome::OutcomeUnknown
+                };
+                effect.complete(actor, outcome)?;
+                if let Some(request_id) = request_id {
+                    replies.push(if durable {
+                        protocol::success(
+                            &request_id,
+                            json!({
+                                "edit_id": id,
+                                "state": "quiescent",
+                                "receipt": receipt,
+                                "journal_committed": true
+                            }),
+                        )
+                    } else {
+                        crate::ipc::protocol::Fault {
+                            code: crate::constants::protocol::error_codes::OUTCOME_UNKNOWN,
+                            status: "outcome_unknown",
+                            message: "Editor journal settlement failed; do not replay this operation",
+                        }
+                        .response(Some(&request_id))
+                    });
                 }
             }
         }

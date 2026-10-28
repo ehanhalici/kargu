@@ -45,13 +45,13 @@ pub(crate) struct ReadyPreflight {
     total: FileCount,
     digest: CaptureDigest,
 }
-fn count(artifact: &Artifact) -> usize {
+pub(super) fn count(artifact: &Artifact) -> usize {
     match artifact {
         Artifact::File(_) => 1,
         Artifact::Batch(batch) => batch.files.len(),
     }
 }
-fn file(artifact: &Artifact, index: FileIndex) -> Result<&Prepared, CoreError> {
+pub(super) fn file(artifact: &Artifact, index: FileIndex) -> Result<&Prepared, CoreError> {
     match artifact {
         Artifact::File(prepared) if index.get() == 0 => Ok(prepared),
         Artifact::Batch(batch) => batch
@@ -151,6 +151,13 @@ impl PreflightWork {
     }
 }
 impl ReadyPreflight {
+    pub(super) fn document(&self, index: FileIndex) -> Result<&LiveDocument, CoreError> {
+        self.witnesses
+            .files
+            .get(&index)
+            .map(|file| &file.document)
+            .ok_or_else(|| EditError::InvalidEvidence.into())
+    }
     pub(crate) fn digest(&self) -> CaptureDigest {
         self.digest
     }

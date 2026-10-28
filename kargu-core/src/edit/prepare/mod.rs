@@ -11,6 +11,7 @@ use artifact::Prepared;
 pub(crate) use git::{GitPreparation, PatchPrepared, RunningPatch};
 pub(crate) use inspection::{PatchWork, PreparationResult, PrepareWork};
 mod preflight;
+pub(crate) mod receipt;
 mod service;
 pub(crate) use preflight::{PreflightFile, PreflightSet, ReadyPreflight};
 mod types;

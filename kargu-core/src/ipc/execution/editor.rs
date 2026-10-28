@@ -9,7 +9,10 @@ use crate::{
     domain::{ApplicationId, ToolCallId, ToolName},
     edit::{
         journal::JournalDirectory,
-        prepare::{ClaimedAction, PreflightFile, PreflightSet, PreparationId, ReadyPreflight},
+        prepare::{
+            ClaimedAction, PreflightFile, PreflightSet, PreparationId, ReadyPreflight,
+            receipt::{ReceiptCollection, ReceiptInput, VerifiedReceipt},
+        },
         types::{
             EditorEditId, EditorIssueToken, EditorRevision, EditorSourceId, NoDispatchReason,
             QuiescentEffect,
@@ -75,6 +78,24 @@ struct Quiescent {
     issued_token: EditorIssueToken,
     effect: QuiescentEffect,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReceiptRpc {
+    origin_id: EditorSourceId,
+    edit_id: EditorEditId,
+    revision: EditorRevision,
+    issued_token: EditorIssueToken,
+    input: ReceiptInput,
+}
+struct Verifying {
+    run: RunHandle,
+    effect: crate::security::IssuedEditorEdit,
+    journal: crate::edit::journal::IssuedJournal,
+    task: JoinHandle<Result<VerifiedReceipt, CoreError>>,
+    cancel: CancellationToken,
+    deadline: Instant,
+    request_id: RpcId,
+}
 struct Preflighting {
     run: RunHandle,
     grant: AuthorizedEditorEdit,
@@ -92,6 +113,7 @@ struct Preparing {
 enum Stage {
     Issuing(issue::Recording),
     Issued(Box<issue::Issued>),
+    Verifying(Verifying),
     Finishing(issue::Finishing),
     Preparing(Preparing),
     Review {
@@ -133,6 +155,7 @@ impl Editors {
                         | Stage::Preflighting(_)
                         | Stage::Issuing(_)
                         | Stage::Issued(_)
+                        | Stage::Verifying(_)
                         | Stage::Finishing(_)
                 )
             })
@@ -151,9 +174,11 @@ impl Editors {
             Stage::Preparing(p) => &p.request_id == id,
             Stage::Preflighting(p) => &p.request_id == id,
             Stage::Issuing(p) => &p.request_id == id,
+            Stage::Verifying(v) => &v.request_id == id,
             Stage::Finishing(p) => match &p.completion {
                 issue::Completion::Unissued { request_id, .. } => request_id == id,
                 issue::Completion::Quiescent { request_id, .. } => request_id.as_ref() == Some(id),
+                issue::Completion::Receipt { request_id, .. } => request_id.as_ref() == Some(id),
             },
             _ => false,
         })
@@ -178,6 +203,9 @@ impl Editors {
                         op.terminal = Some(CoreError::Cancelled);
                     }
                     p.cancel.cancel();
+                }
+                Stage::Verifying(v) if &v.request_id == id && op.terminal.is_none() => {
+                    op.terminal = Some(CoreError::Cancelled);
                 }
                 _ => {}
             }
@@ -204,7 +232,7 @@ impl Editors {
         self.operations.values().any(|op| {
             matches!(
                 op.stage,
-                Stage::Issuing(_) | Stage::Issued(_) | Stage::Finishing(_)
+                Stage::Issuing(_) | Stage::Issued(_) | Stage::Verifying(_) | Stage::Finishing(_)
             )
         })
     }
@@ -335,6 +363,94 @@ impl Editors {
             },
         );
         Ok(())
+    }
+    pub(super) fn receipt(
+        &mut self,
+        host: &mut Host,
+        id: RpcId,
+        params: Value,
+    ) -> Result<Option<Value>, Fault> {
+        let request: Request<ReceiptRpc> =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        let input = request.arguments;
+        let op = self
+            .operations
+            .get_mut(&input.edit_id)
+            .ok_or_else(|| fault(CoreError::StaleOwner))?;
+        if op.scope != request.scope || op.origin != input.origin_id {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let Stage::Issued(issued) = &mut op.stage else {
+            return Err(fault(CoreError::AlreadyCompleted));
+        };
+        if issued.token != input.issued_token || issued.effect.revision() != input.revision {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let actor = host.actor_mut(&op.scope).map_err(fault)?;
+        actor.validate_owner(&issued.run).map_err(fault)?;
+        // Issuance retains the immutable body and reservation through retired-owner settlement.
+        let artifact = issued.artifact.clone();
+
+        match input.input {
+            ReceiptInput::File { observation } => {
+                let progress = issued
+                    .receipts
+                    .record(&artifact, &issued.preflight, observation)
+                    .map_err(fault)?;
+                Ok(Some(progress))
+            }
+            ReceiptInput::Append {
+                file,
+                part,
+                offset,
+                text,
+            } => {
+                let progress = issued
+                    .receipts
+                    .append(file, part, offset, text)
+                    .map_err(fault)?;
+                Ok(Some(progress))
+            }
+            ReceiptInput::Commit {} => {
+                // Stage::Issued already reserves this verification/cleanup worker slot.
+                if !issued.receipts.complete(&artifact) {
+                    return Err(fault(crate::edit::EditError::InvalidEvidence.into()));
+                }
+                let op = self
+                    .operations
+                    .remove(&input.edit_id)
+                    .ok_or_else(|| fault(CoreError::StaleOwner))?;
+                let Stage::Issued(issued) = op.stage else {
+                    return Err(fault(CoreError::AlreadyCompleted));
+                };
+                let deadline = Instant::now()
+                    .checked_add(crate::constants::timeouts::EDIT_RECEIPT)
+                    .ok_or_else(|| fault(CoreError::ArithmeticOverflow))?;
+                let work = issued
+                    .receipts
+                    .into_work(artifact, issued.preflight, deadline)
+                    .map_err(fault)?;
+                let cancel = CancellationToken::new();
+                let worker_cancel = cancel.clone();
+                let task = tokio::task::spawn_blocking(move || work.execute(&worker_cancel));
+                self.operations.insert(
+                    input.edit_id,
+                    Operation {
+                        stage: Stage::Verifying(Verifying {
+                            run: issued.run,
+                            effect: issued.effect,
+                            journal: issued.journal,
+                            task,
+                            cancel,
+                            deadline,
+                            request_id: id,
+                        }),
+                        ..op
+                    },
+                );
+                Ok(None)
+            }
+        }
     }
     pub(super) fn authorize(
         &mut self,
@@ -654,6 +770,7 @@ impl Editors {
                         }
                     };
                     let issued = Box::new(issue::Issued {
+                        artifact: recorded.artifact,
                         run: recording.run,
                         token: recording.token,
                         effect,
@@ -663,6 +780,7 @@ impl Editors {
                             .checked_add(crate::constants::timeouts::EDIT_RECEIPT)
                             .ok_or(CoreError::ArithmeticOverflow)?,
                         revoked: false,
+                        receipts: ReceiptCollection::default(),
                     });
                     let reply = protocol::success(&recording.request_id, issued.descriptor(&id));
                     if reply.to_string().len() > host.frame_limit().as_usize() {
@@ -722,6 +840,72 @@ impl Editors {
                                 ..op
                             },
                         );
+                    }
+                }
+                Stage::Verifying(mut verifying) => {
+                    // External effects already quiesced. Verify on a fresh cleanup lifetime;
+                    // source cancellation cannot erase evidence of a completed write.
+                    if Instant::now() >= verifying.deadline {
+                        op.terminal.get_or_insert(CoreError::Deadline);
+                        verifying.cancel.cancel();
+                    }
+                    if !verifying.task.is_finished() {
+                        self.operations.insert(
+                            id,
+                            Operation {
+                                stage: Stage::Verifying(verifying),
+                                ..op
+                            },
+                        );
+                        continue;
+                    }
+                    let result = (&mut verifying.task)
+                        .now_or_never()
+                        .ok_or(CoreError::CleanupFailed)?
+                        .map_err(|_| CoreError::CleanupFailed);
+                    match result {
+                        Ok(Ok(receipt)) => {
+                            let finishing = issue::Finishing::finish_receipt(
+                                verifying.run,
+                                verifying.journal,
+                                verifying.effect,
+                                Some(verifying.request_id),
+                                Box::new(receipt),
+                            )?;
+                            self.operations.insert(
+                                id,
+                                Operation {
+                                    stage: Stage::Finishing(finishing),
+                                    ..op
+                                },
+                            );
+                        }
+                        _ => {
+                            let reason = match op.terminal {
+                                Some(CoreError::Deadline | CoreError::ApprovalExpired) => {
+                                    NoDispatchReason::Timeout
+                                }
+                                _ => NoDispatchReason::Cancelled,
+                            };
+                            let finishing = issue::Finishing::start(
+                                verifying.run,
+                                verifying.journal,
+                                issue::Completion::Quiescent {
+                                    effect: verifying.effect,
+                                    request_id: Some(verifying.request_id),
+                                    observed: QuiescentEffect::OutcomeUnknown,
+                                    reason,
+                                },
+                                crate::edit::journal::JournalResolution::OutcomeUnknown,
+                            )?;
+                            self.operations.insert(
+                                id,
+                                Operation {
+                                    stage: Stage::Finishing(finishing),
+                                    ..op
+                                },
+                            );
+                        }
                     }
                 }
                 Stage::Finishing(mut finishing) => {
@@ -987,7 +1171,7 @@ fn descriptor(id: &EditorEditId, op: &Operation) -> Value {
             json!({"edit_id":id,"state":"preflighted","scope":run.scope(),"revision":grant.revision(),"preflight":preflight.descriptor(),"applied":false})
         }
         Stage::Issued(issued) => issued.descriptor(id),
-        Stage::Issuing(_) | Stage::Finishing(_) => Value::Null,
+        Stage::Issuing(_) | Stage::Verifying(_) | Stage::Finishing(_) => Value::Null,
         Stage::Preflighting(_) => Value::Null,
         Stage::Preparing(_) => Value::Null,
     }
@@ -1025,6 +1209,7 @@ fn cleanup(
         | Stage::Preflighting(_)
         | Stage::Issuing(_)
         | Stage::Issued(_)
+        | Stage::Verifying(_)
         | Stage::Finishing(_) => return Err(CoreError::Busy),
     };
     actor
@@ -1235,7 +1420,7 @@ mod tests {
             .checked_add(Duration::from_secs(3))
             .ok_or("deadline")?;
         let preflight = witnesses
-            .into_work(artifact, deadline)?
+            .into_work(artifact.clone(), deadline)?
             .execute(&CancellationToken::new())?;
         let directory = tempfile::tempdir()?;
         std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
@@ -1354,7 +1539,7 @@ mod tests {
             .checked_add(Duration::from_secs(3))
             .ok_or("deadline")?;
         let preflight = witnesses
-            .into_work(artifact, deadline)?
+            .into_work(artifact.clone(), deadline)?
             .execute(&CancellationToken::new())?;
         let directory = tempfile::tempdir()?;
         std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
@@ -1380,6 +1565,7 @@ mod tests {
             let _ = ready.send(());
             let _ = wait.recv();
             issue::Recorded {
+                artifact,
                 grant,
                 preflight,
                 journal,

@@ -609,6 +609,12 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   sonra Elisp stage/review/pending-plan/global edit motorlarını sil. Kaynak: Aşama 2,
   G04/G10; .codex/06 ve 08.
 
+  **2026-10-29 denetimi:** Görevin tamamlandığı iddiası kodla doğrulanmadı.
+  Receipt akışı düzeltildi ve test edildi; native snapshot/rollback, hunk sayımları,
+  revised Ediff, production consumer cutover ve legacy temizliği henüz yok.
+  3.4–3.10 açık tutulur. Gereksinim/kod/kanıt eşlemesi ve sınırlar:
+  `docs/task3-audit-2026-10-29.md`. Yeşil legacy testleri native cutover kanıtı değildir.
+
   - [x] **3.1 Sözleşme ve kabul envanteri:** mevcut public edit/LSP/patch/review/
     rollback consumer'larını ve testlerini eşle; tek typed file/batch outcome,
     save policy, revision/hash, owner ve cancellation sözleşmesini belirle.
@@ -696,8 +702,11 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     tahliye; malformed settlement eski bağlantıyı drain eder, replay yoktur.
     Gerçek save pipe testi controller'a bağlandı; 11 lifecycle testi ve yeni
     editor-activity TLC (356 farklı durum) temiz. EOF'ta erken release mutantı
-    PhysicalFence ihlaliyle reddedildi. Pozitif receipt henüz bağlı değildir;
-    girilmiş handler gerçek gözlemleriyle terminal unknown raporlar.
+    PhysicalFence ihlaliyle reddedildi. Pozitif `edit/receipt` akışı 2026-10-29
+    denetiminde bağlandı ve sertleştirildi; native disk/stat/metin doğrulaması,
+    gerçek written/final metin, bounded ACK-driven upload ve retired-owner
+    settlement eklendi. Handler hataları explicit unknown taşır. Production
+    producer/cutover ve tüm kodlamaların pozitif save doğrulaması hâlâ açıktır.
     Full ERT 1.306/1.306; son Stop/unwind ekini de içeren native edit testleri
     33/33, warning-as-error bytecompile/checkdoc temiz. Rust kaynakları değişmedi.
   - [ ] **3.6 Native batch/journal/rollback:** bütün dosyalar preflight edilmeden
@@ -723,6 +732,10 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     tam taramayı geçti; erken release ve sync-siz dispatch mutantları reddedildi.
     Olumlu file/batch receipt, gerçek sayımlar, snapshot/rollback ve consumer
     cutover tamamlanmadan bu alt iş açık kalır.
+    2026-10-29: receipt doğrulama worker'ı ve durable receipt digest eklendi;
+    worker/journal join boyunca tek writer rezervasyonu korunur. Hunk sayımları,
+    native snapshot stack ve rollback portu eklenmedi; `track.el` hâlâ gerçek
+    rollback sahibidir. Bu nedenle 3.6 tamamlanmış değildir.
   - [ ] **3.7 Review UI adapter:** Ediff yalnız edit_id/review revision'a bağlı
     sunum ve kullanıcı metni sağlar; düzenlenmiş proposal yeniden native review
     revision'ı alır. Core receipt olmadan applied yazılmaz; reject/timeout/C-g,
@@ -741,6 +754,11 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     fixture'larıyla doğrulansın. Full ERT, locked Rust/compile-fail, strict Clippy,
     fmt, warning-free bytecompile/checkdoc ve etkilenen exhaustive TLC temizlensin;
     tamamlanan alt maddeler kanıtlarıyla işaretlensin, üst madde en son kapansın.
+    2026-10-29 denetimi: full locked Rust 449/449 (29 compile-fail dahil), full
+    ERT 1.314/1.314, strict all-targets Clippy/fmt, warning-as-error bytecompile/
+    checkdoc temiz. Beş exhaustive TLC modeli temiz; issuance modeli gerçek
+    verification join ve pozitif receipt önkoşuluyla güncellendi (959 farklı durum).
+    Bu kontroller native cutover/rollback/revised review eksiklerini kapatmaz.
     2026-10-28 native prepare/patch dilimi: domain 9/9, prepare pipe 6/6,
     patch pipe 8/8, Emacs pipe 8/8; filtresiz `cargo test --locked` toplam 394/394
     (67 library, 301 integration, 26 compile-fail) ve full ERT 1.279/1.279 geçti.
@@ -777,6 +795,36 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Filtresiz locked Rust 429/429 (29 compile-fail), strict Clippy/fmt ve
     preparation TLC (319.746 farklı durum) temiz. Gerçek editor create/save
     uygulaması ve receipt 3.5–3.6'da açık kalır.
+
+  - [x] **3.14 Receipt false success (denetimde bulundu):** native doğrulayıcı
+    diski hiç okumadan, uydurma stat ve `save_returned` alanıyla `applied_full`
+    üretiyordu. Şimdi pinned root/path/stat ve tek native disk okumasından gerçek
+    decoded text/raw hash doğrulanır. Yabancı/stale disk, dirty final, buffer_only
+    disk değişimi, sahte no-op/hash ve encoded-hash/metin uyumsuzluğu full başarı
+    üretmez. Pozitif fixture'lar artık gerçekten diske yazar. Native receipt
+    suite 10/10; issuance TLC doğrulanmamış positive-receipt mutantını reddeder.
+  - [x] **3.15 Receipt teardown ve kapasite (denetimde bulundu):** source abort /
+    retired session/application receipt'i reddediyor, verification'ı eski run'ın
+    cancel'ı düşürüyordu. Issued artifact tutulur; exact eski scope/token yalnız
+    sonuç raporlayabilir, yeni yazma yetkisi alamaz. Verification cleanup ömründe
+    join edilir; zaten ayrılmış worker slotu tekrar admission gerektirmez. Üç
+    retirement yolu gerçek pipe regresyonuyla doğrulandı.
+  - [x] **3.16 Gerçek editor gözlemleri ve delete guard (denetimde bulundu):**
+    written alanı istenen metni, kill-buffer reddedilse de closed alanı kapanmış
+    tamponu iddia ediyordu. Gerçek post-change-hook metni ve gerçek tampon ömrü
+    raporlanır; delete guard callback'inden sonra bütün kaynak kanıtı yeniden
+    kontrol edilir. Üç red→green ERT regresyonu, belge suite 18/18.
+  - [x] **3.17 Receipt frame/ACK ve unwind (denetimde bulundu):** sınırsız eager
+    chunk kuyruğu ve sabit 32 KiB append yerine 32 MiB aggregate / 4 MiB part /
+    256-file bound'lu detached cursor, negotiated UTF-8 frame ve exact offset /
+    part / file / terminal ACK kontrolü eklendi. Cancellation gerçek receipt'i
+    düşürmez; queue kurulum hatası fence'i kilitli bırakmaz. Activity suite 14/14;
+    1 KiB gerçek edit pipe testi katalog bootstrap'ı ayrı tutarak geçti.
+  - [ ] **3.18 Küçük frame ile provider bootstrap (denetimde bulundu):** 1 KiB
+    handshake başarılı olsa da Emacs startup'ının unpaged `provider/catalog`
+    yanıtı `resource_limit` ile düşüyor. Bu G02/katalog transport açığı giderilmeden
+    genel Emacs 1 KiB startup desteği iddia edilmesin. Edit receipt fixture'ı
+    yalnız provider hydration'ını izole eder; production fallback eklenmedi.
 
 - [ ] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
   revision/connection/thread/frame-bound reverse RPC'ye bağla. Mention/folder/

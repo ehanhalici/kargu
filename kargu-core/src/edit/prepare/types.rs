@@ -43,7 +43,7 @@ macro_rules! count {
     ($name:ident,$limit:expr) => {
         #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
         #[serde(try_from = "usize")]
-        pub(super) struct $name(usize);
+        pub(crate) struct $name(usize);
         impl TryFrom<usize> for $name {
             type Error = EditError;
             fn try_from(v: usize) -> Result<Self, Self::Error> {
@@ -55,7 +55,7 @@ macro_rules! count {
             }
         }
         impl $name {
-            pub(super) fn get(self) -> usize {
+            pub(crate) fn get(self) -> usize {
                 self.0
             }
         }
@@ -76,9 +76,9 @@ impl RetainedBytes {
         Ok(())
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Deserialize, Serialize)]
 #[serde(try_from = "u64")]
-pub(super) struct DocumentTick(u64);
+pub(crate) struct DocumentTick(u64);
 impl TryFrom<u64> for DocumentTick {
     type Error = EditError;
     fn try_from(v: u64) -> Result<Self, Self::Error> {
@@ -129,7 +129,7 @@ impl UnixNanos {
 }
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct DiskVersion {
+pub(crate) struct DiskVersion {
     device: Device,
     inode: Inode,
     bytes: DiskBytes,
@@ -149,13 +149,13 @@ impl DiskVersion {
 }
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub(super) enum DiskState {
+pub(crate) enum DiskState {
     Absent {},
     File { version: DiskVersion },
 }
 #[derive(Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]
-pub(super) struct Coding(String);
+pub(crate) struct Coding(String);
 impl TryFrom<String> for Coding {
     type Error = EditError;
     fn try_from(v: String) -> Result<Self, Self::Error> {
@@ -173,7 +173,7 @@ impl From<Coding> for String {
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct LiveDocument {
+pub(crate) struct LiveDocument {
     pub id: DocumentId,
     pub tick: DocumentTick,
     pub bytes: TextBytes,
@@ -222,7 +222,7 @@ pub(super) struct Begin {
 }
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
 #[serde(try_from = "usize")]
-pub(super) struct FileIndex(usize);
+pub(crate) struct FileIndex(usize);
 impl TryFrom<usize> for FileIndex {
     type Error = EditError;
     fn try_from(v: usize) -> Result<Self, EditError> {

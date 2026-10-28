@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'tests/test-bridge)
+(require 'tests/test-native-edit-document)
 (require 'kargu/bridge/edit/activity)
 
 (defmacro kargu-edit-activity-test--with-peer (&rest body)
@@ -241,6 +242,76 @@
       (should (eq (kargu-bridge-edit-activity-state activity) :finished))
       (should (eq (kargu-bridge-status connection) 'closed))
       (should-not kargu-bridge-edit-activity--active))))
+
+(defun kargu-edit-activity-test--change (buffer)
+  "Create detached BUFFER facts for the held peer."
+  (let* ((before (kargu-bridge-edit-document-capture buffer))
+         (after (copy-kargu-bridge-edit-document before)))
+    (setf (kargu-bridge-edit-document-text after) "new\n"
+          (kargu-bridge-edit-document-tick after) 2
+          (kargu-bridge-edit-document-dirty after) t)
+    (kargu-bridge-edit-document-change--make
+     :before before :after after :written "new\n" :write-tick 2 :stage :replaced)))
+
+(defun kargu-edit-activity-test--receipt-ack (sent activity)
+  "Reply to ACTIVITY's latest receipt action from SENT using exact offsets."
+  (let* ((call (cl-find "edit/receipt" sent :test #'equal
+                        :key (lambda (entry) (gethash "method" (cdr entry)))))
+         (input (gethash "input" (gethash "arguments" (gethash "params" (cdr call)))))
+         (reply
+          (pcase (gethash "action" input)
+            ("file" (kargu-bridge--object "file" 0 "recorded" t "files_received" 1 "files_total" 1))
+            ("append" (kargu-bridge--object "file" 0 "part" (gethash "part" input)
+                                             "next_offset" (+ (gethash "offset" input)
+                                                              (string-bytes (encode-coding-string
+                                                                             (gethash "text" input) 'utf-8-unix)))
+                                             "complete" t))
+            ("commit" (kargu-bridge--object
+                       "edit_id" (kargu-bridge-edit-activity-edit activity)
+                       "state" "quiescent" "journal_committed" t
+                       "receipt" (kargu-bridge--object "outcome" "applied_full" "files_total" 1 "files_applied" 1
+                                                       "files" (vector (kargu-bridge--object "file" 0 "outcome" "applied")))))
+            (_ (error "Unexpected receipt action")))))
+    (kargu-edit-activity-test--reply sent "edit/receipt" reply)))
+
+(ert-deftest kargu-native-edit-activity-receipt-survives-cancel-and-validates-acks-test ()
+  (kargu-edit-activity-test--with-peer
+    (kargu-edit-document-test--with-file "old\n"
+      (let* ((change (kargu-edit-activity-test--change buffer))
+             (activity (kargu-edit-activity-test--start
+                        artifact source :handler (lambda (_) change)
+                        :callback (lambda (&rest result) (push result observations)))))
+        (kargu-edit-activity-test--reply sent "edit/issue" (kargu-edit-activity-test--issued activity))
+        (should (eq (kargu-bridge-edit-activity-state activity) :settling))
+        (kargu-bridge-edit-activity-cancel activity)
+        (should-not observations)
+        (dotimes (_ 4) (kargu-edit-activity-test--receipt-ack sent activity))
+        (should (eq (kargu-bridge-edit-activity-state activity) :finished))
+        (should (= (length observations) 1))
+        (should-not (cadar observations))
+        (should-not kargu-bridge-edit-activity--active)))))
+
+(ert-deftest kargu-native-edit-activity-receipt-rejects-wrong-offset-ack-test ()
+  (kargu-edit-activity-test--with-peer
+    (kargu-edit-document-test--with-file "old\n"
+      (let* ((change (kargu-edit-activity-test--change buffer))
+             (activity (kargu-edit-activity-test--start artifact source :handler (lambda (_) change))))
+        (kargu-edit-activity-test--reply sent "edit/issue" (kargu-edit-activity-test--issued activity))
+        (kargu-edit-activity-test--receipt-ack sent activity)
+        (kargu-edit-activity-test--reply
+         sent "edit/receipt" (kargu-bridge--object "file" 0 "part" "written" "next_offset" 3 "complete" t))
+        (should (eq (kargu-bridge-status connection) 'stopping))
+        (should (eq activity kargu-bridge-edit-activity--active))))))
+
+(ert-deftest kargu-native-edit-activity-receipt-build-failure-drains-instead-of-stalling-test ()
+  (kargu-edit-activity-test--with-peer
+    (kargu-edit-document-test--with-file "old\n"
+      (let* ((change (kargu-edit-activity-test--change buffer))
+             (kargu-bridge-edit-activity--receipt-part-bytes 2)
+             (activity (kargu-edit-activity-test--start artifact source :handler (lambda (_) change))))
+        (kargu-edit-activity-test--reply sent "edit/issue" (kargu-edit-activity-test--issued activity))
+        (should (eq (kargu-bridge-status connection) 'stopping))
+        (should (eq activity kargu-bridge-edit-activity--active))))))
 
 (provide 'tests/test-native-edit-activity)
 ;;; test-native-edit-activity.el ends here

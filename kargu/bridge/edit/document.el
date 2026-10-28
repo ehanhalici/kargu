@@ -41,12 +41,17 @@
   "Observed transaction progress, including failures and failed observation.
 STAGE records entry into editor primitives, never an applied verdict.
 WRITE-TICK precedes save hooks; AFTER includes their actual buffer effects."
-  before after (stage :not-entered) write-tick failure observation-failure)
+  before after written (stage :not-entered) write-tick failure observation-failure)
 
 (cl-defstruct (kargu-bridge-edit-disk
                (:constructor kargu-bridge-edit-disk--make))
   "Local stat identity, excluding atime as in native DiskVersion."
   device inode bytes mtime ctime)
+
+(cl-defstruct (kargu-bridge-edit-document-closed
+               (:constructor kargu-bridge-edit-document-closed--make))
+  "Actual closed-buffer observation after a deletion primitive."
+  id disk)
 
 (defun kargu-bridge-edit-document--text (text)
   "Return a detached plain TEXT within the native UTF-8 limit."
@@ -140,6 +145,10 @@ This is a platform observation, not the native approval decision or a lock."
   (undo-boundary)
   (setf (kargu-bridge-edit-document-change-write-tick change)
         (buffer-chars-modified-tick)
+        (kargu-bridge-edit-document-change-written change)
+        (save-restriction
+          (widen)
+          (kargu-bridge-edit-document--text (buffer-string)))
         (kargu-bridge-edit-document-change-stage change) :replaced))
 
 (defun kargu-bridge-edit-document--save (change check-issued)
@@ -201,6 +210,44 @@ The caller reports them to Rust, which owns outcome and rollback decisions."
     (kargu-bridge-edit-document--observe change)
     change))
 
+(cl-defun kargu-bridge-edit-document-delete (document &key check-issued)
+  "Consume DOCUMENT to delete its underlying file on disk, recording raw facts.
+CHECK-ISSUED guards live authority."
+  (when (kargu-bridge-edit-document-used document)
+    (signal 'kargu-bridge-edit-document-consumed nil))
+  (setf (kargu-bridge-edit-document-used document) t)
+  (let ((change (kargu-bridge-edit-document-change--make :before document)))
+    (condition-case failure
+        (progn
+          (kargu-bridge-edit-document-check document)
+          (unless (and (functionp check-issued) (funcall check-issued))
+            (signal 'kargu-bridge-edit-document-revoked nil))
+          (kargu-bridge-edit-document-check document)
+          (setf (kargu-bridge-edit-document-change-stage change) :deleting)
+          (let ((path (kargu-bridge-edit-document-path document)))
+            (when (file-exists-p path)
+              (delete-file path)))
+          (setf (kargu-bridge-edit-document-change-stage change) :deleted)
+          (when (buffer-live-p (kargu-bridge-edit-document-buffer document))
+            (kill-buffer (kargu-bridge-edit-document-buffer document))))
+      ((error quit)
+       (setf (kargu-bridge-edit-document-change-failure change) failure)))
+    (kargu-bridge-edit-document--observe-delete change)
+    change))
+
+(defun kargu-bridge-edit-document--observe-delete (change)
+  "Observe CHANGE's actual buffer lifetime and disk after delete or refusal."
+  (let ((before (kargu-bridge-edit-document-change-before change)))
+    (if (buffer-live-p (kargu-bridge-edit-document-buffer before))
+        (kargu-bridge-edit-document--observe change)
+      (condition-case failure
+          (setf (kargu-bridge-edit-document-change-after change)
+                (kargu-bridge-edit-document-closed--make
+                 :id (kargu-bridge-edit-document-id before)
+                 :disk (kargu-bridge-edit-document--disk (kargu-bridge-edit-document-path before))))
+        ((error quit)
+         (setf (kargu-bridge-edit-document-change-observation-failure change) failure))))))
+
 (defun kargu-bridge-edit-document--disk-facts (disk)
   "Encode observed DISK in the native stat schema without reading contents."
   (if (null disk)
@@ -224,7 +271,7 @@ The caller reports them to Rust, which owns outcome and rollback decisions."
   "Encode detached DOCUMENT facts for native capture or preflight.
 This reports observations without asserting approval, freshness or an outcome."
   (map-into
-   `(("id" . ,(kargu-bridge-edit-document-id document))
+   `(("id" . ,(copy-sequence (kargu-bridge-edit-document-id document)))
      ("tick" . ,(kargu-bridge-edit-document-tick document))
      ("bytes" . ,(string-bytes (encode-coding-string
                                (kargu-bridge-edit-document-text document) 'utf-8-unix)))
@@ -246,6 +293,56 @@ an assertion about a potentially stale editor buffer."
                                   (kargu-bridge-edit-document-text document) 'utf-8-unix)))
      ("document" . ,(kargu-bridge-edit-document-facts document)))
    'hash-table))
+
+(defconst kargu-bridge-edit-document--progress
+  '((:not-entered . "not_entered") (:replacing . "replacing")
+    (:replaced . "replaced") (:saving . "saving") (:save-returned . "save_returned")
+    (:deleting . "deleting") (:deleted . "deleted"))
+  "Closed mapping of raw platform stages into receipt metadata.")
+
+(defun kargu-bridge-edit-document--encoded-hash (document)
+  "Hash DOCUMENT's logical text in its observed disk coding, if encodable."
+  (condition-case nil
+      (secure-hash 'sha256 (encode-coding-string
+                           (kargu-bridge-edit-document-text document)
+                           (kargu-bridge-edit-document-coding document)))
+    ((error quit) :json-null)))
+
+(defun kargu-bridge-edit-document--after-facts (change)
+  "Encode the actual final observation of CHANGE without inventing closure."
+  (let ((after (kargu-bridge-edit-document-change-after change)))
+    (cond
+     ((kargu-bridge-edit-document-change-observation-failure change)
+      (map-into '(("kind" . "unavailable")) 'hash-table))
+     ((kargu-bridge-edit-document-p after)
+      (map-into `(("kind" . "document")
+                  ("document" . ,(kargu-bridge-edit-document-facts after))
+                  ("encoded_hash" . ,(kargu-bridge-edit-document--encoded-hash after))) 'hash-table))
+     ((kargu-bridge-edit-document-closed-p after)
+      (map-into `(("kind" . "closed")
+                  ("document_id" . ,(copy-sequence (kargu-bridge-edit-document-closed-id after)))
+                  ("disk" . ,(kargu-bridge-edit-document--disk-facts
+                              (kargu-bridge-edit-document-closed-disk after)))) 'hash-table))
+     (t (map-into '(("kind" . "unavailable")) 'hash-table)))))
+
+(defun kargu-bridge-edit-document-observation (change file-index)
+  "Encode CHANGE's actual platform facts for receipt FILE-INDEX."
+  (let* ((stage (kargu-bridge-edit-document-change-stage change))
+         (progress (or (alist-get stage kargu-bridge-edit-document--progress)
+                       (error "Unknown editor primitive stage")))
+         (failure (kargu-bridge-edit-document-change-failure change))
+         (fields `(("file" . ,file-index) ("progress" . ,progress)
+                   ("after" . ,(kargu-bridge-edit-document--after-facts change)))))
+    (when failure
+      (push (cons "failure" (if (eq (car-safe failure) 'quit) "quit" "error")) fields))
+    (when (memq stage '(:replaced :saving :save-returned))
+      (let ((tick (kargu-bridge-edit-document-change-write-tick change))
+            (written (kargu-bridge-edit-document-change-written change)))
+        (unless (and (integerp tick) (stringp written))
+          (error "Missing raw editor write observation"))
+        (push (cons "write_tick" tick) fields)
+        (push (cons "written_bytes" (string-bytes (encode-coding-string written 'utf-8-unix))) fields)))
+    (map-into fields 'hash-table)))
 
 (provide 'kargu/bridge/edit/document)
 ;;; document.el ends here
