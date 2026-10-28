@@ -4,6 +4,61 @@ This directory holds the TLA+ specification of Kargu's agent loop and protocol w
 
 The check is exhaustive over a bounded model. It is a proof for those bounds, not for every parameter value.
 
+## Native edit preparation and exact checker verdict (2026-10-28)
+
+`KarguEditPreparation.tla` / `EditPreparationMC.cfg` cover two opaque preparation
+IDs, two separately typed source-owner IDs and one application's bounded byte
+reservations. File reads/patch inspection share a bounded worker pool with
+external reads; patch metadata preparation, Git and final snapshot IO have actual
+start/join accounting. Cancel, source close, expiry and source changes can happen
+before collection. Reservations remain held while any worker/process is unjoined;
+Git follows whole-batch capture, and ready publication follows actual drain.
+The model uses all four independent identity-renaming permutations, preserving
+both IDs and both owners. It checks safety invariants, not liveness, concrete
+filesystem operations, encoding, hashes, review decisions or editor effects.
+
+The earlier restricted sandbox denied the RMI listener used by BFS mode.
+For invariant-only configurations, the supported
+[depth-first iterative-deepening option](https://github.com/tlaplus/tlaplus/blob/master/general/docs/current-tools.md)
+can run without that listener. The wrapper accepts it before a named model:
+
+```sh
+proof/run_tlc.sh --dfid 128 --edit-preparation
+proof/run_tlc.sh --dfid 64 --edit-transaction
+proof/run_tlc.sh --dfid 64 --application
+proof/run_tlc.sh --dfid 64 --approval
+proof/run_tlc.sh --dfid 64 --process
+```
+
+After the sandbox restriction was removed, the standard BFS commands for these
+five models also completed without errors, with an empty queue:
+
+| Model | Generated | Distinct |
+|---|---:|---:|
+| Native preparation, identity symmetry | 151,744 | 34,258 |
+| Edit transaction | 1,849 | 560 |
+| Application | 17,545 | 4,624 |
+| Approval | 8,194 | 1,536 |
+| Process | 535 | 179 |
+
+Earlier unsymmetrized DFID attempts ended in the installed tool's fingerprint
+statistics with `ArithmeticException: Division by zero`; those are failed runs,
+not proof evidence. The completed native model uses disjoint opaque IDs and
+ordinary identity symmetry. A temporary mutation that freed an active reservation
+on Cancel was rejected by `ActualJoinBeforeRelease` (76 distinct states), showing
+that the join barrier invariant catches that error.
+
+`Finished in` and exit zero alone are insufficient: with the installed checker,
+`--dfid 2 --edit-transaction` returns zero after only nine states without declaring
+complete exploration. The wrapper now rejects it. Both BFS and DFID model-check
+modes require the explicit full verdict; errors/counterexamples still fail.
+Simulation remains labelled as simulation and cannot be combined with `--dfid`.
+Declared liveness properties are not removed to make DFID run; use BFS for models
+that require liveness. No partial-depth or random run is counted as exhaustive.
+Earlier complete DFID scans found the same distinct-state counts. The complete
+implementation acceptance still requires the native/Emacs fixtures and the
+remaining editor grant, transaction, journal and consumer migration in todo 3.
+
 ## Interrupted-package integration checks (2026-10-22)
 
 The 2026-10-27 application model also checks sequential connection and skill

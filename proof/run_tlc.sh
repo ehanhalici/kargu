@@ -17,11 +17,13 @@
 #   ./run_tlc.sh --debug-watch   exhaustive debugger-watch ownership scan
 #   ./run_tlc.sh --debug-execution exhaustive debugger-execution ownership scan
 #   ./run_tlc.sh --verification  exhaustive changed-file ownership scan
+#   ./run_tlc.sh --edit-preparation exhaustive native proposal/Git drain scan
 #   ./run_tlc.sh --edit-transaction exhaustive reviewed edit transaction scan
 #   ./run_tlc.sh --debug-selection exhaustive debugger-selection scan
 #   ./run_tlc.sh --debug-readiness exhaustive debugger-readiness scan
 #   ./run_tlc.sh --connection    exhaustive connection-snapshot scan
 #   ./run_tlc.sh --transport     exhaustive transport-contract scan
+#   ./run_tlc.sh --dfid N [mode] exhaustive depth-first check; requires completion
 #   ./run_tlc.sh --simulate [N]  random simulation of N behaviors (default
 #                                100000): a quick smoke test, NOT a proof
 #   ./run_tlc.sh <tlc args...>   any other arguments go to TLC as they are
@@ -47,6 +49,16 @@ fi
 METADIR="$(mktemp -d "${TMPDIR:-/tmp}/kargu-tlc.XXXXXX")"
 LOG="${METADIR}/tlc.log"
 trap 'rm -rf "${METADIR}"' EXIT
+
+DFID_DEPTH=""
+if [[ "${1:-}" == "--dfid" ]]; then
+    if [[ ! "${2:-}" =~ ^[0-9]+$ ]] || [[ ${#2} -gt 6 ]] || (( 10#$2 < 2 )); then
+        echo "ERROR: --dfid requires an integer depth from 2 through 999999." >&2
+        exit 1
+    fi
+    DFID_DEPTH="$2"
+    shift 2
+fi
 
 SPECIFICATION="MC.tla (KarguLoop, KarguProtocol, KarguCircuit, KarguTools, KarguState)"
 if [[ $# -eq 0 ]]; then
@@ -108,6 +120,10 @@ elif [[ "$1" == "--debug-execution" ]]; then
     MODE="exhaustive debugger-execution ownership scan"
     SPECIFICATION="DebugExecutionMC.tla (KarguDebugExecution)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config DebugExecutionMC.cfg DebugExecutionMC.tla)
+elif [[ "$1" == "--edit-preparation" ]]; then
+    MODE="exhaustive native edit preparation scan"
+    SPECIFICATION="EditPreparationMC.tla (KarguEditPreparation)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config EditPreparationMC.cfg EditPreparationMC.tla)
 elif [[ "$1" == "--edit-transaction" ]]; then
     MODE="exhaustive reviewed edit transaction scan"
     SPECIFICATION="EditMC.tla (KarguEdit)"
@@ -140,6 +156,20 @@ else
     ARGS=("$@")
 fi
 
+if [[ -n "${DFID_DEPTH}" ]]; then
+    for ((i=0; i<${#ARGS[@]}; i++)); do
+        if [[ "${ARGS[i]}" == "-simulate" ]]; then
+            echo "ERROR: --dfid is model checking and cannot be combined with simulation." >&2
+            exit 1
+        fi
+        if [[ "${ARGS[i]}" == "-workers" ]]; then
+            ARGS[i+1]=1
+        fi
+    done
+    ARGS=(-dfid "${DFID_DEPTH}" "${ARGS[@]}")
+    MODE="exhaustive depth-first scan (${MODE}); requires a completed verdict"
+fi
+
 echo "=== TLC on Kargu: ${MODE} ==="
 echo "Specification: ${SPECIFICATION}"
 echo "TLC Binary:    ${TLC_BIN}"
@@ -154,8 +184,13 @@ if [[ ${status} -ne 0 ]] || grep -qE "^Error:|Invariant .* is violated|Deadlock 
     echo "TLC FAILED (exit ${status}): see the trace above." >&2
     exit 1
 fi
-if ! grep -q "Model checking completed. No error has been found\|Finished in" "${LOG}"; then
-    echo "TLC did not finish: no verdict." >&2
+if [[ "${MODE}" == "random simulation (not a proof)" ]]; then
+    if ! grep -q "Finished in" "${LOG}"; then
+        echo "TLC simulation did not finish." >&2
+        exit 1
+    fi
+elif ! grep -qF "Model checking completed. No error has been found." "${LOG}"; then
+    echo "TLC did not complete exhaustive exploration: no proof verdict." >&2
     exit 1
 fi
 echo "TLC finished without error (${MODE})."
