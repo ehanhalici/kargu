@@ -151,6 +151,8 @@ pub mod limits {
 /// Timeouts are typed durations, never shared unlabelled numbers.
 pub mod timeouts {
     use std::time::Duration;
+    /// Bounded native all-file edit preflight worker lifetime.
+    pub const EDIT_PREFLIGHT: Duration = Duration::from_secs(30);
     /// Stalled transport writer deadline.
     pub const WRITE: Duration = Duration::from_secs(5);
     /// Pending-request expiry sweep.
@@ -257,6 +259,8 @@ pub mod protocol {
     pub mod methods {
         /// Consume a prepared artifact into the shared editor permission ledger.
         pub const EDIT_AUTHORIZE: &str = "edit/authorize";
+        /// Add one live preflight witness; the complete set is revalidated off-actor.
+        pub const EDIT_PREFLIGHT: &str = "edit/preflight";
         /// Decide exactly one native editor review revision.
         pub const EDIT_DECISION: &str = "edit/decision";
         /// Parse an uploaded patch before requesting live document captures.

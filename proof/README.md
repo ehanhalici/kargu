@@ -35,7 +35,7 @@ five models also completed without errors, with an empty queue:
 
 | Model | Generated | Distinct |
 |---|---:|---:|
-| Native preparation and editor admission, identity symmetry | 480,956 | 97,230 |
+| Native preparation, editor admission and preflight, identity symmetry | 1,568,116 | 319,746 |
 | Edit transaction | 1,849 | 560 |
 | Application | 17,545 | 4,624 |
 | Approval, shared command/editor kinds | 360,452 | 49,152 |
@@ -621,3 +621,21 @@ Rust file fixtures independently check real locks, create-new behavior, private
 permissions, fd-rooted identity, special-file refusal, every terminal-record byte
 cut, source-free schema and bounded recovery. IPC issuance/receipt integration
 remains part of todo 3.
+
+### Complete native editor preflight (2026-10-28)
+
+The native preparation model now adds one witness per abstract target before
+`authorized → preflight → preflighted`. Two-file patches and one-file proposals
+exercise incomplete prefixes and independent target ordering. Preflight retains
+the same source reservation and an actual worker start/join; cancel/close/expiry
+cannot free it while the worker remains live. Worker admission shares the command
+bound. Source changes can invalidate observations; the model does not assume an
+atomic filesystem/Emacs snapshot or authorize a write.
+
+`--edit-preparation` completes 1,568,116 generated / 319,746 distinct states at
+depth 36, with an empty queue. Removing the full-witness-set guard violates
+`CompletePreflight` after 775 distinct states. Native pipe tests independently
+check document identity/tick/coding, dirty/read-only flags, base hash, disk revision,
+duplicate file/document identities, earlier-target replacement and 1 KiB framing.
+A held worker verifies actual join-before-release in the controller. Journalled
+issuance, actual Emacs mutation and receipt/rollback remain outside this model.

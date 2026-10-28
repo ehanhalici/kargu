@@ -10,7 +10,9 @@ pub(crate) use artifact::Artifact;
 use artifact::Prepared;
 pub(crate) use git::{GitPreparation, PatchPrepared, RunningPatch};
 pub(crate) use inspection::{PatchWork, PreparationResult, PrepareWork};
+mod preflight;
 mod service;
+pub(crate) use preflight::{PreflightFile, PreflightSet, ReadyPreflight};
 mod types;
 use crate::{
     edit::{EditError, types::EditText},

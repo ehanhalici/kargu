@@ -153,7 +153,7 @@ pub(super) enum DiskState {
     Absent {},
     File { version: DiskVersion },
 }
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]
 pub(super) struct Coding(String);
 impl TryFrom<String> for Coding {

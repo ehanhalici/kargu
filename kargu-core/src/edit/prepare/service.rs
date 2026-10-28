@@ -413,6 +413,20 @@ impl EditPreparations {
             _ => Err(CoreError::StaleOwner),
         }
     }
+    pub(crate) fn claimed_artifact(
+        &mut self,
+        session: &SessionId,
+        origin: &OriginId,
+        id: &PreparationId,
+        now: Instant,
+    ) -> Result<Arc<Artifact>, CoreError> {
+        self.claim_status(session, id, now)?;
+        let entry = self.owned(session, origin, id)?;
+        let Phase::Claimed { artifact, .. } = &entry.phase else {
+            return Err(CoreError::StaleOwner);
+        };
+        Ok(artifact.clone())
+    }
     pub(crate) fn release_claim(
         &mut self,
         session: &SessionId,

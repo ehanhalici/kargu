@@ -239,7 +239,7 @@ regression results for the preparation slice; actual native editor writes,
 save-hook settlement, native rollback and consumer cutover are still open.
 
 Standard BFS TLC now completes with an empty queue for Edit (560 distinct states),
-Application (4,624), Approval (49,152), Process (179) and native preparation (97,230).
+Application (4,624), Approval (49,152), Process (179) and native preparation (319,746).
 The preparation/approval counts include the editor admission extension below.
 The native preparation model retains two preparation IDs and two separate
 source-owner IDs modulo identity-renaming symmetry. It models byte/worker
@@ -377,3 +377,39 @@ the native run and reservation through normal cleanup, and checks actual tool
 results. The unfiltered locked Rust suite passes 421/421 (29 compile-fail), with
 strict all-targets Clippy/fmt and the preparation TLC scan clean. This fixes todo
 3.12; it does not establish editor issuance or completion.
+
+## Complete native preflight observations
+
+`edit/preflight` accepts one closed live-document witness per file under the
+existing edit/source/review revision. The actor compares only cached evidence:
+base hash and UTF-8 byte count, exact initial live identity/tick/coding when one
+was captured, disk revision and clean/writable flags. Duplicate file indices or
+document identities and foreign/stale owners cannot advance the count. There is
+no replacement text, path, policy or root in this input.
+
+The complete set transitions to a consuming bounded worker. That worker rechecks
+all captured root/file pins and hashes the ordered, typed witness set. Only its
+actual completion can publish `state:preflighted`, with a native fingerprint and
+real total/checked file counts. Partial sets remain partial. The completed state
+retains the immutable witnesses and the original unissued grant. Command and
+editor preparation still share one admission bound, and source cancellation,
+close or deadline holds the grant/reservation until actual worker join/cleanup.
+
+Five real pipe tests cover single-file and multi-file/out-of-order witnesses,
+duplicate identities, stale live metadata, base/disk mismatch, a foreign change
+to an earlier file before final preflight, a 1 KiB frame and owner closure. A held
+blocking-worker regression checks that cancellation releases neither capacity nor
+the run lease before the actual join. Unfiltered locked Rust passes 427/427 (29
+compile-fail), with strict all-targets Clippy and fmt clean.
+
+The preparation model now includes per-target witnesses, preflight-worker
+ownership and full-set publication. Its exhaustive scan completes 1,568,116
+generated / 319,746 distinct states, depth 36, empty queue. Removing the full-set
+guard violates `CompletePreflight` after 775 distinct states. This is a bounded
+resource/completeness model, not a filesystem CAS or an atomic observation of
+all Emacs buffers. Witnesses describe observed state; the actual adapter must
+recheck every live target before its first mutation.
+
+No editor write capability is advertised. The actual Emacs witness producer,
+journalled consuming issuance, editor transaction/receipt, revised-review
+measurement and native rollback/consumer cutover remain outstanding.

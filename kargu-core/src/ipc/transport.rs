@@ -394,6 +394,19 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     }
                     continue;
                 }
+                if method == methods::EDIT_PREFLIGHT {
+                    if let Some(id) = id.as_ref() {
+                        let reply = match commands.preflight_editor(host, id.clone(), params) {
+                            Ok(Some(value)) => Some(protocol::success(id, value)),
+                            Ok(None) => None,
+                            Err(fault) => Some(fault.response(Some(id))),
+                        };
+                        if let Some(reply) = reply {
+                            queue_reply(reply, host.frame_limit(), tx, permits)?;
+                        }
+                    }
+                    continue;
+                }
                 if method == methods::EDIT_DECISION {
                     if let Some(id) = id.as_ref() {
                         let reply = match commands.decide_editor(host, params) {

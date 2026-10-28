@@ -667,6 +667,14 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     marker/narrowing, coding/EOL ve açık buffer_only/save policy ile uygulansın.
     Save-hook final hash/revision ve failure/partial/unknown gerçek receipt taşısın;
     Rust'ta paralel editor dosyası yazma veya legacy fallback açılmasın.
+    `edit/preflight` native portu eklendi: exact edit/source/review revision altında
+    dosya başına canlı document/hash/disk kanıtı; duplicate file/document ID,
+    dirty/read-only ve stale tick/coding reddi. Tam set sonrasında ortak bounded
+    worker bütün disk pinlerini yeniden denetler; prefix ready yayınlanmaz.
+    Native grant ve source rezervasyonu gerçek join'e kadar tutulur. 5 gerçek pipe
+    ve held-worker testi; filtresiz Rust 427/427 (29 compile-fail), strict Clippy/
+    fmt, preparation TLC (319.746 farklı durum) temiz. Bu henüz Emacs transaction
+    producer/actual-write adapter'ı veya journal issuance değildir; 3.5 açık kalır.
   - [ ] **3.6 Native batch/journal/rollback:** bütün dosyalar preflight edilmeden
     ilk yazma olmasın; gerçek file/batch durumları, hunk sayıları ve snapshot stack
     tek kayıtta yaşasın. Rollback yalnız hâlâ kendi yazdığı revision'da; foreign
@@ -725,6 +733,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     dolduğunda actual tool ledger Timeout verir. Rezervasyon yine gerçek join/
     cleanup'a kadar tutulur. Filtresiz locked Rust 421/421 (29 compile-fail),
     strict Clippy/fmt ve preparation TLC (97.230 farklı durum) temiz.
+
+  - [ ] **3.13 Boş canlı yeni dosyanın save/no-op kararı (çalışırken bulundu):**
+    Diskte bulunmayan boş live buffer için full write boş ve policy `save` iken
+    native prepare `unchanged:true` dönüyor. Bu işlem boş dosya oluşturmalıdır;
+    `buffer_only` ise mevcut boş buffer'da gerçekten değişikliksiz kalabilir.
+    Save policy ve existence ayrımını native no-op kararına bağla; gerçek pipe'da
+    empty add/live-buffer/buffer_only/save regresyonunu doğrula.
 
 - [ ] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
   revision/connection/thread/frame-bound reverse RPC'ye bağla. Mention/folder/

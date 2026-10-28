@@ -138,6 +138,19 @@ impl Commands {
         }
         self.editors.authorize(host, id, params)
     }
+    pub fn preflight_editor(
+        &mut self,
+        host: &mut Host,
+        id: RpcId,
+        params: Value,
+    ) -> Result<Option<Value>, Fault> {
+        let available = self
+            .operations
+            .len()
+            .saturating_add(self.editors.preparing_count())
+            < limits::HOST_PROCESSES;
+        self.editors.preflight(host, id, params, available)
+    }
     pub fn decide_editor(&mut self, host: &mut Host, params: Value) -> Result<Value, Fault> {
         self.editors.decision(host, &mut self.gate, params)
     }

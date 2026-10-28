@@ -7,7 +7,7 @@ use crate::{
     constants::limits,
     domain::{ApplicationId, ToolCallId, ToolName},
     edit::{
-        prepare::{ClaimedAction, PreparationId},
+        prepare::{ClaimedAction, PreflightFile, PreflightSet, PreparationId, ReadyPreflight},
         types::{EditorEditId, EditorRevision, EditorSourceId},
     },
     error::CoreError,
@@ -45,6 +45,22 @@ struct Decision {
     revision: EditorRevision,
     decision: EditorDecision,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Preflight {
+    origin_id: EditorSourceId,
+    edit_id: EditorEditId,
+    revision: EditorRevision,
+    witness: PreflightFile,
+}
+struct Preflighting {
+    run: RunHandle,
+    grant: AuthorizedEditorEdit,
+    task: JoinHandle<Result<ReadyPreflight, CoreError>>,
+    cancel: CancellationToken,
+    request_id: RpcId,
+    deadline: Instant,
+}
 struct Preparing {
     request_id: RpcId,
     task: JoinHandle<Result<ClaimedAction, CoreError>>,
@@ -60,6 +76,13 @@ enum Stage {
     Authorized {
         run: RunHandle,
         grant: AuthorizedEditorEdit,
+        witnesses: PreflightSet,
+    },
+    Preflighting(Preflighting),
+    Preflighted {
+        run: RunHandle,
+        grant: AuthorizedEditorEdit,
+        preflight: ReadyPreflight,
     },
 }
 struct Operation {
@@ -77,7 +100,7 @@ impl Editors {
     pub(super) fn preparing_count(&self) -> usize {
         self.operations
             .values()
-            .filter(|op| matches!(op.stage, Stage::Preparing(_)))
+            .filter(|op| matches!(op.stage, Stage::Preparing(_) | Stage::Preflighting(_)))
             .count()
     }
     pub(super) fn is_empty(&self) -> bool {
@@ -89,25 +112,40 @@ impl Editors {
             .any(|op| &op.scope.application_id == id)
     }
     pub(super) fn contains(&self, id: &RpcId) -> bool {
-        self.operations
-            .values()
-            .any(|op| matches!(&op.stage, Stage::Preparing(p) if &p.request_id == id))
+        self.operations.values().any(|op| match &op.stage {
+            Stage::Preparing(p) => &p.request_id == id,
+            Stage::Preflighting(p) => &p.request_id == id,
+            _ => false,
+        })
     }
     pub(super) fn cancel(&mut self, id: &RpcId) {
         for op in self.operations.values_mut() {
-            if let Stage::Preparing(p) = &op.stage
-                && &p.request_id == id
-            {
-                op.terminal = Some(CoreError::Cancelled);
-                p.cancel.cancel();
+            match &op.stage {
+                Stage::Preparing(p) if &p.request_id == id => {
+                    if op.terminal.is_none() {
+                        op.terminal = Some(CoreError::Cancelled);
+                    }
+                    p.cancel.cancel();
+                }
+                Stage::Preflighting(p) if &p.request_id == id => {
+                    if op.terminal.is_none() {
+                        op.terminal = Some(CoreError::Cancelled);
+                    }
+                    p.cancel.cancel();
+                }
+                _ => {}
             }
         }
     }
     pub(super) fn cancel_all(&mut self) {
         for op in self.operations.values_mut() {
-            op.terminal = Some(CoreError::Cancelled);
-            if let Stage::Preparing(p) = &op.stage {
-                p.cancel.cancel();
+            if op.terminal.is_none() {
+                op.terminal = Some(CoreError::Cancelled);
+            }
+            match &op.stage {
+                Stage::Preparing(p) => p.cancel.cancel(),
+                Stage::Preflighting(p) => p.cancel.cancel(),
+                _ => {}
             }
         }
     }
@@ -148,6 +186,90 @@ impl Editors {
             },
         );
         Ok(())
+    }
+    pub(super) fn preflight(
+        &mut self,
+        host: &mut Host,
+        id: RpcId,
+        params: Value,
+        worker_available: bool,
+    ) -> Result<Option<Value>, Fault> {
+        let request: Request<Preflight> =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !host.owns_read_scope(&request.scope) {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let input = request.arguments;
+        let op = self
+            .operations
+            .get_mut(&input.edit_id)
+            .ok_or_else(|| fault(CoreError::StaleOwner))?;
+        if op.scope != request.scope || op.origin != input.origin_id {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let Stage::Authorized {
+            grant, witnesses, ..
+        } = &mut op.stage
+        else {
+            return Err(fault(CoreError::AlreadyCompleted));
+        };
+        if grant.revision() != input.revision {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let actor = host.actor_mut(&op.scope).map_err(fault)?;
+        grant.revalidate(actor).map_err(fault)?;
+        let artifact = actor
+            .edits
+            .claimed_artifact(
+                &op.scope.session_id,
+                &op.origin,
+                &op.preparation,
+                Instant::now(),
+            )
+            .map_err(fault)?;
+        if witnesses.would_finish(&artifact) && !worker_available {
+            return Err(fault(CoreError::Limit));
+        }
+        let progress = witnesses.record(&artifact, input.witness).map_err(fault)?;
+        if !progress.ready {
+            return serde_json::to_value(progress)
+                .map(Some)
+                .map_err(|_| fault(CoreError::InvalidToolOutput));
+        }
+        let op = self
+            .operations
+            .remove(&input.edit_id)
+            .ok_or_else(|| fault(CoreError::StaleOwner))?;
+        let Stage::Authorized {
+            run,
+            grant,
+            witnesses,
+        } = op.stage
+        else {
+            return Err(fault(CoreError::AlreadyCompleted));
+        };
+        let deadline = Instant::now()
+            .checked_add(crate::constants::timeouts::EDIT_PREFLIGHT)
+            .ok_or_else(|| fault(CoreError::ArithmeticOverflow))?;
+        let work = witnesses.into_work(artifact, deadline).map_err(fault)?;
+        let cancel = CancellationToken::new();
+        let worker_cancel = cancel.clone();
+        let task = tokio::task::spawn_blocking(move || work.execute(&worker_cancel));
+        self.operations.insert(
+            input.edit_id,
+            Operation {
+                stage: Stage::Preflighting(Preflighting {
+                    run,
+                    grant,
+                    task,
+                    cancel,
+                    request_id: id,
+                    deadline,
+                }),
+                ..op
+            },
+        );
+        Ok(None)
     }
     pub(super) fn decision(
         &mut self,
@@ -197,7 +319,11 @@ impl Editors {
         match gate.decide_editor(actor, &run, &review, input.revision, input.decision) {
             Ok(grant) => {
                 let op = Operation {
-                    stage: Stage::Authorized { run, grant },
+                    stage: Stage::Authorized {
+                        run,
+                        grant,
+                        witnesses: PreflightSet::default(),
+                    },
                     ..op
                 };
                 let result = descriptor(&input.edit_id, &op);
@@ -281,9 +407,11 @@ impl Editors {
                             Ok(EditorAdmission::Review(request)) => {
                                 Ok(Stage::Review { run, request })
                             }
-                            Ok(EditorAdmission::Authorized(grant)) => {
-                                Ok(Stage::Authorized { run, grant })
-                            }
+                            Ok(EditorAdmission::Authorized(grant)) => Ok(Stage::Authorized {
+                                run,
+                                grant,
+                                witnesses: PreflightSet::default(),
+                            }),
                             Err(error) => {
                                 actor.cancel(&run)?;
                                 gate.dismiss_run(actor, &run)?;
@@ -315,6 +443,106 @@ impl Editors {
                         }
                     }
                 }
+                Stage::Preflighting(preparing) => {
+                    if op.terminal.is_none() && Instant::now() >= preparing.deadline {
+                        op.terminal = Some(CoreError::Deadline);
+                    }
+                    if op.terminal.is_none() {
+                        op.terminal = preparing.grant.revalidate(host.actor_mut(&op.scope)?).err();
+                    }
+                    if op.terminal.is_some() {
+                        preparing.cancel.cancel();
+                    }
+                    if !preparing.task.is_finished() {
+                        self.operations.insert(
+                            id,
+                            Operation {
+                                stage: Stage::Preflighting(preparing),
+                                ..op
+                            },
+                        );
+                        continue;
+                    }
+                    let result = preparing
+                        .task
+                        .now_or_never()
+                        .ok_or(CoreError::CleanupFailed)?
+                        .map_err(|_| CoreError::CleanupFailed)
+                        .and_then(|value| value);
+                    let result = if let Some(error) = op.terminal.take() {
+                        Err(error)
+                    } else {
+                        result
+                    };
+                    match result {
+                        Ok(preflight) => {
+                            let op = Operation {
+                                stage: Stage::Preflighted {
+                                    run: preparing.run,
+                                    grant: preparing.grant,
+                                    preflight,
+                                },
+                                ..op
+                            };
+                            let reply =
+                                protocol::success(&preparing.request_id, descriptor(&id, &op));
+                            if reply.to_string().len() > host.frame_limit().as_usize() {
+                                cleanup(host, gate, op)?;
+                                replies.push(
+                                    fault(CoreError::Limit).response(Some(&preparing.request_id)),
+                                );
+                            } else {
+                                self.operations.insert(id, op);
+                                replies.push(reply);
+                            }
+                        }
+                        Err(error) => {
+                            let timed_out =
+                                matches!(error, CoreError::Deadline | CoreError::ApprovalExpired);
+                            let terminal = if timed_out {
+                                Some(CoreError::Deadline)
+                            } else {
+                                Some(CoreError::Cancelled)
+                            };
+                            cleanup(
+                                host,
+                                gate,
+                                Operation {
+                                    stage: Stage::Authorized {
+                                        run: preparing.run,
+                                        grant: preparing.grant,
+                                        witnesses: PreflightSet::default(),
+                                    },
+                                    terminal,
+                                    ..op
+                                },
+                            )?;
+                            replies.push(fault(error).response(Some(&preparing.request_id)));
+                        }
+                    }
+                }
+                Stage::Preflighted {
+                    run,
+                    grant,
+                    preflight,
+                } => {
+                    if op.terminal.is_none() {
+                        op.terminal = grant.revalidate(host.actor_mut(&op.scope)?).err();
+                    }
+                    let op = Operation {
+                        stage: Stage::Preflighted {
+                            run,
+                            grant,
+                            preflight,
+                        },
+                        ..op
+                    };
+                    if op.terminal.is_some() {
+                        cleanup(host, gate, op)?;
+                    } else {
+                        self.operations.insert(id, op);
+                    }
+                }
                 Stage::Review { run, request } => {
                     if op.terminal.is_none() {
                         op.terminal = host.actor_mut(&op.scope)?.validate(&run).err();
@@ -332,12 +560,20 @@ impl Editors {
                         self.operations.insert(id, op);
                     }
                 }
-                Stage::Authorized { run, grant } => {
+                Stage::Authorized {
+                    run,
+                    grant,
+                    witnesses,
+                } => {
                     if op.terminal.is_none() {
                         op.terminal = grant.revalidate(host.actor_mut(&op.scope)?).err();
                     }
                     let op = Operation {
-                        stage: Stage::Authorized { run, grant },
+                        stage: Stage::Authorized {
+                            run,
+                            grant,
+                            witnesses,
+                        },
                         ..op
                     };
                     if op.terminal.is_some() {
@@ -356,9 +592,17 @@ fn descriptor(id: &EditorEditId, op: &Operation) -> Value {
         Stage::Review { run, request } => {
             json!({"edit_id":id,"state":"review","scope":run.scope(),"revision":request.revision(),"review_mode":request.review_mode(),"applied":false})
         }
-        Stage::Authorized { run, grant } => {
+        Stage::Authorized { run, grant, .. } => {
             json!({"edit_id":id,"state":"authorized","scope":run.scope(),"revision":grant.revision(),"review_mode":grant.action().review_mode(),"applied":false})
         }
+        Stage::Preflighted {
+            run,
+            grant,
+            preflight,
+        } => {
+            json!({"edit_id":id,"state":"preflighted","scope":run.scope(),"revision":grant.revision(),"preflight":preflight.descriptor(),"applied":false})
+        }
+        Stage::Preflighting(_) => Value::Null,
         Stage::Preparing(_) => Value::Null,
     }
 }
@@ -382,7 +626,7 @@ fn cleanup(
             }
             actor.finish(&run)?
         }
-        Stage::Authorized { run, grant } => {
+        Stage::Authorized { run, grant, .. } | Stage::Preflighted { run, grant, .. } => {
             actor.cancel(&run)?;
             if timed_out {
                 grant.expire_unissued(actor)?;
@@ -391,7 +635,7 @@ fn cleanup(
             }
             actor.finish(&run)?
         }
-        Stage::Preparing(_) => return Err(CoreError::Busy),
+        Stage::Preparing(_) | Stage::Preflighting(_) => return Err(CoreError::Busy),
     };
     actor
         .edits
@@ -493,6 +737,7 @@ mod tests {
                     EditorAdmission::Authorized(grant) => Stage::Authorized {
                         run: run.clone(),
                         grant,
+                        witnesses: PreflightSet::default(),
                     },
                 };
                 assert!(matches!(actor.finish(&run), Err(CoreError::Busy)));
@@ -556,6 +801,109 @@ mod tests {
                 assert!(host.actor_mut(&scope)?.drained());
             }
         }
+        Ok(())
+    }
+    #[tokio::test]
+    async fn preflight_cancel_retains_native_grant_and_source_capacity_until_actual_join()
+    -> TestResult {
+        let (root, mut host, scope, work) = claimed("auto")?;
+        let preparation = work.id.clone();
+        let origin = work.origin.clone();
+        let prepared = work.execute(&CancellationToken::new())?;
+        let actor = host.actor_mut(&scope)?;
+        let run = actor.admit_editor(&scope.session_id, prepared.settings)?;
+        let mut registry = ToolRegistry::default();
+        let tool = ToolName::try_from("editor_edit".to_owned())?;
+        registry.register_editor(tool.clone(), vec![])?;
+        let mut gate = ExecutionGate::default();
+        let EditorAdmission::Authorized(grant) = gate.admit_editor(
+            actor,
+            &run,
+            &registry,
+            &tool,
+            EditorAdmissionInput {
+                call_id: ToolCallId::new(),
+                action: prepared.action,
+                presenter: EditorPresenter::Missing,
+            },
+        )?
+        else {
+            return Err("auto grant expected".into());
+        };
+        let artifact = actor.edits.claimed_artifact(
+            &scope.session_id,
+            &origin,
+            &preparation,
+            Instant::now(),
+        )?;
+        let fact: PreflightFile = serde_json::from_value(
+            json!({"file":0,"base_hash":crate::edit::types::EditText::try_from(String::new())?.hash(),"document":{"id":"editor_document_12345678-1234-4234-8234-123456789abc","tick":1,"bytes":0,"coding":"utf-8-unix","dirty":false,"read_only":false,"disk":{"kind":"absent"}}}),
+        )?;
+        let mut witnesses = PreflightSet::default();
+        assert!(witnesses.record(&artifact, fact)?.ready);
+        let deadline = Instant::now()
+            .checked_add(Duration::from_secs(3))
+            .ok_or("deadline")?;
+        let work = witnesses.into_work(artifact, deadline)?;
+        let cancel = CancellationToken::new();
+        let worker_cancel = cancel.clone();
+        let (release, wait) = mpsc::channel::<()>();
+        let task = tokio::task::spawn_blocking(move || {
+            wait.recv().map_err(|_| CoreError::Cancelled)?;
+            work.execute(&worker_cancel)
+        });
+        let request_id = RpcId::String("held-preflight".to_owned());
+        let mut editors = Editors::default();
+        editors.operations.insert(
+            EditorEditId::new(),
+            Operation {
+                scope: scope.clone(),
+                origin,
+                preparation,
+                terminal: None,
+                stage: Stage::Preflighting(Preflighting {
+                    run: run.clone(),
+                    grant,
+                    task,
+                    cancel,
+                    request_id: request_id.clone(),
+                    deadline,
+                }),
+            },
+        );
+        assert_eq!(editors.preparing_count(), 1);
+        let begin = || json!({"scope":{"application_id":scope.application_id,"session_id":scope.session_id},"arguments":{"origin_id":"editor_source_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","root":root.path(),"mode":"agent","intent":{"kind":"write","path":"empty","new_bytes":0},"live":null,"config_revision":0,"policy_revision":0,"review_mode":"auto","save_policy":"buffer_only"}});
+        assert!(host.dispatch("edit/begin", begin(), true).result.is_ok());
+        editors.cancel(&request_id);
+        assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
+        assert_eq!(editors.preparing_count(), 1);
+        assert!(host.dispatch("edit/begin", begin(), true).result.is_err());
+        assert!(matches!(
+            host.actor_mut(&scope)?.finish(&run),
+            Err(CoreError::Busy)
+        ));
+        release.send(())?;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let replies = editors.tick(&mut host, &mut gate, &registry)?;
+                if editors.is_empty() {
+                    assert_eq!(replies.len(), 1);
+                    assert_eq!(
+                        replies
+                            .first()
+                            .and_then(|reply| reply.get("error"))
+                            .and_then(|error| error.get("data"))
+                            .and_then(|data| data.get("status")),
+                        Some(&json!("cancelled"))
+                    );
+                    return Ok::<(), CoreError>(());
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await??;
+        assert!(host.dispatch("edit/begin", begin(), true).result.is_ok());
+        assert!(host.actor_mut(&scope)?.drained());
         Ok(())
     }
     #[tokio::test]
