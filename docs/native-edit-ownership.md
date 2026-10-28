@@ -250,8 +250,32 @@ zero without a completed-exploration verdict is rejected by the hardened runner.
 This is bounded safety evidence, not a proof of concrete IO, content hashing,
 editor transactions or liveness. See `proof/README.md` for commands and counts.
 
-The next integration is the closed editor action branch of the shared permission
-gate and the actual Emacs transaction adapter. Its consuming issued state must
+The shared `ExecutionGate` now has a closed `EditorAction` branch in the same
+bounded pending map as commands. It commits to ordered file operations, native
+source/review revision, base/proposed hashes, capture digest, pinned workspace,
+config/policy and review/save policy. Source bodies have no implicit Debug or
+Serialize. Native run settings must share the exact captured workspace handle;
+a separately recaptured directory at the same path cannot substitute for it.
+
+`EditorAdmission` returns either a pending review or a consuming
+`AuthorizedEditorEdit`. Auto policy authorizes without a presenter; async and
+blocking require one. Delete requires auto policy. Foreign owners, stale review
+revisions and wrong action kinds cannot consume another pending entry. Reject,
+interrupt, expiration and source/run revocation use the existing tool ledger and
+shared drain. Accepted authorizations retain the actual run lease until explicit
+unissued cancellation or the future issued transaction consumes them. They cannot
+be forged or cloned, and do not claim an applied effect.
+
+Seven integration tests cover these shared-ledger owner/replay/deadline/resource
+boundaries and command coexistence. The unfiltered locked Rust suite passes
+403/403, including 28 compile-fail cases; strict all-targets Clippy and fmt pass. The extended approval model checks both action
+kinds and twelve authority fields: 360,452 generated / 49,152 distinct states,
+empty queue, depth 15. Removing the kind guard violates `Safety_ExactActionKind`
+after 16 distinct states. This kernel is not yet connected to stdio or an editor
+write port; preparation IDs/capture hashes remain insufficient permission.
+
+The next integration is consuming an owned prepared artifact into this shared
+permission branch and the actual Emacs transaction adapter. Its consuming issued state must
 retain the real editor settlement/drain barrier across cancellation; timing out a
 reverse RPC alone is not proof that a queued or executing editor write stopped.
 The old Elisp consumers remain active until that boundary and native journal/

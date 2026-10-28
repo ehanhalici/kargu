@@ -23,6 +23,11 @@ use std::{
 };
 use tokio::time::Instant;
 
+mod editor;
+pub use editor::{
+    AuthorizedEditorEdit, EditorAdmission, EditorAdmissionInput, EditorApprovalRequest,
+    EditorDecision, EditorPresenter,
+};
 mod action_snapshot;
 pub(crate) mod file;
 pub(crate) use action_snapshot::ActionSnapshot;
@@ -56,6 +61,9 @@ impl TryFrom<PathBuf> for Workspace {
     }
 }
 impl Workspace {
+    pub(crate) fn same_capture(&self, other: &Self) -> bool {
+        self.path == other.path && Arc::ptr_eq(&self.directory, &other.directory)
+    }
     /// Canonical captured directory; no fallback to the process cwd.
     pub fn path(&self) -> &Path {
         &self.path
@@ -364,6 +372,14 @@ impl ToolRegistry {
         aliases: Vec<ToolName>,
     ) -> Result<(), CoreError> {
         self.register(name, aliases, ToolSafetyLevel::ExecutesArbitraryCode)
+    }
+    /// Register the closed editor executor with its actual mutation effect class.
+    pub fn register_editor(
+        &mut self,
+        name: ToolName,
+        aliases: Vec<ToolName>,
+    ) -> Result<(), CoreError> {
+        self.register(name, aliases, ToolSafetyLevel::MutatesState)
     }
     pub(crate) fn register_listing(&mut self) -> Result<(), CoreError> {
         self.register(
@@ -709,11 +725,15 @@ impl ApprovalRequest {
     }
 }
 
+enum CapturedAction {
+    Command(Box<CommandSpec>),
+    Editor(Box<crate::edit::intent::EditorAction>),
+}
 struct PendingApproval {
     run: RunHandle,
     call_id: ToolCallId,
     name: ToolName,
-    command: CommandSpec,
+    action: CapturedAction,
     digest: ActionDigest,
     deadline: Instant,
     lease: RunLease,
@@ -833,7 +853,7 @@ impl ExecutionGate {
                 run: run.clone(),
                 call_id,
                 name: descriptor.name().clone(),
-                command,
+                action: CapturedAction::Command(Box::new(command)),
                 digest: action_digest,
                 deadline,
                 lease,
@@ -860,16 +880,22 @@ impl ExecutionGate {
         {
             return Err(CoreError::StaleOwner);
         }
+        if !matches!(pending.action, CapturedAction::Command(_)) {
+            return Err(CoreError::Rejected);
+        }
         let pending = self
             .pending
             .remove(request.id())
             .ok_or(CoreError::ApprovalUnavailable)?;
+        let CapturedAction::Command(command) = pending.action else {
+            return Err(CoreError::Rejected);
+        };
         let validation = if Instant::now() >= pending.deadline {
             Err(CoreError::ApprovalExpired)
         } else if decision == UserDecision::Rejected {
             Err(CoreError::Rejected)
         } else {
-            pending.command.revalidate(run)
+            command.revalidate(run)
         };
         if let Err(error) = validation {
             let outcome = if matches!(error, CoreError::ApprovalExpired) {
@@ -881,13 +907,13 @@ impl ExecutionGate {
             return Err(error);
         }
         // Recompute from private captured data, never caller-supplied display text.
-        if digest(run, &pending.name, &pending.command)? != pending.digest {
+        if digest(run, &pending.name, &command)? != pending.digest {
             return Err(CoreError::Rejected);
         }
         Ok(AuthorizedCommand {
             run: pending.run,
             call_id: pending.call_id,
-            command: pending.command,
+            command: *command,
             lease: pending.lease,
             deadline: pending.deadline,
         })

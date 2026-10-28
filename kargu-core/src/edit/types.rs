@@ -189,3 +189,71 @@ count!(
     limits::EDIT_TEXT_BYTES,
     "New-side Unified Diff start coordinate; zero denotes an empty range."
 );
+
+/// Review policy captured with an immutable editor intent.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewMode {
+    /// Apply under captured auto policy without an interactive decision.
+    Auto,
+    /// Keep a pending review while its caller may continue.
+    Async,
+    /// Keep the caller pending until an explicit review decision.
+    Blocking,
+}
+/// Explicit editor buffer-only or disk-save policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SavePolicy {
+    /// Change only the live buffer.
+    BufferOnly,
+    /// Save through the editor and report actual hook effects.
+    Save,
+}
+
+/// Source owner identity, distinct from an application/session or editor edit ID.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct EditorSourceId(uuid::Uuid);
+impl TryFrom<String> for EditorSourceId {
+    type Error = EditError;
+    fn try_from(value: String) -> Result<Self, EditError> {
+        uuid::Uuid::parse_str(
+            value
+                .strip_prefix("editor_source_")
+                .ok_or(EditError::InvalidEvidence)?,
+        )
+        .map(Self)
+        .map_err(|_| EditError::InvalidEvidence)
+    }
+}
+impl From<EditorSourceId> for String {
+    fn from(value: EditorSourceId) -> Self {
+        format!("editor_source_{}", value.0)
+    }
+}
+
+/// Native review revision; a different revision cannot reuse the same decision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(try_from = "u64")]
+pub struct EditorRevision(u64);
+impl TryFrom<u64> for EditorRevision {
+    type Error = EditError;
+    fn try_from(value: u64) -> Result<Self, EditError> {
+        if value == 0 {
+            Err(EditError::InvalidEvidence)
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+/// Commitment to captured document/disk evidence, not a content hash or authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct CaptureDigest(ContentHash);
+impl TryFrom<String> for CaptureDigest {
+    type Error = EditError;
+    fn try_from(value: String) -> Result<Self, EditError> {
+        ContentHash::try_from(value).map(Self)
+    }
+}

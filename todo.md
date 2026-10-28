@@ -644,6 +644,15 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     policy/config ve base/proposed/review revision'ına bağlı tek kullanımlık grant;
     auto/async/blocking politikası, stale/foreign/missing presenter, duplicate apply,
     timeout/reject/Stop ve revoke→actual drain→admit geçişleri native'de olsun.
+    Ortak `ExecutionGate` pending tablosuna kapalı editor action/grant türü eklendi;
+    fake command veya ikinci onay ledger'ı yok. Exact native run/root capture,
+    config/policy/review revision, auto/async/blocking, missing presenter, yalnız
+    auto delete, foreign/replay ve shared lease/drain sınırları 7/7 integration
+    testiyle doğrulandı. Grant henüz stdio/editor issuance'a bağlı değil;
+    artifact consumption, canlı preflight/journal ve gerçek receipt tamamlanmadan
+    bu alt madde kapanmaz. Approval TLC: 49.152 farklı durum; kind-confusion
+    mutantı invariant ihlaliyle reddedildi. Bu adımda filtresiz locked Rust
+    403/403 (28 compile-fail dahil), strict all-targets Clippy ve fmt temiz.
   - [ ] **3.5 Emacs transaction adapter:** bütün açık/kapalı dosyalar yetkili
     native edit_id üzerinden canlı belge kontrolü, atomic change group, undo/point/
     marker/narrowing, coding/EOL ve açık buffer_only/save policy ile uygulansın.

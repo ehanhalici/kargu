@@ -115,6 +115,14 @@ impl RunScope {
     pub fn session_id(&self) -> &SessionId {
         &self.session_id
     }
+    /// Configuration revision frozen at actual native admission.
+    pub fn config_revision(&self) -> ConfigRevision {
+        self.config_revision
+    }
+    /// Policy revision frozen at actual native admission.
+    pub fn policy_revision(&self) -> PolicyRevision {
+        self.policy_revision
+    }
     /// Current run identity, independent of the admission claim.
     pub fn run_id(&self) -> &RunId {
         &self.run_id

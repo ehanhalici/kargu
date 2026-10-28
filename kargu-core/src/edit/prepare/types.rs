@@ -37,7 +37,7 @@ impl PreparationId {
         Self(uuid::Uuid::new_v4())
     }
 }
-identity!(OriginId, "editor_source_");
+pub(crate) use crate::edit::types::EditorSourceId as OriginId;
 identity!(DocumentId, "editor_document_");
 macro_rules! count {
     ($name:ident,$limit:expr) => {
@@ -182,19 +182,7 @@ pub(super) struct LiveDocument {
     pub read_only: bool,
     pub disk: DiskState,
 }
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum ReviewMode {
-    Auto,
-    Async,
-    Blocking,
-}
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum SavePolicy {
-    BufferOnly,
-    Save,
-}
+pub(crate) use crate::edit::types::{ReviewMode, SavePolicy};
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Intent {

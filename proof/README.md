@@ -38,7 +38,7 @@ five models also completed without errors, with an empty queue:
 | Native preparation, identity symmetry | 151,744 | 34,258 |
 | Edit transaction | 1,849 | 560 |
 | Application | 17,545 | 4,624 |
-| Approval | 8,194 | 1,536 |
+| Approval, shared command/editor kinds | 360,452 | 49,152 |
 | Process | 535 | 179 |
 
 Earlier unsymmetrized DFID attempts ended in the installed tool's fingerprint
@@ -108,7 +108,7 @@ with `proof/run_tlc.sh` and its flag:
 | `--connection` | 446,212 | 77,292 | 20 |
 | `--transport` | 1,810 | 693 | 12 |
 | `--edit-transaction` | 1,849 | 560 | 11 |
-| `--approval` | 8,194 | 1,536 | 11 |
+| `--approval` | 360,452 | 49,152 | 15 |
 | `--process` | 535 | 179 | 9 |
 | `--process-session` | 129 | 42 | 8 |
 | `--mode` | 20,179 | 5,958 | 15 |
@@ -230,15 +230,20 @@ ERT checks real preparation failure/retry, view/owner cancellation, approved
 revision and draft changes, foreign completion, duplicate decisions and
 reentrant mode observers. The model does not prove UI draft equivalence itself.
 
-`KarguApproval.tla` / `ApprovalMC.cfg` refine one captured permission operation.
-Run `proof/run_tlc.sh --approval` for an exhaustive scan. Eight independent
-authority checks can become stale before or after approval; approval is claimed
-before entering its continuation, and cancellation prevents later starts.
-The 2026-10-21 scan explored 8,194 generated states, 1,536 distinct states,
-depth 11, with no error. ERT covers directory replacement, owner closure,
-environment/policy changes, reentrant and duplicate decisions, and cancellation
-of only the owned UI prompt. This is not a proof of shell analysis, OS isolation,
-exactly-once external effects or filesystem compare-and-swap.
+`KarguApproval.tla` / `ApprovalMC.cfg` refine one captured permission operation
+in the shared command/editor ledger. Run `proof/run_tlc.sh --approval` for an
+exhaustive scan. Twelve independent authority checks include config/policy,
+content and review revision; the captured action kind cannot be interchanged.
+Approval is claimed before entering its continuation, and cancellation prevents
+later starts. The 2026-10-28 scan explored 360,452 generated / 49,152 distinct
+states, depth 15, with no error and an empty queue. Removing the action-kind guard
+violates `Safety_ExactActionKind` after 16 distinct states. The native editor gate
+tests cover actual run ownership, exact revision, single use, command coexistence,
+missing presenter, policy and resource release. Existing ERT covers directory
+replacement, owner closure, environment/policy changes, reentrant decisions and
+cancellation of only the owned UI prompt. This is not a proof of shell analysis,
+OS isolation, editor issuance/settlement, exactly-once external effects or
+filesystem compare-and-swap.
 
 Model capabilities are read from provider/model-owned metadata records.
 Provider isolation, ambiguous display aliases, exact request identities and
