@@ -689,6 +689,17 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     arası activity fence olmadan applied sonucu veya mutation capability açılmaz.
     Full ERT 1.294/1.294; son witness/read-only ekleriyle ilgili testler 17/17,
     warning-as-error bytecompile/checkdoc temiz. Rust geçişleri değişmedi.
+    Native issued activity controller artık acquisition/settlement observer'ını
+    UI iptalinden bağımsız tutar: late token sonrası yazmadan no-dispatch; handler
+    içindeki revoke/Stop/EOF sonrası gerçek unwind'a kadar bağlantılar arası
+    fiziksel writer fence. Yalnız doğrulanmış terminal ACK veya actual EOF ile
+    tahliye; malformed settlement eski bağlantıyı drain eder, replay yoktur.
+    Gerçek save pipe testi controller'a bağlandı; 11 lifecycle testi ve yeni
+    editor-activity TLC (356 farklı durum) temiz. EOF'ta erken release mutantı
+    PhysicalFence ihlaliyle reddedildi. Pozitif receipt henüz bağlı değildir;
+    girilmiş handler gerçek gözlemleriyle terminal unknown raporlar.
+    Full ERT 1.306/1.306; son Stop/unwind ekini de içeren native edit testleri
+    33/33, warning-as-error bytecompile/checkdoc temiz. Rust kaynakları değişmedi.
   - [ ] **3.6 Native batch/journal/rollback:** bütün dosyalar preflight edilmeden
     ilk yazma olmasın; gerçek file/batch durumları, hunk sayıları ve snapshot stack
     tek kayıtta yaşasın. Rollback yalnız hâlâ kendi yazdığı revision'da; foreign

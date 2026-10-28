@@ -4,6 +4,22 @@ This directory holds the TLA+ specification of Kargu's agent loop and protocol w
 
 The check is exhaustive over a bounded model. It is a proof for those bounds, not for every parameter value.
 
+## Native editor activity across connection replacement (2026-10-28)
+
+`proof/run_tlc.sh --editor-activity` checks `KarguEditorActivity` /
+`EditorActivityMC`: two activities, two connection epochs, pending issuance,
+late token delivery, revoke, synchronous handler return, terminal ACK and EOF.
+A single physical Emacs fence survives EOF/reconnect until the old handler
+actually unwinds. Publication assumes the gate/preflight/journal ordering checked
+by `--edit-issuance`; native IO joins remain that model's responsibility.
+It does not prove arbitrary asynchronous effects scheduled by editor hooks.
+
+Standard BFS completed with 933 generated / 356 distinct states, depth 15 and an
+empty queue. The early-release-on-EOF mutant violates `PhysicalFence` after 20
+distinct states. Eleven held-peer ERT tests exercise the actual bridge/controller,
+and the real CRLF/Unicode pipe fixture now applies through it. Positive native
+receipt ingestion and production consumer cutover remain open in todo task 3.
+
 ## Native edit preparation and exact checker verdict (2026-10-28)
 
 `KarguEditPreparation.tla` / `EditPreparationMC.cfg` cover two opaque preparation

@@ -21,6 +21,8 @@
                   (connection arguments callback &rest options))
 (declare-function kargu-bridge-approval-request "kargu/bridge/approval" (connection id params))
 (declare-function kargu-bridge-job--disconnect "kargu/bridge/jobs" (job status))
+(declare-function kargu-bridge-edit-activity-disconnect "kargu/bridge/edit/activity" (connection))
+(declare-function kargu-bridge-edit-activity-revoke "kargu/bridge/edit/activity" (connection params))
 (declare-function kargu-providers-install-projection "kargu/providers/projection" (snapshot))
 
 (defgroup kargu-bridge nil
@@ -119,6 +121,8 @@
   "Revoke CONNECTION and finish every waiter with STATUS before resource release."
   (unless (eq (kargu-bridge-connection-state connection) 'closed)
     (setf (kargu-bridge-connection-state connection) 'closed)
+    (when (fboundp 'kargu-bridge-edit-activity-disconnect)
+      (kargu-bridge-edit-activity-disconnect connection))
     (dolist (job (hash-table-values (kargu-bridge-connection-jobs connection)))
       (kargu-bridge-job--disconnect job status))
     (kargu-bridge--dismiss-reverse connection)
@@ -393,6 +397,9 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
                          (or (eq params :missing) (hash-table-p params) (vectorp params))))
             (error "Invalid request envelope"))
           (cond
+           ((and (eq id :missing) (equal method "editor/revoke_edit"))
+            (when (fboundp 'kargu-bridge-edit-activity-revoke)
+              (kargu-bridge-edit-activity-revoke connection (gethash "params" msg))))
            ((and (eq id :missing) (member method '("api/delta" "api/body")))
             (let* ((params (gethash "params" msg))
                    (request-id (and (hash-table-p params) (gethash "request_id" params)))

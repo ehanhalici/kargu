@@ -500,9 +500,47 @@ CRLF/Unicode editor save and records terminal `outcome_unknown`. Positive receip
 validation is still absent; the test deliberately does not fabricate success.
 A second pipe test proves that a stale clean buffer with unchanged tick and the
 same byte count cannot pass native preflight against different disk contents.
-These primitives are not connected to public tool consumers. The issued observer,
-cross-connection activity fence, full receipts, batch/rollback and consumer cutover
-remain required before advertising native mutation capability.
+These primitives are not connected to public tool consumers. Full receipts,
+batch/rollback and consumer cutover remain required before advertising native
+mutation capability. The issued observer and activity fence are connected below.
 Full ERT passed 1,294/1,294 before the final witness/read-only additions; the final
 affected suite passed 17/17. Changed Elisp sources compile with warnings treated
 as errors and pass checkdoc. Native Rust state transitions/models are unchanged.
+
+## Emacs issued activity lifetime
+
+`bridge/edit/activity.el` acquires `edit/issue` only on the captured connection,
+source, scope, revision and complete-preflight fingerprint. The forward observer
+has no UI buffer owner or delivery timeout: a separate source timer/kill/mode
+cleanup revokes via native abort without discarding a late nonce. A late token
+after revocation is settled as not dispatched. Actual source validity is checked
+again after caller guards, and native revocation notices match their original
+connection/edit/source/token. Duplicated responses cannot rerun a handler.
+
+One Emacs activity fence spans native applications and connection epochs. It
+remains held during queued acquisition, synchronous handler execution and native
+terminal settlement. EOF inside a handler revokes new primitive entry but cannot
+release the fence; the handler's actual unwind does. EOF after quiescence finishes
+once even when pending request callbacks are subsequently drained. Malformed or
+rejected settlement drains the original connection; a different connection is
+never substituted. Observer failures after settlement do not reverse it.
+
+Eleven held-peer tests exercise real bridge waiters/notifications/EOF, actual timer
+expiry, late/duplicate replies, source kill, reentrant guards, native revoke,
+Stop, C-g/nonlocal exits and settlement failure. The real CRLF/Unicode native pipe
+test now acquires, applies and settles through this controller and the document
+adapter. This controller currently reports entered handlers as outcome unknown:
+positive native receipt ingestion and the production batch producer are still
+required. Handler callbacks must be synchronous and must not schedule deferred
+file effects; their return is the platform quiescence fact.
+
+`--editor-activity` explores two activity identities and two connection epochs:
+933 generated / 356 distinct states, depth 15, empty queue. It composes with the
+native issuance model by assuming actual native publication follows that model's
+gate/preflight/journal sync. It checks physical fence retention, observation
+ownership, single entry and no overlap across disconnect/reconnect. Releasing on
+EOF while a handler is running violates `PhysicalFence` after 20 distinct states.
+These are bounded safety checks, not a liveness or arbitrary save-hook IO proof.
+Full ERT passed 1,306/1,306 before the final Stop/unwind addition; the final native
+edit suite passed 33/33. Changed Elisp files pass warning-as-error byte compilation
+and checkdoc. Native Rust sources and their original-file IO ownership are unchanged.

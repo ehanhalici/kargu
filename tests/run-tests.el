@@ -83,6 +83,7 @@
 (require 'tests/test-native-edit-patch)
 (require 'tests/test-native-edit-document)
 (require 'tests/test-native-edit-transaction)
+(require 'tests/test-native-edit-activity)
 (require 'tests/test-metadata)
 (require 'tests/test-model-store)
 (require 'tests/test-parameters)
