@@ -609,11 +609,14 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   sonra Elisp stage/review/pending-plan/global edit motorlarını sil. Kaynak: Aşama 2,
   G04/G10; .codex/06 ve 08.
 
-  **2026-10-29 denetimi:** Görevin tamamlandığı iddiası kodla doğrulanmadı.
-  Receipt akışı düzeltildi ve test edildi; native snapshot/rollback, hunk sayımları,
-  revised Ediff, production consumer cutover ve legacy temizliği henüz yok.
-  3.4–3.10 açık tutulur. Gereksinim/kod/kanıt eşlemesi ve sınırlar:
-  `docs/task3-audit-2026-10-29.md`. Yeşil legacy testleri native cutover kanıtı değildir.
+  **2026-10-29 tekrar denetimi:** Native revision worker/atomik onay güncellemesi,
+  version-bound process-local rollback ve asenkron batch producer eklendi ve
+  düzeltildi. Tool/LSP/plan/interactive undo yolu yalnız açık
+  `kargu-diff-native-edit-enabled` seçimiyle etkin; ready/mocked test fonksiyonları
+  backend seçmez, seçilmiş işlem başka writer'a düşmez. Tam hunk ölçümü, default
+  consumer cutover, verification readers ve legacy temizliği tamamlanmadığından
+  3.4–3.10 açık tutulur. Güncel kapsam/kanıt/sınırlar:
+  `docs/task3-audit-2026-10-29.md`.
 
   - [x] **3.1 Sözleşme ve kabul envanteri:** mevcut public edit/LSP/patch/review/
     rollback consumer'larını ve testlerini eşle; tek typed file/batch outcome,
@@ -736,6 +739,11 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     worker/journal join boyunca tek writer rezervasyonu korunur. Hunk sayımları,
     native snapshot stack ve rollback portu eklenmedi; `track.el` hâlâ gerçek
     rollback sahibidir. Bu nedenle 3.6 tamamlanmış değildir.
+    Tekrar denetim: native stack artık gerçek final body/document/disk tutar;
+    app başına 16 snapshot / 48 MiB sınırı, exact foreign-version kontrolü,
+    worker inverse hazırlığı ve consuming per-file undo vardır. Whole-file/revised/
+    inverse hunk ölçümü ve kalan recovery kabulü açık; eski paragraf ilk denetimin
+    durumunu kaydeder, güncel kapsam audit belgesindedir.
   - [ ] **3.7 Review UI adapter:** Ediff yalnız edit_id/review revision'a bağlı
     sunum ve kullanıcı metni sağlar; düzenlenmiş proposal yeniden native review
     revision'ı alır. Core receipt olmadan applied yazılmaz; reject/timeout/C-g,
@@ -825,6 +833,33 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     yanıtı `resource_limit` ile düşüyor. Bu G02/katalog transport açığı giderilmeden
     genel Emacs 1 KiB startup desteği iddia edilmesin. Edit receipt fixture'ı
     yalnız provider hydration'ını izole eder; production fallback eklenmedi.
+
+  - [x] **3.19 Rollback sahipliği ve geçmiş (tekrar denetimde bulundu):** güncel
+    diski sahiplenen inverse yerine verified final stat/body/document zorunlu.
+    Add/delete inverse, owned dirty buffer-only, save-hook body ve ardışık/targeted
+    undo düzeltildi. Başarılı inverse yalnız kaynak snapshot dosyasını tüketir;
+    redo üretmez. Geç receipt kapalı session geçmişini diriltmez; app history ve
+    passive UI referansları sınırlıdır.
+  - [x] **3.20 Atomik revision ve gerçek drain (tekrar denetimde bulundu):**
+    source/onay ayrı mutasyon yerine bounded candidate worker + geçici byte
+    reservation + consuming commit permit. Hata eski iki kaydı korur; metadata/
+    digest/revision birlikte ilerler. Cancel worker join'i taklit etmez; application close bekleyeni iptal edilse
+    de gerçek join beklenir. Üç native regresyon ve 272 durumlu exhaustive revision modeli; half-commit mutantı red.
+  - [x] **3.21 Asenkron batch ve kalıcı journal (tekrar denetimde bulundu):**
+    production IPC spin-wait kaldırıldı; bütün metadata/text sayfaları ve belgeler
+    ilk yazımdan önce dondurulur, bütün belgeler tekrar kontrol edilir. Target parent
+    root olamaz; mode/session/policy revision değişimi eski devamı durdurur.
+    Başarılı journal silinmez; private persistent directory kullanılır.
+  - [x] **3.22 Deterministik opt-in consumer yolu (tekrar denetimde bulundu):**
+    tool/LSP/plan ve native undo aynı asenkron producer'a bağlı. Mock/readiness
+    tabanlı seçim, APPLIED-prefix doğrulaması ve native→legacy undo fallback'i
+    kaldırıldı. Sonuç saved/count alanları receipt'ten gelir; mevcut legacy Git
+    tüketicisinin ortak process supervision'ı korunur. Tam default cutover değildir.
+  - [ ] **3.23 Hunk/receipt ve kalan UI kabulü:** write/revised/inverse hunk'larını
+    gerçek native ölçümle tamamla; şimdilik unknown. Büyük review metni için bounded
+    upload portunu tamamla. Büyük batch receipt yanıtını
+    küçük frame'lerde sayfala. Gerçek GUI cancel/foreign-window ve journal restart/
+    retention kabulünü tamamla. Bu kabul olmadan 3.6–3.10'u kapatma.
 
 - [ ] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
   revision/connection/thread/frame-bound reverse RPC'ye bağla. Mention/folder/

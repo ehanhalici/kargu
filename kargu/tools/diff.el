@@ -35,6 +35,7 @@
 (require 'kargu/files)
 (require 'kargu/edit)
 (require 'kargu/tools/process)
+(require 'kargu/tools/diff/native)
 
 ;;;; Customization --------------------------------------------------------
 
@@ -128,7 +129,8 @@ arrives once the human finishes the ediff review, without ever waiting for
 it.  RUN returns the result string, or `deferred' when DONE will deliver it.
 Without CALLBACK the string is returned; with CALLBACK it is passed there."
   (let* ((done (and callback
-                    (eq kargu-diff-review-mode 'blocking)
+                    (or (eq kargu-diff-review-mode 'blocking)
+                        (kargu-diff-native-enabled-p))
                     (lambda (outcome)
                       (funcall callback (kargu-diff--describe outcome)))))
          (result (condition-case-unless-debug err
@@ -164,8 +166,10 @@ Without CALLBACK the string is returned; with CALLBACK it is passed there."
           (when (and (stringp reason) (not (string-empty-p reason)))
             (message "kargu edit proposal for %s: %s" path reason)
             (kargu-log 'info "diff: edit reason: %s" reason))
-          (let ((outcome (kargu-diff-apply-replace path old new done)))
-            (if done 'deferred (kargu-diff--describe outcome))))))))
+          (if (kargu-diff-native-enabled-p)
+              (kargu-diff-native-execute (list :intent :replace :path path :old old :new new) done)
+            (let ((outcome (kargu-diff-apply-replace path old new done)))
+              (if done 'deferred (kargu-diff--describe outcome)))))))))
 
 (defun kargu-diff--write-file-tool (args &optional callback)
   "Write the file described by ARGS, reporting the result to CALLBACK."
@@ -194,8 +198,10 @@ Without CALLBACK the string is returned; with CALLBACK it is passed there."
               (when (and (stringp reason) (not (string-empty-p reason)))
                 (message "kargu write proposal for %s: %s" path reason)
                 (kargu-log 'info "diff: write reason: %s" reason))
-              (let ((outcome (kargu-diff-apply-proposal path contents done)))
-                (if done 'deferred (kargu-diff--describe outcome)))))))))))
+              (if (kargu-diff-native-enabled-p)
+                  (kargu-diff-native-execute (list :intent :write :path path :content contents) done)
+                (let ((outcome (kargu-diff-apply-proposal path contents done)))
+                  (if done 'deferred (kargu-diff--describe outcome))))))))))))
 
 ;;;; Unified Diff parsing and isolated git apply ----------------------------
 
@@ -215,7 +221,7 @@ Without CALLBACK the string is returned; with CALLBACK it is passed there."
    ((string-match-p (rx string-start (or "old" "new") " mode ") line)
     (error "Unsupported file mode change in patch: %s" line))
    ((and (string-match (rx string-start (or "new" "deleted") " file mode "
-                            (group (* nonl)) string-end) line)
+                           (group (* nonl)) string-end) line)
          (not (equal (string-trim (match-string 1 line)) "100644")))
     (error "Unsupported file mode in patch: %s" line))))
 
@@ -648,7 +654,7 @@ Return an ordered list of target plists."
           t)
       (error
        (puthash file (list :status :error :file file :saved nil
-                          :message (format "ERROR: %s: %s" file (error-message-string err)))
+                           :message (format "ERROR: %s: %s" file (error-message-string err)))
                 (kargu-diff--patch-batch-outcomes batch))
        nil))))
 
@@ -679,7 +685,7 @@ Return an ordered list of target plists."
 (defun kargu-diff--finish-patch (batch)
   "Deliver BATCH once after all proposals have reached a final outcome."
   (when (and (eq (kargu-diff--patch-batch-state batch) :waiting)
-              (zerop (kargu-diff--patch-batch-pending batch)))
+             (zerop (kargu-diff--patch-batch-pending batch)))
     (setf (kargu-diff--patch-batch-state batch) :done)
     (kargu-diff--commit-deferred-batch batch)
     (when (and (kargu-diff--batch-has-failure-p batch)
@@ -761,7 +767,7 @@ Return an ordered list of target plists."
                   (if error
                       (funcall callback (format "ERROR: %s" error))
                     (kargu-diff-with-service service
-                      (kargu-diff--commit-patch plan callback))))
+					     (kargu-diff--commit-patch plan callback))))
                 :cancel cleanup)))
     (setq proc
           (kargu-process-run
@@ -823,7 +829,13 @@ receives the final summary once all file reviews have finished."
                               (unless (kargu-nonempty patch)
                                 "ERROR: patch argument is required"))))
             (if failure (deliver failure)
-              (kargu-diff-apply-patch patch (and callback #'deliver))))
+              (if (kargu-diff-native-enabled-p)
+                  (if callback
+                      (kargu-diff-native-execute
+                       (list :intent :patch :patch patch)
+                       (lambda (outcome) (deliver (kargu-diff-native-describe outcome))))
+                    (deliver "ERROR: Native edits require an asynchronous callback"))
+                (kargu-diff-apply-patch patch (and callback #'deliver)))))
         (error (deliver (format "ERROR: %s" (error-message-string err))))))))
 
 (defconst kargu-diff--tool-specs
@@ -920,11 +932,16 @@ Format:
         (content (kargu-edit-request-content request)))
     (if-let* ((blocked (kargu-diff--mutating-disabled "edit_by_lsp")))
         (if callback (funcall callback blocked) blocked)
-      (if callback
-          (kargu-diff-apply-proposal
-           path content (lambda (outcome)
-                          (funcall callback (kargu-diff--describe outcome))))
-        (kargu-diff--describe (kargu-diff-apply-proposal path content))))))
+      (if (kargu-diff-native-enabled-p)
+          (if callback
+              (kargu-diff-native-execute
+               (list :intent :write :path path :content content)
+               (lambda (outcome) (funcall callback (kargu-diff--describe outcome))))
+            "ERROR: Native edits require an asynchronous callback")
+        (if callback
+            (kargu-diff-apply-proposal
+             path content (lambda (outcome) (funcall callback (kargu-diff--describe outcome))))
+          (kargu-diff--describe (kargu-diff-apply-proposal path content)))))))
 
 (defun kargu-diff-prepare-execution (context)
   "Attach only CONTEXT's session edit service, retaining its undo snapshots."

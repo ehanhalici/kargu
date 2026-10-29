@@ -31,7 +31,10 @@
 (defconst kargu-bridge-edit--methods
   '((:begin . "edit/begin") (:append . "edit/append") (:prepare . "edit/prepare")
     (:read . "edit/read") (:abort . "edit/abort") (:inspect . "edit/inspect")
-    (:targets . "edit/targets") (:document . "edit/document") (:files . "edit/files"))
+    (:targets . "edit/targets") (:document . "edit/document") (:files . "edit/files")
+    (:authorize . "edit/authorize") (:decision . "edit/decision")
+    (:revise . "edit/revise") (:preflight . "edit/preflight")
+    (:rollback . "edit/rollback"))
   "Closed native edit wire method names.")
 
 (cl-defstruct (kargu-bridge-edit-artifact
@@ -97,7 +100,7 @@
   (kargu-async-finish (kargu-bridge-edit-transfer-task transfer) nil failure))
 
 (defun kargu-bridge-edit--guard (transfer callback)
-  "Wrap CALLBACK with TRANSFER ownership and deadline checks."
+  "Guard CALLBACK with TRANSFER ownership and deadline verification."
   (lambda (value failure)
     (cond
      (failure (kargu-bridge-edit--fail transfer failure))
@@ -127,8 +130,8 @@
                  (if inspect (and batch (eq (gethash "inspected" value) t))
                    (or (and batch (eq (gethash "batch" value) t))
                        (cl-every (lambda (key) (let ((hash (gethash key value)))
-                                               (and (stringp hash)
-                                                    (string-match-p kargu-bridge-edit--hash-pattern hash))))
+						 (and (stringp hash)
+                                                      (string-match-p kargu-bridge-edit--hash-pattern hash))))
                                  '("base_hash" "proposed_hash")))))
       (error "Invalid proposal descriptor"))
     (kargu-bridge-edit--deliver transfer value)))
@@ -230,7 +233,7 @@
              (lambda (scope error-data) (kargu-bridge-edit--begin transfer scope error-data))))))))
 
 (defun kargu-bridge-edit--watch-owner (transfer)
-  "Cancel TRANSFER when its captured source is killed or changes major mode."
+  "Cancel TRANSFER when its captured source is killed or mode is altered."
   (let* ((task (kargu-bridge-edit-transfer-task transfer))
          (owner (kargu-async-task-buffer task))
          (cancel (lambda () (kargu-async-cancel task))))
@@ -322,6 +325,78 @@ This transport does not read editor files or grant editor effects."
          (funcall callback (and (kargu-bridge-edit--current-p artifact) value)
                   (or failure (unless (kargu-bridge-edit--current-p artifact)
                                 (kargu-bridge--fault "stale_edit_preparation")))))))))
+
+(defun kargu-bridge-edit-authorize (artifact presenter callback)
+  "Request execution authorization for ARTIFACT with PRESENTER into CALLBACK."
+  (let ((arguments (kargu-bridge-edit--arguments artifact)))
+    (puthash "presenter" (if (eq presenter 'available) "available" "missing") arguments)
+    (kargu-bridge-edit--call artifact :authorize arguments callback)))
+
+(cl-defun kargu-bridge-edit-decision (artifact &key edit-id revision decision callback)
+  "Submit DECISION for ARTIFACT's exact EDIT-ID and REVISION into CALLBACK."
+  (kargu-bridge-edit--execution-call
+   artifact :decision :edit edit-id :revision revision
+   :fields (list "decision" (if (symbolp decision) (symbol-name decision) decision)) :callback callback))
+
+(cl-defun kargu-bridge-edit-revise (artifact &key edit-id revision file-index new-text callback)
+  "Revise ARTIFACT's EDIT-ID at REVISION into CALLBACK.
+FILE-INDEX selects the proposal receiving NEW-TEXT."
+  (kargu-bridge-edit--execution-call
+   artifact :revise :edit edit-id :revision revision
+   :fields (list "file_index" file-index "new_text" new-text) :callback callback))
+
+(cl-defun kargu-bridge-edit-preflight (artifact &key edit-id revision witness callback)
+  "Preflight ARTIFACT's EDIT-ID and REVISION with WITNESS into CALLBACK."
+  (kargu-bridge-edit--execution-call
+   artifact :preflight :edit edit-id :revision revision :fields (list "witness" witness) :callback callback))
+
+(cl-defun kargu-bridge-edit--execution-call (artifact method &key edit revision fields callback)
+  "Call METHOD on ARTIFACT's EDIT and REVISION with FIELDS into CALLBACK."
+  (if (not (kargu-bridge-edit--current-p artifact))
+      (funcall callback nil (kargu-bridge--fault "stale_edit_preparation"))
+    (kargu-bridge-edit--call
+     artifact method
+     (apply #'kargu-bridge--object "origin_id" (kargu-bridge-edit-artifact-origin artifact)
+            "edit_id" edit "revision" revision fields)
+     (lambda (value failure)
+       (funcall callback value
+                (or failure (unless (kargu-bridge-edit--current-p artifact)
+                              (kargu-bridge--fault "stale_edit_preparation"))))))))
+
+(cl-defun kargu-bridge-edit-rollback (application arguments &key callback parent)
+  "Prepare APPLICATION rollback from detached ARGUMENTS into CALLBACK.
+PARENT owns only preparation; no write capability is returned."
+  (let* ((arguments (kargu-bridge-edit--copy arguments))
+         (task (kargu-async-start callback :timeout 30 :parent parent)))
+    (kargu-bridge-ensure
+     (kargu-async-wrap
+      task
+      (lambda (connection failure)
+        (if failure (kargu-async-finish task nil failure)
+          (kargu-bridge-application-ensure
+           connection application
+           (kargu-async-wrap
+            task
+            (lambda (scope error-data)
+              (if error-data (kargu-async-finish task nil error-data)
+                (kargu-bridge-call
+                 connection "edit/rollback"
+                 (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope scope)
+                                       "arguments" arguments)
+                 (lambda (value fault)
+                   (if fault (kargu-async-finish task nil fault)
+                     (let ((artifact (kargu-bridge-edit-artifact--make
+                                      :application application :connection connection
+                                      :scope (kargu-bridge-application--copy-scope scope)
+                                      :origin (gethash "origin_id" arguments)
+                                      :id (gethash "preparation_id" value)
+                                      :descriptor (gethash "descriptor" value))))
+                       (if (and (kargu-bridge-edit--task-current-p task)
+                                (kargu-bridge-edit--current-p artifact))
+                           (kargu-async-finish task artifact nil)
+                         (kargu-bridge-edit-release artifact)
+                         (kargu-async-finish task nil (kargu-bridge--fault "stale_edit_preparation")))))))))))))))
+    task))
 
 (provide 'kargu/bridge/edit)
 ;;; edit.el ends here

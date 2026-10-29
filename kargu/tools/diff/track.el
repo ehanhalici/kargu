@@ -19,6 +19,8 @@
 (require 'kargu/files)
 (require 'kargu/tools/diff/context)
 
+(declare-function kargu-diff-native-rollback "kargu/tools/diff/native"
+                  (path &rest options))
 (declare-function kargu-lsp-diagnostics-snapshot "kargu/tools/lsp/diagnostics" (file-path))
 (declare-function kargu-lsp-current-diagnostics-p "kargu/tools/lsp/freshness" (buffer))
 
@@ -188,7 +190,7 @@ Refuse when LATEST or SNAP indicates edits occurred since commit."
               (delete path kargu-diff--run-modified-files))))
     (kargu-log 'info "diff: rollback of %s (initial=%s)" path (not single-step))))
 
-(defun kargu-diff-rollback (file-path &optional single-step service)
+(cl-defun kargu-diff-rollback (file-path &optional single-step service &key callback)
   "Restore FILE-PATH to its initial state before agent edits in this series.
 By default, restores to the earliest pre-agent snapshot (as if the prompt
 was never run) and clears the file's rollback snapshot stack.
@@ -196,7 +198,8 @@ When SINGLE-STEP is non-nil (or with a prefix argument), restore only to
 the content before the last edit step instead of the initial state.
 SERVICE is the optional `kargu-edit-service' holding the snapshots.
 A file that was originally created by an agent edit is deleted instead.
-The file is also removed from the changed-file set consumed by the agent loop."
+The file is also removed from the changed-file set consumed by the agent loop.
+Native rows deliver CALLBACK asynchronously."
   (interactive
    (list (let ((paths (kargu-diff-snapshot-paths)))
            (if paths
@@ -207,37 +210,50 @@ The file is also removed from the changed-file set consumed by the agent loop."
          (stack (gethash path (kargu-diff--service-snapshots service))))
     (if (null stack)
         (user-error "No snapshot for %s" path)
-      (let* ((latest (car stack))
-             (snap (if single-step latest (car (last stack))))
-             (content (plist-get snap :content))
-             (created-new (plist-get snap :created-new))
-             (buffer (find-buffer-visiting path)))
-        (when (and latest (or (plist-member latest :post-content) (plist-get latest :deleted))
-                   (not (kargu-diff--snapshot-unmodified-since-commit-p path latest)))
-          (error "Rollback conflict for %s: file or buffer was modified after the agent edit" path))
-        (if created-new
-            (kargu-diff--rollback-created-file path buffer latest)
-          (kargu-diff--rollback-existing-file path buffer content snap latest))
-        (when (and single-step (cdr stack))
-          (let ((prev (cadr stack)))
-            (plist-put prev :post-content (if (buffer-live-p buffer)
-                                              (kargu-diff--buffer-full-text buffer)
-                                            content))
-            (plist-put prev :post-tick (and (buffer-live-p buffer)
-                                            (buffer-chars-modified-tick buffer)))
-            (plist-put prev :post-disk-revision (kargu-diff--disk-revision path))))
-        (kargu-diff--pop-snapshot-and-clear path stack single-step service)
-        path))))
+      (if (plist-get (car stack) :native)
+          (kargu-diff-native-rollback
+           path :single-step single-step :service service
+           :callback (or callback (lambda (result) (message "Rollback %s: %s" path
+                                                                    (or (plist-get result :message) (plist-get result :status))))))
+        (let* ((latest (car stack))
+               (snap (if single-step latest (car (last stack))))
+               (content (plist-get snap :content))
+               (created-new (plist-get snap :created-new))
+               (buffer (find-buffer-visiting path)))
+          (when (and latest (or (plist-member latest :post-content) (plist-get latest :deleted))
+                     (not (kargu-diff--snapshot-unmodified-since-commit-p path latest)))
+            (error "Rollback conflict for %s: file or buffer was modified after the agent edit" path))
+          (if created-new
+              (kargu-diff--rollback-created-file path buffer latest)
+            (kargu-diff--rollback-existing-file path buffer content snap latest))
+          (when (and single-step (cdr stack))
+            (let ((prev (cadr stack)))
+              (plist-put prev :post-content (if (buffer-live-p buffer)
+						(kargu-diff--buffer-full-text buffer)
+                                              content))
+              (plist-put prev :post-tick (and (buffer-live-p buffer)
+                                              (buffer-chars-modified-tick buffer)))
+              (plist-put prev :post-disk-revision (kargu-diff--disk-revision path))))
+          (kargu-diff--pop-snapshot-and-clear path stack single-step service)
+          path)))))
 
 (defun kargu-diff-rollback-all (&optional service)
-  "Roll back all files modified in this series on optional SERVICE."
+  "Roll back all files on SERVICE, waiting asynchronously between native edits."
   (interactive)
   (let ((paths (kargu-diff-snapshot-paths service)))
-    (if (null paths)
-        (message "kargu: no rollback snapshots")
-      (dolist (path paths)
-        (kargu-diff-rollback path nil service))
-      (message "kargu: rolled back all %d modified file(s) to initial state" (length paths)))))
+    (cl-labels ((next (remaining)
+                  (when remaining
+                    (let ((path (car remaining)))
+                      (if (plist-get (car (gethash path (kargu-diff--service-snapshots service))) :native)
+                          (kargu-diff-rollback
+                           path nil service :callback
+                           (lambda (result)
+                             (if (eq (plist-get result :status) :applied-full)
+                                 (next (cdr remaining))
+                               (message "Rollback stopped: %s" (plist-get result :status)))))
+                        (kargu-diff-rollback path nil service)
+                        (next (cdr remaining)))))))
+      (next paths))))
 
 ;;;; Changed-file signal (consumed by the loop) ---------------------------
 
@@ -301,9 +317,9 @@ Return (OLD-MIDDLE . NEW-MIDDLE)."
     (setq old (cdr old) new (cdr new)))
   (let ((rold (reverse old))
         (rnew (reverse new)))
-  (while (and rold rnew (equal (car rold) (car rnew)))
-    (setq rold (cdr rold) rnew (cdr rnew)))
-  (cons (nreverse rold) (nreverse rnew))))
+    (while (and rold rnew (equal (car rold) (car rnew)))
+      (setq rold (cdr rold) rnew (cdr rnew)))
+    (cons (nreverse rold) (nreverse rnew))))
 
 (defun kargu-diff--count-unmatched (lines other)
   "How many of LINES have no counterpart in OTHER (each counterpart used once)."

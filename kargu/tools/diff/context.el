@@ -18,11 +18,14 @@
 (require 'kargu/contract/assert)
 (require 'kargu/contract/result)
 (require 'kargu/files)
+(require 'kargu/async)
 
 (declare-function kargu-diff-apply-replace "kargu/tools/diff/stage"
                   (file-path old-string new-string &optional callback))
 (declare-function kargu-diff-apply-proposal "kargu/tools/diff/stage"
                   (file-path new-content &optional callback))
+(declare-function kargu-diff-native-enabled-p "kargu/tools/diff/native" ())
+(declare-function kargu-diff-native-execute "kargu/tools/diff/native" (spec callback &optional service))
 (declare-function kargu-diff-apply-patch "kargu/tools/diff"
                   (patch-text &optional callback))
 (declare-function kargu-diff--describe "kargu/tools/diff/stage" (outcome))
@@ -31,6 +34,7 @@
 (declare-function kargu-session-id "kargu/core/session" (session))
 (declare-function kargu-session-id-value "kargu/core/session" (session))
 (declare-function kargu-process-cancel "kargu/tools/process" (proc))
+(declare-function kargu-diff--ediff-quit "kargu/tools/diff/review" ())
 (declare-function ediff-really-quit "ediff-util" (&optional flag))
 
 (defvar kargu-diff-review-mode)
@@ -63,6 +67,8 @@
   (run-modified-files nil)
   (temp-dirs nil)
   (processes nil)
+  (native-tasks nil)
+  (native-edits nil)
   (timers nil)
   (buffers nil)
   (review-mode 'auto)
@@ -146,6 +152,8 @@ SERVICE-ID is an optional string identifier."
   "Revoke edit SERVICE before closing only its own resources."
   (when (and (kargu-edit-service-p service) (not (kargu-edit-service-closed service)))
     (setf (kargu-edit-service-closed service) t)
+    (mapc #'kargu-async-cancel (kargu-edit-service-native-tasks service))
+    (setf (kargu-edit-service-native-tasks service) nil)
     (maphash (lambda (_path review) (kargu-edit-service--close-review review))
              (kargu-edit-service-reviews service))
     (dolist (process (kargu-edit-service-processes service))
@@ -258,8 +266,8 @@ PLAN-ID is the plan identifier.
 PATH is the modified file path.
 STATUS is a symbol indicating the transaction result.
 POST-REVISION is the post-write `kargu-file-revision'.
-HUNKS-APPLIED is the count of applied hunks.
-HUNKS-TOTAL is the total count of proposed hunks.
+HUNKS-APPLIED is the applied count, or :json-null when unmeasured.
+HUNKS-TOTAL is the proposed count, or :json-null when unmeasured.
 MESSAGE is a model/human-facing description.
 SAVED is non-nil if disk write succeeded.
 HOOK-TRANSFORMED is non-nil if save hooks altered file content.
@@ -397,8 +405,11 @@ An explicitly closed service never silently acquires another owner's state."
      :path resolved
      :status status
      :post-revision post-rev
-     :hunks-applied (if (memq status '(:applied :partial)) 1 0)
-     :hunks-total 1
+     :hunks-applied (if (and is-plist (plist-member raw :hunks-applied))
+                        (plist-get raw :hunks-applied)
+                      (if (memq status '(:applied :partial)) 1 0))
+     :hunks-total (if (and is-plist (plist-member raw :hunks-total))
+                      (plist-get raw :hunks-total) 1)
      :message msg
      :saved saved
      :hook-transformed hook-transformed
@@ -426,51 +437,63 @@ An explicitly closed service never silently acquires another owner's state."
                 (kargu-err (kargu-edit-outcome-message outcome) :edit-failed outcome))
                (t
                 (kargu-ok outcome)))))))
-    (pcase kind
-      (:block
-       (let ((old-str (or (and (listp content) (plist-get content :old-string))
-                          (and (consp content) (car content))
-                          (and (listp metadata) (plist-get metadata :old-string))))
-             (new-str (or (and (listp content) (plist-get content :new-string))
-                          (and (consp content) (cdr content))
-                          (and (stringp content) content)
-                          (and (listp metadata) (plist-get metadata :new-string)))))
-         (unless (and (stringp old-str) (not (string-empty-p old-str)))
-           (error "Old_string is required for :block edit"))
-         (unless (stringp new-str)
-           (error "New_string is required for :block edit"))
-         (if callback
-             (kargu-diff-apply-replace
-              resolved old-str new-str
-              (lambda (raw) (funcall callback (funcall handle-outcome raw))))
-           (funcall handle-outcome (kargu-diff-apply-replace resolved old-str new-str nil)))))
-      ((or :write :symbol)
-       (let ((new-text (if (stringp content) content (plist-get metadata :text))))
-         (unless (stringp new-text)
-           (error "Proposed content must be a string for %s edit" kind))
-         (if callback
-             (kargu-diff-apply-proposal
-              resolved new-text
-              (lambda (raw) (funcall callback (funcall handle-outcome raw))))
-           (funcall handle-outcome (kargu-diff-apply-proposal resolved new-text nil)))))
-      (:unified-diff
-       (let ((patch-text (if (stringp content) content (plist-get metadata :patch))))
-         (unless (stringp patch-text)
-           (error "Proposed content must be a patch string for :unified-diff edit"))
-         (if callback
-             (kargu-diff-apply-patch
-              patch-text
-              (lambda (summary)
-                (funcall callback
-                         (funcall handle-outcome
-                                  (list :status :unknown
-                                        :file resolved
-                                        :message summary)))))
-           (let ((summary (kargu-diff-apply-patch patch-text nil)))
-             (funcall handle-outcome
-                      (list :status :unknown
-                            :file resolved
-                            :message summary)))))))))
+    (cl-labels ((native (spec)
+                  (if callback
+                      (kargu-diff-native-execute
+                       spec (lambda (raw) (funcall callback (funcall handle-outcome raw))) service)
+                    (remhash plan-id (kargu-edit-service-active-plans service))
+                    (kargu-err "Native edits require an asynchronous callback" :edit-failed))))
+      (pcase kind
+	(:block
+	 (let ((old-str (or (and (listp content) (plist-get content :old-string))
+                            (and (consp content) (car content))
+                            (and (listp metadata) (plist-get metadata :old-string))))
+               (new-str (or (and (listp content) (plist-get content :new-string))
+                            (and (consp content) (cdr content))
+                            (and (stringp content) content)
+                            (and (listp metadata) (plist-get metadata :new-string)))))
+           (unless (and (stringp old-str) (not (string-empty-p old-str)))
+             (error "Old_string is required for :block edit"))
+           (unless (stringp new-str)
+             (error "New_string is required for :block edit"))
+           (if (kargu-diff-native-enabled-p)
+               (native (list :intent :replace :path resolved :old old-str :new new-str))
+             (if callback
+		 (kargu-diff-apply-replace
+		  resolved old-str new-str
+		  (lambda (raw) (funcall callback (funcall handle-outcome raw))))
+               (funcall handle-outcome (kargu-diff-apply-replace resolved old-str new-str nil))))))
+	((or :write :symbol)
+	 (let ((new-text (if (stringp content) content (plist-get metadata :text))))
+           (unless (stringp new-text)
+             (error "Proposed content must be a string for %s edit" kind))
+           (if (kargu-diff-native-enabled-p)
+               (native (list :intent :write :path resolved :content new-text))
+             (if callback
+		 (kargu-diff-apply-proposal
+		  resolved new-text
+		  (lambda (raw) (funcall callback (funcall handle-outcome raw))))
+               (funcall handle-outcome (kargu-diff-apply-proposal resolved new-text nil))))))
+	(:unified-diff
+	 (let ((patch-text (if (stringp content) content (plist-get metadata :patch))))
+           (unless (stringp patch-text)
+             (error "Proposed content must be a patch string for :unified-diff edit"))
+           (if (kargu-diff-native-enabled-p)
+               (native (list :intent :patch :patch patch-text))
+             (if callback
+		 (kargu-diff-apply-patch
+		  patch-text
+		  (lambda (summary)
+                    (funcall callback
+                             (funcall handle-outcome
+                                      (list :status :unknown
+                                            :file resolved
+                                            :message summary)))))
+               (let ((summary (kargu-diff-apply-patch patch-text nil)))
+		 (funcall handle-outcome
+			  (list :status :unknown
+				:file resolved
+				:message summary)))))))))))
 
 (defun kargu-diff--submit-plan-impl (service plan callback)
   "Submit transaction PLAN to edit SERVICE, delivering result to CALLBACK."
@@ -514,7 +537,7 @@ An explicitly closed service never silently acquires another owner's state."
                (t
                 (puthash plan-id plan (kargu-edit-service-active-plans service))
                 (kargu-diff-with-service service
-                  (kargu-edit--execute-plan service plan resolved callback)))))))))))
+					 (kargu-edit--execute-plan service plan resolved callback)))))))))))
 
 (defun kargu-diff-submit-plan (service plan &rest args)
   "Submit transaction PLAN to edit SERVICE, delivering result to CALLBACK.

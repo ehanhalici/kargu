@@ -119,15 +119,17 @@ Dirty/read-only facts are reported; transaction entry rejects either condition."
               (kargu-bridge-edit-document-truename document))
        (eq buffer-file-coding-system (kargu-bridge-edit-document-coding document))))
 
-(defun kargu-bridge-edit-document-check (document)
-  "Reject DOCUMENT if any captured clean-buffer or disk fact changed.
+(defun kargu-bridge-edit-document-check (document &optional owned-dirty)
+  "Reject DOCUMENT when its captured buffer or disk facts change.
+OWNED-DIRTY permits only a native rollback of an exact dirty observation.
 This is a platform observation, not the native approval decision or a lock."
   (unless (buffer-live-p (kargu-bridge-edit-document-buffer document))
     (signal 'kargu-bridge-edit-document-conflict nil))
   (with-current-buffer (kargu-bridge-edit-document-buffer document)
-    (unless (and (not (kargu-bridge-edit-document-dirty document))
+    (unless (and (or owned-dirty (not (kargu-bridge-edit-document-dirty document)))
                  (not (kargu-bridge-edit-document-read-only document))
-                 (not (buffer-modified-p))
+                 (eq (not (null (buffer-modified-p)))
+                     (not (null (kargu-bridge-edit-document-dirty document))))
                  (not (kargu-bridge-edit-document--read-only-p))
                  (kargu-bridge-edit-document--location-current-p document)
                  (= (buffer-chars-modified-tick)
@@ -151,8 +153,9 @@ This is a platform observation, not the native approval decision or a lock."
           (kargu-bridge-edit-document--text (buffer-string)))
         (kargu-bridge-edit-document-change-stage change) :replaced))
 
-(defun kargu-bridge-edit-document--save (change check-issued)
-  "Save after CHANGE only while CHECK-ISSUED still permits entry."
+(defun kargu-bridge-edit-document--save (change check-issued &optional restore-coding)
+  "Save after CHANGE while CHECK-ISSUED permits entry.
+RESTORE-CODING restores the native rollback coding after source verification."
   (unless (funcall check-issued)
     (signal 'kargu-bridge-edit-document-revoked nil))
   (let ((before (kargu-bridge-edit-document-change-before change)))
@@ -160,6 +163,7 @@ This is a platform observation, not the native approval decision or a lock."
                  (equal (kargu-bridge-edit-document--disk buffer-file-name)
                         (kargu-bridge-edit-document-disk before)))
       (signal 'kargu-bridge-edit-document-conflict nil)))
+  (when restore-coding (set-buffer-file-coding-system restore-coding))
   (setf (kargu-bridge-edit-document-change-stage change) :saving)
   ;; Even a byte-identical empty new file must be created under explicit save.
   (unless (kargu-bridge-edit-document-disk
@@ -178,23 +182,24 @@ This is a platform observation, not the native approval decision or a lock."
     ((error quit)
      (setf (kargu-bridge-edit-document-change-observation-failure change) failure))))
 
-(cl-defun kargu-bridge-edit-document-replace (document text &key check-issued save)
+(cl-defun kargu-bridge-edit-document-replace (document text &key check-issued save owned-dirty restore-coding restore-clean)
   "Consume DOCUMENT to replace with TEXT, optionally SAVE, recording raw facts.
 CHECK-ISSUED is the owning controller's live issuance guard, required at entry
 and before save.  That controller must hold its fence until actual return.
 Failures after entry are observations, never permission to replay or restore.
-The caller reports them to Rust, which owns outcome and rollback decisions."
+The caller reports them to Rust, which owns outcome and rollback decisions.
+OWNED-DIRTY, RESTORE-CODING and RESTORE-CLEAN use native rollback metadata."
   (when (kargu-bridge-edit-document-used document)
     (signal 'kargu-bridge-edit-document-consumed nil))
   (setf (kargu-bridge-edit-document-used document) t)
   (let ((change (kargu-bridge-edit-document-change--make :before document)))
     (condition-case failure
         (let ((text (kargu-bridge-edit-document--text text)))
-          (kargu-bridge-edit-document-check document)
+          (kargu-bridge-edit-document-check document owned-dirty)
           (unless (and (functionp check-issued) (funcall check-issued))
             (signal 'kargu-bridge-edit-document-revoked nil))
           ;; The controller callback can yield or run arbitrary editor hooks.
-          (kargu-bridge-edit-document-check document)
+          (kargu-bridge-edit-document-check document owned-dirty)
           (with-temp-buffer
             (insert text)
             (let ((source (current-buffer)))
@@ -203,26 +208,29 @@ The caller reports them to Rust, which owns outcome and rollback decisions."
                   (save-restriction
                     (widen)
                     (kargu-bridge-edit-document--replace change source)
-                    (when save
-                      (kargu-bridge-edit-document--save change check-issued))))))))
+                    (if save
+                        (kargu-bridge-edit-document--save change check-issued restore-coding)
+                      (when restore-coding (set-buffer-file-coding-system restore-coding)))
+                    (when (and restore-clean (equal (buffer-string) text))
+                      (set-buffer-modified-p nil))))))))
       ((error quit)
        (setf (kargu-bridge-edit-document-change-failure change) failure)))
     (kargu-bridge-edit-document--observe change)
     change))
 
-(cl-defun kargu-bridge-edit-document-delete (document &key check-issued)
+(cl-defun kargu-bridge-edit-document-delete (document &key check-issued owned-dirty)
   "Consume DOCUMENT to delete its underlying file on disk, recording raw facts.
-CHECK-ISSUED guards live authority."
+CHECK-ISSUED guards live authority; OWNED-DIRTY requires native ownership."
   (when (kargu-bridge-edit-document-used document)
     (signal 'kargu-bridge-edit-document-consumed nil))
   (setf (kargu-bridge-edit-document-used document) t)
   (let ((change (kargu-bridge-edit-document-change--make :before document)))
     (condition-case failure
         (progn
-          (kargu-bridge-edit-document-check document)
+          (kargu-bridge-edit-document-check document owned-dirty)
           (unless (and (functionp check-issued) (funcall check-issued))
             (signal 'kargu-bridge-edit-document-revoked nil))
-          (kargu-bridge-edit-document-check document)
+          (kargu-bridge-edit-document-check document owned-dirty)
           (setf (kargu-bridge-edit-document-change-stage change) :deleting)
           (let ((path (kargu-bridge-edit-document-path document)))
             (when (file-exists-p path)
@@ -274,7 +282,7 @@ This reports observations without asserting approval, freshness or an outcome."
    `(("id" . ,(copy-sequence (kargu-bridge-edit-document-id document)))
      ("tick" . ,(kargu-bridge-edit-document-tick document))
      ("bytes" . ,(string-bytes (encode-coding-string
-                               (kargu-bridge-edit-document-text document) 'utf-8-unix)))
+				(kargu-bridge-edit-document-text document) 'utf-8-unix)))
      ("coding" . ,(symbol-name (kargu-bridge-edit-document-coding document)))
      ("dirty" . ,(if (kargu-bridge-edit-document-dirty document) t :json-false))
      ("read_only" . ,(if (kargu-bridge-edit-document-read-only document) t :json-false))
@@ -289,8 +297,8 @@ an assertion about a potentially stale editor buffer."
   (map-into
    `(("file" . ,file)
      ("base_hash" . ,(secure-hash 'sha256
-                                 (encode-coding-string
-                                  (kargu-bridge-edit-document-text document) 'utf-8-unix)))
+                                  (encode-coding-string
+                                   (kargu-bridge-edit-document-text document) 'utf-8-unix)))
      ("document" . ,(kargu-bridge-edit-document-facts document)))
    'hash-table))
 
@@ -304,8 +312,8 @@ an assertion about a potentially stale editor buffer."
   "Hash DOCUMENT's logical text in its observed disk coding, if encodable."
   (condition-case nil
       (secure-hash 'sha256 (encode-coding-string
-                           (kargu-bridge-edit-document-text document)
-                           (kargu-bridge-edit-document-coding document)))
+                            (kargu-bridge-edit-document-text document)
+                            (kargu-bridge-edit-document-coding document)))
     ((error quit) :json-null)))
 
 (defun kargu-bridge-edit-document--after-facts (change)
