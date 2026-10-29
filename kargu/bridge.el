@@ -516,6 +516,37 @@ Raw stderr is deliberately discarded: future backends may put secrets there."
         (when (> (buffer-size) kargu-bridge--max-frame)
           (delete-region (point-min) (- (point-max) kargu-bridge--max-frame)))))))
 
+(defun kargu-bridge--install-catalog (connection callback snapshot)
+  "Install SNAPSHOT provider projection and mark CONNECTION ready via CALLBACK."
+  (let (failure)
+    (condition-case nil
+        (progn (require 'kargu/providers/projection)
+               (kargu-providers-install-projection snapshot))
+      (error (setq failure (kargu-bridge--fault "invalid_catalog"))))
+    (kargu-bridge--start-ready connection callback failure)))
+
+(defun kargu-bridge--hydrate-catalog-page (connection callback offset chunks)
+  "Read catalog page from CONNECTION at OFFSET into CHUNKS, then call CALLBACK."
+  (kargu-bridge-call
+   connection "provider/catalog" (kargu-bridge--object "offset" offset)
+   (lambda (page failure)
+     (if failure (kargu-bridge--start-ready connection callback failure)
+       (let* ((chunk (and (hash-table-p page) (gethash "text" page)))
+              (next (and (hash-table-p page) (gethash "next_offset" page)))
+              (complete (and (hash-table-p page) (gethash "complete" page)))
+              (end (and (stringp chunk) (+ offset (string-bytes (encode-coding-string chunk 'utf-8-unix))))))
+         (cond
+          ((not (and end (eql (gethash "offset" page) offset) (eql next end)
+                     (<= end (* 1024 1024)) (memq complete '(t :json-false))
+                     (or (eq complete t) (> end offset))))
+           (kargu-bridge--start-ready connection callback (kargu-bridge--fault "invalid_catalog")))
+          ((eq complete t)
+           (condition-case nil
+               (kargu-bridge--install-catalog
+                connection callback (kargu-bridge--decode (apply #'concat (nreverse (cons chunk chunks)))))
+             (error (kargu-bridge--start-ready connection callback (kargu-bridge--fault "invalid_catalog")))))
+          (t (kargu-bridge--hydrate-catalog-page connection callback next (cons chunk chunks)))))))))
+
 (defun kargu-bridge--start-finish (connection callback error-data)
   "Hydrate CONNECTION's provider projection before completing CALLBACK.
 ERROR-DATA skips hydration; older peers retain the packaged projection."
@@ -523,15 +554,14 @@ ERROR-DATA skips hydration; older peers retain the packaged projection."
            (member "provider_catalog" (append (kargu-bridge-connection-capabilities connection) nil)))
       (progn
         (setf (kargu-bridge-connection-state connection) 'binding)
-        (kargu-bridge-call
-         connection "provider/catalog" (kargu-bridge--object)
-         (lambda (snapshot failure)
-           (unless failure
-             (condition-case nil
-                 (progn (require 'kargu/providers/projection)
-                        (kargu-providers-install-projection snapshot))
-               (error (setq failure (kargu-bridge--fault "invalid_catalog")))))
-           (kargu-bridge--start-ready connection callback failure))))
+        (if (member "provider_catalog_pages" (append (kargu-bridge-connection-capabilities connection) nil))
+            (kargu-bridge--hydrate-catalog-page connection callback 0 nil)
+          (kargu-bridge-call
+           connection "provider/catalog" (kargu-bridge--object)
+           (lambda (snapshot failure)
+             (if failure
+                 (kargu-bridge--start-ready connection callback failure)
+               (kargu-bridge--install-catalog connection callback snapshot))))))
     (kargu-bridge--start-ready connection callback error-data)))
 
 (defun kargu-bridge--start-ready (connection callback error-data)

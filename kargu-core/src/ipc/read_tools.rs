@@ -42,11 +42,13 @@ enum ReadOperation {
     Configuration(ReadInput),
     Edit(crate::edit::prepare::Work),
     Rollback(crate::edit::prepare::RollbackWork),
+    JournalRecovery(crate::edit::journal::RecoverInput),
 }
 enum ReadCompletion {
     Workspace(ReadResult),
     Configuration(ReadOutput),
     Edit(Box<crate::edit::prepare::PreparationResult>),
+    JournalRecovery(Box<crate::edit::journal::RecoveredJournal>),
 }
 impl ReadOperation {
     fn timeout(&self) -> Duration {
@@ -54,6 +56,7 @@ impl ReadOperation {
             Self::Workspace(_) => timeouts::WORKSPACE_READ,
             Self::Configuration(input) => input.timeout(),
             Self::Edit(_) | Self::Rollback(_) => timeouts::WORKSPACE_READ,
+            Self::JournalRecovery(_) => timeouts::EDIT_JOURNAL,
         }
     }
     fn execute(
@@ -74,6 +77,13 @@ impl ReadOperation {
             Self::Configuration(input) => input
                 .execute(cancel, deadline)
                 .map(ReadCompletion::Configuration),
+            Self::JournalRecovery(input) => crate::edit::journal::recover(
+                input.journal_directory,
+                input.edit_id,
+                cancel,
+                deadline,
+            )
+            .map(|value| ReadCompletion::JournalRecovery(Box::new(value))),
         }
     }
 }
@@ -83,6 +93,7 @@ impl ReadCompletion {
             Self::Workspace(value) => serde_json::to_value(value).map_err(|_| CoreError::Limit),
             Self::Configuration(value) => Ok(value.into_editor_value()),
             Self::Edit(_) => Err(CoreError::CleanupFailed),
+            Self::JournalRecovery(value) => Ok(value.into_json()),
         }
     }
 }
@@ -190,6 +201,19 @@ impl ReadTools {
             id,
             ReadOwner::Session(scope),
             ReadOperation::Rollback(input),
+        )
+    }
+
+    pub fn start_journal_recovery(
+        &mut self,
+        id: RpcId,
+        scope: ReadScope,
+        input: crate::edit::journal::RecoverInput,
+    ) -> Result<(), Fault> {
+        self.start_owned(
+            id,
+            ReadOwner::Session(scope),
+            ReadOperation::JournalRecovery(input),
         )
     }
 

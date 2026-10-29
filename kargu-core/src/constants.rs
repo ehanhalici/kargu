@@ -11,6 +11,14 @@ pub mod limits {
     /// Total edit journal bytes, including newline framing.
     pub const EDIT_JOURNAL_BYTES: usize =
         (EDIT_JOURNAL_RECORD_BYTES + 1) * EDIT_JOURNAL_RECORDS as usize;
+    /// Unread metadata-only receipt streams, including reserved active edits.
+    pub const EDIT_RECEIPT_STREAMS: usize = 8;
+    /// Maximum serialized credential-free provider projection bytes.
+    pub const PROVIDER_CATALOG_BYTES: usize = 1024 * 1024;
+    /// Retained resolved edit journal files per journal directory.
+    pub const EDIT_JOURNAL_FILES: usize = 64;
+    /// Unresolved/corrupt private journals preserved before refusing new issuance.
+    pub const EDIT_JOURNAL_UNRESOLVED_FILES: usize = 64;
     /// Native disk bytes before strict decoding into bounded edit text.
     pub const EDIT_DISK_BYTES: usize = 16 * 1024 * 1024;
     /// Bounded Git diagnostics, never returned as edit source or success prose.
@@ -228,6 +236,7 @@ pub mod protocol {
         "workspace_grep",
         "git_status",
         "provider_catalog",
+        "provider_catalog_pages",
         "provider_catalog_target",
         "command_execute",
         "process_jobs",
@@ -279,6 +288,8 @@ pub mod protocol {
         pub const EDIT_REVISE: &str = "edit/revise";
         /// Prepare an inverse native proposal from a committed editor transaction.
         pub const EDIT_ROLLBACK: &str = "edit/rollback";
+        /// Inspect a durable edit journal without creating a run or write capability.
+        pub const EDIT_RECOVER: &str = "edit/recover";
         /// Record raw editor observations and verify the final transaction outcome.
         pub const EDIT_RECEIPT: &str = "edit/receipt";
         /// Add one live preflight witness; the complete set is revalidated off-actor.

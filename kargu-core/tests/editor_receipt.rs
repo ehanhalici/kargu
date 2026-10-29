@@ -32,8 +32,12 @@ struct Client {
 
 impl Client {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        Self::new_with_limit(1_048_576)
+    }
+
+    fn new_with_limit(max_frame_bytes: usize) -> Result<Self, Box<dyn std::error::Error>> {
         let mut peer = Peer::start()?;
-        peer.initialize()?;
+        peer.initialize_with_limit(max_frame_bytes)?;
         let scope = peer.scope()?;
         Ok(Self {
             peer,
@@ -97,6 +101,16 @@ impl Client {
         policy: &str,
         text: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
+        self.prepared_with_review(root, source, policy, text, "auto")
+    }
+    fn prepared_with_review(
+        &mut self,
+        root: &Path,
+        source: &str,
+        policy: &str,
+        text: &str,
+        review: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let id = self.call(
             "edit/begin",
             json!({
@@ -111,22 +125,22 @@ impl Client {
                 "live": null,
                 "config_revision": 3,
                 "policy_revision": 7,
-                "review_mode": "auto",
+                "review_mode": review,
                 "save_policy": policy
             }),
         )?["result"]["preparation_id"]
             .clone();
         assert!(id.is_string());
-        self.call(
-            "edit/append",
-            json!({
-                "origin_id": source,
-                "preparation_id": id,
-                "part": "new",
-                "offset": 0,
-                "text": text
-            }),
-        )?;
+        let mut offset = 0usize;
+        while offset < text.len() {
+            let mut end = offset.saturating_add(16384).min(text.len());
+            while !text.is_char_boundary(end) {
+                end = end.checked_sub(1).ok_or("boundary")?;
+            }
+            let ack = self.call("edit/append",json!({"origin_id":source,"preparation_id":id,"part":"new","offset":offset,"text":&text[offset..end]}))?;
+            assert!(ack.get("result").is_some(), "{ack}");
+            offset = end;
+        }
         let prep = self.call(
             "edit/prepare",
             json!({
@@ -981,7 +995,8 @@ async fn test_edit_revise_bumps_revision_and_rejects_stale_decision() -> TestRes
         "revised\n",
     )?;
     assert_eq!(reply["result"]["receipt"]["outcome"], "applied_full");
-    assert!(reply["result"]["receipt"]["hunks_applied"].is_null());
+    assert_eq!(reply["result"]["receipt"]["hunks_total"], 1);
+    assert_eq!(reply["result"]["receipt"]["hunks_applied"], 1);
 
     Ok(())
 }
@@ -1175,5 +1190,446 @@ fn rollback_rejects_real_foreign_disk_change_before_preparation() -> TestResult 
         assert!(rollback.get("error").is_some(), "{rollback}");
         assert_eq!(fs::read_to_string(&path)?, "foreign owner\n");
     }
+    Ok(())
+}
+
+#[test]
+fn hunk_measurement_distinguishes_zero_single_multi_and_hook_modified_unproven() -> TestResult {
+    let root = private()?;
+    let journal = private()?;
+    let path = root.path().join("file.txt");
+    let base: String = (0..12).map(|i| format!("line-{i}\n")).collect();
+    let mut multi_lines: Vec<String> = (0..12).map(|i| format!("line-{i}\n")).collect();
+    multi_lines[0] = "changed-0\n".to_owned();
+    multi_lines[11] = "changed-11\n".to_owned();
+    let multi = multi_lines.concat();
+
+    fs::write(&path, &base)?;
+    let mut client = Client::new()?;
+
+    // 1. Multi-hunk write (2 hunks separated by 10 unchanged lines)
+    let prep = client.prepared_with_text(root.path(), SOURCE, "save", &multi)?;
+    assert_eq!(prep["hunks_total"], 2, "{prep}");
+    let edit = client.grant(&prep["preparation_id"], SOURCE)?;
+    client.preflight(&prep, &edit, SOURCE)?;
+    let issued = client.issue(&edit, SOURCE, journal.path())?;
+    fs::write(&path, &multi)?;
+    let reply = upload(
+        &mut client,
+        &edit,
+        &issued["result"]["issued_token"],
+        observed(&path, &multi, &multi)?,
+        &multi,
+        &multi,
+    )?;
+    assert_eq!(reply["result"]["receipt"]["hunks_total"], 2);
+    assert_eq!(reply["result"]["receipt"]["hunks_applied"], 2);
+
+    // 2. Rollback of multi-hunk edit preserves 2 hunks
+    let rollback_prep = client.call(
+        "edit/rollback",
+        json!({
+            "origin_id": SOURCE,
+            "target_edit_id": edit,
+            "mode": "agent",
+            "review_mode": "auto",
+            "save_policy": "save",
+            "config_revision": 3,
+            "policy_revision": 7
+        }),
+    )?;
+    assert_eq!(rollback_prep["result"]["descriptor"]["hunks_total"], 2);
+
+    // 3. Save-hook modification leaves hunks_applied unproven (null) while hunks_total is 2
+    let prep2 = client.prepared_with_text(root.path(), SOURCE, "save", &base)?;
+    assert_eq!(prep2["hunks_total"], 2);
+    let edit2 = client.grant(&prep2["preparation_id"], SOURCE)?;
+    client.preflight(&prep2, &edit2, SOURCE)?;
+    let issued2 = client.issue(&edit2, SOURCE, journal.path())?;
+    let hooked = format!("{base}#hook\n");
+    fs::write(&path, &hooked)?;
+    let reply2 = upload(
+        &mut client,
+        &edit2,
+        &issued2["result"]["issued_token"],
+        observed(&path, &base, &hooked)?,
+        &base,
+        &hooked,
+    )?;
+    assert_eq!(reply2["result"]["receipt"]["hunks_total"], 2);
+    assert!(reply2["result"]["receipt"]["hunks_applied"].is_null());
+
+    // 4. Edit recovery RPC surfaces journal resolution over stdio
+    let recovered = client.call(
+        "edit/recover",
+        json!({
+            "edit_id": edit2,
+            "journal_directory": journal.path()
+        }),
+    )?;
+    assert_eq!(recovered["result"]["state"], "resolved", "{recovered}");
+    assert_eq!(recovered["result"]["resolution"]["kind"], "receipt");
+    Ok(())
+}
+
+#[test]
+fn chunked_revise_and_paged_receipt_succeed_under_one_kib_negotiated_frames() -> TestResult {
+    paged_receipt_case(false)
+}
+#[test]
+fn application_close_preserves_unread_receipt_pages_until_the_last_page() -> TestResult {
+    paged_receipt_case(true)
+}
+fn paged_receipt_case(close_application: bool) -> TestResult {
+    let root = private()?;
+    let journal = private()?;
+    let first = root.path().join("first.txt");
+    let second = root.path().join("second.txt");
+    let third = root.path().join("third.txt");
+    fs::write(&first, "old-1\n")?;
+    fs::write(&second, "old-2\n")?;
+    fs::write(&third, "old-3\n")?;
+
+    let mut client = Client::new_with_limit(1024)?;
+    let patch = concat!(
+        "--- a/first.txt\n+++ b/first.txt\n@@ -1 +1 @@\n-old-1\n+new-1\n",
+        "--- a/second.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-old-2\n+new-2\n",
+        "--- a/third.txt\n+++ b/third.txt\n@@ -1 +1 @@\n-old-3\n+new-3\n"
+    );
+    let prep_id = client.call(
+        "edit/begin",
+        json!({
+            "origin_id": SOURCE,
+            "root": root.path(),
+            "mode": "agent",
+            "live": null,
+            "intent": {"kind": "patch", "patch_bytes": patch.len()},
+            "config_revision": 3,
+            "policy_revision": 7,
+            "review_mode": "async",
+            "save_policy": "save"
+        }),
+    )?["result"]["preparation_id"]
+        .clone();
+    client.call(
+        "edit/append",
+        json!({
+            "origin_id": SOURCE,
+            "preparation_id": prep_id,
+            "part": "patch",
+            "offset": 0,
+            "text": patch
+        }),
+    )?;
+    client.call(
+        "edit/inspect",
+        json!({"origin_id": SOURCE, "preparation_id": prep_id}),
+    )?;
+    client.call(
+        "edit/prepare",
+        json!({"origin_id": SOURCE, "preparation_id": prep_id}),
+    )?;
+    let f0_reply = client.call(
+        "edit/files",
+        json!({"origin_id": SOURCE, "preparation_id": prep_id, "offset": 0}),
+    )?;
+    assert!(f0_reply["result"]["files"].is_array(), "{f0_reply}");
+    let f0 = f0_reply["result"]["files"][0].clone();
+    let f1_reply = client.call(
+        "edit/files",
+        json!({"origin_id": SOURCE, "preparation_id": prep_id, "offset": 1}),
+    )?;
+    assert!(f1_reply["result"]["files"].is_array(), "{f1_reply}");
+    let f1 = f1_reply["result"]["files"][0].clone();
+    let f2_reply = client.call(
+        "edit/files",
+        json!({"origin_id": SOURCE, "preparation_id": prep_id, "offset": 2}),
+    )?;
+    assert!(f2_reply["result"]["files"].is_array(), "{f2_reply}");
+    let f2 = f2_reply["result"]["files"][0].clone();
+
+    let auth = client.call(
+        "edit/authorize",
+        json!({"origin_id": SOURCE, "preparation_id": prep_id, "presenter": "available"}),
+    )?;
+    assert_eq!(auth["result"]["state"], "review", "{auth}");
+    let edit_id = auth["result"]["edit_id"].clone();
+
+    // Stream a 390-byte revision across 4 chunks under the 1 KiB frame cap
+    let revised = "revised line\n".repeat(30);
+    let begin_rev = client.call(
+        "edit/revise",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": edit_id,
+            "revision": 1,
+            "input": {
+                "action": "begin",
+                "file_index": 0,
+                "new_bytes": revised.len()
+            }
+        }),
+    )?;
+    assert_eq!(begin_rev["result"]["bytes"], revised.len(), "{begin_rev}");
+    let mut offset = 0usize;
+    while offset < revised.len() {
+        let end = (offset + 120).min(revised.len());
+        let chunk = &revised[offset..end];
+        let step = client.call(
+            "edit/revise",
+            json!({
+                "origin_id": SOURCE,
+                "edit_id": edit_id,
+                "revision": 1,
+                "input": {
+                    "action": "append",
+                    "file_index": 0,
+                    "offset": offset,
+                    "text": chunk
+                }
+            }),
+        )?;
+        assert_eq!(step["result"]["offset"], end, "{step}");
+        offset = end;
+    }
+    let commit_rev = client.call(
+        "edit/revise",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": edit_id,
+            "revision": 1,
+            "input": {
+                "action": "commit",
+                "file_index": 0
+            }
+        }),
+    )?;
+    assert_eq!(commit_rev["result"]["revision"], 2, "{commit_rev}");
+
+    let decision = client.call(
+        "edit/decision",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": edit_id,
+            "revision": 2,
+            "decision": "accept"
+        }),
+    )?;
+    assert_eq!(decision["result"]["state"], "authorized", "{decision}");
+
+    for (index, desc, doc_id) in [
+        (
+            0,
+            &f0,
+            "editor_document_12345678-1234-4234-8234-123456789abc",
+        ),
+        (
+            1,
+            &f1,
+            "editor_document_22345678-1234-4234-8234-123456789abc",
+        ),
+        (
+            2,
+            &f2,
+            "editor_document_32345678-1234-4234-8234-123456789abc",
+        ),
+    ] {
+        let pf = client.call(
+            "edit/preflight",
+            json!({
+                "origin_id": SOURCE,
+                "edit_id": edit_id,
+                "revision": 2,
+                "witness": {
+                    "file": index,
+                    "base_hash": desc["base_hash"],
+                    "document": {
+                        "id": doc_id,
+                        "tick": 1,
+                        "bytes": desc["base_bytes"],
+                        "coding": "utf-8-unix",
+                        "dirty": false,
+                        "read_only": false,
+                        "disk": desc["disk"]
+                    }
+                }
+            }),
+        )?;
+        if index < 2 {
+            assert_eq!(pf["result"]["ready"], false, "{pf}");
+        } else {
+            assert_eq!(pf["result"]["state"], "preflighted", "{pf}");
+        }
+    }
+
+    let issued = client.call(
+        "edit/issue",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": edit_id,
+            "revision": 2,
+            "journal_directory": journal.path()
+        }),
+    )?;
+    let token = &issued["result"]["issued_token"];
+
+    fs::write(&first, &revised)?;
+    fs::write(&second, "new-2\n")?;
+    fs::write(&third, "new-3\n")?;
+
+    for (index, path, body, doc_id) in [
+        (
+            0usize,
+            &first,
+            revised.as_str(),
+            "editor_document_12345678-1234-4234-8234-123456789abc",
+        ),
+        (
+            1usize,
+            &second,
+            "new-2\n",
+            "editor_document_22345678-1234-4234-8234-123456789abc",
+        ),
+        (
+            2usize,
+            &third,
+            "new-3\n",
+            "editor_document_32345678-1234-4234-8234-123456789abc",
+        ),
+    ] {
+        let mut obs = observed(path, body, body)?;
+        obs["file"] = json!(index);
+        obs["after"]["document"]["id"] = json!(doc_id);
+        client.receipt_with_revision(
+            &edit_id,
+            SOURCE,
+            token,
+            2,
+            json!({"action": "file", "observation": obs}),
+        )?;
+        for part in ["written", "after"] {
+            let mut off = 0usize;
+            while off < body.len() {
+                let end = (off + 120).min(body.len());
+                client.receipt_with_revision(
+                    &edit_id,
+                    SOURCE,
+                    token,
+                    2,
+                    json!({
+                        "action": "append",
+                        "file": index,
+                        "part": part,
+                        "offset": off,
+                        "text": &body[off..end]
+                    }),
+                )?;
+                off = end;
+            }
+        }
+    }
+
+    let settled =
+        client.receipt_with_revision(&edit_id, SOURCE, token, 2, json!({"action": "commit"}))?;
+    assert_eq!(
+        settled["result"]["receipt"]["complete"], false,
+        "3-file receipt under 1 KiB frame must return paged summary: {settled}"
+    );
+    if close_application {
+        client.peer.send(json!({"jsonrpc":"2.0","id":"close-with-pages","method":"application/close","params":{"application_id":client.scope["application_id"]}}))?;
+    }
+    let page0 = client.receipt_with_revision(
+        &edit_id,
+        SOURCE,
+        token,
+        2,
+        json!({"action": "files", "offset": 0}),
+    )?;
+    assert_eq!(page0["result"]["files"][0]["path"], "first.txt", "{page0}");
+    assert_eq!(page0["result"]["next_offset"], 2, "{page0}");
+    assert_eq!(page0["result"]["complete"], false, "{page0}");
+    let page1 = client.receipt_with_revision(
+        &edit_id,
+        SOURCE,
+        token,
+        2,
+        json!({"action": "files", "offset": 2}),
+    )?;
+    assert_eq!(page1["result"]["files"][0]["path"], "third.txt", "{page1}");
+    assert_eq!(page1["result"]["next_offset"], 3, "{page1}");
+    assert_eq!(page1["result"]["complete"], true, "{page1}");
+    if close_application {
+        assert_eq!(
+            client.response("close-with-pages")?["result"]["status"],
+            "closed"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn streamed_review_reserves_its_body_once_and_releases_capacity_after_commit() -> TestResult {
+    let root = private()?;
+    let path = root.path().join("file.txt");
+    let body = "a".repeat(kargu_core::constants::limits::EDIT_TEXT_BYTES);
+    fs::write(&path, &body)?;
+    let mut client = Client::new()?;
+    let prepared = client.prepared_with_review(root.path(), SOURCE, "save", &body, "blocking")?;
+    let prep = &prepared["preparation_id"];
+    let auth = client.call(
+        "edit/authorize",
+        json!({"origin_id":SOURCE,"preparation_id":prep,"presenter":"available"}),
+    )?;
+    let edit = &auth["result"]["edit_id"];
+    assert_eq!(auth["result"]["state"], "review", "{auth}");
+    let competing=client.call("edit/begin",json!({"origin_id":SOURCE,"root":root.path(),"mode":"agent","intent":{"kind":"write","path":"other.txt","new_bytes":0},"live":null,"config_revision":3,"policy_revision":7,"review_mode":"auto","save_policy":"save"}))?;
+    assert!(
+        competing["result"]["preparation_id"].is_string(),
+        "{competing}"
+    );
+    let begin=client.call("edit/revise",json!({"origin_id":SOURCE,"edit_id":edit,"revision":1,"input":{"action":"begin","file_index":0,"new_bytes":body.len()}}))?;
+    assert_eq!(begin["result"]["bytes"], body.len(), "{begin}");
+    for offset in (0..body.len()).step_by(16384) {
+        let end = offset.saturating_add(16384).min(body.len());
+        let ack=client.call("edit/revise",json!({"origin_id":SOURCE,"edit_id":edit,"revision":1,"input":{"action":"append","file_index":0,"offset":offset,"text":&body[offset..end]}}))?;
+        assert_eq!(ack["result"]["next_offset"], end, "{ack}");
+    }
+    let committed=client.call("edit/revise",json!({"origin_id":SOURCE,"edit_id":edit,"revision":1,"input":{"action":"commit","file_index":0}}))?;
+    assert_eq!(committed["result"]["revision"], 2, "{committed}");
+    let rejected = client.call(
+        "edit/decision",
+        json!({"origin_id":SOURCE,"edit_id":edit,"revision":2,"decision":"reject"}),
+    )?;
+    assert!(rejected.get("error").is_some());
+    assert_eq!(fs::read_to_string(path)?, body);
+    Ok(())
+}
+
+#[test]
+fn pending_revision_upload_cannot_be_replaced_or_approved_as_old_text() -> TestResult {
+    let root = private()?;
+    fs::write(root.path().join("file.txt"), "old\n")?;
+    let mut client = Client::new()?;
+    let prepared = client.prepared_with_review(root.path(), SOURCE, "save", "new\n", "blocking")?;
+    let auth=client.call("edit/authorize",json!({"origin_id":SOURCE,"preparation_id":prepared["preparation_id"],"presenter":"available"}))?;
+    let edit = &auth["result"]["edit_id"];
+    let begin = || json!({"origin_id":SOURCE,"edit_id":edit,"revision":1,"input":{"action":"begin","file_index":0,"new_bytes":6}});
+    assert!(client.call("edit/revise", begin())?.get("result").is_some());
+    assert!(
+        client.call("edit/revise", begin())?.get("error").is_some(),
+        "second upload must not replace the first"
+    );
+    let accept = client.call(
+        "edit/decision",
+        json!({"origin_id":SOURCE,"edit_id":edit,"revision":1,"decision":"accept"}),
+    )?;
+    assert!(
+        accept.get("error").is_some(),
+        "unfinished review text must not authorize the old proposal: {accept}"
+    );
+    let append=client.call("edit/revise",json!({"origin_id":SOURCE,"edit_id":edit,"revision":1,"input":{"action":"append","file_index":0,"offset":0,"text":"human\n"}}))?;
+    assert_eq!(append["result"]["next_offset"], 6, "{append}");
+    let committed=client.call("edit/revise",json!({"origin_id":SOURCE,"edit_id":edit,"revision":1,"input":{"action":"commit","file_index":0}}))?;
+    assert_eq!(committed["result"]["revision"], 2, "{committed}");
     Ok(())
 }

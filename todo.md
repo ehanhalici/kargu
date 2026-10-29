@@ -659,7 +659,8 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Hata eski iki kaydı korur. Application close bekleyeni iptal edilse de worker
     join edilmeden owner/kapasite bırakılmaz. Native pipe/lifecycle regresyonları
     ve 272 durumlu revision TLC temiz; half-commit mutantı reddedildi.
-    Büyük review metninin ek upload portu 3.23'te; default cutover 3.8'de açıktır.
+    Büyük review metninin bounded upload portu 3.23'te tamamlandı;
+    default cutover 3.8'de açıktır.
   - [x] **3.5 Emacs transaction adapter:** açık/kapalı dosyaların native edit_id
     üzerinden canlı document/hash/disk preflight'ı ve gerçek editor uygulaması bağlı.
     Producer bütün sayfaları/metinleri/belgeleri ilk yazımdan önce dondurur; bütün
@@ -679,8 +680,14 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     - [x] Native process-local snapshot stack: app başına 16 kayıt / 48 MiB,
       verified final body/document/disk, foreign-version guard, add/update/delete
       inverse ve consuming per-file/ardışık undo. Kanıtlar 3.19 ve 3.21'de.
-    - [ ] Write/revised/inverse için gerçek hunk ölçümünü tamamla; şimdilik unknown.
-    - [ ] Journal restart/retention ve kalan recovery kabulünü tamamla (3.23).
+    - [x] Write/revised/inverse için bounded native hunk ölçümü bağlı. Üç satır
+      context kullanılır; ölçüm sınırı aşılırsa ve hook sonucu değiştirirse ilgili
+      sayı unknown kalır. Gerçek pipe write/revise/inverse kabulü geçti (3.23).
+    - [x] Resolved journal restart okuması ve retention kabulü geçti: 64 resolved
+      kayıt sınırı, unknown/locked kanıtı koruma ve 64 unresolved kayıtta admission
+      reddi. Recovery salt okunur; restart yazma/replay yetkisi yaratmaz (3.23).
+    - [ ] Kalan recovery kabulünü tamamla; genel session restart/persistence işi
+      madde 7'de açık kalır.
   - [ ] **3.7 Review UI adapter:**
 
     - [x] Ediff native edit_id/review revision'a bağlı; bütün dosyalar onaydan önce
@@ -704,8 +711,9 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     `tools/process.el` diff tüketicisi de kalksın; Dape/session consumer'ları korunur.
   - [ ] **3.10 Bütünleşik kabul/kapanış:**
 
-    - [x] Güncel filtresiz locked Rust 455/455 (29 compile-fail), full source ERT
-      1.337/1.337, focused native producer/consumer 23/23; strict Clippy/fmt,
+    - [x] Güncel filtresiz locked Rust 467/467 (29 compile-fail), full source ERT
+      1.345/1.345, focused bridge/edit 107/107 ve son değişikliklerde 3/3;
+      strict Clippy/fmt,
       warning-as-error bytecompile ve production checkdoc temiz.
     - [x] Altı exhaustive TLC modeli tam verdict ve boş kuyrukla geçti:
       preparation 319.746, journal 1.116, issuance 959, activity 356,
@@ -762,11 +770,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     part / file / terminal ACK kontrolü eklendi. Cancellation gerçek receipt'i
     düşürmez; queue kurulum hatası fence'i kilitli bırakmaz. Activity suite 14/14;
     1 KiB gerçek edit pipe testi katalog bootstrap'ı ayrı tutarak geçti.
-  - [ ] **3.18 Küçük frame ile provider bootstrap (denetimde bulundu):** 1 KiB
-    handshake başarılı olsa da Emacs startup'ının unpaged `provider/catalog`
-    yanıtı `resource_limit` ile düşüyor. Bu G02/katalog transport açığı giderilmeden
-    genel Emacs 1 KiB startup desteği iddia edilmesin. Edit receipt fixture'ı
-    yalnız provider hydration'ını izole eder; production fallback eklenmedi.
+  - [x] **3.18 Küçük frame ile provider bootstrap (denetimde bulundu):** katalog
+    capability'sine bounded UTF-8 byte paging eklendi. Emacs gerçek startup'ı bütün
+    sayfaları exact cursor kontrolüyle toplar; 1 MiB aggregate sınırı korunur.
+    Gerçek 1 KiB Emacs startup + katalog hydration + ping testi geçti; provider
+    hydration'ı testte atlanmıyor. Büyük/escaped RPC ID'leri için response envelope
+    bütçesi metadata sayfalamasından önce ayrılır. Bu kabul bütün tool payload'ları
+    ve sınırsız path uzunlukları için 1 KiB desteği anlamına gelmez.
 
   - [x] **3.19 Rollback sahipliği ve geçmiş (tekrar denetimde bulundu):** güncel
     diski sahiplenen inverse yerine verified final stat/body/document zorunlu.
@@ -790,11 +800,27 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     tabanlı seçim, APPLIED-prefix doğrulaması ve native→legacy undo fallback'i
     kaldırıldı. Sonuç saved/count alanları receipt'ten gelir; mevcut legacy Git
     tüketicisinin ortak process supervision'ı korunur. Tam default cutover değildir.
-  - [ ] **3.23 Hunk/receipt ve kalan UI kabulü:** write/revised/inverse hunk'larını
-    gerçek native ölçümle tamamla; şimdilik unknown. Büyük review metni için bounded
-    upload portunu tamamla. Büyük batch receipt yanıtını
-    küçük frame'lerde sayfala. Gerçek GUI cancel/foreign-window ve journal restart/
-    retention kabulünü tamamla. Bu kabul olmadan 3.6–3.10'u kapatma.
+  - [ ] **3.23 Hunk/receipt ve kalan UI kabulü:**
+
+    - [x] Write/revised/inverse native hunk ölçümü; sıfır/tek/çok hunk, altı/yedi
+      context satırı sınırı ve tekrarlı satırlar doğrulandı. Bounded Myers ölçümü
+      512 edit distance sınırında unknown döner; hook sonrası eşit olmayan sonuç
+      için uygulanmış hunk sayısı tahmin edilmez.
+    - [x] Büyük review metni begin/append/commit upload portuna bağlı; owner,
+      revision, file ve byte offset ACK'i kontrol edilir. Mevcut reservation ve
+      atomik revision worker kullanılır; incomplete upload accept edilemez.
+    - [x] Büyük batch receipt metadata'sı küçük frame'lerde sayfalanır. Sonuç
+      sayfaları kaynak gövdesi/yazma yetkisi tutmaz; 8 stream / 30 saniye sınırı ve
+      son sayfada tüketim vardır. Native 1 KiB ve Emacs 1280 byte gerçek pipe kabulü
+      geçti; application close okunmamış sayfaları kaybettirmez.
+    - [x] Resolved journal gerçek core restart'ından sonra salt okunur RPC ile
+      okunur; retention resolved kayıtları budar, unknown/locked kayıtları korur.
+    - [x] Presenter başlangıç hatası typed interrupted sonucuyla biter; foreign
+      control buffer ve değiştirilmiş window layout batch regresyonlarında korunur.
+      Native display baseline'ları 16 edit / 48 MiB ile sınırlıdır.
+    - [ ] Gerçek GUI'de reject/timeout/C-g ve foreign control/window/buffer kabulünü,
+      kalan recovery senaryolarını tamamla. Batch testleri gerçek GUI kabulünün
+      yerine geçmez. Bu kabul olmadan 3.6–3.10'u kapatma.
 
 - [ ] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
   revision/connection/thread/frame-bound reverse RPC'ye bağla. Mention/folder/

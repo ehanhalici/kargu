@@ -256,6 +256,21 @@
     (should second)
     (should (= 0 (hash-table-count (kargu-bridge-connection-pending conn))))))
 
+(ert-deftest kargu-bridge-real-minimum-frame-hydrates-catalog-test ()
+  "Production startup hydrates the complete catalog at the minimum frame size."
+  (let ((kargu-bridge--max-frame 1024)
+        (pages 0)
+        (hydrate (symbol-function 'kargu-bridge--hydrate-catalog-page)))
+    (cl-letf (((symbol-function 'kargu-bridge--hydrate-catalog-page)
+               (lambda (&rest arguments)
+                 (cl-incf pages)
+                 (apply hydrate arguments))))
+      (kargu-bridge-test--with-core
+        (should (eq (kargu-bridge-status conn) 'ready))
+        (should (= (kargu-bridge-connection-frame-limit conn) 1024))
+        (should (> pages 1))
+        (should-not (cadr (kargu-bridge-test--call conn "ping" (kargu-bridge--object))))))))
+
 (ert-deftest kargu-bridge-real-core-lifecycle-test ()
   (kargu-bridge-test--with-core
     (should (eq (kargu-bridge-status conn) 'ready))
@@ -442,6 +457,21 @@
           (should (equal (gethash "status" (gethash "data" failure)) "owner_closed"))
           (should-not (gethash id (kargu-bridge-connection-pending connection))))
       (when (buffer-live-p owner) (kill-buffer owner)))))
+
+
+(ert-deftest kargu-bridge-catalog-pages-reject-skipped-or-empty-cursors-test ()
+  "Catalog hydration requires exact byte offsets and progress on every page."
+  (dolist (page (list (kargu-bridge--object "text" "ab" "offset" 0 "next_offset" 1 "complete" :json-false)
+                      (kargu-bridge--object "text" "" "offset" 0 "next_offset" 1 "complete" :json-false)
+                      (kargu-bridge--object "text" "ab" "offset" 1 "next_offset" 2 "complete" t)))
+    (let (failure (calls 0))
+      (cl-letf (((symbol-function 'kargu-bridge-call)
+                 (lambda (_connection _method _params callback &rest _)
+                   (cl-incf calls) (funcall callback page nil)))
+                ((symbol-function 'kargu-bridge--start-ready)
+                 (lambda (_connection _callback error-data) (setq failure error-data))))
+        (kargu-bridge--hydrate-catalog-page nil #'ignore 0 nil))
+      (should failure) (should (= calls 1)))))
 
 (provide 'tests/test-bridge)
 ;;; test-bridge.el ends here

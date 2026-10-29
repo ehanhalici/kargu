@@ -112,15 +112,10 @@
   (kargu-edit-transaction-test--issued-crlf-save "new 🦀\n"))
 
 (ert-deftest kargu-native-edit-transaction-tiny-frames-stream-real-receipt-test ()
-  "Exercise negotiated 1 KiB edit frames independently of catalog hydration."
+  "Exercise negotiated 1 KiB edit frames including paged catalog hydration."
   (let ((kargu-bridge--max-frame 1024))
-    ;; The unrelated unpaged provider/catalog response exceeds this frame size.
-    ;; Keep real native handshake/read scope; isolate only provider hydration.
-    (cl-letf (((symbol-function 'kargu-bridge--start-finish)
-               (lambda (connection callback failure)
-                 (kargu-bridge--start-ready connection callback failure))))
-      (kargu-edit-transaction-test--issued-crlf-save
-       (apply #'concat (make-list 400 "🦀\\\"\n"))))))
+    (kargu-edit-transaction-test--issued-crlf-save
+     (apply #'concat (make-list 400 "🦀\\\"\n")))))
 
 (ert-deftest kargu-native-edit-transaction-stale-clean-buffer-hash-is-rejected-real-pipe-test ()
   "Equal byte counts and an unchanged tick cannot bless stale editor contents."

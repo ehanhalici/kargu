@@ -1,5 +1,49 @@
 # Rust geçişi: uygulama günlüğü
 
+## 2026-10-29 — Todo 3.23 devamı: bounded edit aktarımı ve küçük frame bootstrap
+
+Önceki çalışmanın diskte kalan değişiklikleri üzerinden devam edildi. Write,
+revised proposal ve inverse için native üç satır context hunk ölçümü eklendi;
+512 edit distance sınırı aşılırsa sonuç unknown kalır. Hook sonrası istenen
+sonuçla eşleşmeyen receipt, uygulanmış hunk sayısı uydurmaz. Altı/yedi context
+satırı sınırı, tekrarlı satırlar ve gerçek write/revise/inverse pipe'ı testlidir.
+
+Review metni begin/append/commit ile bounded upload edilir. Reservation mevcut
+edit actor'ündedir; revision/file/offset ACK kontrolü ve incomplete upload accept
+reddi vardır. Büyük receipt'ler kaynak gövdelerini bırakıp detached metadata
+sayfaları tutar; 8 stream / 30 saniye ve son sayfada tüketim sınırı uygulanır.
+Application close okunmamış sonuç sayfalarını kaybettirmez. RPC ID'nin gerçek
+serialized envelope boyutu metadata sayfa bütçesinden ayrılır.
+
+Journal recovery mevcut read worker'a bağlandı; yeni core process'i resolved
+journal'ı salt okunur inceler, run/grant veya replay yaratmaz. Retention en eski
+resolved kayıtları budar (64), unknown/locked kanıtı korur ve 64 unresolved
+kayıtta yeni issuance'ı reddeder. Foreign window layout/presenter startup hata
+regresyonları ve native display baseline'larına 16 edit / 48 MiB sınırı eklendi.
+Gerçek GUI reject/timeout/C-g/foreign UI kabulü ve kalan recovery senaryoları açık;
+3.6–3.10 ve genel edit geçişi tamamlandı sayılmaz.
+
+Provider catalog bounded UTF-8 paging'e bağlandı. Gerçek Emacs startup'ı 1 KiB
+frame'de tüm katalog sayfalarını yükleyip ping yapar; transaction fixture'ındaki
+hydration bypass kaldırıldı. Böylece todo 3.18 kapandı. Genel tool/path payload
+boyutları için koşulsuz 1 KiB desteği iddia edilmez.
+
+Devam sırasında iki engel düzeltildi: receipt unit test'inde serde hata dönüş
+tipi ve Emacs 29.1'de obsolete pencere karşılaştırma çağrısı. Checkdoc ve değişen
+Elisp dosyalarının warning-as-error bytecompile kontrolü temiz (ortamın mevcut
+OpenPGP autoload bildirimi dışında). Test çıktıları `/tmp/kargu-edit-*`,
+`/tmp/kargu-rust-final.log`, `/tmp/kargu-full-ert.log` ve
+`/tmp/kargu-tlc-{preparation,journal,issuance,activity,transaction,revision}.log`
+altındadır. Altı exhaustive model tam verdict ve boş kuyrukla geçti: 319.746,
+1.116, 959, 356, 560 ve 272 farklı durum. Model kaynakları değiştirilmedi;
+bu koşular GUI ve retention algoritmasına ayrı bir formal kanıt değildir.
+
+Son kabul: **467/467 locked Rust** (29 compile-fail), **1345/1345 full source
+ERT**, 0 unexpected/skip, 182.27 saniye; **107/107 focused bridge/edit** ve son
+pencere API/startup değişikliklerinde **3/3 focused ERT** geçti. Üç hunk unit
+testi ayrıca geçti. Locked strict all-target Clippy (unwrap/expect/panic deny),
+fmt, build ve değişen Elisp Werror bytecompile/production checkdoc temiz.
+
 ## 2026-10-27 — Todo 2 tamamen kapandı: Git mutations, probes, webfetch ve son bridge audit
 
 Kullanıcı todo 2'nin tamamlanmasını istedi. Kalan mutation araçları closed

@@ -4,7 +4,8 @@ pub mod catalog_target;
 mod domain;
 use domain::SourceDate;
 pub use domain::{
-    ApiEndpoint, ApiProviderId, CatalogEndpoint, EnvironmentName, ProviderName, WireFamily,
+    ApiEndpoint, ApiProviderId, CatalogEndpoint, CatalogOffset, EnvironmentName, ProviderName,
+    WireFamily,
 };
 
 use crate::error::CoreError;
@@ -171,6 +172,40 @@ impl ProviderCatalog {
     pub fn snapshot(&self) -> Value {
         json!({"schema_version":1,"source_date":self.source_date,"revision":self.revision,
             "formats":self.formats,"providers":self.providers.values().collect::<Vec<_>>()})
+    }
+    /// Frame-bounded UTF-8 slice of the credential-free catalog snapshot.
+    pub fn page(
+        &self,
+        offset: CatalogOffset,
+        frame: crate::domain::ByteLimit,
+    ) -> Result<Value, CoreError> {
+        let text =
+            serde_json::to_string(&self.snapshot()).map_err(|_| CoreError::InvalidValue {
+                field: "ProviderManifest",
+            })?;
+        if text.len() > crate::constants::limits::PROVIDER_CATALOG_BYTES {
+            return Err(CoreError::Limit);
+        }
+        let start = offset.as_usize();
+        if start > text.len() || !text.is_char_boundary(start) {
+            return Err(CoreError::InvalidValue {
+                field: "CatalogOffset",
+            });
+        }
+        let budget = frame.as_usize().saturating_sub(128) / 6;
+        if budget < 4 {
+            return Err(CoreError::Limit);
+        }
+        let mut end = start.saturating_add(budget).min(text.len());
+        while end > start && !text.is_char_boundary(end) {
+            end = end.checked_sub(1).ok_or(CoreError::Limit)?;
+        }
+        Ok(json!({
+            "text": &text[start..end],
+            "offset": start,
+            "next_offset": end,
+            "complete": end == text.len(),
+        }))
     }
 }
 

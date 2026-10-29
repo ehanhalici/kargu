@@ -69,10 +69,19 @@ pub(super) enum Completion {
         reason: NoDispatchReason,
     },
     Receipt {
+        token: EditorIssueToken,
         effect: IssuedEditorEdit,
         request_id: Option<RpcId>,
         receipt: Box<VerifiedReceipt>,
     },
+}
+pub(super) struct SettledReceipt {
+    pub scope: crate::application::host::ReadScope,
+    pub origin: crate::edit::types::EditorSourceId,
+    pub token: EditorIssueToken,
+    pub revision: crate::edit::types::EditorRevision,
+    pub receipt: crate::edit::prepare::receipt::ReceiptPages,
+    pub expires_at: Instant,
 }
 pub(super) struct Finishing {
     pub run: RunHandle,
@@ -150,6 +159,7 @@ impl Issued {
 impl Finishing {
     pub(super) fn finish_receipt(
         run: RunHandle,
+        token: EditorIssueToken,
         journal: IssuedJournal,
         effect: IssuedEditorEdit,
         request_id: Option<RpcId>,
@@ -161,6 +171,7 @@ impl Finishing {
             run,
             journal,
             Completion::Receipt {
+                token,
                 effect,
                 request_id,
                 receipt,
@@ -189,10 +200,12 @@ impl Finishing {
         self,
         host: &mut Host,
         scope: &crate::application::host::ReadScope,
+        origin: &crate::edit::types::EditorSourceId,
         preparation: &crate::edit::prepare::PreparationId,
         id: &EditorEditId,
         result: Result<JournalCommit, CoreError>,
-    ) -> Result<Vec<Value>, CoreError> {
+    ) -> Result<(Vec<Value>, Option<SettledReceipt>), CoreError> {
+        let frame_limit = host.frame_limit().as_usize();
         let live_owner = host.owns_read_scope(scope);
         let actor = host.actor_mut(scope)?;
         let expected = match &self.completion {
@@ -213,6 +226,7 @@ impl Finishing {
             .as_ref()
             .is_ok_and(|commit| commit.id() == id && commit.resolution() == &expected);
         let mut replies = Vec::new();
+        let mut settled = None;
         match self.completion {
             Completion::Unissued {
                 grant,
@@ -243,10 +257,12 @@ impl Finishing {
                 }
             }
             Completion::Receipt {
+                token,
                 effect,
                 request_id,
                 receipt,
             } => {
+                let revision = effect.revision();
                 let outcome = if durable {
                     receipt.outcome()
                 } else {
@@ -263,16 +279,39 @@ impl Finishing {
                 effect.complete(actor, outcome)?;
                 if let Some(request_id) = request_id {
                     replies.push(if durable {
-                        protocol::success(
+                        let full = protocol::success(
                             &request_id,
                             json!({
                                 "edit_id": id,
                                 "state": "quiescent",
-                                "receipt": receipt,
-                                "rollback_available":rollback_available,
+                                "receipt": &receipt,
+                                "rollback_available": rollback_available,
                                 "journal_committed": true
                             }),
-                        )
+                        );
+                        if full.to_string().len() <= frame_limit {
+                            full
+                        } else {
+                            let summary = receipt.paged_summary();
+                            settled = Some(SettledReceipt {
+                                scope: scope.clone(),
+                                origin: origin.clone(),
+                                token,
+                                revision,
+                                receipt: receipt.into_pages(),
+                                expires_at: deadline()?,
+                            });
+                            protocol::success(
+                                &request_id,
+                                json!({
+                                    "edit_id": id,
+                                    "state": "quiescent",
+                                    "receipt": summary,
+                                    "rollback_available": rollback_available,
+                                    "journal_committed": true
+                                }),
+                            )
+                        }
                     } else {
                         crate::ipc::protocol::Fault {
                             code: crate::constants::protocol::error_codes::OUTCOME_UNKNOWN,
@@ -286,6 +325,6 @@ impl Finishing {
         }
         actor.finish(&self.run)?;
         actor.edits.release_claim(&scope.session_id, preparation)?;
-        Ok(replies)
+        Ok((replies, settled))
     }
 }

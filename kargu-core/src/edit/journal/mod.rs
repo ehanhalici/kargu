@@ -4,6 +4,7 @@
 //! before its consuming journal state is returned; resolution is synced afterward.
 //! Recovery projects evidence only and has no execution or replay API.
 mod metadata;
+mod retention;
 mod storage;
 use crate::{
     application::RunScope,
@@ -151,7 +152,8 @@ pub enum JournalResolution {
     },
 }
 /// Why recovered issuance cannot establish a terminal result.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RecoveryReason {
     /// No complete issuance record was found.
     MissingIssue,
@@ -161,6 +163,15 @@ pub enum RecoveryReason {
     InvalidRecord,
     /// Issuance or an uncertainty marker has no terminal resolution.
     MissingResolution,
+}
+/// Detached input for read-only journal recovery after restart or disconnect.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoverInput {
+    /// Private directory containing the `.ndjson` journal file.
+    pub journal_directory: JournalDirectory,
+    /// Native edit operation identity.
+    pub edit_id: EditorEditId,
 }
 /// Detached recovery evidence. No variant can create a live run or editor grant.
 pub enum RecoveredJournal {
@@ -180,6 +191,27 @@ pub enum RecoveredJournal {
         /// Actual terminal evidence; receipt does not itself mean success.
         resolution: JournalResolution,
     },
+}
+impl RecoveredJournal {
+    /// Detached JSON projection for read-only recovery inspection.
+    pub fn into_json(self) -> serde_json::Value {
+        match self {
+            Self::Unconfirmed(reason) => serde_json::json!({
+                "state": "unconfirmed",
+                "reason": reason,
+            }),
+            Self::OutcomeUnknown { issue, reason } => serde_json::json!({
+                "state": "outcome_unknown",
+                "issue": issue,
+                "reason": reason,
+            }),
+            Self::Resolved { issue, resolution } => serde_json::json!({
+                "state": "resolved",
+                "issue": issue,
+                "resolution": resolution,
+            }),
+        }
+    }
 }
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "u8", into = "u8")]
@@ -345,6 +377,14 @@ pub fn recover(
     deadline: Instant,
 ) -> Result<RecoveredJournal, CoreError> {
     let bytes = storage::read(directory, &id, cancel, deadline)?;
+    recover_bytes(&bytes, id, cancel, deadline)
+}
+fn recover_bytes(
+    bytes: &[u8],
+    id: EditorEditId,
+    cancel: &CancellationToken,
+    deadline: Instant,
+) -> Result<RecoveredJournal, CoreError> {
     let mut issue = None;
     let mut resolution = None;
     let mut previous = GENESIS;

@@ -95,17 +95,22 @@
           :restore-clean (eq (gethash "restore_dirty" view) :json-false)))))
    files))
 
-(defun kargu-bridge-edit-batch--result (native root)
-  "Project verified NATIVE facts under ROOT into a consumer result."
+(defun kargu-bridge-edit-batch--result (native root &optional proposals)
+  "Project verified NATIVE facts under ROOT and PROPOSALS into a consumer result."
   (let* ((receipt (gethash "receipt" native))
-         (files (mapcar
-                 (lambda (file)
-                   (list :path (expand-file-name (gethash "path" file) root)
-                         :status (intern (concat ":" (replace-regexp-in-string "_" "-" (gethash "outcome" file))))
-                         :saved (eq (gethash "saved" file) t)
-                         :hunks (gethash "hunks" file)
-                         :hook-transformed (eq (gethash "hook_modified" file) t)))
-                 (append (gethash "files" receipt) nil))))
+         (files (cl-loop for file across (gethash "files" receipt)
+                         for index from 0
+                         for proposal = (nth index proposals)
+                         for view = (plist-get proposal :view)
+                         collect
+                         (list :path (expand-file-name (gethash "path" file) root)
+                               :status (intern (concat ":" (replace-regexp-in-string "_" "-" (gethash "outcome" file))))
+                               :saved (eq (gethash "saved" file) t)
+                               :hunks (gethash "hunks" file)
+                               :base (plist-get proposal :base)
+                               :existed (and (hash-table-p view) (eq (gethash "existed" view) t))
+                               :baseline (plist-get proposal :baseline)
+                               :hook-transformed (eq (gethash "hook_modified" file) t)))))
     (list :status (intern (concat ":" (replace-regexp-in-string "_" "-" (gethash "outcome" receipt))))
           :file (and (= (length files) 1) (plist-get (car files) :path))
           :files files :root root :edit-id (gethash "edit_id" native)
@@ -153,8 +158,10 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
             artifact (guard (lambda (files) (authorize files)))))
          (authorize (files)
            (dolist (file files)
-             (setf (plist-get file :document)
-                   (kargu-bridge-edit-batch-read-document (gethash "path" (plist-get file :view)))))
+             (let ((path (gethash "path" (plist-get file :view))))
+               (setf (plist-get file :document) (kargu-bridge-edit-batch-read-document path))
+               (when (functionp (plist-get spec :capture-baseline))
+                 (setf (plist-get file :baseline) (funcall (plist-get spec :capture-baseline) path)))))
            (kargu-bridge-edit-authorize
             artifact (or (plist-get spec :presenter) 'available)
             (guard
@@ -187,7 +194,7 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
                   :handler (lambda (live-p) (kargu-bridge-edit-batch--apply files live-p))
                   :callback (guard (lambda (value)
                                      (finish (kargu-bridge-edit-batch--result
-                                              (plist-get value :native) (plist-get spec :root)) nil)))))
+                                              (plist-get value :native) (plist-get spec :root) files) nil)))))
            (kargu-async-add-cleanup task (lambda () (kargu-bridge-edit-activity-cancel activity))))
          (prepare-patch (application arguments)
            (kargu-bridge-edit-patch-inspect

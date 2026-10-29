@@ -78,10 +78,15 @@ impl Peer {
         let line = self.output.recv_timeout(Duration::from_secs(12))?;
         Ok(serde_json::from_str(&line)?)
     }
+    #[allow(dead_code)]
     pub(super) fn initialize(&mut self) -> TestResult {
+        self.initialize_with_limit(1_048_576)
+    }
+    #[allow(dead_code)]
+    pub(super) fn initialize_with_limit(&mut self, max_frame_bytes: usize) -> TestResult {
         self.send(json!({"jsonrpc":"2.0","id":"e:init","method":"initialize",
             "params":{"protocol_major":1,"protocol_minor":0,"client_version":"pipe-test",
-            "capabilities":[],"limits":{"max_frame_bytes":1048576}}}))?;
+            "capabilities":[],"limits":{"max_frame_bytes":max_frame_bytes}}}))?;
         let initialized = self.read()?;
         self.epoch = initialized["result"]["connection_epoch"]
             .as_str()

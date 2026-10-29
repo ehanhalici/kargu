@@ -81,7 +81,7 @@
                                (lambda (proposed error-data)
                                  (if error-data (funcall callback nil error-data)
                                    (next (cdr remaining) (1+ index)
-                                         (cons (list :view view :base base :proposed proposed :document nil)
+                                         (cons (list :view view :base base :proposed proposed :document nil :baseline nil)
                                                reversed))))))))))))
          (next views 0 nil))))))
 

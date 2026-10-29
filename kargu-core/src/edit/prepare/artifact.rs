@@ -48,6 +48,7 @@ pub(crate) struct Prepared {
     pub(super) base_hash: ContentHash,
     pub(super) proposed_hash: ContentHash,
     pub(super) unchanged: bool,
+    pub(super) hunks: Option<HunkCount>,
     pub(super) live: Option<LiveDocument>,
     pub(super) config_revision: ConfigRevision,
     pub(super) policy_revision: PolicyRevision,
@@ -61,7 +62,7 @@ impl Prepared {
         json!({"preparation_id":id,"root":self.root.path(),"path":self.path,"requested_path":self.relative,
         "existed":self.evidence.existed(),"base_hash":self.base_hash,"proposed_hash":self.proposed_hash,
         "base_bytes":self.base.as_str().len(),"proposed_bytes":self.proposed.as_str().len(),"unchanged":self.unchanged,
-        "document":self.live,"disk":self.disk,"config_revision":self.config_revision,"policy_revision":self.policy_revision,
+        "hunks_total":self.hunks,"document":self.live,"disk":self.disk,"config_revision":self.config_revision,"policy_revision":self.policy_revision,
         "review_mode":self.review_mode,"save_policy":self.save_policy,"restore_dirty":self.restore_dirty,"restore_coding":self.restore_coding,"applied":false})
     }
     pub(super) fn page(
@@ -111,9 +112,11 @@ impl Prepared {
             self.base_hash,
             proposed_hash,
         );
+        let hunks = super::hunks::measure_hunks(&self.base, &proposed, is_unchanged);
         self.proposed = proposed;
         self.proposed_hash = proposed_hash;
         self.unchanged = is_unchanged;
+        self.hunks = hunks;
         Ok(())
     }
 }
@@ -155,7 +158,7 @@ impl Artifact {
         match self {
             Self::File(p) => p.descriptor(id),
             Self::Batch(b) => {
-                json!({"preparation_id":id,"file_count":b.files.len(),"hunks_total":b.hunks,"batch":true,"applied":false})
+                json!({"preparation_id":id,"root":b.files.first().map(|file|file.proposal.root.path()),"file_count":b.files.len(),"hunks_total":b.hunks,"batch":true,"applied":false})
             }
         }
     }
@@ -193,6 +196,9 @@ impl Artifact {
         for (index, file) in b.files.iter().enumerate().skip(offset.get()) {
             let mut value = file.proposal.descriptor(id);
             let object = value.as_object_mut().ok_or(EditError::InvalidEvidence)?;
+            // Shared immutable ticket/root are in the batch descriptor, not every row.
+            object.remove("root");
+            object.remove("preparation_id");
             object.insert("operation".into(), json!(file.kind));
             object.insert("hunks_total".into(), json!(file.hunks));
             object.insert("file".into(), json!(types::FileIndex::try_from(index)?));
@@ -232,11 +238,14 @@ impl Artifact {
                     file.proposal.base_hash,
                     proposed_hash,
                 );
+                let hunks =
+                    super::hunks::measure_hunks(&file.proposal.base, &proposed, is_unchanged);
                 file.proposal.proposed = proposed;
                 file.proposal.proposed_hash = proposed_hash;
                 file.proposal.unchanged = is_unchanged;
-                file.hunks = None;
-                batch.hunks = None;
+                file.proposal.hunks = hunks;
+                file.hunks = hunks;
+                batch.hunks = super::hunks::sum_hunks(batch.files.iter().map(|entry| entry.hunks));
                 Ok(())
             }
         }

@@ -452,3 +452,62 @@ fn legacy_version_one_records_without_issuance_fields_keep_their_integrity() -> 
     assert_eq!(fs::read_to_string(f.path())?, encoded);
     Ok(())
 }
+
+#[test]
+fn retention_prunes_oldest_resolved_journals_while_preserving_unknown_records() -> TestResult {
+    let mut f = Fixture::new()?;
+    let unknown_id = EditorEditId::try_from(format!("editor_edit_{}", uuid::Uuid::new_v4()))?;
+    f.id = unknown_id.clone();
+    let unknown_pending = f.create()?;
+    drop(unknown_pending.mark_unknown(&f.cancel, f.deadline()?)?);
+    let unknown_path = f.path();
+    assert!(unknown_path.exists());
+
+    let mut resolved_paths = Vec::with_capacity(limits::EDIT_JOURNAL_FILES + 4);
+    for _ in 0..(limits::EDIT_JOURNAL_FILES + 4) {
+        std::thread::sleep(Duration::from_millis(1));
+        f.id = EditorEditId::try_from(format!("editor_edit_{}", uuid::Uuid::new_v4()))?;
+        let pending = f.create()?;
+        pending.resolve(receipt()?, &f.cancel, f.deadline()?)?;
+        resolved_paths.push(f.path());
+    }
+    // Trigger one more create to run retention pruning after the last resolved journal.
+    std::thread::sleep(Duration::from_millis(1));
+    f.id = EditorEditId::try_from(format!("editor_edit_{}", uuid::Uuid::new_v4()))?;
+    let active = f.create()?;
+
+    assert!(
+        unknown_path.exists(),
+        "OutcomeUnknown journal must never be pruned by retention"
+    );
+    assert!(
+        !resolved_paths.first().ok_or("first")?.exists(),
+        "Oldest Resolved journal must be pruned once cap is exceeded"
+    );
+    assert!(
+        resolved_paths.last().ok_or("last")?.exists(),
+        "Newest Resolved journal must be retained"
+    );
+    let total_entries = fs::read_dir(f.directory.path())?.count();
+    assert_eq!(total_entries, limits::EDIT_JOURNAL_FILES + 1);
+    drop(active);
+    Ok(())
+}
+
+#[test]
+fn unresolved_retention_refuses_new_issuance_without_deleting_evidence() -> TestResult {
+    let mut f = Fixture::new()?;
+    let mut paths = Vec::new();
+    for _ in 0..limits::EDIT_JOURNAL_UNRESOLVED_FILES {
+        f.id = EditorEditId::try_from(format!("editor_edit_{}", uuid::Uuid::new_v4()))?;
+        drop(f.create()?);
+        paths.push(f.path());
+    }
+    f.id = EditorEditId::try_from(format!("editor_edit_{}", uuid::Uuid::new_v4()))?;
+    assert!(matches!(f.create(), Err(CoreError::Limit)));
+    assert!(!f.path().exists());
+    for path in paths {
+        assert!(path.exists());
+    }
+    Ok(())
+}

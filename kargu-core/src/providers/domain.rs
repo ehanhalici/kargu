@@ -228,3 +228,23 @@ impl WireFamily {
         }
     }
 }
+
+/// Bounded UTF-8 byte offset into a serialized provider catalog projection.
+#[derive(Clone, Copy, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(try_from = "usize")]
+pub struct CatalogOffset(usize);
+impl TryFrom<usize> for CatalogOffset {
+    type Error = CoreError;
+    fn try_from(value: usize) -> Result<Self, CoreError> {
+        if value > crate::constants::limits::PROVIDER_CATALOG_BYTES {
+            return Err(CoreError::Limit);
+        }
+        Ok(Self(value))
+    }
+}
+impl CatalogOffset {
+    /// Validated byte offset within the serialized catalog snapshot.
+    pub fn as_usize(self) -> usize {
+        self.0
+    }
+}

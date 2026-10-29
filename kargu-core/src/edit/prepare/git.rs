@@ -145,6 +145,7 @@ fn capture_files(
                 base: base.into(),
                 proposed: proposed.into(),
                 unchanged: false,
+                hunks: Some(target.hunks),
                 live,
                 config_revision: inspection.input.config_revision,
                 policy_revision: inspection.input.policy_revision,

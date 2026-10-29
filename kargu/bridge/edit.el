@@ -122,8 +122,12 @@
   (let* ((artifact (kargu-bridge-edit-transfer-artifact transfer))
          (inspect (eq (kargu-bridge-edit-transfer-action transfer) :inspect))
          (count (and (hash-table-p value) (gethash "file_count" value)))
+         (hunks (and (hash-table-p value) (gethash "hunks_total" value)))
          (batch (and (integerp count) (<= 1 count kargu-bridge-edit--file-count)
-                     (integerp (gethash "hunks_total" value)) (<= 0 (gethash "hunks_total" value) kargu-bridge-edit--hunk-count))))
+                     (if inspect
+                         (and (integerp hunks) (<= 0 hunks kargu-bridge-edit--hunk-count))
+                       (or (null hunks)
+                           (and (integerp hunks) (<= 0 hunks kargu-bridge-edit--hunk-count)))))))
     (unless (and (hash-table-p value)
                  (equal (gethash "preparation_id" value) (kargu-bridge-edit-artifact-id artifact))
                  (eq (gethash "applied" value) :json-false)
@@ -234,8 +238,11 @@
 
 (defun kargu-bridge-edit--watch-owner (transfer)
   "Cancel TRANSFER when its captured source is killed or mode is altered."
-  (let* ((task (kargu-bridge-edit-transfer-task transfer))
-         (owner (kargu-async-task-buffer task))
+  (kargu-bridge-edit--watch-task-owner (kargu-bridge-edit-transfer-task transfer)))
+
+(defun kargu-bridge-edit--watch-task-owner (task)
+  "Cancel TASK when its captured source is killed or mode is altered."
+  (let* ((owner (kargu-async-task-buffer task))
          (cancel (lambda () (kargu-async-cancel task))))
     (add-hook 'kill-buffer-hook cancel nil t)
     (add-hook 'change-major-mode-hook cancel nil t)
@@ -338,12 +345,81 @@ This transport does not read editor files or grant editor effects."
    artifact :decision :edit edit-id :revision revision
    :fields (list "decision" (if (symbolp decision) (symbol-name decision) decision)) :callback callback))
 
-(cl-defun kargu-bridge-edit-revise (artifact &key edit-id revision file-index new-text callback)
-  "Revise ARTIFACT's EDIT-ID at REVISION into CALLBACK.
-FILE-INDEX selects the proposal receiving NEW-TEXT."
-  (kargu-bridge-edit--execution-call
-   artifact :revise :edit edit-id :revision revision
-   :fields (list "file_index" file-index "new_text" new-text) :callback callback))
+(cl-defun kargu-bridge-edit-revise
+    (artifact &key edit-id revision file-index new-text callback (parent kargu-async--current-task))
+  "Revise ARTIFACT's EDIT-ID at REVISION asynchronously into CALLBACK.
+FILE-INDEX selects NEW-TEXT's proposal.  PARENT owns cancellation and source
+lifetime.  Failure revokes the preparation; text is never replayed implicitly."
+  (let* ((edit (copy-sequence edit-id))
+         (task (kargu-async-start callback :timeout 30 :parent parent
+                                  :valid-p (lambda () (kargu-bridge-edit--current-p artifact))))
+         (frame (or (kargu-bridge-connection-frame-limit
+                     (kargu-bridge-edit-artifact-connection artifact)) kargu-bridge--max-frame))
+         (limit (min kargu-bridge-edit--chunk-bytes (max 4 (/ (- frame 512) 6))))
+         bytes succeeded)
+    (kargu-bridge-edit--watch-task-owner task)
+    (kargu-async-add-cleanup task (lambda () (unless succeeded (kargu-bridge-edit-release artifact))))
+    (cl-labels
+        ((fail (failure) (kargu-async-finish task nil failure))
+         (identity-p (reply)
+           (and (hash-table-p reply) (equal (gethash "edit_id" reply) edit)
+                (eql (gethash "revision" reply) revision)
+                (eql (gethash "file_index" reply) file-index)))
+         (finish (reply failure)
+           (cond
+            (failure (fail failure))
+            ((and (hash-table-p reply) (equal (gethash "edit_id" reply) edit)
+                  (eql (gethash "revision" reply) (1+ revision))
+                  (stringp (gethash "digest" reply))
+                  (string-match-p kargu-bridge-edit--hash-pattern (gethash "digest" reply)))
+             (setq succeeded t)
+             (kargu-async-finish task reply nil))
+            (t (fail (kargu-bridge--fault "invalid_edit_preparation")))))
+         (send (input receive)
+           (kargu-bridge-edit--execution-call
+            artifact :revise :edit edit :revision revision :fields (list "input" input)
+            :callback (kargu-async-wrap task receive)))
+         (pump (offset page)
+           (if (= offset (length bytes))
+               (send (kargu-bridge--object "action" "commit" "file_index" file-index) #'finish)
+             (let ((end (min (length bytes) (+ offset page))))
+               (while (and (< end (length bytes)) (= (logand (aref bytes end) #xc0) #x80))
+                 (setq end (1- end)))
+               (send
+                (kargu-bridge--object "action" "append" "file_index" file-index "offset" offset
+                                      "text" (decode-coding-string (substring bytes offset end) 'utf-8-unix))
+                (lambda (reply failure)
+                  (cond
+                   (failure (fail failure))
+                   ((and (identity-p reply) (eql (gethash "offset" reply) end)
+                         (eql (gethash "next_offset" reply) end)
+                         (eq (gethash "complete" reply) (if (= end (length bytes)) t :json-false)))
+                    (pump end page))
+                   (t (fail (kargu-bridge--fault "invalid_edit_preparation"))))))))))
+      (condition-case nil
+          (progn
+            (unless (and (stringp new-text) (<= (length new-text) (* 4 1024 1024)))
+              (error "Invalid revision text"))
+            (setq bytes (encode-coding-string (substring-no-properties new-text) 'utf-8-unix))
+            (when (> (length bytes) (* 4 1024 1024)) (error "Revision text exceeds byte limit"))
+            (if (<= (length bytes) limit)
+                (kargu-bridge-edit--execution-call
+                 artifact :revise :edit edit :revision revision
+                 :fields (list "file_index" file-index "new_text" (decode-coding-string bytes 'utf-8-unix))
+                 :callback (kargu-async-wrap task #'finish))
+              (send
+               (kargu-bridge--object "action" "begin" "file_index" file-index "new_bytes" (length bytes))
+               (lambda (reply failure)
+                 (let ((page (and (hash-table-p reply) (gethash "page_bytes" reply))))
+                   (cond
+                    (failure (fail failure))
+                    ((and (identity-p reply) (eql (gethash "bytes" reply) (length bytes))
+                          (eq (gethash "complete" reply) :json-false)
+                          (integerp page) (<= 4 page kargu-bridge-edit--chunk-bytes))
+                     (pump 0 (min page limit)))
+                    (t (fail (kargu-bridge--fault "invalid_edit_preparation")))))))))
+        ((error quit) (fail (kargu-bridge--fault "invalid_edit_preparation")))))
+    task))
 
 (cl-defun kargu-bridge-edit-preflight (artifact &key edit-id revision witness callback)
   "Preflight ARTIFACT's EDIT-ID and REVISION with WITNESS into CALLBACK."
@@ -396,6 +472,36 @@ PARENT owns only preparation; no write capability is returned."
                            (kargu-async-finish task artifact nil)
                          (kargu-bridge-edit-release artifact)
                          (kargu-async-finish task nil (kargu-bridge--fault "stale_edit_preparation")))))))))))))))
+    task))
+
+(cl-defun kargu-bridge-edit-recover (application journal-directory edit-id &key callback parent)
+  "Inspect JOURNAL-DIRECTORY's EDIT-ID for APPLICATION into CALLBACK.
+PARENT guards the asynchronous read; recovery never creates a write grant."
+  (let* ((directory (expand-file-name journal-directory))
+         (id (copy-sequence edit-id))
+         (task (kargu-async-start callback :timeout 30 :parent parent)))
+    (kargu-bridge-ensure
+     (kargu-async-wrap
+      task
+      (lambda (connection failure)
+        (if failure (kargu-async-finish task nil failure)
+          (kargu-bridge-application-ensure
+           connection application
+           (kargu-async-wrap
+            task
+            (lambda (scope error-data)
+              (if error-data (kargu-async-finish task nil error-data)
+                (kargu-bridge-call
+                 connection "edit/recover"
+                 (kargu-bridge--object
+                  "scope" (kargu-bridge-application--copy-scope scope)
+                  "arguments" (kargu-bridge--object
+                               "journal_directory" directory
+                               "edit_id" id))
+                 (lambda (value fault)
+                   (if fault
+                       (kargu-async-finish task nil fault)
+                     (kargu-async-finish task value nil))))))))))))
     task))
 
 (provide 'kargu/bridge/edit)

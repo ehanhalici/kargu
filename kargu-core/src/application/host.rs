@@ -110,6 +110,12 @@ struct SessionScope {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct CatalogPageRequest {
+    offset: crate::providers::CatalogOffset,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CatalogTargetRequest {
     connection_epoch: String,
     arguments: crate::providers::catalog_target::CatalogTargetInput,
@@ -265,6 +271,21 @@ impl Host {
         Ok((scope, input))
     }
 
+    pub(crate) fn prepare_journal_recovery(
+        &self,
+        params: Value,
+    ) -> Result<(ReadScope, crate::edit::journal::RecoverInput), Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let request: ReadRequest<crate::edit::journal::RecoverInput> =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&request.scope) {
+            return Err(owner_fault());
+        }
+        Ok((request.scope, request.arguments))
+    }
+
     pub(crate) fn prepare_rollback(
         &mut self,
         params: Value,
@@ -369,6 +390,36 @@ impl Host {
 
     /// Dispatch a request or notification; state-changing methods require ids.
     pub fn dispatch(&mut self, method: &str, params: Value, request: bool) -> Dispatch {
+        self.dispatch_budgeted(method, params, request, self.frame_limit)
+    }
+    pub(crate) fn dispatch_rpc(
+        &mut self,
+        method: &str,
+        params: Value,
+        id: Option<&crate::ipc::protocol::RpcId>,
+    ) -> Dispatch {
+        let response_limit = match id.map(|id| id.result_budget(self.frame_limit)).transpose() {
+            Ok(limit) => limit.unwrap_or(self.frame_limit),
+            Err(_) => {
+                return Dispatch {
+                    result: Err(Fault {
+                        code: protocol::error_codes::RESOURCE_LIMIT,
+                        status: "resource_limit",
+                        message: "Response envelope exceeds negotiated frame limit",
+                    }),
+                    exit: false,
+                };
+            }
+        };
+        self.dispatch_budgeted(method, params, id.is_some(), response_limit)
+    }
+    fn dispatch_budgeted(
+        &mut self,
+        method: &str,
+        params: Value,
+        request: bool,
+        response_limit: ByteLimit,
+    ) -> Dispatch {
         if method == methods::EXIT && !request {
             return Dispatch {
                 result: Ok(Value::Null),
@@ -404,7 +455,7 @@ impl Host {
         } else if self.phase != Phase::Ready {
             Err(state_fault())
         } else {
-            self.ready_call(method, params)
+            self.ready_call(method, params, response_limit)
         };
         Dispatch {
             result,
@@ -443,7 +494,12 @@ impl Host {
         )
     }
 
-    fn ready_call(&mut self, method: &str, params: Value) -> Result<Value, Fault> {
+    fn ready_call(
+        &mut self,
+        method: &str,
+        params: Value,
+        response_limit: ByteLimit,
+    ) -> Result<Value, Fault> {
         match method {
             methods::EDIT_BEGIN
             | methods::EDIT_TARGETS
@@ -458,7 +514,7 @@ impl Host {
                 if !self.owns_read_scope(&request.scope) {
                     return Err(owner_fault());
                 }
-                let frame = self.frame_limit;
+                let frame = response_limit;
                 self.actor_mut(&request.scope)
                     .map_err(|_| owner_fault())?
                     .edits
@@ -492,7 +548,7 @@ impl Host {
                     method,
                     request.arguments,
                     catalog,
-                    self.frame_limit,
+                    response_limit,
                     std::time::Instant::now(),
                 )
             }
@@ -507,7 +563,7 @@ impl Host {
                 if !self.owns_read_scope(&request.scope) {
                     return Err(owner_fault());
                 }
-                let frame = self.frame_limit;
+                let frame = response_limit;
                 self.actor_mut(&request.scope)
                     .map_err(|_| owner_fault())?
                     .models
@@ -530,7 +586,18 @@ impl Host {
                     message: "Provider manifest is invalid",
                     status: "invalid_catalog",
                 }),
-            methods::PROVIDER_CATALOG => Err(Fault::params()),
+            methods::PROVIDER_CATALOG => {
+                let request: CatalogPageRequest =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let catalog = self.providers.as_ref().map_err(|_| Fault {
+                    code: protocol::error_codes::INVALID_STATE,
+                    message: "Provider manifest is invalid",
+                    status: "invalid_catalog",
+                })?;
+                catalog
+                    .page(request.offset, response_limit)
+                    .map_err(|_| Fault::params())
+            }
             methods::PROVIDER_CATALOG_TARGET => self.catalog_target(params),
             methods::CONFIGURATION_PARSE => self.configuration_parse(params),
             methods::APPLICATION_CREATE => {

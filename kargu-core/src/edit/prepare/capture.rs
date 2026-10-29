@@ -271,11 +271,13 @@ impl Work {
             base_hash,
             proposed_hash,
         );
+        let hunks = super::hunks::measure_hunks(&base, &proposed, unchanged);
         Ok(super::PreparationResult::Complete(super::Artifact::File(
             Box::new(Prepared {
                 base_hash,
                 proposed_hash,
                 unchanged,
+                hunks,
                 root,
                 path: evidence.canonical.clone(),
                 relative,

@@ -90,6 +90,11 @@ impl TryFrom<String> for ReceiptChunk {
         Ok(Self(Zeroizing::new(text)))
     }
 }
+impl ReceiptChunk {
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum ReceiptInput {
@@ -103,6 +108,9 @@ pub(crate) enum ReceiptInput {
         text: ReceiptChunk,
     },
     Commit {},
+    Files {
+        offset: super::types::FileCursor,
+    },
 }
 struct FileUpload {
     observation: FileObservation,
@@ -345,5 +353,106 @@ impl VerifiedReceipt {
             }
             BatchOutcome::OutcomeUnknown => crate::application::ToolOutcome::OutcomeUnknown,
         }
+    }
+    pub(crate) fn paged_summary(&self) -> serde_json::Value {
+        serde_json::json!({
+            "outcome": self.outcome,
+            "files": [],
+            "files_total": self.files_total,
+            "files_applied": self.files_applied,
+            "hunks_total": self.hunks_total,
+            "hunks_applied": self.hunks_applied,
+            "offset": 0,
+            "next_offset": 0,
+            "complete": false,
+        })
+    }
+    pub(crate) fn into_pages(self) -> ReceiptPages {
+        let files = self
+            .files
+            .into_iter()
+            .map(|mut file| {
+                file.final_text = None;
+                file
+            })
+            .collect();
+        ReceiptPages {
+            files,
+            total: self.files_total,
+        }
+    }
+}
+/// Detached outcome metadata. Source bodies and executable rights are never retained.
+pub(crate) struct ReceiptPages {
+    files: Vec<FileResult>,
+    total: FileCount,
+}
+impl ReceiptPages {
+    pub(crate) fn page_files(
+        &self,
+        offset: super::types::FileCursor,
+        frame: crate::domain::ByteLimit,
+    ) -> Result<serde_json::Value, CoreError> {
+        if offset.get() > self.files.len() {
+            return Err(EditError::InvalidEvidence.into());
+        }
+        let mut page = super::page::MetadataPage::new(frame)?;
+        for file in self.files.iter().skip(offset.get()) {
+            let value = serde_json::to_value(file).map_err(|_| CoreError::Limit)?;
+            if !page.push(value)? {
+                break;
+            }
+        }
+        page.finish(offset, self.total)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn paged_outcome_drops_source_body_ownership_and_keeps_metadata()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let body = Arc::new(EditText::try_from("private source body\n".repeat(20_000))?);
+        let weak = Arc::downgrade(&body);
+        let hash = body.hash();
+        let doc: LiveDocument = serde_json::from_value(
+            serde_json::json!({"id":"editor_document_12345678-1234-4234-8234-123456789abc",
+            "tick":1,"bytes":body.as_str().len(),"coding":"utf-8-unix","dirty":true,"read_only":false,"disk":{"kind":"absent"}}),
+        )?;
+        let receipt = VerifiedReceipt {
+            outcome: BatchOutcome::AppliedFull,
+            files_total: FileCount::try_from(1)?,
+            files_applied: FileCount::try_from(1)?,
+            hunks_total: None,
+            hunks_applied: None,
+            files: vec![FileResult {
+                file: FileIndex::try_from(0)?,
+                path: crate::edit::types::EditPath::try_from("file.txt".to_owned())?,
+                outcome: FileOutcome::Applied,
+                base_hash: hash,
+                proposed_hash: hash,
+                written_hash: Some(hash),
+                final_hash: Some(hash),
+                hunks: None,
+                final_text: Some(body),
+                final_document: Some(doc.clone()),
+                before_document: doc,
+                final_disk: DiskState::Absent {},
+                saved: false,
+                hook_modified: false,
+            }],
+        };
+        let pages = receipt.into_pages();
+        assert!(weak.upgrade().is_none());
+        let page = pages.page_files(
+            super::super::types::FileCursor::default(),
+            crate::domain::ByteLimit::try_from(1024)?,
+        )?;
+        let encoded = serde_json::to_string(&page).map_err(|_| CoreError::Limit)?;
+        assert!(encoded.len() < 1024);
+        assert!(!encoded.contains("private source body"));
+        assert_eq!(page["files"][0]["outcome"], "applied");
+        Ok(())
     }
 }

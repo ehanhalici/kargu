@@ -4,6 +4,7 @@ mod claim;
 pub(crate) use claim::{ClaimWork, ClaimedAction};
 mod capture;
 mod git;
+mod hunks;
 mod inspection;
 mod page;
 pub(crate) use artifact::Artifact;
@@ -24,7 +25,7 @@ use crate::{
 pub(crate) use service::EditPreparations;
 use std::{collections::BTreeMap, time::Instant};
 use types::{Begin, Part};
-pub(crate) use types::{FileIndex, PreparationId, TextOffset};
+pub(crate) use types::{FileIndex, PreparationId, TextBytes, TextOffset};
 use zeroize::Zeroizing;
 
 /// Consuming, owned worker input. It cannot publish into the application actor.

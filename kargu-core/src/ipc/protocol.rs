@@ -26,6 +26,24 @@ impl RpcId {
         }
     }
 
+    /// Reserve the exact serialized RPC envelope before constructing paged results.
+    pub(crate) fn result_budget(
+        &self,
+        frame: crate::domain::ByteLimit,
+    ) -> Result<crate::domain::ByteLimit, crate::error::CoreError> {
+        let envelope = serde_json::to_vec(&success(self, json!({})))
+            .map_err(|_| crate::error::CoreError::Limit)?;
+        let overhead = envelope
+            .len()
+            .checked_sub(2)
+            .ok_or(crate::error::CoreError::Limit)?;
+        crate::domain::ByteLimit::try_from(
+            frame
+                .as_usize()
+                .checked_sub(overhead)
+                .ok_or(crate::error::CoreError::Limit)?,
+        )
+    }
     /// Preserve the original identity's wire representation.
     pub fn value(&self) -> Value {
         match self {

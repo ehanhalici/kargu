@@ -94,7 +94,7 @@
              (should (eq (plist-get res :status) :applied-full))
              (should (equal (plist-get res :file) file))
              (should (= (plist-get res :files-applied) 1))
-             (should-not (integerp (plist-get res :hunks-applied)))
+             (should (= (plist-get res :hunks-applied) 1))
              (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string))
                             expected))))
        (delete-directory root t)))))
@@ -468,24 +468,21 @@
 (ert-deftest kargu-native-edit-batch-small-frame-pages-all-targets-test ()
   "Read multiple native metadata pages before mutating any file."
   (let ((kargu-bridge--max-frame 4096))
-    (cl-letf (((symbol-function 'kargu-bridge--start-finish)
-               (lambda (connection callback failure)
-                 (kargu-bridge--start-ready connection callback failure))))
-      (kargu-native-edit-test--with-core
-       (let ((root (make-temp-file "kargu-paged-batch-" t)) (patch ""))
-         (unwind-protect
-             (progn
-               (dotimes (index 8)
-                 (write-region "old\n" nil (expand-file-name (format "file%d.txt" index) root) nil 'silent)
-                 (setq patch (concat patch (format "--- a/file%d.txt\n+++ b/file%d.txt\n@@ -1 +1 @@\n-old\n+new\n" index index))))
-               (let ((result (kargu-native-edit-test--execute (list :intent :patch :root root :patch patch))))
-                 (should (eq (plist-get result :status) :applied-full))
-                 (should (= (plist-get result :files-applied) 8)))
-               (dotimes (index 8)
-                 (should (equal (with-temp-buffer
-                                  (insert-file-contents (expand-file-name (format "file%d.txt" index) root))
-                                  (buffer-string)) "new\n"))))
-           (delete-directory root t)))))))
+    (kargu-native-edit-test--with-core
+     (let ((root (make-temp-file "kargu-paged-batch-" t)) (patch ""))
+       (unwind-protect
+           (progn
+             (dotimes (index 8)
+               (write-region "old\n" nil (expand-file-name (format "file%d.txt" index) root) nil 'silent)
+               (setq patch (concat patch (format "--- a/file%d.txt\n+++ b/file%d.txt\n@@ -1 +1 @@\n-old\n+new\n" index index))))
+             (let ((result (kargu-native-edit-test--execute (list :intent :patch :root root :patch patch))))
+               (should (eq (plist-get result :status) :applied-full))
+               (should (= (plist-get result :files-applied) 8)))
+             (dotimes (index 8)
+               (should (equal (with-temp-buffer
+                                (insert-file-contents (expand-file-name (format "file%d.txt" index) root))
+                                (buffer-string)) "new\n"))))
+         (delete-directory root t))))))
 
 (ert-deftest kargu-native-edit-selection-never-falls-back-test ()
   "An unavailable selected native writer cannot enter legacy staging."
@@ -537,7 +534,7 @@
                                   :patch (concat "--- a/first.txt\n+++ b/first.txt\n@@ -1 +1 @@\n-old\n+new\n"
                                                  "--- a/second.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-old\n+new\n")))))
                (should (eq (plist-get result :status) :applied-full))
-               (should-not (integerp (plist-get result :hunks-applied)))))
+               (should (= (plist-get result :hunks-applied) 2))))
            (should (= screens 2))
            (should (equal (with-temp-buffer (insert-file-contents first) (buffer-string)) "new\n"))
            (should (equal (with-temp-buffer (insert-file-contents second) (buffer-string)) "human revision\n")))
@@ -629,7 +626,8 @@
     (let* ((root (make-temp-file "kargu-native-plan-" t))
            (kargu-permission--override-root root)
            (path (expand-file-name "file.txt" root))
-           (service (kargu-edit-service-create :root root :review-mode 'auto)))
+           (service (kargu-edit-service-create :root root :review-mode 'auto))
+           (hook (lambda () (goto-char (point-max)) (insert "#hook\n"))))
       (unwind-protect
           (progn
             (write-region "old\n" nil path nil 'silent)
@@ -644,8 +642,24 @@
                    (outcome (kargu-result-value result)))
               (should outcome)
               (should (eq (kargu-edit-outcome-status outcome) :applied))
-              (should (eq (kargu-edit-outcome-hunks-applied outcome) :json-null))
-              (should (equal (with-temp-buffer (insert-file-contents path) (buffer-string)) "new\n"))))
+              (should (= (kargu-edit-outcome-hunks-applied outcome) 1))
+              (should (= (kargu-edit-outcome-hunks-total outcome) 1))
+              (should (equal (with-temp-buffer (insert-file-contents path) (buffer-string)) "new\n")))
+            ;; When a save hook transforms the final body, hunks-applied stays explicit :json-null
+            (with-current-buffer (find-file-noselect path) (add-hook 'before-save-hook hook nil t))
+            (let* ((plan2 (kargu-edit-plan-create
+                           :path path :kind :block :proposed-content "next\n"
+                           :metadata (list :old-string "new\n" :new-string "next\n")))
+                   (result2 (kargu-native-edit-test--await
+                             (lambda (callback)
+                               (kargu-diff-submit-plan
+                                service plan2 :callback
+                                (lambda (value) (funcall callback value nil))))))
+                   (outcome2 (kargu-result-value result2)))
+              (should outcome2)
+              (should (eq (kargu-edit-outcome-status outcome2) :applied))
+              (should (eq (kargu-edit-outcome-hunks-applied outcome2) :json-null))
+              (should (= (kargu-edit-outcome-hunks-total outcome2) 1))))
         (kargu-edit-service-close service)
         (delete-directory root t)))))
 
@@ -687,6 +701,191 @@
         (should (string-search "native unavailable"
                                (kargu-diff-native-describe
                                 (list :status :error :message "native unavailable"))))))))
+
+(ert-deftest kargu-native-edit-batch-tiny-frame-revise-and-paged-receipt-test ()
+  "Large review revisions and multi-file receipts stream and page under small frames."
+  (let ((kargu-bridge--max-frame 1280))
+    (kargu-native-edit-test--with-core
+     (let* ((root (make-temp-file "kargu-tiny-batch-" t))
+            (first (expand-file-name "first.txt" root))
+            (second (expand-file-name "second.txt" root))
+            (third (expand-file-name "third.txt" root))
+            (review-function (symbol-function 'kargu-bridge-edit-batch-review))
+            (revised (apply #'concat (make-list 35 "revised line\n")))
+            (screens 0))
+       (unwind-protect
+           (progn
+             (write-region "old-1\n" nil first nil 'silent)
+             (write-region "old-2\n" nil second nil 'silent)
+             (write-region "old-3\n" nil third nil 'silent)
+             (cl-letf (((symbol-function 'kargu-bridge-edit-batch-review)
+                        (lambda (&rest arguments)
+                          (let ((noninteractive nil)) (apply review-function arguments))))
+                       ((symbol-function 'ediff-buffers)
+                        (lambda (_base shadow &rest _)
+                          (cl-incf screens)
+                          (when (= screens 1)
+                            (with-current-buffer shadow (erase-buffer) (insert revised)))
+                          (let ((control (generate-new-buffer " *kargu-test-tiny-review*")))
+                            (run-at-time 0 nil
+                                         (lambda ()
+                                           (with-current-buffer control (run-hooks 'ediff-quit-hook))
+                                           (when (buffer-live-p control) (kill-buffer control))))
+                            control))))
+               (let ((result (kargu-native-edit-test--execute
+                              (list :intent :patch :root root :review-mode 'blocking
+                                    :patch (concat "--- a/first.txt\n+++ b/first.txt\n@@ -1 +1 @@\n-old-1\n+new-1\n"
+                                                   "--- a/second.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-old-2\n+new-2\n"
+                                                   "--- a/third.txt\n+++ b/third.txt\n@@ -1 +1 @@\n-old-3\n+new-3\n")))))
+                 (should (eq (plist-get result :status) :applied-full))
+                 (should (= (plist-get result :files-total) 3))
+                 (should (= (plist-get result :files-applied) 3))
+                 (should (= (length (plist-get result :files)) 3))
+                 (should (= (plist-get result :hunks-applied) 3))))
+             (should (= screens 3))
+             (should (equal (with-temp-buffer (insert-file-contents first) (buffer-string)) revised))
+             (should (equal (with-temp-buffer (insert-file-contents second) (buffer-string)) "new-2\n"))
+             (should (equal (with-temp-buffer (insert-file-contents third) (buffer-string)) "new-3\n")))
+         (delete-directory root t))))))
+
+(ert-deftest kargu-native-edit-batch-recover-journal-across-restart-test ()
+  "Verify `kargu-bridge-edit-recover' inspects durable journals across core restarts."
+  (kargu-native-edit-test--with-core
+   (let* ((root (make-temp-file "kargu-recover-" t))
+          (path (expand-file-name "file.txt" root)))
+     (unwind-protect
+         (progn
+           (write-region "old\n" nil path nil 'silent)
+           (let* ((result (kargu-native-edit-test--execute
+                           (list :intent :write :root root :path path :content "new\n")))
+                  (edit-id (plist-get result :edit-id)))
+             (should (stringp edit-id))
+             ;; Close current core connection and recover journal from a fresh process
+             (kargu-bridge--close conn "test_restart")
+             (let ((recovered (kargu-native-edit-test--await
+                               (lambda (callback)
+                                 (kargu-bridge-edit-recover
+                                  (kargu-application-context)
+                                  kargu-bridge-edit-batch-journal-directory
+                                  edit-id :callback callback)))))
+               (should (equal (gethash "state" recovered) "resolved"))
+               (should (equal (gethash "kind" (gethash "resolution" recovered)) "receipt")))))
+       (delete-directory root t)))))
+
+(ert-deftest kargu-native-edit-review-error-and-evidence-projection-test ()
+  "Presenter startup errors abort cleanly without killing foreign Ediff buffers, and projection records diff stats."
+  (kargu-native-edit-test--with-core
+   (let* ((root (make-temp-file "kargu-review-edge-" t))
+          (path (expand-file-name "file.txt" root))
+          (service (kargu-edit-service-create :root root :review-mode 'auto))
+          (review-function (symbol-function 'kargu-bridge-edit-batch-review))
+          (foreign-control (generate-new-buffer " *foreign-ediff-control*")))
+     (unwind-protect
+         (progn
+           (write-region "line 1\nline 2\n" nil path nil 'silent)
+           ;; 1. Startup error in ediff-buffers sends interrupt and keeps foreign control buffer live
+           (cl-letf (((symbol-function 'kargu-bridge-edit-batch-review)
+                      (lambda (&rest arguments)
+                        (let ((noninteractive nil)) (apply review-function arguments))))
+                     ((symbol-function 'ediff-buffers)
+                      (lambda (&rest _) (error "Simulated Ediff startup failure"))))
+             (let (done outcome)
+               (kargu-diff-native-execute
+                (list :intent :write :root root :path path :content "changed\n" :review-mode 'blocking)
+                (lambda (res) (setq done t outcome res))
+                service)
+               (kargu-bridge-test--wait (lambda () done))
+               (should (eq (plist-get outcome :status) :interrupted))
+               (should (buffer-live-p foreign-control))
+               (should (equal (with-temp-buffer (insert-file-contents path) (buffer-string))
+                              "line 1\nline 2\n"))))
+           ;; 2. Successful native execution projects snapshot :content for kargu-diff-file-stats
+           (let (done outcome)
+             (kargu-diff-native-execute
+              (list :intent :write :root root :path path :content "line 1\nline 2 changed\nline 3\n")
+              (lambda (res) (setq done t outcome res))
+              service)
+             (kargu-bridge-test--wait (lambda () done))
+             (should (eq (plist-get outcome :status) :applied-full))
+             (kargu-diff-with-service service
+               (let ((stats (kargu-diff-file-stats path)))
+                 (should (equal stats '(2 . 1)))
+                 (should (member path (kargu-diff-run-modified-files))))))
+           ;; 3. Rolling back the only snapshot clears modified files and change evidence
+           (let ((rolled (kargu-native-edit-test--await
+                          (lambda (done)
+                            (kargu-diff-with-service service
+                              (kargu-diff-rollback path nil service :callback
+                                                   (lambda (result) (funcall done result nil))))))))
+             (should (eq (plist-get rolled :status) :applied-full))
+             (should (equal (plist-get rolled :file) path))
+             (kargu-diff-with-service service
+               (should-not (kargu-diff-run-modified-files))
+               (should (= (hash-table-count (kargu-edit-service-changes service)) 0)))))
+       (when (buffer-live-p foreign-control) (kill-buffer foreign-control))
+       (kargu-edit-service-close service)
+       (delete-directory root t)))))
+
+
+(ert-deftest kargu-native-edit-review-keeps-foreign-window-layout-test ()
+  "Cleanup cannot restore a whole frame after the user changed its window layout."
+  (save-window-excursion
+    (let* ((original (generate-new-buffer " *review-base*"))
+           (shadow (generate-new-buffer " *review-shadow*"))
+           (foreign (generate-new-buffer " *foreign-review-window*"))
+           (before (current-window-configuration))
+           (screen (kargu-bridge-edit-batch-review--screen
+                    :original original :shadow shadow :window-config before :completed t)))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (set-window-buffer (selected-window) shadow)
+            (setf (kargu-bridge-edit-batch-review-screen-owned-window-config screen)
+                  (current-window-configuration))
+            (let ((foreign-window (split-window-right)))
+              (set-window-buffer foreign-window foreign)
+              (kargu-bridge-edit-batch-review--dispose screen)
+              (should (window-live-p foreign-window))
+              (should (eq (window-buffer foreign-window) foreign))))
+        (dolist (buffer (list original shadow foreign))
+          (when (buffer-live-p buffer) (kill-buffer buffer)))))))
+
+(ert-deftest kargu-native-edit-consumer-bounds-cached-display-body-bytes-test ()
+  "Display baselines have a byte cap in addition to the edit reference count cap."
+  (let* ((root (kargu-test-scratch-root))
+         (service (kargu-edit-service-create :root root :review-mode 'auto))
+         (base (make-string (* 4 1024 1024) ?a)))
+    (dotimes (index 13)
+      (kargu-diff-native--project
+       service (list :intent :write)
+       (list :rollback-available t :edit-id (format "body-%d" index) :root root
+             :files (list (list :base base :existed t :path (expand-file-name (format "file-%d" index) root) :status :applied)))))
+    (should (= (hash-table-count (kargu-edit-service-snapshots service)) 12))
+    (should-not (gethash (expand-file-name "file-0" root) (kargu-edit-service-snapshots service)))
+    (should (<= (kargu-diff-native--reference-bytes service) (* 48 1024 1024)))))
+
+(ert-deftest kargu-native-edit-revision-foreign-ack-aborts-without-more-chunks-test ()
+  "A correct offset under another file index cannot acknowledge this revision."
+  (let ((artifact (kargu-bridge-edit-artifact--make
+                   :connection (kargu-bridge--connection-create :state 'ready :frame-limit 1024)))
+        (edit "editor_edit_12345678-1234-4234-8234-123456789abc") done failure released (sends 0))
+    (cl-letf (((symbol-function 'kargu-bridge-edit--current-p) (lambda (_) t))
+              ((symbol-function 'kargu-bridge-edit-release) (lambda (_) (setq released t)))
+              ((symbol-function 'kargu-bridge-edit--execution-call)
+               (lambda (_artifact _method &rest arguments)
+                 (cl-incf sends)
+                 (let* ((callback (plist-get arguments :callback))
+                        (input (cadr (plist-get arguments :fields))))
+                   (if (equal (gethash "action" input) "begin")
+                       (funcall callback (kargu-bridge--object "edit_id" edit "revision" 1 "file_index" 0
+                                                              "bytes" 400 "page_bytes" 100 "complete" :json-false) nil)
+                     (let ((next (length (gethash "text" input))))
+                       (funcall callback (kargu-bridge--object "edit_id" edit "revision" 1 "file_index" 1
+                                                              "offset" next "next_offset" next "complete" :json-false) nil)))))))
+      (kargu-bridge-edit-revise artifact :edit-id edit :revision 1 :file-index 0
+                                :new-text (make-string 400 ?a)
+                                :callback (lambda (_reply error-data) (setq done t failure error-data))))
+    (should done) (should failure) (should released) (should (= sends 2))))
 
 (provide 'tests/test-native-edit-batch)
 ;;; test-native-edit-batch.el ends here

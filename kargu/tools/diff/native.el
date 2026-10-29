@@ -14,6 +14,8 @@
 (require 'kargu/tools/diff/context)
 (require 'kargu/bridge/edit/batch)
 
+(declare-function kargu-diff--capture-baseline-diagnostics "kargu/tools/diff/track" (path))
+
 (defvar kargu-diff-review-mode)
 (defvar kargu-diff-auto-save)
 
@@ -39,47 +41,110 @@ Enable explicitly while the remaining migration acceptance work is open."
                 (format "%d/%d hunks applied" applied total) "hunk count unmeasured")
             (if (plist-get result :saved) "; files saved" "")))))
 
+(defconst kargu-diff-native--base-bytes (* 48 1024 1024)
+  "Conservative UTF-8 byte bound for cached display baselines on one service.")
+
+(defun kargu-diff-native--prune-references (service)
+  "Discard SERVICE's native display rows outside its retained edit IDs."
+  (let ((snapshots (kargu-edit-service-snapshots service)) remove)
+    (maphash
+     (lambda (path rows)
+       (let ((retained (cl-remove-if
+                        (lambda (row)
+                          (and (plist-get row :native)
+                               (not (member (plist-get row :edit-id)
+                                            (kargu-edit-service-native-edits service))))) rows)))
+         (if retained (puthash path retained snapshots) (push path remove)))) snapshots)
+    (dolist (path remove) (remhash path snapshots))))
+
+(defun kargu-diff-native--reference-bytes (service)
+  "Count retained native display baseline bytes on SERVICE."
+  (let ((total 0))
+    (maphash (lambda (_path rows)
+               (dolist (row rows)
+                 (when (plist-get row :native)
+                   (setq total (+ total (or (plist-get row :content-bytes) 0))))))
+             (kargu-edit-service-snapshots service))
+    total))
+
 (defun kargu-diff-native--retain-references (service result)
   "Bound SERVICE's display references after archiving verified RESULT.
 These IDs are presentation history; only Rust decides whether undo is available."
   (when (plist-get result :rollback-available)
     (setf (kargu-edit-service-native-edits service)
           (seq-take (cons (plist-get result :edit-id)
-                          (delete (plist-get result :edit-id) (kargu-edit-service-native-edits service))) 16))
-    (let ((snapshots (kargu-edit-service-snapshots service)) remove)
-      (maphash
-       (lambda (path rows)
-         (let ((retained (cl-remove-if
-                          (lambda (row)
-                            (and (plist-get row :native)
-                                 (not (member (plist-get row :edit-id)
-                                              (kargu-edit-service-native-edits service))))) rows)))
-           (if retained (puthash path retained snapshots) (push path remove)))) snapshots)
-      (dolist (path remove) (remhash path snapshots)))))
+                          (delete (plist-get result :edit-id) (kargu-edit-service-native-edits service))) 16)))
+  (kargu-diff-native--prune-references service)
+  (while (and (kargu-edit-service-native-edits service)
+              (> (kargu-diff-native--reference-bytes service) kargu-diff-native--base-bytes))
+    (setf (kargu-edit-service-native-edits service) (butlast (kargu-edit-service-native-edits service)))
+    (kargu-diff-native--prune-references service)))
+
+(defun kargu-diff-native--failure-result (failure)
+  "Translate native RPC FAILURE into a structured consumer result."
+  (let* ((data (and (hash-table-p failure) (gethash "data" failure)))
+         (raw-status (or (and (hash-table-p failure) (gethash "status" failure))
+                         (and (hash-table-p data) (gethash "status" data))))
+         (message (or (and (hash-table-p failure) (gethash "message" failure))
+                      (and (stringp failure) failure)
+                      (format "%s" failure)))
+         (status (pcase raw-status
+                   ("rejected" :rejected)
+                   ("cancelled" :interrupted)
+                   ("timeout" :timeout)
+                   ("outcome_unknown" :outcome-unknown)
+                   ((or "conflict" "workspace_changed" "missing_match"
+                        "ambiguous_match" "missing_target" "patch_failed")
+                    :conflict)
+                   (_ :error))))
+    (list :status status :saved nil :message message :native-failure failure)))
 
 (defun kargu-diff-native--project (service spec result)
   "Update SERVICE's passive references from SPEC and verified RESULT."
-  (kargu-diff-native--retain-references service result)
   (dolist (file (plist-get result :files))
     (when (memq (plist-get file :status) '(:applied :partial))
       (let* ((path (plist-get file :path))
              (snapshots (kargu-edit-service-snapshots service))
-             (stack (gethash path snapshots)))
-        (when (eq (plist-get file :status) :applied)
-          (if (eq (plist-get spec :intent) :rollback)
-              (progn
-		(setq stack (cl-remove (plist-get spec :target-edit-id) stack
-                                       :key (lambda (row) (plist-get row :edit-id)) :test #'equal))
-		(if stack (puthash path stack snapshots) (remhash path snapshots)))
-            (when (plist-get result :rollback-available)
-              (puthash path
-                       (seq-take (cons (list :native t :edit-id (plist-get result :edit-id)
-                                             :root (plist-get result :root)
-                                             :application (plist-get spec :application)) stack) 16)
-                       snapshots))))
-        (puthash path (list :native t :edit-id (plist-get result :edit-id))
-                 (kargu-edit-service-changes service))
-        (cl-pushnew path (kargu-edit-service-run-modified-files service) :test #'equal)))))
+             (changes (kargu-edit-service-changes service))
+             (stack (gethash path snapshots))
+             (baseline (plist-get file :baseline)))
+        (if (and (eq (plist-get spec :intent) :rollback)
+                 (eq (plist-get file :status) :applied))
+            (progn
+              (setq stack (cl-remove (plist-get spec :target-edit-id) stack
+                                     :key (lambda (row) (plist-get row :edit-id)) :test #'equal))
+              (if stack
+                  (puthash path stack snapshots)
+                (remhash path snapshots)
+                (remhash path changes)
+                (setf (kargu-edit-service-run-modified-files service)
+                      (delete path (kargu-edit-service-run-modified-files service)))))
+          (when (and (eq (plist-get file :status) :applied)
+                     (plist-get result :rollback-available))
+            (puthash path
+                     (seq-take
+                      (cons (list :native t :edit-id (plist-get result :edit-id)
+                                  :root (plist-get result :root)
+                                  :application (plist-get spec :application)
+                                  :content (plist-get file :base)
+                                  :content-bytes (if (stringp (plist-get file :base))
+                                                     (string-bytes (encode-coding-string (plist-get file :base) 'utf-8-unix)) 0)
+                                  :created-new (not (plist-get file :existed))
+                                  :baseline-diagnostics (plist-get baseline :diagnostics)
+                                  :baseline-available (plist-get baseline :available))
+                            stack)
+                      16)
+                     snapshots))
+          (puthash path
+                   (list :native t :edit-id (plist-get result :edit-id)
+                         :status (plist-get file :status)
+                         :saved (plist-get file :saved)
+                         :baseline baseline
+                         :baseline-diagnostics (plist-get baseline :diagnostics)
+                         :baseline-available (plist-get baseline :available))
+                   changes)
+          (cl-pushnew path (kargu-edit-service-run-modified-files service) :test #'equal)))))
+  (kargu-diff-native--retain-references service result))
 
 (defun kargu-diff-native-execute (spec callback &optional service)
   "Execute SPEC into CALLBACK on captured SERVICE; never choose another writer."
@@ -94,8 +159,9 @@ These IDs are presentation history; only Rust decides whether undo is available.
       (setf (plist-get spec :root) (or (plist-get spec :root) (kargu-edit-service-root service)
                                        (kargu-permission-project-root))
             (plist-get spec :application) (or (plist-get spec :application) (kargu-application-context))
-            (plist-get spec :review-mode) review
-            (plist-get spec :save-policy) (if save 'save 'buffer_only)
+            (plist-get spec :review-mode) (or (plist-get spec :review-mode) review)
+            (plist-get spec :save-policy) (or (plist-get spec :save-policy) (if save 'save 'buffer_only))
+            (plist-get spec :capture-baseline) #'kargu-diff--capture-baseline-diagnostics
             (plist-get spec :policy-revision) policy
             (plist-get spec :valid-p)
             (lambda ()
@@ -110,7 +176,7 @@ These IDs are presentation history; only Rust decides whether undo is available.
              spec (lambda (result failure)
                     (unless (kargu-edit-service-closed service)
                       (if failure
-                          (funcall callback (list :status :error :message (format "%s" failure)))
+                          (funcall callback (kargu-diff-native--failure-result failure))
                         (kargu-diff-native--project service spec result)
                         (funcall callback result))))))
       (push task (kargu-edit-service-native-tasks service))

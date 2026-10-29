@@ -23,11 +23,11 @@ use tokio_util::sync::CancellationToken;
 
 const IO_BYTES: usize = 4096;
 
-struct Directory {
-    path: PathBuf,
-    held: File,
+pub(super) struct Directory {
+    pub(super) path: PathBuf,
+    pub(super) held: File,
 }
-fn os_error(error: nix::errno::Errno) -> CoreError {
+pub(super) fn os_error(error: nix::errno::Errno) -> CoreError {
     std::io::Error::from(error).into()
 }
 fn lock(file: File, operation: FlockArg) -> Result<Flock<File>, CoreError> {
@@ -60,7 +60,7 @@ impl Directory {
         result.revalidate()?;
         Ok(result)
     }
-    fn revalidate(&self) -> Result<(), CoreError> {
+    pub(super) fn revalidate(&self) -> Result<(), CoreError> {
         let held = self.held.metadata()?;
         let named = std::fs::symlink_metadata(&self.path)?;
         if !held.is_dir()
@@ -129,6 +129,7 @@ impl Writer {
         if directory.path.starts_with(&issue.workspace) {
             return Err(CoreError::Rejected);
         }
+        super::retention::prune(&directory, cancel, deadline)?;
         let name = name(&issue.id);
         let file = File::from(
             openat(
@@ -255,12 +256,52 @@ fn write_record(
     checkpoint(cancel, deadline)?;
     Ok(checksum)
 }
+pub(super) struct LockedRead {
+    directory: Directory,
+    file: Flock<File>,
+    name: PathBuf,
+    revision: Revision,
+    pub(super) bytes: Vec<u8>,
+}
+impl LockedRead {
+    pub(super) fn matches(&self, stat: &nix::sys::stat::FileStat) -> Result<bool, CoreError> {
+        let held = self.file.metadata()?;
+        Ok(held.dev() == stat.st_dev && held.ino() == stat.st_ino)
+    }
+    pub(super) fn remove(
+        self,
+        cancel: &CancellationToken,
+        deadline: Instant,
+    ) -> Result<(), CoreError> {
+        checkpoint(cancel, deadline)?;
+        self.directory.check_file(&self.file, &self.name)?;
+        if Revision::from(self.file.metadata()?) != self.revision {
+            return Err(CoreError::WorkspaceChanged);
+        }
+        nix::unistd::unlinkat(
+            &self.directory.held,
+            &self.name,
+            nix::unistd::UnlinkatFlags::NoRemoveDir,
+        )
+        .map_err(os_error)?;
+        self.directory.held.sync_all()?;
+        Ok(())
+    }
+}
 pub(super) fn read(
     directory: JournalDirectory,
     id: &crate::edit::types::EditorEditId,
     cancel: &CancellationToken,
     deadline: Instant,
 ) -> Result<Vec<u8>, CoreError> {
+    Ok(read_locked(directory, id, cancel, deadline)?.bytes)
+}
+pub(super) fn read_locked(
+    directory: JournalDirectory,
+    id: &crate::edit::types::EditorEditId,
+    cancel: &CancellationToken,
+    deadline: Instant,
+) -> Result<LockedRead, CoreError> {
     checkpoint(cancel, deadline)?;
     let directory = Directory::open(directory)?;
     let name = name(id);
@@ -314,5 +355,11 @@ pub(super) fn read(
     if Revision::from(file.metadata()?) != revision {
         return Err(CoreError::WorkspaceChanged);
     }
-    Ok(output)
+    Ok(LockedRead {
+        directory,
+        file,
+        name,
+        revision,
+        bytes: output,
+    })
 }

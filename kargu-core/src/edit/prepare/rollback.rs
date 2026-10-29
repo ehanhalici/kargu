@@ -125,9 +125,10 @@ impl RollbackWork {
                 base_hash,
                 proposed_hash,
             );
+            let file_hunks = super::hunks::measure_hunks(&base, &proposed, is_unchanged);
             files.push(BatchFile {
                 kind,
-                hunks: None,
+                hunks: file_hunks,
                 proposal: Prepared {
                     root: prepared.root.clone(),
                     path: prepared.path.clone(),
@@ -139,6 +140,7 @@ impl RollbackWork {
                     base_hash,
                     proposed_hash,
                     unchanged: is_unchanged,
+                    hunks: file_hunks,
                     live,
                     config_revision: self.input.config_revision,
                     policy_revision: self.input.policy_revision,
@@ -155,7 +157,8 @@ impl RollbackWork {
                 },
             });
         }
-        let artifact = Artifact::Batch(Box::new(Batch { files, hunks: None }));
+        let hunks = super::hunks::sum_hunks(files.iter().map(|entry| entry.hunks));
+        let artifact = Artifact::Batch(Box::new(Batch { files, hunks }));
         artifact.retained_bytes()?;
         checkpoint(cancel, deadline)?;
         Ok(super::PreparationResult::Complete(artifact))

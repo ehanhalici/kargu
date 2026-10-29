@@ -187,7 +187,7 @@ impl Commands {
         host: &mut Host,
         id: RpcId,
         params: Value,
-    ) -> Result<(), Fault> {
+    ) -> Result<Option<Value>, Fault> {
         let available = self
             .operations
             .len()

@@ -444,10 +444,28 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     continue;
                 }
                 if method == methods::EDIT_REVISE {
-                    if let Some(id) = id.as_ref()
-                        && let Err(fault) = commands.revise_editor(host, id.clone(), params)
-                    {
-                        queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                    if let Some(id) = id.as_ref() {
+                        let reply = match commands.revise_editor(host, id.clone(), params) {
+                            Ok(Some(value)) => Some(protocol::success(id, value)),
+                            Ok(None) => None,
+                            Err(fault) => Some(fault.response(Some(id))),
+                        };
+                        if let Some(reply) = reply {
+                            queue_reply(reply, host.frame_limit(), tx, permits)?;
+                        }
+                    }
+                    continue;
+                }
+                if method == methods::EDIT_RECOVER {
+                    if let Some(id) = id.as_ref() {
+                        let admitted =
+                            host.prepare_journal_recovery(params)
+                                .and_then(|(scope, input)| {
+                                    reads.start_journal_recovery(id.clone(), scope, input)
+                                });
+                        if let Err(fault) = admitted {
+                            queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
                     }
                     continue;
                 }
@@ -565,7 +583,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     }
                     continue;
                 }
-                let dispatch = host.dispatch(&method, params, id.is_some());
+                let dispatch = host.dispatch_rpc(&method, params, id.as_ref());
                 let draining_shutdown = method == methods::SHUTDOWN && dispatch.result.is_ok();
                 reads.sweep(host);
                 api.sweep(host);

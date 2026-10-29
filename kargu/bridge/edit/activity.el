@@ -321,18 +321,58 @@ CHANGES supplies the detached platform observations."
               (t (kargu-bridge-edit-activity--drain activity)))
            ((error quit) (kargu-bridge-edit-activity--drain activity))))))))
 
+(defun kargu-bridge-edit-activity--receipt-page-files (activity stream native offset reversed)
+  "Fetch paged receipt files from OFFSET into NATIVE for ACTIVITY and STREAM.
+Accumulate entries in REVERSED under the stream's original file bound."
+  (let ((arguments (kargu-bridge-edit-activity--arguments activity)))
+    (puthash "issued_token" (kargu-bridge-edit-activity-token activity) arguments)
+    (puthash "input" (kargu-bridge-edit-activity--object `(("action" . "files") ("offset" . ,offset))) arguments)
+    (kargu-bridge-edit-activity--call
+     activity "edit/receipt" arguments
+     (lambda (page failure)
+       (when (eq (kargu-bridge-edit-activity-state activity) :settling)
+         (condition-case nil
+             (let* ((files (and (hash-table-p page) (gethash "files" page)))
+                    (next (and (hash-table-p page) (gethash "next_offset" page)))
+                    (complete (and (hash-table-p page) (gethash "complete" page)))
+                    (total (kargu-bridge-edit-activity-stream-total stream)))
+               (if (not (and (not failure) (vectorp files)
+                             (eql (gethash "offset" page) offset)
+                             (eql next (+ offset (length files))) (<= next total)
+                             (eq complete (if (= next total) t :json-false))
+                             (or (eq complete t) (> next offset))
+                             (cl-loop for file across files for index from offset
+                                      always (and (hash-table-p file) (eql (gethash "file" file) index)))))
+                   (kargu-bridge-edit-activity--drain activity)
+                 (seq-doseq (file files) (push file reversed))
+                 (if (eq complete t)
+                     (progn
+                       (puthash "files" (vconcat (nreverse reversed)) (gethash "receipt" native))
+                       (puthash "complete" t (gethash "receipt" native))
+                       (kargu-bridge-edit-activity--receipt-complete activity stream native))
+                   (kargu-bridge-edit-activity--receipt-page-files activity stream native next reversed))))
+           ((error quit) (kargu-bridge-edit-activity--drain activity))))))))
+
 (defun kargu-bridge-edit-activity--receipt-complete (activity stream native)
   "Adopt NATIVE receipt from STREAM for quiescent ACTIVITY."
-  (if (and (hash-table-p native)
+  (let ((receipt (and (hash-table-p native) (gethash "receipt" native))))
+    (cond
+     ((and (hash-table-p native)
            (equal (gethash "edit_id" native) (kargu-bridge-edit-activity-edit activity))
            (equal (gethash "state" native) "quiescent")
            (eq (gethash "journal_committed" native) t)
-           (kargu-bridge-edit-activity--receipt-result-p stream (gethash "receipt" native)))
-      (progn
-        ;; UI cancellation cannot replace an authoritative completed-write result.
-        (setf (kargu-bridge-edit-activity-failure activity) nil)
-        (kargu-bridge-edit-activity--finish activity native nil))
-    (kargu-bridge-edit-activity--drain activity)))
+           (hash-table-p receipt)
+           (eq (gethash "complete" receipt) :json-false))
+      (kargu-bridge-edit-activity--receipt-page-files activity stream native 0 nil))
+     ((and (hash-table-p native)
+           (equal (gethash "edit_id" native) (kargu-bridge-edit-activity-edit activity))
+           (equal (gethash "state" native) "quiescent")
+           (eq (gethash "journal_committed" native) t)
+           (kargu-bridge-edit-activity--receipt-result-p stream receipt))
+      ;; UI cancellation cannot replace an authoritative completed-write result.
+      (setf (kargu-bridge-edit-activity-failure activity) nil)
+      (kargu-bridge-edit-activity--finish activity native nil))
+     (t (kargu-bridge-edit-activity--drain activity)))))
 
 (defun kargu-bridge-edit-activity--receipt-append (activity stream)
   "Send one bounded text append for ACTIVITY/STREAM, or advance an empty part."

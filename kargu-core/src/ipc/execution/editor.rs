@@ -1,5 +1,6 @@
 //! Actual prepared editor admission, sharing Commands' gate and the actor's run ledger.
 mod issue;
+mod revise;
 use crate::{
     application::{
         RunHandle,
@@ -87,17 +88,9 @@ struct ReceiptRpc {
     issued_token: EditorIssueToken,
     input: ReceiptInput,
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReviseRpc {
-    origin_id: EditorSourceId,
-    edit_id: EditorEditId,
-    revision: EditorRevision,
-    file_index: crate::edit::prepare::FileIndex,
-    new_text: crate::edit::types::EditText,
-}
 struct Verifying {
     run: RunHandle,
+    token: EditorIssueToken,
     effect: crate::security::IssuedEditorEdit,
     journal: crate::edit::journal::IssuedJournal,
     task: JoinHandle<Result<VerifiedReceipt, CoreError>>,
@@ -145,6 +138,7 @@ enum Stage {
     Review {
         run: RunHandle,
         request: EditorApprovalRequest,
+        upload: Option<revise::RevisionUpload>,
     },
     Authorized {
         run: RunHandle,
@@ -168,6 +162,7 @@ struct Operation {
 #[derive(Default)]
 pub(super) struct Editors {
     operations: HashMap<EditorEditId, Operation>,
+    settled: HashMap<EditorEditId, issue::SettledReceipt>,
     disconnected: bool,
 }
 impl Editors {
@@ -189,12 +184,16 @@ impl Editors {
             .count()
     }
     pub(super) fn is_empty(&self) -> bool {
-        self.operations.is_empty()
+        self.operations.is_empty() && self.settled.is_empty()
     }
     pub(super) fn owns_application(&self, id: &ApplicationId) -> bool {
         self.operations
             .values()
             .any(|op| &op.scope.application_id == id)
+            || self
+                .settled
+                .values()
+                .any(|receipt| &receipt.scope.application_id == id)
     }
     pub(super) fn contains(&self, id: &RpcId) -> bool {
         self.operations.values().any(|op| match &op.stage {
@@ -261,6 +260,7 @@ impl Editors {
     }
     pub(super) fn disconnect(&mut self) {
         self.disconnected = true;
+        self.settled.clear();
         self.cancel_all();
     }
     fn writer_reserved(&self) -> bool {
@@ -408,6 +408,28 @@ impl Editors {
         let request: Request<ReceiptRpc> =
             serde_json::from_value(params).map_err(|_| Fault::params())?;
         let input = request.arguments;
+        if let ReceiptInput::Files { offset } = input.input {
+            let settled = self
+                .settled
+                .get(&input.edit_id)
+                .ok_or_else(|| fault(CoreError::StaleOwner))?;
+            if settled.scope != request.scope
+                || settled.origin != input.origin_id
+                || settled.token != input.issued_token
+                || settled.revision != input.revision
+                || Instant::now() >= settled.expires_at
+            {
+                return Err(fault(CoreError::StaleOwner));
+            }
+            let page = settled
+                .receipt
+                .page_files(offset, id.result_budget(host.frame_limit()).map_err(fault)?)
+                .map_err(fault)?;
+            if page.get("complete") == Some(&Value::Bool(true)) {
+                self.settled.remove(&input.edit_id);
+            }
+            return Ok(Some(page));
+        }
         let op = self
             .operations
             .get_mut(&input.edit_id)
@@ -473,6 +495,7 @@ impl Editors {
                     Operation {
                         stage: Stage::Verifying(Verifying {
                             run: issued.run,
+                            token: issued.token,
                             effect: issued.effect,
                             journal: issued.journal,
                             task,
@@ -485,6 +508,7 @@ impl Editors {
                 );
                 Ok(None)
             }
+            ReceiptInput::Files { .. } => Err(fault(CoreError::AlreadyCompleted)),
         }
     }
     pub(super) fn authorize(
@@ -498,7 +522,9 @@ impl Editors {
         if !host.owns_read_scope(&request.scope) {
             return Err(fault(CoreError::StaleOwner));
         }
-        if self.operations.len() >= limits::MAX_PENDING || self.contains(&id) {
+        if self.operations.len().saturating_add(self.settled.len()) >= limits::EDIT_RECEIPT_STREAMS
+            || self.contains(&id)
+        {
             return Err(fault(CoreError::Limit));
         }
         let actor = host.actor_mut(&request.scope).map_err(fault)?;
@@ -629,13 +655,18 @@ impl Editors {
             return Err(fault(CoreError::StaleOwner));
         }
         let Stage::Review {
-            request: review, ..
+            request: review,
+            upload,
+            ..
         } = &op.stage
         else {
             return Err(fault(CoreError::AlreadyCompleted));
         };
         if review.revision() != input.revision {
             return Err(fault(CoreError::StaleOwner));
+        }
+        if upload.is_some() && input.decision == EditorDecision::Accept {
+            return Err(fault(CoreError::Busy));
         }
         host.actor_mut(&op.scope)
             .map_err(fault)?
@@ -649,11 +680,16 @@ impl Editors {
         let Stage::Review {
             run,
             request: review,
+            ..
         } = op.stage
         else {
             return Err(fault(CoreError::AlreadyCompleted));
         };
         let actor = host.actor_mut(&op.scope).map_err(fault)?;
+        let _ =
+            actor
+                .edits
+                .finish_revision(&op.scope.session_id, &op.origin, &op.preparation, None);
         match gate.decide_editor(actor, &run, &review, input.revision, input.decision) {
             Ok(grant) => {
                 let op = Operation {
@@ -687,52 +723,141 @@ impl Editors {
         request_id: RpcId,
         params: Value,
         available: bool,
-    ) -> Result<(), Fault> {
-        if !available {
-            return Err(fault(CoreError::Limit));
-        }
-        let request: Request<ReviseRpc> =
+    ) -> Result<Option<Value>, Fault> {
+        let request: Request<revise::ReviseRpc> =
             serde_json::from_value(params).map_err(|_| Fault::params())?;
         if !host.owns_read_scope(&request.scope) {
             return Err(fault(CoreError::StaleOwner));
         }
         let input = request.arguments;
+        let edit_id = input.edit_id().clone();
+        let revision = input.revision();
+        let origin_id = input.origin_id().clone();
+        let frame_limit = host.frame_limit();
         let op = self
             .operations
-            .get(&input.edit_id)
+            .get_mut(&edit_id)
             .ok_or_else(|| fault(CoreError::StaleOwner))?;
-        if op.scope != request.scope || op.origin != input.origin_id {
+        if op.scope != request.scope || op.origin != origin_id {
             return Err(fault(CoreError::StaleOwner));
         }
+        let op_scope = op.scope.clone();
+        let op_origin = op.origin.clone();
+        let op_preparation = op.preparation.clone();
         let Stage::Review {
             run,
             request: review,
-        } = &op.stage
+            upload,
+        } = &mut op.stage
         else {
             return Err(fault(CoreError::AlreadyCompleted));
         };
-        let actor = host.actor_mut(&op.scope).map_err(fault)?;
+        if review.revision() != revision {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let actor = host.actor_mut(&op_scope).map_err(fault)?;
         actor
             .edits
-            .claim_status(&op.scope.session_id, &op.preparation, Instant::now())
+            .claim_status(&op_scope.session_id, &op_preparation, Instant::now())
             .map_err(fault)?;
+        let (file_index, new_text) = match input {
+            revise::ReviseRpc::Stream {
+                input:
+                    revise::ReviseInput::Begin {
+                        file_index,
+                        new_bytes,
+                    },
+                ..
+            } => {
+                if upload.is_some() {
+                    return Err(fault(CoreError::Busy));
+                }
+                gate.revision_work(actor, run, review, revision)
+                    .map_err(fault)?;
+                let page_bytes = revise::RevisionUpload::page_bytes(frame_limit).map_err(fault)?;
+                let bytes = crate::edit::prepare::TextOffset::try_from(new_bytes.get())
+                    .map_err(|error| fault(error.into()))?;
+                actor
+                    .edits
+                    .reserve_revision(&op_scope.session_id, &op_origin, &op_preparation, bytes)
+                    .map_err(fault)?;
+                *upload = Some(revise::RevisionUpload::new(revision, file_index, new_bytes));
+                return Ok(Some(json!({
+                    "edit_id": edit_id,
+                    "revision": revision,
+                    "file_index": file_index,
+                    "bytes": new_bytes,
+                    "page_bytes": page_bytes,
+                    "complete": new_bytes.get() == 0,
+                })));
+            }
+            revise::ReviseRpc::Stream {
+                input:
+                    revise::ReviseInput::Append {
+                        file_index,
+                        offset,
+                        text,
+                    },
+                ..
+            } => {
+                let active = upload
+                    .as_mut()
+                    .ok_or_else(|| fault(crate::edit::EditError::InvalidEvidence.into()))?;
+                let progress = active
+                    .append(&edit_id, revision, file_index, offset, &text)
+                    .map_err(fault)?;
+                return Ok(Some(progress));
+            }
+            revise::ReviseRpc::Stream {
+                input: revise::ReviseInput::Commit { file_index },
+                ..
+            } => {
+                if !available {
+                    return Err(fault(CoreError::Limit));
+                }
+                let active = upload
+                    .take()
+                    .ok_or_else(|| fault(crate::edit::EditError::InvalidEvidence.into()))?;
+                // The upload body transfers to the worker in this same actor turn.
+                // Release its reservation before reserving that body once for revision.
+                actor
+                    .edits
+                    .finish_revision(&op_scope.session_id, &op_origin, &op_preparation, None)
+                    .map_err(fault)?;
+                active.take(revision, file_index).map_err(fault)?
+            }
+            revise::ReviseRpc::Inline {
+                file_index,
+                new_text,
+                ..
+            } => {
+                if !available {
+                    return Err(fault(CoreError::Limit));
+                }
+                if upload.is_some() {
+                    return Err(fault(CoreError::Busy));
+                }
+                (file_index, new_text)
+            }
+        };
         let gate_work = gate
-            .revision_work(actor, run, review, input.revision)
+            .revision_work(actor, run, review, revision)
             .map_err(fault)?;
-        let bytes = crate::edit::prepare::TextOffset::try_from(input.new_text.as_str().len())
+        let bytes = crate::edit::prepare::TextOffset::try_from(new_text.as_str().len())
             .map_err(|error| fault(error.into()))?;
         let artifact = actor
             .edits
-            .reserve_revision(&op.scope.session_id, &op.origin, &op.preparation, bytes)
+            .reserve_revision(&op_scope.session_id, &op_origin, &op_preparation, bytes)
             .map_err(fault)?;
         let deadline = review.deadline().into_std();
         let op = self
             .operations
-            .remove(&input.edit_id)
+            .remove(&edit_id)
             .ok_or_else(|| fault(CoreError::StaleOwner))?;
         let Stage::Review {
             run,
             request: review,
+            ..
         } = op.stage
         else {
             return Err(fault(CoreError::AlreadyCompleted));
@@ -741,16 +866,16 @@ impl Editors {
         let worker_cancel = cancel.clone();
         let task = tokio::task::spawn_blocking(move || {
             crate::security::file::checkpoint(&worker_cancel, deadline)?;
-            let text = std::sync::Arc::new(input.new_text);
+            let text = std::sync::Arc::new(new_text);
             let mut candidate = (*artifact).clone();
-            candidate.revise(input.file_index, text.clone())?;
+            candidate.revise(file_index, text.clone())?;
             candidate.retained_bytes()?;
-            let revised = gate_work.execute(input.file_index, text)?;
+            let revised = gate_work.execute(file_index, text)?;
             crate::security::file::checkpoint(&worker_cancel, deadline)?;
             Ok((candidate, revised))
         });
         self.operations.insert(
-            input.edit_id,
+            edit_id,
             Operation {
                 stage: Stage::Revising(Revising {
                     run,
@@ -763,7 +888,7 @@ impl Editors {
                 ..op
             },
         );
-        Ok(())
+        Ok(None)
     }
     pub(super) fn tick(
         &mut self,
@@ -839,6 +964,7 @@ impl Editors {
                         stage: Stage::Review {
                             run: revising.run,
                             request: revising.request,
+                            upload: None,
                         },
                         ..op
                     };
@@ -1063,6 +1189,7 @@ impl Editors {
                         Ok(Ok(receipt)) => {
                             let finishing = issue::Finishing::finish_receipt(
                                 verifying.run,
+                                verifying.token,
                                 verifying.journal,
                                 verifying.effect,
                                 Some(verifying.request_id),
@@ -1120,13 +1247,20 @@ impl Editors {
                         .ok_or(CoreError::CleanupFailed)?
                         .map_err(|_| CoreError::CleanupFailed)
                         .and_then(|value| value);
-                    replies.extend(finishing.publish(
+                    let (published, settled) = finishing.publish(
                         host,
                         &op.scope,
+                        &op.origin,
                         &op.preparation,
                         &id,
                         result,
-                    )?);
+                    )?;
+                    if let Some(settled) = settled
+                        && !self.disconnected
+                    {
+                        self.settled.insert(id, settled);
+                    }
+                    replies.extend(published);
                 }
                 Stage::Preparing(preparing) => {
                     if op.terminal.is_some() {
@@ -1168,9 +1302,11 @@ impl Editors {
                             },
                         );
                         match admission {
-                            Ok(EditorAdmission::Review(request)) => {
-                                Ok(Stage::Review { run, request })
-                            }
+                            Ok(EditorAdmission::Review(request)) => Ok(Stage::Review {
+                                run,
+                                request,
+                                upload: None,
+                            }),
                             Ok(EditorAdmission::Authorized(grant)) => Ok(Stage::Authorized {
                                 run,
                                 grant,
@@ -1307,7 +1443,11 @@ impl Editors {
                         self.operations.insert(id, op);
                     }
                 }
-                Stage::Review { run, request } => {
+                Stage::Review {
+                    run,
+                    request,
+                    upload,
+                } => {
                     if op.terminal.is_none() {
                         op.terminal = host.actor_mut(&op.scope)?.validate(&run).err();
                         if tokio::time::Instant::now() >= request.deadline() {
@@ -1315,7 +1455,11 @@ impl Editors {
                         }
                     }
                     let op = Operation {
-                        stage: Stage::Review { run, request },
+                        stage: Stage::Review {
+                            run,
+                            request,
+                            upload,
+                        },
                         ..op
                     };
                     if op.terminal.is_some() {
@@ -1348,12 +1492,14 @@ impl Editors {
                 }
             }
         }
+        let now = Instant::now();
+        self.settled.retain(|_, s| now < s.expires_at);
         Ok(replies)
     }
 }
 fn descriptor(id: &EditorEditId, op: &Operation) -> Value {
     match &op.stage {
-        Stage::Review { run, request } => {
+        Stage::Review { run, request, .. } => {
             json!({"edit_id":id,"state":"review","scope":run.scope(),"revision":request.revision(),"review_mode":request.review_mode(),"applied":false})
         }
         Stage::Authorized { run, grant, .. } => {
@@ -1384,6 +1530,12 @@ fn cleanup(
     );
     let completion = match op.stage {
         Stage::Review { run, .. } => {
+            let _ = actor.edits.finish_revision(
+                &op.scope.session_id,
+                &op.origin,
+                &op.preparation,
+                None,
+            );
             actor.cancel(&run)?;
             if timed_out {
                 gate.timeout_run(actor, &run)?;
@@ -1505,6 +1657,7 @@ mod tests {
                     EditorAdmission::Review(request) => Stage::Review {
                         run: run.clone(),
                         request,
+                        upload: None,
                     },
                     EditorAdmission::Authorized(grant) => Stage::Authorized {
                         run: run.clone(),

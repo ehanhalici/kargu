@@ -188,8 +188,10 @@ impl ReceiptWork {
                     OperationKind::Update,
                     Some(crate::edit::types::HunkCount::default()),
                 ),
-                Artifact::File(_) if prepared.evidence.existed() => (OperationKind::Update, None),
-                Artifact::File(_) => (OperationKind::Add, None),
+                Artifact::File(_) if prepared.evidence.existed() => {
+                    (OperationKind::Update, prepared.hunks)
+                }
+                Artifact::File(_) => (OperationKind::Add, prepared.hunks),
                 Artifact::Batch(batch) => {
                     let file = batch
                         .files
