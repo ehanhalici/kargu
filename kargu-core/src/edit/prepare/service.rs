@@ -15,7 +15,7 @@ use crate::{
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, VecDeque},
     sync::Arc,
     time::Instant,
 };
@@ -31,6 +31,14 @@ struct Entry {
     reserved: Reservation,
     expires: Instant,
     phase: Phase,
+    provenance: Provenance,
+}
+enum Provenance {
+    Forward,
+    Rollback {
+        target: crate::edit::types::EditorEditId,
+        files: Vec<super::types::FileIndex>,
+    },
 }
 enum Phase {
     Uploading {
@@ -51,6 +59,7 @@ enum Phase {
 #[derive(Default)]
 pub(crate) struct EditPreparations {
     entries: HashMap<PreparationId, Entry>,
+    snapshots: VecDeque<super::AppliedSnapshot>,
 }
 fn decode<T: DeserializeOwned>(value: Value) -> Result<T, CoreError> {
     serde_json::from_value(value).map_err(|_| EditError::InvalidEvidence.into())
@@ -76,6 +85,8 @@ impl EditPreparations {
         });
     }
     pub(crate) fn close_session(&mut self, session: &SessionId) {
+        self.snapshots
+            .retain(|snapshot| &snapshot.session != session);
         self.entries.retain(|_, entry| {
             if &entry.owner.session != session {
                 return true;
@@ -283,6 +294,7 @@ impl EditPreparations {
         self.entries.insert(
             id.clone(),
             Entry {
+                provenance: Provenance::Forward,
                 owner: Owner {
                     session: session.clone(),
                     origin: input.origin_id.clone(),
@@ -439,6 +451,221 @@ impl EditPreparations {
         self.entries.remove(id);
         Ok(())
     }
+    pub(crate) fn reserve_revision(
+        &mut self,
+        session: &SessionId,
+        origin: &OriginId,
+        id: &PreparationId,
+        extra: super::types::TextOffset,
+    ) -> Result<Arc<Artifact>, CoreError> {
+        let total = self.entries.values().try_fold(extra.get(), |n, entry| {
+            n.checked_add(entry.reserved.0).ok_or(CoreError::Limit)
+        })?;
+        if total > limits::EDIT_BUFFER_BYTES {
+            return Err(CoreError::Limit);
+        }
+        let entry = self.owned(session, origin, id)?;
+        let Phase::Claimed {
+            artifact,
+            revoked: false,
+        } = &entry.phase
+        else {
+            return Err(CoreError::StaleOwner);
+        };
+        entry.reserved = Reservation(
+            entry
+                .reserved
+                .0
+                .checked_add(extra.get())
+                .ok_or(CoreError::Limit)?,
+        );
+        Ok(artifact.clone())
+    }
+    pub(crate) fn finish_revision(
+        &mut self,
+        session: &SessionId,
+        origin: &OriginId,
+        id: &PreparationId,
+        candidate: Option<Artifact>,
+    ) -> Result<(), CoreError> {
+        let entry = self.entries.get_mut(id).ok_or(CoreError::StaleOwner)?;
+        if !entry.owner.matches(session, origin) {
+            return Err(CoreError::StaleOwner);
+        }
+        let Phase::Claimed { artifact, revoked } = &mut entry.phase else {
+            return Err(CoreError::StaleOwner);
+        };
+        if let Some(candidate) = candidate {
+            if *revoked || Instant::now() >= entry.expires {
+                return Err(CoreError::Cancelled);
+            }
+            let bytes = candidate.retained_bytes()?.get();
+            if bytes > entry.reserved.0 {
+                return Err(CoreError::Limit);
+            }
+            *artifact = Arc::new(candidate);
+        }
+        entry.reserved = Reservation(artifact.retained_bytes()?.get());
+        Ok(())
+    }
+    pub(crate) fn record_applied(
+        &mut self,
+        session: &SessionId,
+        edit_id: &crate::edit::types::EditorEditId,
+        preparation: &PreparationId,
+        receipt: &super::receipt::VerifiedReceipt,
+    ) -> Result<bool, CoreError> {
+        let entry = self.entries.get(preparation).ok_or(CoreError::StaleOwner)?;
+        if &entry.owner.session != session {
+            return Err(CoreError::StaleOwner);
+        }
+        let Phase::Claimed { artifact, .. } = &entry.phase else {
+            return Err(CoreError::StaleOwner);
+        };
+        if let Provenance::Rollback { target, files } = &entry.provenance {
+            let mut completed = Vec::new();
+            for result in receipt
+                .files()
+                .iter()
+                .filter(|r| r.outcome() == super::receipt::FileOutcome::Applied)
+            {
+                let original = *files
+                    .get(result.index().get())
+                    .ok_or(EditError::InvalidEvidence)?;
+                let inverse = super::preflight::file(artifact, result.index())?;
+                completed.push((original, inverse.path.clone(), result.clone()));
+            }
+            for snapshot in &mut self.snapshots {
+                if &snapshot.session != session {
+                    continue;
+                }
+                for (original, path, version) in &completed {
+                    if &snapshot.edit_id == target {
+                        snapshot.remaining.remove(original);
+                    }
+                    for index in &snapshot.remaining {
+                        let before = super::preflight::file(&snapshot.artifact, *index)?;
+                        if &before.path == path {
+                            Arc::make_mut(&mut snapshot.receipt).rebase(&before.relative, version);
+                        }
+                    }
+                }
+            }
+            self.snapshots.retain(|s| !s.remaining.is_empty());
+            return Ok(false);
+        }
+        let remaining = receipt
+            .files()
+            .iter()
+            .filter(|r| r.outcome() == super::receipt::FileOutcome::Applied)
+            .map(|r| r.index())
+            .collect();
+        let snapshot = super::AppliedSnapshot {
+            session: session.clone(),
+            edit_id: edit_id.clone(),
+            artifact: artifact.clone(),
+            receipt: Arc::new(receipt.clone()),
+            remaining,
+        };
+        let bytes = snapshot.retained_bytes()?;
+        if bytes > limits::EDIT_HISTORY_BYTES {
+            return Err(CoreError::Limit);
+        }
+        loop {
+            let retained = self.snapshots.iter().try_fold(bytes, |n, snapshot| {
+                n.checked_add(snapshot.retained_bytes()?)
+                    .ok_or(CoreError::Limit)
+            })?;
+            if self.snapshots.len() < limits::EDIT_SNAPSHOTS
+                && retained <= limits::EDIT_HISTORY_BYTES
+            {
+                break;
+            }
+            self.snapshots.pop_front().ok_or(CoreError::Limit)?;
+        }
+        self.snapshots.push_back(snapshot);
+        Ok(true)
+    }
+    pub(crate) fn prepare_rollback(
+        &mut self,
+        session: &SessionId,
+        input: super::rollback::RollbackInput,
+        now: Instant,
+    ) -> Result<super::rollback::RollbackWork, CoreError> {
+        self.sweep(now);
+        if input.mode != Mode::Agent {
+            return Err(CoreError::Rejected);
+        }
+        let selected = self
+            .snapshots
+            .iter()
+            .rev()
+            .find_map(|snapshot| {
+                if &snapshot.session != session
+                    || input
+                        .target_edit_id
+                        .as_ref()
+                        .is_some_and(|id| id != &snapshot.edit_id)
+                {
+                    return None;
+                }
+                let files: Vec<_> = snapshot
+                    .remaining
+                    .iter()
+                    .filter(|index| {
+                        super::preflight::file(&snapshot.artifact, **index).is_ok_and(|file| {
+                            input
+                                .root
+                                .as_ref()
+                                .is_none_or(|root| root == file.root.path())
+                                && input
+                                    .target_file
+                                    .as_ref()
+                                    .is_none_or(|path| path == &file.relative)
+                        })
+                    })
+                    .copied()
+                    .collect();
+                if files.is_empty() {
+                    None
+                } else {
+                    Some((snapshot.clone(), files))
+                }
+            })
+            .ok_or(CoreError::Unavailable)?;
+        let reserved = Reservation(limits::EDIT_BUFFER_BYTES);
+        let total = self.entries.values().try_fold(reserved.0, |n, e| {
+            n.checked_add(e.reserved.0).ok_or(CoreError::Limit)
+        })?;
+        if self.entries.len() >= limits::EDIT_PREPARATIONS || total > limits::EDIT_BUFFER_BYTES {
+            return Err(CoreError::Limit);
+        }
+        let id = PreparationId::new();
+        self.entries.insert(
+            id.clone(),
+            Entry {
+                owner: Owner {
+                    session: session.clone(),
+                    origin: input.origin_id.clone(),
+                },
+                reserved,
+                expires: now
+                    .checked_add(timeouts::WORKSPACE_READ)
+                    .ok_or(CoreError::ArithmeticOverflow)?,
+                phase: Phase::Preparing { revoked: false },
+                provenance: Provenance::Rollback {
+                    target: selected.0.edit_id.clone(),
+                    files: selected.1.clone(),
+                },
+            },
+        );
+        Ok(super::rollback::RollbackWork {
+            id,
+            snapshot: selected.0,
+            files: selected.1,
+            input,
+        })
+    }
     pub(crate) fn can_publish(
         &self,
         session: &SessionId,
@@ -501,6 +728,15 @@ impl EditPreparations {
                 entry.phase = Phase::Collecting(patch);
                 descriptor
             }
+        };
+        let descriptor = if let Provenance::Rollback { target, .. } = &entry.provenance {
+            let mut descriptor = descriptor;
+            if let Some(object) = descriptor.as_object_mut() {
+                object.insert("rollback_target_edit_id".into(), json!(target));
+            }
+            json!({"preparation_id":id,"target_edit_id":target,"descriptor":descriptor})
+        } else {
+            descriptor
         };
         self.entries.insert(id.clone(), entry);
         Ok(descriptor)

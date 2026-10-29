@@ -163,6 +163,8 @@ impl ReceiptWork {
         let count = preflight::count(&self.artifact);
         let mut results = Vec::with_capacity(count);
         let mut applied = FileCount::default();
+        let mut hunks_total = Some(crate::edit::types::HunkCount::default());
+        let mut hunks_applied = Some(crate::edit::types::HunkCount::default());
         for number in 0..count {
             checkpoint(cancel, self.deadline)?;
             let index = FileIndex::try_from(number)?;
@@ -181,17 +183,22 @@ impl ReceiptWork {
                 .map(|part| EditText::from_sensitive(part.text))
                 .transpose()?;
             let after = EditText::from_sensitive(after.text)?;
-            let kind = match &*self.artifact {
-                Artifact::File(_) if prepared.evidence.existed() => OperationKind::Update,
-                Artifact::File(_) => OperationKind::Add,
+            let (kind, hunks) = match &*self.artifact {
+                Artifact::File(_) if prepared.unchanged => (
+                    OperationKind::Update,
+                    Some(crate::edit::types::HunkCount::default()),
+                ),
+                Artifact::File(_) if prepared.evidence.existed() => (OperationKind::Update, None),
+                Artifact::File(_) => (OperationKind::Add, None),
                 Artifact::Batch(batch) => {
-                    batch
+                    let file = batch
                         .files
                         .get(index.get())
-                        .ok_or(EditError::InvalidEvidence)?
-                        .kind
+                        .ok_or(EditError::InvalidEvidence)?;
+                    (file.kind, file.hunks)
                 }
             };
+            hunks_total = add_hunks(hunks_total, hunks)?;
             let mut result = FileResult {
                 file: index,
                 path: prepared.relative.clone(),
@@ -202,6 +209,18 @@ impl ReceiptWork {
                 final_hash: match observation.after {
                     After::Document { .. } => Some(after.hash()),
                     _ => None,
+                },
+                hunks,
+                final_text: None,
+                before_document: before.clone(),
+                final_document: match &observation.after {
+                    After::Document { document, .. } => Some(document.clone()),
+                    _ => None,
+                },
+                final_disk: match &observation.after {
+                    After::Document { document, .. } => document.disk.clone(),
+                    After::Closed { disk, .. } => disk.clone(),
+                    _ => prepared.disk.clone(),
                 },
                 saved: false,
                 hook_modified: false,
@@ -229,6 +248,18 @@ impl ReceiptWork {
                         .checked_add(1)
                         .ok_or(CoreError::ArithmeticOverflow)?,
                 )?;
+                hunks_applied = add_hunks(
+                    hunks_applied,
+                    if result.hook_modified { None } else { hunks },
+                )?;
+            } else if matches!(
+                result.outcome,
+                FileOutcome::Partial | FileOutcome::OutcomeUnknown
+            ) {
+                hunks_applied = None;
+            }
+            if matches!(observation.after, After::Document { .. }) {
+                result.final_text = Some(Arc::new(after));
             }
             results.push(result);
         }
@@ -256,6 +287,22 @@ impl ReceiptWork {
             files: results,
             files_total: FileCount::try_from(count)?,
             files_applied: applied,
+            hunks_total,
+            hunks_applied,
         })
+    }
+}
+
+fn add_hunks(
+    total: Option<crate::edit::types::HunkCount>,
+    count: Option<crate::edit::types::HunkCount>,
+) -> Result<Option<crate::edit::types::HunkCount>, CoreError> {
+    match (total, count) {
+        (Some(a), Some(b)) => Ok(Some(crate::edit::types::HunkCount::try_from(
+            a.get()
+                .checked_add(b.get())
+                .ok_or(CoreError::ArithmeticOverflow)?,
+        )?)),
+        _ => Ok(None),
     }
 }

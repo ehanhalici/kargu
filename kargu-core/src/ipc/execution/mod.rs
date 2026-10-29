@@ -182,6 +182,21 @@ impl Commands {
     pub fn decide_editor(&mut self, host: &mut Host, params: Value) -> Result<Value, Fault> {
         self.editors.decision(host, &mut self.gate, params)
     }
+    pub fn revise_editor(
+        &mut self,
+        host: &mut Host,
+        id: RpcId,
+        params: Value,
+    ) -> Result<(), Fault> {
+        let available = self
+            .operations
+            .len()
+            .saturating_add(self.editors.reserved_workers())
+            < limits::HOST_PROCESSES;
+        self.editors
+            .revise(host, &mut self.gate, id, params, available)
+    }
+
     pub fn start(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
         self.start_kind(host, id, params, RunPurpose::AgentTurn)
     }

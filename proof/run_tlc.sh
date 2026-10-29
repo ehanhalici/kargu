@@ -20,6 +20,7 @@
 #   ./run_tlc.sh --edit-issuance  exhaustive journal/issuance/quiescence scan
 #   ./run_tlc.sh --editor-activity exhaustive cross-epoch editor activity scan
 #   ./run_tlc.sh --edit-journal   exhaustive bounded journal/recovery scan
+#   ./run_tlc.sh --edit-revision  exhaustive atomic native review revision scan
 #   ./run_tlc.sh --edit-preparation exhaustive native proposal/Git drain scan
 #   ./run_tlc.sh --edit-transaction exhaustive reviewed edit transaction scan
 #   ./run_tlc.sh --debug-selection exhaustive debugger-selection scan
@@ -135,6 +136,10 @@ elif [[ "$1" == "--edit-journal" ]]; then
     MODE="exhaustive native edit journal scan"
     SPECIFICATION="EditJournalMC.tla (KarguEditJournal)"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config EditJournalMC.cfg EditJournalMC.tla)
+elif [[ "$1" == "--edit-revision" ]]; then
+    MODE="exhaustive atomic native review revision scan"
+    SPECIFICATION="EditRevisionMC.tla (KarguEditRevision)"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config EditRevisionMC.cfg EditRevisionMC.tla)
 elif [[ "$1" == "--edit-preparation" ]]; then
     MODE="exhaustive native edit preparation scan"
     SPECIFICATION="EditPreparationMC.tla (KarguEditPreparation)"

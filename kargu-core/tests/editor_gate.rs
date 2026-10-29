@@ -212,6 +212,13 @@ fn presenter_deletion_and_actual_mode_fail_before_creating_pending_work() -> Tes
     }
     let mut f = Fixture::new(Mode::Agent)?;
     let input = f.input(ReviewMode::Auto, true)?;
+    assert!(matches!(
+        f.admit(input, EditorPresenter::Missing),
+        Err(CoreError::Rejected)
+    ));
+    assert_eq!(f.gate.pending_count(), 0);
+    let mut input = f.input(ReviewMode::Auto, true)?;
+    input.save_policy = SavePolicy::Save;
     let EditorAdmission::Authorized(grant) = f.admit(input, EditorPresenter::Missing)? else {
         return Err("expected auto delete grant".into());
     };

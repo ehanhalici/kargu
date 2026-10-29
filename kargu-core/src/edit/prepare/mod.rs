@@ -12,6 +12,8 @@ pub(crate) use git::{GitPreparation, PatchPrepared, RunningPatch};
 pub(crate) use inspection::{PatchWork, PreparationResult, PrepareWork};
 mod preflight;
 pub(crate) mod receipt;
+mod rollback;
+pub(crate) use rollback::{AppliedSnapshot, RollbackInput, RollbackWork};
 mod service;
 pub(crate) use preflight::{PreflightFile, PreflightSet, ReadyPreflight};
 mod types;
@@ -21,8 +23,8 @@ use crate::{
 };
 pub(crate) use service::EditPreparations;
 use std::{collections::BTreeMap, time::Instant};
-pub(crate) use types::PreparationId;
 use types::{Begin, Part};
+pub(crate) use types::{FileIndex, PreparationId, TextOffset};
 use zeroize::Zeroizing;
 
 /// Consuming, owned worker input. It cannot publish into the application actor.

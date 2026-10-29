@@ -36,11 +36,12 @@ pub(super) fn unchanged(
 }
 /// Private immutable proposal and held evidence; serializing a descriptor cannot
 /// manufacture an execution grant or rewrite any of its contents.
+#[derive(Clone)]
 pub(crate) struct Prepared {
     pub(super) root: Workspace,
     pub(super) path: PathBuf,
     pub(super) relative: EditPath,
-    pub(super) evidence: capture::Evidence,
+    pub(super) evidence: Arc<capture::Evidence>,
     pub(super) disk: DiskState,
     pub(super) base: Arc<EditText>,
     pub(super) proposed: Arc<EditText>,
@@ -52,6 +53,8 @@ pub(crate) struct Prepared {
     pub(super) policy_revision: PolicyRevision,
     pub(super) review_mode: ReviewMode,
     pub(super) save_policy: SavePolicy,
+    pub(super) restore_dirty: Option<bool>,
+    pub(super) restore_coding: Option<super::types::Coding>,
 }
 impl Prepared {
     pub(super) fn descriptor(&self, id: &PreparationId) -> Value {
@@ -59,7 +62,7 @@ impl Prepared {
         "existed":self.evidence.existed(),"base_hash":self.base_hash,"proposed_hash":self.proposed_hash,
         "base_bytes":self.base.as_str().len(),"proposed_bytes":self.proposed.as_str().len(),"unchanged":self.unchanged,
         "document":self.live,"disk":self.disk,"config_revision":self.config_revision,"policy_revision":self.policy_revision,
-        "review_mode":self.review_mode,"save_policy":self.save_policy,"applied":false})
+        "review_mode":self.review_mode,"save_policy":self.save_policy,"restore_dirty":self.restore_dirty,"restore_coding":self.restore_coding,"applied":false})
     }
     pub(super) fn page(
         &self,
@@ -92,23 +95,47 @@ impl Prepared {
             json!({"text":slice,"offset":types::TextOffset::try_from(start)?,"next_offset":types::TextOffset::try_from(end)?,"complete":end==text.len()}),
         )
     }
+    pub(super) fn revise(&mut self, new_text: Arc<EditText>) -> Result<(), CoreError> {
+        let proposed = new_text;
+        let proposed_hash = proposed.hash();
+        let kind = if self.evidence.existed() {
+            OperationKind::Update
+        } else {
+            OperationKind::Add
+        };
+        let is_unchanged = unchanged(
+            &self.evidence,
+            self.live.as_ref(),
+            kind,
+            self.save_policy,
+            self.base_hash,
+            proposed_hash,
+        );
+        self.proposed = proposed;
+        self.proposed_hash = proposed_hash;
+        self.unchanged = is_unchanged;
+        Ok(())
+    }
 }
 
+#[derive(Clone)]
 pub(super) struct BatchFile {
-    pub proposal: Prepared,
-    pub kind: OperationKind,
-    pub hunks: HunkCount,
+    pub(super) proposal: Prepared,
+    pub(super) kind: OperationKind,
+    pub(super) hunks: Option<HunkCount>,
 }
+#[derive(Clone)]
 pub(crate) struct Batch {
     pub(super) files: Vec<BatchFile>,
-    pub(super) hunks: HunkCount,
+    pub(super) hunks: Option<HunkCount>,
 }
+#[derive(Clone)]
 pub(crate) enum Artifact {
     File(Box<Prepared>),
     Batch(Box<Batch>),
 }
 impl Artifact {
-    pub(super) fn retained_bytes(&self) -> Result<types::RetainedBytes, CoreError> {
+    pub(crate) fn retained_bytes(&self) -> Result<types::RetainedBytes, CoreError> {
         let mut count = types::RetainedBytes::default();
         match self {
             Self::File(file) => {
@@ -174,5 +201,44 @@ impl Artifact {
             }
         }
         page.finish(offset, types::FileCount::try_from(b.files.len())?)
+    }
+    pub(crate) fn revise(
+        &mut self,
+        file_index: types::FileIndex,
+        new_text: Arc<EditText>,
+    ) -> Result<(), CoreError> {
+        match self {
+            Self::File(prepared) => {
+                if file_index.get() != 0 {
+                    return Err(EditError::InvalidEvidence.into());
+                }
+                prepared.revise(new_text)
+            }
+            Self::Batch(batch) => {
+                let file = batch
+                    .files
+                    .get_mut(file_index.get())
+                    .ok_or(EditError::InvalidEvidence)?;
+                if file.kind == OperationKind::Delete {
+                    return Err(EditError::InvalidEvidence.into());
+                }
+                let proposed = new_text;
+                let proposed_hash = proposed.hash();
+                let is_unchanged = unchanged(
+                    &file.proposal.evidence,
+                    file.proposal.live.as_ref(),
+                    file.kind,
+                    file.proposal.save_policy,
+                    file.proposal.base_hash,
+                    proposed_hash,
+                );
+                file.proposal.proposed = proposed;
+                file.proposal.proposed_hash = proposed_hash;
+                file.proposal.unchanged = is_unchanged;
+                file.hunks = None;
+                batch.hunks = None;
+                Ok(())
+            }
+        }
     }
 }

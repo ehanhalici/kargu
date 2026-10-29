@@ -217,12 +217,23 @@ impl Client {
         token: &Value,
         input: Value,
     ) -> Result<Value, Box<dyn std::error::Error>> {
+        self.receipt_with_revision(edit, source, token, 1, input)
+    }
+
+    fn receipt_with_revision(
+        &mut self,
+        edit: &Value,
+        source: &str,
+        token: &Value,
+        revision: u64,
+        input: Value,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         self.call(
             "edit/receipt",
             json!({
                 "origin_id": source,
                 "edit_id": edit,
-                "revision": 1,
+                "revision": revision,
                 "issued_token": token,
                 "input": input
             }),
@@ -516,23 +527,37 @@ fn upload(
     written: &str,
     after: &str,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    let reply = client.receipt(
+    upload_with_revision(client, edit, token, 1, observation, written, after)
+}
+
+fn upload_with_revision(
+    client: &mut Client,
+    edit: &Value,
+    token: &Value,
+    revision: u64,
+    observation: Value,
+    written: &str,
+    after: &str,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let reply = client.receipt_with_revision(
         edit,
         SOURCE,
         token,
+        revision,
         json!({"action":"file","observation":observation}),
     )?;
     assert_eq!(reply["result"]["recorded"], true, "{reply}");
     for (part, text) in [("written", written), ("after", after)] {
-        let reply = client.receipt(
+        let reply = client.receipt_with_revision(
             edit,
             SOURCE,
             token,
+            revision,
             json!({"action":"append","file":0,"part":part,"offset":0,"text":text}),
         )?;
         assert_eq!(reply["result"]["complete"], true, "{reply}");
     }
-    client.receipt(edit, SOURCE, token, json!({"action":"commit"}))
+    client.receipt_with_revision(edit, SOURCE, token, revision, json!({"action":"commit"}))
 }
 
 #[test]
@@ -792,6 +817,363 @@ fn deletion_receipts_verify_actual_absence_after_real_git_preparation() -> TestR
             },
             "{reply}"
         );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_edit_revise_bumps_revision_and_rejects_stale_decision() -> TestResult {
+    let root = private()?;
+    let journal = private()?;
+    let path = root.path().join("file.txt");
+    fs::write(&path, "old\n")?;
+
+    let mut client = Client::new()?;
+    let prep_id = client.call(
+        "edit/begin",
+        json!({
+            "origin_id": SOURCE,
+            "root": root.path(),
+            "mode": "agent",
+            "intent": {
+                "kind": "write",
+                "path": "file.txt",
+                "new_bytes": 4
+            },
+            "live": null,
+            "config_revision": 3,
+            "policy_revision": 7,
+            "review_mode": "async",
+            "save_policy": "save"
+        }),
+    )?["result"]["preparation_id"]
+        .clone();
+    client.call(
+        "edit/append",
+        json!({
+            "origin_id": SOURCE,
+            "preparation_id": prep_id,
+            "part": "new",
+            "offset": 0,
+            "text": "new\n"
+        }),
+    )?;
+    let prep = client.call(
+        "edit/prepare",
+        json!({
+            "origin_id": SOURCE,
+            "preparation_id": prep_id
+        }),
+    )?["result"]
+        .clone();
+
+    // Authorize with an available presenter yields interactive review
+    let auth_reply = client.call(
+        "edit/authorize",
+        json!({
+            "origin_id": SOURCE,
+            "preparation_id": prep_id,
+            "presenter": "available"
+        }),
+    )?;
+    assert_eq!(auth_reply["result"]["state"], "review", "{auth_reply}");
+    assert_eq!(auth_reply["result"]["revision"], 1);
+    let edit_id = auth_reply["result"]["edit_id"].clone();
+
+    let invalid = client.call("edit/revise", json!({"origin_id":SOURCE,"edit_id":edit_id,"revision":1,"file_index":1,"new_text":"wrong\n"}))?;
+    assert!(invalid.get("error").is_some(), "{invalid}");
+    let original = client.call(
+        "edit/read",
+        json!({"origin_id":SOURCE,"preparation_id":prep_id,"part":"proposed","offset":0}),
+    )?;
+    assert_eq!(original["result"]["text"], "new\n");
+    // Revise proposed text from review UI
+    let revise_reply = client.call(
+        "edit/revise",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": edit_id,
+            "revision": 1,
+            "file_index": 0,
+            "new_text": "revised\n"
+        }),
+    )?;
+    assert_eq!(revise_reply["result"]["edit_id"], edit_id);
+    assert_eq!(revise_reply["result"]["revision"], 2, "{revise_reply}");
+
+    // Calling decision with stale revision 1 must be rejected
+    let stale_decision = client.call(
+        "edit/decision",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": edit_id,
+            "revision": 1,
+            "decision": "accept"
+        }),
+    )?;
+    assert!(
+        stale_decision.get("error").is_some(),
+        "Expected stale decision error: {stale_decision}"
+    );
+
+    // Calling decision with updated revision 2 must succeed
+    let valid_decision = client.call(
+        "edit/decision",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": edit_id,
+            "revision": 2,
+            "decision": "accept"
+        }),
+    )?;
+    assert_eq!(
+        valid_decision["result"]["state"], "authorized",
+        "{valid_decision}"
+    );
+    assert_eq!(valid_decision["result"]["revision"], 2);
+
+    // Preflight with revision 2
+    let preflight_reply = client.call(
+        "edit/preflight",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": edit_id,
+            "revision": 2,
+            "witness": {
+                "file": 0,
+                "base_hash": prep["base_hash"],
+                "document": {
+                    "id": "editor_document_12345678-1234-4234-8234-123456789abc",
+                    "tick": 1,
+                    "bytes": prep["base_bytes"],
+                    "coding": "utf-8-unix",
+                    "dirty": false,
+                    "read_only": false,
+                    "disk": prep["disk"]
+                }
+            }
+        }),
+    )?;
+    assert_eq!(preflight_reply["result"]["state"], "preflighted");
+
+    // Issue with revision 2
+    let issued = client.call(
+        "edit/issue",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": edit_id,
+            "revision": 2,
+            "journal_directory": journal.path()
+        }),
+    )?;
+    assert_eq!(issued["result"]["state"], "issued");
+    let token = &issued["result"]["issued_token"];
+
+    // Write the revised text to disk and upload receipt
+    fs::write(&path, "revised\n")?;
+    let reply = upload_with_revision(
+        &mut client,
+        &edit_id,
+        token,
+        2,
+        observed(&path, "revised\n", "revised\n")?,
+        "revised\n",
+        "revised\n",
+    )?;
+    assert_eq!(reply["result"]["receipt"]["outcome"], "applied_full");
+    assert!(reply["result"]["receipt"]["hunks_applied"].is_null());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_edit_rollback_reverses_applied_edit_and_rejects_foreign_modifications() -> TestResult
+{
+    let root = private()?;
+    let journal = private()?;
+    let path = root.path().join("file.txt");
+    fs::write(&path, "old\n")?;
+
+    let mut client = Client::new()?;
+    let (_prep, edit_id) = client.ready(root.path(), SOURCE)?;
+    let issued = client.issue(&edit_id, SOURCE, journal.path())?;
+    let token = &issued["result"]["issued_token"];
+
+    fs::write(&path, "new\n")?;
+    let commit_reply = upload(
+        &mut client,
+        &edit_id,
+        token,
+        observed(&path, "new\n", "new\n")?,
+        "new\n",
+        "new\n",
+    )?;
+    assert_eq!(commit_reply["result"]["receipt"]["outcome"], "applied_full");
+
+    // Prepare rollback for the edit
+    let rollback_prep = client.call(
+        "edit/rollback",
+        json!({
+            "origin_id": SOURCE,
+            "target_edit_id": edit_id,
+            "mode":"agent","review_mode":"auto","save_policy":"save",
+            "config_revision":9,"policy_revision":11
+        }),
+    )?;
+    assert!(rollback_prep["result"]["preparation_id"].is_string());
+    assert_eq!(rollback_prep["result"]["target_edit_id"], edit_id);
+    let rollback_prep_id = &rollback_prep["result"]["preparation_id"];
+
+    // Authorize rollback
+    let rollback_auth = client.call(
+        "edit/authorize",
+        json!({
+            "origin_id": SOURCE,
+            "preparation_id": rollback_prep_id,
+            "presenter": "missing"
+        }),
+    )?;
+    assert_eq!(rollback_auth["result"]["state"], "authorized");
+    assert_eq!(rollback_auth["result"]["scope"]["config_revision"], 9);
+    assert_eq!(rollback_auth["result"]["scope"]["policy_revision"], 11);
+    let rollback_edit_id = &rollback_auth["result"]["edit_id"];
+
+    // If file has foreign modifications, preflight must fail with conflict
+    let stat = fs::metadata(&path)?;
+    let dev = stat.dev();
+    let ino = stat.ino();
+    let mtime = stat.mtime_nsec();
+    let ctime = stat.ctime_nsec();
+
+    let foreign_witness = json!({
+        "file": 0,
+        "base_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "document": {
+            "id": "editor_document_12345678-1234-4234-8234-123456789abc",
+            "tick": 3,
+            "bytes": 12,
+            "coding": "utf-8-unix",
+            "dirty": false,
+            "read_only": false,
+            "disk": {
+                "kind": "file",
+                "version": {
+                    "device": dev,
+                    "inode": ino,
+                    "bytes": 12,
+                    "mtime_ns": mtime.to_string(),
+                    "ctime_ns": ctime.to_string()
+                }
+            }
+        }
+    });
+    let preflight_fail = client.call(
+        "edit/preflight",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": rollback_edit_id,
+            "revision": 1,
+            "witness": foreign_witness
+        }),
+    )?;
+    assert!(
+        preflight_fail.get("error").is_some(),
+        "Expected preflight conflict on foreign hash: {preflight_fail}"
+    );
+
+    // Preflight with matching base_hash ("new\n")
+    let rollback_files = client.call(
+        "edit/files",
+        json!({"origin_id":SOURCE,"preparation_id":rollback_prep_id,"offset":0}),
+    )?;
+    let rollback_descriptor = &rollback_files["result"]["files"][0];
+    let preflight_ok = client.call(
+        "edit/preflight",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": rollback_edit_id,
+            "revision": 1,
+            "witness": {
+                "file": 0,
+                "base_hash": rollback_descriptor["base_hash"],
+                "document": {
+                    "id": "editor_document_12345678-1234-4234-8234-123456789abc",
+                    "tick": 3,
+                    "bytes": rollback_descriptor["base_bytes"],
+                    "coding": "utf-8-unix",
+                    "dirty": false,
+                    "read_only": false,
+                    "disk": rollback_descriptor["disk"]
+                }
+            }
+        }),
+    )?;
+    assert_eq!(
+        preflight_ok["result"]["state"], "preflighted",
+        "{preflight_ok}"
+    );
+
+    // Issue rollback
+    let rollback_issued = client.call(
+        "edit/issue",
+        json!({
+            "origin_id": SOURCE,
+            "edit_id": rollback_edit_id,
+            "revision": 1,
+            "journal_directory": journal.path()
+        }),
+    )?;
+    assert_eq!(rollback_issued["result"]["state"], "issued");
+    let rollback_token = &rollback_issued["result"]["issued_token"];
+
+    // Restore "old\n" to disk and upload rollback receipt
+    fs::write(&path, "old\n")?;
+    let rollback_commit = upload(
+        &mut client,
+        rollback_edit_id,
+        rollback_token,
+        {
+            let mut fact = observed(&path, "old\n", "old\n")?;
+            fact["write_tick"] = json!(4);
+            fact["after"]["document"]["tick"] = json!(5);
+            fact
+        },
+        "old\n",
+        "old\n",
+    )?;
+    assert_eq!(
+        rollback_commit["result"]["receipt"]["outcome"],
+        "applied_full"
+    );
+    assert_eq!(fs::read_to_string(&path)?, "old\n");
+
+    Ok(())
+}
+
+#[test]
+fn rollback_rejects_real_foreign_disk_change_before_preparation() -> TestResult {
+    for final_body in ["new\n", "save hook result\n"] {
+        let root = private()?;
+        let journal = private()?;
+        let path = root.path().join("file.txt");
+        fs::write(&path, "old\n")?;
+        let mut client = Client::new()?;
+        let (_, edit) = client.ready(root.path(), SOURCE)?;
+        let issued = client.issue(&edit, SOURCE, journal.path())?;
+        fs::write(&path, final_body)?;
+        let reply = upload(
+            &mut client,
+            &edit,
+            &issued["result"]["issued_token"],
+            observed(&path, "new\n", final_body)?,
+            "new\n",
+            final_body,
+        )?;
+        assert_eq!(reply["result"]["receipt"]["outcome"], "applied_full");
+        fs::write(&path, "foreign owner\n")?;
+        let rollback=client.call("edit/rollback",json!({"origin_id":SOURCE,"target_edit_id":edit,"mode":"agent","review_mode":"auto","save_policy":"save","config_revision":3,"policy_revision":7}))?;
+        assert!(rollback.get("error").is_some(), "{rollback}");
+        assert_eq!(fs::read_to_string(&path)?, "foreign owner\n");
     }
     Ok(())
 }

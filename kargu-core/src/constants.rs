@@ -29,6 +29,10 @@ pub mod limits {
     pub const EDIT_HUNKS: usize = 4096;
     /// Framing lines accepted before any Git preparation or editor effect.
     pub const EDIT_PATCH_LINES: usize = 200_000;
+    /// Retained applied rollback snapshots per application.
+    pub const EDIT_SNAPSHOTS: usize = 16;
+    /// Original and final text in the bounded application rollback history.
+    pub const EDIT_HISTORY_BYTES: usize = EDIT_BUFFER_BYTES + EDIT_RECEIPT_BYTES;
     /// UTF-8 bytes per wire frame, excluding LF.
     pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
     /// Minimum frame size accepted by negotiation.
@@ -271,6 +275,10 @@ pub mod protocol {
         pub const EDIT_ISSUE: &str = "edit/issue";
         /// Settle an issued token after actual editor quiescence, including retired owners.
         pub const EDIT_QUIESCENT: &str = "edit/quiescent";
+        /// Revise proposed text during review, publishing an incremented review revision.
+        pub const EDIT_REVISE: &str = "edit/revise";
+        /// Prepare an inverse native proposal from a committed editor transaction.
+        pub const EDIT_ROLLBACK: &str = "edit/rollback";
         /// Record raw editor observations and verify the final transaction outcome.
         pub const EDIT_RECEIPT: &str = "edit/receipt";
         /// Add one live preflight witness; the complete set is revalidated off-actor.

@@ -193,6 +193,7 @@ impl Finishing {
         id: &EditorEditId,
         result: Result<JournalCommit, CoreError>,
     ) -> Result<Vec<Value>, CoreError> {
+        let live_owner = host.owns_read_scope(scope);
         let actor = host.actor_mut(scope)?;
         let expected = match &self.completion {
             Completion::Unissued { .. } => JournalResolution::NotDispatched,
@@ -251,6 +252,14 @@ impl Finishing {
                 } else {
                     crate::application::ToolOutcome::OutcomeUnknown
                 };
+                let rollback_available = if durable && live_owner && receipt.has_applied() {
+                    actor
+                        .edits
+                        .record_applied(&scope.session_id, id, preparation, &receipt)
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
                 effect.complete(actor, outcome)?;
                 if let Some(request_id) = request_id {
                     replies.push(if durable {
@@ -260,6 +269,7 @@ impl Finishing {
                                 "edit_id": id,
                                 "state": "quiescent",
                                 "receipt": receipt,
+                                "rollback_available":rollback_available,
                                 "journal_committed": true
                             }),
                         )

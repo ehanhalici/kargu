@@ -18,6 +18,7 @@ use std::{collections::BTreeSet, sync::Arc};
 
 /// A closed file intent with decoded text and a captured-evidence commitment.
 /// No Debug/Serialize implementation can implicitly disclose source bodies.
+#[derive(Clone)]
 pub enum EditorFileInput {
     /// An absent file becomes a regular file; even empty creation is an effect.
     Add {
@@ -96,6 +97,7 @@ impl EditorFileInput {
 }
 /// Boundary input from the owned proposal/capture service, not an execution grant.
 /// Filesystem capture and text hashing must run on a bounded worker.
+#[derive(Clone)]
 pub struct EditorActionInput {
     /// Captured source owner, separate from the native execution run scope.
     pub source: EditorSourceId,
@@ -195,11 +197,41 @@ impl EditorAction {
             && self.input.policy_revision == run.scope().policy_revision()
     }
     pub(crate) fn permits_deletion(&self) -> bool {
-        self.input.review_mode == ReviewMode::Auto
-            || !self
-                .input
-                .files
-                .iter()
-                .any(|f| matches!(f, EditorFileInput::Delete { .. }))
+        !self
+            .input
+            .files
+            .iter()
+            .any(|f| matches!(f, EditorFileInput::Delete { .. }))
+            || (self.input.review_mode == ReviewMode::Auto
+                && self.input.save_policy == SavePolicy::Save)
+    }
+    pub(crate) fn detached_input(&self) -> EditorActionInput {
+        self.input.clone()
+    }
+    /// Publish a revised version of the action with an incremented revision.
+    pub(crate) fn revise(
+        &self,
+        file_index: super::prepare::FileIndex,
+        new_text: Arc<EditText>,
+    ) -> Result<EditorAction, CoreError> {
+        let mut input = self.input.clone();
+        input.revision = input.revision.next()?;
+        let file = input
+            .files
+            .get_mut(file_index.get())
+            .ok_or(EditError::InvalidEvidence)?;
+        let arc_text = new_text;
+        match file {
+            EditorFileInput::Add { proposed, .. } => {
+                *proposed = arc_text;
+            }
+            EditorFileInput::Update { proposed, .. } => {
+                *proposed = arc_text;
+            }
+            EditorFileInput::Delete { .. } => {
+                return Err(EditError::InvalidEvidence.into());
+            }
+        }
+        EditorAction::try_from(input)
     }
 }

@@ -265,6 +265,27 @@ impl Host {
         Ok((scope, input))
     }
 
+    pub(crate) fn prepare_rollback(
+        &mut self,
+        params: Value,
+    ) -> Result<(ReadScope, crate::edit::prepare::RollbackWork), Fault> {
+        let request: ReadRequest<crate::edit::prepare::RollbackInput> =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&request.scope) {
+            return Err(owner_fault());
+        }
+        let work = self
+            .actor_mut(&request.scope)
+            .map_err(|_| owner_fault())?
+            .edits
+            .prepare_rollback(
+                &request.scope.session_id,
+                request.arguments,
+                std::time::Instant::now(),
+            )
+            .map_err(crate::edit::prepare::fault)?;
+        Ok((request.scope, work))
+    }
     pub(crate) fn prepare_edit(
         &mut self,
         params: Value,

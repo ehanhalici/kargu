@@ -24,11 +24,11 @@ use std::{
 use tokio::time::Instant;
 
 mod editor;
-pub(crate) use editor::IssuedEditorEdit;
 pub use editor::{
     AuthorizedEditorEdit, EditorAdmission, EditorAdmissionInput, EditorApprovalRequest,
     EditorDecision, EditorPresenter,
 };
+pub(crate) use editor::{IssuedEditorEdit, RevisedEditorAction};
 mod action_snapshot;
 pub(crate) mod file;
 pub(crate) use action_snapshot::ActionSnapshot;
@@ -476,6 +476,17 @@ impl ToolRegistry {
 /// SHA-256 of owner, revisions, canonical tool, executable identity, cwd and argv.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActionDigest([u8; 32]);
+impl serde::Serialize for ActionDigest {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(
+            &self
+                .0
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>(),
+        )
+    }
+}
 fn digest(
     run: &RunHandle,
     name: &ToolName,

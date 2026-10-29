@@ -280,7 +280,7 @@ impl Work {
                 path: evidence.canonical.clone(),
                 relative,
                 disk,
-                evidence,
+                evidence: std::sync::Arc::new(evidence),
                 base: base.into(),
                 proposed: proposed.into(),
                 live: self.input.live,
@@ -288,6 +288,8 @@ impl Work {
                 policy_revision: self.input.policy_revision,
                 review_mode: self.input.review_mode,
                 save_policy: self.input.save_policy,
+                restore_dirty: None,
+                restore_coding: None,
             }),
         )))
     }

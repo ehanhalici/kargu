@@ -133,14 +133,14 @@ fn capture_files(
         let proposed = EditText::try_from(String::new())?;
         files.push(BatchFile {
             kind: target.initial,
-            hunks: target.hunks,
+            hunks: Some(target.hunks),
             proposal: Prepared {
                 root: root.clone(),
                 path: evidence.canonical.clone(),
                 relative: target.path.clone(),
                 base_hash: base.hash(),
                 proposed_hash: proposed.hash(),
-                evidence,
+                evidence: std::sync::Arc::new(evidence),
                 disk,
                 base: base.into(),
                 proposed: proposed.into(),
@@ -150,6 +150,8 @@ fn capture_files(
                 policy_revision: inspection.input.policy_revision,
                 review_mode: inspection.input.review_mode,
                 save_policy: inspection.input.save_policy,
+                restore_dirty: None,
+                restore_coding: None,
             },
         });
     }
@@ -342,7 +344,7 @@ impl RunningPatch {
         Ok(PreparationResult::Complete(Artifact::Batch(Box::new(
             Batch {
                 files,
-                hunks: self.prepared.hunks,
+                hunks: Some(self.prepared.hunks),
             },
         ))))
     }

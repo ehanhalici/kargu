@@ -41,6 +41,7 @@ enum ReadOperation {
     Workspace(WorkspaceRead),
     Configuration(ReadInput),
     Edit(crate::edit::prepare::Work),
+    Rollback(crate::edit::prepare::RollbackWork),
 }
 enum ReadCompletion {
     Workspace(ReadResult),
@@ -52,7 +53,7 @@ impl ReadOperation {
         match self {
             Self::Workspace(_) => timeouts::WORKSPACE_READ,
             Self::Configuration(input) => input.timeout(),
-            Self::Edit(_) => timeouts::WORKSPACE_READ,
+            Self::Edit(_) | Self::Rollback(_) => timeouts::WORKSPACE_READ,
         }
     }
     fn execute(
@@ -61,6 +62,9 @@ impl ReadOperation {
         deadline: Instant,
     ) -> Result<ReadCompletion, CoreError> {
         match self {
+            Self::Rollback(input) => input
+                .execute(cancel, deadline)
+                .map(|value| ReadCompletion::Edit(Box::new(value))),
             Self::Edit(input) => input
                 .execute(cancel, deadline)
                 .map(|value| ReadCompletion::Edit(Box::new(value))),
@@ -176,6 +180,19 @@ impl ReadTools {
         self.start_owned(id, ReadOwner::Session(scope), ReadOperation::Edit(input))
     }
 
+    pub fn start_rollback(
+        &mut self,
+        id: RpcId,
+        scope: ReadScope,
+        input: crate::edit::prepare::RollbackWork,
+    ) -> Result<(), Fault> {
+        self.start_owned(
+            id,
+            ReadOwner::Session(scope),
+            ReadOperation::Rollback(input),
+        )
+    }
+
     fn start_owned(
         &mut self,
         id: RpcId,
@@ -194,6 +211,7 @@ impl ReadTools {
             .ok_or_else(|| fault(CoreError::ArithmeticOverflow))?;
         let edit = match &input {
             ReadOperation::Edit(work) => Some(work.id.clone()),
+            ReadOperation::Rollback(work) => Some(work.id.clone()),
             _ => None,
         };
         self.requests.insert(

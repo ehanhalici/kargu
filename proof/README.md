@@ -4,6 +4,19 @@ This directory holds the TLA+ specification of Kargu's agent loop and protocol w
 
 The check is exhaustive over a bounded model. It is a proof for those bounds, not for every parameter value.
 
+## Atomic native review revisions (2026-10-29)
+
+`proof/run_tlc.sh --edit-revision` checks `KarguEditRevision`: a source and
+approval record, a candidate worker, a competing upload, revocation and expiry.
+Only successful worker join updates source revision, approval digest metadata
+and revision together. Cancellation retains the worker and candidate reservation
+until actual join; authorization consumes the exact current revision. Exhaustive
+BFS completes **714 generated / 272 distinct states**, depth 13, empty queue,
+with deadlock checking enabled. Keeping the old approval while adopting a new
+source violates `AtomicRevision` in the mutant check. Filesystem and text truth
+are covered separately by native pipe regressions, rather than assumed proven by
+this bounded ledger model.
+
 ## Receipt verification and cleanup audit (2026-10-29)
 
 `--edit-issuance` now includes the verification worker between editor quiescence
@@ -13,8 +26,8 @@ A positive committed result requires successful verification. BFS completes
 3,633 generated / 959 distinct states, depth 17, empty queue. Replacing verification
 with a quiescence flag violates `PositiveReceiptsVerified` in the mutant fixture.
 Disk/hash truth remains an explicit abstract input here; native real-file receipt
-regressions separately check the validation boundary. Cutover, native rollback and
-revised Ediff are still incomplete; see `docs/task3-audit-2026-10-29.md`.
+regressions separately check the validation boundary. Native process-local rollback and an opt-in revised batch UI now exist; full
+consumer cutover remains incomplete. See `docs/task3-audit-2026-10-29.md`.
 
 ## Native editor activity across connection replacement (2026-10-28)
 

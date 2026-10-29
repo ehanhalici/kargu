@@ -1,5 +1,6 @@
 //! Editor actions share the command approval map, but can never become commands.
 use super::{ActionDigest, CapturedAction, ExecutionGate, PendingApproval, ToolRegistry};
+use crate::edit::{prepare::FileIndex, types::EditText};
 use crate::{
     application::{ApplicationActor, RunHandle, RunLease, RunScope, ToolOutcome},
     constants::{limits, timeouts},
@@ -12,6 +13,7 @@ use crate::{
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 use tokio::time::Instant;
 
 /// Actual review-presenter availability captured by the trusted editor adapter.
@@ -227,6 +229,64 @@ fn digest(
     }
     Ok(ActionDigest(hash.finalize().into()))
 }
+pub(crate) struct EditorRevisionWork {
+    action: crate::edit::intent::EditorActionInput,
+    run: RunHandle,
+    name: ToolName,
+}
+pub(crate) struct RevisedEditorAction {
+    action: EditorAction,
+    digest: ActionDigest,
+}
+impl EditorRevisionWork {
+    pub(crate) fn execute(
+        self,
+        file: FileIndex,
+        text: Arc<EditText>,
+    ) -> Result<RevisedEditorAction, CoreError> {
+        let action = EditorAction::try_from(self.action)?.revise(file, text)?;
+        let digest = digest(&self.run, &self.name, &action)?;
+        Ok(RevisedEditorAction { action, digest })
+    }
+}
+pub(crate) struct EditorRevisionPermit<'a> {
+    pending: &'a mut PendingApproval,
+    request: &'a mut EditorApprovalRequest,
+    revised: RevisedEditorAction,
+}
+impl EditorRevisionPermit<'_> {
+    pub(crate) fn commit(self) {
+        self.request.revision = self.revised.action.revision();
+        self.request.digest = self.revised.digest.clone();
+        self.request.metadata = self.revised.action.metadata().clone();
+        self.pending.action = CapturedAction::Editor(Box::new(self.revised.action));
+        self.pending.digest = self.revised.digest;
+    }
+}
+fn validate_revision(
+    pending: &PendingApproval,
+    run: &RunHandle,
+    request: &EditorApprovalRequest,
+    revision: EditorRevision,
+) -> Result<(), CoreError> {
+    if Instant::now() >= pending.deadline {
+        return Err(CoreError::ApprovalExpired);
+    }
+    if !pending.run.same_owner(run)
+        || request.scope != *run.scope()
+        || pending.digest != request.digest
+        || request.revision != revision
+    {
+        return Err(CoreError::StaleOwner);
+    }
+    let CapturedAction::Editor(action) = &pending.action else {
+        return Err(CoreError::Rejected);
+    };
+    if action.revision() != revision {
+        return Err(CoreError::StaleOwner);
+    }
+    Ok(())
+}
 impl ExecutionGate {
     /// Admit an editor intent through the shared ledger. Hashes/client IDs alone never consent.
     pub fn admit_editor(
@@ -294,6 +354,48 @@ impl ExecutionGate {
         } else {
             Ok(EditorAdmission::Review(request))
         }
+    }
+    pub(crate) fn revision_work(
+        &self,
+        actor: &ApplicationActor,
+        run: &RunHandle,
+        request: &EditorApprovalRequest,
+        revision: EditorRevision,
+    ) -> Result<EditorRevisionWork, CoreError> {
+        actor.validate(run)?;
+        let pending = self
+            .pending
+            .get(request.id())
+            .ok_or(CoreError::ApprovalUnavailable)?;
+        validate_revision(pending, run, request, revision)?;
+        let CapturedAction::Editor(action) = &pending.action else {
+            return Err(CoreError::Rejected);
+        };
+        Ok(EditorRevisionWork {
+            action: action.detached_input(),
+            run: run.clone(),
+            name: pending.name.clone(),
+        })
+    }
+    pub(crate) fn revision_permit<'a>(
+        &'a mut self,
+        actor: &ApplicationActor,
+        run: &RunHandle,
+        request: &'a mut EditorApprovalRequest,
+        revision: EditorRevision,
+        revised: RevisedEditorAction,
+    ) -> Result<EditorRevisionPermit<'a>, CoreError> {
+        actor.validate(run)?;
+        let pending = self
+            .pending
+            .get_mut(request.id())
+            .ok_or(CoreError::ApprovalUnavailable)?;
+        validate_revision(pending, run, request, revision)?;
+        Ok(EditorRevisionPermit {
+            pending,
+            request,
+            revised,
+        })
     }
     /// Consume exactly one matching native revision; foreign/stale decisions leave it pending.
     pub fn decide_editor(

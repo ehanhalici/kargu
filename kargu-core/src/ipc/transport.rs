@@ -443,6 +443,34 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     }
                     continue;
                 }
+                if method == methods::EDIT_REVISE {
+                    if let Some(id) = id.as_ref()
+                        && let Err(fault) = commands.revise_editor(host, id.clone(), params)
+                    {
+                        queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                    }
+                    continue;
+                }
+                if method == methods::EDIT_ROLLBACK {
+                    if let Some(id) = id.as_ref() {
+                        let result = host.prepare_rollback(params).and_then(|(scope, work)| {
+                            let ticket = work.id.clone();
+                            let admitted = reads.start_rollback(id.clone(), scope.clone(), work);
+                            if admitted.is_err() {
+                                let _ = host.finish_edit(
+                                    &scope,
+                                    &ticket,
+                                    Err(crate::error::CoreError::Limit),
+                                );
+                            }
+                            admitted
+                        });
+                        if let Err(fault) = result {
+                            queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
+                    }
+                    continue;
+                }
                 if matches!(
                     method.as_str(),
                     methods::EDIT_PREPARE | methods::EDIT_INSPECT

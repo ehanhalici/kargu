@@ -266,7 +266,7 @@ pub(crate) enum BatchOutcome {
     NotApplied,
     OutcomeUnknown,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub(crate) struct FileResult {
     file: FileIndex,
     path: crate::edit::types::EditPath,
@@ -275,17 +275,63 @@ pub(crate) struct FileResult {
     proposed_hash: ContentHash,
     written_hash: Option<ContentHash>,
     final_hash: Option<ContentHash>,
+    hunks: Option<crate::edit::types::HunkCount>,
+    #[serde(skip)]
+    pub(super) final_text: Option<Arc<EditText>>,
+    #[serde(skip)]
+    pub(super) final_document: Option<LiveDocument>,
+    #[serde(skip)]
+    pub(super) before_document: LiveDocument,
+    #[serde(skip)]
+    pub(super) final_disk: DiskState,
     saved: bool,
     hook_modified: bool,
 }
-#[derive(Serialize)]
+impl FileResult {
+    pub(crate) fn outcome(&self) -> FileOutcome {
+        self.outcome
+    }
+    pub(crate) fn final_hash(&self) -> Option<ContentHash> {
+        self.final_hash
+    }
+    pub(crate) fn index(&self) -> FileIndex {
+        self.file
+    }
+}
+#[derive(Clone, Serialize)]
 pub(crate) struct VerifiedReceipt {
     outcome: BatchOutcome,
     files: Vec<FileResult>,
     files_total: FileCount,
     files_applied: FileCount,
+    hunks_total: Option<crate::edit::types::HunkCount>,
+    hunks_applied: Option<crate::edit::types::HunkCount>,
 }
 impl VerifiedReceipt {
+    pub(crate) fn has_applied(&self) -> bool {
+        self.files_applied.get() > 0
+    }
+    pub(crate) fn files(&self) -> &[FileResult] {
+        &self.files
+    }
+    pub(super) fn retained_bytes(&self) -> Result<usize, CoreError> {
+        self.files.iter().try_fold(0usize, |n, file| {
+            n.checked_add(
+                file.final_text
+                    .as_ref()
+                    .map_or(0, |text| text.as_str().len()),
+            )
+            .ok_or(CoreError::Limit)
+        })
+    }
+    pub(super) fn rebase(&mut self, path: &crate::edit::types::EditPath, version: &FileResult) {
+        for file in &mut self.files {
+            if &file.path == path && file.final_hash == version.final_hash {
+                file.final_document = version.final_document.clone();
+                file.final_disk = version.final_disk.clone();
+            }
+        }
+    }
     pub(crate) fn digest(&self) -> Result<CaptureDigest, CoreError> {
         Ok(CaptureDigest::capture(
             &serde_json::to_vec(self).map_err(|_| CoreError::InvalidToolOutput)?,

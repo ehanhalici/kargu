@@ -87,6 +87,15 @@ struct ReceiptRpc {
     issued_token: EditorIssueToken,
     input: ReceiptInput,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviseRpc {
+    origin_id: EditorSourceId,
+    edit_id: EditorEditId,
+    revision: EditorRevision,
+    file_index: crate::edit::prepare::FileIndex,
+    new_text: crate::edit::types::EditText,
+}
 struct Verifying {
     run: RunHandle,
     effect: crate::security::IssuedEditorEdit,
@@ -110,12 +119,29 @@ struct Preparing {
     cancel: CancellationToken,
     presenter: EditorPresenter,
 }
+struct Revising {
+    run: RunHandle,
+    request: EditorApprovalRequest,
+    task: JoinHandle<
+        Result<
+            (
+                crate::edit::prepare::Artifact,
+                crate::security::RevisedEditorAction,
+            ),
+            CoreError,
+        >,
+    >,
+    cancel: CancellationToken,
+    deadline: Instant,
+    request_id: RpcId,
+}
 enum Stage {
     Issuing(issue::Recording),
     Issued(Box<issue::Issued>),
     Verifying(Verifying),
     Finishing(issue::Finishing),
     Preparing(Preparing),
+    Revising(Revising),
     Review {
         run: RunHandle,
         request: EditorApprovalRequest,
@@ -152,6 +178,7 @@ impl Editors {
                 matches!(
                     op.stage,
                     Stage::Preparing(_)
+                        | Stage::Revising(_)
                         | Stage::Preflighting(_)
                         | Stage::Issuing(_)
                         | Stage::Issued(_)
@@ -172,6 +199,7 @@ impl Editors {
     pub(super) fn contains(&self, id: &RpcId) -> bool {
         self.operations.values().any(|op| match &op.stage {
             Stage::Preparing(p) => &p.request_id == id,
+            Stage::Revising(p) => &p.request_id == id,
             Stage::Preflighting(p) => &p.request_id == id,
             Stage::Issuing(p) => &p.request_id == id,
             Stage::Verifying(v) => &v.request_id == id,
@@ -186,6 +214,12 @@ impl Editors {
     pub(super) fn cancel(&mut self, id: &RpcId) {
         for op in self.operations.values_mut() {
             match &op.stage {
+                Stage::Revising(p) if &p.request_id == id => {
+                    if op.terminal.is_none() {
+                        op.terminal = Some(CoreError::Cancelled);
+                    }
+                    p.cancel.cancel();
+                }
                 Stage::Preparing(p) if &p.request_id == id => {
                     if op.terminal.is_none() {
                         op.terminal = Some(CoreError::Cancelled);
@@ -218,6 +252,7 @@ impl Editors {
             }
             match &op.stage {
                 Stage::Preparing(p) => p.cancel.cancel(),
+                Stage::Revising(p) => p.cancel.cancel(),
                 Stage::Preflighting(p) => p.cancel.cancel(),
                 Stage::Issuing(p) => p.cancel.cancel(),
                 _ => {}
@@ -645,6 +680,91 @@ impl Editors {
             }
         }
     }
+    pub(super) fn revise(
+        &mut self,
+        host: &mut Host,
+        gate: &mut ExecutionGate,
+        request_id: RpcId,
+        params: Value,
+        available: bool,
+    ) -> Result<(), Fault> {
+        if !available {
+            return Err(fault(CoreError::Limit));
+        }
+        let request: Request<ReviseRpc> =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !host.owns_read_scope(&request.scope) {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let input = request.arguments;
+        let op = self
+            .operations
+            .get(&input.edit_id)
+            .ok_or_else(|| fault(CoreError::StaleOwner))?;
+        if op.scope != request.scope || op.origin != input.origin_id {
+            return Err(fault(CoreError::StaleOwner));
+        }
+        let Stage::Review {
+            run,
+            request: review,
+        } = &op.stage
+        else {
+            return Err(fault(CoreError::AlreadyCompleted));
+        };
+        let actor = host.actor_mut(&op.scope).map_err(fault)?;
+        actor
+            .edits
+            .claim_status(&op.scope.session_id, &op.preparation, Instant::now())
+            .map_err(fault)?;
+        let gate_work = gate
+            .revision_work(actor, run, review, input.revision)
+            .map_err(fault)?;
+        let bytes = crate::edit::prepare::TextOffset::try_from(input.new_text.as_str().len())
+            .map_err(|error| fault(error.into()))?;
+        let artifact = actor
+            .edits
+            .reserve_revision(&op.scope.session_id, &op.origin, &op.preparation, bytes)
+            .map_err(fault)?;
+        let deadline = review.deadline().into_std();
+        let op = self
+            .operations
+            .remove(&input.edit_id)
+            .ok_or_else(|| fault(CoreError::StaleOwner))?;
+        let Stage::Review {
+            run,
+            request: review,
+        } = op.stage
+        else {
+            return Err(fault(CoreError::AlreadyCompleted));
+        };
+        let cancel = run.cancel_token();
+        let worker_cancel = cancel.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            crate::security::file::checkpoint(&worker_cancel, deadline)?;
+            let text = std::sync::Arc::new(input.new_text);
+            let mut candidate = (*artifact).clone();
+            candidate.revise(input.file_index, text.clone())?;
+            candidate.retained_bytes()?;
+            let revised = gate_work.execute(input.file_index, text)?;
+            crate::security::file::checkpoint(&worker_cancel, deadline)?;
+            Ok((candidate, revised))
+        });
+        self.operations.insert(
+            input.edit_id,
+            Operation {
+                stage: Stage::Revising(Revising {
+                    run,
+                    request: review,
+                    task,
+                    cancel,
+                    deadline,
+                    request_id,
+                }),
+                ..op
+            },
+        );
+        Ok(())
+    }
     pub(super) fn tick(
         &mut self,
         host: &mut Host,
@@ -667,6 +787,82 @@ impl Editors {
                 }
             }
             match op.stage {
+                Stage::Revising(mut revising) => {
+                    if op.terminal.is_none() {
+                        op.terminal = host.actor_mut(&op.scope)?.validate(&revising.run).err();
+                    }
+                    if op.terminal.is_none() && Instant::now() >= revising.deadline {
+                        op.terminal = Some(CoreError::ApprovalExpired);
+                    }
+                    if op.terminal.is_some() {
+                        revising.cancel.cancel();
+                    }
+                    if !revising.task.is_finished() {
+                        self.operations.insert(
+                            id,
+                            Operation {
+                                stage: Stage::Revising(revising),
+                                ..op
+                            },
+                        );
+                        continue;
+                    }
+                    let actor = host.actor_mut(&op.scope)?;
+                    let result = (&mut revising.task)
+                        .now_or_never()
+                        .ok_or(CoreError::CleanupFailed)?
+                        .map_err(|_| CoreError::CleanupFailed)
+                        .and_then(|value| value);
+                    let result = if let Some(error) = op.terminal.take() {
+                        Err(error)
+                    } else {
+                        result
+                    };
+                    let result = result.and_then(|(candidate, revised)| {
+                        let revision = revising.request.revision();
+                        let permit = gate.revision_permit(actor, &revising.run, &mut revising.request, revision, revised)?;
+                        // No permission mutation occurs unless source adoption succeeds.
+                        actor.edits.finish_revision(&op.scope.session_id, &op.origin, &op.preparation, Some(candidate))?;
+                        permit.commit();
+                        Ok(json!({"edit_id":id,"revision":revising.request.revision(),"digest":revising.request.digest()}))
+                    });
+                    if result.is_err() {
+                        actor.edits.finish_revision(
+                            &op.scope.session_id,
+                            &op.origin,
+                            &op.preparation,
+                            None,
+                        )?;
+                    }
+                    let expired = Instant::now() >= revising.deadline;
+                    let op = Operation {
+                        stage: Stage::Review {
+                            run: revising.run,
+                            request: revising.request,
+                        },
+                        ..op
+                    };
+                    if result.is_err() && (expired || revising.cancel.is_cancelled()) {
+                        cleanup(
+                            host,
+                            gate,
+                            Operation {
+                                terminal: Some(if expired {
+                                    CoreError::ApprovalExpired
+                                } else {
+                                    CoreError::Cancelled
+                                }),
+                                ..op
+                            },
+                        )?;
+                    } else {
+                        self.operations.insert(id, op);
+                    }
+                    replies.push(match result {
+                        Ok(value) => protocol::success(&revising.request_id, value),
+                        Err(error) => fault(error).response(Some(&revising.request_id)),
+                    });
+                }
                 Stage::Issuing(mut recording) => {
                     if op.terminal.is_none() {
                         op.terminal = host.actor_mut(&op.scope)?.validate(&recording.run).err();
@@ -1173,7 +1369,7 @@ fn descriptor(id: &EditorEditId, op: &Operation) -> Value {
         Stage::Issued(issued) => issued.descriptor(id),
         Stage::Issuing(_) | Stage::Verifying(_) | Stage::Finishing(_) => Value::Null,
         Stage::Preflighting(_) => Value::Null,
-        Stage::Preparing(_) => Value::Null,
+        Stage::Preparing(_) | Stage::Revising(_) => Value::Null,
     }
 }
 fn cleanup(
@@ -1206,6 +1402,7 @@ fn cleanup(
             actor.finish(&run)?
         }
         Stage::Preparing(_)
+        | Stage::Revising(_)
         | Stage::Preflighting(_)
         | Stage::Issuing(_)
         | Stage::Issued(_)
@@ -1846,6 +2043,159 @@ mod tests {
         })
         .await??;
         assert!(host.dispatch("edit/begin", begin(), true).result.is_ok());
+        Ok(())
+    }
+    #[tokio::test]
+    async fn revision_cancellation_retains_the_source_and_worker_until_actual_join() -> TestResult {
+        let (_root, mut host, scope, work) = claimed("async")?;
+        let preparation = work.id.clone();
+        let origin = work.origin.clone();
+        let prepared = work.execute(&CancellationToken::new())?;
+        let actor = host.actor_mut(&scope)?;
+        let run = actor.admit_editor(&scope.session_id, prepared.settings)?;
+        let mut registry = ToolRegistry::default();
+        let tool = ToolName::try_from("editor_edit".to_owned())?;
+        registry.register_editor(tool.clone(), vec![])?;
+        let mut gate = ExecutionGate::default();
+        let EditorAdmission::Review(request) = gate.admit_editor(
+            actor,
+            &run,
+            &registry,
+            &tool,
+            EditorAdmissionInput {
+                call_id: ToolCallId::new(),
+                action: prepared.action,
+                presenter: EditorPresenter::Available,
+            },
+        )?
+        else {
+            return Err("review expected".into());
+        };
+        let deadline = request.deadline().into_std();
+        let cancel = run.cancel_token();
+        let worker_cancel = cancel.clone();
+        let extra = crate::edit::prepare::TextOffset::try_from(4)?;
+        let artifact =
+            actor
+                .edits
+                .reserve_revision(&scope.session_id, &origin, &preparation, extra)?;
+        let (release, wait) = mpsc::channel::<()>();
+        let task = tokio::task::spawn_blocking(move || {
+            let _held = artifact;
+            wait.recv().map_err(|_| CoreError::Cancelled)?;
+            crate::security::file::checkpoint(&worker_cancel, deadline)?;
+            Err(CoreError::Cancelled)
+        });
+        let request_id = RpcId::String("held-revision".into());
+        let mut editors = Editors::default();
+        editors.operations.insert(
+            EditorEditId::new(),
+            Operation {
+                scope: scope.clone(),
+                origin,
+                preparation,
+                terminal: None,
+                stage: Stage::Revising(Revising {
+                    run: run.clone(),
+                    request,
+                    task,
+                    cancel,
+                    deadline,
+                    request_id: request_id.clone(),
+                }),
+            },
+        );
+        editors.cancel(&request_id);
+        assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
+        assert_eq!(editors.reserved_workers(), 1);
+        assert!(matches!(
+            host.actor_mut(&scope)?.finish(&run),
+            Err(CoreError::Busy)
+        ));
+        release.send(())?;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let replies = editors.tick(&mut host, &mut gate, &registry)?;
+                if editors.is_empty() {
+                    assert_eq!(replies.len(), 1);
+                    assert_eq!(
+                        replies.first().map(|r| &r["error"]["data"]["status"]),
+                        Some(&json!("cancelled"))
+                    );
+                    return Ok::<(), CoreError>(());
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await??;
+        assert_eq!(gate.pending_count(), 0);
+        assert!(host.actor_mut(&scope)?.drained());
+        Ok(())
+    }
+
+    #[test]
+    fn failed_revision_adoption_preserves_both_source_and_approval() -> TestResult {
+        let (_root, mut host, scope, work) = claimed("async")?;
+        let preparation = work.id.clone();
+        let origin = work.origin.clone();
+        let prepared = work.execute(&CancellationToken::new())?;
+        let actor = host.actor_mut(&scope)?;
+        let run = actor.admit_editor(&scope.session_id, prepared.settings)?;
+        let mut registry = ToolRegistry::default();
+        let tool = ToolName::try_from("editor_edit".to_owned())?;
+        registry.register_editor(tool.clone(), vec![])?;
+        let mut gate = ExecutionGate::default();
+        let EditorAdmission::Review(mut review) = gate.admit_editor(
+            actor,
+            &run,
+            &registry,
+            &tool,
+            EditorAdmissionInput {
+                call_id: ToolCallId::new(),
+                action: prepared.action,
+                presenter: EditorPresenter::Available,
+            },
+        )?
+        else {
+            return Err("review expected".into());
+        };
+        let original_digest = review.digest().clone();
+        let original_metadata = review.metadata().clone();
+        let revision = review.revision();
+        let file = crate::edit::prepare::FileIndex::try_from(0)?;
+        let text = std::sync::Arc::new(crate::edit::types::EditText::try_from(
+            "replacement".to_owned(),
+        )?);
+        let work = gate.revision_work(actor, &run, &review, revision)?;
+        let artifact = actor.edits.claimed_artifact(
+            &scope.session_id,
+            &origin,
+            &preparation,
+            Instant::now(),
+        )?;
+        let mut candidate = (*artifact).clone();
+        candidate.revise(file, text.clone())?;
+        let revised = work.execute(file, text)?;
+        let permit = gate.revision_permit(actor, &run, &mut review, revision, revised)?;
+        // A candidate that exceeds its reserved capacity must not alter either owner.
+        assert!(matches!(
+            actor
+                .edits
+                .finish_revision(&scope.session_id, &origin, &preparation, Some(candidate)),
+            Err(CoreError::Limit)
+        ));
+        drop(permit);
+        assert_eq!(review.digest(), &original_digest);
+        assert_eq!(review.metadata(), &original_metadata);
+        assert_eq!(review.revision(), revision);
+        let raw=host.dispatch("edit/read",json!({"scope":{"application_id":scope.application_id,"session_id":scope.session_id},"arguments":{"origin_id":origin,"preparation_id":preparation,"part":"proposed","offset":0}}),true).result.map_err(|_|"read")?;
+        assert_eq!(raw["text"], "");
+        let actor = host.actor_mut(&scope)?;
+        let grant = gate.decide_editor(actor, &run, &review, revision, EditorDecision::Accept)?;
+        assert_eq!(grant.action().metadata(), &original_metadata);
+        grant.cancel_unissued(actor)?;
+        actor.finish(&run)?;
+        actor.edits.release_claim(&scope.session_id, &preparation)?;
         Ok(())
     }
 }

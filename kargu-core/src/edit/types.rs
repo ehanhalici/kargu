@@ -55,6 +55,11 @@ impl Serialize for EditText {
         serializer.serialize_str(self.as_str())
     }
 }
+impl Default for EditText {
+    fn default() -> Self {
+        Self(Zeroizing::new(String::new()))
+    }
+}
 
 /// SHA-256 of decoded text; a digest alone never grants permission to edit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
@@ -245,6 +250,13 @@ impl TryFrom<u64> for EditorRevision {
         } else {
             Ok(Self(value))
         }
+    }
+}
+impl EditorRevision {
+    /// Advance to the next sequential revision.
+    pub fn next(self) -> Result<Self, EditError> {
+        let value = self.0.checked_add(1).ok_or(EditError::Limit)?;
+        Self::try_from(value)
     }
 }
 /// Commitment to captured document/disk evidence, not a content hash or authority.

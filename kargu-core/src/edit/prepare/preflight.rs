@@ -86,7 +86,7 @@ impl PreflightSet {
         if input.base_hash != prepared.base_hash
             || document.bytes.get() != prepared.base.as_str().len()
             || document.disk != prepared.disk
-            || document.dirty
+            || document.dirty != prepared.live.as_ref().is_some_and(|live| live.dirty)
             || document.read_only
         {
             return Err(EditError::Conflict.into());
