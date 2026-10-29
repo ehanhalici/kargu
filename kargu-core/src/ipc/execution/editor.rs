@@ -2047,6 +2047,14 @@ mod tests {
     }
     #[tokio::test]
     async fn revision_cancellation_retains_the_source_and_worker_until_actual_join() -> TestResult {
+        revision_worker_teardown(false).await
+    }
+    #[tokio::test]
+    async fn application_close_waits_for_the_revision_worker_even_when_close_waiter_is_cancelled()
+    -> TestResult {
+        revision_worker_teardown(true).await
+    }
+    async fn revision_worker_teardown(close_application: bool) -> TestResult {
         let (_root, mut host, scope, work) = claimed("async")?;
         let preparation = work.id.clone();
         let origin = work.origin.clone();
@@ -2105,7 +2113,27 @@ mod tests {
                 }),
             },
         );
-        editors.cancel(&request_id);
+        let mut lifecycle = crate::ipc::lifecycle::Lifecycle::default();
+        if close_application {
+            let close_id = RpcId::String("close-during-revision".into());
+            lifecycle
+                .start(
+                    &mut host,
+                    close_id.clone(),
+                    json!({"application_id":scope.application_id}),
+                )
+                .map_err(|_| "close")?;
+            lifecycle.cancel(&close_id);
+            assert!(!host.owns_read_scope(&scope));
+            assert!(
+                lifecycle
+                    .collect(&mut host, |id| editors.owns_application(id))?
+                    .is_empty()
+            );
+            assert!(!lifecycle.is_empty());
+        } else {
+            editors.cancel(&request_id);
+        }
         assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
         assert_eq!(editors.reserved_workers(), 1);
         assert!(matches!(
@@ -2120,7 +2148,11 @@ mod tests {
                     assert_eq!(replies.len(), 1);
                     assert_eq!(
                         replies.first().map(|r| &r["error"]["data"]["status"]),
-                        Some(&json!("cancelled"))
+                        Some(&json!(if close_application {
+                            "stale_owner"
+                        } else {
+                            "cancelled"
+                        }))
                     );
                     return Ok::<(), CoreError>(());
                 }
@@ -2130,6 +2162,15 @@ mod tests {
         .await??;
         assert_eq!(gate.pending_count(), 0);
         assert!(host.actor_mut(&scope)?.drained());
+        if close_application {
+            assert!(
+                lifecycle
+                    .collect(&mut host, |id| editors.owns_application(id))?
+                    .is_empty()
+            );
+            assert!(lifecycle.is_empty());
+            assert!(host.actor_mut(&scope).is_err());
+        }
         Ok(())
     }
 
