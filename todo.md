@@ -613,9 +613,10 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   version-bound process-local rollback ve asenkron batch producer eklendi ve
   düzeltildi. Tool/LSP/plan/interactive undo yolu yalnız açık
   `kargu-diff-native-edit-enabled` seçimiyle etkin; ready/mocked test fonksiyonları
-  backend seçmez, seçilmiş işlem başka writer'a düşmez. Tam hunk ölçümü, default
-  consumer cutover, verification readers ve legacy temizliği tamamlanmadığından
-  3.4–3.10 açık tutulur. Güncel kapsam/kanıt/sınırlar:
+  backend seçmez, seçilmiş işlem başka writer'a düşmez. 3.4–3.5 tamamlandı.
+  Tam hunk ölçümü, default consumer cutover, verification readers ve legacy
+  temizliği tamamlanmadığından 3.6–3.10 kalan işleriyle açık tutulur.
+  Güncel kapsam/kanıt/sınırlar:
   `docs/task3-audit-2026-10-29.md`.
 
   - [x] **3.1 Sözleşme ve kabul envanteri:** mevcut public edit/LSP/patch/review/
@@ -635,7 +636,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     worker kapasitesi ve gerçek join sonrası release. Native pipe 6/6,
     Emacs prepare/patch pipe 8/8, ortak worker 8/8; Unicode/CRLF, stale disk/document guard, foreign owner,
     late allocation abort ve minimum 1 KiB frame doğrulandı. Bu port yazma grant'i
-    vermez; transaction ve consumer cutover 3.4–3.8'de açık kalır.
+    vermez; transaction adapter 3.4–3.5'te tamamlandı, consumer cutover 3.8'de açıktır.
   - [x] **3.3 Native Unified Diff/Git adapter:** kapalı parser/normalizer, hunk
     sayımı ve zero-context ambiguity kararlarını Rust'a taşı; gerçek apply mevcut
     Git motoruyla isolated workspace'te ortak supervisor üzerinden yürüsün.
@@ -649,135 +650,68 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Hazır teklif rezervasyonu gerçek içerik boyutuna iner; iki küçük replacement
     servisinin aynı path'te ayrı tutulması ayrıca doğrulandı. Public tool cutover
     3.8'de; bu port gerçek editor dosyasına yazma grant'i değildir.
-  - [ ] **3.4 Native edit/review ledger:** edit_id, owner/run/generation, root,
-    policy/config ve base/proposed/review revision'ına bağlı tek kullanımlık grant;
-    auto/async/blocking politikası, stale/foreign/missing presenter, duplicate apply,
-    timeout/reject/Stop ve revoke→actual drain→admit geçişleri native'de olsun.
-    Ortak `ExecutionGate` pending tablosuna kapalı editor action/grant türü eklendi;
-    fake command veya ikinci onay ledger'ı yok. Exact native run/root capture,
-    config/policy/review revision, auto/async/blocking, missing presenter, yalnız
-    auto delete, foreign/replay ve shared lease/drain sınırları 7/7 integration
-    testiyle doğrulandı. `edit/authorize` hazır teklifi tüketerek aynı gate'e
-    bağlıyor; `edit/decision` exact edit/source/review revision kararını tüketiyor.
-    Ayrı native `editor_edit` scope'u async onayda foreground'u tutmaz. Metin
-    paylaşılır; claimed rezervasyonu revoke sonrası gerçek worker join ve
-    tool/run cleanup'a kadar korunur. 7 gerçek pipe ve held-worker testi;
-    1 KiB frame, foreground command coexistence ve tüm close yolları temiz.
-    Actual Emacs preflight/receipt ve revised review tamamlanmadan
-    bu alt madde kapanmaz. Approval TLC: 49.152 farklı durum; kind-confusion
-    mutantı invariant ihlaliyle reddedildi. Bu adımda filtresiz locked Rust
-    403/403 (28 compile-fail dahil), strict all-targets Clippy ve fmt temiz.
-    Claim/review/authorization eklenen preparation TLC 97.230 farklı durumda
-    tamamlandı; erken claim-release mutantı `ClaimOwnership` ile reddedildi.
-    Admission diliminde filtresiz locked Rust 411/411 (28 compile-fail), Clippy/fmt temiz;
-    mevcut Emacs prepare/patch gerçek pipe testleri 8/8 geçti.
-  - [ ] **3.5 Emacs transaction adapter:** bütün açık/kapalı dosyalar yetkili
-    native edit_id üzerinden canlı belge kontrolü, atomic change group, undo/point/
-    marker/narrowing, coding/EOL ve açık buffer_only/save policy ile uygulansın.
-    Save-hook final hash/revision ve failure/partial/unknown gerçek receipt taşısın;
-    Rust'ta paralel editor dosyası yazma veya legacy fallback açılmasın.
-    `edit/preflight` native portu eklendi: exact edit/source/review revision altında
-    dosya başına canlı document/hash/disk kanıtı; duplicate file/document ID,
-    dirty/read-only ve stale tick/coding reddi. Tam set sonrasında ortak bounded
-    worker bütün disk pinlerini yeniden denetler; prefix ready yayınlanmaz.
-    Native grant ve source rezervasyonu gerçek join'e kadar tutulur. 5 gerçek pipe
-    ve held-worker testi; filtresiz Rust 427/427 (29 compile-fail), strict Clippy/
-    fmt, preparation TLC (319.746 farklı durum) temiz. Bu henüz Emacs transaction
-    producer/actual-write adapter'ı değildir; native issuance aşağıda bağlandı,
-    gerçek Emacs mutasyonu/receipt tamamlanmadan 3.5 açık kalır.
-    Canlı belge primitive adapter'ı eklendi: bounded widened snapshot ve native
-    stat/tick/coding witness; tüketilen snapshot üzerinde atomic replacement,
-    undo/point/mark/marker/narrowing koruması ve gerçek save-hook gözlemi.
-    Yabancı disk/path değişimi save öncesi reddedilir; hook hatası veya aşırı
-    büyüyen/öldürülen tampon final observation failure taşır, kör restore yapılmaz.
-    15 belge testi ve iki gerçek pipe testi geçti: shared gate → preflight →
-    synced issue → gerçek Emacs CRLF/Unicode save → quiescent unknown; ayrıca
-    tick/byte sayısı aynı kalan stale clean buffer reddi. Witness base hash'i
-    canlı metinden hesaplanır; native proposal'dan kopyalanmaz. Bu primitive henüz
-    public tool consumer'ına bağlı değil; pozitif native receipt ve bağlantılar
-    arası activity fence olmadan applied sonucu veya mutation capability açılmaz.
-    Full ERT 1.294/1.294; son witness/read-only ekleriyle ilgili testler 17/17,
-    warning-as-error bytecompile/checkdoc temiz. Rust geçişleri değişmedi.
-    Native issued activity controller artık acquisition/settlement observer'ını
-    UI iptalinden bağımsız tutar: late token sonrası yazmadan no-dispatch; handler
-    içindeki revoke/Stop/EOF sonrası gerçek unwind'a kadar bağlantılar arası
-    fiziksel writer fence. Yalnız doğrulanmış terminal ACK veya actual EOF ile
-    tahliye; malformed settlement eski bağlantıyı drain eder, replay yoktur.
-    Gerçek save pipe testi controller'a bağlandı; 11 lifecycle testi ve yeni
-    editor-activity TLC (356 farklı durum) temiz. EOF'ta erken release mutantı
-    PhysicalFence ihlaliyle reddedildi. Pozitif `edit/receipt` akışı 2026-10-29
-    denetiminde bağlandı ve sertleştirildi; native disk/stat/metin doğrulaması,
-    gerçek written/final metin, bounded ACK-driven upload ve retired-owner
-    settlement eklendi. Handler hataları explicit unknown taşır. Production
-    producer/cutover ve tüm kodlamaların pozitif save doğrulaması hâlâ açıktır.
-    Full ERT 1.306/1.306; son Stop/unwind ekini de içeren native edit testleri
-    33/33, warning-as-error bytecompile/checkdoc temiz. Rust kaynakları değişmedi.
-  - [ ] **3.6 Native batch/journal/rollback:** bütün dosyalar preflight edilmeden
-    ilk yazma olmasın; gerçek file/batch durumları, hunk sayıları ve snapshot stack
-    tek kayıtta yaşasın. Rollback yalnız hâlâ kendi yazdığı revision'da; foreign
-    kullanıcı/disk değişimi korunur. Issued ama sonucu bilinmeyen işlem/journal
-    recovery açık unknown olsun; otomatik replay/crash-atomicity iddiası olmasın.
-    Native journal storage çekirdeği eklendi: source-free kapalı metadata schema,
-    create-new fd-rooted dosya, UID/0700/0600/single-link ve writer lock kontrolü,
-    sequence/SHA-256 chain, file+directory sync ve consuming issue/unknown/commit
-    durumları. Kayıt 4 MiB, dosya üç kayıtla sınırlı. Recovery yalnız detached
-    unknown/resolved kanıtı verir; bozuk/yarım kayıt başarı veya replay üretmez.
-    8 gerçek dosya testi ve yeni journal TLC (1.116 farklı durum) temiz;
-    premature-resolution mutantı reddedildi. Filtresiz locked Rust 420/420
-    (29 compile-fail), strict Clippy/fmt temiz. `edit/issue` artık complete
-    preflight → native pin recheck → journal sync → consuming issued nonce akışına
-    bağlı. Source/Stop/timeout sonrası fence ve lease gerçek quiescence'a kadar
-    tutulur; `edit/quiescent` retired scope/token ile no-dispatch/unknown kaydeder.
-    EOF terminal unknown ile native IO'yu tahliye eder; actual Emacs activity
-    fence'i yeni bağlantı boyunca korunmadan mutasyon capability'si açılmaz.
-    7 gerçek pipe, 2 controller ve legacy v1 integrity testi; filtresiz Rust
-    439/439, Emacs pipe 8/8, Clippy/fmt temiz. Issuance TLC 440 farklı durumda
-    tam taramayı geçti; erken release ve sync-siz dispatch mutantları reddedildi.
-    Olumlu file/batch receipt, gerçek sayımlar, snapshot/rollback ve consumer
-    cutover tamamlanmadan bu alt iş açık kalır.
-    2026-10-29: receipt doğrulama worker'ı ve durable receipt digest eklendi;
-    worker/journal join boyunca tek writer rezervasyonu korunur. Hunk sayımları,
-    native snapshot stack ve rollback portu eklenmedi; `track.el` hâlâ gerçek
-    rollback sahibidir. Bu nedenle 3.6 tamamlanmış değildir.
-    Tekrar denetim: native stack artık gerçek final body/document/disk tutar;
-    app başına 16 snapshot / 48 MiB sınırı, exact foreign-version kontrolü,
-    worker inverse hazırlığı ve consuming per-file undo vardır. Whole-file/revised/
-    inverse hunk ölçümü ve kalan recovery kabulü açık; eski paragraf ilk denetimin
-    durumunu kaydeder, güncel kapsam audit belgesindedir.
-  - [ ] **3.7 Review UI adapter:** Ediff yalnız edit_id/review revision'a bağlı
-    sunum ve kullanıcı metni sağlar; düzenlenmiş proposal yeniden native review
-    revision'ı alır. Core receipt olmadan applied yazılmaz; reject/timeout/C-g,
-    foreign control/window/buffer ve presenter hatası commit'i geri çevirmesin.
-  - [ ] **3.8 Consumer cutover:** edit_file/write_file/apply_patch, LSP symbol edit,
-    loop verification/change readers ve interactive rollback aynı native servis/
-    gate/typed sonucu kullansın; metin önekinden sonuç çıkaran wrapper kaldırılsın.
-    Passive UI projection kaynak sahibi yerine geçmesin; missing core/cap açık hata.
+  - [x] **3.4 Native edit/review ledger:** edit_id, owner/run/generation, root,
+    policy/config ve base/proposed/review revision'ına bağlı tek kullanımlık grant
+    ortak `ExecutionGate` içinde. Auto/async/blocking, missing presenter,
+    stale/foreign/duplicate karar, reject/timeout/Stop ve gerçek drain bağlı.
+    Bounded revision worker ve geçici byte reservation sonrası source/onay kaydı
+    consuming permit ile atomik ilerler; metadata/digest/revision birlikte değişir.
+    Hata eski iki kaydı korur. Application close bekleyeni iptal edilse de worker
+    join edilmeden owner/kapasite bırakılmaz. Native pipe/lifecycle regresyonları
+    ve 272 durumlu revision TLC temiz; half-commit mutantı reddedildi.
+    Büyük review metninin ek upload portu 3.23'te; default cutover 3.8'de açıktır.
+  - [x] **3.5 Emacs transaction adapter:** açık/kapalı dosyaların native edit_id
+    üzerinden canlı document/hash/disk preflight'ı ve gerçek editor uygulaması bağlı.
+    Producer bütün sayfaları/metinleri/belgeleri ilk yazımdan önce dondurur; bütün
+    belgeleri tekrar kontrol eder. Consuming snapshot, atomic change group,
+    undo/point/mark/marker/narrowing, coding/EOL ve buffer_only/save policy korunur.
+    Gerçek written/final/save-hook metni, disk/stat ve partial/unknown receipt
+    doğrulanır; client hash'i tek başına saved kanıtı değildir. Desteklenmeyen
+    coding açık partial/unknown kalır. Issued activity fence'i Stop/EOF/revoke
+    sonrasında gerçek unwind ve settlement'a kadar tutulur; legacy fallback yok.
+    Gerçek CRLF/Unicode save, stale buffer, hook, all-file preflight, owned dirty
+    undo ve retirement testleri geçti. Public opt-in producer tamamlandı;
+    bütün consumer'ların varsayılan geçişi 3.8'de ayrı olarak açıktır.
+  - [ ] **3.6 Native batch/journal/rollback:**
+
+    - [x] Bütün dosyaların preflight'ı, verified file/batch receipt ve durable
+      journal sync/settlement; unknown sonuçta otomatik replay yapılmaz.
+    - [x] Native process-local snapshot stack: app başına 16 kayıt / 48 MiB,
+      verified final body/document/disk, foreign-version guard, add/update/delete
+      inverse ve consuming per-file/ardışık undo. Kanıtlar 3.19 ve 3.21'de.
+    - [ ] Write/revised/inverse için gerçek hunk ölçümünü tamamla; şimdilik unknown.
+    - [ ] Journal restart/retention ve kalan recovery kabulünü tamamla (3.23).
+  - [ ] **3.7 Review UI adapter:**
+
+    - [x] Ediff native edit_id/review revision'a bağlı; bütün dosyalar onaydan önce
+      sunulur. İnsan metni yeni native revision alır; karar/IPC hataları korunur,
+      sonraki dosya Ediff cleanup sonrasında açılır. Native pipe ve taklit edilmiş
+      sunumla bütün dosyaları kapsayan revised review testi geçti.
+    - [ ] Gerçek GUI'de reject/timeout/C-g, foreign control/window/buffer ve
+      presenter hata kabulünü tamamla (3.23); foreign UI kaynaklarına dokunma.
+  - [ ] **3.8 Consumer cutover:**
+
+    - [x] edit_file/write_file/apply_patch, LSP/plan ve interactive native undo için
+      açık `kargu-diff-native-edit-enabled` yolu bağlı. Backend seçimi readiness/
+      mocked fonksiyonlara bağlı değil; seçilmiş işlem başka writer'a düşmez.
+      Receipt saved/count alanları ve bounded passive UI referansları kullanılır;
+      APPLIED-prefix'ten typed sonuç çıkarılmaz. Kanıtlar 3.22'de.
+    - [ ] Loop verification/change reader'larını aynı native servis/sonuca geçir;
+      bütün consumer kabulü sonrasında varsayılan native cutover'ı tamamla.
   - [ ] **3.9 Son legacy temizliği:** son consumer sonrası Elisp patch/proposal/
     stage/review/pending-plan/snapshot/change domain motorlarını ve default/global
     edit aynalarını sil; yalnız canlı transaction/save/undo ve UI adapter'ları kalsın.
     `tools/process.el` diff tüketicisi de kalksın; Dape/session consumer'ları korunur.
-  - [ ] **3.10 Bütünleşik kabul/kapanış:** dirty/CRLF/Unicode, save-hook mutation/
-    failure, stale review, iki servis aynı path, duplicate/late karar, multi-file
-    partial failure, foreign rollback ve active close gerçek native pipe/Emacs
-    fixture'larıyla doğrulansın. Full ERT, locked Rust/compile-fail, strict Clippy,
-    fmt, warning-free bytecompile/checkdoc ve etkilenen exhaustive TLC temizlensin;
-    tamamlanan alt maddeler kanıtlarıyla işaretlensin, üst madde en son kapansın.
-    2026-10-29 denetimi: full locked Rust 449/449 (29 compile-fail dahil), full
-    ERT 1.314/1.314, strict all-targets Clippy/fmt, warning-as-error bytecompile/
-    checkdoc temiz. Beş exhaustive TLC modeli temiz; issuance modeli gerçek
-    verification join ve pozitif receipt önkoşuluyla güncellendi (959 farklı durum).
-    Bu kontroller native cutover/rollback/revised review eksiklerini kapatmaz.
-    2026-10-28 native prepare/patch dilimi: domain 9/9, prepare pipe 6/6,
-    patch pipe 8/8, Emacs pipe 8/8; filtresiz `cargo test --locked` toplam 394/394
-    (67 library, 301 integration, 26 compile-fail) ve full ERT 1.279/1.279 geçti.
-    Strict Clippy/fmt ve warning-free bytecompile/checkdoc temiz. Önceki socket
-    EPERM engeli izin değişikliğiyle kalktı; artık filtre veya skip yok.
-    Standart BFS tam verdict ve boş kuyrukla Edit (560), Application (4.624),
-    Approval (1.536), Process (179) ve yeni native preparation (34.258 farklı
-    durum) taramaları geçti. Yeni model actual-join, kapasite, cancel/expiry/close,
-    source değişimi ve Git öncesi tam capture'ı kapsar; erken-release mutantı
-    invariant ihlaliyle reddedildi. Bu test başarısı henüz native editor yazma,
-    save-hook/journal/rollback ve consumer cutover kanıtı değildir; 3.4–3.9 açık.
+  - [ ] **3.10 Bütünleşik kabul/kapanış:**
+
+    - [x] Güncel filtresiz locked Rust 455/455 (29 compile-fail), full source ERT
+      1.337/1.337, focused native producer/consumer 23/23; strict Clippy/fmt,
+      warning-as-error bytecompile ve production checkdoc temiz.
+    - [x] Altı exhaustive TLC modeli tam verdict ve boş kuyrukla geçti:
+      preparation 319.746, journal 1.116, issuance 959, activity 356,
+      transaction 560, revision 272 farklı durum; revision half-commit mutantı red.
+    - [ ] 3.6–3.9, 3.18 ve 3.23'teki kalan kabul/geçiş işleri tamamlanınca bütün
+      kontrolleri nihai kodda tekrar doğrula; üst madde 3'ü en son kapat.
   - [x] **3.11 TLC kapanış verdict'ini sağlamlaştırma (çalışırken bulundu):**
     `Finished in` veya sıfır exit kodu tek başına tam tarama sayılmasın. Koşucu
     model-check modunda açık tamamlanma verdict'i arar; `--dfid N` invariant-only
@@ -802,7 +736,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     ve gerçek Git empty add iki policy'de red→green pipe regresyonuyla doğrulandı.
     Filtresiz locked Rust 429/429 (29 compile-fail), strict Clippy/fmt ve
     preparation TLC (319.746 farklı durum) temiz. Gerçek editor create/save
-    uygulaması ve receipt 3.5–3.6'da açık kalır.
+    uygulaması ve receipt 3.5'te tamamlandı; kalan batch kabulü 3.6'da açıktır.
 
   - [x] **3.14 Receipt false success (denetimde bulundu):** native doğrulayıcı
     diski hiç okumadan, uydurma stat ve `save_returned` alanıyla `applied_full`
@@ -843,8 +777,9 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [x] **3.20 Atomik revision ve gerçek drain (tekrar denetimde bulundu):**
     source/onay ayrı mutasyon yerine bounded candidate worker + geçici byte
     reservation + consuming commit permit. Hata eski iki kaydı korur; metadata/
-    digest/revision birlikte ilerler. Cancel worker join'i taklit etmez; application close bekleyeni iptal edilse
-    de gerçek join beklenir. Üç native regresyon ve 272 durumlu exhaustive revision modeli; half-commit mutantı red.
+    digest/revision birlikte ilerler. Cancel worker join'i taklit etmez; application
+    close bekleyeni iptal edilse de gerçek join beklenir. Üç native regresyon ve
+    272 durumlu exhaustive revision modeli; half-commit mutantı red.
   - [x] **3.21 Asenkron batch ve kalıcı journal (tekrar denetimde bulundu):**
     production IPC spin-wait kaldırıldı; bütün metadata/text sayfaları ve belgeler
     ilk yazımdan önce dondurulur, bütün belgeler tekrar kontrol edilir. Target parent
