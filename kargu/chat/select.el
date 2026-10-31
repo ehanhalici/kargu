@@ -25,6 +25,7 @@
 (declare-function company-mode "company" (&optional arg))
 (declare-function company-manual-begin "company" ())
 (declare-function company-abort "company" ())
+(declare-function company-install-map "company" ())
 (declare-function company--match-from-capf-face "company" (match))
 (declare-function kargu-chat-refresh-footer "kargu/chat/prompt" ())
 (declare-function kargu-connected-providers "kargu/providers/registry" ())
@@ -82,8 +83,7 @@ Company only confirms a listed candidate.  Fuzzy matching only filters."
                   (eq (marker-buffer start) (current-buffer))
                   (marker-position start)
                   (>= (point) (marker-position start)))
-         (cons (buffer-substring-no-properties (marker-position start) (point))
-               t)))
+         (buffer-substring-no-properties (marker-position start) (point))))
       (candidates
        (kargu-api--fuzzy-filter (or arg "") candidates))
       (annotation
@@ -117,8 +117,10 @@ Insertion at point is writable.  `inhibit-read-only' is not set locally."
         (put-text-property (1- inner-start) inner-start
                            'rear-nonsticky
                            '(read-only field front-sticky face mouse-face
-                                       help-echo keymap action)))
+                                       help-echo keymap local-map action button)))
       (when (< inner-start (point-max))
+        (remove-text-properties inner-start (1+ inner-start)
+                                '(read-only nil field nil keymap nil local-map nil action nil button nil))
         (put-text-property inner-start (1+ inner-start) 'front-sticky nil)))
     (goto-char inner-start)
     (copy-marker inner-start nil)))
@@ -213,7 +215,9 @@ Invoke APPLY with the accepted candidate."
               (kargu-api-select--stay-on-field field))))
     (add-hook 'company-completion-finished-hook finish nil t)
     (add-hook 'company-completion-cancelled-hook cancel nil t)
-    (unless (ignore-errors (company-manual-begin))
+    (if (ignore-errors (company-manual-begin))
+        (when (fboundp 'company-install-map)
+          (company-install-map))
       (funcall cancel))))
 
 (defun kargu-api-select--chat-buffer ()
@@ -243,8 +247,9 @@ Invoke APPLY with the accepted candidate."
         (setq-local company-backends
                     (list (kargu-api-select--backend candidates annotations start)))
         (setq-local company-minimum-prefix-length 0)
-        (setq-local company-idle-delay 0.01)
+        (setq-local company-idle-delay nil)
         (company-mode 1)
+        (setq this-command 'company-manual-begin)
         (kargu-api-select--listen start candidates apply field)))))
 
 (defun kargu-api-select (field candidates annotations apply)
