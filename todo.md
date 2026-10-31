@@ -610,7 +610,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   değildir. Dape file worker, credential/UI/package ve binary locator interop'u
   kendi tüketicileri için korunur. G04–G13 ve tüm Rust göçü kapanmış sayılmaz.
 
-- [x] **3. Edit/proposal/review motoru** — diff/proposal/revision/journal kararlarını
+- [ ] **3. Edit/proposal/review motoru** — diff/proposal/revision/journal kararlarını
   Rust'a taşı; Emacs'te yalnız canlı belge kontrolü, transaction/undo/save ve review
   etkileşimi kalsın. Tek typed sonuç kullan; dirty buffer, coding/EOL, save-hook,
   conflict, partial/unknown ve foreign rollback davranışını koru. Son consumer'dan
@@ -736,7 +736,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       motorları ve compatibility backend seçimini kaldır. Edit service yalnız
       native handle ve passive UI kaynakları tutsun; clear/close/unload gerçek
       pending review/activity settlement'ını beklesin.
-  - [x] **3.10 Bütünleşik kabul/kapanış:**
+  - [ ] **3.10 Bütünleşik kabul/kapanış:**
 
     - [x] Güncel filtresiz locked Rust 467/467 (29 compile-fail), full source ERT
       1.345/1.345, focused bridge/edit 107/107 ve son değişikliklerde 3/3;
@@ -849,7 +849,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       kalan recovery senaryolarını tamamla. Batch testleri gerçek GUI kabulünün
       yerine geçmez. Bu kabul olmadan 3.6–3.10'u kapatma.
 
-- [x] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
+- [ ] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
   revision/connection/thread/frame-bound reverse RPC'ye bağla. Mention/folder/
   attachment/provenance ve byte/token/egress kararlarını native'a taşı; canlı
   buffer snapshot'ı Emacs'te kalsın. Stale/unavailable tanı veya debugger bağlantısı
@@ -897,7 +897,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     UI index cache'i ve menü isim kısaltması snapshot kaynağı değildir.
     Library tip/derleme, fmt, check-parens ve whitespace temiz. Yalnız kaynak
     uygulaması işaretlendi; runtime kabulü ve 4/4.4 kapanışı değildir.
-  - [x] **4.4b Kalan symbol consumer ve kabulü:** definition/reference/hover ve
+  - [ ] **4.4b Kalan symbol consumer ve kabulü:** definition/reference/hover ve
     project skeleton portlarını, captured context-file kullanımını ve edit_by_lsp
     hazırlığını aynı typed kaynağa bağla; public/standalone/mention consumer'larını
     geçirip son legacy formatter/parser/cache consumer'larını kaldır. 4.4a'nın
@@ -926,13 +926,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     dedup ile kullanıcı sırası; native muhafazakâr token/byte/output-overhead
     bütçesi ve explicit truncation. İçerik data rolünde, delimiter escape'li;
     completion veya path bilgisi tek başına gönderim izni olmasın.
-  - [x] **4.10 Tüketici ve temizlik:** prompt/attach, tool/LSP/Dape, edit-baseline
+  - [ ] **4.10 Tüketici ve temizlik:** prompt/attach, tool/LSP/Dape, edit-baseline
     ve verification aynı DTO/RPC'yi kullansın. Son consumer'dan sonra eski Elisp
     context/domain formatter/parser/budget motorlarını sil; canlı kaynak/hook/
     buffer adapter'ları kalsın. İki workspace, stale revision/frame, Unicode/CRLF,
     missing adapter, injection, cancel corpus'unu son toplu kabul için hazırla.
 
-- [x] **5. Genel Rust run/session/history motoru** — native servis lease'i ile
+- [ ] **5. Genel Rust run/session/history motoru** — native servis lease'i ile
   gerçek agent run'ını ayır; tek claim/writer altında loop FSM, tool-call/result
   protokolü, mode/plan dispatch, history repair ve terminal raporu bağla. Stop/reset/
   EOF'ta revoke → gerçek drain → repair → admit sırasını kanıtla. Headless/fake
@@ -1040,7 +1040,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     repair → release hattı transport'a bağlandı; rpc/cancel, abort, owner close,
     shutdown ve EOF kaynakları hazır. Reset ve gerçek OS/editor tool child'ları
     aynı hatta bağlanmadan ve son kabul çalışmadan bu alt iş kapanmaz.
-  - [x] **5.9 IPC ve UI consumer:** `session/prompt`, `session/abort`, snapshot ve
+  - [ ] **5.9 IPC ve UI consumer:** `session/prompt`, `session/abort`, snapshot ve
     gerekli history/plan portları; epoch/session sequence'li chunk/state/terminal
     olayları. Chat/API direct caller'ları explicit run handle'a geçir; event gap
     snapshot ile toparlansın, eski sentinel/epoch sonucu yayınlayamasın.
@@ -1054,7 +1054,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     düzeltilmeden UI cutover sayılamaz. Elisp chat/API/plan tüketici geçişi,
     fileless/paged context ve bütün editor/edit rotaları açıktır. Native plain-provider
     pipe corpus'u yazıldı, çalıştırılmadı.
-  - [x] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
+  - [ ] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
     repair ile domain state/plan dispatch motorlarını son tüketici sonrası kaldır.
     Madde 6'daki compaction/healing consumer'larının native run'a bağlanması için
     gereken dar portları koru; iki writer veya gizli legacy run fallback'i bırakma.
@@ -1062,10 +1062,21 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Emacs aynı contract corpus'u kullansın. Multi-turn/tool batch, mode/plan,
     partial stream, cancel/EOF/reset/repair, iki owner ve kaynak drain senaryoları
     ile application/approval/transport/history/run modellerini eşle.
-  - [x] **5.12 Son toplu kabul:** 3 ve 4'ün bütün alt işleriyle beraber uygulama
+  - [ ] **5.12 Son toplu kabul:** 3 ve 4'ün bütün alt işleriyle beraber uygulama
     bitince locked Rust+compile-fail, full source ERT, gerçek GUI kabulü, strict
     Clippy/fmt, değişen Elisp Werror/checkdoc ve etkilenen exhaustive TLC çalıştır.
     Eksik/başarısız kabul ve kalan legacy consumer varken 3/4/5'i kapatma.
+
+  **2026-11-01 denetim kanıtı:** üst 3/4/5 ve ilgili kapanış kutuları yeniden
+  açıldı. Native edit seçimi hâlâ opt-in; `edit/prepare/parent.rs` native
+  `edit_by_lsp` için açık `Unavailable` döndürüyor. `loop.el`/`loop/ui.el`
+  silinen dosyalardaki Elisp FSM/tool orchestration'ını hâlâ yürütüyor;
+  dosya taşıma engine kaldırma değildir. Native UI adapter'ında default
+  scope/revision ve genel bağlantı/terminal eksikleri var. Native sensor domain
+  kaynakları tüm LSP/Dape/context tüketicilerinin geçtiğini kanıtlamıyor.
+  Güncel native binary ile ilk ERT: 1341 test, 30 başarısız; son katalog/seçim
+  düzeltmesinin odak kabulü: 75/75. Tam son kabul ayrıca çalışıyor.
+  Ayrıntı ve açık teknik bulgular: `docs/migration-review-2026-11-01.md`.
 
 - [ ] **6. Bütçe, compaction, healing ve verification birliği** — mevcut native
   budget/metadata tiplerini kullanarak normal/retry/continue/compaction/healing
