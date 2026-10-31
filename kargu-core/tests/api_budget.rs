@@ -301,3 +301,186 @@ fn exact_accounting_overflow_is_terminal_without_wrap_or_partial_commit() -> Tes
     assert_eq!(snapshot(&across)?["refusal"], "accounting");
     Ok(())
 }
+
+#[test]
+fn compaction_and_healing_turns_share_single_run_limits() -> TestResult {
+    let mut b = budget(json!({"requests": 4, "compactions": 1, "tokens": 100}))?;
+    let first = b.admit(DebitKind::CompactionTurn)?;
+    b.finish(first, known(10, 5)?)?;
+    assert_eq!(snapshot(&b)?["compactions_spent"], 1);
+    assert_eq!(snapshot(&b)?["requests_spent"], 1);
+    assert_eq!(snapshot(&b)?["tokens_spent"], 15);
+
+    // Healing turn uses the same run budget.
+    let healing = b.admit(DebitKind::HealingTurn)?;
+    b.finish(healing, known(10, 5)?)?;
+    assert_eq!(snapshot(&b)?["requests_spent"], 2);
+    assert_eq!(snapshot(&b)?["tokens_spent"], 30);
+
+    // Continuation turn uses the same run budget.
+    let cont = b.admit(DebitKind::Continuation)?;
+    b.finish(cont, known(5, 5)?)?;
+    assert_eq!(snapshot(&b)?["requests_spent"], 3);
+    assert_eq!(snapshot(&b)?["tokens_spent"], 40);
+
+    // Second logical compaction is refused under single compaction limit, locking the meter.
+    assert!(matches!(
+        b.admit(DebitKind::CompactionTurn),
+        Err(Refusal::Compactions)
+    ));
+    assert_eq!(snapshot(&b)?["refusal"], "compactions");
+    Ok(())
+}
+
+#[test]
+fn monetary_microusd_and_rates_never_use_floats_and_fail_closed_on_overflow() -> TestResult {
+    use kargu_core::domain::MicroUsd;
+    use kargu_core::models::InputTokenRate;
+    use std::str::FromStr;
+
+    let zero_rate = InputTokenRate::from_str("0.00")?;
+    assert!(zero_rate.is_zero());
+    assert_eq!(zero_rate.per_million_label(), "$0.00/1M");
+
+    let rate = InputTokenRate::from_str("0.0000015")?;
+    assert!(!rate.is_zero());
+    assert_eq!(rate.per_million_label(), "$1.50/1M");
+
+    let micro = MicroUsd::try_from(1_000_000)?;
+    assert_eq!(micro.as_u64(), 1_000_000);
+    let overflow = MicroUsd::try_from(u64::MAX)?.checked_add(MicroUsd::try_from(1)?);
+    assert!(overflow.is_err());
+    Ok(())
+}
+
+#[test]
+fn observed_monetary_ceiling_and_unknown_pricing_fail_closed() -> TestResult {
+    use kargu_core::domain::MicroUsd;
+
+    // A budget with an observed monetary ceiling of 2,000,000 MicroUsd ($2.00)
+    let mut b = budget(json!({"requests": 5, "monetary": 2_000_000}))?;
+    let charge = b.admit(DebitKind::NormalRequest)?;
+
+    // Charge 1,500,000 MicroUsd
+    b.finish_with_cost(
+        charge,
+        known(100, 50)?,
+        Some(MicroUsd::try_from(1_500_000)?),
+    )?;
+    let state = snapshot(&b)?;
+    assert_eq!(state["monetary_spent"], 1_500_000);
+    assert_eq!(state["monetary_unknown"], false);
+
+    // Second request fits under the $2.00 limit
+    let charge2 = b.admit(DebitKind::NormalRequest)?;
+    b.finish_with_cost(charge2, known(50, 25)?, Some(MicroUsd::try_from(600_000)?))?;
+
+    // Now total is 2,100,000 MicroUsd, which exceeds 2,000,000 limit -> Refusal::Monetary
+    assert!(matches!(
+        b.admit(DebitKind::NormalRequest),
+        Err(Refusal::Monetary)
+    ));
+    assert_eq!(snapshot(&b)?["refusal"], "monetary");
+
+    // Test unknown pricing fails closed when monetary limit is set
+    let mut unk = budget(json!({"requests": 5, "monetary": 5_000_000}))?;
+    let charge = unk.admit(DebitKind::NormalRequest)?;
+    // Finish with unknown cost (None) and non-zero tokens
+    unk.finish_with_cost(charge, known(10, 10)?, None)?;
+    assert_eq!(snapshot(&unk)?["monetary_unknown"], true);
+
+    // Subsequent admission must fail closed with Refusal::UnknownPricing
+    assert!(matches!(
+        unk.admit(DebitKind::NormalRequest),
+        Err(Refusal::UnknownPricing)
+    ));
+    assert_eq!(snapshot(&unk)?["refusal"], "unknown_pricing");
+    Ok(())
+}
+
+#[test]
+fn pricing_rates_calculates_exact_microusd_without_floats() -> TestResult {
+    use kargu_core::application::budget::PricingRates;
+    use kargu_core::domain::{InputTokens, OutputTokens};
+    use kargu_core::models::{CacheReadTokenRate, InputTokenRate, OutputTokenRate};
+    use std::str::FromStr;
+
+    let input_rate = InputTokenRate::from_str("0.0000015")?; // $1.50 / 1M tokens
+    let output_rate = OutputTokenRate::from_str("0.0000030")?; // $3.00 / 1M tokens
+    let cache_rate = CacheReadTokenRate::from_str("0.0000005")?; // $0.50 / 1M tokens
+
+    let pricing = PricingRates::new(Some(input_rate), Some(output_rate), Some(cache_rate));
+
+    let cost = pricing.compute_cost(
+        Some(InputTokens::try_from(1_000_000)?),
+        Some(OutputTokens::try_from(500_000)?),
+        Some(2_000_000),
+    )?;
+
+    // 1M * 1.50 = $1.50 = 1,500,000 MicroUsd
+    // 500k * 3.00 = $1.50 = 1,500,000 MicroUsd
+    // 2M * 0.50 = $1.00 = 1,000,000 MicroUsd
+    // Total = 4,000,000 MicroUsd
+    assert_eq!(cost.map(|c| c.as_u64()), Some(4_000_000));
+
+    // Missing rate for non-zero tokens yields None (unknown)
+    let partial = PricingRates::new(None, None, None);
+    let unknown_cost = partial.compute_cost(Some(InputTokens::try_from(100)?), None, None)?;
+    assert!(unknown_cost.is_none());
+    Ok(())
+}
+
+#[test]
+fn late_usage_and_monetary_charges_settle_after_seal() -> TestResult {
+    use kargu_core::domain::MicroUsd;
+
+    let mut b = budget(json!({"requests": 3, "monetary": 1_000_000}))?;
+    let charge = b.admit(DebitKind::NormalRequest)?;
+
+    let mut sealed = b.seal();
+    assert!(!sealed.drained());
+
+    // Deliver late result
+    sealed.finish_with_cost(charge, known(50, 50)?, Some(MicroUsd::try_from(500_000)?))?;
+    assert!(sealed.drained());
+    let snap = snapshot(&sealed)?;
+    assert_eq!(snap["monetary_spent"], 500_000);
+    assert_eq!(snap["tokens_spent"], 100);
+    assert_eq!(snap["sealed"], true);
+    Ok(())
+}
+
+#[test]
+fn token_ceiling_does_not_mask_unknown_monetary_usage() -> TestResult {
+    let mut meter = budget(json!({"requests":10,"tokens":1000,"monetary":100}))?;
+    let charge = meter.admit(DebitKind::NormalRequest)?;
+    meter.finish(charge, known(1, 1)?)?;
+    assert_eq!(
+        meter.preflight(DebitKind::NormalRequest),
+        Err(Refusal::UnknownPricing)
+    );
+    assert_eq!(snapshot(&meter)?["requests_spent"], 1);
+    Ok(())
+}
+
+#[test]
+fn incomplete_usage_and_fractional_microdollars_are_not_exact_zero() -> TestResult {
+    use kargu_core::{application::budget::PricingRates, models::InputTokenRate};
+    use std::str::FromStr;
+    let pricing = PricingRates::new(Some(InputTokenRate::from_str("0.0000005")?), None, None);
+    assert!(
+        pricing
+            .compute_cost(None, Some(OutputTokens::try_from(0)?), None)?
+            .is_none()
+    );
+    assert!(
+        pricing
+            .compute_cost(
+                Some(InputTokens::try_from(1)?),
+                Some(OutputTokens::try_from(0)?),
+                None
+            )?
+            .is_none()
+    );
+    Ok(())
+}

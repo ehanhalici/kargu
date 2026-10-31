@@ -24,6 +24,7 @@
 //! let invalid = ContextCapacity(0);
 //! ```
 
+use crate::{domain::MicroUsd, error::CoreError};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, num::NonZeroU64, str::FromStr};
 
@@ -149,6 +150,24 @@ macro_rules! rate {
             /// Exact zero, never inferred from malformed or rounded text.
             pub fn is_zero(&self) -> bool {
                 self.0.coefficient == 0
+            }
+
+            /// Compute exact integer MicroUsd and fractional remainder for token count.
+            pub fn charge_tokens(&self, tokens: u64) -> Result<(MicroUsd, u128, u128), CoreError> {
+                if tokens == 0 || self.is_zero() {
+                    return Ok((MicroUsd::ZERO, 0, 1));
+                }
+                let numerator = u128::from(tokens)
+                    .checked_mul(self.0.coefficient)
+                    .and_then(|val| val.checked_mul(1_000_000))
+                    .ok_or(CoreError::ArithmeticOverflow)?;
+                let denominator = 10_u128
+                    .checked_pow(u32::from(self.0.scale))
+                    .ok_or(CoreError::ArithmeticOverflow)?;
+                let quotient = numerator / denominator;
+                let remainder = numerator % denominator;
+                let micro = u64::try_from(quotient).map_err(|_| CoreError::ArithmeticOverflow)?;
+                Ok((MicroUsd::try_from(micro)?, remainder, denominator))
             }
         }
         impl fmt::Display for $name {

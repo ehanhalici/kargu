@@ -27,11 +27,12 @@
 
 mod domain;
 use crate::{
-    domain::{BudgetId, CompactionCount, Deadline, RequestCount, TokenCount},
+    domain::{BudgetId, CompactionCount, Deadline, MicroUsd, RequestCount, TokenCount},
     error::CoreError,
 };
 pub use domain::{
-    BudgetLimits, CompactionLimit, DebitKind, ObservedUsage, RequestLimit, TokenLimit,
+    BudgetLimits, CompactionLimit, DebitKind, MonetaryLimit, ObservedUsage, PricingRates,
+    RequestLimit, TokenLimit,
 };
 use serde::Serialize;
 use std::{collections::BTreeSet, marker::PhantomData};
@@ -66,6 +67,12 @@ pub enum Refusal {
     /// Exact accounting failed; never wrap or reset it to zero.
     #[error("budget accounting overflow")]
     Accounting,
+    /// Hard monetary budget exhausted.
+    #[error("monetary budget exhausted")]
+    Monetary,
+    /// Pricing is unknown under a configured monetary ceiling.
+    #[error("pricing unknown under a configured monetary ceiling")]
+    UnknownPricing,
 }
 
 /// Move-only ticket. Completion consumes it once, including after cancellation.
@@ -84,6 +91,8 @@ pub struct BudgetSnapshot {
     compactions_spent: CompactionCount,
     tokens_spent: TokenCount,
     tokens_unknown: bool,
+    monetary_spent: MicroUsd,
+    monetary_unknown: bool,
     outstanding: usize,
     refusal: Option<Refusal>,
     sealed: bool,
@@ -98,6 +107,8 @@ pub struct Budget<State = Open> {
     compactions: CompactionCount,
     tokens: TokenCount,
     unknown: bool,
+    monetary: MicroUsd,
+    monetary_unknown: bool,
     refusal: Option<Refusal>,
     outstanding: BTreeSet<RequestCount>,
     sealed: bool,
@@ -114,6 +125,8 @@ impl Budget<Open> {
             compactions: CompactionCount::ZERO,
             tokens: TokenCount::ZERO,
             unknown: false,
+            monetary: MicroUsd::ZERO,
+            monetary_unknown: false,
             refusal: None,
             outstanding: BTreeSet::new(),
             sealed: false,
@@ -127,7 +140,9 @@ impl Budget<Open> {
             return Err(refusal);
         }
         // Temporary contention must not poison an otherwise healthy meter.
-        if self.limits.tokens().is_some() && !self.outstanding.is_empty() {
+        if (self.limits.tokens().is_some() || self.limits.monetary().is_some())
+            && !self.outstanding.is_empty()
+        {
             return Err(Refusal::PendingUsage);
         }
         let refusal = if self.deadline.expired() {
@@ -138,14 +153,22 @@ impl Budget<Open> {
             Some(Refusal::Compactions)
         } else if self.requests.as_u64() >= self.limits.requests().count() {
             Some(Refusal::Requests)
-        } else if let Some(limit) = self.limits.tokens() {
-            if self.unknown {
-                Some(Refusal::UnknownUsage)
-            } else if self.tokens >= limit.count() {
-                Some(Refusal::Tokens)
-            } else {
-                None
-            }
+        } else if self.limits.tokens().is_some() && self.unknown {
+            Some(Refusal::UnknownUsage)
+        } else if self
+            .limits
+            .tokens()
+            .is_some_and(|limit| self.tokens >= limit.count())
+        {
+            Some(Refusal::Tokens)
+        } else if self.limits.monetary().is_some() && self.monetary_unknown {
+            Some(Refusal::UnknownPricing)
+        } else if self
+            .limits
+            .monetary()
+            .is_some_and(|limit| self.monetary.as_u64() >= limit.amount().as_u64())
+        {
+            Some(Refusal::Monetary)
         } else {
             None
         };
@@ -183,6 +206,8 @@ impl Budget<Open> {
             compactions: self.compactions,
             tokens: self.tokens,
             unknown: self.unknown,
+            monetary: self.monetary,
+            monetary_unknown: self.monetary_unknown,
             refusal: self.refusal,
             outstanding: self.outstanding,
             sealed: true,
@@ -201,6 +226,15 @@ impl<State> Budget<State> {
     }
     /// Complete a charged attempt once. Faults/cancellation use unknown usage.
     pub fn finish(&mut self, charge: AttemptCharge, usage: ObservedUsage) -> Result<(), CoreError> {
+        self.finish_with_cost(charge, usage, None)
+    }
+    /// Complete a charged attempt with optional exact monetary cost.
+    pub fn finish_with_cost(
+        &mut self,
+        charge: AttemptCharge,
+        usage: ObservedUsage,
+        cost: Option<MicroUsd>,
+    ) -> Result<(), CoreError> {
         if charge.budget != self.id || !self.outstanding.remove(&charge.sequence) {
             return Err(CoreError::StaleOwner);
         }
@@ -208,6 +242,29 @@ impl<State> Budget<State> {
             self.refusal = Some(Refusal::Deadline);
         }
         self.unknown |= usage.unknown();
+        match cost {
+            Some(micro) => {
+                if let Ok(sum) = self.monetary.checked_add(micro) {
+                    self.monetary = sum;
+                    if self
+                        .limits
+                        .monetary()
+                        .is_some_and(|limit| sum.as_u64() >= limit.amount().as_u64())
+                        && self.refusal.is_none()
+                    {
+                        self.refusal = Some(Refusal::Monetary);
+                    }
+                } else {
+                    self.monetary_unknown = true;
+                    self.refusal = Some(Refusal::Accounting);
+                }
+            }
+            None => {
+                if usage.unknown() || usage.total().is_ok_and(|t| t > TokenCount::ZERO) {
+                    self.monetary_unknown = true;
+                }
+            }
+        }
         let total = usage
             .total()
             .and_then(|total| self.tokens.checked_add(total));
@@ -244,6 +301,8 @@ impl<State> Budget<State> {
             compactions_spent: self.compactions,
             tokens_spent: self.tokens,
             tokens_unknown: self.unknown,
+            monetary_spent: self.monetary,
+            monetary_unknown: self.monetary_unknown,
             outstanding: self.outstanding.len(),
             refusal: self.refusal,
             sealed: self.sealed,

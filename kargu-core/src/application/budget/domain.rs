@@ -2,8 +2,9 @@
 
 use crate::{
     constants::limits,
-    domain::{InputTokens, OutputTokens, TokenCount},
+    domain::{InputTokens, MicroUsd, OutputTokens, TokenCount},
     error::CoreError,
+    models::{CacheReadTokenRate, InputTokenRate, OutputTokenRate},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -79,6 +80,28 @@ impl TokenLimit {
     }
 }
 
+/// Observed-spend ceiling in integer micro-dollars; admission reserves no future cost.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(try_from = "u64")]
+pub struct MonetaryLimit(MicroUsd);
+impl TryFrom<u64> for MonetaryLimit {
+    type Error = CoreError;
+    fn try_from(value: u64) -> Result<Self, CoreError> {
+        if value == 0 {
+            return Err(CoreError::InvalidValue {
+                field: "MonetaryLimit",
+            });
+        }
+        Ok(Self(MicroUsd::try_from(value)?))
+    }
+}
+impl MonetaryLimit {
+    /// Exact micro-dollar amount.
+    pub fn amount(self) -> MicroUsd {
+        self.0
+    }
+}
+
 /// Immutable run intent; omitted token cap means unknown usage remains observable.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -89,6 +112,8 @@ pub struct BudgetLimits {
     compactions: CompactionLimit,
     #[serde(default)]
     tokens: Option<TokenLimit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    monetary: Option<MonetaryLimit>,
 }
 impl Default for BudgetLimits {
     fn default() -> Self {
@@ -96,6 +121,7 @@ impl Default for BudgetLimits {
             requests: RequestLimit::default(),
             compactions: CompactionLimit::one(),
             tokens: None,
+            monetary: None,
         }
     }
 }
@@ -110,7 +136,13 @@ impl BudgetLimits {
             requests,
             compactions,
             tokens,
+            monetary: None,
         }
+    }
+    /// Attach an optional observed monetary ceiling.
+    pub fn with_monetary(mut self, monetary: Option<MonetaryLimit>) -> Self {
+        self.monetary = monetary;
+        self
     }
     pub(super) fn requests(self) -> RequestLimit {
         self.requests
@@ -120,6 +152,89 @@ impl BudgetLimits {
     }
     pub(super) fn tokens(self) -> Option<TokenLimit> {
         self.tokens
+    }
+    pub(super) fn monetary(self) -> Option<MonetaryLimit> {
+        self.monetary
+    }
+}
+
+/// Exact model pricing rates for computing cost in micro-dollars.
+#[derive(Clone, Debug, Default)]
+pub struct PricingRates {
+    input: Option<InputTokenRate>,
+    output: Option<OutputTokenRate>,
+    cache_read: Option<CacheReadTokenRate>,
+}
+impl PricingRates {
+    /// Capture exact rate fields.
+    pub fn new(
+        input: Option<InputTokenRate>,
+        output: Option<OutputTokenRate>,
+        cache_read: Option<CacheReadTokenRate>,
+    ) -> Self {
+        Self {
+            input,
+            output,
+            cache_read,
+        }
+    }
+    /// Compute total cost in micro-dollars for the given observed usage.
+    /// If required rates are missing for non-zero token categories, returns None (unknown).
+    pub fn compute_cost(
+        &self,
+        input_tokens: Option<InputTokens>,
+        output_tokens: Option<OutputTokens>,
+        cached_tokens: Option<u64>,
+    ) -> Result<Option<MicroUsd>, CoreError> {
+        let (Some(input), Some(output)) = (input_tokens, output_tokens) else {
+            return Ok(None);
+        };
+        let input_cnt = input.as_u64();
+        let output_cnt = output.as_u64();
+        let cache_cnt = cached_tokens.unwrap_or(0);
+
+        let mut total = MicroUsd::ZERO;
+
+        if input_cnt > 0 {
+            match &self.input {
+                Some(rate) => {
+                    let (cost, remainder, _) = rate.charge_tokens(input_cnt)?;
+                    // Fractional micro-dollars cannot be advertised as exact integer spend.
+                    if remainder != 0 {
+                        return Ok(None);
+                    }
+                    total = total.checked_add(cost)?;
+                }
+                None => return Ok(None),
+            }
+        }
+        if output_cnt > 0 {
+            match &self.output {
+                Some(rate) => {
+                    let (cost, remainder, _) = rate.charge_tokens(output_cnt)?;
+                    // Fractional micro-dollars cannot be advertised as exact integer spend.
+                    if remainder != 0 {
+                        return Ok(None);
+                    }
+                    total = total.checked_add(cost)?;
+                }
+                None => return Ok(None),
+            }
+        }
+        if cache_cnt > 0 {
+            match &self.cache_read {
+                Some(rate) => {
+                    let (cost, remainder, _) = rate.charge_tokens(cache_cnt)?;
+                    // Fractional micro-dollars cannot be advertised as exact integer spend.
+                    if remainder != 0 {
+                        return Ok(None);
+                    }
+                    total = total.checked_add(cost)?;
+                }
+                None => return Ok(None),
+            }
+        }
+        Ok(Some(total))
     }
 }
 
