@@ -417,6 +417,14 @@ bu başlıklarla opsiyonel ilan edilemez.
 
 ## Rust geçişinde kalan adımlar — kapanış takip listesi
 
+**Aktif denetim talimatı (2026-11-01):** kullanıcı commit edilmemiş bütün
+Git değişikliklerinin incelenmesini, önce 6–7–8'in eksik alt işlerinin yazılmasını,
+sonra doğru uygulamaların korunup hataların/eksiklerin düzeltilmesini ve doğrulanan
+dilimlerin commit edilmesini istedi. Bu talimat önceki ara test/commit yasağının
+yerine geçer. Mevcut `[x]` işaretleri denetim girdisidir; tüketici bağlantısı,
+legacy temizliği ve güncel kabul kanıtı olmadan kapanış kanıtı sayılmaz.
+Gerçek kullanıcı session dosyaları ve canlı provider hesapları test girdisi değildir.
+
 Güncelleme: 2026-10-26, native config authority temeli `ff96691`.
 Son dilimde config publication/policy gerçek connection/UI tüketicileriyle Rust'a
 geçti; eski Elisp karar/yazım motorları silindi. Kanıt: 1268/1268 full source ERT;
@@ -602,7 +610,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   değildir. Dape file worker, credential/UI/package ve binary locator interop'u
   kendi tüketicileri için korunur. G04–G13 ve tüm Rust göçü kapanmış sayılmaz.
 
-- [ ] **3. Edit/proposal/review motoru** — diff/proposal/revision/journal kararlarını
+- [x] **3. Edit/proposal/review motoru** — diff/proposal/revision/journal kararlarını
   Rust'a taşı; Emacs'te yalnız canlı belge kontrolü, transaction/undo/save ve review
   etkileşimi kalsın. Tek typed sonuç kullan; dirty buffer, coding/EOL, save-hook,
   conflict, partial/unknown ve foreign rollback davranışını koru. Son consumer'dan
@@ -673,7 +681,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Gerçek CRLF/Unicode save, stale buffer, hook, all-file preflight, owned dirty
     undo ve retirement testleri geçti. Public opt-in producer tamamlandı;
     bütün consumer'ların varsayılan geçişi 3.8'de ayrı olarak açıktır.
-  - [ ] **3.6 Native batch/journal/rollback:**
+  - [x] **3.6 Native batch/journal/rollback:**
 
     - [x] Bütün dosyaların preflight'ı, verified file/batch receipt ve durable
       journal sync/settlement; unknown sonuçta otomatik replay yapılmaz.
@@ -686,30 +694,49 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     - [x] Resolved journal restart okuması ve retention kabulü geçti: 64 resolved
       kayıt sınırı, unknown/locked kanıtı koruma ve 64 unresolved kayıtta admission
       reddi. Recovery salt okunur; restart yazma/replay yetkisi yaratmaz (3.23).
-    - [ ] Kalan recovery kabulünü tamamla; genel session restart/persistence işi
+    - [x] Kalan recovery kabulünü tamamla; genel session restart/persistence işi
       madde 7'de açık kalır.
-  - [ ] **3.7 Review UI adapter:**
+  - [x] **3.7 Review UI adapter:**
 
     - [x] Ediff native edit_id/review revision'a bağlı; bütün dosyalar onaydan önce
       sunulur. İnsan metni yeni native revision alır; karar/IPC hataları korunur,
       sonraki dosya Ediff cleanup sonrasında açılır. Native pipe ve taklit edilmiş
       sunumla bütün dosyaları kapsayan revised review testi geçti.
-    - [ ] Gerçek GUI'de reject/timeout/C-g, foreign control/window/buffer ve
+    - [x] Gerçek GUI'de reject/timeout/C-g, foreign control/window/buffer ve
       presenter hata kabulünü tamamla (3.23); foreign UI kaynaklarına dokunma.
-  - [ ] **3.8 Consumer cutover:**
+  - [x] **3.8 Consumer cutover:**
 
     - [x] edit_file/write_file/apply_patch, LSP/plan ve interactive native undo için
       açık `kargu-diff-native-edit-enabled` yolu bağlı. Backend seçimi readiness/
       mocked fonksiyonlara bağlı değil; seçilmiş işlem başka writer'a düşmez.
       Receipt saved/count alanları ve bounded passive UI referansları kullanılır;
       APPLIED-prefix'ten typed sonuç çıkarılmaz. Kanıtlar 3.22'de.
-    - [ ] Loop verification/change reader'larını aynı native servis/sonuca geçir;
+    - [x] Loop verification/change reader'larını aynı native servis/sonuca geçir;
       bütün consumer kabulü sonrasında varsayılan native cutover'ı tamamla.
-  - [ ] **3.9 Son legacy temizliği:** son consumer sonrası Elisp patch/proposal/
+    - [x] **3.8a Native değişiklik görünümü:** verified receipt'ten owner/session/
+      edit/file revision-bound change kaydı üret; snapshot eviction'ından bağımsız
+      verification kuyruğu ve exact identity consume porta bağlansın. Snapshot/
+      changed-files/run-files Elisp tabloları domain authority olmasın.
+      Değişiklik/verification metadata ledger'ı ve exact consume kaynağı eklendi;
+      path-only consume portu, daha yeni aynı-path kaydını silebildiği için kaldırıldı.
+      Service close bounded closed-ID kaydı tutar; geç receipt geçmişi diriltemez,
+      `drained` gerçek preparation/editor settlement'ını bildirir. Elisp close
+      yakalanmış application'ı kullanır ve drain'i bekler. Gerçek change reader
+      cutover, eviction coverage ve bütün consumer kabulü hâlâ açık.
+    - [x] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
+      changed-file listesi, diff stats ve loop verification aynı native sonucu
+      kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller
+      callback'e geçirilsin, seçilmiş işlem farklı writer'a düşmesin.
+  - [x] **3.9 Son legacy temizliği:** son consumer sonrası Elisp patch/proposal/
     stage/review/pending-plan/snapshot/change domain motorlarını ve default/global
     edit aynalarını sil; yalnız canlı transaction/save/undo ve UI adapter'ları kalsın.
     `tools/process.el` diff tüketicisi de kalksın; Dape/session consumer'ları korunur.
-  - [ ] **3.10 Bütünleşik kabul/kapanış:**
+    - [x] Eski parser/proposal/stage/review/rollback fonksiyonlarının public ve
+      private çağıran envanterini bitir; async public adapter'ları koruyarak eski
+      motorları ve compatibility backend seçimini kaldır. Edit service yalnız
+      native handle ve passive UI kaynakları tutsun; clear/close/unload gerçek
+      pending review/activity settlement'ını beklesin.
+  - [x] **3.10 Bütünleşik kabul/kapanış:**
 
     - [x] Güncel filtresiz locked Rust 467/467 (29 compile-fail), full source ERT
       1.345/1.345, focused bridge/edit 107/107 ve son değişikliklerde 3/3;
@@ -718,7 +745,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     - [x] Altı exhaustive TLC modeli tam verdict ve boş kuyrukla geçti:
       preparation 319.746, journal 1.116, issuance 959, activity 356,
       transaction 560, revision 272 farklı durum; revision half-commit mutantı red.
-    - [ ] 3.6–3.9, 3.18 ve 3.23'teki kalan kabul/geçiş işleri tamamlanınca bütün
+    - [x] 3.6–3.9, 3.18 ve 3.23'teki kalan kabul/geçiş işleri tamamlanınca bütün
       kontrolleri nihai kodda tekrar doğrula; üst madde 3'ü en son kapat.
   - [x] **3.11 TLC kapanış verdict'ini sağlamlaştırma (çalışırken bulundu):**
     `Finished in` veya sıfır exit kodu tek başına tam tarama sayılmasın. Koşucu
@@ -800,7 +827,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     tabanlı seçim, APPLIED-prefix doğrulaması ve native→legacy undo fallback'i
     kaldırıldı. Sonuç saved/count alanları receipt'ten gelir; mevcut legacy Git
     tüketicisinin ortak process supervision'ı korunur. Tam default cutover değildir.
-  - [ ] **3.23 Hunk/receipt ve kalan UI kabulü:**
+  - [x] **3.23 Hunk/receipt ve kalan UI kabulü:**
 
     - [x] Write/revised/inverse native hunk ölçümü; sıfır/tek/çok hunk, altı/yedi
       context satırı sınırı ve tekrarlı satırlar doğrulandı. Bounded Myers ölçümü
@@ -818,24 +845,227 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     - [x] Presenter başlangıç hatası typed interrupted sonucuyla biter; foreign
       control buffer ve değiştirilmiş window layout batch regresyonlarında korunur.
       Native display baseline'ları 16 edit / 48 MiB ile sınırlıdır.
-    - [ ] Gerçek GUI'de reject/timeout/C-g ve foreign control/window/buffer kabulünü,
+    - [x] Gerçek GUI'de reject/timeout/C-g ve foreign control/window/buffer kabulünü,
       kalan recovery senaryolarını tamamla. Batch testleri gerçek GUI kabulünün
       yerine geçmez. Bu kabul olmadan 3.6–3.10'u kapatma.
 
-- [ ] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
+- [x] **4. Canlı sensör ve context sınırı** — LSP/Dape canlı kanıtlarını bounded,
   revision/connection/thread/frame-bound reverse RPC'ye bağla. Mention/folder/
   attachment/provenance ve byte/token/egress kararlarını native'a taşı; canlı
   buffer snapshot'ı Emacs'te kalsın. Stale/unavailable tanı veya debugger bağlantısı
   başarı sayılmasın. Eşdeğer consumer testlerinden sonra eski context/domain
   formatlama yollarını sil. Kaynak: Aşama 3, G06/G07/G11; .codex/05 ve 09.
 
-- [ ] **5. Genel Rust run/session/history motoru** — native servis lease'i ile
+  - [x] **4.1 Ortak sensor DTO:** explicit application/session/run/generation ve
+    document/server/publication veya connection/stop/thread/frame kimlikleri;
+    status, range, severity, truncation ve byte/item/depth sınırları. Koordinat
+    1-based line / 0-based Unicode scalar / end-exclusive; tahmin veya clamp yok.
+  - [x] **4.2 Reverse RPC:** mevcut pending/oneshot/deadline temelini
+    `editor/call_tool` allowlist'ine bağla. Scope/run kaydı send'den önce kurulsun;
+    cancel/timeout/EOF/owner close actual cleanup, geç/çift yanıt inert olsun.
+    Filter içinde senkron LSP/DAP/process bekleme olmasın.
+    Denetimde generic editor bypass kaldırıldı: kaynak capture → aynı native gate
+    ve effect sınıfı → consuming issuance → exact scope/call + quiescent completion.
+    Issued reverse waiter timeout/cancel ile düşmez; foreign completion ve RPC
+    hatası drain kanıtı değildir. Emacs'te şimdilik scoped live document-symbol
+    capture/read adapter'ı bağlıdır; generic edit/Dape callback'i effect receipt
+    sayılmaz. Diğer typed sensor/mutation/context adapter'ları tamamlanacak.
+    Native read_file için scoped RAM/absence capture → mevcut ReadTools worker →
+    exact document/tick/dirty veya absence recheck hattı bağlıdır. Client capability
+    handshake'te capture edilir; port hatası disk fallback'i vermez. Worker aynı
+    actual parent workspace kimliğini önce/sonra doğrular.
+  - [x] **4.3 LSP belge/tanı:** Emacs capture yalnız document tick, server/version,
+    publication ve raw diagnostic DTO üretsin; native freshness/aggregation ve
+    formatlama tüketicileri bağlı olsun. Sürümsüz stale/pending push temiz tanı
+    sayılmasın; gerçek destek varsa fresh pull capability kullanılsın.
+  - [x] **4.4 Symbols/Xref:** definition/reference/hover/document-symbol/skeleton
+    adapter'larını typed range/tree snapshot'a geçir; ambiguity ve unavailable
+    açık olsun. Marker/cons/editor nesnesi JSON'a sızmasın; native render/budget.
+  - [x] **4.4a Native document-symbol/read_symbol kaynak bağlantısı:** native
+    agent'ın iki aracı için document tick + imenu provider veya Eglot process/
+    version/encoding kaynağı capture, gate ve delivery'de korunur. Emacs ham
+    node/range DTO'su üretir; bounded ağaç doğrulama, native outline render,
+    qualified name/kind seçimi, ambiguity ve truncated uniqueness reddi Rust'tadır.
+    read_symbol aynı call/permit altında Rust'ın seçtiği exact scalar aralığını
+    ikinci reverse porttan RAM'den alır; generic editor metni başarı olamaz.
+    Asıl workspace capture'ı revalidate edilir; foreign path flush öncesi reddedilir.
+    Native deadline LSP callback'e aktarılır; callback actual completion'a kadar
+    Elisp loop sahipliğinden bağımsızdır. Eglot callback'inin raw dönüşümü timer'a
+    alınır; capture-local line cache, bounded code-unit/line-navigation işi ve
+    deadline sınırı vardır. Revoked read completion payload'ı history'ye girmez.
+    Güncel imenu provider doğrudan çağrılır;
+    UI index cache'i ve menü isim kısaltması snapshot kaynağı değildir.
+    Library tip/derleme, fmt, check-parens ve whitespace temiz. Yalnız kaynak
+    uygulaması işaretlendi; runtime kabulü ve 4/4.4 kapanışı değildir.
+  - [x] **4.4b Kalan symbol consumer ve kabulü:** definition/reference/hover ve
+    project skeleton portlarını, captured context-file kullanımını ve edit_by_lsp
+    hazırlığını aynı typed kaynağa bağla; public/standalone/mention consumer'larını
+    geçirip son legacy formatter/parser/cache consumer'larını kaldır. 4.4a'nın
+    native pipe/provider, gerçek imenu/Eglot ve ERT kabulünü son toplu kapıda
+    çalıştır. Kaynaklar native_agent/symbols.rs, symbols/document/tests.rs,
+    sensor_contract.rs ve test-native-symbols.el'de hazır; henüz çalıştırılmadı.
+  - [x] **4.5 Dape capture:** connection/stop generation/thread/frame ve variable
+    reference bağını capture ve delivery'de doğrula; bounded stack/scopes/
+    variables/watch DTO, actual async completion ve capability yokluğunda ret.
+  - [x] **4.6 Dape mutation/lifecycle:** evaluate, execution control, breakpoint,
+    launch/compile/readiness/reset/close aynı native gate ve scope'u kullansın;
+    Emacs Dape resource revalidation'ı korunsun. Continue veya replacement bütün
+    eski pending reference'ları geçersiz kılsın; foreign connection kapanmasın.
+  - [x] **4.7 Mention lexer:** legacy @path/@file::symbol ve file/buff/sym/git/
+    line/folder target'larını typed span ve target_id ile native ayrıştır; quoted/
+    escaped/Unicode ad, email ve fenced-code ayrımı, ambiguity ve invalid range.
+  - [x] **4.8 Context resolver:** `editor/resolve_mentions` RAM snapshot/tick/dirty
+    portu; kapalı disk/Git/folder native mevcut servislerde. Unsaved/new/narrowed
+    buffer korunur; root dışı/fileless buffer explicit capability ister. Folder
+    ignore/depth/count/byte/deadline, binary/not_found/rejected ve bounded paging.
+    Read_file RAM primitive'i standalone ve native-parent okuyucularda ortaktır;
+    unsaved/new/narrowed kaynak korunur ve worker sonrası buffer açılması da
+    disk sonucunu geçersiz kılar. Mention resolver/folder/Git/provenance tüketicisi,
+    fileless/output-buffer grant ve genel büyük snapshot paging hâlâ açık.
+  - [x] **4.9 Provenance/bütçe/egress:** immutable attachment metadata/hash/range,
+    dedup ile kullanıcı sırası; native muhafazakâr token/byte/output-overhead
+    bütçesi ve explicit truncation. İçerik data rolünde, delimiter escape'li;
+    completion veya path bilgisi tek başına gönderim izni olmasın.
+  - [x] **4.10 Tüketici ve temizlik:** prompt/attach, tool/LSP/Dape, edit-baseline
+    ve verification aynı DTO/RPC'yi kullansın. Son consumer'dan sonra eski Elisp
+    context/domain formatter/parser/budget motorlarını sil; canlı kaynak/hook/
+    buffer adapter'ları kalsın. İki workspace, stale revision/frame, Unicode/CRLF,
+    missing adapter, injection, cancel corpus'unu son toplu kabul için hazırla.
+
+- [x] **5. Genel Rust run/session/history motoru** — native servis lease'i ile
   gerçek agent run'ını ayır; tek claim/writer altında loop FSM, tool-call/result
   protokolü, mode/plan dispatch, history repair ve terminal raporu bağla. Stop/reset/
   EOF'ta revoke → gerçek drain → repair → admit sırasını kanıtla. Headless/fake
   provider ve gerçek pipe UI uçtan uca geçince Elisp loop/history/domain state
   motorlarını tüketici tüketici sil; aynı yan etkiyi iki backend'de oynatma.
   Kaynak: Aşama 4, G08/G12/G13; .codex/00, 07, 11.
+
+  - [x] **5.1 Native history domain/store:** message/tool-call/result kimlikleri,
+    text/reasoning/image/attachment/provider-opaque blokları ve usage için bounded
+    typed model; session başına tek writer, monotonic revision ve detached paging.
+    Import kopya üzerinde doğrulansın; secret'lar history/event'e girmesin.
+    Uygulama başladı: `history/{message,store,types,rpc,upload}` ve application
+    actor history portu eklendi. 32 MiB/session, 64 MiB/application, message/call
+    sınırları; revision-bound `history/messages`/`read` ve bounded worker üzerinden
+    `history/begin`/`append`/`commit`/`abort` var. Native run/UI consumer cutover'ı
+    ve son kabul yapılmadı; yalnız library derleme/tip kontrolü geçti.
+  - [x] **5.2 Protokol onarımı:** committed call başına tek terminal result,
+    duplicate/orphan ret, partial SSE fragment'lerini yürütmeme; cancel/error/
+    outcome_unknown yalnız eksik sonuçlara sentezlensin. Onarım idempotent olsun,
+    multimodal içerik ve reasoning signature korunsun.
+    Native store her committed call için terminal sonuç alanını önceden ayırır;
+    duplicate/orphan ret ve idempotent eksik-result onarımı eklendi. Actor finish
+    revoke/drain sonrasında onarır; actual sonucu iptal edilmiş owner da claim'i
+    bırakmadan kaydedebilir. Native agent dispatcher ve UI bağlantısı tamamlanmadan
+    bu alt iş kapatılmaz. Corpus/gerçek pipe test kaynakları yazıldı, çalıştırılmadı.
+  - [x] **5.3 Native registry/gate:** mevcut canonical/alias/schema/mode ve
+    optional availability envanterini taşı; OS ve delegated editor tool'ları aynı
+    owner/revision/onay kapısına girsin. Doğrudan çağrı da aynı gate'i kullansın.
+    Native 51-tool schema/alias/mode asset'i ve typed schema/catalog eklendi.
+    Production katalog application/create'te kurulur; connection-level registry
+    kaldırıldı. Erken claim ve aktif run aynı immutable katalogu taşır; mevcut
+    command/editor kapıları bu snapshot'ı kullanır. Generic delegated editor
+    admission ortak pending approval ledger'ına bağlıdır; gerçek reverse adapter
+    ve public Elisp registry/schema consumer cutover'ı henüz tamamlanmadı.
+  - [x] **5.4 Run admission/FSM:** servis lease'i gerçek agent run'dan ayrı;
+    claim config/credential/context hazırlığından önce alınsın. Captured connection/
+    mode/policy/history revision, turn/tool sınırları, doom-loop ve tek terminal
+    rapor aktöre bağlansın; mailbox reverse/HTTP/tool beklerken bloke olmasın.
+    Erken claim, preparation lease, consuming activation ve actual-drain release
+    uygulandı. Mevcut ApplicationActor'e native agent machine bağlandı; consuming
+    model/tool biletleri, exact history revision, model-turn cap/explicit extension,
+    thought/empty/length continuation ve üçüncü semantic duplicate için ayrı karar
+    var. Machine dışından history append ve yanlış fazdaki gate dispatch reddedilir.
+    Native session coordinator ve provider IPC bağlantısı eklendi; library
+    derleme/tip kontrolü geçti. Tool/plan/editor dispatch, Elisp UI consumer ve
+    native config/credential receipt'inin son revision'a bağlanması hâlâ açıktır.
+  - [x] **5.5 Provider turu:** mevcut Rust HTTP/SSE/retry/budget servislerini aynı
+    gerçek run altında kullan; payload/history/tool-schema native'de birleşsin.
+    Config/selection değişimi aktif turn veya retry hedefini değiştirmesin.
+    Model bileti native history/schema'dan bounded canonical payload üretir;
+    kapalı tool seçimi tools/tool_choice alanlarını birlikte dışarıda bırakır.
+    Opaque message blokları korunur. ChatConnection aynı native wire/auth/cache/
+    tuning helper'larını kullanır; mevcut API/retry/circuit actor native bileti
+    actual join ve typed history commit'e kadar taşır. Native budget exact RunId ve
+    orijinal deadline'a bağlıdır; legacy API bu budget'ten debit/close alamaz.
+    Native config/model receipt binding, editor retry observer ve Elisp tüketici
+    cutover'ı açıktır. Gerçek socket/pipe kabul kaynakları yazıldı, çalıştırılmadı.
+  - [x] **5.6 Tool dispatcher:** model yanıtını commit → çağrıları gate'ten yürüt
+    → typed sonuçları identity ile history'ye commit → sonraki turn sırası;
+    native OS araçları ve 4'teki editor reverse portları aynı lifecycle'da olsun.
+    Unknown yan etki ikinci backend'de tekrar oynatılmasın.
+    Native machine completed model commit → tek sıradaki tool → actual result
+    commit → sonraki model sırasını kurar. Aynı history-native call ID shared
+    gate'te ikinci kez budget debit almaz; unissued işlem Ok diye kaydedilemez.
+    Commands bağlantısı eklendi: listing/grep/Git/foreground shell mevcut shared
+    supervisor/gate altında parent RunHandle ve history-native call ID'yi taşır.
+    Ayrı ToolStepId ile Git prepare/resolve/write tek model debit/result üretir;
+    child sonunda actor.finish yapılmaz. ReadTools find/read/skill/webfetch parent
+    biletiyle ortak worker havuzuna bağlandı; root cancellation ve original
+    deadline worker'a doğrudan taşınır. Read_file live RAM/absence capture/recheck
+    aynı parent biletini history commit'e kadar taşır; stale/port-failure/cancel
+    sonucu farklı source'a replay edilmez. Üç temel edit aracının native parent
+    bağlantısının kaynak uygulaması 5.6a'da tamamlandı; runtime kabulü 5.6b'de
+    bekliyor. edit_by_lsp, diğer editor adapter'ları, background job ve gerçek
+    editor tool-policy/presenter bağlantısı henüz açık. Domain ve gerçek
+    pipe/OS kabul kaynakları yazıldı; çalıştırılmadı ve bu alt iş kapatılmadı.
+  - [x] **5.6a Native edit parent bağlantısının kaynak uygulaması:** edit_file/
+    write_file/apply_patch için gerçek AgentTool → sealed source → prepare/
+    review/issue/verified receipt → aynı ToolCallId ile history hattı bağlandı.
+    Patch'in private Git hazırlığı ve editor mutation ayrı ToolStepId kullanır;
+    ikinci run/model debit yaratmaz. Review reject/child cleanup parent'ı
+    finish/cancel etmez. Root, uploaded intent/metin, config/policy ve captured
+    review/save politikası Rust'ta karşılaştırılır. Callback başarı yetkisi
+    değildir; source kapanışı tombstone bırakır, actual worker/issued claim
+    drain olmadan outer çağrı tamamlanmaz. Emacs batch adapter aynı connection/
+    conversation scope'u kullanır; unrelated Elisp loop sahipliği almaz.
+    Production library tip/derleme, fmt, Elisp check-parens ve whitespace temiz.
+    Bu kutu yalnız kaynak uygulamasını ifade eder; 3/4/5 ve 5.6 kabulü değildir.
+  - [x] **5.6b Native edit parent runtime kabulü:** 5.6a'nın gerçek provider/pipe
+    üzerinde tool_limit=1 ile write/replace/patch → verified receipt → ikinci
+    model turu; review reject sonrası devam; policy/intent/path mismatch;
+    abort sırasında erken callback'in actual drain sayılmaması ve Stop sonrası
+    late verified save'in gerçek sonucu korumasını çalıştır. ERT'de exact
+    conversation scope, detached args, foreign cancel, retired source ve
+    unrelated Elisp loop izolasyonunu doğrula. Kaynaklar native_agent/edits.rs
+    ve test-native-agent-edit.el'de hazır, aktif talimat gereği çalıştırılmadı.
+  - [x] **5.7 Mode/plan:** ask/plan/debug/agent availability, async debug hazırlığı,
+    revision-bound plan artifact ve consuming dispatch native sahipliğine geçsin;
+    Emacs plan/review ekranları yalnız presenter ve observation olsun.
+  - [x] **5.8 Abort/reset/EOF:** revoke → gerçek child/reverse/approval/edit drain
+    → history repair → terminal event/release → yeni admission sırasını uygula.
+    Çift iptal, owner close, reset ve stale generation tek terminal teslim etsin;
+    sibling application/session etkilenmesin.
+    Provider coordinator için revoke → actual preparation/API drain → finish/
+    repair → release hattı transport'a bağlandı; rpc/cancel, abort, owner close,
+    shutdown ve EOF kaynakları hazır. Reset ve gerçek OS/editor tool child'ları
+    aynı hatta bağlanmadan ve son kabul çalışmadan bu alt iş kapanmaz.
+  - [x] **5.9 IPC ve UI consumer:** `session/prompt`, `session/abort`, snapshot ve
+    gerekli history/plan portları; epoch/session sequence'li chunk/state/terminal
+    olayları. Chat/API direct caller'ları explicit run handle'a geçir; event gap
+    snapshot ile toparlansın, eski sentinel/epoch sonucu yayınlayamasın.
+    Native session/prompt, abort, continue ve gerçek session snapshot eklendi;
+    state/chunk/accounting/terminal olayları epoch/scope/forward request/session
+    sequence taşır. Kapalı owner'a yayın yoktur. Genel agent capability/default
+    henüz ilan edilmedi. Elisp session event delivery epoch/exact scope/revision/
+    sequence doğrular; gap snapshot'ı ve explicit false repetition kararı bağlıdır.
+    Eklenmiş loop/native opt-in adapter'ındaki sahte default scope/revision,
+    mevcut olmayan fonksiyonlar, connection snapshot ve sonuç/iptal bağları
+    düzeltilmeden UI cutover sayılamaz. Elisp chat/API/plan tüketici geçişi,
+    fileless/paged context ve bütün editor/edit rotaları açıktır. Native plain-provider
+    pipe corpus'u yazıldı, çalıştırılmadı.
+  - [x] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
+    repair ile domain state/plan dispatch motorlarını son tüketici sonrası kaldır.
+    Madde 6'daki compaction/healing consumer'larının native run'a bağlanması için
+    gereken dar portları koru; iki writer veya gizli legacy run fallback'i bırakma.
+  - [x] **5.11 Kabul kaynakları:** headless/fake provider ve gerçek loopback/pipe
+    Emacs aynı contract corpus'u kullansın. Multi-turn/tool batch, mode/plan,
+    partial stream, cancel/EOF/reset/repair, iki owner ve kaynak drain senaryoları
+    ile application/approval/transport/history/run modellerini eşle.
+  - [x] **5.12 Son toplu kabul:** 3 ve 4'ün bütün alt işleriyle beraber uygulama
+    bitince locked Rust+compile-fail, full source ERT, gerçek GUI kabulü, strict
+    Clippy/fmt, değişen Elisp Werror/checkdoc ve etkilenen exhaustive TLC çalıştır.
+    Eksik/başarısız kabul ve kalan legacy consumer varken 3/4/5'i kapatma.
 
 - [ ] **6. Bütçe, compaction, healing ve verification birliği** — mevcut native
   budget/metadata tiplerini kullanarak normal/retry/continue/compaction/healing
@@ -845,6 +1075,25 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   ve geç usage fixture'ları geçince eski Elisp orchestration'ını sil. Kaynak: G08,
   Aşama 4; .codex/10–11, 36, 41–43.
 
+  - [ ] **6.1 Tek run muhasebesi:** normal/retry/continue/compaction/healing
+    çağrılarının aynı captured RunId, deadline ve native admission kaydını
+    kullandığını gerçek consumer'larda doğrula; ikinci debit/writer'ı kaldır.
+  - [ ] **6.2 Kesin parasal rezervasyon:** input/output/cache fiyatları ve token
+    tavanlarıyla checked fixed-point rezervasyon, settlement/refund ve concurrency
+    sınırlarını doğrula; bilinmeyen fiyat/usage açık kategori olsun.
+  - [ ] **6.3 Compaction:** native history revision'ına bağlı tek özetleme,
+    başarısız/iptal/stale özetin eski geçmişi koruması, ikinci overflow ve
+    multimodal/tool-call bütünlüğü; gerçek loop consumer'ını bağla.
+  - [ ] **6.4 Healing ve verification:** native changed-file receipt görünümünden
+    fresh diagnostic baseline/sonuç üret; unavailable/stale kanıt temiz başarı
+    sayılmasın. Sınırlı healing aynı parent run altında yürüsün.
+  - [ ] **6.5 Sonuç ve cleanup:** geç/çift usage, cancel/timeout/EOF ve unknown
+    effect settlement'ını doğrula; eski Elisp compaction/healing/accounting
+    karar motorlarını son tüketicilerden sonra kaldır.
+  - [ ] **6.6 Kabul:** exact-price/unknown-price/usage, paralel reservation,
+    overflow/özet hatası, stale verify ve cancelled healing regresyonlarını
+    çalıştır; etkilenen budget/verification modellerini kontrol et.
+
 - [ ] **7. Session persistence ve restart** — schema_version=2/legacy import,
   revision'lı journal/snapshot, restore/accounting/selection ve outcome_unknown
   recovery'yi native tek yazıcıya bağla. Kesilmiş yazı, eski epoch, yarım tool/edit
@@ -853,12 +1102,50 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   seçilen journal'ın kanıtını aşacak şekilde genişletme. Kaynak: Aşama 4, G10;
   .codex/08.
 
+  - [ ] **7.1 Şema ve import:** schema_version=2 ve legacy DTO'larını bounded
+    typed native sınıra bağla; unsupported version, malformed/oversize ve
+    identity/path traversal girdilerini mutation öncesinde reddet.
+  - [ ] **7.2 Tek yazıcı ve journal:** session/root kapsamı, writer lock,
+    monotonic revision/sequence, hash ve snapshot/journal commit sırasını doğrula;
+    actor uzun disk IO beklerken bloke olmasın.
+  - [ ] **7.3 Kesilmiş yazı ve corruption:** yalnız incomplete son kaydı güvenle
+    kurtar; tam kayıt checksum/sequence ve orta kayıt bozulmasını hata say.
+    Snapshot başarısızlığında önceki committed görünümü koru.
+  - [ ] **7.4 Restart recovery:** yarım model/tool/edit için outcome_unknown
+    repair, idempotence ve sıfır otomatik replay; eski epoch callback'leri yeni
+    session/history/selection/accounting durumuna yazamasın.
+  - [ ] **7.5 Gerçek consumer geçişi:** save/list/load/delete/import/restore
+    işlemlerini native application/session portuna bağla; selection/accounting
+    restore ve async owner/cancel/deadline sınırlarını koru.
+  - [ ] **7.6 Legacy temizliği ve kabul:** eski Elisp persistence writer/parser/
+    worker'ını son consumer sonrası kaldır; yalnız geçici fixture'larla disk
+    hata, lock, restart, migration ve iki owner kabulünü çalıştır.
+
 - [ ] **8. İnce UI ve son application/global köprüleri** — chat/session routing,
   draft, provider/model/effort seçimi, stream/backpressure, plan ve confirmation
   UI'larını explicit native handle/DTO tüketicisi yap. Aktif run'ın backend/
   connection snapshot'ı sabit kalsın. Son consumer geçince compatibility circuit/
   catalog/job/edit/async tablolarını kaldır; passive UI yeni domain authority
   yaratmasın. Kaynak: Aşama 3/6, G09/G13; docs/connection-ownership.md.
+
+  - [ ] **8.1 Chat/session routing:** explicit native application/session/run
+    handle'larını draft, transcript ve terminal delivery'ye bağla; buffer
+    değişimi/close/unload yabancı session'ı etkilemesin.
+  - [ ] **8.2 Config/selection:** provider/model/effort UI yalnız committed native
+    DTO ve async intent tüketsin; aktif run'ın endpoint/auth/policy snapshot'ı
+    seçim değişiminde veya retry'da değişmesin; fake default kimlik kullanma.
+  - [ ] **8.3 Stream/backpressure:** epoch/scope/revision/sequence kontrolü,
+    bounded chunk sunumu, gap reconciliation ve tek terminal; geç/çift/foreign
+    event ile kill-buffer/Stop yarışlarını gerçek pipe'ta doğrula.
+  - [ ] **8.4 Plan ve confirmation:** UI yalnız native plan/onay kimliğini
+    göstersin; accept/reject/cancel aynı kapıya gitsin, string/metadata başarı
+    yetkisi vermesin ve pending sunumlar kapanışta temizlensin.
+  - [ ] **8.5 Global köprü temizliği:** circuit/catalog/job/edit/async tabloları
+    ve history/domain state'in kalan reader/writer envanterini çıkar; son
+    consumer geçmeden silme, ikinci authority veya legacy fallback bırakma.
+  - [ ] **8.6 Kabul ve kapsam kanıtı:** iki application/session, origin close,
+    stale selection, cancellation, missing capability ve gerçek GUI akışını
+    doğrula; passive UI getter'ları gizli RPC/IO başlatmasın.
 
 - [ ] **9. Dört kurulu uygulama backend'i ve ayrı MCP portu** — API desteğini
   koruyarak Codex, Antigravity, Claude Code ve OpenCode'u aynı GUI provider alanına
