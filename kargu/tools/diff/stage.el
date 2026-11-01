@@ -115,25 +115,6 @@ Dynamically bound while the hook runs.")
       (replace-match new t t)
       (buffer-string))))
 
-(defun kargu-diff--file-text (path)
-  "Return the full widened text of PATH from its clean visiting buffer, or disk.
-Signal when a visiting buffer has unsaved user edits."
-  (let ((buf (find-buffer-visiting path)))
-    (cond
-     ((buffer-live-p buf)
-      (with-current-buffer buf
-        (when (buffer-modified-p buf)
-          (error "Buffer %s has unsaved modifications; save or revert it before agent edits"
-                 (buffer-name buf)))
-        (save-restriction
-          (widen)
-          (buffer-string))))
-     ((file-exists-p path)
-      (with-temp-buffer
-        (insert-file-contents path)
-        (buffer-string)))
-     (t nil))))
-
 (defun kargu-diff--capture-pre-state (path)
   "Capture pre-edit snapshot state for PATH without opening or dirtying buffers."
   (let* ((exists (file-exists-p path))

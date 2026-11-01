@@ -79,27 +79,6 @@ Empty objects and empty arrays retain their distinct wire types."
      (kargu--log-block "bad JSON input" (or string ""))
      nil)))
 
-(defun kargu--json-whole-string-p (string)
-  "Non-nil when STRING is exactly one JSON value (no trailing tokens)."
-  (and (stringp string)
-       (let ((s (string-trim string)))
-         (and (not (string-empty-p s))
-              (condition-case nil
-                  (with-temp-buffer
-                    (insert s)
-                    (goto-char (point-min))
-                    (json-parse-buffer)
-                    (skip-chars-forward " \t\n\r")
-                    (eobp))
-                (error nil))))))
-
-(defun kargu--json-complete-value-string-p (string)
-  "Non-nil when STRING is exactly one JSON object or array."
-  (and (stringp string)
-       (let ((s (string-trim string)))
-         (and (or (string-prefix-p "{" s) (string-prefix-p "[" s))
-              (kargu--json-whole-string-p s)))))
-
 (defun kargu--json-decode-last-value-checked (string)
   "Return (ok . VALUE) for the last JSON value in STRING, or nil.
 Concatenated values such as `{}{\"file_path\":\"x\"}` keep the last
@@ -237,10 +216,6 @@ are ignored.  Optional DEPTH caps nesting at
   "Read KEY from OBJ, also accepting an interned symbol key."
   (or (kargu-aget obj key)
       (and (stringp key) (kargu-aget obj (intern key)))))
-
-(defun kargu--json-decode-object (string)
-  "Decode JSON STRING to a typed object with string keys, or nil."
-  (kargu--json-decode-safe string))
 
 (defun kargu--provider-error-text (obj)
   "Extract a concise provider error string from decoded JSON OBJ."

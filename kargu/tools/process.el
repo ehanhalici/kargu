@@ -302,13 +302,6 @@ Return the process, or nil when none started."
        (kargu-process--fail callback (error-message-string err))
        nil))))
 
-(defun kargu-process-deliver (callback thunk)
-  "Deliver THUNK's result to CALLBACK, converting failures to error text."
-  (funcall callback
-           (condition-case-unless-debug err
-               (funcall thunk)
-             (error (format "ERROR: %s" (error-message-string err))))))
-
 (defun kargu-process-failure (label result)
   "Error text for a failed RESULT of the command named LABEL."
   (cond

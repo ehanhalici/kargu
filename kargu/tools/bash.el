@@ -52,18 +52,6 @@
       (executable-find "sh")
       (error "Bash tool requires an executable bash or sh")))
 
-(defun kargu-bash--run-background (command dir shell callback)
-  "Start persistent COMMAND in DIR using SHELL and deliver receipt to CALLBACK."
-  (kargu-bash-start-job command dir shell :background t :callback callback))
-
-(defun kargu-bash--run-async (command dir shell callback)
-  "Run COMMAND in DIR using SHELL, delivering output to CALLBACK."
-  (kargu-bash-start-job command dir shell :callback callback))
-
-(defun kargu-bash--manage-kill (id)
-  "Request cancellation of shell job ID without discarding its live log."
-  (kargu-bash-manage-job (concat "kill " id)))
-
 (defun kargu-bash-run (command &optional cwd background callback)
   "Run COMMAND in CWD, capturing stdout and stderr.
 With CALLBACK the call returns at once: approval, execution and the result

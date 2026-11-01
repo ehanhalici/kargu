@@ -250,12 +250,6 @@ JSON false, nil, \"false\", and 0 are false.  A missing value is false."
   "Bound STRING through the shared tool output boundary."
   (kargu-tool-execution-truncate-for-model string))
 
-(defmacro kargu-safe-tool-call (&rest body)
-  "Execute BODY, catching errors and formatting as an ERROR string."
-  `(condition-case-unless-debug err
-       (progn ,@body)
-     (error (format "ERROR: %s" (error-message-string err)))))
-
 (defun kargu-execute-tool (name arguments &optional callback)
   "Execute NAME with ARGUMENTS through the shared gate once.
 CALLBACK receives the asynchronous result; without it, no waiting occurs."
