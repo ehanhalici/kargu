@@ -1853,3 +1853,82 @@ fn native_service_close_retires_identity_and_drains_late_editor_receipt_without_
     assert_eq!(fs::read_to_string(path)?, "new\n");
     Ok(())
 }
+
+#[test]
+fn verification_debt_survives_undo_snapshot_eviction_and_consumes_only_exact_identity() -> TestResult
+{
+    let journal = private()?;
+    let mut client = Client::new()?;
+    let mut roots = Vec::new();
+    let mut first = None;
+    for _ in 0..17 {
+        let root = private()?;
+        let path = root.path().join("file.txt");
+        fs::write(&path, "old\n")?;
+        let (_, edit) = client.ready(root.path(), SOURCE)?;
+        let issued = client.issue(&edit, SOURCE, journal.path())?;
+        assert_eq!(issued["result"]["state"], "issued", "{issued}");
+        fs::write(&path, "new\n")?;
+        let reply = upload(
+            &mut client,
+            &edit,
+            &issued["result"]["issued_token"],
+            observed(&path, "new\n", "new\n")?,
+            "new\n",
+            "new\n",
+        )?;
+        assert_eq!(
+            reply["result"]["receipt"]["outcome"], "applied_full",
+            "{reply}"
+        );
+        if first.is_none() {
+            first = Some(edit);
+        }
+        roots.push(root);
+    }
+    let first = first.ok_or("first edit")?;
+    let snapshots = client.call("edit/history", json!({"action":"list","offset":0}))?;
+    let snapshots = snapshots["result"]["files"].as_array().ok_or("snapshots")?;
+    assert_eq!(snapshots.len(), 16);
+    assert!(!snapshots.iter().any(|row| row["edit_id"] == first));
+    let pending = client.call(
+        "edit/history",
+        json!({"action":"changes","offset":0,"pending_only":true}),
+    )?;
+    let rows = pending["result"]["files"].as_array().ok_or("changes")?;
+    assert_eq!(rows.len(), 17);
+    let row = rows
+        .iter()
+        .find(|row| row["edit_id"] == first)
+        .ok_or("evicted edit remains pending")?;
+    let file = row["file"].clone();
+    let hash = row["final_hash"].clone();
+    let refused = client.call(
+        "edit/history",
+        json!({"action":"consume","edit_id":first,
+        "file":file,"final_hash":"0".repeat(64)}),
+    )?;
+    assert_eq!(refused["result"]["consumed"], false);
+    let consumed = client.call(
+        "edit/history",
+        json!({"action":"consume","edit_id":first,
+        "file":file,"final_hash":hash}),
+    )?;
+    assert_eq!(consumed["result"]["consumed"], true);
+    let pending = client.call(
+        "edit/history",
+        json!({"action":"changes","offset":0,"pending_only":true}),
+    )?;
+    assert_eq!(
+        pending["result"]["files"]
+            .as_array()
+            .ok_or("pending after consume")?
+            .len(),
+        16
+    );
+    assert_eq!(
+        fs::read_to_string(roots.first().ok_or("first root")?.path().join("file.txt"))?,
+        "new\n"
+    );
+    Ok(())
+}

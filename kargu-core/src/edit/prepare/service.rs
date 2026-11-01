@@ -643,10 +643,16 @@ impl EditPreparations {
         self.sweep(now);
         let input: types::Ticket = decode(args)?;
         let parent = self.parent(session, &input.origin_id)?;
-        let entry = self.owned(session, &input.origin_id, &input.preparation_id)?;
-        if !matches!(entry.phase, Phase::Ready(_)) {
+        self.owned(session, &input.origin_id, &input.preparation_id)?;
+        let entry = self
+            .entries
+            .get(&input.preparation_id)
+            .ok_or(CoreError::StaleOwner)?;
+        let Phase::Ready(artifact) = &entry.phase else {
             return Err(CoreError::AlreadyCompleted);
-        }
+        };
+        self.check_change_capacity(&entry.owner, artifact)?;
+        let entry = self.owned(session, &input.origin_id, &input.preparation_id)?;
         let phase = std::mem::replace(&mut entry.phase, Phase::Preparing { revoked: false });
         let Phase::Ready(artifact) = phase else {
             return Err(CoreError::CleanupFailed);
@@ -663,6 +669,22 @@ impl EditPreparations {
             deadline: entry.expires,
             parent,
         })
+    }
+    fn check_change_capacity(
+        &self,
+        incoming: &Owner,
+        artifact: &Artifact,
+    ) -> Result<(), CoreError> {
+        let mut reserved = super::history::ChangeReservations::default();
+        for record in self.changes.iter().filter(|row| row.verification_pending) {
+            reserved.change(record)?;
+        }
+        for entry in self.entries.values() {
+            if let Phase::Claimed { artifact, .. } = &entry.phase {
+                reserved.artifact(&entry.owner.session, &entry.owner.service_id, artifact)?;
+            }
+        }
+        reserved.artifact(&incoming.session, &incoming.service_id, artifact)
     }
     pub(crate) fn claim_status(
         &self,
@@ -848,27 +870,30 @@ impl EditPreparations {
                 if let Some((prev_edit, prev_index, prev_root, prev_full, prev_rel, prev_res)) =
                     remaining_for_path
                 {
-                    self.changes.push_back(super::history::ChangedFileRecord {
-                        session: session.clone(),
-                        service_id: service_id.clone(),
-                        edit_id: prev_edit,
-                        revision,
-                        file: prev_index,
-                        root: prev_root,
-                        full_path: prev_full,
-                        path: prev_rel,
-                        outcome: prev_res.outcome(),
-                        final_hash: version.final_hash().or_else(|| prev_res.final_hash()),
-                        document: version
-                            .final_document
-                            .clone()
-                            .or_else(|| prev_res.final_document.clone()),
-                        disk: version.final_disk.clone(),
-                        hunks: prev_res.hunks(),
-                        saved: version.saved(),
-                        hook_modified: prev_res.hook_modified(),
-                        verification_pending: false,
-                    });
+                    super::history::publish_change(
+                        &mut self.changes,
+                        super::history::ChangedFileRecord {
+                            session: session.clone(),
+                            service_id: service_id.clone(),
+                            edit_id: prev_edit,
+                            revision,
+                            file: prev_index,
+                            root: prev_root,
+                            full_path: prev_full,
+                            path: prev_rel,
+                            outcome: prev_res.outcome(),
+                            final_hash: version.final_hash().or_else(|| prev_res.final_hash()),
+                            document: version
+                                .final_document
+                                .clone()
+                                .or_else(|| prev_res.final_document.clone()),
+                            disk: version.final_disk.clone(),
+                            hunks: prev_res.hunks(),
+                            saved: version.saved(),
+                            hook_modified: prev_res.hook_modified(),
+                            verification_pending: false,
+                        },
+                    )?;
                 }
             }
             return Ok(false);
@@ -885,27 +910,27 @@ impl EditPreparations {
                     && record.service_id == service_id
                     && record.full_path == file.path)
             });
-            while self.changes.len() >= limits::EDIT_FILES {
-                self.changes.pop_front();
-            }
-            self.changes.push_back(super::history::ChangedFileRecord {
-                session: session.clone(),
-                service_id: service_id.clone(),
-                edit_id: edit_id.clone(),
-                revision,
-                file: result.index(),
-                root: file.root.path().to_path_buf(),
-                full_path: file.path.clone(),
-                path: file.relative.clone(),
-                outcome: result.outcome(),
-                final_hash: result.final_hash(),
-                document: result.final_document.clone(),
-                disk: result.final_disk.clone(),
-                hunks: result.hunks(),
-                saved: result.saved(),
-                hook_modified: result.hook_modified(),
-                verification_pending: true,
-            });
+            super::history::publish_change(
+                &mut self.changes,
+                super::history::ChangedFileRecord {
+                    session: session.clone(),
+                    service_id: service_id.clone(),
+                    edit_id: edit_id.clone(),
+                    revision,
+                    file: result.index(),
+                    root: file.root.path().to_path_buf(),
+                    full_path: file.path.clone(),
+                    path: file.relative.clone(),
+                    outcome: result.outcome(),
+                    final_hash: result.final_hash(),
+                    document: result.final_document.clone(),
+                    disk: result.final_disk.clone(),
+                    hunks: result.hunks(),
+                    saved: result.saved(),
+                    hook_modified: result.hook_modified(),
+                    verification_pending: true,
+                },
+            )?;
         }
         if !receipt.has_applied() {
             return Ok(false);
@@ -1102,3 +1127,6 @@ impl EditPreparations {
         Ok(descriptor)
     }
 }
+
+#[cfg(test)]
+mod tests;

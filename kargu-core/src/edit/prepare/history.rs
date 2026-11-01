@@ -21,6 +21,54 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::VecDeque, path::PathBuf};
 
+/// Distinct pending or still-claimed changes, bounded before editor admission.
+#[derive(Default)]
+pub(super) struct ChangeReservations(std::collections::HashSet<ChangeKey>);
+#[derive(Eq, Hash, PartialEq)]
+struct ChangeKey {
+    session: SessionId,
+    service: Option<EditServiceId>,
+    path: PathBuf,
+}
+impl ChangeReservations {
+    fn reserve(
+        &mut self,
+        session: &SessionId,
+        service: &Option<EditServiceId>,
+        path: &std::path::Path,
+    ) -> Result<(), CoreError> {
+        let key = ChangeKey {
+            session: session.clone(),
+            service: service.clone(),
+            path: path.to_path_buf(),
+        };
+        if !self.0.contains(&key) && self.0.len() >= crate::constants::limits::EDIT_FILES {
+            return Err(CoreError::Limit);
+        }
+        self.0.insert(key);
+        Ok(())
+    }
+    pub(super) fn change(&mut self, record: &ChangedFileRecord) -> Result<(), CoreError> {
+        self.reserve(&record.session, &record.service_id, &record.full_path)
+    }
+    pub(super) fn artifact(
+        &mut self,
+        session: &SessionId,
+        service: &Option<EditServiceId>,
+        artifact: &super::Artifact,
+    ) -> Result<(), CoreError> {
+        match artifact {
+            super::Artifact::File(file) => self.reserve(session, service, &file.path),
+            super::Artifact::Batch(batch) => {
+                for file in &batch.files {
+                    self.reserve(session, service, &file.proposal.path)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct HistoryRevision(u64);
 
@@ -49,6 +97,22 @@ pub(super) struct ChangedFileRecord {
     pub(super) saved: bool,
     pub(super) hook_modified: bool,
     pub(super) verification_pending: bool,
+}
+
+pub(super) fn publish_change(
+    changes: &mut VecDeque<ChangedFileRecord>,
+    record: ChangedFileRecord,
+) -> Result<(), CoreError> {
+    while changes.len() >= crate::constants::limits::EDIT_FILES {
+        // A pending verification is debt, independent of undo snapshot eviction.
+        let consumed = changes
+            .iter()
+            .position(|row| !row.verification_pending)
+            .ok_or(CoreError::CleanupFailed)?;
+        changes.remove(consumed);
+    }
+    changes.push_back(record);
+    Ok(())
 }
 
 #[derive(Deserialize)]

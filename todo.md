@@ -638,8 +638,8 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   düzeltildi. Tool/LSP/plan/interactive undo yolu yalnız açık
   `kargu-diff-native-edit-enabled` seçimiyle etkin; ready/mocked test fonksiyonları
   backend seçmez, seçilmiş işlem başka writer'a düşmez. 3.4–3.5 tamamlandı.
-  Tam hunk ölçümü, default consumer cutover, verification readers ve legacy
-  temizliği tamamlanmadığından 3.6–3.10 kalan işleriyle açık tutulur.
+  Tam hunk ölçümü 3.23’te tamamlandı. Default consumer cutover, verification
+  readers ve legacy temizliği tamamlanmadığından 3.8–3.10 açık tutulur.
   Güncel kapsam/kanıt/sınırlar:
   `docs/task3-audit-2026-10-29.md`.
 
@@ -720,16 +720,16 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       sunumla bütün dosyaları kapsayan revised review testi geçti.
     - [x] Gerçek GUI'de reject/timeout/C-g, foreign control/window/buffer ve
       presenter hata kabulünü tamamla (3.23); foreign UI kaynaklarına dokunma.
-  - [x] **3.8 Consumer cutover:**
+  - [ ] **3.8 Consumer cutover:**
 
     - [x] edit_file/write_file/apply_patch, LSP/plan ve interactive native undo için
       açık `kargu-diff-native-edit-enabled` yolu bağlı. Backend seçimi readiness/
       mocked fonksiyonlara bağlı değil; seçilmiş işlem başka writer'a düşmez.
       Receipt saved/count alanları ve bounded passive UI referansları kullanılır;
       APPLIED-prefix'ten typed sonuç çıkarılmaz. Kanıtlar 3.22'de.
-    - [x] Loop verification/change reader'larını aynı native servis/sonuca geçir;
+    - [ ] Loop verification/change reader'larını aynı native servis/sonuca geçir;
       bütün consumer kabulü sonrasında varsayılan native cutover'ı tamamla.
-    - [x] **3.8a Native değişiklik görünümü:** verified receipt'ten owner/session/
+    - [ ] **3.8a Native değişiklik görünümü:** verified receipt'ten owner/session/
       edit/file revision-bound change kaydı üret; snapshot eviction'ından bağımsız
       verification kuyruğu ve exact identity consume porta bağlansın. Snapshot/
       changed-files/run-files Elisp tabloları domain authority olmasın.
@@ -739,15 +739,24 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       `drained` gerçek preparation/editor settlement'ını bildirir. Elisp close
       yakalanmış application'ı kullanır ve drain'i bekler. Gerçek change reader
       cutover, eviction coverage ve bütün consumer kabulü hâlâ açık.
-    - [x] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
+      - [x] **3.8a1 Pending verification kapasitesi:** yeni hedef için native
+        claim verilmeden önce `(session, service, path)` yer ayır; iptal edilmiş
+        claim gerçek release'e kadar yerini tutsun. Dolu kuyruğun pending kaydı
+        silinmez; yalnız tüketilmiş metadata atılabilir. Aynı hedefi düzenlemek
+        veya undo yapmak kapasite yüzünden gereksiz yere engellenmez. Undo'nun
+        16 snapshot sınırı verification borcunu düşürmez; exact edit/file/hash
+        consume korunur. Kanıt: `docs/native-change-capacity.md`. Bu alt iş,
+        tüketilmiş bütün run-files geçmişinin sınırsız tutulması veya Elisp
+        consumer cutover'ı anlamına gelmez.
+    - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller
       callback'e geçirilsin, seçilmiş işlem farklı writer'a düşmesin.
-  - [x] **3.9 Son legacy temizliği:** son consumer sonrası Elisp patch/proposal/
+  - [ ] **3.9 Son legacy temizliği:** son consumer sonrası Elisp patch/proposal/
     stage/review/pending-plan/snapshot/change domain motorlarını ve default/global
     edit aynalarını sil; yalnız canlı transaction/save/undo ve UI adapter'ları kalsın.
     `tools/process.el` diff tüketicisi de kalksın; Dape/session consumer'ları korunur.
-    - [x] Eski parser/proposal/stage/review/rollback fonksiyonlarının public ve
+    - [ ] Eski parser/proposal/stage/review/rollback fonksiyonlarının public ve
       private çağıran envanterini bitir; async public adapter'ları koruyarak eski
       motorları ve compatibility backend seçimini kaldır. Edit service yalnız
       native handle ve passive UI kaynakları tutsun; clear/close/unload gerçek
@@ -761,7 +770,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     - [x] Altı exhaustive TLC modeli tam verdict ve boş kuyrukla geçti:
       preparation 319.746, journal 1.116, issuance 959, activity 356,
       transaction 560, revision 272 farklı durum; revision half-commit mutantı red.
-    - [x] 3.6–3.9, 3.18 ve 3.23'teki kalan kabul/geçiş işleri tamamlanınca bütün
+    - [ ] 3.6–3.9, 3.18 ve 3.23'teki kalan kabul/geçiş işleri tamamlanınca bütün
       kontrolleri nihai kodda tekrar doğrula; üst madde 3'ü en son kapat.
   - [x] **3.11 TLC kapanış verdict'ini sağlamlaştırma (çalışırken bulundu):**
     `Finished in` veya sıfır exit kodu tek başına tam tarama sayılmasın. Koşucu
