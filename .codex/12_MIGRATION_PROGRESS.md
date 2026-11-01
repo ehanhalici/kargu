@@ -1632,3 +1632,52 @@ seçeneği yoktur: bu dilim yalnız opt-in bridge lifecycle altyapısıdır.
 
 `.codex/` halen `.git/info/exclude` ile gizlidir. Bu günlük ve envanter diskte
 saklanır; Git index/exclude değiştirilmemiştir.
+
+
+## 2026-11-02 — Commit edilmemiş çalışma ağacının incelemesi
+
+Kullanıcının tüm mevcut değişiklikleri inceleme, düzeltme veya geri alma ve
+çalışma ağacını temizleme yetkisi kapsamında:
+
+- Kullanılmayan Elisp yardımcıları, optional Eglot/catalog yükleme korumaları,
+  footer tamamlama ve transcript model sunumu korundu. Draft, parçalı reasoning
+  ve passive UI testleri geçişin tamamlandığına kanıt olarak kullanılmaz.
+- Edit snapshot/review tablolarının aktif service üzerinden okunup yazılması
+  korundu; delete işleminin service modified-path kaydı tamamlandı.
+- Native parasal bütçe DTO sunumunda eksik bilgi ile bilinen sıfır ayrıldı;
+  geçersiz kısmi DTO, alanlar değiştirilmeden reddedilir.
+- Provider/model readonly host testleri korundu. `model/select` prototipi seçim
+  kaydetmeden başarı döndürdüğü için geri alındı.
+- Yeni catalog RPC wrapper'ları exact epoch/scope ve request cancellation
+  ömrünü yeterince sabitlemediği için geri alındı. Mevcut katalog portu korunur.
+- Config refresh paylaşımı bağımsız owner/deadline ömrünü kaybediyordu; eski
+  completion yeni isteğin callback listesini temizleyebiliyordu. Bu paylaşım
+  ve ona bağlı chat-mode config tetiklemesi geri alındı.
+- Yeni session RPC'leri actor üzerinde senkron disk I/O yapıyor ve zorunlu
+  application/session/revision yetkisini taşımıyordu. UI portu da RPC hatasında
+  Elisp'e senkron fallback ekliyordu. Bunlar geri alındı; önceki async worker
+  gerçek native consumer geçişine kadar geçiş borcu olarak korunur.
+- Bağlanmamış Rust session prototipinde delete/import writer kilidini atlıyor,
+  yüklenen snapshot dosya kimliğiyle bağlanmıyor ve recovery eksik tool
+  sonuçlarını konuşmanın sonuna ekliyordu. Journal dayanıklılığına ilişkin
+  yararlı testleri tam persistence kabulü saymak doğru değildir. Prototip ve
+  ona bağlı testler geri alındı; 7.3a yeniden açıldı.
+- Healing'deki ikinci result dispatcher mevcut queue continuation'ını
+  kesiyordu; başarıda tüm receipt'leri consume eden ekleme de doğrulanmış
+  settlement değildi. Her ikisi geri alındı.
+- Eski doğrulama sayılarıyla yeni cutover iddialarını karıştıran commit edilmemiş
+  ilerleme eki kaldırıldı. İşlerin tek listesi `todo.md` olarak kalır.
+
+İlk ağacın binary diff'i, index diff'i ve üç geçici fixture'ın yedeği repo
+dışında `/tmp/nix-shell-5332-2396127854/kargu-worktree-review-q57ane3p` altında
+alındı. Önceden commit edilmiş Rust geçişleri geri alınmadı. Bu inceleme
+3–8 görevlerinin tamamlandığı veya legacy motorların kaldırıldığı anlamına gelmez.
+
+
+Doğrulama: locked Rust 593 test (32 compile-fail dahil), fmt ve tüm target'larda
+`clippy -D warnings` geçti. Kaynak Elisp ile tam ERT 1446/1446 geçti; daha sonra
+eklenen review izolasyonu dahil iki service regresyonu ayrıca 2/2 geçti.
+Değişen 18 Elisp dosyasının warnings-as-errors byte compile, parantez ve checkdoc
+kontrolleri geçti. Emacs başlangıcındaki ortam kaynaklı OpenPGP autoload mesajı
+sürüyor; test veya derleme hatası değildir. TLA+ kaynakları değişmediği için TLC
+çalıştırılmadı. Testler geçici fixture'larla çalıştırıldı.

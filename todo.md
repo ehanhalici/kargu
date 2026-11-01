@@ -1427,12 +1427,12 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] **7.3 Kesilmiş yazı ve corruption:** yalnız incomplete son kaydı güvenle
     kurtar; tam kayıt checksum/sequence ve orta kayıt bozulmasını hata say.
     Snapshot başarısızlığında önceki committed görünümü koru.
-  - [x] **7.3a Storage kaynak düzeltmesi ve odak kabulü:** tekrarlanan save
-    journal sequence'i sıfırlamaz; tamamlanmış bozuk son kayıt silinmez; recovery
-    aktif writer'ın flock'ını atlayamaz. Public storage ID traversal kontrolü,
-    bounded/no-follow okuma, atomic exclusive snapshot ve tam journal checkpoint
-    eklendi. Dört kırmızı regresyondan sonra toplam 18 session testi geçti.
-    Host RPC'nin async/scope/revision bağları ve tam 7.3 kapanışı hâlâ açıktır.
+  - [ ] **7.3a Storage temelini güvenli biçimde yeniden kur:** önceki WIP
+    incelemesinde kilitsiz delete/import, snapshot/journal kimlik uyuşmazlığı ve
+    tool sonuçlarını yanlış sıraya ekleyen recovery bulundu. Bağlanmamış session
+    prototipi geri alındı; önceki 18 test tam storage kabulü sayılmaz. Stable
+    writer lock, doğrulanmış session kimliği ve protokol sıralı restart repair
+    regresyonlarıyla yeniden doğrula; actor üzerinde disk I/O yapma.
   - [ ] **7.4 Restart recovery:** yarım model/tool/edit için outcome_unknown
     repair, idempotence ve sıfır otomatik replay; eski epoch callback'leri yeni
     session/history/selection/accounting durumuna yazamasın.
