@@ -84,6 +84,83 @@ fn semantic_baseline_keeps_duplicate_counts_and_ignores_position_shifts() -> Tes
 }
 
 #[test]
+fn fresh_baselines_require_the_same_producer_cohort_and_forward_document_evidence() -> TestResult {
+    let variants = [
+        "server_restart",
+        "server_removed",
+        "backend_replaced",
+        "backend_added",
+        "backend_removed",
+        "tick_reversed",
+        "version_reversed",
+    ];
+    for variant in variants {
+        let mut before = snapshot();
+        let mut after = snapshot();
+        match variant {
+            "server_restart" => {
+                after["server"]["requested_server"] = json!("restarted-server");
+                after["server"]["observed_server"] = json!("restarted-server");
+            }
+            "server_removed" => after["server"] = Value::Null,
+            "backend_replaced" => after["backends"][0]["backend"] = json!("another-checker"),
+            "backend_added" => after["backends"].as_array_mut().ok_or("backends")?.push(
+                json!({"backend":"additional-checker","requested":9,"observed":9,"tick":7,"reported":true})),
+            "backend_removed" => before["backends"].as_array_mut().ok_or("backends")?.push(
+                json!({"backend":"removed-checker","requested":9,"observed":9,"tick":7,"reported":true})),
+            "tick_reversed" => {
+                before["requested"]["tick"] = json!(8);
+                before["observed"]["tick"] = json!(8);
+                before["backends"][0]["tick"] = json!(8);
+                before["server"]["tick"] = json!(8);
+            }
+            "version_reversed" => {
+                before["server"]["requested_version"] = json!(3);
+                before["server"]["published_version"] = json!(3);
+            }
+            _ => return Err("invalid fixture".into()),
+        }
+        let baseline: DiagnosticSnapshot = serde_json::from_value(before)?;
+        let observed: DiagnosticSnapshot = serde_json::from_value(after)?;
+        assert_eq!(baseline.freshness(), Freshness::Fresh);
+        assert_eq!(observed.freshness(), Freshness::Fresh);
+        assert!(observed.compare_errors(&baseline).is_none(), "{variant}");
+    }
+    Ok(())
+}
+
+#[test]
+fn baseline_producer_order_and_new_report_generations_do_not_invalidate_comparison() -> TestResult {
+    let mut before = snapshot();
+    before["backends"]
+        .as_array_mut()
+        .ok_or("backends")?
+        .push(json!({"backend":"checker-2","requested":9,"observed":9,"tick":7,"reported":true}));
+    let mut after = before.clone();
+    after["requested"]["tick"] = json!(8);
+    after["observed"]["tick"] = json!(8);
+    after["server"]["tick"] = json!(8);
+    after["server"]["requested_version"] = json!(3);
+    after["server"]["published_version"] = json!(3);
+    let backends = after["backends"].as_array_mut().ok_or("backends")?;
+    backends.reverse();
+    for backend in backends {
+        backend["tick"] = json!(8);
+        backend["requested"] = json!(10);
+        backend["observed"] = json!(10);
+    }
+    let baseline: DiagnosticSnapshot = serde_json::from_value(before)?;
+    let observed: DiagnosticSnapshot = serde_json::from_value(after)?;
+    let delta = observed
+        .compare_errors(&baseline)
+        .ok_or("stable producer comparison")?;
+    assert_eq!(delta.new.get(), 0);
+    assert_eq!(delta.pre_existing.get(), 0);
+    assert_eq!(delta.resolved.get(), 0);
+    Ok(())
+}
+
+#[test]
 fn scalar_positions_preserve_emoji_tabs_crlf_and_final_empty_line() -> TestResult {
     let text = "a🦀\t\r\nb\n";
     let position = |line, column| -> Result<Position, kargu_core::error::CoreError> {

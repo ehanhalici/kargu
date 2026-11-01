@@ -261,13 +261,35 @@ impl DiagnosticSnapshot {
                 .all(|d| d.severity != Severity::Error)
     }
 
-    /// Compare semantic error identities only across two trustworthy snapshots.
-    /// Source identity is preserved; position shifts do not invent new errors.
+    fn comparable_producers(&self, baseline: &Self) -> bool {
+        let current: BTreeSet<_> = self.backends.iter().map(|report| &report.backend).collect();
+        let previous: BTreeSet<_> = baseline
+            .backends
+            .iter()
+            .map(|report| &report.backend)
+            .collect();
+        current == previous
+            && match (&self.server, &baseline.server) {
+                (None, None) => true,
+                (Some(current), Some(previous)) => {
+                    current.requested_server == previous.requested_server
+                        && matches!((current.requested_version, previous.requested_version),
+                        (Some(now), Some(before)) if now >= before)
+                }
+                _ => false,
+            }
+    }
+
+    /// Compare semantic errors across trustworthy snapshots from the same producers.
+    /// Restarted/replaced checkers or reversed document evidence invalidate the
+    /// baseline. New report generations and position shifts remain comparable.
     pub fn compare_errors(&self, baseline: &Self) -> Option<DiagnosticDelta> {
         if self.freshness() != Freshness::Fresh
             || baseline.freshness() != Freshness::Fresh
             || self.requested.path != baseline.requested.path
             || self.requested.document_id != baseline.requested.document_id
+            || self.requested.tick < baseline.requested.tick
+            || !self.comparable_producers(baseline)
         {
             return None;
         }

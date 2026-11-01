@@ -1370,6 +1370,21 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] **6.4 Healing ve verification:** native changed-file receipt görünümünden
     fresh diagnostic baseline/sonuç üret; unavailable/stale kanıt temiz başarı
     sayılmasın. Sınırlı healing aynı parent run altında yürüsün.
+    - [x] **6.4a Native baseline kaynak uyumu:** iki ayrı fresh snapshot aynı
+      belgeye ait olsa bile server restart/presence değişimi veya checker kümesi
+      değişiminden sonra delta üretmesin. Geri tick/server version reddedilsin;
+      aynı checker'ların sırası ve yeni report generation'ları karşılaştırmayı
+      bozmasın. Server restart regresyonu eski kodda red, yedi negatif varyant ve
+      pozitif reorder/generation ile duplicate/position-shift testleri green.
+      Bu native comparison primitive düzeltmesidir; gerçek verification consumer
+      bağlantısı değildir. 606 locked Rust (32 compile-fail), 9/9 sensor contract,
+      strict Clippy/fmt temiz. Kanıt: `docs/native-diagnostic-baseline-origin.md`.
+    - [ ] **6.4b Gerçek consumer:** native receipt/document/hash/revision'a bağlı
+      baseline capture → post-edit fresh observation → Rust delta/verification
+      settlement → bounded healing akışını aynı parent RunId/deadline/bütçeyle
+      bağla. Eksik/değişen provider, Stop/timeout/stale ve snapshot eviction
+      pending borcu silemesin. Son consumer sonrası Elisp verification/healing
+      karar motorunu kaldır; 6.4a bu kabulü kapatmaz.
   - [ ] **6.5 Sonuç ve cleanup:** geç/çift usage, cancel/timeout/EOF ve unknown
     effect settlement'ını doğrula; eski Elisp compaction/healing/accounting
     karar motorlarını son tüketicilerden sonra kaldır.
