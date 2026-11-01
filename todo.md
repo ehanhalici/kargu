@@ -764,6 +764,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         metadata odak ERT 92/92 ve Elisp Werror/parantez/checkdoc temiz.
         Public Elisp service close'un ACK/drain beklemesi ve servis lease'inin
         ilk edit'ten yakalanması hâlâ açık; bu alt iş onları kapatmaz.
+      - [x] **3.8a4 Native consume ACK tüketicisi:** public consume-change/file
+        Rust `consumed:true` ACK'i gelmeden passive referansı silmez. Hata,
+        ret ve geç eski cevap daha yeni referansı tüketmez. Native servis ID ve
+        application capture değişiklikleriyle birlikte 109/109 edit/service/heal/
+        metadata ERT ve değişen Elisp Werror/parantez kabulü geçti. Native snapshot
+        listeleme Rust metadata okuyucusunu kullanır. Reset, tüm verification
+        reader'ları ve public service-close drain geçişi ayrı olarak açık kalır.
     - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller

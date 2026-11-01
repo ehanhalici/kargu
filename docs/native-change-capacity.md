@@ -72,3 +72,18 @@ warning-as-error Elisp compilation, parenthesis checks and production checkdoc.
 Rust and TLA+ were unchanged. This is todo 3.8a3, not public service-close cutover:
 that caller still needs to retain its original edit lease and await native drain
 before discarding its remaining resources. Its uncommitted WIP was preserved.
+
+## Public consume acknowledgement
+
+The native consume-change/file consumer now retains its passive reference until
+Rust acknowledges `consumed: true`. A refusal or RPC error preserves it; an old
+acknowledgement cannot remove a newer reference at the same path. It sends the
+captured application/service/edit/file/hash tuple and does not acquire a current
+application as a substitute. The existing native application/service capture
+and snapshot-list reader changes are included in this consumer slice.
+
+The affected edit/service/healing/metadata suite passed 109/109, including the
+accepted/refused/failed/newer-reference regression. Changed Elisp passed
+warning-as-error compilation and parenthesis checks. This completes 3.8a4 only;
+reset acknowledgement, native verification readers and public close/drain remain
+open. No Rust or TLA+ source changed in this slice.

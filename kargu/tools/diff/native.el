@@ -137,6 +137,12 @@ These IDs are presentation history; only Rust decides whether undo is available.
                      snapshots))
           (puthash path
                    (list :native t :edit-id (plist-get result :edit-id)
+                         :service-id (plist-get spec :service-id)
+                         :application (plist-get spec :application)
+                         :root (plist-get result :root)
+                         :relative (plist-get file :relative)
+                         :file-index (or (plist-get file :file-index) 0)
+                         :final-hash (plist-get file :final-hash)
                          :status (plist-get file :status)
                          :saved (plist-get file :saved)
                          :baseline baseline
@@ -156,8 +162,19 @@ These IDs are presentation history; only Rust decides whether undo is available.
                      (kargu-edit-service-review-mode service)))
            (save (if (eq service kargu-diff--default-service) kargu-diff-auto-save
                    (kargu-edit-service-auto-save service))) task)
+      (let ((application (or (plist-get spec :application)
+                             (kargu-edit-service-native-application service)
+                             (kargu-application-context))))
+        (when (and (kargu-edit-service-native-application service)
+                   (not (eq application (kargu-edit-service-native-application service))))
+          (error "Native edit service belongs to another application"))
+        (setf (kargu-edit-service-native-application service) application
+              (plist-get spec :application) application))
       (setf (plist-get spec :root) (or (plist-get spec :root) (kargu-edit-service-root service)
                                        (kargu-permission-project-root))
+            (plist-get spec :service-id)
+            (or (kargu-edit-service-native-id service)
+                (setf (kargu-edit-service-native-id service) (concat "edit_service_" (kargu-random-uuid))))
             (plist-get spec :application) (or (plist-get spec :application) (kargu-application-context))
             (plist-get spec :review-mode) (or (plist-get spec :review-mode) review)
             (plist-get spec :save-policy) (or (plist-get spec :save-policy) (if save 'save 'buffer_only))

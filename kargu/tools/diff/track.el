@@ -21,6 +21,13 @@
 
 (declare-function kargu-diff-native-rollback "kargu/tools/diff/native"
                   (path &rest options))
+(declare-function kargu-diff-native-enabled-p "kargu/tools/diff/native" ())
+(declare-function kargu-bridge-edit-history-paths "kargu/bridge/edit/history"
+                  (application callback &optional service-id))
+(declare-function kargu-bridge-edit-history-consume "kargu/bridge/edit/history"
+                  (application &rest options))
+(declare-function kargu-bridge-edit-history-reset "kargu/bridge/edit/history"
+                  (application &rest options))
 (declare-function kargu-lsp-diagnostics-snapshot "kargu/tools/lsp/diagnostics" (file-path))
 (declare-function kargu-lsp-current-diagnostics-p "kargu/tools/lsp/freshness" (buffer))
 
@@ -117,11 +124,23 @@ Owned by `kargu-edit-service'.")
 (defun kargu-diff-list-snapshots (&optional service)
   "Message the rollback snapshots recorded by agent edits on optional SERVICE."
   (interactive)
-  (let ((paths (kargu-diff-snapshot-paths service)))
-    (if (null paths)
-        (message "kargu: no rollback snapshots")
-      (message "kargu rollback snapshots: %s"
-               (string-join paths ", ")))))
+  (let ((service (or service (kargu-diff--current-service))))
+    (if (kargu-diff-native-enabled-p)
+        (if (null (kargu-edit-service-native-id service))
+            (message "kargu: no rollback snapshots")
+          (require 'kargu/bridge/edit/history)
+          (kargu-bridge-edit-history-paths
+           (kargu-edit-service-native-application service)
+           (lambda (paths failure)
+             (cond
+              (failure (message "kargu: native undo history unavailable"))
+              ((null paths) (message "kargu: no rollback snapshots"))
+              (t (message "kargu rollback snapshots: %s" (string-join paths ", ")))))
+           (kargu-edit-service-native-id service)))
+      (let ((paths (kargu-diff-snapshot-paths service)))
+        (if (null paths)
+            (message "kargu: no rollback snapshots")
+          (message "kargu rollback snapshots: %s" (string-join paths ", ")))))))
 
 (defun kargu-diff--rollback-created-file (path buffer &optional snap)
   "Roll back an agent-created file at PATH, killing BUFFER and deleting the file.
@@ -281,24 +300,46 @@ Native rows deliver CALLBACK asynchronously."
                   :diagnostics (plist-get id :baseline-diagnostics)))))))
 
 (defun kargu-diff-consume-change (change &optional service)
-  "Consume captured CHANGE on optional SERVICE if no newer edit replaced it.
-The captured absolute path is independent of later project selection."
-  (let ((changes (kargu-diff--service-changes service)))
-    (when (and change
-               (eq (kargu-diff-change-identity change)
-                   (gethash (kargu-diff-change-path change) changes)))
-      (remhash (kargu-diff-change-path change) changes)
-      t)))
+  "Consume captured CHANGE on SERVICE only after native acknowledgement.
+A newer local reference survives an older completion.  Native failure or refusal
+preserves the reference; the backend remains the verification authority."
+  (let* ((svc (or service (kargu-diff--current-service)))
+         (changes (kargu-diff--service-changes svc))
+         (identity (and (kargu-diff-change-p change) (kargu-diff-change-identity change))))
+    (cl-labels ((forget ()
+                  (when (and change
+                             (eq identity (gethash (kargu-diff-change-path change) changes)))
+                    (remhash (kargu-diff-change-path change) changes)
+                    t)))
+      (if (and (listp identity) (plist-get identity :native))
+          (progn
+            (require 'kargu/bridge/edit/history)
+            (kargu-bridge-edit-history-consume
+             (plist-get identity :application)
+             :edit-id (plist-get identity :edit-id)
+             :file (plist-get identity :file-index)
+             :final-hash (plist-get identity :final-hash)
+             :service-id (plist-get identity :service-id)
+             :callback (lambda (value failure)
+                         (when (and (not failure) (hash-table-p value)
+                                    (eq (gethash "consumed" value) t))
+                           (forget)))))
+        (forget)))))
 
 (defun kargu-diff-consume-file (path &optional service)
-  "Remove PATH from the changed-file set on optional SERVICE."
-  (let ((resolved (kargu-permission-resolve path "file")))
-    (remhash resolved (kargu-diff--service-changes service))))
+  "Consume PATH's captured reference on SERVICE through its backend."
+  (when-let* ((change (kargu-diff-pending-change path service)))
+    (kargu-diff-consume-change change service)))
 
 (defun kargu-diff-reset-run-files (&optional service)
   "Reset the list of modified files for a new agent run on optional SERVICE."
   (let ((svc (or service (kargu-diff--current-service))))
     (when svc
+      (when (and (kargu-diff-native-enabled-p) (kargu-edit-service-native-id svc))
+        (require 'kargu/bridge/edit/history)
+        (kargu-bridge-edit-history-reset
+         (kargu-edit-service-native-application svc)
+         :service-id (kargu-edit-service-native-id svc)))
       (setf (kargu-edit-service-run-modified-files svc) nil)))
   (setq kargu-diff--run-modified-files nil))
 

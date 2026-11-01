@@ -288,5 +288,29 @@
         (should (= calls 1))
         (should-not cancelled)))))
 
+(ert-deftest kargu-edit-history-native-reference-consumption-waits-for-rust-ack-test ()
+  (dolist (outcome '(accepted refused failed newer))
+    (let* ((service (kargu-edit-service-create))
+           (path (expand-file-name "reference.txt" default-directory))
+           (identity (list :native t :application (kargu-application-create)
+                           :edit-id "opaque-edit" :file-index 1 :final-hash "opaque-hash"
+                           :service-id "opaque-service"))
+           (changes (kargu-edit-service-changes service)) callback)
+      (puthash path identity changes)
+      (cl-letf (((symbol-function 'kargu-bridge-edit-history-consume)
+                 (lambda (application &rest options)
+                   (should (eq application (plist-get identity :application)))
+                   (should (= (plist-get options :file) 1))
+                   (setq callback (plist-get options :callback)))))
+        (kargu-diff-consume-change (kargu-diff--make-change :path path :identity identity) service)
+        (should (eq (gethash path changes) identity))
+        (when (eq outcome 'newer) (puthash path 'newer-reference changes))
+        (funcall callback (kargu-bridge--object "consumed" (if (eq outcome 'refused) :json-false t))
+                 (when (eq outcome 'failed) (kargu-bridge--fault "unavailable")))
+        (pcase outcome
+          ('accepted (should-not (gethash path changes)))
+          ('newer (should (eq (gethash path changes) 'newer-reference)))
+          (_ (should (eq (gethash path changes) identity))))))))
+
 (provide 'tests/test-native-edit-history)
 ;;; test-native-edit-history.el ends here

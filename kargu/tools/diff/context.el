@@ -26,6 +26,9 @@
                   (file-path new-content &optional callback))
 (declare-function kargu-diff-native-enabled-p "kargu/tools/diff/native" ())
 (declare-function kargu-diff-native-execute "kargu/tools/diff/native" (spec callback &optional service))
+(declare-function kargu-bridge-edit-history-close-service "kargu/bridge/edit/history"
+                  (application service-id &optional callback))
+(declare-function kargu-application-context "kargu/core/application" ())
 (declare-function kargu-diff-apply-patch "kargu/tools/diff"
                   (patch-text &optional callback))
 (declare-function kargu-diff--describe "kargu/tools/diff/stage" (outcome))
@@ -69,6 +72,8 @@
   (processes nil)
   (native-tasks nil)
   (native-edits nil)
+  (native-id nil)
+  (native-application nil)
   (timers nil)
   (buffers nil)
   (review-mode 'auto)
@@ -154,6 +159,11 @@ SERVICE-ID is an optional string identifier."
     (setf (kargu-edit-service-closed service) t)
     (mapc #'kargu-async-cancel (kargu-edit-service-native-tasks service))
     (setf (kargu-edit-service-native-tasks service) nil)
+    (when (kargu-edit-service-native-id service)
+      (require 'kargu/bridge/edit/history)
+      (kargu-bridge-edit-history-close-service
+       (kargu-edit-service-native-application service)
+       (kargu-edit-service-native-id service)))
     (maphash (lambda (_path review) (kargu-edit-service--close-review review))
              (kargu-edit-service-reviews service))
     (dolist (process (kargu-edit-service-processes service))
