@@ -37,6 +37,7 @@
 (require 'tests/test-native-file)
 (require 'tests/test-native-agent-edit)
 (require 'tests/test-native-symbols)
+(require 'tests/test-native-diagnostics)
 (require 'tests/test-native-application)
 (require 'tests/test-bridge-jobs)
 (require 'tests/test-native-bash)

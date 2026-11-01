@@ -17,13 +17,6 @@
 
 ;;;; Diagnostics ----------------------------------------------------------
 
-(defun kargu-lsp--diagnostic-severity (type)
-  "Normalize diagnostic TYPE through its declared Flymake category."
-  (pcase (or (and (symbolp type) (get type 'flymake-category)) type)
-    ((or :error 'flymake-error 'e :flymake-error) 1)
-    ((or :warning 'flymake-warning 'w :flymake-warning) 2)
-    (_ 3)))
-
 (defun kargu-lsp--diagnostic-location (locus position)
   "Return one-based (LINE . COLUMN) for POSITION in LOCUS."
   (cond

@@ -21,8 +21,7 @@
 
 (declare-function kargu-lsp-snapshot-source "kargu/tools/lsp/snapshot" (&optional flush))
 (declare-function kargu-bridge-sensor-symbols-call "kargu/bridge/sensor/symbols" (connection id params))
-(declare-function kargu-lsp-get-diagnostics "kargu/tools/lsp/diagnostics" (path))
-(declare-function kargu-lsp-get-project-diagnostics "kargu/tools/lsp/diagnostics" ())
+(declare-function kargu-bridge-sensor-diagnostics-call "kargu/bridge/sensor/diagnostics" (connection id params))
 (declare-function kargu-lsp-find-definition "kargu/tools/lsp/symbols" (name callback))
 (declare-function kargu-lsp-build-skeleton "kargu/tools/lsp/skeleton" (&optional root callback))
 
@@ -160,7 +159,12 @@
                  ((member tool '("read_file_symbols" "read_symbol"))
                   (unless (buffer-live-p buffer) (error "Live document unavailable"))
                   (kargu-bridge-sensor--language-document buffer root t))
-                 ((member tool '("lsp_diagnostics" "lsp_find_symbol" "lsp_project_skeleton"))
+                 ((equal tool "lsp_diagnostics")
+                  (require 'kargu/tools/lsp/freshness)
+                  (if (and (stringp path) (not (string-empty-p path)) (buffer-live-p buffer))
+                      (kargu-bridge-sensor--document buffer root)
+                    (kargu-bridge--object "kind" "workspace")))
+                 ((member tool '("lsp_find_symbol" "lsp_project_skeleton"))
                   (if (buffer-live-p buffer)
                       (condition-case nil
                           (kargu-bridge-sensor--document buffer root)
@@ -228,13 +232,6 @@
           (setf (kargu-bridge-sensor-call-state call) :issued
                 (kargu-bridge-sensor-call-reverse-id call) id)
           (pcase tool
-            ("lsp_diagnostics"
-             (require 'kargu/tools/lsp/diagnostics)
-             (let* ((path (and (hash-table-p args) (gethash "file_path" args)))
-                    (output (if (and (stringp path) (not (string-empty-p (string-trim path))))
-                                (kargu-lsp-get-diagnostics path)
-                              (kargu-lsp-get-project-diagnostics))))
-               (kargu-bridge-sensor--reply-tool-result connection id params "ok" output)))
             ("lsp_find_symbol"
              (require 'kargu/tools/lsp/symbols)
              (let* ((sym (and (hash-table-p args)
@@ -266,7 +263,10 @@
      ((member tool '("read_file_symbols" "read_symbol"))
       (require 'kargu/bridge/sensor/symbols)
       (kargu-bridge-sensor-symbols-call connection id params))
-     ((member tool '("lsp_diagnostics" "lsp_find_symbol" "lsp_project_skeleton"))
+     ((equal tool "lsp_diagnostics")
+      (require 'kargu/bridge/sensor/diagnostics)
+      (kargu-bridge-sensor-diagnostics-call connection id params))
+     ((member tool '("lsp_find_symbol" "lsp_project_skeleton"))
       (kargu-bridge-sensor-lsp-call connection id params))
      (t
       (kargu-bridge-sensor--error connection id)))))

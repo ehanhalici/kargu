@@ -937,6 +937,17 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Kanıt: `docs/native-diagnostic-port.md`. Raw Elisp capture producer, project
     aggregation, UI capability cutover ve gerçek verification/healing 4.3/6.4'te
     hâlâ açıktır; üst maddeler kapatılmadı.
+  - [x] **4.3b Ham dosya diagnostic capture:** reverse read, canlı belge/tick,
+    actual Flymake report-generation ve ham scalar range/severity/source DTO'su
+    üretir. Native bridge'den eski diagnostic formatter çağrısı kaldırıldı;
+    source/coordinate/mesaj/item/byte sınırları ve küçük frame'de typed negatif
+    quiescent sonuç korunur. Eglot publication gerçek process nesnesini yakalar;
+    aynı server/version ile restart eski publication'ı taze göstermez. C-g owned
+    read'i cancelled olarak settle eder. Gerçek Flymake → reverse RPC → Rust →
+    provider turunda ham bulgu Rust'ta formatlandı. 1427/1427 tam ERT; son process/
+    quit/helper diliminde 73/73 odak ERT ve Elisp Werror/parantez/checkdoc temiz.
+    Project aggregation, native UI capability ilanı ve verification barrier/
+    healing consumer'ları 4.3/6.4'te açık; legacy standalone formatter henüz silinmedi.
   - [ ] **4.4 Symbols/Xref:** definition/reference/hover/document-symbol/skeleton
     adapter'larını typed range/tree snapshot'a geçir; ambiguity ve unavailable
     açık olsun. Marker/cons/editor nesnesi JSON'a sızmasın; native render/budget.

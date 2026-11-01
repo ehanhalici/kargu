@@ -17,12 +17,20 @@
 
 (declare-function eglot--signal-textDocument/didChange "eglot" ())
 (declare-function eglot--report-to-flymake "eglot" (diags))
+(declare-function jsonrpc--process "jsonrpc" (connection))
 (defvar eglot--versioned-identifier)
 (defvar eglot--diagnostics)
 
+(defun kargu-lsp--diagnostic-severity (type)
+  "Normalize diagnostic TYPE through its declared Flymake category."
+  (pcase (or (and (symbolp type) (get type 'flymake-category)) type)
+    ((or :error 'flymake-error 'e :flymake-error) 1)
+    ((or :warning 'flymake-warning 'w :flymake-warning) 2)
+    (_ 3)))
+
 (cl-defstruct (kargu-lsp--publication (:constructor kargu-lsp--make-publication))
   "An observed Eglot publication tied to its server and document."
-  server version tick)
+  server version tick process)
 
 (defvar-local kargu-lsp--publication nil
   "Last Eglot publication observed in this buffer.")
@@ -76,7 +84,9 @@
       (when (eq server (eglot-current-server))
         (setq kargu-lsp--publication
               (kargu-lsp--make-publication
-               :server server :version version :tick (buffer-chars-modified-tick)))))))
+               :server server :version version :tick (buffer-chars-modified-tick)
+               :process (and (fboundp 'jsonrpc--process)
+                             (ignore-errors (jsonrpc--process server)))))))))
 
 (defun kargu-lsp--diagnostic-capabilities (capabilities)
   "Add version support to a private copy of Eglot CAPABILITIES."
