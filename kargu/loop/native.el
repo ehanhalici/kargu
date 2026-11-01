@@ -142,6 +142,7 @@ Startup errors are reported without switching to the Elisp backend."
                          (kargu-loop-native--finish run result failure)))
               :parent (kargu-execution-task context)
               :owner (plist-get run :chat-buffer)
+              :session (plist-get run :session)
               :valid-p (lambda () (kargu-loop--live-p run))
               :on-delta (kargu-execution-wrap
                          context (lambda (chunk)

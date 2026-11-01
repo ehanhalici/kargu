@@ -425,6 +425,11 @@ yerine geçer. Mevcut `[x]` işaretleri denetim girdisidir; tüketici bağlantı
 legacy temizliği ve güncel kabul kanıtı olmadan kapanış kanıtı sayılmaz.
 Gerçek kullanıcı session dosyaları ve canlı provider hesapları test girdisi değildir.
 
+**Aktif hedef ve test kuralı (kullanıcı, 2026-11-01):** bu listedeki 1–6 dahil
+bütün maddeleri adım adım tamamla ve doğrulanan dilimleri commit et. TLA+/TLC
+yalnız TLA+ kodu değiştiğinde çalıştırılır; değişmeyen modellerin eski sonuçlarını
+tekrar üretmek bu hedefin kabul şartı değildir.
+
 **Bağlayıcı frontend/backend kuralı (kullanıcı, 2026-11-01):** Elisp yalnız
 Emacs frontend'i ve Rust ile editör arasındaki köprüdür. Config dosyasını okuma,
 provider/endpoint/model seçimi, provider'a model listesi isteği, yanıt ayrıştırma,
@@ -1019,7 +1024,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     orijinal deadline'a bağlıdır; legacy API bu budget'ten debit/close alamaz.
     Native config/model receipt binding, editor retry observer ve Elisp tüketici
     cutover'ı açıktır. Gerçek socket/pipe kabul kaynakları yazıldı, çalıştırılmadı.
-  - [x] **5.6 Tool dispatcher:** model yanıtını commit → çağrıları gate'ten yürüt
+  - [ ] **5.6 Tool dispatcher:** model yanıtını commit → çağrıları gate'ten yürüt
     → typed sonuçları identity ile history'ye commit → sonraki turn sırası;
     native OS araçları ve 4'teki editor reverse portları aynı lifecycle'da olsun.
     Unknown yan etki ikinci backend'de tekrar oynatılmasın.
@@ -1058,10 +1063,10 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     conversation scope, detached args, foreign cancel, retired source ve
     unrelated Elisp loop izolasyonunu doğrula. Kaynaklar native_agent/edits.rs
     ve test-native-agent-edit.el'de hazır, aktif talimat gereği çalıştırılmadı.
-  - [x] **5.7 Mode/plan:** ask/plan/debug/agent availability, async debug hazırlığı,
+  - [ ] **5.7 Mode/plan:** ask/plan/debug/agent availability, async debug hazırlığı,
     revision-bound plan artifact ve consuming dispatch native sahipliğine geçsin;
     Emacs plan/review ekranları yalnız presenter ve observation olsun.
-  - [x] **5.8 Abort/reset/EOF:** revoke → gerçek child/reverse/approval/edit drain
+  - [ ] **5.8 Abort/reset/EOF:** revoke → gerçek child/reverse/approval/edit drain
     → history repair → terminal event/release → yeni admission sırasını uygula.
     Çift iptal, owner close, reset ve stale generation tek terminal teslim etsin;
     sibling application/session etkilenmesin.
@@ -1096,6 +1101,18 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     seçimi regresyonu dahil odak grup 11/11; Werror/parantez ve application/
     connection/transport exhaustive TLC temiz. History/UI projection, native claim'in
     hazırlıktan önce alınması ve genel 5.9 kapanışı bu alt işin dışında açıktır.
+  - [x] **5.9b Sohbet başına native conversation sahipliği:** gerçek agent
+    application'ın ortak servis session'ını kullanmaz; her Emacs session'ı kendi
+    native session/create kimliğine bağlanır. Aynı sohbetin sonraki turu aynı
+    history'yi kullanır; iki sohbet aynı application'da geçmiş paylaşmaz.
+    Binding exact application lease/connection epoch'a bağlıdır. Waiter iptali
+    sibling lease'i bozmaz; retire/kill/mode değişimi ve geç create callback'i
+    yalnız yakalanan conversation'ı revoke eder. Close ACK actual worker drain
+    sayılmaz; Rust claim'i kendi drain'i bitene kadar tutar. Altı yeni lease/gerçek
+    pipe testi ve mevcut on native startup testi geçti; full source ERT
+    1398/1398 ve değişen Elisp Werror/parantez kabulü temiz. TLA+ kodu değişmediği
+    için TLC tekrar çalıştırılmadı. Native history UI paging/import, hazırlıktan
+    önce native claim ve genel 5.9 kapanışı hâlâ açıktır.
   - [ ] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
     repair ile domain state/plan dispatch motorlarını son tüketici sonrası kaldır.
     Madde 6'daki compaction/healing consumer'larının native run'a bağlanması için

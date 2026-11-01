@@ -261,3 +261,38 @@ Todo 8.2b remains open: native config/publication orchestration, auth-source as 
 Rust-requested editor primitive, custom registry/header options, concurrent model
 publication ordering, public picker/API-list-models cutover and deletion of the
 remaining Elisp catalog orchestration/cache authority are still required.
+
+## Follow-up: real conversations must not use the application service session
+
+Native loop startup reused the application's passive service session for every
+chat. Consequently two UI conversations under one application could share native
+history, and replacing a UI conversation did not replace the native history
+owner. A conversation lease now maps each explicit Emacs session to its own
+Rust-created session ID, distinct from the service session used by config/model
+ports. These are editor-to-backend handle mappings; Rust remains the history,
+claim and drain authority.
+
+The lease captures the application service identity, exact connection and epoch.
+Cancelling one startup waiter preserves sibling waiters and the allocated chat
+lease. Retiring a chat, killing its buffer or changing major mode revokes its
+native conversation; a create response arriving after retirement is revoked on
+its original connection. A changed epoch never receives an old close. Retired or
+replaced leases cannot silently allocate another conversation. Close ACK means
+session revocation, not actual worker collection or claim release.
+
+A real stdio/local-provider test sends A1, B1 and A2 under one application. A2's
+provider payload contains A1 and its answer plus A2; B1 contains no A messages.
+A1/A2 use the same native session, B uses another, and neither uses the service
+session. Killing A invalidates only A's native snapshot; B remains available.
+Five additional controlled tests cover waiter cancellation, detached scope DTOs,
+late create cleanup, replacement/epoch loss and mode-change retirement. Existing
+10 native startup/terminal tests also pass. Full source ERT: 1398/1398. Changed
+Elisp passes warning-as-error compilation, check-parens and whitespace checks.
+No Rust or TLA+ source changed in this slice; TLC was not rerun, as requested.
+
+Todo 5.9b closes only this conversation identity slice. Native history UI
+paging/import, preparation-time native claim and final config receipt binding,
+all mode/plan/background-tool consumers, legacy engine removal and task 6 remain
+open. Inconsistent checked parent boxes 5.6/5.7/5.8 were reopened while preserving
+the verified implementation/runtime subitems. Shared native Rust integration is
+still present in the working tree and is not claimed as committed by this slice.

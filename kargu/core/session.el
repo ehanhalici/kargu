@@ -39,6 +39,8 @@
   (id-value nil :read-only t) usage-value
   (mode-value 'ask) (mode-revision 0) mode-request
   (history-value (kargu-history-create) :read-only t)
+  (native-conversations (make-hash-table :test #'eq) :read-only t)
+  native-retired
   (selection-value (kargu-selection-create)))
 
 (defvar-local kargu-session--context nil

@@ -13,17 +13,18 @@
 (require 'cl-lib)
 (require 'kargu/async)
 (require 'kargu/bridge/application)
+(require 'kargu/bridge/conversation)
 (require 'kargu/bridge/session)
 
 (defun kargu-loop-native-owned--issue
-    (task application connection arguments owner on-delta on-event scope failure)
+    (task application session connection arguments owner on-delta on-event scope failure)
   "Issue TASK's captured ARGUMENTS only under the current native SCOPE.
-APPLICATION, CONNECTION and OWNER remain captured through delivery; FAILURE
-rejects startup.  ON-DELTA and ON-EVENT observe this task alone."
+APPLICATION, SESSION, CONNECTION and OWNER remain captured through delivery.
+FAILURE rejects startup.  ON-DELTA and ON-EVENT observe this task alone."
   (cond
    (failure (kargu-async-finish task nil failure))
    ((not (kargu-bridge-application-scope-equal-p
-          scope (kargu-bridge-application-current-scope application connection)))
+          scope (kargu-bridge-conversation-current-scope application session connection)))
     (kargu-async-finish task nil "Native application lease changed"))
    (t
     (let ((id (kargu-bridge-session-start
@@ -37,10 +38,30 @@ rejects startup.  ON-DELTA and ON-EVENT observe this task alone."
         (kargu-async-add-cleanup
          task (lambda () (kargu-bridge-cancel connection id))))))))
 
+(defun kargu-loop-native-owned--application
+    (task application session connection arguments owner on-delta on-event scope failure)
+  "Acquire SESSION's conversation after APPLICATION's service SCOPE is ready.
+Retain TASK, CONNECTION, ARGUMENTS, OWNER, ON-DELTA and ON-EVENT
+through FAILURE."
+  (cond
+   (failure (kargu-async-finish task nil failure))
+   ((not (kargu-bridge-application-scope-equal-p
+          scope (kargu-bridge-application-current-scope application connection)))
+    (kargu-async-finish task nil "Native application lease changed"))
+   (t
+    (kargu-async-add-cleanup
+     task (kargu-bridge-conversation-ensure
+           connection application session scope
+           (kargu-async-wrap
+            task (lambda (conversation error-data)
+                   (kargu-loop-native-owned--issue
+                    task application session connection arguments owner on-delta on-event
+                    conversation error-data))))))))
+
 (defun kargu-loop-native-owned--ready
-    (task application arguments owner on-delta on-event connection failure)
+    (task application session arguments owner on-delta on-event connection failure)
   "Acquire APPLICATION's scope on CONNECTION for TASK's ARGUMENTS.
-FAILURE rejects startup.  OWNER, ON-DELTA and ON-EVENT remain captured."
+FAILURE rejects startup.  SESSION, OWNER, ON-DELTA and ON-EVENT remain captured."
   (if failure
       (kargu-async-finish task nil failure)
     (kargu-async-add-cleanup
@@ -49,21 +70,29 @@ FAILURE rejects startup.  OWNER, ON-DELTA and ON-EVENT remain captured."
       connection application
       (kargu-async-wrap
        task (lambda (scope error-data)
-              (kargu-loop-native-owned--issue
-               task application connection arguments owner on-delta on-event
+              (kargu-loop-native-owned--application
+               task application session connection arguments owner on-delta on-event
                scope error-data)))))))
 
 (cl-defun kargu-loop-native-owned-start
-    (application arguments callback &key parent owner valid-p on-delta on-event)
+    (application arguments callback &key parent owner session valid-p on-delta on-event)
   "Start captured ARGUMENTS for APPLICATION and deliver CALLBACK once.
-PARENT and OWNER bind startup and delivery.  VALID-P rejects retired resources.
+PARENT, OWNER and SESSION bind startup and delivery.
+VALID-P rejects retired resources.
 ON-DELTA and ON-EVENT observe only this task's native request."
-  (let* ((arguments (kargu-bridge--decode
+  (let* ((origin (or owner (current-buffer)))
+         (session (or session (kargu-session-context origin)))
+         (arguments (kargu-bridge--decode
                      (json-serialize arguments :null-object :json-null
                                                :false-object :json-false)))
          (task (kargu-async-start callback :parent parent :owner nil
-                                  :buffer (or owner (current-buffer))
-                                  :valid-p valid-p :timeout 120)))
+                                  :buffer origin
+                                  :valid-p (lambda ()
+                                             (and (buffer-live-p origin)
+                                                  (eq session (kargu-session-context origin))
+                                                  (not (kargu-session-native-retired session))
+                                                  (or (null valid-p) (funcall valid-p))))
+                                  :timeout 120)))
     (funcall
      (kargu-async-wrap
       task (lambda ()
@@ -73,7 +102,7 @@ ON-DELTA and ON-EVENT observe only this task's native request."
                (kargu-async-wrap
                 task (lambda (connection failure)
                        (kargu-loop-native-owned--ready
-                        task application arguments owner on-delta on-event
+                        task application session arguments owner on-delta on-event
                         connection failure))))))))
     task))
 
