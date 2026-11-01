@@ -926,6 +926,17 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     publication ve raw diagnostic DTO üretsin; native freshness/aggregation ve
     formatlama tüketicileri bağlı olsun. Sürümsüz stale/pending push temiz tanı
     sayılmasın; gerçek destek varsa fresh pull capability kullanılsın.
+  - [x] **4.3a Native dosya diagnostic DTO tüketicisi:** `lsp_diagnostics` için
+    exact captured DocumentStamp'a bağlı DiagnosticSnapshot kabul edilir; generic
+    editor text başarı kanıtı değildir. Freshness, scalar konum/severity/source
+    sunumu ve byte sınırı Rust'tadır. Pending/stale/unavailable/truncated evidence
+    tool failure kalır; fresh error bulgusu checker verisi olarak gösterilir,
+    project-wide temiz sonucu üretilmez. Stop sonrası gerçek reverse callback
+    gelene kadar drain sürer; iptal edilen capture'ın bulguları yayımlanmaz.
+    Gerçek provider/stdio testinde sekiz vaka ve native read lifecycle kabulü geçti.
+    Kanıt: `docs/native-diagnostic-port.md`. Raw Elisp capture producer, project
+    aggregation, UI capability cutover ve gerçek verification/healing 4.3/6.4'te
+    hâlâ açıktır; üst maddeler kapatılmadı.
   - [ ] **4.4 Symbols/Xref:** definition/reference/hover/document-symbol/skeleton
     adapter'larını typed range/tree snapshot'a geçir; ambiguity ve unavailable
     açık olsun. Marker/cons/editor nesnesi JSON'a sızmasın; native render/budget.

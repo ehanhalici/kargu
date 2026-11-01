@@ -35,9 +35,18 @@ enum ReadProgress {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Observation {
-    Symbols { snapshot: SymbolSnapshot },
-    Body { snapshot: SymbolBody },
-    Unavailable { reason: SymbolFailure },
+    Diagnostics {
+        snapshot: crate::sensors::diagnostics::DiagnosticSnapshot,
+    },
+    Symbols {
+        snapshot: SymbolSnapshot,
+    },
+    Body {
+        snapshot: SymbolBody,
+    },
+    Unavailable {
+        reason: SymbolFailure,
+    },
 }
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -347,7 +356,7 @@ impl EditorCall {
                 };
                 let revoked_read = matches!(
                     self.call.name().as_str(),
-                    "read_file_symbols" | "read_symbol" | "edit_by_lsp"
+                    "read_file_symbols" | "read_symbol" | "edit_by_lsp" | "lsp_diagnostics"
                 ) && (expired || terminal.is_some());
                 let completion: Option<Completion> = if revoked_read {
                     None
@@ -586,6 +595,24 @@ fn read_result(
         return Ok(ReadProgress::Done(
             completion.outcome,
             completion.outcome.summary().to_owned(),
+        ));
+    }
+    if call.name().as_str() == "lsp_diagnostics" {
+        call.run().settings().workspace.revalidate()?;
+        let EditorResource::Document { document } = resource else {
+            return Err(CoreError::InvalidToolOutput);
+        };
+        let Some(Observation::Diagnostics { snapshot }) = completion.observation else {
+            return Err(CoreError::InvalidToolOutput);
+        };
+        let (freshness, text) = snapshot.render_for(document)?;
+        return Ok(ReadProgress::Done(
+            if freshness == crate::sensors::diagnostics::Freshness::Fresh {
+                ToolOutcome::Ok
+            } else {
+                ToolOutcome::Failed
+            },
+            text,
         ));
     }
     if matches!(

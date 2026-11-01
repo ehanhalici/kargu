@@ -154,6 +154,57 @@ pub enum Freshness {
 }
 
 impl DiagnosticSnapshot {
+    /// Render only facts bound to the exact document captured before issuance.
+    /// The returned freshness is separate from tool execution success and text.
+    pub fn render_for(&self, document: &DocumentStamp) -> Result<(Freshness, String), CoreError> {
+        use std::fmt::Write;
+        if &self.requested != document {
+            return Err(CoreError::StaleOwner);
+        }
+        let freshness = self.freshness();
+        let label = match freshness {
+            Freshness::Fresh => "fresh",
+            Freshness::Pending => "pending",
+            Freshness::Stale => "stale",
+            Freshness::Unavailable => "unavailable",
+            Freshness::Truncated => "truncated",
+        };
+        let mut text = format!("Diagnostics for {} ({label})\n", document.path.as_str());
+        if freshness != Freshness::Fresh {
+            text.push_str(
+                "Verification incomplete: this snapshot cannot certify a clean document.\n",
+            );
+        }
+        if self.diagnostics.is_empty() {
+            text.push_str("0 observed findings; absence alone does not establish freshness.\n");
+        }
+        for diagnostic in &self.diagnostics {
+            let start = diagnostic.range.start();
+            let severity = match diagnostic.severity {
+                Severity::Error => "error",
+                Severity::Warning => "warning",
+                Severity::Note => "note",
+                Severity::Info => "info",
+            };
+            writeln!(
+                text,
+                "[{severity}] L{}:C{}: {} (source: {})",
+                start.line.get(),
+                start.column.get(),
+                diagnostic.message.as_str(),
+                diagnostic.source.as_str()
+            )
+            .map_err(|_| CoreError::InvalidToolOutput)?;
+            if text.len() > limits::SENSOR_DIAGNOSTIC_BYTES {
+                return Err(CoreError::Limit);
+            }
+        }
+        text.push_str("Project-wide effects are unverified.");
+        if text.len() > limits::SENSOR_DIAGNOSTIC_BYTES {
+            return Err(CoreError::Limit);
+        }
+        Ok((freshness, text))
+    }
     /// Decide freshness from exact runtime evidence, never from elapsed time.
     pub fn freshness(&self) -> Freshness {
         if !self.available || self.backends.is_empty() {

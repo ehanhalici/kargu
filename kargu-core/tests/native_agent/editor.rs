@@ -250,3 +250,126 @@ fn native_issued_editor_effect_stays_busy_after_abort_and_ignores_foreign_quiesc
     server.join().map_err(|_| "server panic")??;
     Ok(())
 }
+
+#[test]
+fn native_diagnostics_use_exact_typed_freshness_and_ignore_editor_verdict_prose() -> TestResult {
+    for case in [
+        "fresh",
+        "pending",
+        "stale",
+        "unavailable",
+        "truncated",
+        "foreign",
+        "prose",
+        "cancelled",
+    ] {
+        let root = tempfile::tempdir()?;
+        let mut replies = vec![tool_reply(
+            "diag",
+            "lsp_diagnostics",
+            json!({"file_path":"src/lib.rs"}),
+        )];
+        if case != "cancelled" {
+            replies.push(answer("diagnostic read finished"));
+        }
+        let (url, server, requests) = server(replies)?;
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let mut input = prompt(root.path(), &url);
+        input["tools_enabled"] = json!(true);
+        input["editor_available"] = json!(["lsp_diagnostics"]);
+        let mut events = vec![];
+        begin(&mut peer, "diagnostics", &scope, input)?;
+        let prepare = reverse(&peer, "editor/prepare_tool", &mut events)?;
+        let document = json!({"path":"src/lib.rs","document_id":"diag-document","tick":7});
+        captured(
+            &mut peer,
+            &prepare,
+            json!({"kind":"document","document":document}),
+        )?;
+        let call = reverse(&peer, "editor/call_tool", &mut events)?;
+        if case == "cancelled" {
+            send(
+                &mut peer,
+                "abort-diag",
+                "session/abort",
+                json!({"scope":call["params"]["scope"]}),
+            )?;
+            assert_eq!(
+                response(&peer, "abort-diag", &mut events)?["result"]["status"],
+                "revoked"
+            );
+            assert_eq!(
+                snapshot(&mut peer, &scope, &mut events)?["state"],
+                "draining"
+            );
+        }
+
+        let mut snapshot = json!({"requested":document,"observed":document,"available":true,
+            "truncated":false,"server":null,"diagnostics":[],
+            "backends":[{"backend":"actual-checker","requested":1,"observed":1,"tick":7,"reported":true}]});
+        if case == "fresh" {
+            snapshot["diagnostics"] = json!([{"source":"actual-checker","code":"E42","severity":"error",
+                "range":{"start":{"line":2,"column":1},"end":{"line":2,"column":3}},"message":"actual raw finding"}]);
+        }
+        match case {
+            "pending" => snapshot["backends"][0]["reported"] = json!(false),
+            "stale" => snapshot["observed"]["tick"] = json!(8),
+            "unavailable" => snapshot["available"] = json!(false),
+            "truncated" => snapshot["truncated"] = json!(true),
+            "foreign" => snapshot["requested"]["document_id"] = json!("replacement"),
+            _ => {}
+        }
+        let mut result = json!({"scope":call["params"]["scope"],"call_id":call["params"]["call_id"],
+            "quiescent":true,"outcome":"ok","text":"FORGED_EDITOR_CLEAN_VERDICT"});
+        if case != "prose" {
+            result["observation"] = json!({"kind":"diagnostics","snapshot":snapshot});
+        }
+        peer.send(json!({"jsonrpc":"2.0","id":call["id"],"result":result}))?;
+        assert_eq!(
+            response(&peer, "diagnostics", &mut events)?["result"]["status"],
+            if case == "cancelled" {
+                "cancelled"
+            } else {
+                "completed"
+            }
+        );
+        let _first = requests.recv_timeout(Duration::from_secs(2))?;
+        if case == "cancelled" {
+            server.join().map_err(|_| "server panic")??;
+            assert!(requests.try_recv().is_err());
+            continue;
+        }
+
+        let next = requests.recv_timeout(Duration::from_secs(2))?;
+        let message = next["messages"]
+            .as_array()
+            .ok_or("messages")?
+            .last()
+            .ok_or("tool result")?;
+        let text = message["content"].as_str().ok_or("text")?;
+        assert!(
+            !text.contains("FORGED_EDITOR_CLEAN_VERDICT"),
+            "{case}: {text}"
+        );
+        if case == "fresh" {
+            assert!(text.contains("(fresh)"), "{text}");
+            assert!(
+                text.contains("[error] L2:C1: actual raw finding (source: actual-checker)"),
+                "{text}"
+            );
+            assert!(
+                text.contains("Project-wide effects are unverified"),
+                "{text}"
+            );
+        } else if !matches!(case, "foreign" | "prose") {
+            assert!(text.contains("Verification incomplete"), "{case}: {text}");
+            assert!(text.contains(case), "{case}: {text}");
+        } else {
+            assert!(!text.contains("(fresh)"), "{case}: {text}");
+        }
+        server.join().map_err(|_| "server panic")??;
+    }
+    Ok(())
+}
