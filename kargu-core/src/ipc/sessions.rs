@@ -1008,6 +1008,10 @@ impl Sessions {
             if !running.run.drained() {
                 return Ok(false);
             }
+            let changes = host
+                .actor_mut(&owner.scope)?
+                .edits
+                .conversation_changes(&owner.scope.session_id)?;
             let budget = ctx.api.close_run_budget(&running.run, &running.budget)?;
             let actor = host.actor_mut(&owner.scope)?;
             actor.finish(&running.run)?;
@@ -1026,7 +1030,7 @@ impl Sessions {
             } else {
                 None
             };
-            let accounting = json!({"budget":budget,"history_revision":revision,
+            let accounting = json!({"budget":budget,"changes":changes,"history_revision":revision,
                 "answer_message":answer_message,"failure":running.failure.as_ref().map(ApiError::snapshot)});
             op.stage = Stage::Settled;
             finish_response(host, id, owner, terminal, Some(accounting), messages)?;

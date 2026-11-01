@@ -71,6 +71,8 @@ Startup errors are reported without switching to the Elisp backend."
            (accounting (and (hash-table-p result) (gethash "accounting" result)))
            (budget (and (hash-table-p accounting) (gethash "budget" accounting)))
            (spent (and (hash-table-p budget) (gethash "requests_spent" budget))))
+      (plist-put run :native-change-evidence
+                 (and (hash-table-p accounting) (gethash "changes" accounting)))
       (when (and (integerp spent) (>= spent 0))
         (plist-put run :iterations spent))
       (cond

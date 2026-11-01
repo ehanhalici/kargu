@@ -253,5 +253,34 @@
         (should-not (memq #'kargu-edit-changes calls))
         (should-not (memq #'kargu--validate-history calls))))))
 
+(ert-deftest kargu-native-loop-report-projects-only-the-native-change-dto-test ()
+  (let* ((evidence (kargu-bridge--object "revision" 7
+                                        "pending_files" 2 "retained_files" 3))
+         (run (list :native-backend t :native-change-evidence evidence)))
+    (cl-letf (((symbol-function 'kargu-edit-changes)
+               (lambda (&rest _) (ert-fail "Native evidence borrowed a legacy table"))))
+      (let* ((report (kargu-loop--finish-report run :done "fixture"))
+             (projection (plist-get report :change-evidence)))
+        (should (= (gethash "revision" projection) 7))
+        (should (= (gethash "pending_files" projection) 2))
+        (should-not (eq evidence projection))
+        (puthash "pending_files" 0 projection)
+        (should (= (gethash "pending_files" evidence) 2))))))
+
+(ert-deftest kargu-native-loop-change-counter-ui-never-invents-a-clean-verdict-test ()
+  (dolist (pending '(0 2))
+    (let (text)
+      (cl-letf (((symbol-function 'kargu-chat-insert)
+                 (lambda (value &rest _) (setq text (concat text value)))))
+        (kargu-chat--render-change-evidence
+         (kargu-bridge--object "pending_files" pending "retained_files" 3))
+        (should (string-match-p (format "%d pending verification" pending) text))
+        (should-not (string-match-p "clean\\|passed\\|verified" text)))))
+  (let (text)
+    (cl-letf (((symbol-function 'kargu-chat-insert)
+               (lambda (value &rest _) (setq text value))))
+      (kargu-chat--render-change-evidence :unavailable)
+      (should (string-match-p "unconfirmed" text)))))
+
 (provide 'tests/test-native-loop)
 ;;; test-native-loop.el ends here

@@ -1184,6 +1184,19 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Son lifecycle/history/ownership odak ERT 60/60 ve değişen Elisp Werror/parantez
     kabulü temiz. Bu, native verification reader veya genel 5.9 kapanışı değildir.
     Kanıt: `docs/native-lifecycle-domain-isolation.md`.
+  - [x] **5.9f Native conversation değişiklik özeti:** Rust terminal accounting
+    session/service kapsamına göre pending ve retained dosya sayılarını ledger
+    revision'ıyla üretir; başka conversation ve explicit edit-service kayıtları
+    sayılmaz. Elisp DTO'yu sonuç raporuna ve sohbet görünümüne aktarır; yerel edit
+    tablosuna başvurmaz. Retained sayı tam run-modified geçmişi değildir; sıfır
+    pending temiz diagnostic sonucu sayılmaz. Scope mevcut RunScope zarfındadır,
+    1 KiB frame için session kimliği metadata içinde tekrarlanmaz. Gerçek native
+    write/edit/patch receipt → terminal accounting regresyonu, service/session
+    izolasyonu, exact consume sonrası sayı ve UI sunum kabulü eklendi.
+    Kanıt: `docs/native-conversation-change-summary.md`. Path reader, gerçek
+    verification/healing, tam modified-run kapsamı ve genel 5.9 hâlâ açıktır.
+    599 locked Rust (32 compile-fail), strict Clippy/fmt, 1422/1422 tam ERT;
+    son chat sunum diliminde 65/65 odak ERT ve Elisp Werror/checkdoc/parantez temiz.
   - [ ] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
     repair ile domain state/plan dispatch motorlarını son tüketici sonrası kaldır.
     Madde 6'daki compaction/healing consumer'larının native run'a bağlanması için

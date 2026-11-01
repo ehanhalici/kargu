@@ -232,3 +232,33 @@ fn a_foreign_session_cannot_borrow_an_existing_paths_slot() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn conversation_summary_excludes_foreign_sessions_and_editor_services() -> TestResult {
+    let session = SessionId::new();
+    let foreign = SessionId::new();
+    let mut service = EditPreparations::default();
+    seed(&mut service, &session, 2)?;
+    service.changes.push_back(record(&foreign, 2, true)?);
+    let mut editor = record(&session, 3, true)?;
+    editor.service_id = Some(crate::domain::EditServiceId::new());
+    service.changes.push_back(editor);
+    let before = serde_json::to_value(service.conversation_changes(&session)?)?;
+    assert_eq!(before["pending_files"], 2);
+    assert_eq!(before["retained_files"], 2);
+    let row = service.changes.front().ok_or("pending row")?;
+    let consume =
+        json!({"action":"consume","edit_id":row.edit_id,"file":row.file,"final_hash":null});
+    service.call(
+        &session,
+        methods::EDIT_HISTORY,
+        consume,
+        ByteLimit::WIRE_MAX,
+        Instant::now(),
+    )?;
+    let after = serde_json::to_value(service.conversation_changes(&session)?)?;
+    assert_eq!(after["pending_files"], 1);
+    assert_eq!(after["retained_files"], 2);
+    assert!(after["revision"].as_u64() > before["revision"].as_u64());
+    Ok(())
+}

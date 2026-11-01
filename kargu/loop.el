@@ -420,7 +420,9 @@ Deliver events to ON-DELTA, completion to ON-FINISH, and admission to ON-READY."
     (if (plist-get run :native-backend)
         ;; Native conversations have their own history and edit identities.
         ;; Local legacy tables cannot supply evidence for that conversation.
-        (plist-put report :change-evidence :unavailable)
+        (plist-put report :change-evidence
+                   (let ((evidence (plist-get run :native-change-evidence)))
+                     (if (hash-table-p evidence) (copy-hash-table evidence) :unavailable)))
       (when-let* ((modified (kargu-edit-changes :modified)))
         (plist-put report :modified-files (copy-sequence modified)))
       (when-let* ((pending (kargu-edit-changes :pending)))

@@ -236,6 +236,14 @@ fn native_edits_share_one_model_budget_and_commit_verified_receipts_before_the_n
         complete(&mut peer, &request)?;
         let terminal = response(&peer, "native-edit", &mut events)?;
         assert_eq!(terminal["result"]["status"], "completed", "{terminal}");
+        let changes = &terminal["result"]["accounting"]["changes"];
+        assert_eq!(
+            terminal["result"]["scope"]["session_id"],
+            scope["session_id"]
+        );
+        assert_eq!(changes["pending_files"], 1);
+        assert_eq!(changes["retained_files"], 1);
+
         assert_eq!(
             terminal["result"]["accounting"]["budget"]["requests_spent"],
             2

@@ -160,6 +160,20 @@ See `kargu-loop-send' for the shape of the report."
           (kargu-chat--render-report report))
       (kargu-chat--render-report report))))
 
+(defun kargu-chat--render-change-evidence (evidence)
+  "Display native EVIDENCE counters without inferring diagnostic success."
+  (let ((pending (and (hash-table-p evidence) (gethash "pending_files" evidence)))
+        (retained (and (hash-table-p evidence) (gethash "retained_files" evidence))))
+    (cond
+     ((and (integerp pending) (>= pending 0) (integerp retained) (>= retained pending))
+      (kargu-chat-insert
+       (format "Native change ledger: %d pending verification file(s); %d retained metadata record(s).\n"
+               pending retained)
+       (if (> pending 0) 'kargu-chat-error 'kargu-chat-meta)))
+     (evidence
+      (kargu-chat-insert "Native change evidence unavailable; verification is unconfirmed.\n"
+                         'kargu-chat-error)))))
+
 (defun kargu-chat--render-report (report)
   "Render REPORT into the current chat buffer (or only notify without one)."
   (kargu-chat-flush-stream)
@@ -174,6 +188,7 @@ See `kargu-loop-send' for the shape of the report."
     (kargu-chat-insert "\n")
     (kargu-chat--render-finish-status status report text error)
     (kargu-chat--render-modified-files modified)
+    (kargu-chat--render-change-evidence (plist-get report :change-evidence))
     (when (and (listp pending) pending)
       (kargu-chat-insert
        (format "unverified changed file(s): %s\nroll back with M-x kargu-diff-rollback or the menu's r\n"

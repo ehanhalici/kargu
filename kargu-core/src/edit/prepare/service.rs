@@ -82,6 +82,12 @@ impl Owner {
     }
 }
 impl EditPreparations {
+    pub(crate) fn conversation_changes(
+        &self,
+        session: &SessionId,
+    ) -> Result<super::history::ChangeSummary, CoreError> {
+        super::history::ChangeSummary::capture(session, self.history_revision, &self.changes)
+    }
     pub(crate) fn register_parent(
         &mut self,
         source: OriginId,

@@ -99,6 +99,33 @@ pub(super) struct ChangedFileRecord {
     pub(super) verification_pending: bool,
 }
 
+/// Bounded conversation evidence; retained rows are not a complete run audit.
+#[derive(Serialize)]
+pub(crate) struct ChangeSummary {
+    revision: HistoryRevision,
+    pending_files: FileCount,
+    retained_files: FileCount,
+}
+impl ChangeSummary {
+    pub(super) fn capture(
+        session: &SessionId,
+        revision: HistoryRevision,
+        changes: &VecDeque<ChangedFileRecord>,
+    ) -> Result<Self, CoreError> {
+        let owned: Vec<_> = changes
+            .iter()
+            .filter(|row| &row.session == session && row.service_id.is_none())
+            .collect();
+        Ok(Self {
+            revision,
+            pending_files: FileCount::try_from(
+                owned.iter().filter(|row| row.verification_pending).count(),
+            )?,
+            retained_files: FileCount::try_from(owned.len())?,
+        })
+    }
+}
+
 pub(super) fn publish_change(
     changes: &mut VecDeque<ChangedFileRecord>,
     record: ChangedFileRecord,
