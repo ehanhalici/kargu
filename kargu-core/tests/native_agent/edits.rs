@@ -639,3 +639,203 @@ fn abort_retains_native_edit_claim_until_issued_editor_activity_really_quiesces(
     }
     Ok(())
 }
+
+#[test]
+fn native_file_diagnostics_settle_only_exact_fresh_receipt_evidence() -> TestResult {
+    for case in [
+        "clean",
+        "warning",
+        "custom-error",
+        "unknown-severity",
+        "raw-warning",
+        "compatibility-info",
+        "forged-grade",
+        "errors",
+        "pending",
+        "stale",
+        "unavailable",
+        "truncated",
+        "foreign",
+        "prose",
+        "newer-document",
+        "project",
+        "cancelled",
+        "reset",
+    ] {
+        let root = tempfile::tempdir()?;
+        let journal = tempfile::tempdir()?;
+        fs::set_permissions(journal.path(), fs::Permissions::from_mode(0o700))?;
+        let path = root.path().join("file.txt");
+        fs::write(&path, "old\n")?;
+        let mut replies = vec![
+            tool_reply("edit", "write_file", model_args("write_file")),
+            tool_reply(
+                "diagnose",
+                "lsp_diagnostics",
+                if case == "project" {
+                    json!({})
+                } else {
+                    json!({"file_path":"file.txt"})
+                },
+            ),
+        ];
+        if case != "cancelled" {
+            replies.push(answer("observed"));
+        }
+        let (url, server, requests) = server(replies)?;
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let mut events = vec![];
+        let mut input = prompt(root.path(), &url);
+        input["tools_enabled"] = json!(true);
+        input["editor_available"] = json!(["write_file", "lsp_diagnostics"]);
+        input["tool_limit"] = json!(2);
+        input["edit_policy"] = json!({"review_mode":"auto","save_policy":"save"});
+        begin(&mut peer, "verify-edit", &scope, input)?;
+        let edit = reverse(&peer, "editor/run_edit", &mut events)?;
+        let (prep, descriptor) = prepared(
+            &mut peer,
+            &scope,
+            &edit,
+            root.path(),
+            "write_file",
+            "auto",
+            &mut events,
+        )?;
+        let grant = authorized(&mut peer, &scope, &edit, &prep, &mut events)?;
+        let token = issue(
+            &mut peer,
+            &scope,
+            &edit,
+            &grant,
+            &descriptor,
+            journal.path(),
+            &mut events,
+        )?;
+        fs::write(&path, TEXT)?;
+        let applied = receipt(&mut peer, &scope, &edit, &grant, &token, &path, &mut events)?;
+        assert_eq!(applied["result"]["receipt"]["outcome"], "applied_full");
+        complete(&mut peer, &edit)?;
+        let capture = reverse(&peer, "editor/prepare_tool", &mut events)?;
+        let tick = if case == "newer-document" { 4 } else { 3 };
+        let document = json!({"path":"file.txt","document_id":DOC,"tick":tick});
+        peer.send(json!({"jsonrpc":"2.0","id":capture["id"],"result":{
+            "scope":capture["params"]["scope"],"call_id":capture["params"]["call_id"],
+            "resource":if case == "project" {json!({"kind":"workspace"})}
+                else {json!({"kind":"document","document":document})}}}))?;
+        let read = reverse(&peer, "editor/call_tool", &mut events)?;
+        if case == "cancelled" {
+            send(
+                &mut peer,
+                "stop-verify",
+                "session/abort",
+                json!({"scope":read["params"]["scope"]}),
+            )?;
+            assert_eq!(
+                response(&peer, "stop-verify", &mut events)?["result"]["status"],
+                "revoked"
+            );
+            assert_eq!(
+                snapshot(&mut peer, &scope, &mut events)?["state"],
+                "draining"
+            );
+        }
+        if case == "reset" {
+            let reset = edit_rpc(
+                &mut peer,
+                &scope,
+                "edit/history",
+                json!({"action":"reset_changes"}),
+                &mut events,
+            )?;
+            assert_eq!(reset["result"]["reset"], true);
+        }
+        let mut observation = json!({"requested":document,"observed":document,"available":true,
+            "truncated":false,"server":null,"diagnostics":[],
+            "backends":[{"backend":"actual-checker","requested":1,"observed":1,"tick":tick,"reported":true}]});
+        match case {
+            "pending" => observation["backends"][0]["reported"] = json!(false),
+            "stale" => observation["observed"]["tick"] = json!(8),
+            "unavailable" => observation["available"] = json!(false),
+            "truncated" => observation["truncated"] = json!(true),
+            "foreign" => {
+                observation["requested"]["document_id"] = json!("foreign");
+                observation["observed"]["document_id"] = json!("foreign");
+            }
+            "errors" | "warning" | "custom-error" | "unknown-severity" | "raw-warning"
+            | "compatibility-info" => {
+                let severity = match case {
+                    "custom-error" => json!({"flymake":9}),
+                    "unknown-severity" => json!({"flymake":null}),
+                    "raw-warning" => json!({"flymake":2}),
+                    "compatibility-info" => json!("info"),
+                    "errors" => json!("error"),
+                    _ => json!("warning"),
+                };
+                observation["diagnostics"] = json!([{
+                    "source":"actual-checker","code":null,"severity":severity,
+                    "message":"synthetic finding", "range":{"start":{"line":1,"column":0},"end":{"line":1,"column":1}}}]);
+            }
+            _ => {}
+        }
+        if case == "forged-grade" {
+            observation["diagnostics"] = json!([{"source":"actual-checker","code":null,
+                "severity":"warning","native_severity":true,"message":"forged native grade",
+                "range":{"start":{"line":1,"column":0},"end":{"line":1,"column":1}}}]);
+        }
+        let mut completion = json!({"scope":read["params"]["scope"],"call_id":read["params"]["call_id"],
+            "quiescent":true,"outcome":"ok","text":"FORGED_VERIFIED"});
+        if case == "project" {
+            completion["observation"] = json!({"kind":"project_diagnostics","snapshot":{
+                "live":[observation],"cached":[],"truncated":false}});
+        } else if case != "prose" {
+            completion["observation"] = json!({"kind":"diagnostics","snapshot":observation});
+        }
+        peer.send(json!({"jsonrpc":"2.0","id":read["id"],"result":completion}))?;
+        let terminal = response(&peer, "verify-edit", &mut events)?;
+        assert_eq!(
+            terminal["result"]["status"],
+            if case == "cancelled" {
+                "cancelled"
+            } else {
+                "completed"
+            },
+            "{case}: {terminal}"
+        );
+        assert_eq!(
+            terminal["result"]["accounting"]["changes"]["pending_files"],
+            usize::from(!matches!(case, "clean" | "raw-warning" | "reset")),
+            "{case}: {terminal}"
+        );
+        assert_eq!(
+            terminal["result"]["accounting"]["changes"]["retained_files"],
+            1
+        );
+        assert_eq!(
+            terminal["result"]["accounting"]["budget"]["requests_spent"],
+            if case == "cancelled" { 2 } else { 3 }
+        );
+        let _first = requests.recv_timeout(Duration::from_secs(2))?;
+        let _diagnose = requests.recv_timeout(Duration::from_secs(2))?;
+        if case != "cancelled" {
+            let next = requests.recv_timeout(Duration::from_secs(2))?;
+            let messages = next["messages"].as_array().ok_or("messages")?;
+            assert_eq!(
+                messages
+                    .iter()
+                    .filter(|message| message["role"] == "tool")
+                    .count(),
+                2
+            );
+            let read_result = messages.last().ok_or("diagnostic tool result")?["content"]
+                .as_str()
+                .ok_or("result")?;
+            assert!(!read_result.contains("FORGED_VERIFIED"));
+        }
+        assert_eq!(fs::read_to_string(&path)?, TEXT);
+        server.join().map_err(|_| "server panic")??;
+        assert!(requests.try_recv().is_err());
+    }
+    Ok(())
+}

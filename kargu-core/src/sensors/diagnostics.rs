@@ -7,23 +7,22 @@ use std::collections::{BTreeMap, BTreeSet};
 mod project;
 pub use project::ProjectDiagnostics;
 
-/// Canonical diagnostic severity; editor-specific symbols do not cross the port.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Severity {
-    /// Compiler or checker error.
-    Error,
-    /// Warning without a compiler error.
-    Warning,
-    /// Supplemental note.
-    Note,
-    /// Informational finding.
-    Info,
+mod severity;
+pub use severity::Severity;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiagnosticInput {
+    source: DiagnosticSource,
+    code: Option<DiagnosticCode>,
+    severity: severity::SeverityObservation,
+    range: SourceRange,
+    message: SensorText,
 }
 
 /// One diagnostic's exact source span and semantic identity.
 #[derive(Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "DiagnosticInput")]
 pub struct Diagnostic {
     /// Diagnostic producer, rather than the selected UI backend.
     pub source: DiagnosticSource,
@@ -35,6 +34,26 @@ pub struct Diagnostic {
     pub range: SourceRange,
     /// Bounded message text, excluded from debug output.
     pub message: SensorText,
+    #[serde(skip)]
+    native_severity: bool,
+}
+impl From<DiagnosticInput> for Diagnostic {
+    fn from(input: DiagnosticInput) -> Self {
+        let (severity, native_severity) = input.severity.classify();
+        Self {
+            source: input.source,
+            code: input.code,
+            severity,
+            range: input.range,
+            message: input.message,
+            native_severity,
+        }
+    }
+}
+impl Diagnostic {
+    pub(crate) fn has_native_severity(&self) -> bool {
+        self.native_severity
+    }
 }
 
 /// Exact document stamp. A reused path alone cannot identify a live buffer.

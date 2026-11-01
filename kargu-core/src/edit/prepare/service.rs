@@ -88,6 +88,28 @@ impl EditPreparations {
     ) -> Result<super::history::ChangeSummary, CoreError> {
         super::history::ChangeSummary::capture(session, self.history_revision, &self.changes)
     }
+    pub(crate) fn capture_verification(
+        &self,
+        session: &SessionId,
+        root: &std::path::Path,
+        document: &crate::sensors::diagnostics::DocumentStamp,
+    ) -> Option<super::VerificationTicket> {
+        super::verification::capture(&self.changes, session, root, document)
+    }
+    pub(crate) fn settle_verification(
+        &mut self,
+        session: &SessionId,
+        ticket: super::VerificationTicket,
+        snapshot: &crate::sensors::diagnostics::DiagnosticSnapshot,
+    ) -> Result<bool, CoreError> {
+        super::verification::settle(
+            &mut self.changes,
+            &mut self.history_revision,
+            session,
+            ticket,
+            snapshot,
+        )
+    }
     pub(crate) fn register_parent(
         &mut self,
         source: OriginId,

@@ -37,9 +37,10 @@ empty cache. No TLA+ source changed and TLC was not rerun.
 The diagnostic reverse dispatcher now captures detached raw Flymake findings,
 actual report-function generation handles and the original document stamp.
 Rust receives the current observations and evaluates freshness. The bridge no
-longer invokes the old diagnostic formatter. Severity category conversion is a
-shared editor primitive in freshness.el; the new producer does not require the
-legacy diagnostic formatting module.
+longer invokes the old diagnostic formatter. The producer now copies Flymake's
+raw severity property; classification belongs to Rust. The legacy category
+helper remains only for unmigrated consumers. The receipt-bound file verification
+consumer and raw grading contract are documented in native-receipt-verification.md.
 
 Capture limits findings, source-coordinate traversal work, aggregate JSON and
 individual message prefixes. Omission marks truncation. Metadata exceeding the

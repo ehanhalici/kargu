@@ -60,11 +60,10 @@
   (let* ((message (flymake-diagnostic-text diagnostic))
          (cut (> (length message) 4096))
          (backend (flymake-diagnostic-backend diagnostic))
-         (severity (pcase (kargu-lsp--diagnostic-severity (flymake-diagnostic-type diagnostic))
-                     (1 "error") (2 "warning") (_ "info"))))
+         (severity (flymake--lookup-type-property (flymake-diagnostic-type diagnostic) 'severity)))
     (cons (kargu-bridge--object
            "source" (kargu-bridge-diagnostics--producer backend)
-           "code" :json-null "severity" severity
+           "code" :json-null "severity" (kargu-bridge--object "flymake" (or severity :json-null))
            "message" (substring-no-properties message 0 (min 4096 (length message)))) cut)))
 
 (defun kargu-bridge-diagnostics--finding (diagnostic)

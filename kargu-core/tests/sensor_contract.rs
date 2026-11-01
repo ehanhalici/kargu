@@ -355,3 +355,34 @@ fn project_diagnostics_preserve_cache_uncertainty_and_supersede_only_the_same_fr
     assert!(project(vec![snapshot(), snapshot()], vec![], false).is_err());
     Ok(())
 }
+
+#[test]
+fn raw_flymake_severity_preserves_errors_and_rejects_unknown_ranks() -> TestResult {
+    use kargu_core::sensors::diagnostics::Severity;
+    for (input, expected) in [
+        (json!("error"), Severity::Error),
+        (json!("warning"), Severity::Warning),
+        (json!("note"), Severity::Note),
+        (json!("info"), Severity::Info),
+        (json!({"flymake":1}), Severity::Note),
+        (json!({"flymake":2}), Severity::Warning),
+        (json!({"flymake":3}), Severity::Error),
+        (json!({"flymake":9}), Severity::Error),
+    ] {
+        let parsed: Severity = serde_json::from_value(input)?;
+        assert_eq!(parsed, expected);
+    }
+    for invalid in [
+        json!(null),
+        json!({"flymake":null}),
+        json!({"flymake":0}),
+        json!({"flymake":-1}),
+        json!({"flymake":2.5}),
+        json!({"flymake":u64::MAX}),
+        json!({"flymake":3,"clean":true}),
+        json!("custom"),
+    ] {
+        assert!(serde_json::from_value::<Severity>(invalid).is_err());
+    }
+    Ok(())
+}

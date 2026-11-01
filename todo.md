@@ -1385,6 +1385,24 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       bağla. Eksik/değişen provider, Stop/timeout/stale ve snapshot eviction
       pending borcu silemesin. Son consumer sonrası Elisp verification/healing
       karar motorunu kaldır; 6.4a bu kabulü kapatmaz.
+      - [x] **6.4b1 Gerçek native file-diagnostic consumer:** native agent'ın
+        dosya `lsp_diagnostics` çağrısı öncesinde Rust session/edit/revision/file/
+        hash/document UUID/tick biletini yakalar; exact fresh ve errorsuz,
+        native-graded gözlem yalnız bu publication'ın pending borcunu kapatır.
+        Undo kayıtları ve diğer owner/service'ler kalır; Stop/timeout, project,
+        farklı tick, unknown/severity/prose/truncated/error sonucu borcu düşürmez.
+        Emacs ham Flymake severity property taşır; sınıflandırma Rust'tadır.
+        Compatibility label ve JSON'dan forged grade verification yetkisi değildir.
+        Dört ledger unit + 18 gerçek provider/stdio vaka; gerçek Emacs write/save
+        → Flymake report → native diagnostic → pending=0, retained=1, üç model
+        isteği kabulü geçti. 612 locked Rust (32 compile-fail), 1451/1451 tam ERT,
+        strict Clippy/fmt ve Elisp Werror/parantez/checkdoc temiz. Kanıt:
+        `docs/native-receipt-verification.md`.
+      - [ ] **6.4b2 Kalan otomatik akış:** her editten sonra native-graded baseline/
+        fresh-pull barrier, error delta ve bounded healing'i otomatik aynı parent
+        run/bütçe/deadline altında kur. Deleted/closed-file ve explicit edit-service
+        verification'ı tamamla; son legacy consumer/Elisp karar motorlarını kaldır.
+        6.4b1 yalnız explicit file diagnostic okuması bağlar; üst 6.4 kapanışı değildir.
   - [ ] **6.5 Sonuç ve cleanup:** geç/çift usage, cancel/timeout/EOF ve unknown
     effect settlement'ını doğrula; eski Elisp compaction/healing/accounting
     karar motorlarını son tüketicilerden sonra kaldır.

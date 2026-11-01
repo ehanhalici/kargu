@@ -28,6 +28,10 @@ enum ReadStage {
     Body(SelectedSymbol),
 }
 enum ReadProgress {
+    Diagnostics {
+        snapshot: Box<crate::sensors::diagnostics::DiagnosticSnapshot>,
+        text: String,
+    },
     Edit(SymbolEditSelection),
     Done(ToolOutcome, String),
     Body(SelectedSymbol),
@@ -99,6 +103,7 @@ pub(super) struct EditorCall {
     cancel_sent: bool,
     step: Option<crate::domain::ToolStepId>,
     selection: Option<SymbolEditSelection>,
+    verification: Option<crate::edit::prepare::VerificationTicket>,
 }
 
 #[derive(Deserialize)]
@@ -157,6 +162,7 @@ impl EditorCall {
                     cancel_sent: false,
                     step: None,
                     selection: None,
+                    verification: None,
                 })
             }
             Err(error) => Err(Box::new((error, call))),
@@ -395,7 +401,19 @@ impl EditorCall {
                         None => ReadProgress::Done(missing, missing.summary().to_owned()),
                     }
                 };
+                let mut diagnostic = None;
                 let result = match progress {
+                    ReadProgress::Diagnostics { snapshot, text } => {
+                        let outcome = if snapshot.freshness()
+                            == crate::sensors::diagnostics::Freshness::Fresh
+                        {
+                            ToolOutcome::Ok
+                        } else {
+                            ToolOutcome::Failed
+                        };
+                        diagnostic = Some(snapshot);
+                        (outcome, text)
+                    }
                     ReadProgress::Done(outcome, text) => (outcome, text),
                     ReadProgress::Edit(selection) => {
                         self.selection = Some(selection);
@@ -474,6 +492,21 @@ impl EditorCall {
                     self.step.as_ref(),
                     result.0,
                 )?;
+                if !self.cancel_sent
+                    && Instant::now() < self.deadline
+                    && self.call.run().check_live().is_ok()
+                    && let (Some(ticket), Some(snapshot)) = (self.verification.take(), diagnostic)
+                {
+                    // The read action completed under its native issuance lease.
+                    // Only this captured publication can consume the evidence.
+                    // A refused metadata settlement keeps the debt. The read
+                    // itself remains valid and must not complete its action twice.
+                    let _settled = host
+                        .actor_mut(scope)?
+                        .edits
+                        .settle_verification(&scope.session_id, ticket, &snapshot)
+                        .unwrap_or(false);
+                }
                 release_symbols(host, forward, &self.call, messages)?;
                 self.phase = Phase::Settled;
                 Ok(Some(result))
@@ -491,6 +524,15 @@ impl EditorCall {
         grant: AuthorizedEditorTool,
         messages: &mut Vec<Value>,
     ) -> Result<(), CoreError> {
+        if self.call.name().as_str() == "lsp_diagnostics"
+            && let EditorResource::Document { document } = grant.action().resource()
+        {
+            self.verification = host.actor_mut(scope)?.edits.capture_verification(
+                &scope.session_id,
+                self.call.run().settings().workspace.path(),
+                document,
+            );
+        }
         let id = reverse_id(host, &self.call, "issued")?;
         let deadline = self.deadline;
         let remaining = deadline
@@ -606,7 +648,13 @@ fn read_result(
             (
                 EditorResource::Document { document },
                 Some(Observation::Diagnostics { snapshot }),
-            ) => snapshot.render_for(document)?,
+            ) => {
+                let (_, text) = snapshot.render_for(document)?;
+                return Ok(ReadProgress::Diagnostics {
+                    snapshot: Box::new(snapshot),
+                    text,
+                });
+            }
             (EditorResource::Workspace {}, Some(Observation::ProjectDiagnostics { snapshot })) => {
                 snapshot.render()?
             }

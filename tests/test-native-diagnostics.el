@@ -42,7 +42,7 @@
           (should (kargu-bridge-sensor--equal-p requested (gethash "observed" snapshot)))
           (should (eq (gethash "reported" (aref (gethash "backends" snapshot) 0)) t))
           (should (equal (gethash "message" finding) "raw diagnostic 🦀"))
-          (should (equal (gethash "severity" finding) "error"))
+          (should (= (gethash "flymake" (gethash "severity" finding)) 3))
           (should-not (gethash "text" result))
           (should-not (gethash "freshness" snapshot))
           (should-not (gethash "symbol-call" (kargu-bridge-connection-sensor-calls connection)))))
@@ -221,6 +221,94 @@
       (let ((capture (kargu-bridge-diagnostics--cached finding root)))
         (should (= (gethash "line" (car capture)) 2))
         (should (eq (gethash "column" (car capture)) :json-null))))))
+
+(defun kargu-native-diagnostics-test--clean-backend (report &rest _)
+  "Publish an actual empty Flymake REPORT for the synthetic source."
+  (funcall report nil))
+
+(ert-deftest kargu-native-diagnostics-fresh-post-save-settles-native-receipt-real-pipe-test ()
+  (kargu-bridge-test--with-core
+    (let* ((root (make-temp-file "kargu-native-verify-" t))
+           (journal (make-temp-file "kargu-native-verify-journal-" t))
+           (kargu-bridge-edit-batch-journal-directory journal)
+           (application (kargu-application-create))
+           (path (expand-file-name "source.el" root))
+           (text "new 🦀\n")
+           source server requests done result failure)
+      (unwind-protect
+          (cl-letf (((symbol-function 'trusted-content-p) (lambda () t)))
+            (cl-labels ((reply (name arguments)
+                          (json-serialize
+                           (kargu-bridge--object
+                            "choices" (vector
+                                       (kargu-bridge--object
+                                        "message" (kargu-bridge--object
+                                                   "role" "assistant" "content" :json-null
+                                                   "tool_calls" (vector (kargu-bridge--object
+                                                                         "id" name "type" "function"
+                                                                         "function" (kargu-bridge--object
+                                                                                     "name" name "arguments" (decode-coding-string (json-serialize arguments) 'utf-8-unix)))))
+                                        "finish_reason" "tool_calls"))) :null-object :json-null)))
+              (write-region "old\n" nil path nil 'silent)
+              (setq source (find-file-noselect path))
+              (with-current-buffer source
+                (emacs-lisp-mode)
+                (setq-local kargu-application-owner application
+                            flymake-diagnostic-functions '(kargu-native-diagnostics-test--clean-backend))
+                (flymake-mode 1)
+                (flymake-start)
+                (add-hook 'after-save-hook #'flymake-start nil t))
+              (let* ((write (reply "write_file" (kargu-bridge--object "file_path" "source.el" "contents" text)))
+                     (diagnose (reply "lsp_diagnostics" (kargu-bridge--object "file_path" "source.el")))
+                     (answer "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"done\"},\"finish_reason\":\"stop\"}]}"))
+                (setq server (kargu-stream-test--server
+                              write nil nil (lambda (body) (push (kargu--json-decode-safe body) requests))
+                              nil nil nil (list (list :body write) (list :body diagnose) (list :body answer)))))
+              (with-current-buffer source
+                (kargu-loop-native-owned-start
+                 application
+                 (kargu-bridge--object
+                  "root" (directory-file-name root) "mode" "agent"
+                  "prompt" (kargu-bridge--object "role" "user" "content" "synthetic edit and diagnostics")
+                  "tools_enabled" t "editor_available" ["write_file" "lsp_diagnostics"]
+                  "tool_limit" 2 "turn_limit" 3 "timeout_ms" 10000
+                  "config_revision" 1 "policy_revision" 1
+                  "edit_policy" (kargu-bridge--object "review_mode" "auto" "save_policy" "save")
+                  "connection" (kargu-bridge--object
+                                "url" (format "http://127.0.0.1:%d/v1" (process-contact server :service))
+                                "model" "fixture" "headers" (kargu-bridge--object) "stream" :json-false
+                                "timeouts" (kargu-bridge--object "connect_ms" 1000 "first_byte_ms" 1000 "deadline_ms" 8000)))
+                 (lambda (value fault) (setq result value failure fault done t)) :owner source))
+              (kargu-bridge-test--wait (lambda () done))
+              (should-not failure)
+              (should (equal (gethash "status" result) "completed"))
+              (let* ((accounting (gethash "accounting" result))
+                     (changes (gethash "changes" accounting)))
+                (should (= (gethash "pending_files" changes) 0))
+                (should (= (gethash "retained_files" changes) 1))
+                (should (= (gethash "requests_spent" (gethash "budget" accounting)) 3)))
+              (should (= (length requests) 3))
+              (let* ((messages (gethash "messages" (car requests)))
+                     (diagnostic (aref messages (1- (length messages)))))
+                (should (equal (gethash "tool_call_id" diagnostic) "lsp_diagnostics"))
+                (should (string-match-p "(fresh)" (gethash "content" diagnostic))))
+              (should (equal (with-temp-buffer (insert-file-contents path) (buffer-string)) text))))
+        (when (and (processp server) (process-live-p server)) (delete-process server))
+        (when (buffer-live-p source)
+          (with-current-buffer source (set-buffer-modified-p nil)) (kill-buffer source))
+        (delete-directory root t)
+        (delete-directory journal t)))))
+
+(ert-deftest kargu-native-diagnostics-capture-preserves-custom-and-unknown-severity-test ()
+  (let* ((type (make-symbol "custom-checker-type"))
+         (finding (flymake-make-diagnostic (current-buffer) 1 1 type "custom finding")))
+    (setf (flymake--diag-backend finding) 'custom-checker)
+    (put type 'severity 9)
+    (let ((capture (kargu-bridge-diagnostics--facts finding)))
+      (should (= (gethash "flymake" (gethash "severity" (car capture))) 9)))
+    (put type 'severity nil)
+    (let ((capture (kargu-bridge-diagnostics--facts finding)))
+      (should (eq (gethash "flymake" (gethash "severity" (car capture))) :json-null)))))
 
 (provide 'tests/test-native-diagnostics)
 ;;; test-native-diagnostics.el ends here
