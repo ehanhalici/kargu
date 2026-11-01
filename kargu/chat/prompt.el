@@ -63,15 +63,14 @@ ACTION-FN is called on RET or click.  MOUSE-FN receives mouse events."
   (let ((map (make-sparse-keymap)))
     (when (boundp 'kargu-chat-mode-map)
       (set-keymap-parent map kargu-chat-mode-map))
-    (define-key map [mouse-1] (or mouse-fn (lambda (_) (interactive) (funcall action-fn))))
-    (define-key map [mouse-2] (or mouse-fn (lambda (_) (interactive) (funcall action-fn))))
+    (define-key map [mouse-1] (or mouse-fn (lambda (_e) (interactive "e") (funcall action-fn))))
+    (define-key map [mouse-2] (or mouse-fn (lambda (_e) (interactive "e") (funcall action-fn))))
     (define-key map (kbd "RET") (lambda () (interactive) (funcall action-fn)))
     (propertize label
                 'face face
                 'mouse-face 'highlight
                 'help-echo help
                 'keymap map
-                'local-map map
                 'button t
                 'action (lambda (_) (funcall action-fn)))))
 
@@ -107,7 +106,7 @@ fresh chat asks for a selection."
     (kargu-chat--footer-button
      (format "[%s]" mode-name) 'bold
      "mouse-1 or RET: switch mode with company list (C-c C-x)"
-     #'kargu-chat-select-mode-company
+     (lambda () (interactive) (kargu-chat-select-mode-company t))
      (lambda (e) (interactive "e") (kargu-chat-select-mode-company e)))))
 
 (defun kargu-chat--footer-provider-button ()
@@ -117,12 +116,12 @@ fresh chat asks for a selection."
         (kargu-chat--footer-button
          (format "[%s]" pname) 'font-lock-type-face
          "mouse-1 or RET: switch provider (company list)"
-         #'kargu-chat-select-provider-company
+         (lambda () (interactive) (kargu-chat-select-provider-company t))
          (lambda (e) (interactive "e") (kargu-chat-select-provider-company e)))
       (kargu-chat--footer-button
        "[select provider]" 'font-lock-warning-face
        "mouse-1 or RET: select provider (company list)"
-       #'kargu-chat-select-provider-company
+       (lambda () (interactive) (kargu-chat-select-provider-company t))
        (lambda (e) (interactive "e") (kargu-chat-select-provider-company e))))))
 
 (defun kargu-chat--footer-model-button ()
@@ -132,7 +131,7 @@ fresh chat asks for a selection."
     (kargu-chat--footer-button
      (car m-info) (cdr m-info)
      "mouse-1 or RET: select model (company list)"
-     #'kargu-chat-select-model-company
+     (lambda () (interactive) (kargu-chat-select-model-company nil nil nil t))
      (lambda (e) (interactive "e") (kargu-chat-select-model-company nil nil nil e)))))
 
 (defun kargu-chat--footer-context-button ()
@@ -151,7 +150,7 @@ fresh chat asks for a selection."
     (kargu-chat--footer-button
      (format "[%s]" effort) 'font-lock-keyword-face
      "mouse-1 or RET: select reasoning effort (company list)"
-     #'kargu-chat-select-effort-company
+     (lambda () (interactive) (kargu-chat-select-effort-company t))
      (lambda (e) (interactive "e") (kargu-chat-select-effort-company e)))))
 
 

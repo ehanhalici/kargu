@@ -144,10 +144,14 @@ Never choose a different chat or signal from a process callback."
 
 (defun kargu-chat--render-agent-heading ()
   "Open the next assistant turn in the chat log."
-  (kargu-chat-insert "\n")
-  (kargu-chat-insert
-   (format "## kargu · %s\n" (kargu--model))
-   'kargu-chat-agent-heading))
+  (let ((model (or (and (bound-and-true-p kargu--loop-run)
+                        (plist-get kargu--loop-run :model))
+                   (kargu-chat--shown-model)
+                   (kargu--model))))
+    (kargu-chat-insert "\n")
+    (kargu-chat-insert
+     (format "## kargu · %s\n" model)
+     'kargu-chat-agent-heading)))
 
 (provide 'kargu/chat/transcript)
 

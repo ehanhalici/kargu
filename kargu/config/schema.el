@@ -60,7 +60,8 @@ CALLBACK receives a Result after the UI has adopted the native choice."
          (origin (current-buffer)) (app (kargu-application-context))
          (mode major-mode)
          (session (kargu-session-context)) (before (kargu-selection-context))
-         (cached (kargu-config-copy (gethash name (kargu-metadata-table :catalog kargu--live-models-cache))))
+         (cached (and (boundp 'kargu--live-models-cache)
+                      (kargu-config-copy (gethash name (kargu-metadata-table :catalog kargu--live-models-cache)))))
          committed task)
     (cl-labels
         ((valid ()

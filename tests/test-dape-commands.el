@@ -14,10 +14,12 @@
 (require 'tests/test-helpers)
 (require 'tests/dape-fixtures)
 (require 'kargu/tools/dape)
-(require 'kargu/loop/tools)
+(require 'kargu/loop)
 (require 'kargu/languages)
 
 (defvar dape-active-mode-off-hook)
+(defvar dape-active-mode)
+(defvar dape-configs)
 
 (ert-deftest kargu-dape-render-strips-terminal-control-sequences-test ()
   "Colors and terminal hyperlinks never enter variable or context text."

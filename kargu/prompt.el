@@ -233,7 +233,7 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
 
 (defun kargu-prompt--lsp-status ()
   "Describe actual project LSP availability without promising diagnostics."
-  (if (kargu-eglot-connected-p)
+  (if (and (fboundp 'kargu-eglot-connected-p) (kargu-eglot-connected-p))
       "  Flymake / LSP: Connected; request diagnostics explicitly.\n"
     "  Flymake / LSP: Unavailable; use available file/search tools and project tests.\n"))
 
@@ -322,7 +322,7 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
   (list (kargu-state-mode)
         (and (kargu-prompt--tools-off-p) t)
         (kargu--model)
-        (and (kargu-eglot-connected-p) t)
+        (and (fboundp 'kargu-eglot-connected-p) (kargu-eglot-connected-p) t)
         (kargu-history-overlay history)
         (kargu-prompt--workspace)
         (kargu-prompt--context-file-name)

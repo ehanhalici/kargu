@@ -13,6 +13,7 @@
 
 (require 'ert)
 (require 'tests/test-helpers)
+(require 'tests/test-bridge)
 (require 'kargu/contract/constants)
 (require 'kargu/core)
 (require 'kargu/api)
@@ -360,6 +361,39 @@
                      (lambda (&rest _) nil)))
             (kargu-chat-select-provider-company)
             (should (null inhibit-read-only))))
+      (when (get-buffer kargu-chat-buffer-name)
+        (kill-buffer kargu-chat-buffer-name)))))
+
+(ert-deftest kargu-company-footer-field-properties-and-completion-test ()
+  "Ensure opening footer field clears button action/local-map and installs company map."
+  (when (get-buffer kargu-chat-buffer-name)
+    (kill-buffer kargu-chat-buffer-name))
+  (with-temp-buffer
+    (rename-buffer kargu-chat-buffer-name)
+    (set-window-buffer (selected-window) (current-buffer))
+    (unwind-protect
+        (progn
+          (kargu-chat-mode)
+          (kargu-chat--ensure-idle-prompt)
+          (let ((applied nil))
+            (cl-letf (((symbol-function 'kargu-api-select--chat-buffer)
+                       (lambda () (current-buffer))))
+              (kargu-api-select--in-footer
+               'provider '("anthropic" "openai") nil
+               (lambda (choice) (setq applied choice)))
+              ;; Candidates are active
+              (should (equal company-candidates '("anthropic" "openai")))
+              ;; Field point should not have button local-map or action
+              (should-not (get-text-property (point) 'local-map))
+              (should-not (get-text-property (point) 'action))
+              (should-not (get-text-property (point) 'button))
+              ;; Company active map is installed in emulation alist
+              (should (fboundp 'company-complete-selection))
+              ;; Executing kargu-chat-return confirms selection rather than aborting
+              (kargu-chat-return)
+              (should (equal applied "anthropic"))
+              ;; Footer is restored
+              (should (string-match-p "provider: \\[" (buffer-string))))))
       (when (get-buffer kargu-chat-buffer-name)
         (kill-buffer kargu-chat-buffer-name)))))
 

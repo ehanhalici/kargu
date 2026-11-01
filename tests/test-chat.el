@@ -21,7 +21,14 @@
 (require 'kargu/loop)
 (require 'kargu/providers/catalog)
 (require 'kargu/tools/lsp)
+(require 'kargu/ui/transient)
 
+(defvar company-backends)
+(defvar company-backend)
+(defvar company-candidates)
+(defvar company-minimum-prefix-length)
+
+(declare-function company-call-backend "company" (action &rest args))
 (declare-function kargu-chat--tool-heading "kargu/chat/render" (name arguments))
 (declare-function kargu-chat--result-summary "kargu/chat/render" (result))
 
@@ -641,6 +648,95 @@
           (kargu-chat--finish-tool-activity run "late observer")
           (should (equal-including-properties before (buffer-string))))
         (should (= deliveries 1))))))
+
+(ert-deftest kargu-draft-preservation-across-streaming-and-user-stop-test ()
+  "Draft in prompt is preserved during rapid stream deltas and user stop."
+  (let* ((chat-buf (generate-new-buffer " *kargu-stream-draft-test*"))
+         (kargu-session-auto-save nil)
+         (run (list :id "run-draft-test" :state 'running :chat-buffer chat-buf
+                    :session (kargu-session-context chat-buf)
+                    :model "test-model")))
+    (unwind-protect
+        (with-current-buffer chat-buf
+          (kargu-chat-mode)
+          (kargu-chat--ensure-idle-prompt)
+          ;; Type an unsent draft
+          (goto-char (point-max))
+          (insert "my valuable draft text")
+          (let ((initial-draft (kargu-chat--input-text))
+                (kargu--loop-run run))
+            (should (equal initial-draft "my valuable draft text"))
+            ;; Stream chunks above the prompt
+            (kargu-chat--on-delta "Hello " nil)
+            (kargu-chat--on-delta "<think>internal reasoning</think>" nil)
+            (kargu-chat--on-delta "world!" nil)
+            ;; Draft must be completely unchanged
+            (should (equal (kargu-chat--input-text) "my valuable draft text"))
+            (should (string-search "Hello" (buffer-string)))
+            (should (string-search "world!" (buffer-string)))
+            ;; Now simulate user stop (C-c C-k)
+            (cl-letf (((symbol-function 'kargu-application-current-run) (lambda () run))
+                      ((symbol-function 'kargu-loop-cancel)
+                       (lambda (_r &optional reason)
+                         (kargu-chat--on-finish (list :status :stopped :text reason)))))
+              (kargu-chat-stop)
+              ;; Prompt is idle and draft is preserved
+              (should (kargu-chat--prompt-live-p))
+              (should (equal (kargu-chat--input-text) "my valuable draft text"))
+              (should (string-search "run stopped" (buffer-string))))))
+      (when (buffer-live-p chat-buf)
+        (kill-buffer chat-buf)))))
+
+(ert-deftest kargu-thin-ui-passive-getters-no-io-test ()
+  "Passive UI getters read committed state/DTOs without starting processes or I/O."
+  (let ((chat-buf (generate-new-buffer " *kargu-passive-ui-test*")))
+    (unwind-protect
+        (with-current-buffer chat-buf
+          (kargu-chat-mode)
+          (kargu-chat--ensure-idle-prompt)
+          ;; Mock any potential IO/process to fail if invoked
+          (cl-letf (((symbol-function 'make-process)
+                     (lambda (&rest _) (ert-fail "Passive getter started a process")))
+                    ((symbol-function 'kargu-bridge-call)
+                     (lambda (&rest _) (ert-fail "Passive getter started native RPC"))))
+            ;; Passive getters must execute purely in memory
+            (should (or (null (kargu-chat--shown-provider))
+                        (stringp (kargu-chat--shown-provider))))
+            (should (or (null (kargu-chat--shown-model))
+                        (stringp (kargu-chat--shown-model))))
+            (should (stringp (kargu-chat--footer-effort-button)))
+            (should (stringp (kargu-chat--footer-context-button)))
+            (should (stringp (kargu-chat--footer-provider-button)))
+            (should (stringp (kargu-chat--footer-model-button)))
+            (should (stringp (kargu-chat--footer-mode-button)))
+            (should (stringp (kargu-chat--footer-string)))
+            (should (stringp (kargu-circuit-status-string)))
+            (should (listp (kargu-model-read "m1" "p1")))))
+      (when (buffer-live-p chat-buf)
+        (kill-buffer chat-buf)))))
+
+(ert-deftest kargu-chat-stream-fragmented-reasoning-chunks-test ()
+  "Fragmented reasoning tags across arbitrary chunk boundaries stream coherently."
+  (let ((chat-buf (generate-new-buffer " *kargu-stream-chunk-test*")))
+    (unwind-protect
+        (with-current-buffer chat-buf
+          (kargu-chat-mode)
+          (kargu-chat--ensure-idle-prompt)
+          (let ((kargu--loop-run (list :chat-buffer chat-buf)))
+            ;; Stream fragmented chunks
+            (kargu-chat--on-delta "Normal start. <th" nil)
+            (should (equal kargu-chat--thought-pending "<th"))
+            (kargu-chat--on-delta "ink>thought content</th" nil)
+            (should (equal kargu-chat--thought-pending "</th"))
+            (kargu-chat--on-delta "ink> Normal end." nil)
+            (should (equal kargu-chat--thought-pending ""))
+            (kargu-chat-flush-stream)
+            (let ((str (buffer-string)))
+              (should (string-search "Normal start." str))
+              (should (string-search "thought content" str))
+              (should (string-search "Normal end." str)))))
+      (when (buffer-live-p chat-buf)
+        (kill-buffer chat-buf)))))
 
 (provide 'tests/test-chat)
 ;;; test-chat.el ends here

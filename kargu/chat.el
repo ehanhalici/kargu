@@ -117,28 +117,33 @@ the model must call `read_file' instead of drowning the prompt."
 
 (defun kargu-chat-return ()
   "Handle RET in the chat buffer.
-Execute button action if on a button, stop run if on stop button,
-or insert newline if editing prompt."
+Execute button action if on a button, complete selection if in company,
+stop run if on stop button, or insert newline if editing prompt."
   (interactive)
-  (let ((action (or (get-text-property (point) 'action)
-                    (and (fboundp 'button-at)
-                         (button-at (point))
-                         (button-get (button-at (point)) 'action)))))
-    (cond
-     (action
-      (if (functionp action)
-          (funcall action (point))
-        (call-interactively action)))
-     ((and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
-      (message "kargu is currently running. Click [Stop] or press C-c C-k to stop."))
-     ;; If point is in the footer or transcript area (before prompt marker), never insert newline!
-     ((and (boundp 'kargu-chat--prompt-marker)
-           (markerp kargu-chat--prompt-marker)
-           (marker-position kargu-chat--prompt-marker)
-           (< (point) (marker-position kargu-chat--prompt-marker)))
-      (goto-char (point-max)))
-     (t
-      (newline)))))
+  (cond
+   ((and (bound-and-true-p company-candidates)
+         (fboundp 'company-complete-selection))
+    (company-complete-selection))
+   (t
+    (let ((action (or (get-text-property (point) 'action)
+                      (and (fboundp 'button-at)
+                           (button-at (point))
+                           (button-get (button-at (point)) 'action)))))
+      (cond
+       (action
+        (if (functionp action)
+            (funcall action (point))
+          (call-interactively action)))
+       ((and (fboundp 'kargu-loop-running-p) (kargu-loop-running-p))
+        (message "kargu is currently running. Click [Stop] or press C-c C-k to stop."))
+       ;; If point is in the footer or transcript area (before prompt marker), never insert newline!
+       ((and (boundp 'kargu-chat--prompt-marker)
+             (markerp kargu-chat--prompt-marker)
+             (marker-position kargu-chat--prompt-marker)
+             (< (point) (marker-position kargu-chat--prompt-marker)))
+        (goto-char (point-max)))
+       (t
+        (newline)))))))
 
 (defun kargu-chat-list-buffers ()
   "Return a list of live buffers running `kargu-chat-mode'."
