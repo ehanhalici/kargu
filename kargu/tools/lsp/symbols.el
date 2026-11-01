@@ -14,6 +14,7 @@
 (require 'kargu/edit)
 
 (require 'kargu/tools/lsp/context)
+(require 'kargu/tools/lsp/coordinates)
 (require 'kargu/tools/lsp/skeleton)
 (require 'xref)
 (require 'elisp-mode)
@@ -147,58 +148,6 @@ CALLBACK receives fresh results; interactive use reports them on completion."
    ((and (numberp end-char) (<= end-char 0))
     (max start-line end-0))
    (t (max start-line (1+ end-0)))))
-
-(defun kargu-lsp--char-code-units (ch encoding)
-  "Return code unit width of character CH in LSP position ENCODING."
-  (pcase (or encoding 'utf-16)
-    ('utf-16 (if (> ch #xFFFF) 2 1))
-    ('utf-8 (string-bytes (char-to-string ch)))
-    ('utf-32 1)
-    (other (error "Unsupported LSP position encoding: %S" other))))
-
-(defun kargu-lsp--lsp-pos-to-point (line &optional character encoding)
-  "Convert 0-based LSP (LINE, CHARACTER) in ENCODING to widened point.
-Return nil when LINE or CHARACTER is out of bounds or splits a code unit."
-  (when (and (listp line) (plist-member line :line))
-    (setq encoding character
-          character (plist-get line :character)
-          line (plist-get line :line)))
-  (when (and (integerp line) (>= line 0)
-             (integerp character) (>= character 0))
-    (save-excursion
-      (save-restriction
-        (widen)
-        (goto-char (point-min))
-        (let ((rem (forward-line line)))
-          (when (and (= rem 0)
-                     (or (= line 0) (bolp)))
-            (let ((line-end (line-end-position))
-                  (units 0)
-                  (valid t))
-              (while (and valid (< units character) (< (point) line-end))
-                (let ((step (kargu-lsp--char-code-units (char-after) encoding)))
-                  (if (> (+ units step) character)
-                      (setq valid nil)
-                    (setq units (+ units step))
-                    (forward-char 1))))
-              (and valid (= units character) (point)))))))))
-
-(defun kargu-lsp--point-to-lsp-pos (pos &optional encoding)
-  "Convert widened buffer POS to 0-based LSP (:line L :character C) in ENCODING.
-Return nil when POS is outside the widened buffer bounds."
-  (save-excursion
-    (save-restriction
-      (widen)
-      (when (and (integerp pos) (>= pos (point-min)) (<= pos (point-max)))
-        (goto-char pos)
-        (let ((line (1- (line-number-at-pos pos t)))
-              (line-start (line-beginning-position))
-              (units 0))
-          (goto-char line-start)
-          (while (< (point) pos)
-            (setq units (+ units (kargu-lsp--char-code-units (char-after) encoding)))
-            (forward-char 1))
-          (list :line line :character units))))))
 
 (defun kargu-lsp--symbol-plist (item)
   "Normalized plist for one LSP document symbol ITEM, or nil."

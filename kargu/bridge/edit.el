@@ -13,6 +13,10 @@
 (require 'kargu/async)
 (require 'kargu/bridge/application)
 
+(defvar kargu-execution--current)
+(defvar kargu--loop-run)
+(declare-function kargu-execution-app "kargu/application/execution" (context))
+
 (require 'rx)
 (defconst kargu-bridge-edit--text-bytes (* 4 1024 1024)
   "Maximum bytes in one native text part.")
@@ -40,7 +44,7 @@
 (cl-defstruct (kargu-bridge-edit-artifact
                (:constructor kargu-bridge-edit-artifact--make))
   "One connection-bound, read-only native proposal handle."
-  application connection scope origin id descriptor released (page-bytes kargu-bridge-edit--chunk-bytes))
+  application connection scope scope-valid-p origin id descriptor released (page-bytes kargu-bridge-edit--chunk-bytes))
 
 (cl-defstruct (kargu-bridge-edit-transfer
                (:constructor kargu-bridge-edit-transfer--make))
@@ -74,11 +78,21 @@
 (defun kargu-bridge-edit--current-p (artifact)
   "Check ARTIFACT's exact application lease without acquiring another one."
   (and (not (kargu-bridge-edit-artifact-released artifact))
-       (kargu-bridge-application-scope-equal-p
-        (kargu-bridge-edit-artifact-scope artifact)
-        (kargu-bridge-application-current-scope
-         (kargu-bridge-edit-artifact-application artifact)
-         (kargu-bridge-edit-artifact-connection artifact)))))
+       (eq (kargu-bridge-status (kargu-bridge-edit-artifact-connection artifact)) 'ready)
+       (if-let* ((valid-p (kargu-bridge-edit-artifact-scope-valid-p artifact)))
+           (condition-case nil (funcall valid-p) ((error quit) nil))
+         (kargu-bridge-application-scope-equal-p
+          (kargu-bridge-edit-artifact-scope artifact)
+          (kargu-bridge-application-current-scope
+           (kargu-bridge-edit-artifact-application artifact)
+           (kargu-bridge-edit-artifact-connection artifact))))))
+
+(defun kargu-bridge-edit--async-owner (&optional artifact)
+  "Return the legacy task owner unless ARTIFACT has a captured native scope.
+Native source ownership is checked by its forward waiter, independently of
+any unrelated Elisp loop active when a delayed callback runs."
+  (unless (and artifact (kargu-bridge-edit-artifact-scope-valid-p artifact))
+    (if kargu-execution--current (kargu-execution-app kargu-execution--current) kargu--loop-run)))
 
 (defun kargu-bridge-edit--task-current-p (task)
   "Check TASK's captured source, deadline and optional document guard."
@@ -277,7 +291,8 @@
                      ((error quit)
                       (when (kargu-bridge-edit-artifact-p value) (kargu-bridge-edit-release value))
                       (signal (car err) (cdr err))))))
-                :parent parent :valid-p valid-p :timeout kargu-bridge-edit--timeout))
+                :parent parent :owner (kargu-bridge-edit--async-owner artifact)
+                :valid-p valid-p :timeout kargu-bridge-edit--timeout))
          (transfer (kargu-bridge-edit-transfer--make
                     :task task :artifact artifact :arguments arguments :action action
                     :page-bytes (kargu-bridge-edit-artifact-page-bytes artifact))))
@@ -294,21 +309,32 @@
   (json-parse-string (json-serialize value :null-object :json-null :false-object :json-false)
                      :object-type 'hash-table :null-object :json-null :false-object :json-false))
 
-(cl-defun kargu-bridge-edit--start (application arguments parts &key callback parent valid-p (action :prepare))
+(cl-defun kargu-bridge-edit--start (application arguments parts &key callback parent valid-p (action :prepare)
+                                             connection scope scope-valid-p)
   "Begin detached ARGUMENTS/PARTS for APPLICATION.
 CALLBACK, PARENT, VALID-P and ACTION control transfer lifetime."
   (let* ((arguments (kargu-bridge-edit--copy arguments))
          (artifact (kargu-bridge-edit-artifact--make
-                    :application application :origin (copy-sequence (gethash "origin_id" arguments))))
+                    :application application :origin (copy-sequence (gethash "origin_id" arguments))
+                    :connection connection :scope (and scope (kargu-bridge-application--copy-scope scope))
+                    :scope-valid-p scope-valid-p))
          (transfer (kargu-bridge-edit--transfer artifact callback :arguments arguments :parent parent :valid-p valid-p :action action))
          (task (kargu-bridge-edit-transfer-task transfer)))
     (condition-case nil
         (progn
           (kargu-bridge-edit--detach transfer parts)
           (when (kargu-async-pending-p task)
-            (kargu-async-add-cleanup
-             task (kargu-bridge-ensure
-                   (lambda (connection failure) (kargu-bridge-edit--ready transfer connection failure))))))
+            (if (or connection scope scope-valid-p)
+                (progn
+                  (unless (and connection scope (functionp scope-valid-p)
+                               (kargu-bridge-edit--current-p artifact)
+                               (member (if (eq action :inspect) "edit_patch_preparation" "edit_preparation")
+                                       (append (kargu-bridge-connection-capabilities connection) nil)))
+                    (error "Invalid captured edit scope"))
+                  (kargu-bridge-edit--begin transfer scope nil))
+              (kargu-async-add-cleanup
+               task (kargu-bridge-ensure
+                     (lambda (connection failure) (kargu-bridge-edit--ready transfer connection failure)))))))
       ((error quit) (kargu-bridge-edit--fail transfer (kargu-bridge--fault "invalid_edit_upload"))))
     task))
 
@@ -352,6 +378,7 @@ FILE-INDEX selects NEW-TEXT's proposal.  PARENT owns cancellation and source
 lifetime.  Failure revokes the preparation; text is never replayed implicitly."
   (let* ((edit (copy-sequence edit-id))
          (task (kargu-async-start callback :timeout 30 :parent parent
+                                  :owner (kargu-bridge-edit--async-owner artifact)
                                   :valid-p (lambda () (kargu-bridge-edit--current-p artifact))))
          (frame (or (kargu-bridge-connection-frame-limit
                      (kargu-bridge-edit-artifact-connection artifact)) kargu-bridge--max-frame))

@@ -50,11 +50,14 @@
          (relative (and path (file-relative-name (expand-file-name path root) root)))
          (arguments
           (kargu-bridge--object
-           "origin_id" (kargu-bridge-edit-batch--random-origin)
+           "origin_id" (or (plist-get spec :origin-id) (kargu-bridge-edit-batch--random-origin))
+           "service_id" (or (plist-get spec :service-id) :json-null)
            "root" root "mode" (symbol-name mode) "live" :json-null
            "config_revision" (or (plist-get spec :config-revision) 0)
            "policy_revision" (or (plist-get spec :policy-revision) 0)
            "review_mode" (symbol-name review) "save_policy" (symbol-name save))))
+    (when (plist-get spec :language-source)
+      (puthash "language_source" (plist-get spec :language-source) arguments))
     (unless (eq mode 'agent) (error "Native edits require agent mode"))
     (puthash "intent"
              (pcase intent
@@ -63,6 +66,8 @@
                                                "new_bytes" (string-bytes (encode-coding-string (plist-get spec :new) 'utf-8-unix))))
                (:write (kargu-bridge--object "kind" "write" "path" relative
                                              "new_bytes" (string-bytes (encode-coding-string (plist-get spec :content) 'utf-8-unix))))
+               (:symbol (kargu-bridge--object "kind" "symbol" "path" relative
+                                              "new_bytes" (string-bytes (encode-coding-string (plist-get spec :content) 'utf-8-unix))))
                (:patch (kargu-bridge--object "kind" "patch"
                                              "patch_bytes" (string-bytes (encode-coding-string (plist-get spec :patch) 'utf-8-unix))))
                (:rollback :json-null)
@@ -104,9 +109,13 @@
                          for view = (plist-get proposal :view)
                          collect
                          (list :path (expand-file-name (gethash "path" file) root)
+                               :relative (gethash "path" file)
+                               :file-index index
                                :status (intern (concat ":" (replace-regexp-in-string "_" "-" (gethash "outcome" file))))
                                :saved (eq (gethash "saved" file) t)
                                :hunks (gethash "hunks" file)
+                               :final-hash (let ((h (gethash "final_hash" file)))
+                                             (unless (eq h :json-null) h))
                                :base (plist-get proposal :base)
                                :existed (and (hash-table-p view) (eq (gethash "existed" view) t))
                                :baseline (plist-get proposal :baseline)
@@ -123,9 +132,11 @@
 (defun kargu-bridge-edit-batch--freeze (spec)
   "Detach SPEC's mutable strings before the first asynchronous boundary."
   (let ((copy (copy-sequence spec)))
-    (dolist (key '(:path :root :old :new :content :patch :target-edit-id :journal-directory))
+    (dolist (key '(:path :root :old :new :content :patch :target-edit-id :journal-directory :service-id :origin-id))
       (when (stringp (plist-get copy key))
         (setf (plist-get copy key) (copy-sequence (plist-get copy key)))))
+    (when (plist-get copy :scope)
+      (setf (plist-get copy :scope) (kargu-bridge-application--copy-scope (plist-get copy :scope))))
     copy))
 
 (defun kargu-bridge-edit-batch-execute (spec &optional callback)
@@ -137,14 +148,19 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
          (session (kargu-session-context))
          (mode-revision (kargu-session-mode-revision session))
          (directory default-directory)
+         (native (plist-get spec :scope-valid-p))
          (valid-p (lambda ()
-                    (and (eq session (kargu-session-context))
-                         (= mode-revision (kargu-session-mode-revision session))
-                         (eq (kargu-state-mode) 'agent)
-                         (equal directory default-directory)
+                    (and (if native
+                             (and (buffer-live-p source) (funcall native))
+                           (and (eq session (kargu-session-context))
+                                (= mode-revision (kargu-session-mode-revision session))
+                                (eq (kargu-state-mode) 'agent)
+                                (equal directory default-directory)))
                          (or (null (plist-get spec :valid-p))
                              (funcall (plist-get spec :valid-p))))))
-         (task (kargu-async-start (or callback #'ignore) :timeout 300 :valid-p valid-p))
+         (task (kargu-async-start (or callback #'ignore) :timeout 300 :valid-p valid-p
+                                  :owner (unless native (kargu-bridge-edit--async-owner))
+                                  :parent (unless native kargu-async--current-task)))
          artifact activity)
     (cl-labels
         ((finish (value failure) (kargu-async-finish task value failure))
@@ -184,6 +200,7 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
                             :callback (guard (lambda (value) (next (cdr remaining) (1+ index) value)))))))
              (next files 0 nil)))
          (issue (files edit revision preflight)
+           (when (plist-get spec :validate-source) (funcall (plist-get spec :validate-source)))
            (setq activity
                  (kargu-bridge-edit-activity-start
                   artifact :edit-id edit :revision revision
@@ -191,15 +208,21 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
                   :journal-directory (or (plist-get spec :journal-directory)
                                          (kargu-bridge-edit-batch--journal-directory))
                   :valid-p (lambda () (and (kargu-async-pending-p task) (funcall valid-p)))
-                  :handler (lambda (live-p) (kargu-bridge-edit-batch--apply files live-p))
+                  :handler (lambda (live-p)
+                             (when (plist-get spec :validate-source) (funcall (plist-get spec :validate-source)))
+                             (kargu-bridge-edit-batch--apply files live-p))
                   :callback (guard (lambda (value)
                                      (finish (kargu-bridge-edit-batch--result
                                               (plist-get value :native) (plist-get spec :root) files) nil)))))
            (kargu-async-add-cleanup task (lambda () (kargu-bridge-edit-activity-cancel activity))))
+         (prepare (application arguments parts action callback)
+           (kargu-bridge-edit--start
+            application arguments parts :parent task :action action :callback callback
+            :connection (plist-get spec :connection) :scope (plist-get spec :scope)
+            :scope-valid-p (plist-get spec :scope-valid-p)))
          (prepare-patch (application arguments)
-           (kargu-bridge-edit-patch-inspect
-            application arguments (plist-get spec :patch) :parent task
-            :callback
+           (prepare
+            application arguments (list (cons "patch" (plist-get spec :patch))) :inspect
             (guard (lambda (inspected)
                      (setq artifact inspected)
                      (kargu-async-add-cleanup task (lambda () (kargu-bridge-edit-release inspected)))
@@ -226,6 +249,7 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
                                              (if (eq (gethash "complete" page) t) :complete next)
                                              (append (gethash "files" page) nil)))))))))
          (start ()
+           (when (plist-get spec :validate-source) (funcall (plist-get spec :validate-source)))
            (unless (funcall valid-p) (error "Native edit source is no longer current"))
            (let* ((root (or (plist-get spec :root) (kargu-permission-project-root)))
                   (application (or (plist-get spec :application) (kargu-application-context))))
@@ -249,9 +273,9 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
                                     (list (cons "old" (plist-get spec :old)) (cons "new" (plist-get spec :new)))
                                   (list (cons "new" (plist-get spec :content))))))
                     (puthash "live" (kargu-bridge-edit-document-facts document) arguments)
-                    (kargu-bridge-edit-prepare
+                    (prepare
                      application arguments (cons (cons "document" (kargu-bridge-edit-document-text document)) parts)
-                     (guard #'ready) :parent task))))))))
+                     :prepare (guard #'ready)))))))))
       (let ((cancel (lambda () (kargu-async-cancel task))))
         (add-hook 'kill-buffer-hook cancel nil t)
         (add-hook 'change-major-mode-hook cancel nil t)

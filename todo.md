@@ -878,7 +878,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     publication ve raw diagnostic DTO üretsin; native freshness/aggregation ve
     formatlama tüketicileri bağlı olsun. Sürümsüz stale/pending push temiz tanı
     sayılmasın; gerçek destek varsa fresh pull capability kullanılsın.
-  - [x] **4.4 Symbols/Xref:** definition/reference/hover/document-symbol/skeleton
+  - [ ] **4.4 Symbols/Xref:** definition/reference/hover/document-symbol/skeleton
     adapter'larını typed range/tree snapshot'a geçir; ambiguity ve unavailable
     açık olsun. Marker/cons/editor nesnesi JSON'a sızmasın; native render/budget.
   - [x] **4.4a Native document-symbol/read_symbol kaynak bağlantısı:** native
@@ -903,7 +903,25 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     geçirip son legacy formatter/parser/cache consumer'larını kaldır. 4.4a'nın
     native pipe/provider, gerçek imenu/Eglot ve ERT kabulünü son toplu kapıda
     çalıştır. Kaynaklar native_agent/symbols.rs, symbols/document/tests.rs,
-    sensor_contract.rs ve test-native-symbols.el'de hazır; henüz çalıştırılmadı.
+    sensor_contract.rs ve test-native-symbols.el'deki mevcut kaynaklar toplu Rust/
+    ERT kabulünde çalıştırıldı; bu sonuç kalan xref/public/context consumer'larını
+    veya gerçek Eglot server kabulünü kapatmaz.
+  - [x] **4.4c Native edit_by_lsp hazırlık ve mutation bağlantısı:** aynı model
+    çağrısının read_file_symbols helper step'i ortak gate/lease altında yürür.
+    Rust tam/fresh ağaçtan tekil sembol seçip deserialize edilemeyen witness üretir;
+    model yeni metni, path, belge UUID/tick ve provider kaynağı Begin/upload'da
+    korunur. Tam RAM snapshot'ında exact scalar range native splice edilir;
+    editor sembol seçmez veya tüm-dosya replacement metni üretmez. Provider belge
+    capture, review/issue ve gerçek handler girişi öncesinde revalidate edilir;
+    kendi yazdığı tick receipt'i geçersiz kılmaz. Tek tool_limit=1 ve tek history
+    sonucu ile gerçek imenu/provider/pipe/buffer edit kabulü var. Belirsiz/truncated/
+    stale kaynak, sahte tick/provider/new_content/wire range ve issue sonrası
+    provider değişimi sıfır yazma testli; duplicate Unicode/CRLF splice korunur.
+    Çalışma ağacında 577 locked Rust (31 compile-fail dahil), 1389/1389 ERT,
+    strict Clippy, değişen Elisp Werror/parantez ve application/edit-preparation/
+    edit-transaction exhaustive kontrolleri temiz. Ortak Rust modül/host
+    entegrasyonunun bütün commit'leri henüz kapanmadı. Public/standalone LSP edit
+    ve kalan 4.4b tüketicileri bu alt işin dışındadır.
   - [ ] **4.5 Dape capture:** connection/stop generation/thread/frame ve variable
     reference bağını capture ve delivery'de doğrula; bounded stack/scopes/
     variables/watch DTO, actual async completion ve capability yokluğunda ret.

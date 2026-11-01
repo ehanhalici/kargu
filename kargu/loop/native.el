@@ -60,7 +60,8 @@ Startup errors are reported without switching to the Elisp backend."
           "read_symbol"
           "edit_file"
           "write_file"
-          "apply_patch"))
+          "apply_patch"
+          "edit_by_lsp"))
 
 (defun kargu-loop-native--finish (run result failure)
   "Project native RESULT or FAILURE into the still-owned RUN's terminal state."

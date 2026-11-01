@@ -71,11 +71,7 @@
        (equal (kargu-bridge-edit-activity-epoch activity)
               (kargu-bridge-connection-epoch (kargu-bridge-edit-activity-connection activity)))
        (buffer-live-p (kargu-bridge-edit-activity-buffer activity))
-       (kargu-bridge-application-scope-equal-p
-        (kargu-bridge-edit-activity-scope activity)
-        (kargu-bridge-application-current-scope
-         (kargu-bridge-edit-activity-application activity)
-         (kargu-bridge-edit-activity-connection activity)))))
+       (kargu-bridge-edit--current-p (kargu-bridge-edit-activity-artifact activity))))
 
 (defun kargu-bridge-edit-activity-live-p (activity)
   "Whether ACTIVITY's exact issued owner still permits a new primitive entry."

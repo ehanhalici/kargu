@@ -41,7 +41,9 @@ were used in tests.
 
 ## Remaining findings requiring implementation review
 
-- Native edit_by_lsp is explicitly unavailable in edit/prepare/parent.rs.
+- Native edit_by_lsp now uses typed symbol selection and the shared native edit
+  pipeline (see follow-up below). Public/standalone symbol edit/xref/context
+  consumers still require cutover before todo 4.4b closes.
 - Native startup now uses the existing application lease, detaches snapshot
   connection/auth policy before yielding and cancels the exact prompt request.
   Native claim before configuration/credential/context preparation, canonical
@@ -170,3 +172,48 @@ pass for the changed frontend/bridge/test files. Exhaustive TLC passed applicati
 (4,624 states), connection (101,708 states), and transport (693 states).
 No Rust source changed in this follow-up; the previous 574-test Rust acceptance
 remains the baseline, not a newly claimed run. No GUI acceptance was performed.
+
+## Native symbol edit follow-up
+
+A native edit_by_lsp call now borrows one read_file_symbols execution step under
+its actual model call. The existing delegated gate retains the same run lease,
+uses native completion facts, and waits for real reverse-request quiescence.
+It does not open another run or debit another model tool call. Only the fixed
+helper pair is admitted; helper completion cannot become a parent history result.
+
+Rust selects a unique definition in a complete, fresh tree and constructs a
+native-only SymbolEditSelection witness (no Deserialize). Parent preparation
+binds that witness to the actual model path/new_content and exact document UUID,
+tick and language source. An editor-supplied range is not part of Begin. The
+proposal splices the selected scalar range into the full captured RAM document;
+identical text elsewhere is preserved, including Unicode and CRLF boundaries.
+
+The editor observes raw provider/document metadata and uses the existing chunked
+upload, review, transaction, journal and verified receipt adapters. It rechecks
+the source at capture, before issue, and at actual handler entry after the native
+issue RPC. Ownership guards remain valid after the edit's own tick changes.
+The native batch path no longer borrows unrelated Elisp mode/directory authority;
+the native run's captured scope controls it. The ordinary standalone path retains
+its existing mode/revision guards.
+
+Tests cover one-tool-budget actual imenu/provider/pipe edits, one canonical tool
+result before the next model turn, stale/ambiguous/truncated lookup, forged
+source/tick/text/wire range, duplicate CRLF/non-BMP splicing, and provider change
+between native issuance and actual editor mutation. Journals in the fixture are
+private temporary directories outside the workspace, matching the real policy.
+
+This is a native-agent consumer slice. Public/standalone symbol edit and xref/
+context migration, plus the remaining native run/UI/history integration, stay
+open. Shared Rust module/host integration changes are still present in the
+worktree; source commits do not imply the entire migration is committed or closed.
+
+Symbol-edit validation: locked Rust **577 passed** across 54 suite results,
+including 31 compile-fail documentation tests. Strict all-target Clippy and
+changed Elisp Werror/check-parens pass. Existing exhaustive application (4,624),
+edit preparation (319,746), and edit transaction (560) models passed. These are
+lifecycle model checks, not proof of all unfinished sensor/context consumers.
+
+Full source ERT for this worktree passed **1389/1389**. The validated source is
+recorded in separate sensor/witness and editor-adapter commits. Common Rust
+module/host exports and remaining native actor integration are not all committed
+yet; these source commits do not assert a complete native backend at HEAD.
