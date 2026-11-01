@@ -197,7 +197,7 @@ Use the Ediff command `ediff-copy-A-to-B' to revert individual hunks."
                                                            kargu-diff--run-modified-files)
                                                       (kargu-diff-snapshot-paths))))
                                          "file"))
-         (stack (gethash path kargu-diff--snapshots)))
+         (stack (gethash path (kargu-diff--service-snapshots))))
     (unless stack
       (user-error "No rollback snapshot recorded for %s" path))
     (let* ((orig-snap (car (last stack)))
@@ -237,7 +237,7 @@ Use the Ediff command `ediff-copy-A-to-B' to revert individual hunks."
                                            #'split-window-horizontally)))
         (ediff-buffers base shadow))
     (error
-     (remhash path kargu-diff--sessions)
+     (remhash path (kargu-diff--service-reviews))
      (dolist (buf (list base shadow))
        (when (buffer-live-p buf) (kill-buffer buf)))
      (kargu-diff--maybe-drop-hook)

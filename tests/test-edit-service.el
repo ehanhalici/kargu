@@ -32,6 +32,61 @@
 (require 'kargu/tools/diff/context)
 (require 'tests/test-helpers)
 
+(ert-deftest kargu-edit-service-deletion-records-only-its-owner-test ()
+  "Deletion keeps rollback state and modified paths in the active service."
+  (kargu-test-with-git-repo '(("delete.txt" . "original\n"))
+    (let* ((path (expand-file-name "delete.txt" repo))
+           (first (kargu-edit-service-create :service-id "delete-owner" :root repo))
+           (second (kargu-edit-service-create :service-id "foreign-owner" :root repo)))
+      (unwind-protect
+          (progn
+            (kargu-diff-with-service first
+              (kargu-diff--delete-file path "original\n"))
+            (should-not (file-exists-p path))
+            (should (gethash path (kargu-edit-service-snapshots first)))
+            (should (gethash path (kargu-edit-service-changes first)))
+            (should (member path (kargu-edit-service-run-modified-files first)))
+            (should-not (gethash path (kargu-edit-service-snapshots second)))
+            (should-not (gethash path (kargu-edit-service-changes second)))
+            (should-not (kargu-edit-service-run-modified-files second)))
+        (kargu-edit-service-close first)
+        (kargu-edit-service-close second)))))
+
+(ert-deftest kargu-edit-service-review-and-failure-preserve-foreign-owner-test ()
+  "Review reads its snapshot and failed startup clears only its own review."
+  (kargu-test-with-git-repo '(("review.txt" . "current\n"))
+    (let* ((path (expand-file-name "review.txt" repo))
+           (first (kargu-edit-service-create :service-id "review-owner" :root repo))
+           (second (kargu-edit-service-create :service-id "foreign-review" :root repo))
+           (base (generate-new-buffer " *review-test-base*"))
+           (shadow (generate-new-buffer " *review-test-shadow*"))
+           original)
+      (unwind-protect
+          (progn
+            (puthash path (list (list :content "own original\n"))
+                     (kargu-edit-service-snapshots first))
+            (puthash path (list (list :content "foreign original\n"))
+                     (kargu-edit-service-snapshots second))
+            (puthash path :own-review (kargu-edit-service-reviews first))
+            (puthash path :foreign-review (kargu-edit-service-reviews second))
+            (kargu-diff-with-service first
+              (cl-letf (((symbol-function 'kargu-diff--rollback-review)
+                         (lambda (_path text) (setq original text))))
+                (kargu-diff-review path))
+              (should (equal original "own original\n"))
+              (cl-letf (((symbol-function 'ediff-buffers)
+                         (lambda (&rest _) (error "Simulated startup failure"))))
+                (should-error (kargu-diff--open-review-control path base shadow))))
+            (should-not (gethash path (kargu-edit-service-reviews first)))
+            (should (eq (gethash path (kargu-edit-service-reviews second)) :foreign-review))
+            (should-not (buffer-live-p base))
+            (should-not (buffer-live-p shadow)))
+        (when (buffer-live-p base) (kill-buffer base))
+        (when (buffer-live-p shadow) (kill-buffer shadow))
+        (remhash path (kargu-edit-service-reviews second))
+        (kargu-edit-service-close first)
+        (kargu-edit-service-close second)))))
+
 (ert-deftest kargu-edit-service-two-services-different-paths-test ()
   "Two edit services operating on different files maintain isolated state and tables."
   (kargu-test-with-git-repo '(("file1.txt" . "alpha 1\n") ("file2.txt" . "beta 1\n"))

@@ -522,7 +522,8 @@ Return an ordered list of target plists."
   "Delete FILE, keeping ORIGINAL and PRE-STATE as its rollback snapshot."
   (when pre-state
     (kargu-diff--validate-pre-state pre-state))
-  (let ((snap (list :content original
+  (let* ((service (kargu-diff--current-service))
+         (snap (list :content original
                     :created-new nil
                     :deleted t
                     :at (current-time)
@@ -539,13 +540,15 @@ Return an ordered list of target plists."
         (error "Deletion cancelled: buffer for %s could not be closed" file)))
     (when pre-state (kargu-diff--validate-pre-state pre-state))
     (delete-file file)
-    (puthash file (cons snap (gethash file kargu-diff--snapshots))
-             kargu-diff--snapshots)
-    (puthash file (list :status :applied-full :saved t
-                        :at (format-time-string "%H:%M:%S")
-                        :baseline-available (plist-get snap :baseline-available)
-                        :baseline-diagnostics (plist-get snap :baseline-diagnostics))
-             kargu-diff--changed)
+    (let* ((snaps (kargu-diff--service-snapshots service))
+           (changes (kargu-diff--service-changes service)))
+      (puthash file (cons snap (gethash file snaps)) snaps)
+      (puthash file (list :status :applied-full :saved t
+                          :at (format-time-string "%H:%M:%S")
+                          :baseline-available (plist-get snap :baseline-available)
+                          :baseline-diagnostics (plist-get snap :baseline-diagnostics))
+               changes)
+      (cl-pushnew file (kargu-edit-service-run-modified-files service) :test #'equal))
     (when (boundp 'kargu-diff--run-modified-files)
       (cl-pushnew file kargu-diff--run-modified-files :test #'equal))
     snap))
