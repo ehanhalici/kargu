@@ -73,6 +73,41 @@ impl ReadyProfile {
     }
 }
 impl Profile {
+    pub(super) fn into_catalog_request(
+        self,
+        catalog: &ProviderCatalog,
+        session: &crate::domain::SessionId,
+    ) -> Result<crate::api::HttpRequest, CoreError> {
+        let endpoint = self.endpoint.as_ref().ok_or(CoreError::Unavailable)?;
+        let (url, authentication) =
+            catalog.catalog_connection(&self.provider, endpoint.as_str())?;
+        let public = matches!(
+            authentication,
+            crate::providers::catalog_target::CatalogAuthentication::Public
+        );
+        // Public discovery never acquires or forwards the provider credential.
+        let key = if public {
+            None
+        } else {
+            match self.credential {
+                Credential::Direct(key) if self.authenticated => Some(key),
+                Credential::Keyless => None,
+                _ => return Err(CoreError::Unavailable),
+            }
+        };
+        serde_json::from_value(json!({
+            "url": url, "method": "get", "headers": {}, "stream": false,
+            "response_profile": "model_catalog", "provider": self.provider,
+            "timeouts": {"connect_ms": 5000, "first_byte_ms": 12000, "deadline_ms": 12000},
+            "wire": catalog.wire_value(&self.provider),
+            "auth": {"key": key.as_ref().map(ConfigText::editor_value),
+                "extra_headers": catalog.get(&self.provider).map(|entry| entry.catalog_headers()).unwrap_or_else(|| json!({})),
+                "session": session, "app_url": "https://github.com/kargu/kargu"},
+        }))
+        .map_err(|_| CoreError::InvalidValue {
+            field: "catalog_connection",
+        })
+    }
     pub(super) fn authenticated(&self) -> bool {
         self.authenticated
     }

@@ -83,6 +83,10 @@ impl ProviderDefinition {
     pub fn id(&self) -> &ApiProviderId {
         &self.id
     }
+    /// Display name of the provider.
+    pub fn name(&self) -> &ProviderName {
+        &self.name
+    }
     /// Implemented wire, or explicit unsupported metadata.
     pub fn family(&self) -> Option<WireFamily> {
         self.format
@@ -90,6 +94,13 @@ impl ProviderDefinition {
     /// Default endpoint before explicit user overrides.
     pub fn endpoint(&self) -> &CatalogEndpoint {
         &self.api
+    }
+    /// Default remote models endpoint for catalog refresh.
+    pub fn models_endpoint(&self) -> &CatalogEndpoint {
+        &self.models_api
+    }
+    pub(crate) fn catalog_headers(&self) -> Value {
+        json!(self.extra_headers)
     }
 }
 
@@ -167,6 +178,49 @@ impl ProviderCatalog {
     /// Exact lookup; unknown custom IDs do not borrow another provider's policy.
     pub fn get(&self, id: &ApiProviderId) -> Option<&ProviderDefinition> {
         self.providers.get(id)
+    }
+    /// Extract reasoning effort specifications declared for a provider.
+    pub fn effort_specs(&self, provider: &ApiProviderId) -> crate::models::metadata::EffortSpecs {
+        let Some(p) = self.get(provider) else {
+            return crate::models::metadata::EffortSpecs::default();
+        };
+        let Some(family) = p.family() else {
+            return crate::models::metadata::EffortSpecs::default();
+        };
+        let Some(format_val) = self.formats.get(family.as_str()) else {
+            return crate::models::metadata::EffortSpecs::default();
+        };
+        let Some(models_val) = format_val.get("models") else {
+            return crate::models::metadata::EffortSpecs::default();
+        };
+        let Some(efforts_val) = models_val.get("reasoning-efforts") else {
+            return crate::models::metadata::EffortSpecs::default();
+        };
+        serde_json::from_value(efforts_val.clone()).unwrap_or_default()
+    }
+    pub(crate) fn wire_value(&self, provider: &ApiProviderId) -> Option<&Value> {
+        self.get(provider)
+            .and_then(ProviderDefinition::family)
+            .and_then(|family| self.formats.get(family.as_str()))
+    }
+    /// Resolve model discovery from native metadata and a configuration endpoint.
+    pub(crate) fn catalog_connection(
+        &self,
+        provider: &ApiProviderId,
+        api_base: &str,
+    ) -> Result<(ApiEndpoint, catalog_target::CatalogAuthentication), CoreError> {
+        let definition = self.get(provider);
+        let input: catalog_target::CatalogConnectionInput = serde_json::from_value(json!({
+            "api_base": api_base,
+            "default_api": definition.map(|entry| &entry.api),
+            "models_api": definition.map(|entry| &entry.models_api),
+            "models_auth": definition.and_then(|entry| entry.models_auth.as_ref()),
+            "native_models": self.wire_value(provider).and_then(|wire| wire.get("native-models")),
+        }))
+        .map_err(|_| CoreError::InvalidValue {
+            field: "catalog_target",
+        })?;
+        input.resolve()
     }
     /// Credential-free baseline projection for synchronous editor metadata readers.
     pub fn snapshot(&self) -> Value {

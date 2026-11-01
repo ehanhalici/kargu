@@ -92,6 +92,12 @@ where
             retry_after,
         });
     }
+    if response
+        .content_length()
+        .is_some_and(|bytes| bytes > request.limits.raw() as u64)
+    {
+        return Err(ApiError::Limit);
+    }
     let explicit_sse = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)

@@ -19,6 +19,13 @@ impl TryFrom<String> for ProviderName {
     }
 }
 
+impl ProviderName {
+    /// Borrow the provider label string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(try_from = "String")]
 pub(super) struct SourceDate(String);

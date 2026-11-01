@@ -501,3 +501,19 @@ async fn stalled_ui_backpressure_is_interrupted_by_the_absolute_deadline() -> Te
     thread.join().map_err(|_| "fixture failed")?;
     Ok(())
 }
+
+#[tokio::test]
+async fn declared_body_over_captured_limit_is_rejected_before_body_read() -> TestResult {
+    let (url, thread) = server(|mut socket| {
+        let _ = socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1024\r\nConnection: close\r\n\r\n");
+    })?;
+    let input: HttpRequest = serde_json::from_value(json!({
+        "url":url,"method":"get","headers":{},"stream":false,
+        "response_profile":"model_catalog","timeouts":timers(),"limits":{"raw_bytes":128}
+    }))?;
+    let result = execute(input, |_| async { Ok(()) }, CancellationToken::new()).await;
+    assert!(matches!(result, Err(ApiError::Limit)));
+    thread.join().map_err(|_| "fixture failed")?;
+    Ok(())
+}

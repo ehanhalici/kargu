@@ -23,7 +23,9 @@
 //! }
 //! ```
 
+mod catalog;
 mod domain;
+pub use catalog::prepare_catalog_request;
 mod environment;
 mod identity;
 mod resolve;

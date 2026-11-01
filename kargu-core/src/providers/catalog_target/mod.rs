@@ -40,9 +40,37 @@ pub struct CatalogTarget {
     authentication: CatalogAuthentication,
 }
 
+/// Native discovery facts without an editor projection identity.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CatalogConnectionInput {
+    api_base: CapturedApiBase,
+    default_api: Option<CatalogEndpoint>,
+    models_api: Option<CatalogEndpoint>,
+    models_auth: Option<ModelsAuth>,
+    native_models: Option<NativeModels>,
+}
 impl CatalogTargetInput {
     /// Consume captured input without consulting mutable provider/config state.
     pub fn resolve(self) -> Result<CatalogTarget, CoreError> {
+        let (url, authentication) = CatalogConnectionInput {
+            api_base: self.api_base,
+            default_api: self.default_api,
+            models_api: self.models_api,
+            models_auth: self.models_auth,
+            native_models: self.native_models,
+        }
+        .resolve()?;
+        Ok(CatalogTarget {
+            provider: self.provider,
+            configuration_revision: self.configuration_revision,
+            url,
+            authentication,
+        })
+    }
+}
+impl CatalogConnectionInput {
+    pub(crate) fn resolve(self) -> Result<(ApiEndpoint, CatalogAuthentication), CoreError> {
         let custom = self
             .default_api
             .as_ref()
@@ -58,12 +86,7 @@ impl CatalogTargetInput {
         } else {
             (self.derived(custom)?, CatalogAuthentication::Provider)
         };
-        Ok(CatalogTarget {
-            provider: self.provider,
-            configuration_revision: self.configuration_revision,
-            url,
-            authentication,
-        })
+        Ok((url, authentication))
     }
 
     fn derived(&self, custom: bool) -> Result<ApiEndpoint, CoreError> {
