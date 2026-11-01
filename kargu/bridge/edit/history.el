@@ -167,13 +167,14 @@ PARENT owns cancellation."
       (when callback (funcall callback nil (kargu-bridge--fault "unavailable"))))))
 
 (cl-defun kargu-bridge-edit-history-consume
-    (application &key edit-id file final-hash service-id callback)
-  "Consume exact verification identity (EDIT-ID FILE FINAL-HASH) on APPLICATION."
+    (application &key edit-id edit-revision file final-hash service-id callback)
+  "Consume EDIT-ID, EDIT-REVISION, FILE and FINAL-HASH on APPLICATION."
   (kargu-bridge-edit-history--mutate
    application
    (kargu-bridge--object
     "action" "consume"
     "edit_id" edit-id
+    "edit_revision" edit-revision
     "file" file
     "final_hash" (or final-hash :json-null)
     "service_id" (or service-id :json-null))

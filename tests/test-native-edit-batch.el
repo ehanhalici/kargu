@@ -738,6 +738,7 @@
                                                    "--- a/second.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-old-2\n+new-2\n"
                                                    "--- a/third.txt\n+++ b/third.txt\n@@ -1 +1 @@\n-old-3\n+new-3\n")))))
                  (should (eq (plist-get result :status) :applied-full))
+                 (should (integerp (plist-get result :edit-revision)))
                  (should (= (plist-get result :files-total) 3))
                  (should (= (plist-get result :files-applied) 3))
                  (should (= (length (plist-get result :files)) 3))

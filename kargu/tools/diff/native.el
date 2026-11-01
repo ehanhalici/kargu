@@ -13,6 +13,7 @@
 
 (require 'kargu/tools/diff/context)
 (require 'kargu/bridge/edit/batch)
+(require 'kargu/bridge/edit/history)
 
 (declare-function kargu-diff--capture-baseline-diagnostics "kargu/tools/diff/track" (path))
 
@@ -115,10 +116,7 @@ These IDs are presentation history; only Rust decides whether undo is available.
                                      :key (lambda (row) (plist-get row :edit-id)) :test #'equal))
               (if stack
                   (puthash path stack snapshots)
-                (remhash path snapshots)
-                (remhash path changes)
-                (setf (kargu-edit-service-run-modified-files service)
-                      (delete path (kargu-edit-service-run-modified-files service)))))
+                (remhash path snapshots)))
           (when (and (eq (plist-get file :status) :applied)
                      (plist-get result :rollback-available))
             (puthash path
@@ -138,6 +136,7 @@ These IDs are presentation history; only Rust decides whether undo is available.
           (puthash path
                    (list :native t :edit-id (plist-get result :edit-id)
                          :service-id (plist-get spec :service-id)
+                         :edit-revision (plist-get result :edit-revision)
                          :application (plist-get spec :application)
                          :root (plist-get result :root)
                          :relative (plist-get file :relative)
@@ -151,6 +150,47 @@ These IDs are presentation history; only Rust decides whether undo is available.
                    changes)
           (cl-pushnew path (kargu-edit-service-run-modified-files service) :test #'equal)))))
   (kargu-diff-native--retain-references service result))
+
+(defun kargu-diff-native--refresh-rollback (service spec result callback)
+  "Read SERVICE's authoritative references after rollback SPEC and RESULT.
+Deliver RESULT to CALLBACK after the read; preserve newer local references."
+  (let ((captured (mapcar (lambda (file)
+                           (let ((path (plist-get file :path)))
+                             (cons path (gethash path (kargu-edit-service-changes service)))))
+                         (plist-get result :files))))
+    (kargu-bridge-edit-history-changes
+     (plist-get spec :application) :service-id (plist-get spec :service-id)
+     :pending-only t
+     :callback
+     (lambda (value failure)
+       (unless (kargu-edit-service-closed service)
+         (if failure
+             (setf (plist-get result :change-projection-failure) failure)
+           (dolist (entry captured)
+             (let* ((path (car entry))
+                    (changes (kargu-edit-service-changes service))
+                    (row (cl-find path (plist-get value :rows)
+                                  :key (lambda (item) (expand-file-name (gethash "path" item)
+                                                                         (gethash "root" item)))
+                                  :test #'equal)))
+               (when (eq (cdr entry) (gethash path changes))
+                 (if (null row)
+                     (progn
+                       (remhash path changes)
+                       (setf (kargu-edit-service-run-modified-files service)
+                             (delete path (kargu-edit-service-run-modified-files service))))
+                   (cl-pushnew path (kargu-edit-service-run-modified-files service) :test #'equal)
+                   (puthash path
+                            (list :native t :application (plist-get spec :application)
+                                  :service-id (plist-get spec :service-id)
+                                  :edit-id (gethash "edit_id" row)
+                                  :edit-revision (gethash "edit_revision" row)
+                                  :root (gethash "root" row) :relative (gethash "path" row)
+                                  :file-index (gethash "file" row)
+                                  :final-hash (let ((hash (gethash "final_hash" row)))
+                                                (unless (eq hash :json-null) hash))
+                                  :saved (eq (gethash "saved" row) t)) changes))))))
+         (funcall callback result))))))
 
 (defun kargu-diff-native-execute (spec callback &optional service)
   "Execute SPEC into CALLBACK on captured SERVICE; never choose another writer."
@@ -195,7 +235,9 @@ These IDs are presentation history; only Rust decides whether undo is available.
                       (if failure
                           (funcall callback (kargu-diff-native--failure-result failure))
                         (kargu-diff-native--project service spec result)
-                        (funcall callback result))))))
+                        (if (eq (plist-get spec :intent) :rollback)
+                            (kargu-diff-native--refresh-rollback service spec result callback)
+                          (funcall callback result)))))))
       (push task (kargu-edit-service-native-tasks service))
       (kargu-async-add-cleanup
        task (lambda () (setf (kargu-edit-service-native-tasks service)

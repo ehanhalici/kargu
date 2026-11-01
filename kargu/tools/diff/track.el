@@ -317,6 +317,7 @@ preserves the reference; the backend remains the verification authority."
             (kargu-bridge-edit-history-consume
              (plist-get identity :application)
              :edit-id (plist-get identity :edit-id)
+             :edit-revision (plist-get identity :edit-revision)
              :file (plist-get identity :file-index)
              :final-hash (plist-get identity :final-hash)
              :service-id (plist-get identity :service-id)

@@ -800,7 +800,7 @@ impl EditPreparations {
         edit_id: &crate::edit::types::EditorEditId,
         preparation: &PreparationId,
         receipt: &super::receipt::VerifiedReceipt,
-    ) -> Result<bool, CoreError> {
+    ) -> Result<super::AppliedPublication, CoreError> {
         let entry = self.entries.get(preparation).ok_or(CoreError::StaleOwner)?;
         if &entry.owner.session != session {
             return Err(CoreError::StaleOwner);
@@ -812,7 +812,7 @@ impl EditPreparations {
         if service_id.as_ref().is_some_and(|service| {
             self.services.get(&(session.clone(), service.clone())) == Some(&ServiceState::Closed)
         }) {
-            return Ok(false);
+            return Ok(super::AppliedPublication::default());
         }
         self.history_revision.advance()?;
         let revision = self.history_revision;
@@ -847,6 +847,15 @@ impl EditPreparations {
             }
             self.snapshots.retain(|s| !s.remaining.is_empty());
             for (_, path, version) in &completed {
+                let baseline = self
+                    .changes
+                    .iter()
+                    .find(|record| {
+                        &record.session == session
+                            && record.service_id == service_id
+                            && &record.full_path == path
+                    })
+                    .map(|record| record.baseline);
                 let remaining_for_path = self.snapshots.iter().rev().find_map(|s| {
                     if &s.session != session || s.service_id != service_id {
                         return None;
@@ -873,6 +882,11 @@ impl EditPreparations {
                         && record.service_id == service_id
                         && &record.full_path == path)
                 });
+                // Net-zero is determined by retained identity, never by the absence
+                // of an undo body. Evicted bodies cannot erase verification debt.
+                if baseline.is_some_and(|original| original.matches(version.final_hash())) {
+                    continue;
+                }
                 if let Some((prev_edit, prev_index, prev_root, prev_full, prev_rel, prev_res)) =
                     remaining_for_path
                 {
@@ -889,6 +903,8 @@ impl EditPreparations {
                             path: prev_rel,
                             outcome: prev_res.outcome(),
                             final_hash: version.final_hash().or_else(|| prev_res.final_hash()),
+                            baseline: baseline
+                                .unwrap_or(super::history::ChangeBaseline::Unavailable),
                             document: version
                                 .final_document
                                 .clone()
@@ -897,12 +913,36 @@ impl EditPreparations {
                             hunks: prev_res.hunks(),
                             saved: version.saved(),
                             hook_modified: prev_res.hook_modified(),
-                            verification_pending: false,
+                            verification_pending: true,
+                        },
+                    )?;
+                } else if let Some(baseline) = baseline {
+                    let inverse = super::preflight::file(artifact, version.index())?;
+                    super::history::publish_change(
+                        &mut self.changes,
+                        super::history::ChangedFileRecord {
+                            session: session.clone(),
+                            service_id: service_id.clone(),
+                            edit_id: edit_id.clone(),
+                            revision,
+                            file: version.index(),
+                            root: inverse.root.path().to_path_buf(),
+                            full_path: path.clone(),
+                            path: inverse.relative.clone(),
+                            outcome: version.outcome(),
+                            final_hash: version.final_hash(),
+                            baseline,
+                            document: version.final_document.clone(),
+                            disk: version.final_disk.clone(),
+                            hunks: version.hunks(),
+                            saved: version.saved(),
+                            hook_modified: version.hook_modified(),
+                            verification_pending: true,
                         },
                     )?;
                 }
             }
-            return Ok(false);
+            return Ok(super::AppliedPublication::default());
         }
         for result in receipt.files().iter().filter(|r| {
             matches!(
@@ -911,6 +951,20 @@ impl EditPreparations {
             )
         }) {
             let file = super::preflight::file(artifact, result.index())?;
+            let baseline = self
+                .changes
+                .iter()
+                .find(|record| {
+                    &record.session == session
+                        && record.service_id == service_id
+                        && record.full_path == file.path
+                })
+                .map(|record| record.baseline)
+                .unwrap_or_else(|| {
+                    super::history::ChangeBaseline::Known(
+                        file.evidence.existed().then_some(file.base_hash),
+                    )
+                });
             self.changes.retain(|record| {
                 !(&record.session == session
                     && record.service_id == service_id
@@ -929,6 +983,7 @@ impl EditPreparations {
                     path: file.relative.clone(),
                     outcome: result.outcome(),
                     final_hash: result.final_hash(),
+                    baseline,
                     document: result.final_document.clone(),
                     disk: result.final_disk.clone(),
                     hunks: result.hunks(),
@@ -939,7 +994,10 @@ impl EditPreparations {
             )?;
         }
         if !receipt.has_applied() {
-            return Ok(false);
+            return Ok(super::AppliedPublication {
+                rollback_available: false,
+                edit_revision: Some(revision),
+            });
         }
         let remaining = receipt
             .files()
@@ -972,7 +1030,10 @@ impl EditPreparations {
             self.snapshots.pop_front().ok_or(CoreError::Limit)?;
         }
         self.snapshots.push_back(snapshot);
-        Ok(true)
+        Ok(super::AppliedPublication {
+            rollback_available: true,
+            edit_revision: Some(revision),
+        })
     }
     pub(crate) fn prepare_rollback(
         &mut self,

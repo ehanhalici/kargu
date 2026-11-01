@@ -5,6 +5,7 @@ pub(crate) use claim::{ClaimWork, ClaimedAction};
 mod capture;
 mod git;
 mod history;
+pub(crate) use history::AppliedPublication;
 mod hunks;
 mod inspection;
 mod page;

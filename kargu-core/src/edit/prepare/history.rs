@@ -70,12 +70,31 @@ impl ChangeReservations {
 }
 
 #[derive(Clone, Copy, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub(super) struct HistoryRevision(u64);
+pub(crate) struct HistoryRevision(u64);
 
 impl HistoryRevision {
     pub(super) fn advance(&mut self) -> Result<(), CoreError> {
         self.0 = self.0.checked_add(1).ok_or(CoreError::ArithmeticOverflow)?;
         Ok(())
+    }
+}
+
+/// Publication identity captured by the single writer with the receipt.
+#[derive(Default)]
+pub(crate) struct AppliedPublication {
+    pub(crate) rollback_available: bool,
+    pub(crate) edit_revision: Option<HistoryRevision>,
+}
+
+/// No retained baseline is different from an originally absent file.
+#[derive(Clone, Copy)]
+pub(super) enum ChangeBaseline {
+    Known(Option<ContentHash>),
+    Unavailable,
+}
+impl ChangeBaseline {
+    pub(super) fn matches(self, hash: Option<ContentHash>) -> bool {
+        matches!(self, Self::Known(original) if original == hash)
     }
 }
 
@@ -91,6 +110,8 @@ pub(super) struct ChangedFileRecord {
     pub(super) path: EditPath,
     pub(super) outcome: FileOutcome,
     pub(super) final_hash: Option<ContentHash>,
+    // Original content identity survives undo body eviction.
+    pub(super) baseline: ChangeBaseline,
     pub(super) document: Option<LiveDocument>,
     pub(super) disk: DiskState,
     pub(super) hunks: Option<HunkCount>,
@@ -164,6 +185,7 @@ pub(super) enum HistoryQuery {
     },
     Consume {
         edit_id: EditorEditId,
+        edit_revision: HistoryRevision,
         file: FileIndex,
         final_hash: Option<ContentHash>,
         service_id: Option<EditServiceId>,
@@ -187,6 +209,7 @@ pub(super) fn execute(
     match input {
         HistoryQuery::Consume {
             edit_id,
+            edit_revision,
             file,
             final_hash,
             service_id,
@@ -196,6 +219,7 @@ pub(super) fn execute(
                 &record.session == session
                     && record.service_id == service_id
                     && record.edit_id == edit_id
+                    && record.revision == edit_revision
                     && record.file == file
                     && record.final_hash == final_hash
             }) && record.verification_pending

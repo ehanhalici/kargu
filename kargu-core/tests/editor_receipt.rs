@@ -1329,18 +1329,41 @@ fn hunk_measurement_distinguishes_zero_single_multi_and_hook_modified_unproven()
             "action": "consume",
             "edit_id": edit,
             "file": 0,
+            "edit_revision": changes["result"]["files"][0]["edit_revision"],
             "final_hash": edit2_hash
         }),
     )?;
     assert_eq!(stale_consume["result"]["consumed"], false);
 
-    // Consuming exact (edit_id, file, final_hash) clears verification_pending while keeping modified-file entry
+    // Missing revision fails closed, and matching content with another revision
+    // is not evidence for this publication.
+    let missing_revision = client.call(
+        "edit/history",
+        json!({
+            "action":"consume", "edit_id":edit2, "file":0, "final_hash":edit2_hash
+        }),
+    )?;
+    assert!(
+        missing_revision.get("error").is_some(),
+        "{missing_revision}"
+    );
+    let stale_revision = client.call(
+        "edit/history",
+        json!({
+            "action":"consume", "edit_id":edit2, "file":0, "final_hash":edit2_hash,
+            "edit_revision":0
+        }),
+    )?;
+    assert_eq!(stale_revision["result"]["consumed"], false);
+
+    // Exact publication consumption keeps the modified-file entry.
     let exact_consume = client.call(
         "edit/history",
         json!({
             "action": "consume",
             "edit_id": edit2,
             "file": 0,
+            "edit_revision": changes["result"]["files"][0]["edit_revision"],
             "final_hash": edit2_hash
         }),
     )?;
@@ -1679,6 +1702,7 @@ fn paged_receipt_case(close_application: bool) -> TestResult {
         settled["result"]["receipt"]["complete"], false,
         "3-file receipt under 1 KiB frame must return paged summary: {settled}"
     );
+    assert!(settled["result"]["edit_revision"].is_u64(), "{settled}");
     if close_application {
         client.peer.send(json!({"jsonrpc":"2.0","id":"close-with-pages","method":"application/close","params":{"application_id":client.scope["application_id"]}}))?;
     }
@@ -1906,13 +1930,13 @@ fn verification_debt_survives_undo_snapshot_eviction_and_consumes_only_exact_ide
     let refused = client.call(
         "edit/history",
         json!({"action":"consume","edit_id":first,
-        "file":file,"final_hash":"0".repeat(64)}),
+        "edit_revision":row["edit_revision"],"file":file,"final_hash":"0".repeat(64)}),
     )?;
     assert_eq!(refused["result"]["consumed"], false);
     let consumed = client.call(
         "edit/history",
         json!({"action":"consume","edit_id":first,
-        "file":file,"final_hash":hash}),
+        "edit_revision":row["edit_revision"],"file":file,"final_hash":hash}),
     )?;
     assert_eq!(consumed["result"]["consumed"], true);
     let pending = client.call(

@@ -30,6 +30,7 @@ fn record(
         path: EditPath::try_from(relative)?,
         outcome: FileOutcome::Partial,
         final_hash: None,
+        baseline: history::ChangeBaseline::Unavailable,
         document: None,
         disk: DiskState::Absent {},
         hunks: None,
@@ -247,8 +248,7 @@ fn conversation_summary_excludes_foreign_sessions_and_editor_services() -> TestR
     assert_eq!(before["pending_files"], 2);
     assert_eq!(before["retained_files"], 2);
     let row = service.changes.front().ok_or("pending row")?;
-    let consume =
-        json!({"action":"consume","edit_id":row.edit_id,"file":row.file,"final_hash":null});
+    let consume = json!({"action":"consume","edit_id":row.edit_id,"edit_revision":row.revision,"file":row.file,"final_hash":null});
     service.call(
         &session,
         methods::EDIT_HISTORY,

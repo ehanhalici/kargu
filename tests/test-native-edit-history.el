@@ -211,6 +211,7 @@
                             (lambda (receive)
                               (kargu-bridge-edit-history-consume
                                application :service-id service-a :edit-id (gethash "edit_id" row)
+                               :edit-revision (gethash "edit_revision" row)
                                :file (gethash "file" row) :final-hash (gethash "final_hash" row)
                                :callback receive)))))
                 (should (eq (gethash "consumed" reply) t))))
@@ -293,7 +294,7 @@
     (let* ((service (kargu-edit-service-create))
            (path (expand-file-name "reference.txt" default-directory))
            (identity (list :native t :application (kargu-application-create)
-                           :edit-id "opaque-edit" :file-index 1 :final-hash "opaque-hash"
+                           :edit-id "opaque-edit" :edit-revision 19 :file-index 1 :final-hash "opaque-hash"
                            :service-id "opaque-service"))
            (changes (kargu-edit-service-changes service)) callback)
       (puthash path identity changes)
@@ -301,6 +302,7 @@
                  (lambda (application &rest options)
                    (should (eq application (plist-get identity :application)))
                    (should (= (plist-get options :file) 1))
+                   (should (= (plist-get options :edit-revision) 19))
                    (setq callback (plist-get options :callback)))))
         (kargu-diff-consume-change (kargu-diff--make-change :path path :identity identity) service)
         (should (eq (gethash path changes) identity))
@@ -311,6 +313,104 @@
           ('accepted (should-not (gethash path changes)))
           ('newer (should (eq (gethash path changes) 'newer-reference)))
           (_ (should (eq (gethash path changes) identity))))))))
+
+(ert-deftest kargu-edit-history-undo-reanchor-rejects-old-proof-real-pipe-test ()
+  "Restoring the same content reopens debt under a new publication identity."
+  (kargu-native-edit-test--with-core
+    (let* ((root (make-temp-file "kargu-undo-proof-" t))
+           (path (expand-file-name "file.txt" root))
+           (application (kargu-application-create))
+           (service (kargu-edit-service-create :root root :review-mode 'auto))
+           first old-reference)
+      (unwind-protect
+          (cl-labels
+              ((execute (content)
+                 (kargu-native-edit-test--await
+                  (lambda (receive)
+                    (kargu-diff-native-execute
+                     (list :intent :write :application application :root root
+                           :path path :content content :save-policy 'save)
+                     (lambda (value) (funcall receive value nil)) service))))
+               (consume (identity)
+                 (kargu-native-edit-test--await
+                  (lambda (receive)
+                    (kargu-bridge-edit-history-consume
+                     application :service-id (plist-get identity :service-id)
+                     :edit-id (plist-get identity :edit-id)
+                     :edit-revision (plist-get identity :edit-revision)
+                     :file (plist-get identity :file-index)
+                     :final-hash (plist-get identity :final-hash) :callback receive))))
+               (rollback ()
+                 (kargu-native-edit-test--await
+                  (lambda (receive)
+                    (kargu-diff-native-rollback
+                     path :single-step t :service service
+                     :callback (lambda (value) (funcall receive value nil)))))))
+            (write-region "base\n" nil path nil 'silent)
+            (setq first (execute "first 🦀\n")
+                  old-reference (gethash path (kargu-edit-service-changes service)))
+            (should (integerp (plist-get first :edit-revision)))
+            (should (= (plist-get first :edit-revision) (plist-get old-reference :edit-revision)))
+            ;; Even a previously consumed edit needs new evidence after undo.
+            (should (eq (gethash "consumed" (consume old-reference)) t))
+            (execute "second\n")
+            (let ((result (rollback)))
+              (should (eq (plist-get result :status) :applied-full))
+              (should-not (plist-get result :change-projection-failure)))
+            (let ((current (gethash path (kargu-edit-service-changes service))))
+              (should current)
+              (should (equal (plist-get current :edit-id) (plist-get old-reference :edit-id)))
+              (should (equal (plist-get current :final-hash) (plist-get old-reference :final-hash)))
+              (should (> (plist-get current :edit-revision) (plist-get old-reference :edit-revision)))
+              (should-not (eq (gethash "consumed" (consume old-reference)) t))
+              (should (eq (gethash "consumed" (consume current)) t)))
+            (should (eq (plist-get (rollback) :status) :applied-full))
+            (should-not (gethash path (kargu-edit-service-changes service)))
+            (should (equal (with-temp-buffer (insert-file-contents path) (buffer-string)) "base\n")))
+        (delete-directory root t)))))
+
+(ert-deftest kargu-edit-history-undo-body-eviction-keeps-debt-real-pipe-test ()
+  "Undo body retention cannot decide whether modified content needs evidence."
+  (kargu-native-edit-test--with-core
+    (let* ((root (make-temp-file "kargu-undo-retention-" t))
+           (path (expand-file-name "file.txt" root))
+           (application (kargu-application-create))
+           (service (kargu-edit-service-create :root root :review-mode 'auto)))
+      (unwind-protect
+          (progn
+            (write-region "base\n" nil path nil 'silent)
+            (dotimes (index 17)
+              (let ((result (kargu-native-edit-test--await
+                             (lambda (receive)
+                               (kargu-diff-native-execute
+                                (list :intent :write :application application :root root :path path
+                                      :content (format "edit-%d\n" index) :save-policy 'save)
+                                (lambda (value) (funcall receive value nil)) service)))))
+                (should (eq (plist-get result :status) :applied-full))))
+            (dotimes (_ 16)
+              (let ((result (kargu-native-edit-test--await
+                             (lambda (receive)
+                               (kargu-diff-native-rollback
+                                path :single-step t :service service
+                                :callback (lambda (value) (funcall receive value nil)))))))
+                (should (eq (plist-get result :status) :applied-full))
+                (should-not (plist-get result :change-projection-failure))))
+            (should (equal (with-temp-buffer (insert-file-contents path) (buffer-string)) "edit-0\n"))
+            (should-not (gethash path (kargu-edit-service-snapshots service)))
+            (let* ((reference (gethash path (kargu-edit-service-changes service)))
+                   (pending (kargu-native-edit-test--await
+                             (lambda (receive)
+                               (kargu-bridge-edit-history-changes
+                                application :service-id (kargu-edit-service-native-id service)
+                                :pending-only t :callback receive))))
+                   (row (car (plist-get pending :rows))))
+              (should reference)
+              (should (member path (kargu-edit-service-run-modified-files service)))
+              (should (= (length (plist-get pending :rows)) 1))
+              (should (eq (gethash "verification_pending" row) t))
+              (should (equal (gethash "edit_id" row) (plist-get reference :edit-id)))
+              (should (= (gethash "edit_revision" row) (plist-get reference :edit-revision)))))
+        (delete-directory root t)))))
 
 (provide 'tests/test-native-edit-history)
 ;;; test-native-edit-history.el ends here

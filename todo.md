@@ -771,14 +771,20 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         metadata ERT ve değişen Elisp Werror/parantez kabulü geçti. Native snapshot
         listeleme Rust metadata okuyucusunu kullanır. Reset, tüm verification
         reader'ları ve public service-close drain geçişi ayrı olarak açık kalır.
-      - [ ] **3.8a5 Undo reanchor ve ABA koruması (kaynak denetiminde bulundu):**
-        `record_applied` rollback dalı kalan önceki edit kaydını yeni document/tick
-        ile yeniden yayımlarken `verification_pending:false` atıyor. Kalan editin
-        doğrulama borcunu koru. Pending'i yeniden açarken edit/file/hash tuple'ının
-        eski doğrulama callback'iyle tekrar eşleşmesini record revision üzerinden
-        reddet; receipt/IPC/Elisp capture-consume zincirini aynı kimliğe bağla.
-        İki edit → single-step undo ve geç eski consume için gerçek pipe regresyonu
-        kur; tam undo/net-zero ile pending borcu ve snapshot retention ayrımını koru.
+      - [x] **3.8a5 Undo reanchor ve ABA koruması:** kalan edit yeni document/tick
+        ve record revision ile yeniden doğrulama bekler; consume zorunlu
+        `(session, service, edit, revision, file, hash)` kimliğine bağlıdır.
+        Inline/paged receipt → Elisp passive reference → consume aynı yayın
+        revizyonunu taşır. Undo sonrası frontend native pending DTO'yu yeniden
+        okur; boş undo stack'inden temiz sonucu üretmez. Rust başlangıç içerik
+        kimliğini body retention'dan bağımsız tutar: bilinen baseline'a tam undo
+        net-zero'dur, evicted önceki edit hâlâ değişiklikse borcu kalır. Gerçek
+        pipe'ta önceden consume edilmiş A → B → undo B → eski proof ret/yeni proof
+        kabul/tam undo ve 17 edit → 16 undo sınırı geçti. Kanıt ve kapsam:
+        `docs/native-undo-verification.md`: 602 Rust (32 compile-fail), son receipt
+        20/20, 1436/1436 tam ERT, strict Clippy/fmt ve Elisp Werror/checkdoc temiz.
+        Genel verification consumer cutover'ı,
+        fresh diagnostic barrier, public service close/drain ve legacy silme açık.
     - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller

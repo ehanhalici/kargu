@@ -268,14 +268,16 @@ impl Finishing {
                 } else {
                     crate::application::ToolOutcome::OutcomeUnknown
                 };
-                let rollback_available = if durable && live_owner && receipt.has_modified() {
+                let publication = if durable && live_owner && receipt.has_modified() {
                     actor
                         .edits
                         .record_applied(&scope.session_id, id, preparation, &receipt)
-                        .unwrap_or(false)
+                        .unwrap_or_default()
                 } else {
-                    false
+                    crate::edit::prepare::AppliedPublication::default()
                 };
+                let rollback_available = publication.rollback_available;
+                let edit_revision = publication.edit_revision;
                 effect.complete(actor, outcome)?;
                 // File results contain only bounded identities/counts/hashes;
                 // source text and editor objects are skipped by serialization.
@@ -287,6 +289,7 @@ impl Finishing {
                         object.insert("outcome".into(), json!("outcome_unknown"));
                     }
                     object.insert("edit_id".into(), json!(id));
+                    object.insert("edit_revision".into(), json!(edit_revision));
                     object.insert("journal_committed".into(), json!(durable));
                     object.insert("rollback_available".into(), json!(rollback_available));
                     object.insert(
@@ -315,6 +318,7 @@ impl Finishing {
                                 "state": "quiescent",
                                 "receipt": &receipt,
                                 "rollback_available": rollback_available,
+                                "edit_revision": edit_revision,
                                 "journal_committed": true
                             }),
                         );
@@ -337,6 +341,7 @@ impl Finishing {
                                     "state": "quiescent",
                                     "receipt": summary,
                                     "rollback_available": rollback_available,
+                                    "edit_revision": edit_revision,
                                     "journal_committed": true
                                 }),
                             )

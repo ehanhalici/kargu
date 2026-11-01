@@ -123,6 +123,7 @@
     (list :status (intern (concat ":" (replace-regexp-in-string "_" "-" (gethash "outcome" receipt))))
           :file (and (= (length files) 1) (plist-get (car files) :path))
           :files files :root root :edit-id (gethash "edit_id" native)
+          :edit-revision (gethash "edit_revision" native)
           :rollback-available (eq (gethash "rollback_available" native) t)
           :files-total (gethash "files_total" receipt) :files-applied (gethash "files_applied" receipt)
           :hunks-total (gethash "hunks_total" receipt) :hunks-applied (gethash "hunks_applied" receipt)
