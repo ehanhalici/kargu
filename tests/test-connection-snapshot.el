@@ -26,6 +26,8 @@
 (require 'kargu/config/connection)
 (require 'kargu/config/worker)
 (require 'kargu/providers)
+(require 'kargu/loop)
+(require 'kargu/loop/native)
 
 (ert-deftest kargu-connection-snapshot-immutable-fields-test ()
   "Connection snapshot slots must be populated and read-only."
@@ -243,6 +245,62 @@
         (should-not (string-search "sk-" argv-str))
         (should-not (string-search "password" argv-str))))
     (kargu-async-cancel dummy-task)))
+
+(ert-deftest kargu-active-run-connection-snapshot-immutability-test ()
+  "Active run pins its connection snapshot; selection updates are refused mid-run."
+  (let* ((scope (kargu-credential-scope--create :raw-secret "secret-xyz"))
+         (snap (kargu-connection-snapshot--create
+                :provider "test-provider"
+                :model "test-model-1"
+                :endpoint "http://127.0.0.1:9090"
+                :config-revision 5
+                :credential-scope scope))
+         (app (kargu-application-create))
+         (run (kargu-loop--new-run "test prompt"))
+         (context (kargu-execution--create :app app :run run)))
+    (setf (kargu-execution-task context) (kargu-async-start #'ignore))
+    (plist-put run :context context)
+    (setf (kargu-execution-connection context) snap)
+    (cl-letf (((symbol-function 'kargu-model-supports-tools-p) (lambda () t))
+              ((symbol-function 'kargu-loop-require-tools-for-agent) #'ignore)
+              ((symbol-function 'kargu-edit-changes) #'ignore)
+              ((symbol-function 'kargu-session-mark-active) #'ignore)
+              ((symbol-function 'kargu-loop-native-enabled-p) (lambda () nil))
+              ((symbol-function 'kargu--loop-request) #'ignore))
+      (kargu-loop--send-ready run "test prompt")
+      ;; Run captured the exact snapshot
+      (should (eq (plist-get run :connection-snapshot) snap))
+      (should (equal (plist-get run :provider) "test-provider"))
+      (should (equal (plist-get run :model) "test-model-1"))
+      (should (equal (plist-get run :api-base) "http://127.0.0.1:9090"))
+      ;; Active work locks selection updates
+      (let ((kargu--loop-run run)
+            (kargu-application-owner app))
+        (setf (kargu-application-active-run app) run)
+        (should (kargu-loop-running-p))
+        (should-error (kargu-selection-update :model "mutated-model")
+                      :type 'user-error)
+        ;; Snapshot on the run remains unchanged
+        (should (equal (plist-get run :model) "test-model-1"))
+        (should (equal (kargu-connection-snapshot-model (plist-get run :connection-snapshot))
+                       "test-model-1"))))))
+
+(ert-deftest kargu-active-run-native-start-uses-pinned-snapshot-test ()
+  "Native arguments use the prepared snapshot and delegate auth to Rust."
+  (let* ((credential (kargu-credential-scope--create :raw-secret "synthetic-key"))
+         (snapshot (kargu-connection-snapshot--create
+                    :provider "openai" :model "pinned-model"
+                    :endpoint "http://127.0.0.1:1" :config-revision 12
+                    :credential-scope credential))
+         (run (kargu-loop--new-run "prompt"))
+         (arguments (kargu-loop-native--arguments run snapshot))
+         (connection (gethash "connection" arguments)))
+    (should (equal (gethash "model" connection) "pinned-model"))
+    (should (equal (gethash "url" connection) "http://127.0.0.1:1"))
+    (should (equal (gethash "key" (gethash "auth" connection)) "synthetic-key"))
+    (should-not (gethash "Authorization" (gethash "headers" connection)))
+    (should (= (gethash "config_revision" arguments) 12))
+    (should (= (gethash "turn_limit" arguments) (plist-get run :max-iterations)))))
 
 (provide 'tests/test-connection-snapshot)
 

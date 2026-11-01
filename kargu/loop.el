@@ -33,6 +33,7 @@
 (require 'kargu/edit)
 (require 'kargu/tools/deps nil t)
 (require 'kargu/confirm)
+(require 'kargu/loop/native)
 
 (declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id provider))
 (declare-function kargu-deps-missing "kargu/tools/deps" (&optional root include-optional packages-only))
@@ -73,6 +74,15 @@ They are advertised and executable in debug and agent modes."
 Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
 :healing, :verifications, :empty-retries, :compactions,
 :length-continues, :doom-sigs.")
+
+(defvar kargu-loop-tool-start-hook nil
+  "Observers called with RUN, NAME and ARGS before a tool executes.")
+
+(defvar kargu-loop-tool-finish-hook nil
+  "Observers called with RUN and RESULT after a tool delivers its result.")
+
+(defvar kargu-loop-model-stream-hook nil
+  "Observers called with RUN and EVENT (`start' | `retry') on model stream events.")
 
 (defvar-local kargu-loop--owner-state :open
   "Lifecycle of this buffer as a run owner: :open or :closing.")
@@ -182,6 +192,8 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
 (defun kargu-loop-cancel (run &optional reason)
   "Cancel captured RUN for REASON without touching another execution."
   (when (kargu-loop--live-p run)
+    (when-let* ((abort-fn (plist-get run :abort-fn)))
+      (funcall abort-fn))
     (kargu--loop-finish run :stopped (or reason "stopped by the user"))))
 
 (defun kargu-loop--retire-session (session)
@@ -353,15 +365,26 @@ the diff run files and the UI as they were."
       (progn
         (kargu-loop-require-tools-for-agent)
         (plist-put run :no-tools (not (kargu-model-supports-tools-p)))
-        (plist-put run :provider (kargu--provider-name))
-        (plist-put run :model (kargu--model))
-        (plist-put run :api-base (kargu--api-base))
+        (let* ((context (plist-get run :context))
+               (snapshot (and context (kargu-execution-connection context))))
+          (if snapshot
+              (progn
+                (plist-put run :connection-snapshot snapshot)
+                (plist-put run :provider (kargu-connection-snapshot-provider snapshot))
+                (plist-put run :model (kargu-connection-snapshot-model snapshot))
+                (plist-put run :api-base (kargu-connection-snapshot-endpoint snapshot)))
+            (plist-put run :provider (kargu--provider-name))
+            (plist-put run :model (kargu--model))
+            (plist-put run :api-base (kargu--api-base))))
         (let ((wrapped (kargu-prompt-wrap-user prompt)))
           (setf (kargu-execution-state (plist-get run :context)) :running)
-          (setf (kargu-history-overlay (plist-get run :history)) nil)
           (kargu-edit-changes :reset)
           (kargu-session-mark-active t (plist-get run :session))
-          (kargu--loop-request run wrapped)))
+          (if (and (fboundp 'kargu-loop-native-enabled-p)
+                   (kargu-loop-native-enabled-p))
+              (kargu-loop-native-start run wrapped)
+            (setf (kargu-history-overlay (plist-get run :history)) nil)
+            (kargu--loop-request run wrapped))))
     (error (kargu--loop-finish run :error (error-message-string err)))))
 
 (cl-defun kargu-loop-send (prompt &optional on-delta on-finish &key on-ready)
@@ -469,9 +492,10 @@ INITIALIZED is nil when preparation failed before history or edits were touched.
       (kargu-loop--cleanup-step #'kargu--validate-history 'keep-assistant-tail history))))
 
 (require 'kargu/loop/compact)
-(require 'kargu/loop/tools)
 (require 'kargu/loop/heal)
+(require 'kargu/loop/tools)
 (require 'kargu/loop/machine)
+(require 'kargu/loop/ui)
 
 (kargu-log 'info "loop module loaded")
 

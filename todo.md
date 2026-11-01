@@ -1054,6 +1054,19 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     düzeltilmeden UI cutover sayılamaz. Elisp chat/API/plan tüketici geçişi,
     fileless/paged context ve bütün editor/edit rotaları açıktır. Native plain-provider
     pipe corpus'u yazıldı, çalıştırılmadı.
+  - [x] **5.9a Native startup/iptal ve bağlantı snapshot kaynağı:** application
+    scope mevcut owned service lease'ten alınır; sahte app/session/revision ve
+    provider/model/credential fallback'leri kaldırıldı. Endpoint/model/wire/auth/
+    tuning/cache/retry tercihleri ilk yield öncesinde captured snapshot'tan
+    dondurulur; auth header ve chat URL Rust'ta üretilir. Startup/lease/request
+    aynı parent task'a bağlıdır; Stop yalnız exact prompt RPC'sini iptal eder.
+    Backend seçimi yalnız explicit native bayrağıdır; missing binary veya API
+    fonksiyonu değişimi legacy fallback yaratmaz; mock algılama sabitleri silindi.
+    Geç startup, replaced lease, retired owner, mutable input, geç request ID ve
+    gerçek pipe/provider kaynakları eklendi. Tam ERT 1386/1386, son backend
+    seçimi regresyonu dahil odak grup 11/11; Werror/parantez ve application/
+    connection/transport exhaustive TLC temiz. History/UI projection, native claim'in
+    hazırlıktan önce alınması ve genel 5.9 kapanışı bu alt işin dışında açıktır.
   - [ ] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
     repair ile domain state/plan dispatch motorlarını son tüketici sonrası kaldır.
     Madde 6'daki compaction/healing consumer'larının native run'a bağlanması için

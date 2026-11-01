@@ -20,6 +20,8 @@
 (declare-function kargu-bridge-approval-execute "kargu/bridge/approval"
                   (connection arguments callback &rest options))
 (declare-function kargu-bridge-approval-request "kargu/bridge/approval" (connection id params))
+(declare-function kargu-bridge-sensor-call-tool "kargu/bridge/sensor" (connection id params))
+(declare-function kargu-bridge-sensor-resolve-mentions "kargu/bridge/sensor" (connection id params))
 (declare-function kargu-bridge-job--disconnect "kargu/bridge/jobs" (job status))
 (declare-function kargu-bridge-edit-activity-disconnect "kargu/bridge/edit/activity" (connection))
 (declare-function kargu-bridge-edit-activity-revoke "kargu/bridge/edit/activity" (connection params))
@@ -29,7 +31,14 @@
   "Opt-in Rust core connection."
   :group 'kargu)
 
-(defcustom kargu-bridge-binary-path "kargu-core"
+(defcustom kargu-bridge-binary-path
+  (or (getenv "KARGU_CORE_TEST_BINARY")
+      (let* ((lib (locate-library "kargu/bridge"))
+             (root (and lib (file-name-directory (directory-file-name (file-name-directory lib)))))
+             (target (and root (expand-file-name "kargu-core/target/debug/kargu-core" root))))
+        (if (and target (file-executable-p target))
+            target
+          "kargu-core")))
   "Rust binary, resolved as a path or through the variable `exec-path'."
   :type 'string :group 'kargu-bridge)
 
@@ -52,14 +61,30 @@
   (pending (make-hash-table :test #'equal)) queue queue-tail (queue-bytes 0)
   dispatch-timer stop-timer reverse-timers capabilities read-scope ready-waiters
   (reverse-cleanups (make-hash-table :test #'equal))
+  (session-sequences (make-hash-table :test #'equal))
+  (sensor-calls (make-hash-table :test #'equal))
+  (file-observations (make-hash-table :test #'equal))
+  (native-edits (make-hash-table :test #'equal))
   (jobs (make-hash-table :test #'equal)))
 
 (cl-defstruct (kargu-bridge--pending (:constructor kargu-bridge--pending-create))
   "Take-once request waiter and its owner cleanup."
-  callback timer deadline owner owner-cleanup review on-delta on-body on-retry api-scope
+  callback timer deadline owner owner-cleanup review on-delta on-body on-retry on-event api-scope
+  session-intent session-run-scope session-sequence
   (retry-delivery 0))
 
 (declare-function kargu-bridge-api-retry "kargu/bridge/api" (connection id params))
+(declare-function kargu-bridge-session-notify "kargu/bridge/session" (connection method params))
+(declare-function kargu-bridge-sensor-prepare-tool "kargu/bridge/sensor" (connection id params))
+(declare-function kargu-bridge-sensor-approve-tool "kargu/bridge/sensor" (connection id params))
+(declare-function kargu-bridge-sensor-cancel-tool "kargu/bridge/sensor" (connection params))
+(declare-function kargu-bridge-file-capture "kargu/bridge/file" (connection id params))
+(declare-function kargu-bridge-file-validate "kargu/bridge/file" (connection id params))
+(declare-function kargu-bridge-file-release "kargu/bridge/file" (connection params))
+(declare-function kargu-bridge-native-edit-start "kargu/bridge/native-edit" (connection id params))
+(declare-function kargu-bridge-native-edit-cancel "kargu/bridge/native-edit" (connection params))
+(declare-function kargu-bridge-sensor-symbols-body "kargu/bridge/sensor/symbols" (connection id params))
+(declare-function kargu-bridge-sensor-symbols-release "kargu/bridge/sensor/symbols" (connection params))
 
 (defun kargu-bridge--dismiss-reverse (connection &optional forward-id)
   "Dismiss CONNECTION's reverse requests, optionally only for FORWARD-ID."
@@ -126,6 +151,10 @@
     (dolist (job (hash-table-values (kargu-bridge-connection-jobs connection)))
       (kargu-bridge-job--disconnect job status))
     (kargu-bridge--dismiss-reverse connection)
+    (clrhash (kargu-bridge-connection-session-sequences connection))
+    (clrhash (kargu-bridge-connection-sensor-calls connection))
+    (clrhash (kargu-bridge-connection-file-observations connection))
+    (clrhash (kargu-bridge-connection-native-edits connection))
     (dolist (timer (append (list (kargu-bridge-connection-dispatch-timer connection)
                                  (kargu-bridge-connection-stop-timer connection))
                            (kargu-bridge-connection-reverse-timers connection)))
@@ -175,10 +204,10 @@
   (let* ((scope (gethash "scope" params))
          (app (and (hash-table-p scope) (gethash "application_id" scope)))
          (session (and (hash-table-p scope) (gethash "session_id" scope))))
-    (unless (and (stringp app) (stringp session)) (error "Invalid API observer scope"))
-    (kargu-bridge--object "application_id" (copy-sequence app) "session_id" (copy-sequence session))))
+    (when (and (stringp app) (stringp session))
+      (kargu-bridge--object "application_id" (copy-sequence app) "session_id" (copy-sequence session)))))
 
-(cl-defun kargu-bridge-call (connection method params callback &key owner timeout on-delta on-body on-retry)
+(cl-defun kargu-bridge-call (connection method params callback &key owner timeout on-delta on-body on-retry on-event)
   "Call METHOD with PARAMS on CONNECTION and asynchronously deliver CALLBACK.
 CALLBACK receives (RESULT ERROR).  OWNER is an optional live source buffer;
 its closure or major-mode change cancels delivery.  TIMEOUT overrides the
@@ -186,12 +215,14 @@ default deadline; :unlimited disables only this forward-request timer.
 ON-DELTA receives core API events while this exact waiter remains owned.
 ON-BODY receives bounded final JSON body fragments, not provider events.
 ON-RETRY observes an owned native retry before ACK, never schedules its IO.
+ON-EVENT observes native session events (such as chunk, state, or results).
 Return the correlation id, or nil on local rejection."
   (let ((deadline (or timeout kargu-bridge-request-timeout)))
     (unless (and (functionp callback) (stringp method) (hash-table-p params)
                  (or (null on-delta) (functionp on-delta))
                  (or (null on-body) (functionp on-body))
                  (or (null on-retry) (and (equal method "api/request") (functionp on-retry)))
+                 (or (null on-event) (functionp on-event))
                  (or (eq deadline :unlimited) (and (numberp deadline) (> deadline 0)))
                  (or (null owner) (buffer-live-p owner)))
       (error "Invalid Rust request arguments"))
@@ -212,7 +243,24 @@ Return the correlation id, or nil on local rejection."
                                                   :on-delta on-delta
                                                   :on-body on-body
                                                   :on-retry on-retry
-                                                  :api-scope (and on-retry (kargu-bridge--capture-api-scope params))
+                                                  :on-event on-event
+                                                  :session-intent
+                                                  (when (equal method "session/prompt")
+                                                    (let ((scope (kargu-bridge--capture-api-scope params))
+                                                          (args (gethash "arguments" params)))
+                                                      (when (and scope (hash-table-p args))
+                                                        (kargu-bridge--decode
+                                                         (json-serialize
+                                                          (kargu-bridge--object
+                                                           "scope" scope
+                                                           "root" (gethash "root" args)
+                                                           "config_revision" (gethash "config_revision" args)
+                                                           "policy_revision" (gethash "policy_revision" args)
+                                                           "editor_available" (gethash "editor_available" args []))
+                                                          :null-object :json-null :false-object :json-false)))))
+                                                  :api-scope (and on-retry
+                                                                  (or (kargu-bridge--capture-api-scope params)
+                                                                      (error "Invalid API observer scope")))
                                                   :deadline (when (numberp deadline) (+ (float-time) deadline))
                                                   :owner-cleanup cleanup)))
         (puthash id entry (kargu-bridge-connection-pending connection))
@@ -367,7 +415,7 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
   (let ((json-object-type 'alist) (json-key-type 'string)
         (json-array-type 'vector) (json-null :json-null) (json-false :json-false))
     (with-temp-buffer
-      (insert line)
+      (insert (if (multibyte-string-p line) line (decode-coding-string line 'utf-8)))
       (goto-char (point-min))
       (let ((value (json-read)))
         (skip-chars-forward " \t\r\n")
@@ -410,6 +458,11 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
                 (condition-case nil
                     (funcall consumer (gethash (if (equal method "api/delta") "delta" "chunk") params))
                   ((error quit) (kargu-bridge--cancel connection request-id "consumer_failed"))))))
+           ((and (eq id :missing)
+                 (member method '("session/chunk" "session/state" "session/tool_result"
+                                  "session/accounting" "session/terminal")))
+            (require 'kargu/bridge/session)
+            (kargu-bridge-session-notify connection method (gethash "params" msg)))
            ((and (eq id :missing) (equal method "rpc/cancel"))
             (let* ((params (gethash "params" msg))
                    (entry (and (hash-table-p params)
@@ -423,6 +476,45 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
            ((and (not (eq id :missing)) (equal method "editor/api_retry"))
             (require 'kargu/bridge/api)
             (kargu-bridge-api-retry connection id (gethash "params" msg)))
+           ((and (not (eq id :missing)) (equal method "editor/prepare_tool"))
+            (require 'kargu/bridge/sensor)
+            (kargu-bridge-sensor-prepare-tool connection id (gethash "params" msg)))
+           ((and (not (eq id :missing)) (equal method "editor/read_symbol_range"))
+            (require 'kargu/bridge/sensor/symbols)
+            (kargu-bridge-sensor-symbols-body connection id (gethash "params" msg)))
+           ((and (eq id :missing) (equal method "editor/release_symbol_snapshot"))
+            (when (fboundp 'kargu-bridge-sensor-symbols-release)
+              (kargu-bridge-sensor-symbols-release connection (gethash "params" msg))))
+           ((and (not (eq id :missing)) (equal method "editor/run_edit"))
+            (require 'kargu/bridge/native-edit)
+            (kargu-bridge-native-edit-start connection id (gethash "params" msg)))
+           ((and (eq id :missing) (equal method "editor/cancel_edit"))
+            (when (fboundp 'kargu-bridge-native-edit-cancel)
+              (kargu-bridge-native-edit-cancel connection (gethash "params" msg))))
+           ((and (not (eq id :missing)) (equal method "editor/read_file_snapshot"))
+            (require 'kargu/bridge/file)
+            (kargu-bridge-file-capture connection id (gethash "params" msg)))
+           ((and (not (eq id :missing)) (equal method "editor/validate_file_snapshot"))
+            (require 'kargu/bridge/file)
+            (kargu-bridge-file-validate connection id (gethash "params" msg)))
+           ((and (eq id :missing) (equal method "editor/release_file_snapshot"))
+            (when (fboundp 'kargu-bridge-file-release)
+              (kargu-bridge-file-release connection (gethash "params" msg))))
+           ((and (not (eq id :missing)) (equal method "editor/approve_tool"))
+            (require 'kargu/bridge/sensor)
+            (kargu-bridge-sensor-approve-tool connection id (gethash "params" msg)))
+           ((and (eq id :missing) (equal method "editor/cancel_tool"))
+            (when (fboundp 'kargu-bridge-sensor-cancel-tool)
+              (kargu-bridge-sensor-cancel-tool connection (gethash "params" msg))))
+           ((and (not (eq id :missing))
+                 (equal method "editor/call_tool")
+                 (let ((p (gethash "params" msg)))
+                   (and (hash-table-p p) (gethash "tool" p))))
+            (require 'kargu/bridge/sensor)
+            (kargu-bridge-sensor-call-tool connection id (gethash "params" msg)))
+           ((and (not (eq id :missing)) (equal method "editor/resolve_mentions"))
+            (require 'kargu/bridge/sensor)
+            (kargu-bridge-sensor-resolve-mentions connection id (gethash "params" msg)))
            ((not (eq id :missing))
             (kargu-bridge--send
              connection (kargu-bridge--object
@@ -636,7 +728,7 @@ CALLBACK receives (CONNECTION ERROR).  Return the starting connection handle."
           (kargu-bridge-call
            connection "initialize"
            (kargu-bridge--object "protocol_major" 1 "protocol_minor" 0 "client_version" "0.1.0"
-                                 "capabilities" [] "limits"
+                                 "capabilities" ["editor_file_snapshot"] "limits"
                                  (kargu-bridge--object "max_frame_bytes" kargu-bridge--max-frame))
            (lambda (result error-data)
              (if error-data
@@ -695,6 +787,13 @@ Allow Rust TERM/grace/drain before forcing transport cleanup."
                    (kargu-bridge-connection-state conn) 'stopped)))
     (when (called-interactively-p 'interactive) (message "Kargu Rust core: %s" state))
     state))
+
+(defun kargu-bridge-available-p ()
+  "Return non-nil if the Rust core binary is available and executable."
+  (let ((binary (if (file-name-directory kargu-bridge-binary-path)
+                    (expand-file-name kargu-bridge-binary-path)
+                  (executable-find kargu-bridge-binary-path))))
+    (and binary (file-executable-p binary) t)))
 
 (provide 'kargu/bridge)
 ;;; bridge.el ends here

@@ -42,13 +42,14 @@ were used in tests.
 ## Remaining findings requiring implementation review
 
 - Native edit_by_lsp is explicitly unavailable in edit/prepare/parent.rs.
-- loop/native.el still invents default application/session identities and
-  revisions, assembles Bearer auth itself, logs raw native events and treats
-  every successful RPC response as a successful run. Captured run/config/
-  credential authority and terminal status need full integration.
-- Elisp agent FSM/tool orchestration was moved from deleted machine/tools
-  files into loop.el/ui.el; native enablement remains optional. Deleted loop
-  tests must be reconciled with the remaining real consumers.
+- Native startup now uses the existing application lease, detaches snapshot
+  connection/auth policy before yielding and cancels the exact prompt request.
+  Native claim before configuration/credential/context preparation, canonical
+  history import/projection, continuation UI and complete output rendering still
+  need integration before native becomes the default agent.
+- The complete Elisp agent FSM/tool consumers and original tests are retained
+  because partial moved implementations lost repetition/continuation guards.
+  Remove them only after their native consumers and acceptance are complete.
 - LSP/Dape/context DTO foundations are not proof of complete consumer migration;
   standalone symbol/xref/context routes still need review.
 - Session persistence RPCs in application/host.rs perform disk IO synchronously,
@@ -131,3 +132,41 @@ Cargo test/Clippy, and `KARGU_CORE_TEST_BINARY=$PWD/kargu-core/target/debug/karg
 with the documented tests/run-tests.el batch runner. Compile artifacts were
 written to a temporary directory and removed. The temporary budget worktree
 was removed after its isolated acceptance run.
+
+## Native startup ownership follow-up
+
+The optional native frontend now requires a live execution and prepared connection.
+It captures model, endpoint, provider, wire, tuning, auth intent, cache/stream,
+retry and actual revision/turn-limit values before startup yields. It no longer
+invents app/session identities, Bearer headers or provider/model defaults.
+Unsupported diagnostic/xref reverse adapters are no longer advertised.
+
+The new native-owner port acquires the captured application's existing native
+lease, verifies it again before dispatch, and owns startup/scope waiters plus the
+exact prompt request under one parent task. Stop uses rpc/cancel for that prompt;
+it does not pass a service scope where session/abort requires a full RunScope.
+Callbacks return through the captured execution; late acquisitions clean up
+immediately. The scope is never taken from whichever application is current.
+
+Regression sources cover retired owners, delayed startup after cancellation,
+lease replacement, detached input, exact request cancellation and cancellation
+before request-ID acquisition returns. Real pipe tests acquire actual app/run
+identities and use a controlled local provider to check Rust-generated auth and
+chat-path handling. No live account is used. Missing tuning is sent as an empty
+policy object, preserving native defaults rather than invalid null.
+
+History/UI projection, native pre-preparation claim and full continuation/context
+consumers are still open. This does not complete todo 5.9 or enable native by default.
+
+Backend selection is now solely the explicit native option. Missing binaries or
+redefined API functions cannot cause a selected native run to fall back to Elisp.
+The production constants that detected test mocks were removed. A dedicated
+regression covers both missing availability and a redefined API sender.
+
+Follow-up validation: full ERT **1386/1386** passed. After adding the explicit
+backend-selection regression and removing mock-detection constants, the focused
+native owner/snapshot group passed **11/11**. Werror compilation and check-parens
+pass for the changed frontend/bridge/test files. Exhaustive TLC passed application
+(4,624 states), connection (101,708 states), and transport (693 states).
+No Rust source changed in this follow-up; the previous 574-test Rust acceptance
+remains the baseline, not a newly claimed run. No GUI acceptance was performed.
