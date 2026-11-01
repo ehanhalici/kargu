@@ -334,17 +334,32 @@ preserves the reference; the backend remains the verification authority."
     (kargu-diff-consume-change change service)))
 
 (defun kargu-diff-reset-run-files (&optional service)
-  "Reset the list of modified files for a new agent run on optional SERVICE."
+  "Reset SERVICE's run display after native acknowledgement.
+Pending verification belongs to Rust and survives a run boundary.  A late ACK
+cannot clear references projected by a newer edit."
   (let ((svc (or service (kargu-diff--current-service))))
-    (when svc
-      (when (and (kargu-diff-native-enabled-p) (kargu-edit-service-native-id svc))
-        (require 'kargu/bridge/edit/history)
-        (kargu-bridge-edit-history-reset
-         (kargu-edit-service-native-application svc)
-         :service-id (kargu-edit-service-native-id svc)
-         :lease (kargu-edit-service-native-lease svc)))
-      (setf (kargu-edit-service-run-modified-files svc) nil)))
-  (setq kargu-diff--run-modified-files nil))
+    (if (and (kargu-diff-native-enabled-p) (kargu-edit-service-native-id svc))
+        (let* ((changes (kargu-edit-service-changes svc))
+               (captured (copy-hash-table changes))
+               (files (kargu-edit-service-run-modified-files svc)))
+          (require 'kargu/bridge/edit/history)
+          (kargu-bridge-edit-history-reset
+           (kargu-edit-service-native-application svc)
+           :service-id (kargu-edit-service-native-id svc)
+           :lease (kargu-edit-service-native-lease svc)
+           :callback
+           (lambda (value failure)
+             (when (and (not failure) (hash-table-p value) (eq (gethash "reset" value) t)
+                        (eq files (kargu-edit-service-run-modified-files svc))
+                        (= (hash-table-count captured) (hash-table-count changes))
+                        (cl-loop for path being the hash-keys of captured
+                                 using (hash-values identity)
+                                 always (eq identity (gethash path changes))))
+               (setf (kargu-edit-service-run-modified-files svc) nil)
+               (when (eq svc kargu-diff--default-service)
+                 (setq kargu-diff--run-modified-files nil))))))
+      (setf (kargu-edit-service-run-modified-files svc) nil)
+      (setq kargu-diff--run-modified-files nil))))
 
 (defun kargu-diff-run-modified-files (&optional service)
   "Return files modified during the current agent run on optional SERVICE."

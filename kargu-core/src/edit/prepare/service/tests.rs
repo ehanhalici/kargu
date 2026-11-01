@@ -262,3 +262,77 @@ fn conversation_summary_excludes_foreign_sessions_and_editor_services() -> TestR
     assert!(after["revision"].as_u64() > before["revision"].as_u64());
     Ok(())
 }
+
+#[test]
+fn run_reset_preserves_pending_debt_and_foreign_rows() -> TestResult {
+    let session = SessionId::new();
+    let foreign = SessionId::new();
+    let mut service = EditPreparations::default();
+    service.changes.push_back(record(&session, 0, true)?);
+    service.changes.push_back(record(&session, 1, false)?);
+    service.changes.push_back(record(&foreign, 2, false)?);
+    let mut editor = record(&session, 3, false)?;
+    editor.service_id = Some(crate::domain::EditServiceId::new());
+    service.changes.push_back(editor);
+    let reply = service.call(
+        &session,
+        methods::EDIT_HISTORY,
+        json!({"action":"reset_changes"}),
+        ByteLimit::WIRE_MAX,
+        Instant::now(),
+    )?;
+    assert_eq!(reply["reset"], true);
+    assert_eq!(service.changes.len(), 3);
+    assert!(
+        service
+            .changes
+            .iter()
+            .any(|row| row.session == session && row.verification_pending)
+    );
+    assert!(service.changes.iter().any(|row| row.session == foreign));
+    assert!(service.changes.iter().any(|row| row.service_id.is_some()));
+    let repeated = service.call(
+        &session,
+        methods::EDIT_HISTORY,
+        json!({"action":"reset_changes"}),
+        ByteLimit::WIRE_MAX,
+        Instant::now(),
+    )?;
+    assert_eq!(repeated["revision"], reply["revision"]);
+    Ok(())
+}
+
+#[test]
+fn history_revision_overflow_preserves_consume_and_reset_state() -> TestResult {
+    let session = SessionId::new();
+    for pending in [true, false] {
+        let mut service = EditPreparations::default();
+        let row = record(&session, 0, pending)?;
+        let input = if pending {
+            json!({"action":"consume", "edit_id":row.edit_id,
+                "edit_revision":row.revision, "file":row.file, "final_hash":null})
+        } else {
+            json!({"action":"reset_changes"})
+        };
+        service.changes.push_back(row);
+        service.history_revision = serde_json::from_value(json!(u64::MAX))?;
+        let result = service.call(
+            &session,
+            methods::EDIT_HISTORY,
+            input,
+            ByteLimit::WIRE_MAX,
+            Instant::now(),
+        );
+        assert!(matches!(result, Err(CoreError::ArithmeticOverflow)));
+        assert_eq!(service.changes.len(), 1);
+        assert_eq!(
+            service
+                .changes
+                .front()
+                .ok_or("retained row")?
+                .verification_pending,
+            pending
+        );
+    }
+    Ok(())
+}

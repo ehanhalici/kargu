@@ -1,4 +1,4 @@
-//! Real provider/pipe/edit acceptance sources; run only at the final 3/4/5 gate.
+//! Real provider/pipe/edit acceptance; broader 3/4/5 consumer cutover remains open.
 use super::editor::{reverse, tool_reply};
 use super::*;
 use sha2::{Digest, Sha256};
@@ -189,6 +189,7 @@ fn native_edits_share_one_model_budget_and_commit_verified_receipts_before_the_n
         let (url, server, requests) = server(vec![
             tool_reply("call-edit", tool, model_args(tool)),
             answer("edited"),
+            answer("next run"),
         ])?;
         let mut peer = Peer::start()?;
         peer.initialize()?;
@@ -265,6 +266,37 @@ fn native_edits_share_one_model_budget_and_commit_verified_receipts_before_the_n
         assert_eq!(facts["files_saved"], 1);
         assert_eq!(facts["files"][0]["path"], "file.txt");
         assert_eq!(fs::read_to_string(&path)?, TEXT);
+        let reset = edit_rpc(
+            &mut peer,
+            &scope,
+            "edit/history",
+            json!({"action":"reset_changes"}),
+            &mut events,
+        )?;
+        assert_eq!(reset["result"]["reset"], true);
+        begin(&mut peer, "second-run", &scope, prompt(root.path(), &url))?;
+        let second = response(&peer, "second-run", &mut events)?;
+        assert_eq!(second["result"]["status"], "completed", "{second}");
+        assert_eq!(
+            second["result"]["accounting"]["changes"]["pending_files"],
+            1
+        );
+        assert_eq!(
+            second["result"]["accounting"]["changes"]["retained_files"],
+            1
+        );
+        assert_eq!(
+            second["result"]["accounting"]["budget"]["requests_spent"],
+            1
+        );
+        let followup = requests.recv_timeout(Duration::from_secs(2))?;
+        assert!(
+            followup["messages"]
+                .as_array()
+                .ok_or("followup history")?
+                .iter()
+                .any(|message| message["role"] == "tool" && message["tool_call_id"] == "call-edit")
+        );
         server.join().map_err(|_| "server panic")??;
     }
     Ok(())

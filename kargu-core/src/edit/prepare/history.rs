@@ -224,9 +224,9 @@ pub(super) fn execute(
                     && record.final_hash == final_hash
             }) && record.verification_pending
             {
+                current.advance()?;
                 record.verification_pending = false;
                 consumed = true;
-                current.advance()?;
             }
             return Ok(json!({
                 "consumed": consumed,
@@ -234,11 +234,16 @@ pub(super) fn execute(
             }));
         }
         HistoryQuery::ResetChanges { service_id } => {
-            let before = changes.len();
-            changes
-                .retain(|record| !(&record.session == session && record.service_id == service_id));
-            if changes.len() != before {
+            // A run boundary clears consumed presentation history, never debt.
+            // Reset cannot stand in for exact verification consumption.
+            let removable = |record: &ChangedFileRecord| {
+                &record.session == session
+                    && record.service_id == service_id
+                    && !record.verification_pending
+            };
+            if changes.iter().any(removable) {
                 current.advance()?;
+                changes.retain(|record| !removable(record));
             }
             return Ok(json!({
                 "reset": true,

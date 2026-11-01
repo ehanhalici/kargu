@@ -820,6 +820,24 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         ile exact consume gereken pending ledger'ı ayır. Reset ACK gelmeden yeni
         run'ın UI referansları temizlenmesin; gerçek iki-run/late-ACK regresyonu
         ve Rust backend lifecycle/default cutover ile tamamla.
+        - [x] **3.8a9a Native borç ve UI ACK:** Rust reset yalnız consume edilmiş
+          metadata'yı temizler; pending ve foreign session/service kayıtları ile
+          undo snapshot'ları kalır. Consume/reset revizyon artışını mutation'dan
+          önce denetler; overflow kısmi state değişikliği üretmez. UI run display
+          yalnız geçerli ACK ve aynı captured passive kimliklerde temizlenir;
+          failed/refused/late ACK daha yeni aynı-path editini silemez. Gerçek
+          pipe'ta A edit → reset → B edit → reset → A consume → reset kabulü geçti.
+          Write/replace/patch sonrası gerçek ikinci native model run'ında pending
+          borcu/tool geçmişi korunur, yeni run'ın istek sayacı ayrı başlar (34/34
+          son native agent kabulü).
+          İki Rust regresyonu önce red sonra green; 604 locked Rust (32 compile-fail),
+          112/112 odak ve 1449/1449 tam ERT; strict Clippy/fmt, Elisp Werror/
+          parantez/checkdoc temiz. Kanıt:
+          `docs/native-run-reset-debt.md`.
+        - [ ] **3.8a9b Tam run kabulü:** retained pending'in sonraki native model
+          run'ına taşınması 3.8a9a'da geçti. Birleşik Stop/reset/geç ACK model-run
+          akışını ve Rust lifecycle/default cutover + legacy run-view kaldırmayı
+          tamamlayıp üst 3.8a9'u kapat. 3.8a9a tek başına bu kabul değildir.
     - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller
@@ -1294,9 +1312,10 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Eksik/başarısız kabul ve kalan legacy consumer varken 3/4/5'i kapatma.
 
   **2026-11-01 denetim kanıtı:** üst 3/4/5 ve ilgili kapanış kutuları yeniden
-  açıldı. Native edit seçimi hâlâ opt-in; `edit/prepare/parent.rs` native
-  `edit_by_lsp` için açık `Unavailable` döndürüyor. `loop.el`/`loop/ui.el`
-  silinen dosyalardaki Elisp FSM/tool orchestration'ını hâlâ yürütüyor;
+  açıldı. İlk denetimde native `edit_by_lsp` parent'ı `Unavailable` idi;
+  bu bağlantı ve runtime kabulü sonradan 4.4c/5.9d'de tamamlandı. Native edit seçimi
+  hâlâ opt-in. `loop.el`/`loop/ui.el` legacy backend seçiliyken Elisp FSM/tool
+  orchestration'ını hâlâ yürütüyor;
   dosya taşıma engine kaldırma değildir. Native UI adapter'ında default
   scope/revision ve genel bağlantı/terminal eksikleri var. Native sensor domain
   kaynakları tüm LSP/Dape/context tüketicilerinin geçtiğini kanıtlamıyor.

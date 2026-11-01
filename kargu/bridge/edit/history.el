@@ -198,8 +198,8 @@ SERVICE-ID and LEASE pin the original owner; deliver the ACK to CALLBACK."
 
 (cl-defun kargu-bridge-edit-history-reset
     (application &key service-id callback lease)
-  "Reset SERVICE-ID's change records on APPLICATION, preserving snapshots.
-Use captured LEASE and deliver the native acknowledgement to CALLBACK."
+  "Reset SERVICE-ID's consumed metadata on APPLICATION, preserving pending debt.
+Snapshots are retained.  Use LEASE and deliver acknowledgement to CALLBACK."
   (kargu-bridge-edit-history--mutate
    application
    (kargu-bridge--object

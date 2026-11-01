@@ -596,5 +596,69 @@
         (funcall held (kargu-bridge--object "consumed" t) nil)
         (should (eq reference (gethash path (kargu-edit-service-changes service))))))))
 
+(ert-deftest kargu-edit-history-run-boundary-reset-keeps-pending-real-pipe-test ()
+  (kargu-native-edit-test--with-core
+    (let* ((root (make-temp-file "kargu-run-debt-" t))
+           (application (kargu-application-create))
+           (service (kargu-edit-service-create :root root :review-mode 'auto))
+           (first (expand-file-name "first.txt" root))
+           (second (expand-file-name "second.txt" root)))
+      (unwind-protect
+          (cl-labels
+              ((write-file (path)
+                 (let ((result (kargu-native-edit-test--await
+                                (lambda (receive)
+                                  (kargu-diff-native-execute
+                                   (list :application application :intent :write :root root
+                                         :path path :content "changed\n" :save-policy 'save)
+                                   (lambda (value) (funcall receive value nil)) service)))))
+                   (should (eq (plist-get result :status) :applied-full))))
+               (rows ()
+                 (plist-get (kargu-native-edit-test--await
+                             (lambda (receive)
+                               (kargu-bridge-edit-history-changes
+                                application :service-id (kargu-edit-service-native-id service)
+                                :lease (kargu-edit-service-native-lease service) :callback receive))) :rows)))
+            (write-file first)
+            (kargu-diff-reset-run-files service)
+            (let ((remaining (rows)))
+              (should (= (length remaining) 1))
+              (should (eq (gethash "verification_pending" (car remaining)) t)))
+            (write-file second)
+            (kargu-diff-reset-run-files service)
+            (should (= (length (rows)) 2))
+            ;; The first publication remains consumable after multiple run resets.
+            (kargu-diff-with-service service
+              (kargu-diff-consume-change (kargu-diff-pending-change first service) service))
+            (kargu-bridge-test--wait (lambda () (not (gethash first (kargu-edit-service-changes service)))))
+            (kargu-diff-reset-run-files service)
+            (let ((remaining (rows)))
+              (should (= (length remaining) 1))
+              (should (equal (gethash "path" (car remaining)) "second.txt"))
+              (should (eq (gethash "verification_pending" (car remaining)) t)))
+            (should (gethash second (kargu-edit-service-changes service))))
+        (delete-directory root t)))))
+
+(ert-deftest kargu-edit-history-run-display-reset-waits-for-exact-ack-test ()
+  (dolist (outcome '(accepted refused failed newer))
+    (let* ((service (kargu-edit-service-create))
+           (path "same-path") (files (list path))
+           (kargu-diff-native-edit-enabled t)
+           (kargu-diff--run-modified-files '(foreign)) callback)
+      (setf (kargu-edit-service-native-id service) "same-service"
+            (kargu-edit-service-run-modified-files service) files)
+      (puthash path (list :edit-revision 1) (kargu-edit-service-changes service))
+      (cl-letf (((symbol-function 'kargu-bridge-edit-history-reset)
+                 (lambda (_application &rest options) (setq callback (plist-get options :callback)))))
+        (kargu-diff-reset-run-files service))
+      (should (eq files (kargu-edit-service-run-modified-files service)))
+      (when (eq outcome 'newer)
+        (puthash path (list :edit-revision 2) (kargu-edit-service-changes service)))
+      (funcall callback (kargu-bridge--object "reset" (if (eq outcome 'refused) :json-false t))
+               (when (eq outcome 'failed) (kargu-bridge--fault "unavailable")))
+      (if (eq outcome 'accepted) (should-not (kargu-edit-service-run-modified-files service))
+        (should (eq files (kargu-edit-service-run-modified-files service))))
+      (should (equal kargu-diff--run-modified-files '(foreign))))))
+
 (provide 'tests/test-native-edit-history)
 ;;; test-native-edit-history.el ends here
