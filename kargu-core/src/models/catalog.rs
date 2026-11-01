@@ -52,6 +52,7 @@ fn parse<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T, CatalogError> 
     serde_json::from_str(source).map_err(|_| CatalogError::Shape)
 }
 
+#[derive(Clone)]
 struct Record {
     id: ModelId,
     fields: Map<String, Value>,
@@ -97,6 +98,7 @@ impl TryFrom<&RawValue> for Record {
 }
 
 /// Accepted ordered records. An empty catalog is explicit, never inferred.
+#[derive(Clone)]
 pub struct ModelCatalog(Vec<Record>);
 impl TryFrom<&str> for ModelCatalog {
     type Error = CatalogError;
@@ -133,6 +135,20 @@ impl TryFrom<&str> for ModelCatalog {
     }
 }
 impl ModelCatalog {
+    /// Borrow the parsed records without consuming the catalog.
+    pub fn records(&self) -> impl Iterator<Item = (&ModelId, &RawValue)> {
+        self.0
+            .iter()
+            .map(|record| (&record.id, record.source.as_ref()))
+    }
+    /// Count of parsed models in this catalog.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    /// True when this catalog contains no models.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
     pub(crate) fn into_records(self) -> impl Iterator<Item = (ModelId, Box<RawValue>)> {
         self.0.into_iter().map(|record| (record.id, record.source))
     }

@@ -23,7 +23,15 @@ use std::{
 };
 use tokio::time::Instant;
 
+mod catalog;
 mod editor;
+pub use catalog::{ToolModes, ToolPresentation, ToolRoute};
+mod delegated;
+pub mod schema;
+pub use delegated::{
+    AuthorizedEditorTool, EditorResource, EditorToolAdmission, EditorToolApprovalRequest,
+    IssuedEditorTool, PreparedEditorTool,
+};
 pub use editor::{
     AuthorizedEditorEdit, EditorAdmission, EditorAdmissionInput, EditorApprovalRequest,
     EditorDecision, EditorPresenter,
@@ -172,6 +180,7 @@ pub struct CommandInput {
 /// Validated immutable command; no Debug or Serialize can disclose its arguments.
 pub struct CommandSpec {
     action_snapshot: Option<Arc<ActionSnapshot>>,
+    isolated_patch: Option<Workspace>,
     safety: ToolSafetyLevel,
     read_targets: Vec<ReadTarget>,
     pub(crate) invocation: PathBuf,
@@ -230,6 +239,7 @@ impl TryFrom<CommandInput> for CommandSpec {
         }
         Ok(Self {
             action_snapshot: None,
+            isolated_patch: None,
             safety: ToolSafetyLevel::ExecutesArbitraryCode,
             read_targets: Vec::new(),
             invocation: input.program,
@@ -249,6 +259,17 @@ impl TryFrom<CommandInput> for CommandSpec {
     }
 }
 impl CommandSpec {
+    /// Closed Git adapter may prepare a patch only in its retained private
+    /// workspace. This capability is never deserialized from command RPC input.
+    pub(crate) fn edit_patch(input: CommandInput, workspace: Workspace) -> Result<Self, CoreError> {
+        let mut command = Self::git_read(input)?;
+        workspace.revalidate()?;
+        if command.cwd.path() != workspace.path() {
+            return Err(CoreError::Rejected);
+        }
+        command.isolated_patch = Some(workspace);
+        Ok(command)
+    }
     pub(crate) fn with_action_snapshot(mut self, snapshot: Arc<ActionSnapshot>) -> Self {
         self.action_snapshot = Some(snapshot);
         self
@@ -325,7 +346,14 @@ impl CommandSpec {
         for target in &self.read_targets {
             target.revalidate()?;
         }
-        if !self.cwd.path.starts_with(run.settings().workspace.path()) {
+        let isolated = match &self.isolated_patch {
+            Some(workspace) => {
+                workspace.revalidate()?;
+                self.cwd.path() == workspace.path()
+            }
+            None => false,
+        };
+        if !isolated && !self.cwd.path.starts_with(run.settings().workspace.path()) {
             return Err(CoreError::Rejected);
         }
         let held = self.executable.metadata()?;
@@ -344,9 +372,11 @@ impl CommandSpec {
 }
 
 /// Canonical tool metadata; callers cannot relabel a general program as read-only.
+#[derive(Clone)]
 pub struct ToolDescriptor {
     name: ToolName,
     safety: ToolSafetyLevel,
+    presentation: Option<Arc<ToolPresentation>>,
 }
 impl ToolDescriptor {
     /// Canonical name after alias resolution.
@@ -357,15 +387,47 @@ impl ToolDescriptor {
     pub fn safety(&self) -> ToolSafetyLevel {
         self.safety
     }
+    /// Immutable model/schema metadata, absent for internal-only execution helpers.
+    pub fn presentation(&self) -> Option<&ToolPresentation> {
+        self.presentation.as_deref()
+    }
+    /// Captured mode admission shared by model visibility and delegated execution.
+    pub fn permits_mode(&self, mode: Mode) -> bool {
+        self.presentation
+            .as_ref()
+            .map(|metadata| metadata.modes().permits(mode))
+            .unwrap_or(self.safety == ToolSafetyLevel::SafeReadOnly || mode == Mode::Agent)
+    }
 }
 
-/// Explicit application-owned definitions and flattened aliases. No global registry.
-#[derive(Default)]
+/// Monotonic definition generation, distinct from a run's config/policy revisions.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+pub struct RegistryRevision(u64);
+impl RegistryRevision {
+    fn next(self) -> Result<Self, CoreError> {
+        self.0
+            .checked_add(1)
+            .map(Self)
+            .ok_or(CoreError::ArithmeticOverflow)
+    }
+    /// Exact native registry generation for a captured run or approval digest.
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Explicit application-owned definitions and flattened aliases; no global registry.
+#[derive(Clone, Default)]
 pub struct ToolRegistry {
     definitions: HashMap<ToolName, ToolDescriptor>,
     aliases: HashMap<ToolName, ToolName>,
+    revision: RegistryRevision,
 }
 impl ToolRegistry {
+    /// Current native generation; immutable run snapshots retain this exact catalog.
+    pub fn revision(&self) -> RegistryRevision {
+        self.revision
+    }
     /// Register a process executor atomically. Every process is arbitrary code.
     pub fn register_process(
         &mut self,
@@ -439,6 +501,12 @@ impl ToolRegistry {
         aliases: Vec<ToolName>,
         safety: ToolSafetyLevel,
     ) -> Result<(), CoreError> {
+        if aliases.len() > limits::TOOL_DEFINITIONS
+            || (!self.definitions.contains_key(&name)
+                && self.definitions.len() >= limits::TOOL_DEFINITIONS)
+        {
+            return Err(CoreError::Limit);
+        }
         if self.aliases.contains_key(&name)
             || aliases.iter().any(|alias| {
                 alias != &name
@@ -451,11 +519,31 @@ impl ToolRegistry {
         {
             return Err(CoreError::Rejected);
         }
+        let revision = self.revision.next()?;
+        let new_aliases = aliases
+            .iter()
+            .filter(|alias| *alias != &name && !self.aliases.contains_key(*alias))
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        if self
+            .aliases
+            .len()
+            .checked_add(new_aliases)
+            .is_none_or(|count| count > limits::TOOL_DEFINITIONS)
+        {
+            return Err(CoreError::Limit);
+        }
+        let presentation = self
+            .definitions
+            .get(&name)
+            .filter(|descriptor| descriptor.safety == safety)
+            .and_then(|descriptor| descriptor.presentation.clone());
         self.definitions.insert(
             name.clone(),
             ToolDescriptor {
                 name: name.clone(),
                 safety,
+                presentation,
             },
         );
         for alias in aliases {
@@ -463,6 +551,7 @@ impl ToolRegistry {
                 self.aliases.insert(alias, name.clone());
             }
         }
+        self.revision = revision;
         Ok(())
     }
     /// Resolve aliases to current definitions, never an old metadata snapshot.
@@ -740,10 +829,12 @@ impl ApprovalRequest {
 enum CapturedAction {
     Command(Box<CommandSpec>),
     Editor(Box<crate::edit::intent::EditorAction>),
+    Delegated(Box<PreparedEditorTool>),
 }
 struct PendingApproval {
     run: RunHandle,
     call_id: ToolCallId,
+    step_id: Option<ToolStepId>,
     name: ToolName,
     action: CapturedAction,
     digest: ActionDigest,
@@ -759,6 +850,7 @@ struct PendingApproval {
 pub struct AuthorizedCommand {
     run: RunHandle,
     call_id: ToolCallId,
+    step_id: Option<ToolStepId>,
     command: CommandSpec,
     lease: RunLease,
     deadline: Instant,
@@ -766,6 +858,7 @@ pub struct AuthorizedCommand {
 pub(crate) struct ApprovedParts {
     pub(crate) run: RunHandle,
     pub(crate) call_id: ToolCallId,
+    pub(crate) step_id: Option<ToolStepId>,
     pub(crate) command: CommandSpec,
     pub(crate) lease: RunLease,
 }
@@ -776,6 +869,9 @@ impl AuthorizedCommand {
     pub(crate) fn call_id(&self) -> &ToolCallId {
         &self.call_id
     }
+    pub(crate) fn step_id(&self) -> Option<&ToolStepId> {
+        self.step_id.as_ref()
+    }
     pub(crate) fn command(&self) -> &CommandSpec {
         &self.command
     }
@@ -783,6 +879,7 @@ impl AuthorizedCommand {
         ApprovedParts {
             run: self.run,
             call_id: self.call_id,
+            step_id: self.step_id,
             command: self.command,
             lease: self.lease,
         }
@@ -806,6 +903,13 @@ impl AuthorizedCommand {
 pub struct ExecutionGate {
     pending: HashMap<ApprovalId, PendingApproval>,
 }
+struct CommandAdmission<'a> {
+    registry: &'a ToolRegistry,
+    requested: &'a ToolName,
+    call_id: ToolCallId,
+    step_id: Option<ToolStepId>,
+    command: CommandSpec,
+}
 impl ExecutionGate {
     /// Validate typed arguments/owner/mode/budget before requesting user approval.
     pub fn prepare(
@@ -817,8 +921,57 @@ impl ExecutionGate {
         call_id: ToolCallId,
         command: CommandSpec,
     ) -> Result<ApprovalRequest, CoreError> {
+        self.prepare_command(
+            actor,
+            run,
+            CommandAdmission {
+                registry,
+                requested,
+                call_id,
+                step_id: None,
+                command,
+            },
+        )
+    }
+    pub(crate) fn prepare_step(
+        &mut self,
+        actor: &mut ApplicationActor,
+        run: &RunHandle,
+        requested: &ToolName,
+        parent: ToolCallId,
+        step: ToolStepId,
+        command: CommandSpec,
+    ) -> Result<ApprovalRequest, CoreError> {
+        self.prepare_command(
+            actor,
+            run,
+            CommandAdmission {
+                registry: run.tool_registry(),
+                requested,
+                call_id: parent,
+                step_id: Some(step),
+                command,
+            },
+        )
+    }
+    fn prepare_command(
+        &mut self,
+        actor: &mut ApplicationActor,
+        run: &RunHandle,
+        input: CommandAdmission<'_>,
+    ) -> Result<ApprovalRequest, CoreError> {
+        let CommandAdmission {
+            registry,
+            requested,
+            call_id,
+            step_id,
+            command,
+        } = input;
         actor.validate(run)?;
         let descriptor = registry.resolve(requested)?;
+        if command.isolated_patch.is_some() && descriptor.name().as_str() != "edit_patch_prepare" {
+            return Err(CoreError::Rejected);
+        }
         if descriptor.safety != command.safety
             || (run.settings().mode != Mode::Agent
                 && descriptor.safety != ToolSafetyLevel::SafeReadOnly)
@@ -836,7 +989,16 @@ impl ExecutionGate {
                 .ok_or(CoreError::ArithmeticOverflow)?,
         );
         let lease = run.lease()?;
-        actor.register_call(run, call_id.clone(), descriptor.name().clone())?;
+        if let Some(step) = &step_id {
+            actor.claim_step(run, &call_id, step, descriptor.name(), descriptor.safety())?;
+        } else {
+            actor.reserve_call(
+                run,
+                call_id.clone(),
+                descriptor.name().clone(),
+                descriptor.safety(),
+            )?;
+        }
         let id = ApprovalId::new();
         let request = ApprovalRequest {
             safety: descriptor.safety,
@@ -864,6 +1026,7 @@ impl ExecutionGate {
             PendingApproval {
                 run: run.clone(),
                 call_id,
+                step_id,
                 name: descriptor.name().clone(),
                 action: CapturedAction::Command(Box::new(command)),
                 digest: action_digest,
@@ -915,7 +1078,7 @@ impl ExecutionGate {
             } else {
                 ToolOutcome::Rejected
             };
-            actor.complete_tool(run, &pending.call_id, outcome)?;
+            actor.complete_action(run, &pending.call_id, pending.step_id.as_ref(), outcome)?;
             return Err(error);
         }
         // Recompute from private captured data, never caller-supplied display text.
@@ -925,6 +1088,7 @@ impl ExecutionGate {
         Ok(AuthorizedCommand {
             run: pending.run,
             call_id: pending.call_id,
+            step_id: pending.step_id,
             command: *command,
             lease: pending.lease,
             deadline: pending.deadline,
@@ -960,9 +1124,10 @@ impl ExecutionGate {
             .collect();
         for id in ids {
             if let Some(pending) = self.pending.remove(&id) {
-                actor.complete_tool(
+                actor.complete_action(
                     run,
                     &pending.call_id,
+                    pending.step_id.as_ref(),
                     if Instant::now() >= pending.deadline {
                         ToolOutcome::Timeout
                     } else {
@@ -996,7 +1161,7 @@ impl ExecutionGate {
                 } else {
                     ToolOutcome::Cancelled
                 };
-                actor.complete_tool(run, &pending.call_id, outcome)?;
+                actor.complete_action(run, &pending.call_id, pending.step_id.as_ref(), outcome)?;
             }
         }
         Ok(())

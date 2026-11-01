@@ -337,3 +337,42 @@ integrated working tree, not an independently complete native backend at HEAD.
 Full transcript import/projection, early claim/config receipt, remaining tools,
 mode/plan, legacy deletion and task 6 are still open. Todo 5.9c closes only the
 explicit answer-display source/runtime slice.
+
+## Follow-up: independent native core integration
+
+The native agent/claim/history, typed registry/schema and sensor components are
+now registered by the real library/application/IPC roots. Provider API accounting
+and retry, parent-run OS/read/editor/edit dispatch, immutable tool catalog,
+execution steps and actual resource collection share the existing actor and
+supervisors. Native file capture/recheck uses a shared bounded raw RAM adapter;
+normal ERT registration now includes native session/loop/file/edit/symbol tests.
+
+The candidate was built from a clean HEAD archive, overlaid with the reviewed
+native Rust integration and only the required editor/test adapters. It used its
+own Cargo target directory and its own Emacs sources. No local crate artifacts
+were shared across source roots. This independently integrated candidate passed
+561 locked Rust tests across 54 suite results (including 31 compile-fail docs),
+strict all-target Clippy/fmt, 1395/1395 full source ERT with the actual candidate
+binary, and warning-as-error/check-parens for changed editor adapters/fixtures.
+
+Task 7 persistence code is deliberately not part of this commit: its public RPCs
+still perform blocking disk IO in the host and lack mandatory application/session
+capabilities. Task 8's model/select only validates a choice while reporting
+selected, without an authoritative native selection commit. The candidate omits
+these unfinished RPC implementations and their future module/test registration.
+A real stdio probe verified all five persistence methods and model/select return
+MethodNotFound, create no disk artifacts and leave ping responsive. Owned native
+provider/model discovery and the existing config policy ports remain available.
+
+The original working files and unrelated staged changes are preserved. Native
+integration is committed independently; the excluded persistence/selection work
+remains visible as an uncommitted delta for its own audit. Counts above describe
+the exact integration candidate, not a mix of its binary and the full working
+tree. Previous notes that the shared native roots were uncommitted are historical
+and superseded for this reviewed integration slice.
+
+This does not close tasks 3–6: the agent is still opt-in; preparation-time UI
+claim/config receipt, full native history/context import and projection, complete
+LSP/Dape/plan/background consumers, compaction/healing/verification, hard monetary
+reservation and legacy engine removal remain outstanding. No TLA+ code changed;
+TLC was not rerun under the user's current test rule.

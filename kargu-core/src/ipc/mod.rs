@@ -6,6 +6,8 @@ mod lifecycle;
 pub mod pending;
 pub mod protocol;
 mod read_tools;
+pub(crate) use read_tools::ModelCatalogWork;
+mod sessions;
 mod transport;
 
 pub use transport::serve;

@@ -15,6 +15,16 @@ pub(crate) struct Preparation {
     cancel: CancellationToken,
 }
 impl Preparation {
+    pub(crate) fn for_run(run: &crate::application::RunHandle) -> Result<Self, CoreError> {
+        run.check_live()?;
+        let mut context = Self::new()?;
+        context.cancel = run.cancel_token();
+        context.deadline = run
+            .deadline()
+            .cap(tokio::time::Instant::from_std(context.deadline))
+            .into_std();
+        Ok(context)
+    }
     pub(crate) fn new() -> Result<Self, CoreError> {
         let started = Instant::now();
         Ok(Self {

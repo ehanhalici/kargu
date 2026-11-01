@@ -7,6 +7,7 @@ use crate::constants::{
 };
 use crate::domain::{ApplicationId, ByteLimit, RequestScope, SessionId};
 use crate::ipc::protocol::Fault;
+use crate::providers::ApiProviderId;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -68,6 +69,7 @@ pub struct Host {
     frame_limit: ByteLimit,
     applications: HashMap<ApplicationId, Application>,
     providers: Result<crate::providers::ProviderCatalog, crate::error::CoreError>,
+    editor_file_snapshot: bool,
 }
 
 /// Effect of dispatching one call.
@@ -156,12 +158,16 @@ impl Host {
             frame_limit: ByteLimit::WIRE_MAX,
             applications: HashMap::new(),
             providers: crate::providers::ProviderCatalog::embedded(),
+            editor_file_snapshot: false,
         }
     }
 
     /// Negotiated limit applied immediately after initialize.
     pub fn frame_limit(&self) -> ByteLimit {
         self.frame_limit
+    }
+    pub(crate) fn editor_file_snapshot_available(&self) -> bool {
+        self.editor_file_snapshot
     }
 
     /// Whether this connection has finished draining its domain resources.
@@ -307,6 +313,54 @@ impl Host {
             .map_err(crate::edit::prepare::fault)?;
         Ok((request.scope, work))
     }
+
+    pub(crate) fn prepare_history_import(
+        &mut self,
+        params: Value,
+    ) -> Result<(ReadScope, crate::history::HistoryWork), Fault> {
+        let request: ReadRequest<Value> =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&request.scope) {
+            return Err(owner_fault());
+        }
+        let work = self
+            .actor_mut(&request.scope)
+            .map_err(crate::history::fault)?
+            .prepare_history_import(&request.scope.session_id, request.arguments)
+            .map_err(crate::history::fault)?;
+        Ok((request.scope, work))
+    }
+    pub(crate) fn can_publish_history(
+        &self,
+        scope: &ReadScope,
+        id: &crate::domain::HistoryUploadId,
+    ) -> bool {
+        self.owns_read_scope(scope)
+            && self
+                .applications
+                .get(&scope.application_id)
+                .is_some_and(|application| {
+                    application
+                        .actor()
+                        .can_publish_history(&scope.session_id, id)
+                })
+    }
+    pub(crate) fn finish_history_import(
+        &mut self,
+        scope: &ReadScope,
+        id: &crate::domain::HistoryUploadId,
+        result: Result<crate::history::History, crate::error::CoreError>,
+    ) -> Result<Value, Fault> {
+        let result = if self.owns_read_scope(scope) {
+            result
+        } else {
+            Err(crate::error::CoreError::StaleOwner)
+        };
+        self.actor_mut(scope)
+            .map_err(crate::history::fault)?
+            .finish_history_import(&scope.session_id, id, result)
+            .map_err(crate::history::fault)
+    }
     pub(crate) fn prepare_edit(
         &mut self,
         params: Value,
@@ -383,6 +437,88 @@ impl Host {
             return Err(owner_fault());
         }
         Ok((scope, request.arguments))
+    }
+
+    pub(crate) fn prepare_model_refresh(
+        &self,
+        params: Value,
+    ) -> Result<(RequestScope, crate::ipc::ModelCatalogWork), Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let request: ModelRefreshRequest =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        let connection =
+            RequestScope::try_from(request.connection_epoch).map_err(|_| Fault::params())?;
+        if !self.owns_connection_read(&connection) || !self.owns_read_scope(&request.scope) {
+            return Err(owner_fault());
+        }
+        let provider = ApiProviderId::try_from(request.provider).map_err(|_| Fault::params())?;
+        let catalog = self.providers.as_ref().map_err(|_| Fault::params())?;
+        let app = self
+            .applications
+            .get(&request.scope.application_id)
+            .ok_or_else(owner_fault)?;
+        let capture = app
+            .actor()
+            .configuration
+            .prepare_catalog(
+                request.configuration_revision,
+                provider.clone(),
+                &request.scope.session_id,
+                catalog,
+            )
+            .map_err(|error| match error {
+                crate::error::CoreError::StaleOwner => owner_fault(),
+                crate::error::CoreError::Unavailable => Fault {
+                    code: protocol::error_codes::INVALID_STATE,
+                    message: "Native catalog credential is unavailable",
+                    status: "credential_unavailable",
+                },
+                _ => Fault::params(),
+            })?;
+        Ok((
+            connection,
+            crate::ipc::ModelCatalogWork {
+                owner: request.scope,
+                configuration_revision: request.configuration_revision,
+                provider: provider.clone(),
+                request: capture,
+                specs: catalog.effort_specs(&provider),
+            },
+        ))
+    }
+
+    pub(crate) fn owns_model_refresh(
+        &self,
+        scope: &ReadScope,
+        revision: crate::domain::ConfigRevision,
+    ) -> bool {
+        self.owns_read_scope(scope)
+            && self
+                .applications
+                .get(&scope.application_id)
+                .is_some_and(|app| app.actor().configuration.is_revision(revision))
+    }
+
+    pub(crate) fn update_provider_models(
+        &mut self,
+        connection: &RequestScope,
+        owner: &ReadScope,
+        revision: crate::domain::ConfigRevision,
+        provider: ApiProviderId,
+        catalog: crate::models::catalog::ModelCatalog,
+        specs: crate::models::metadata::EffortSpecs,
+    ) -> Result<(), crate::error::CoreError> {
+        if !self.owns_connection_read(connection) || !self.owns_model_refresh(owner, revision) {
+            return Err(crate::error::CoreError::StaleOwner);
+        }
+        self.actor_mut(owner)?
+            .models
+            .store_mut()
+            .update_catalog(provider, catalog, specs)
+            .map(|_| ())
+            .map_err(|_| crate::error::CoreError::Unavailable)
     }
     pub(crate) fn request_scope(&self) -> Result<RequestScope, crate::error::CoreError> {
         RequestScope::try_from(self.epoch.clone())
@@ -485,6 +621,10 @@ impl Host {
         self.frame_limit =
             ByteLimit::try_from(init.limits.max_frame_bytes.min(limits::MAX_FRAME_BYTES))
                 .map_err(|_| Fault::params())?;
+        self.editor_file_snapshot = init
+            .capabilities
+            .iter()
+            .any(|capability| capability == "editor_file_snapshot");
         self.phase = Phase::Negotiated;
         Ok(
             json!({"core_version":crate::VERSION, "protocol_major":protocol::MAJOR,
@@ -501,12 +641,40 @@ impl Host {
         response_limit: ByteLimit,
     ) -> Result<Value, Fault> {
         match method {
+            methods::HISTORY_BEGIN | methods::HISTORY_APPEND | methods::HISTORY_ABORT => {
+                let request: ReadRequest<Value> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                if !self.owns_read_scope(&request.scope) {
+                    return Err(owner_fault());
+                }
+                self.actor_mut(&request.scope)
+                    .map_err(crate::history::fault)?
+                    .history_rpc(
+                        &request.scope.session_id,
+                        method,
+                        request.arguments,
+                        response_limit,
+                    )
+            }
+            methods::HISTORY_MESSAGES | methods::HISTORY_READ => {
+                let request: ReadRequest<Value> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                if !self.owns_read_scope(&request.scope) {
+                    return Err(owner_fault());
+                }
+                self.actor_mut(&request.scope)
+                    .map_err(crate::history::fault)?
+                    .session_history(&request.scope.session_id)
+                    .map_err(crate::history::fault)?
+                    .read_rpc(method, request.arguments, response_limit)
+            }
             methods::EDIT_BEGIN
             | methods::EDIT_TARGETS
             | methods::EDIT_DOCUMENT
             | methods::EDIT_FILES
             | methods::EDIT_APPEND
             | methods::EDIT_READ
+            | methods::EDIT_HISTORY
             | methods::EDIT_ABORT
             | methods::EDIT_CLOSE => {
                 let request: ReadRequest<Value> =
@@ -599,6 +767,8 @@ impl Host {
                     .map_err(|_| Fault::params())
             }
             methods::PROVIDER_CATALOG_TARGET => self.catalog_target(params),
+            methods::PROVIDER_LIST => self.provider_list(params),
+            methods::MODEL_LIST => self.model_list(params),
             methods::CONFIGURATION_PARSE => self.configuration_parse(params),
             methods::APPLICATION_CREATE => {
                 if !empty_params(&params) {
@@ -608,9 +778,14 @@ impl Host {
                     return Err(capacity_fault());
                 }
                 let id = ApplicationId::new();
+                let registry = crate::security::ToolRegistry::standard().map_err(|_| Fault {
+                    code: protocol::error_codes::INVALID_STATE,
+                    message: "Tool manifest is invalid",
+                    status: "invalid_catalog",
+                })?;
                 self.applications.insert(
                     id.clone(),
-                    Application::Live(ApplicationActor::new(id.clone())),
+                    Application::Live(ApplicationActor::with_registry(id.clone(), registry)),
                 );
                 Ok(json!({"application_id":id}))
             }
@@ -657,11 +832,14 @@ impl Host {
                         .map_err(|_| owner_fault())?;
                     Ok(json!({"status":"closed"}))
                 } else {
-                    Ok(
-                        json!({"connection_epoch":self.epoch,"application_id":scope.application_id,
-                        "session_id":scope.session_id,"generation":0,"sequence":0,
-                        "state":"idle","active_run":null}),
-                    )
+                    let mut snapshot = actor
+                        .session_projection(&scope.session_id)
+                        .map_err(|_| owner_fault())?;
+                    let fields = snapshot.as_object_mut().ok_or_else(owner_fault)?;
+                    fields.insert("connection_epoch".to_owned(), json!(self.epoch));
+                    fields.insert("application_id".to_owned(), json!(scope.application_id));
+                    fields.insert("session_id".to_owned(), json!(scope.session_id));
+                    Ok(snapshot)
                 }
             }
             _ => Err(Fault {
@@ -693,6 +871,317 @@ impl Host {
             return Err(owner_fault());
         }
         Ok(request.arguments.resolve())
+    }
+
+    fn provider_list(&self, params: Value) -> Result<Value, Fault> {
+        let req: ProviderListRequest =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if let Some(ref epoch_str) = req.connection_epoch {
+            let epoch = RequestScope::try_from(epoch_str.clone()).map_err(|_| Fault::params())?;
+            if !self.matches_epoch(&epoch) {
+                return Err(owner_fault());
+            }
+        }
+        let catalog = self.providers.as_ref().map_err(|_| Fault {
+            code: protocol::error_codes::INVALID_STATE,
+            message: "Provider manifest is invalid",
+            status: "invalid_catalog",
+        })?;
+
+        let app = match req.application_id.as_ref() {
+            Some(id) => Some(
+                self.applications
+                    .get(id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?,
+            ),
+            None => None,
+        };
+        let configured_profiles = app
+            .and_then(|app| app.actor().configuration.published_view())
+            .and_then(|view| view.get("profiles").and_then(Value::as_array).cloned())
+            .unwrap_or_default();
+
+        let mut seen = std::collections::BTreeSet::new();
+        let mut items = Vec::new();
+
+        // 1. Process configured profiles first
+        for profile in configured_profiles {
+            let Some(p_id) = profile.get("provider").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if !seen.insert(p_id.to_string()) {
+                continue;
+            }
+            let api_p_id = match ApiProviderId::try_from(p_id.to_string()) {
+                Ok(id) => id,
+                Err(_) => continue,
+            };
+            let embedded_def = catalog.get(&api_p_id);
+            let name = embedded_def
+                .map(|d| d.name().as_str().to_string())
+                .unwrap_or_else(|| capitalize_provider(p_id));
+            let is_local = profile
+                .get("local")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                || embedded_def.is_some_and(|d| d.local());
+            let cred_source = profile
+                .get("credential_source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let authenticated = profile
+                .get("authenticated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                || is_local;
+            let status = if is_local {
+                "local"
+            } else if cred_source == "environment" {
+                "env_key"
+            } else if authenticated {
+                "configured"
+            } else {
+                "available"
+            };
+            let default_model = profile
+                .get("configured_model")
+                .and_then(|v| v.as_str())
+                .or_else(|| profile.get("model").and_then(|v| v.as_str()))
+                .map(String::from);
+            let models: Vec<String> = profile
+                .get("models")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            items.push(json!({
+                "id": p_id,
+                "name": name,
+                "status": status,
+                "authenticated": authenticated,
+                "default_model": default_model,
+                "models": models,
+                "local": is_local,
+            }));
+        }
+
+        let auth_only = req.authenticated_only.unwrap_or(false);
+
+        // 2. Add embedded definitions not yet seen if authenticated_only is false
+        if !auth_only {
+            for def in catalog.definitions() {
+                let p_id = def.id().as_str();
+                if !seen.insert(p_id.to_string()) {
+                    continue;
+                }
+                let is_local = def.local();
+                let authenticated = is_local || def.keyless();
+                let status = if is_local {
+                    "local"
+                } else if authenticated {
+                    "configured"
+                } else {
+                    "available"
+                };
+                items.push(json!({
+                    "id": p_id,
+                    "name": def.name().as_str(),
+                    "status": status,
+                    "authenticated": authenticated,
+                    "default_model": null,
+                    "models": Vec::<String>::new(),
+                    "local": is_local,
+                }));
+            }
+        }
+
+        let connected: Vec<String> = items
+            .iter()
+            .filter(|it| {
+                it.get("authenticated")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            })
+            .filter_map(|it| it.get("id").and_then(|v| v.as_str()).map(String::from))
+            .collect();
+
+        if auth_only {
+            items.retain(|it| {
+                it.get("authenticated")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            });
+        }
+
+        Ok(json!({
+            "status": "ok",
+            "providers": items,
+            "connected": connected
+        }))
+    }
+
+    fn model_list(&self, params: Value) -> Result<Value, Fault> {
+        let req: ModelListRequest = serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if let Some(ref epoch_str) = req.connection_epoch {
+            let epoch = RequestScope::try_from(epoch_str.clone()).map_err(|_| Fault::params())?;
+            if !self.matches_epoch(&epoch) {
+                return Err(owner_fault());
+            }
+        }
+        let provider_id =
+            ApiProviderId::try_from(req.provider.clone()).map_err(|_| Fault::params())?;
+        let app = match req.application_id.as_ref() {
+            Some(id) => Some(
+                self.applications
+                    .get(id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?,
+            ),
+            None => None,
+        };
+
+        let mut models = if let Some(app) = app {
+            app.actor().models.provider_models(&provider_id)
+        } else {
+            Vec::new()
+        };
+
+        // If models are not in ModelStore yet, check published config profile
+        if models.is_empty()
+            && let Some(app) = app
+            && let Some(view) = app.actor().configuration.published_view()
+            && let Some(profiles) = view.get("profiles").and_then(|p| p.as_array())
+        {
+            for prof in profiles {
+                if prof.get("provider").and_then(|v| v.as_str()) == Some(req.provider.as_str()) {
+                    let mut seen_ids = std::collections::BTreeSet::new();
+                    if let Some(cfg_m) = prof.get("configured_model").and_then(|v| v.as_str())
+                        && !cfg_m.is_empty()
+                        && seen_ids.insert(cfg_m.to_string())
+                    {
+                        models.push(create_fallback_model_dto(cfg_m));
+                    }
+                    if let Some(m) = prof.get("model").and_then(|v| v.as_str())
+                        && !m.is_empty()
+                        && seen_ids.insert(m.to_string())
+                    {
+                        models.push(create_fallback_model_dto(m));
+                    }
+                    if let Some(arr) = prof.get("models").and_then(|v| v.as_array()) {
+                        for item in arr {
+                            if let Some(m_str) = item.as_str()
+                                && !m_str.is_empty()
+                                && seen_ids.insert(m_str.to_string())
+                            {
+                                models.push(create_fallback_model_dto(m_str));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut is_fallback = false;
+        // Default fallbacks if completely empty based on provider name
+        if models.is_empty() {
+            is_fallback = true;
+            match req.provider.as_str() {
+                "openrouter" => {
+                    models.push(create_fallback_model_dto("anthropic/claude-3.5-sonnet"));
+                    models.push(create_fallback_model_dto("openai/gpt-4o"));
+                }
+                "opencode" => {
+                    models.push(create_fallback_model_dto("nemotron-3-ultra-free"));
+                }
+                "nvidia" => {
+                    models.push(create_fallback_model_dto("meta/llama-3.1-70b-instruct"));
+                }
+                _ => {}
+            }
+        }
+
+        Ok(json!({
+            "status": "ok",
+            "provider": req.provider,
+            "models": models,
+            "cached": !is_fallback,
+            "fallback": is_fallback
+        }))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelRefreshRequest {
+    connection_epoch: String,
+    scope: ReadScope,
+    configuration_revision: crate::domain::ConfigRevision,
+    provider: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProviderListRequest {
+    #[serde(default)]
+    connection_epoch: Option<String>,
+    #[serde(default)]
+    application_id: Option<ApplicationId>,
+    #[serde(default)]
+    authenticated_only: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelListRequest {
+    #[serde(default)]
+    connection_epoch: Option<String>,
+    #[serde(default)]
+    application_id: Option<ApplicationId>,
+    provider: String,
+    #[serde(default, rename = "refresh")]
+    _refresh: bool,
+}
+
+fn capitalize_provider(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
+fn create_fallback_model_dto(id: &str) -> crate::models::store::ModelSummaryDto {
+    let lower = id.to_lowercase();
+    let has_reasoning = lower.contains("r1")
+        || lower.contains("o1")
+        || lower.contains("o3")
+        || lower.contains("reason")
+        || lower.contains("thinking");
+    let efforts = if has_reasoning {
+        vec!["low".to_string(), "medium".to_string(), "high".to_string()]
+    } else {
+        Vec::new()
+    };
+    let is_free = lower.contains("free");
+    crate::models::store::ModelSummaryDto {
+        id: id.to_string(),
+        context_window: Some(128_000),
+        max_output: Some(4096),
+        reasoning_efforts: efforts,
+        price_label: if is_free {
+            Some("free".to_string())
+        } else {
+            None
+        },
+        free: is_free,
+        vision: lower.contains("vision") || lower.contains("vl"),
+        supports_tools: true,
+        supports_reasoning: has_reasoning,
     }
 }
 

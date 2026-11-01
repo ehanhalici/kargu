@@ -111,11 +111,23 @@ impl Client {
         text: &str,
         review: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
+        self.prepared_with_service(root, source, policy, text, review, None)
+    }
+    fn prepared_with_service(
+        &mut self,
+        root: &Path,
+        source: &str,
+        policy: &str,
+        text: &str,
+        review: &str,
+        service: Option<&str>,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let id = self.call(
             "edit/begin",
             json!({
                 "origin_id": source,
                 "root": root,
+                "service_id": service,
                 "mode": "agent",
                 "intent": {
                     "kind": "write",
@@ -1259,7 +1271,139 @@ fn hunk_measurement_distinguishes_zero_single_multi_and_hook_modified_unproven()
     assert_eq!(reply2["result"]["receipt"]["hunks_total"], 2);
     assert!(reply2["result"]["receipt"]["hunks_applied"].is_null());
 
-    // 4. Edit recovery RPC surfaces journal resolution over stdio
+    // Undo enumeration comes from the native owner, without retaining bodies in UI.
+    let history = client.call(
+        "edit/history",
+        json!({"action":"list", "offset":0, "revision":null}),
+    )?;
+    let revision = history["result"]["revision"].clone();
+    assert!(revision.is_u64(), "{history}");
+    let rows = history["result"]["files"]
+        .as_array()
+        .ok_or("history rows missing")?;
+    assert!(rows.iter().any(|row| row["edit_id"] == edit2));
+    let foreign_service = "edit_service_12345678-1234-4234-8234-123456789abc";
+    let isolated = client.call(
+        "edit/history",
+        json!({"action":"list", "offset":0, "revision":null, "service_id":foreign_service}),
+    )?;
+    assert_eq!(isolated["result"]["files"], json!([]));
+    let foreign_files = client.call(
+        "edit/history",
+        json!({"action":"files", "edit_id":edit2, "offset":0, "revision":revision,
+               "service_id":foreign_service}),
+    )?;
+    assert!(foreign_files.get("error").is_some(), "{foreign_files}");
+    let files = client.call(
+        "edit/history",
+        json!({"action":"files", "edit_id":edit2, "offset":0, "revision":revision}),
+    )?;
+    assert_eq!(files["result"]["files"][0]["path"], "file.txt");
+    assert!(!files.to_string().contains("changed-0"));
+    let stale = client.call(
+        "edit/history",
+        json!({"action":"list", "offset":0, "revision":0}),
+    )?;
+    assert!(stale.get("error").is_some(), "{stale}");
+
+    // 4. Native change and verification ledger is revision-bound and exact-identity consumed
+    let changes = client.call(
+        "edit/history",
+        json!({
+            "action": "changes",
+            "offset": 0,
+            "revision": null,
+            "pending_only": true
+        }),
+    )?;
+    assert_eq!(changes["result"]["files"].as_array().map(Vec::len), Some(1));
+    assert_eq!(changes["result"]["files"][0]["edit_id"], edit2);
+    assert_eq!(changes["result"]["files"][0]["path"], "file.txt");
+    assert_eq!(changes["result"]["files"][0]["verification_pending"], true);
+    let edit2_hash = changes["result"]["files"][0]["final_hash"].clone();
+
+    // Consuming an older edit_id on the same file does NOT consume the newer edit's pending state
+    let stale_consume = client.call(
+        "edit/history",
+        json!({
+            "action": "consume",
+            "edit_id": edit,
+            "file": 0,
+            "final_hash": edit2_hash
+        }),
+    )?;
+    assert_eq!(stale_consume["result"]["consumed"], false);
+
+    // Consuming exact (edit_id, file, final_hash) clears verification_pending while keeping modified-file entry
+    let exact_consume = client.call(
+        "edit/history",
+        json!({
+            "action": "consume",
+            "edit_id": edit2,
+            "file": 0,
+            "final_hash": edit2_hash
+        }),
+    )?;
+    assert_eq!(exact_consume["result"]["consumed"], true);
+
+    let pending_after = client.call(
+        "edit/history",
+        json!({
+            "action": "changes",
+            "offset": 0,
+            "revision": null,
+            "pending_only": true
+        }),
+    )?;
+    assert_eq!(pending_after["result"]["files"], json!([]));
+
+    let all_after = client.call(
+        "edit/history",
+        json!({
+            "action": "changes",
+            "offset": 0,
+            "revision": null,
+            "pending_only": false
+        }),
+    )?;
+    assert_eq!(
+        all_after["result"]["files"].as_array().map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        all_after["result"]["files"][0]["verification_pending"],
+        false
+    );
+
+    // Resetting run changes clears modified files without dropping rollback snapshots
+    let reset = client.call(
+        "edit/history",
+        json!({
+            "action": "reset_changes"
+        }),
+    )?;
+    assert_eq!(reset["result"]["reset"], true);
+    let after_reset = client.call(
+        "edit/history",
+        json!({
+            "action": "changes",
+            "offset": 0,
+            "revision": null
+        }),
+    )?;
+    assert_eq!(after_reset["result"]["files"], json!([]));
+    let snapshots_still_exist = client.call(
+        "edit/history",
+        json!({"action":"list", "offset":0, "revision":null}),
+    )?;
+    assert!(
+        !snapshots_still_exist["result"]["files"]
+            .as_array()
+            .ok_or("snapshots missing")?
+            .is_empty()
+    );
+
+    // 5. Edit recovery RPC surfaces journal resolution over stdio
     let recovered = client.call(
         "edit/recover",
         json!({
@@ -1631,5 +1775,81 @@ fn pending_revision_upload_cannot_be_replaced_or_approved_as_old_text() -> TestR
     assert_eq!(append["result"]["next_offset"], 6, "{append}");
     let committed=client.call("edit/revise",json!({"origin_id":SOURCE,"edit_id":edit,"revision":1,"input":{"action":"commit","file_index":0}}))?;
     assert_eq!(committed["result"]["revision"], 2, "{committed}");
+    Ok(())
+}
+
+#[test]
+fn native_service_close_retires_identity_and_drains_late_editor_receipt_without_republishing_history()
+-> TestResult {
+    let root = private()?;
+    let journal = private()?;
+    let path = root.path().join("file.txt");
+    fs::write(&path, "old\n")?;
+    let mut client = Client::new()?;
+    let service = "edit_service_12345678-1234-4234-8234-123456789abc";
+    let prep = client.prepared_with_service(
+        root.path(),
+        SOURCE,
+        "save",
+        "new\n",
+        "auto",
+        Some(service),
+    )?;
+    let edit = client.grant(&prep["preparation_id"], SOURCE)?;
+    client.preflight(&prep, &edit, SOURCE)?;
+    let issued = client.issue(&edit, SOURCE, journal.path())?;
+    fs::write(&path, "new\n")?;
+    let closing = client.call(
+        "edit/history",
+        json!({"action":"close_service","service_id":service}),
+    )?;
+    assert_eq!(closing["result"]["closed"], true);
+    assert_eq!(closing["result"]["drained"], false);
+    let late_prepare = client.call(
+        "edit/begin",
+        json!({
+        "origin_id":SOURCE,"service_id":service,"root":root.path(),"mode":"agent",
+        "intent":{"kind":"write","path":"file.txt","new_bytes":4},"live":null,
+        "config_revision":3,"policy_revision":7,"review_mode":"auto","save_policy":"save"}),
+    )?;
+    assert!(
+        late_prepare.get("error").is_some(),
+        "closed identity must not restart: {late_prepare}"
+    );
+    assert_eq!(late_prepare["error"]["data"]["status"], "cancelled");
+    // A cancellation can interrupt validation, or a completed verifier can still
+    // report facts. Neither case may revive a retired service's undo/change view.
+    let settled = upload(
+        &mut client,
+        &edit,
+        &issued["result"]["issued_token"],
+        observed(&path, "new\n", "new\n")?,
+        "new\n",
+        "new\n",
+    )?;
+    assert_eq!(settled["result"]["receipt"]["outcome"], "applied_full");
+    assert_eq!(settled["result"]["rollback_available"], false);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let state = client.call(
+            "edit/history",
+            json!({"action":"close_service","service_id":service}),
+        )?;
+        if state["result"]["drained"] == true {
+            break;
+        }
+        if Instant::now() >= deadline {
+            return Err("retired service did not drain".into());
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for action in ["list", "changes"] {
+        let view = client.call(
+            "edit/history",
+            json!({"action":action,"offset":0,"revision":null,"service_id":service}),
+        )?;
+        assert_eq!(view["result"]["files"], json!([]));
+    }
+    assert_eq!(fs::read_to_string(path)?, "new\n");
     Ok(())
 }

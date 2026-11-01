@@ -11,10 +11,12 @@ use super::protocol::{self, Fault, RpcId};
 use crate::constants::limits;
 use crate::{
     api::{ApiError, HttpRequest},
+    application::agent::{AssistantTurn, ModelTurn},
     application::budget::ObservedUsage,
     application::host::{Host, ReadScope},
     error::CoreError,
 };
+pub(super) use retry::Configuration as RetryConfiguration;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
@@ -32,6 +34,7 @@ struct Request {
     retry: Option<retry::Configuration>,
 }
 struct Pending {
+    model: Option<ModelTurn>,
     scope: ReadScope,
     cancel: CancellationToken,
     published: bool,
@@ -63,9 +66,19 @@ enum Completion {
     Observed(Result<bool, ApiError>),
 }
 struct Outcome {
-    result: Result<Value, ApiError>,
+    result: Result<Success, ApiError>,
     usage: ObservedUsage,
     entropy: Option<Result<crate::api::resilience::RetryEntropy, CoreError>>,
+}
+enum Success {
+    Editor(Value),
+    Model(Box<AssistantTurn>),
+}
+pub(super) struct ModelDelivery {
+    pub turn: ModelTurn,
+    pub result: Result<Box<AssistantTurn>, ApiError>,
+    pub budget: Option<Value>,
+    pub circuit: Option<Value>,
 }
 
 pub(super) struct ApiRequests {
@@ -79,6 +92,7 @@ pub(super) struct ApiRequests {
     budgets: budget::Budgets,
     sequence: crate::domain::RequestSequence,
     circuits: circuit::Circuits,
+    models: VecDeque<ModelDelivery>,
 }
 impl Default for ApiRequests {
     fn default() -> Self {
@@ -95,6 +109,7 @@ impl Default for ApiRequests {
             budgets: budget::Budgets::default(),
             sequence: crate::domain::RequestSequence::ZERO,
             circuits: circuit::Circuits::default(),
+            models: VecDeque::new(),
         }
     }
 }
@@ -106,6 +121,10 @@ impl ApiRequests {
                 .pending
                 .values()
                 .any(|active| &active.pending.scope.application_id == id)
+            || self
+                .models
+                .iter()
+                .any(|delivery| delivery.turn.run().scope().application_id() == id)
     }
     pub fn contains(&self, id: &RpcId) -> bool {
         self.pending.contains_key(id) || self.budgets.contains(id)
@@ -115,6 +134,7 @@ impl ApiRequests {
             && self.pending.is_empty()
             && self.ready.is_empty()
             && !self.budgets.closing()
+            && self.models.is_empty()
     }
     pub fn budget_rpc(
         &mut self,
@@ -150,19 +170,109 @@ impl ApiRequests {
         self.circuits.rpc(host, method, params)
     }
     pub fn start(&mut self, host: &Host, id: RpcId, params: Value) -> Result<(), Fault> {
+        if self.contains(&id) {
+            return Err(Fault::params());
+        }
         let request: Request = serde_json::from_value(params).map_err(|_| Fault::params())?;
+        let admitted = self.admit_request(host, request)?;
+        self.launch_admitted(id, admitted, None);
+        Ok(())
+    }
+    pub fn open_run_budget(
+        &mut self,
+        host: &Host,
+        run: &crate::application::RunHandle,
+        limits: crate::application::budget::BudgetLimits,
+    ) -> Result<crate::domain::BudgetId, CoreError> {
+        self.budgets.open_run(host, run, limits)
+    }
+    pub fn close_run_budget(
+        &mut self,
+        run: &crate::application::RunHandle,
+        id: &crate::domain::BudgetId,
+    ) -> Result<Value, CoreError> {
+        if self.pending.values().any(|active| {
+            active
+                .pending
+                .model
+                .as_ref()
+                .is_some_and(|turn| turn.run().same_owner(run))
+        }) || self
+            .models
+            .iter()
+            .any(|delivery| delivery.turn.run().same_owner(run))
+        {
+            return Err(CoreError::Busy);
+        }
+        self.budgets.close_run(run, id)
+    }
+    pub fn take_model(&mut self) -> Option<ModelDelivery> {
+        self.models.pop_front()
+    }
+    pub fn start_model(
+        &mut self,
+        host: &Host,
+        id: RpcId,
+        turn: ModelTurn,
+        arguments: HttpRequest,
+        budget: crate::domain::BudgetId,
+        retry: Option<retry::Configuration>,
+    ) -> Result<(), Box<(Fault, ModelTurn)>> {
+        if self.contains(&id)
+            || turn.run().check_live().is_err()
+            || retry
+                .as_ref()
+                .is_some_and(|config| matches!(config.observer, retry::Observer::Editor))
+        {
+            return Err(Box::new((
+                fault("invalid_state", "Native model admission is unavailable"),
+                turn,
+            )));
+        }
+        let scope = ReadScope {
+            application_id: turn.run().scope().application_id().clone(),
+            session_id: turn.run().scope().session_id().clone(),
+        };
+        let request = Request {
+            scope,
+            arguments,
+            budget: Some(budget::BudgetRef {
+                budget_id: budget,
+                kind: crate::application::budget::DebitKind::NormalRequest,
+                native_run: Some(turn.run().scope().run_id().clone()),
+            }),
+            retry,
+        };
+        match self.admit_request(host, request) {
+            Ok(admitted) => {
+                self.launch_admitted(id, admitted, Some(turn));
+                Ok(())
+            }
+            Err(error) => Err(Box::new((error, turn))),
+        }
+    }
+    fn launch_admitted(
+        &mut self,
+        id: RpcId,
+        admitted: admission::Admitted,
+        model: Option<ModelTurn>,
+    ) {
         let admission::Admitted {
             scope,
             arguments,
             flight,
             circuit,
             page_bytes,
-        } = self.admit_request(host, request)?;
+        } = admitted;
         let deadline = flight.deadline();
         let budget_id = flight.charge().map(|charge| charge.id.clone());
-        let cancel = self.root.child_token();
+        let cancel = model
+            .as_ref()
+            .map_or_else(|| self.root.child_token(), ModelTurn::cancellation);
         let observe_entropy = flight.retrying();
-        let expectation = if circuit.is_some() {
+        let expectation = if model.is_some() {
+            worker::ResponseExpectation::Native
+        } else if circuit.is_some() {
             worker::ResponseExpectation::Model
         } else {
             worker::ResponseExpectation::Raw
@@ -171,6 +281,7 @@ impl ApiRequests {
             id.clone(),
             Active {
                 pending: Pending {
+                    model,
                     scope,
                     cancel: cancel.clone(),
                     published: false,
@@ -195,7 +306,6 @@ impl ApiRequests {
             }
             .run(),
         );
-        Ok(())
     }
     pub fn cancel(&mut self, id: &RpcId) {
         self.budgets.cancel_waiter(id);
@@ -205,11 +315,18 @@ impl ApiRequests {
     }
     pub fn cancel_all(&mut self) {
         self.root.cancel();
+        for active in self.pending.values() {
+            active.pending.cancel.cancel();
+        }
     }
     pub fn sweep(&mut self, host: &Host) {
         for active in self.pending.values() {
             let pending = &active.pending;
             if !host.owns_read_scope(&pending.scope)
+                || pending
+                    .model
+                    .as_ref()
+                    .is_some_and(|turn| turn.run().check_live().is_err())
                 || pending
                     .budget_id
                     .as_ref()
@@ -323,6 +440,7 @@ impl ApiRequests {
             }
         }
         self.pending.clear();
+        self.models.clear();
         self.ready.clear();
         while self.events.try_recv().is_ok() {}
         Ok(())
@@ -427,6 +545,7 @@ mod tests {
                 id.clone(),
                 Active {
                     pending: Pending {
+                        model: None,
                         scope: serde_json::from_value(scope)?,
                         cancel: api.root.child_token(),
                         published: false,
@@ -470,7 +589,7 @@ mod tests {
             (
                 completed,
                 Completion::Attempt(Outcome {
-                    result: Ok(json!({"body_ready":true})),
+                    result: Ok(Success::Editor(json!({"body_ready":true}))),
                     usage: ObservedUsage::default(),
                     entropy: None,
                 }),

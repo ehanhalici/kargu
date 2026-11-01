@@ -64,7 +64,9 @@ impl ApiRequests {
         if !host.owns_read_scope(&request.scope) {
             return Err(fault("stale_owner", "API owner is no longer live"));
         }
-        if self.root.is_cancelled() || self.pending.len() >= limits::API_REQUESTS {
+        if self.root.is_cancelled()
+            || self.pending.len().saturating_add(self.models.len()) >= limits::API_REQUESTS
+        {
             return Err(fault("resource_limit", "API admission limit reached"));
         }
         let page_bytes = ApiPageBytes::try_from(host.frame_limit())
@@ -156,6 +158,7 @@ impl ApiRequests {
             reference: budget::BudgetRef {
                 budget_id: reference.budget_id,
                 kind: DebitKind::RetryAttempt,
+                native_run: reference.native_run,
             },
             deadline: charge.deadline,
             attempt: RetryAttempt::ZERO,

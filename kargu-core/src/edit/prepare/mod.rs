@@ -4,13 +4,16 @@ mod claim;
 pub(crate) use claim::{ClaimWork, ClaimedAction};
 mod capture;
 mod git;
+mod history;
 mod hunks;
 mod inspection;
 mod page;
+mod parent;
 pub(crate) use artifact::Artifact;
 use artifact::Prepared;
 pub(crate) use git::{GitPreparation, PatchPrepared, RunningPatch};
 pub(crate) use inspection::{PatchWork, PreparationResult, PrepareWork};
+pub(crate) use parent::{ParentEdit, ParentPolicy, ParentResult};
 mod preflight;
 pub(crate) mod receipt;
 mod rollback;
@@ -34,8 +37,12 @@ pub(crate) struct Work {
     input: Begin,
     parts: BTreeMap<Part, PartBuffer>,
     deadline: Instant,
+    parent: Option<ParentEdit>,
 }
 impl Work {
+    pub(crate) fn cancellation(&self) -> Option<tokio_util::sync::CancellationToken> {
+        self.parent.as_ref().map(ParentEdit::cancellation)
+    }
     fn take(&mut self, part: Part) -> Result<EditText, CoreError> {
         let buffer = self.parts.remove(&part).ok_or(EditError::InvalidEvidence)?;
         if !buffer.complete() {

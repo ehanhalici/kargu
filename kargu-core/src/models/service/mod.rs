@@ -53,6 +53,22 @@ impl ModelService {
     pub(crate) fn revoke(&mut self) {
         self.staging = None;
     }
+    /// Borrow the underlying model store.
+    #[allow(dead_code)]
+    pub fn store(&self) -> &ModelStore {
+        &self.store
+    }
+    /// Mutably borrow the underlying model store.
+    pub fn store_mut(&mut self) -> &mut ModelStore {
+        &mut self.store
+    }
+    /// Return models for a specific provider.
+    pub fn provider_models(
+        &self,
+        provider: &ApiProviderId,
+    ) -> Vec<crate::models::store::ModelSummaryDto> {
+        self.store.provider_models(provider)
+    }
     pub(crate) fn rpc(
         &mut self,
         session: &SessionId,

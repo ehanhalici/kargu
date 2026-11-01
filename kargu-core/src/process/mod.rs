@@ -7,7 +7,7 @@
 use crate::{
     application::{ApplicationActor, RunHandle, RunLease, ToolOutcome},
     constants::{limits, timeouts},
-    domain::{ByteLimit, ByteOffset, CaptureStop, JobId, ProcessId, ToolCallId},
+    domain::{ByteLimit, ByteOffset, CaptureStop, JobId, ProcessId, ToolCallId, ToolStepId},
     error::CoreError,
     security::AuthorizedCommand,
 };
@@ -160,6 +160,7 @@ impl ProcessResult {
 pub struct JobCompletion {
     run: RunHandle,
     call_id: ToolCallId,
+    step_id: Option<ToolStepId>,
     result: ProcessResult,
     _lease: RunLease,
 }
@@ -177,7 +178,12 @@ impl JobCompletion {
         if !self.result.cleanup_complete {
             actor.quarantine(&self.run)?;
         }
-        actor.complete_tool(&self.run, &self.call_id, self.result.outcome)?;
+        actor.complete_action(
+            &self.run,
+            &self.call_id,
+            self.step_id.as_ref(),
+            self.result.outcome,
+        )?;
         Ok(self.result)
     }
 }
@@ -239,7 +245,12 @@ impl ProcessSupervisor {
                         CoreError::Rejected | CoreError::WorkspaceChanged => ToolOutcome::Rejected,
                         _ => ToolOutcome::Failed,
                     };
-                    let _ = actor.complete_tool(authorized.run(), authorized.call_id(), outcome);
+                    let _ = actor.complete_action(
+                        authorized.run(),
+                        authorized.call_id(),
+                        authorized.step_id(),
+                        outcome,
+                    );
                 }
                 return Err(error);
             }
@@ -305,7 +316,7 @@ impl ProcessSupervisor {
             .process_slots()
             .try_acquire_owned()
             .map_err(|_| CoreError::Limit)?;
-        actor.mark_started(authorized.run(), authorized.call_id())?;
+        actor.mark_action_started(authorized.run(), authorized.call_id(), authorized.step_id())?;
         Ok((
             stdio::spawn(authorized.command())?,
             Slots {
@@ -562,6 +573,7 @@ async fn supervise(
     let crate::security::ApprovedParts {
         run,
         call_id,
+        step_id,
         command,
         lease,
         ..
@@ -570,6 +582,7 @@ async fn supervise(
     JobCompletion {
         run,
         call_id,
+        step_id,
         result,
         _lease: lease,
     }

@@ -220,6 +220,11 @@ pub enum SavePolicy {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct EditorSourceId(uuid::Uuid);
+impl EditorSourceId {
+    pub(crate) fn new() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
 impl TryFrom<String> for EditorSourceId {
     type Error = EditError;
     fn try_from(value: String) -> Result<Self, EditError> {

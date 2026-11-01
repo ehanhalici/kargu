@@ -84,9 +84,16 @@ impl Peer {
     }
     #[allow(dead_code)]
     pub(super) fn initialize_with_limit(&mut self, max_frame_bytes: usize) -> TestResult {
+        self.initialize_with_capabilities(max_frame_bytes, &[])
+    }
+    pub(super) fn initialize_with_capabilities(
+        &mut self,
+        max_frame_bytes: usize,
+        capabilities: &[&str],
+    ) -> TestResult {
         self.send(json!({"jsonrpc":"2.0","id":"e:init","method":"initialize",
             "params":{"protocol_major":1,"protocol_minor":0,"client_version":"pipe-test",
-            "capabilities":[],"limits":{"max_frame_bytes":max_frame_bytes}}}))?;
+            "capabilities":capabilities,"limits":{"max_frame_bytes":max_frame_bytes}}}))?;
         let initialized = self.read()?;
         self.epoch = initialized["result"]["connection_epoch"]
             .as_str()

@@ -3,6 +3,7 @@
 mod editor;
 pub(crate) mod input;
 mod jobs;
+mod native;
 mod reply;
 mod state;
 
@@ -13,7 +14,8 @@ use super::{
 use crate::workspace::command::Preparation;
 use crate::{
     application::{
-        RunPurpose,
+        RunPurpose, ToolOutcome,
+        agent::{AgentTool, ToolAdmission},
         host::{Host, ReadScope},
     },
     constants::{
@@ -23,7 +25,7 @@ use crate::{
     domain::{RequestSequence, ToolCallId, ToolName, ToolSafetyLevel},
     error::CoreError,
     process::{CleanupPolicy, JobStatus, ProcessSupervisor},
-    security::{ExecutionGate, ToolRegistry, UserDecision},
+    security::{ExecutionGate, UserDecision},
 };
 use futures_util::FutureExt;
 use input::{ExecuteInput, Prepared};
@@ -34,7 +36,7 @@ use state::{
     ApprovalReady, Discarding, Finalizing, Operation, OperationValue, Owner, Preparing, Progress,
     Reviewing, Running, Stage,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use tokio::sync::oneshot;
 
 #[derive(Deserialize)]
@@ -81,46 +83,117 @@ struct GitMutationRequest {
 pub(super) struct Commands {
     operations: HashMap<RpcId, Stage>,
     gate: ExecutionGate,
-    registry: ToolRegistry,
     supervisor: ProcessSupervisor,
     sequence: RequestSequence,
     jobs: jobs::Jobs,
     editors: editor::Editors,
+    completed: VecDeque<CommandDelivery>,
+}
+pub(super) struct CommandDelivery {
+    pub id: RpcId,
+    pub call: AgentTool,
+    pub outcome: ToolOutcome,
+    pub result: Result<Value, CoreError>,
 }
 impl Commands {
+    pub(super) fn editor_tool_gate(&mut self) -> &mut ExecutionGate {
+        &mut self.gate
+    }
     pub fn owns_application(&self, id: &crate::domain::ApplicationId) -> bool {
         self.operations
             .values()
             .any(|stage| &stage.owner().scope.application_id == id)
             || self.jobs.owns_application(id)
             || self.editors.owns_application(id)
+            || self
+                .completed
+                .iter()
+                .any(|delivery| delivery.call.run().scope().application_id() == id)
     }
     pub fn new() -> Result<Self, CoreError> {
-        let mut registry = ToolRegistry::default();
-        registry.register_process(ToolName::try_from("bash".to_owned())?, vec![])?;
-        registry.register_listing()?;
-        registry.register_grep()?;
-        registry.register_git_status()?;
-        registry.register_git_reads()?;
-        registry.register_git_mutations()?;
-        registry.register_editor(ToolName::try_from("editor_edit".to_owned())?, vec![])?;
         Ok(Self {
             operations: HashMap::new(),
             gate: ExecutionGate::default(),
-            registry,
             supervisor: ProcessSupervisor::new(CleanupPolicy::default())?,
             sequence: RequestSequence::ZERO,
             jobs: jobs::Jobs::default(),
             editors: editor::Editors::default(),
+            completed: VecDeque::new(),
         })
     }
     pub fn contains(&self, id: &RpcId) -> bool {
         self.operations.contains_key(id)
             || self.jobs.contains_request(id)
             || self.editors.contains(id)
+            || self.completed.iter().any(|delivery| &delivery.id == id)
     }
     pub fn is_empty(&self) -> bool {
-        self.operations.is_empty() && self.jobs.is_idle() && self.editors.is_empty()
+        self.operations.is_empty()
+            && self.jobs.is_idle()
+            && self.editors.is_empty()
+            && self.completed.is_empty()
+    }
+    pub fn take_call(&mut self) -> Option<CommandDelivery> {
+        self.completed.pop_front()
+    }
+    pub fn start_call(
+        &mut self,
+        host: &mut Host,
+        id: RpcId,
+        call: AgentTool,
+    ) -> Result<(), Box<(CoreError, AgentTool)>> {
+        if self.contains(&id)
+            || self
+                .operations
+                .len()
+                .saturating_add(self.completed.len())
+                .saturating_add(self.editors.reserved_workers())
+                >= limits::HOST_PROCESSES
+        {
+            return Err(Box::new((CoreError::Limit, call)));
+        }
+        let run = call.run();
+        let scope = ReadScope {
+            application_id: run.scope().application_id().clone(),
+            session_id: run.scope().session_id().clone(),
+        };
+        let validation = host.actor_mut(&scope).and_then(|actor| actor.validate(run));
+        if let Err(error) = validation {
+            return Err(Box::new((error, call)));
+        }
+        if call.admission() != ToolAdmission::Ready
+            || call.route() != Some(crate::security::ToolRoute::NativeCommand)
+        {
+            return Err(Box::new((CoreError::Rejected, call)));
+        }
+        let run = run.clone();
+        let worker_run = run.clone();
+        let name = call.name().clone();
+        let arguments = call.arguments().to_owned();
+        let phase = match Preparing::spawn_owned(Some(&run), move |context| {
+            native::prepare(&worker_run, &name, &arguments, context)
+        }) {
+            Ok(phase) => phase,
+            Err(error) => return Err(Box::new((error, call))),
+        };
+        self.operations.insert(
+            id,
+            Stage::Preparing(Operation {
+                owner: Owner {
+                    parent: Some(call),
+                    edit_parent: None,
+                    step: None,
+                    outcome: None,
+                    edit: None,
+                    mutation_issued: false,
+                    purpose: RunPurpose::AgentTurn,
+                    scope,
+                    terminal: None,
+                },
+                phase,
+            }),
+        );
+        Ok(())
     }
     pub fn authorize_editor(
         &mut self,
@@ -283,6 +356,17 @@ impl Commands {
         purpose: RunPurpose,
         prepare: impl FnOnce(&Preparation) -> Result<Prepared, CoreError> + Send + 'static,
     ) -> Result<(), Fault> {
+        self.admit_bound(host, id, scope, purpose, None, prepare)
+    }
+    fn admit_bound(
+        &mut self,
+        host: &Host,
+        id: RpcId,
+        scope: ReadScope,
+        purpose: RunPurpose,
+        parent: Option<crate::edit::prepare::ParentEdit>,
+        prepare: impl FnOnce(&Preparation) -> Result<Prepared, CoreError> + Send + 'static,
+    ) -> Result<(), Fault> {
         if !host.owns_read_scope(&scope) {
             return Err(fault(CoreError::StaleOwner));
         }
@@ -319,17 +403,23 @@ impl Commands {
                 return Err(fault(CoreError::Limit));
             }
         }
+        let phase = Preparing::spawn_owned(parent.as_ref().map(|parent| &parent.run), prepare)
+            .map_err(fault)?;
         self.operations.insert(
             id,
             Stage::Preparing(Operation {
                 owner: Owner {
+                    parent: None,
+                    edit_parent: parent,
+                    step: None,
+                    outcome: None,
                     edit: None,
                     mutation_issued: false,
                     purpose,
                     scope,
                     terminal: None,
                 },
-                phase: Preparing::spawn(prepare).map_err(fault)?,
+                phase,
             }),
         );
         Ok(())
@@ -358,11 +448,13 @@ impl Commands {
         input: crate::edit::prepare::PatchWork,
     ) -> Result<(), Fault> {
         let ticket = input.id.clone();
-        self.admit(
+        let parent = input.parent.clone();
+        self.admit_bound(
             host,
             id.clone(),
             scope,
             RunPurpose::AgentTurn,
+            parent,
             move |context| input.prepare(context).map(Prepared::from),
         )?;
         self.operations
@@ -399,7 +491,7 @@ impl Commands {
     ) -> Result<Vec<Value>, CoreError> {
         let ids: Vec<_> = self.operations.keys().cloned().collect();
         let mut messages = self.jobs.tick(host, &mut self.supervisor)?;
-        messages.extend(self.editors.tick(host, &mut self.gate, &self.registry)?);
+        messages.extend(self.editors.tick(host, &mut self.gate)?);
         for id in ids {
             let mut stage = self
                 .operations
@@ -408,6 +500,9 @@ impl Commands {
             let owner = stage.owner_mut();
             if !host.owns_read_scope(&owner.scope) && owner.terminal.is_none() {
                 owner.terminal = Some(CoreError::StaleOwner);
+            }
+            if owner.terminal.is_none() {
+                owner.terminal = owner.parent_run().and_then(|run| run.check_live().err());
             }
             if let Some(ticket) = &owner.edit
                 && owner.terminal.is_none()
@@ -420,7 +515,30 @@ impl Commands {
                 Progress::Pending(stage) => {
                     self.operations.insert(id, stage);
                 }
-                Progress::Done(owner, result) => {
+                Progress::Done(mut owner, result) => {
+                    if let Some(call) = owner.parent.take() {
+                        let result = result.and_then(|value| match value {
+                            OperationValue::Json(value) => Ok(value),
+                            _ => Err(CoreError::InvalidToolOutput),
+                        });
+                        let result = if result.is_err() {
+                            owner.terminal.take().map_or(result, Err)
+                        } else {
+                            result
+                        };
+                        let outcome = match &result {
+                            Ok(_) => owner.outcome.unwrap_or(ToolOutcome::Failed),
+                            Err(_) if owner.mutation_issued => ToolOutcome::OutcomeUnknown,
+                            Err(error) => error_outcome(error),
+                        };
+                        self.completed.push_back(CommandDelivery {
+                            id,
+                            call,
+                            outcome,
+                            result,
+                        });
+                        continue;
+                    }
                     let result = owner.terminal.map_or(result, Err);
                     let reply = if let Some(ticket) = &owner.edit {
                         let result = result.and_then(|value| match value {
@@ -474,8 +592,13 @@ impl Commands {
             Stage::Review(operation) => self.advance_review(host, pending, operation, messages),
             Stage::Running(operation) => {
                 if operation.owner.terminal.is_some() {
-                    host.actor_mut(&operation.owner.scope)?
-                        .cancel(&operation.phase.run)?;
+                    self.supervisor
+                        .cancel(&operation.phase.run, &operation.phase.job)?;
+                    cancel_standalone(
+                        host.actor_mut(&operation.owner.scope)?,
+                        &operation.owner,
+                        &operation.phase.run,
+                    )?;
                 }
                 self.collect(operation)
             }
@@ -531,7 +654,7 @@ impl Commands {
             operation.owner.terminal = Some(error);
         }
         if operation.owner.terminal.is_some() {
-            actor.cancel(run)?;
+            cancel_standalone(actor, &operation.owner, run)?;
             self.gate.dismiss_run(actor, run)?;
             pending.cancel(&operation.phase.reverse, &host.request_scope()?);
             messages.push(json!({"jsonrpc":"2.0","method":methods::CANCEL,"params":{"request_id":operation.phase.reverse.value(),"scope":host.request_scope()?.as_str()}}));
@@ -561,31 +684,46 @@ impl Commands {
         messages: &mut Vec<Value>,
     ) -> Result<Progress, CoreError> {
         let Operation {
-            owner,
+            mut owner,
             phase: prepared,
         } = operation;
         let scope = &owner.scope;
         let actor = host.actor_mut(scope)?;
-        let admitted = match owner.purpose {
-            RunPurpose::AgentTurn => actor.admit(&scope.session_id, prepared.settings),
-            RunPurpose::ProcessJob => actor.admit_job(&scope.session_id, prepared.settings),
-            RunPurpose::EditorEdit => Err(CoreError::Rejected),
+        let admitted = if let Some(parent) = owner.parent_run() {
+            actor.validate(parent).map(|()| parent.clone())
+        } else {
+            match owner.purpose {
+                RunPurpose::AgentTurn => actor.admit(&scope.session_id, prepared.settings),
+                RunPurpose::ProcessJob => actor.admit_job(&scope.session_id, prepared.settings),
+                RunPurpose::EditorEdit => Err(CoreError::Rejected),
+            }
         };
         let run = match admitted {
             Ok(run) => Box::new(run),
             Err(error) => return Ok(Self::discard(owner, None, prepared.reply, error)),
         };
-        let request = match self.gate.prepare(
-            actor,
-            &run,
-            &self.registry,
-            &prepared.tool,
-            ToolCallId::new(),
-            prepared.command,
-        ) {
+        let admission = if let Some(parent) = owner.parent_call().cloned() {
+            let step = match actor.register_step(&run, &parent, &prepared.tool) {
+                Ok(step) => step,
+                Err(error) => return Ok(Self::discard(owner, Some(run), prepared.reply, error)),
+            };
+            owner.step = Some(step.clone());
+            self.gate
+                .prepare_step(actor, &run, &prepared.tool, parent, step, prepared.command)
+        } else {
+            self.gate.prepare(
+                actor,
+                &run,
+                run.tool_registry(),
+                &prepared.tool,
+                ToolCallId::new(),
+                prepared.command,
+            )
+        };
+        let request = match admission {
             Ok(request) => request,
             Err(error) => {
-                actor.cancel(&run)?;
+                cancel_standalone(actor, &owner, &run)?;
                 self.gate.dismiss_run(actor, &run)?;
                 return Ok(Self::discard(owner, Some(run), prepared.reply, error));
             }
@@ -643,7 +781,15 @@ impl Commands {
         operation: Operation<ApprovalReady>,
     ) -> Result<Progress, CoreError> {
         let actor = host.actor_mut(&operation.owner.scope)?;
-        actor.cancel(&operation.phase.run)?;
+        if operation.owner.parent_run().is_some() {
+            let _ = self.gate.decide(
+                actor,
+                &operation.phase.run,
+                &operation.phase.request,
+                UserDecision::Rejected,
+            );
+        }
+        cancel_standalone(actor, &operation.owner, &operation.phase.run)?;
         self.gate.dismiss_run(actor, &operation.phase.run)?;
         Ok(Self::discard(
             operation.owner,
@@ -672,7 +818,7 @@ impl Commands {
         let grant = match self.gate.decide(actor, &run, &request, decision) {
             Ok(grant) => grant,
             Err(error) => {
-                actor.cancel(&run)?;
+                cancel_standalone(actor, &owner, &run)?;
                 self.gate.dismiss_run(actor, &run)?;
                 return Ok(Self::discard(owner, Some(run), reply, error));
             }
@@ -688,8 +834,11 @@ impl Commands {
                         .map(|value| owner.complete(Ok(value)));
                 }
                 if let Err(error) = self.supervisor.close_input(&run, &job) {
-                    actor.cancel(&run)?;
-                    return Err(error);
+                    cancel_standalone(actor, &owner, &run)?;
+                    // Spawn already transferred a real child and resource lease
+                    // to the supervisor. Keep its collector until actual drain;
+                    // an EOF delivery race cannot detach the owned process.
+                    owner.terminal = Some(error);
                 }
                 Ok(Progress::Pending(Stage::Running(Operation {
                     owner,
@@ -697,7 +846,7 @@ impl Commands {
                 })))
             }
             Err(error) => {
-                actor.cancel(&run)?;
+                cancel_standalone(actor, &owner, &run)?;
                 Ok(Self::discard(owner, Some(run), reply, error))
             }
         }
@@ -747,7 +896,14 @@ impl Commands {
             if cleaned.is_err() {
                 actor.quarantine(run)?;
             }
-            actor.finish(run)?;
+            if let (Some(parent), Some(step)) =
+                (operation.owner.parent_call(), &operation.owner.step)
+            {
+                actor.abandon_step(run, parent, step, error_outcome(&operation.phase.error))?;
+            }
+            if operation.owner.parent_run().is_none() {
+                actor.finish(run)?;
+            }
         }
         cleaned?;
         Ok(operation.owner.complete(Err(operation.phase.error)))
@@ -763,8 +919,11 @@ impl Commands {
             operation.owner.terminal = Some(error);
         }
         if operation.owner.terminal.is_some() {
-            host.actor_mut(&operation.owner.scope)?
-                .cancel(&operation.phase.run)?;
+            cancel_standalone(
+                host.actor_mut(&operation.owner.scope)?,
+                &operation.owner,
+                &operation.phase.run,
+            )?;
         }
         let Some(joined) = (&mut operation.phase.task).now_or_never() else {
             return Ok(Progress::Pending(Stage::Finalizing(operation)));
@@ -777,15 +936,22 @@ impl Commands {
         if matches!(&result, Err(CoreError::CleanupFailed)) {
             host.actor_mut(&operation.owner.scope)?.quarantine(&run)?;
         }
-        completion.deliver(host.actor_mut(&operation.owner.scope)?)?;
+        let process = completion.deliver(host.actor_mut(&operation.owner.scope)?)?;
+        operation.owner.outcome = Some(process.outcome);
+        operation.owner.step = None;
         self.supervisor.forget(&run, &job)?;
-        host.actor_mut(&operation.owner.scope)?.finish(&run)?;
+        if operation.owner.parent_run().is_none() {
+            host.actor_mut(&operation.owner.scope)?.finish(&run)?;
+        }
         match result {
             Ok(CompletedReply::Edit(result)) => Ok(operation.owner.complete_edit(result)),
             Ok(CompletedReply::Continue(next)) if operation.owner.terminal.is_none() => {
+                let phase = Preparing::spawn_owned(operation.owner.parent_run(), move |context| {
+                    next.prepare(context)
+                })?;
                 Ok(Progress::Pending(Stage::Preparing(Operation {
                     owner: operation.owner,
-                    phase: Preparing::spawn(move |context| next.prepare(context))?,
+                    phase,
                 })))
             }
             Ok(CompletedReply::Continue(_)) => {
@@ -804,6 +970,30 @@ impl Commands {
     ) -> Result<Option<Value>, Fault> {
         self.jobs
             .rpc(host, &mut self.supervisor, id, method, params)
+    }
+}
+
+fn cancel_standalone(
+    actor: &mut crate::application::ApplicationActor,
+    owner: &Owner,
+    run: &crate::application::RunHandle,
+) -> Result<(), CoreError> {
+    if owner.parent_run().is_none() {
+        actor.cancel(run)?;
+    }
+    Ok(())
+}
+fn error_outcome(error: &CoreError) -> ToolOutcome {
+    match error {
+        CoreError::Cancelled => ToolOutcome::Cancelled,
+        CoreError::Deadline | CoreError::ApprovalExpired => ToolOutcome::Timeout,
+        CoreError::Rejected | CoreError::WorkspaceChanged | CoreError::ApprovalUnavailable => {
+            ToolOutcome::Rejected
+        }
+        CoreError::MutationOutcomeUnknown | CoreError::InputOutcomeUnknown => {
+            ToolOutcome::OutcomeUnknown
+        }
+        _ => ToolOutcome::Failed,
     }
 }
 

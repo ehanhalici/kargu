@@ -118,6 +118,15 @@ enum Source {
         complete: bool,
     },
 }
+/// Detached live excerpt facts. The native caller retains path/window policy.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EditorSnapshot {
+    text: String,
+    probe: String,
+    from_available: bool,
+    complete: bool,
+}
 /// Closed read-only request; no process, decoder callback or mutable edit action.
 #[derive(Deserialize)]
 #[serde(try_from = "ReadFileDto")]
@@ -172,6 +181,30 @@ impl TryFrom<ReadFileDto> for ReadFileInput {
             scan_chars: value.scan_chars,
             output_chars: value.output_chars,
             source: value.source,
+        })
+    }
+}
+impl ReadFileInput {
+    /// Capture instructions, derived from the already parsed native request.
+    pub(crate) fn editor_capture(&self) -> serde_json::Value {
+        serde_json::json!({"path":self.display_path.0,"from":self.window.from.0,
+            "to":self.window.to.map(|line| line.0),"scan_chars":self.scan_chars.0,
+            "output_chars":self.output_chars.0})
+    }
+    /// Adopt only raw RAM facts; an editor cannot replace root or range policy.
+    pub(crate) fn with_editor_snapshot(self, snapshot: EditorSnapshot) -> Result<Self, CoreError> {
+        Self::try_from(ReadFileDto {
+            display_path: self.display_path,
+            window: self.window,
+            max_bytes: self.max_bytes,
+            scan_chars: self.scan_chars,
+            output_chars: self.output_chars,
+            source: Source::Editor {
+                text: snapshot.text,
+                probe: snapshot.probe,
+                from_available: snapshot.from_available,
+                complete: snapshot.complete,
+            },
         })
     }
 }

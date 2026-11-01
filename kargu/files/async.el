@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'kargu/files)
+(require 'kargu/files/snapshot)
 (require 'kargu/async)
 (require 'kargu/bridge/read)
 
@@ -46,26 +47,11 @@
       buffer)))
 
 (defun kargu-file--capture-live (operation buffer)
-  "Capture bounded raw text from BUFFER for OPERATION, preserving editor state.
-Line motion is editor interop, not presentation: no numbering or EOF inference."
-  (with-current-buffer buffer
-    (save-excursion
-      (save-restriction
-        (widen)
-        (let* ((end (point-max))
-               (scan-end (min end (+ (point-min) (kargu-file-read-operation-scan-chars operation))))
-               (probe (buffer-substring-no-properties (point-min) (min end (+ (point-min) 1000))))
-               (from (kargu-file-window-from (kargu-file-read-operation-window operation))))
-          (narrow-to-region (point-min) scan-end)
-          (goto-char (point-min))
-          (let* ((available (and (zerop (forward-line (1- from)))
-                                 (or (= from 1) (< (point) (point-max)))))
-                 (finish (min (point-max) (+ (point) (1+ (kargu-file-read-operation-output-chars operation))))))
-            (kargu-bridge--object
-             "kind" "editor" "probe" probe
-             "from_available" (if available t :json-false)
-             "complete" (if (= finish end) t :json-false)
-             "text" (if available (buffer-substring-no-properties (point) finish) ""))))))))
+  "Capture raw BUFFER text for OPERATION through the shared RAM adapter."
+  (kargu-file-capture-live
+   buffer (kargu-file-window-from (kargu-file-read-operation-window operation))
+   (kargu-file-read-operation-scan-chars operation)
+   (kargu-file-read-operation-output-chars operation)))
 
 (defun kargu-file--native-arguments (operation source)
   "Build OPERATION's immutable native request from raw SOURCE."

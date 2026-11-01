@@ -4,6 +4,7 @@ mod auth;
 mod authority;
 pub(crate) use authority::ApiAuthority;
 pub mod cache;
+pub mod catalog;
 mod domain;
 mod failure;
 mod http;
@@ -11,7 +12,7 @@ pub mod policy;
 pub mod resilience;
 pub mod stream;
 pub mod wire;
-pub use domain::{HttpRequest, ModelId, SecretString};
+pub use domain::{ChatConnection, HttpRequest, ModelId, SecretString};
 pub use failure::FailureCategory;
 pub use http::{execute, execute_captured};
 

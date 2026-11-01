@@ -45,7 +45,10 @@ impl PatchWork {
     pub(crate) fn prepare(mut self, context: &Preparation) -> Result<GitPreparation, CoreError> {
         context.check()?;
         let deadline = self.deadline.min(context.deadline());
-        let root = Workspace::try_from(self.inspection.input.root.clone())?;
+        let root = match &self.parent {
+            Some(parent) => parent.workspace()?,
+            None => Workspace::try_from(self.inspection.input.root.clone())?,
+        };
         if root.path().to_str().is_none() {
             return Err(EditError::InvalidPath.into());
         }
@@ -247,13 +250,17 @@ fn build_command(
         ".kargu.patch".into(),
     ];
     // This closed fixed-argv adapter mutates only its owned temporary workspace.
-    let command = CommandSpec::git_read(CommandInput {
-        program,
-        arguments,
-        working_directory: root.to_owned(),
-        timeout: Some(timeout),
-        environment: CommandEnvironment::try_from(environment)?,
-    })?
+    let workspace = Workspace::try_from(root.to_owned())?;
+    let command = CommandSpec::edit_patch(
+        CommandInput {
+            program,
+            arguments,
+            working_directory: root.to_owned(),
+            timeout: Some(timeout),
+            environment: CommandEnvironment::try_from(environment)?,
+        },
+        workspace.clone(),
+    )?
     .with_capture(CapturePolicy::Complete)
     .with_output_limit(OutputLimit::try_from(limits::EDIT_PATCH_OUTPUT_BYTES)?)
     .with_snapshot_target(root.join(".kargu.patch"))?;
@@ -261,7 +268,7 @@ fn build_command(
     // which revalidates every file off-mailbox before publishing any proposal.
     let settings = RunSettings::new(
         Mode::Ask,
-        Workspace::try_from(root.to_owned())?,
+        workspace,
         ToolCallLimit::default(),
         timeout,
         inspection.input.config_revision,

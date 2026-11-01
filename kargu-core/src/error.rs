@@ -3,6 +3,9 @@
 /// Cross-service failure taxonomy. Display deliberately excludes command/input data.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    /// Canonical conversation protocol or bounded history-store failure.
+    #[error(transparent)]
+    History(#[from] crate::history::HistoryError),
     /// Closed edit preparation/review failure, without source text.
     #[error(transparent)]
     Edit(#[from] crate::edit::EditError),

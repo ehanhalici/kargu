@@ -57,3 +57,18 @@ impl WorkspaceRead {
         }
     }
 }
+
+impl ReadResult {
+    pub(crate) fn into_tool_output(
+        self,
+    ) -> Result<(crate::application::ToolOutcome, String), CoreError> {
+        use crate::application::ToolOutcome;
+        match self {
+            Self::FindFiles(result) => Ok((ToolOutcome::Ok, result.text)),
+            Self::File(result) => Ok((ToolOutcome::Ok, result.text)),
+            Self::Skills(result) => Ok(result.into_tool_output()),
+            Self::Webfetch(result) => Ok((result.outcome(), result.into_text())),
+            Self::Probe(_) => Err(CoreError::InvalidToolOutput),
+        }
+    }
+}

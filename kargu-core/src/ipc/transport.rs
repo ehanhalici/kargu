@@ -6,6 +6,7 @@ use super::{
     pending::PendingRequests,
     protocol::{self, Message},
     read_tools::ReadTools,
+    sessions::Sessions,
 };
 use crate::application::host::Host;
 use crate::constants::{protocol::methods, timeouts};
@@ -46,6 +47,7 @@ struct Services {
     commands: Commands,
     api: ApiRequests,
     lifecycle: Lifecycle,
+    sessions: Sessions,
 }
 
 // Unlike LinesCodec's default EOF behavior, an incomplete trailing line is
@@ -145,6 +147,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
         commands: Commands::new().map_err(|_| TransportError::Command)?,
         api: ApiRequests::default(),
         lifecycle: Lifecycle::default(),
+        sessions: Sessions::default(),
     };
     let result = read_messages(
         reader,
@@ -161,23 +164,31 @@ async fn read_loop<R: AsyncRead + Unpin>(
         reads,
         commands,
         api,
+        sessions,
         ..
     } = &mut services;
+    sessions
+        .disconnect(&mut host)
+        .map_err(|_| TransportError::Command)?;
     reads.cancel_all();
     commands.disconnect();
     api.drain().await.map_err(|_| TransportError::ReadWorker)?;
-    while !commands.is_empty() {
-        commands
-            .tick(&mut host, pending)
-            .map_err(|_| TransportError::Command)?;
-        tokio::time::sleep(timeouts::PROCESS_POLL).await;
-    }
+    sessions.api_drained();
     // EOF/error revokes publication immediately, but worker slots are not released
     // early. Blocking filesystem calls cannot be safely aborted by dropping a task.
     while let Some(completion) = reads.next(&host).await {
-        completion
+        let _ = completion
             .map_err(|_| TransportError::ReadWorker)?
             .publish(&mut host);
+    }
+    while !sessions.is_empty() || !commands.is_empty() || !reads.is_empty() {
+        commands
+            .tick(&mut host, pending)
+            .map_err(|_| TransportError::Command)?;
+        sessions
+            .tick(&mut host, api, commands, reads, pending)
+            .map_err(|_| TransportError::Command)?;
+        tokio::time::sleep(timeouts::PROCESS_POLL).await;
     }
     result
 }
@@ -196,11 +207,18 @@ async fn read_messages<R: AsyncRead + Unpin>(
         commands,
         api,
         lifecycle,
+        sessions,
     } = services;
     let mut input = FramedRead::new(reader, StrictLines::new(ByteLimit::WIRE_MAX));
     let mut expiry = tokio::time::interval(timeouts::PENDING_SWEEP);
     let mut shutdown_reply = None;
     loop {
+        for reply in sessions
+            .tick(host, api, commands, reads, pending)
+            .map_err(|_| TransportError::Command)?
+        {
+            queue_reply(reply, host.frame_limit(), tx, permits)?;
+        }
         for reply in api.collect(host) {
             queue_reply(reply, host.frame_limit(), tx, permits)?;
         }
@@ -209,6 +227,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 reads.owns_application(application)
                     || commands.owns_application(application)
                     || api.owns_application(application)
+                    || sessions.owns_application(application)
             })
             .map_err(|_| TransportError::Command)?
         {
@@ -218,6 +237,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
             && commands.is_empty()
             && api.is_empty()
             && lifecycle.is_empty()
+            && sessions.is_empty()
             && let Some(reply) = shutdown_reply.take()
         {
             queue_reply(reply, host.frame_limit(), tx, permits)?;
@@ -234,20 +254,23 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 drop(permit);
                 api.next(host, pending).await.map_err(|_| TransportError::ReadWorker)
             }, if !api.is_empty() => {
-                if let Some(reply) = completion? {
+                if let Some(reply) = completion?
+                    && let Some(reply) = sessions.route_api(host, reply).map_err(|_| TransportError::Command)?
+                {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
-                if reads.is_empty() && commands.is_empty() && api.is_empty() && lifecycle.is_empty() && let Some(reply) = shutdown_reply.take() {
+                if reads.is_empty() && commands.is_empty() && api.is_empty() && lifecycle.is_empty() && sessions.is_empty() && let Some(reply) = shutdown_reply.take() {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
                 continue;
             }
-            completion = reads.next(host), if !reads.is_empty() => {
+            completion = reads.next(host), if reads.has_workers() => {
                 let reply = completion.ok_or(TransportError::ReadWorker)?
                     .map_err(|_| TransportError::ReadWorker)?;
-                let reply = reply.publish(host);
-                queue_reply(reply, host.frame_limit(), tx, permits)?;
-                if reads.is_empty() && commands.is_empty() && api.is_empty() && lifecycle.is_empty() && let Some(reply) = shutdown_reply.take() {
+                if let Some(reply) = reply.publish(host) {
+                    queue_reply(reply, host.frame_limit(), tx, permits)?;
+                }
+                if reads.is_empty() && commands.is_empty() && api.is_empty() && lifecycle.is_empty() && sessions.is_empty() && let Some(reply) = shutdown_reply.take() {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
                 continue;
@@ -260,7 +283,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 for message in commands.tick(host, pending).map_err(|_| TransportError::Command)? {
                     queue_reply(message, host.frame_limit(), tx, permits)?;
                 }
-                if reads.is_empty() && commands.is_empty() && api.is_empty() && lifecycle.is_empty() && let Some(reply) = shutdown_reply.take() {
+                if reads.is_empty() && commands.is_empty() && api.is_empty() && lifecycle.is_empty() && sessions.is_empty() && let Some(reply) = shutdown_reply.take() {
                     queue_reply(reply, host.frame_limit(), tx, permits)?;
                 }
                 continue;
@@ -291,6 +314,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                             commands.cancel(&id);
                             api.cancel(&id);
                             lifecycle.cancel(&id);
+                            sessions.cancel(&id);
                         }
                     }
                     continue;
@@ -300,9 +324,41 @@ async fn read_messages<R: AsyncRead + Unpin>(
                         || commands.contains(id)
                         || api.contains(id)
                         || lifecycle.contains(id)
+                        || sessions.contains(id)
                 }) {
                     // Two responses with the same live id would be ambiguous.
                     return Err(TransportError::Framing);
+                }
+                if method == methods::SESSION_PROMPT {
+                    if let Some(id) = id.as_ref()
+                        && let Err(fault) = sessions.start(host, id.clone(), params)
+                    {
+                        queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                    }
+                    continue;
+                }
+                if matches!(
+                    method.as_str(),
+                    methods::SESSION_ABORT | methods::SESSION_CONTINUE
+                ) {
+                    if let Some(id) = id.as_ref() {
+                        let result = if method == methods::SESSION_ABORT {
+                            sessions.abort(host, params).map(|value| (value, None))
+                        } else {
+                            sessions.resume(host, params)
+                        };
+                        let reply = match result {
+                            Ok((value, notification)) => {
+                                if let Some(notification) = notification {
+                                    queue_reply(notification, host.frame_limit(), tx, permits)?;
+                                }
+                                protocol::success(id, value)
+                            }
+                            Err(fault) => fault.response(Some(id)),
+                        };
+                        queue_reply(reply, host.frame_limit(), tx, permits)?;
+                    }
+                    continue;
                 }
                 if method == methods::APPLICATION_CLOSE {
                     if let Some(id) = id.as_ref()
@@ -379,6 +435,31 @@ async fn read_messages<R: AsyncRead + Unpin>(
                             commands.start_job(host, id.clone(), params)
                         } else {
                             commands.start(host, id.clone(), params)
+                        };
+                        if let Err(fault) = admitted {
+                            queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
+                    }
+                    continue;
+                }
+                if method == methods::HISTORY_COMMIT {
+                    if let Some(id) = id.as_ref() {
+                        let admitted = match host.prepare_history_import(params) {
+                            Ok((scope, work)) => {
+                                let ticket = work.id.clone();
+                                match reads.start_history_import(id.clone(), scope.clone(), work) {
+                                    Ok(()) => Ok(()),
+                                    Err(fault) => {
+                                        let _ = host.finish_history_import(
+                                            &scope,
+                                            &ticket,
+                                            Err(crate::error::CoreError::Limit),
+                                        );
+                                        Err(fault)
+                                    }
+                                }
+                            }
+                            Err(fault) => Err(fault),
                         };
                         if let Err(fault) = admitted {
                             queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
@@ -542,6 +623,19 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     }
                     continue;
                 }
+                if method == methods::MODEL_REFRESH {
+                    if let Some(id) = id.as_ref() {
+                        let admitted =
+                            host.prepare_model_refresh(params)
+                                .and_then(|(scope, input)| {
+                                    reads.start_model_refresh(id.clone(), scope, input)
+                                });
+                        if let Err(fault) = admitted {
+                            queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
+                    }
+                    continue;
+                }
                 if matches!(
                     method.as_str(),
                     methods::FIND_FILES
@@ -603,7 +697,8 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     && (!reads.is_empty()
                         || !commands.is_empty()
                         || !api.is_empty()
-                        || !lifecycle.is_empty())
+                        || !lifecycle.is_empty()
+                        || !sessions.is_empty())
                 {
                     shutdown_reply = reply;
                     None

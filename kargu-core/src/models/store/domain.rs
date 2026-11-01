@@ -140,6 +140,13 @@ pub(super) enum Operation {
 }
 /// A fully parsed update; callers cannot construct a half-validated command.
 pub struct ModelUpdate(pub(super) Operation);
+
+impl ModelUpdate {
+    /// Create a catalog replacement update.
+    pub fn replace_catalog(catalog: ModelCatalog) -> Self {
+        Self(Operation::ReplaceCatalog(catalog))
+    }
+}
 fn model(value: String) -> Result<ModelId, StoreError> {
     ModelId::try_from(value.trim().to_owned()).map_err(|_| StoreError::Invalid)
 }

@@ -6,8 +6,8 @@ use super::{
 };
 use crate::workspace::command::Preparation;
 use crate::{
-    application::{RunHandle, RunPurpose, host::ReadScope},
-    domain::JobId,
+    application::{RunHandle, RunPurpose, ToolOutcome, agent::AgentTool, host::ReadScope},
+    domain::{JobId, ToolStepId},
     error::CoreError,
     ipc::{pending::PendingOutcome, protocol::RpcId},
     process::{CapturedOutput, JobCompletion},
@@ -19,11 +19,29 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 pub(super) struct Owner {
+    pub parent: Option<AgentTool>,
+    pub edit_parent: Option<crate::edit::prepare::ParentEdit>,
+    pub step: Option<ToolStepId>,
+    pub outcome: Option<ToolOutcome>,
     pub edit: Option<crate::edit::prepare::PreparationId>,
     pub mutation_issued: bool,
     pub purpose: RunPurpose,
     pub scope: ReadScope,
     pub terminal: Option<CoreError>,
+}
+impl Owner {
+    pub fn parent_run(&self) -> Option<&RunHandle> {
+        self.parent
+            .as_ref()
+            .map(AgentTool::run)
+            .or_else(|| self.edit_parent.as_ref().map(|parent| &parent.run))
+    }
+    pub fn parent_call(&self) -> Option<&crate::domain::ToolCallId> {
+        self.parent
+            .as_ref()
+            .map(AgentTool::id)
+            .or_else(|| self.edit_parent.as_ref().map(|parent| &parent.call))
+    }
 }
 pub(super) struct Preparing {
     pub task: JoinHandle<Result<Prepared, CoreError>>,
@@ -32,14 +50,26 @@ pub(super) struct Preparing {
     _guard: DropGuard,
 }
 impl Preparing {
+    #[cfg(test)]
     pub fn spawn(
         prepare: impl FnOnce(&Preparation) -> Result<Prepared, CoreError> + Send + 'static,
     ) -> Result<Self, CoreError> {
-        let context = Preparation::new()?;
+        Self::spawn_owned(None, prepare)
+    }
+    pub fn spawn_owned(
+        parent: Option<&RunHandle>,
+        prepare: impl FnOnce(&Preparation) -> Result<Prepared, CoreError> + Send + 'static,
+    ) -> Result<Self, CoreError> {
+        let lease = parent.map(RunHandle::lease).transpose()?;
+        let context = match parent {
+            Some(run) => Preparation::for_run(run)?,
+            None => Preparation::new()?,
+        };
         let cancel = context.cancellation().clone();
         let deadline = context.deadline();
         let guard = cancel.clone().drop_guard();
         let task = tokio::task::spawn_blocking(move || {
+            let _lease = lease;
             context.check()?;
             let result = prepare(&context);
             if let Err(error) = context.check() {

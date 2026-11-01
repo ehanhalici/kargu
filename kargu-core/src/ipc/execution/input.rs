@@ -63,6 +63,11 @@ pub(super) struct Prepared {
     pub settings: RunSettings,
     pub reply: Reply,
 }
+enum CommandLifetime {
+    Standalone,
+    ServiceJob,
+    BorrowedAgent,
+}
 impl From<crate::workspace::git::GitPrepared> for Prepared {
     fn from(value: crate::workspace::git::GitPrepared) -> Self {
         Self {
@@ -110,6 +115,17 @@ impl From<crate::workspace::git::mutation::MutationPrepared> for Prepared {
 
 impl ExecuteInput {
     pub fn prepare(self, purpose: RunPurpose) -> Result<Prepared, CoreError> {
+        let lifetime = if purpose == RunPurpose::ProcessJob {
+            CommandLifetime::ServiceJob
+        } else {
+            CommandLifetime::Standalone
+        };
+        self.prepare_lifetime(lifetime)
+    }
+    pub(super) fn prepare_borrowed(self) -> Result<Prepared, CoreError> {
+        self.prepare_lifetime(CommandLifetime::BorrowedAgent)
+    }
+    fn prepare_lifetime(self, lifetime: CommandLifetime) -> Result<Prepared, CoreError> {
         if self.mode != Mode::Agent {
             return Err(CoreError::Rejected);
         }
@@ -125,7 +141,7 @@ impl ExecuteInput {
             return Err(CoreError::Rejected);
         }
         let timeout = self.timeout_ms.0.duration();
-        if timeout.is_none() && purpose == RunPurpose::AgentTurn {
+        if timeout.is_none() && matches!(lifetime, CommandLifetime::Standalone) {
             return Err(CoreError::InvalidValue {
                 field: "CommandTimeout",
             });
@@ -162,11 +178,16 @@ impl ExecuteInput {
             timeout,
             environment: CommandEnvironment::try_from(environment)?,
         })?
-        .with_retention(if purpose == RunPurpose::ProcessJob {
-            OutputRetention::Tail
-        } else {
-            OutputRetention::Prefix
-        })
+        .with_retention(
+            if matches!(
+                lifetime,
+                CommandLifetime::ServiceJob | CommandLifetime::BorrowedAgent
+            ) {
+                OutputRetention::Tail
+            } else {
+                OutputRetention::Prefix
+            },
+        )
         .with_output_limit(self.output_bytes)
         .with_idle_timeout(self.idle_timeout_ms)
         .with_stderr(self.stderr);

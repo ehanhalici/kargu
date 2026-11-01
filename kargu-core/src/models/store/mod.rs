@@ -15,8 +15,32 @@ use crate::{
 };
 use domain::Operation;
 pub use domain::{MetadataRevision, ModelUpdate, StoreError};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json, value::RawValue};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Summary DTO for UI presentation of a model's capabilities.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ModelSummaryDto {
+    /// Canonical model identity.
+    pub id: String,
+    /// Context window in tokens, or None if unknown.
+    pub context_window: Option<u64>,
+    /// Max output tokens, or None if unknown.
+    pub max_output: Option<u64>,
+    /// Declared reasoning effort labels (e.g. ["low", "medium", "high"]).
+    pub reasoning_efforts: Vec<String>,
+    /// Preformatted price label (e.g. "$3.00/M"), or None if unknown.
+    pub price_label: Option<String>,
+    /// True if model is free or known zero-cost.
+    pub free: bool,
+    /// True if model supports vision.
+    pub vision: bool,
+    /// True if model allows tools.
+    pub supports_tools: bool,
+    /// True if model allows reasoning.
+    pub supports_reasoning: bool,
+}
 
 #[derive(Clone, Default)]
 struct Entry {
@@ -228,6 +252,88 @@ impl ModelStore {
         self.snapshot = update.snapshot;
         self.snapshot_json = update.snapshot_json;
         Ok(self.revision)
+    }
+    /// Return models for a specific provider in summary DTO format.
+    pub fn provider_models(&self, provider: &ApiProviderId) -> Vec<ModelSummaryDto> {
+        let Some(p) = self.providers.get(provider) else {
+            return Vec::new();
+        };
+        let mut results = Vec::new();
+        let mut seen = BTreeSet::new();
+        for id in &p.advertised {
+            if seen.insert(id.clone())
+                && let Some(dto) = self.entry_summary(p, id)
+            {
+                results.push(dto);
+            }
+        }
+        for id in p.entries.keys() {
+            if seen.insert(id.clone())
+                && let Some(dto) = self.entry_summary(p, id)
+            {
+                results.push(dto);
+            }
+        }
+        results
+    }
+    /// Return a specific model summary for a provider.
+    pub fn provider_model(
+        &self,
+        provider: &ApiProviderId,
+        model: &ModelId,
+    ) -> Option<ModelSummaryDto> {
+        let p = self.providers.get(provider)?;
+        self.entry_summary(p, model)
+    }
+    fn entry_summary(&self, p: &Provider, id: &ModelId) -> Option<ModelSummaryDto> {
+        let entry = p.entries.get(id)?;
+        let raw = entry.effective().ok()?;
+        let fields = ModelFields::from_raw(&raw, &p.specs);
+        let display = fields.display_snapshot();
+        let efforts = display
+            .get("reasoning-efforts")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let price_label = display
+            .get("price-label")
+            .and_then(|v| v.as_str().map(String::from));
+        let free = display
+            .get("free")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let vision = display
+            .get("vision")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let context_window = display.get("context-window").and_then(|v| v.as_u64());
+        let max_output = display.get("max-output").and_then(|v| v.as_u64());
+        Some(ModelSummaryDto {
+            id: id.as_str().to_owned(),
+            context_window,
+            max_output,
+            reasoning_efforts: efforts,
+            price_label,
+            free,
+            vision,
+            supports_tools: fields.allows_tools() && !p.refused.contains(id),
+            supports_reasoning: fields.allows_reasoning(),
+        })
+    }
+    /// Directly replace a provider's model catalog in live store.
+    pub fn update_catalog(
+        &mut self,
+        provider: ApiProviderId,
+        catalog: crate::models::catalog::ModelCatalog,
+        specs: EffortSpecs,
+    ) -> Result<MetadataRevision, StoreError> {
+        let update = ModelUpdate::replace_catalog(catalog);
+        let prepared = self.prepare(provider, update, specs)?;
+        self.commit(prepared)
     }
 }
 fn projection(

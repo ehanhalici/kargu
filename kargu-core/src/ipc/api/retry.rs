@@ -21,13 +21,13 @@ use tokio::time::Instant;
 /// Explicit headless mode never silently bypasses a configured editor observer.
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum Observer {
+pub(in crate::ipc) enum Observer {
     None,
     Editor,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Configuration {
+pub(in crate::ipc) struct Configuration {
     pub policy: RetryPolicy,
     pub observer: Observer,
     #[serde(default)]
@@ -183,6 +183,12 @@ impl ApiRequests {
         if pending.cancel.is_cancelled() || !host.owns_read_scope(&pending.scope) {
             return Some(ApiError::Cancelled);
         }
+        if let Some(Err(error)) = pending.model.as_ref().map(|turn| turn.run().check_live()) {
+            return Some(match error {
+                CoreError::Deadline => ApiError::RunDeadline,
+                _ => ApiError::Cancelled,
+            });
+        }
         if deadline.is_some_and(Deadline::expired) {
             // Expiry must be projected even when there is no ticket to finish.
             if let Some(reference) = reference {
@@ -325,7 +331,9 @@ impl ApiRequests {
                 deadline: Some(operation.intent.deadline),
                 page_bytes: operation.intent.page_bytes,
                 observe_entropy: true,
-                expectation: if operation.intent.configuration.circuit.is_some() {
+                expectation: if pending.model.is_some() {
+                    worker::ResponseExpectation::Native
+                } else if operation.intent.configuration.circuit.is_some() {
                     worker::ResponseExpectation::Model
                 } else {
                     worker::ResponseExpectation::Raw
@@ -427,15 +435,34 @@ impl ApiRequests {
         host: &Host,
         id: RpcId,
         mut pending: Pending,
-        result: Result<Value, ApiError>,
+        result: Result<super::Success, ApiError>,
     ) -> Result<Option<Value>, CoreError> {
         let circuit = pending
             .circuit
             .take()
-            .map(|grant| self.circuits.finish(grant, Some(&result)))
+            .map(|grant| {
+                self.circuits
+                    .finish(grant, Some(result.as_ref().map(|_| ())))
+            })
             .transpose()?;
+        if let Some(turn) = pending.model {
+            let result = match result {
+                Ok(super::Success::Model(reply)) => Ok(reply),
+                Ok(super::Success::Editor(_)) => Err(ApiError::Protocol),
+                Err(error) => Err(error),
+            };
+            self.models.push_back(super::ModelDelivery {
+                turn,
+                result,
+                budget: pending.snapshot,
+                circuit,
+            });
+            self.circuits.collect(host);
+            return Ok(None);
+        }
         let mut payload = match result {
-            Ok(value) => value,
+            Ok(super::Success::Editor(value)) => value,
+            Ok(super::Success::Model(_)) => return Err(CoreError::CleanupFailed),
             Err(error) => json!({"failure":error.snapshot(),"partial":pending.published}),
         };
         let object = payload.as_object_mut().ok_or(CoreError::CleanupFailed)?;

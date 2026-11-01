@@ -24,6 +24,7 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub(crate) struct AppliedSnapshot {
     pub session: SessionId,
+    pub service_id: Option<crate::domain::EditServiceId>,
     pub edit_id: EditorEditId,
     pub artifact: Arc<Artifact>,
     pub receipt: Arc<VerifiedReceipt>,
@@ -42,6 +43,7 @@ impl AppliedSnapshot {
 #[serde(deny_unknown_fields)]
 pub(crate) struct RollbackInput {
     pub origin_id: OriginId,
+    pub service_id: Option<crate::domain::EditServiceId>,
     pub target_edit_id: Option<EditorEditId>,
     pub target_file: Option<EditPath>,
     pub root: Option<PathBuf>,

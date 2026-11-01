@@ -981,8 +981,9 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Uygulama başladı: `history/{message,store,types,rpc,upload}` ve application
     actor history portu eklendi. 32 MiB/session, 64 MiB/application, message/call
     sınırları; revision-bound `history/messages`/`read` ve bounded worker üzerinden
-    `history/begin`/`append`/`commit`/`abort` var. Native run/UI consumer cutover'ı
-    ve son kabul yapılmadı; yalnız library derleme/tip kontrolü geçti.
+    `history/begin`/`append`/`commit`/`abort` var. Native lib/actor/host ve gerçek
+    run consumer bağlantısı 5.9d'de bağımsız kabulden geçti. Bütün history UI
+    import/projection consumer'ları ve son legacy silme tamamlanmadan üst iş açık.
   - [x] **5.2 Protokol onarımı:** committed call başına tek terminal result,
     duplicate/orphan ret, partial SSE fragment'lerini yürütmeme; cancel/error/
     outcome_unknown yalnız eksik sonuçlara sentezlensin. Onarım idempotent olsun,
@@ -990,8 +991,9 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Native store her committed call için terminal sonuç alanını önceden ayırır;
     duplicate/orphan ret ve idempotent eksik-result onarımı eklendi. Actor finish
     revoke/drain sonrasında onarır; actual sonucu iptal edilmiş owner da claim'i
-    bırakmadan kaydedebilir. Native agent dispatcher ve UI bağlantısı tamamlanmadan
-    bu alt iş kapatılmaz. Corpus/gerçek pipe test kaynakları yazıldı, çalıştırılmadı.
+    bırakmadan kaydedebilir. Native dispatcher/repair ve gerçek pipe corpus'u
+    5.9d'deki bağımsız binary'de geçti. Bu protokol dilimi bütün history UI
+    consumer'larının veya 5'in kapanışı değildir.
   - [ ] **5.3 Native registry/gate:** mevcut canonical/alias/schema/mode ve
     optional availability envanterini taşı; OS ve delegated editor tool'ları aynı
     owner/revision/onay kapısına girsin. Doğrudan çağrı da aynı gate'i kullansın.
@@ -1062,7 +1064,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     late verified save'in gerçek sonucu korumasını çalıştır. ERT'de exact
     conversation scope, detached args, foreign cancel, retired source ve
     unrelated Elisp loop izolasyonunu doğrula. Kaynaklar native_agent/edits.rs
-    ve test-native-agent-edit.el'de hazır, aktif talimat gereği çalıştırılmadı.
+    ve test-native-agent-edit.el'de; 5.9d'nin bağımsız binary/source kabulünde geçti.
   - [ ] **5.7 Mode/plan:** ask/plan/debug/agent availability, async debug hazırlığı,
     revision-bound plan artifact ve consuming dispatch native sahipliğine geçsin;
     Emacs plan/review ekranları yalnız presenter ve observation olsun.
@@ -1125,8 +1127,22 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     reference boş başarı üretemez; prompt ve page cancel exact epoch'a bağlıdır.
     587 locked Rust (31 compile-fail dahil), full ERT 1405/1405, son epoch guard'ı
     sonrası odak 25/25; strict Clippy/fmt, Elisp Werror/checkdoc/parantez temiz.
-    Ortak Rust lib/actor/host entegrasyon commit'i, bütün geçmişin UI projection/
-    import'u ve genel 5.9 kapanışı hâlâ açıktır. TLA+ değişmedi; TLC çalıştırılmadı.
+    Ortak Rust lib/actor/host entegrasyonu 5.9d'de bağlandı. Bütün geçmişin UI
+    projection/import'u ve genel 5.9 kapanışı hâlâ açıktır. TLA+ değişmedi;
+    TLC çalıştırılmadı.
+  - [x] **5.9d Ortak Rust entegrasyonu ve bağımsız kabul:** native agent/claim/
+    history, registry/schema, API budget/retry, native OS/read/editor/edit dispatch,
+    sensor ve kaynak lease/step modüllerini gerçek lib/actor/host/transport'a bağla.
+    HAM RAM read_file adaptörü ve native kabul corpus'u normal ERT runner'a kayıtlı.
+    Temiz HEAD tabanlı adayın kendi kaynakları/binary'siyle 561 locked Rust
+    (31 compile-fail), 1395/1395 source ERT, strict all-target Clippy/fmt ve değişen
+    Elisp Werror/parantez kabulü geçti. Altı gelecek persistence/seçim RPC'si
+    gerçek stdio'da MethodNotFound döndürdü; diske yazı yok, ping canlı.
+    7'nin mailbox'ta blocking/unscoped persistence RPC'leri ve 8'in yalnız
+    doğrulayıp selected diyen seçim RPC'si bu commit'in dışında kaldı; kullanıcının
+    çalışma ağacındaki bu WIP değişiklikleri korundu. Genel agent default/capability,
+    erken UI claim/config receipt, bütün history/context/plan/debug/background
+    consumer'ları ve 3–6 kapanışı henüz ilan edilmez. TLA+ değişmedi; TLC çalışmadı.
   - [ ] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
     repair ile domain state/plan dispatch motorlarını son tüketici sonrası kaldır.
     Madde 6'daki compaction/healing consumer'larının native run'a bağlanması için

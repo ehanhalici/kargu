@@ -117,12 +117,37 @@ identity!(
     "Application identity, distinct from a session or run."
 );
 identity!(SessionId, "sess_", "Conversation identity.");
+identity!(
+    MessageId,
+    "message_",
+    "One committed conversation message identity."
+);
+identity!(
+    HistoryUploadId,
+    "history_upload_",
+    "One bounded conversation import lifetime."
+);
+identity!(
+    EditServiceId,
+    "edit_service_",
+    "One editor edit service, independent of source operations."
+);
 identity!(RunId, "run_", "One execution attempt identity.");
+identity!(
+    ModelTurnId,
+    "turn_",
+    "One native model-turn completion identity."
+);
 identity!(ClaimId, "claim_", "Application admission claim identity.");
 identity!(
     ToolCallId,
     "call_",
     "One committed native tool invocation identity."
+);
+identity!(
+    ToolStepId,
+    "step_",
+    "One concrete action within a committed native tool call."
 );
 identity!(
     ApprovalId,
@@ -182,6 +207,10 @@ macro_rules! counter {
 }
 counter!(Generation, "Application run generation.");
 counter!(RequestSequence, "Connection-owned reverse RPC sequence.");
+counter!(
+    SessionEventSequence,
+    "Monotonic native event sequence within one conversation."
+);
 counter!(
     ConfigRevision,
     "Captured configuration publication revision."

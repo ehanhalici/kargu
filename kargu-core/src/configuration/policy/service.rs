@@ -113,6 +113,28 @@ pub(crate) struct ConfigurationService {
     published: Option<Published>,
 }
 impl ConfigurationService {
+    pub(crate) fn is_revision(&self, revision: ConfigRevision) -> bool {
+        self.published.is_some() && self.revision == revision
+    }
+    pub(crate) fn prepare_catalog(
+        &self,
+        revision: ConfigRevision,
+        provider: crate::providers::ApiProviderId,
+        session: &SessionId,
+        catalog: &ProviderCatalog,
+    ) -> Result<crate::api::HttpRequest, CoreError> {
+        if !self.is_revision(revision) {
+            return Err(CoreError::StaleOwner);
+        }
+        let published = self.published.as_ref().ok_or(CoreError::Unavailable)?;
+        super::prepare_catalog_request(
+            &published.document,
+            &published.context,
+            provider,
+            session,
+            catalog,
+        )
+    }
     pub(crate) fn sweep(&mut self, now: Instant) {
         if self
             .staged
@@ -134,6 +156,10 @@ impl ConfigurationService {
     pub(crate) fn revoke(&mut self) {
         self.staged = None;
         self.published = None;
+    }
+    pub(crate) fn published_view(&self) -> Option<Value> {
+        let p = self.published.as_ref()?;
+        serde_json::from_str(&p.view).ok()
     }
     pub(crate) fn rpc(
         &mut self,

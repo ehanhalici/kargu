@@ -71,6 +71,17 @@ pub(crate) struct FetchResult {
     status: u16,
     truncated: bool,
 }
+impl FetchResult {
+    pub(crate) fn outcome(&self) -> crate::application::ToolOutcome {
+        match self.outcome {
+            FetchOutcome::Ok => crate::application::ToolOutcome::Ok,
+            FetchOutcome::HttpError => crate::application::ToolOutcome::Failed,
+        }
+    }
+    pub(crate) fn into_text(self) -> String {
+        self.text
+    }
+}
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 enum FetchOutcome {

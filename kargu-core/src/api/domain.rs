@@ -4,7 +4,7 @@ use super::ApiError;
 use crate::providers::ApiEndpoint;
 use reqwest::{Method, header::HeaderMap};
 use serde::Deserialize;
-use std::{collections::BTreeMap, fmt, time::Duration};
+use std::{collections::BTreeMap, fmt, sync::Arc, time::Duration};
 use zeroize::Zeroizing;
 
 /// Open model namespace; never confused with a provider or external thread ID.
@@ -59,7 +59,7 @@ impl fmt::Display for SecretString {
 
 macro_rules! timeout_type {
     ($name:ident) => {
-        #[derive(Deserialize)]
+        #[derive(Clone, Copy, Deserialize)]
         #[serde(try_from = "u64")]
         struct $name(Duration);
         impl TryFrom<u64> for $name {
@@ -78,7 +78,7 @@ timeout_type!(FirstByteTimeout);
 timeout_type!(IdleTimeout);
 timeout_type!(RequestDeadline);
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Timeouts {
     connect_ms: ConnectTimeout,
@@ -145,8 +145,175 @@ pub struct HttpRequest {
     pub(super) body: Option<Zeroizing<String>>,
     timeouts: Timeouts,
     pub(super) limits: super::stream::StreamLimits,
-    pub(super) wire: super::wire::WireCodec,
+    pub(super) wire: Arc<super::wire::WireCodec>,
     pub(super) response_profile: ResponseProfile,
+}
+
+struct ConnectionInput {
+    url: ApiEndpoint,
+    target: RequestTarget,
+    provider: Option<crate::providers::ApiProviderId>,
+    headers: BTreeMap<String, SecretString>,
+    wire: Option<super::wire::WireSpec>,
+    auth: Option<super::auth::AuthCapture>,
+}
+struct CapturedConnection {
+    authority: super::ApiAuthority,
+    provider: Option<crate::providers::ApiProviderId>,
+    url: ApiEndpoint,
+    headers: HeaderMap,
+    wire: Arc<super::wire::WireCodec>,
+}
+impl ConnectionInput {
+    fn capture(self, model: Option<&ModelId>) -> Result<CapturedConnection, ApiError> {
+        if self.headers.len() > 64 {
+            return Err(ApiError::Limit);
+        }
+        let mut headers = HeaderMap::new();
+        for (name, value) in self.headers {
+            let name = super::auth::header_name(&name)?;
+            if headers.contains_key(&name) {
+                return Err(ApiError::InvalidRequest);
+            }
+            headers.insert(name, super::auth::header_value(value.exposed())?);
+        }
+        super::auth::check_size(&headers)?;
+        let spec = self.wire.unwrap_or_default();
+        let url = match self.target {
+            RequestTarget::Exact => self.url,
+            RequestTarget::Chat => spec.chat_endpoint(self.url)?,
+        };
+        let wire = spec.bind(&url, model, self.provider.as_ref())?;
+        let headers = wire.headers(headers, self.auth)?;
+        let wire = Arc::new(wire.capture_headers(&headers)?);
+        let authority = super::ApiAuthority::capture(&url, self.provider.as_ref(), &headers)?;
+        Ok(CapturedConnection {
+            authority,
+            provider: self.provider,
+            url,
+            headers,
+            wire,
+        })
+    }
+}
+
+fn encode_body(
+    mut value: serde_json::Value,
+    wire: &super::wire::WireCodec,
+    stream: bool,
+    tuning: &super::policy::RequestTuning,
+    cache_markers: bool,
+) -> Result<Zeroizing<String>, ApiError> {
+    if !value.is_object()
+        || (stream
+            && (!wire.streams()
+                || value.get("stream").and_then(serde_json::Value::as_bool) != Some(true)))
+    {
+        return Err(ApiError::InvalidRequest);
+    }
+    value = wire.tune(value, tuning)?;
+    if cache_markers {
+        super::cache::prepare(&mut value)?;
+    }
+    let body = Zeroizing::new(wire.encode(value)?.to_string());
+    if body.len() > crate::constants::limits::API_REQUEST_BYTES {
+        return Err(ApiError::Limit);
+    }
+    Ok(body)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChatConnectionInput {
+    model: ModelId,
+    url: ApiEndpoint,
+    headers: BTreeMap<String, SecretString>,
+    stream: bool,
+    timeouts: Timeouts,
+    #[serde(default)]
+    limits: super::stream::StreamLimits,
+    wire: Option<super::wire::WireSpec>,
+    provider: Option<crate::providers::ApiProviderId>,
+    #[serde(default)]
+    cache_markers: bool,
+    #[serde(default)]
+    tuning: super::policy::RequestTuning,
+    auth: Option<super::auth::AuthCapture>,
+}
+
+/// Captured native chat connection. Model, tenant, credentials, wire policy and
+/// endpoint remain fixed across all model turns and physical retries of a run.
+/// It cannot be serialized or printed, and performs no credential lookup or IO.
+#[derive(Deserialize)]
+#[serde(try_from = "ChatConnectionInput")]
+pub struct ChatConnection {
+    model: ModelId,
+    connection: CapturedConnection,
+    stream: bool,
+    timeouts: Timeouts,
+    limits: super::stream::StreamLimits,
+    tuning: super::policy::RequestTuning,
+    cache_markers: bool,
+}
+impl TryFrom<ChatConnectionInput> for ChatConnection {
+    type Error = ApiError;
+    fn try_from(input: ChatConnectionInput) -> Result<Self, ApiError> {
+        let connection = ConnectionInput {
+            url: input.url,
+            target: RequestTarget::Chat,
+            provider: input.provider,
+            headers: input.headers,
+            wire: input.wire,
+            auth: input.auth,
+        }
+        .capture(Some(&input.model))?;
+        if input.stream && !connection.wire.streams() {
+            return Err(ApiError::InvalidRequest);
+        }
+        Ok(Self {
+            model: input.model,
+            connection,
+            stream: input.stream,
+            timeouts: input.timeouts,
+            limits: input.limits,
+            tuning: input.tuning,
+            cache_markers: input.cache_markers,
+        })
+    }
+}
+impl ChatConnection {
+    /// Prepare only from the actual native model ticket, on a bounded worker.
+    /// Reuses the existing wire/auth/tuning/cache implementation; history stays immutable.
+    pub fn prepare_turn(
+        &self,
+        turn: &crate::application::agent::ModelTurn,
+    ) -> Result<HttpRequest, ApiError> {
+        let canonical = turn.canonical_payload(&self.model, self.stream)?;
+        let value = serde_json::from_str(canonical.get()).map_err(|_| ApiError::InvalidRequest)?;
+        let body = encode_body(
+            value,
+            &self.connection.wire,
+            self.stream,
+            &self.tuning,
+            self.cache_markers,
+        )?;
+        turn.run().check_live().map_err(|error| match error {
+            crate::error::CoreError::Deadline => ApiError::RunDeadline,
+            _ => ApiError::Cancelled,
+        })?;
+        Ok(HttpRequest {
+            authority: self.connection.authority.clone(),
+            provider: self.connection.provider.clone(),
+            url: self.connection.url.clone(),
+            method: Method::POST,
+            headers: self.connection.headers.clone(),
+            body: Some(body),
+            timeouts: self.timeouts,
+            limits: self.limits,
+            wire: self.connection.wire.clone(),
+            response_profile: ResponseProfile::Raw,
+        })
+    }
 }
 
 impl TryFrom<RequestDto> for HttpRequest {
@@ -167,20 +334,11 @@ impl TryFrom<RequestDto> for HttpRequest {
             || dto
                 .body
                 .as_ref()
-                .is_some_and(|body| body.len() > 768 * 1024)
+                .is_some_and(|body| body.len() > crate::constants::limits::API_REQUEST_BYTES)
             || (matches!(dto.method, HttpMethod::Get) && (dto.body.is_some() || dto.stream))
         {
             return Err(ApiError::Limit);
         }
-        let mut headers = HeaderMap::new();
-        for (name, value) in dto.headers {
-            let name = super::auth::header_name(&name)?;
-            if headers.contains_key(&name) {
-                return Err(ApiError::InvalidRequest);
-            }
-            headers.insert(name, super::auth::header_value(value.exposed())?);
-        }
-        super::auth::check_size(&headers)?;
         let value = match dto.body.as_ref() {
             Some(body) => Some(
                 serde_json::from_str::<serde_json::Value>(body)
@@ -194,53 +352,42 @@ impl TryFrom<RequestDto> for HttpRequest {
             .map(|value| serde_json::from_value::<ModelId>(value.clone()))
             .transpose()
             .map_err(|_| ApiError::InvalidRequest)?;
-        let spec = dto.wire.unwrap_or_default();
-        let url = match dto.target {
-            RequestTarget::Exact => dto.url,
-            RequestTarget::Chat => spec.chat_endpoint(dto.url)?,
-        };
-        let wire = spec.bind(&url, model.as_ref(), dto.provider.as_ref())?;
-        let headers = wire.headers(headers, dto.auth)?;
-        let wire = wire.capture_headers(&headers)?;
-        let body = if let Some(mut value) = value {
-            if !value.is_object() {
-                return Err(ApiError::InvalidRequest);
-            }
-            if dto.stream
-                && (!wire.streams()
-                    || value.get("stream").and_then(serde_json::Value::as_bool) != Some(true))
-            {
-                return Err(ApiError::InvalidRequest);
-            }
-            value = wire.tune(value, &dto.tuning.unwrap_or_default())?;
-            if dto.cache_markers {
-                super::cache::prepare(&mut value)?;
-            }
-            let encoded = wire.encode(value)?.to_string();
-            if encoded.len() > 768 * 1024 {
-                return Err(ApiError::Limit);
-            }
-            Some(Zeroizing::new(encoded))
+        let connection = ConnectionInput {
+            url: dto.url,
+            target: dto.target,
+            provider: dto.provider,
+            headers: dto.headers,
+            wire: dto.wire,
+            auth: dto.auth,
+        }
+        .capture(model.as_ref())?;
+        let body = if let Some(value) = value {
+            Some(encode_body(
+                value,
+                &connection.wire,
+                dto.stream,
+                &dto.tuning.unwrap_or_default(),
+                dto.cache_markers,
+            )?)
         } else {
             if matches!(dto.method, HttpMethod::Post) {
                 return Err(ApiError::InvalidRequest);
             }
             None
         };
-        let authority = super::ApiAuthority::capture(&url, dto.provider.as_ref(), &headers)?;
         Ok(Self {
-            authority,
-            provider: dto.provider,
-            url,
+            authority: connection.authority,
+            provider: connection.provider,
+            url: connection.url,
             method: match dto.method {
                 HttpMethod::Get => Method::GET,
                 HttpMethod::Post => Method::POST,
             },
-            headers,
+            headers: connection.headers,
             body,
             timeouts: dto.timeouts,
             limits: dto.limits,
-            wire,
+            wire: connection.wire,
             response_profile: dto.response_profile,
         })
     }

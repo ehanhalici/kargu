@@ -159,7 +159,7 @@ impl Circuits {
     pub fn finish(
         &mut self,
         grant: Grant,
-        result: Option<&Result<Value, ApiError>>,
+        result: Option<Result<(), &ApiError>>,
     ) -> Result<Value, CoreError> {
         let entry = self
             .entries
@@ -270,7 +270,7 @@ mod tests {
         let classification: RetryPolicy = serde_json::from_value(json!({}))?;
         let mut circuits = Circuits::default();
         let mut first = None;
-        let failure = Err(ApiError::Http {
+        let failure: Result<(), ApiError> = Err(ApiError::Http {
             status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
             retry_after: None,
         });
@@ -280,7 +280,7 @@ mod tests {
             if first.is_none() {
                 first = Some(grant.id.clone());
             }
-            circuits.finish(grant, Some(&failure))?;
+            circuits.finish(grant, Some(failure.as_ref().map(|_| ())))?;
         }
         let next = request(limits::API_CIRCUITS)?;
         assert!(matches!(

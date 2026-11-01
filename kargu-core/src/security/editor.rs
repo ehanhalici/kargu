@@ -4,7 +4,7 @@ use crate::edit::{prepare::FileIndex, types::EditText};
 use crate::{
     application::{ApplicationActor, RunHandle, RunLease, RunScope, ToolOutcome},
     constants::{limits, timeouts},
-    domain::{ApprovalId, ToolCallId, ToolName, ToolSafetyLevel},
+    domain::{ApprovalId, ToolCallId, ToolName, ToolSafetyLevel, ToolStepId},
     edit::{
         intent::EditorAction,
         types::{EditorRevision, ReviewMode},
@@ -105,6 +105,7 @@ pub enum EditorAdmission {
 pub struct AuthorizedEditorEdit {
     run: RunHandle,
     call_id: ToolCallId,
+    step_id: Option<ToolStepId>,
     action: Box<EditorAction>,
     lease: RunLease,
     deadline: Instant,
@@ -144,17 +145,21 @@ impl AuthorizedEditorEdit {
         self,
         actor: &mut ApplicationActor,
     ) -> Result<IssuedEditorEdit, Box<(CoreError, Self)>> {
-        if let Err(error) = self
-            .revalidate(actor)
-            .and_then(|()| actor.mark_started(&self.run, &self.call_id))
-        {
+        if let Err(error) = self.revalidate(actor).and_then(|()| {
+            actor.mark_action_started(&self.run, &self.call_id, self.step_id.as_ref())
+        }) {
             return Err(Box::new((error, self)));
         }
         Ok(IssuedEditorEdit(self))
     }
     pub(crate) fn expire_unissued(self, actor: &mut ApplicationActor) -> Result<(), CoreError> {
         actor.validate_owner(&self.run)?;
-        actor.complete_tool(&self.run, &self.call_id, ToolOutcome::Timeout)?;
+        actor.complete_action(
+            &self.run,
+            &self.call_id,
+            self.step_id.as_ref(),
+            ToolOutcome::Timeout,
+        )?;
         drop(self.lease);
         Ok(())
     }
@@ -166,7 +171,7 @@ impl AuthorizedEditorEdit {
         } else {
             ToolOutcome::Cancelled
         };
-        actor.complete_tool(&self.run, &self.call_id, outcome)?;
+        actor.complete_action(&self.run, &self.call_id, self.step_id.as_ref(), outcome)?;
         drop(self.lease);
         Ok(())
     }
@@ -191,7 +196,12 @@ impl IssuedEditorEdit {
                 crate::edit::types::NoDispatchReason::Cancelled => ToolOutcome::Cancelled,
             },
         };
-        actor.complete_tool(&self.0.run, &self.0.call_id, outcome)?;
+        actor.complete_action(
+            &self.0.run,
+            &self.0.call_id,
+            self.0.step_id.as_ref(),
+            outcome,
+        )?;
         drop(self.0.lease);
         Ok(())
     }
@@ -201,7 +211,12 @@ impl IssuedEditorEdit {
         outcome: ToolOutcome,
     ) -> Result<(), CoreError> {
         actor.validate_owner(&self.0.run)?;
-        actor.complete_tool(&self.0.run, &self.0.call_id, outcome)?;
+        actor.complete_action(
+            &self.0.run,
+            &self.0.call_id,
+            self.0.step_id.as_ref(),
+            outcome,
+        )?;
         drop(self.0.lease);
         Ok(())
     }
@@ -297,6 +312,35 @@ impl ExecutionGate {
         requested: &ToolName,
         input: EditorAdmissionInput,
     ) -> Result<EditorAdmission, CoreError> {
+        self.admit_editor_action(actor, run, registry, requested, input, None)
+    }
+    /// Admit one concrete editor effect inside an already committed native tool call.
+    pub(crate) fn admit_editor_step(
+        &mut self,
+        actor: &mut ApplicationActor,
+        run: &RunHandle,
+        requested: &ToolName,
+        input: EditorAdmissionInput,
+        step: ToolStepId,
+    ) -> Result<EditorAdmission, CoreError> {
+        self.admit_editor_action(
+            actor,
+            run,
+            run.tool_registry(),
+            requested,
+            input,
+            Some(step),
+        )
+    }
+    fn admit_editor_action(
+        &mut self,
+        actor: &mut ApplicationActor,
+        run: &RunHandle,
+        registry: &ToolRegistry,
+        requested: &ToolName,
+        input: EditorAdmissionInput,
+        step_id: Option<ToolStepId>,
+    ) -> Result<EditorAdmission, CoreError> {
         let EditorAdmissionInput {
             call_id,
             action,
@@ -324,7 +368,16 @@ impl ExecutionGate {
                 .ok_or(CoreError::ArithmeticOverflow)?,
         );
         let lease = run.lease()?;
-        actor.register_call(run, call_id.clone(), descriptor.name().clone())?;
+        if let Some(step) = &step_id {
+            actor.claim_step(run, &call_id, step, descriptor.name(), descriptor.safety())?;
+        } else {
+            actor.reserve_call(
+                run,
+                call_id.clone(),
+                descriptor.name().clone(),
+                descriptor.safety(),
+            )?;
+        }
         let id = ApprovalId::new();
         let request = EditorApprovalRequest {
             id: id.clone(),
@@ -340,6 +393,7 @@ impl ExecutionGate {
             PendingApproval {
                 run: run.clone(),
                 call_id,
+                step_id,
                 name: descriptor.name().clone(),
                 action: CapturedAction::Editor(Box::new(action)),
                 digest: action_digest,
@@ -449,12 +503,13 @@ impl ExecutionGate {
                 CoreError::Cancelled => ToolOutcome::Cancelled,
                 _ => ToolOutcome::Rejected,
             };
-            actor.complete_tool(run, &pending.call_id, outcome)?;
+            actor.complete_action(run, &pending.call_id, pending.step_id.as_ref(), outcome)?;
             return Err(error);
         }
         Ok(AuthorizedEditorEdit {
             run: pending.run,
             call_id: pending.call_id,
+            step_id: pending.step_id,
             action,
             lease: pending.lease,
             deadline: pending.deadline,

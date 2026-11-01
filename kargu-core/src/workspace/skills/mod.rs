@@ -127,9 +127,16 @@ struct Skill {
 #[derive(Serialize)]
 pub(crate) struct SkillResult {
     text: String,
+    #[serde(skip)]
+    outcome: crate::application::ToolOutcome,
     skills: Vec<SkillMetadata>,
     truncated: bool,
     skipped: usize,
+}
+impl SkillResult {
+    pub(crate) fn into_tool_output(self) -> (crate::application::ToolOutcome, String) {
+        (self.outcome, self.text)
+    }
 }
 
 impl SkillInput {
@@ -157,6 +164,13 @@ fn render(
     truncated: bool,
     skipped: usize,
 ) -> Result<SkillResult, CoreError> {
+    let outcome = match &input.query {
+        Operation::Catalog {} => crate::application::ToolOutcome::Ok,
+        Operation::Load { name } if skills.iter().any(|skill| skill.metadata.name == name.0) => {
+            crate::application::ToolOutcome::Ok
+        }
+        Operation::Load { .. } => crate::application::ToolOutcome::Failed,
+    };
     let mut text = match &input.query {
         Operation::Catalog {} if skills.is_empty() => String::new(),
         Operation::Catalog {} => {
@@ -211,6 +225,7 @@ fn render(
     }
     Ok(SkillResult {
         text,
+        outcome,
         skills: skills.into_iter().map(|s| s.metadata).collect(),
         truncated,
         skipped,

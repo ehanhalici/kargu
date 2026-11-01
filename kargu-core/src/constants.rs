@@ -2,6 +2,38 @@
 
 /// Resource limits used by admission, transport and process supervision.
 pub mod limits {
+    /// Stored protocol messages in one conversation, including reserved tool results.
+    pub const HISTORY_MESSAGES: usize = 4096;
+    /// Serialized message bytes in one conversation, including repair reservations.
+    pub const HISTORY_BYTES: usize = 32 * 1024 * 1024;
+    /// Aggregate serialized conversation bytes owned by one application.
+    pub const APPLICATION_HISTORY_BYTES: usize = 64 * 1024 * 1024;
+    /// Bytes in one canonical history message before any native admission.
+    pub const HISTORY_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+    /// Committed provider calls retained in one conversation ledger.
+    pub const HISTORY_CALLS: usize = 8192;
+    /// Bytes reserved before committing each call for an eventual synthetic result.
+    pub const HISTORY_REPAIR_BYTES: usize = 1024;
+    /// Explicit model-turn ceiling, independent of charged HTTP retry attempts.
+    pub const AGENT_MODEL_TURNS: u32 = 4096;
+    /// Consecutive semantic duplicate calls requiring a separate decision.
+    pub const AGENT_REPETITIONS: u8 = 3;
+    /// Canonical and provider-encoded request body bytes accepted by HTTP.
+    pub const API_REQUEST_BYTES: usize = 768 * 1024;
+    /// Concurrent staged history imports; aggregate source bytes remain bounded separately.
+    pub const HISTORY_UPLOADS: usize = 4;
+    /// Canonical definitions and aliases accepted by one native tool catalog.
+    pub const TOOL_DEFINITIONS: usize = 256;
+    /// Serialized bytes in the trusted built-in tool manifest.
+    pub const TOOL_MANIFEST_BYTES: usize = 512 * 1024;
+    /// Bytes in one tool description or schema field description.
+    pub const TOOL_DESCRIPTION_BYTES: usize = 16 * 1024;
+    /// Nodes in one bounded parameter schema.
+    pub const TOOL_SCHEMA_NODES: usize = 1024;
+    /// Nested object/array schema depth, independently of JSON codec recursion.
+    pub const TOOL_SCHEMA_DEPTH: usize = 16;
+    /// Metadata/expressions in one delegated editor tool; file bodies use edit uploads.
+    pub const EDITOR_TOOL_ARGUMENT_BYTES: usize = 64 * 1024;
     /// Decoded text/patch bytes accepted by the native edit domain.
     pub const EDIT_TEXT_BYTES: usize = 4 * 1024 * 1024;
     /// Maximum encoded metadata-only record in an edit issuance journal.
@@ -29,6 +61,8 @@ pub mod limits {
     pub const EDIT_RECEIPT_BYTES: usize = 32 * 1024 * 1024;
     /// Upload/prepare/ready records per application, including draining work.
     pub const EDIT_PREPARATIONS: usize = 2;
+    /// Open and retired service identities retained until their session closes.
+    pub const EDIT_SERVICES: usize = 256;
     /// UTF-8 source bytes per edit upload or immutable read page.
     pub const EDIT_PAGE_BYTES: usize = 32 * 1024;
     /// File operations in one fully preflighted edit transaction.
@@ -39,6 +73,22 @@ pub mod limits {
     pub const EDIT_PATCH_LINES: usize = 200_000;
     /// Retained applied rollback snapshots per application.
     pub const EDIT_SNAPSHOTS: usize = 16;
+    /// Diagnostics accepted in one detached live-editor observation.
+    pub const SENSOR_DIAGNOSTICS: usize = 4096;
+    /// Total diagnostic payload bytes, independent of the transport frame size.
+    pub const SENSOR_DIAGNOSTIC_BYTES: usize = 256 * 1024;
+    /// UTF-8 bytes in a single sensor message or symbol description.
+    pub const SENSOR_TEXT_BYTES: usize = 16 * 1024;
+    /// Nodes retained in one document symbol tree.
+    pub const SENSOR_SYMBOLS: usize = 2048;
+    /// Maximum symbol hierarchy depth, counting roots as depth zero.
+    pub const SENSOR_SYMBOL_DEPTH: usize = 16;
+    /// Serialized document symbol metadata, independent of IPC frame size.
+    pub const SENSOR_SYMBOL_BYTES: usize = 128 * 1024;
+    /// One symbol identifier or qualified query, before rendering.
+    pub const SENSOR_SYMBOL_NAME_BYTES: usize = 1024;
+    /// Independently observed checker identities on one document.
+    pub const SENSOR_BACKENDS: usize = 64;
     /// Original and final text in the bounded application rollback history.
     pub const EDIT_HISTORY_BYTES: usize = EDIT_BUFFER_BYTES + EDIT_RECEIPT_BYTES;
     /// UTF-8 bytes per wire frame, excluding LF.
@@ -55,6 +105,12 @@ pub mod limits {
     pub const MAX_APPLICATIONS: usize = 64;
     /// Sessions in one host.
     pub const MAX_SESSIONS: usize = 256;
+    /// Maximum serialized session file size accepted for reading and writing (16 MiB).
+    pub const SESSION_MAX_FILE_BYTES: usize = 16 * 1024 * 1024;
+    /// Maximum session files inspected during one listing.
+    pub const SESSION_LIST_MAX_FILES: usize = 500;
+    /// Maximum cumulative bytes read across session files during one listing (64 MiB).
+    pub const SESSION_LIST_MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
     /// Maximum client version length.
     pub const CLIENT_VERSION_BYTES: usize = 128;
     /// Maximum advertised client capabilities.
@@ -65,6 +121,8 @@ pub mod limits {
     pub const REQUEST_SCOPE_BYTES: usize = 256;
     /// Default run tool call limit.
     pub const TOOL_CALLS: u64 = 25;
+    /// Concrete preparation/execution actions within a single model invocation.
+    pub const TOOL_EXECUTION_STEPS: usize = 16;
     /// Concurrent subprocesses per run.
     pub const RUN_PROCESSES: usize = 4;
     /// Persistent/draining process-job scopes per application, independent of its turn.
@@ -165,6 +223,8 @@ pub mod limits {
 /// Timeouts are typed durations, never shared unlabelled numbers.
 pub mod timeouts {
     use std::time::Duration;
+    /// Absolute staging and validation lifetime of a canonical history import.
+    pub const HISTORY_IMPORT: Duration = Duration::from_secs(30);
     /// Bounded journal IO worker lifetime; slots survive cancellation until join.
     pub const EDIT_JOURNAL: Duration = Duration::from_secs(30);
     /// Issued editor confirmation interval; expiry revokes but does not prove quiescence.
@@ -204,6 +264,9 @@ pub mod protocol {
     /// Implemented standalone wire services, not yet a full agent backend.
     pub const LIFECYCLE_CAPABILITIES: &[&str] = &[
         "edit_preparation",
+        "edit_history",
+        "history_snapshot",
+        "history_store",
         "edit_patch_preparation",
         "workspace_probe",
         "workspace_webfetch",
@@ -276,6 +339,18 @@ pub mod protocol {
     }
     /// Canonical method names.
     pub mod methods {
+        /// Reserve an exact-revision private conversation import.
+        pub const HISTORY_BEGIN: &str = "history/begin";
+        /// Append one exact-offset UTF-8 history fragment.
+        pub const HISTORY_APPEND: &str = "history/append";
+        /// Validate an import on a bounded worker, then atomically adopt it.
+        pub const HISTORY_COMMIT: &str = "history/commit";
+        /// Revoke one import without replacing conversation state.
+        pub const HISTORY_ABORT: &str = "history/abort";
+        /// Read canonical conversation message metadata at one exact native revision.
+        pub const HISTORY_MESSAGES: &str = "history/messages";
+        /// Read a bounded UTF-8 slice of a canonical message without serializing the whole store.
+        pub const HISTORY_READ: &str = "history/read";
         /// Consume a prepared artifact into the shared editor permission ledger.
         pub const EDIT_AUTHORIZE: &str = "edit/authorize";
         /// Revoke one issued editor token without asserting quiescence.
@@ -290,6 +365,8 @@ pub mod protocol {
         pub const EDIT_ROLLBACK: &str = "edit/rollback";
         /// Inspect a durable edit journal without creating a run or write capability.
         pub const EDIT_RECOVER: &str = "edit/recover";
+        /// Read session-owned rollback metadata without granting execution rights.
+        pub const EDIT_HISTORY: &str = "edit/history";
         /// Record raw editor observations and verify the final transaction outcome.
         pub const EDIT_RECEIPT: &str = "edit/receipt";
         /// Add one live preflight witness; the complete set is revalidated off-actor.
@@ -336,6 +413,14 @@ pub mod protocol {
         pub const PROVIDER_CATALOG: &str = "provider/catalog";
         /// Pure epoch-bound catalog target projection before credential discovery.
         pub const PROVIDER_CATALOG_TARGET: &str = "provider/catalogTarget";
+        /// Configured and embedded provider list for UI presentation.
+        pub const PROVIDER_LIST: &str = "provider/list";
+        /// List models for a provider with reasoning capabilities.
+        pub const MODEL_LIST: &str = "model/list";
+        /// Validate and select provider, model, and reasoning effort.
+        pub const MODEL_SELECT: &str = "model/select";
+        /// Fetch remote model catalog and refresh store asynchronously.
+        pub const MODEL_REFRESH: &str = "model/refresh";
         /// Owned HTTP attempt with bounded SSE deltas and explicit cancellation.
         pub const API_REQUEST: &str = "api/request";
         /// Allocate one shared, application-bound accounting lifetime.
@@ -384,8 +469,24 @@ pub mod protocol {
         pub const SESSION_CREATE: &str = "session/create";
         /// Get lifecycle projection.
         pub const SESSION_SNAPSHOT: &str = "session/snapshot";
+        /// Claim and run a native conversation turn through actual provider services.
+        pub const SESSION_PROMPT: &str = "session/prompt";
+        /// Revoke an exact native run; terminal acknowledgement follows actual drain.
+        pub const SESSION_ABORT: &str = "session/abort";
+        /// Continue an exact native run after a captured length/turn-cap decision.
+        pub const SESSION_CONTINUE: &str = "session/continue";
         /// Close session.
         pub const SESSION_CLOSE: &str = "session/close";
+        /// Persist session with single-writer lock, journal commit, and atomic snapshot.
+        pub const SESSION_SAVE: &str = "session/save";
+        /// Restore session with journal/snapshot recovery and outcome_unknown repair.
+        pub const SESSION_LOAD: &str = "session/load";
+        /// Bounded session metadata listing for a project.
+        pub const SESSION_LIST: &str = "session/list";
+        /// Delete persisted session snapshot and journal files.
+        pub const SESSION_DELETE: &str = "session/delete";
+        /// Import and migrate legacy or v2 session without overwriting source.
+        pub const SESSION_IMPORT: &str = "session/import";
         /// Bounded, read-only native file discovery.
         pub const FIND_FILES: &str = "workspace/findFiles";
         /// Bounded regular-file or revision-bound editor text excerpt.

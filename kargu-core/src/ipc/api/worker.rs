@@ -1,6 +1,6 @@
 //! One physical exchange per grant. No budget/circuit/retry state is written here.
 
-use super::{Completion, Event, EventValue, Outcome, publish_body};
+use super::{Completion, Event, EventValue, Outcome, Success, publish_body};
 use crate::{
     api::{ApiError, HttpRequest, resilience::RetryEntropy},
     application::budget::ObservedUsage,
@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 pub(super) enum ResponseExpectation {
     Raw,
     Model,
+    Native,
 }
 pub(super) struct Attempt {
     pub id: super::RpcId,
@@ -48,13 +49,15 @@ impl Attempt {
         )
     }
     fn observe(&self, value: Value) -> Result<(Value, ObservedUsage), ApiError> {
-        if matches!(self.expectation, ResponseExpectation::Model)
-            && !value
-                .get("choices")
-                .and_then(Value::as_array)
-                .and_then(|choices| choices.first())
-                .and_then(|choice| choice.get("message"))
-                .is_some_and(Value::is_object)
+        if matches!(
+            self.expectation,
+            ResponseExpectation::Model | ResponseExpectation::Native
+        ) && !value
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("message"))
+            .is_some_and(Value::is_object)
         {
             return Err(ApiError::Protocol);
         }
@@ -89,16 +92,26 @@ impl Attempt {
             exchange.await
         }
     }
-    async fn publish(&self, value: Value) -> Result<Value, ApiError> {
+    async fn publish(&self, value: Value) -> Result<Success, ApiError> {
+        if matches!(self.expectation, ResponseExpectation::Native) {
+            let raw = serde_json::value::to_raw_value(&value).map_err(|_| ApiError::Protocol)?;
+            let turn = crate::application::agent::AssistantTurn::try_from(raw).map_err(
+                |error| match error {
+                    crate::error::CoreError::Limit => ApiError::Limit,
+                    _ => ApiError::Protocol,
+                },
+            )?;
+            return Ok(Success::Model(Box::new(turn)));
+        }
         let publish = publish_body(&self.sender, &self.id, value, &self.cancel, self.page_bytes);
         if let Some(deadline) = self.deadline {
             tokio::select! {
                 biased;
                 _ = deadline.elapsed() => Err(ApiError::RunDeadline),
-                result = publish => result,
+                result = publish => result.map(Success::Editor),
             }
         } else {
-            publish.await
+            publish.await.map(Success::Editor)
         }
     }
 }

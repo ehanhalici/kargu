@@ -11,11 +11,13 @@ pub mod constants;
 pub mod domain;
 pub mod edit;
 pub mod error;
+pub mod history;
 pub mod ipc;
 pub mod models;
 pub mod process;
 pub mod providers;
 pub mod security;
+pub mod sensors;
 pub mod workspace;
 
 /// Package version advertised during negotiation.

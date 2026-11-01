@@ -25,6 +25,7 @@ struct Reservation(usize);
 struct Owner {
     session: SessionId,
     origin: OriginId,
+    service_id: Option<crate::domain::EditServiceId>,
 }
 struct Entry {
     owner: Owner,
@@ -55,11 +56,22 @@ enum Phase {
         revoked: bool,
     },
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ServiceState {
+    Open,
+    Closed,
+}
 /// Actor-only store. The separate states never contain optional worker handles.
 #[derive(Default)]
 pub(crate) struct EditPreparations {
     entries: HashMap<PreparationId, Entry>,
     snapshots: VecDeque<super::AppliedSnapshot>,
+    changes: VecDeque<super::history::ChangedFileRecord>,
+    history_revision: super::history::HistoryRevision,
+    // Closed identities remain tombstoned for the lifetime of their session;
+    // delayed preparation or actual receipts cannot revive a retired service.
+    services: HashMap<(SessionId, crate::domain::EditServiceId), ServiceState>,
+    parents: HashMap<(SessionId, OriginId), super::parent::ParentSource>,
 }
 fn decode<T: DeserializeOwned>(value: Value) -> Result<T, CoreError> {
     serde_json::from_value(value).map_err(|_| EditError::InvalidEvidence.into())
@@ -70,6 +82,120 @@ impl Owner {
     }
 }
 impl EditPreparations {
+    pub(crate) fn register_parent(
+        &mut self,
+        source: OriginId,
+        call: &crate::application::agent::AgentTool,
+        policy: super::ParentPolicy,
+        selection: Option<crate::sensors::symbols::SymbolEditSelection>,
+    ) -> Result<(), CoreError> {
+        let binding = super::ParentEdit::capture(call, policy, selection)?;
+        let key = (binding.run.scope().session_id().clone(), source);
+        if self.parents.contains_key(&key)
+            || self.parents.len() >= limits::HISTORY_CALLS
+            || self
+                .entries
+                .values()
+                .any(|entry| entry.owner.matches(&key.0, &key.1))
+        {
+            return Err(CoreError::Limit);
+        }
+        self.parents.insert(
+            key,
+            super::parent::ParentSource {
+                state: super::parent::ParentState::Open {
+                    binding: Box::new(binding),
+                    begun: false,
+                },
+                step: None,
+                result: None,
+            },
+        );
+        Ok(())
+    }
+    fn parent(
+        &self,
+        session: &SessionId,
+        origin: &OriginId,
+    ) -> Result<Option<super::ParentEdit>, CoreError> {
+        match self.parents.get(&(session.clone(), origin.clone())) {
+            None => Ok(None),
+            Some(source) => match &source.state {
+                super::parent::ParentState::Open { binding, .. } => {
+                    binding.run.check_live()?;
+                    Ok(Some((**binding).clone()))
+                }
+                super::parent::ParentState::Closed => Err(CoreError::Cancelled),
+            },
+        }
+    }
+    pub(crate) fn record_parent_step(
+        &mut self,
+        session: &SessionId,
+        origin: &OriginId,
+        step: crate::domain::ToolStepId,
+    ) -> Result<(), CoreError> {
+        let source = self
+            .parents
+            .get_mut(&(session.clone(), origin.clone()))
+            .ok_or(CoreError::StaleOwner)?;
+        if !matches!(source.state, super::parent::ParentState::Open { .. }) || source.step.is_some()
+        {
+            return Err(CoreError::AlreadyCompleted);
+        }
+        source.step = Some(step);
+        Ok(())
+    }
+    pub(crate) fn parent_step(
+        &self,
+        session: &SessionId,
+        origin: &OriginId,
+    ) -> Option<&crate::domain::ToolStepId> {
+        self.parents
+            .get(&(session.clone(), origin.clone()))
+            .and_then(|source| source.step.as_ref())
+    }
+    pub(crate) fn record_parent_result(
+        &mut self,
+        session: &SessionId,
+        origin: &OriginId,
+        result: super::ParentResult,
+    ) {
+        if let Some(source) = self.parents.get_mut(&(session.clone(), origin.clone())) {
+            source.result = Some(result);
+        }
+    }
+    pub(crate) fn take_parent_result(
+        &mut self,
+        session: &SessionId,
+        origin: &OriginId,
+    ) -> Option<super::ParentResult> {
+        self.parents
+            .get_mut(&(session.clone(), origin.clone()))
+            .and_then(|source| source.result.take())
+    }
+    pub(crate) fn close_parent(&mut self, session: &SessionId, origin: &OriginId) {
+        if let Some(source) = self.parents.get_mut(&(session.clone(), origin.clone())) {
+            source.state = super::parent::ParentState::Closed;
+        }
+        self.entries.retain(|_, entry| {
+            if !entry.owner.matches(session, origin) {
+                return true;
+            }
+            match &mut entry.phase {
+                Phase::Preparing { revoked } | Phase::Claimed { revoked, .. } => {
+                    *revoked = true;
+                    true
+                }
+                _ => false,
+            }
+        });
+    }
+    pub(crate) fn parent_busy(&self, session: &SessionId, origin: &OriginId) -> bool {
+        self.entries
+            .values()
+            .any(|entry| entry.owner.matches(session, origin))
+    }
     pub(crate) fn sweep(&mut self, now: Instant) {
         self.entries.retain(|_, entry| {
             if now < entry.expires {
@@ -85,8 +211,18 @@ impl EditPreparations {
         });
     }
     pub(crate) fn close_session(&mut self, session: &SessionId) {
+        // Actual issued receipts may arrive while this closed session drains.
+        // Keep their small outcome/step records until the owning call collects
+        // them; drop captured arguments and prevent every fresh preparation.
+        for ((owner, _), source) in &mut self.parents {
+            if owner == session {
+                source.state = super::parent::ParentState::Closed;
+            }
+        }
+        self.services.retain(|(owner, _), _| owner != session);
         self.snapshots
             .retain(|snapshot| &snapshot.session != session);
+        self.changes.retain(|record| &record.session != session);
         self.entries.retain(|_, entry| {
             if &entry.owner.session != session {
                 return true;
@@ -100,7 +236,81 @@ impl EditPreparations {
             }
         });
     }
+    pub(crate) fn close_service(
+        &mut self,
+        session: &SessionId,
+        service_id: &crate::domain::EditServiceId,
+    ) -> Result<Value, CoreError> {
+        let key = (session.clone(), service_id.clone());
+        if !self.services.contains_key(&key) && self.services.len() >= limits::EDIT_SERVICES {
+            return Err(CoreError::Limit);
+        }
+        self.services.insert(key, ServiceState::Closed);
+        let mut changed = false;
+        let before_snapshots = self.snapshots.len();
+        self.snapshots.retain(|snapshot| {
+            !(&snapshot.session == session && snapshot.service_id.as_ref() == Some(service_id))
+        });
+        if self.snapshots.len() != before_snapshots {
+            changed = true;
+        }
+        let before_changes = self.changes.len();
+        self.changes.retain(|record| {
+            !(&record.session == session && record.service_id.as_ref() == Some(service_id))
+        });
+        if self.changes.len() != before_changes {
+            changed = true;
+        }
+        self.entries.retain(|_, entry| {
+            if !(&entry.owner.session == session
+                && entry.owner.service_id.as_ref() == Some(service_id))
+            {
+                return true;
+            }
+            match &mut entry.phase {
+                Phase::Preparing { revoked } | Phase::Claimed { revoked, .. } => {
+                    changed |= !*revoked;
+                    *revoked = true;
+                    true
+                }
+                _ => {
+                    changed = true;
+                    false
+                }
+            }
+        });
+        if changed {
+            self.history_revision.advance()?;
+        }
+        Ok(json!({
+            "closed": true,
+            "drained": !self.entries.values().any(|entry|
+                &entry.owner.session == session && entry.owner.service_id.as_ref() == Some(service_id)),
+            "revision": self.history_revision,
+        }))
+    }
+
+    fn admit_service(
+        &mut self,
+        session: &SessionId,
+        service: Option<&crate::domain::EditServiceId>,
+    ) -> Result<(), CoreError> {
+        if let Some(service) = service {
+            let key = (session.clone(), service.clone());
+            if self.services.get(&key) == Some(&ServiceState::Closed) {
+                return Err(CoreError::Cancelled);
+            }
+            if !self.services.contains_key(&key) && self.services.len() >= limits::EDIT_SERVICES {
+                return Err(CoreError::Limit);
+            }
+            self.services.entry(key).or_insert(ServiceState::Open);
+        }
+        Ok(())
+    }
     pub(crate) fn revoke(&mut self) {
+        for source in self.parents.values_mut() {
+            source.state = super::parent::ParentState::Closed;
+        }
         self.entries.retain(|_, entry| match &mut entry.phase {
             Phase::Preparing { revoked } | Phase::Claimed { revoked, .. } => {
                 *revoked = true;
@@ -130,6 +340,20 @@ impl EditPreparations {
         now: Instant,
     ) -> Result<Value, CoreError> {
         match method {
+            methods::EDIT_HISTORY => {
+                let query: super::history::HistoryQuery = decode(args)?;
+                if let super::history::HistoryQuery::CloseService { service_id } = query {
+                    return self.close_service(session, &service_id);
+                }
+                super::history::execute(
+                    &mut self.snapshots,
+                    &mut self.changes,
+                    session,
+                    &mut self.history_revision,
+                    query,
+                    frame,
+                )
+            }
             methods::EDIT_BEGIN => self.begin(session, decode(args)?, frame, now),
             methods::EDIT_APPEND => {
                 let input: types::Append = decode(args)?;
@@ -225,6 +449,18 @@ impl EditPreparations {
         if input.mode != Mode::Agent {
             return Err(CoreError::Rejected);
         }
+        let parent = self.parent(session, &input.origin_id)?;
+        if let Some(parent) = &parent {
+            parent.check_begin(&input)?;
+            if !matches!(
+                self.parents
+                    .get(&(session.clone(), input.origin_id.clone()))
+                    .map(|source| &source.state),
+                Some(super::parent::ParentState::Open { begun: false, .. })
+            ) {
+                return Err(CoreError::AlreadyCompleted);
+            }
+        }
         crate::workspace::command::validate_path(&input.root)?;
         if !input.root.is_absolute() || input.root.as_os_str().as_encoded_bytes().contains(&0) {
             return Err(EditError::InvalidPath.into());
@@ -235,6 +471,11 @@ impl EditPreparations {
             .is_some_and(|live| live.dirty || live.read_only)
         {
             return Err(EditError::Conflict.into());
+        }
+        if matches!(input.intent, Intent::Symbol { .. })
+            && (parent.is_none() || input.live.is_none())
+        {
+            return Err(CoreError::Rejected);
         }
         let mut parts = BTreeMap::new();
         let mut extra = if input.live.is_some() {
@@ -264,7 +505,7 @@ impl EditPreparations {
                 parts.insert(Part::Patch, PartBuffer::new(*patch_bytes));
                 extra = 0;
             }
-            Intent::Write { new_bytes, .. } => {
+            Intent::Write { new_bytes, .. } | Intent::Symbol { new_bytes, .. } => {
                 parts.insert(Part::New, PartBuffer::new(*new_bytes));
             }
         }
@@ -287,10 +528,21 @@ impl EditPreparations {
         let expires = now
             .checked_add(timeouts::WORKSPACE_READ)
             .ok_or(CoreError::ArithmeticOverflow)?;
+        let expires = parent
+            .as_ref()
+            .map_or(expires, |parent| parent.deadline(expires));
         let part_info: Vec<_> = parts
             .iter()
             .map(|(name, value)| json!({"part":name,"bytes":value.expected}))
             .collect();
+        self.admit_service(session, input.service_id.as_ref())?;
+        if let Some(source) = self
+            .parents
+            .get_mut(&(session.clone(), input.origin_id.clone()))
+            && let super::parent::ParentState::Open { begun, .. } = &mut source.state
+        {
+            *begun = true;
+        }
         self.entries.insert(
             id.clone(),
             Entry {
@@ -298,6 +550,7 @@ impl EditPreparations {
                 owner: Owner {
                     session: session.clone(),
                     origin: input.origin_id.clone(),
+                    service_id: input.service_id.clone(),
                 },
                 reserved,
                 expires,
@@ -347,6 +600,7 @@ impl EditPreparations {
         inspect: bool,
     ) -> Result<PrepareWork, CoreError> {
         let input: types::Ticket = decode(args)?;
+        let parent = self.parent(session, &input.origin_id)?;
         let entry = self.owned(session, &input.origin_id, &input.preparation_id)?;
         let valid = match &entry.phase {
             Phase::Uploading { input, parts } => {
@@ -369,11 +623,13 @@ impl EditPreparations {
                 input: *begin,
                 parts,
                 deadline: entry.expires,
+                parent,
             })),
             Phase::Collecting(patch) => Ok(PrepareWork::Patch(PatchWork {
                 id: input.preparation_id,
                 inspection: *patch,
                 deadline: entry.expires,
+                parent,
             })),
             _ => Err(CoreError::CleanupFailed),
         }
@@ -386,6 +642,7 @@ impl EditPreparations {
     ) -> Result<ClaimWork, CoreError> {
         self.sweep(now);
         let input: types::Ticket = decode(args)?;
+        let parent = self.parent(session, &input.origin_id)?;
         let entry = self.owned(session, &input.origin_id, &input.preparation_id)?;
         if !matches!(entry.phase, Phase::Ready(_)) {
             return Err(CoreError::AlreadyCompleted);
@@ -404,6 +661,7 @@ impl EditPreparations {
             origin: input.origin_id,
             artifact,
             deadline: entry.expires,
+            parent,
         })
     }
     pub(crate) fn claim_status(
@@ -522,6 +780,14 @@ impl EditPreparations {
         let Phase::Claimed { artifact, .. } = &entry.phase else {
             return Err(CoreError::StaleOwner);
         };
+        let service_id = entry.owner.service_id.clone();
+        if service_id.as_ref().is_some_and(|service| {
+            self.services.get(&(session.clone(), service.clone())) == Some(&ServiceState::Closed)
+        }) {
+            return Ok(false);
+        }
+        self.history_revision.advance()?;
+        let revision = self.history_revision;
         if let Provenance::Rollback { target, files } = &entry.provenance {
             let mut completed = Vec::new();
             for result in receipt
@@ -536,7 +802,7 @@ impl EditPreparations {
                 completed.push((original, inverse.path.clone(), result.clone()));
             }
             for snapshot in &mut self.snapshots {
-                if &snapshot.session != session {
+                if &snapshot.session != session || snapshot.service_id != service_id {
                     continue;
                 }
                 for (original, path, version) in &completed {
@@ -552,6 +818,96 @@ impl EditPreparations {
                 }
             }
             self.snapshots.retain(|s| !s.remaining.is_empty());
+            for (_, path, version) in &completed {
+                let remaining_for_path = self.snapshots.iter().rev().find_map(|s| {
+                    if &s.session != session || s.service_id != service_id {
+                        return None;
+                    }
+                    for index in &s.remaining {
+                        if let Ok(before) = super::preflight::file(&s.artifact, *index)
+                            && &before.path == path
+                            && let Some(r) = s.receipt.files().get(index.get())
+                        {
+                            return Some((
+                                s.edit_id.clone(),
+                                *index,
+                                before.root.path().to_path_buf(),
+                                before.path.clone(),
+                                before.relative.clone(),
+                                r.clone(),
+                            ));
+                        }
+                    }
+                    None
+                });
+                self.changes.retain(|record| {
+                    !(&record.session == session
+                        && record.service_id == service_id
+                        && &record.full_path == path)
+                });
+                if let Some((prev_edit, prev_index, prev_root, prev_full, prev_rel, prev_res)) =
+                    remaining_for_path
+                {
+                    self.changes.push_back(super::history::ChangedFileRecord {
+                        session: session.clone(),
+                        service_id: service_id.clone(),
+                        edit_id: prev_edit,
+                        revision,
+                        file: prev_index,
+                        root: prev_root,
+                        full_path: prev_full,
+                        path: prev_rel,
+                        outcome: prev_res.outcome(),
+                        final_hash: version.final_hash().or_else(|| prev_res.final_hash()),
+                        document: version
+                            .final_document
+                            .clone()
+                            .or_else(|| prev_res.final_document.clone()),
+                        disk: version.final_disk.clone(),
+                        hunks: prev_res.hunks(),
+                        saved: version.saved(),
+                        hook_modified: prev_res.hook_modified(),
+                        verification_pending: false,
+                    });
+                }
+            }
+            return Ok(false);
+        }
+        for result in receipt.files().iter().filter(|r| {
+            matches!(
+                r.outcome(),
+                super::receipt::FileOutcome::Applied | super::receipt::FileOutcome::Partial
+            )
+        }) {
+            let file = super::preflight::file(artifact, result.index())?;
+            self.changes.retain(|record| {
+                !(&record.session == session
+                    && record.service_id == service_id
+                    && record.full_path == file.path)
+            });
+            while self.changes.len() >= limits::EDIT_FILES {
+                self.changes.pop_front();
+            }
+            self.changes.push_back(super::history::ChangedFileRecord {
+                session: session.clone(),
+                service_id: service_id.clone(),
+                edit_id: edit_id.clone(),
+                revision,
+                file: result.index(),
+                root: file.root.path().to_path_buf(),
+                full_path: file.path.clone(),
+                path: file.relative.clone(),
+                outcome: result.outcome(),
+                final_hash: result.final_hash(),
+                document: result.final_document.clone(),
+                disk: result.final_disk.clone(),
+                hunks: result.hunks(),
+                saved: result.saved(),
+                hook_modified: result.hook_modified(),
+                verification_pending: true,
+            });
+        }
+        if !receipt.has_applied() {
             return Ok(false);
         }
         let remaining = receipt
@@ -562,6 +918,7 @@ impl EditPreparations {
             .collect();
         let snapshot = super::AppliedSnapshot {
             session: session.clone(),
+            service_id,
             edit_id: edit_id.clone(),
             artifact: artifact.clone(),
             receipt: Arc::new(receipt.clone()),
@@ -602,6 +959,7 @@ impl EditPreparations {
             .rev()
             .find_map(|snapshot| {
                 if &snapshot.session != session
+                    || snapshot.service_id != input.service_id
                     || input
                         .target_edit_id
                         .as_ref()
@@ -640,6 +998,7 @@ impl EditPreparations {
         if self.entries.len() >= limits::EDIT_PREPARATIONS || total > limits::EDIT_BUFFER_BYTES {
             return Err(CoreError::Limit);
         }
+        self.admit_service(session, input.service_id.as_ref())?;
         let id = PreparationId::new();
         self.entries.insert(
             id.clone(),
@@ -647,6 +1006,7 @@ impl EditPreparations {
                 owner: Owner {
                     session: session.clone(),
                     origin: input.origin_id.clone(),
+                    service_id: input.service_id.clone(),
                 },
                 reserved,
                 expires: now

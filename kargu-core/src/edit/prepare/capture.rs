@@ -213,6 +213,9 @@ impl Work {
     ) -> Result<super::PreparationResult, CoreError> {
         let deadline = deadline.min(self.deadline);
         checkpoint(cancel, deadline)?;
+        if let Some(parent) = &self.parent {
+            parent.check_parts(&self.input, &self.parts)?;
+        }
         if matches!(self.input.intent, Intent::Patch { .. }) {
             let patch = crate::edit::patch::UnifiedPatch::try_from(self.take(Part::Patch)?)?;
             checkpoint(cancel, deadline)?;
@@ -226,7 +229,10 @@ impl Work {
             .path()
             .ok_or(EditError::InvalidEvidence)?
             .clone();
-        let root = Workspace::try_from(self.input.root.clone())?;
+        let root = match &self.parent {
+            Some(parent) => parent.workspace()?,
+            None => Workspace::try_from(self.input.root.clone())?,
+        };
         let (evidence, disk) = evidence(&root, relative.as_path(), cancel, deadline)?;
         if root.path().to_str().is_none() || evidence.canonical.to_str().is_none() {
             return Err(EditError::InvalidPath.into());
@@ -244,6 +250,11 @@ impl Work {
         let new = self.take(Part::New)?;
         let proposed = match &self.input.intent {
             Intent::Write { .. } => new,
+            Intent::Symbol { .. } => self
+                .parent
+                .as_ref()
+                .ok_or(CoreError::Rejected)?
+                .replace_symbol(&base, &new)?,
             Intent::Patch { .. } => return Err(EditError::InvalidEvidence.into()),
             Intent::Replace { .. } => {
                 if !evidence.exists && self.input.live.is_none() {

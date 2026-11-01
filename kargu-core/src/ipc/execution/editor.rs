@@ -23,7 +23,7 @@ use crate::{
     ipc::protocol::{self, Fault, RpcId},
     security::{
         AuthorizedEditorEdit, EditorAdmission, EditorAdmissionInput, EditorApprovalRequest,
-        EditorDecision, EditorPresenter, ExecutionGate, ToolRegistry,
+        EditorDecision, EditorPresenter, ExecutionGate,
     },
 };
 use futures_util::FutureExt;
@@ -531,7 +531,7 @@ impl Editors {
         let work = actor.edits.claim(&request.scope.session_id, json!({"origin_id":request.arguments.origin_id,"preparation_id":request.arguments.preparation_id}), Instant::now()).map_err(fault)?;
         let preparation = work.id.clone();
         let origin = work.origin.clone();
-        let cancel = CancellationToken::new();
+        let cancel = work.cancellation();
         let worker_cancel = cancel.clone();
         let task = tokio::task::spawn_blocking(move || work.execute(&worker_cancel));
         self.operations.insert(
@@ -705,9 +705,9 @@ impl Editors {
                 Ok(result)
             }
             Err(error) => {
-                actor.cancel(&run).map_err(fault)?;
+                cancel_standalone(actor, &run).map_err(fault)?;
                 gate.dismiss_run(actor, &run).map_err(fault)?;
-                actor.finish(&run).map_err(fault)?;
+                finish_standalone(actor, &run).map_err(fault)?;
                 actor
                     .edits
                     .release_claim(&op.scope.session_id, &op.preparation)
@@ -894,7 +894,6 @@ impl Editors {
         &mut self,
         host: &mut Host,
         gate: &mut ExecutionGate,
-        registry: &ToolRegistry,
     ) -> Result<Vec<Value>, CoreError> {
         let mut replies = Vec::new();
         let ids: Vec<_> = self.operations.keys().cloned().collect();
@@ -1135,7 +1134,7 @@ impl Editors {
                         op.terminal = Some(CoreError::Deadline);
                     }
                     if op.terminal.is_some() {
-                        host.actor_mut(&op.scope)?.cancel(&issued.run)?;
+                        cancel_standalone(host.actor_mut(&op.scope)?, &issued.run)?;
                         if !issued.revoked {
                             issued.revoked = true;
                             replies.push(json!({"jsonrpc":"2.0","method":crate::constants::protocol::methods::EDITOR_REVOKE_EDIT,"params":{"edit_id":id,"issued_token":issued.token,"origin_id":op.origin}}));
@@ -1289,18 +1288,51 @@ impl Editors {
                     };
                     let result = result.and_then(|prepared| {
                         let actor = host.actor_mut(&op.scope)?;
-                        let run = actor.admit_editor(&op.scope.session_id, prepared.settings)?;
-                        let admission = gate.admit_editor(
-                            actor,
-                            &run,
-                            registry,
-                            &ToolName::try_from("editor_edit".to_owned())?,
-                            EditorAdmissionInput {
-                                call_id: ToolCallId::new(),
-                                action: prepared.action,
-                                presenter: preparing.presenter,
-                            },
-                        );
+                        let (run, admission) = if let Some(parent) = prepared.parent {
+                            actor.validate(&parent.run)?;
+                            let step =
+                                actor.register_step(&parent.run, &parent.call, &parent.name)?;
+                            let admission = actor
+                                .edits
+                                .record_parent_step(&op.scope.session_id, &op.origin, step.clone())
+                                .and_then(|()| {
+                                    gate.admit_editor_step(
+                                        actor,
+                                        &parent.run,
+                                        &parent.name,
+                                        EditorAdmissionInput {
+                                            call_id: parent.call.clone(),
+                                            action: prepared.action,
+                                            presenter: preparing.presenter,
+                                        },
+                                        step.clone(),
+                                    )
+                                });
+                            if admission.is_err() {
+                                actor.abandon_step(
+                                    &parent.run,
+                                    &parent.call,
+                                    &step,
+                                    crate::application::ToolOutcome::Failed,
+                                )?;
+                            }
+                            (parent.run, admission)
+                        } else {
+                            let run =
+                                actor.admit_editor(&op.scope.session_id, prepared.settings)?;
+                            let admission = gate.admit_editor(
+                                actor,
+                                &run,
+                                run.tool_registry(),
+                                &ToolName::try_from("editor_edit".to_owned())?,
+                                EditorAdmissionInput {
+                                    call_id: ToolCallId::new(),
+                                    action: prepared.action,
+                                    presenter: preparing.presenter,
+                                },
+                            );
+                            (run, admission)
+                        };
                         match admission {
                             Ok(EditorAdmission::Review(request)) => Ok(Stage::Review {
                                 run,
@@ -1313,9 +1345,9 @@ impl Editors {
                                 witnesses: PreflightSet::default(),
                             }),
                             Err(error) => {
-                                actor.cancel(&run)?;
+                                cancel_standalone(actor, &run)?;
                                 gate.dismiss_run(actor, &run)?;
-                                actor.finish(&run)?;
+                                finish_standalone(actor, &run)?;
                                 Err(error)
                             }
                         }
@@ -1522,7 +1554,7 @@ fn cleanup(
     host: &mut Host,
     gate: &mut ExecutionGate,
     op: Operation,
-) -> Result<crate::application::RunCompletion, CoreError> {
+) -> Result<Option<crate::application::RunCompletion>, CoreError> {
     let actor = host.actor_mut(&op.scope)?;
     let timed_out = matches!(
         op.terminal,
@@ -1536,22 +1568,22 @@ fn cleanup(
                 &op.preparation,
                 None,
             );
-            actor.cancel(&run)?;
+            cancel_standalone(actor, &run)?;
             if timed_out {
                 gate.timeout_run(actor, &run)?;
             } else {
                 gate.dismiss_run(actor, &run)?;
             }
-            actor.finish(&run)?
+            finish_standalone(actor, &run)?
         }
         Stage::Authorized { run, grant, .. } | Stage::Preflighted { run, grant, .. } => {
-            actor.cancel(&run)?;
+            cancel_standalone(actor, &run)?;
             if timed_out {
                 grant.expire_unissued(actor)?;
             } else {
                 grant.cancel_unissued(actor)?;
             }
-            actor.finish(&run)?
+            finish_standalone(actor, &run)?
         }
         Stage::Preparing(_)
         | Stage::Revising(_)
@@ -1567,6 +1599,26 @@ fn cleanup(
     Ok(completion)
 }
 
+fn cancel_standalone(
+    actor: &mut crate::application::ApplicationActor,
+    run: &RunHandle,
+) -> Result<(), CoreError> {
+    if run.scope().purpose() == crate::application::RunPurpose::EditorEdit {
+        actor.cancel(run)?;
+    }
+    Ok(())
+}
+fn finish_standalone(
+    actor: &mut crate::application::ApplicationActor,
+    run: &RunHandle,
+) -> Result<Option<crate::application::RunCompletion>, CoreError> {
+    if run.scope().purpose() == crate::application::RunPurpose::EditorEdit {
+        actor.finish(run).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
 fn fault(error: CoreError) -> Fault {
     crate::edit::prepare::fault(error)
 }
@@ -1574,6 +1626,7 @@ fn fault(error: CoreError) -> Fault {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::security::ToolRegistry;
     use std::{sync::mpsc, time::Duration};
     type TestResult = Result<(), Box<dyn std::error::Error>>;
     fn claimed(
@@ -1704,7 +1757,8 @@ mod tests {
                         terminal,
                         stage,
                     },
-                )?;
+                )?
+                .ok_or(CoreError::CleanupFailed)?;
                 assert_eq!(completion.tool_results.len(), 1);
                 assert_eq!(
                     completion.tool_results.first().map(|result| result.outcome),
@@ -1794,7 +1848,7 @@ mod tests {
         editors.issue(&mut host,RpcId::String("issue".to_owned()),scoped(json!({"origin_id":origin,"edit_id":edit,"revision":1,"journal_directory":directory.path()})),true).map_err(|_|"issue")?;
         let issued = tokio::time::timeout(Duration::from_secs(3), async {
             loop {
-                for reply in editors.tick(&mut host, &mut gate, &registry)? {
+                for reply in editors.tick(&mut host, &mut gate)? {
                     if reply["result"]["state"] == "issued" {
                         return Ok::<Value, CoreError>(reply["result"].clone());
                     }
@@ -1808,7 +1862,7 @@ mod tests {
             return Err("issued state expected".into());
         };
         state.deadline = Instant::now();
-        let notices = editors.tick(&mut host, &mut gate, &registry)?;
+        let notices = editors.tick(&mut host, &mut gate)?;
         assert!(
             notices
                 .iter()
@@ -1819,12 +1873,12 @@ mod tests {
             host.actor_mut(&scope)?.finish(&run),
             Err(CoreError::Busy)
         ));
-        assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
+        assert!(editors.tick(&mut host, &mut gate)?.is_empty());
         assert!(!editors.is_empty());
         editors.quiescent(&mut host,RpcId::String("settle".to_owned()),scoped(json!({"origin_id":origin,"edit_id":edit,"revision":1,"issued_token":issued["issued_token"],"effect":"not_dispatched"}))).map_err(|_|"quiescent")?;
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
-                let replies = editors.tick(&mut host, &mut gate, &registry)?;
+                let replies = editors.tick(&mut host, &mut gate)?;
                 if editors.is_empty() {
                     assert_eq!(replies.len(), 1);
                     assert_eq!(
@@ -1951,7 +2005,7 @@ mod tests {
             Err(CoreError::Busy)
         ));
         editors.cancel(&request_id);
-        assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
+        assert!(editors.tick(&mut host, &mut gate)?.is_empty());
         assert_eq!(editors.reserved_workers(), 1);
         assert!(matches!(
             host.actor_mut(&scope)?.finish(&run),
@@ -1961,7 +2015,7 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(3), async {
             let mut replies = Vec::new();
             loop {
-                replies.extend(editors.tick(&mut host, &mut gate, &registry)?);
+                replies.extend(editors.tick(&mut host, &mut gate)?);
                 if editors.is_empty() {
                     assert_eq!(replies.len(), 1);
                     assert_eq!(
@@ -2065,7 +2119,7 @@ mod tests {
         let begin = || json!({"scope":{"application_id":scope.application_id,"session_id":scope.session_id},"arguments":{"origin_id":"editor_source_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","root":root.path(),"mode":"agent","intent":{"kind":"write","path":"empty","new_bytes":0},"live":null,"config_revision":0,"policy_revision":0,"review_mode":"auto","save_policy":"buffer_only"}});
         assert!(host.dispatch("edit/begin", begin(), true).result.is_ok());
         editors.cancel(&request_id);
-        assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
+        assert!(editors.tick(&mut host, &mut gate)?.is_empty());
         assert_eq!(editors.reserved_workers(), 1);
         assert!(host.dispatch("edit/begin", begin(), true).result.is_err());
         assert!(matches!(
@@ -2075,7 +2129,7 @@ mod tests {
         release.send(())?;
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
-                let replies = editors.tick(&mut host, &mut gate, &registry)?;
+                let replies = editors.tick(&mut host, &mut gate)?;
                 if editors.is_empty() {
                     assert_eq!(replies.len(), 1);
                     assert_eq!(
@@ -2179,14 +2233,13 @@ mod tests {
             .map_err(|_| "abort")?;
         editors.cancel(&request_id);
         let mut gate = ExecutionGate::default();
-        let registry = ToolRegistry::default();
-        assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
+        assert!(editors.tick(&mut host, &mut gate)?.is_empty());
         assert!(!editors.is_empty());
         assert!(host.dispatch("edit/begin", begin(), true).result.is_err());
         release.send(())?;
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
-                let replies = editors.tick(&mut host, &mut gate, &registry)?;
+                let replies = editors.tick(&mut host, &mut gate)?;
                 if editors.is_empty() {
                     assert_eq!(replies.len(), 1);
                     return Ok::<(), CoreError>(());
@@ -2287,7 +2340,7 @@ mod tests {
         } else {
             editors.cancel(&request_id);
         }
-        assert!(editors.tick(&mut host, &mut gate, &registry)?.is_empty());
+        assert!(editors.tick(&mut host, &mut gate)?.is_empty());
         assert_eq!(editors.reserved_workers(), 1);
         assert!(matches!(
             host.actor_mut(&scope)?.finish(&run),
@@ -2296,7 +2349,7 @@ mod tests {
         release.send(())?;
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
-                let replies = editors.tick(&mut host, &mut gate, &registry)?;
+                let replies = editors.tick(&mut host, &mut gate)?;
                 if editors.is_empty() {
                     assert_eq!(replies.len(), 1);
                     assert_eq!(

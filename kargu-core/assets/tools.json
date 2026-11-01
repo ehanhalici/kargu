@@ -1,0 +1,1171 @@
+{
+  "schema_version": 1,
+  "tools": [
+    {
+      "name": "apply_patch",
+      "description": "Apply a multi-file standard Unified Diff patch in an isolated temporary workspace. Agent mode only.\nBinary patches, renames/copies and file mode changes are unsupported and rejected before writing.\nFormat:\n--- a/path/to/existing.ext\n+++ b/path/to/existing.ext\n@@ -1,3 +1,3 @@\n context\n-old line\n+new line\n--- /dev/null\n+++ b/path/to/new_file.ext\n@@ -0,0 +1,2 @@\n+line1\n+line2\n--- a/path/to/deleted.ext\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-removed line",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "patch": {
+            "type": "string",
+            "description": "Standard Unified Diff patch text (--- a/file, +++ b/file, @@ -L,C +L,C @@)."
+          }
+        },
+        "required": [
+          "patch"
+        ]
+      },
+      "aliases": [
+        "patch"
+      ],
+      "modes": [
+        "agent"
+      ]
+    },
+    {
+      "name": "bash",
+      "description": "Run a project shell command asynchronously with no default duration limit. Agent mode only. Output is bounded without terminating the job. Use list/status <id>/kill <id> for monitoring and cancellation. Set background=true for persistent servers or watchers; ordinary long builds can remain foreground jobs.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Shell command to run, or 'status <id>', 'kill <id>', 'list'."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory (default: project root)."
+          },
+          "background": {
+            "type": "boolean",
+            "description": "Set true to start a persistent background server/watcher."
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "aliases": [],
+      "modes": [
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_clear_breakpoint",
+      "description": "Remove a source breakpoint at a specific file_path and line number.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the source file."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number to clear breakpoint from."
+          }
+        },
+        "required": [
+          "file_path",
+          "line"
+        ]
+      },
+      "aliases": [
+        "clear_breakpoint"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_continue",
+      "description": "Resume execution until next breakpoint or termination.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "continue"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_disconnect",
+      "description": "Disconnect from the debug adapter.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "disconnect"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_down",
+      "description": "Select stack frame down towards callee. Optional count (default 1).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of stack frames to navigate down (default 1)."
+          }
+        }
+      },
+      "aliases": [
+        "down"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_eval",
+      "description": "Evaluate an expression in the paused frame and return its value. (what the adapter can evaluate depends on the language; see the language profile).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "Expression to evaluate."
+          },
+          "context": {
+            "type": "string",
+            "description": "Evaluation context: 'repl' (default), 'hover', or 'watch'."
+          }
+        },
+        "required": [
+          "expression"
+        ]
+      },
+      "aliases": [
+        "eval"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_get_context",
+      "description": "Inspect the live debug session: the paused thread's call-stack and all in-scope variables.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_kill",
+      "description": "Terminate the debuggee process.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "kill"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_list_breakpoints",
+      "description": "List all source breakpoints (file and line) known to the debugger.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "breakpoints",
+        "debug_breakpoints"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_modules",
+      "description": "List loaded modules and shared libraries in target process.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "modules"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_pause",
+      "description": "Pause execution of running debuggee and return paused location, stack, and variables.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "pause"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_quit",
+      "description": "Close only the captured adapter and its owned children, not other Dape sessions.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "quit"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_restart",
+      "description": "Restart the debugging session with current configuration.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "restart"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_scope",
+      "description": "Inspect scopes or expand child variables of a struct/vector by name.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "variable_name": {
+            "type": "string",
+            "description": "Name of variable to expand child fields for (e.g. 'frame', 'landmarks_2d')."
+          },
+          "scope_index": {
+            "type": "integer",
+            "description": "Index of scope to list (0-based)."
+          }
+        }
+      },
+      "aliases": [
+        "debug_inspect_variable",
+        "debug_variables",
+        "scope"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_set_breakpoint",
+      "description": "Set a source breakpoint at a file_path and 1-based line number. Requires both parameters.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the source file."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number to set breakpoint on."
+          }
+        },
+        "required": [
+          "file_path",
+          "line"
+        ]
+      },
+      "aliases": [
+        "set_breakpoint"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_sources",
+      "description": "List known source files reported by the debug adapter.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "sources"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_stack",
+      "description": "List call stack frames for the current thread.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "levels": {
+            "type": "integer",
+            "description": "Maximum frame depth to report (default 20)."
+          }
+        }
+      },
+      "aliases": [
+        "stack"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_start",
+      "description": "Start or attach a Dape debugging session with optional config_name.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "config_name": {
+            "type": "string",
+            "description": "Optional dape configuration name (e.g. 'lldb-vscode', 'dlv', 'debugpy')."
+          }
+        }
+      },
+      "aliases": [
+        "debug"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_step_in",
+      "description": "Step into the function call on the current line.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "step",
+        "step_in"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_step_out",
+      "description": "Step out of current function back to caller.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "finish",
+        "out",
+        "step_out"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_step_over",
+      "description": "Step to the next source line in current function (does not step into calls).",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "next",
+        "step_over"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_threads",
+      "description": "List all threads reported by the active debugger adapter.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [
+        "threads"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_toggle_breakpoint",
+      "description": "Toggle a breakpoint at file_path and line number.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the source file."
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number."
+          }
+        },
+        "required": [
+          "file_path",
+          "line"
+        ]
+      },
+      "aliases": [
+        "toggle_breakpoint"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_up",
+      "description": "Select stack frame up towards caller. Optional count (default 1).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of stack frames to navigate up (default 1)."
+          }
+        }
+      },
+      "aliases": [
+        "up"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "debug_watch",
+      "description": "List or update this chat's watch expressions for the current adapter; independent of Dape's global UI list.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "Expression to add or remove from watch list."
+          },
+          "remove": {
+            "type": "boolean",
+            "description": "Set true to remove expression instead of adding."
+          }
+        }
+      },
+      "aliases": [
+        "watch"
+      ],
+      "modes": [
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "edit_by_lsp",
+      "description": "Replace the entire implementation body or definition of a specific symbol (function, method, class, struct, type) in a source file with new content. Uses exact language-agnostic LSP/imenu symbol line boundaries. ALWAYS PREFER THIS over edit_file for modifying existing code definitions across all programming languages.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to edit."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to replace."
+          },
+          "new_content": {
+            "type": "string",
+            "description": "New code to replace the entire symbol body/definition with (use empty string to delete)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional explanation for the change."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol",
+          "new_content"
+        ]
+      },
+      "aliases": [
+        "edit_by_symbol",
+        "edit_symbol",
+        "edit_with_lsp",
+        "replace_symbol"
+      ],
+      "modes": [
+        "agent"
+      ]
+    },
+    {
+      "name": "edit_file",
+      "description": "Replace an exact unique block in an existing file. Read the relevant lines first, then supply old_string with enough surrounding text to be unique and new_string. Prefer structural editing when available. Changes follow the active review policy and retain rollback snapshots. Verify with available diagnostics and project tests.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to edit."
+          },
+          "old_string": {
+            "type": "string",
+            "description": "The exact unique string to replace, copied from read_file without the line-number prefix."
+          },
+          "new_string": {
+            "type": "string",
+            "description": "The replacement string."
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-sentence justification of the edit, shown to the human during review."
+          }
+        },
+        "required": [
+          "file_path",
+          "old_string",
+          "new_string"
+        ]
+      },
+      "aliases": [
+        "edit"
+      ],
+      "modes": [
+        "agent"
+      ]
+    },
+    {
+      "name": "find_files",
+      "description": "Find project files matching a glob pattern (e.g. **/*.rs, *.el, *test*) using bounded native Rust discovery. Includes hidden sources, applies configured directory/artifact exclusions, and reports incomplete searches. Read-only, available in all modes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern such as **/*.rs or *.el."
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search (default: project root)."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      },
+      "aliases": [
+        "fd",
+        "find",
+        "find_files_by_glob",
+        "glob"
+      ],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "git_blame",
+      "description": "Show line-by-line Git commit and author information for a file. Read-only, available in all modes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "File path to blame."
+          },
+          "start_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional start line, defaults to 1."
+          },
+          "end_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional end line, defaults to end of file."
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "git_branch",
+      "description": "Manage Git branches (list, create, switch, delete). Agent mode only.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Action: list, create, switch, or delete."
+          },
+          "name": {
+            "type": "string",
+            "description": "Branch name."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "aliases": [],
+      "modes": [
+        "agent"
+      ]
+    },
+    {
+      "name": "git_branches",
+      "description": "List local and remote Git branches. Read-only, available in every mode.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "git_commit",
+      "description": "Record staged changes in repository. Agent mode only.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Commit message."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "If true, automatically stage all modified tracked files."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "aliases": [],
+      "modes": [
+        "agent"
+      ]
+    },
+    {
+      "name": "git_diff",
+      "description": "Show Git diff (staged changes with staged:true, unstaged, or specific commit/path). Read-only, available in all modes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "staged": {
+            "type": "boolean",
+            "description": "If true, show staged changes (--cached)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Optional file or directory path to diff."
+          },
+          "commit": {
+            "type": "string",
+            "description": "Optional commit hash or reference."
+          }
+        },
+        "required": []
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "git_log",
+      "description": "Show recent Git commit log. Read-only, available in all modes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "max_count": {
+            "type": "integer",
+            "description": "Maximum commits to show (default 10)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Optional file path to limit history to."
+          }
+        },
+        "required": []
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "git_stage",
+      "description": "Stage file(s) into git index (git add). Agent mode only.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "string",
+            "description": "Literal file or directory path to stage (e.g. '.' for all)."
+          }
+        },
+        "required": [
+          "paths"
+        ]
+      },
+      "aliases": [],
+      "modes": [
+        "agent"
+      ]
+    },
+    {
+      "name": "git_stash",
+      "description": "Stash changes (push, apply, list). Apply pins the selected object before approval and never deletes it. Pop/drop are refused; delete manually with Git/Magit. Agent mode only.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Action: push, apply, or list. Pop/drop are unsupported.",
+            "enum": [
+              "push",
+              "apply",
+              "list"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Optional stash message for push."
+          },
+          "stash": {
+            "type": "string",
+            "description": "Required for apply: explicit stash@{N} reference, for example stash@{1}."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "aliases": [],
+      "modes": [
+        "agent"
+      ]
+    },
+    {
+      "name": "git_stashes",
+      "description": "List Git stash entries and their indices. Read-only, available in every mode.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "git_status",
+      "description": "Show structured Git repository status (branch, upstream, staged, unstaged, untracked). Magit-style. Read-only, available in all modes.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "git_unstage",
+      "description": "Unstage file(s) from git index (git restore --staged). Agent mode only.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "string",
+            "description": "File path to unstage."
+          }
+        },
+        "required": [
+          "paths"
+        ]
+      },
+      "aliases": [],
+      "modes": [
+        "agent"
+      ]
+    },
+    {
+      "name": "list_files",
+      "description": "List a project directory using GNU ls -lAh through the Rust command service. Read-only in all modes; returns ls text with bounded output and explicit truncation. For custom ls options use the bash tool with the full command.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory path to list (default: project root)."
+          }
+        },
+        "required": []
+      },
+      "aliases": [
+        "dir",
+        "ls"
+      ],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "lsp_diagnostics",
+      "description": "Get compiler and linter diagnostics (errors, warnings) from LSP via Flymake. Pass 'file_path' to inspect a specific file, or OMIT 'file_path' (pass empty or no arguments) to scan the ENTIRE PROJECT for all compile and lint errors across all project files. Always call this after editing or building to verify zero compilation errors.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Optional. Absolute or project-relative path of a specific file to check. When omitted or empty, runs a project-wide diagnostic scan across all project files."
+          }
+        }
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "lsp_find_symbol",
+      "description": "Locate where a named symbol (function, type, variable) is defined in the workspace. Returns file:line for each definition candidate.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "symbol_name": {
+            "type": "string",
+            "description": "Name of the symbol to look up, e.g. the function or type name."
+          }
+        },
+        "required": [
+          "symbol_name"
+        ]
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "lsp_project_skeleton",
+      "description": "Get a compact map of the whole project: every file with its symbols (functions, types, classes, constants) and line numbers. Use this FIRST to orient yourself; it is far cheaper than reading files.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "read_file",
+      "description": "Read a file with numbered lines (\"12 | code\"). Requires file_path. Search first, then use from_line/to_line (or limit) to read relevant sections rather than entire large files. Use structural inspection when available. NEVER pass search patterns or regex here.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file (or output buffer) to read. Must be a valid file path, NOT a search pattern or regex."
+          },
+          "from_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "First 1-based line to return (inclusive)."
+          },
+          "to_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Last 1-based line to return (inclusive)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum number of lines to return from from_line."
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      },
+      "aliases": [
+        "read"
+      ],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "read_file_symbols",
+      "description": "Get symbols and line ranges from LSP documentSymbol or native Emacs Lisp imenu. Use this before reading a large file to inspect its structure.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to inspect."
+          }
+        }
+      },
+      "aliases": [
+        "file_outline",
+        "file_symbols",
+        "outline",
+        "read_file_outline"
+      ],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "read_symbol",
+      "description": "Read the exact implementation body of a specific symbol (function, method, class, struct, type) by name from a file. Uses LSP/imenu line ranges to fetch only the relevant code without loading the full file.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Name of the symbol (function, method, class, struct, type) to read."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter (e.g. Function, Method, Class, Struct, Type)."
+          }
+        },
+        "required": [
+          "file_path",
+          "symbol"
+        ]
+      },
+      "aliases": [
+        "get_symbol",
+        "read_symbol_body",
+        "symbol_body"
+      ],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "skill",
+      "description": "Load a named skill's instructions. Use when the task matches an available_skills entry.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Skill name from available_skills."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "webfetch",
+      "description": "Fetch a http/https URL and return the response body as text. Use for documentation pages the user named. Do not invent URLs.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute http or https URL."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "aliases": [],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "workspace_grep",
+      "description": "Search file contents for regex or literal text pattern. ALWAYS use this (or rg/grep) instead of reading entire files when searching for definitions, usages, or text. Uses `rg' (ripgrep) if available, otherwise GNU grep. Read-only, available in all modes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Search pattern (regex or literal)."
+          },
+          "path": {
+            "type": "string",
+            "description": "File or directory to search (default: project root)."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Optional file glob, e.g. *.el or **/*.rs."
+          },
+          "max_matches": {
+            "type": "integer",
+            "description": "Maximum hits to return (default 50)."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      },
+      "aliases": [
+        "grep",
+        "rg"
+      ],
+      "modes": [
+        "ask",
+        "plan",
+        "debug",
+        "agent"
+      ]
+    },
+    {
+      "name": "write_file",
+      "description": "Write or rewrite a file completely. Overwrites the entire file with contents (or creates it if it does not exist). Note: for small, localized changes to an existing file, prefer edit_file to save tokens and avoid merge conflicts. Use write_file when replacing the entire file or creating a new file. The human reviews the proposal in ediff before it is saved.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or project-relative path of the file to write or create."
+          },
+          "contents": {
+            "type": "string",
+            "description": "Complete contents of the file."
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-sentence justification, shown during review."
+          }
+        },
+        "required": [
+          "file_path",
+          "contents"
+        ]
+      },
+      "aliases": [
+        "write"
+      ],
+      "modes": [
+        "agent"
+      ]
+    }
+  ]
+}

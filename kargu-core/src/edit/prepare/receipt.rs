@@ -305,6 +305,15 @@ impl FileResult {
     pub(crate) fn index(&self) -> FileIndex {
         self.file
     }
+    pub(crate) fn hunks(&self) -> Option<crate::edit::types::HunkCount> {
+        self.hunks
+    }
+    pub(crate) fn saved(&self) -> bool {
+        self.saved
+    }
+    pub(crate) fn hook_modified(&self) -> bool {
+        self.hook_modified
+    }
 }
 #[derive(Clone, Serialize)]
 pub(crate) struct VerifiedReceipt {
@@ -318,6 +327,11 @@ pub(crate) struct VerifiedReceipt {
 impl VerifiedReceipt {
     pub(crate) fn has_applied(&self) -> bool {
         self.files_applied.get() > 0
+    }
+    pub(crate) fn has_modified(&self) -> bool {
+        self.files
+            .iter()
+            .any(|file| matches!(file.outcome, FileOutcome::Applied | FileOutcome::Partial))
     }
     pub(crate) fn files(&self) -> &[FileResult] {
         &self.files

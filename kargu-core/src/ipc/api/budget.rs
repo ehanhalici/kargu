@@ -3,6 +3,7 @@
 use super::{Fault, RpcId, fault, protocol};
 use crate::{
     application::{
+        RunHandle,
         budget::{
             AttemptCharge, Budget, BudgetLimits, BudgetSnapshot, DebitKind, ObservedUsage, Refusal,
             Sealed,
@@ -10,7 +11,7 @@ use crate::{
         host::{Host, ReadScope},
     },
     constants::{limits, protocol::methods},
-    domain::{ApplicationId, BudgetId, Deadline, ExecutionTimeout},
+    domain::{ApplicationId, BudgetId, Deadline, ExecutionTimeout, RunId},
     error::CoreError,
 };
 use serde::Deserialize;
@@ -65,6 +66,8 @@ struct OwnedRequest {
 pub(super) struct BudgetRef {
     pub budget_id: BudgetId,
     pub kind: DebitKind,
+    #[serde(skip)]
+    pub native_run: Option<RunId>,
 }
 pub(super) struct Charge {
     pub id: BudgetId,
@@ -142,6 +145,7 @@ struct Closing {
 }
 struct Owned {
     scope: ReadScope,
+    native_run: Option<RunId>,
     meter: Meter,
     close: Option<Closing>,
 }
@@ -151,6 +155,56 @@ pub(super) struct Budgets {
     entries: HashMap<BudgetId, Owned>,
 }
 impl Budgets {
+    pub fn open_run(
+        &mut self,
+        host: &Host,
+        run: &RunHandle,
+        limits: BudgetLimits,
+    ) -> Result<BudgetId, CoreError> {
+        run.check_live()?;
+        let scope = ReadScope {
+            application_id: run.scope().application_id().clone(),
+            session_id: run.scope().session_id().clone(),
+        };
+        if !host.owns_read_scope(&scope) {
+            return Err(CoreError::StaleOwner);
+        }
+        if self.entries.len() >= crate::constants::limits::MAX_APPLICATIONS
+            || self
+                .entries
+                .values()
+                .any(|entry| entry.scope.application_id == scope.application_id)
+        {
+            return Err(CoreError::Busy);
+        }
+        let budget = Budget::new(limits, run.deadline());
+        let id = budget.id().clone();
+        self.entries.insert(
+            id.clone(),
+            Owned {
+                scope,
+                native_run: Some(run.scope().run_id().clone()),
+                meter: Meter::Open(budget),
+                close: None,
+            },
+        );
+        Ok(id)
+    }
+    pub fn close_run(&mut self, run: &RunHandle, id: &BudgetId) -> Result<Value, CoreError> {
+        let entry = self.entries.get(id).ok_or(CoreError::StaleOwner)?;
+        if entry.native_run.as_ref() != Some(run.scope().run_id())
+            || &entry.scope.application_id != run.scope().application_id()
+            || &entry.scope.session_id != run.scope().session_id()
+        {
+            return Err(CoreError::StaleOwner);
+        }
+        if !entry.meter.drained() {
+            return Err(CoreError::Busy);
+        }
+        let snapshot = json!(entry.meter.snapshot());
+        self.entries.remove(id);
+        Ok(snapshot)
+    }
     pub fn owns_application(&self, id: &ApplicationId) -> bool {
         self.entries
             .values()
@@ -217,6 +271,7 @@ impl Budgets {
                 budget.id().clone(),
                 Owned {
                     scope: request.scope,
+                    native_run: None,
                     meter: Meter::Open(budget),
                     close: None,
                 },
@@ -232,6 +287,16 @@ impl Budgets {
         if method != methods::API_BUDGET_CLOSE {
             return Err(Fault::params());
         }
+        if self
+            .entries
+            .get(&request.budget_id)
+            .is_some_and(|entry| entry.native_run.is_some())
+        {
+            return Err(fault(
+                "budget_busy",
+                "Native run owns this accounting lifetime",
+            ));
+        }
         let entry = self.entries.remove(&request.budget_id).ok_or_else(stale)?;
         if entry.close.is_some() {
             self.entries.insert(request.budget_id, entry);
@@ -241,6 +306,7 @@ impl Budgets {
             request.budget_id,
             Owned {
                 scope: entry.scope,
+                native_run: entry.native_run,
                 meter: entry.meter.seal(),
                 close: Some(Closing { id, publish: true }),
             },
@@ -295,6 +361,7 @@ impl Budgets {
         scope: &ReadScope,
         reference: &BudgetRef,
     ) -> Result<Charge, AdmissionFailure> {
+        self.check_native_reference(reference)?;
         let budget = self.open_meter(host, scope, &reference.budget_id)?;
         let charge = budget.admit(reference.kind)?;
         Ok(Charge {
@@ -328,8 +395,19 @@ impl Budgets {
         scope: &ReadScope,
         reference: &BudgetRef,
     ) -> Result<(), AdmissionFailure> {
+        self.check_native_reference(reference)?;
         self.open_meter(host, scope, &reference.budget_id)?
             .preflight(reference.kind)?;
+        Ok(())
+    }
+    fn check_native_reference(&self, reference: &BudgetRef) -> Result<(), AdmissionFailure> {
+        if self
+            .entries
+            .get(&reference.budget_id)
+            .is_none_or(|entry| entry.native_run != reference.native_run)
+        {
+            return Err(AdmissionFailure::StaleOwner);
+        }
         Ok(())
     }
     pub fn snapshot(&self, id: &BudgetId) -> Option<Value> {
@@ -362,6 +440,7 @@ impl Budgets {
                     id,
                     Owned {
                         scope: entry.scope,
+                        native_run: entry.native_run,
                         meter: entry.meter.seal(),
                         close: entry.close,
                     },
@@ -372,7 +451,10 @@ impl Budgets {
             .entries
             .iter()
             .filter(|(id, entry)| {
-                matches!(entry.meter, Meter::Sealed(_)) && entry.meter.drained() && !retained(id)
+                entry.native_run.is_none()
+                    && matches!(entry.meter, Meter::Sealed(_))
+                    && entry.meter.drained()
+                    && !retained(id)
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -430,6 +512,7 @@ mod tests {
         let reference = BudgetRef {
             budget_id: budget_id.clone(),
             kind: DebitKind::NormalRequest,
+            native_run: None,
         };
         let charge = budgets
             .admit(&host, &typed, Some(&reference), true)?
@@ -499,6 +582,7 @@ mod tests {
         let reference = BudgetRef {
             budget_id: budget_id.clone(),
             kind: DebitKind::NormalRequest,
+            native_run: None,
         };
         let charge = budgets
             .admit(&host, &typed, Some(&reference), true)?

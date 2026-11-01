@@ -128,4 +128,5 @@ pub(crate) struct PatchWork {
     pub(crate) id: PreparationId,
     pub(super) inspection: Inspection,
     pub(super) deadline: Instant,
+    pub(crate) parent: Option<super::ParentEdit>,
 }

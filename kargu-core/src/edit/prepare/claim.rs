@@ -24,12 +24,19 @@ pub(crate) struct ClaimWork {
     pub(crate) origin: OriginId,
     pub(super) artifact: Arc<Artifact>,
     pub(super) deadline: Instant,
+    pub(crate) parent: Option<super::ParentEdit>,
 }
 pub(crate) struct ClaimedAction {
     pub(crate) action: EditorAction,
     pub(crate) settings: PreparedEditorSettings,
+    pub(crate) parent: Option<super::ParentEdit>,
 }
 impl ClaimWork {
+    pub(crate) fn cancellation(&self) -> CancellationToken {
+        self.parent
+            .as_ref()
+            .map_or_else(CancellationToken::new, super::ParentEdit::cancellation)
+    }
     pub(crate) fn execute(self, cancel: &CancellationToken) -> Result<ClaimedAction, CoreError> {
         checkpoint(cancel, self.deadline)?;
         let entries: Vec<(&Prepared, OperationKind)> = match self.artifact.as_ref() {
@@ -49,6 +56,12 @@ impl ClaimWork {
         };
         let (first, _) = entries.first().ok_or(EditError::InvalidEvidence)?;
         let root = first.root.clone();
+        if let Some(parent) = &self.parent {
+            let workspace = parent.workspace()?;
+            if !workspace.same_capture(&root) {
+                return Err(CoreError::StaleOwner);
+            }
+        }
         let config = first.config_revision;
         let policy = first.policy_revision;
         let review = first.review_mode;
@@ -109,6 +122,10 @@ impl ClaimWork {
         )?
         .prepare_editor()?;
         checkpoint(cancel, self.deadline)?;
-        Ok(ClaimedAction { action, settings })
+        Ok(ClaimedAction {
+            action,
+            settings,
+            parent: self.parent,
+        })
     }
 }

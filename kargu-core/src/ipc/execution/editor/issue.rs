@@ -268,7 +268,7 @@ impl Finishing {
                 } else {
                     crate::application::ToolOutcome::OutcomeUnknown
                 };
-                let rollback_available = if durable && live_owner && receipt.has_applied() {
+                let rollback_available = if durable && live_owner && receipt.has_modified() {
                     actor
                         .edits
                         .record_applied(&scope.session_id, id, preparation, &receipt)
@@ -277,6 +277,35 @@ impl Finishing {
                     false
                 };
                 effect.complete(actor, outcome)?;
+                // File results contain only bounded identities/counts/hashes;
+                // source text and editor objects are skipped by serialization.
+                let mut summary =
+                    serde_json::to_value(&receipt).map_err(|_| CoreError::InvalidToolOutput)?;
+                if let Some(object) = summary.as_object_mut() {
+                    object.insert("tool_outcome".into(), json!(outcome));
+                    if !durable {
+                        object.insert("outcome".into(), json!("outcome_unknown"));
+                    }
+                    object.insert("edit_id".into(), json!(id));
+                    object.insert("journal_committed".into(), json!(durable));
+                    object.insert("rollback_available".into(), json!(rollback_available));
+                    object.insert(
+                        "files_saved".into(),
+                        json!(receipt.files().iter().filter(|file| file.saved()).count()),
+                    );
+                    object.insert(
+                        "hook_modified".into(),
+                        json!(receipt.files().iter().any(|file| file.hook_modified())),
+                    );
+                }
+                actor.edits.record_parent_result(
+                    &scope.session_id,
+                    origin,
+                    crate::edit::prepare::ParentResult {
+                        outcome,
+                        text: summary.to_string(),
+                    },
+                );
                 if let Some(request_id) = request_id {
                     replies.push(if durable {
                         let full = protocol::success(
@@ -323,7 +352,7 @@ impl Finishing {
                 }
             }
         }
-        actor.finish(&self.run)?;
+        super::finish_standalone(actor, &self.run)?;
         actor.edits.release_claim(&scope.session_id, preparation)?;
         Ok((replies, settled))
     }

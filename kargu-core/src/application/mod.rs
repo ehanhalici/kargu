@@ -1,10 +1,20 @@
 //! Single-writer admission, claims, tool ledger and revoke/drain/release lifecycle.
 
+pub mod agent;
 pub mod budget;
+mod claim;
+mod history;
+mod steps;
+pub use claim::{ClaimIntent, ClaimLease, PreparedRun, RequestedWorkspace, RunClaim};
 pub mod host;
 mod jobs;
 
-use crate::{constants::limits, domain::*, error::CoreError, security::Workspace};
+use crate::{
+    constants::limits,
+    domain::*,
+    error::CoreError,
+    security::{ToolRegistry, Workspace},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -174,8 +184,13 @@ pub struct RunHandle {
     settings: RunSettings,
     deadline: Deadline,
     resources: Arc<Resources>,
+    registry: Arc<ToolRegistry>,
 }
 impl RunHandle {
+    /// Immutable application catalog captured at claim acquisition.
+    pub fn tool_registry(&self) -> &ToolRegistry {
+        &self.registry
+    }
     /// Borrow immutable captured scope.
     pub fn scope(&self) -> &RunScope {
         &self.scope
@@ -247,7 +262,7 @@ impl Drop for RunLease {
 }
 
 /// Canonical terminal classification. Human text never controls retry or success.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolOutcome {
     /// Executor returned exit success.
@@ -279,10 +294,16 @@ impl ToolOutcome {
     }
 }
 
+enum CallAdmission {
+    Unclaimed,
+    Claimed,
+}
 struct Call {
     name: ToolName,
     started: bool,
     outcome: Option<ToolOutcome>,
+    admission: CallAdmission,
+    safety: Option<ToolSafetyLevel>,
 }
 struct ActiveRun {
     handle: RunHandle,
@@ -290,6 +311,8 @@ struct ActiveRun {
     call_order: Vec<ToolCallId>,
     spent: StepCount,
     cleanup_failed: bool,
+    agent: Option<agent::AgentMachine>,
+    steps: HashMap<ToolStepId, steps::ExecutionStep>,
 }
 
 /// Protocol repair evidence for one committed tool call.
@@ -319,9 +342,14 @@ pub struct RunCompletion {
 /// Domain actor: all state changes require exclusive access, never an I/O await.
 pub struct ApplicationActor {
     id: ApplicationId,
+    registry: Arc<ToolRegistry>,
     sessions: HashSet<SessionId>,
+    histories: HashMap<SessionId, crate::history::History>,
+    session_events: HashMap<SessionId, SessionEventSequence>,
+    history_imports: crate::history::HistoryImports,
     generation: Generation,
     active: Option<ActiveRun>,
+    preparing: Option<claim::PendingClaim>,
     job_runs: HashMap<RunId, ActiveRun>,
     editor_runs: HashMap<RunId, ActiveRun>,
     pub(crate) models: crate::models::service::ModelService,
@@ -333,9 +361,14 @@ impl ApplicationActor {
     pub fn new(id: ApplicationId) -> Self {
         Self {
             id,
+            registry: Arc::new(ToolRegistry::default()),
             sessions: HashSet::new(),
+            histories: HashMap::new(),
+            session_events: HashMap::new(),
+            history_imports: crate::history::HistoryImports::default(),
             generation: Generation::ZERO,
             active: None,
+            preparing: None,
             job_runs: HashMap::new(),
             editor_runs: HashMap::new(),
             models: crate::models::service::ModelService::default(),
@@ -343,22 +376,102 @@ impl ApplicationActor {
             configuration: crate::configuration::policy::ConfigurationService::default(),
         }
     }
+    /// Compose an application with its explicit trusted execution catalog.
+    pub fn with_registry(id: ApplicationId, registry: ToolRegistry) -> Self {
+        let mut actor = Self::new(id);
+        actor.registry = Arc::new(registry);
+        actor
+    }
+    /// Detached immutable catalog; siblings never share mutable registrations.
+    pub fn tool_registry(&self) -> Arc<ToolRegistry> {
+        self.registry.clone()
+    }
     /// Register a new conversation without admitting a run.
     pub fn create_session(&mut self) -> SessionId {
         let id = SessionId::new();
         self.sessions.insert(id.clone());
+        self.histories
+            .insert(id.clone(), crate::history::History::default());
+        self.session_events
+            .insert(id.clone(), SessionEventSequence::ZERO);
         id
     }
     /// Registered conversation count for host admission limits.
     pub fn session_count(&self) -> usize {
         self.sessions.len()
     }
+    /// Advance native UI event ordering without allowing a view to mutate history.
+    pub(crate) fn next_session_event(
+        &mut self,
+        session: &SessionId,
+    ) -> Result<SessionEventSequence, CoreError> {
+        if !self.owns_session(session) {
+            return Err(CoreError::StaleOwner);
+        }
+        let sequence = self
+            .session_events
+            .get_mut(session)
+            .ok_or(CoreError::StaleOwner)?;
+        *sequence = sequence.next()?;
+        Ok(*sequence)
+    }
     /// Whether the application owns this conversation.
     pub fn owns_session(&self, session: &SessionId) -> bool {
         self.sessions.contains(session)
     }
+    pub(crate) fn session_projection(
+        &self,
+        session: &SessionId,
+    ) -> Result<serde_json::Value, CoreError> {
+        let history = self.session_history(session)?;
+        let sequence = self
+            .session_events
+            .get(session)
+            .ok_or(CoreError::StaleOwner)?;
+        let preparing = self
+            .preparing
+            .as_ref()
+            .filter(|pending| pending.claim.scope().session_id() == session);
+        let active = self
+            .active
+            .as_ref()
+            .filter(|active| active.handle.scope().session_id() == session);
+        let (state, scope, phase) = if let Some(pending) = preparing {
+            let state = if pending.claim.check_live().is_ok() {
+                "preparing"
+            } else {
+                "draining"
+            };
+            (state, Some(pending.claim.scope()), None)
+        } else if let Some(active) = active {
+            let state = if active.handle.check_live().is_ok() {
+                "running"
+            } else {
+                "draining"
+            };
+            let phase = active
+                .agent
+                .as_ref()
+                .map(|_| self.agent_phase(&active.handle))
+                .transpose()?;
+            (state, Some(active.handle.scope()), phase)
+        } else {
+            ("idle", None, None)
+        };
+        Ok(
+            serde_json::json!({"state":state,"active_run":scope,"phase":phase,
+            "generation":scope.map_or(self.generation, RunScope::generation),"sequence":sequence,"history_revision":history.revision()}),
+        )
+    }
     /// Close only an idle conversation.
     pub fn close_session(&mut self, session: &SessionId) -> Result<(), CoreError> {
+        if self
+            .preparing
+            .as_ref()
+            .is_some_and(|pending| pending.claim.scope().session_id() == session)
+        {
+            return Err(CoreError::Busy);
+        }
         if self
             .active
             .iter()
@@ -369,6 +482,9 @@ impl ApplicationActor {
             return Err(CoreError::Busy);
         }
         if self.sessions.remove(session) {
+            self.history_imports.revoke(Some(session));
+            self.histories.remove(session);
+            self.session_events.remove(session);
             self.models.close_session(session);
             self.configuration.close_session(session);
             self.edits.close_session(session);
@@ -382,6 +498,9 @@ impl ApplicationActor {
         if !self.sessions.remove(session) {
             return Err(CoreError::StaleOwner);
         }
+        self.session_events.remove(session);
+        self.revoke_preparing(Some(session));
+        self.history_imports.revoke(Some(session));
         self.models.close_session(session);
         self.configuration.close_session(session);
         self.edits.close_session(session);
@@ -395,14 +514,18 @@ impl ApplicationActor {
                 run.handle.resources.cancellation.cancel();
             }
         }
+        self.prune_retired_histories();
         Ok(())
     }
     /// Revoke application admission/publication while retaining live run ledgers.
     pub(crate) fn revoke_all(&mut self) {
+        self.revoke_preparing(None);
+        self.history_imports.revoke(None);
         self.models.revoke();
         self.configuration.revoke();
         self.edits.revoke();
         self.sessions.clear();
+        self.session_events.clear();
         for run in self
             .active
             .iter()
@@ -411,9 +534,14 @@ impl ApplicationActor {
         {
             run.handle.resources.cancellation.cancel();
         }
+        self.prune_retired_histories();
     }
     pub(crate) fn drained(&self) -> bool {
-        self.active.is_none() && self.job_runs.is_empty() && self.editor_runs.is_empty()
+        self.active.is_none()
+            && self.preparing.is_none()
+            && self.job_runs.is_empty()
+            && self.editor_runs.is_empty()
+            && self.history_imports.drained()
     }
     /// Claim before any async preparation, policy UI, spawn or view effect.
     pub fn admit(
@@ -421,7 +549,10 @@ impl ApplicationActor {
         session: &SessionId,
         settings: RunSettings,
     ) -> Result<RunHandle, CoreError> {
-        if self.active.is_some() {
+        if self.active.is_some() || self.preparing.is_some() {
+            return Err(CoreError::Busy);
+        }
+        if self.history_imports.owns_session(session) {
             return Err(CoreError::Busy);
         }
         self.check_admission()?;
@@ -454,6 +585,7 @@ impl ApplicationActor {
         let generation = self.generation.next()?;
         let deadline = settings.timeout.start()?;
         let handle = RunHandle {
+            registry: self.registry.clone(),
             scope: RunScope {
                 purpose,
                 application_id: self.id.clone(),
@@ -475,6 +607,8 @@ impl ApplicationActor {
         };
         self.generation = generation;
         Ok(ActiveRun {
+            steps: HashMap::new(),
+            agent: None,
             handle,
             calls: HashMap::new(),
             call_order: Vec::new(),
@@ -547,8 +681,41 @@ impl ApplicationActor {
                 name,
                 started: false,
                 outcome: None,
+                admission: CallAdmission::Unclaimed,
+                safety: None,
             },
         );
+        Ok(())
+    }
+    /// Bind a committed model call to one gate without charging it a second time.
+    pub(crate) fn reserve_call(
+        &mut self,
+        handle: &RunHandle,
+        id: ToolCallId,
+        name: ToolName,
+        safety: ToolSafetyLevel,
+    ) -> Result<(), CoreError> {
+        self.validate(handle)?;
+        if let Some(agent) = &self.owned(handle)?.agent {
+            agent.check_dispatch(&id)?;
+        }
+        if !self.owned(handle)?.calls.contains_key(&id) {
+            self.register_call(handle, id.clone(), name.clone())?;
+        }
+        let call = self
+            .owned_mut(handle)?
+            .calls
+            .get_mut(&id)
+            .ok_or(CoreError::StaleOwner)?;
+        if call.name != name
+            || call.started
+            || call.outcome.is_some()
+            || matches!(call.admission, CallAdmission::Claimed)
+        {
+            return Err(CoreError::AlreadyCompleted);
+        }
+        call.admission = CallAdmission::Claimed;
+        call.safety = Some(safety);
         Ok(())
     }
     pub(crate) fn mark_started(
@@ -562,7 +729,10 @@ impl ApplicationActor {
             .calls
             .get_mut(id)
             .ok_or(CoreError::StaleOwner)?;
-        if call.started || call.outcome.is_some() {
+        if call.started
+            || call.outcome.is_some()
+            || !matches!(call.admission, CallAdmission::Claimed)
+        {
             return Err(CoreError::AlreadyCompleted);
         }
         call.started = true;
@@ -575,6 +745,9 @@ impl ApplicationActor {
         id: &ToolCallId,
         outcome: ToolOutcome,
     ) -> Result<(), CoreError> {
+        if self.call_steps_settled(handle, id)? == Some(false) {
+            return Err(CoreError::Busy);
+        }
         let call = self
             .owned_mut(handle)?
             .calls
@@ -584,6 +757,7 @@ impl ApplicationActor {
             return Err(CoreError::AlreadyCompleted);
         }
         call.outcome = Some(outcome);
+        self.retire_call_steps(handle, id)?;
         Ok(())
     }
     pub(crate) fn quarantine(&mut self, handle: &RunHandle) -> Result<(), CoreError> {
@@ -606,19 +780,27 @@ impl ApplicationActor {
             return Err(CoreError::Busy);
         }
         let interrupted = handle.check_live().is_err();
+        if !interrupted && run.agent.as_ref().is_some_and(|agent| !agent.terminal()) {
+            return Err(CoreError::Busy);
+        }
         if !interrupted && run.calls.values().any(|call| call.outcome.is_none()) {
+            return Err(CoreError::Busy);
+        }
+        if !interrupted && run.steps.values().any(|step| !step.settled()) {
             return Err(CoreError::Busy);
         }
         let mut results = Vec::new();
         for id in &run.call_order {
             let call = run.calls.get(id).ok_or(CoreError::StaleOwner)?;
-            let outcome = call.outcome.unwrap_or(if call.started {
-                ToolOutcome::OutcomeUnknown
-            } else if handle.deadline.expired() {
-                ToolOutcome::Timeout
-            } else {
-                ToolOutcome::Cancelled
-            });
+            let outcome = call.outcome.unwrap_or(
+                if call.started && call.safety != Some(ToolSafetyLevel::SafeReadOnly) {
+                    ToolOutcome::OutcomeUnknown
+                } else if handle.deadline.expired() {
+                    ToolOutcome::Timeout
+                } else {
+                    ToolOutcome::Cancelled
+                },
+            );
             results.push(ToolResult {
                 tool_call_id: id.clone(),
                 tool_name: call.name.clone(),
@@ -631,6 +813,23 @@ impl ApplicationActor {
             scope: handle.scope.clone(),
             tool_results: results,
         };
+        if handle.scope.purpose() == RunPurpose::AgentTurn {
+            let history = self
+                .histories
+                .get_mut(handle.scope.session_id())
+                .ok_or(CoreError::StaleOwner)?;
+            if !interrupted && !history.settled() {
+                return Err(CoreError::Busy);
+            }
+            if interrupted {
+                let fallback = if handle.deadline.expired() {
+                    ToolOutcome::Timeout
+                } else {
+                    ToolOutcome::Cancelled
+                };
+                history.repair_missing(&completion.tool_results, fallback)?;
+            }
+        }
         handle.resources.cancellation.cancel();
         match handle.scope.purpose() {
             RunPurpose::AgentTurn => self.active = None,
@@ -641,11 +840,13 @@ impl ApplicationActor {
                 self.editor_runs.remove(handle.scope.run_id());
             }
         }
+        self.prune_retired_histories();
         Ok(completion)
     }
 }
 impl Drop for ApplicationActor {
     fn drop(&mut self) {
+        self.revoke_preparing(None);
         for run in self
             .active
             .iter()

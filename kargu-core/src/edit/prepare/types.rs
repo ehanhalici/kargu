@@ -89,6 +89,11 @@ impl TryFrom<u64> for DocumentTick {
         }
     }
 }
+impl DocumentTick {
+    pub(super) fn get(self) -> u64 {
+        self.0
+    }
+}
 macro_rules! stat {
     ($name:ident) => {
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -195,6 +200,10 @@ pub(super) enum Intent {
         path: EditPath,
         new_bytes: TextBytes,
     },
+    Symbol {
+        path: EditPath,
+        new_bytes: TextBytes,
+    },
     Patch {
         patch_bytes: TextBytes,
     },
@@ -202,7 +211,9 @@ pub(super) enum Intent {
 impl Intent {
     pub(super) fn path(&self) -> Option<&EditPath> {
         match self {
-            Self::Replace { path, .. } | Self::Write { path, .. } => Some(path),
+            Self::Replace { path, .. } | Self::Write { path, .. } | Self::Symbol { path, .. } => {
+                Some(path)
+            }
             Self::Patch { .. } => None,
         }
     }
@@ -211,10 +222,12 @@ impl Intent {
 #[serde(deny_unknown_fields)]
 pub(super) struct Begin {
     pub origin_id: OriginId,
+    pub service_id: Option<crate::domain::EditServiceId>,
     pub root: PathBuf,
     pub mode: Mode,
     pub intent: Intent,
     pub live: Option<LiveDocument>,
+    pub language_source: Option<crate::sensors::symbols::LanguageSource>,
     pub config_revision: ConfigRevision,
     pub policy_revision: PolicyRevision,
     pub review_mode: ReviewMode,
