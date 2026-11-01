@@ -222,5 +222,71 @@
                 (should (= (length (plist-get changes :rows)) (if (equal service service-a) 0 1))))))
         (delete-directory root t)))))
 
+(ert-deftest kargu-edit-history-close-epoch-loss-never-cancels-a-replacement-request-test ()
+  (dolist (transition '(cancel reply))
+    (kargu-edit-history-test--with-lease
+      (let (callback task result failure delivered cancelled)
+        (cl-letf (((symbol-function 'kargu-bridge-call)
+                   (lambda (_connection _method _params receive &rest _) (setq callback receive) "reused-id"))
+                  ((symbol-function 'kargu-bridge-cancel)
+                   (lambda (_connection id) (push id cancelled))))
+          (setq task (kargu-bridge-edit-history-close-service
+                      application "edit_service_fixture"
+                      (lambda (value error-data) (setq result value failure error-data delivered t))))
+          (setf (kargu-bridge-connection-epoch connection) "replacement-epoch")
+          (if (eq transition 'cancel)
+              (progn (kargu-async-cancel task) (should-not delivered))
+            (funcall callback (kargu-bridge--object "closed" t "drained" t) nil)
+            (should delivered)
+            (should failure)
+            (should-not result))
+          (should-not (kargu-async-pending-p task))
+          (should-not cancelled))))))
+
+(ert-deftest kargu-edit-history-close-stale-scope-does-not-publish-drained-test ()
+  (kargu-edit-history-test--with-lease
+    (let (callback failure result)
+      (cl-letf (((symbol-function 'kargu-bridge-call)
+                 (lambda (_connection _method _params receive &rest _) (setq callback receive) "close"))
+                ((symbol-function 'kargu-bridge-cancel) #'ignore))
+        (kargu-bridge-edit-history-close-service
+         application "edit_service_fixture"
+         (lambda (value error-data) (setq result value failure error-data)))
+        (puthash "session_id" "sess_replacement" scope)
+        (funcall callback (kargu-bridge--object "closed" t "drained" t) nil)
+        (should failure)
+        (should-not result)))))
+
+(ert-deftest kargu-edit-history-close-poll-retains-its-original-epoch-test ()
+  (kargu-edit-history-test--with-lease
+    (let ((schedule (symbol-function 'run-at-time))
+          (cancel-timer-function (symbol-function 'cancel-timer))
+          (calls 0) poll done failure cancelled)
+      (cl-letf (((symbol-function 'kargu-bridge-call)
+                 (lambda (_connection _method _params receive &rest _)
+                   (cl-incf calls)
+                   (funcall receive (kargu-bridge--object "closed" t "drained" :json-false) nil)
+                   "completed-close"))
+                ((symbol-function 'kargu-bridge-cancel)
+                 (lambda (_connection id) (push id cancelled)))
+                ((symbol-function 'run-at-time)
+                 (lambda (delay repeat callback &rest arguments)
+                   (if (equal delay 0.1)
+                       (progn (setq poll (lambda () (apply callback arguments))) 'poll-timer)
+                     (apply schedule delay repeat callback arguments))))
+                ((symbol-function 'cancel-timer)
+                 (lambda (timer) (unless (eq timer 'poll-timer) (funcall cancel-timer-function timer)))))
+        (kargu-bridge-edit-history-close-service
+         application "edit_service_fixture"
+         (lambda (_value error-data) (setq done t failure error-data)))
+        (should poll)
+        (should-not done)
+        (setf (kargu-bridge-connection-epoch connection) "replacement-epoch")
+        (funcall poll)
+        (should done)
+        (should failure)
+        (should (= calls 1))
+        (should-not cancelled)))))
+
 (provide 'tests/test-native-edit-history)
 ;;; test-native-edit-history.el ends here

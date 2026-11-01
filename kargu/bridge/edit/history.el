@@ -196,31 +196,47 @@ Capture the existing lease; never reconnect or adopt another application."
   (let* ((binding (and application (gethash :native-core (kargu-application-services application))))
          (connection (and binding (kargu-bridge-application-connection binding)))
          (scope (and connection (kargu-bridge-application-current-scope application connection)))
+         (epoch (and connection (copy-sequence (kargu-bridge-connection-epoch connection))))
          (task (kargu-async-start (or callback #'ignore) :parent nil :owner nil :timeout 30))
-         (service-id (and (stringp service-id) (copy-sequence service-id))))
+         (service-id (and (stringp service-id) (copy-sequence service-id)))
+         active)
     (cl-labels
-        ((poll ()
-           (if (not (and (kargu-async-pending-p task) service-id scope
-                         (kargu-bridge-application-scope-equal-p
-                          scope (kargu-bridge-application-current-scope application connection))))
+        ((current-p ()
+           (and (kargu-async-pending-p task) service-id scope
+                (equal epoch (kargu-bridge-connection-epoch connection))
+                (kargu-bridge-application-scope-equal-p
+                 scope (kargu-bridge-application-current-scope application connection))))
+         (poll ()
+           (if (not (current-p))
                (kargu-async-finish task nil (kargu-bridge--fault "stale_owner"))
-             (let ((id (kargu-bridge-call
+             (let* ((received nil)
+                    (id (kargu-bridge-call
                         connection "edit/history"
                         (kargu-bridge--object
                          "scope" scope "arguments"
                          (kargu-bridge--object "action" "close_service" "service_id" service-id))
-                        (kargu-async-wrap task #'receive))))
-               (when id
-                 (kargu-async-add-cleanup task (lambda () (kargu-bridge-cancel connection id)))))))
+                        (kargu-async-wrap task (lambda (value failure)
+                                                (setq received t active nil)
+                                                (receive value failure))))))
+               (when (and (not received) id)
+                 (if (kargu-async-pending-p task) (setq active id)
+                   (when (equal epoch (kargu-bridge-connection-epoch connection))
+                     (kargu-bridge-cancel connection id)))))))
          (receive (value failure)
            (cond
             (failure (kargu-async-finish task nil failure))
+            ((not (current-p)) (kargu-async-finish task nil (kargu-bridge--fault "stale_owner")))
             ((not (and (hash-table-p value) (eq (gethash "closed" value) t)
                        (memq (gethash "drained" value) '(t :json-false))))
              (kargu-async-finish task nil (kargu-bridge--fault "invalid_edit_history")))
             ((eq (gethash "drained" value) t) (kargu-async-finish task value nil))
             (t (let ((timer (run-at-time 0.1 nil (kargu-async-wrap task #'poll))))
                  (kargu-async-add-cleanup task (lambda () (cancel-timer timer))))))))
+      (kargu-async-add-cleanup
+       task (lambda ()
+              (when (and active (equal epoch (kargu-bridge-connection-epoch connection)))
+                (kargu-bridge-cancel connection active))
+              (setq active nil)))
       (poll))
     task))
 

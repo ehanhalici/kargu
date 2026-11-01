@@ -57,3 +57,18 @@ a sibling service remains pending. The complete affected edit suite passed
 and non-mutating production checkdoc. Rust was unchanged after the validation
 above. Conversation-scoped readers and the remaining legacy verification
 consumers are still open.
+
+## Close acknowledgement ownership
+
+The close-service port also captures scope and connection epoch. A stale reply
+cannot certify drain, a pending poll cannot switch epochs, and cancellation
+cannot target a replacement connection's reused request ID. Inline completion
+is recorded before accepting the returned request ID, so an already completed
+request does not remain active while waiting for the next poll.
+
+Three close regressions fail against the preceding implementation and pass with
+this change. The affected edit/service/metadata suite passed 92/92, together with
+warning-as-error Elisp compilation, parenthesis checks and production checkdoc.
+Rust and TLA+ were unchanged. This is todo 3.8a3, not public service-close cutover:
+that caller still needs to retain its original edit lease and await native drain
+before discarding its remaining resources. Its uncommitted WIP was preserved.

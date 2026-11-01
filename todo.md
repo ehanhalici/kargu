@@ -757,6 +757,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         change DTO → exact consume ve ayrı servis izolasyonu pipe testinde geçti.
         77/77 odak ERT, değişen Elisp Werror/parantez ve production checkdoc temiz.
         Genel verification tüketicileri ve conversation-scoped görünüm açık kalır.
+      - [x] **3.8a3 Close portunun sahiplik sınırı:** scope/epoch kaybından sonra
+        gelen `drained` cevabı başarı olmasın; polling ve cancellation yeni
+        bağlantıyı benimsemesin. Inline cevapta bitmiş request ID tutulmasın.
+        Üç regresyon önceki kodda red, düzeltilmiş kodda green; edit/service/
+        metadata odak ERT 92/92 ve Elisp Werror/parantez/checkdoc temiz.
+        Public Elisp service close'un ACK/drain beklemesi ve servis lease'inin
+        ilk edit'ten yakalanması hâlâ açık; bu alt iş onları kapatmaz.
     - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller
