@@ -838,6 +838,17 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
           run'ına taşınması 3.8a9a'da geçti. Birleşik Stop/reset/geç ACK model-run
           akışını ve Rust lifecycle/default cutover + legacy run-view kaldırmayı
           tamamlayıp üst 3.8a9'u kapat. 3.8a9a tek başına bu kabul değildir.
+          - [x] **3.8a9b1 Stop/reset/geç cevap runtime kabulü:** gerçek provider/
+            stdio'da Stop → erken callback/reset → busy → gerçek receipt/drain →
+            yeni model run'ı sırasında eski callback + eski receipt + reset
+            senaryosu geçti. Dispatch edilmeyen işlem ve Stop sonrası tamamlanan
+            gerçek save ayrı testli; tek tool sonucu, korunmuş pending borcu,
+            inherited history ve yeni run'ın ayrı istek sayacı doğrulandı.
+            34/34 native agent kabulü, strict Clippy/fmt temiz. Kanıt:
+            `docs/native-stop-reset-acceptance.md`.
+          - [ ] **3.8a9b2 Consumer/default kapanışı:** legacy run-view ve reset
+            orkestrasyonunu son native verification consumer sonrasında kaldır;
+            native backend varsayılanı ve toplu kabul üst 3/5/6 ile tamamla.
     - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller

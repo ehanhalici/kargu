@@ -442,11 +442,13 @@ fn abort_retains_native_edit_claim_until_issued_editor_activity_really_quiesces(
         let journal = tempfile::tempdir()?;
         fs::set_permissions(journal.path(), fs::Permissions::from_mode(0o700))?;
         fs::write(root.path().join("file.txt"), "old\n")?;
-        let (url, server, _requests) = server(vec![tool_reply(
-            "call-edit",
-            "write_file",
-            model_args("write_file"),
-        )])?;
+        let (release, wait) = mpsc::channel();
+        let mut next_reply = answer("after stop");
+        next_reply.release = Some(wait);
+        let (url, server, requests) = server(vec![
+            tool_reply("call-edit", "write_file", model_args("write_file")),
+            next_reply,
+        ])?;
         let mut peer = Peer::start()?;
         peer.initialize()?;
         let scope = peer.scope()?;
@@ -457,6 +459,7 @@ fn abort_retains_native_edit_claim_until_issued_editor_activity_really_quiesces(
         input["edit_policy"] = json!({"review_mode":"auto","save_policy":"save"});
         begin(&mut peer, "native-edit", &scope, input)?;
         let request = reverse(&peer, "editor/run_edit", &mut events)?;
+        let _first_request = requests.recv_timeout(Duration::from_secs(2))?;
         let (prep, descriptor) = prepared(
             &mut peer,
             &scope,
@@ -501,6 +504,24 @@ fn abort_retains_native_edit_claim_until_issued_editor_activity_really_quiesces(
         )?;
         assert_eq!(
             response(&peer, "still-competing", &mut events)?["error"]["data"]["status"],
+            "busy"
+        );
+        let reset = edit_rpc(
+            &mut peer,
+            &scope,
+            "edit/history",
+            json!({"action":"reset_changes"}),
+            &mut events,
+        )?;
+        assert_eq!(reset["result"]["reset"], true);
+        begin(
+            &mut peer,
+            "reset-competing",
+            &scope,
+            prompt(root.path(), &url),
+        )?;
+        assert_eq!(
+            response(&peer, "reset-competing", &mut events)?["error"]["data"]["status"],
             "busy"
         );
         let settled = if applied {
@@ -553,6 +574,67 @@ fn abort_retains_native_edit_claim_until_issued_editor_activity_really_quiesces(
             &mut events,
         )?;
         assert!(replay.get("error").is_some(), "{replay}");
+        // The next model run owns a different run identity. Old callbacks,
+        // receipt uploads and a concurrent reset cannot release or consume it.
+        begin(&mut peer, "after-stop", &scope, prompt(root.path(), &url))?;
+        let followup = requests.recv_timeout(Duration::from_secs(2))?;
+        assert!(
+            followup["messages"]
+                .as_array()
+                .ok_or("followup history")?
+                .iter()
+                .any(|message| message["role"] == "tool" && message["tool_call_id"] == "call-edit")
+        );
+        complete(&mut peer, &request)?;
+        let late_receipt = edit_rpc(
+            &mut peer,
+            &scope,
+            "edit/receipt",
+            json!({"origin_id":request["params"]["origin_id"],"edit_id":grant["edit_id"],
+                "revision":1,"issued_token":token,"input":{"action":"begin","files_total":1}}),
+            &mut events,
+        )?;
+        assert!(late_receipt.get("error").is_some(), "{late_receipt}");
+        let reset = edit_rpc(
+            &mut peer,
+            &scope,
+            "edit/history",
+            json!({"action":"reset_changes"}),
+            &mut events,
+        )?;
+        assert_eq!(reset["result"]["reset"], true);
+        begin(
+            &mut peer,
+            "late-competing",
+            &scope,
+            prompt(root.path(), &url),
+        )?;
+        assert_eq!(
+            response(&peer, "late-competing", &mut events)?["error"]["data"]["status"],
+            "busy"
+        );
+        release.send(())?;
+        let terminal = response(&peer, "after-stop", &mut events)?;
+        assert_eq!(terminal["result"]["status"], "completed", "{terminal}");
+        assert_eq!(
+            terminal["result"]["accounting"]["changes"]["pending_files"],
+            usize::from(applied)
+        );
+        assert_eq!(
+            terminal["result"]["accounting"]["budget"]["requests_spent"],
+            1
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join("file.txt"))?,
+            if applied { TEXT } else { "old\n" }
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["method"] == "session/tool_result")
+                .count(),
+            1
+        );
         server.join().map_err(|_| "server panic")??;
     }
     Ok(())
