@@ -4,6 +4,16 @@ Bu belge; Rust ile geliştirilen arka plan servisleri, CLI araçları, editör k
 
 ---
 
+## 0. Backend ve frontend sınırı — bağlayıcı kullanıcı kuralı
+
+Rust tüm iş mantığının ve orkestrasyonun sahibidir; Elisp yalnız Emacs frontend'i
+ve editör köprüsüdür (2026-11-01 kullanıcı talimatı). Config okuma, provider/model
+keşfi ve HTTP istekleri Rust'ta yapılır; Elisp sonuç DTO'larını listeler. Loop,
+permission, tools, history, cache ve seçim kararları Elisp'te ikinci bir motor
+olarak yaşayamaz. Emacs'e özel buffer/undo/save, Eglot/Dape ve auth-source
+primitifleri ince adaptörlerdir. Eski Elisp motorları tüketici cutover'ı ve eşdeğer
+doğrulamadan sonra kaldırılır; geçici varlıkları hedef mimariyi değiştirmez.
+
 ## 1. Tip Sistemi, Alan Modellemesi ve "Parse, Don't Validate"
 
 * **İlkel Tip Takıntısı Yasağı (No Primitive Obsession):**

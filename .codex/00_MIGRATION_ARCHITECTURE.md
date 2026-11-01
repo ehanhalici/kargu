@@ -33,6 +33,15 @@ testleri gerektirir. Ayrıntılar 01 ve proof/README.md ile eşlenir.
 
 ## 2. Nihai sorumluluk dağılımı
 
+**Bağlayıcı kullanıcı kuralı (2026-11-01):** Rust backend, Elisp yalnız Emacs
+frontend'idir. Config okuma, provider keşfi, endpoint/model çözümleme, model
+listesinin provider'dan alınması, ayrıştırılması ve saklanması dahil bütün iş
+mantığı ve orkestrasyon Rust'a aittir. Elisp hazır DTO'ları gösterir, kullanıcı
+olaylarını iletir ve Emacs'e özel buffer/undo/save, Eglot/Dape, auth-source
+erişimini ince adaptörlerle sağlar. Bu adaptörler iş kararı, bağımsız cache,
+permission motoru veya agent loop içermez. Mevcut legacy Elisp motorları
+taşınması ve kaldırılması gereken göç borcudur; nihai mimarinin istisnası değildir.
+
 Araç bileşimi ilkesi: listeleme/arama/Git motorlarını Rust'ta yeniden yazmak
 yerine `ls`/`rg`/`git` adapter'ları ortak süreç/izin altyapısını kullanır.
 Rust politika, sahiplik ve kaynak ömrünü yönetir. Güncel yön ve geçiş sırası:
@@ -44,8 +53,8 @@ Rust politika, sahiplik ve kaynak ömrünü yönetir. Güncel yön ve geçiş s�
 | Network/OS | Rust | Provider adapter, SSE, retry/breaker, process/job, read/search/Git/webfetch |
 | Güvenlik | Rust + Emacs runtime revalidation | Policy/approval/path/egress; editör kaynağına dokunmadan önce canlı kimlik/revision kontrolü |
 | Edit/review | Hibrit | Rust proposal/diff/review; Emacs buffer/undo/save transaction |
-| Canlı sensör | Emacs | Eglot/Flymake publication, Xref/symbol/range; Dape connection/thread/frame/stop |
-| Görünüm/etkileşim | Emacs | Chat/draft/routing, Markdown/scroll/header, picker/completion, review/approval UI |
+| Canlı sensör | Emacs adaptörü + Rust kararları | Emacs'ten Eglot/Flymake/Xref/Dape ham kanıtı; Rust'ta tazelik, sembol/aralık seçimi ve lifecycle |
+| Görünüm/etkileşim | Emacs | Chat/draft gösterimi, Markdown/scroll/header, picker/completion, review/approval UI; routing ve iş akışı Rust'ta |
 | Harici köprü | Rust uygulama adapter'ları; ayrı MCP adapter'ı | Codex, Antigravity, Claude Code, OpenCode; agent backend ve MCP tool sunumu ayrı capability |
 
 Emacs'in runtime kanıtı olan document tick, diagnostic publication, debugger

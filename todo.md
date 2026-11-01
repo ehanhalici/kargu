@@ -425,6 +425,17 @@ yerine geçer. Mevcut `[x]` işaretleri denetim girdisidir; tüketici bağlantı
 legacy temizliği ve güncel kabul kanıtı olmadan kapanış kanıtı sayılmaz.
 Gerçek kullanıcı session dosyaları ve canlı provider hesapları test girdisi değildir.
 
+**Bağlayıcı frontend/backend kuralı (kullanıcı, 2026-11-01):** Elisp yalnız
+Emacs frontend'i ve Rust ile editör arasındaki köprüdür. Config dosyasını okuma,
+provider/endpoint/model seçimi, provider'a model listesi isteği, yanıt ayrıştırma,
+cache, agent loop, tool/permission politikası, history ve iş akışı kararlarının
+tamamı Rust backend'ine aittir. Elisp Rust'ın DTO'larını gösterir ve kullanıcı
+etkileşimlerini geri iletir. Buffer/undo/save, Eglot/Dape ve auth-source gibi
+Emacs'e özel erişimler ince adaptörlerdir; ayrı bir karar veya orkestrasyon motoru
+kuramaz. Henüz taşınmamış Elisp motorları geçici göç borcudur; yeşil testler veya
+bir RPC wrapper'ının varlığı bu kuralın sağlandığını göstermez. Bir tüketici ancak
+uçtan uca Rust'a taşınıp eski Elisp motoru kaldırılınca kapanır.
+
 Güncelleme: 2026-10-26, native config authority temeli `ff96691`.
 Son dilimde config publication/policy gerçek connection/UI tüketicileriyle Rust'a
 geçti; eski Elisp karar/yazım motorları silindi. Kanıt: 1268/1268 full source ERT;
