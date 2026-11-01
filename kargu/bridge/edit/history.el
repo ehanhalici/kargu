@@ -13,13 +13,18 @@
 (require 'kargu/async)
 (require 'kargu/bridge/application)
 
-(defun kargu-bridge-edit-history--read (application arguments maximum callback parent)
+(defun kargu-bridge-edit-history--read (application arguments maximum callback parent &optional lease)
   "Page native metadata for APPLICATION using ARGUMENTS into CALLBACK.
-MAXIMUM bounds the assembled DTO count; PARENT owns cancellation."
-  (let* ((binding (gethash :native-core (kargu-application-services application)))
-         (connection (and binding (kargu-bridge-application-connection binding)))
-         (scope (and connection (kargu-bridge-application-current-scope application connection)))
-         (epoch (and connection (copy-sequence (kargu-bridge-connection-epoch connection))))
+MAXIMUM bounds DTO count; PARENT owns cancellation.
+LEASE pins the original service owner."
+  (let* ((lease (kargu-bridge-edit-history--copy-lease lease))
+         (binding (gethash :native-core (kargu-application-services application)))
+         (connection (if lease (plist-get lease :connection)
+                       (and binding (kargu-bridge-application-connection binding))))
+         (scope (if lease (plist-get lease :scope)
+                  (and connection (kargu-bridge-application-current-scope application connection))))
+         (epoch (if lease (plist-get lease :epoch)
+                  (and connection (copy-sequence (kargu-bridge-connection-epoch connection)))))
          (revision (gethash "revision" arguments))
          (task (kargu-async-start (or callback #'ignore) :parent parent :timeout 30))
          (cursor 0) (sequence 0) active rows)
@@ -27,6 +32,7 @@ MAXIMUM bounds the assembled DTO count; PARENT owns cancellation."
         ((fail (failure) (kargu-async-finish task nil failure))
          (current-p ()
            (and (kargu-async-pending-p task)
+                (or (null lease) (eq application (plist-get lease :application)))
                 (equal epoch (kargu-bridge-connection-epoch connection))
                 (kargu-bridge-application-scope-equal-p
                  scope (kargu-bridge-application-current-scope application connection))))
@@ -83,22 +89,22 @@ MAXIMUM bounds the assembled DTO count; PARENT owns cancellation."
        (t (read-page))))
     task))
 
-(cl-defun kargu-bridge-edit-history (application &key service-id edit-id revision callback parent)
+(cl-defun kargu-bridge-edit-history (application &key service-id edit-id revision callback parent lease)
   "Read APPLICATION's native undo metadata asynchronously into CALLBACK.
 With EDIT-ID, read its files at the exact previously observed REVISION.
 Otherwise read retained edit identities.  Return a cancellable task without
-starting a core.  SERVICE-ID isolates services sharing an application and path."
+starting a core.  SERVICE-ID isolates services; LEASE pins the original owner."
   (let ((arguments (kargu-bridge--object
                     "action" (if edit-id "files" "list")
                     "service_id" (if service-id (copy-sequence service-id) :json-null)
                     "revision" revision)))
     (when edit-id (puthash "edit_id" (copy-sequence edit-id) arguments))
-    (kargu-bridge-edit-history--read application arguments (if edit-id 256 16) callback parent)))
+    (kargu-bridge-edit-history--read application arguments (if edit-id 256 16) callback parent lease)))
 
-(defun kargu-bridge-edit-history-paths (application callback &optional service-id)
+(defun kargu-bridge-edit-history-paths (application callback &optional service-id lease)
   "Read APPLICATION's retained undo paths into CALLBACK without local mirrors.
 CALLBACK receives (PATHS FAILURE); a concurrent edit invalidates the read.
-SERVICE-ID selects only that native edit service's retained snapshots."
+SERVICE-ID selects the service; LEASE pins its original connection and scope."
   (let ((service-id (and service-id (copy-sequence service-id)))
         (task (kargu-async-start callback :timeout 30))
         connection scope epoch revision remaining paths)
@@ -116,7 +122,7 @@ SERVICE-ID selects only that native edit service's retained snapshots."
             (t
              (let ((edit (pop remaining)))
                (kargu-bridge-edit-history
-                application :service-id service-id :edit-id (gethash "edit_id" edit) :revision revision :parent task
+                application :service-id service-id :edit-id (gethash "edit_id" edit) :revision revision :parent task :lease lease
                 :callback (kargu-async-wrap task #'files-ready))))))
          (files-ready (value failure)
            (cond
@@ -136,39 +142,49 @@ SERVICE-ID selects only that native edit service's retained snapshots."
                    remaining (plist-get value :rows))
              (next))))
       (kargu-bridge-edit-history
-       application :service-id service-id :parent task :callback (kargu-async-wrap task #'edits-ready)))
+       application :service-id service-id :parent task :lease lease :callback (kargu-async-wrap task #'edits-ready)))
     task))
 
 (cl-defun kargu-bridge-edit-history-changes
-    (application &key service-id revision pending-only callback parent)
+    (application &key service-id revision pending-only callback parent lease)
   "Read APPLICATION's native change DTOs asynchronously into CALLBACK.
 SERVICE-ID selects an edit service; REVISION pins a previous observation.
 PENDING-ONLY filters files awaiting verification; Rust owns that selection.
-PARENT owns cancellation."
+PARENT owns cancellation; LEASE pins the original service owner."
   (kargu-bridge-edit-history--read
    application
    (kargu-bridge--object "action" "changes"
                         "service_id" (if service-id (copy-sequence service-id) :json-null)
                         "revision" revision
                         "pending_only" (if pending-only t :json-false))
-   256 callback parent))
+   256 callback parent lease))
 
-(defun kargu-bridge-edit-history--mutate (application arguments &optional callback)
-  "Send a non-paged `edit/history' mutation with ARGUMENTS on APPLICATION."
+(defun kargu-bridge-edit-history--mutate (application arguments &optional callback lease)
+  "Send ARGUMENTS on APPLICATION only through its captured LEASE.
+When absent, capture the current binding.  Deliver a guarded ACK to CALLBACK."
   (let* ((binding (and application (gethash :native-core (kargu-application-services application))))
          (connection (and binding (kargu-bridge-application-connection binding)))
-         (scope (and connection (kargu-bridge-application-current-scope application connection))))
-    (if (and scope
+         (scope (and connection (kargu-bridge-application-current-scope application connection)))
+         (lease (kargu-bridge-edit-history--copy-lease
+                 (or lease (and scope (kargu-bridge-edit-history-capture-lease application connection scope)))))
+         (connection (plist-get lease :connection))
+         (receive (or callback #'ignore)))
+    (if (and (eq application (plist-get lease :application))
+             (kargu-bridge-edit-history-lease-current-p lease)
              (member "edit_history" (append (kargu-bridge-connection-capabilities connection) nil)))
         (kargu-bridge-call
          connection "edit/history"
-         (kargu-bridge--object "scope" scope "arguments" arguments)
-         (or callback #'ignore))
-      (when callback (funcall callback nil (kargu-bridge--fault "unavailable"))))))
+         (kargu-bridge--object "scope" (plist-get lease :scope) "arguments" arguments)
+         (lambda (value failure)
+           (let ((current (kargu-bridge-edit-history-lease-current-p lease)))
+             (funcall receive (and current value)
+                      (or failure (unless current (kargu-bridge--fault "stale_owner")))))))
+      (funcall receive nil (kargu-bridge--fault "unavailable")))))
 
 (cl-defun kargu-bridge-edit-history-consume
-    (application &key edit-id edit-revision file final-hash service-id callback)
-  "Consume EDIT-ID, EDIT-REVISION, FILE and FINAL-HASH on APPLICATION."
+    (application &key edit-id edit-revision file final-hash service-id callback lease)
+  "Consume EDIT-ID, EDIT-REVISION, FILE and FINAL-HASH on APPLICATION.
+SERVICE-ID and LEASE pin the original owner; deliver the ACK to CALLBACK."
   (kargu-bridge-edit-history--mutate
    application
    (kargu-bridge--object
@@ -178,18 +194,26 @@ PARENT owns cancellation."
     "file" file
     "final_hash" (or final-hash :json-null)
     "service_id" (or service-id :json-null))
-   callback))
+   callback lease))
 
 (cl-defun kargu-bridge-edit-history-reset
-    (application &key service-id callback)
+    (application &key service-id callback lease)
   "Reset SERVICE-ID's change records on APPLICATION, preserving snapshots.
-Deliver the native acknowledgement to CALLBACK."
+Use captured LEASE and deliver the native acknowledgement to CALLBACK."
   (kargu-bridge-edit-history--mutate
    application
    (kargu-bridge--object
     "action" "reset_changes"
     "service_id" (or service-id :json-null))
-   callback))
+   callback lease))
+
+(defun kargu-bridge-edit-history--copy-lease (lease)
+  "Detach LEASE's mutable metadata before an asynchronous boundary."
+  (when lease
+    (list :connection (plist-get lease :connection)
+          :epoch (copy-sequence (plist-get lease :epoch))
+          :scope (kargu-bridge-application--copy-scope (plist-get lease :scope))
+          :application (plist-get lease :application))))
 
 (defun kargu-bridge-edit-history-capture-lease (application connection scope)
   "Capture APPLICATION's existing CONNECTION and SCOPE without acquiring a lease."

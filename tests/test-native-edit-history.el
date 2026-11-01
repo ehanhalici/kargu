@@ -535,5 +535,66 @@
                  (lambda (&rest _) (ert-fail "Old service acquired a new core"))))
         (should-error (kargu-diff-native-execute (list :intent :write :path "unused") #'ignore service))))))
 
+(ert-deftest kargu-edit-history-lifetime-lease-blocks-all-ports-after-reconnect-test ()
+  (kargu-edit-history-test--with-lease
+    (let ((lease (kargu-bridge-edit-history-capture-lease application connection scope))
+          (calls 0) failures)
+      (setf (kargu-bridge-connection-epoch connection) "replacement")
+      (cl-labels ((receive (_value failure) (push failure failures)))
+        (cl-letf (((symbol-function 'kargu-bridge-call)
+                   (lambda (&rest _) (cl-incf calls))))
+          (kargu-bridge-edit-history application :lease lease :callback #'receive)
+          (kargu-bridge-edit-history application :lease lease :edit-id "same-edit" :revision 1 :callback #'receive)
+          (kargu-bridge-edit-history-changes application :lease lease :callback #'receive)
+          (kargu-bridge-edit-history-paths application #'receive "same-service" lease)
+          (kargu-bridge-edit-history-consume application :lease lease :edit-id "same-edit"
+                                             :edit-revision 1 :file 0 :callback #'receive)
+          (kargu-bridge-edit-history-reset application :lease lease :callback #'receive)))
+      (should (= calls 0))
+      (should (= (length failures) 6))
+      (should (cl-every #'identity failures)))))
+
+(ert-deftest kargu-edit-history-native-consume-cannot-adopt-a-new-core-test ()
+  (kargu-edit-history-test--with-lease
+    (let* ((lease (kargu-bridge-edit-history-capture-lease application connection scope))
+           (service (kargu-edit-service-create))
+           (path (expand-file-name "same-path" default-directory))
+           (reference (list :native t :application application :lease lease
+                            :service-id "same-service" :edit-id "same-edit" :edit-revision 1
+                            :file-index 0 :final-hash "same-hash"))
+           (calls 0))
+      (setf (kargu-edit-service-native-lease service) lease)
+      (puthash path reference (kargu-edit-service-changes service))
+      (setf (kargu-bridge-connection-epoch connection) "replacement")
+      (cl-letf (((symbol-function 'kargu-bridge-call)
+                 (lambda (_connection _method _params callback &rest _)
+                   (cl-incf calls) (funcall callback (kargu-bridge--object "consumed" t) nil))))
+        (kargu-diff-consume-change (kargu-diff--make-change :path path :identity reference) service))
+      (should (= calls 0))
+      (should (eq reference (gethash path (kargu-edit-service-changes service)))))))
+
+(ert-deftest kargu-edit-history-native-consume-keeps-reference-after-stale-ack-test ()
+  (dolist (transition '(epoch scope))
+    (kargu-edit-history-test--with-lease
+      (let* ((lease (kargu-bridge-edit-history-capture-lease application connection scope))
+             (service (kargu-edit-service-create))
+             (path (expand-file-name "same-path" default-directory))
+             (reference (list :native t :application application :lease lease
+                              :service-id "same-service" :edit-id "same-edit" :edit-revision 1
+                              :file-index 0 :final-hash "same-hash")) held)
+        (puthash path reference (kargu-edit-service-changes service))
+        (cl-letf (((symbol-function 'kargu-bridge-call)
+                   (lambda (_connection _method _params callback &rest _) (setq held callback) "reused-id")))
+          (kargu-diff-consume-change (kargu-diff--make-change :path path :identity reference) service))
+        (should held)
+        (if (eq transition 'epoch)
+            (setf (kargu-bridge-connection-epoch connection) "replacement"
+                  (plist-get lease :epoch) "replacement")
+          (puthash "session_id" "replacement" scope)
+          (puthash "session_id" "replacement" (plist-get lease :scope)))
+        ;; Caller mutation cannot rewrite the request's already captured lease.
+        (funcall held (kargu-bridge--object "consumed" t) nil)
+        (should (eq reference (gethash path (kargu-edit-service-changes service))))))))
+
 (provide 'tests/test-native-edit-history)
 ;;; test-native-edit-history.el ends here

@@ -805,12 +805,21 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         106/106 odak, 1444/1444 tam ERT; Elisp Werror/parantez/checkdoc temiz.
         Kanıt: `docs/native-edit-handle-epoch.md`. Metadata/consume reader'larının
         ilk servis lease'ine bağlanması ayrı 3.8a8 işidir.
-      - [ ] **3.8a8 Metadata ve consume lifetime lease:** list/files/changes/
-        consume/reset okuyucularını yalnız çağrı anındaki application binding'e
-        değil ilk editten yakalanan servis lease'ine bağla. Reconnect ve aynı
-        service/path/ticket isimleriyle geç DTO/ACK eski UI referansını silemesin;
-        epoch kaybında yeni core'a read/mutation gönderilmesin. Native verification
-        consumer cutover'ı ve genel 3.8b kabulü ayrıca tamamlanmalı.
+      - [x] **3.8a8 Metadata ve consume lifetime lease:** list/files/changes/
+        undo paths/consume/reset portları explicit servis lease'ini kullanır;
+        native UI referansı, rollback projection ve snapshot listesi ilk edit
+        lease'ini iletir. Reconnect sonrasında altı giriş noktasının hiçbiri RPC
+        göndermez. Geç consumed:true ACK, scope/epoch kaybında eski referansı
+        silemez; caller lease metadata'sını değiştirse bile request kendi
+        detached capture'ını korur. 110/110 odak ERT ve son detachment regresyonu,
+        Elisp Werror/parantez/checkdoc temiz. Kanıt: `docs/native-history-lifetime.md`.
+        Genel verification consumer cutover'ı ve 3.8b kabulü açık kalır.
+      - [ ] **3.8a9 Run reset/verification ayrımı:** legacy agent + native edit
+        opt-in yolunda `reset-run-files` otomatik `reset_changes` gönderiyor;
+        retained verification borcunu yeni run başlarken silmesin. Run görünümü
+        ile exact consume gereken pending ledger'ı ayır. Reset ACK gelmeden yeni
+        run'ın UI referansları temizlenmesin; gerçek iki-run/late-ACK regresyonu
+        ve Rust backend lifecycle/default cutover ile tamamla.
     - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller

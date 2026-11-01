@@ -137,6 +137,7 @@ These IDs are presentation history; only Rust decides whether undo is available.
                    (list :native t :edit-id (plist-get result :edit-id)
                          :service-id (plist-get spec :service-id)
                          :edit-revision (plist-get result :edit-revision)
+                         :lease (kargu-edit-service-native-lease service)
                          :application (plist-get spec :application)
                          :root (plist-get result :root)
                          :relative (plist-get file :relative)
@@ -160,7 +161,7 @@ Deliver RESULT to CALLBACK after the read; preserve newer local references."
                          (plist-get result :files))))
     (kargu-bridge-edit-history-changes
      (plist-get spec :application) :service-id (plist-get spec :service-id)
-     :pending-only t
+     :pending-only t :lease (kargu-edit-service-native-lease service)
      :callback
      (lambda (value failure)
        (unless (kargu-edit-service-closed service)
@@ -182,6 +183,7 @@ Deliver RESULT to CALLBACK after the read; preserve newer local references."
                    (cl-pushnew path (kargu-edit-service-run-modified-files service) :test #'equal)
                    (puthash path
                             (list :native t :application (plist-get spec :application)
+                                  :lease (kargu-edit-service-native-lease service)
                                   :service-id (plist-get spec :service-id)
                                   :edit-id (gethash "edit_id" row)
                                   :edit-revision (gethash "edit_revision" row)

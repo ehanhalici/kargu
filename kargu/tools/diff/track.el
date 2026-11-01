@@ -23,7 +23,7 @@
                   (path &rest options))
 (declare-function kargu-diff-native-enabled-p "kargu/tools/diff/native" ())
 (declare-function kargu-bridge-edit-history-paths "kargu/bridge/edit/history"
-                  (application callback &optional service-id))
+                  (application callback &optional service-id lease))
 (declare-function kargu-bridge-edit-history-consume "kargu/bridge/edit/history"
                   (application &rest options))
 (declare-function kargu-bridge-edit-history-reset "kargu/bridge/edit/history"
@@ -136,7 +136,7 @@ Owned by `kargu-edit-service'.")
               (failure (message "kargu: native undo history unavailable"))
               ((null paths) (message "kargu: no rollback snapshots"))
               (t (message "kargu rollback snapshots: %s" (string-join paths ", ")))))
-           (kargu-edit-service-native-id service)))
+           (kargu-edit-service-native-id service) (kargu-edit-service-native-lease service)))
       (let ((paths (kargu-diff-snapshot-paths service)))
         (if (null paths)
             (message "kargu: no rollback snapshots")
@@ -318,6 +318,7 @@ preserves the reference; the backend remains the verification authority."
              (plist-get identity :application)
              :edit-id (plist-get identity :edit-id)
              :edit-revision (plist-get identity :edit-revision)
+             :lease (or (plist-get identity :lease) (kargu-edit-service-native-lease svc))
              :file (plist-get identity :file-index)
              :final-hash (plist-get identity :final-hash)
              :service-id (plist-get identity :service-id)
@@ -340,7 +341,8 @@ preserves the reference; the backend remains the verification authority."
         (require 'kargu/bridge/edit/history)
         (kargu-bridge-edit-history-reset
          (kargu-edit-service-native-application svc)
-         :service-id (kargu-edit-service-native-id svc)))
+         :service-id (kargu-edit-service-native-id svc)
+         :lease (kargu-edit-service-native-lease svc)))
       (setf (kargu-edit-service-run-modified-files svc) nil)))
   (setq kargu-diff--run-modified-files nil))
 
