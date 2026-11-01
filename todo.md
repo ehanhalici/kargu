@@ -1175,6 +1175,15 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     çalışma ağacındaki bu WIP değişiklikleri korundu. Genel agent default/capability,
     erken UI claim/config receipt, bütün history/context/plan/debug/background
     consumer'ları ve 3–6 kapanışı henüz ilan edilmez. TLA+ değişmedi; TLC çalışmadı.
+  - [x] **5.9e Native run lifecycle / legacy domain ayrımı:** backend seçimini
+    hazırlık öncesi run'a yakala; geç ayar değişikliği başka motora yönlendirmesin.
+    Native başlangıç legacy change reset çalıştırmaz. Native sonuç raporu legacy
+    modified/pending tablolarını okumaz; native değişiklik kanıtı henüz rapora
+    bağlı değilse unavailable bildirir. Stop/hata cleanup'ı legacy edit abort,
+    history overlay veya repair motorunu çalıştırmaz; native task iptali korunur.
+    Son lifecycle/history/ownership odak ERT 60/60 ve değişen Elisp Werror/parantez
+    kabulü temiz. Bu, native verification reader veya genel 5.9 kapanışı değildir.
+    Kanıt: `docs/native-lifecycle-domain-isolation.md`.
   - [ ] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
     repair ile domain state/plan dispatch motorlarını son tüketici sonrası kaldır.
     Madde 6'daki compaction/healing consumer'larının native run'a bağlanması için

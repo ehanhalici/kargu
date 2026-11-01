@@ -216,5 +216,42 @@
   (let ((kargu-loop-native-agent-enabled nil))
     (should-not (kargu-loop-native-enabled-p))))
 
+(ert-deftest kargu-native-loop-terminal-report-never-borrows-legacy-change-evidence-test ()
+  (dolist (status '(:done :stopped :error))
+    (let ((run (list :id "native-run" :native-backend t)))
+      (cl-letf (((symbol-function 'kargu-edit-changes)
+                 (lambda (&rest _) (ert-fail "Native report borrowed legacy edit tables"))))
+        (let ((report (kargu-loop--finish-report run status "fixture")))
+          (should (eq (plist-get report :change-evidence) :unavailable))
+          (should-not (plist-member report :modified-files))
+          (should-not (plist-member report :pending-files)))))))
+
+(ert-deftest kargu-native-loop-backend-selection-is-captured-before-startup-test ()
+  (with-temp-buffer
+    (setq-local kargu-session--context
+                (kargu-test-session-with-history :provider "openai" :model "fixture"))
+    (let* ((kargu-loop-native-agent-enabled t)
+           (run (kargu-loop--new-run "fixture")))
+      (setq kargu-loop-native-agent-enabled nil)
+      (should (plist-get run :native-backend))
+      (should-not (plist-get (kargu-loop--new-run "another") :native-backend))
+      (cl-letf (((symbol-function 'kargu-edit-changes)
+                 (lambda (&rest _) (ert-fail "Startup failure borrowed legacy edit tables"))))
+        (should (eq (plist-get (kargu-loop--finish-report run :error "startup") :change-evidence)
+                    :unavailable))))))
+
+(ert-deftest kargu-native-loop-cleanup-never-aborts-or-repairs-legacy-domain-state-test ()
+  (dolist (status '(:done :error :stopped))
+    (let ((run (list :native-backend t)) calls)
+      (cl-letf (((symbol-function 'kargu-history-context)
+                 (lambda (&rest _) (ert-fail "Native cleanup acquired legacy history")))
+                ((symbol-function 'kargu-loop--cleanup-step)
+                 (lambda (function &rest _) (push function calls)))
+                ((symbol-function 'kargu-application-set-active-run) #'ignore))
+        (kargu-loop--cleanup-run run status)
+        (should (memq #'kargu-async-cancel-owner calls))
+        (should-not (memq #'kargu-edit-changes calls))
+        (should-not (memq #'kargu--validate-history calls))))))
+
 (provide 'tests/test-native-loop)
 ;;; test-native-loop.el ends here

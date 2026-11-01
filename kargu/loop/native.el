@@ -66,6 +66,7 @@ Startup errors are reported without switching to the Elisp backend."
 (defun kargu-loop-native--finish (run result failure)
   "Project native RESULT or FAILURE into the still-owned RUN's terminal state."
   (when (kargu-loop--live-p run)
+    (plist-put run :native-backend t)
     (let* ((status (and (hash-table-p result) (gethash "status" result)))
            (accounting (and (hash-table-p result) (gethash "accounting" result)))
            (budget (and (hash-table-p accounting) (gethash "budget" accounting)))
@@ -128,6 +129,7 @@ Startup errors are reported without switching to the Elisp backend."
 
 (defun kargu-loop-native-start (run prompt)
   "Execute RUN for PROMPT through its captured native application lease."
+  (plist-put run :native-backend t)
   (let* ((context (plist-get run :context))
          (snapshot (plist-get run :connection-snapshot)))
     (unless (and (kargu-execution-p context) (kargu-loop--live-p run))

@@ -276,6 +276,8 @@ the diff run files and the UI as they were."
         (root (kargu-permission-project-root)))
     (list :id (kargu--generate-session-id)
           :prompt prompt :state 'request :chat-buffer (current-buffer)
+          :native-backend (and (fboundp 'kargu-loop-native-enabled-p)
+                               (kargu-loop-native-enabled-p))
           :session session
           :session-id (kargu-session-id session)
           :project-root root
@@ -378,10 +380,9 @@ the diff run files and the UI as they were."
             (plist-put run :api-base (kargu--api-base))))
         (let ((wrapped (kargu-prompt-wrap-user prompt)))
           (setf (kargu-execution-state (plist-get run :context)) :running)
-          (kargu-edit-changes :reset)
+          (unless (plist-get run :native-backend) (kargu-edit-changes :reset))
           (kargu-session-mark-active t (plist-get run :session))
-          (if (and (fboundp 'kargu-loop-native-enabled-p)
-                   (kargu-loop-native-enabled-p))
+          (if (plist-get run :native-backend)
               (kargu-loop-native-start run wrapped)
             (setf (kargu-history-overlay (plist-get run :history)) nil)
             (kargu--loop-request run wrapped))))
@@ -416,11 +417,15 @@ Deliver events to ON-DELTA, completion to ON-FINISH, and admission to ON-READY."
                       :verifications (or (plist-get run :verifications) 0))))
     (when (eq status :error)
       (plist-put report :error (or text "unknown error")))
-    (when-let* ((modified (kargu-edit-changes :modified)))
-      (plist-put report :modified-files (copy-sequence modified)))
-    (when-let* ((pending (kargu-edit-changes :pending)))
-      (plist-put report :pending-files pending)
-      (kargu-log 'warn "run end with %d unconsumed changed file(s)" (length pending)))
+    (if (plist-get run :native-backend)
+        ;; Native conversations have their own history and edit identities.
+        ;; Local legacy tables cannot supply evidence for that conversation.
+        (plist-put report :change-evidence :unavailable)
+      (when-let* ((modified (kargu-edit-changes :modified)))
+        (plist-put report :modified-files (copy-sequence modified)))
+      (when-let* ((pending (kargu-edit-changes :pending)))
+        (plist-put report :pending-files pending)
+        (kargu-log 'warn "run end with %d unconsumed changed file(s)" (length pending))))
     report))
 
 (defun kargu--loop-finish (run status &optional text)
@@ -469,7 +474,8 @@ Deliver events to ON-DELTA, completion to ON-FINISH, and admission to ON-READY."
   "Drain RUN's resources before release; STATUS controls abort.
 INITIALIZED is nil when preparation failed before history or edits were touched."
   (let ((context (plist-get run :context))
-        (history (or (plist-get run :history) (kargu-history-context))))
+        (history (unless (plist-get run :native-backend)
+                   (or (plist-get run :history) (kargu-history-context)))))
     (when-let* ((budget (and context (kargu-execution-budget context))))
       (kargu-loop--cleanup-step #'kargu-budget-seal budget)
       (when (eq budget (kargu-application-budget-get (kargu-execution-app context)))
@@ -483,12 +489,13 @@ INITIALIZED is nil when preparation failed before history or edits were touched.
       (kargu-loop--cleanup-step #'kargu-async-cancel-owner run)
       (kargu-loop--cleanup-step #'kargu-api-cancel)
       (kargu-application-set-active-run nil))
-    (when (and initialized (memq status '(:stopped :error)))
+    (when (and initialized (not (plist-get run :native-backend))
+               (memq status '(:stopped :error)))
       (kargu-loop--cleanup-step #'kargu-edit-changes :abort))
-    (when initialized
+    (when (and initialized (not (plist-get run :native-backend)))
       (setf (kargu-history-overlay history) nil))
     (kargu-loop--cleanup-step #'kargu-session-mark-active nil (plist-get run :session))
-    (when initialized
+    (when (and initialized (not (plist-get run :native-backend)))
       (kargu-loop--cleanup-step #'kargu--validate-history 'keep-assistant-tail history))))
 
 (require 'kargu/loop/compact)
