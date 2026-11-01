@@ -35,6 +35,9 @@ enum ReadProgress {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Observation {
+    ProjectDiagnostics {
+        snapshot: crate::sensors::diagnostics::ProjectDiagnostics,
+    },
     Diagnostics {
         snapshot: crate::sensors::diagnostics::DiagnosticSnapshot,
     },
@@ -599,13 +602,16 @@ fn read_result(
     }
     if call.name().as_str() == "lsp_diagnostics" {
         call.run().settings().workspace.revalidate()?;
-        let EditorResource::Document { document } = resource else {
-            return Err(CoreError::InvalidToolOutput);
+        let (freshness, text) = match (resource, completion.observation) {
+            (
+                EditorResource::Document { document },
+                Some(Observation::Diagnostics { snapshot }),
+            ) => snapshot.render_for(document)?,
+            (EditorResource::Workspace {}, Some(Observation::ProjectDiagnostics { snapshot })) => {
+                snapshot.render()?
+            }
+            _ => return Err(CoreError::InvalidToolOutput),
         };
-        let Some(Observation::Diagnostics { snapshot }) = completion.observation else {
-            return Err(CoreError::InvalidToolOutput);
-        };
-        let (freshness, text) = snapshot.render_for(document)?;
         return Ok(ReadProgress::Done(
             if freshness == crate::sensors::diagnostics::Freshness::Fresh {
                 ToolOutcome::Ok

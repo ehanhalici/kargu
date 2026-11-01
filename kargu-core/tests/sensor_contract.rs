@@ -238,3 +238,43 @@ fn mention_lexer_and_context_xml_rendering() -> TestResult {
     assert!(xml.contains("</context_attachment>"));
     Ok(())
 }
+
+#[test]
+fn project_diagnostics_preserve_cache_uncertainty_and_supersede_only_the_same_fresh_source()
+-> TestResult {
+    use kargu_core::sensors::diagnostics::ProjectDiagnostics;
+    let cached = json!({"path":"src/main.rs","source":"eglot","code":null,"severity":"error",
+        "line":2,"column":null,"message":"cached finding"});
+    let project = |live: Vec<Value>,
+                   cached: Vec<Value>,
+                   truncated: bool|
+     -> Result<ProjectDiagnostics, serde_json::Error> {
+        serde_json::from_value(json!({"live":live,"cached":cached,"truncated":truncated}))
+    };
+    let (status, text) = project(vec![snapshot()], vec![cached.clone()], false)?.render()?;
+    assert_eq!(status, Freshness::Fresh);
+    assert!(!text.contains("cached finding"));
+    assert!(text.contains("project-wide effects are unverified"));
+    let mut other = cached.clone();
+    other["source"] = json!("other-checker");
+    let (status, text) = project(vec![snapshot()], vec![other.clone(), other], false)?.render()?;
+    assert_eq!(status, Freshness::Unavailable);
+    assert_eq!(text.matches("cached finding").count(), 1);
+    assert!(text.contains("C?"));
+    assert!(text.contains("unversioned cache"));
+    let mut stale = snapshot();
+    stale["observed"]["tick"] = json!(8);
+    let (status, text) = project(vec![stale], vec![cached], false)?.render()?;
+    assert_eq!(status, Freshness::Stale);
+    assert!(text.contains("cached finding"));
+    assert_eq!(
+        project(vec![], vec![], true)?.render()?.0,
+        Freshness::Truncated
+    );
+    assert_eq!(
+        project(vec![], vec![], false)?.render()?.0,
+        Freshness::Unavailable
+    );
+    assert!(project(vec![snapshot(), snapshot()], vec![], false).is_err());
+    Ok(())
+}

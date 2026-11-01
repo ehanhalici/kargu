@@ -4,6 +4,8 @@ use super::{coordinates::SourceRange, types::*};
 use crate::{constants::limits, edit::types::EditPath, error::CoreError};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+mod project;
+pub use project::ProjectDiagnostics;
 
 /// Canonical diagnostic severity; editor-specific symbols do not cross the port.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd, Serialize)]

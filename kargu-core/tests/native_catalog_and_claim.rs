@@ -326,3 +326,47 @@ fn issued_editor_read_retains_the_parent_until_actual_result_commit() -> TestRes
     assert!(actor.session_history(&session)?.settled());
     Ok(())
 }
+
+#[test]
+fn diagnostic_resource_scope_is_bound_to_the_requested_file_or_project_at_preparation() -> TestResult
+{
+    let root = tempfile::tempdir()?;
+    let mut actor = ApplicationActor::new(ApplicationId::new());
+    let session = actor.create_session();
+    let run = actor.admit(&session, settings(root.path(), Mode::Agent)?)?;
+    let registry = ToolRegistry::builtins()?;
+    let name = ToolName::try_from("lsp_diagnostics".to_owned())?;
+    for (arguments, resource, accepted) in [
+        (json!({}), json!({"kind":"workspace"}), true),
+        (
+            json!({"file_path":"source.rs"}),
+            json!({"kind":"workspace"}),
+            false,
+        ),
+        (
+            json!({}),
+            json!({"kind":"document","document":{"path":"source.rs","document_id":"doc","tick":1}}),
+            false,
+        ),
+        (
+            json!({"file_path":"source.rs"}),
+            json!({"kind":"document","document":{"path":"source.rs","document_id":"doc","tick":1}}),
+            true,
+        ),
+    ] {
+        assert_eq!(
+            PreparedEditorTool::prepare(
+                &run,
+                &registry,
+                &name,
+                ToolCallId::new(),
+                arguments,
+                serde_json::from_value(resource)?
+            )
+            .is_ok(),
+            accepted
+        );
+    }
+    actor.finish(&run)?;
+    Ok(())
+}

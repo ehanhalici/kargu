@@ -50,19 +50,29 @@
                                (kargu-lsp--publication-version publication) :json-null)
        "tick" (if publication (kargu-lsp--publication-tick publication) (buffer-chars-modified-tick))))))
 
-(defun kargu-bridge-diagnostics--finding (diagnostic)
-  "Capture raw Flymake DIAGNOSTIC in the current source buffer."
+(defun kargu-bridge-diagnostics--producer (backend)
+  "Return the transport source identity for actual Flymake BACKEND."
+  (unless backend (error "Missing diagnostic producer"))
+  (if (symbolp backend) (symbol-name backend) (kargu-bridge-diagnostics--identity backend)))
+
+(defun kargu-bridge-diagnostics--facts (diagnostic)
+  "Capture DIAGNOSTIC's editor fields, returning (FACTS . TRUNCATED)."
   (let* ((message (flymake-diagnostic-text diagnostic))
          (cut (> (length message) 4096))
          (backend (flymake-diagnostic-backend diagnostic))
          (severity (pcase (kargu-lsp--diagnostic-severity (flymake-diagnostic-type diagnostic))
                      (1 "error") (2 "warning") (_ "info"))))
-    (unless backend (error "Missing diagnostic producer"))
     (cons (kargu-bridge--object
-     "source" (if (symbolp backend) (symbol-name backend) (kargu-bridge-diagnostics--identity backend))
-     "code" :json-null "severity" severity
-     "range" (kargu-lsp-coordinate-range (flymake-diagnostic-beg diagnostic) (flymake-diagnostic-end diagnostic))
-     "message" (substring-no-properties message 0 (min 4096 (length message)))) cut)))
+           "source" (kargu-bridge-diagnostics--producer backend)
+           "code" :json-null "severity" severity
+           "message" (substring-no-properties message 0 (min 4096 (length message)))) cut)))
+
+(defun kargu-bridge-diagnostics--finding (diagnostic)
+  "Capture raw Flymake DIAGNOSTIC in the current source buffer."
+  (let ((capture (kargu-bridge-diagnostics--facts diagnostic)))
+    (puthash "range" (kargu-lsp-coordinate-range (flymake-diagnostic-beg diagnostic)
+                                               (flymake-diagnostic-end diagnostic)) (car capture))
+    capture))
 
 (defun kargu-bridge-diagnostics--snapshot (buffer root requested)
   "Capture BUFFER's raw facts under ROOT for REQUESTED document stamp."
@@ -76,7 +86,7 @@
             (let* ((report (and kargu-lsp--backend-reports (gethash backend kargu-lsp--backend-reports)))
                    (generation (kargu-bridge-diagnostics--generation report)))
               (push (kargu-bridge--object
-                     "backend" (kargu-bridge-diagnostics--identity backend)
+                     "backend" (kargu-bridge-diagnostics--producer backend)
                      "requested" generation "observed" generation
                      "tick" (if report (kargu-lsp--backend-report-tick report) (buffer-chars-modified-tick))
                      "reported" (if (and report (kargu-lsp--backend-report-reported report)) t :json-false)) reports)))
@@ -101,6 +111,65 @@
            "backends" (vconcat (nreverse reports)) "server" (or (kargu-bridge-diagnostics--server) :json-null)
            "diagnostics" (vconcat (nreverse findings)) "truncated" (if truncated t :json-false)))))))
 
+(defun kargu-bridge-diagnostics--owned-path (path root)
+  "Return canonical local PATH inside captured ROOT, before inspecting findings."
+  (when (and (stringp path) (file-name-absolute-p path) (not (file-remote-p path))
+             (string-prefix-p (file-name-as-directory root) (expand-file-name path))
+             (file-in-directory-p path root))
+    (file-truename path)))
+
+(defun kargu-bridge-diagnostics--cached (diagnostic root)
+  "Capture unversioned file-locus DIAGNOSTIC under ROOT, or nil when foreign."
+  (when-let* ((path (kargu-bridge-diagnostics--owned-path (flymake--diag-locus diagnostic) root)))
+    (let* ((position (flymake-diagnostic-beg diagnostic))
+           (line (car-safe position)) (column (cdr-safe position)))
+      (unless (and (integerp line) (<= 1 line #x7fffffffffffffff)
+                   (or (null column) (and (integerp column) (<= 0 column #x8000000000000000))))
+        (error "Unsupported cached diagnostic position"))
+      (let ((capture (kargu-bridge-diagnostics--facts diagnostic)))
+        (puthash "path" (file-relative-name path root) (car capture))
+        (puthash "line" line (car capture))
+        (puthash "column" (if (and column (> column 0)) (1- column) :json-null) (car capture))
+        capture))))
+
+(defun kargu-bridge-diagnostics--project (root)
+  "Observe live documents and raw Flymake file-cache entries under ROOT.
+Rust owns grouping, deduplication, supersession and rendering."
+  (let ((bytes 0) (files 0) (items 0) live cached truncated)
+    (cl-labels
+        ((reserve (value)
+           (setq bytes (+ bytes (kargu-bridge-sensor-symbols--size value)))
+           (when (> bytes (* 128 1024)) (setq truncated t) (throw 'bounded nil)))
+         (cache (diagnostic)
+           (when (> (cl-incf items) 4096) (setq truncated t) (throw 'bounded nil))
+           (condition-case nil
+               (when-let* ((capture (kargu-bridge-diagnostics--cached diagnostic root)))
+                 (when (cdr capture) (setq truncated t))
+                 (reserve (car capture))
+                 (push (car capture) cached))
+             (error (setq truncated t)))))
+      (catch 'bounded
+        (dolist (buffer (buffer-list))
+          (when (and (not (buffer-base-buffer buffer))
+                     (kargu-bridge-diagnostics--owned-path (buffer-file-name buffer) root))
+            (when (> (cl-incf files) 256) (setq truncated t) (throw 'bounded nil))
+            (condition-case nil
+                (let* ((document (gethash "document" (kargu-bridge-sensor--document buffer root)))
+                       (snapshot (kargu-bridge-diagnostics--snapshot buffer root document)))
+                  (reserve snapshot)
+                  (push snapshot live))
+              (error (setq truncated t)))
+            (with-current-buffer buffer
+              (when (hash-table-p flymake--state)
+                (maphash (lambda (_backend state)
+                           (when-let* ((foreign (flymake--state-foreign-diags state)))
+                             (maphash (lambda (_path findings) (mapc #'cache findings)) foreign)))
+                         flymake--state)))))
+        (dolist (entry flymake-list-only-diagnostics)
+          (mapc #'cache (cdr entry)))))
+    (kargu-bridge--object "live" (vconcat (nreverse live)) "cached" (vconcat (nreverse cached))
+                         "truncated" (if truncated t :json-false))))
+
 (defun kargu-bridge-sensor-diagnostics-call (connection id params)
   "Return raw diagnostic facts for captured ID/PARAMS on CONNECTION."
   (let* ((call-id (and (hash-table-p params) (gethash "call_id" params)))
@@ -118,14 +187,23 @@
           (let* ((resource (kargu-bridge-sensor-call-resource call))
                  (root (gethash "root" params))
                  (buffer (kargu-bridge-sensor-call-buffer call)))
-            (unless (and (equal (gethash "kind" resource) "document")
-                         (buffer-live-p buffer)
-                         (kargu-bridge-sensor--equal-p resource (kargu-bridge-sensor--document buffer root)))
-              (error "Diagnostic document unavailable"))
-            (let ((snapshot (kargu-bridge-diagnostics--snapshot buffer root (gethash "document" resource))))
+            (let ((observation
+                   (pcase (gethash "kind" resource)
+                     ("document"
+                      (unless (and (buffer-live-p buffer)
+                                   (kargu-bridge-sensor--equal-p resource (kargu-bridge-sensor--document buffer root)))
+                        (error "Diagnostic document unavailable"))
+                      (kargu-bridge--object "kind" "diagnostics" "snapshot"
+                                            (kargu-bridge-diagnostics--snapshot buffer root (gethash "document" resource))))
+                     ("workspace"
+                      (let ((path (gethash "file_path" (gethash "arguments" params))))
+                        (when (and (stringp path) (not (string-empty-p path)))
+                          (error "File-specific diagnostics cannot acquire project scope")))
+                      (kargu-bridge--object "kind" "project_diagnostics" "snapshot"
+                                            (kargu-bridge-diagnostics--project root)))
+                     (_ (error "Unsupported diagnostic resource")))))
               (unless (kargu-bridge-sensor--same-call-p connection call params) (error "Retired diagnostic source"))
-              (kargu-bridge-sensor-symbols--finish
-               connection call id "ok" (kargu-bridge--object "kind" "diagnostics" "snapshot" snapshot)))))
+              (kargu-bridge-sensor-symbols--finish connection call id "ok" observation))))
       (quit
        (if entered (kargu-bridge-sensor-symbols--failed connection call id 'cancelled)
          (kargu-bridge-sensor-symbols--refuse connection id params)))

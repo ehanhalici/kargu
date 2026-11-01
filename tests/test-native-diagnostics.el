@@ -82,18 +82,21 @@
           (should (eq (gethash "quiescent" result) t))
           (should (equal (gethash "kind" (gethash "observation" result)) "unavailable")))))))
 
-(ert-deftest kargu-native-diagnostics-real-provider-gets-rust-rendered-flymake-finding-test ()
-  (kargu-bridge-test--with-core
+(defun kargu-native-diagnostics-test--roundtrip (project)
+  "Exercise real native collection, optionally including PROJECT cache facts."
+  (let ((kargu-bridge--max-frame (if (eq project 'tiny) 1024 kargu-bridge--max-frame)))
+   (kargu-bridge-test--with-core
     (let* ((root (make-temp-file "kargu-diagnostic-live-" t))
            (source (generate-new-buffer " *native diagnostic live*"))
            (application (kargu-application-create))
            (call (kargu-bridge--object "id" "diag" "type" "function" "function"
                                       (kargu-bridge--object "name" "lsp_diagnostics"
-                                                           "arguments" "{\"file_path\":\"source.el\"}")))
+                                                           "arguments" (if project "{}" "{\"file_path\":\"source.el\"}"))))
            (first (json-serialize (kargu-bridge--object "choices" (vector (kargu-bridge--object
                             "message" (kargu-bridge--object "role" "assistant" "content" :json-null "tool_calls" (vector call))
                             "finish_reason" "tool_calls"))) :null-object :json-null))
            (last "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"done\"},\"finish_reason\":\"stop\"}]}")
+           (flymake-list-only-diagnostics nil)
            requests server done failure result)
       (unwind-protect
           (progn
@@ -104,6 +107,11 @@
               (setq-local flymake-diagnostic-functions '(kargu-native-diagnostics-test--backend))
               (cl-letf (((symbol-function 'trusted-content-p) (lambda () t)))
                 (flymake-mode 1) (flymake-start)))
+            (when project
+              (let* ((path (expand-file-name "closed.el" root))
+                     (finding (flymake-make-diagnostic path '(2 . 3) nil :warning "cached project finding")))
+                (setf (flymake--diag-backend finding) 'project-checker)
+                (setq flymake-list-only-diagnostics (list (cons path (list finding))))))
             (setq server (kargu-stream-test--server
                           first nil nil (lambda (body) (push (kargu--json-decode-safe body) requests))
                           nil nil nil (list (list :body first) (list :body last))))
@@ -126,12 +134,21 @@
                    (tool (aref messages (1- (length messages))))
                    (text (gethash "content" tool)))
               (should (equal (gethash "role" tool) "tool"))
-              (should (string-match-p "(fresh)" text))
-              (should (string-match-p "raw diagnostic 🦀" text))
-              (should (string-match-p "Project-wide effects are unverified" text))))
+              (if (eq project 'tiny)
+                  (progn
+                    (should (string-match-p "Verification incomplete" text))
+                    (should-not (string-match-p "(fresh)" text)))
+                (should (string-match-p "(fresh)" text))
+                (should (string-match-p "raw diagnostic 🦀" text))
+                (should (string-match-p "Project-wide effects are unverified" text))
+                (when project
+                  (should (string-match-p "cached project finding" text))
+                  (should (string-match-p "closed.el L2:C2" text))
+                  (should (string-match-p "unversioned cache" text))
+                  (should (string-match-p "Verification incomplete" text))))))
         (when (and (processp server) (process-live-p server)) (delete-process server))
         (when (buffer-live-p source) (with-current-buffer source (set-buffer-modified-p nil)) (kill-buffer source))
-        (delete-directory root t)))))
+        (delete-directory root t))))))
 
 (ert-deftest kargu-native-diagnostics-publication-cannot-borrow-a-restarted-eglot-process-test ()
   (kargu-native-symbols-test--with-source "lsp_diagnostics"
@@ -169,6 +186,41 @@
       (should (equal (gethash "outcome" result) "cancelled"))
       (should (eq (gethash "quiescent" result) t))
       (should-not (gethash "symbol-call" (kargu-bridge-connection-sensor-calls connection))))))
+
+(ert-deftest kargu-native-diagnostics-real-provider-gets-rust-rendered-flymake-finding-test ()
+  (kargu-native-diagnostics-test--roundtrip nil))
+
+(ert-deftest kargu-native-diagnostics-ui-advertises-the-typed-adapter-test ()
+  (require 'kargu/loop/native)
+  (should (member "lsp_diagnostics" (append (kargu-loop-native--editor-tools) nil))))
+
+(ert-deftest kargu-native-diagnostics-real-project-provider-preserves-unversioned-cache-test ()
+  (kargu-native-diagnostics-test--roundtrip t))
+
+(ert-deftest kargu-native-diagnostics-real-project-tiny-frame-keeps-truncation-explicit-test ()
+  (kargu-native-diagnostics-test--roundtrip 'tiny))
+
+(ert-deftest kargu-native-diagnostics-project-refuses-foreign-cache-before-reading-its-text-test ()
+  (kargu-native-symbols-test--with-source "lsp_diagnostics"
+    (ignore params)
+    (let* ((foreign (expand-file-name "foreign.el" (file-name-directory (directory-file-name root))))
+           (finding (flymake-make-diagnostic foreign '(1 . 1) nil :error "private"))
+           (flymake-list-only-diagnostics (list (cons foreign (list finding)))))
+      (let (inspected)
+        (cl-letf (((symbol-function 'flymake-diagnostic-text)
+                   (lambda (_) (setq inspected t) "private")))
+          (let ((snapshot (kargu-bridge-diagnostics--project root)))
+            (should (= (length (gethash "cached" snapshot)) 0))
+            (should-not inspected)))))))
+
+(ert-deftest kargu-native-diagnostics-cached-zero-column-remains-unknown-test ()
+  (kargu-native-symbols-test--with-source "lsp_diagnostics"
+    (ignore params)
+    (let ((finding (flymake-make-diagnostic (expand-file-name "closed.el" root) '(2 . 0) nil :error "finding")))
+      (setf (flymake--diag-backend finding) 'fixture)
+      (let ((capture (kargu-bridge-diagnostics--cached finding root)))
+        (should (= (gethash "line" (car capture)) 2))
+        (should (eq (gethash "column" (car capture)) :json-null))))))
 
 (provide 'tests/test-native-diagnostics)
 ;;; test-native-diagnostics.el ends here

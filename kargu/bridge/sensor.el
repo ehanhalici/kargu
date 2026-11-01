@@ -161,8 +161,10 @@
                   (kargu-bridge-sensor--language-document buffer root t))
                  ((equal tool "lsp_diagnostics")
                   (require 'kargu/tools/lsp/freshness)
-                  (if (and (stringp path) (not (string-empty-p path)) (buffer-live-p buffer))
-                      (kargu-bridge-sensor--document buffer root)
+                  (if (and (stringp path) (not (string-empty-p path)))
+                      (progn
+                        (unless (buffer-live-p buffer) (error "Diagnostic document unavailable"))
+                        (kargu-bridge-sensor--document buffer root))
                     (kargu-bridge--object "kind" "workspace")))
                  ((member tool '("lsp_find_symbol" "lsp_project_skeleton"))
                   (if (buffer-live-p buffer)

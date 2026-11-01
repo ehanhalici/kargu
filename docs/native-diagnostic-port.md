@@ -23,9 +23,9 @@ fixture passed separately, strict all-target Clippy/fmt and 44 focused ERT passe
 These working-tree totals include unfinished task 7/8 tests.
 
 The Rust result port is todo 4.3a and the file capture below is 4.3b, not full
-diagnostic cutover. Project diagnostic collection, optional capability
-advertisement and actual verification/healing consumers still need connection. Until then the standard
-native UI does not advertise lsp_diagnostics. Existing Flymake/Eglot formatters
+diagnostic cutover. The project collection/capability work below completes 4.3c. Public/standalone
+formatter migration, fresh pull/barriers and actual verification/healing consumers
+still need connection. The native UI now advertises lsp_diagnostics for typed file/project reads. Existing Flymake/Eglot formatters
 are migration debt. The next producer must preserve actual report generations,
 backend identity, Eglot process incarnation/publication version, document tick,
 truncation and negotiated frame limits; it cannot synthesize freshness from an
@@ -59,5 +59,39 @@ finding. The production trusted-content check is preserved. Full source ERT
 passed 1427/1427 before the last process/quit/shared-helper changes; the final
 affected sensor/LSP suite passed 73/73. Changed Elisp passed warning-as-error
 compilation, parenthesis checks and production checkdoc. Rust and TLA+ sources
-were unchanged. Project collection and default capability cutover remain open;
-the standard native UI still does not advertise the partial diagnostic capability.
+were unchanged. Project collection and native UI capability cutover are completed by the next
+section; standalone/public formatters and verification remain migration debt.
+
+
+## Project collection and native UI capability
+
+Project reads collect bounded live snapshots and raw foreign/list-only Flymake
+file-cache records. They use the native-captured workspace without invoking
+project-root discovery or opening files. A file-locus record has a known line
+and an optional scalar column, not an invented live document/version or range.
+Flymake's missing/zero column remains unknown; positive columns are converted
+from its one-based character coordinates. Foreign loci are rejected before
+reading diagnostic text. Aggregate bytes/items/documents and frame truncation
+are explicit, with a real 1 KiB project roundtrip regression.
+
+Rust parses a bounded ProjectDiagnostics value. It groups output, deduplicates
+cached observations by their full semantic/location identity and supersedes an
+old cache only when the same producer has a fresh live snapshot for that path.
+Other sources remain visible as unversioned and unavailable. Empty, stale,
+pending or truncated collections cannot certify a clean project. Even complete
+live observations explicitly leave unopened/unreported files and project-wide
+build/test effects unverified. The native UI now advertises lsp_diagnostics.
+
+The preparation boundary binds the requested file/project selection to the
+resource class before issuance; project reads cannot silently acquire a current
+buffer and file reads cannot widen to project scope. The native result handler
+uses that prepared contract. Public/standalone legacy formatters, fresh pull/
+barrier orchestration and actual post-edit verification/healing remain open.
+
+Validation: 602 locked Rust tests including 32 compile-fail, strict all-target
+Clippy/fmt, 1431/1431 full source ERT before the last gate/capture changes, and
+78/78 final affected sensor/LSP tests. Changed Elisp Werror compilation,
+parenthesis checks and production checkdoc passed. The working-tree totals
+include future task 7/8 tests and do not certify those uncommitted features.
+Rust catalog/agent acceptance also passed after the final resource gate change.
+No TLA+ source changed; TLC was not rerun.

@@ -37,6 +37,12 @@
        ((and (equal kind "body") (> (length (gethash "text" snapshot)) 0))
         (puthash "text" (substring (gethash "text" snapshot) 0 (/ (length (gethash "text" snapshot)) 2)) snapshot)
         (puthash "truncated" t snapshot))
+       ((and (equal kind "project_diagnostics")
+             (or (> (length (gethash "live" snapshot)) 0) (> (length (gethash "cached" snapshot)) 0)))
+        (dolist (key '("live" "cached"))
+          (let ((rows (gethash key snapshot)))
+            (puthash key (vconcat (seq-take rows (/ (length rows) 2))) snapshot)))
+        (puthash "truncated" t snapshot))
        (t
         ;; Metadata itself cannot fit.  A compact negative result still reports
         ;; actual quiescence and never switches to the old formatter or disk.

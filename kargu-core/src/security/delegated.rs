@@ -83,7 +83,7 @@ impl PreparedEditorTool {
             return Err(CoreError::Rejected);
         }
         metadata.parameters().validate(&arguments)?;
-        check_resource(descriptor.name(), &resource)?;
+        check_resource(descriptor.name(), &resource, &arguments)?;
         if let EditorResource::Document { document }
         | EditorResource::LanguageDocument { document, .. } = &resource
             && let Some(path) = arguments.get("file_path").and_then(Value::as_str)
@@ -150,7 +150,11 @@ impl PreparedEditorTool {
     }
 }
 
-fn check_resource(name: &ToolName, resource: &EditorResource) -> Result<(), CoreError> {
+fn check_resource(
+    name: &ToolName,
+    resource: &EditorResource,
+    arguments: &Value,
+) -> Result<(), CoreError> {
     let allowed = match name.as_str() {
         "debug_start"
         | "debug_list_breakpoints"
@@ -180,7 +184,18 @@ fn check_resource(name: &ToolName, resource: &EditorResource) -> Result<(), Core
                 ..
             }
         ),
-        "lsp_diagnostics" | "lsp_project_skeleton" | "lsp_find_symbol" => matches!(
+        "lsp_diagnostics" => {
+            if arguments
+                .get("file_path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| !path.is_empty())
+            {
+                matches!(resource, EditorResource::Document { .. })
+            } else {
+                matches!(resource, EditorResource::Workspace { .. })
+            }
+        }
+        "lsp_project_skeleton" | "lsp_find_symbol" => matches!(
             resource,
             EditorResource::Workspace {} | EditorResource::Document { .. }
         ),

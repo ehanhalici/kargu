@@ -771,6 +771,14 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         metadata ERT ve değişen Elisp Werror/parantez kabulü geçti. Native snapshot
         listeleme Rust metadata okuyucusunu kullanır. Reset, tüm verification
         reader'ları ve public service-close drain geçişi ayrı olarak açık kalır.
+      - [ ] **3.8a5 Undo reanchor ve ABA koruması (kaynak denetiminde bulundu):**
+        `record_applied` rollback dalı kalan önceki edit kaydını yeni document/tick
+        ile yeniden yayımlarken `verification_pending:false` atıyor. Kalan editin
+        doğrulama borcunu koru. Pending'i yeniden açarken edit/file/hash tuple'ının
+        eski doğrulama callback'iyle tekrar eşleşmesini record revision üzerinden
+        reddet; receipt/IPC/Elisp capture-consume zincirini aynı kimliğe bağla.
+        İki edit → single-step undo ve geç eski consume için gerçek pipe regresyonu
+        kur; tam undo/net-zero ile pending borcu ve snapshot retention ayrımını koru.
     - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller
@@ -948,6 +956,18 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     quit/helper diliminde 73/73 odak ERT ve Elisp Werror/parantez/checkdoc temiz.
     Project aggregation, native UI capability ilanı ve verification barrier/
     healing consumer'ları 4.3/6.4'te açık; legacy standalone formatter henüz silinmedi.
+  - [x] **4.3c Native project aggregation ve capability:** açık belgelerin typed
+    snapshot'ları ile Flymake foreign/list-only file cache gözlemleri aynı native
+    sonuç portunda toplanır. Dedup ve yalnız aynı fresh producer'ın cache'ini
+    supersede etme kararı Rust'tadır; sürümsüz cache unavailable kalır, bilinmeyen
+    kolon tahmin edilmez. Foreign cache metni scope kontrolünden önce okunmaz.
+    File/project kapsamı native preparation'da argümana bağlanır; scope genişletme
+    veya current-buffer'a daraltma reddedilir. Native UI `lsp_diagnostics` ilan eder.
+    Gerçek file/project provider turları ve 1 KiB project truncation kabulü geçti.
+    602 locked Rust (32 compile-fail), 1431/1431 tam ERT; son gate/capture testleri
+    ve 78/78 son odak ERT, strict Clippy/fmt, Elisp Werror/checkdoc/parantez temiz.
+    Public/standalone formatter geçişi, fresh-pull/barrier ve verification/healing
+    tüketicileri nedeniyle 4.3/6.4 açık kalır. Kanıt: `docs/native-diagnostic-port.md`.
   - [ ] **4.4 Symbols/Xref:** definition/reference/hover/document-symbol/skeleton
     adapter'larını typed range/tree snapshot'a geçir; ambiguity ve unavailable
     açık olsun. Marker/cons/editor nesnesi JSON'a sızmasın; native render/budget.
