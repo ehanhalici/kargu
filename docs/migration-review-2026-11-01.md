@@ -56,10 +56,14 @@ were used in tests.
   capability. Elisp storage/restore writers still exist. Delete/import/load
   locking, pinned directory identity, journal growth/compaction, protocol-ordered
   repair and snapshot/journal concurrency need completion before task 7 closes.
-- New model refresh can collect credentials from other applications and publish
-  metadata into all applications; owner isolation must be established. Other
-  model/provider RPCs require the same scope audit. Public UI currently uses
-  the existing owned pipeline; this does not fix direct RPC consumers.
+- Direct provider/model RPCs no longer borrow arbitrary application views or
+  read config files synchronously as a fallback. Refresh uses only explicitly
+  supplied auth; it no longer scavenges other applications/environment keys.
+  Metadata publication is restricted to the captured application and live epoch;
+  unscoped fetches return detached data. Unknown application IDs are rejected.
+  Full session/config-revision/cancellation binding and authoritative native
+  selection commit still require review. Public UI uses the existing owned
+  pipeline rather than these incomplete replacement services.
 - Monetary pricing helpers are not connected to actual native provider
   settlement. Hard pre-IO monetary reservation is absent; compaction/healing/
   verification still have Elisp orchestration.
@@ -72,3 +76,58 @@ A previous invocation without the binary skipped native cases and is not
 acceptance evidence. Full Rust/ERT and strict Clippy are being rerun after
 corrections; final counts must be recorded before declaring closure. GUI/TLC
 acceptance and review of all remaining paths have not been completed.
+
+A verification-environment issue was found after the isolated worktree check:
+sharing Cargo's target directory across the two source roots reused incompatible
+local crate artifacts. The affected reruns are discarded. The isolated budget
+result remains valid; the main crate artifacts are being rebuilt from a package
+clean before final Rust/ERT acceptance. Dependencies and source files are kept.
+
+Restoring the deleted loop test corpus exposed 14 real regressions in the
+remaining Elisp backend: repetition guards, continuation caps, incomplete
+responses and unsupported tools. The original machine/tools consumers and
+boundary inventory are retained until native cutover is complete; the moved
+partial implementations were removed from loop.el/ui.el. Focused loop/native
+terminal suite passes 40/40. Native callback projection now distinguishes
+completed/cancelled/timeout/rejected/failed/malformed replies; retired owners
+are ignored and raw event payloads are no longer logged.
+
+Clean rebuild validation: 573 Rust tests passed across 54 suite results
+(including 31 compile-fail documentation tests). Strict all-target Clippy
+passed with warnings/unwrap/expect/panic denied. The focused suites include
+22 budget, 18 session storage and 3 catalog ingress tests. Full ERT including
+restored loop coverage is running (1376 tests). These results establish the
+checked behavior, not closure of the missing migration consumers listed above.
+
+The 1376-test intermediate full ERT run ended with 7 failures: six fixtures
+still targeting the discarded public catalog path and one already-loaded
+boundary inventory. Credential/epoch lifecycle fixtures were restored alongside
+the new direct RPC tests, with no live catalog network in the suite. Their
+focused reruns passed 23/23 catalog tests and 49/49 module tests. Full current
+source ERT must be rerun rather than treating these substitutions as one green
+full-suite result. Exhaustive TLC passed budget (432 states), application
+(4,624 states) and selection (640,440 states); these models do not establish the
+missing hard monetary reservation or persistence RPC implementation.
+
+## Final evidence for this review slice
+
+- Current full source ERT with the native binary: **1379/1379 passed**, no
+  unexpected results (2026-11-01 03:04 Europe/Istanbul). No tests were disabled
+  to obtain this result. The original loop and credential lifecycle coverage
+  is retained; new native terminal and direct RPC coverage is included.
+- Current locked Rust suite: **574 passed across 54 suite results**, including
+  **31 compile-fail documentation tests**. Strict all-target Clippy passes with
+  warnings, unwrap, expect and panic denied; cargo fmt and git diff --check pass.
+- Changed Elisp sources pass check-parens and Werror byte compilation. The one
+  overlong session bridge docstring was corrected and its compilation rerun.
+- Budget/application/selection TLC completed exhaustive scans successfully.
+- GUI acceptance and complete review/implementation of all remaining migration
+  consumers are outstanding. Most migration source changes remain uncommitted;
+  the isolated budget slice and Company input behavior were committed separately.
+  Green tests do not close tasks 3–8 or constitute review of every source path.
+
+Reproduction uses the repository's Nix toolchain (`nix-shell --run ...`), locked
+Cargo test/Clippy, and `KARGU_CORE_TEST_BINARY=$PWD/kargu-core/target/debug/kargu-core`
+with the documented tests/run-tests.el batch runner. Compile artifacts were
+written to a temporary directory and removed. The temporary budget worktree
+was removed after its isolated acceptance run.

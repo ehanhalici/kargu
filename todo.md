@@ -860,7 +860,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     document/server/publication veya connection/stop/thread/frame kimlikleri;
     status, range, severity, truncation ve byte/item/depth sınırları. Koordinat
     1-based line / 0-based Unicode scalar / end-exclusive; tahmin veya clamp yok.
-  - [x] **4.2 Reverse RPC:** mevcut pending/oneshot/deadline temelini
+  - [ ] **4.2 Reverse RPC:** mevcut pending/oneshot/deadline temelini
     `editor/call_tool` allowlist'ine bağla. Scope/run kaydı send'den önce kurulsun;
     cancel/timeout/EOF/owner close actual cleanup, geç/çift yanıt inert olsun.
     Filter içinde senkron LSP/DAP/process bekleme olmasın.
@@ -874,7 +874,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     exact document/tick/dirty veya absence recheck hattı bağlıdır. Client capability
     handshake'te capture edilir; port hatası disk fallback'i vermez. Worker aynı
     actual parent workspace kimliğini önce/sonra doğrular.
-  - [x] **4.3 LSP belge/tanı:** Emacs capture yalnız document tick, server/version,
+  - [ ] **4.3 LSP belge/tanı:** Emacs capture yalnız document tick, server/version,
     publication ve raw diagnostic DTO üretsin; native freshness/aggregation ve
     formatlama tüketicileri bağlı olsun. Sürümsüz stale/pending push temiz tanı
     sayılmasın; gerçek destek varsa fresh pull capability kullanılsın.
@@ -904,17 +904,17 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     native pipe/provider, gerçek imenu/Eglot ve ERT kabulünü son toplu kapıda
     çalıştır. Kaynaklar native_agent/symbols.rs, symbols/document/tests.rs,
     sensor_contract.rs ve test-native-symbols.el'de hazır; henüz çalıştırılmadı.
-  - [x] **4.5 Dape capture:** connection/stop generation/thread/frame ve variable
+  - [ ] **4.5 Dape capture:** connection/stop generation/thread/frame ve variable
     reference bağını capture ve delivery'de doğrula; bounded stack/scopes/
     variables/watch DTO, actual async completion ve capability yokluğunda ret.
-  - [x] **4.6 Dape mutation/lifecycle:** evaluate, execution control, breakpoint,
+  - [ ] **4.6 Dape mutation/lifecycle:** evaluate, execution control, breakpoint,
     launch/compile/readiness/reset/close aynı native gate ve scope'u kullansın;
     Emacs Dape resource revalidation'ı korunsun. Continue veya replacement bütün
     eski pending reference'ları geçersiz kılsın; foreign connection kapanmasın.
   - [x] **4.7 Mention lexer:** legacy @path/@file::symbol ve file/buff/sym/git/
     line/folder target'larını typed span ve target_id ile native ayrıştır; quoted/
     escaped/Unicode ad, email ve fenced-code ayrımı, ambiguity ve invalid range.
-  - [x] **4.8 Context resolver:** `editor/resolve_mentions` RAM snapshot/tick/dirty
+  - [ ] **4.8 Context resolver:** `editor/resolve_mentions` RAM snapshot/tick/dirty
     portu; kapalı disk/Git/folder native mevcut servislerde. Unsaved/new/narrowed
     buffer korunur; root dışı/fileless buffer explicit capability ister. Folder
     ignore/depth/count/byte/deadline, binary/not_found/rejected ve bounded paging.
@@ -922,7 +922,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     unsaved/new/narrowed kaynak korunur ve worker sonrası buffer açılması da
     disk sonucunu geçersiz kılar. Mention resolver/folder/Git/provenance tüketicisi,
     fileless/output-buffer grant ve genel büyük snapshot paging hâlâ açık.
-  - [x] **4.9 Provenance/bütçe/egress:** immutable attachment metadata/hash/range,
+  - [ ] **4.9 Provenance/bütçe/egress:** immutable attachment metadata/hash/range,
     dedup ile kullanıcı sırası; native muhafazakâr token/byte/output-overhead
     bütçesi ve explicit truncation. İçerik data rolünde, delimiter escape'li;
     completion veya path bilgisi tek başına gönderim izni olmasın.
@@ -940,7 +940,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   motorlarını tüketici tüketici sil; aynı yan etkiyi iki backend'de oynatma.
   Kaynak: Aşama 4, G08/G12/G13; .codex/00, 07, 11.
 
-  - [x] **5.1 Native history domain/store:** message/tool-call/result kimlikleri,
+  - [ ] **5.1 Native history domain/store:** message/tool-call/result kimlikleri,
     text/reasoning/image/attachment/provider-opaque blokları ve usage için bounded
     typed model; session başına tek writer, monotonic revision ve detached paging.
     Import kopya üzerinde doğrulansın; secret'lar history/event'e girmesin.
@@ -958,7 +958,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     revoke/drain sonrasında onarır; actual sonucu iptal edilmiş owner da claim'i
     bırakmadan kaydedebilir. Native agent dispatcher ve UI bağlantısı tamamlanmadan
     bu alt iş kapatılmaz. Corpus/gerçek pipe test kaynakları yazıldı, çalıştırılmadı.
-  - [x] **5.3 Native registry/gate:** mevcut canonical/alias/schema/mode ve
+  - [ ] **5.3 Native registry/gate:** mevcut canonical/alias/schema/mode ve
     optional availability envanterini taşı; OS ve delegated editor tool'ları aynı
     owner/revision/onay kapısına girsin. Doğrudan çağrı da aynı gate'i kullansın.
     Native 51-tool schema/alias/mode asset'i ve typed schema/catalog eklendi.
@@ -967,7 +967,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     command/editor kapıları bu snapshot'ı kullanır. Generic delegated editor
     admission ortak pending approval ledger'ına bağlıdır; gerçek reverse adapter
     ve public Elisp registry/schema consumer cutover'ı henüz tamamlanmadı.
-  - [x] **5.4 Run admission/FSM:** servis lease'i gerçek agent run'dan ayrı;
+  - [ ] **5.4 Run admission/FSM:** servis lease'i gerçek agent run'dan ayrı;
     claim config/credential/context hazırlığından önce alınsın. Captured connection/
     mode/policy/history revision, turn/tool sınırları, doom-loop ve tek terminal
     rapor aktöre bağlansın; mailbox reverse/HTTP/tool beklerken bloke olmasın.
@@ -1075,7 +1075,10 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   scope/revision ve genel bağlantı/terminal eksikleri var. Native sensor domain
   kaynakları tüm LSP/Dape/context tüketicilerinin geçtiğini kanıtlamıyor.
   Güncel native binary ile ilk ERT: 1341 test, 30 başarısız; son katalog/seçim
-  düzeltmesinin odak kabulü: 75/75. Tam son kabul ayrıca çalışıyor.
+  düzeltmesinin odak kabulü: 75/75. Güncel tam source ERT 1379/1379;
+  locked Rust 574 (31 compile-fail dahil), strict all-target Clippy ve değişen
+  Elisp Werror/parantez kontrolleri temiz. Budget/application/selection TLC geçti.
+  Bunlar eksik native tüketici bağlantıları ve gerçek GUI kabulünü kapatmaz.
   Ayrıntı ve açık teknik bulgular: `docs/migration-review-2026-11-01.md`.
 
 - [ ] **6. Bütçe, compaction, healing ve verification birliği** — mevcut native
@@ -1092,6 +1095,10 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] **6.2 Kesin parasal rezervasyon:** input/output/cache fiyatları ve token
     tavanlarıyla checked fixed-point rezervasyon, settlement/refund ve concurrency
     sınırlarını doğrula; bilinmeyen fiyat/usage açık kategori olsun.
+  - [x] **6.2a Gözlenen parasal tavanın denetimi:** token tavanı parasal
+    unknown kontrolünü maskelemez; eksik usage ve kesirli micro-USD kesin sıfır
+    sayılmaz. Bağımsız worktree'de 22 bütçe testi geçti; `f99b674`.
+    Bu, 6.2'deki hard reservation veya gerçek provider settlement bağlantısı değildir.
   - [ ] **6.3 Compaction:** native history revision'ına bağlı tek özetleme,
     başarısız/iptal/stale özetin eski geçmişi koruması, ikinci overflow ve
     multimodal/tool-call bütünlüğü; gerçek loop consumer'ını bağla.
@@ -1122,6 +1129,12 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] **7.3 Kesilmiş yazı ve corruption:** yalnız incomplete son kaydı güvenle
     kurtar; tam kayıt checksum/sequence ve orta kayıt bozulmasını hata say.
     Snapshot başarısızlığında önceki committed görünümü koru.
+  - [x] **7.3a Storage kaynak düzeltmesi ve odak kabulü:** tekrarlanan save
+    journal sequence'i sıfırlamaz; tamamlanmış bozuk son kayıt silinmez; recovery
+    aktif writer'ın flock'ını atlayamaz. Public storage ID traversal kontrolü,
+    bounded/no-follow okuma, atomic exclusive snapshot ve tam journal checkpoint
+    eklendi. Dört kırmızı regresyondan sonra toplam 18 session testi geçti.
+    Host RPC'nin async/scope/revision bağları ve tam 7.3 kapanışı hâlâ açıktır.
   - [ ] **7.4 Restart recovery:** yarım model/tool/edit için outcome_unknown
     repair, idempotence ve sıfır otomatik replay; eski epoch callback'leri yeni
     session/history/selection/accounting durumuna yazamasın.
@@ -1145,6 +1158,11 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] **8.2 Config/selection:** provider/model/effort UI yalnız committed native
     DTO ve async intent tüketsin; aktif run'ın endpoint/auth/policy snapshot'ı
     seçim değişiminde veya retry'da değişmesin; fake default kimlik kullanma.
+  - [x] **8.2a Katalog/seçim regresyonlarının düzeltilmesi:** public katalog
+    native HTTP/metadata publication ve captured credential/epoch adaptörünü
+    kullanır; refresh hatası eski listeyi başarılı sonuç saymaz. Application'lar
+    arası global UI cache/ikinci selection writer kaldırıldı. Katalog/model/
+    provider/seçim odak kabulü 75/75; credential fixture'ları da korunur.
   - [ ] **8.3 Stream/backpressure:** epoch/scope/revision/sequence kontrolü,
     bounded chunk sunumu, gap reconciliation ve tek terminal; geç/çift/foreign
     event ile kill-buffer/Stop yarışlarını gerçek pipe'ta doğrula.
