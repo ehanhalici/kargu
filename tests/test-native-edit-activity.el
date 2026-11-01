@@ -23,7 +23,7 @@
           (source (generate-new-buffer " *kargu-activity-source*"))
           (scope (kargu-bridge--object "application_id" "app_fixture" "session_id" "session_fixture"))
           (artifact (kargu-bridge-edit-artifact--make
-                     :application 'fixture :connection connection :scope scope
+                     :application 'fixture :connection connection :epoch "old" :scope scope
                      :origin "editor_source_12345678-1234-4234-8234-123456789abc"
                      :id "edit_preparation_fixture"))
           (sent nil) (observations nil))

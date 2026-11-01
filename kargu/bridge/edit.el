@@ -44,7 +44,7 @@
 (cl-defstruct (kargu-bridge-edit-artifact
                (:constructor kargu-bridge-edit-artifact--make))
   "One connection-bound, read-only native proposal handle."
-  application connection scope scope-valid-p origin id descriptor released (page-bytes kargu-bridge-edit--chunk-bytes))
+  application connection epoch scope scope-valid-p origin id descriptor released (page-bytes kargu-bridge-edit--chunk-bytes))
 
 (cl-defstruct (kargu-bridge-edit-transfer
                (:constructor kargu-bridge-edit-transfer--make))
@@ -56,21 +56,34 @@
   (kargu-bridge--object "origin_id" (kargu-bridge-edit-artifact-origin artifact)
                         "preparation_id" (kargu-bridge-edit-artifact-id artifact)))
 
+(defun kargu-bridge-edit--epoch-current-p (artifact)
+  "Whether ARTIFACT still belongs to its captured physical connection epoch."
+  (let ((connection (kargu-bridge-edit-artifact-connection artifact))
+        (epoch (kargu-bridge-edit-artifact-epoch artifact)))
+    (and connection (stringp epoch)
+         (equal epoch (kargu-bridge-connection-epoch connection)))))
+
 (defun kargu-bridge-edit--call (artifact method arguments callback)
   "Call METHOD with ARGUMENTS for ARTIFACT and deliver CALLBACK."
-  (kargu-bridge-call
-   (kargu-bridge-edit-artifact-connection artifact)
-   (or (alist-get method kargu-bridge-edit--methods) (error "Unknown edit method"))
-   (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope
-                                  (kargu-bridge-edit-artifact-scope artifact))
-                         "arguments" arguments)
-   callback))
+  (if (not (kargu-bridge-edit--epoch-current-p artifact))
+      (funcall callback nil (kargu-bridge--fault "stale_edit_preparation"))
+    (kargu-bridge-call
+     (kargu-bridge-edit-artifact-connection artifact)
+     (or (alist-get method kargu-bridge-edit--methods) (error "Unknown edit method"))
+     (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope
+                                    (kargu-bridge-edit-artifact-scope artifact))
+                           "arguments" arguments)
+     (lambda (value failure)
+       (let ((current (kargu-bridge-edit--epoch-current-p artifact)))
+         (funcall callback (and current value)
+                  (or failure (unless current (kargu-bridge--fault "stale_edit_preparation")))))))))
 
 (defun kargu-bridge-edit-release (artifact)
   "Release only ARTIFACT's native preparation on its existing connection."
   (unless (kargu-bridge-edit-artifact-released artifact)
     (setf (kargu-bridge-edit-artifact-released artifact) t)
     (when (and (kargu-bridge-edit-artifact-id artifact)
+               (kargu-bridge-edit--epoch-current-p artifact)
                (eq (kargu-bridge-status (kargu-bridge-edit-artifact-connection artifact)) 'ready))
       (kargu-bridge-edit--call artifact :abort
                                (kargu-bridge-edit--arguments artifact) #'ignore))))
@@ -78,6 +91,7 @@
 (defun kargu-bridge-edit--current-p (artifact)
   "Check ARTIFACT's exact application lease without acquiring another one."
   (and (not (kargu-bridge-edit-artifact-released artifact))
+       (kargu-bridge-edit--epoch-current-p artifact)
        (eq (kargu-bridge-status (kargu-bridge-edit-artifact-connection artifact)) 'ready)
        (if-let* ((valid-p (kargu-bridge-edit-artifact-scope-valid-p artifact)))
            (condition-case nil (funcall valid-p) ((error quit) nil))
@@ -251,7 +265,9 @@ any unrelated Elisp loop active when a delayed callback runs."
                    (append (kargu-bridge-connection-capabilities connection) nil)))
       (kargu-bridge-edit--fail transfer (kargu-bridge--fault "unsupported_edit_preparation")))
      (t
-      (setf (kargu-bridge-edit-artifact-connection artifact) connection)
+      (setf (kargu-bridge-edit-artifact-connection artifact) connection
+            (kargu-bridge-edit-artifact-epoch artifact)
+            (copy-sequence (kargu-bridge-connection-epoch connection)))
       (kargu-async-add-cleanup
        task (kargu-bridge-application-ensure
              connection (kargu-bridge-edit-artifact-application artifact)
@@ -324,7 +340,8 @@ BOUND-CALLBACK observes the exact connection and scope before allocation."
   (let* ((arguments (kargu-bridge-edit--copy arguments))
          (artifact (kargu-bridge-edit-artifact--make
                     :application application :origin (copy-sequence (gethash "origin_id" arguments))
-                    :connection connection :scope (and scope (kargu-bridge-application--copy-scope scope))
+                    :connection connection :epoch (and connection (copy-sequence (kargu-bridge-connection-epoch connection)))
+                    :scope (and scope (kargu-bridge-application--copy-scope scope))
                     :scope-valid-p scope-valid-p))
          (transfer (kargu-bridge-edit--transfer artifact callback :arguments arguments :parent parent :valid-p valid-p :action action :bound-callback bound-callback))
          (task (kargu-bridge-edit-transfer-task transfer)))
@@ -482,10 +499,10 @@ before dispatch.  No write capability is returned."
          (task (kargu-async-start callback :timeout 30 :parent parent)))
     (cl-labels
         ((fail (failure) (kargu-async-finish task nil failure))
-         (receive (connection scope value failure)
+         (receive (connection epoch scope value failure)
            (if failure (fail failure)
              (let ((artifact (kargu-bridge-edit-artifact--make
-                              :application application :connection connection
+                              :application application :connection connection :epoch epoch
                               :scope (kargu-bridge-application--copy-scope scope)
                               :origin (gethash "origin_id" arguments)
                               :id (gethash "preparation_id" value)
@@ -497,17 +514,19 @@ before dispatch.  No write capability is returned."
                  (fail (kargu-bridge--fault "stale_edit_preparation"))))))
          (bound (connection scope failure)
            (if failure (fail failure)
-             (condition-case nil
-                 (progn
-                   (when bound-callback (funcall bound-callback connection scope))
-                   (if (not (kargu-bridge-edit--task-current-p task))
-                       (fail (kargu-bridge--fault "stale_edit_preparation"))
-                     (kargu-bridge-call
-                      connection "edit/rollback"
-                      (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope scope)
-                                            "arguments" arguments)
-                      (lambda (value fault) (receive connection scope value fault)))))
-               ((error quit) (fail (kargu-bridge--fault "stale_edit_preparation")))))))
+             (let ((epoch (copy-sequence (kargu-bridge-connection-epoch connection))))
+               (condition-case nil
+                   (progn
+                     (when bound-callback (funcall bound-callback connection scope))
+                     (if (not (and (kargu-bridge-edit--task-current-p task)
+                                   (equal epoch (kargu-bridge-connection-epoch connection))))
+                         (fail (kargu-bridge--fault "stale_edit_preparation"))
+                       (kargu-bridge-call
+                        connection "edit/rollback"
+                        (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope scope)
+                                              "arguments" arguments)
+                        (lambda (value fault) (receive connection epoch scope value fault)))))
+                 ((error quit) (fail (kargu-bridge--fault "stale_edit_preparation"))))))))
       (kargu-bridge-ensure
        (kargu-async-wrap
         task (lambda (connection failure)

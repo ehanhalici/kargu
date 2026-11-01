@@ -170,5 +170,103 @@
         (should (equal (gethash "status" (gethash "data" failure)) "invalid_edit_upload"))
         (should (= (aref text 0) ?x))))))
 
+(ert-deftest kargu-native-edit-prepare-old-epoch-cannot-read-authorize-or-release-test ()
+  (kargu-bridge-test--with-core
+    (let* ((app (kargu-application-create))
+           (root (make-temp-file "kargu-handle-epoch-" t)) artifact done failure)
+      (unwind-protect
+          (progn
+            (kargu-bridge-edit-prepare
+             app (kargu-edit-prepare-test--arguments root "new") '(("new" . "new"))
+             (lambda (value fault) (setq artifact value failure fault done t)))
+            (kargu-bridge-test--wait (lambda () done))
+            (should-not failure)
+            (should (kargu-bridge-edit--current-p artifact))
+            ;; Deliberately keep the scope fields equal across the replacement.
+            (setf (kargu-bridge-connection-epoch conn) "replacement-epoch")
+            (cl-letf (((symbol-function 'kargu-bridge-call)
+                       (lambda (&rest _) (ert-fail "Old handle sent an RPC to the replacement core"))))
+              (should-not (kargu-bridge-edit--current-p artifact))
+              (setq failure nil)
+              (kargu-bridge-edit-read artifact "proposed" 0 (lambda (_value fault) (setq failure fault)))
+              (should failure)
+              (setq failure nil)
+              (kargu-bridge-edit-authorize artifact 'missing (lambda (_value fault) (setq failure fault)))
+              (should failure)
+              (kargu-bridge-edit-release artifact)
+              (should (kargu-bridge-edit-artifact-released artifact))))
+        (delete-directory root t)))))
+
+(ert-deftest kargu-native-edit-prepare-old-epoch-late-allocation-does-not-abort-new-core-test ()
+  (kargu-bridge-test--with-core
+    (let* ((app (kargu-application-create))
+           (root (make-temp-file "kargu-handle-late-epoch-" t))
+           (call (symbol-function 'kargu-bridge-call)) held sent done failure artifact)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-bridge-call)
+                     (lambda (connection method params callback &rest options)
+                       (if (equal (kargu-bridge-connection-epoch connection) "replacement-epoch")
+                           (progn
+                             (push method sent)
+                             (funcall callback nil (kargu-bridge--fault "stale_owner")) "reused-id")
+                         (apply call connection method params
+                                (if (equal method "edit/begin")
+                                    (lambda (value fault)
+                                      (setq held (lambda () (funcall callback value fault))))
+                                  callback) options)))))
+            (kargu-bridge-edit-prepare
+             app (kargu-edit-prepare-test--arguments root "") '(("new" . ""))
+             (lambda (value fault) (setq artifact value failure fault done t)))
+            (kargu-bridge-test--wait (lambda () held))
+            (setf (kargu-bridge-connection-epoch conn) "replacement-epoch")
+            (funcall held)
+            (should done)
+            (should failure)
+            (should-not artifact)
+            (should-not sent))
+        (delete-directory root t)))))
+
+(ert-deftest kargu-native-edit-prepare-old-epoch-reply-cannot-publish-authorized-test ()
+  (let* ((connection (kargu-bridge--connection-create :state 'ready :epoch "original"))
+         (artifact (kargu-bridge-edit-artifact--make :connection connection :epoch "original"
+                                                   :scope (kargu-bridge--object)
+                                                   :origin "source" :id "reused-ticket"))
+         held result failure)
+    (cl-letf (((symbol-function 'kargu-bridge-call)
+               (lambda (_connection _method _params callback &rest _)
+                 (setq held callback) "reused-request")))
+      (kargu-bridge-edit-authorize artifact 'available
+                                   (lambda (value fault) (setq result value failure fault)))
+      (should held)
+      (setf (kargu-bridge-connection-epoch connection) "replacement")
+      (funcall held (kargu-bridge--object "state" "authorized") nil)
+      (should-not result)
+      (should failure))))
+
+(ert-deftest kargu-native-edit-prepare-old-epoch-rollback-allocation-retains-dispatch-epoch-test ()
+  (let* ((connection (kargu-bridge--connection-create :state 'ready :epoch "original"))
+         (scope (kargu-bridge--object "application_id" "app_fixture" "session_id" "sess_fixture"))
+         held sent result failure done)
+    (cl-letf (((symbol-function 'kargu-bridge-ensure)
+               (lambda (receive) (funcall receive connection nil)))
+              ((symbol-function 'kargu-bridge-application-ensure)
+               (lambda (_connection _application receive) (funcall receive scope nil)))
+              ((symbol-function 'kargu-bridge-application-current-scope)
+               (lambda (&rest _) scope))
+              ((symbol-function 'kargu-bridge-call)
+               (lambda (_connection method _params receive &rest _)
+                 (push method sent) (setq held receive) "reused-request")))
+      (kargu-bridge-edit-rollback
+       (kargu-application-create) (kargu-bridge--object "origin_id" "source")
+       :callback (lambda (value fault) (setq result value failure fault done t)))
+      (should held)
+      (setf (kargu-bridge-connection-epoch connection) "replacement")
+      (funcall held (kargu-bridge--object "preparation_id" "reused-ticket"
+                                         "descriptor" (kargu-bridge--object)) nil)
+      (should done)
+      (should-not result)
+      (should failure)
+      (should (equal sent '("edit/rollback"))))))
+
 (provide 'tests/test-native-edit-prepare)
 ;;; test-native-edit-prepare.el ends here

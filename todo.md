@@ -796,12 +796,21 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         Elisp Werror/parantez/checkdoc temiz. Kanıt: `docs/native-service-close.md`.
         Genel change/verification reader'larının ilk servis lease'ine bağlanması
         ve legacy/default/global edit state temizliği ayrı olarak açıktır.
-      - [ ] **3.8a7 Preparation handle epoch sınırı:** native service ilk lease'i
-        ve issued activity epoch'u yakalıyor; read-only edit artifact ve release
-        yolunu da exact epoch'a bağla. Reconnect sonrası aynı connection nesnesinde
-        eski prepare/read/abort yeni core'a gidemesin; tekrar kullanılan ticket ve
-        request ID'leriyle regresyon kur. Genel metadata reader'larının lifetime
-        lease capture'ı ve post-edit verification reader cutover'ını ayrıca tamamla.
+      - [x] **3.8a7 Preparation handle epoch sınırı:** normal/native conversation
+        preparation handle'ı ilk dispatch epoch'unu yakalar; rollback geç cevabın
+        geldiği yeni epoch'u örneklemez. Eski handle read/authorize/upload/abort
+        gönderemez ve geç authorized sonucu yayımlayamaz. İki regresyon eski
+        kodda red (yeni core'a prepare/abort gidiyordu), düzeltmede green; dört
+        epoch vakası ve aynı-epoch late-cancel/stale-scope cleanup kabulü geçti.
+        106/106 odak, 1444/1444 tam ERT; Elisp Werror/parantez/checkdoc temiz.
+        Kanıt: `docs/native-edit-handle-epoch.md`. Metadata/consume reader'larının
+        ilk servis lease'ine bağlanması ayrı 3.8a8 işidir.
+      - [ ] **3.8a8 Metadata ve consume lifetime lease:** list/files/changes/
+        consume/reset okuyucularını yalnız çağrı anındaki application binding'e
+        değil ilk editten yakalanan servis lease'ine bağla. Reconnect ve aynı
+        service/path/ticket isimleriyle geç DTO/ACK eski UI referansını silemesin;
+        epoch kaybında yeni core'a read/mutation gönderilmesin. Native verification
+        consumer cutover'ı ve genel 3.8b kabulü ayrıca tamamlanmalı.
     - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller

@@ -681,7 +681,7 @@
 
 (ert-deftest kargu-native-edit-batch-stale-rollback-releases-and-replies-test ()
   "A late stale rollback preparation releases its ticket and fails immediately."
-  (let ((connection (kargu-bridge--connection-create :state 'ready)) done failure released)
+  (let ((connection (kargu-bridge--connection-create :state 'ready :epoch "rollback-epoch")) done failure released)
     (cl-letf (((symbol-function 'kargu-bridge-ensure)
                (lambda (callback) (funcall callback connection nil)))
               ((symbol-function 'kargu-bridge-application-ensure)

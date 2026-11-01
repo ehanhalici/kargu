@@ -75,7 +75,7 @@
          (live t)
          (kargu--loop-run (list :foreign-run t))
          (artifact (kargu-bridge-edit-artifact--make
-                    :connection connection :scope (kargu-native-session-test--scope)
+                    :connection connection :epoch "fixture-epoch" :scope (kargu-native-session-test--scope)
                     :scope-valid-p (lambda () live))))
     (cl-letf (((symbol-function 'kargu-bridge-application-current-scope)
                (lambda (&rest _) (ert-fail "Conversation edit acquired a service scope"))))
