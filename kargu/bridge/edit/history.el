@@ -13,40 +13,42 @@
 (require 'kargu/async)
 (require 'kargu/bridge/application)
 
-(cl-defun kargu-bridge-edit-history (application &key service-id edit-id revision callback parent)
-  "Read APPLICATION's native undo metadata asynchronously into CALLBACK.
-With EDIT-ID, read its files at the exact previously observed REVISION.
-Otherwise read the retained edit identities.  Return a cancellable task; never
-start or replace a core merely to inspect history.  SERVICE-ID isolates edit
-services sharing the same application and path."
+(defun kargu-bridge-edit-history--read (application arguments maximum callback parent)
+  "Page native metadata for APPLICATION using ARGUMENTS into CALLBACK.
+MAXIMUM bounds the assembled DTO count; PARENT owns cancellation."
   (let* ((binding (gethash :native-core (kargu-application-services application)))
          (connection (and binding (kargu-bridge-application-connection binding)))
          (scope (and connection (kargu-bridge-application-current-scope application connection)))
-         (edit-id (and edit-id (copy-sequence edit-id)))
-         (service-id (and service-id (copy-sequence service-id)))
-         (maximum (if edit-id 256 16))
+         (epoch (and connection (copy-sequence (kargu-bridge-connection-epoch connection))))
+         (revision (gethash "revision" arguments))
          (task (kargu-async-start (or callback #'ignore) :parent parent :timeout 30))
-         (cursor 0) rows)
+         (cursor 0) (sequence 0) active rows)
     (cl-labels
         ((fail (failure) (kargu-async-finish task nil failure))
          (current-p ()
            (and (kargu-async-pending-p task)
+                (equal epoch (kargu-bridge-connection-epoch connection))
                 (kargu-bridge-application-scope-equal-p
                  scope (kargu-bridge-application-current-scope application connection))))
+         (cancel (id)
+           (when (and id (equal epoch (kargu-bridge-connection-epoch connection)))
+             (kargu-bridge-cancel connection id)))
          (read-page ()
            (if (not (current-p)) (fail (kargu-bridge--fault "stale_owner"))
-             (let ((arguments (kargu-bridge--object
-                               "action" (if edit-id "files" "list")
-                               "service_id" (or service-id :json-null)
-                               "offset" cursor "revision" (or revision :json-null))))
-               (when edit-id (puthash "edit_id" edit-id arguments))
-               (let ((id (kargu-bridge-call
-                          connection "edit/history"
-                          (kargu-bridge--object "scope" scope "arguments" arguments)
-                          (kargu-async-wrap task #'receive-page))))
-                 (when id
-                   (kargu-async-add-cleanup
-                    task (lambda () (kargu-bridge-cancel connection id))))))))
+             (puthash "offset" cursor arguments)
+             (puthash "revision" (or revision :json-null) arguments)
+             (let* ((generation (cl-incf sequence))
+                    (id (kargu-bridge-call
+                         connection "edit/history"
+                         (kargu-bridge--object "scope" scope "arguments" (copy-hash-table arguments))
+                         (kargu-async-wrap
+                          task (lambda (page failure)
+                                 (setq active nil)
+                                 (receive-page page failure))))))
+               ;; Inline completion can issue a newer page before this ID exists.
+               (if (and (kargu-async-pending-p task) (= sequence generation))
+                   (setq active id)
+                 (cancel id)))))
          (receive-page (page failure)
            (cond
             (failure (fail failure))
@@ -68,27 +70,43 @@ services sharing the same application and path."
                  (if (eq complete t)
                      (kargu-async-finish
                       task (list :revision revision :rows (nreverse rows)
-                                 :connection connection :scope scope))
+                                 :connection connection :scope scope :epoch epoch))
                    (read-page))))))))
+      (kargu-async-add-cleanup task (lambda () (cancel active) (setq active nil)))
       (cond
        ((or (null scope)
             (not (member "edit_history" (append (kargu-bridge-connection-capabilities connection) nil))))
         (fail (kargu-bridge--fault "unavailable")))
-       ((and edit-id (not (and (integerp revision) (>= revision 0))))
+       ((not (or (and (null revision) (not (equal (gethash "action" arguments) "files")))
+                 (and (integerp revision) (>= revision 0))))
         (fail (kargu-bridge--fault "invalid_edit_history")))
        (t (read-page))))
     task))
+
+(cl-defun kargu-bridge-edit-history (application &key service-id edit-id revision callback parent)
+  "Read APPLICATION's native undo metadata asynchronously into CALLBACK.
+With EDIT-ID, read its files at the exact previously observed REVISION.
+Otherwise read retained edit identities.  Return a cancellable task without
+starting a core.  SERVICE-ID isolates services sharing an application and path."
+  (let ((arguments (kargu-bridge--object
+                    "action" (if edit-id "files" "list")
+                    "service_id" (if service-id (copy-sequence service-id) :json-null)
+                    "revision" revision)))
+    (when edit-id (puthash "edit_id" (copy-sequence edit-id) arguments))
+    (kargu-bridge-edit-history--read application arguments (if edit-id 256 16) callback parent)))
 
 (defun kargu-bridge-edit-history-paths (application callback &optional service-id)
   "Read APPLICATION's retained undo paths into CALLBACK without local mirrors.
 CALLBACK receives (PATHS FAILURE); a concurrent edit invalidates the read.
 SERVICE-ID selects only that native edit service's retained snapshots."
-  (let ((task (kargu-async-start callback :timeout 30))
-        connection scope revision remaining paths)
+  (let ((service-id (and service-id (copy-sequence service-id)))
+        (task (kargu-async-start callback :timeout 30))
+        connection scope epoch revision remaining paths)
     (cl-labels
         ((finish (failure) (kargu-async-finish task (unless failure (nreverse paths)) failure))
          (current-p ()
            (and (kargu-async-pending-p task)
+                (equal epoch (kargu-bridge-connection-epoch connection))
                 (kargu-bridge-application-scope-equal-p
                  scope (kargu-bridge-application-current-scope application connection))))
          (next ()
@@ -114,7 +132,8 @@ SERVICE-ID selects only that native edit service's retained snapshots."
          (edits-ready (value failure)
            (if failure (finish failure)
              (setq connection (plist-get value :connection) scope (plist-get value :scope)
-                   revision (plist-get value :revision) remaining (plist-get value :rows))
+                   epoch (plist-get value :epoch) revision (plist-get value :revision)
+                   remaining (plist-get value :rows))
              (next))))
       (kargu-bridge-edit-history
        application :service-id service-id :parent task :callback (kargu-async-wrap task #'edits-ready)))
@@ -122,62 +141,17 @@ SERVICE-ID selects only that native edit service's retained snapshots."
 
 (cl-defun kargu-bridge-edit-history-changes
     (application &key service-id revision pending-only callback parent)
-  "Read APPLICATION's native change records asynchronously into CALLBACK.
-PENDING-ONLY filters to files awaiting diagnostic verification."
-  (let* ((binding (gethash :native-core (kargu-application-services application)))
-         (connection (and binding (kargu-bridge-application-connection binding)))
-         (scope (and connection (kargu-bridge-application-current-scope application connection)))
-         (service-id (and service-id (copy-sequence service-id)))
-         (task (kargu-async-start (or callback #'ignore) :parent parent :timeout 30))
-         (cursor 0) rows)
-    (cl-labels
-        ((fail (failure) (kargu-async-finish task nil failure))
-         (current-p ()
-           (and (kargu-async-pending-p task)
-                (kargu-bridge-application-scope-equal-p
-                 scope (kargu-bridge-application-current-scope application connection))))
-         (read-page ()
-           (if (not (current-p)) (fail (kargu-bridge--fault "stale_owner"))
-             (let ((arguments (kargu-bridge--object
-                               "action" "changes"
-                               "service_id" (or service-id :json-null)
-                               "pending_only" (if pending-only t :json-false)
-                               "offset" cursor "revision" (or revision :json-null))))
-               (let ((id (kargu-bridge-call
-                          connection "edit/history"
-                          (kargu-bridge--object "scope" scope "arguments" arguments)
-                          (kargu-async-wrap task #'receive-page))))
-                 (when id
-                   (kargu-async-add-cleanup
-                    task (lambda () (kargu-bridge-cancel connection id))))))))
-         (receive-page (page failure)
-           (cond
-            (failure (fail failure))
-            ((not (current-p)) (fail (kargu-bridge--fault "stale_owner")))
-            (t
-             (let* ((files (and (hash-table-p page) (gethash "files" page)))
-                    (next (and (hash-table-p page) (gethash "next_offset" page)))
-                    (version (and (hash-table-p page) (gethash "revision" page)))
-                    (complete (and (hash-table-p page) (gethash "complete" page))))
-               (if (not (and (vectorp files) (integerp next) (integerp version)
-                             (>= version 0) (or (null revision) (= revision version))
-                             (eql (gethash "offset" page) cursor)
-                             (= next (+ cursor (length files))) (<= next 256)
-                             (memq complete '(t :json-false))
-                             (or (eq complete t) (> next cursor))))
-                   (fail (kargu-bridge--fault "invalid_edit_history"))
-                 (setq revision version cursor next)
-                 (mapc (lambda (row) (push row rows)) files)
-                 (if (eq complete t)
-                     (kargu-async-finish
-                      task (list :revision revision :rows (nreverse rows)
-                                 :connection connection :scope scope))
-                   (read-page))))))))
-      (if (or (null scope)
-              (not (member "edit_history" (append (kargu-bridge-connection-capabilities connection) nil))))
-          (fail (kargu-bridge--fault "unavailable"))
-        (read-page)))
-    task))
+  "Read APPLICATION's native change DTOs asynchronously into CALLBACK.
+SERVICE-ID selects an edit service; REVISION pins a previous observation.
+PENDING-ONLY filters files awaiting verification; Rust owns that selection.
+PARENT owns cancellation."
+  (kargu-bridge-edit-history--read
+   application
+   (kargu-bridge--object "action" "changes"
+                        "service_id" (if service-id (copy-sequence service-id) :json-null)
+                        "revision" revision
+                        "pending_only" (if pending-only t :json-false))
+   256 callback parent))
 
 (defun kargu-bridge-edit-history--mutate (application arguments &optional callback)
   "Send a non-paged `edit/history' mutation with ARGUMENTS on APPLICATION."
@@ -207,7 +181,8 @@ PENDING-ONLY filters to files awaiting diagnostic verification."
 
 (cl-defun kargu-bridge-edit-history-reset
     (application &key service-id callback)
-  "Reset modified-file change records on APPLICATION without dropping snapshots."
+  "Reset SERVICE-ID's change records on APPLICATION, preserving snapshots.
+Deliver the native acknowledgement to CALLBACK."
   (kargu-bridge-edit-history--mutate
    application
    (kargu-bridge--object

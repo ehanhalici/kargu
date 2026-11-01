@@ -748,6 +748,14 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         consume korunur. Kanıt: `docs/native-change-capacity.md`. Bu alt iş,
         tüketilmiş bütün run-files geçmişinin sınırsız tutulması veya Elisp
         consumer cutover'ı anlamına gelmez.
+      - [x] **3.8a2 Native metadata köprüsü:** list/files/changes sayfalarını aynı
+        captured scope/revision/connection epoch'una bağla. Epoch kaybında eski
+        callback başarı yayımlamaz ve cleanup yeni bağlantıdaki tekrar kullanılmış
+        request ID'yi iptal etmez. Parent iptali yalnız aktif sayfayı boşaltır;
+        undo path okuyucusu yeni epoch'u benimsemez. Gerçek receipt → service-owned
+        change DTO → exact consume ve ayrı servis izolasyonu pipe testinde geçti.
+        77/77 odak ERT, değişen Elisp Werror/parantez ve production checkdoc temiz.
+        Genel verification tüketicileri ve conversation-scoped görünüm açık kalır.
     - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller

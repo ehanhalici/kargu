@@ -30,7 +30,30 @@ This count includes
 uncommitted task 7/8 tests; it is not a claim that those tasks are accepted.
 TLA+ sources were unchanged, so TLC was not rerun.
 
-This completes todo 3.8a1 only. Consumed run-file metadata remains bounded; this
+The capacity change completes todo 3.8a1; the transport change below completes
+3.8a2. Consumed run-file metadata remains bounded; this
 does not promise an unlimited audit trail. Native default selection, all change
 reader/verification consumers and legacy Elisp engine removal remain open in
 3.8–3.10. The matching boxes were reopened to reflect the source tree.
+
+## Editor metadata transport
+
+The undo list, undo files and changed-file DTO readers now share one bounded
+paging implementation. They capture the original connection epoch as well as
+scope and revision. A replacement connection cannot publish a successful old
+read or receive an old request's cancellation, even if IDs and scope fields are
+reused. Only the currently outstanding page is retained for cancellation;
+inline callbacks cannot overwrite a newer page's request ID. The higher-level
+undo path reader also retains that original epoch and detaches its service ID.
+No change selection, verification decision or undo eligibility moved to Elisp.
+
+The stale-epoch regression failed against the previous implementation and
+passed after the fix. Eight new ERT tests cover the three paging projections,
+malformed/stale pages, cancellation, scope replacement, absent leases, aggregate
+path reads and an actual native editor receipt. The pipe test reads only one
+service's changes and undo paths, consumes its exact identity and confirms that
+a sibling service remains pending. The complete affected edit suite passed
+77/77, alongside changed Elisp warning-as-error compilation, parenthesis checks
+and non-mutating production checkdoc. Rust was unchanged after the validation
+above. Conversation-scoped readers and the remaining legacy verification
+consumers are still open.
