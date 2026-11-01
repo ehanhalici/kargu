@@ -1,0 +1,271 @@
+//! Native diagnostic freshness and baseline comparison over detached editor facts.
+
+use super::{coordinates::SourceRange, types::*};
+use crate::{constants::limits, edit::types::EditPath, error::CoreError};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Canonical diagnostic severity; editor-specific symbols do not cross the port.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    /// Compiler or checker error.
+    Error,
+    /// Warning without a compiler error.
+    Warning,
+    /// Supplemental note.
+    Note,
+    /// Informational finding.
+    Info,
+}
+
+/// One diagnostic's exact source span and semantic identity.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Diagnostic {
+    /// Diagnostic producer, rather than the selected UI backend.
+    pub source: DiagnosticSource,
+    /// Optional checker code.
+    pub code: Option<DiagnosticCode>,
+    /// Canonical severity.
+    pub severity: Severity,
+    /// End-exclusive range in the diagnostic's own document.
+    pub range: SourceRange,
+    /// Bounded message text, excluded from debug output.
+    pub message: SensorText,
+}
+
+/// Exact document stamp. A reused path alone cannot identify a live buffer.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentStamp {
+    /// Workspace-relative source path.
+    pub path: EditPath,
+    /// Opaque editor document identity.
+    pub document_id: DocumentId,
+    /// Captured live modification tick.
+    pub tick: DocumentTick,
+}
+
+/// One checker's report-function generation and its actual completion evidence.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendReport {
+    /// Stable checker identity within this editor resource.
+    pub backend: BackendId,
+    /// Generation requested by the barrier.
+    pub requested: PublicationGeneration,
+    /// Generation observed when delivering the snapshot.
+    pub observed: PublicationGeneration,
+    /// Actual document tick when this report function was acquired.
+    pub tick: DocumentTick,
+    /// True only after the report function has been called for this generation.
+    pub reported: bool,
+}
+
+/// Language-server publication evidence; missing versions cannot certify freshness.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerPublication {
+    /// Server captured when requesting diagnostics.
+    pub requested_server: ServerId,
+    /// Server that supplied the publication.
+    pub observed_server: ServerId,
+    /// Version requested at the document barrier.
+    pub requested_version: Option<LspVersion>,
+    /// Version actually carried by publishDiagnostics or a version-bound pull.
+    pub published_version: Option<LspVersion>,
+    /// Document tick observed at publication.
+    pub tick: DocumentTick,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnapshotInput {
+    requested: DocumentStamp,
+    observed: DocumentStamp,
+    available: bool,
+    backends: Vec<BackendReport>,
+    server: Option<ServerPublication>,
+    diagnostics: Vec<Diagnostic>,
+    truncated: bool,
+}
+
+/// Bounded parse-once diagnostics, with runtime freshness evaluated separately.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(try_from = "SnapshotInput")]
+pub struct DiagnosticSnapshot {
+    requested: DocumentStamp,
+    observed: DocumentStamp,
+    available: bool,
+    backends: Vec<BackendReport>,
+    server: Option<ServerPublication>,
+    diagnostics: Vec<Diagnostic>,
+    truncated: bool,
+}
+impl TryFrom<SnapshotInput> for DiagnosticSnapshot {
+    type Error = CoreError;
+    fn try_from(input: SnapshotInput) -> Result<Self, CoreError> {
+        if input.backends.len() > limits::SENSOR_BACKENDS
+            || input.diagnostics.len() > limits::SENSOR_DIAGNOSTICS
+        {
+            return Err(CoreError::Limit);
+        }
+        let mut identities = BTreeSet::new();
+        for report in &input.backends {
+            if !identities.insert(&report.backend) {
+                return Err(CoreError::InvalidValue {
+                    field: "BackendReport",
+                });
+            }
+        }
+        let bytes = serde_json::to_vec(&input.diagnostics)
+            .map_err(|_| CoreError::Limit)?
+            .len();
+        if bytes > limits::SENSOR_DIAGNOSTIC_BYTES {
+            return Err(CoreError::Limit);
+        }
+        Ok(Self {
+            requested: input.requested,
+            observed: input.observed,
+            available: input.available,
+            backends: input.backends,
+            server: input.server,
+            diagnostics: input.diagnostics,
+            truncated: input.truncated,
+        })
+    }
+}
+
+/// Interpretation of the live observation, independent of how many diagnostics exist.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Freshness {
+    /// No usable live checker is available.
+    Unavailable,
+    /// Document, checker generation or server identity changed.
+    Stale,
+    /// Still waiting for an exact report; an empty cache is not clean evidence.
+    Pending,
+    /// Every captured checker and publication belongs to the requested document.
+    Fresh,
+    /// A bounded snapshot omitted findings and cannot certify a clean document.
+    Truncated,
+}
+
+impl DiagnosticSnapshot {
+    /// Decide freshness from exact runtime evidence, never from elapsed time.
+    pub fn freshness(&self) -> Freshness {
+        if !self.available || self.backends.is_empty() {
+            return Freshness::Unavailable;
+        }
+        if self.requested != self.observed
+            || self.backends.iter().any(|report| {
+                report.requested != report.observed || report.tick != self.requested.tick
+            })
+        {
+            return Freshness::Stale;
+        }
+        if let Some(server) = &self.server {
+            if server.requested_server != server.observed_server
+                || server.tick != self.requested.tick
+            {
+                return Freshness::Stale;
+            }
+            match (server.requested_version, server.published_version) {
+                (Some(requested), Some(published)) if requested != published => {
+                    return Freshness::Stale;
+                }
+                (None, _) | (_, None) => return Freshness::Pending,
+                _ => {}
+            }
+        }
+        if self.backends.iter().any(|report| !report.reported) {
+            return Freshness::Pending;
+        }
+        if self.truncated {
+            return Freshness::Truncated;
+        }
+        Freshness::Fresh
+    }
+
+    /// Exact live document this snapshot was requested for.
+    pub fn document(&self) -> &DocumentStamp {
+        &self.requested
+    }
+
+    /// Borrow observations for rendering, retaining their separate freshness status.
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    /// A clean verdict requires complete fresh evidence and no error severity.
+    pub fn is_clean(&self) -> bool {
+        self.freshness() == Freshness::Fresh
+            && self
+                .diagnostics
+                .iter()
+                .all(|d| d.severity != Severity::Error)
+    }
+
+    /// Compare semantic error identities only across two trustworthy snapshots.
+    /// Source identity is preserved; position shifts do not invent new errors.
+    pub fn compare_errors(&self, baseline: &Self) -> Option<DiagnosticDelta> {
+        if self.freshness() != Freshness::Fresh
+            || baseline.freshness() != Freshness::Fresh
+            || self.requested.path != baseline.requested.path
+            || self.requested.document_id != baseline.requested.document_id
+        {
+            return None;
+        }
+        let mut previous = BTreeMap::new();
+        for error in baseline
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+        {
+            let key = (&error.source, &error.code, error.message.as_str());
+            let count: &mut usize = previous.entry(key).or_insert(0);
+            *count = count.checked_add(1)?;
+        }
+        let mut result = DiagnosticDelta::default();
+        for error in self
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+        {
+            let key = (&error.source, &error.code, error.message.as_str());
+            if let Some(count) = previous.get_mut(&key).filter(|count| **count > 0) {
+                *count = count.checked_sub(1)?;
+                result.pre_existing.0 = result.pre_existing.0.checked_add(1)?;
+            } else {
+                result.new.0 = result.new.0.checked_add(1)?;
+            }
+        }
+        result.resolved.0 = previous
+            .values()
+            .try_fold(0usize, |sum, count| sum.checked_add(*count))?;
+        Some(result)
+    }
+}
+
+/// Number of diagnostics, distinct from lines, bytes or healing attempts.
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Serialize)]
+pub struct DiagnosticCount(usize);
+impl DiagnosticCount {
+    /// Exact number of findings.
+    pub fn get(self) -> usize {
+        self.0
+    }
+}
+
+/// Position-independent comparison of two fresh diagnostic snapshots.
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Serialize)]
+pub struct DiagnosticDelta {
+    /// Errors absent from the baseline.
+    pub new: DiagnosticCount,
+    /// Errors also present in the baseline.
+    pub pre_existing: DiagnosticCount,
+    /// Baseline errors absent from the new snapshot.
+    pub resolved: DiagnosticCount,
+}
