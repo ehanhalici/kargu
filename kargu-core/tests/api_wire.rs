@@ -100,6 +100,36 @@ fn blocks_response_usage_and_finish_are_native_without_zero_invention() -> TestR
 }
 
 #[test]
+fn normalized_cache_inclusive_input_is_priced_once_per_category() -> TestResult {
+    use kargu_core::{
+        application::budget::{PricingRates, PricingUsage},
+        models::{CacheReadTokenRate, CacheWriteTokenRate, InputTokenRate, OutputTokenRate},
+    };
+    use std::str::FromStr;
+    let wire = codec("claude", "anthropic", "https://localhost/messages")?;
+    let normalized = wire.decode(native_response())?;
+    let usage = &normalized["usage"];
+    let priced = PricingUsage::new(
+        serde_json::from_value(usage["prompt_tokens"].clone())?,
+        serde_json::from_value(usage["completion_tokens"].clone())?,
+        serde_json::from_value(usage["prompt_tokens_details"]["cached_tokens"].clone())?,
+        serde_json::from_value(usage["prompt_tokens_details"]["cache_write_tokens"].clone())?,
+    )?;
+    let rates = PricingRates::new(
+        Some(InputTokenRate::from_str("0.000001")?),
+        Some(OutputTokenRate::from_str("0.000003")?),
+        Some(CacheReadTokenRate::from_str("0.0000005")?),
+        Some(CacheWriteTokenRate::from_str("0.000002")?),
+    );
+    // 100 uncached + 1 * 3 output + 80 * 0.5 cache reads + 20 * 2 creations.
+    assert_eq!(
+        rates.compute_cost(Some(&priced))?.map(|cost| cost.as_u64()),
+        Some(183)
+    );
+    Ok(())
+}
+
+#[test]
 fn opaque_signatures_are_retained_only_for_exact_authority() -> TestResult {
     let wire = codec("claude", "anthropic", "https://localhost/messages")?;
     let response = wire.decode(native_response())?;

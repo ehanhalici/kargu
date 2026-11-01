@@ -26,14 +26,16 @@
 //! ```
 
 mod domain;
+mod pricing;
 use crate::{
     domain::{BudgetId, CompactionCount, Deadline, MicroUsd, RequestCount, TokenCount},
     error::CoreError,
 };
 pub use domain::{
-    BudgetLimits, CompactionLimit, DebitKind, MonetaryLimit, ObservedUsage, PricingRates,
-    RequestLimit, TokenLimit,
+    BudgetLimits, CompactionLimit, DebitKind, MonetaryLimit, ObservedUsage, RequestLimit,
+    TokenLimit,
 };
+pub use pricing::{PricingRates, PricingUsage};
 use serde::Serialize;
 use std::{collections::BTreeSet, marker::PhantomData};
 

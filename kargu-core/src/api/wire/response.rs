@@ -2,7 +2,7 @@ use super::{
     ApiError,
     domain::{Field, ResponseRules},
 };
-use crate::domain::{CachedTokens, InputTokens, OutputTokens, TokenCount};
+use crate::domain::{CacheWriteTokens, CachedTokens, InputTokens, OutputTokens, TokenCount};
 use serde_json::{Map, Value, json};
 
 fn count<T>(
@@ -30,14 +30,14 @@ fn usage(value: &Value, rules: &ResponseRules) -> Result<Option<Value>, ApiError
     }
     if let Some(cache) = rules.cache.as_ref() {
         let read = count(source.get(cache.read.as_str()), CachedTokens::try_from)?;
-        let write = count(source.get(cache.write.as_str()), InputTokens::try_from)?;
+        let write = count(source.get(cache.write.as_str()), CacheWriteTokens::try_from)?;
         if cache.input_excludes_cache
             && let Some(input) = count(mapped.get("prompt_tokens"), InputTokens::try_from)?
         {
             let input = input
                 .as_u64()
                 .checked_add(read.map_or(0, CachedTokens::as_u64))
-                .and_then(|input| input.checked_add(write.map_or(0, InputTokens::as_u64)))
+                .and_then(|input| input.checked_add(write.map_or(0, CacheWriteTokens::as_u64)))
                 .ok_or(ApiError::Limit)?;
             mapped.insert(
                 "prompt_tokens".to_owned(),

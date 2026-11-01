@@ -736,8 +736,9 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       Değişiklik/verification metadata ledger'ı ve exact consume kaynağı eklendi;
       path-only consume portu, daha yeni aynı-path kaydını silebildiği için kaldırıldı.
       Service close bounded closed-ID kaydı tutar; geç receipt geçmişi diriltemez,
-      `drained` gerçek preparation/editor settlement'ını bildirir. Elisp close
-      yakalanmış application'ı kullanır ve drain'i bekler. Gerçek change reader
+      `drained` gerçek preparation/editor settlement'ını bildirir. Bridge close
+      okuyucusu yakalanmış application'da drain'i poll eder; public Elisp service
+      close tüketicisinin bu asenkron settlement'ı beklemesi hâlâ açıktır. Gerçek change reader
       cutover, eviction coverage ve bütün consumer kabulü hâlâ açık.
       - [x] **3.8a1 Pending verification kapasitesi:** yeni hedef için native
         claim verilmeden önce `(session, service, path)` yer ayır; iptal edilmiş
@@ -1205,6 +1206,15 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     unknown kontrolünü maskelemez; eksik usage ve kesirli micro-USD kesin sıfır
     sayılmaz. Bağımsız worktree'de 22 bütçe testi geçti; `f99b674`.
     Bu, 6.2'deki hard reservation veya gerçek provider settlement bağlantısı değildir.
+  - [x] **6.2b Canonical cache fiyat hesabı:** toplam input içindeki cache read/
+    write alt kümelerini checked typed sınırda ayır; her kategoriyi kendi
+    fiyatıyla bir kez ücretlendir. Eksik kullanım/fiyat unknown kalsın; explicit
+    sıfır fiyatı eksik fiyatla karıştırma. Kategori kesirlerini son micro-USD
+    sınırına kadar tam topla, taşmayı reddet. Native wire → fiyat regresyonu ve
+    compile-fail birim ayrımı eklendi. Kanıt: `docs/native-cache-pricing.md`.
+    598 locked Rust (32 compile-fail), 1414/1414 full source ERT ve strict
+    Clippy/fmt temiz. Bu hesap henüz runtime provider settlement'a bağlı değildir;
+    hard reservation/refund/concurrency ve genel 6.2 açık kalır.
   - [ ] **6.3 Compaction:** native history revision'ına bağlı tek özetleme,
     başarısız/iptal/stale özetin eski geçmişi koruması, ikinci overflow ve
     multimodal/tool-call bütünlüğü; gerçek loop consumer'ını bağla.

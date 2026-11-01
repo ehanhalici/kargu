@@ -401,7 +401,6 @@ fn observed_monetary_ceiling_and_unknown_pricing_fail_closed() -> TestResult {
 #[test]
 fn pricing_rates_calculates_exact_microusd_without_floats() -> TestResult {
     use kargu_core::application::budget::PricingRates;
-    use kargu_core::domain::{InputTokens, OutputTokens};
     use kargu_core::models::{CacheReadTokenRate, InputTokenRate, OutputTokenRate};
     use std::str::FromStr;
 
@@ -409,14 +408,12 @@ fn pricing_rates_calculates_exact_microusd_without_floats() -> TestResult {
     let output_rate = OutputTokenRate::from_str("0.0000030")?; // $3.00 / 1M tokens
     let cache_rate = CacheReadTokenRate::from_str("0.0000005")?; // $0.50 / 1M tokens
 
-    let pricing = PricingRates::new(Some(input_rate), Some(output_rate), Some(cache_rate));
+    let pricing = PricingRates::new(Some(input_rate), Some(output_rate), Some(cache_rate), None);
 
-    let cost = pricing.compute_cost(
-        Some(InputTokens::try_from(1_000_000)?),
-        Some(OutputTokens::try_from(500_000)?),
-        Some(2_000_000),
-    )?;
+    let usage = priced_usage(3_000_000, 500_000, 2_000_000, 0)?;
+    let cost = pricing.compute_cost(Some(&usage))?;
 
+    // Canonical 3M input includes 2M cache reads, leaving 1M normal input.
     // 1M * 1.50 = $1.50 = 1,500,000 MicroUsd
     // 500k * 3.00 = $1.50 = 1,500,000 MicroUsd
     // 2M * 0.50 = $1.00 = 1,000,000 MicroUsd
@@ -424,8 +421,8 @@ fn pricing_rates_calculates_exact_microusd_without_floats() -> TestResult {
     assert_eq!(cost.map(|c| c.as_u64()), Some(4_000_000));
 
     // Missing rate for non-zero tokens yields None (unknown)
-    let partial = PricingRates::new(None, None, None);
-    let unknown_cost = partial.compute_cost(Some(InputTokens::try_from(100)?), None, None)?;
+    let partial = PricingRates::new(None, None, None, None);
+    let unknown_cost = partial.compute_cost(Some(&priced_usage(100, 0, 0, 0)?))?;
     assert!(unknown_cost.is_none());
     Ok(())
 }
@@ -467,20 +464,144 @@ fn token_ceiling_does_not_mask_unknown_monetary_usage() -> TestResult {
 fn incomplete_usage_and_fractional_microdollars_are_not_exact_zero() -> TestResult {
     use kargu_core::{application::budget::PricingRates, models::InputTokenRate};
     use std::str::FromStr;
-    let pricing = PricingRates::new(Some(InputTokenRate::from_str("0.0000005")?), None, None);
+    let pricing = PricingRates::new(
+        Some(InputTokenRate::from_str("0.0000005")?),
+        None,
+        None,
+        None,
+    );
+    assert!(pricing.compute_cost(None)?.is_none());
     assert!(
         pricing
-            .compute_cost(None, Some(OutputTokens::try_from(0)?), None)?
+            .compute_cost(Some(&priced_usage(1, 0, 0, 0)?))?
+            .is_none()
+    );
+    Ok(())
+}
+
+fn priced_usage(
+    input: u64,
+    output: u64,
+    read: u64,
+    write: u64,
+) -> Result<kargu_core::application::budget::PricingUsage, kargu_core::error::CoreError> {
+    use kargu_core::{
+        application::budget::PricingUsage,
+        domain::{CacheWriteTokens, CachedTokens},
+    };
+    PricingUsage::new(
+        InputTokens::try_from(input)?,
+        OutputTokens::try_from(output)?,
+        CachedTokens::try_from(read)?,
+        CacheWriteTokens::try_from(write)?,
+    )
+}
+
+#[test]
+fn cache_subsets_are_charged_once_at_their_own_read_and_write_rates() -> TestResult {
+    use kargu_core::{application::budget::PricingRates, models::*};
+    use std::str::FromStr;
+    let rates = PricingRates::new(
+        Some(InputTokenRate::from_str("0.000001")?),
+        Some(OutputTokenRate::from_str("0.000003")?),
+        Some(CacheReadTokenRate::from_str("0.000002")?),
+        Some(CacheWriteTokenRate::from_str("0.000004")?),
+    );
+    let usage = priced_usage(100, 10, 25, 25)?;
+    // 50 uncached + 10 * 3 output + 25 * 2 cache read + 25 * 4 cache write.
+    assert_eq!(
+        rates.compute_cost(Some(&usage))?.map(|cost| cost.as_u64()),
+        Some(230)
+    );
+    assert!(priced_usage(99, 0, 100, 0).is_err());
+    assert!(priced_usage(99, 0, 0, 100).is_err());
+    assert!(priced_usage(100, 0, 75, 26).is_err());
+    assert!(priced_usage(u64::MAX, 0, u64::MAX, 1).is_err());
+    Ok(())
+}
+
+#[test]
+fn absent_pricing_is_required_only_for_nonzero_known_categories() -> TestResult {
+    use kargu_core::{application::budget::PricingRates, models::CacheReadTokenRate};
+    use std::str::FromStr;
+    let absent = PricingRates::default();
+    assert_eq!(
+        absent
+            .compute_cost(Some(&priced_usage(0, 0, 0, 0)?))?
+            .map(|c| c.as_u64()),
+        Some(0)
+    );
+    assert!(
+        absent
+            .compute_cost(Some(&priced_usage(1, 0, 1, 0)?))?
             .is_none()
     );
     assert!(
-        pricing
-            .compute_cost(
-                Some(InputTokens::try_from(1)?),
-                Some(OutputTokens::try_from(0)?),
-                None
-            )?
+        absent
+            .compute_cost(Some(&priced_usage(1, 0, 0, 1)?))?
             .is_none()
+    );
+    let free_reads = PricingRates::new(None, None, Some(CacheReadTokenRate::from_str("0")?), None);
+    assert_eq!(
+        free_reads
+            .compute_cost(Some(&priced_usage(1, 0, 1, 0)?))?
+            .map(|c| c.as_u64()),
+        Some(0)
+    );
+    assert!(
+        free_reads
+            .compute_cost(Some(&priced_usage(2, 0, 1, 0)?))?
+            .is_none()
+    );
+    Ok(())
+}
+
+#[test]
+fn fractional_categories_are_summed_exactly_before_the_microdollar_boundary() -> TestResult {
+    use kargu_core::{application::budget::PricingRates, models::*};
+    use std::str::FromStr;
+    let rates = PricingRates::new(
+        Some(InputTokenRate::from_str("0.0000005")?),
+        Some(OutputTokenRate::from_str("0.00000025")?),
+        Some(CacheReadTokenRate::from_str("0.000000125")?),
+        Some(CacheWriteTokenRate::from_str("0.000000125")?),
+    );
+    // 0.5 + 0.25 + 0.125 + 0.125 micro-USD is exactly one, not unknown or zero.
+    let exact = priced_usage(3, 1, 1, 1)?;
+    assert_eq!(
+        rates.compute_cost(Some(&exact))?.map(|cost| cost.as_u64()),
+        Some(1)
+    );
+    assert!(
+        rates
+            .compute_cost(Some(&priced_usage(2, 1, 1, 0)?))?
+            .is_none()
+    );
+    // Force carries with a common denominator near u128's upper decimal range.
+    let near = "0.00000099999999999999999999999999999999";
+    let high_precision = PricingRates::new(
+        Some(InputTokenRate::from_str(near)?),
+        Some(OutputTokenRate::from_str(near)?),
+        Some(CacheReadTokenRate::from_str(near)?),
+        Some(CacheWriteTokenRate::from_str(near)?),
+    );
+    assert!(high_precision.compute_cost(Some(&exact))?.is_none());
+    let overflow = PricingRates::new(
+        Some(InputTokenRate::from_str("18446744073709.551615")?),
+        None,
+        None,
+        None,
+    );
+    assert_eq!(
+        overflow
+            .compute_cost(Some(&priced_usage(1, 0, 0, 0)?))?
+            .map(|cost| cost.as_u64()),
+        Some(u64::MAX)
+    );
+    assert!(
+        overflow
+            .compute_cost(Some(&priced_usage(2, 0, 0, 0)?))
+            .is_err()
     );
     Ok(())
 }

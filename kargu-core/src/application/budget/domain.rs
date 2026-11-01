@@ -4,7 +4,6 @@ use crate::{
     constants::limits,
     domain::{InputTokens, MicroUsd, OutputTokens, TokenCount},
     error::CoreError,
-    models::{CacheReadTokenRate, InputTokenRate, OutputTokenRate},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -155,86 +154,6 @@ impl BudgetLimits {
     }
     pub(super) fn monetary(self) -> Option<MonetaryLimit> {
         self.monetary
-    }
-}
-
-/// Exact model pricing rates for computing cost in micro-dollars.
-#[derive(Clone, Debug, Default)]
-pub struct PricingRates {
-    input: Option<InputTokenRate>,
-    output: Option<OutputTokenRate>,
-    cache_read: Option<CacheReadTokenRate>,
-}
-impl PricingRates {
-    /// Capture exact rate fields.
-    pub fn new(
-        input: Option<InputTokenRate>,
-        output: Option<OutputTokenRate>,
-        cache_read: Option<CacheReadTokenRate>,
-    ) -> Self {
-        Self {
-            input,
-            output,
-            cache_read,
-        }
-    }
-    /// Compute total cost in micro-dollars for the given observed usage.
-    /// If required rates are missing for non-zero token categories, returns None (unknown).
-    pub fn compute_cost(
-        &self,
-        input_tokens: Option<InputTokens>,
-        output_tokens: Option<OutputTokens>,
-        cached_tokens: Option<u64>,
-    ) -> Result<Option<MicroUsd>, CoreError> {
-        let (Some(input), Some(output)) = (input_tokens, output_tokens) else {
-            return Ok(None);
-        };
-        let input_cnt = input.as_u64();
-        let output_cnt = output.as_u64();
-        let cache_cnt = cached_tokens.unwrap_or(0);
-
-        let mut total = MicroUsd::ZERO;
-
-        if input_cnt > 0 {
-            match &self.input {
-                Some(rate) => {
-                    let (cost, remainder, _) = rate.charge_tokens(input_cnt)?;
-                    // Fractional micro-dollars cannot be advertised as exact integer spend.
-                    if remainder != 0 {
-                        return Ok(None);
-                    }
-                    total = total.checked_add(cost)?;
-                }
-                None => return Ok(None),
-            }
-        }
-        if output_cnt > 0 {
-            match &self.output {
-                Some(rate) => {
-                    let (cost, remainder, _) = rate.charge_tokens(output_cnt)?;
-                    // Fractional micro-dollars cannot be advertised as exact integer spend.
-                    if remainder != 0 {
-                        return Ok(None);
-                    }
-                    total = total.checked_add(cost)?;
-                }
-                None => return Ok(None),
-            }
-        }
-        if cache_cnt > 0 {
-            match &self.cache_read {
-                Some(rate) => {
-                    let (cost, remainder, _) = rate.charge_tokens(cache_cnt)?;
-                    // Fractional micro-dollars cannot be advertised as exact integer spend.
-                    if remainder != 0 {
-                        return Ok(None);
-                    }
-                    total = total.checked_add(cost)?;
-                }
-                None => return Ok(None),
-            }
-        }
-        Ok(Some(total))
     }
 }
 

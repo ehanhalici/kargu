@@ -235,6 +235,10 @@ counter!(
     "Cache usage, interpreted by provider billing rules."
 );
 counter!(
+    CacheWriteTokens,
+    "Cache creation usage, distinct from cache-read tokens."
+);
+counter!(
     ReasoningTokens,
     "Reasoning usage; not automatically added to output usage."
 );
