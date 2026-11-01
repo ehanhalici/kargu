@@ -6,6 +6,7 @@
 (require 'tests/test-helpers)
 (require 'tests/test-bridge)
 (require 'tests/test-native-conversation)
+(require 'tests/test-native-history)
 
 (declare-function kargu-stream-test--server "tests/test-stream"
                   (body stream &optional hold capture capture-headers status headers script))
@@ -18,7 +19,7 @@
       (cl-letf (((symbol-function 'kargu-loop--live-p) (lambda (_run) t))
                 ((symbol-function 'kargu--loop-finish)
                  (lambda (_run status &optional _text) (push status delivered))))
-               (kargu-loop-native--finish run (kargu-bridge--object "status" (car case)) nil)
+               (kargu-loop-native--finish run (kargu-bridge--object "status" (car case) "answer_text" "fixture answer") nil)
                (should (equal delivered (list (cdr case))))))))
 
 (ert-deftest kargu-native-loop-terminal-error-and-retired-owner-test ()
@@ -44,7 +45,7 @@
 	     (setq task (kargu-loop-native-owned-start
 			 nil (kargu-bridge--object) #'ignore))
 	     (kargu-async-cancel task)
-	     (funcall ready 'connection nil)
+	     (funcall ready (kargu-bridge--connection-create :state 'ready :epoch "fixture-epoch") nil)
 	     (should cleanup)
 	     (should-not acquired)
 	     (should-not dispatched))))
@@ -76,7 +77,7 @@
 	     (setq task (kargu-loop-native-owned-start nil arguments
 						       (lambda (&rest _) (ert-fail "late callback"))))
 	     (puthash "text" "mutated" arguments)
-	     (funcall ready 'connection nil)
+	     (funcall ready (kargu-bridge--connection-create :state 'ready :epoch "fixture-epoch") nil)
 	     (should (equal (gethash "text" sent) "original"))
 	     (kargu-async-cancel task)
 	     (should (equal cancel-id "exact-prompt-id"))
@@ -85,7 +86,7 @@
 (ert-deftest kargu-native-loop-replaced-lease-never-dispatches-test ()
   (let (task delivered sent)
     (cl-letf (((symbol-function 'kargu-bridge-ensure)
-               (lambda (callback) (funcall callback 'connection nil) #'ignore))
+               (lambda (callback) (funcall callback (kargu-bridge--connection-create :state 'ready :epoch "fixture-epoch") nil) #'ignore))
               ((symbol-function 'kargu-bridge-application-ensure)
                (lambda (_connection _application callback)
                  (funcall callback (kargu-bridge--object "application_id" "old" "session_id" "old") nil)
@@ -179,7 +180,7 @@
          (parent (kargu-async-start #'ignore :owner nil :parent nil))
          task issued cancelled)
     (cl-letf (((symbol-function 'kargu-bridge-ensure)
-               (lambda (callback) (funcall callback 'connection nil) #'ignore))
+               (lambda (callback) (funcall callback (kargu-bridge--connection-create :state 'ready :epoch "fixture-epoch") nil) #'ignore))
               ((symbol-function 'kargu-bridge-application-ensure)
                (lambda (_conn _app callback) (funcall callback scope nil) #'ignore))
               ((symbol-function 'kargu-bridge-conversation-ensure)

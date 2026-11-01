@@ -74,7 +74,8 @@ Startup errors are reported without switching to the Elisp backend."
         (plist-put run :iterations spent))
       (cond
        (failure (kargu--loop-finish run :error "Native agent request failed"))
-       ((equal status "completed") (kargu--loop-finish run :done ""))
+       ((and (equal status "completed") (stringp (gethash "answer_text" result)))
+        (kargu--loop-finish run :done (gethash "answer_text" result)))
        ((equal status "cancelled") (kargu--loop-finish run :stopped "Native agent cancelled"))
        ((equal status "timeout") (kargu--loop-finish run :error "Native agent timed out"))
        ((equal status "rejected") (kargu--loop-finish run :error "Native agent rejected the request"))

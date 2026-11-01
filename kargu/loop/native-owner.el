@@ -14,7 +14,36 @@
 (require 'kargu/async)
 (require 'kargu/bridge/application)
 (require 'kargu/bridge/conversation)
+(require 'kargu/bridge/history)
 (require 'kargu/bridge/session)
+
+(defun kargu-loop-native-owned--completed
+    (task application session connection scope result failure)
+  "Read RESULT's committed answer before delivering TASK's terminal callback.
+APPLICATION, SESSION, CONNECTION and SCOPE bind the read; FAILURE ends delivery."
+  (cond
+   (failure (kargu-async-finish task nil failure))
+   ((not (kargu-bridge-application-scope-equal-p
+          scope (kargu-bridge-conversation-current-scope application session connection)))
+    (kargu-async-finish task nil "Native conversation lease changed"))
+   ((not (and (hash-table-p result) (equal (gethash "status" result) "completed")))
+    (kargu-async-finish task result nil))
+   (t
+    (let* ((accounting (gethash "accounting" result))
+           (revision (and (hash-table-p accounting) (gethash "history_revision" accounting)))
+           (message (and (hash-table-p accounting) (gethash "answer_message" accounting))))
+      (if (not (and (integerp revision) (> revision 0) (stringp message)))
+          (kargu-async-finish task nil "Native answer reference is unavailable")
+        (kargu-bridge-history-display
+         connection scope revision message
+         (kargu-async-wrap
+          task (lambda (text error-data)
+                 (unless error-data (puthash "answer_text" text result))
+                 (kargu-async-finish task (unless error-data result) error-data)))
+         :parent task :owner (kargu-async-task-buffer task)
+         :valid-p (lambda ()
+                    (kargu-bridge-application-scope-equal-p
+                     scope (kargu-bridge-conversation-current-scope application session connection)))))))))
 
 (defun kargu-loop-native-owned--issue
     (task application session connection arguments owner on-delta on-event scope failure)
@@ -27,16 +56,21 @@ FAILURE rejects startup.  ON-DELTA and ON-EVENT observe this task alone."
           scope (kargu-bridge-conversation-current-scope application session connection)))
     (kargu-async-finish task nil "Native application lease changed"))
    (t
-    (let ((id (kargu-bridge-session-start
+    (let* ((epoch (copy-sequence (kargu-bridge-connection-epoch connection)))
+           (id (kargu-bridge-session-start
                connection scope arguments
-               (lambda (result error-data)
-                 (kargu-async-finish task result error-data))
+               (kargu-async-wrap
+                task (lambda (result error-data)
+                       (kargu-loop-native-owned--completed
+                        task application session connection scope result error-data)))
                :owner owner
                :on-delta (when on-delta (kargu-async-wrap task on-delta))
                :on-event (when on-event (kargu-async-wrap task on-event)))))
       (when id
         (kargu-async-add-cleanup
-         task (lambda () (kargu-bridge-cancel connection id))))))))
+         task (lambda ()
+                (when (equal epoch (kargu-bridge-connection-epoch connection))
+                  (kargu-bridge-cancel connection id)))))))))
 
 (defun kargu-loop-native-owned--application
     (task application session connection arguments owner on-delta on-event scope failure)

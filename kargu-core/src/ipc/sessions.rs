@@ -1016,7 +1016,18 @@ impl Sessions {
                 .ok()
                 .map(|history| history.revision());
             let terminal = running.terminal;
-            let accounting = json!({"budget":budget,"history_revision":revision,"failure":running.failure.as_ref().map(ApiError::snapshot)});
+            let answer_message = if terminal == Some(AgentStop::Answer) && owner.terminal.is_none()
+            {
+                actor
+                    .session_history(&owner.scope.session_id)
+                    .ok()
+                    .and_then(crate::history::History::answer_message)
+                    .cloned()
+            } else {
+                None
+            };
+            let accounting = json!({"budget":budget,"history_revision":revision,
+                "answer_message":answer_message,"failure":running.failure.as_ref().map(ApiError::snapshot)});
             op.stage = Stage::Settled;
             finish_response(host, id, owner, terminal, Some(accounting), messages)?;
             return Ok(true);

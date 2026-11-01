@@ -1113,6 +1113,20 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     1398/1398 ve değişen Elisp Werror/parantez kabulü temiz. TLA+ kodu değişmediği
     için TLC tekrar çalıştırılmadı. Native history UI paging/import, hazırlıktan
     önce native claim ve genel 5.9 kapanışı hâlâ açıktır.
+  - [x] **5.9c Native son yanıtın revizyonlu sunum portu — kaynak/runtime dilimi:**
+    Rust terminal accounting'i son assistant MessageId ve history revision'ını
+    taşır. Görünür text/output_text projection'ı native message ingress'te
+    hazırlanır ve native history kapasitesine dahil edilir; opaque/reasoning/
+    image/tool verileri metin diye gösterilmez. Emacs aynı conversation/revision
+    üzerinden bounded display sayfalarını birleştirir; wire JSON'u ayrıştırmaz.
+    Unicode/CRLF ve 1024-byte frame ile büyük plain yanıt gerçek provider/pipe
+    üzerinden UI'ye bir kez ulaşır; stream'de gösterilmiş metin tekrar basılmaz.
+    Stale/malformed sayfa, kapanan origin, epoch değişimi veya eksik answer
+    reference boş başarı üretemez; prompt ve page cancel exact epoch'a bağlıdır.
+    587 locked Rust (31 compile-fail dahil), full ERT 1405/1405, son epoch guard'ı
+    sonrası odak 25/25; strict Clippy/fmt, Elisp Werror/checkdoc/parantez temiz.
+    Ortak Rust lib/actor/host entegrasyon commit'i, bütün geçmişin UI projection/
+    import'u ve genel 5.9 kapanışı hâlâ açıktır. TLA+ değişmedi; TLC çalıştırılmadı.
   - [ ] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
     repair ile domain state/plan dispatch motorlarını son tüketici sonrası kaldır.
     Madde 6'daki compaction/healing consumer'larının native run'a bağlanması için

@@ -296,3 +296,44 @@ all mode/plan/background-tool consumers, legacy engine removal and task 6 remain
 open. Inconsistent checked parent boxes 5.6/5.7/5.8 were reopened while preserving
 the verified implementation/runtime subitems. Shared native Rust integration is
 still present in the working tree and is not claimed as committed by this slice.
+
+## Follow-up: native answers must reach the editor without a second history engine
+
+A completed native prompt previously returned only status/accounting, and the
+Elisp terminal adapter always supplied an empty answer. With streaming disabled,
+no answer reached the chat renderer. The native terminal now identifies the last
+committed answer message and exact history revision. Native message ingress
+caches a display projection of assistant text/output_text blocks; its retained
+bytes count against history capacity. Raw wire/provider/opaque content remains
+unchanged. Reasoning, signatures, images and tool data cannot become display text
+through a raw-JSON fallback.
+
+The existing revision-bound history/read port now supports an explicit display
+projection. UTF-8 page offsets and stale revisions are checked in Rust. The editor
+only validates DTO identity/progress and assembles bounded text pages under the
+original conversation lease. The terminal callback receives answer_text after
+all pages succeed. Missing references, malformed/foreign/non-progressing pages,
+revision loss, origin closure or epoch replacement cannot deliver partial text as
+success. Both current page cancellation and prompt cleanup are bound to the
+original connection epoch, including synchronous callback/request-ID races.
+
+Real Rust pipe tests cover native display projection, opaque wire roundtrip,
+Unicode/CRLF page boundaries, stale replacement and malformed visible blocks.
+A real Emacs/native/local-provider test negotiates 1024-byte frames, retrieves an
+answer larger than one frame with streaming disabled, and passes the complete
+answer to the actual finish-status renderer once. Already streamed text is not
+rendered a second time. The production formatter/parser remains in Rust.
+
+Validation: 587 locked Rust tests including 31 compile-fail docs; 1405/1405 full
+source ERT, followed by 25/25 focused history/conversation/startup tests after the
+last prompt epoch-guard fix; strict all-target Clippy/fmt; changed Elisp
+warning-as-error/check-parens/checkdoc; whitespace checks. TLA+ code did not
+change and TLC was not rerun.
+
+This slice commits the history component source and its native display/UI path.
+The shared Rust module/actor/host integration and root Rust integration test
+registration remain in the working tree; runtime counts above describe that
+integrated working tree, not an independently complete native backend at HEAD.
+Full transcript import/projection, early claim/config receipt, remaining tools,
+mode/plan, legacy deletion and task 6 are still open. Todo 5.9c closes only the
+explicit answer-display source/runtime slice.
