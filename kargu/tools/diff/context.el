@@ -27,7 +27,7 @@
 (declare-function kargu-diff-native-enabled-p "kargu/tools/diff/native" ())
 (declare-function kargu-diff-native-execute "kargu/tools/diff/native" (spec callback &optional service))
 (declare-function kargu-bridge-edit-history-close-service "kargu/bridge/edit/history"
-                  (application service-id &optional callback))
+                  (application service-id &optional callback lease))
 (declare-function kargu-application-context "kargu/core/application" ())
 (declare-function kargu-diff-apply-patch "kargu/tools/diff"
                   (patch-text &optional callback))
@@ -74,6 +74,11 @@
   (native-edits nil)
   (native-id nil)
   (native-application nil)
+  (native-lease nil)
+  (native-close-task nil)
+  (close-waiters nil)
+  (drained nil)
+  (close-failure nil)
   (timers nil)
   (buffers nil)
   (review-mode 'auto)
@@ -153,39 +158,68 @@ SERVICE-ID is an optional string identifier."
       (with-current-buffer buffer (set-buffer-modified-p nil))
       (kill-buffer buffer))))
 
-(defun kargu-edit-service-close (service)
-  "Revoke edit SERVICE before closing only its own resources."
-  (when (and (kargu-edit-service-p service) (not (kargu-edit-service-closed service)))
-    (setf (kargu-edit-service-closed service) t)
-    (mapc #'kargu-async-cancel (kargu-edit-service-native-tasks service))
-    (setf (kargu-edit-service-native-tasks service) nil)
-    (when (kargu-edit-service-native-id service)
-      (require 'kargu/bridge/edit/history)
-      (kargu-bridge-edit-history-close-service
-       (kargu-edit-service-native-application service)
-       (kargu-edit-service-native-id service)))
-    (maphash (lambda (_path review) (kargu-edit-service--close-review review))
-             (kargu-edit-service-reviews service))
-    (dolist (process (kargu-edit-service-processes service))
-      (when (processp process) (kargu-process-cancel process)))
-    (dolist (timer (kargu-edit-service-timers service))
-      (when (timerp timer) (cancel-timer timer)))
-    (dolist (buffer (kargu-edit-service-buffers service))
-      (when (buffer-live-p buffer)
-        (with-current-buffer buffer (set-buffer-modified-p nil))
-        (kill-buffer buffer)))
-    (dolist (directory (kargu-edit-service-temp-dirs service))
-      (when (file-directory-p directory) (delete-directory directory t)))
-    (mapc #'clrhash (list (kargu-edit-service-snapshots service)
-                          (kargu-edit-service-changes service)
-                          (kargu-edit-service-reviews service)
-                          (kargu-edit-service-active-plans service)))
-    (setf (kargu-edit-service-processes service) nil
-          (kargu-edit-service-timers service) nil
-          (kargu-edit-service-buffers service) nil
-          (kargu-edit-service-temp-dirs service) nil
-          (kargu-edit-service-run-modified-files service) nil)
-    t))
+(defun kargu-edit-service--release-resources (service)
+  "Release SERVICE's local resources after its native writer has drained."
+  (maphash (lambda (_path review) (kargu-edit-service--close-review review))
+           (kargu-edit-service-reviews service))
+  (dolist (process (kargu-edit-service-processes service))
+    (when (processp process) (kargu-process-cancel process)))
+  (dolist (timer (kargu-edit-service-timers service))
+    (when (timerp timer) (cancel-timer timer)))
+  (dolist (buffer (kargu-edit-service-buffers service))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer (set-buffer-modified-p nil))
+      (kill-buffer buffer)))
+  (dolist (directory (kargu-edit-service-temp-dirs service))
+    (when (file-directory-p directory) (delete-directory directory t)))
+  (mapc #'clrhash (list (kargu-edit-service-snapshots service)
+                        (kargu-edit-service-changes service)
+                        (kargu-edit-service-reviews service)
+                        (kargu-edit-service-active-plans service)))
+  (setf (kargu-edit-service-processes service) nil
+        (kargu-edit-service-timers service) nil
+        (kargu-edit-service-buffers service) nil
+        (kargu-edit-service-temp-dirs service) nil
+        (kargu-edit-service-run-modified-files service) nil)
+  t)
+
+(defun kargu-edit-service--closed (service value failure)
+  "Settle SERVICE closure from authoritative VALUE or FAILURE."
+  (setf (kargu-edit-service-close-failure service) failure)
+  (unless failure
+    (setf (kargu-edit-service-drained service) t)
+    (kargu-edit-service--release-resources service))
+  (let ((waiters (kargu-edit-service-close-waiters service)))
+    (setf (kargu-edit-service-close-waiters service) nil)
+    (dolist (callback waiters) (funcall callback value failure))))
+
+(defun kargu-edit-service-close (service &optional callback)
+  "Revoke SERVICE now and release local resources after native drain.
+Notify CALLBACK with (VALUE FAILURE).
+Failure preserves resources for inspection.
+Repeated calls share an in-flight close, and a failed close can be retried."
+  (when (kargu-edit-service-p service)
+    (cond
+     ((kargu-edit-service-drained service)
+      (when callback (funcall callback t nil))
+      t)
+     (t
+      (when callback (push callback (kargu-edit-service-close-waiters service)))
+      (if (and (kargu-edit-service-native-close-task service)
+               (kargu-async-pending-p (kargu-edit-service-native-close-task service)))
+          (kargu-edit-service-native-close-task service)
+        (setf (kargu-edit-service-closed service) t)
+        (mapc #'kargu-async-cancel (kargu-edit-service-native-tasks service))
+        (setf (kargu-edit-service-native-tasks service) nil)
+        (if (not (kargu-edit-service-native-lease service))
+            (progn (kargu-edit-service--closed service t nil) t)
+          (require 'kargu/bridge/edit/history)
+          (setf (kargu-edit-service-native-close-task service)
+                (kargu-bridge-edit-history-close-service
+                 (kargu-edit-service-native-application service)
+                 (kargu-edit-service-native-id service)
+                 (lambda (value failure) (kargu-edit-service--closed service value failure))
+                 (kargu-edit-service-native-lease service)))))))))
 
 ;;;; Resource Registration Helpers ----------------------------------------
 

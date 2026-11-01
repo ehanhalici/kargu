@@ -412,5 +412,128 @@
               (should (= (gethash "edit_revision" row) (plist-get reference :edit-revision)))))
         (delete-directory root t)))))
 
+(ert-deftest kargu-edit-history-service-close-keeps-resources-until-drain-test ()
+  (kargu-edit-history-test--with-lease
+    (let* ((service (kargu-edit-service-create))
+           (buffer (generate-new-buffer " *close-owned*"))
+           (directory (make-temp-file "kargu-close-owned-" t))
+           (lease (kargu-bridge-edit-history-capture-lease application connection scope))
+           (calls 0) (delivered 0) callback task)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-bridge-call)
+                     (lambda (_connection _method params receive &rest _)
+                       (should (equal (gethash "action" (gethash "arguments" params)) "close_service"))
+                       (cl-incf calls) (setq callback receive) (format "close-%d" calls)))
+                    ((symbol-function 'kargu-bridge-cancel) #'ignore))
+            (setf (kargu-edit-service-native-application service) application
+                  (kargu-edit-service-native-id service) "edit_service_fixture"
+                  (kargu-edit-service-native-lease service) lease)
+            (kargu-edit-service-register-buffer service buffer)
+            (kargu-edit-service-register-temp-dir service directory)
+            (setq task (kargu-edit-service-close
+                        service (lambda (_value failure) (should-not failure) (cl-incf delivered))))
+            (should (eq task (kargu-edit-service-close
+                              service (lambda (_value failure) (should-not failure) (cl-incf delivered)))))
+            (should (kargu-edit-service-closed-p service))
+            (should-not (kargu-edit-service-drained service))
+            (should (buffer-live-p buffer))
+            (should (file-directory-p directory))
+            (should (= calls 1))
+            (funcall callback (kargu-bridge--object "closed" t "drained" :json-false) nil)
+            (should-not (kargu-edit-service-drained service))
+            (should (buffer-live-p buffer))
+            (kargu-bridge-test--wait (lambda () (= calls 2)))
+            (funcall callback (kargu-bridge--object "closed" t "drained" t) nil)
+            (should (kargu-edit-service-drained service))
+            (should-not (buffer-live-p buffer))
+            (should-not (file-directory-p directory))
+            (should (= delivered 2)))
+        (when (kargu-async-pending-p task) (kargu-async-cancel task))
+        (when (buffer-live-p buffer) (kill-buffer buffer))
+        (when (file-directory-p directory) (delete-directory directory t))))))
+
+(ert-deftest kargu-edit-history-service-close-never-adopts-a-new-epoch-test ()
+  (kargu-edit-history-test--with-lease
+    (let* ((service (kargu-edit-service-create))
+           (buffer (generate-new-buffer " *close-stale-owned*"))
+           (lease (kargu-bridge-edit-history-capture-lease application connection scope)) failure)
+      (unwind-protect
+          (cl-letf (((symbol-function 'kargu-bridge-call)
+                     (lambda (&rest _) (ert-fail "Old service closed the replacement core")))
+                    ((symbol-function 'kargu-bridge-ensure)
+                     (lambda (&rest _) (ert-fail "Close acquired a new core"))))
+            (setf (kargu-edit-service-native-application service) application
+                  (kargu-edit-service-native-id service) "edit_service_fixture"
+                  (kargu-edit-service-native-lease service) lease
+                  (kargu-bridge-connection-epoch connection) "replacement")
+            (kargu-edit-service-register-buffer service buffer)
+            (kargu-edit-service-close service (lambda (_value fault) (setq failure fault)))
+            (should failure)
+            (should (kargu-edit-service-closed-p service))
+            (should-not (kargu-edit-service-drained service))
+            (should (buffer-live-p buffer))
+            (should (kargu-edit-service-close-failure service)))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest kargu-edit-history-public-close-during-issued-write-real-pipe-test ()
+  (kargu-native-edit-test--with-core
+    (let* ((root (make-temp-file "kargu-issued-close-" t))
+           (path (expand-file-name "file.txt" root))
+           (service (kargu-edit-service-create :root root :review-mode 'auto))
+           (owned (generate-new-buffer " *issued-close-owned*"))
+           (call (symbol-function 'kargu-bridge-call))
+           source closing done failure saw-draining)
+      (unwind-protect
+          (progn
+            (write-region "base\n" nil path nil 'silent)
+            (setq source (find-file-noselect path))
+            (kargu-edit-service-register-buffer service owned)
+            (with-current-buffer source
+              (add-hook 'after-change-functions
+                        (lambda (&rest _)
+                          (unless closing
+                            (setq closing t)
+                            (should (kargu-edit-service-native-lease service))
+                            (kargu-edit-service-close
+                             service (lambda (_value fault) (setq done t failure fault)))
+                            (should (buffer-live-p owned))
+                            (should-not (kargu-edit-service-drained service)))) nil t))
+            (cl-letf (((symbol-function 'kargu-bridge-call)
+                       (lambda (connection method params receive &rest options)
+                         (if (and (equal method "edit/history")
+                                  (equal (gethash "action" (gethash "arguments" params)) "close_service"))
+                             (apply call connection method params
+                                    (lambda (value fault)
+                                      (when (and (hash-table-p value) (eq (gethash "drained" value) :json-false))
+                                        (setq saw-draining t)
+                                        (should (buffer-live-p owned)))
+                                      (funcall receive value fault)) options)
+                           (apply call connection method params receive options)))))
+              (kargu-diff-native-execute
+               (list :intent :write :root root :path path :content "changed\n" :save-policy 'save)
+               #'ignore service)
+              (kargu-bridge-test--wait (lambda () done)))
+            (should closing)
+            (should-not failure)
+            (should saw-draining)
+            (should (kargu-edit-service-drained service))
+            (should-not (buffer-live-p owned))
+            (should-not kargu-bridge-edit-activity--active))
+        (when (buffer-live-p owned) (kill-buffer owned))
+        (delete-directory root t)))))
+
+(ert-deftest kargu-edit-history-old-service-cannot-edit-a-replacement-core-test ()
+  (kargu-edit-history-test--with-lease
+    (let ((service (kargu-edit-service-create)))
+      (setf (kargu-edit-service-native-application service) application
+            (kargu-edit-service-native-lease service)
+            (kargu-bridge-edit-history-capture-lease application connection scope)
+            (kargu-bridge-connection-epoch connection) "replacement")
+      (cl-letf (((symbol-function 'kargu-bridge-edit-batch-execute)
+                 (lambda (&rest _) (ert-fail "Old service started a new preparation")))
+                ((symbol-function 'kargu-bridge-ensure)
+                 (lambda (&rest _) (ert-fail "Old service acquired a new core"))))
+        (should-error (kargu-diff-native-execute (list :intent :write :path "unused") #'ignore service))))))
+
 (provide 'tests/test-native-edit-history)
 ;;; test-native-edit-history.el ends here

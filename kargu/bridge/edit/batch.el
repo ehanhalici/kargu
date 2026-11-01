@@ -220,7 +220,7 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
            (kargu-bridge-edit--start
             application arguments parts :parent task :action action :callback callback
             :connection (plist-get spec :connection) :scope (plist-get spec :scope)
-            :scope-valid-p (plist-get spec :scope-valid-p)))
+            :scope-valid-p (plist-get spec :scope-valid-p) :bound-callback (plist-get spec :bound-callback)))
          (prepare-patch (application arguments)
            (prepare
             application arguments (list (cons "patch" (plist-get spec :patch))) :inspect
@@ -265,7 +265,8 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
                     (puthash "target_edit_id" (plist-get spec :target-edit-id) arguments))
                   (when (plist-get spec :path)
                     (puthash "target_file" (file-relative-name (plist-get spec :path) root) arguments))
-                  (kargu-bridge-edit-rollback application arguments :parent task :callback (guard #'ready)))
+                  (kargu-bridge-edit-rollback application arguments :parent task :callback (guard #'ready)
+                                              :bound-callback (plist-get spec :bound-callback)))
                  (:patch (prepare-patch application arguments))
                  (_
                   (let* ((document (kargu-bridge-edit-batch-read-document

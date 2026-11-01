@@ -259,6 +259,7 @@ PROVIDER, MODEL and EFFORT default to the current owner's explicit values."
 (defvar kargu-context-buffer nil)
 (defvar kargu-diff--changed)
 (defvar kargu-diff--snapshots)
+(defvar kargu-diff--default-service)
 (defvar kargu-diff--run-modified-files)
 
 (declare-function kargu-application-create "kargu/application/coordinator")
@@ -336,6 +337,8 @@ Tests never see the working tree of Kargu as their project."
                                       (hash-table-p kargu-diff--changed))
                                  (copy-hash-table kargu-diff--changed)
                                (make-hash-table :test #'equal)))
+        ;; Compatibility UI handles must not retain another test's core lease.
+        (kargu-diff--default-service nil)
         (kargu-diff--snapshots (if (and (boundp 'kargu-diff--snapshots)
                                         (hash-table-p kargu-diff--snapshots))
                                    (copy-hash-table kargu-diff--snapshots)

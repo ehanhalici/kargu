@@ -191,19 +191,37 @@ Deliver the native acknowledgement to CALLBACK."
     "service_id" (or service-id :json-null))
    callback))
 
-(defun kargu-bridge-edit-history-close-service (application service-id &optional callback)
+(defun kargu-bridge-edit-history-capture-lease (application connection scope)
+  "Capture APPLICATION's existing CONNECTION and SCOPE without acquiring a lease."
+  (list :connection connection :epoch (copy-sequence (kargu-bridge-connection-epoch connection))
+        :scope (kargu-bridge-application--copy-scope scope) :application application))
+
+(defun kargu-bridge-edit-history-lease-current-p (lease)
+  "Whether LEASE still identifies its original application, epoch and scope."
+  (let ((connection (plist-get lease :connection)))
+    (and connection (eq (kargu-bridge-status connection) 'ready)
+         (equal (plist-get lease :epoch) (kargu-bridge-connection-epoch connection))
+         (kargu-bridge-application-scope-equal-p
+          (plist-get lease :scope)
+          (kargu-bridge-application-current-scope (plist-get lease :application) connection)))))
+
+(defun kargu-bridge-edit-history-close-service (application service-id &optional callback lease)
   "Revoke SERVICE-ID on APPLICATION, completing only after native drain.
-Capture the existing lease; never reconnect or adopt another application."
+Use captured LEASE when supplied; otherwise capture the current binding."
   (let* ((binding (and application (gethash :native-core (kargu-application-services application))))
-         (connection (and binding (kargu-bridge-application-connection binding)))
-         (scope (and connection (kargu-bridge-application-current-scope application connection)))
-         (epoch (and connection (copy-sequence (kargu-bridge-connection-epoch connection))))
+         (connection (if lease (plist-get lease :connection)
+                       (and binding (kargu-bridge-application-connection binding))))
+         (scope (if lease (kargu-bridge-application--copy-scope (plist-get lease :scope))
+                  (and connection (kargu-bridge-application-current-scope application connection))))
+         (epoch (if lease (copy-sequence (plist-get lease :epoch))
+                  (and connection (copy-sequence (kargu-bridge-connection-epoch connection)))))
          (task (kargu-async-start (or callback #'ignore) :parent nil :owner nil :timeout 30))
          (service-id (and (stringp service-id) (copy-sequence service-id)))
          active)
     (cl-labels
         ((current-p ()
            (and (kargu-async-pending-p task) service-id scope
+                (or (null lease) (eq application (plist-get lease :application)))
                 (equal epoch (kargu-bridge-connection-epoch connection))
                 (kargu-bridge-application-scope-equal-p
                  scope (kargu-bridge-application-current-scope application connection))))

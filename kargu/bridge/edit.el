@@ -49,7 +49,7 @@
 (cl-defstruct (kargu-bridge-edit-transfer
                (:constructor kargu-bridge-edit-transfer--make))
   "Owned transport state, detached before the first asynchronous boundary."
-  task artifact arguments parts (action :prepare) (offset 0) (page-bytes kargu-bridge-edit--chunk-bytes) handed)
+  task artifact arguments parts bound-callback (action :prepare) (offset 0) (page-bytes kargu-bridge-edit--chunk-bytes) handed)
 
 (defun kargu-bridge-edit--arguments (artifact)
   "Return the exact ticket arguments for ARTIFACT."
@@ -226,10 +226,17 @@ any unrelated Elisp loop active when a delayed callback runs."
       (setf (kargu-bridge-edit-artifact-scope artifact) (kargu-bridge-application--copy-scope scope))
       (if (not (kargu-bridge-edit--live-p transfer))
           (kargu-bridge-edit--fail transfer (kargu-bridge--fault "stale_edit_preparation"))
-        ;; Keep allocation callbacks alive after cancellation to release tickets.
-        (kargu-bridge-edit--call
-         artifact :begin (kargu-bridge-edit-transfer-arguments transfer)
-         (lambda (value error-data) (kargu-bridge-edit--begun transfer value error-data)))))))
+        (condition-case nil
+            (progn
+              (when-let* ((bound (kargu-bridge-edit-transfer-bound-callback transfer)))
+                (funcall bound (kargu-bridge-edit-artifact-connection artifact) scope))
+              ;; Keep allocation callbacks alive after cancellation to release tickets.
+              (if (not (kargu-bridge-edit--live-p transfer))
+                  (kargu-bridge-edit--fail transfer (kargu-bridge--fault "stale_edit_preparation"))
+                (kargu-bridge-edit--call
+                 artifact :begin (kargu-bridge-edit-transfer-arguments transfer)
+                 (lambda (value error-data) (kargu-bridge-edit--begun transfer value error-data)))))
+          ((error quit) (kargu-bridge-edit--fail transfer (kargu-bridge--fault "stale_edit_preparation"))))))))
 
 (defun kargu-bridge-edit--ready (transfer connection failure)
   "Bind TRANSFER to CONNECTION after startup, or report FAILURE."
@@ -281,7 +288,7 @@ any unrelated Elisp loop active when a delayed callback runs."
         (when (or (> (length bytes) kargu-bridge-edit--text-bytes) (> total kargu-bridge-edit--upload-bytes)) (error "Upload limit"))))
     (setf (kargu-bridge-edit-transfer-parts transfer) (nreverse detached))))
 
-(cl-defun kargu-bridge-edit--transfer (artifact callback &key arguments parent valid-p (action :prepare))
+(cl-defun kargu-bridge-edit--transfer (artifact callback &key arguments parent valid-p bound-callback (action :prepare))
   "Own one ARTIFACT transfer of ARGUMENTS under CALLBACK/PARENT/VALID-P/ACTION."
   (let* ((task (kargu-async-start
                 (kargu-application-wrap
@@ -294,7 +301,7 @@ any unrelated Elisp loop active when a delayed callback runs."
                 :parent parent :owner (kargu-bridge-edit--async-owner artifact)
                 :valid-p valid-p :timeout kargu-bridge-edit--timeout))
          (transfer (kargu-bridge-edit-transfer--make
-                    :task task :artifact artifact :arguments arguments :action action
+                    :task task :artifact artifact :arguments arguments :action action :bound-callback bound-callback
                     :page-bytes (kargu-bridge-edit-artifact-page-bytes artifact))))
     (kargu-bridge-edit--watch-owner transfer)
     (kargu-async-add-cleanup
@@ -310,15 +317,16 @@ any unrelated Elisp loop active when a delayed callback runs."
                      :object-type 'hash-table :null-object :json-null :false-object :json-false))
 
 (cl-defun kargu-bridge-edit--start (application arguments parts &key callback parent valid-p (action :prepare)
-                                             connection scope scope-valid-p)
+                                             connection scope scope-valid-p bound-callback)
   "Begin detached ARGUMENTS/PARTS for APPLICATION.
-CALLBACK, PARENT, VALID-P and ACTION control transfer lifetime."
+CALLBACK, PARENT, VALID-P and ACTION control transfer lifetime.
+BOUND-CALLBACK observes the exact connection and scope before allocation."
   (let* ((arguments (kargu-bridge-edit--copy arguments))
          (artifact (kargu-bridge-edit-artifact--make
                     :application application :origin (copy-sequence (gethash "origin_id" arguments))
                     :connection connection :scope (and scope (kargu-bridge-application--copy-scope scope))
                     :scope-valid-p scope-valid-p))
-         (transfer (kargu-bridge-edit--transfer artifact callback :arguments arguments :parent parent :valid-p valid-p :action action))
+         (transfer (kargu-bridge-edit--transfer artifact callback :arguments arguments :parent parent :valid-p valid-p :action action :bound-callback bound-callback))
          (task (kargu-bridge-edit-transfer-task transfer)))
     (condition-case nil
         (progn
@@ -466,39 +474,47 @@ lifetime.  Failure revokes the preparation; text is never replayed implicitly."
                 (or failure (unless (kargu-bridge-edit--current-p artifact)
                               (kargu-bridge--fault "stale_edit_preparation"))))))))
 
-(cl-defun kargu-bridge-edit-rollback (application arguments &key callback parent)
+(cl-defun kargu-bridge-edit-rollback (application arguments &key callback parent bound-callback)
   "Prepare APPLICATION rollback from detached ARGUMENTS into CALLBACK.
-PARENT owns only preparation; no write capability is returned."
+PARENT owns preparation; BOUND-CALLBACK observes the exact connection and scope
+before dispatch.  No write capability is returned."
   (let* ((arguments (kargu-bridge-edit--copy arguments))
          (task (kargu-async-start callback :timeout 30 :parent parent)))
-    (kargu-bridge-ensure
-     (kargu-async-wrap
-      task
-      (lambda (connection failure)
-        (if failure (kargu-async-finish task nil failure)
-          (kargu-bridge-application-ensure
-           connection application
-           (kargu-async-wrap
-            task
-            (lambda (scope error-data)
-              (if error-data (kargu-async-finish task nil error-data)
-                (kargu-bridge-call
-                 connection "edit/rollback"
-                 (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope scope)
-                                       "arguments" arguments)
-                 (lambda (value fault)
-                   (if fault (kargu-async-finish task nil fault)
-                     (let ((artifact (kargu-bridge-edit-artifact--make
-                                      :application application :connection connection
-                                      :scope (kargu-bridge-application--copy-scope scope)
-                                      :origin (gethash "origin_id" arguments)
-                                      :id (gethash "preparation_id" value)
-                                      :descriptor (gethash "descriptor" value))))
-                       (if (and (kargu-bridge-edit--task-current-p task)
-                                (kargu-bridge-edit--current-p artifact))
-                           (kargu-async-finish task artifact nil)
-                         (kargu-bridge-edit-release artifact)
-                         (kargu-async-finish task nil (kargu-bridge--fault "stale_edit_preparation")))))))))))))))
+    (cl-labels
+        ((fail (failure) (kargu-async-finish task nil failure))
+         (receive (connection scope value failure)
+           (if failure (fail failure)
+             (let ((artifact (kargu-bridge-edit-artifact--make
+                              :application application :connection connection
+                              :scope (kargu-bridge-application--copy-scope scope)
+                              :origin (gethash "origin_id" arguments)
+                              :id (gethash "preparation_id" value)
+                              :descriptor (gethash "descriptor" value))))
+               (if (and (kargu-bridge-edit--task-current-p task)
+                        (kargu-bridge-edit--current-p artifact))
+                   (kargu-async-finish task artifact nil)
+                 (kargu-bridge-edit-release artifact)
+                 (fail (kargu-bridge--fault "stale_edit_preparation"))))))
+         (bound (connection scope failure)
+           (if failure (fail failure)
+             (condition-case nil
+                 (progn
+                   (when bound-callback (funcall bound-callback connection scope))
+                   (if (not (kargu-bridge-edit--task-current-p task))
+                       (fail (kargu-bridge--fault "stale_edit_preparation"))
+                     (kargu-bridge-call
+                      connection "edit/rollback"
+                      (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope scope)
+                                            "arguments" arguments)
+                      (lambda (value fault) (receive connection scope value fault)))))
+               ((error quit) (fail (kargu-bridge--fault "stale_edit_preparation")))))))
+      (kargu-bridge-ensure
+       (kargu-async-wrap
+        task (lambda (connection failure)
+               (if failure (fail failure)
+                 (kargu-bridge-application-ensure
+                  connection application
+                  (kargu-async-wrap task (lambda (scope fault) (bound connection scope fault)))))))))
     task))
 
 (cl-defun kargu-bridge-edit-recover (application journal-directory edit-id &key callback parent)

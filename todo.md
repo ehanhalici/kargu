@@ -738,8 +738,8 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       Service close bounded closed-ID kaydı tutar; geç receipt geçmişi diriltemez,
       `drained` gerçek preparation/editor settlement'ını bildirir. Bridge close
       okuyucusu yakalanmış application'da drain'i poll eder; public Elisp service
-      close tüketicisinin bu asenkron settlement'ı beklemesi hâlâ açıktır. Gerçek change reader
-      cutover, eviction coverage ve bütün consumer kabulü hâlâ açık.
+      close tüketicisi 3.8a6 ile ilk edit lease'inde gerçek ACK/drain bekler.
+      Genel change reader/verification cutover ve bütün consumer kabulü hâlâ açık.
       - [x] **3.8a1 Pending verification kapasitesi:** yeni hedef için native
         claim verilmeden önce `(session, service, path)` yer ayır; iptal edilmiş
         claim gerçek release'e kadar yerini tutsun. Dolu kuyruğun pending kaydı
@@ -762,8 +762,8 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         bağlantıyı benimsemesin. Inline cevapta bitmiş request ID tutulmasın.
         Üç regresyon önceki kodda red, düzeltilmiş kodda green; edit/service/
         metadata odak ERT 92/92 ve Elisp Werror/parantez/checkdoc temiz.
-        Public Elisp service close'un ACK/drain beklemesi ve servis lease'inin
-        ilk edit'ten yakalanması hâlâ açık; bu alt iş onları kapatmaz.
+        Bu alt iş invocation/polling sınırıdır; public service close ve ilk edit
+        lease capture ayrıca 3.8a6'da tamamlandı.
       - [x] **3.8a4 Native consume ACK tüketicisi:** public consume-change/file
         Rust `consumed:true` ACK'i gelmeden passive referansı silmez. Hata,
         ret ve geç eski cevap daha yeni referansı tüketmez. Native servis ID ve
@@ -785,6 +785,23 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         20/20, 1436/1436 tam ERT, strict Clippy/fmt ve Elisp Werror/checkdoc temiz.
         Genel verification consumer cutover'ı,
         fresh diagnostic barrier, public service close/drain ve legacy silme açık.
+      - [x] **3.8a6 Public native service close/drain:** ilk hazırlık RPC'sinden
+        önce connection/epoch/application/session lease'ini yakala; sonraki edit/
+        rollback ve close başka core'u benimsemesin. UI yeni işi hemen reddeder,
+        private buffer/directory ve passive tabloları ancak native drained ACK
+        sonrasında bırakır. Hata/timeout/epoch kaybı kaynakları korur; tekrar close
+        aynı in-flight isteği paylaşır. Gerçek issued primitive içinde close →
+        drained:false → receipt settlement → drained:true → UI cleanup testi ve
+        stale lease/shared waiter testleri geçti. 103/103 odak, 1440/1440 tam ERT;
+        Elisp Werror/parantez/checkdoc temiz. Kanıt: `docs/native-service-close.md`.
+        Genel change/verification reader'larının ilk servis lease'ine bağlanması
+        ve legacy/default/global edit state temizliği ayrı olarak açıktır.
+      - [ ] **3.8a7 Preparation handle epoch sınırı:** native service ilk lease'i
+        ve issued activity epoch'u yakalıyor; read-only edit artifact ve release
+        yolunu da exact epoch'a bağla. Reconnect sonrası aynı connection nesnesinde
+        eski prepare/read/abort yeni core'a gidemesin; tekrar kullanılan ticket ve
+        request ID'leriyle regresyon kur. Genel metadata reader'larının lifetime
+        lease capture'ı ve post-edit verification reader cutover'ını ayrıca tamamla.
     - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller
@@ -948,9 +965,9 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     project-wide temiz sonucu üretilmez. Stop sonrası gerçek reverse callback
     gelene kadar drain sürer; iptal edilen capture'ın bulguları yayımlanmaz.
     Gerçek provider/stdio testinde sekiz vaka ve native read lifecycle kabulü geçti.
-    Kanıt: `docs/native-diagnostic-port.md`. Raw Elisp capture producer, project
-    aggregation, UI capability cutover ve gerçek verification/healing 4.3/6.4'te
-    hâlâ açıktır; üst maddeler kapatılmadı.
+    Kanıt: `docs/native-diagnostic-port.md`. Raw capture, project aggregation ve
+    UI capability ayrıca 4.3b/c'de tamamlandı; public/standalone formatter ve gerçek
+    verification/healing nedeniyle üst 4.3/6.4 maddeleri açık kalır.
   - [x] **4.3b Ham dosya diagnostic capture:** reverse read, canlı belge/tick,
     actual Flymake report-generation ve ham scalar range/severity/source DTO'su
     üretir. Native bridge'den eski diagnostic formatter çağrısı kaldırıldı;
@@ -960,8 +977,8 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     read'i cancelled olarak settle eder. Gerçek Flymake → reverse RPC → Rust →
     provider turunda ham bulgu Rust'ta formatlandı. 1427/1427 tam ERT; son process/
     quit/helper diliminde 73/73 odak ERT ve Elisp Werror/parantez/checkdoc temiz.
-    Project aggregation, native UI capability ilanı ve verification barrier/
-    healing consumer'ları 4.3/6.4'te açık; legacy standalone formatter henüz silinmedi.
+    Project aggregation ve native UI capability ilanı ayrıca 4.3c'de tamamlandı.
+    Verification barrier/healing consumer'ları ve standalone formatter geçişi açık.
   - [x] **4.3c Native project aggregation ve capability:** açık belgelerin typed
     snapshot'ları ile Flymake foreign/list-only file cache gözlemleri aynı native
     sonuç portunda toplanır. Dedup ve yalnız aynı fresh producer'ın cache'ini

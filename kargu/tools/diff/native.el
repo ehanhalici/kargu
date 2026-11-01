@@ -192,6 +192,18 @@ Deliver RESULT to CALLBACK after the read; preserve newer local references."
                                   :saved (eq (gethash "saved" row) t)) changes))))))
          (funcall callback result))))))
 
+(defun kargu-diff-native--bind-service (service application connection scope)
+  "Pin SERVICE to APPLICATION's first CONNECTION, epoch and SCOPE."
+  (when (kargu-edit-service-closed service) (error "Native edit service is closed"))
+  (let ((lease (kargu-edit-service-native-lease service)))
+    (if lease
+        (unless (and (eq connection (plist-get lease :connection))
+                     (kargu-bridge-edit-history-lease-current-p lease)
+                     (kargu-bridge-application-scope-equal-p scope (plist-get lease :scope)))
+          (error "Native edit service lost its original lease"))
+      (setf (kargu-edit-service-native-lease service)
+            (kargu-bridge-edit-history-capture-lease application connection scope)))))
+
 (defun kargu-diff-native-execute (spec callback &optional service)
   "Execute SPEC into CALLBACK on captured SERVICE; never choose another writer."
   (if (null callback) "ERROR: Native edits require an asynchronous callback"
@@ -202,6 +214,10 @@ Deliver RESULT to CALLBACK after the read; preserve newer local references."
                      (kargu-edit-service-review-mode service)))
            (save (if (eq service kargu-diff--default-service) kargu-diff-auto-save
                    (kargu-edit-service-auto-save service))) task)
+      (when (kargu-edit-service-closed service) (error "Native edit service is closed"))
+      (when (and (kargu-edit-service-native-lease service)
+                 (not (kargu-bridge-edit-history-lease-current-p (kargu-edit-service-native-lease service))))
+        (error "Native edit service lost its original lease"))
       (let ((application (or (plist-get spec :application)
                              (kargu-edit-service-native-application service)
                              (kargu-application-context))))
@@ -209,7 +225,10 @@ Deliver RESULT to CALLBACK after the read; preserve newer local references."
                    (not (eq application (kargu-edit-service-native-application service))))
           (error "Native edit service belongs to another application"))
         (setf (kargu-edit-service-native-application service) application
-              (plist-get spec :application) application))
+              (plist-get spec :application) application
+              (plist-get spec :bound-callback)
+              (lambda (connection scope)
+                (kargu-diff-native--bind-service service application connection scope))))
       (setf (plist-get spec :root) (or (plist-get spec :root) (kargu-edit-service-root service)
                                        (kargu-permission-project-root))
             (plist-get spec :service-id)
