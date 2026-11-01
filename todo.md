@@ -1205,6 +1205,22 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     kullanır; refresh hatası eski listeyi başarılı sonuç saymaz. Application'lar
     arası global UI cache/ikinci selection writer kaldırıldı. Katalog/model/
     provider/seçim odak kabulü 75/75; credential fixture'ları da korunur.
+  - [ ] **8.2b Config → provider → model listesi yalnız Rust:** config okuma/
+    publication, provider registry, hedef/auth/wire çözümleme, HTTP, metadata
+    commit ve eşzamanlı istek sırasını tek native akışta birleştir. Auth-source
+    yalnız Rust'ın talep ettiği editör primitifi olsun. Public
+    `kargu-api-list-models`/picker consumer'larını sonuç DTO'suna geçir; eski
+    `api/catalog/request.el` orchestration'ını ve Elisp katalog cache/generation
+    kararlarını kaldır. Config/credential hazırlığının UI tarafından sıralanması
+    bu işin kapanışı değildir; özel provider kayıtlarını ve header ayarlarını koru.
+    - [x] **8.2b1 Native config'ten HTTP capture temeli:** Rust yayımlanmış
+      config'ten endpoint/credential/wire seçer; public endpoint credential
+      istemez, custom override private policy kullanır, Anthropic x-api-key ve
+      version header'ını korur. Yeni refresh çalışma ağacında exact epoch/
+      application/session/config revision'a bağlıdır; değişen config, session
+      close ve exact RPC cancel sonucu publish edemez. Bridge secret/URL çıkarmaz;
+      native HTTP portunu kullanır. Genel picker/auth-source/registry cutover'ı
+      ve ortak host entegrasyon commit'i bu temelin kapsamı dışındadır.
   - [ ] **8.3 Stream/backpressure:** epoch/scope/revision/sequence kontrolü,
     bounded chunk sunumu, gap reconciliation ve tek terminal; geç/çift/foreign
     event ile kill-buffer/Stop yarışlarını gerçek pipe'ta doğrula.

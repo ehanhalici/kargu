@@ -60,13 +60,18 @@ were used in tests.
   locking, pinned directory identity, journal growth/compaction, protocol-ordered
   repair and snapshot/journal concurrency need completion before task 7 closes.
 - Direct provider/model RPCs no longer borrow arbitrary application views or
-  read config files synchronously as a fallback. Refresh uses only explicitly
-  supplied auth; it no longer scavenges other applications/environment keys.
-  Metadata publication is restricted to the captured application and live epoch;
-  unscoped fetches return detached data. Unknown application IDs are rejected.
-  Full session/config-revision/cancellation binding and authoritative native
-  selection commit still require review. Public UI uses the existing owned
-  pipeline rather than these incomplete replacement services.
+  read config files synchronously as a fallback. Refresh now requires the exact
+  epoch, application/session scope and published configuration revision. Rust
+  captures target/credential/wire from its config policy; caller URL/auth
+  overrides and unowned refreshes are rejected. The existing native HTTP port
+  performs discovery; stale config/session and exact RPC cancel prevent model
+  publication. Bridge wrappers keep the application lease and cancel their exact
+  request, without extracting credentials or reconnecting retired owners.
+  Auth-source orchestration, custom registry/header settings, concurrent catalog
+  publication ordering and authoritative native selection commit still need
+  completion. The general public picker still uses the older owned pipeline.
+  The binding user rule now explicitly requires removing its remaining Elisp
+  orchestration; maintaining the old pipeline is migration debt, not closure.
 - Monetary pricing helpers are not connected to actual native provider
   settlement. Hard pre-IO monetary reservation is absent; compaction/healing/
   verification still have Elisp orchestration.
@@ -217,3 +222,42 @@ Full source ERT for this worktree passed **1389/1389**. The validated source is
 recorded in separate sensor/witness and editor-adapter commits. Common Rust
 module/host exports and remaining native actor integration are not all committed
 yet; these source commits do not assert a complete native backend at HEAD.
+
+## Follow-up: Rust backend / Emacs frontend rule and native catalog capture
+
+The user's 2026-11-01 instruction is now binding in todo.md and architecture
+00/01: all business decisions and orchestration belong to Rust. Emacs supplies
+UI events and editor primitives. Existing Elisp orchestration is migration debt.
+Commit `12e2ca5` records this rule.
+
+Commit `8596906` adds native configuration-to-model-request capture and shares
+the existing catalog endpoint policy without creating a synthetic configuration
+identity. Config/environment credentials, exact custom endpoint/query semantics,
+public versus private discovery and provider wire/header policy are resolved in
+Rust. The existing native HTTP implementation also rejects an oversized declared
+body before attempting to read it. A private HEAD-based candidate containing only
+this slice passed 25 tests and strict all-target Clippy independently of the
+remaining working tree.
+
+The working tree additionally binds model/refresh to the exact connection epoch,
+application/session and config revision. Native configuration/read to model HTTP
+to metadata publication passes a real pipe/loopback test. Changed config, closed
+session, explicit RPC cancellation, foreign scope, stale revision and caller
+URL/auth overrides cannot publish. The old duplicate reqwest fetch engine now
+uses the existing native HTTP port. Bridge wrappers carry the exact lease and
+RPC cancellation, do not extract keys or reconnect retired owners, survive an
+unrelated agent Stop and cancel when the UI origin closes. These runtime/bridge
+changes still depend on the uncommitted shared host/module integration; they are
+not claimed as independently integrated at HEAD.
+
+Current working-tree validation: 585 locked Rust tests including 31 compile-fail
+docs; 1391/1391 full source ERT, followed by 6/6 focused bridge tests covering the
+additional origin-close/agent-Stop case; strict all-target Clippy/fmt; changed
+Elisp warning-as-error/check-parens; whitespace checks. Existing exhaustive TLC
+models passed application (4624 distinct states) and connection (101708 distinct
+states). These models do not prove a complete catalog consumer cutover.
+
+Todo 8.2b remains open: native config/publication orchestration, auth-source as a
+Rust-requested editor primitive, custom registry/header options, concurrent model
+publication ordering, public picker/API-list-models cutover and deletion of the
+remaining Elisp catalog orchestration/cache authority are still required.
