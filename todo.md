@@ -1,7 +1,11 @@
 # Açık işler — birlikte çözülecek gruplar
 
-İnceleme tabanı: 32e917b, 2026-10-22. İnceleme ERT baseline'ı: 1116/1116,
-2026-10-23. Rust göçünün güncel uygulama/test kaydı: .codex/12_MIGRATION_PROGRESS.md.
+İlk inceleme tabanı: 32e917b, 2026-10-22; tarihsel ERT: 1116/1116.
+Son görev ayrıştırma denetimi: 2026-11-03, `5be9668` sonrası ağaç.
+Son çalıştırılmış kabul (2026-11-02): 593 locked Rust (32 compile-fail dahil),
+1446/1446 tam ERT ve 2/2 service odak testi. Bu doküman turunda test çalıştırılmadı;
+aşağıdaki daha eski sayılar yalnız ilgili dilimin tarihsel kanıtıdır.
+Rust göçünün güncel uygulama/test kaydı: .codex/12_MIGRATION_PROGRESS.md.
 G02 bağlantı/metadata sözleşmesi ve kalan köprüler: docs/connection-ownership.md.
 Tamamlanan geçiş alt maddeleri takip için `[x]`, kalan işler `[ ]` ile tutulur;
 tekrarlanan iş tarifleri birleştirilir. Bir çekirdeğin testinin geçmesi,
@@ -15,15 +19,17 @@ Aşağıdaki kaynak yolları kargu/ altında; tests/ ve proof/ depo kökündedir
 
 ## Çalışma şekli
 
-Her grup için ayrı **Plan mode → onay → Default mode** döngüsü uygulanır.
-Bu belge gruplamadır; aşağıdaki uygulamalar henüz onaylanmış sayılmaz.
+Kullanıcının atadığı kapsam içinde ilerlenir. Bu listenin hazırlanması veya bir
+alt ajana verilmesi, listelenen tüm uygulamaların otomatik yürütülmesi değildir.
+Atanmış işi somutlaştırmak için yeniden genel izin döngüsü kurulmaz; kapsam ve
+ürün kararı gerektiren açık noktalar koordinatöre bildirilir.
 
-1. Plan mode: yalnız kalan açığı doğrula; mevcut portları/testleri oku, gerekli
-   dosyaları, silinecek eski yolları, küçük commit sırasını ve kabul testlerini
-   belirle. Yeni framework veya zaten çalışan motoru yeniden yazma.
-2. Default mode: onaylanan grubu regresyon → düzeltme/refactor → ilgili/tam ERT
-   → derleme/checkdoc → etkilenen exhaustive TLC → commit sırasıyla uygula.
-   Her grup tek dev commit olmak zorunda değildir.
+1. Önce ilgili açık alt işin mevcut portlarını/testlerini oku; değişecek dosyaları,
+   silinecek consumer'ları, bağımlılıkları ve küçük commit sınırını belirle.
+   Çalışan Rust motorunu veya ortak sözleşmeyi yeniden tasarlama.
+2. Uygulama: anlamlı regresyon → düzeltme/refactor → ilgili Rust/ERT →
+   derleme/checkdoc → commit. TLA+/TLC yalnız TLA+ kaynağı değişmişse çalıştırılır;
+   değişmeyen modelin önceki sonucunu yeniden üretmek kabul şartı değildir.
 3. Kapanan maddeyi `[x]` ile işaretle; kısmen kapanan üst grup açık kalsın.
    Yeni bulguyu aynı kök nedense mevcut gruba, değilse ilgili grubun sonuna ekle.
    Kanıtsız risk, yalnız yeşil tekrarlarla kapatılmaz.
@@ -352,9 +358,10 @@ kalan bridge tüketicileri; proof/ ve README.md.
   callback/cleanup hatası, yabancı writer, cevap kaybı ve restart enjekte et.
   Yanlış başarı, yetkisiz etki, çift yürütme, sonsuz bekleme veya leak kalmasın.
 - Tüm ERT; değişen üretim/yeni testlerde uyarısız byte-compile/checkdoc;
-  eski fixture istisnaları tek tek gerekçeli; ilgili exhaustive modeller.
-  Ana loop/protocol/state/circuit/tools semantiği değişmişse ana model de
-  taransın. Yerel TLC bütün sistemin kanıtı değildir; simulation proof değildir.
+  eski fixture istisnaları tek tek gerekçeli; TLA+ kaynağı değişen ilgili modeller.
+  Ana loop/protocol/state/circuit/tools semantiği değişmişse model uyumu
+  incelensin; TLC yalnız TLA+ kaynağı değişmişse çalıştırılsın. Yerel TLC bütün
+  sistemin kanıtı değildir; simulation proof değildir.
   Kullanıcı onayı olmadan master merge/push veya gerçek dış entegrasyon yok.
 
 ## Her grubun ortak mimari kabul kuralları
@@ -417,7 +424,11 @@ bu başlıklarla opsiyonel ilan edilemez.
 
 ## Rust geçişinde kalan adımlar — kapanış takip listesi
 
-**Aktif denetim talimatı (2026-11-01):** kullanıcı commit edilmemiş bütün
+**Bu güncellemenin kapsamı (2026-11-03):** mevcut kod/mimari ile kalan adımları
+karşılaştır, eksik işi alt ajanlara atanabilir alt adımlarla aç. Bu tur yalnız
+`todo.md` güncellemesidir; yeni uygulama veya test kabulü yapılmış sayılmaz.
+
+**Önceki uygulama/denetim talimatı (2026-11-01):** kullanıcı commit edilmemiş bütün
 Git değişikliklerinin incelenmesini, önce 6–7–8'in eksik alt işlerinin yazılmasını,
 sonra doğru uygulamaların korunup hataların/eksiklerin düzeltilmesini ve doğrulanan
 dilimlerin commit edilmesini istedi. Bu talimat önceki ara test/commit yasağının
@@ -425,7 +436,7 @@ yerine geçer. Mevcut `[x]` işaretleri denetim girdisidir; tüketici bağlantı
 legacy temizliği ve güncel kabul kanıtı olmadan kapanış kanıtı sayılmaz.
 Gerçek kullanıcı session dosyaları ve canlı provider hesapları test girdisi değildir.
 
-**Aktif hedef ve test kuralı (kullanıcı, 2026-11-01):** bu listedeki 1–6 dahil
+**Onaylı uygulama hedefi ve test kuralı (kullanıcı, 2026-11-01):** bu listedeki 1–6 dahil
 bütün maddeleri adım adım tamamla ve doğrulanan dilimleri commit et. TLA+/TLC
 yalnız TLA+ kodu değiştiğinde çalıştırılır; değişmeyen modellerin eski sonuçlarını
 tekrar üretmek bu hedefin kabul şartı değildir.
@@ -453,6 +464,60 @@ Kutular ancak gerçek tüketici Rust'a bağlanıp eşdeğer testler geçtikten v
 Elisp motoru silindikten sonra kapanır. Her doğrulanmış küçük dilim ayrı commit
 olur; bağımsız işler önkoşulları sağlanınca öne alınabilir. Emacs'in canlı buffer,
 undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
+
+### Alt ajanlara görev verme ve birleştirme sözleşmesi
+
+Bu bölüm ikinci iş listesi değildir; aşağıdaki numaralı alt işler atanır.
+Bir işin Rust domain, IPC entegrasyon ve Elisp consumer dilimleri farklı ajanlara
+verilebilir; consumer geçmeden domain diliminin tamamlanması üst kutuyu kapatmaz.
+
+Her atamada şu alanlar zorunludur: **iş kimliği, önkoşul, temel commit,
+hedef davranış, sahip olunan dosyalar, ortak dosya talebi, giriş/çıkış sözleşmesi,
+korunacak özellikler, silinecek legacy consumer, test komutları ve teslim kanıtı**.
+Beklenen hata/unknown/stale/cancel sonuçları da sözleşmenin parçasıdır.
+
+- Ayrı worktree/branch kullan; aynı dosyada eşzamanlı bağımsız yazma yapma.
+  `application/host.rs`, `application/mod.rs`, `ipc/transport.rs`, `constants.rs`,
+  `lib.rs`, Cargo manifest/lock, `kargu.el`, `tests/run-tests.el` ve `todo.md`
+  ortak entegrasyon dosyalarıdır. Bunlara tek entegratör veya sırayla sahiplik ver;
+  domain ajanı dar port ve entegrasyon patch'i teslim etsin.
+- Her teslimde gerçek ve önerilen RPC/capability adlarını ayır; sabit adı bulunan
+  portu yeniden adlandırma. Scope/epoch/revision biriminin sahibi bellidir;
+  UI'ın gönderdiği kimlik veya receipt tek başına yetki değildir.
+- Her atama `[ ]` durumunda başlar; kod varlığı, sabit/RPC wrapper tanımı veya
+  mock'un başarı dönmesi yeterli değildir. Koordinatör gerçek consumer/test/commit
+  kanıtını gördükten sonra yalnız kapanan kutuyu işaretler. Engelin hangi kimliği
+  beklediğini yaz; eksik adapter'ı fallback ile gizleme.
+- Teslim: küçük commit(ler), değişen port/consumer listesi, kaldırılan motor,
+  çalıştırılmış testlerin sonucu ve kapsam sınırı. Domain → IPC → frontend →
+  legacy kaldırma sırasıyla birleştir; her birleşmede etkilenen kabulü çalıştır.
+  Tam testleri her ajanda tekrar koşturmak yerine entegrasyon kapısında çalıştır.
+- Dokümantasyon işi uygulama/test yapıldı sayılmaz. Tarihsel `[x]` açıklamasındaki
+  “çalışma ağacında”, “çalıştırılmadı” veya “henüz commit edilmedi” ifadeleri
+  bugünkü durum yerine geçmez; kaynak/commit/consumer yeniden eşlenir.
+
+- [ ] **0. Ortak sözleşme ve güncel consumer envanteri** — uygulama dalgalarından
+  önce kaynak otoritelerini belirle; bu iş çalışan modülleri yeniden yazmaz.
+  - [ ] **0.1 Sorumluluk matrisi:** public komut/tool/API'den gerçek writer'a çağrı
+    zincirini çıkar; her Elisp fonksiyonunu UI, editor primitive, bridge veya
+    taşınacak domain olarak sınıflandır. Özellikle prompt, permission, plan,
+    config/catalog, LSP/Dape ve session/history consumer'larını atlama.
+  - [ ] **0.2 Ortak DTO/port sözleşmesi:** mevcut tip/portları yeniden kullanarak
+    application/session/run, epoch/generation, request/call/step, revision,
+    sequence, deadline, cancellation ve effect/terminal ayrımını tek yerde eşle.
+    Byte/item/depth/frame sınırlarını ve missing/null/false/zero anlamını belirt.
+  - [ ] **0.3 Kabul matrisi:** her açık alt iş için mevcut test, eksik fixture,
+    negatif vaka ve gerçek consumer testini eşle. “Kaynak var”, “çalıştırıldı” ve
+    “consumer/legacy kaldırma tamam” kanıtlarını ayır; test sayısı hedef yapma.
+  - [ ] **0.4 Entegrasyon sahipliği:** hangi ajan hangi dosyalara yazar ve hangi
+    port revizyonunu bekler belirle. Core transport + registry + actor değişimini
+    farklı ajanların bağımsız varsayımlarıyla aynı anda birleştirme.
+
+
+**1–2 için kapsam notu:** tamamlanmış native foundation/tool consumer dilimleri
+korunur. Bu kutular tüm frontend'in ince köprü olduğu anlamına gelmez; kalan
+config/catalog/selection orchestration 8.2'de, public registry/permission
+consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
 - [x] **1. Config ve bağlantı hazırlığının kalan native politikası** —
   TOML/schema/precedence/env/keyless ve endpoint/model seçim kararlarını typed,
@@ -853,6 +918,18 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller
       callback'e geçirilsin, seçilmiş işlem farklı writer'a düşmesin.
+      - [ ] **3.8b1 Bağımsız edit girişleri:** tool dışındaki interactive edit/review/
+        rollback ve plan/LSP çağrılarını explicit application/session/service
+        handle'ına bağla; eksik native backend yazma yetkisi vermesin.
+    - [ ] **3.8c Change/history reader geçişi:** native sayılarla dosya listesi ve
+      run-modified geçmişini ayır; bounded revision-bound paging, exact consume,
+      closed/deleted/undo kayıtları ve snapshot eviction davranışını koru.
+      6.4 verification okuyucusu aynı authority'yi kullansın.
+    - [ ] **3.8d Varsayılan geçiş kapısı:** opt-in/off matrisinde eşdeğer public
+      consumer kabulünü çalıştır; ardından yalnız yeni işlemler için native
+      default seç. Aktif edit/run'ın backend'i sabit kalsın; 10.4 son agent default
+      geçişiyle sırala. Native hata/EOF sonrası legacy mutation replay yasak.
+
   - [ ] **3.9 Son legacy temizliği:** son consumer sonrası Elisp patch/proposal/
     stage/review/pending-plan/snapshot/change domain motorlarını ve default/global
     edit aynalarını sil; yalnız canlı transaction/save/undo ve UI adapter'ları kalsın.
@@ -873,6 +950,15 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       transaction 560, revision 272 farklı durum; revision half-commit mutantı red.
     - [ ] 3.6–3.9, 3.18 ve 3.23'teki kalan kabul/geçiş işleri tamamlanınca bütün
       kontrolleri nihai kodda tekrar doğrula; üst madde 3'ü en son kapat.
+    - [ ] **3.10a Kalan reader/writer taraması:** `tools/diff/{context,stage,
+      review,track}.el`, `edit.el`, `loop/heal.el`, plan ve LSP çağrılarında
+      proposal/diff/hunk/rollback/verification kararlarını envanterle; yalnız
+      buffer transaction, canlı revision recheck ve sunumu tut.
+    - [ ] **3.10b Kabul paketi:** iki servis aynı path, interactive undo, dirty/
+      narrowed/new/deleted buffer, Unicode/CRLF, save-hook değişimi/hatası,
+      son dosyada failure, Stop/EOF/close, geç receipt ve kullanıcı index'ini
+      bozmama vakalarını aynı native consumer corpus'unda doğrula.
+
   - [x] **3.11 TLC kapanış verdict'ini sağlamlaştırma (çalışırken bulundu):**
     `Finished in` veya sıfır exit kodu tek başına tam tarama sayılmasın. Koşucu
     model-check modunda açık tamamlanma verdict'i arar; `--dfid N` invariant-only
@@ -1000,6 +1086,14 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     exact document/tick/dirty veya absence recheck hattı bağlıdır. Client capability
     handshake'te capture edilir; port hatası disk fallback'i vermez. Worker aynı
     actual parent workspace kimliğini önce/sonra doğrular.
+    - [ ] **4.2a Adapter bağlama:** her delegated read/mutation için kapalı
+      allowlist, native effect sınıfı ve consuming permit → ham editor response
+      → typed settlement hattını kur. Generic text callback yetki sayılmasın.
+    - [ ] **4.2b Actual completion:** timeout/Stop yalnız delivery'yi kesmesin;
+      issued editor işlemi gerçekten quiescent olana kadar drain'i koru.
+      Sırasız/çift/foreign response ve teardown sırasında reverse completion
+      yüksek hacimli chunk trafiği altında da ilerleyebilsin.
+
   - [ ] **4.3 LSP belge/tanı:** Emacs capture yalnız document tick, server/version,
     publication ve raw diagnostic DTO üretsin; native freshness/aggregation ve
     formatlama tüketicileri bağlı olsun. Sürümsüz stale/pending push temiz tanı
@@ -1038,6 +1132,15 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     ve 78/78 son odak ERT, strict Clippy/fmt, Elisp Werror/checkdoc/parantez temiz.
     Public/standalone formatter geçişi, fresh-pull/barrier ve verification/healing
     tüketicileri nedeniyle 4.3/6.4 açık kalır. Kanıt: `docs/native-diagnostic-port.md`.
+  - [ ] **4.3d Freshness barrier:** capability destekliyorsa fresh pull veya
+    exact post-edit publication beklemesini bounded native state'e bağla;
+    timer dolması, “liste boş” veya yeni server aynı version ile clean sayılmasın.
+    Desteksiz backend için unavailable/degraded kapsamını açık bildir.
+  - [ ] **4.3e Public diagnostic consumer:** standalone tool, header/status,
+    project tanı ve baseline okuyucularını aynı typed sonuca geçir;
+    `tools/lsp/{diagnostics,freshness,settle}.el` içindeki karar/format motorunu
+    son consumer sonrası kaldır. Canlı Flymake/Eglot hook'ları Emacs'te kalsın.
+
   - [ ] **4.4 Symbols/Xref:** definition/reference/hover/document-symbol/skeleton
     adapter'larını typed range/tree snapshot'a geçir; ambiguity ve unavailable
     açık olsun. Marker/cons/editor nesnesi JSON'a sızmasın; native render/budget.
@@ -1082,13 +1185,45 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     edit-transaction exhaustive kontrolleri temiz. Ortak Rust modül/host
     entegrasyonunun bütün commit'leri henüz kapanmadı. Public/standalone LSP edit
     ve kalan 4.4b tüketicileri bu alt işin dışındadır.
+  - [ ] **4.4d Xref/hover:** definition/reference sonuçlarını ham location/link
+    DTO'suna çevir; buffer/URI/root, source revision, target range/encoding ve
+    belirsizliği Rust doğrulasın. Hover markup ve snippet/tool metni render'ı
+    native olsun; Emacs yalnız hazır konumu açsın.
+  - [ ] **4.4e Skeleton ve symbol consumer:** native document tree temeliyle
+    bounded project enumeration/skeleton ve mention sembol seçimini bağla;
+    standalone komut ile agent aynı resolver'ı kullansın. Gerçek imenu ve
+    kontrollü Eglot adapter testi ayrı kanıtlansın; mock server canlı server
+    kabulü diye yazılmasın.
+
   - [ ] **4.5 Dape capture:** connection/stop generation/thread/frame ve variable
     reference bağını capture ve delivery'de doğrula; bounded stack/scopes/
     variables/watch DTO, actual async completion ve capability yokluğunda ret.
+    - [ ] **4.5a Kaynak kimliği:** Dape connection nesnesi için opaque editor
+      handle + generation üret; stopped/running, thread/frame ve variableReference
+      ömrünü ham gözlem olarak taşı. Rust selection/freshness kararını versin.
+    - [ ] **4.5b Okuma portları:** threads, stack, scopes, paged variables ve watch
+      için bounded DTO ve cycle/depth/item/byte sınırları; stale reference,
+      evaluateName/expression metni ve unreadable sonuçları ayrı taşı.
+    - [ ] **4.5c Event invalidation:** continued/stopped/thread exit/restart/
+      disconnect olaylarını generation ile işle; sonradan gelen stack/variable
+      cevabı yeni frame seçimine veya başka connection'a yazamasın.
+
   - [ ] **4.6 Dape mutation/lifecycle:** evaluate, execution control, breakpoint,
     launch/compile/readiness/reset/close aynı native gate ve scope'u kullansın;
     Emacs Dape resource revalidation'ı korunsun. Continue veya replacement bütün
     eski pending reference'ları geçersiz kılsın; foreign connection kapanmasın.
+    - [ ] **4.6a Mutation gate:** evaluate, step/continue/pause, breakpoint ve
+      watch işlemlerinin effect/onay sınıfını Rust belirlesin; expression side
+      effect ihtimali read-only etiketiyle aşılmasın. Emacs exact resource recheck
+      yapıp Dape primitive'ini uygulasın.
+    - [ ] **4.6b Launch ve hazırlık:** config seçimi/validation, compile/preflight,
+      debug readiness, connection retry ve launch/cancel FSM'sini native'e taşı;
+      Dape config fonksiyonları gibi Emacs'e özel çağrılar dar reverse primitive
+      kalsın. Shell/process işi mevcut Rust supervisor/gate'ini kullansın.
+    - [ ] **4.6c Close/unload kabulü:** Dape eksikliği, compile hatası, C-g,
+      approval sırasında reset, geç connect ve paylaşılan debugger senaryosunda
+      yalnız owned kaynaklar temizlensin; eski ref replay veya foreign kill olmasın.
+
   - [x] **4.7 Mention lexer:** legacy @path/@file::symbol ve file/buff/sym/git/
     line/folder target'larını typed span ve target_id ile native ayrıştır; quoted/
     escaped/Unicode ad, email ve fenced-code ayrımı, ambiguity ve invalid range.
@@ -1100,10 +1235,27 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     unsaved/new/narrowed kaynak korunur ve worker sonrası buffer açılması da
     disk sonucunu geçersiz kılar. Mention resolver/folder/Git/provenance tüketicisi,
     fileless/output-buffer grant ve genel büyük snapshot paging hâlâ açık.
+    - [ ] **4.8a Editor snapshot portu:** file/buff/line target'larını captured
+      buffer UUID/tick/coding/narrowing ve RAM içeriğiyle ver; editor buffer seçimi
+      yalnız verilen handle'ı çözsün. İçerik/path seçim politikasını Rust versin.
+    - [ ] **4.8b Native kaynaklar:** disk/file, folder ignore/depth ve Git target
+      çözümlemeyi mevcut native read/search/Git portlarıyla birleştir; tüm ağaç
+      belleğe alınmasın, paging cursor scope/revision'a bağlı olsun.
+    - [ ] **4.8c Özel buffer yetkisi:** fileless/output/TRAMP/remote veya root dışı
+      kaynağın destek ve grant sınırını açık belirle. İsim benzerliği, completion
+      adayı veya UI'ın açık olması context egress izni vermesin.
+
   - [ ] **4.9 Provenance/bütçe/egress:** immutable attachment metadata/hash/range,
     dedup ile kullanıcı sırası; native muhafazakâr token/byte/output-overhead
     bütçesi ve explicit truncation. İçerik data rolünde, delimiter escape'li;
     completion veya path bilgisi tek başına gönderim izni olmasın.
+    - [ ] **4.9a Attachment ledger:** native ordered target_id, source/hash/
+      range/revision/provenance ve truncation nedeni; aynı kaynağı dedup ederken
+      kullanıcı sırası ve attachment kimliği korunsun, editor nesnesi serialize edilmesin.
+    - [ ] **4.9b Prompt data sınırı:** token/byte/output-overhead hesabı Rust'ta;
+      instructions ile dosya/tool/web içeriği ayrı trust sınıfında olsun. Delimiter
+      escape, destination/provider egress kararı ve unknown token tahmini açık olsun.
+
   - [ ] **4.10 Tüketici ve temizlik:** prompt/attach, tool/LSP/Dape, edit-baseline
     ve verification aynı DTO/RPC'yi kullansın. Son consumer'dan sonra eski Elisp
     context/domain formatter/parser/budget motorlarını sil; canlı kaynak/hook/
@@ -1128,6 +1280,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     `history/begin`/`append`/`commit`/`abort` var. Native lib/actor/host ve gerçek
     run consumer bağlantısı 5.9d'de bağımsız kabulden geçti. Bütün history UI
     import/projection consumer'ları ve son legacy silme tamamlanmadan üst iş açık.
+    - [ ] **5.1a Bütün içerik türleri:** native typed modelde text/reasoning,
+      signature/opaque provider blokları, multimodal ve attachment referanslarının
+      round-trip'ini fixture'la doğrula; unknown alanı kör JSON olarak yetkiye çevirme.
+    - [ ] **5.1b Public history consumer:** chat/new/clear/import/restore/direct
+      API/history debug komutları aynı native revision/store'u kullansın; detached
+      sayfalama yeni mutable Elisp store yaratmasın. 7.5 restore atomik porta bağlansın.
+
   - [x] **5.2 Protokol onarımı:** committed call başına tek terminal result,
     duplicate/orphan ret, partial SSE fragment'lerini yürütmeme; cancel/error/
     outcome_unknown yalnız eksik sonuçlara sentezlensin. Onarım idempotent olsun,
@@ -1147,6 +1306,18 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     command/editor kapıları bu snapshot'ı kullanır. Generic delegated editor
     admission ortak pending approval ledger'ına bağlıdır; gerçek reverse adapter
     ve public Elisp registry/schema consumer cutover'ı henüz tamamlanmadı.
+    - [ ] **5.3a Registry publication:** public register/unregister, alias/schema,
+      mode/capability değişimini native revision'lı registry'ye bağla; immutable
+      run snapshot'ı koru. Dynamic tool desteği varsa kapalı registration contract
+      kullan; isme bakarak generic editor execution açma.
+    - [ ] **5.3b Son permission consumer:** `permission/{bash,policy,execute}.el`
+      risk/auto-decision, cwd/argv ve callback-start kararlarını native gate'e
+      geçir; confirmation yalnız native approval ID kararını iletsin. Editor
+      resource recheck ve UI escaping kalır; ayrı izin deposu kalmasın.
+    - [ ] **5.3c Public/direct çağrı:** agent dışı tool invoke, API tool schema,
+      plan ve LSP/Dape mutation aynı gate'ten geçsin; alias/availability, eksik
+      capability ve forged callback hiçbir yolu izinli hale getirmesin.
+
   - [ ] **5.4 Run admission/FSM:** servis lease'i gerçek agent run'dan ayrı;
     claim config/credential/context hazırlığından önce alınsın. Captured connection/
     mode/policy/history revision, turn/tool sınırları, doom-loop ve tek terminal
@@ -1159,6 +1330,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     Native session coordinator ve provider IPC bağlantısı eklendi; library
     derleme/tip kontrolü geçti. Tool/plan/editor dispatch, Elisp UI consumer ve
     native config/credential receipt'inin son revision'a bağlanması hâlâ açıktır.
+    - [ ] **5.4a Preparation receipt:** claim'den sonra native config/credential/
+      model/context revision'larını actor commit'ine bağla; değişen receipt'i
+      activation öncesi reddet. Snapshot capture için UI'ın karar sıralamasına güvenme.
+    - [ ] **5.4b Admission negatif kabulü:** iki session aynı application,
+      iki application bağımsız run, hazırlıkta close/deadline, yanlış fazda
+      history/tool yazısı ve retry sırasında config değişimi gerçek pipe'ta testli olsun.
+
   - [x] **5.5 Provider turu:** mevcut Rust HTTP/SSE/retry/budget servislerini aynı
     gerçek run altında kullan; payload/history/tool-schema native'de birleşsin.
     Config/selection değişimi aktif turn veya retry hedefini değiştirmesin.
@@ -1170,6 +1348,14 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     orijinal deadline'a bağlıdır; legacy API bu budget'ten debit/close alamaz.
     Native config/model receipt binding, editor retry observer ve Elisp tüketici
     cutover'ı açıktır. Gerçek socket/pipe kabul kaynakları yazıldı, çalıştırılmadı.
+  - [ ] **5.5a Native run wire eşdeğerliği:** desteklenen doğrudan API/wire
+    ailelerinin text/tool/reasoning/usage/cancel ve tools-off davranışını aynı
+    native run portuyla loopback fixture'larında doğrula. Çalışan wire engine'ini
+    yeniden yazma; completion-only public API ile agent girişini ayır.
+  - [ ] **5.5b Retry/recovery consumer:** native circuit/retry observer ve
+    manuel reset ACK'i exact run/connection snapshot'a bağlı kalsın; UI retry
+    düğmesi yeni hedef seçmesin veya loop içinde ikinci backoff kurmasın.
+
   - [ ] **5.6 Tool dispatcher:** model yanıtını commit → çağrıları gate'ten yürüt
     → typed sonuçları identity ile history'ye commit → sonraki turn sırası;
     native OS araçları ve 4'teki editor reverse portları aynı lifecycle'da olsun.
@@ -1209,9 +1395,29 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     conversation scope, detached args, foreign cancel, retired source ve
     unrelated Elisp loop izolasyonunu doğrula. Kaynaklar native_agent/edits.rs
     ve test-native-agent-edit.el'de; 5.9d'nin bağımsız binary/source kabulünde geçti.
+  - [ ] **5.6c Background/interactive job parent'ı:** start/poll/stdin/EOF/kill
+    araçlarını aynı native tool-call/run kimliğiyle bağla; turn sona ermesi ile
+    job ömrünü ayır, run/session close politikasını belirle. Aynı job iki caller
+    tarafından sahiplenilmesin; çıktı cap ve reap mevcut supervisor'da kalsın.
+  - [ ] **5.6d Kalan delegated araçlar:** 4.2–4.6 allowlist'inin her aracı için
+    captured source → gate → exact completion → tek history result hattını kur;
+    pending/unissued/unknown sonucu başarı metnine indirgeme. Her araç ailesi
+    için gerçek native parent consumer testi teslim et.
+
   - [ ] **5.7 Mode/plan:** ask/plan/debug/agent availability, async debug hazırlığı,
     revision-bound plan artifact ve consuming dispatch native sahipliğine geçsin;
     Emacs plan/review ekranları yalnız presenter ve observation olsun.
+    - [ ] **5.7a Mode state:** ask/plan/debug/agent geçişleri, tool availability
+      ve debug hazırlık kararı native actor'da; Elisp `state/transitions.el` ve
+      `application/mode.el` yalnız intent/DTO projeksiyonuna dönüşsün.
+    - [ ] **5.7b Plan domain:** artifact ID/content hash/revision, origin session,
+      pending/superseded/rejected/dispatching/terminal durumları ve tek kullanımlık
+      accept native'de tutulsun; plan buffer değişikliği yeniden revision üretsin.
+    - [ ] **5.7c Dispatch consumer:** `plan/{store,dispatch,context}.el` ve
+      `chat/plan.el` consumer'larını native accept/reject/cancel'e bağla; plan
+      text/metadata'nın tek başına edit izni olmadığı, çift click ve eski transcript
+      butonunun ikinci run başlatmadığı doğrulansın.
+
   - [ ] **5.8 Abort/reset/EOF:** revoke → gerçek child/reverse/approval/edit drain
     → history repair → terminal event/release → yeni admission sırasını uygula.
     Çift iptal, owner close, reset ve stale generation tek terminal teslim etsin;
@@ -1220,6 +1426,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     repair → release hattı transport'a bağlandı; rpc/cancel, abort, owner close,
     shutdown ve EOF kaynakları hazır. Reset ve gerçek OS/editor tool child'ları
     aynı hatta bağlanmadan ve son kabul çalışmadan bu alt iş kapanmaz.
+    - [ ] **5.8a Tek drain ağacı:** HTTP, native OS worker/job, delegated sensor,
+      editor mutation, approval ve edit receipt settlement child'larını tek
+      parent release kapısında birleştir; callback kaybı drained sayılmasın.
+    - [ ] **5.8b Reset/EOF matrisi:** hazırlıkta, model stream'de, review'da,
+      mutation issue sonrası ve history commit öncesi Stop/reset/EOF enjekte et;
+      actual sonuç repair'den önce kaydedilsin, yeni admission erken açılmasın.
+
   - [ ] **5.9 IPC ve UI consumer:** `session/prompt`, `session/abort`, snapshot ve
     gerekli history/plan portları; epoch/session sequence'li chunk/state/terminal
     olayları. Chat/API direct caller'ları explicit run handle'a geçir; event gap
@@ -1309,6 +1522,14 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     verification/healing, tam modified-run kapsamı ve genel 5.9 hâlâ açıktır.
     599 locked Rust (32 compile-fail), strict Clippy/fmt, 1422/1422 tam ERT;
     son chat sunum diliminde 65/65 odak ERT ve Elisp Werror/checkdoc/parantez temiz.
+  - [ ] **5.9g Kalan public girişler:** chat send/regenerate/continue, direct
+    plain/stream API, Transient, plan dispatch ve debug girişlerinin sahipliğini
+    envanterle. Completion-only API agent loop başlatmasın; konuşma başlatan
+    consumer native session/run portunu kullansın, gizli Elisp history yazmasın.
+  - [ ] **5.9h Event reconciliation:** 8.3 ile ortak sequence/gap snapshot,
+    reconnect/restart ve exact pending request kuralını tamamla; eski sentinel
+    veya mutable current-buffer yeni session'a event taşımasın.
+
   - [ ] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
     repair ile domain state/plan dispatch motorlarını son tüketici sonrası kaldır.
     Madde 6'daki compaction/healing consumer'larının native run'a bağlanması için
@@ -1319,7 +1540,7 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     ile application/approval/transport/history/run modellerini eşle.
   - [ ] **5.12 Son toplu kabul:** 3 ve 4'ün bütün alt işleriyle beraber uygulama
     bitince locked Rust+compile-fail, full source ERT, gerçek GUI kabulü, strict
-    Clippy/fmt, değişen Elisp Werror/checkdoc ve etkilenen exhaustive TLC çalıştır.
+    Clippy/fmt, değişen Elisp Werror/checkdoc; TLA+ değişmişse ilgili TLC çalıştır.
     Eksik/başarısız kabul ve kalan legacy consumer varken 3/4/5'i kapatma.
 
   **2026-11-01 denetim kanıtı:** üst 3/4/5 ve ilgili kapanış kutuları yeniden
@@ -1337,6 +1558,26 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   Bunlar eksik native tüketici bağlantıları ve gerçek GUI kabulünü kapatmaz.
   Ayrıntı ve açık teknik bulgular: `docs/migration-review-2026-11-01.md`.
 
+  - [ ] **5.13 Prompt ve instruction motoru** — kalan belirgin domain açığı:
+    `prompt.el` hâlâ instructions/env/skills/mode/tools metni ve cache key üretir.
+    Rust'ta mevcut history/wire/config/metadata portlarına bağla; yeni Elisp motoru kurma.
+    - [ ] **5.13a Instruction kaynakları:** prompt/default asset, proje instruction
+      dosyaları, kullanıcı override, model/provider özel talimat ve mode overlay
+      precedence'ını envanterle; bounded native file capture + kaynak revision'ı,
+      trust/egress ve hata kategorilerini tanımla. Editor-only özelleştirme gerekirse
+      explicit ham text primitive olsun; keyfi Elisp kodunu Rust'a taşımaya çalışma.
+    - [ ] **5.13b Ortam/context bileşimi:** OS/shell/Git/toolchain/skills bilgisi,
+      tool guidance ve mode reminder Rust'ta üretildiğinde 4.9 attachment ve
+      native registry/capability snapshot'ını kullansın; modelden gelen içerik
+      instruction kaynağı olmasın.
+    - [ ] **5.13c Cache ve invalidation:** cache gerekiyorsa native owner/root/
+      config/model/mode/instruction/context revision key'i, byte/ömür cap'i ve
+      dosya değişimi invalidation testi olsun. Elisp'te ikinci prompt cache kalmasın.
+    - [ ] **5.13d Consumer/kabul:** agent ve direct API aynı canonical prompt
+      builder'ı kullansın; tools-off, plan/debug, compaction overlay, reasoning,
+      Unicode ve instruction değişimi golden/negatif testleriyle eski prompt
+      assembly/cache/OS probe engine'lerini kaldır; UI debug hazır DTO göstersin.
+
 - [ ] **6. Bütçe, compaction, healing ve verification birliği** — mevcut native
   budget/metadata tiplerini kullanarak normal/retry/continue/compaction/healing
   çağrılarını aynı run handle'ına bağla. Exact fiyatla hard monetary reservation
@@ -1348,6 +1589,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] **6.1 Tek run muhasebesi:** normal/retry/continue/compaction/healing
     çağrılarının aynı captured RunId, deadline ve native admission kaydını
     kullandığını gerçek consumer'larda doğrula; ikinci debit/writer'ı kaldır.
+    - [ ] **6.1a Attempt kimliği:** normal/retry/continue/summary/healing için
+      exact run + attempt/charge kimliğini runtime provider sonucuna bağla;
+      HTTP retry ikinci logical tool debit veya bağımsız bütçe yaratmasın.
+    - [ ] **6.1b Usage settlement:** wire normalize usage/cache kategorilerini
+      canonical pricing'e gerçek provider completion'da bağla; duplicate/late
+      completion, partial stream, cancellation ve provider cumulative usage ayrı olsun.
+
   - [ ] **6.2 Kesin parasal rezervasyon:** input/output/cache fiyatları ve token
     tavanlarıyla checked fixed-point rezervasyon, settlement/refund ve concurrency
     sınırlarını doğrula; bilinmeyen fiyat/usage açık kategori olsun.
@@ -1364,9 +1612,30 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     598 locked Rust (32 compile-fail), 1414/1414 full source ERT ve strict
     Clippy/fmt temiz. Bu hesap henüz runtime provider settlement'a bağlı değildir;
     hard reservation/refund/concurrency ve genel 6.2 açık kalır.
+  - [ ] **6.2c Reservation admission:** captured pricing/model revision ve
+    bounded input/output/cache üst sınırıyla checked fixed-point rezervasyon
+    üret; yeterli üst sınır yoksa hard ceiling garantisi iddia etme. Unknown
+    pricing/usage altında izin/ret politikasını native typed sonuçla bildir.
+  - [ ] **6.2d Settlement/refund:** ticket consume bir kez; actual kullanım,
+    kullanılmayan rezervasyon, hata/iptal/unknown ve overflow muhasebesini aynı
+    ledger'da işle. Remote billing'in iptalle kesin durduğu varsayılmasın.
+  - [ ] **6.2e Yarış ve UI:** eşzamanlı reservation ve aynı call'ın çift cevabı
+    toplam tavanı aşamasın. UI exact observed/reserved/unknown DTO göstersin;
+    fiyat hesaplamasın, eksik alanı sıfır veya ücretsiz diye sunmasın.
+
   - [ ] **6.3 Compaction:** native history revision'ına bağlı tek özetleme,
     başarısız/iptal/stale özetin eski geçmişi koruması, ikinci overflow ve
     multimodal/tool-call bütünlüğü; gerçek loop consumer'ını bağla.
+    - [ ] **6.3a Summary transaction:** history revision/tail hash ile özet
+      hazırlığı, tools-off model bileti ve tek compaction hakkı native run'da;
+      summary/preserved tail/tool-call blokları immutable candidate olsun.
+    - [ ] **6.3b Commit/abort:** yalnız aynı revision'a başarılı ve bounded özet
+      commit edilsin; stale/empty/error/cancel/ikinci overflow orijinal history'yi
+      korusun. Retry aynı parent deadline ve attempt budget'ten beslensin.
+    - [ ] **6.3c Consumer/kabul:** `loop/compact.el`, `history/compact.el` ve prompt
+      overlay kararlarını kaldır; cancelled summary + geç reply, multimodal,
+      orphan-call repair ve tools yeniden açma senaryoları pipe'ta doğrulansın.
+
   - [ ] **6.4 Healing ve verification:** native changed-file receipt görünümünden
     fresh diagnostic baseline/sonuç üret; unavailable/stale kanıt temiz başarı
     sayılmasın. Sınırlı healing aynı parent run altında yürüsün.
@@ -1403,9 +1672,31 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
         run/bütçe/deadline altında kur. Deleted/closed-file ve explicit edit-service
         verification'ı tamamla; son legacy consumer/Elisp karar motorlarını kaldır.
         6.4b1 yalnız explicit file diagnostic okuması bağlar; üst 6.4 kapanışı değildir.
+      - [ ] **6.4b3 Baseline bileti:** edit öncesi producer/document/hash/revision
+        bağlı baseline yakala; baseline yokluğu/değişimi için explicit unavailable
+        sonucu üret, sonradan gelen diagnostic'i geçmiş baseline gibi kullanma.
+      - [ ] **6.4b4 Otomatik verification scheduler:** receipt sonrası exact fresh
+        gözlemi bounded bekle; delete/closed-file/explicit service ve aynı path'te
+        ikinci edit için ayrı publication debt tut. Consume yalnız exact terminal
+        settlement ile olsun; queue doluluğunda pending kayıt düşmesin.
+      - [ ] **6.4b5 Healing turu:** yalnız native delta'nın uygun gördüğü yeni
+        bulgular için sınırlı child turn; aynı RunId/budget/deadline, iteration/
+        doom-loop cap'i ve history protokolü. Mevcut tool kuyruğunun devamı veya
+        başarısız doğrulama borcu “heal tamam” diye kaybolmasın.
+      - [ ] **6.4b6 Kapanış:** Stop/reset/provider değişimi, false-clean string,
+        missing/stale/truncated diagnostic ve late receipt corpus'uyla
+        `loop/heal.el` / `tools/diff/track.el` karar reader'larını kaldır.
+
   - [ ] **6.5 Sonuç ve cleanup:** geç/çift usage, cancel/timeout/EOF ve unknown
     effect settlement'ını doğrula; eski Elisp compaction/healing/accounting
     karar motorlarını son tüketicilerden sonra kaldır.
+    - [ ] **6.5a Tek rapor:** observed/reserved/unknown cost, usage, compaction,
+      verification/healing ve terminal nedeni Rust DTO'sundan gelsin; history'ye
+      sonucu ekleme ve kuyruğa devam tek native dispatcher'da kalsın.
+    - [ ] **6.5b Teardown:** geç usage actual muhasebeyi settle edebilsin ancak
+      iptal edilmiş UI'ı açmasın; resource/ticket/verification debt sızıntısı ve
+      ikinci ledger bulunmadığını run close sonrasında doğrula.
+
   - [ ] **6.6 Kabul:** exact-price/unknown-price/usage, paralel reservation,
     overflow/özet hatası, stale verify ve cancelled healing regresyonlarını
     çalıştır; etkilenen budget/verification modellerini kontrol et.
@@ -1421,9 +1712,29 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] **7.1 Şema ve import:** schema_version=2 ve legacy DTO'larını bounded
     typed native sınıra bağla; unsupported version, malformed/oversize ve
     identity/path traversal girdilerini mutation öncesinde reddet.
+    - [ ] **7.1a Domain sınırı:** private alanlı SessionId/StorageRoot/Revision/
+      Sequence ve bounded schema DTO → TryFrom; public mutable raw record ile
+      validation atlanmasın. Payload Debug/log/export hassas metin sızdırmasın.
+    - [ ] **7.1b Migration/import:** v2 ve desteklenen legacy formatları saf
+      candidate'a dönüştür; kimlik/path/schema/content sınırları yan etkiden önce
+      doğrulansın. ID collision için explicit ret/yeni kimlik kararı; kaynak
+      dosya değişmesin, import aktif session'ı sessizce değiştirmesin.
+
   - [ ] **7.2 Tek yazıcı ve journal:** session/root kapsamı, writer lock,
     monotonic revision/sequence, hash ve snapshot/journal commit sırasını doğrula;
     actor uzun disk IO beklerken bloke olmasın.
+    - [ ] **7.2a Stable writer lock:** save/load-recovery/import/delete aynı
+      storage/session kilidini kullansın; journal inode'unu unlink edip yeni writer
+      açarak lock atlanamasın. İki process ve journal-only session yarışını test et.
+    - [ ] **7.2b Async worker:** bounded disk işi worker'da; actor immutable write
+      candidate ve typed completion taşısın. Completion epoch/session/revision
+      doğrulanmadan publication yapılmasın; cancellation yazının durable durumunu
+      uydurmasın, mailbox ping/abort/close'a yanıt vermeyi sürdürsün.
+    - [ ] **7.2c Commit düzeni:** checkpoint/journal/snapshot kimliği, monotonic
+      sequence ve durable publication sırasını tanımla. Exclusive create atomik,
+      partial append/fsync hatasından sonra writer state'i explicit bozuk/kapalı
+      olsun. Symlink/no-follow, private dir, byte cap ve desteklenen fsync garantisi açık.
+
   - [ ] **7.3 Kesilmiş yazı ve corruption:** yalnız incomplete son kaydı güvenle
     kurtar; tam kayıt checksum/sequence ve orta kayıt bozulmasını hata say.
     Snapshot başarısızlığında önceki committed görünümü koru.
@@ -1433,15 +1744,55 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     prototipi geri alındı; önceki 18 test tam storage kabulü sayılmaz. Stable
     writer lock, doğrulanmış session kimliği ve protokol sıralı restart repair
     regresyonlarıyla yeniden doğrula; actor üzerinde disk I/O yapma.
+  - [ ] **7.3b Recovery parser:** yalnız incomplete son kaydı truncate et;
+    tam son kaydın checksum hatası, orta corruption veya sequence gap'i veri
+    silmeden reddet. Snapshot file ID, Init/checkpoint ID ve istenen session
+    eşleşsin; replay sonrası domain ve toplam boyut tekrar canonical sınırdan geçsin.
+  - [ ] **7.3c Disk hata corpus'u:** cut-write, tam bozuk son kayıt, disk full,
+    izin/fsync/rename hatası ve snapshot publication kaybında journal checkpoint
+    doğruluğunu test et. List/load aynı committed recovery görünümünü kullansın;
+    limit nedeniyle eksik liste dönüyorsa truncation görünür olsun.
+
   - [ ] **7.4 Restart recovery:** yarım model/tool/edit için outcome_unknown
     repair, idempotence ve sıfır otomatik replay; eski epoch callback'leri yeni
     session/history/selection/accounting durumuna yazamasın.
+    - [ ] **7.4a Protocol repair:** unfinished model/tool/edit için her call'a
+      tek outcome_unknown; missing result doğru assistant/tool bloğunda ve
+      deterministik sırada olsun. Duplicate call ID/orphan ve StartAction-only
+      kaydı kaybolmasın; genel 5.2 repair domain'ini yeniden yazma.
+    - [ ] **7.4b Restart authority:** persisted approval/permit/callback yeni
+      epoch'ta yetki vermesin; no automatic replay, repeat load idempotence ve
+      pending edit/journal ilişkisinde bilinmeyen etkiyi koruma kabulünü çalıştır.
+
   - [ ] **7.5 Gerçek consumer geçişi:** save/list/load/delete/import/restore
     işlemlerini native application/session portuna bağla; selection/accounting
     restore ve async owner/cancel/deadline sınırlarını koru.
+    - [ ] **7.5a Gerçek RPC entegrasyonu:** save/list/load/delete/import için
+      zorunlu application/session/storage scope, expected revision ve cancel/
+      deadline; constants veya bridge stub'ı backend varlığı sayılmaz. Arbitrary
+      path/root parametresi tek başına dosya erişim yetkisi vermesin.
+    - [ ] **7.5b Atomik restore:** history/selection/accounting/context root'u
+      candidate olarak doğrula; aktif run varken ret veya açık transition uygula.
+      Bir alan bozuksa yarım restore olmasın; draft/transcript UI sunumunun
+      serialize edilecek kısmıyla native konuşma state'ini ayır.
+    - [ ] **7.5c UI akışı:** chat save/list/picker/load/delete/import ve auto-save
+      debounce/storage policy Rust'ta; Emacs seçim/sonuç/draft DTO'sunu sunsun.
+      Native hata/unavailable sonrası senkron local fallback veya çift writer olmasın.
+    - [ ] **7.5d Fixture kabulü:** gerçek geçici disk + pipe'ta CRUD/import/restart,
+      iki owner, stale revision, reply kaybı ve UI origin close'u çalıştır;
+      gerçek kullanıcı session/config dosyasını veya secret'ını kullanma.
+
   - [ ] **7.6 Legacy temizliği ve kabul:** eski Elisp persistence writer/parser/
     worker'ını son consumer sonrası kaldır; yalnız geçici fixture'larla disk
     hata, lock, restart, migration ve iki owner kabulünü çalıştır.
+
+    - [ ] **7.6a Son writer temizliği:** `chat/session/{schema,storage,validate,
+      restore,worker}.el`, session/history export ve `files/async.el` çağrılarını
+      eşle; migration consumer'ı kalmadığında parser/writer/recovery engine'lerini
+      kaldır. Emacs draft/buffer restore primitive'lerini koru.
+    - [ ] **7.6b Retention/delete:** native count/byte/age retention, explicit
+      delete ve owned temp cleanup davranışını belirle; aktif writer/foreign root
+      silinmesin. Silme + yeniden açma ve eski callback yarışı fixture'la testli olsun.
 
 - [ ] **8. İnce UI ve son application/global köprüleri** — chat/session routing,
   draft, provider/model/effort seçimi, stream/backpressure, plan ve confirmation
@@ -1453,6 +1804,13 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   - [ ] **8.1 Chat/session routing:** explicit native application/session/run
     handle'larını draft, transcript ve terminal delivery'ye bağla; buffer
     değişimi/close/unload yabancı session'ı etkilemesin.
+    - [ ] **8.1a Frontend handle store:** buffer başına opaque application/
+      session/run/edit handle ve son revision'lı DTO tut; current-buffer/global
+      loop üzerinden hedef seçme. UI point/window/draft state'i domain store değildir.
+    - [ ] **8.1b Routing kabulü:** chat değişimi, rename, aynı proje iki chat,
+      buffer close/reopen ve draft/IME/Unicode/scroll korunumu; origin close
+      başka session'ı abort etmesin, yeni buffer eski completion'ı almasın.
+
   - [ ] **8.2 Config/selection:** provider/model/effort UI yalnız committed native
     DTO ve async intent tüketsin; aktif run'ın endpoint/auth/policy snapshot'ı
     seçim değişiminde veya retry'da değişmesin; fake default kimlik kullanma.
@@ -1477,15 +1835,71 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
       close ve exact RPC cancel sonucu publish edemez. Bridge secret/URL çıkarmaz;
       native HTTP portunu kullanır. Genel picker/auth-source/registry cutover'ı
       ve ortak host entegrasyon commit'i bu temelin kapsamı dışındadır.
+    - [ ] **8.2b2 Native config orchestration:** path precedence/read/parse/
+      publication, env/keyless ve credential ihtiyaçlarını Rust sıralasın;
+      auth-source/callable editor primitive yalnız native talebe yanıt versin.
+      Gerçek config refresh ile defaults bootstrap birbirini ezmesin; shared
+      request varsa her waiter bağımsız owner/deadline/cancel ömrünü korusun.
+    - [ ] **8.2b3 Provider registry/list:** embedded/custom/API/application
+      backend kayıtlarının namespace, availability ve config revision'lı DTO'su
+      native olsun; Elisp kimlik, auth veya endpoint türetmesin. Gerekli alanların
+      UI'a verilmesi secret/header'ın da projection'a eklenmesi anlamına gelmesin.
+    - [ ] **8.2b4 Discovery ve cache:** native refresh temelini public picker ve
+      `kargu-api-list-models` consumer'ına bağla; exact lease/epoch/config revision,
+      concurrent refresh sırası, stale/error ve authenticated/public hedef kararları
+      Rust'ta. Cache TTL/cap/invalidation/last-good/error anlamı native'e ait olsun.
+  - [ ] **8.2c Native selection commit:** provider/model/effort/tuning intent'i
+    native session'a expected revision ile commit edilsin; response sadece
+    hesaplanmış seçim değil gerçek state/snapshot üretsin. Unknown model veya
+    capability unknown ise invented tools/context/rate varsayılanı verme.
+  - [ ] **8.2d Frontend consumer ve yarış:** provider/model/effort picker,
+    footer/company ve Transient yalnız list DTO + intent kullansın; superseded
+    intent, origin close ve config/model revision değişimi eski seçimi commit
+    etmesin. Aktif run'ın captured endpoint/auth/backend'i değişmesin.
+  - [ ] **8.2e Eski yolun kaldırılması:** `api/catalog/request.el`, selection/
+    config-service/metadata tablolarındaki kalan orchestration/cache/generation
+    kararlarını tüketicileriyle sil. Native refresh portu varken frontend'in
+    URL/key çıkarıp HTTP sıralaması yapmadığını gerçek pipe/loopback ile doğrula.
+
   - [ ] **8.3 Stream/backpressure:** epoch/scope/revision/sequence kontrolü,
     bounded chunk sunumu, gap reconciliation ve tek terminal; geç/çift/foreign
     event ile kill-buffer/Stop yarışlarını gerçek pipe'ta doğrula.
+    - [ ] **8.3a Bounded event queue:** native event/frame/chunk byte ve queue
+      sınırı, cancellation/control yanıtlarının ilerlemesi ve backpressure;
+      dropped/coalesced delta varsa sequence/snapshot semantiği açık olsun.
+    - [ ] **8.3b Frontend sunum:** UI timer ile bounded batch render, transcript/
+      reasoning fragment ve point/draft korunumu; timer yalnız çizim planlasın,
+      model continuation/tool/terminal kararı vermesin.
+    - [ ] **8.3c Recovery kabulü:** duplicate/out-of-order/gap/oversize/late chunk,
+      Stop ile queued delta ve reconnect yeni epoch'u; snapshot ile exact state
+      uzlaştırılsın, bir terminal iki kez çizilmesin. Gerçek pipe ve yoğun stream
+      ölçümüyle UI responsiveness/queue cap'i doğrula.
+
   - [ ] **8.4 Plan ve confirmation:** UI yalnız native plan/onay kimliğini
     göstersin; accept/reject/cancel aynı kapıya gitsin, string/metadata başarı
     yetkisi vermesin ve pending sunumlar kapanışta temizlensin.
+    - [ ] **8.4a Approval presenter:** native action/plan ID, scope/revision ve
+      deadline göster; accept/reject/C-g/timeout/close tek karar portuna gitsin.
+      Buton text'i, “approved” metadata veya eski transcript action'ı yetki vermesin.
+    - [ ] **8.4b UI cleanup:** pending confirmation/review/plan listeleri yalnız
+      view reference tutsun; native supersede/close eventiyle kapansın. Headless
+      veya missing presenter fail-closed olsun; başka origin'in popup'ı temizlenmesin.
+
   - [ ] **8.5 Global köprü temizliği:** circuit/catalog/job/edit/async tabloları
     ve history/domain state'in kalan reader/writer envanterini çıkar; son
     consumer geçmeden silme, ikinci authority veya legacy fallback bırakma.
+    - [ ] **8.5a Authority taraması:** `state/`, `selection.el`, `core/session.el`,
+      application coordinator/reset/execution, loop/api/tools, permission ve plan
+      tablolarında kalan mutable domain writer'ları 0.1 matrisiyle kapat.
+    - [ ] **8.5b Composition/unload:** optional Eglot/Dape/company/Transient ve
+      native binary eksikliği yüklemeyi çökertmesin; register/unregister/hook
+      yalnız kendi handle'ını yönetip actual drain'i beklesin. Autoload/hook/keymap
+      gibi Emacs kayıtlarını domain singleton sanıp kaldırma.
+    - [ ] **8.5c Worker sınıflandırması:** config credential worker, snapshot/
+      session/file worker ve async task tablolarını tek tek değerlendir; Emacs-only
+      ham kaynak erişimi gerekiyorsa dar primitive bırak, OS/domain işi için
+      ikinci Emacs process veya fallback motoru tutma.
+
   - [ ] **8.6 Kabul ve kapsam kanıtı:** iki application/session, origin close,
     stale selection, cancellation, missing capability ve gerçek GUI akışını
     doğrula; passive UI getter'ları gizli RPC/IO başlatmasın.
@@ -1500,12 +1914,105 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
   login, kurulum ve credential taşıma ayrıca onay ister. Kaynak: Aşama 5, G12;
   .codex/03'ün dört ayrı backend kabulü ve MCP topolojisi.
 
+  - [ ] **9.1 Backend domain/port:** direct API completion, native agent ve
+    kendi loop'u olan harici backend ayrı capability; start/cancel/resume/event/
+    usage/approval ve external thread/turn ↔ native session/run eşlemesi Rust'ta.
+    Backend kendi loop'unu yürütürken Kargu ikinci model/tool loop'u açmasın.
+  - [ ] **9.2 Discovery/readiness:** Rust bounded PATH/explicit executable ve
+    sürüm/protokol/config/auth probe'u; NotInstalled/Unverified/NeedsLogin/
+    UnsupportedVersion/Protocol/ProbeFailed/Ready DTO'sunu üret. Probe gizli
+    login/kurulum/ücretli turn başlatmasın; UI yalnız nedeni göstersin.
+  - [ ] **9.3 Codex adapter'ı:** uygulama öncesi resmi protokolü ve sabitlenen
+    kurulu binary şemasını doğrula; initialize, thread/turn/stream/terminal,
+    approval/cancel ve varsa resume/usage/model/effort mapping'i offline fixture
+    ile bağla. Aynı kabul paketi ve güvenlik sınırı geçmeden Ready ilan etme.
+    - [ ] **9.3a Protokol/codec (Codex):** resmi kaynak + desteklenen
+      sürüm/schema kanıtı, bounded handshake/event/terminal parser ve malformed/
+      partial/unknown event fixture'ları. Bu teslim gerçek backend readiness değildir.
+    - [ ] **9.3b Lifecycle/otorite (Codex):** owned session/turn mapping,
+      actual Stop/drain, disconnect/restart/no replay, varsa resume/usage/approval;
+      child process/servis sahipliği ve dirty buffer/gate sınırı testli olsun.
+    - [ ] **9.3c Consumer/kabul (Codex):** native provider listesi ve GUI
+      seçiminden prompt/stream/terminal/cancel'e ortak contract suite; optional
+      capability'ler ve missing/unready nedeni. Offline fixture ile ayrıca
+      yetkilendirilmiş canlı kabulün sonuçları ayrı kaydedilsin.
+  - [ ] **9.4 Claude Code adapter'ı:** sürüme bağlı resmi headless giriş/çıkış
+    sözleşmesini doğrula; stdin/argv ve bounded stream parser, result + exit
+    eşlemesi, Stop ve session isolation. Resume/usage/approval yoksa açık capability
+    eksikliği; fixture ve kontrollü entegrasyon kanıtı ayrı olsun.
+    - [ ] **9.4a Protokol/codec (Claude Code):** resmi kaynak + desteklenen
+      sürüm/schema kanıtı, bounded handshake/event/terminal parser ve malformed/
+      partial/unknown event fixture'ları. Bu teslim gerçek backend readiness değildir.
+    - [ ] **9.4b Lifecycle/otorite (Claude Code):** owned session/turn mapping,
+      actual Stop/drain, disconnect/restart/no replay, varsa resume/usage/approval;
+      child process/servis sahipliği ve dirty buffer/gate sınırı testli olsun.
+    - [ ] **9.4c Consumer/kabul (Claude Code):** native provider listesi ve GUI
+      seçiminden prompt/stream/terminal/cancel'e ortak contract suite; optional
+      capability'ler ve missing/unready nedeni. Offline fixture ile ayrıca
+      yetkilendirilmiş canlı kabulün sonuçları ayrı kaydedilsin.
+  - [ ] **9.5 OpenCode adapter'ı:** resmi desteklenen CLI/server yolunu kurulu
+    sürümle doğrula; start/attach ownership, event normalizasyonu, cancel ve
+    session mapping. Paylaşılan servis/foreign konuşmayı Stop ile kapatma;
+    desteklenen optional capability'leri ayrı test et.
+    - [ ] **9.5a Protokol/codec (OpenCode):** resmi kaynak + desteklenen
+      sürüm/schema kanıtı, bounded handshake/event/terminal parser ve malformed/
+      partial/unknown event fixture'ları. Bu teslim gerçek backend readiness değildir.
+    - [ ] **9.5b Lifecycle/otorite (OpenCode):** owned session/turn mapping,
+      actual Stop/drain, disconnect/restart/no replay, varsa resume/usage/approval;
+      child process/servis sahipliği ve dirty buffer/gate sınırı testli olsun.
+    - [ ] **9.5c Consumer/kabul (OpenCode):** native provider listesi ve GUI
+      seçiminden prompt/stream/terminal/cancel'e ortak contract suite; optional
+      capability'ler ve missing/unready nedeni. Offline fixture ile ayrıca
+      yetkilendirilmiş canlı kabulün sonuçları ayrı kaydedilsin.
+  - [ ] **9.6 Antigravity adapter'ı:** resmi desteklenen conversation protokolünü
+    doğrula; init/update/result, conversation identity, cancel ve varsa cumulative
+    usage normalizasyonunu fixture'la kanıtla. MCP erişimi veya desktop kurulumu
+    konuşma backend kabulü değildir; doğrulanamayan bölüm açık engel kalsın.
+    - [ ] **9.6a Protokol/codec (Antigravity):** resmi kaynak + desteklenen
+      sürüm/schema kanıtı, bounded handshake/event/terminal parser ve malformed/
+      partial/unknown event fixture'ları. Bu teslim gerçek backend readiness değildir.
+    - [ ] **9.6b Lifecycle/otorite (Antigravity):** owned session/turn mapping,
+      actual Stop/drain, disconnect/restart/no replay, varsa resume/usage/approval;
+      child process/servis sahipliği ve dirty buffer/gate sınırı testli olsun.
+    - [ ] **9.6c Consumer/kabul (Antigravity):** native provider listesi ve GUI
+      seçiminden prompt/stream/terminal/cancel'e ortak contract suite; optional
+      capability'ler ve missing/unready nedeni. Offline fixture ile ayrıca
+      yetkilendirilmiş canlı kabulün sonuçları ayrı kaydedilsin.
+  - [ ] **9.7 Her adapter için ayrı kabul:** 9.3–9.6 tek ajana dev paket verilmesin;
+    her biri şu alt teslimleri ayrı yapsın: sürüm/protokol kanıtı → offline codec
+    fixture'ı → Rust lifecycle/session portu → UI provider consumer → güvenlik ve
+    ortak contract kabulü. Dördünden biri eksikse üst 9 açık kalır.
+  - [ ] **9.8 Tool/izin ve dosya güvenliği:** harici backend'in kendi Bash/Edit
+    etkilerinin Kargu gate'inden geçip geçmediğini belge ve fixture ile kanıtla.
+    Geçmiyorsa eşdeğer desteklenen kontrol/izolasyon veya açık read-only sınır;
+    dirty buffer'a dışarıdan yazma ve yetki varmış gibi UI sunma yasak. Yerel
+    Kargu approval'ı foreign backend'in onayını verdiği iddiasına dönüşmesin.
+  - [ ] **9.9 Ayrı MCP portu:** editor araç sunumu ayrı Rust adapter/auth/scope ve
+    capability; stdio/proxy topolojisini .codex/03'e göre uygula. Connection başına
+    session/permission/byte/deadline sınırı; tool list/call, missing adapter,
+    foreign owner ve disconnect cleanup kabulü. MCP, backend selection'ı kapatmaz.
+    - [ ] **9.9a Protokol/keşif:** desteklenen MCP sürüm/transport ve tool schema
+      asset'lerini native registry/gate'e bağla; resource/tool capability'leri
+      açık, malformed/oversize mesaj ve unsupported version sonucu typed olsun.
+    - [ ] **9.9b Caller yetkisi:** MCP connection/owner kimliğini native session
+      ve explicit editor grant'e bağla; authentication yokluğu veya tool adına
+      erişim workspace/editor mutation izni vermesin.
+    - [ ] **9.9c Yaşam döngüsü/kabul:** tool call → approval/reverse editor → tek
+      sonuç, cancel/disconnect/EOF ve stale/foreign completion ortak native
+      lifecycle'da; MCP-only kullanım agent-backend testini tamamlamasın.
+  - [ ] **9.10 Provider UI ve kabul:** API/Uygulamalar aynı picker'da native DTO;
+    missing/unready nedenleri görünür, aktif run backend'i sabit. Dört adapter'da
+    prompt → stream → terminal → Stop/session isolation; resume/usage/effort ayrı
+    capability. Canlı hesap/ücretli turn/kurulum ancak ayrıca verilen yetkiyle;
+    offline başarıyı canlı kabul diye işaretleme.
+
 - [ ] **10. Son kabul, varsayılan cutover ve paketleme** — G03/G11 log gizliliği,
   retention/egress ve .codex/01/39 uyum açıklarını gerçek consumer'larda kapat.
   Missing-module, version mismatch, clean-machine startup, release binary/asset
   paketi ve export/geri dönüş sınırını doğrula. Tüm ERT, locked native test,
-  compile-fail, fmt, strict Clippy, uyarısız değişen Elisp ve etkilenen exhaustive
-  modeller geçsin. Uçtan uca eşdeğerlikten sonra Rust agent default olsun; yalnız
+  compile-fail, fmt, strict Clippy ve uyarısız değişen Elisp geçsin; yalnız
+  TLA+ kaynağı değişen ilgili exhaustive modeller çalıştırılsın. Uçtan uca
+  eşdeğerlikten sonra Rust agent default olsun; yalnız
   o zaman son legacy backend/engine kaynaklarını sil. Thin editor adapter'ları
   kalır; merge/push ayrıca onay ister. Kaynak: Aşama 6, G03/G11/G13.
 
@@ -1514,3 +2021,144 @@ undo/save, Eglot/Dape ve UI adapter'ları gereksiz kod sayılarak kaldırılmaz.
     uzak model sağlığı testi değildir. Release kabulünde missing/incompatible
     configured binary ile bu ayrımı ve gerçek startup'ın fail-closed hatasını
     birlikte doğrula; passive reader'a gizli core/model isteği ekleme.
+
+  - [ ] **10.1 Gizlilik ve retention (G03/G10):**
+    - [ ] **10.1a Native log sınırı:** Rust tracing/error/export'ta metadata
+      allowlist + secret/URL/header/upstream echo redaction; payload Debug ve
+      deserialization hata metni de kapsansın. Native log DTO'sunu Elisp göstersin;
+      redaction hatası raw fallback üretmesin.
+    - [ ] **10.1b Owner/cap/cleanup:** logs/history/session/job/output için ayrı
+      scope ve byte/count/age politikalarını envanterle; process-local/kalıcı
+      kaynak farkını belirt. Foreign owner retention/delete ile silinmesin.
+    - [ ] **10.1c Kanıt:** sentetik nested secret, malformed JSON, truncation,
+      stdout/stderr/export ve iki owner; her yazımda cap ve sıfır retention.
+      Native allocation/tepe bellek ölçümünü UI render maliyetinden ayır.
+  - [ ] **10.2 Egress ve proje güveni (G11):**
+    - [ ] **10.2a Trust politikası:** kullanıcı config'i, güvenilen proje
+      instruction/policy ve dosya/web/tool içeriğini native trust tiplerinde ayır;
+      proje dosyası executable/permission/credential yetkisini sessiz genişletmesin.
+    - [ ] **10.2b Destination admission:** context attachment, provider ve
+      external backend snapshot'ında root/origin/secret/egress kararını kontrol et;
+      context hazırlandıktan sonra hedef değişirse izin tekrar bağlansın.
+    - [ ] **10.2c OS/adapter kabulü:** PATH/executable/config değişimi, symlink/
+      TOCTOU/root escape, option injection, Git hook/config, DNS/redirect ve remote
+      kaynak corpus'u; mevcut native güvenlik primitive'lerini yeniden kullan.
+      Verilmeyen OS sandbox veya power-loss garantisini dokümana ekleme.
+  - [ ] **10.3 Mimari ve kaynak denetimi (.codex/01/39, G05/G13):**
+    - [ ] **10.3a Rust kuralları:** yeni/etkilenen domain'de private newtype,
+      TryFrom, checked units, no unsafe/panic/unwrap, tek writer ve nonblocking
+      actor. Mevcut somut borcu port/consumer ve test kimliğiyle kaydet; satır
+      sayısı veya yeni facade kurarak mimari uyum iddia etme.
+    - [ ] **10.3b Kaynak stres paketi:** job/PGID/reap, pipe/output cap,
+      archive/active handle sınırı, cancel'da late spawn, approval/reverse/edit
+      drain ve startup/shutdown; bounded queue ve bilinen ownership leak'leri.
+    - [ ] **10.3c Frontend kalıntı kapısı:** 0.1/8.5 envanterini yeniden çıkar;
+      config parser/HTTP orchestration, risk/selection/cache/prompt/loop/history/
+      plan/persistence/verification kararları Elisp'te kalmasın. Emacs runtime
+      revalidation ve DTO validation'ı korunur; bunlar ikinci domain motoru değildir.
+  - [ ] **10.4 Native default ve son kaldırma:**
+    - [ ] **10.4a Önkoşul:** 3.8/3.9, 4 consumer'ları, 5/6/7/8 runtime kabulü
+      ve direct API eşdeğerliği hazır; 9'un durumu ayrı raporlansın, dört backend
+      eksikliği nihai ürün kapanışından gizlenmesin. Missing binary/capability
+      fail-closed mesajları ve eski session migration yolu doğrulansın.
+    - [ ] **10.4b Geçiş:** Rust agent yeni run'larda varsayılan; aktif run'a
+      runtime setting uygulanmasın. Legacy backend selector/fallback ve artık
+      tüketilmeyen engine dosyalarını require/autoload/test bağlantılarıyla sil;
+      Rust hatasından sonra otomatik legacy replay bırakma.
+  - [ ] **10.5 Paketleme ve dağıtım:**
+    - [ ] **10.5a Release artifact:** desteklenen OS/arch ve Emacs/Rust runtime
+      matrisi, locked binary build, protocol/version handshake ve embedded
+      provider/tool/prompt asset'lerini paketle; geliştirme checkout'una muhtaç olmasın.
+    - [ ] **10.5b Clean-machine senaryosu:** explicit binary path/PATH, missing/
+      incompatible binary, optional adapter yokluğu, startup/exit/upgrade ve
+      uninstall cleanup. Setup raporu ile native/remote health farkını koru;
+      passive UI açılışı keşif/ücretli istek başlatmasın.
+    - [ ] **10.5c Kullanıcı dokümanı:** kurulum, readiness nedenleri, config ve
+      session migration/export, desteklenen capability ve garanti sınırları;
+      rollback yolu varsa explicit kullanıcı işlemi, sessiz engine fallback olmasın.
+  - [ ] **10.6 Nihai entegrasyon kabulü:**
+    - [ ] **10.6a Headless + gerçek pipe:** claim → config/context → model →
+      tool/approval → edit → fresh verify/heal → history/persistence → tek
+      terminal; her sınırda Stop/reset/EOF/stale/duplicate/foreign ve restart.
+    - [ ] **10.6b Emacs GUI:** çoklu chat/draft/company/footer/Transient/plan/
+      confirmation/Ediff, canlı Flymake/Eglot/Dape ve unload; headless ERT gerçek
+      GUI veya gerçek server kabulü sayılmasın. Eksik dış bağımlılığı açık raporla.
+    - [ ] **10.6c Release kapısı:** locked Rust + compile-fail, full source ERT,
+      fmt, strict all-target Clippy ve değişen Elisp uyarısız compile/checkdoc;
+      TLA+ değiştiyse ilgili TLC. Test corpus'u sentetik/geçici; gerçek hesap/
+      kullanıcı verisi kullanımı ayrıca yetkili olsun.
+    - [ ] **10.6d Teslim raporu:** her public consumer'ın native writer/portu ve
+      kalan Emacs primitive'i, test/commit kanıtı, 9'daki dört adapter'ın ayrı
+      durumu ve bilinen sınırlar. Açık alt iş varken üst görev tamamlanmasın.
+
+### Ortak doğrulama komutları ve kanıt kapsamı
+
+Ajan önce ilgili Rust test target/filtre ve ERT selector'ını tesliminde belirtir.
+Aşağıdaki tam kapı entegrasyon içindir; yalnız doküman değişikliğinde çalıştırılmaz.
+Komutlar repo kökünden, mevcut Nix geliştirme ortamında uygulanır:
+
+```sh
+nix-shell --run 'cargo fmt --manifest-path kargu-core/Cargo.toml --check'
+nix-shell --run 'cargo test --manifest-path kargu-core/Cargo.toml --locked'
+nix-shell --run 'cargo clippy --manifest-path kargu-core/Cargo.toml --locked --all-targets -- -D warnings'
+nix-shell --run 'cargo build --manifest-path kargu-core/Cargo.toml --locked'
+env KARGU_CORE_TEST_BINARY="$PWD/kargu-core/target/debug/kargu-core" emacs --batch -Q -L . --eval '(progn (require (quote package)) (package-initialize))' -l tests/run-tests.el
+```
+
+Odak ERT'de aynı eval içinde `kargu-test-selector` atanır. Pipe/ERT öncesi binary
+ayrı build edilerek kaynakla eşleşir; eski binary veya mock-only başarı native
+entegrasyon kanıtı değildir. Elisp'te değişen kaynak/yeni testler warnings-as-errors
+byte compile + check-parens/checkdoc'tan geçsin; `.elc` çıktıları geçici dizine
+alınsın, kaynak ERT'sini gölgelemesin. Her teslim kullanılan temel commit, gerçek
+komut/selector, exit sonucu ve atlanan/engelli kabulü yazar. TLC yalnız TLA+
+kaynağı değiştiyse ilgili modele uygulanır; eski sayıyı tekrar etmek gerekmez.
+
+### Ajanlar için başlangıç kaynak haritası
+
+Rust sütunu `kargu-core/src/`, Elisp sütunu `kargu/` altındadır; klasör adı
+önerisi mevcut implementation var demek değildir. Kaynak sahipliği 0.4'te kesinleşir.
+
+| İş alanı | Mevcut Rust başlangıcı | Elisp consumer / taşınacak karar |
+|---|---|---|
+| Config/katalog/seçim | `configuration/`, `providers/`, `models/service/`, `ipc/read_tools.rs` | `config/`, `api/catalog/request.el`, `selection.el`, `chat/select/` |
+| Prompt/context | `sensors/mentions.rs`, `workspace/`, `history/`, `api/wire/` | `prompt.el`, `chat/attach.el`, `project-probe.el` |
+| Sensor/LSP | `sensors/`, `security/delegated.rs`, `ipc/sessions/` | `bridge/sensor/`, `tools/lsp/` |
+| Dape | `sensors/debugger.rs`, `security/`, mevcut reverse portları | `tools/dape/`, `application/mode.el` |
+| Run/history/registry/plan | `application/agent/`, `application/history.rs`, `history/`, `security/catalog.rs`, `ipc/sessions/` | `loop/`, `history/`, `tools/registry.el`, `permission/`, `state/`, `plan/` |
+| Bütçe/verification | `application/budget/`, `sensors/diagnostics/`, mevcut edit ledger | `loop/{compact,heal}.el`, `history/compact.el`, `tools/diff/track.el` |
+| Edit | `edit/`, `security/editor.rs`, mevcut native edit IPC | `tools/diff/`, `bridge/edit/`, `edit.el` |
+| Persistence | `history/` ve actor worker portları; session storage prototipi geri alındı | `chat/session.el`, `chat/session/`, `files/async.el` |
+| UI/event | `ipc/protocol.rs`, `ipc/sessions/`, history presentation | `bridge/session.el`, `loop/native.el`, `chat/`, `ui/` |
+| Harici backend/MCP | Mevcut native run/process/gate temeli; adapter'lar ayrıca uygulanacak | `chat/select/`, UI capability/readiness sunumu |
+
+### Önerilen dağıtım dalgaları ve bağımlılıklar
+
+Bu tablo kutuların yerine geçmez; atama kimliklerini ve birleşme sırasını gösterir.
+Mevcut Rust temelleri kullanılır. Dalgalar bütün grubun bitmesini gerektiren
+bariyerler değildir; belirtilen port hazırsa ilgili consumer işi öne alınabilir.
+
+| Paket | Atanacak işler | Başlamadan gereken | Paralellik / ortak sınır |
+|---|---|---|---|
+| Sözleşme/entegratör | 0.1–0.4 | Güncel kaynak ve audit | DTO sürümü, ortak dosya sahipliği ve kabul corpus'unu dondurur |
+| Config/katalog | 8.2b2–8.2e | 0; mevcut native config/model refresh | Prompt/sensor ile paralel; selection revision için 5.4a ile anlaşır |
+| Prompt | 5.13a–d | 0; config/registry/context DTO | 4.9 tam değilse typed interface teslim edilir, consumer kabulü açık kalır |
+| Sensor read | 4.2a/b, 4.3d/e, 4.4d/e | 0; mevcut sensor/reverse gate | LSP/Xref ile Dape ayrı dosyalarda; reverse dispatcher tek entegratörde |
+| Debugger | 4.5a–c, 4.6a–c | 0, 4.2 portu, native gate | Launch FSM ile capture ayrılabilir; debug mode 5.7a'ya port verir |
+| Context | 4.8a–c, 4.9a/b | 0; read/symbol/Git primitive'leri | Prompt/egress sözleşmesi ortak; kullanıcı kaynağına erişim grant'i önceden belirlenir |
+| Registry/izin | 5.3a–c | 0; mevcut native catalog/gate | Her tool ailesi için aynı immutable contract; yeni ikinci policy motoru yok |
+| Mode/plan | 5.7a–c, 8.4a/b | 0; run/gate portu; debug için 4.6 | Plan UI ayrı, native dispatch entegre edilir |
+| Run/history | 5.1a/b, 5.4a/b, 5.5a/b, 5.6c/d, 5.8a/b, 5.9g/h | 0; ilgili registry/reverse portları | Merkezi actor/transport entegratörü; consumer ailesi bazında küçük teslim |
+| Muhasebe | 6.1a/b, 6.2c–e | 0; native budget/pricing ve run ticket | Storage ile paralel; provider settlement tek owner'da |
+| Compaction | 6.3a–c | 5 history/run portu, 5.13, 6.1 | History API'yi yeniden tasarlamaz; stale commit kabulü zorunlu |
+| Verification/healing | 6.4b3–b6, 6.5a/b | 3.8 change ledger, 4.3 freshness, 5 run, 6.1 | 6.4b2 üst kapsamdır; mevcut 6.4b1 primitive'i tekrar yazılmaz |
+| Persistence | 7.1a/b, 7.2a–c, 7.3b/c, 7.4a/b, 7.5a–d, 7.6a/b | 0; 5 history/selection candidate sözleşmesi | Önce storage/domain; RPC/UI sonradan, actor'da disk I/O yok |
+| Edit consumer | 3.8b–d, 3.10a/b | Mevcut edit ledger; 6 verification portu | Public edit default ile son agent default geçişi ayrı kapılar |
+| UI/event | 8.1a/b, 8.3a–c, 8.5a–c, 8.6 | İlgili native DTO/intent hazır | UI draft/render paralel; backend/state kararı eklemez |
+| Harici backend'ler | 9.1/9.2; sonra 9.3, 9.4, 9.5, 9.6 ayrı ajan | Ortak backend/capability contract ve native run portu | Dört adapter birbirinden bağımsız; MCP 9.9 ayrı paket |
+| Gizlilik/egress | 10.1a–c, 10.2a–c | 0; ilgili boundary sözleşmesi | Son aşamaya ertelenmez, her yeni consumer aynı kapıyı uygular |
+| Son entegrasyon/release | 3.9, 4.10, 5.10/5.12, 6.6, 8.6, 10.3–10.6 | İlgili consumer'lar ve negatif kabul | Son legacy silme/default/GUI/release kapısı koordinatörde |
+
+Döngüsel “önce tüm 4, sonra tüm 5, sonra tüm 6” bağımlılığı kurulmaz: gereken
+dar DTO/port önce teslim edilir, domain/adapter paralel geliştirilir, sonra aynı
+gerçek consumer'da birleştirilir. Bir bağımlılık hazır değilken sahte success veya
+legacy fallback eklemek yerine integration kutusu açık bırakılır.
