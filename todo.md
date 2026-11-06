@@ -5683,7 +5683,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Ortak doğrulama komutları + ilgili gerçek adapter/GUI
         kabulü; TLA+ kaynakları değişmediyse TLC çalıştırma.
 
-    - [ ] **10.6e CI ve kaynak test kapısı:** mevcut `.github/workflows/rust-bridge.yml`
+    - [x] **10.6e CI ve kaynak test kapısı:** mevcut `.github/workflows/rust-bridge.yml`
       Rust kontrollerinden sonra yalnız bağımsız bridge ERT ve altı dosyanın byte
       compile'ını çalıştırıyor. Tam uygulama kaynak ERT, değişen Elisp lint ve
       gerekli fixture dependency kurulumunu görünür ayrı kapılara bağla.
@@ -5702,6 +5702,31 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         `cargo test --manifest-path kargu-core/Cargo.toml --locked --test listing`
         6/6 geçti. Değişen Elisp warnings-as-errors compile/check-parens/checkdoc
         temiz; Rust fmt/Clippy ve tam kabul üst CI işinde kaydedilir.
+
+      **Teslim (2026-11-06, `52b29f1` tabanı):** mevcut workflow'da
+      bridge smoke korunarak ayrı tam kaynak ERT ve changed-Elisp kapıları
+      eklendi. Company paket bağımlılığı explicit; Dape 0.27.1 fixture kaynağı
+      `dcbdffc68a3c89bbb89956161edde9f0fe062e64` sürümünde sabit. Runner
+      temiz HOME/config/credential environment kullanıyor; stale checkout `.elc`
+      ve skipped ERT success sayılmıyor. Lint bytecode'u geçici dizine yazıyor;
+      compile uyarısı, check-parens ve checkdoc hata kapıları aktif.
+      TLA+ kaynak bağımlılıkları EXTENDS/INSTANCE üzerinden configured root'a
+      eşleniyor; yalnız değişen `.tla`/`.cfg` için Nix/TLC adımı açılıyor.
+
+      **Çalıştırılan kabul:** `tests/ci/run-ert.sh full` explicit Company/Dape
+      kaynak yolları ve freshly-built `KARGU_CORE_TEST_BINARY` ile temiz
+      HOME'da 1448/1448, `bridge` 39/39 (exit 0). Aynı locked Rust workflow
+      komutları fmt + strict all-target Clippy + 593 test (32 compile-fail dahil)
+      + build exit 0; ilk fixture hatası 10.6e1'de düzeltildi.
+      `tests/ci/check-elisp.py e5cd2b1`, yeni lint script'inin kendi kontrolü,
+      `bash -n` ve `git diff --check` temiz. Model selector'unun 3 testi tüm
+      mevcut model kaynak eşlemesini, transitive INSTANCE ve fake-executable
+      üzerinden runner argv/rejection davranışını doğruladı; gerçek TLC veya
+      model execution çalıştırılmadı. Bytecode/compile-warning/checkdoc/skip
+      hata enjeksiyonları kapıları gerçekten kırdı.
+      Loglar: `/tmp/kargu-ci-{clean-with-deps,bridge,rust-fixed,final-lint}.log`.
+      Yerel Emacs 30.2 kullanıldı; hosted Ubuntu/Emacs çalışması ve GUI/live
+      backend kabulü bu yerel teslimin kanıtı değildir. Workflow push edilmedi.
 
       **Önkoşul:** mevcut CI workflow; 0.3 test/dependency matrisi; ortak yerel
         doğrulama komutları. Hazır workflow vardır, yeni CI sistemi icat etme.

@@ -10,23 +10,74 @@ permissions:
 jobs:
   rust-bridge:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       RUSTUP_TOOLCHAIN: 1.95.0
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install toolchain and Emacs
         run: |
           rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
           sudo apt-get update
-          sudo apt-get install -y emacs-nox ripgrep
+          sudo apt-get install -y emacs-nox ripgrep elpa-company
       - name: Rust checks
         run: |
           cargo fmt --manifest-path kargu-core/Cargo.toml --check
           cargo clippy --manifest-path kargu-core/Cargo.toml --locked --all-targets -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic
           cargo test --manifest-path kargu-core/Cargo.toml --locked
           cargo build --manifest-path kargu-core/Cargo.toml --locked
-      - name: Compile and test independent Emacs bridge
+      - name: Independent source bridge smoke
+        env:
+          KARGU_CORE_TEST_BINARY: ${{ github.workspace }}/kargu-core/target/debug/kargu-core
+        run: tests/ci/run-ert.sh bridge
+      - name: Checkout pinned Dape fixture dependency
+        uses: actions/checkout@v4
+        with:
+          repository: svaante/dape
+          ref: dcbdffc68a3c89bbb89956161edde9f0fe062e64 # 0.27.1
+          path: .ci-deps/dape
+          persist-credentials: false
+      - name: Full application source ERT (offline fixtures)
+        env:
+          KARGU_CORE_TEST_BINARY: ${{ github.workspace }}/kargu-core/target/debug/kargu-core
         run: |
-          emacs --batch -Q -L . --eval '(setq byte-compile-error-on-warn t)' -f batch-byte-compile kargu/bridge.el kargu/bridge/approval.el kargu/bridge/jobs.el kargu/bridge/job-output.el tests/test-bridge.el tests/test-bridge-jobs.el
-          KARGU_CORE_TEST_BINARY="$PWD/kargu-core/target/debug/kargu-core" emacs --batch -Q -L . -l tests/test-bridge.el -l tests/test-bridge-jobs.el -f ert-run-tests-batch-and-exit
+          company_file=$(rg --files /usr/share/emacs/site-lisp/elpa | rg '/company-[^/]+/company.el$')
+          export KARGU_CI_COMPANY_DIR="$(dirname "$company_file")"
+          export KARGU_CI_DAPE_DIR="$PWD/.ci-deps/dape"
+          tests/ci/run-ert.sh full
+      - name: Select changed source checks
+        id: changes
+        env:
+          EVENT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base="$EVENT_BASE"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base=$(git hash-object -t tree /dev/null)
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          python3 tests/ci/test-select-models.py
+          python3 tests/ci/select-models.py "$base" > "$RUNNER_TEMP/kargu-models"
+          if [[ -s "$RUNNER_TEMP/kargu-models" ]]; then
+            echo 'models=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Changed Elisp lint and independent bridge compilation
+        env:
+          CI_BASE: ${{ steps.changes.outputs.base }}
+        run: |
+          company_file=$(rg --files /usr/share/emacs/site-lisp/elpa | rg '/company-[^/]+/company.el$')
+          export KARGU_CI_COMPANY_DIR="$(dirname "$company_file")"
+          export KARGU_CI_DAPE_DIR="$PWD/.ci-deps/dape"
+          python3 tests/ci/check-elisp.py "$CI_BASE"
+      - name: Install Nix for changed formal models
+        if: steps.changes.outputs.models == 'true'
+        uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - name: Check only affected TLA+ models
+        if: steps.changes.outputs.models == 'true'
+        run: |
+          while IFS= read -r model; do
+            nix-shell --run "proof/run_tlc.sh --model $model"
+          done < "$RUNNER_TEMP/kargu-models"

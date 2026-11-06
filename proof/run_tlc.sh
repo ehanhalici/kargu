@@ -4,6 +4,7 @@
 #   ./run_tlc.sh                 exhaustive breadth-first scan (the proof)
 #   ./run_tlc.sh --plan          exhaustive plan-ownership scan
 #   ./run_tlc.sh --mode          exhaustive session-mode preparation scan
+#   ./run_tlc.sh --model NAME     exhaustive scan of a configured model
 #   ./run_tlc.sh --application   exhaustive native claim/teardown scan
 #   ./run_tlc.sh --budget        exhaustive run-budget scan
 #   ./run_tlc.sh --restore       exhaustive prepared-restoration scan
@@ -68,6 +69,16 @@ SPECIFICATION="MC.tla (KarguLoop, KarguProtocol, KarguCircuit, KarguTools, Kargu
 if [[ $# -eq 0 ]]; then
     MODE="exhaustive scan"
     ARGS=(-workers auto -nowarning -metadir "${METADIR}" MC.tla)
+elif [[ "$1" == "--model" ]]; then
+    MODEL="${2:-}"
+    if [[ ! "$MODEL" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]] || \
+       [[ ! -f "$MODEL.tla" || ! -f "$MODEL.cfg" || $# -ne 2 ]]; then
+        echo "ERROR: --model requires one configured model name." >&2
+        exit 1
+    fi
+    MODE="exhaustive configured model scan"
+    SPECIFICATION="$MODEL.tla"
+    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config "$MODEL.cfg" "$MODEL.tla")
 elif [[ "$1" == "--application" ]]; then
     MODE="exhaustive native claim/teardown scan"
     SPECIFICATION="ApplicationMC.tla (KarguApplication)"
