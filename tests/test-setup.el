@@ -94,6 +94,20 @@
    (should-not (kargu-async-task-timer task))
    (with-current-buffer origin (should-not kargu-setup--task))))
 
+(ert-deftest kargu-setup-report-states-health-scope-test ()
+  "A successful setup report must not imply agent or remote model readiness."
+  (kargu-setup-test--pending
+   (kargu-async-finish refresh (kargu-ok nil))
+   (kargu-bridge-test--wait (lambda () credential))
+   (kargu-async-finish credential (kargu-ok "synthetic-owned-key"))
+   (kargu-bridge-test--wait (lambda () (not (kargu-async-pending-p task))))
+   (should (cl-some
+            (lambda (text)
+              (and (string-search "kargu setup OK (config/credentials/dependencies)" text)
+                   (string-search "agent readiness and remote model health not checked" text)))
+            messages))
+   (should-not (cl-some (lambda (text) (string-search "kargu ready" text)) messages))))
+
 (ert-deftest kargu-setup-cancel-and-origin-close-revoke-both-phases-test ()
   "Cancel/kill/mode/deadline close child work in config and credential phases."
   (dolist (phase '(config credential))
@@ -113,7 +127,7 @@
          (should-not (kargu-async-task-children task))
          (should-not (kargu-async-task-timer task))
          (should-not snapshot)
-         (should-not (cl-some (lambda (text) (string-search "kargu ready" text)) messages))
+         (should-not (cl-some (lambda (text) (string-search "kargu setup OK" text)) messages))
          (when (eq phase 'credential) (should (= credential-cleanups 1)))
          (when (buffer-live-p origin)
            (with-current-buffer origin
@@ -131,7 +145,7 @@
    (should snapshot)
    (should-not (kargu-connection-snapshot-secret snapshot))
    (should-not key-copy)
-   (should-not (cl-some (lambda (text) (string-search "kargu ready" text)) messages))))
+   (should-not (cl-some (lambda (text) (string-search "kargu setup OK" text)) messages))))
 
 (ert-deftest kargu-setup-config-failure-and-credential-errors-do-not-echo-secrets-test ()
   "Both phases finish once with no raw adapter/config error in UI or logs."
@@ -206,7 +220,7 @@
                  (while (and (kargu-async-pending-p task) (< (float-time) deadline)) (accept-process-output nil 0.01))
                  (cl-assert (not (kargu-async-pending-p task)))
                  (cl-assert (null kargu-setup--task))
-                 (cl-assert (cl-some (lambda (text) (string-search "kargu ready" text)) messages))
+                 (cl-assert (cl-some (lambda (text) (string-search "kargu setup OK" text)) messages))
                  (cl-assert (not (featurep 'kargu/api)))
                  (cl-assert (not (fboundp 'kargu-config-resolve-api-key-async))))))
          (delete-file file)

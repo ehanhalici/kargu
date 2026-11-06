@@ -179,7 +179,7 @@ CALLBACK receives a Result after the UI has adopted the native choice."
     (cons problems warnings)))
 
 (defun kargu-config--report-setup (result)
-  "Report setup dependencies and resolved credential RESULT."
+  "Report config/dependency scope and resolved credential RESULT."
   (let* ((key (and (kargu-ok-p result) (kargu-result-value result)))
          (report (kargu--setup-problems
                   key (and (fboundp 'kargu-deps-missing) (kargu-deps-missing))
@@ -193,9 +193,9 @@ CALLBACK receives a Result after the UI has adopted the native choice."
                            (string-join (nreverse problems) "; "))))
           (kargu-log 'error "%s" msg)
           (message "%s" msg))
-      (kargu-log 'info "setup check passed (provider=%s model=%s config=%s)"
+      (kargu-log 'info "config/credentials/dependencies check passed (provider=%s model=%s config=%s)"
                  (kargu--provider-name) (kargu--model) (kargu-config-file))
-      (message "kargu ready: provider=%s model=%s, %s, config=%s, dependencies OK%s"
+      (message "kargu setup OK (config/credentials/dependencies): provider=%s model=%s, %s, config=%s, dependencies OK%s; agent readiness and remote model health not checked"
                (kargu--provider-name)
                (kargu--model)
                (cond

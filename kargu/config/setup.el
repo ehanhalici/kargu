@@ -77,6 +77,7 @@
 ;;;###autoload
 (defun kargu-check-setup ()
   "Check config and credentials through one cancellable, origin-owned task.
+This does not test agent readiness or remote model health.
 Return the task.  A repeated check replaces only this buffer's earlier check;
 origin close, mode/session/selection change and deadline reject late reports."
   (interactive)

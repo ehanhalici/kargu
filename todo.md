@@ -5557,6 +5557,26 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     configured binary ile bu ayrımı ve gerçek startup'ın fail-closed hatasını
     birlikte doğrula; passive reader'a gizli core/model isteği ekleme.
 
+    - [x] **10.5e1 Rapor kapsamı:** `kargu ready` yerine
+      `kargu setup OK (config/credentials/dependencies)` gösteriliyor; agent
+      readiness ve remote model health'in kontrol edilmediği açık yazıyor.
+      Komut docstring'i ve README aynı kapsamı açıklıyor. Native config refresh
+      core kullandığından missing/incompatible binary hazırlığı yine reddedebilir;
+      setup'ın binary'den bağımsız başarılı olacağı varsayılmıyor.
+
+      **Kanıt (2026-11-06, `e5cd2b1` tabanı):** Yeni
+      `kargu-setup-report-states-health-scope-test` eski mesajda exit 1 ile
+      başarısız oldu. `nix-shell --run 'cargo build --manifest-path
+      kargu-core/Cargo.toml --locked'` exit 0; aynı binary ile ortak ERT
+      komutunda `kargu-test-selector="kargu-setup-"`: 12/12, exit 0
+      (gerçek config pipe ve cold-schema child dahil). Değişen schema/setup/test
+      kaynaklarında warnings-as-errors geçici byte compile, check-parens ve
+      checkdoc exit 0; `git diff --check` temiz. Ortam package autoload sırasında
+      `epg-error no usable configuration OpenPGP` mesajı veriyor; testler geçti.
+      TLC kaynağı değişmedi, çalıştırılmadı.
+      Üst 10.5e'nin release düzeyindeki missing/incompatible binary ve pasif
+      reader kabul matrisi açık kalır.
+
     **Önkoşul:** 4.11c; native lifecycle handshake; 9.2 readiness.
 
     **Başlangıç kaynakları:** kargu-core/Cargo.toml, Cargo.lock, kargu-core/src/main.rs,

@@ -250,7 +250,11 @@ auth-source and is only a memory-backed check.
 buffer-owned task covering config refresh and credential resolution. Closing
 the buffer, changing its mode or replacing its check cancels only that check.
 Reports use the captured provider/model and wipe their private credential scope
-afterward, even if reporting fails. The duplicate
+afterward, even if reporting fails. `kargu setup OK` covers configuration,
+credentials and dependencies; it does not certify agent readiness or remote model
+health. Config refresh uses the native core, so a missing or incompatible binary
+can still fail preparation. Use the explicit connection test for remote health.
+The duplicate
 `kargu-config-resolve-api-key-async` key-only facade was also removed; custom
 consumers should use the connection port and wipe their snapshot when done.
 
