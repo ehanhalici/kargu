@@ -3,6 +3,13 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
+;; Dependency classification uses built-in packages and synthetic missing names.
+;; No package from the user's installation is required by these fixtures.
+
+;;; Code:
+
 (require 'ert)
 (require 'tests/test-helpers)
 (require 'cl-lib)
@@ -22,7 +29,7 @@
 
 (ert-deftest kargu-deps-package-check-test ()
   "Ensure kargu-deps correctly identifies installed and missing packages."
-  (let ((kargu-deps-mandatory-packages '(plz transient non-existent-dummy-package))
+  (let ((kargu-deps-mandatory-packages '(json transient non-existent-dummy-package))
         (kargu-deps-mandatory-executables nil)
         (kargu-deps-check-lsp-server nil))
     (let ((missing (kargu-deps-missing)))
@@ -85,7 +92,7 @@
       (delete-directory temp-dir t))))
 
 (ert-deftest kargu-deps-format-missing-report-test ()
-  "Ensure kargu-deps-format-missing-report builds sensible multi-line error banner."
+  "Ensure `kargu-deps-format-missing-report' builds a sensible error banner."
   (let ((missing '((:id magit :name "magit" :type package :purpose "Git integration interface" :install-hint "M-x package-install RET magit")
                    (:id "curl" :name "curl" :type executable :purpose "HTTP client" :install-hint "apt install curl"))))
     (let ((report (kargu-deps-format-missing-report missing)))
@@ -115,7 +122,7 @@
       (kill-buffer buf))))
 
 (ert-deftest kargu-deps-blocks-prompt-send-test ()
-  "Ensure kargu-chat-send blocks prompt submission when mandatory tools are missing."
+  "Ensure `kargu-chat-send' blocks prompts when mandatory tools are missing."
   (let ((kargu-deps-mandatory-packages '(missing-dummy-test-pkg))
         (kargu-deps-mandatory-executables nil)
         (kargu-deps-check-lsp-server nil)
@@ -139,7 +146,7 @@
           (when (buffer-live-p buf) (kill-buffer buf)))))))
 
 (ert-deftest kargu-deps-blocks-loop-send-test ()
-  "Ensure kargu-loop-send blocks agent runs when mandatory tools are missing."
+  "Ensure `kargu-loop-send' blocks runs when mandatory tools are missing."
   (let ((kargu-deps-mandatory-packages '(missing-tool-for-loop))
         (kargu-deps-mandatory-executables nil)
         (kargu-deps-check-lsp-server nil))

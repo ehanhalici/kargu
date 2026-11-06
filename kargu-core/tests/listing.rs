@@ -47,7 +47,9 @@ fn listing(
 
 #[test]
 fn listing_returns_ls_text_with_hidden_files_links_and_literal_exclusions() -> TestResult {
-    let root = tempfile::tempdir()?;
+    // Unix socket addresses have a small platform limit. A nested Nix TMPDIR
+    // can exceed it before the fixture's filename is even appended.
+    let root = tempfile::tempdir_in("/tmp")?;
     for file in [
         "top.el",
         ".hidden",

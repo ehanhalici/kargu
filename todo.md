@@ -5688,6 +5688,21 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       compile'ını çalıştırıyor. Tam uygulama kaynak ERT, değişen Elisp lint ve
       gerekli fixture dependency kurulumunu görünür ayrı kapılara bağla.
 
+      - [x] **10.6e1 Temiz ortam fixture'ları:** dependency testinin kullanıcıda
+        `plz` kurulu olması varsayımı yerleşik `json` ile kaldırıldı; testin
+        dosya başlığı ve docstring'leri checkdoc'a uygun hale geldi. Unix socket
+        listing fixture'ı uzun/nested Nix TMPDIR altında `SUN_LEN` sınırını
+        aşmamak için kısa `/tmp` kökünde oluşturuluyor.
+
+        **Kanıt (2026-11-06):** temiz HOME koşusunda eski dependency testi
+        eksik paket sayısını 2 buluyordu; düzeltmeyle açık Company/Dape load
+        path'leri ve aynı native binary altında 1448/1448 ERT (exit 0).
+        İlk locked Rust kapısında socket fixture'ı `path must be shorter than
+        SUN_LEN` ile düştü; aynı uzun TMPDIR ile düzeltme sonrası
+        `cargo test --manifest-path kargu-core/Cargo.toml --locked --test listing`
+        6/6 geçti. Değişen Elisp warnings-as-errors compile/check-parens/checkdoc
+        temiz; Rust fmt/Clippy ve tam kabul üst CI işinde kaydedilir.
+
       **Önkoşul:** mevcut CI workflow; 0.3 test/dependency matrisi; ortak yerel
         doğrulama komutları. Hazır workflow vardır, yeni CI sistemi icat etme.
 
