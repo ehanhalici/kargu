@@ -120,19 +120,24 @@ Raise native failures so negative fixtures can use `should-error'."
                           "review-mode" (or (plist-get data :review-mode) :json-null)
                           "providers" (vconcat (nreverse providers)))))
 
+(defvar kargu-test--config-generation 1000000
+  "Fixture staging generation, above any natively allocated test refresh.")
+
 (defun kargu-test-config-publish (service data path digest)
-  "Publish synthetic DATA/PATH/DIGEST through the real native owner of SERVICE."
+  "Publish synthetic DATA/PATH/DIGEST through the real native owner of SERVICE.
+The fixture stages a synthetic document; Rust remains the only writer."
   (should (eq service (kargu-config-service-context)))
-  (let ((generation (cl-incf (kargu-config-service-generation service))) result failure)
+  (let (result failure)
     (cl-pushnew (kargu-application-context) kargu-test--model-apps)
-    (let ((captured (kargu-bridge--object
-                     "status" "ok" "generation" generation "path" path
-                     "digest" (secure-hash 'sha256 digest) "config" (kargu-test-config-document data))))
-      (kargu-test-await
-       (lambda (done)
-         (kargu-bridge-config-publish
-          captured generation (lambda (view error-data) (setq result view failure error-data) (funcall done t))
-          :application (kargu-application-context)))))
+    (kargu-test-await
+     (lambda (done)
+       (kargu-bridge-config-stage
+        "configuration/prepare"
+        (kargu-bridge--object
+         "generation" (cl-incf kargu-test--config-generation) "path" path
+         "digest" (secure-hash 'sha256 digest) "document" (kargu-test-config-document data))
+        (lambda (view error-data) (setq result view failure error-data) (funcall done t))
+        :application (kargu-application-context))))
     (should-not failure)
     (kargu-config--observe service result)))
 

@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 
-;; Real native prepare/commit replies are held at the editor delivery boundary.
+;; Real native refresh/commit replies are held at the editor delivery boundary.
 ;; No policy engine or credential lookup is replaced with a second implementation.
 
 ;;; Code:
@@ -32,7 +32,8 @@
                                   (lambda (value failure)
                                     (setq receipt value held (lambda () (funcall callback value failure))))
                                 callback) options))))
-            (setq task (kargu-config-refresh-async (lambda (value) (setq result value)) :defaults-only t))
+            (setq task (kargu-config-refresh-async (lambda (value) (setq result value))
+                                                   :paths (list (expand-file-name "kargu-policy-absent.toml" temporary-file-directory))))
              (kargu-bridge-test--wait (lambda () held))
              (should (hash-table-p receipt))
              ,@body)
@@ -40,7 +41,7 @@
 
 (ert-deftest kargu-config-policy-cancelled-prepare-aborts-late-ticket-test ()
   "A cancelled root drains a late acquisition, never issuing commit."
-  (kargu-config-policy-test--held "configuration/prepare"
+  (kargu-config-policy-test--held "configuration/refresh"
 				  (kargu-async-cancel task)
 				  (funcall held)
 				  (should (= aborts 1))
@@ -75,7 +76,7 @@
 
 (ert-deftest kargu-config-policy-replaced-session-on-same-epoch-rejects-ticket-test ()
   "Connection identity alone cannot authorize a replaced native session."
-  (kargu-config-policy-test--held "configuration/prepare"
+  (kargu-config-policy-test--held "configuration/refresh"
     (let* ((app (kargu-application-context))
            (binding (gethash :native-core (kargu-application-services app)))
            (scope (kargu-bridge-application-scope binding))
@@ -105,11 +106,12 @@
                              (if (equal method "configuration/prepare")
                                  (lambda (value failure) (setq held (lambda () (funcall callback value failure))))
                                callback) options))))
-           (setq task (kargu-bridge-config-publish
-                       (kargu-bridge--object "path" "/synthetic/config" "digest" (make-string 64 ?a)
-                                             "config" (kargu-test-config-document
-                                                       '(:provider "custom" :providers (("custom" :apikey "${KARGU_POLICY_TOKEN}")))))
-                       1 (lambda (value failure) (should-not failure) (setq view value))
+           (setq task (kargu-bridge-config-stage
+                       "configuration/prepare"
+                       (kargu-bridge--object "generation" 1 "path" "/synthetic/config" "digest" (make-string 64 ?a)
+                                             "document" (kargu-test-config-document
+                                                         '(:provider "custom" :providers (("custom" :apikey "${KARGU_POLICY_TOKEN}")))))
+                       (lambda (value failure) (should-not failure) (setq view value))
                        :application (kargu-application-context)))
            (kargu-bridge-test--wait (lambda () held))
            (clear-string entry)

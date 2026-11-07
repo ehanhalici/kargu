@@ -10,7 +10,8 @@
 
 ;;; Code:
 
-(require 'kargu/bridge/config)
+(require 'kargu/async)
+(require 'kargu/bridge/application)
 (require 'kargu/providers/registry)
 
 (declare-function kargu-config-copy "kargu/config/service" (value))
@@ -100,15 +101,18 @@ When omitted, use the last committed native view and current editor options."
    (kargu-bridge--object "scope" (kargu-bridge-application--copy-scope scope) "arguments" arguments)
    callback :timeout (max 0.001 (- (kargu-async-task-deadline task) (float-time)))))
 
-(cl-defun kargu-bridge-config-publish (captured generation callback &key parent application valid-p)
-  "Publish CAPTURED/GENERATION natively for APPLICATION under PARENT.
-CALLBACK receives (VIEW FAILURE); VALID-P guards the captured editor intent.
-This port never updates an editor cache."
+(cl-defun kargu-bridge-config-stage (method arguments callback &key parent application valid-p)
+  "Stage config natively with METHOD/ARGUMENTS, then commit what Rust requests.
+Rust orders the refresh, reads and parses the file and names the environment
+variables it needs; this port only answers that request from frozen editor
+inputs.  CALLBACK receives (VIEW FAILURE); an invalid source arrives as a
+VIEW whose status is \"invalid\".  VALID-P guards the captured editor intent
+under PARENT and APPLICATION.  This port never updates an editor cache."
   (let* ((inputs (kargu-bridge-config-policy--inputs))
          (task (kargu-async-start (kargu-application-wrap application callback) :parent parent :owner nil :timeout 5))
          connection scope ticket commit-sent)
-    (put inputs 'captured (kargu-config-copy captured))
-    (setq captured nil)
+    (put inputs 'arguments (kargu-config-copy arguments))
+    (setq arguments nil)
     (cl-labels
         ((abort ()
            (when (and ticket (not commit-sent) connection scope (eq (kargu-bridge-status connection) 'ready))
@@ -127,33 +131,36 @@ This port never updates an editor cache."
            (when (kargu-async-pending-p task)
              (if (live) (kargu-async-finish task value failure)
                (kargu-async-finish task nil (kargu-bridge--fault "stale_configuration")))))
-         (prepared (value failure)
-           (setq ticket (and (hash-table-p value) (gethash "capture_id" value)))
-           (cond
-            (failure (finish nil failure))
-            ((not (and (stringp ticket) (equal (gethash "generation" value) generation)))
-             (finish nil (kargu-bridge--fault "invalid_configuration_ticket")))
-            ((not (live)) (abort) (finish nil (kargu-bridge--fault "stale_configuration")))
-            (t
-             (condition-case nil
-                 (let ((context (kargu-bridge-config-policy--captured-context inputs (gethash "environment_names" value))))
-                   (setq commit-sent t)
-                   (kargu-bridge-config-policy--call
-                    task connection scope "configuration/commit"
-                    (kargu-bridge--object "capture_id" ticket "context" context) #'finish))
-               (error (finish nil (kargu-bridge--fault "invalid_configuration_context")))))))
+         (staged (value failure)
+           (let ((status (and (hash-table-p value) (gethash "status" value))))
+             (setq ticket (and (hash-table-p value) (gethash "capture_id" value)))
+             (cond
+              (failure (finish nil failure))
+              ((equal status "invalid") (finish value nil))
+              ((equal status "observed")
+               (kargu-bridge-config-policy--call
+                task connection scope "configuration/snapshot" (kargu-bridge--object) #'finish))
+              ((not (stringp ticket))
+               (finish nil (kargu-bridge--fault "invalid_configuration_ticket")))
+              ((not (live)) (abort) (finish nil (kargu-bridge--fault "stale_configuration")))
+              (t
+               (condition-case nil
+                   (let ((context (kargu-bridge-config-policy--captured-context
+                                   inputs (gethash "environment_names" value))))
+                     (setq commit-sent t)
+                     (kargu-bridge-config-policy--call
+                      task connection scope "configuration/commit"
+                      (kargu-bridge--object "capture_id" ticket "context" context) #'finish))
+                 (error (finish nil (kargu-bridge--fault "invalid_configuration_context"))))))))
          (scoped (value failure)
            (if failure (finish nil failure)
              (setq scope value)
              (when (live)
-               (kargu-bridge-config-policy--call
-                task connection scope "configuration/prepare"
-                (kargu-bridge--object
-                 "generation" generation "path" (gethash "path" (get inputs 'captured))
-                 "timeout_ms" (max 1 (min 5000 (floor (* 1000 (- (kargu-async-task-deadline task) (float-time))))))
-                 "digest" (or (gethash "digest" (get inputs 'captured)) :json-null)
-                 "document" (or (gethash "config" (get inputs 'captured)) :json-null) "registry" (get inputs 'registry))
-                #'prepared))))
+               (let ((request (kargu-config-copy (get inputs 'arguments))))
+                 (puthash "registry" (get inputs 'registry) request)
+                 (puthash "timeout_ms" (max 1 (min 5000 (floor (* 1000 (- (kargu-async-task-deadline task) (float-time))))))
+                          request)
+                 (kargu-bridge-config-policy--call task connection scope method request #'staged)))))
          (ready (value failure)
            (setq connection value)
            (cond
@@ -169,6 +176,38 @@ This port never updates an editor cache."
             (ready (kargu-bridge-application-connection binding) nil)
           (kargu-async-add-cleanup task (kargu-bridge-ensure #'ready)))))
     task))
+
+(defun kargu-bridge-config-locations ()
+  "Capture raw editor location observations; Rust decides their precedence."
+  (kargu-bridge--object
+   "home" (or (kargu-config-copy (getenv "HOME")) :json-null)
+   "xdg_config_home" (or (kargu-config-copy (getenv "XDG_CONFIG_HOME")) :json-null)
+   "user_emacs_directory" (expand-file-name user-emacs-directory)))
+
+(cl-defun kargu-bridge-config-refresh (callback &key paths defaults-only parent application valid-p)
+  "Ask Rust to discover, read, parse and stage config, then commit it.
+PATHS are explicit local editor file grants replacing native discovery;
+remote (TRAMP) or relative grants are refused before any native call.
+DEFAULTS-ONLY bootstraps built-ins and never supersedes a publication or a
+pending refresh.  CALLBACK, PARENT, APPLICATION and VALID-P are as for
+`kargu-bridge-config-stage'."
+  (if (and paths (not (and (<= 1 (length paths) 8)
+                            (cl-every (lambda (path) (and (stringp path) (file-name-absolute-p path)
+                                                         (not (file-remote-p path))))
+                                      paths))))
+      (let ((task (kargu-async-start (kargu-application-wrap application callback)
+                                     :parent parent :owner nil :timeout 5)))
+        (when (kargu-async-pending-p task)
+          (kargu-async-finish task nil (kargu-bridge--fault "invalid_configuration_paths")))
+        task)
+    (kargu-bridge-config-stage
+     "configuration/refresh"
+     (if paths
+       (kargu-bridge--object "paths" (vconcat (mapcar #'expand-file-name paths))
+                             "defaults_only" (if defaults-only t :json-false))
+     (kargu-bridge--object "locations" (kargu-bridge-config-locations)
+                           "defaults_only" (if defaults-only t :json-false)))
+     callback :parent parent :application application :valid-p valid-p)))
 
 (cl-defun kargu-bridge-config-query (method arguments callback &key parent application)
   "Query native config METHOD/ARGUMENTS into CALLBACK under PARENT/APPLICATION."

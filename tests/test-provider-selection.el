@@ -81,7 +81,7 @@
             (previous-buffer (window-buffer (selected-window))) task opened busy)
         (kargu-selection-update :provider "before")
         (unwind-protect
-            (cl-letf (((symbol-function 'kargu-bridge-config-read) #'ignore)
+            (cl-letf (((symbol-function 'kargu-bridge-config-refresh) #'ignore)
                       ((symbol-function 'kargu-selection-busy-p) (lambda () busy))
                       ((symbol-function 'kargu-api-select--open-provider-selector)
                        (lambda () (setq opened t))))
@@ -105,8 +105,8 @@
         (other-view (generate-new-buffer " *kargu-other-provider-view*"))
         first next other (opened 0) cleaned)
     (unwind-protect
-        (cl-letf (((symbol-function 'kargu-bridge-config-read)
-                   (lambda (_paths _generation callback &rest options)
+        (cl-letf (((symbol-function 'kargu-bridge-config-refresh)
+                   (lambda (callback &rest options)
                      (let ((task (kargu-async-start callback :parent (plist-get options :parent) :owner nil)))
                        (kargu-async-add-cleanup task (lambda () (push task cleaned))))))
                   ((symbol-function 'kargu-api-select--open-provider-selector)
@@ -139,16 +139,19 @@
     (kargu-bridge-test--with-core
      (let ((view (generate-new-buffer " *kargu-provider-owner*"))
            (file (make-temp-file "kargu-provider-owner-")) task held
-           (read (symbol-function 'kargu-bridge-config-read))
+           (refresh (symbol-function 'kargu-bridge-config-refresh))
            (call (symbol-function 'kargu-bridge-call)))
        (unwind-protect
-           (cl-letf (((symbol-function 'kargu-bridge-config-read)
-                      (lambda (_paths generation callback &rest options)
-                        (apply read (list file) generation callback options)))
+           (cl-letf (((symbol-function 'kargu-bridge-config-refresh)
+                      (lambda (callback &rest options)
+                        (apply refresh callback :paths (list file)
+                               (cl-loop for (key value) on options by #'cddr
+                                        unless (memq key '(:paths :defaults-only))
+                                        append (list key value)))))
                      ((symbol-function 'kargu-bridge-call)
                       (lambda (connection method params callback &rest options)
                         (apply call connection method params
-                               (if (equal method "configuration/read")
+                               (if (equal method "configuration/refresh")
                                    (lambda (value failure) (setq held (lambda () (funcall callback value failure))))
                                  callback) options)))
                      ((symbol-function 'kargu-api-select--open-provider-selector)

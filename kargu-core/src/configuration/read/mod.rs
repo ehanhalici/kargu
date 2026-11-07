@@ -38,6 +38,18 @@ impl ReadOutput {
 }
 
 impl ReadInput {
+    /// Capture native-ordered candidates for one native-allocated generation.
+    pub(crate) fn native(
+        paths: Vec<ConfigurationPath>,
+        generation: RefreshGeneration,
+        timeout_ms: ReadTimeout,
+    ) -> Result<Self, CoreError> {
+        Ok(Self {
+            paths: CandidatePaths::try_from(paths)?,
+            generation,
+            timeout_ms,
+        })
+    }
     pub(crate) fn timeout(&self) -> Duration {
         self.timeout_ms.duration()
     }

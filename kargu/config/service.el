@@ -5,15 +5,16 @@
 
 ;;; Commentary:
 
-;; Readers never touch files.  A bounded child refreshes one owner's config;
-;; only its latest successful generation may publish a new revision.
+;; Readers never touch files.  Rust orders each refresh, discovers, reads and
+;; parses the file and stages it; this service only answers Rust's request for
+;; named editor inputs and observes the committed view.  A defaults bootstrap
+;; waits for a real refresh in flight instead of superseding it.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'kargu/application/coordinator)
 (require 'kargu/async)
-(require 'kargu/bridge/config)
 (require 'kargu/bridge/config-policy)
 
 (defconst kargu-config-refresh-default-timeout 5.0
@@ -47,8 +48,8 @@
     (get cell 'value)))
 
 (cl-defstruct (kargu-config-service (:constructor kargu-config-service-create))
-  "Configuration publications and pending refresh generation for one owner."
-  snapshot view-cell (generation 0) (revision 0))
+  "Configuration publications and in-flight real refreshes for one owner."
+  snapshot view-cell (revision 0) refreshes)
 
 (defun kargu-config-service-context ()
   "Return the current application's configuration service."
@@ -127,24 +128,6 @@
         (kargu-log 'warn "Configured environment variable %s is unset or empty; native policy tried remaining credential sources" name)))
     (kargu-config-service-snapshot service)))
 
-(defun kargu-config--committed (task generation view failure)
-  "Finish TASK only with a native committed VIEW for captured GENERATION."
-  (if (and (not failure) (hash-table-p view)
-           (equal (gethash "status" view) "committed")
-           (equal (gethash "generation" view) generation)
-           (natnump (gethash "revision" view))
-           (hash-table-p (gethash "config" view)))
-      (kargu-async-finish task (kargu-ok view))
-    (kargu-async-finish task (kargu-err "Native config publication unavailable" :config-unavailable))))
-
-(defun kargu-config--publish-native (task generation value)
-  "Submit parsed VALUE for GENERATION under TASK's captured native owner."
-  (let ((service (kargu-config-service-context)))
-    (kargu-bridge-config-publish
-     value generation (kargu-async-wrap task (lambda (view failure) (kargu-config--committed task generation view failure)))
-     :parent task :application (kargu-application-context)
-     :valid-p (lambda () (= generation (kargu-config-service-generation service))))))
-
 (defun kargu-config--editor-data (value)
   "Translate native VALUE into the existing read-only plist/alist UI projection."
   (let (data)
@@ -169,51 +152,54 @@
                 (push (cons name attributes) entries))) providers)
       (plist-put data :providers (nreverse entries)))))
 
-(defun kargu-config--parsed (task path generation value failure)
-  "Complete TASK with native VALUE for PATH/GENERATION or sanitized FAILURE."
-  (condition-case nil
-      (cond
-       (failure (kargu-async-finish task (kargu-err "Native config read failed; check TOML and rebuild kargu-core if outdated" :config-unavailable)))
-       ((/= generation (kargu-config-service-generation (kargu-config-service-context)))
-        (kargu-async-finish task (kargu-err "Configuration refresh was superseded" :stale)))
-       ((not (and (hash-table-p value) (equal generation (gethash "generation" value))
-                  (stringp path) (equal path (gethash "path" value))))
-        (error "Invalid config generation"))
-       ((equal (gethash "status" value) "absent")
-        (kargu-config--publish-native task generation value))
-       ((equal (gethash "status" value) "invalid")
-        (let ((line (gethash "line" value)))
-          (unless (and (integerp line) (> line 0)) (error "Invalid source line"))
-          (kargu-async-finish task (kargu-err (format "TOML %s:%d: Invalid configuration" path line) :config-unavailable))))
-       ((equal (gethash "status" value) "ok")
-        (let ((digest (gethash "digest" value)) (config (gethash "config" value)))
-          (unless (and (stringp digest) (string-match-p "\\`[0-9a-f]\\{64\\}\\'" digest)
-                       (hash-table-p config)) (error "Invalid config projection"))
-          (kargu-config--publish-native task generation value)))
-       (t (error "Invalid config result")))
-    (error (kargu-async-finish task (kargu-err "Invalid or oversized native configuration result" :config-unavailable)))))
+(defun kargu-config--failure (view failure)
+  "Return a sanitized result error for a refresh VIEW or FAILURE."
+  (let ((status (and (hash-table-p failure)
+                     (let ((data (gethash "data" failure)))
+                       (and (hash-table-p data) (gethash "status" data))))))
+    (cond
+     ((and (hash-table-p view) (equal (gethash "status" view) "invalid"))
+      (let ((line (gethash "line" view)) (path (gethash "path" view)))
+        (if (and (integerp line) (> line 0) (stringp path))
+            (kargu-err (format "TOML %s:%d: Invalid configuration" path line) :config-unavailable)
+          (kargu-err "Invalid or oversized native configuration result" :config-unavailable))))
+     ((equal status "stale_configuration")
+      (kargu-err "Configuration refresh was superseded" :stale))
+     (t (kargu-err "Native config read failed; check TOML and rebuild kargu-core if outdated"
+                   :config-unavailable)))))
+
+(defun kargu-config--deliver-waiters (record result)
+  "Deliver RESULT to RECORD's still-pending waiters, each on its own task."
+  (dolist (waiter (prog1 (plist-get (cdr record) :waiters) (setcdr record nil)))
+    (when (kargu-async-pending-p waiter)
+      (kargu-async-finish waiter result))))
 
 (cl-defun kargu-config-refresh-async (callback &key paths timeout parent owner defaults-only)
   "Refresh configuration into CALLBACK without UI file I/O.
-PATHS overrides candidate names; TIMEOUT, PARENT and OWNER bound the task.
-Positive TIMEOUT may shorten the fixed refresh deadline.
-It cannot disable or extend that deadline.
-DEFAULTS-ONLY bootstraps native catalog/options without probing a config file."
+PATHS are explicit file grants replacing native discovery; TIMEOUT, PARENT and
+OWNER bound the task.  Positive TIMEOUT may shorten the fixed refresh deadline.
+It cannot disable or extend that deadline.  DEFAULTS-ONLY bootstraps native
+catalog/options without probing a config file and never supersedes a
+publication or a real refresh; Rust decides both."
   (let* ((service (kargu-config-service-context))
-         (generation nil)
          (app (kargu-application-context))
+         (record (unless defaults-only (list :refresh)))
          (task (kargu-async-start
                 (kargu-application-wrap
                  app (lambda (value error)
-                       (cond
-                        ((and generation (/= generation (kargu-config-service-generation service)))
-                         (funcall callback (kargu-err "Configuration refresh was superseded" :stale)))
-                        ((or error (kargu-err-p value))
-                         (funcall callback (or value (kargu-err error :config-unavailable))))
-                        (t
-                         (let ((view (kargu-result-value value)))
-                           (kargu-config--observe service view)
-                           (funcall callback (kargu-ok (kargu-config-current-snapshot))))))))
+                       (setf (kargu-config-service-refreshes service)
+                             (delq record (kargu-config-service-refreshes service)))
+                       (let ((result
+                              (condition-case nil
+                                  (cond
+                                   ((or error (kargu-err-p value))
+                                    (or value (kargu-config--failure nil error)))
+                                   (t (kargu-config--observe service (kargu-result-value value))
+                                      (kargu-ok (kargu-config-current-snapshot))))
+                                (error (kargu-err "Invalid or oversized native configuration result"
+                                                  :config-unavailable)))))
+                         (when record (kargu-config--deliver-waiters record result))
+                         (funcall callback result))))
                 :owner owner :parent parent
                 :timeout (if (and (numberp timeout) (> timeout 0))
                              (min timeout kargu-config-refresh-default-timeout)
@@ -223,27 +209,43 @@ DEFAULTS-ONLY bootstraps native catalog/options without probing a config file."
      ((<= (kargu-async-task-deadline task) (float-time))
       (kargu-async-finish task nil "Configuration deadline expired"))
      (t
-      (setq generation (1+ (kargu-config-service-generation service)))
-      (setf (kargu-config-service-generation service) generation)
-      (if defaults-only
-          (kargu-config--parsed task (kargu--xdg-config-file) generation
-                                (kargu-bridge--object "path" (kargu--xdg-config-file) "generation" generation "status" "absent") nil)
-        (kargu-bridge-config-read
-         (or paths (list (kargu--xdg-config-file) (locate-user-emacs-file "kargu.toml"))) generation
-         (kargu-async-wrap task (lambda (value failure)
-                                  (kargu-config--parsed task (and (hash-table-p value) (gethash "path" value))
-                                                        generation value failure)))
-         :parent task :application app))))
+      (when record
+        (push record (kargu-config-service-refreshes service)))
+      (kargu-bridge-config-refresh
+       (kargu-async-wrap
+        task (lambda (view failure)
+               (if (and (not failure) (hash-table-p view)
+                        (equal (gethash "status" view) "committed")
+                        (natnump (gethash "revision" view))
+                        (hash-table-p (gethash "config" view)))
+                   (kargu-async-finish task (kargu-ok view))
+                 (kargu-async-finish task (kargu-config--failure view failure)))))
+       :paths paths :defaults-only defaults-only :parent task :application app)))
     task))
 
 (cl-defun kargu-config-ensure-native-async (callback &key parent)
   "Ensure a committed native projection for explicit CALLBACK under PARENT.
-An initialized view is only observed; a cold defaults view performs no file IO."
-  (if (kargu-config-native-view)
-      (funcall callback (kargu-ok (kargu-config-current-snapshot)))
-    (kargu-config-refresh-async callback :parent parent :defaults-only t)))
+An initialized view is only observed.  While a real refresh is in flight this
+caller waits for it on its own task, so its deadline and cancellation stay
+independent; otherwise a cold defaults bootstrap performs no file IO."
+  (let* ((service (kargu-config-service-context))
+         (record (car (kargu-config-service-refreshes service))))
+    (cond
+     ((kargu-config-native-view)
+      (funcall callback (kargu-ok (kargu-config-current-snapshot))))
+     (record
+      (let ((waiter (kargu-async-start (lambda (value error)
+                                         (funcall callback (or value (kargu-err error :config-unavailable))))
+                                       :parent parent :owner nil
+                                       :timeout kargu-config-refresh-default-timeout)))
+        (when (kargu-async-pending-p waiter)
+          (setcdr record (list :waiters (cons waiter (plist-get (cdr record) :waiters))))
+          (kargu-async-add-cleanup
+           waiter (lambda ()
+                    (setcdr record (list :waiters (delq waiter (plist-get (cdr record) :waiters)))))))
+        waiter))
+     (t (kargu-config-refresh-async callback :parent parent :defaults-only t)))))
 
-(declare-function kargu--xdg-config-file "kargu/config/schema" ())
 
 (provide 'kargu/config/service)
 ;;; service.el ends here

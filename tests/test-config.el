@@ -185,32 +185,56 @@
       (should (equal (kargu-config-api-key-fast "alpha") "")))))
 
 (ert-deftest kargu-config-refresh-reverse-completion-and-cancel-test ()
-  "Only the newest refresh publishes; cancellation closes its native port task."
+  "Rust's stale verdict never publishes; cancellation closes its native port task."
   (let ((kargu-application--bound (kargu-application-create)) tasks results cleaned)
-    (cl-letf (((symbol-function 'kargu-bridge-config-read)
-               (lambda (_paths _generation callback &rest options)
+    (cl-letf (((symbol-function 'kargu-bridge-config-refresh)
+               (lambda (callback &rest options)
                  (let ((task (kargu-async-start callback :parent (plist-get options :parent) :owner nil)))
                    (push task tasks)
                    (kargu-async-add-cleanup task (lambda () (push task cleaned)))))))
       (let* ((first (kargu-config-refresh-async (lambda (result) (push result results))))
-             (first-reader (car tasks))
+             (first-port (car tasks))
              (second (kargu-config-refresh-async (lambda (result) (push result results))))
-             (second-reader (car tasks))
-             (value (kargu-bridge--object
-                     "status" "ok" "path" "/fake" "generation" 2 "digest" (make-string 64 ?a)
-                     "config" (kargu-bridge--object "provider" "new" "model" :json-null
-                                                    "review-mode" :json-null "providers" []))))
-        (should (eq (kargu-async-task-parent second-reader) second))
-        (should (eq (kargu-async-task-parent first-reader) first))
-        (kargu-async-finish second-reader value)
+             (second-port (car tasks))
+             (view (kargu-bridge--object
+                    "status" "committed" "revision" 1 "path" "/fake" "digest" (make-string 64 ?a)
+                    "absent" :json-false
+                    "config" (kargu-bridge--object "provider" "new" "model" :json-null
+                                                   "review-mode" :json-null "providers" []))))
+        (should (eq (kargu-async-task-parent second-port) second))
+        (should (eq (kargu-async-task-parent first-port) first))
+        (kargu-async-finish second-port view)
         (kargu-bridge-test--wait (lambda () results))
-        (puthash "generation" 1 value)
-        (kargu-async-finish first-reader value)
+        (kargu-async-finish first-port nil (kargu-bridge--fault "stale_configuration"))
         (should (kargu-err-p (car results)))
+        (should (eq (kargu-result-err-code (car results)) :stale))
         (should (equal (plist-get (kargu--config-plist) :provider) "new"))
+        (should-not (kargu-config-service-refreshes (kargu-config-service-context)))
         (let ((third (kargu-config-refresh-async #'ignore)))
           (kargu-async-cancel third)
           (should (cl-some (lambda (child) (eq (kargu-async-task-parent child) third)) cleaned)))))))
+
+(ert-deftest kargu-config-ensure-waits-for-a-pending-real-refresh-test ()
+  "A cold ensure joins the real refresh on its own task instead of bootstrapping."
+  (let ((kargu-application--bound (kargu-application-create)) port defaults first second)
+    (cl-letf (((symbol-function 'kargu-bridge-config-refresh)
+               (lambda (callback &rest options)
+                 (when (plist-get options :defaults-only) (setq defaults t))
+                 (setq port (kargu-async-start callback :parent (plist-get options :parent) :owner nil)))))
+      (kargu-config-refresh-async #'ignore)
+      (let ((cancelled (kargu-config-ensure-native-async (lambda (value) (setq first value)))))
+        (kargu-config-ensure-native-async (lambda (value) (setq second value)))
+        (kargu-async-cancel cancelled))
+      (should-not defaults)
+      (kargu-async-finish
+       port (kargu-bridge--object
+             "status" "committed" "revision" 1 "path" "/fake" "digest" (make-string 64 ?b)
+             "absent" :json-false
+             "config" (kargu-bridge--object "provider" "joined" "model" :json-null
+                                            "review-mode" :json-null "providers" [])))
+      (should-not first)
+      (should (kargu-ok-p second))
+      (should (equal (plist-get (kargu--config-plist) :provider) "joined")))))
 
 (ert-deftest kargu-config-snapshot-detaches-and-hides-credentials-test ()
   "Published data cannot be mutated through input or public snapshot reads."

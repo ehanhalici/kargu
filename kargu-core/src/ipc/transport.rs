@@ -623,6 +623,38 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     }
                     continue;
                 }
+                if method == methods::CONFIGURATION_REFRESH {
+                    if let Some(id) = id.as_ref() {
+                        let budget = id
+                            .result_budget(host.frame_limit())
+                            .unwrap_or(host.frame_limit());
+                        let admitted =
+                            host.prepare_configuration_refresh(params, budget)
+                                .and_then(|start| match start {
+                                    crate::application::host::ConfigurationRefreshStart::Reply(
+                                        value,
+                                    ) => Ok(Some(protocol::success(id, value))),
+                                    crate::application::host::ConfigurationRefreshStart::Read(
+                                        scope,
+                                        input,
+                                        meta,
+                                    ) => reads
+                                        .start_configuration_refresh(id.clone(), scope, input, meta)
+                                        .map(|()| None),
+                                });
+                        match admitted {
+                            Ok(Some(reply)) => queue_reply(reply, host.frame_limit(), tx, permits)?,
+                            Ok(None) => {}
+                            Err(fault) => queue_reply(
+                                fault.response(Some(id)),
+                                host.frame_limit(),
+                                tx,
+                                permits,
+                            )?,
+                        }
+                    }
+                    continue;
+                }
                 if method == methods::MODEL_REFRESH {
                     if let Some(id) = id.as_ref() {
                         let admitted =

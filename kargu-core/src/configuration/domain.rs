@@ -11,6 +11,17 @@ pub const MAX_SOURCE_BYTES: usize = 64 * 1024;
 #[derive(Clone, Copy, Deserialize, Serialize, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(transparent)]
 pub struct RefreshGeneration(u64);
+impl RefreshGeneration {
+    /// The generation after `self`, allocated only by the native config service.
+    pub(crate) fn next(self) -> Result<Self, crate::error::CoreError> {
+        self.0
+            .checked_add(1)
+            .map(Self)
+            .ok_or(crate::error::CoreError::ArithmeticOverflow)
+    }
+    /// Generation preceding every allocated refresh.
+    pub(crate) const ZERO: Self = Self(0);
+}
 
 /// One-based diagnostic line, never an arbitrary parser diagnostic string.
 #[derive(Clone, Copy, Debug, Serialize)]

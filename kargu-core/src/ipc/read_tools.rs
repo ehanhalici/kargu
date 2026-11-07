@@ -74,6 +74,7 @@ struct PendingRead {
     terminal: Option<CoreError>,
     edit: Option<crate::edit::prepare::PreparationId>,
     history: Option<crate::domain::HistoryUploadId>,
+    refresh: Option<crate::application::host::ConfigurationRefreshMeta>,
     call: Option<AgentTool>,
 }
 
@@ -239,6 +240,12 @@ pub(super) enum ReadEvent {
         scope: RequestScope,
         result: Result<Box<ModelCatalogResult>, CoreError>,
     },
+    ConfigurationRefresh {
+        id: RpcId,
+        scope: ReadScope,
+        meta: crate::application::host::ConfigurationRefreshMeta,
+        result: Result<ReadOutput, CoreError>,
+    },
     Tool,
 }
 impl ReadEvent {
@@ -287,6 +294,17 @@ impl ReadEvent {
                 result,
             } => Some(
                 match host.finish_edit(&scope, &ticket, result.map(|prepared| *prepared)) {
+                    Ok(value) => super::protocol::success(&id, value),
+                    Err(fault) => fault.response(Some(&id)),
+                },
+            ),
+            Self::ConfigurationRefresh {
+                id,
+                scope,
+                meta,
+                result,
+            } => Some(
+                match host.finish_configuration_refresh(&scope, meta, result) {
                     Ok(value) => super::protocol::success(&id, value),
                     Err(fault) => fault.response(Some(&id)),
                 },
@@ -440,6 +458,7 @@ impl ReadTools {
                 terminal: None,
                 edit: None,
                 history: None,
+                refresh: None,
                 call: Some(call),
             },
         );
@@ -481,6 +500,24 @@ impl ReadTools {
             ReadOwner::Connection(scope),
             ReadOperation::Configuration(input),
         )
+    }
+
+    pub(crate) fn start_configuration_refresh(
+        &mut self,
+        id: RpcId,
+        scope: ReadScope,
+        input: ReadInput,
+        meta: crate::application::host::ConfigurationRefreshMeta,
+    ) -> Result<(), Fault> {
+        self.start_owned(
+            id.clone(),
+            ReadOwner::Session(scope),
+            ReadOperation::Configuration(input),
+        )?;
+        if let Some(request) = self.requests.get_mut(&id) {
+            request.refresh = Some(meta);
+        }
+        Ok(())
     }
 
     pub fn start_model_refresh(
@@ -586,6 +623,7 @@ impl ReadTools {
                 terminal: None,
                 edit,
                 history,
+                refresh: None,
                 call: None,
             },
         );
@@ -696,6 +734,21 @@ impl ReadTools {
                 result,
             }));
         }
+        if let Some(meta) = request.refresh {
+            let ReadOwner::Session(scope) = request.scope else {
+                return Some(Err(CoreError::CleanupFailed));
+            };
+            let result = result.and_then(|completion| match completion {
+                ReadCompletion::Configuration(output) => Ok(output),
+                _ => Err(CoreError::CleanupFailed),
+            });
+            return Some(Ok(ReadEvent::ConfigurationRefresh {
+                id,
+                scope,
+                meta,
+                result,
+            }));
+        }
         if let (ReadOwner::Session(scope), Some(ticket)) = (&request.scope, request.edit) {
             let result = result.and_then(|completion| match completion {
                 ReadCompletion::Edit(prepared) => Ok(prepared),
@@ -737,6 +790,7 @@ impl ReadTools {
                 ReadEvent::Edit { .. }
                 | ReadEvent::History { .. }
                 | ReadEvent::ModelCatalog { .. }
+                | ReadEvent::ConfigurationRefresh { .. }
                 | ReadEvent::Tool => Err(CoreError::CleanupFailed),
             })
         })

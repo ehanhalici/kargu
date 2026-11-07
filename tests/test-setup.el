@@ -259,7 +259,7 @@
                       (when (member method '("application/create" "session/create"))
                         (when (eq (kargu-bridge-status connection) 'binding)
                           (when (equal method "application/create") (cl-incf bootstraps))))
-                      (when (equal method "configuration/read") (cl-incf parses))
+                      (when (equal method "configuration/refresh") (cl-incf parses))
                       (apply call connection method options)))
                    ((symbol-function 'kargu-connection-resolve-async)
                     (lambda (provider model &rest options)

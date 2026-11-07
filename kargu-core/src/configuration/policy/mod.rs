@@ -38,7 +38,7 @@ pub use domain::{
     ConfigurationDocument, EnvironmentSnapshot, PolicyContext, RegistrySnapshot, TargetInput,
 };
 use serde_json::{Value, json};
-pub(crate) use service::ConfigurationService;
+pub(crate) use service::{ConfigurationService, RefreshStart, fault as configuration_fault};
 use std::collections::BTreeSet;
 
 /// Variable names requested from editor interop; no process environment lookup.

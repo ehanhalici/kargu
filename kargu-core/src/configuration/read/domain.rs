@@ -49,7 +49,7 @@ impl TryFrom<Vec<ConfigurationPath>> for CandidatePaths {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(try_from = "u64")]
 pub(crate) struct ReadTimeout(Duration);
 impl Default for ReadTimeout {

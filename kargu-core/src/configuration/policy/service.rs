@@ -109,10 +109,166 @@ struct Published {
 pub(crate) struct ConfigurationService {
     revision: ConfigRevision,
     latest: Option<RefreshGeneration>,
+    requested: Option<RefreshGeneration>,
     staged: Option<Staged>,
     published: Option<Published>,
 }
+
+/// How a native refresh request proceeds after admission.
+pub(crate) enum RefreshStart {
+    /// Read the native-ordered candidates for this generation on a worker.
+    Read(RefreshGeneration),
+    /// Stage built-in defaults now; no file is probed.
+    Defaults(RefreshGeneration),
+    /// A publication or a real refresh already owns the configuration.
+    Observed,
+}
 impl ConfigurationService {
+    /// Current committed publication revision.
+    pub(crate) fn revision(&self) -> ConfigRevision {
+        self.revision
+    }
+    fn newest(&self) -> RefreshGeneration {
+        self.latest
+            .max(self.requested)
+            .unwrap_or(RefreshGeneration::ZERO)
+    }
+    /// Order a refresh natively.  A defaults bootstrap never supersedes a
+    /// publication, a staged capture or a real refresh still being read.
+    pub(crate) fn begin_refresh(&mut self, defaults_only: bool) -> Result<RefreshStart, CoreError> {
+        if defaults_only {
+            let pending = self
+                .requested
+                .is_some_and(|requested| Some(requested) > self.latest);
+            if self.published.is_some() || self.staged.is_some() || pending {
+                return Ok(RefreshStart::Observed);
+            }
+            return Ok(RefreshStart::Defaults(self.newest().next()?));
+        }
+        let generation = self.newest().next()?;
+        self.requested = Some(generation);
+        Ok(RefreshStart::Read(generation))
+    }
+    /// Release a failed or cancelled read so a later bootstrap is not blocked.
+    pub(crate) fn abandon_refresh(&mut self, generation: RefreshGeneration) {
+        if self.requested == Some(generation) {
+            self.requested = None;
+        }
+    }
+    /// Stage a native read result for its own generation, or report it stale.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stage_refresh(
+        &mut self,
+        session: &SessionId,
+        generation: RefreshGeneration,
+        output: Value,
+        registry: RegistrySnapshot,
+        timeout: ConfigurationTimeout,
+        catalog: &ProviderCatalog,
+        frame: ByteLimit,
+        now: Instant,
+    ) -> Result<Value, CoreError> {
+        self.sweep(now);
+        if self
+            .requested
+            .is_some_and(|requested| requested > generation)
+        {
+            return Err(CoreError::StaleOwner);
+        }
+        let status = output.get("status").and_then(Value::as_str);
+        let path: ConfigurationPath = output
+            .get("path")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|_| CoreError::Limit)?
+            .ok_or(CoreError::Limit)?;
+        let (digest, document) = match status {
+            Some("absent") => (None, None),
+            Some("ok") => {
+                let digest: SourceDigest = output
+                    .get("digest")
+                    .cloned()
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map_err(|_| CoreError::Limit)?
+                    .ok_or(CoreError::Limit)?;
+                let document: ConfigurationDocument = output
+                    .get("config")
+                    .cloned()
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map_err(|_| CoreError::Limit)?
+                    .ok_or(CoreError::Limit)?;
+                (Some(digest), Some(document))
+            }
+            Some("invalid") => {
+                let reply = json!({"status":"invalid","generation":generation,
+                    "path":path.as_path(),"line":output.get("line")});
+                check_frame(&reply, frame)?;
+                return Ok(reply);
+            }
+            _ => return Err(CoreError::Limit),
+        };
+        let mut reply = self.stage(
+            session,
+            Prepare {
+                generation,
+                path,
+                digest,
+                document,
+                registry,
+                timeout_ms: timeout,
+            },
+            catalog,
+            frame,
+            now,
+        )?;
+        reply
+            .as_object_mut()
+            .ok_or(CoreError::Limit)?
+            .insert("status".into(), json!("prepared"));
+        Ok(reply)
+    }
+    fn stage(
+        &mut self,
+        session: &SessionId,
+        input: Prepare,
+        catalog: &ProviderCatalog,
+        frame: ByteLimit,
+        now: Instant,
+    ) -> Result<Value, CoreError> {
+        if input.document.is_some() != input.digest.is_some() {
+            return Err(CoreError::InvalidValue {
+                field: "configuration_capture",
+            });
+        }
+        if self.latest.is_some_and(|latest| input.generation <= latest) {
+            return Err(CoreError::StaleOwner);
+        }
+        let absent = input.document.is_none();
+        let document = input.document.unwrap_or_else(ConfigurationDocument::empty);
+        let names = environment_names(&document, &input.registry, catalog)?;
+        let path = input.path.as_path().to_owned();
+        let staged = Staged {
+            id: CaptureId(uuid::Uuid::new_v4()),
+            owner: session.clone(),
+            generation: input.generation,
+            path: input.path,
+            digest: input.digest,
+            document,
+            expires: now
+                .checked_add(input.timeout_ms.duration())
+                .ok_or(CoreError::ArithmeticOverflow)?,
+            absent,
+        };
+        let reply = json!({"capture_id":staged.id,"generation":staged.generation,"revision":self.revision,
+            "environment_names":names,"path":path,"absent":absent});
+        check_frame(&reply, frame)?;
+        self.latest = Some(staged.generation);
+        self.staged = Some(staged);
+        Ok(reply)
+    }
     pub(crate) fn is_revision(&self, revision: ConfigRevision) -> bool {
         self.published.is_some() && self.revision == revision
     }
@@ -222,34 +378,7 @@ impl ConfigurationService {
             }
             "configuration/prepare" => {
                 let input: Prepare = decode(arguments)?;
-                if input.document.is_some() != input.digest.is_some() {
-                    return Err(CoreError::InvalidValue {
-                        field: "configuration_capture",
-                    });
-                }
-                if self.latest.is_some_and(|latest| input.generation <= latest) {
-                    return Err(CoreError::StaleOwner);
-                }
-                let absent = input.document.is_none();
-                let document = input.document.unwrap_or_else(ConfigurationDocument::empty);
-                let names = environment_names(&document, &input.registry, catalog)?;
-                let staged = Staged {
-                    id: CaptureId(uuid::Uuid::new_v4()),
-                    owner: session.clone(),
-                    generation: input.generation,
-                    path: input.path,
-                    digest: input.digest,
-                    document,
-                    expires: now
-                        .checked_add(input.timeout_ms.duration())
-                        .ok_or(CoreError::ArithmeticOverflow)?,
-                    absent,
-                };
-                let reply = json!({"capture_id":staged.id,"generation":staged.generation,"revision":self.revision,"environment_names":names});
-                check_frame(&reply, frame)?;
-                self.latest = Some(staged.generation);
-                self.staged = Some(staged);
-                Ok(reply)
+                self.stage(session, input, catalog, frame, now)
             }
             "configuration/commit" => {
                 let input: Commit = decode(arguments)?;
@@ -414,7 +543,7 @@ fn check_frame(value: &Value, frame: ByteLimit) -> Result<(), CoreError> {
     }
     Ok(())
 }
-fn fault(error: CoreError) -> Fault {
+pub(crate) fn fault(error: CoreError) -> Fault {
     use crate::constants::protocol::error_codes as codes;
     let (code, status) = match error {
         CoreError::StaleOwner => (codes::STALE_OWNER, "stale_configuration"),
@@ -439,6 +568,33 @@ mod tests {
 
     fn context() -> Value {
         json!({"api_base":"https://fixture.invalid/v1","environment":{},"registry":[]})
+    }
+
+    #[test]
+    fn defaults_wait_for_a_pending_read_until_it_is_abandoned() -> TestResult {
+        let mut service = ConfigurationService::default();
+        let RefreshStart::Read(first) = service.begin_refresh(false)? else {
+            return Err("expected a read".into());
+        };
+        assert!(matches!(
+            service.begin_refresh(true)?,
+            RefreshStart::Observed
+        ));
+        let RefreshStart::Read(second) = service.begin_refresh(false)? else {
+            return Err("expected a read".into());
+        };
+        assert!(second > first);
+        service.abandon_refresh(first);
+        assert!(matches!(
+            service.begin_refresh(true)?,
+            RefreshStart::Observed
+        ));
+        service.abandon_refresh(second);
+        assert!(matches!(
+            service.begin_refresh(true)?,
+            RefreshStart::Defaults(_)
+        ));
+        Ok(())
     }
     fn prepare(generation: u64, timeout: u64) -> Value {
         json!({"generation":generation,"path":"/synthetic/config","document":null,"digest":null,"registry":[],"timeout_ms":timeout})

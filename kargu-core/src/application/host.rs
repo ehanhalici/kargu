@@ -146,6 +146,79 @@ struct ConfigurationReadRequest {
     arguments: crate::configuration::read::ReadInput,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfigurationLocations {
+    home: Option<String>,
+    xdg_config_home: Option<String>,
+    user_emacs_directory: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfigurationRefreshArguments {
+    #[serde(default)]
+    paths: Option<Vec<crate::configuration::read::ConfigurationPath>>,
+    #[serde(default)]
+    locations: Option<ConfigurationLocations>,
+    registry: crate::configuration::policy::RegistrySnapshot,
+    #[serde(default)]
+    defaults_only: bool,
+    #[serde(default)]
+    timeout_ms: crate::configuration::read::ConfigurationTimeout,
+}
+
+/// Captured staging inputs for one natively ordered refresh.
+pub(crate) struct ConfigurationRefreshMeta {
+    generation: crate::configuration::RefreshGeneration,
+    registry: crate::configuration::policy::RegistrySnapshot,
+    timeout: crate::configuration::read::ConfigurationTimeout,
+}
+
+/// Admission result: an immediate reply or a worker read.
+pub(crate) enum ConfigurationRefreshStart {
+    Reply(Value),
+    Read(
+        ReadScope,
+        crate::configuration::read::ReadInput,
+        ConfigurationRefreshMeta,
+    ),
+}
+
+/// Native precedence: explicit grants, else XDG config, then the Emacs directory.
+fn configuration_candidates(
+    paths: Option<Vec<crate::configuration::read::ConfigurationPath>>,
+    locations: Option<ConfigurationLocations>,
+) -> Result<Vec<crate::configuration::read::ConfigurationPath>, crate::error::CoreError> {
+    use crate::configuration::read::ConfigurationPath;
+    use std::path::PathBuf;
+    let invalid = || crate::error::CoreError::InvalidValue {
+        field: "configuration_locations",
+    };
+    match (paths, locations) {
+        (Some(paths), None) => Ok(paths),
+        (None, Some(locations)) => {
+            let absolute =
+                |value: Option<String>| value.map(PathBuf::from).filter(|path| path.is_absolute());
+            let base = absolute(locations.xdg_config_home)
+                .or_else(|| absolute(locations.home).map(|home| home.join(".config")))
+                .ok_or_else(invalid)?;
+            [
+                base.join("kargu").join("config.toml"),
+                PathBuf::from(locations.user_emacs_directory).join("kargu.toml"),
+            ]
+            .into_iter()
+            .map(|path| {
+                path.to_str()
+                    .ok_or_else(invalid)
+                    .and_then(|text| ConfigurationPath::try_from(text.to_owned()))
+            })
+            .collect()
+        }
+        _ => Err(invalid()),
+    }
+}
+
 impl Default for Host {
     fn default() -> Self {
         Self::new()
@@ -446,6 +519,120 @@ impl Host {
             return Err(owner_fault());
         }
         Ok((scope, request.arguments))
+    }
+
+    pub(crate) fn prepare_configuration_refresh(
+        &mut self,
+        params: Value,
+        response_limit: ByteLimit,
+    ) -> Result<ConfigurationRefreshStart, Fault> {
+        use crate::configuration::policy::{RefreshStart, configuration_fault};
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let request: ReadRequest<ConfigurationRefreshArguments> =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&request.scope) {
+            return Err(owner_fault());
+        }
+        let arguments = request.arguments;
+        let candidates = configuration_candidates(arguments.paths, arguments.locations)
+            .map_err(configuration_fault)?;
+        let first = candidates
+            .first()
+            .ok_or_else(Fault::params)?
+            .as_path()
+            .to_owned();
+        let catalog = self.providers.as_ref().map_err(|_| Fault::params())?;
+        let actor = self
+            .applications
+            .get_mut(&request.scope.application_id)
+            .ok_or_else(owner_fault)?
+            .actor_mut();
+        let start = actor
+            .configuration
+            .begin_refresh(arguments.defaults_only)
+            .map_err(configuration_fault)?;
+        match start {
+            RefreshStart::Observed => Ok(ConfigurationRefreshStart::Reply(
+                json!({"status":"observed","revision":actor.configuration.revision()}),
+            )),
+            RefreshStart::Defaults(generation) => actor
+                .configuration
+                .stage_refresh(
+                    &request.scope.session_id,
+                    generation,
+                    json!({"status":"absent","path":first}),
+                    arguments.registry,
+                    arguments.timeout_ms,
+                    catalog,
+                    response_limit,
+                    std::time::Instant::now(),
+                )
+                .map(ConfigurationRefreshStart::Reply)
+                .map_err(configuration_fault),
+            RefreshStart::Read(generation) => {
+                let input = crate::configuration::read::ReadInput::native(
+                    candidates,
+                    generation,
+                    arguments.timeout_ms,
+                )
+                .map_err(configuration_fault)?;
+                Ok(ConfigurationRefreshStart::Read(
+                    request.scope,
+                    input,
+                    ConfigurationRefreshMeta {
+                        generation,
+                        registry: arguments.registry,
+                        timeout: arguments.timeout_ms,
+                    },
+                ))
+            }
+        }
+    }
+
+    pub(crate) fn finish_configuration_refresh(
+        &mut self,
+        scope: &ReadScope,
+        meta: ConfigurationRefreshMeta,
+        result: Result<crate::configuration::read::ReadOutput, crate::error::CoreError>,
+    ) -> Result<Value, Fault> {
+        use crate::configuration::policy::configuration_fault;
+        let frame = self.frame_limit;
+        let catalog = self.providers.as_ref().map_err(|_| Fault::params())?;
+        let actor = self
+            .applications
+            .get_mut(&scope.application_id)
+            .filter(|app| app.is_live())
+            .ok_or_else(owner_fault)?
+            .actor_mut();
+        let output = match result {
+            Ok(output) => output.into_editor_value(),
+            Err(error) => {
+                actor.configuration.abandon_refresh(meta.generation);
+                return Err(configuration_fault(error));
+            }
+        };
+        if !actor.owns_session(&scope.session_id) {
+            actor.configuration.abandon_refresh(meta.generation);
+            return Err(owner_fault());
+        }
+        let staged = actor.configuration.stage_refresh(
+            &scope.session_id,
+            meta.generation,
+            output,
+            meta.registry,
+            meta.timeout,
+            catalog,
+            frame,
+            std::time::Instant::now(),
+        );
+        if staged.as_ref().map_or(true, |reply| {
+            reply.get("status").and_then(Value::as_str) != Some("prepared")
+        }) {
+            actor.configuration.abandon_refresh(meta.generation);
+        }
+        staged.map_err(configuration_fault)
     }
 
     pub(crate) fn prepare_model_refresh(

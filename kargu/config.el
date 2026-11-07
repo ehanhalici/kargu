@@ -8,8 +8,7 @@
 
 ;; Facade module for the Kargu configuration subsystem.
 ;; Requires modular subcomponents under `kargu/config/`:
-;;   * `kargu/bridge/config'     -> bounded native file/TOML/schema port
-;;   * `kargu/bridge/config-policy' -> owned native publication and selection
+;;   * `kargu/bridge/config-policy' -> native refresh, staging and publication
 ;;   * `kargu/config/key'        -> passive native DTO readers
 ;;   * `kargu/config/schema'     -> UI intent and setup verification
 ;;   * `kargu/config/worker'     -> cancellable background credential worker

@@ -4136,11 +4136,38 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       close ve exact RPC cancel sonucu publish edemez. Bridge secret/URL çıkarmaz;
       native HTTP portunu kullanır. Genel picker/auth-source/registry cutover'ı
       ve ortak host entegrasyon commit'i bu temelin kapsamı dışındadır.
-    - [ ] **8.2b2 Native config orchestration:** path precedence/read/parse/
+    - [x] **8.2b2 Native config orchestration:** path precedence/read/parse/
       publication, env/keyless ve credential ihtiyaçlarını Rust sıralasın;
       auth-source/callable editor primitive yalnız native talebe yanıt versin.
       Gerçek config refresh ile defaults bootstrap birbirini ezmesin; shared
       request varsa her waiter bağımsız owner/deadline/cancel ömrünü korusun.
+
+      **Teslim (2026-11-07):** Yeni `configuration/refresh` RPC'si generation'ı
+        Rust'ta ayırır, aday yol önceliğini (açık editor izni, yoksa
+        `$XDG_CONFIG_HOME` mutlaksa onun, değilse `$HOME/.config` altındaki
+        `kargu/config.toml`, sonra `user-emacs-directory/kargu.toml`) Rust'ta
+        kurar, dosyayı worker'da okuyup ayrıştırır ve doğrudan stage eder; ayrışmış
+        doküman artık Elisp'e dönmez. Editör yalnız konum gözlemlerini ve Rust'ın
+        adlandırdığı env değerlerini verir. Defaults bootstrap yayım, staged capture
+        veya okunan gerçek refresh varken `observed` döner ve hiçbir şeyi ezmez;
+        gerçek refresh bootstrap capture'ını bayatlatır; başarısız okuma claim'ini
+        bırakır. Elisp `configuration/read` portu (`kargu/bridge/config.el`) silindi;
+        Elisp generation sayacı, read→parse→publish sıralaması ve sahte "absent"
+        defaults kaydı kaldırıldı. `kargu-config-ensure-native-async` gerçek
+        refresh sürerken kendi deadline/iptal ömrüyle ona katılır. TRAMP/göreli
+        izinler Elisp'te reddedilir. Auth-source zaten yalnız Rust `interop`
+        credential'ı istediğinde çalışır.
+        **Kanıt:** Rust `configuration_refresh_ipc` 3/3 (öncelik, relative XDG,
+        defaults/gerçek sıralama, invalid satır ve claim bırakma) + ordering birim
+        testi; 600 locked Rust, strict Clippy/fmt. ERT: yeni
+        `kargu-config-ensure-waits-for-a-pending-real-refresh-test` ve native
+        supersede vakası; 15 eski port testi aynı davranışla yeni sözleşmeye
+        taşındı. Tam ERT 1456/1456, bridge smoke 40/40, 207/207 üretim Elisp.
+        **Kalan borç:** Rust `configuration/prepare` RPC'si editör tüketicisi
+        olmadan yalnız sentetik politika testleri ve ERT fixture'ı için kalır;
+        `configuration/read` RPC'sinin yalnız Rust testi tüketicisi var — ikisi
+        de son temizlikte (10.4c/G13) kaldırılmalı veya test-only'ye indirilmeli.
+        `kargu-config--observe` review-mode'u hâlâ Elisp defcustom'una uygular.
 
       **Önkoşul:** Mevcut native config read/publish; 0.2.
 

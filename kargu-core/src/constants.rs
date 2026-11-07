@@ -397,6 +397,8 @@ pub mod protocol {
         pub const CONFIGURATION_PARSE: &str = "configuration/parse";
         /// Bounded readonly editor config file capture and parsing.
         pub const CONFIGURATION_READ: &str = "configuration/read";
+        /// Natively ordered config discovery, read, parse and staging for one session.
+        pub const CONFIGURATION_REFRESH: &str = "configuration/refresh";
         /// Start a revision-bound, session-owned bounded metadata upload.
         pub const MODEL_BEGIN: &str = "models/begin";
         /// Append one exact-offset UTF-8 fragment, without publication.
