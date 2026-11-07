@@ -176,15 +176,17 @@
             (should-not (buffer-live-p buffer)))
         (kargu-async-cancel task)))))
 
-(defun kargu-credential-completion-test--run (adapter &optional on-started)
+(defun kargu-credential-completion-test--run (adapter &optional on-started unsupported)
   "Run a native prompt needing interop under ADAPTER; return (RESULT HEADERS).
-ON-STARTED receives the run task once the request is issued."
+ON-STARTED receives the run task once the request is issued.
+UNSUPPORTED omits the fixture format to exercise native refusal."
   (require 'tests/test-stream)
   (kargu-bridge-test--with-core
    (let* ((application (kargu-application-create))
           (owner (generate-new-buffer " *kargu-credential-owner*"))
           (root (make-temp-file "kargu-credential-root-" t))
           (kargu-config-credential-completion-adapter adapter)
+          (kargu-providers--table (copy-hash-table kargu-providers--table))
           headers result failure done
           (server (kargu-stream-test--server
                    "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"interop answer\"},\"finish_reason\":\"stop\"}]}"
@@ -193,6 +195,8 @@ ON-STARTED receives the run task once the request is issued."
      (unwind-protect
          (progn
            (should (member "editor_credential_capture" (append (kargu-bridge--client-capabilities) nil)))
+           (kargu-register-provider :id "interop" :api url
+                                    :format (unless unsupported 'openapi))
            ;; No apikey and no environment: Rust's policy needs an interop credential.
            (let ((kargu-application--bound application))
              (kargu-test-config-publish
@@ -225,6 +229,14 @@ ON-STARTED receives the run task once the request is issued."
        (when (buffer-live-p owner) (kill-buffer owner))
        (delete-process server)
        (delete-directory root t)))))
+
+(ert-deftest kargu-credential-completion-unsupported-wire-never-starts-interop-test ()
+  "An unsupported native target never resolves credentials or sends HTTP."
+  (let* ((outcome (kargu-credential-completion-test--run
+                   (lambda (&rest _) (ert-fail "Unsupported wire started credentials")) nil t))
+         (failure (car outcome)))
+    (should (equal (gethash "status" (gethash "data" failure)) "configuration_unavailable"))
+    (should-not (cadr outcome))))
 
 (ert-deftest kargu-credential-completion-native-run-uses-the-actual-receipt-key-test ()
   "Rust requests the interop credential; only the completed key reaches the wire."

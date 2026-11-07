@@ -2668,9 +2668,15 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
               standalone API/catalog) tam ERT 1469/1469 içinde; bridge 40/40,
               624 locked Rust, strict Clippy/fmt, değişen Elisp Werror/checkdoc.
 
-      - [ ] **5.4a3 Model metadata/wire receipt:** capabilities, wire/auth türü
+      - [x] **5.4a3 Model metadata/wire receipt:** capabilities, wire/auth türü
         ve tuning capture'ını native model/registry revision'ına bağla. Header
         template bağı tam metadata eşdeğerliği değildir. 5.4a2 sonrası.
+        **Kapanış (2026-11-08):** model head admission/preparation/activation
+        sınırlarında denetleniyor; actual native model/registry policy typed run
+        connection'a bağlanıyor ve retry boyunca sabit kalıyor. Gerçek Emacs
+        consumer native revision ve explicit tercihler gönderiyor; metadata,
+        wire/auth/tuning/cache kararları Rust'ta. Aşağıdaki a/b/c kabul corpus'u
+        tamamlandı. Üst 5.4a, 4.9 → 5.4a4 context receipt işi için açık kalır.
 
         - [x] **5.4a3a Preparation sırasında model publication değişimi:**
           admission'da application'ın native `MetadataRevision` değerini yakala;
@@ -2687,7 +2693,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           `/tmp/kargu-model-preparation-all-rust.log` ve
           `/tmp/kargu-model-preparation-ert.log`. Elisp/TLA+ değişmedi;
           TLC çalıştırılmadı.
-        - [ ] **5.4a3b Native metadata receipt ve consumer:** native model
+        - [x] **5.4a3b Native metadata receipt ve consumer:** native model
           revision'lı capabilities/tuning projection'ını frontend hazırlığına
           bağla; claim öncesinde eski/yabancı metadata capture'ını reddet.
           Gerçek tüketici ve hazırlık/retry eşdeğerliğini doğrula.
@@ -2704,7 +2710,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
             Loglar `/tmp/kargu-model-receipt-final.log`,
             `/tmp/kargu-model-receipt-ert.log`, `/tmp/kargu-model-receipt-lint.log`.
             TLA+ değişmedi; TLC çalıştırılmadı.
-          - [ ] **5.4a3b2 Native capabilities/tuning authority:** revision eşitliği
+          - [x] **5.4a3b2 Native capabilities/tuning authority:** revision eşitliği
             metadata içeriğini doğrulamaz. Aynı revision etiketli yabancı/değişmiş
             tools, stream, supported-parameters ve tuning capture'ını yetki sayma;
             bunları actual native model projection ve explicit user intent'ten
@@ -2771,15 +2777,16 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
                 `/tmp/kargu-native-effort-verified-{rust,ert}.log`,
                 `/tmp/kargu-native-effort-retired.log`,
                 `/tmp/kargu-native-effort-lint.log`. TLA+ değişmedi; TLC yok.
-        - [ ] **5.4a3c Native wire/auth policy:** registry format/wire/auth
+        - [x] **5.4a3c Native wire/auth policy:** registry format/wire/auth
           türünü native publication'a dahil et; typed connection'ı committed
           politikadan kur, editörün wire/auth türü yetki olmasın. Custom provider
           ve standalone API/catalog eşdeğerliğini koru. Sıra: a → b → c.
           - [x] **5.4a3c1 Committed wire ve auth authority:** registry bounded
             wire/policy JSON metnini native tiplerle doğrular; fingerprint'e dahil
             eder. Typed run connection native codec/auth/stream/output policy
-            kullanır. Header template portu korunur. Registry wire yoksa embedded
-            wire, custom bilinmeyen hedefte mevcut default codec kullanılır.
+            kullanır. Header template portu korunur. Native registry override
+            yoksa embedded wire kullanılır; custom default codec için explicit
+            wire kaydı gerekir. Eksik/unsupported wire c2 kabulünde reddedilir.
             Invalid wire/tuning publication reddedilir; yalnız wire/tuning
             değişimi de config revision'ını ilerletir. Frontend publication
             literal format/request DTO'larını taşır; transient credential context
@@ -2798,16 +2805,38 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
             `/tmp/kargu-native-wire-verified-{rust,ert}.log`,
             `/tmp/kargu-native-wire-small-frame.log`,
             `/tmp/kargu-native-wire-lint.log`. TLA+ değişmedi; TLC çalıştırılmadı.
-          - [ ] **5.4a3c2 Native target DTO son geçişi:** request'ten artık
+          - [x] **5.4a3c2 Native target DTO son geçişi:** request'ten artık
             kullanılmayan tam wire/provider-policy capture'ını çıkar; custom
             provider'ın wire yokluğu/default/unsupported davranışını explicit
             native sözleşmeye bağla. Cache-marker provider annotation'ını da
             native publication'a al; standalone API/catalog ve custom wire
             corpus'u ile eşdeğerliği kapat. Bu kabul ve b2b2 bitmeden üst 5.4a3
             kapanmaz.
-            **İlerleme:** tam wire/provider-policy/supported-parameters request
-            alanları b2b2'de temizlendi. Kalan: custom default/unsupported ve
-            cache-marker annotation sahipliği; standalone/custom wire karma kabul.
+            **Teslim:** tam wire/provider-policy/supported-parameters request
+            alanları b2b2'de, cache-markers alanı bu dilimde kaldırıldı. Registry
+            override varsa onun wire kaydı zorunludur; yoksa yalnız mevcut native
+            embedded tanım kullanılabilir. Explicit `{}` default codec kaydı
+            desteklenir; bilinmeyen custom/unsupported hedef request'ten codec
+            ödünç alamaz ve claim/credential/HTTP öncesi reddedilir. Embedded
+            fallback provider header'ları da native katalogdan gelir; session ve
+            app-url editörün yabancı değerlerinden bağlanmaz.
+            `prompt_caching` literal provider annotation'ı native publication ve
+            fingerprint'e katılır. Marker ekleme kararı Rust'ta provider annotation
+            AND native wire cache-marker desteğidir; request bool'u etkisizdir.
+            **Kanıt:** dört provider/wire kombinasyonunun gerçek HTTP gövdesi,
+            runtime/stable cache sınırı ve aynı run sonrası history/read ile
+            system mesajının değişmediği doğrulandı. Negatif custom/unsupported
+            RPC corpus'u; OpenAI/OpenRouter embedded wire/header fallback'i;
+            annotation-only revision değişimi ve kararlı tekrar; gerçek Emacs
+            unsupported run'da credential/HTTP başlamaması; explicit formatla
+            interop positive/unavailable/Stop corpus'u. Fixture default formatları
+            explicit ilan eder, üretimde implicit fallback korunmaz.
+            **Doğrulama:** locked Rust 634/634 (32 compile-fail dahil), native
+            IPC 57/57, configuration policy 13/13, tam source ERT 1470/1470;
+            strict Clippy/fmt/build ve değişen Elisp Werror/checkdoc temiz. Loglar
+            `/tmp/kargu-native-cache-policy-accepted-{rust,ert}.log`,
+            `/tmp/kargu-native-cache-policy-interop.log`,
+            `/tmp/kargu-native-cache-policy-lint.log`. TLA+ değişmedi; TLC yok.
 
       - [ ] **5.4a4 Context revision receipt:** 4.9 native context store portu
         üzerinden captured revision'ı claim/activation'a bağla. 4.9 ve 5.4a3

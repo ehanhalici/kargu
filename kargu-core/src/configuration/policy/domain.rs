@@ -247,6 +247,7 @@ pub(super) struct RegistryEntry {
     pub(super) wire: Option<ConfigText>,
     wire_ref: Option<WireIndex>,
     pub(super) tuning_policy: Option<ConfigText>,
+    pub(super) prompt_caching: Option<bool>,
     pub(super) api: Option<ConfigText>,
     #[serde(default)]
     pub(super) models: Vec<ConfigText>,

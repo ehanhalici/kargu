@@ -99,6 +99,8 @@ struct WireDto {
     #[serde(default)]
     default_headers: crate::api::auth::HeaderTemplates,
     stream: Option<bool>,
+    #[serde(default)]
+    cache_marker: bool,
     message_shape: Option<Shape>,
     response_shape: Option<Shape>,
     #[serde(default)]
@@ -154,6 +156,7 @@ pub struct WireSpec {
     pub(super) request: Option<RequestRules>,
     pub(super) response: Option<ResponseRules>,
     pub(super) stream: bool,
+    pub(super) cache_marker: bool,
     pub(super) revision: WireRevision,
     pub(super) policy: crate::api::policy::DefaultsPatch,
     pub(super) reasoning: crate::api::policy::ReasoningShape,
@@ -167,6 +170,7 @@ impl Default for WireSpec {
             request: None,
             response: None,
             stream: true,
+            cache_marker: false,
             revision: WireRevision(String::new()),
             policy: Default::default(),
             reasoning: Default::default(),
@@ -273,6 +277,7 @@ impl TryFrom<WireDto> for WireSpec {
             request,
             response,
             stream: dto.stream.unwrap_or(true),
+            cache_marker: dto.cache_marker,
             revision: WireRevision(String::new()),
             policy: dto.request.unwrap_or_default(),
             reasoning: dto.reasoning_shape.unwrap_or_default(),

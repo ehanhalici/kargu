@@ -57,7 +57,7 @@ PUBLICATION includes header metadata; transient credential source DTOs do not."
         (options (kargu-config-copy (get cell 'options))))
     (unless publication
       (remhash "app_url" options)
-      (mapc (lambda (entry) (remhash "headers" entry) (remhash "wire_headers" entry) (remhash "wire" entry) (remhash "tuning_policy" entry)) registry))
+      (mapc (lambda (entry) (remhash "headers" entry) (remhash "wire_headers" entry) (remhash "wire" entry) (remhash "tuning_policy" entry) (remhash "prompt_caching" entry)) registry))
     (kargu-bridge-config-policy--context registry names options)))
 
 (defun kargu-bridge-config-policy--options (&optional publication)
@@ -92,6 +92,7 @@ METADATA includes detached header DTOs for native publication."
                              "local" (if (plist-get info :local) t :json-false)
                              "keyless" (if (plist-get info :keyless) t :json-false))))
                  (when metadata
+                   (puthash "prompt_caching" (if (plist-get info :prompt-caching) t :json-false) entry)
                    (when-let* ((wire (kargu-provider-format-record (kargu-provider-format id))))
                      (puthash "wire" (json-serialize (kargu-providers-wire-object wire) :false-object :json-false :null-object :json-null) entry))
                    (puthash "tuning_policy" (json-serialize (kargu-providers-wire-object

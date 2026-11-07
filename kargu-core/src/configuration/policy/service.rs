@@ -135,7 +135,8 @@ pub(crate) struct RunTarget {
     app_url: Option<crate::configuration::domain::ConfigText>,
     headers: crate::api::HeaderTemplates,
     wire_headers: crate::api::HeaderTemplates,
-    wire: Option<crate::configuration::domain::ConfigText>,
+    wire: crate::configuration::domain::ConfigText,
+    prompt_caching: bool,
     tuning_policy: Option<crate::configuration::domain::ConfigText>,
 }
 impl RunTarget {
@@ -155,8 +156,9 @@ impl RunTarget {
             self.profile.native_key(interop)?,
             crate::api::NativeRunPolicy {
                 model: self.model_policy.clone(),
+                prompt_caching: self.prompt_caching,
                 wire: crate::api::wire::WireSpec::native_capture(
-                    self.wire.as_ref().map(|value| value.as_str()),
+                    self.wire.as_str(),
                     self.wire_headers.clone(),
                 )
                 .map_err(|_| CoreError::Unavailable)?,
@@ -232,15 +234,22 @@ impl ConfigurationService {
         let (provider, model, endpoint) = target.identity();
         Ok(RunTarget {
             model_policy: Default::default(),
-            wire: published
+            wire: match published.context.registry.get(provider) {
+                Some(entry) => entry.wire.clone(),
+                None => catalog.wire_value(provider).and_then(|wire| {
+                    crate::configuration::domain::ConfigText::try_from(wire.to_string()).ok()
+                }),
+            }
+            .ok_or(CoreError::Unavailable)?,
+            prompt_caching: published
                 .context
                 .registry
                 .get(provider)
-                .and_then(|entry| entry.wire.clone())
-                .or_else(|| {
-                    catalog.wire_value(provider).and_then(|wire| {
-                        crate::configuration::domain::ConfigText::try_from(wire.to_string()).ok()
-                    })
+                .and_then(|entry| entry.prompt_caching)
+                .unwrap_or_else(|| {
+                    catalog
+                        .get(provider)
+                        .is_some_and(|entry| entry.prompt_caching())
                 }),
             tuning_policy: published
                 .context
@@ -259,12 +268,16 @@ impl ConfigurationService {
             provider: provider.as_str().to_owned(),
             model: model.filter(|model| !model.is_empty()).map(str::to_owned),
             endpoint: endpoint.map(str::to_owned),
-            headers: published
-                .context
-                .registry
-                .get(provider)
-                .map(|entry| entry.headers.clone())
-                .unwrap_or_default(),
+            headers: match published.context.registry.get(provider) {
+                Some(entry) => entry.headers.clone(),
+                None => serde_json::from_value(
+                    catalog
+                        .get(provider)
+                        .map(|entry| entry.catalog_headers())
+                        .unwrap_or_else(|| json!({})),
+                )
+                .map_err(|_| CoreError::Unavailable)?,
+            },
             wire_headers: match published.context.registry.get(provider) {
                 Some(entry) => entry.wire_headers.clone(),
                 None => serde_json::from_value(

@@ -202,6 +202,33 @@ fn publish_model_metadata(
     );
     Ok(())
 }
+fn publish_provider_registry(
+    peer: &mut Peer,
+    scope: &Value,
+    bound: &mut Value,
+    provider: &str,
+    registry: Value,
+) -> TestResult {
+    let generation = FIXTURE_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let staged = peer.call("wire-stage", "configuration/prepare", json!({"scope":scope,
+        "arguments":{"generation":generation,"path":"/synthetic/wire","digest":format!("{:064x}",generation),"registry":[],
+        "document":{"provider":provider,"model":null,"review-mode":null,"providers":[{"name":provider,
+            "data":{"api":bound["connection"]["url"],"model":bound["connection"]["model"],"apikey":""}}]}}}))?;
+    let capture = staged["result"]["capture_id"].clone();
+    assert!(capture.is_string());
+    let committed = peer.call(
+        "wire-commit",
+        "configuration/commit",
+        json!({"scope":scope,
+        "arguments":{"capture_id":capture,"context":{"app_url":"https://native-context.invalid/","environment":{},"registry":registry}}}),
+    )?;
+    assert!(committed["result"]["revision"].is_number());
+    bound["config_revision"] = committed["result"]["revision"].clone();
+    bound["connection"]["provider"] = json!(provider);
+    bound["connection"]["auth"] = json!({"key":null});
+    Ok(())
+}
+
 fn prompt(root: &std::path::Path, url: &str) -> Value {
     json!({"root":root,"mode":"agent","prompt":{"role":"user","content":"Inspect synthetic workspace"},
         "tools_enabled":false,"editor_available":[],"tool_limit":8,"turn_limit":4,"timeout_ms":15000,
@@ -293,7 +320,7 @@ fn publish_target_with_header_policy(
         &format!("fixture-commit-{generation}"),
         "configuration/commit",
         json!({"scope":scope,"arguments":{"capture_id":capture,
-            "context":{"app_url":"https://fixture.invalid/","environment":{},"registry":[{"id":"fixture","headers":headers,"wire_headers":wire_headers,"wire":Value::Object(committed_wire).to_string(),"tuning_policy":Value::Object(committed_policy).to_string()}]}}}),
+            "context":{"app_url":"https://fixture.invalid/","environment":{},"registry":[{"id":"fixture","headers":headers,"wire_headers":wire_headers,"wire":Value::Object(committed_wire).to_string(),"tuning_policy":Value::Object(committed_policy).to_string(),"prompt_caching":arguments["connection"]["cache_markers"].as_bool().unwrap_or(false)}]}}}),
     )?;
     let revision = committed["result"]["revision"].clone();
     if revision.is_null() {
@@ -789,6 +816,180 @@ fn native_effort_and_budget_remain_frozen_across_metadata_change_and_retry() -> 
     assert!(disabled.get("reasoning").is_none());
     assert!(disabled.get("thinking").is_none());
     server.join().map_err(|_| "server panic")??;
+    Ok(())
+}
+
+#[test]
+fn native_cache_markers_require_both_committed_provider_and_wire_support() -> TestResult {
+    for (provider_cache, wire_cache) in [(false, false), (false, true), (true, false), (true, true)]
+    {
+        let root = tempfile::tempdir()?;
+        let (url, server, requests) = server(vec![answer("cache policy")])?;
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let mut bound = prompt(root.path(), &url);
+        bound["connection"]["wire"] = json!({"cache-marker":wire_cache,"stream":false});
+        bound["connection"]["cache_markers"] = json!(provider_cache);
+        publish_target(&mut peer, &scope, &mut bound)?;
+        // Request metadata cannot enable or disable the native provider annotation.
+        bound["connection"]["cache_markers"] = json!(!(provider_cache && wire_cache));
+        let system = "stable instructions\n<runtime_environment>\nvolatile context";
+        let source = json!([{"role":"system","content":system}]).to_string();
+        let mut events = Vec::new();
+        send(
+            &mut peer,
+            "cache-history-begin",
+            "history/begin",
+            json!({"scope":scope,"arguments":{"revision":0,"bytes":source.len()}}),
+        )?;
+        let upload =
+            response(&peer, "cache-history-begin", &mut events)?["result"]["upload_id"].clone();
+        assert!(upload.is_string());
+        send(
+            &mut peer,
+            "cache-history-append",
+            "history/append",
+            json!({"scope":scope,"arguments":{"upload_id":upload,"offset":0,"text":source}}),
+        )?;
+        assert!(
+            response(&peer, "cache-history-append", &mut events)?
+                .get("error")
+                .is_none()
+        );
+        send(
+            &mut peer,
+            "cache-history-commit",
+            "history/commit",
+            json!({"scope":scope,"arguments":{"upload_id":upload}}),
+        )?;
+        assert!(
+            response(&peer, "cache-history-commit", &mut events)?
+                .get("error")
+                .is_none()
+        );
+        begin(&mut peer, "cache-run", &scope, bound)?;
+        assert_eq!(
+            response(&peer, "cache-run", &mut events)?["result"]["status"],
+            "completed"
+        );
+        let body = requests.recv_timeout(Duration::from_secs(3))?;
+        let content = &body["messages"][0]["content"];
+        if provider_cache && wire_cache {
+            let blocks = content.as_array().ok_or("native cache blocks")?;
+            assert_eq!(
+                blocks.first().ok_or("stable block")?["cache_control"]["type"],
+                "ephemeral"
+            );
+            assert!(
+                blocks
+                    .get(1)
+                    .ok_or("runtime block")?
+                    .get("cache_control")
+                    .is_none()
+            );
+        } else {
+            assert_eq!(content, system);
+        }
+        send(
+            &mut peer,
+            "cache-history-rows",
+            "history/messages",
+            json!({"scope":scope,"arguments":{"offset":0}}),
+        )?;
+        let rows = response(&peer, "cache-history-rows", &mut events)?;
+        let revision = rows["result"]["revision"].clone();
+        let id = rows["result"]["messages"][0]["message_id"].clone();
+        send(
+            &mut peer,
+            "cache-history-read",
+            "history/read",
+            json!({"scope":scope,"arguments":{"revision":revision,"message_id":id,"offset":0}}),
+        )?;
+        let stored = response(&peer, "cache-history-read", &mut events)?;
+        assert_eq!(stored["result"]["complete"], true);
+        let message: Value =
+            serde_json::from_str(stored["result"]["text"].as_str().ok_or("stored system")?)?;
+        assert_eq!(message["content"], system);
+        server.join().map_err(|_| "server panic")??;
+    }
+    Ok(())
+}
+
+#[test]
+fn missing_or_disabled_custom_wire_never_borrows_request_or_embedded_codec() -> TestResult {
+    for (provider, registry) in [
+        ("fixture", json!([])),
+        ("fixture", json!([{"id":"fixture"}])),
+        ("openai", json!([{"id":"openai"}])),
+    ] {
+        let root = tempfile::tempdir()?;
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        listener.set_nonblocking(true)?;
+        let url = format!("http://{}/v1", listener.local_addr()?);
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let mut bound = prompt(root.path(), &url);
+        publish_provider_registry(&mut peer, &scope, &mut bound, provider, registry)?;
+        bound["connection"]["wire"] = json!({"auth":"bearer","stream":false});
+        let mut events = Vec::new();
+        begin(&mut peer, "unsupported-wire", &scope, bound)?;
+        assert_eq!(
+            response(&peer, "unsupported-wire", &mut events)?["error"]["data"]["status"],
+            "configuration_unavailable"
+        );
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn native_embedded_wire_is_available_without_an_editor_registry_override() -> TestResult {
+    for provider in ["openai", "openrouter"] {
+        let root = tempfile::tempdir()?;
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let headers = if provider == "openrouter" {
+            vec![
+                ("http-referer", "https://native-context.invalid/".to_owned()),
+                ("x-title", "kargu".to_owned()),
+                (
+                    "x-session-id",
+                    scope["session_id"]
+                        .as_str()
+                        .ok_or("native session")?
+                        .to_owned(),
+                ),
+            ]
+        } else {
+            Vec::new()
+        };
+        let (url, server, requests) = server_with_headers(vec![answer("embedded codec")], headers)?;
+        let mut bound = prompt(root.path(), &url);
+        publish_provider_registry(&mut peer, &scope, &mut bound, provider, json!([]))?;
+        if provider == "openrouter" {
+            bound["connection"]["auth"] = json!({"key":null,"session":"foreign-editor-session","app_url":"https://foreign-editor.invalid/",
+                "extra_headers":{"x-session-id":{"binding":"session"}}});
+            bound["connection"]["wire"] =
+                json!({"default-headers":{"HTTP-Referer":{"binding":"app-url"},"X-Title":"kargu"}});
+        }
+        let mut events = Vec::new();
+        begin(&mut peer, "embedded-wire", &scope, bound)?;
+        let reply = response(&peer, "embedded-wire", &mut events)?;
+        assert_eq!(
+            reply["result"]["status"], "completed",
+            "{provider}: {reply}"
+        );
+        assert_eq!(
+            requests.recv_timeout(Duration::from_secs(3))?["model"],
+            "captured-model"
+        );
+        server.join().map_err(|_| "server panic")??;
+    }
     Ok(())
 }
 

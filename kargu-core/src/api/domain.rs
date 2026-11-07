@@ -282,6 +282,7 @@ impl TryFrom<ChatConnectionInput> for ChatConnection {
     }
 }
 pub(crate) struct NativeRunPolicy<'a> {
+    pub prompt_caching: bool,
     pub model: crate::models::store::RunModelPolicy,
     pub wire: super::wire::WireSpec,
     pub provider_policy: Option<&'a str>,
@@ -308,6 +309,7 @@ impl ChatConnection {
             .tuning
             .bind_reasoning(policy.model.reasoning, policy.model.efforts.as_deref())?;
         input.stream &= policy.wire.supports_stream();
+        input.cache_markers = policy.prompt_caching && policy.wire.supports_cache_marker();
         input.wire = Some(policy.wire);
         input.try_into()
     }

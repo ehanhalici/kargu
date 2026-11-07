@@ -63,6 +63,9 @@ enum Binding {
     Session,
 }
 impl ProviderDefinition {
+    pub(crate) fn prompt_caching(&self) -> bool {
+        self.prompt_caching
+    }
     pub(crate) fn request_policy(&self) -> Option<&Value> {
         self.request.as_ref()
     }

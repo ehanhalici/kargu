@@ -109,18 +109,17 @@ impl WireCodec {
 }
 
 impl WireSpec {
+    pub(crate) fn supports_cache_marker(&self) -> bool {
+        self.cache_marker
+    }
     pub(crate) fn supports_stream(&self) -> bool {
         self.stream
     }
     pub(crate) fn native_capture(
-        source: Option<&str>,
+        source: &str,
         headers: crate::api::HeaderTemplates,
     ) -> Result<Self, ApiError> {
-        let mut wire: Self = source
-            .map(serde_json::from_str)
-            .transpose()
-            .map_err(|_| ApiError::InvalidRequest)?
-            .unwrap_or_default();
+        let mut wire: Self = serde_json::from_str(source).map_err(|_| ApiError::InvalidRequest)?;
         wire.headers.set_defaults(headers);
         Ok(wire)
     }

@@ -506,3 +506,19 @@ fn wire_and_tuning_publications_advance_revision_and_validate_at_boundary() -> T
     }
     Ok(())
 }
+
+#[test]
+fn prompt_caching_annotation_participates_in_native_publication_identity() -> TestResult {
+    let (mut host, scope) = host()?;
+    let mut captured = context();
+    captured["registry"] = json!([{"id":"custom","wire":"{}","prompt_caching":false}]);
+    let first = publish(&mut host, &scope, 1, "provider='custom'", captured.clone())?;
+    captured["registry"][0]["prompt_caching"] = json!(true);
+    let changed = publish(&mut host, &scope, 2, "provider='custom'", captured.clone())?;
+    assert_ne!(first["revision"], changed["revision"]);
+    assert_eq!(
+        publish(&mut host, &scope, 3, "provider='custom'", captured)?["revision"],
+        changed["revision"]
+    );
+    Ok(())
+}

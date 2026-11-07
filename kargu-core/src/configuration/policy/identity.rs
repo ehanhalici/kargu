@@ -70,6 +70,10 @@ impl SourceFingerprint {
             optional(&mut hash, entry.api.as_ref())?;
             optional(&mut hash, entry.wire.as_ref())?;
             optional(&mut hash, entry.tuning_policy.as_ref())?;
+            hash.update(match entry.prompt_caching {
+                Some(value) => [1, u8::from(value)],
+                None => [0, 0],
+            });
             hash.update(entry.headers.fingerprint().map_err(|_| CoreError::Limit)?);
             hash.update(
                 entry

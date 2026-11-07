@@ -157,7 +157,10 @@ policy; interop lookup has a separate native receipt corpus.  Return ARGUMENTS."
          (model (gethash "model" connection))
          (auth (gethash "auth" connection))
          (key (and (hash-table-p auth) (gethash "key" auth))))
-    (let ((kargu-application--bound application))
+    (let ((kargu-application--bound application)
+          (kargu-providers--table (copy-hash-table kargu-providers--table)))
+      (unless (kargu-provider-get provider)
+        (kargu-register-provider :id provider :api url :format 'openapi))
       (kargu-test-config-publish
        (kargu-config-service-context)
        (list :provider provider :providers (list (list provider :api url :model model

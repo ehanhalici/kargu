@@ -87,8 +87,18 @@ reasoning retains suppression of effort/budget. The captured typed policy remain
 fixed across physical retries, including later metadata publications. Explicit
 `off` also removes a retained thinking budget, so it cannot reintroduce reasoning
 control fields. Native frontend arguments carry explicit tuning preferences and a default-header guard,
-not full wire/provider-policy/supported-parameter metadata. Remaining work in
-5.4a3c2 covers unsupported/custom default policy and cache-marker ownership.
+not full wire/provider-policy/supported-parameter metadata or a cache-marker
+decision. A registry override must declare a usable wire; an absent wire is
+unsupported even for an otherwise embedded provider. With no registry override,
+native embedded wire and provider headers are used. An unknown custom provider
+cannot borrow a request codec; an explicit empty wire object may declare the
+default codec. Rejection precedes claims, credential lookup and provider IO.
+Native marker insertion requires both the published provider prompt-caching
+annotation and native wire cache-marker support. The annotation participates in
+config identity; request cache-marker flags cannot change the captured decision.
+Marker preparation changes only the owned HTTP body, preserving stored history.
+These model/wire receipt contracts close `todo.md` 5.4a3; context receipt under
+5.4a4 and the native context store remain separate requirements.
 
 Wire metadata travels only in commit context, not initial config staging.
 The editor deduplicates identical wire strings into `wire_formats` and sends
