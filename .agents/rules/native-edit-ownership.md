@@ -548,7 +548,7 @@ and checkdoc. Native Rust sources and their original-file IO ownership are uncha
 ## Receipt verification audit (2026-10-29)
 
 The receipt port is connected and reviewed, but task 3 remains incomplete.
-See [the requirement-by-requirement audit](task3-audit-2026-10-29.md).
+See [the requirement-by-requirement audit](../skills/audit-and-review/references/task3-audit-2026-10-29.md).
 `edit/receipt` accepts bounded per-file written/final observations and validates
 actual pinned disk state on a worker. Saved success requires native decoded disk
 text to match the final editor text, optional encoded hash integrity, an exact

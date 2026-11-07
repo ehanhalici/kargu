@@ -10,8 +10,8 @@ This skill defines the rigorous audit and evidence-gathering procedure for Kargu
 ## 1. Audit Principles
 
 1. **Evidence-Based Acceptance**: A task is never marked complete merely because code compiles or a unit test passes. Real editor cutover, behavioral parity, and contract adherence must be proven.
-2. **Sole Task Checklist**: Acceptance must align strictly with items in [todo.md](file:///home/emrehan/.emacs.local/kargu/todo.md).
-3. **Rust Pattern Compliance**: Verify adherence to [01_RUST_CORE_PATTERNS.md](../coding-standards/references/01_RUST_CORE_PATTERNS.md) and [.agents/skills/coding-standards/SKILL.md](file:///home/emrehan/.emacs.local/kargu/.agents/skills/coding-standards/SKILL.md) (no unwrap, no primitive obsession, typestate, bounded buffers).
+2. **Sole Task Checklist**: Acceptance must align strictly with items in [todo.md](../../../todo.md).
+3. **Rust Pattern Compliance**: Verify adherence to [01_RUST_CORE_PATTERNS.md](../coding-standards/references/01_RUST_CORE_PATTERNS.md) and [coding-standards](../coding-standards/SKILL.md) (no unwrap, no primitive obsession, typestate, bounded buffers).
 
 ---
 
@@ -35,5 +35,5 @@ This skill defines the rigorous audit and evidence-gathering procedure for Kargu
 ## 3. Historical Audit Records
 
 For historical audit evidence and precedents, see:
-- [.agents/skills/audit-and-review/references/task3-audit-2026-10-29.md](file:///home/emrehan/.emacs.local/kargu/.agents/skills/audit-and-review/references/task3-audit-2026-10-29.md)
-- [.agents/skills/audit-and-review/references/migration-review-2026-11-01.md](file:///home/emrehan/.emacs.local/kargu/.agents/skills/audit-and-review/references/migration-review-2026-11-01.md)
+- [task3-audit-2026-10-29.md](references/task3-audit-2026-10-29.md)
+- [migration-review-2026-11-01.md](references/migration-review-2026-11-01.md)

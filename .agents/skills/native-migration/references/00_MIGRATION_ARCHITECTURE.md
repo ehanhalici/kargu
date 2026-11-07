@@ -17,7 +17,7 @@ korunur**; yanına **Codex, Antigravity, Claude Code ve OpenCode** uygulama
 backend'leri eklenir. Kullanıcı aynı GUI **provider alanından** API sağlayıcısı
 veya kurulu uygulama seçer. Bunlar alternatif yürütme yollarıdır; uygulama
 desteği API'yi kaldırmaz. Kurulum/uygunluk ve dört-backend kabul koşullarının
-tek kaynağı [03_EXTERNAL_BRIDGES.md](03_EXTERNAL_BRIDGES.md) bölüm 0/6'dır.
+tek kaynağı [03_EXTERNAL_BRIDGES.md](../../external-bridges/references/03_EXTERNAL_BRIDGES.md) bölüm 0/6'dır.
 
 ## 1. Neden Rust, hangi sınırlarla?
 
@@ -45,7 +45,7 @@ taşınması ve kaldırılması gereken göç borcudur; nihai mimarinin istisnas
 Araç bileşimi ilkesi: listeleme/arama/Git motorlarını Rust'ta yeniden yazmak
 yerine `ls`/`rg`/`git` adapter'ları ortak süreç/izin altyapısını kullanır.
 Rust politika, sahiplik ve kaynak ömrünü yönetir. Güncel yön ve geçiş sırası:
-[17_UNIX_TOOL_COMPOSITION.md](17_UNIX_TOOL_COMPOSITION.md).
+[17_UNIX_TOOL_COMPOSITION.md](../../native-tools/references/17_UNIX_TOOL_COMPOSITION.md).
 
 | Katman | Sahip | Görev |
 | --- | --- | --- |
@@ -167,6 +167,6 @@ değişiklik gerekçesi, model/test eşlemesiyle ayrıca kaydedilir.
 
 Uygulama sırası: [04_PHASED_ROADMAP.md](04_PHASED_ROADMAP.md).
 İlk IPC dilimi mevcut Elisp motorundan bağımsızdı. Güncel ilk tool portu ve
-legacy kaldırma kanıtı: [15_NATIVE_FIND_FILES.md](15_NATIVE_FIND_FILES.md).
-İkinci canlı read portu: [16_NATIVE_DIRECTORY_LISTING.md](16_NATIVE_DIRECTORY_LISTING.md).
+legacy kaldırma kanıtı: [15_NATIVE_FIND_FILES.md](../../native-tools/references/15_NATIVE_FIND_FILES.md).
+İkinci canlı read portu: [16_NATIVE_DIRECTORY_LISTING.md](../../native-tools/references/16_NATIVE_DIRECTORY_LISTING.md).
 Agent run/provider/history ve diğer tool aileleri henüz Elisp'tedir.

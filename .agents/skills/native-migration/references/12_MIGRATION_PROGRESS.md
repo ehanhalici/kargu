@@ -72,7 +72,7 @@ foreground/counter aynaları silindi. Same-project/reused-session-label foreign
 chat ID isolation gerçek native testlidir. Legacy process helper yalnız diff
 Git-apply (todo 3), Dape context/preflight/source (todo 4), session listing worker
 (todo 7) için kalır; native tool fallback'i değildir. Ayrıntı ve tüm kabul/sınırlar:
-[58_NATIVE_TOOLS_COMPLETE.md](58_NATIVE_TOOLS_COMPLETE.md).
+[58_NATIVE_TOOLS_COMPLETE.md](../../native-tools/references/58_NATIVE_TOOLS_COMPLETE.md).
 
 Final **1271/1271 full source ERT**, 0 unexpected/skip, **163.740942 s**,
 **08:09:15 +0300**. **344 native + 24 compile-fail = 368** locked test / 36 suite;
@@ -102,7 +102,7 @@ root/session/settings/deadline ve newest-intent guard'ları eski metni yayınlat
 Passive catalog/list yalnız buffer/session last-completed observation okur;
 named load native'den yeniden okur. Eski Elisp scanner/parser/read/render ve
 TTL global cache silindi. Loop runtime autoload ile modül sınırlarını korur.
-Tool-free prompt skill rehberi içermez. Ayrıntı [57_NATIVE_SKILLS.md](57_NATIVE_SKILLS.md).
+Tool-free prompt skill rehberi içermez. Ayrıntı [57_NATIVE_SKILLS.md](../../native-tools/references/57_NATIVE_SKILLS.md).
 
 Final **1286/1286 source ERT**, 0 unexpected, **152.532591 s**, **02:40:09 +0300**;
 **324 native + 24 compile-fail = 348** locked test / 34 suite temiz. Locked build,
@@ -1447,7 +1447,7 @@ korundu. Küçük commit sırası:
    bağlandı; senkron Elisp scanner, entry classification ve display engine'i silindi.
 
 Detay ve eşdeğerlik/uyumluluk sınırı:
-[16_NATIVE_DIRECTORY_LISTING.md](16_NATIVE_DIRECTORY_LISTING.md).
+[16_NATIVE_DIRECTORY_LISTING.md](../../native-tools/references/16_NATIVE_DIRECTORY_LISTING.md).
 Tool şeması ve alias'ları korunur; Lisp entry point sonucu artık callback ile
 verir. Callback'siz çağrıyı bekleten bir sync bridge veya Elisp fallback yoktur.
 Glob/listing aynı task/owner/cancel adapter'ını ve dört-worker toplam kotasını
@@ -1510,7 +1510,7 @@ kullanıyor. Her tamamlanmış dilim doğrulandıktan sonra ayrı commit'lendi:
    eski fd/rg/Elisp glob engine'lerinin kaldırılması.
 
 Detay, bilinçli normalize edilen arama politikası, cancellation sınırı ve
-eski test -> yeni test eşlemesi: [15_NATIVE_FIND_FILES.md](15_NATIVE_FIND_FILES.md).
+eski test -> yeni test eşlemesi: [15_NATIVE_FIND_FILES.md](../../native-tools/references/15_NATIVE_FIND_FILES.md).
 Agent/provider/history motoru henüz Rust'a geçmiş sayılmaz. Shared read-service
 adapter identity, kullanıcı conversation'ı veya core agent run değildir.
 
@@ -1537,7 +1537,7 @@ Güncel 01_RUST_CORE_PATTERNS.md korunarak merkezi constants, doğrulanan domain
 tipleri, CoreError, ApplicationActor/RunScope, canonical tool registry,
 tek kullanımlık approval gate ve Linux process supervisor eklendi.
 Teknik kararlar, öğrenilenler, test/model eşlemesi ve kalan sınırlar
-[14_EXECUTION_FOUNDATIONS.md](14_EXECUTION_FOUNDATIONS.md) içinde kayıtlıdır.
+[14_EXECUTION_FOUNDATIONS.md](../../native-tools/references/14_EXECUTION_FOUNDATIONS.md) içinde kayıtlıdır.
 
 Önemli öğrenim: PGID'ye sinyal göndermek torunların reap edildiğini tek başına
 sağlamıyor. Linux subreaper + scoped wait eklendi; WNOWAIT ile son grup

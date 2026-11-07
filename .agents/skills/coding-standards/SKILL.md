@@ -14,9 +14,9 @@ This skill defines the non-negotiable coding and architecture standards for Karg
 - **No Duplicate State**: Never introduce parallel domain state stores, second decision engines, or shadow validation layers in Elisp.
 
 Related documents:
-- [.agents/rules/AGENTS.md](file:///home/emrehan/.emacs.local/kargu/.agents/AGENTS.md)
-- [.agents/rules/kodlama_standardi.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/kodlama_standardi.md)
-- [.agents/rules/architecture_principles.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/architecture_principles.md)
+- [AGENTS.md](../../AGENTS.md)
+- [kodlama_standardi.md](../../rules/kodlama_standardi.md)
+- [architecture_principles.md](../../rules/architecture_principles.md)
 - [01_RUST_CORE_PATTERNS.md](references/01_RUST_CORE_PATTERNS.md): Rust core architectural patterns and zero-panic invariants
 - [39_RUST_PATTERN_AUDIT.md](references/39_RUST_PATTERN_AUDIT.md): Rust pattern audit and compliance proof
 

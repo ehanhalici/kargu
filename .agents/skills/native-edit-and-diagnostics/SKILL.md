@@ -29,7 +29,7 @@ This skill details the architecture and operational invariants governing native 
 
 ### Invariants:
 1. **Connection Epoch & Service Lease**:
-   - Every edit preparation handle captures the physical connection epoch and session scope ([.agents/rules/native-edit-handle-epoch.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/native-edit-handle-epoch.md), [.agents/rules/native-service-close.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/native-service-close.md)).
+   - Every edit preparation handle captures the physical connection epoch and session scope ([native-edit-handle-epoch.md](../../rules/native-edit-handle-epoch.md), [native-service-close.md](../../rules/native-service-close.md)).
    - Rollback and consume operations require matching the captured service lease.
 2. **Atomic Writes & Rollback Snapshots**:
    - All file mutations preserve an undo snapshot prior to modification.
@@ -40,21 +40,21 @@ This skill details the architecture and operational invariants governing native 
 ## 2. LSP Diagnostics & Self-Healing
 
 1. **Typed Diagnostic Result Port**:
-   - Diagnostic captures consume a `DiagnosticSnapshot` observation bound to the exact document resource captured prior to issuance ([.agents/rules/native-diagnostic-port.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/native-diagnostic-port.md)).
+   - Diagnostic captures consume a `DiagnosticSnapshot` observation bound to the exact document resource captured prior to issuance ([native-diagnostic-port.md](../../rules/native-diagnostic-port.md)).
    - Freshness and formatting are owned by Rust; editor-provided raw text is never parsed for control flow.
 2. **Baseline Origin Compatibility**:
-   - Comparing diagnostic snapshots requires verifying they originated from the same live checkers and document revision ([.agents/rules/native-diagnostic-baseline-origin.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/native-diagnostic-baseline-origin.md)).
+   - Comparing diagnostic snapshots requires verifying they originated from the same live checkers and document revision ([native-diagnostic-baseline-origin.md](../../rules/native-diagnostic-baseline-origin.md)).
 3. **Freshness Receipts**:
-   - Verification consumes a non-deserializable, single-use ticket issued by Rust when the document is confirmed fresh and error-free ([.agents/rules/native-receipt-verification.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/native-receipt-verification.md)).
+   - Verification consumes a non-deserializable, single-use ticket issued by Rust when the document is confirmed fresh and error-free ([native-receipt-verification.md](../../rules/native-receipt-verification.md)).
 
 ---
 
 ## 3. Undo Verification & Ledger Retention
 
 1. **Identity Integrity**:
-   - Undoing an edit creates a new `edit_revision` and reopens verification debt ([.agents/rules/native-undo-verification.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/native-undo-verification.md)).
+   - Undoing an edit creates a new `edit_revision` and reopens verification debt ([native-undo-verification.md](../../rules/native-undo-verification.md)).
    - Consume requires the exact `(session, service, edit, revision, file, final-hash)` tuple.
 2. **Capacity Pressure Retention**:
-   - The Rust actor owns both undo snapshots and the changed-file ledger. Evicting an undo body under memory pressure must NEVER discard a file that still awaits verification ([.agents/rules/native-change-capacity.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/native-change-capacity.md)).
+   - The Rust actor owns both undo snapshots and the changed-file ledger. Evicting an undo body under memory pressure must NEVER discard a file that still awaits verification ([native-change-capacity.md](../../rules/native-change-capacity.md)).
 3. **Run Reset & Stop Behavior**:
-   - Initiating a subsequent run or issuing a Stop command preserves pending verification debt across sessions ([.agents/rules/native-run-reset-debt.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/native-run-reset-debt.md), [.agents/rules/native-stop-reset-acceptance.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/native-stop-reset-acceptance.md)).
+   - Initiating a subsequent run or issuing a Stop command preserves pending verification debt across sessions ([native-run-reset-debt.md](../../rules/native-run-reset-debt.md), [native-stop-reset-acceptance.md](../../rules/native-stop-reset-acceptance.md)).

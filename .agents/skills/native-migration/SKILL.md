@@ -9,10 +9,10 @@ This skill guides the incremental migration of Kargu from legacy Emacs Lisp doma
 
 ## 1. Governance & Source of Truth
 
-- **Task Checklist**: [todo.md](file:///home/emrehan/.emacs.local/kargu/todo.md) is the **only authoritative checklist** for migration tasks and acceptance criteria.
+- **Task Checklist**: [todo.md](../../../todo.md) is the **only authoritative checklist** for migration tasks and acceptance criteria.
 - **Architecture Masterplan**: Follow [00_MIGRATION_ARCHITECTURE.md](references/00_MIGRATION_ARCHITECTURE.md).
 - **Phased Roadmap**: Follow [04_PHASED_ROADMAP.md](references/04_PHASED_ROADMAP.md).
-- **Core Patterns**: Apply [.agents/skills/coding-standards/SKILL.md](file:///home/emrehan/.emacs.local/kargu/.agents/skills/coding-standards/SKILL.md) and [01_RUST_CORE_PATTERNS.md](../coding-standards/references/01_RUST_CORE_PATTERNS.md) to all Rust implementations.
+- **Core Patterns**: Apply [coding-standards](../coding-standards/SKILL.md) and [01_RUST_CORE_PATTERNS.md](../coding-standards/references/01_RUST_CORE_PATTERNS.md) to all Rust implementations.
 - **Progress & Baseline**: Consult [12_MIGRATION_PROGRESS.md](references/12_MIGRATION_PROGRESS.md) and [13_MIGRATION_BASELINE.json](references/13_MIGRATION_BASELINE.json).
 
 ---
@@ -21,7 +21,7 @@ This skill guides the incremental migration of Kargu from legacy Emacs Lisp doma
 
 ### Step 1: Scope & Contract Discovery
 1. Identify the task item in `todo.md`.
-2. Review existing contracts in [.agents/rules/architecture-contracts.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/architecture-contracts.md) and [.agents/rules/kargu-laws.md](file:///home/emrehan/.emacs.local/kargu/.agents/rules/kargu-laws.md).
+2. Review existing contracts in [architecture-contracts.md](../../rules/architecture-contracts.md) and [kargu-laws.md](../../rules/kargu-laws.md).
 3. Map legacy Elisp symbols to their intended Rust domain types.
 
 ### Step 2: Implement Domain Core in Rust
