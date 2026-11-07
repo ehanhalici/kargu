@@ -624,6 +624,33 @@ impl Host {
         )
     }
 
+    /// Read model policy from this application's actual store, never the request DTO.
+    pub(crate) fn run_model_policy(
+        &self,
+        scope: &ReadScope,
+        target: &crate::configuration::policy::RunTarget,
+    ) -> Result<(bool, Option<Vec<String>>), crate::error::CoreError> {
+        let actor = self
+            .applications
+            .get(&scope.application_id)
+            .filter(|app| app.is_live())
+            .ok_or(crate::error::CoreError::StaleOwner)?
+            .actor();
+        let provider = crate::providers::ApiProviderId::try_from(target.provider.clone())?;
+        let model = crate::api::ModelId::try_from(
+            target
+                .model
+                .clone()
+                .ok_or(crate::error::CoreError::Unavailable)?,
+        )
+        .map_err(|_| crate::error::CoreError::Unavailable)?;
+        actor
+            .models
+            .store()
+            .run_policy(&provider, &model)
+            .map_err(|_| crate::error::CoreError::Unavailable)
+    }
+
     /// Capture the application's native metadata publication before preparation IO.
     pub(crate) fn model_revision(
         &self,

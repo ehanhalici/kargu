@@ -130,6 +130,7 @@ pub(crate) struct RunTarget {
     pub(crate) provider: String,
     pub(crate) model: Option<String>,
     pub(crate) endpoint: Option<String>,
+    pub(crate) model_parameters: Option<Vec<String>>,
     profile: resolve::ReadyProfile,
     app_url: Option<crate::configuration::domain::ConfigText>,
     headers: crate::api::HeaderTemplates,
@@ -150,6 +151,7 @@ impl RunTarget {
             session,
             self.app_url.as_ref().map(|value| value.as_str()),
             self.profile.native_key(interop)?,
+            self.model_parameters.clone(),
         )
         .map_err(|_| CoreError::InvalidValue {
             field: "NativeConnection",
@@ -219,6 +221,7 @@ impl ConfigurationService {
         )?;
         let (provider, model, endpoint) = target.identity();
         Ok(RunTarget {
+            model_parameters: None,
             provider: provider.as_str().to_owned(),
             model: model.filter(|model| !model.is_empty()).map(str::to_owned),
             endpoint: endpoint.map(str::to_owned),

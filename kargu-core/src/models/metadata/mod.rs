@@ -235,6 +235,15 @@ impl ModelFields {
     pub fn input_is_zero(&self) -> bool {
         self.input_cost.known().is_some_and(InputTokenRate::is_zero)
     }
+    /// Exact declared request parameters; absent/invalid observations stay unknown.
+    pub(crate) fn request_parameters(&self) -> Option<Vec<String>> {
+        self.supported_parameters.known().map(|values| {
+            values
+                .iter()
+                .map(|value| value.as_str().to_owned())
+                .collect()
+        })
+    }
     /// Missing parameter metadata is unknown, not an explicit tool prohibition.
     pub fn allows_tools(&self) -> bool {
         self.supports_tools != Field::Known(false)

@@ -2709,6 +2709,26 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
             tools, stream, supported-parameters ve tuning capture'ını yetki sayma;
             bunları actual native model projection ve explicit user intent'ten
             kur. Wire/auth bacağı 5.4a3c ile birlikte gerçek consumer'a bağlansın.
+            - [x] **5.4a3b2a Native tools ve supported-parameters:** admission
+              actual application model store'dan tool izni ve exact-ID parameter
+              listesini yakalar. Editörün tools isteği native yasakları aşamaz;
+              typed run connection tuning listesi native değerle değiştirilir.
+              Bilinmeyen/alias modelde request parameter bilgisi uydurulmaz;
+              alias tool izni ve native refusal uygulanır. Explicit kullanıcı
+              temperature/output isteği mevcut Rust tuning politikasında kalır.
+              Standalone API/catalog capture yoluna bu override uygulanmaz.
+              Gerçek HTTP corpus'u aynı revision'da sahte tools/parameter
+              listesini dener: native tool yasağı korunur, temperature yalnız
+              native destek varsa gövdeye girer, explicit output limiti korunur.
+              **Doğrulama:** locked Rust 626/626 (32 compile-fail dahil), native
+              IPC 51/51, tam source ERT 1469/1469; strict Clippy, fmt ve build
+              temiz. Loglar `/tmp/kargu-native-model-policy-{accepted,all,ert}.log`.
+              Elisp/TLA+ değişmedi; TLC çalıştırılmadı.
+            - [ ] **5.4a3b2b Stream/reasoning ve provider tuning policy:** stream
+              yeteneğini native wire politikasına, effort/budget kabulünü native
+              model projection'ına bağla; editörün `provider_policy` override'ını
+              committed format/provider politikasından kur. 5.4a3c ile birlikte
+              frontend domain capture'ını kaldır ve karma kabulü tamamla.
         - [ ] **5.4a3c Native wire/auth policy:** registry format/wire/auth
           türünü native publication'a dahil et; typed connection'ı committed
           politikadan kur, editörün wire/auth türü yetki olmasın. Custom provider

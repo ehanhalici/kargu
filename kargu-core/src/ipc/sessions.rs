@@ -357,8 +357,8 @@ impl Sessions {
         if !host.owns_read_scope(&request.scope) {
             return Err(fault(CoreError::StaleOwner));
         }
-        let input = request.arguments;
-        let target = host
+        let mut input = request.arguments;
+        let mut target = host
             .prompt_target(&request.scope, input.config_revision)
             .map_err(fault)?;
         input.connection.verify(&target).map_err(fault)?;
@@ -369,6 +369,11 @@ impl Sessions {
         if input.model_revision != model_revision {
             return Err(fault(CoreError::ConfigurationChanged));
         }
+        let (tools, parameters) = host
+            .run_model_policy(&request.scope, &target)
+            .map_err(fault)?;
+        input.tools_enabled &= tools;
+        target.model_parameters = parameters;
         let claim = host
             .actor_mut(&request.scope)
             .map_err(fault)?

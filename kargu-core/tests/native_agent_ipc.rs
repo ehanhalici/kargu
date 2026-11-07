@@ -523,6 +523,75 @@ fn continuation_keeps_the_same_native_run_and_external_api_cannot_borrow_its_bud
 }
 
 #[test]
+fn native_model_policy_overrides_editor_tools_and_parameter_claims() -> TestResult {
+    for temperature in [false, true] {
+        let root = tempfile::tempdir()?;
+        let (url, server, requests) = server(vec![answer("native policy")])?;
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let mut bound = prompt(root.path(), &url);
+        publish_target(&mut peer, &scope, &mut bound)?;
+        let model = bound["connection"]["model"].clone();
+        let mut events = Vec::new();
+        send(
+            &mut peer,
+            "policy-begin",
+            "models/begin",
+            json!({"scope":scope,
+            "arguments":{"provider":"fixture","revision":0}}),
+        )?;
+        let upload = response(&peer, "policy-begin", &mut events)?["result"]["upload_id"].clone();
+        assert!(upload.is_string());
+        let parameters = if temperature {
+            json!(["temperature", "max_tokens"])
+        } else {
+            json!(["max_tokens"])
+        };
+        send(
+            &mut peer,
+            "policy-append",
+            "models/append",
+            json!({"scope":scope,
+            "arguments":{"upload_id":upload,"offset":0,"chunk":json!({"operation":"put",
+                "model":model,"metadata":{"supports_tools":false,"supported_parameters":parameters}}).to_string()}}),
+        )?;
+        assert!(
+            response(&peer, "policy-append", &mut events)?
+                .get("error")
+                .is_none()
+        );
+        send(
+            &mut peer,
+            "policy-commit",
+            "models/commit",
+            json!({"scope":scope,
+            "arguments":{"upload_id":upload}}),
+        )?;
+        assert_eq!(
+            response(&peer, "policy-commit", &mut events)?["result"]["revision"],
+            1
+        );
+        bound["model_revision"] = json!(1);
+        bound["tools_enabled"] = json!(true);
+        bound["connection"]["tuning"] = json!({"temperature":0.6,"max_tokens":8,
+            "supported_parameters":if temperature {json!(["max_tokens","tools"])} else {json!(["temperature","tools"])}});
+        begin(&mut peer, "native-policy", &scope, bound)?;
+        assert_eq!(
+            response(&peer, "native-policy", &mut events)?["result"]["status"],
+            "completed"
+        );
+        let body = requests.recv_timeout(Duration::from_secs(2))?;
+        assert!(body.get("tools").is_none());
+        assert!(body.get("tool_choice").is_none());
+        assert_eq!(body.get("temperature").is_some(), temperature);
+        assert_eq!(body["max_tokens"], 8);
+        server.join().map_err(|_| "server panic")??;
+    }
+    Ok(())
+}
+
+#[test]
 fn committed_custom_header_templates_are_accepted() -> TestResult {
     let root = tempfile::tempdir()?;
     let mut peer = Peer::start()?;

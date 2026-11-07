@@ -42,6 +42,20 @@ impl<'a> Defaults<'a> {
 }
 
 impl RequestTuning {
+    /// Native run metadata replaces the editor's supported-parameter assertion.
+    pub(crate) fn bind_model_parameters(
+        &mut self,
+        values: Option<Vec<String>>,
+    ) -> Result<(), ApiError> {
+        self.supported_parameters = values
+            .map(|values| {
+                let value = serde_json::to_value(values).map_err(|_| ApiError::InvalidRequest)?;
+                serde_json::from_value(value).map_err(|_| ApiError::InvalidRequest)
+            })
+            .transpose()?;
+        Ok(())
+    }
+
     /// Resolve one output field and declared sampling, then merge explicit extras.
     pub fn apply(
         &self,

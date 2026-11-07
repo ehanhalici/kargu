@@ -276,6 +276,34 @@ impl ModelStore {
         }
         results
     }
+    /// Capture request capabilities from the actual publication, with exact-only parameters.
+    pub(crate) fn run_policy(
+        &self,
+        provider: &ApiProviderId,
+        model: &ModelId,
+    ) -> Result<(bool, Option<Vec<String>>), StoreError> {
+        let Some(p) = self.providers.get(provider) else {
+            return Ok((true, None));
+        };
+        let canonical = alias(&p.entries, model).ok();
+        let fields = canonical
+            .and_then(|id| p.entries.get(id))
+            .map(|entry| {
+                entry
+                    .effective()
+                    .map(|raw| ModelFields::from_raw(&raw, &p.specs))
+            })
+            .transpose()?;
+        let tools = fields.as_ref().is_none_or(ModelFields::allows_tools)
+            && !p.refused.contains(model)
+            && canonical.is_none_or(|id| !p.refused.contains(id));
+        let parameters = if p.entries.contains_key(model) {
+            fields.as_ref().and_then(ModelFields::request_parameters)
+        } else {
+            None
+        };
+        Ok((tools, parameters))
+    }
     /// Return a specific model summary for a provider.
     pub fn provider_model(
         &self,

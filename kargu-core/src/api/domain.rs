@@ -288,12 +288,14 @@ impl ChatConnection {
         session: &crate::domain::SessionId,
         app_url: Option<&str>,
         native_key: Option<SecretString>,
+        model_parameters: Option<Vec<String>>,
     ) -> Result<Self, ApiError> {
         let mut input: ChatConnectionInput =
             serde_json::from_str(source).map_err(|_| ApiError::InvalidRequest)?;
         let auth = input.auth.get_or_insert_with(Default::default);
         auth.set_native_key(native_key);
         auth.bind_run(session, app_url)?;
+        input.tuning.bind_model_parameters(model_parameters)?;
         input.try_into()
     }
     /// Prepare only from the actual native model ticket, on a bounded worker.

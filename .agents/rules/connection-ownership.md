@@ -63,6 +63,14 @@ application's model head before acquiring a claim. Omission means revision zero,
 never the current head after publication. This prevents a stale preparation from
 silently adopting newer metadata; matching the revision alone does not authorize
 editor-supplied capabilities or tuning content.
+For native runs, admission now captures tool permission and supported parameters
+from that application's model store. Native refusal/disabled tools cannot be
+enabled by the editor. Request parameters come only from an exact model record;
+short aliases may resolve tool capability but cannot lend request parameters.
+The typed connection replaces the editor's supported-parameter assertion before
+applying explicit temperature/output preferences. Standalone API/catalog request
+captures retain their separate contracts. Stream/reasoning and provider tuning
+defaults still require the native wire/provider cutover in 5.4a3b2b/c.
 Direct/env keys come from the native profile, keyless supplies no key, and only
 a matching interop receipt supplies the interop key; raw editor key capture is
 not the HTTP credential source. A direct key echo guard remains until the
