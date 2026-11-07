@@ -1989,7 +1989,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kutuyu kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya
       sahipliğini atamaya ekle.
 
-    - [ ] **4.8a Editor snapshot portu:** file/buff/line target'larını captured
+    - [x] **4.8a Editor snapshot portu:** file/buff/line target'larını captured
       buffer UUID/tick/coding/narrowing ve RAM içeriğiyle ver; editor buffer seçimi
       yalnız verilen handle'ı çözsün. İçerik/path seçim politikasını Rust versin.
 
@@ -2005,6 +2005,25 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Bitti sayılması için:** Unsaved/new/narrowed buffer disk metniyle değiştirilmez;
         await sırasında tick/buffer değişirse stale, başka buffer içeriğiyle başarı yok.
+
+      **Teslim (2026-11-08):** Prompt'taki dosya (`legacy_path`/`file`) ve satır
+        aralığı (`line_range`) mention'ları artık yeni bir okuyucu yerine ortak
+        `kargu-file-read-async` portundan okunur: canlı buffer RAM snapshot'ı +
+        `buffer-chars-modified-tick`, yoksa Rust disk capture'ı; kök sınırı,
+        decoding, numaralama ve excerpt penceresi Rust'tadır, okuma sırasında
+        buffer açılırsa disk sonucu yeniden okunur, tick değişirse sonuç stale
+        reddidir. `chat/attach.el`'deki dosya `insert-file-contents`, Elisp
+        numaralama ve 150 satır referans politikası silindi; tam dosya için
+        kullanıcı tercihi `kargu-chat-attach-max-lines` yalnız pencere limiti
+        olarak Rust'a gider, ret nedenleri payload'sız gösterilir.
+        `@buff:` adlı buffer hedefi dosyasız kaynak olduğu için grant
+        sözleşmesiyle 4.8c'ye aittir; sembol mention'ları hâlâ Elisp çıkarıcıyı
+        kullanır (4.4b/4.4e).
+        **Kanıt:** ERT `kargu-attach-unsaved-buffer-and-line-range-come-from-native-reads-test`
+        (RAM metni diski yener, `@line:` yalnız penceresini okur, Elisp disk
+        okuması yok) ve güncellenen uzun/eksik dosya testleri; tam ERT
+        1475/1475, bridge 40/40; değişen Elisp Werror/checkdoc temiz. Rust
+        değişmedi.
 
       **Doğrulama başlangıcı:** Rust file_reads, search, git_reads; ERT
         test-native-file, test-attach, test-file-window, test-fs.
@@ -2026,6 +2045,10 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Bitti sayılması için:** Symlink dışına çıkılmaz; partial page'nin missing kaydı
         temiz sonuç sayılmaz; folder/Git target'ı Elisp recursive directory/git process
         başlatmaz.
+
+      **İlerleme (2026-11-08):** disk/file hedefi 4.8a teslimiyle native read
+        worker'ına bağlandı. Folder (`@folder:`), `@git:diff`/`@git:staged` hedefleri
+        ve paging cursor'ı hâlâ açık; şu an attach bunları sessizce yok sayar.
 
       **Doğrulama başlangıcı:** Rust file_reads, search, git_reads; ERT
         test-native-file, test-attach, test-file-window, test-fs.

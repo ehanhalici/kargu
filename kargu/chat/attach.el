@@ -6,10 +6,11 @@
 
 ;;; Commentary:
 
-;; Rust's lexer finds `@' mentions; their file and symbol spans become one
-;; `insert-file-contents' and a Read-tool transcript (or a compact reference).
+;; Rust's lexer finds `@' mentions.  File and line mentions are read and
+;; rendered by Rust through the shared native read port (live buffers from
+;; RAM); symbol mentions still use the Elisp extractor (todo 4.4).
 ;; Requires: `kargu/core', `kargu/tools/diff'.
-;; Public internal: `kargu-chat--expand-prompt' (async), `kargu-chat--expand-mentions'.
+;; Public internal: `kargu-chat--expand-prompt' (async).
 
 ;;; Code:
 
@@ -20,6 +21,7 @@
 (require 'kargu/core)
 (require 'kargu/permission)
 (require 'kargu/files)
+(require 'kargu/files/async)
 (require 'kargu/bridge/mentions)
 
 (defvar kargu-chat-attach-max-lines 150)
@@ -56,13 +58,6 @@
   (format "Called the Read tool with %s"
           (json-encode `(("file_path" . ,abs)))))
 
-(defun kargu-chat--reference-block (abs)
-  "Compact `@' attachment that points at ABS without inlining it."
-  (format
-   "%s\n<referenced_file path=\"%s\">\n  (File is long. Use the `read_file' tool to inspect specific lines as needed.)\n</referenced_file>\n"
-   (kargu-chat--called-read abs)
-   abs))
-
 (defun kargu-chat--dump-buffer-lines (&optional from to)
   "Return lines of current buffer from 1-based FROM to TO with line numbers.
 If FROM or TO is nil, processes entire buffer."
@@ -83,10 +78,6 @@ If FROM or TO is nil, processes entire buffer."
                   (<= (point) pos))
           (goto-char (point-max)))))
     (string-join (nreverse lines) "\n")))
-
-(defun kargu-chat--dump-buffer-numbered ()
-  "Numbered dump of the current buffer; `forward-line' always progresses."
-  (kargu-chat--dump-buffer-lines))
 
 (defun kargu-chat--dump-lines (abs from to)
   "Return lines FROM to TO of file ABS formatted with line numbers."
@@ -209,40 +200,11 @@ If FROM or TO is nil, processes entire buffer."
                     (kargu-chat--called-read abs)
                     abs sym-part from to dump))))))))
 
-(cl-defun kargu-chat--attach-block
-    (mention cap &key (roots (kargu-chat--completion-roots)))
-  "Attachment for MENTION as a synthetic `read_file' transcript.
-The file is read at most once.  Files longer than
-`kargu-chat-attach-max-lines' (or larger than CAP) are
-referenced rather than inlined.  Resolve paths under ROOTS."
-  (let ((abs (kargu-chat--resolve-mention-file mention :roots roots)))
-    (cond
-     ((null abs)
-      (format "<code_selection path=\"%s\">\n(not found)\n</code_selection>\n"
-              mention))
-     ((not (file-readable-p abs))
-      (format "<code_selection path=\"%s\">\n(not readable)\n</code_selection>\n"
-              mention))
-     (t
-      (let* ((attrs (file-attributes abs))
-             (size (and attrs (file-attribute-size attrs)))
-             (max-lines (or kargu-chat-attach-max-lines 150)))
-        (if (and size cap (> size cap))
-            (kargu-chat--reference-block abs)
-          (with-temp-buffer
-            (insert-file-contents abs)
-            (let ((nlines (count-lines (point-min) (point-max))))
-              (if (> nlines max-lines)
-                  (kargu-chat--reference-block abs)
-                (format "%s\n(file %s, lines 1-%d of %d)\n%s\n"
-                        (kargu-chat--called-read abs)
-                        abs nlines nlines
-                        (kargu-chat--dump-buffer-numbered)))))))))))
-
 (defun kargu-chat--span-mentions (spans)
   "Return SPANS' distinct file and symbol mentions as (FILES . SYMBOLS).
-SPANS are native lexer DTOs; each mention is a path or `path::symbol' string
-in prompt order.  Other native target kinds are resolved elsewhere."
+SPANS are native lexer DTOs.  A whole-file mention is its path string and a
+line-range mention is (PATH FROM . TO); a symbol mention is `path::symbol'.
+Other native target kinds are resolved elsewhere."
   (let (files symbols)
     (mapc (lambda (span)
             (let* ((target (gethash "target" span))
@@ -250,6 +212,10 @@ in prompt order.  Other native target kinds are resolved elsewhere."
               (pcase (and (hash-table-p target) (gethash "type" target))
                 ((or "legacy_path" "file")
                  (when (stringp path) (cl-pushnew path files :test #'equal)))
+                ("line_range"
+                 (let ((from (gethash "start" target)) (to (gethash "end" target)))
+                   (when (and (stringp path) (natnump from) (natnump to))
+                     (cl-pushnew (cons path (cons from to)) files :test #'equal))))
                 ("legacy_file_symbol"
                  (let ((symbol (gethash "symbol" target)))
                    (when (and (stringp path) (stringp symbol))
@@ -257,40 +223,73 @@ in prompt order.  Other native target kinds are resolved elsewhere."
           spans)
     (cons (nreverse files) (nreverse symbols))))
 
-(defun kargu-chat--expand-mentions (prompt spans)
+(defun kargu-chat--file-block (mention text)
+  "Render file MENTION's native read TEXT as a synthetic Read transcript.
+A native refusal keeps its payload-free reason and attaches no content."
+  (let ((path (if (consp mention) (car mention) mention)))
+    (if (string-prefix-p "ERROR: " text)
+        (format "<code_selection path=\"%s\">\n(%s)\n</code_selection>\n"
+                path (substring text (length "ERROR: ")))
+      (format "%s\n%s\n" (kargu-chat--called-read path) text))))
+
+(defun kargu-chat--file-window (mention)
+  "Return the line window Rust should read for file MENTION.
+Whole files are limited to `kargu-chat-attach-max-lines'; Rust renders and
+reports the excerpt bounds."
+  (if (consp mention)
+      (kargu-file-window-create :from (cadr mention) :to (cddr mention))
+    (kargu-file-window-create :limit (max 1 (or kargu-chat-attach-max-lines 150)))))
+
+(defun kargu-chat--read-file-mentions (files callback)
+  "Read FILES in order through the native read port; CALLBACK gets the blocks.
+Live unsaved buffers are read from RAM by the shared port; disk, decoding,
+root confinement and excerpts are Rust's.  No Elisp file read happens here."
+  (let ((blocks nil) (pending files))
+    (cl-labels
+        ((next ()
+           (if (null pending)
+               (funcall callback (apply #'concat (nreverse blocks)))
+             (let ((mention (pop pending)))
+               (kargu-file-read-async
+                (if (consp mention) (car mention) mention)
+                (kargu-chat--file-window mention)
+                (lambda (text)
+                  (push (kargu-chat--file-block mention text) blocks)
+                  (next)))))))
+      (next))))
+
+(defun kargu-chat--expand-mentions (prompt spans callback)
   "Wrap PROMPT as `<user_query>' plus attachments for native SPANS.
-`@file::symbol' mentions attach the symbol definition with line numbers.
-Short file mentions become a synthetic Read transcript.  Longer files
-stay a compact reference.  The chat buffer still shows the unwrapped prompt."
+CALLBACK receives the text.  `@file::symbol' mentions attach the symbol
+definition with line numbers; file and line mentions attach Rust-rendered
+excerpts.  The chat buffer still shows the unwrapped prompt."
   (let* ((mentions (kargu-chat--span-mentions spans))
          (file-mentions (car mentions))
          (sym-mentions (cdr mentions))
-         (cap kargu-diff-read-max-chars)
          (query (format "<user_query>\n%s\n</user_query>" prompt)))
     (if (and (null sym-mentions) (null file-mentions))
-        query
-      (let ((roots (kargu-chat--completion-roots)))
-        (concat query "\n\n<attached_files>\n"
-                (mapconcat (lambda (m)
-                             (kargu-chat--attach-symbol-block m :roots roots))
-                           sym-mentions "")
-                (mapconcat (lambda (m)
-                             (kargu-chat--attach-block m cap :roots roots))
-                           file-mentions "")
-                "</attached_files>\n")))))
+        (funcall callback query)
+      (let* ((roots (kargu-chat--completion-roots))
+             (symbols (mapconcat (lambda (m) (kargu-chat--attach-symbol-block m :roots roots))
+                                 sym-mentions "")))
+        (kargu-chat--read-file-mentions
+         file-mentions
+         (lambda (files)
+           (funcall callback (concat query "\n\n<attached_files>\n" symbols files
+                                     "</attached_files>\n"))))))))
 
 (cl-defun kargu-chat--expand-prompt (prompt callback &key parent valid-p)
   "Expand PROMPT for the model, then call CALLBACK with (TEXT FAILURE).
 Rust's lexer decides which spans are mentions; a prompt without `@' needs no
 parse.  PARENT and VALID-P bound the native parse task."
   (if (not (string-search "@" prompt))
-      (funcall callback (kargu-chat--expand-mentions prompt []) nil)
+      (kargu-chat--expand-mentions prompt [] (lambda (text) (funcall callback text nil)))
     (kargu-bridge-mentions-parse
      prompt
      (lambda (spans failure)
        (if failure
            (funcall callback nil failure)
-         (funcall callback (kargu-chat--expand-mentions prompt spans) nil)))
+         (kargu-chat--expand-mentions prompt spans (lambda (text) (funcall callback text nil)))))
      :parent parent :valid-p valid-p)))
 
 (provide 'kargu/chat/attach)

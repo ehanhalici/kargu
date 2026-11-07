@@ -93,13 +93,17 @@
    (list (cons "big.txt" (mapconcat #'number-to-string (number-sequence 1 400) "\n")))
    (let ((kargu-chat-attach-max-lines 50))
      (let ((out (kargu-attach-test--expand "read @big.txt")))
-       (should (string-search "<referenced_file" out))
-       (should-not (string-search "\n399\n" out))))))
+       ;; Rust renders a bounded excerpt and reports its window.
+       (should (string-search "(file big.txt, lines 1-50 of" out))
+       (should (string-search "50 | 50" out))
+       (should-not (string-search "51 | 51" out))))))
 
 (ert-deftest kargu-attach-missing-file-says-not-found-test ()
   "An unknown mention is reported, not silently dropped."
   (kargu-attach-test--with-project '(("a.txt" . "x\n"))
-                                   (should (string-search "(not found)" (kargu-attach-test--expand "see @nope.txt")))))
+                                   (let ((out (kargu-attach-test--expand "see @nope.txt")))
+                                     (should (string-search "<code_selection path=\"nope.txt\">" out))
+                                     (should-not (string-search "Called the Read tool" out)))))
 
 (ert-deftest kargu-attach-refuses-paths-outside-the-project-test ()
   "A mention that climbs out of the project is not attached."
@@ -173,8 +177,28 @@
                      "@a.el @b.txt @a.el::target @missing.txt")))
            (should (string-search "second file" out))
            (should (string-search "symbol target" out))
-           (should (string-search "(not found)" out))
+           (should (string-search "<code_selection path=\"missing.txt\">" out))
            (should (= calls (1+ n)))))))))
+
+(ert-deftest kargu-attach-unsaved-buffer-and-line-range-come-from-native-reads-test ()
+  "Live unsaved text wins over disk, and a line mention reads only its window."
+  (kargu-attach-test--with-project
+   '(("a.txt" . "disk one\ndisk two\n") ("lines.txt" . "l1\nl2\nl3\nl4\n"))
+   (let ((buffer (find-file-noselect (expand-file-name "a.txt" root))))
+     (unwind-protect
+         (progn
+           (with-current-buffer buffer
+             (erase-buffer) (insert "ram one\nram two\n"))
+           (cl-letf (((symbol-function 'insert-file-contents)
+                      (lambda (&rest _) (ert-fail "Attachment read the disk in Elisp"))))
+             (let ((out (kargu-attach-test--expand "@a.txt and @line:lines.txt:2-3")))
+               (should (string-search "ram two" out))
+               (should-not (string-search "disk one" out))
+               (should (string-search "2 | l2" out))
+               (should (string-search "3 | l3" out))
+               (should-not (string-search "4 | l4" out)))))
+       (with-current-buffer buffer (set-buffer-modified-p nil))
+       (kill-buffer buffer)))))
 
 (provide 'tests/test-attach)
 ;;; test-attach.el ends here
