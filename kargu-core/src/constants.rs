@@ -2,6 +2,10 @@
 
 /// Resource limits used by admission, transport and process supervision.
 pub mod limits {
+    /// Maximum UTF-8 source for the pure mention parse port.
+    pub const MENTION_SOURCE_BYTES: usize = 64 * 1024;
+    /// Maximum complete mention result; overflow never returns a prefix.
+    pub const MENTION_TARGETS: usize = 256;
     /// Stored protocol messages in one conversation, including reserved tool results.
     pub const HISTORY_MESSAGES: usize = 4096;
     /// Serialized message bytes in one conversation, including repair reservations.
@@ -397,6 +401,8 @@ pub mod protocol {
         pub const EDIT_CLOSE: &str = "edit/close";
         /// Readonly epoch-bound parsing of one captured configuration source.
         pub const CONFIGURATION_PARSE: &str = "configuration/parse";
+        /// Pure bounded mention parsing, with no source/egress authority.
+        pub const MENTIONS_PARSE: &str = "mentions/parse";
         /// Bounded readonly editor config file capture and parsing.
         pub const CONFIGURATION_READ: &str = "configuration/read";
         /// Natively ordered config discovery, read, parse and staging for one session.

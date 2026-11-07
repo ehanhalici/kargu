@@ -456,7 +456,7 @@
           (kargu-chat-input-history nil)
           (kargu--loop-run nil))
       (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
-                ((symbol-function 'kargu-chat--expand-prompt) #'identity)
+                ((symbol-function 'kargu-chat--expand-prompt) (lambda (prompt callback &rest _) (funcall callback prompt nil)))
                 ((symbol-function 'kargu-loop-send)
                  (lambda (&rest _) (user-error "Late refusal"))))
         (should-error (kargu-chat--send-input) :type 'user-error))
@@ -468,7 +468,7 @@
       (should-not (kargu-loop-running-p)))))
 
 (ert-deftest kargu-chat-expansion-failure-keeps-input-test ()
-  "Attachment expansion failure happens before draft or transcript mutation."
+  "A failed native mention parse sends nothing and mutates no draft or transcript."
   (with-temp-buffer
     (kargu-chat-mode)
     (setf (kargu-selection-provider) "p"
@@ -478,8 +478,9 @@
     (let ((before (buffer-string)))
       (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
                 ((symbol-function 'kargu-chat--expand-prompt)
-                 (lambda (_) (error "Unreadable attachment"))))
-        (should-error (kargu-chat--send-input)))
+                 (lambda (_prompt callback &rest _) (funcall callback nil "Unreadable attachment")))
+                ((symbol-function 'kargu-loop-send) (lambda (&rest _) (ert-fail "Sent after a failed parse"))))
+        (kargu-chat--send-input))
       (should (equal-including-properties (buffer-string) before))
       (should (kargu-chat--prompt-live-p)))))
 
@@ -499,7 +500,7 @@
           (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
                     ((symbol-function 'kargu-chat-show) (lambda () chat))
                     ((symbol-function 'kargu-chat--buffer) (lambda (&rest _) chat))
-                    ((symbol-function 'kargu-chat--expand-prompt) #'identity)
+                    ((symbol-function 'kargu-chat--expand-prompt) (lambda (prompt callback &rest _) (funcall callback prompt nil)))
                     ((symbol-function 'kargu-loop-send)
                      (lambda (prompt _delta finish)
                        (setq sent prompt callback finish)

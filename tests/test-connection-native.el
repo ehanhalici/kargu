@@ -74,7 +74,7 @@
      (kargu-chat--ensure-idle-prompt)
      (insert "preserve this draft")
      (let ((reports 0))
-       (cl-letf (((symbol-function 'kargu-chat--expand-prompt) #'identity)
+       (cl-letf (((symbol-function 'kargu-chat--expand-prompt) (lambda (prompt callback &rest _) (funcall callback prompt nil)))
                  ((symbol-function 'kargu-transport-request) (lambda (&rest _) (ert-fail "Unexpected POST"))))
          (kargu-test-await
           (lambda (done)

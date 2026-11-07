@@ -6,6 +6,7 @@
 pub mod coordinates;
 pub mod debugger;
 pub mod diagnostics;
+pub(crate) mod mention_rpc;
 pub mod mentions;
 pub mod symbols;
 pub mod types;

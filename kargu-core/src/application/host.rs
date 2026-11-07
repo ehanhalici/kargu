@@ -1056,6 +1056,13 @@ impl Host {
             methods::PROVIDER_LIST => self.provider_list(params),
             methods::MODEL_LIST => self.model_list(params),
             methods::CONFIGURATION_PARSE => self.configuration_parse(params),
+            methods::MENTIONS_PARSE => {
+                let request = crate::sensors::mention_rpc::ParseRequest::decode(params)?;
+                if !self.matches_epoch(request.epoch()) {
+                    return Err(owner_fault());
+                }
+                request.page(response_limit)
+            }
             methods::APPLICATION_CREATE => {
                 if !empty_params(&params) {
                     return Err(Fault::params());

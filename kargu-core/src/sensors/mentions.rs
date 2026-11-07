@@ -196,6 +196,14 @@ impl<'a> MentionLexer<'a> {
 
     /// Parse all valid mentions in prompt text.
     pub fn parse(&self) -> Vec<MentionSpan> {
+        self.parse_inner(None).unwrap_or_default()
+    }
+
+    pub(crate) fn parse_bounded(&self) -> Option<Vec<MentionSpan>> {
+        self.parse_inner(Some(crate::constants::limits::MENTION_TARGETS))
+    }
+
+    fn parse_inner(&self, maximum: Option<usize>) -> Option<Vec<MentionSpan>> {
         let mut results = Vec::new();
         let bytes = self.text.as_bytes();
         let len = bytes.len();
@@ -232,6 +240,9 @@ impl<'a> MentionLexer<'a> {
                     let Some(span_str) = self.text.get(idx..idx + span_len + 1) else {
                         break;
                     };
+                    if maximum.is_some_and(|limit| results.len() >= limit) {
+                        return None;
+                    }
                     seq_id += 1;
                     results.push(MentionSpan {
                         target_id: format!("mention-{}", seq_id),
@@ -248,7 +259,7 @@ impl<'a> MentionLexer<'a> {
             idx += 1;
         }
 
-        results
+        Some(results)
     }
 
     fn try_parse_target(&self, start: usize) -> Option<(MentionTarget, usize)> {
@@ -273,12 +284,14 @@ impl<'a> MentionLexer<'a> {
             return Some((MentionTarget::Symbol { name: sym_name }, 4 + eaten));
         }
 
-        if remainder.starts_with("git:diff") {
-            return Some((MentionTarget::GitDiff, 8));
-        }
-
-        if remainder.starts_with("git:staged") {
-            return Some((MentionTarget::GitStaged, 10));
+        if remainder.starts_with("git:") {
+            let (token, _) = parse_token_or_quoted(remainder)?;
+            let token = token.trim_end_matches(['.', '!', '?', ':']);
+            return match token {
+                "git:diff" => Some((MentionTarget::GitDiff, token.len())),
+                "git:staged" => Some((MentionTarget::GitStaged, token.len())),
+                _ => None,
+            };
         }
 
         if let Some(rest) = remainder.strip_prefix("line:") {
@@ -311,6 +324,14 @@ impl<'a> MentionLexer<'a> {
         }
 
         let (first_token, eaten) = parse_token_or_quoted(remainder)?;
+        let (first_token, eaten) = if remainder.starts_with(TOKEN_QUOTES) {
+            (first_token, eaten)
+        } else {
+            trim_sentence_end(first_token, eaten)
+        };
+        if first_token.is_empty() {
+            return None;
+        }
         if let Some((file_part, sym_part)) = first_token.split_once("::")
             && !file_part.is_empty()
             && !sym_part.is_empty()
@@ -334,9 +355,30 @@ impl<'a> MentionLexer<'a> {
     }
 }
 
+/// Quote characters that enclose a whole mention token.
+const TOKEN_QUOTES: [char; 3] = ['"', '`', '\''];
+
+/// Remove sentence punctuation that follows an unquoted token, returning the
+/// token and the bytes it still covers.
+fn trim_sentence_end(token: String, eaten: usize) -> (String, usize) {
+    let trimmed = token.trim_end_matches(['.', ',', ':', ';', '!', '?', '"', '\'', '`']);
+    let removed = token.len() - trimmed.len();
+    (trimmed.to_owned(), eaten - removed)
+}
+
 fn parse_token_or_quoted(input: &str) -> Option<(String, usize)> {
     if input.is_empty() {
         return None;
+    }
+    if let Some(quote) = input.chars().next().filter(|c| *c == '`' || *c == '\'') {
+        // Backtick and single quotes take no escapes; an unclosed one is no token.
+        let body = input.get(quote.len_utf8()..)?;
+        let close = body.find(quote)?;
+        let token = body.get(..close)?;
+        if token.is_empty() {
+            return None;
+        }
+        return Some((token.to_owned(), close + 2 * quote.len_utf8()));
     }
     if input.starts_with('"') {
         let mut out = String::new();
@@ -428,4 +470,48 @@ fn parse_lines(spec: &str) -> Option<(SourceLine, SourceLine)> {
     let start = SourceLine::try_from(start_num).ok()?;
     let end = SourceLine::try_from(end_num).ok()?;
     Some((start, end))
+}
+
+#[cfg(test)]
+mod quoting_tests {
+    use super::*;
+
+    fn paths(text: &str) -> Vec<(String, String)> {
+        MentionLexer::new(text)
+            .parse()
+            .into_iter()
+            .map(|span| {
+                let path = match span.target {
+                    MentionTarget::LegacyPath { path } => path.as_str().to_owned(),
+                    MentionTarget::LegacyFileSymbol { path, symbol } => {
+                        format!("{}::{symbol}", path.as_str())
+                    }
+                    other => format!("{other:?}"),
+                };
+                (span.raw, path)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn quoted_and_sentence_final_tokens_keep_only_the_path() {
+        assert_eq!(
+            paths("see @src/a.el, (@\"b.py\"). also @`c.go`. and @'d e.rs'!"),
+            vec![
+                ("@src/a.el".into(), "src/a.el".into()),
+                ("@\"b.py\"".into(), "b.py".into()),
+                ("@`c.go`".into(), "c.go".into()),
+                ("@'d e.rs'".into(), "d e.rs".into()),
+            ]
+        );
+        assert_eq!(
+            paths("read @a.txt. Then @b.el::fn? Done @c.md!"),
+            vec![
+                ("@a.txt".into(), "a.txt".into()),
+                ("@b.el::fn".into(), "b.el::fn".into()),
+                ("@c.md".into(), "c.md".into()),
+            ]
+        );
+        assert!(paths("unclosed @`x.rs and @. alone").is_empty());
+    }
 }

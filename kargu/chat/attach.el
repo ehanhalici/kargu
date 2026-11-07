@@ -6,10 +6,10 @@
 
 ;;; Commentary:
 
-;; `@path' mentions become one `insert-file-contents' and a Read-tool
-;; transcript (or a compact reference for long files).
+;; Rust's lexer finds `@' mentions; their file and symbol spans become one
+;; `insert-file-contents' and a Read-tool transcript (or a compact reference).
 ;; Requires: `kargu/core', `kargu/tools/diff'.
-;; Public internal: `kargu-chat--expand-prompt'.
+;; Public internal: `kargu-chat--expand-prompt' (async), `kargu-chat--expand-mentions'.
 
 ;;; Code:
 
@@ -20,78 +20,11 @@
 (require 'kargu/core)
 (require 'kargu/permission)
 (require 'kargu/files)
+(require 'kargu/bridge/mentions)
 
 (defvar kargu-chat-attach-max-lines 150)
 (declare-function kargu-chat--completion-roots "kargu/chat/complete")
 
-
-(defun kargu-chat--symbol-mention-p (token)
-  "Return non-nil for a symbol mention TOKEN such as file::symbol."
-  (string-match-p "::" token))
-
-(defun kargu-chat--file-mention-p (token)
-  "Return non-nil for a file path TOKEN."
-  (and (not (kargu-chat--symbol-mention-p token))
-       (or (string-match-p "/" token)
-           (string-match-p "\\.[A-Za-z0-9]+\\'" token))))
-
-(defun kargu-chat--strip-enclosing-pairs (s)
-  "Strip matched enclosing delimiters like brackets and quotes from S."
-  (while (or (and (> (length s) 1) (string-prefix-p "[" s) (string-suffix-p "]" s))
-             (and (> (length s) 1) (string-prefix-p "(" s) (string-suffix-p ")" s))
-             (and (> (length s) 1) (string-prefix-p "<" s) (string-suffix-p ">" s))
-             (and (> (length s) 1) (string-prefix-p "{" s) (string-suffix-p "}" s))
-             (and (> (length s) 1) (string-prefix-p "\"" s) (string-suffix-p "\"" s))
-             (and (> (length s) 1) (string-prefix-p "'" s) (string-suffix-p "'" s))
-             (and (> (length s) 1) (string-prefix-p "`" s) (string-suffix-p "`" s)))
-    (setq s (substring s 1 -1)))
-  s)
-
-(defun kargu-chat--strip-edge-punctuation (s)
-  "Strip leading and trailing punctuation from token S."
-  (while (and (> (length s) 0)
-              (memq (aref s (1- (length s)))
-                    '(?, ?: ?\; ?\) ?\] ?\} ?> ?. ?\" ?\' ?\`)))
-    (setq s (substring s 0 (1- (length s)))))
-  (while (and (> (length s) 0)
-              (memq (aref s 0)
-                    '(?\" ?\' ?\` ?\[ ?\( ?\< ?\{)))
-    (setq s (substring s 1)))
-  s)
-
-(defun kargu-chat--clean-at-token (raw)
-  "Strip enclosing brackets, quotes, and trailing punctuation from RAW mention."
-  (let ((s (string-trim (or raw "")))
-        (changed t))
-    (while (string-prefix-p "@" s)
-      (setq s (substring s 1)))
-    (while changed
-      (setq changed nil)
-      (let ((len (length s)))
-        (setq s (kargu-chat--strip-enclosing-pairs s))
-        (setq s (kargu-chat--strip-edge-punctuation s))
-        (unless (= len (length s))
-          (setq changed t))))
-    (string-trim s)))
-
-(defconst kargu-chat--at-mention-regexp
-  (rx (or string-start space (any "([<{\"'`"))
-      "@" (group (+ (not space))))
-  "Explicit mention boundary and body, excluding embedded email addresses.")
-
-(defun kargu-chat--at-tokens (prompt)
-  "Return @mention bodies in PROMPT, without the leading `@'."
-  (let (acc)
-    (save-match-data
-      (with-temp-buffer
-        (insert (or prompt ""))
-        (goto-char (point-min))
-        (while (re-search-forward kargu-chat--at-mention-regexp nil t)
-          (let ((cleaned (kargu-chat--clean-at-token
-                          (match-string-no-properties 1))))
-            (unless (string-empty-p cleaned)
-              (push cleaned acc))))))
-    (nreverse acc)))
 
 (cl-defun kargu-chat--resolve-mention-file
     (mention &key (roots (kargu-chat--completion-roots)))
@@ -306,14 +239,32 @@ referenced rather than inlined.  Resolve paths under ROOTS."
                         abs nlines nlines
                         (kargu-chat--dump-buffer-numbered)))))))))))
 
-(defun kargu-chat--expand-prompt (prompt)
-  "Wrap PROMPT as `<user_query>' plus `@path' attachments for the model.
+(defun kargu-chat--span-mentions (spans)
+  "Return SPANS' distinct file and symbol mentions as (FILES . SYMBOLS).
+SPANS are native lexer DTOs; each mention is a path or `path::symbol' string
+in prompt order.  Other native target kinds are resolved elsewhere."
+  (let (files symbols)
+    (mapc (lambda (span)
+            (let* ((target (gethash "target" span))
+                   (path (and (hash-table-p target) (gethash "path" target))))
+              (pcase (and (hash-table-p target) (gethash "type" target))
+                ((or "legacy_path" "file")
+                 (when (stringp path) (cl-pushnew path files :test #'equal)))
+                ("legacy_file_symbol"
+                 (let ((symbol (gethash "symbol" target)))
+                   (when (and (stringp path) (stringp symbol))
+                     (cl-pushnew (concat path "::" symbol) symbols :test #'equal)))))))
+          spans)
+    (cons (nreverse files) (nreverse symbols))))
+
+(defun kargu-chat--expand-mentions (prompt spans)
+  "Wrap PROMPT as `<user_query>' plus attachments for native SPANS.
 `@file::symbol' mentions attach the symbol definition with line numbers.
 Short file mentions become a synthetic Read transcript.  Longer files
 stay a compact reference.  The chat buffer still shows the unwrapped prompt."
-  (let* ((all-tokens (delete-dups (kargu-chat--at-tokens prompt)))
-         (sym-mentions (cl-remove-if-not #'kargu-chat--symbol-mention-p all-tokens))
-         (file-mentions (cl-remove-if-not #'kargu-chat--file-mention-p all-tokens))
+  (let* ((mentions (kargu-chat--span-mentions spans))
+         (file-mentions (car mentions))
+         (sym-mentions (cdr mentions))
          (cap kargu-diff-read-max-chars)
          (query (format "<user_query>\n%s\n</user_query>" prompt)))
     (if (and (null sym-mentions) (null file-mentions))
@@ -328,6 +279,19 @@ stay a compact reference.  The chat buffer still shows the unwrapped prompt."
                            file-mentions "")
                 "</attached_files>\n")))))
 
+(cl-defun kargu-chat--expand-prompt (prompt callback &key parent valid-p)
+  "Expand PROMPT for the model, then call CALLBACK with (TEXT FAILURE).
+Rust's lexer decides which spans are mentions; a prompt without `@' needs no
+parse.  PARENT and VALID-P bound the native parse task."
+  (if (not (string-search "@" prompt))
+      (funcall callback (kargu-chat--expand-mentions prompt []) nil)
+    (kargu-bridge-mentions-parse
+     prompt
+     (lambda (spans failure)
+       (if failure
+           (funcall callback nil failure)
+         (funcall callback (kargu-chat--expand-mentions prompt spans) nil)))
+     :parent parent :valid-p valid-p)))
 
 (provide 'kargu/chat/attach)
 

@@ -1926,7 +1926,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   - [x] **4.7 Mention lexer:** legacy @path/@file::symbol ve file/buff/sym/git/
     line/folder target'larını typed span ve target_id ile native ayrıştır; quoted/
     escaped/Unicode ad, email ve fenced-code ayrımı, ambiguity ve invalid range.
-  - [ ] **4.7a Mention lexer consumer geçişi:** native lexer temeli `[x]`, fakat
+  - [x] **4.7a Mention lexer consumer geçişi:** native lexer temeli `[x]`, fakat
     `chat/attach.el` içindeki `kargu-chat--at-tokens`/`--clean-at-token` ve
     `chat/complete.el` consumer'ları hâlâ Elisp token/range kararı veriyor.
     Prompt expansion ve completion span'lerini tek native parse sonucu kullansın;
@@ -1947,6 +1947,32 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
     **Doğrulama başlangıcı:** Rust sensor_contract mention corpus; ERT test-attach ve
       test-fs; aynı input için native parse/consumer karşılaştırması.
+
+    **Teslim (2026-11-08):** Yeni saf `mentions/parse` RPC'si (epoch'a bağlı, 64 KiB
+      kaynak, en çok 256 hedef; taşmada önek dönmez) UTF-8 bayt span'lerini
+      kaynak hash'iyle sayfalar; [bridge/mentions.el](kargu/bridge/mentions.el)
+      sayfaları yalnız aynı hash/bayt/offset zinciriyle birleştirir, iptal geç
+      sayfayı teslim etmez. Lexer artık ters tırnak/tek tırnak alıntılarını ve
+      tırnaksız token sonundaki cümle noktalamasını ayıklar; `git:` hedefleri
+      tam token eşleşmesi ister. `chat/attach.el`'deki `kargu-chat--at-tokens`,
+      `--clean-at-token`, `--strip-*`, `--file-mention-p`/`--symbol-mention-p`
+      ve regexp motoru silindi; `kargu-chat--expand-prompt` async'tir ve dosya/
+      sembol mention'larını yalnız native span tiplerinden (`legacy_path`/`file`,
+      `legacy_file_symbol`) alır. `kargu-chat--submit` parse sonucunu bekler;
+      giriş veya session değişmişse ya da parse başarısızsa hiçbir şey gönderilmez.
+      `@` içermeyen prompt RPC'siz ve senkron kalır.
+      **Bilinçli Emacs sınırı:** `chat/complete.el`'deki `kargu-chat--at-prefix`
+      Company'nin her tuşta senkron istediği imleç-yerel replacement aralığıdır;
+      neyin attach edileceğine karar vermez, bu yüzden input buffer adaptörü
+      olarak kalır. Dosya okuma/sembol çıkarma (attach blokları) 4.8/4.9 resolver
+      borcudur.
+      **Kanıt:** Rust `mentions_ipc` 3/3 (minimum frame sayfalama ve kaynak
+      kimliği), lexer `quoted_and_sentence_final_tokens_keep_only_the_path`;
+      ERT `test-mentions-port` 3/3 ve native lexer'a geçen `test-attach`
+      (tırnak/noktalama, e-posta, fenced literal, quoted Unicode yolu ve bayt
+      koordinatı, `../` reddi, async genişletme), chat parse-hatası testi.
+      638 locked Rust, strict Clippy/fmt; tam ERT 1474/1474, bridge 40/40;
+      değişen Elisp Werror/checkdoc temiz.
 
   - [ ] **4.8 Context resolver:** `editor/resolve_mentions` RAM snapshot/tick/dirty
     portu; kapalı disk/Git/folder native mevcut servislerde. Unsaved/new/narrowed

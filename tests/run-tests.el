@@ -52,6 +52,7 @@
 (require 'tests/test-native-model-catalog)
 (require 'tests/test-catalog-connection)
 (require 'tests/test-credential-completion)
+(require 'tests/test-mentions-port)
 (require 'tests/test-catalog-target)
 (require 'tests/test-native-model-publication)
 (require 'tests/test-native-model-consumers)

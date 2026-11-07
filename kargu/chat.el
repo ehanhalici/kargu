@@ -461,10 +461,29 @@ PRESERVE-DRAFT also restores input following a successfully admitted request."
 
 (cl-defun kargu-chat--submit (prompt &key preserve-draft on-ready)
   "Start a run for PROMPT, restoring the draft if startup is rejected.
-PRESERVE-DRAFT keeps unsent input after completion; ON-READY reports admission."
+PRESERVE-DRAFT keeps unsent input after completion; ON-READY reports admission.
+Rust parses mentions first; nothing is sent if the input or session changed
+meanwhile.  A prompt without mentions continues synchronously."
   (kargu-chat--preflight prompt)
-  (let ((expanded (kargu-chat--expand-prompt prompt))
-        (saved (kargu-chat--capture-submission))
+  (let ((buffer (current-buffer))
+        (session (kargu-session-context))
+        (tick (buffer-modified-tick)))
+    (kargu-chat--expand-prompt
+     prompt
+     (lambda (expanded failure)
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (cond
+            (failure (message "Kargu: mentions could not be prepared; nothing was sent"))
+            ((not (and (eq session (kargu-session-context)) (= tick (buffer-modified-tick))))
+             (message "Kargu: input changed while mentions were prepared; send again"))
+            (t (kargu-chat--send-expanded prompt expanded preserve-draft on-ready))))))
+     :valid-p (lambda () (buffer-live-p buffer)))))
+
+(defun kargu-chat--send-expanded (prompt expanded preserve-draft on-ready)
+  "Publish PROMPT and send its EXPANDED form; see `kargu-chat--submit'.
+PRESERVE-DRAFT and ON-READY are as for `kargu-chat--submit'."
+  (let ((saved (kargu-chat--capture-submission))
         (buffer (current-buffer))
         (session (kargu-session-context)))
     (condition-case err
