@@ -2047,8 +2047,15 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         başlatmaz.
 
       **İlerleme (2026-11-08):** disk/file hedefi 4.8a teslimiyle native read
-        worker'ına bağlandı. Folder (`@folder:`), `@git:diff`/`@git:staged` hedefleri
-        ve paging cursor'ı hâlâ açık; şu an attach bunları sessizce yok sayar.
+        worker'ına bağlandı. `@folder:` hedefi native `list_files` (Rust/GNU ls,
+        bounded output), `@git:diff`/`@git:staged` native Git okuma portuyla
+        çözülür; metni Rust render eder, Emacs dizin listelemez veya git process
+        başlatmaz. Araç ailesi yüklü değilse hedef okunmaz, `unavailable` gösterilir.
+        **Kanıt:** ERT `kargu-attach-folder-and-git-mentions-are-native-test`
+        (gerçek repo; Elisp `directory-files`/recursive tarama yok); tam ERT
+        1476/1476.
+        **Açık:** folder depth/count/byte limitlerinin mention sözdizimi ve
+        scope/revision'a bağlı paging cursor'ı; listing yalnız bounded tek sayfadır.
 
       **Doğrulama başlangıcı:** Rust file_reads, search, git_reads; ERT
         test-native-file, test-attach, test-file-window, test-fs.

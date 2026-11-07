@@ -202,9 +202,10 @@ If FROM or TO is nil, processes entire buffer."
 
 (defun kargu-chat--span-mentions (spans)
   "Return SPANS' distinct file and symbol mentions as (FILES . SYMBOLS).
-SPANS are native lexer DTOs.  A whole-file mention is its path string and a
-line-range mention is (PATH FROM . TO); a symbol mention is `path::symbol'.
-Other native target kinds are resolved elsewhere."
+SPANS are native lexer DTOs.  A whole-file mention is its path string, a
+line-range mention is (PATH FROM . TO), a folder is (:folder PATH) and a Git
+target is (:git STAGED); a symbol mention is `path::symbol'.  Named buffer
+targets need an explicit grant (todo 4.8c) and are not attached."
   (let (files symbols)
     (mapc (lambda (span)
             (let* ((target (gethash "target" span))
@@ -216,6 +217,10 @@ Other native target kinds are resolved elsewhere."
                  (let ((from (gethash "start" target)) (to (gethash "end" target)))
                    (when (and (stringp path) (natnump from) (natnump to))
                      (cl-pushnew (cons path (cons from to)) files :test #'equal))))
+                ("folder"
+                 (when (stringp path) (cl-pushnew (list :folder path) files :test #'equal)))
+                ("git_diff" (cl-pushnew (list :git nil) files :test #'equal))
+                ("git_staged" (cl-pushnew (list :git t) files :test #'equal))
                 ("legacy_file_symbol"
                  (let ((symbol (gethash "symbol" target)))
                    (when (and (stringp path) (stringp symbol))
@@ -223,14 +228,27 @@ Other native target kinds are resolved elsewhere."
           spans)
     (cons (nreverse files) (nreverse symbols))))
 
+(defun kargu-chat--mention-label (mention)
+  "Return the display label of file, folder or Git MENTION."
+  (pcase mention
+    (`(:folder ,path) path)
+    (`(:git ,staged) (if staged "git:staged" "git:diff"))
+    (`(,path . ,_) path)
+    (_ mention)))
+
 (defun kargu-chat--file-block (mention text)
-  "Render file MENTION's native read TEXT as a synthetic Read transcript.
+  "Render MENTION's native TEXT as an attachment block.
 A native refusal keeps its payload-free reason and attaches no content."
-  (let ((path (if (consp mention) (car mention) mention)))
-    (if (string-prefix-p "ERROR: " text)
-        (format "<code_selection path=\"%s\">\n(%s)\n</code_selection>\n"
-                path (substring text (length "ERROR: ")))
-      (format "%s\n%s\n" (kargu-chat--called-read path) text))))
+  (let ((label (kargu-chat--mention-label mention)))
+    (cond
+     ((string-prefix-p "ERROR: " text)
+      (format "<code_selection path=\"%s\">\n(%s)\n</code_selection>\n"
+              label (substring text (length "ERROR: "))))
+     ((eq (car-safe mention) :folder)
+      (format "<attached_folder path=\"%s\">\n%s\n</attached_folder>\n" label text))
+     ((eq (car-safe mention) :git)
+      (format "<attached_git target=\"%s\">\n%s\n</attached_git>\n" label text))
+     (t (format "%s\n%s\n" (kargu-chat--called-read label) text)))))
 
 (defun kargu-chat--file-window (mention)
   "Return the line window Rust should read for file MENTION.
@@ -240,21 +258,40 @@ reports the excerpt bounds."
       (kargu-file-window-create :from (cadr mention) :to (cddr mention))
     (kargu-file-window-create :limit (max 1 (or kargu-chat-attach-max-lines 150)))))
 
+(declare-function kargu-search-list-files "kargu/tools/search" (&optional path callback))
+(declare-function kargu-git-diff "kargu/tools/git" (callback &optional staged path commit))
+
+(defun kargu-chat--read-mention (mention callback)
+  "Resolve file, line, folder or Git MENTION natively into CALLBACK's text.
+Folder and Git targets use their optional native tool families; without them
+the mention is reported unavailable rather than read in Elisp."
+  (pcase mention
+    (`(:folder ,path)
+     (if (require 'kargu/tools/search nil t)
+         (kargu-search-list-files path callback)
+       (funcall callback "ERROR: folder listing is unavailable")))
+    (`(:git ,staged)
+     (if (require 'kargu/tools/git nil t)
+         (kargu-git-diff callback staged)
+       (funcall callback "ERROR: Git is unavailable")))
+    (_ (kargu-file-read-async (if (consp mention) (car mention) mention)
+                              (kargu-chat--file-window mention) callback))))
+
 (defun kargu-chat--read-file-mentions (files callback)
-  "Read FILES in order through the native read port; CALLBACK gets the blocks.
-Live unsaved buffers are read from RAM by the shared port; disk, decoding,
-root confinement and excerpts are Rust's.  No Elisp file read happens here."
+  "Resolve FILES in order through native ports; CALLBACK gets the blocks.
+Live unsaved buffers are read from RAM by the shared port; disk, listing,
+Git, root confinement and rendering are Rust's.  Emacs reads no file here."
   (let ((blocks nil) (pending files))
     (cl-labels
         ((next ()
            (if (null pending)
                (funcall callback (apply #'concat (nreverse blocks)))
              (let ((mention (pop pending)))
-               (kargu-file-read-async
-                (if (consp mention) (car mention) mention)
-                (kargu-chat--file-window mention)
+               (kargu-chat--read-mention
+                mention
                 (lambda (text)
-                  (push (kargu-chat--file-block mention text) blocks)
+                  (push (kargu-chat--file-block mention (if (stringp text) text "ERROR: unavailable"))
+                        blocks)
                   (next)))))))
       (next))))
 

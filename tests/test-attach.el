@@ -200,5 +200,26 @@
        (with-current-buffer buffer (set-buffer-modified-p nil))
        (kill-buffer buffer)))))
 
+(ert-deftest kargu-attach-folder-and-git-mentions-are-native-test ()
+  "Folder and Git targets attach Rust output; Emacs lists no directory itself."
+  (kargu-test-with-git-repo '(("src/one.el" . "(one)\n") ("src/two.el" . "(two)\n")
+                              ("README" . "base\n"))
+    (write-region "changed\n" nil (expand-file-name "README" repo) nil 'silent)
+    (write-region "staged\n" nil (expand-file-name "src/two.el" repo) nil 'silent)
+    (call-process "git" nil nil nil "add" "src/two.el")
+    (cl-letf (((symbol-function 'kargu-chat--completion-roots) (lambda () (list repo)))
+              ((symbol-function 'directory-files)
+               (lambda (&rest _) (ert-fail "Folder mention listed a directory in Elisp")))
+              ((symbol-function 'directory-files-recursively)
+               (lambda (&rest _) (ert-fail "Folder mention scanned recursively in Elisp"))))
+      (let ((out (kargu-attach-test--expand "see @folder:src then @git:diff and @git:staged")))
+        (should (string-search "<attached_folder path=\"src\">" out))
+        (should (string-search "one.el" out))
+        (should (string-search "two.el" out))
+        (should (string-search "<attached_git target=\"git:diff\">" out))
+        (should (string-search "+changed" out))
+        (should (string-search "<attached_git target=\"git:staged\">" out))
+        (should (string-search "+staged" out))))))
+
 (provide 'tests/test-attach)
 ;;; test-attach.el ends here
