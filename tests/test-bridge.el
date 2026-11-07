@@ -290,6 +290,34 @@
     (should (= 0 (hash-table-count (kargu-bridge-connection-pending conn))))
     (should-not (kargu-bridge-connection-stop-timer conn))))
 
+(ert-deftest kargu-bridge-real-core-session-selection-revision-test ()
+  "The pipe routes native selection reads and expected-revision commits."
+  (kargu-bridge-test--with-core
+    (let* ((app (gethash "application_id"
+                         (car (kargu-bridge-test--call conn "application/create" (kargu-bridge--object)))))
+           (session (gethash "session_id"
+                             (car (kargu-bridge-test--call
+                                   conn "session/create" (kargu-bridge--object "application_id" app)))))
+           (scope (kargu-bridge--object "application_id" app "session_id" session))
+           (commit (lambda (revision selection)
+                     (kargu-bridge-test--call
+                      conn "session/selection/commit"
+                      (kargu-bridge--object "application_id" app "session_id" session
+                                            "expected_revision" revision "selection" selection))))
+           (initial (car (kargu-bridge-test--call conn "session/selection" scope)))
+           (first (funcall commit 0 (kargu-bridge--object
+                                     "provider" "openai" "model" "gpt-x"
+                                     "effort" (kargu-bridge--object "kind" "off"))))
+           (stale (funcall commit 0 (kargu-bridge--object))))
+      (should (= (gethash "revision" initial) 0))
+      (should-not (cadr first))
+      (should (= (gethash "revision" (car first)) 1))
+      (should (equal (gethash "model" (gethash "selection" (car first))) "gpt-x"))
+      (should (equal (gethash "status" (gethash "data" (cadr stale))) "stale_revision"))
+      (should (equal (gethash "model" (gethash "selection"
+                                              (car (kargu-bridge-test--call conn "session/selection" scope))))
+                     "gpt-x")))))
+
 (ert-deftest kargu-bridge-startup-waiters-share-connection-and-cancel-independently-test ()
   (let* ((conn (kargu-bridge--connection-create :state 'starting))
          (kargu-bridge--connection conn) first second)

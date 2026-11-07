@@ -469,6 +469,10 @@ pub mod protocol {
         pub const SESSION_CREATE: &str = "session/create";
         /// Get lifecycle projection.
         pub const SESSION_SNAPSHOT: &str = "session/snapshot";
+        /// Read one conversation's committed provider/model/effort selection.
+        pub const SESSION_SELECTION: &str = "session/selection";
+        /// Replace a conversation's selection from its expected revision.
+        pub const SESSION_SELECTION_COMMIT: &str = "session/selection/commit";
         /// Claim and run a native conversation turn through actual provider services.
         pub const SESSION_PROMPT: &str = "session/prompt";
         /// Revoke an exact native run; terminal acknowledgement follows actual drain.

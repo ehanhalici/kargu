@@ -8,6 +8,7 @@ mod steps;
 pub use claim::{ClaimIntent, ClaimLease, PreparedRun, RequestedWorkspace, RunClaim};
 pub mod host;
 mod jobs;
+pub mod selection;
 
 use crate::{
     constants::limits,
@@ -345,6 +346,7 @@ pub struct ApplicationActor {
     registry: Arc<ToolRegistry>,
     sessions: HashSet<SessionId>,
     histories: HashMap<SessionId, crate::history::History>,
+    selections: HashMap<SessionId, selection::SessionSelection>,
     session_events: HashMap<SessionId, SessionEventSequence>,
     history_imports: crate::history::HistoryImports,
     generation: Generation,
@@ -364,6 +366,7 @@ impl ApplicationActor {
             registry: Arc::new(ToolRegistry::default()),
             sessions: HashSet::new(),
             histories: HashMap::new(),
+            selections: HashMap::new(),
             session_events: HashMap::new(),
             history_imports: crate::history::HistoryImports::default(),
             generation: Generation::ZERO,
@@ -392,6 +395,8 @@ impl ApplicationActor {
         self.sessions.insert(id.clone());
         self.histories
             .insert(id.clone(), crate::history::History::default());
+        self.selections
+            .insert(id.clone(), selection::SessionSelection::default());
         self.session_events
             .insert(id.clone(), SessionEventSequence::ZERO);
         id
@@ -418,6 +423,31 @@ impl ApplicationActor {
     /// Whether the application owns this conversation.
     pub fn owns_session(&self, session: &SessionId) -> bool {
         self.sessions.contains(session)
+    }
+    /// Detached committed provider/model/effort choice for one owned conversation.
+    pub fn session_selection(
+        &self,
+        session: &SessionId,
+    ) -> Result<&selection::SessionSelection, CoreError> {
+        self.selections.get(session).ok_or(CoreError::StaleOwner)
+    }
+    /// Commit a complete selection from its observed revision.
+    ///
+    /// Admission or an active run locks every conversation's choice, matching
+    /// the application-wide single active run.
+    pub fn commit_session_selection(
+        &mut self,
+        session: &SessionId,
+        expected: selection::SelectionRevision,
+        desired: selection::Selection,
+    ) -> Result<&selection::SessionSelection, CoreError> {
+        let locked = self.active.is_some() || self.preparing.is_some();
+        let store = self
+            .selections
+            .get_mut(session)
+            .ok_or(CoreError::StaleOwner)?;
+        store.commit(expected, desired, locked)?;
+        Ok(store)
     }
     pub(crate) fn session_projection(
         &self,
@@ -499,6 +529,7 @@ impl ApplicationActor {
             return Err(CoreError::StaleOwner);
         }
         self.session_events.remove(session);
+        self.selections.remove(session);
         self.revoke_preparing(Some(session));
         self.history_imports.revoke(Some(session));
         self.models.close_session(session);

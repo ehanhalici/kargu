@@ -197,3 +197,98 @@ async fn pending_is_bounded_scoped_and_take_once() -> Result<(), Box<dyn std::er
     }
     Ok(())
 }
+
+#[test]
+fn session_selection_commits_only_from_the_owned_expected_revision()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut host = Host::new();
+    host.dispatch(
+        "initialize",
+        json!({"protocol_major":1,"protocol_minor":0,
+        "client_version":"test","capabilities":[],"limits":{"max_frame_bytes":4096}}),
+        true,
+    )
+    .result?;
+    host.dispatch("initialized", json!({}), false).result?;
+    let app = host
+        .dispatch("application/create", json!({}), true)
+        .result?;
+    let other = host
+        .dispatch("application/create", json!({}), true)
+        .result?;
+    let session = host
+        .dispatch(
+            "session/create",
+            json!({"application_id":app["application_id"]}),
+            true,
+        )
+        .result?;
+    let scope = json!({"application_id":app["application_id"],"session_id":session["session_id"]});
+    let initial = host
+        .dispatch("session/selection", scope.clone(), true)
+        .result?;
+    assert_eq!(initial["revision"], 0);
+    assert_eq!(initial["selection"]["effort"]["kind"], "inherit");
+    assert_eq!(initial["selection"]["provider"], Value::Null);
+
+    let commit = |revision: u64, selection: Value, application: &Value| {
+        json!({"application_id":application["application_id"],"session_id":session["session_id"],
+            "expected_revision":revision,"selection":selection})
+    };
+    let desired =
+        json!({"provider":"OpenAI","model":"gpt-x","effort":{"kind":"named","name":"high"}});
+    let committed = host
+        .dispatch(
+            "session/selection/commit",
+            commit(0, desired.clone(), &app),
+            true,
+        )
+        .result?;
+    assert_eq!(committed["revision"], 1);
+    assert_eq!(committed["selection"]["provider"], "openai");
+    assert_eq!(committed["selection"]["model"], "gpt-x");
+
+    let stale = host
+        .dispatch("session/selection/commit", commit(0, json!({}), &app), true)
+        .result;
+    assert_eq!(
+        stale.err().map(|fault| fault.status),
+        Some("stale_revision")
+    );
+    let foreign = host
+        .dispatch(
+            "session/selection/commit",
+            commit(1, json!({}), &other),
+            true,
+        )
+        .result;
+    assert_eq!(foreign.err().map(|fault| fault.status), Some("stale_owner"));
+    for invalid in [
+        json!({"effort":{"kind":"named","name":"off"}}),
+        json!({"model":""}),
+        json!({"tuning":{}}),
+    ] {
+        let result = host
+            .dispatch("session/selection/commit", commit(1, invalid, &app), true)
+            .result;
+        assert_eq!(
+            result.err().map(|fault| fault.status),
+            Some("invalid_params")
+        );
+    }
+    let unchanged = host
+        .dispatch("session/selection", scope.clone(), true)
+        .result?;
+    assert_eq!(unchanged["revision"], 1);
+    assert_eq!(unchanged["selection"], committed["selection"]);
+
+    let reset = host
+        .dispatch("session/selection/commit", commit(1, json!({}), &app), true)
+        .result?;
+    assert_eq!(reset["revision"], 2);
+    assert_eq!(reset["selection"]["model"], Value::Null);
+    host.dispatch("session/close", scope.clone(), true).result?;
+    let closed = host.dispatch("session/selection", scope, true).result;
+    assert_eq!(closed.err().map(|fault| fault.status), Some("stale_owner"));
+    Ok(())
+}

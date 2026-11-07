@@ -112,6 +112,15 @@ struct SessionScope {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct SelectionCommit {
+    application_id: ApplicationId,
+    session_id: SessionId,
+    expected_revision: super::selection::SelectionRevision,
+    selection: super::selection::Selection,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CatalogPageRequest {
     offset: crate::providers::CatalogOffset,
 }
@@ -842,6 +851,41 @@ impl Host {
                     Ok(snapshot)
                 }
             }
+            methods::SESSION_SELECTION => {
+                let scope: SessionScope =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let actor = self
+                    .applications
+                    .get(&scope.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?
+                    .actor();
+                let store = actor
+                    .session_selection(&scope.session_id)
+                    .map_err(|_| owner_fault())?;
+                Ok(json!({"revision":store.revision(),"selection":store.selection()}))
+            }
+            methods::SESSION_SELECTION_COMMIT => {
+                let request: SelectionCommit =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let actor = self
+                    .applications
+                    .get_mut(&request.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?
+                    .actor_mut();
+                if !actor.owns_session(&request.session_id) {
+                    return Err(owner_fault());
+                }
+                let store = actor
+                    .commit_session_selection(
+                        &request.session_id,
+                        request.expected_revision,
+                        request.selection,
+                    )
+                    .map_err(selection_fault)?;
+                Ok(json!({"revision":store.revision(),"selection":store.selection()}))
+            }
             _ => Err(Fault {
                 code: protocol::error_codes::METHOD_NOT_FOUND,
                 message: "Method not found",
@@ -1200,6 +1244,21 @@ fn owner_fault() -> Fault {
         code: protocol::error_codes::STALE_OWNER,
         message: "Unknown or foreign owner",
         status: "stale_owner",
+    }
+}
+fn selection_fault(error: crate::error::CoreError) -> Fault {
+    match error {
+        crate::error::CoreError::Busy => Fault {
+            code: protocol::error_codes::INVALID_STATE,
+            message: "Active work owns the selection",
+            status: "busy",
+        },
+        crate::error::CoreError::StaleOwner => Fault {
+            code: protocol::error_codes::STALE_OWNER,
+            message: "Selection revision or owner is stale",
+            status: "stale_revision",
+        },
+        _ => owner_fault(),
     }
 }
 fn capacity_fault() -> Fault {

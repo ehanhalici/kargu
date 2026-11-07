@@ -4222,6 +4222,22 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       expected revision'lı native commit + detached snapshot ile değiştir;
       provider/model/effort atomik olsun. Başarısız intent yerel seçim bırakmasın.
 
+      **Native port dilimi (2026-11-07):** Rust native conversation başına
+        `application/selection.rs` store'u ve `session/selection` /
+        `session/selection/commit` RPC'leri eklendi. Commit tam selection +
+        `expected_revision` alır; stale revision `stale_revision`, aktif run veya
+        hazırlık `busy`, yabancı/kapalı session `stale_owner` ile reddedilir ve
+        committed değeri değiştirmez. Effort `inherit`/`off`/`named` olarak ayrı;
+        provider `ApiProviderId` ile kanonikleşir, model/effort sınırlı ve
+        kontrol karaktersizdir. Katalog üyeliği hâlâ picker'da; Rust doğrulamaz.
+        Kanıt: 3 Rust birim/host testi + gerçek pipe ERT
+        `kargu-bridge-real-core-session-selection-revision-test`; 596 locked Rust.
+        **Açık:** Elisp writer henüz bu porta bağlı değil. Kalan consumer işi:
+        sohbet oluştuğunda native conversation edinimi, restore/yeni session
+        tohumlamasının native commit'ten geçmesi, `kargu-selection-update` async
+        ticket + ACK snapshot yayımı ve senkron çağıranların (state/transitions,
+        chat/select, config/schema, store reset) callback'e taşınması.
+
       **Önkoşul:** Native conversation/session; 0.2 selection contract.
 
       **Başlangıç kaynakları:** Rust: configuration/policy/, models/service/,
