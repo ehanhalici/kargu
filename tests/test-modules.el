@@ -54,8 +54,10 @@ Initialize installed PACKAGES only when requested."
      ,@assertions)))
 
 (defun kargu-module-test--without-sources (prefixes forms)
-  "Evaluate FORMS in a package physically missing source PREFIXES."
+  "Evaluate FORMS in a package physically missing source PREFIXES.
+FORMS run in a disposable workspace, so fixtures never touch the checkout."
   (let* ((root (make-temp-file "kargu-module-matrix-" t))
+         (default-directory (file-name-as-directory (expand-file-name "workspace" root)))
          (files (append (mapcar (lambda (file) (expand-file-name file kargu-module-test--root))
                                 '("kargu.el" "kargu-core/assets/providers.json" "kargu-core/assets/models-empty.json"))
                       (directory-files-recursively
@@ -69,6 +71,7 @@ Initialize installed PACKAGES only when requested."
               (unless (seq-some (lambda (prefix) (string-prefix-p prefix relative)) prefixes)
                 (make-directory (file-name-directory target) t)
                 (copy-file file target))))
+          (make-directory default-directory t)
           (kargu-module-test--evaluate forms t root))
       (delete-directory root t))))
 
