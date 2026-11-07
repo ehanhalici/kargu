@@ -93,14 +93,10 @@ impl ReadyProfile {
             Credential::Interop => interop.map(Some).ok_or(CoreError::Unavailable),
         }
     }
-    /// Direct and keyless captures must agree with the committed native policy.
-    /// Interop credentials remain an editor-owned observation of this target.
+    /// A native run never takes a key from the editor: direct keys come from
+    /// the committed policy and interop keys only from the native receipt.
     pub(super) fn credential_matches(&self, supplied: Option<&str>) -> bool {
-        match &self.0.credential {
-            Credential::Direct(secret) => supplied == Some(secret.as_str()),
-            Credential::Keyless => supplied.is_none_or(str::is_empty),
-            Credential::Interop => true,
-        }
+        supplied.is_none_or(str::is_empty)
     }
     /// Provider, model and endpoint text that a native run must target.
     pub(super) fn identity(
@@ -114,6 +110,17 @@ impl ReadyProfile {
     }
     pub(super) fn into_editor_value(self) -> Value {
         self.0.into_editor_value()
+    }
+    /// Secret-free projection for native run preparation: the credential kind
+    /// and target metadata, never a direct key.
+    pub(super) fn into_target_value(self) -> Value {
+        let mut value = self.0.into_editor_value();
+        if let Some(credential) = value.get_mut("credential").and_then(Value::as_object_mut)
+            && let Some(Value::String(mut secret)) = credential.remove("secret")
+        {
+            zeroize::Zeroize::zeroize(&mut secret);
+        }
+        value
     }
 }
 impl Profile {

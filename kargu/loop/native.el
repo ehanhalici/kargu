@@ -95,8 +95,9 @@ Startup errors are reported without switching to the Elisp backend."
      (let* ((provider (kargu-connection-snapshot-provider snapshot))
             (capabilities (kargu-connection-snapshot-capabilities snapshot))
             (settings (kargu-connection-snapshot-settings snapshot))
-            (auth (kargu-api-auth-intent
-                   (kargu-connection-snapshot-secret snapshot) provider)))
+            ;; Rust takes direct keys from committed policy and interop keys
+            ;; from its own receipt; the editor never sends one.
+            (auth (kargu-api-auth-intent nil provider)))
        (setcdr (assoc "session" auth) (plist-get run :session-id))
        (kargu-bridge--object
         "root" (copy-sequence (plist-get run :project-root))

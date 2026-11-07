@@ -248,6 +248,13 @@ fn publish_target_with_header_policy(
         return Err(format!("fixture config commit failed: {committed}").into());
     }
     FIXTURE_REVISION.with(|cell| cell.set(revision.as_u64().unwrap_or(0)));
+    // The committed policy now owns the key; a native prompt never echoes it.
+    if let Some(auth) = arguments["connection"]
+        .get_mut("auth")
+        .and_then(Value::as_object_mut)
+    {
+        auth.remove("key");
+    }
     arguments["config_revision"] = revision;
     arguments["connection"]["provider"] = json!("fixture");
     Ok(())
@@ -613,7 +620,7 @@ fn native_prompt_rejects_uncommitted_header_credentials() -> TestResult {
             let mut bound = prompt(root.path(), &url);
             publish_target_with_key(&mut peer, &scope, &mut bound, direct)?;
             bound["connection"]["headers"] = json!({});
-            bound["connection"]["auth"] = json!({"key":direct.unwrap_or("synthetic-interop-key")});
+            bound["connection"]["auth"] = json!({});
             let mut forged = bound.clone();
             let injected = json!({"X-Foreign-Key":"synthetic-foreign-key"});
             match route {
@@ -962,7 +969,6 @@ fn changed_config_during_interop_rejects_activation_after_real_drain() -> TestRe
     begin(&mut peer, "capturing", &scope, bound.clone())?;
     let lookup = credential_request(&peer, &mut events)?;
     publish_target_with_key(&mut peer, &scope, &mut bound, Some("new-config-key"))?;
-    bound["connection"]["auth"]["key"] = json!("new-config-key");
     begin(&mut peer, "busy", &scope, bound)?;
     assert_eq!(
         response(&peer, "busy", &mut events)?["error"]["data"]["status"],
@@ -981,39 +987,29 @@ fn changed_config_during_interop_rejects_activation_after_real_drain() -> TestRe
 }
 
 #[test]
-fn native_credentials_reject_foreign_editor_keys_before_claim() -> TestResult {
-    for expected in ["synthetic-committed-key", ""] {
+fn native_credentials_never_accept_an_editor_key() -> TestResult {
+    for committed in ["synthetic-committed-key", ""] {
         let root = tempfile::tempdir()?;
         let (url, server, requests) = server(vec![answer("bound credential")])?;
         let mut peer = Peer::start()?;
         peer.initialize()?;
         let scope = peer.scope()?;
         let mut bound = prompt(root.path(), &url);
-        publish_target_with_key(&mut peer, &scope, &mut bound, Some(expected))?;
+        publish_target_with_key(&mut peer, &scope, &mut bound, Some(committed))?;
         bound["connection"]["headers"] = json!({});
+        assert!(bound["connection"]["auth"].get("key").is_none());
         let mut events = Vec::new();
-        if !expected.is_empty() {
-            begin(&mut peer, "missing-auth", &scope, bound.clone())?;
-            assert_eq!(
-                response(&peer, "missing-auth", &mut events)?["error"]["data"]["status"],
-                "stale_configuration"
-            );
-            assert!(requests.try_recv().is_err());
-        }
-        for key in [json!("synthetic-foreign-key"), Value::Null] {
-            if expected.is_empty() && key.is_null() {
-                continue;
-            }
+        // Neither a foreign key nor an echo of the committed key is accepted.
+        for key in ["synthetic-foreign-key", "synthetic-committed-key"] {
             let mut forged = bound.clone();
             forged["connection"]["auth"] = json!({"key":key});
-            begin(&mut peer, "foreign-key", &scope, forged)?;
+            begin(&mut peer, "editor-key", &scope, forged)?;
             assert_eq!(
-                response(&peer, "foreign-key", &mut events)?["error"]["data"]["status"],
+                response(&peer, "editor-key", &mut events)?["error"]["data"]["status"],
                 "stale_configuration"
             );
             assert!(requests.try_recv().is_err());
         }
-        bound["connection"]["auth"] = json!({"key":expected});
         begin(&mut peer, "credential-bound", &scope, bound)?;
         assert_eq!(
             response(&peer, "credential-bound", &mut events)?["result"]["status"],

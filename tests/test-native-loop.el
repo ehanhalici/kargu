@@ -172,6 +172,9 @@
      (unwind-protect
          (progn
            (puthash "prompt" (kargu-bridge--object "role" "user" "content" "fixture") arguments)
+           (should (eq (gethash "key" (gethash "auth" (gethash "connection" arguments))) :json-null))
+           ;; Only the fixture's committed config carries the key Rust sends.
+           (puthash "key" "synthetic-owned-key" (gethash "auth" (gethash "connection" arguments)))
            (kargu-test-native-owned-start
             application arguments
             (lambda (value fault) (setq result value failure fault done t)))

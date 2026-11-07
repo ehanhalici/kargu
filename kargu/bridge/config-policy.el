@@ -253,15 +253,19 @@ pending refresh.  CALLBACK, PARENT, APPLICATION and VALID-P are as for
           (kargu-async-add-cleanup task (lambda () (kargu-bridge-cancel connection id)))))))
     task))
 
-(cl-defun kargu-bridge-config-resolve (provider model callback &key parent application context revision)
+(cl-defun kargu-bridge-config-resolve (provider model callback
+                                               &key parent application context revision target-only)
   "Resolve PROVIDER/MODEL into CALLBACK under PARENT/APPLICATION.
-CONTEXT and REVISION pin captured editor inputs and native config publication."
+CONTEXT and REVISION pin captured editor inputs and native config publication.
+TARGET-ONLY asks for the secret-free projection a native run needs; the
+default private projection serves standalone API and catalog consumers."
   (kargu-bridge-config-query
    "configuration/resolve"
    (kargu-bridge--object
     "revision" (or revision (let ((kargu-application--bound application)) (kargu-config-revision)))
     "context" (or context (let ((kargu-application--bound application)) (kargu-bridge-config-context)))
-    "target" (kargu-bridge--object "provider" (or provider :json-null) "model" (or model :json-null)))
+    "target" (kargu-bridge--object "provider" (or provider :json-null) "model" (or model :json-null))
+    "projection" (if target-only "target" "private"))
    callback :parent parent :application application))
 
 (provide 'kargu/bridge/config-policy)

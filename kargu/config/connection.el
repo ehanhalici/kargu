@@ -232,11 +232,14 @@ Explicit session intent is frozen by the request; callers own selection guards."
     (kargu-config-worker-resolve provider host child :timeout timeout)))
 
 (cl-defun kargu-connection-resolve-async
-    (provider model &key callback timeout origin capabilities parent owner settings public expected-endpoint)
+    (provider model &key callback timeout origin capabilities parent owner settings public expected-endpoint
+              native)
   "Resolve PROVIDER/MODEL natively into CALLBACK under PARENT and OWNER.
 ORIGIN captures session ownership; TIMEOUT bounds native policy and interop.
 CAPABILITIES/SETTINGS are captured DTOs.  PUBLIC is a verified catalog flag.
-EXPECTED-ENDPOINT pins a previously verified catalog base before any lookup."
+EXPECTED-ENDPOINT pins a previously verified catalog base before any lookup.
+NATIVE resolves only the secret-free target of a native run: no key reaches
+the editor and no early credential lookup runs; Rust owns the credential."
   (kargu-contract-assert #'functionp callback)
   (let* ((app (kargu-application-context))
          (timeout (if (and (numberp timeout) (> timeout 0))
@@ -302,7 +305,7 @@ EXPECTED-ENDPOINT pins a previously verified catalog base before any lookup."
                             :capabilities (or capabilities (kargu-connection--default-capabilities name))
                             :settings settings :config-revision revision))
                (cond
-                (public (kargu-connection--accept-secret task draft (kargu-ok "")))
+                ((or public native) (kargu-connection--accept-secret task draft (kargu-ok "")))
                 ((equal (gethash "kind" credential) "direct")
                  (kargu-connection--accept-secret task draft (kargu-ok (gethash "secret" credential))))
                 ((equal (gethash "kind" credential) "keyless")
@@ -324,7 +327,8 @@ EXPECTED-ENDPOINT pins a previously verified catalog base before any lookup."
              (kargu-bridge-config-policy--release-inputs inputs)
              (setq revision (kargu-config-revision))
              (kargu-bridge-config-resolve provider model (kargu-async-wrap task #'resolved)
-                                          :parent task :application app :revision revision :context (get private 'value)))))
+                                          :parent task :application app :revision revision :context (get private 'value)
+                                          :target-only native))))
       (setq task (kargu-async-start (kargu-application-wrap app #'finish)
                                     :owner owner :parent parent :buffer origin :valid-p (kargu-application-wrap app #'valid)
                                     :timeout (or timeout kargu-config-worker-default-timeout)))

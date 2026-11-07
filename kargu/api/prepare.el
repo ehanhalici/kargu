@@ -18,7 +18,8 @@
 
 (cl-defstruct (kargu-connection-preparation (:constructor kargu-connection-preparation-create))
   "One target's preparation state, owner identity and pending root task."
-  task app origin session selection provider model public tuning metadata-ticket metadata-view (state :config))
+  task app origin session selection provider model public native tuning metadata-ticket metadata-view
+  (state :config))
 
 (defun kargu-api-prepare--current-p (preparation)
   "Check PREPARATION's captured session and selection without disk access."
@@ -59,6 +60,7 @@
          provider model :parent task :origin (kargu-connection-preparation-origin preparation)
          :settings settings :capabilities (list :tools (plist-get settings :tools))
          :public (kargu-connection-preparation-public preparation)
+         :native (kargu-connection-preparation-native preparation)
          :callback (lambda (value) (kargu-api-prepare--resolved preparation value))))))))
 
 (defun kargu-api-prepare--configured (preparation result)
@@ -83,14 +85,15 @@
 					   (setf (kargu-connection-preparation-metadata-view preparation) view)
 					   (kargu-api-prepare--credentials preparation result)))))))))))
 
-(cl-defun kargu-api-prepare-connection (callback &key parent owner provider model public)
+(cl-defun kargu-api-prepare-connection (callback &key parent owner provider model public native)
   "Prepare a connection for CALLBACK under PARENT and OWNER.
-PROVIDER and MODEL override session defaults; PUBLIC is a verified catalog flag."
+PROVIDER and MODEL override session defaults; PUBLIC is a verified catalog flag.
+NATIVE prepares a secret-free target for a native run."
   (let* ((app (kargu-application-context))
          (preparation (kargu-connection-preparation-create
                        :app app :origin (current-buffer) :session (kargu-session-context)
                        :selection (kargu-selection-context) :provider provider :model model
-                       :public public
+                       :public public :native native
                        :metadata-ticket (or (kargu-bridge-models-capture app)
                                             (kargu-bridge-models-observe app #'ignore))
                        :tuning (list :temperature kargu-temperature :max-tokens kargu-max-tokens

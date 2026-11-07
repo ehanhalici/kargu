@@ -286,7 +286,7 @@
                        "test-model-1"))))))
 
 (ert-deftest kargu-active-run-native-start-uses-pinned-snapshot-test ()
-  "Native arguments use the prepared snapshot and delegate auth to Rust."
+  "Native arguments use the prepared snapshot and never carry its secret."
   (let* ((credential (kargu-credential-scope--create :raw-secret "synthetic-key"))
          (snapshot (kargu-connection-snapshot--create
                     :provider "openai" :model "pinned-model"
@@ -297,7 +297,8 @@
          (connection (gethash "connection" arguments)))
     (should (equal (gethash "model" connection) "pinned-model"))
     (should (equal (gethash "url" connection) "http://127.0.0.1:1"))
-    (should (equal (gethash "key" (gethash "auth" connection)) "synthetic-key"))
+    (should (eq (gethash "key" (gethash "auth" connection)) :json-null))
+    (should-not (string-search "synthetic-key" (prin1-to-string arguments)))
     (should-not (gethash "Authorization" (gethash "headers" connection)))
     (should (= (gethash "config_revision" arguments) 12))
     (should (= (gethash "turn_limit" arguments) (plist-get run :max-iterations)))))

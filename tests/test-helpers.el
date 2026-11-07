@@ -164,6 +164,8 @@ policy; interop lookup has a separate native receipt corpus.  Return ARGUMENTS."
                                                                      :apikey (if (stringp key) key ""))))
        "/synthetic/native-target" (format "%s|%s|%s" provider model url))
       (puthash "provider" provider connection)
+      ;; The committed policy now owns the key; a native prompt never echoes it.
+      (when (hash-table-p auth) (puthash "key" :json-null auth))
       (puthash "config_revision" (kargu-config-revision) arguments))
     arguments))
 

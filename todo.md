@@ -2411,9 +2411,8 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         Eklenen missing-auth vakası focused native-agent testinde de geçti.
         Elisp/TLA+ kaynağı değişmedi; TLC çalıştırılmadı.
         Loglar `/tmp/kargu-run-credentials-{rust,build,ert,bridge}.log`.
-        **Açık:** direct secret hâlâ editör DTO'sunda da taşınıyor; native
-        builder artık kendi config/env key'ini kullanıyor, fakat key echo guard
-        ve secret-free native preparation DTO cutover'ı 5.4a2c2a'da açık. Interop (auth-source/callable)
+        **Açık:** direct secret'ın editör DTO'sundan çıkarılması 5.4a2c2a'da
+        kapandı; native run editör key'i taşımaz. Interop (auth-source/callable)
         credential için opaque receipt/epoch bağı henüz native admission'a
         bağlı değil; native header template/binding kabulü 5.4a1'de kapandı.
         Model metadata ve context
@@ -2606,13 +2605,37 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
             Standalone API/catalog, Stop/reset/EOF ve sonraki claim testlerini
             aynı binary ile çalıştır; eski owner callback'i yeni run'a taşınmasın.
 
-            - [ ] **5.4a2c2a Credential-free native target DTO:** native run
+            - [x] **5.4a2c2a Credential-free native target DTO:** native run
               hazırlığı sadece metadata/target DTO'su alsın; config/env direct
               key UI'a dönüp `auth.key` içinde geri gelmek zorunda kalmasın.
               Native builder artık kendi key'ini kullanıyor ama mevcut direct
               capture guard/snapshot hâlâ key echo bekliyor. Bu tüketici için
               secret-free projection + native-owned credential admission kur;
               standalone API/catalog private projection'ını koru.
+              **Teslim (2026-11-07):** `configuration/resolve` yeni
+              `projection` alanı alır: varsayılan `private` (standalone API/
+              catalog) direct secret'ı korur, `target` yalnız credential türünü
+              ve hedef metadata'sını döndürür (secret sıfırlanıp çıkarılır,
+              bilinmeyen projeksiyon reddedilir). Native prompt artık boş olmayan
+              hiçbir editör key'ini kabul etmez (direct/keyless/interop); key echo
+              guard'ı kaldırıldı, direct key committed policy'den, interop key
+              yalnız native receipt'ten gelir. Elisp: run oluşturulurken yakalanan
+              `:native-backend` seçimi `kargu-api-prepare-connection :native` →
+              `kargu-connection-resolve-async :native` ile secret'sız hedefi ister;
+              bu yolda erken auth-source/callable lookup çalışmaz;
+              `kargu-loop-native--arguments` auth'u key'siz kurar.
+              **Kanıt:** Rust `native_credentials_never_accept_an_editor_key`
+              (yabancı key ve committed key echo'su reddedilir, key'siz bağlı
+              prompt tamamlanır), header ve interop/config-change testleri key'siz
+              sözleşmeye taşındı, policy testi target/private/geçersiz projeksiyon;
+              ERT `kargu-config-native-target-resolution-is-secret-free-test`
+              (direct/interop'ta native snapshot secret'sız ve lookup yok, private
+              yol direct key'i korur), full-wire testi Authorization'ın config
+              key'inden geldiğini doğrular. 624 locked Rust, strict Clippy/fmt;
+              tam ERT 1466/1466, bridge 40/40; değişen Elisp Werror/checkdoc temiz.
+              **Sınır:** native interop run'ı reverse handler (c2b) bağlanana ve
+              capability negotiate edilene kadar `configuration_unavailable` ile
+              reddedilir; sessiz fallback yoktur.
 
             - [ ] **5.4a2c2b Reverse handler ve gerçek consumer kabulü:** c1
               actual-completion portuyla handler'ı bağla; native backend'in

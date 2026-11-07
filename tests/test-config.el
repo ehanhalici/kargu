@@ -349,5 +349,38 @@
           (kargu-async-finish pending-task (kargu-ok "late-secret"))
           (should-not delivered))))))
 
+(ert-deftest kargu-config-native-target-resolution-is-secret-free-test ()
+  "A native run's target carries no key and runs no early credential lookup.
+The standalone private projection still captures the committed direct key."
+  (let ((kargu-session--context (kargu-test-session-with-history :provider "beta"))
+        (kargu-api-key nil))
+    (dolist (case '(direct interop))
+      (kargu-test-config-publish
+       (kargu-config-service-context)
+       (if (eq case 'direct)
+           '(:providers (("beta" :api "https://beta.example/v1" :apikey "synthetic-direct-key")))
+         '(:providers (("beta" :api "https://beta.example/v1"))))
+       "/fixture" (format "native-target-%s" case))
+      (cl-letf (((symbol-function 'kargu-provider-keyless-p) (lambda (_) nil))
+                ((symbol-function 'kargu-provider-env) (lambda (_) nil)))
+        (let* ((kargu-config-credential-adapter
+                (lambda (&rest _) (ert-fail "Native target ran an early credential lookup")))
+               (native (kargu-test-await
+                        (lambda (done) (kargu-connection-resolve-async
+                                        "beta" "m" :native t :callback done)))))
+          (should (kargu-ok-p native))
+          (let ((snapshot (kargu-result-value native)))
+            (should (equal (kargu-connection-snapshot-endpoint snapshot) "https://beta.example/v1"))
+            (should (equal (kargu-connection-snapshot-secret snapshot) ""))
+            (should-not (string-search "synthetic-direct-key" (prin1-to-string snapshot)))
+            (kargu-connection-snapshot-wipe snapshot)))
+        (when (eq case 'direct)
+          (let ((private (kargu-test-await
+                          (lambda (done) (kargu-connection-resolve-async "beta" "m" :callback done)))))
+            (should (kargu-ok-p private))
+            (should (equal (kargu-connection-snapshot-secret (kargu-result-value private))
+                           "synthetic-direct-key"))
+            (kargu-connection-snapshot-wipe (kargu-result-value private))))))))
+
 (provide 'tests/test-config)
 ;;; test-config.el ends here

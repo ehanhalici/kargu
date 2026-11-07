@@ -372,6 +372,26 @@ fn transient_context_and_provider_selection_are_revision_bound_not_publications(
         json!({"revision":1,"context":transient,"target":{}}),
     )?;
     assert_eq!(resolved["credential"]["secret"], "transient-private");
+    // A native run's target projection names the credential kind only.
+    let projected = call(
+        &mut host,
+        &scope,
+        "configuration/resolve",
+        json!({"revision":1,"context":transient,"target":{},"projection":"target"}),
+    )?;
+    assert_eq!(projected["credential"]["kind"], "direct");
+    assert!(projected["credential"].get("secret").is_none());
+    assert!(!projected.to_string().contains("transient-private"));
+    assert_eq!(projected["endpoint"], resolved["endpoint"]);
+    assert!(
+        call(
+            &mut host,
+            &scope,
+            "configuration/resolve",
+            json!({"revision":1,"target":{},"projection":"public"})
+        )
+        .is_err()
+    );
     let select = |provider: &str, no_model, batch| json!({"revision":1,"provider":provider,"no_model":no_model,"batch":batch,"cached_models":["Cached/Case"]});
     assert_eq!(
         call(

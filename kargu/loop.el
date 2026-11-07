@@ -336,7 +336,8 @@ the diff run files and the UI as they were."
           (t (let ((context (plist-get run :context)))
                (kargu-api-prepare-connection
                 (kargu-loop--wrap run (lambda (value) (kargu-loop--connection-ready run prompt value)))
-                :parent (kargu-execution-task context) :owner (kargu-execution-app context)))))))
+                :parent (kargu-execution-task context) :owner (kargu-execution-app context)
+                :native (plist-get run :native-backend)))))))
 
 (defun kargu-loop--connection-ready (run prompt result)
   "Start RUN's PROMPT only after its owned connection RESULT is ready."

@@ -78,6 +78,17 @@ struct Resolve {
     revision: ConfigRevision,
     target: TargetInput,
     context: Option<PolicyContext>,
+    #[serde(default)]
+    projection: ResolveProjection,
+}
+/// Who consumes a resolution: standalone API/catalog paths keep the private
+/// key; a native run only needs its secret-free target.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ResolveProjection {
+    #[default]
+    Private,
+    Target,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -620,13 +631,16 @@ impl ConfigurationService {
                     return Err(CoreError::StaleOwner);
                 }
                 let published = self.published.as_ref().ok_or(CoreError::Unavailable)?;
-                let mut value = resolve::target(
+                let resolved = resolve::target(
                     &published.document,
                     input.context.as_ref().unwrap_or(&published.context),
                     input.target,
                     catalog,
-                )?
-                .into_editor_value();
+                )?;
+                let mut value = match input.projection {
+                    ResolveProjection::Private => resolved.into_editor_value(),
+                    ResolveProjection::Target => resolved.into_target_value(),
+                };
                 value
                     .as_object_mut()
                     .ok_or(CoreError::Limit)?
