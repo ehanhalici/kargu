@@ -52,7 +52,7 @@ core restart gerekir. Kullanıcının canlı Emacs'i otomatik reload edilmedi.
 ## Yeni bulgu ve kalan alt iş
 
 Takip: aşağıdaki tarihsel upstream base-selector bulgusu sonraki dar tüketici
-geçişinde kapatıldı; ham base ve native chat hedefi ayrıntıları .codex/47'de.
+geçişinde kapatıldı; ham base ve native chat hedefi ayrıntıları .agents/skills/native-api-and-catalog/references/47_NATIVE_CHAT_TARGET.md'de.
 Genel native config/schema/precedence üst işi yine açıktır.
 
 Eski string concat, query içeren base'e `/models` ekini query içinde ekliyordu.

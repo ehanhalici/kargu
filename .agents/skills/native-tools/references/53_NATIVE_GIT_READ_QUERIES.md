@@ -100,5 +100,5 @@ dizinlerinde (`...-bytecompile-verified.log`, `...-checkdoc.log`). Connection TL
 **602836 / 101708**, queue 0, depth 22 (**20:33:28**); transport **1810 / 693**,
 queue 0, depth 13 (**20:33:29**) temiz. Bounded TLC modelleri yalnız mevcut
 lifecycle regresyonlarıdır; yeni Git/config/OS adapter'ının formal
-refinement veya bütün `.codex/01` kurallarının ispatı sayılmaz. Genel credential
+refinement veya bütün `.agents/skills/coding-standards/references/01_RUST_CORE_PATTERNS.md` kurallarının ispatı sayılmaz. Genel credential
 process lifecycle, egress/log privacy ve kalan todo 2 motorları açık kalır.

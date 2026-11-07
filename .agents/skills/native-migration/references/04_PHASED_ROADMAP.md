@@ -232,8 +232,8 @@ incelenmiş olması Rust uygulamasının tamamlandığı anlamına gelmez.
 
 - Yukarıdaki mevcut ERT komutu: **1116/1116 expected, 0 unexpected**, exit 0,
   47.68 saniye. Bu sonuç mevcut Elisp baseline'ıdır; henüz Rust eşdeğerliği değildir.
-- 00–11 belgeleri mevcut kaynak aileleri, architecture-contracts.md,
-  docs/modularity.md, docs/connection-ownership.md ve proof/README.md ile
+- 00–11 belgeleri mevcut kaynak aileleri, .agents/rules/architecture-contracts.md,
+  .agents/rules/modularity.md, .agents/rules/connection-ownership.md ve proof/README.md ile
   karşılaştırıldı. Markdown fence ve whitespace kontrolleri geçti.
 - Yalnız plan dosyaları düzenlendi. Mevcut shell.nix değişikliği korunmuştur.
   Rust projesi oluşturulmadı; Rust/TLC doğrulaması bu incelemede çalıştırılmadı.

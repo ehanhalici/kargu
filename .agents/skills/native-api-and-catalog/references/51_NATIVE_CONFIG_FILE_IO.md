@@ -92,7 +92,7 @@ Europe/Istanbul** geçti. **280 native + 20 compile-fail**, locked build/fmt ve
 strict Clippy temiz. Dokuz değişen Elisp dosyası Werror/checkdoc temiz; elc
 yalnız /tmp'dadır. Connection TLC **602836 / 101708**, queue 0, depth 22;
 transport **1810 / 693**, queue 0, depth 13 ile temiz. Log yolları ve kapsam
-aynı commit'in .codex/12 kaydındadır. Native config
+aynı commit'in .agents/skills/native-migration/references/12_MIGRATION_PROGRESS.md kaydındadır. Native config
 publication authority, env/keyless/credential precedence ve provider/model
 selection hâlâ todo 1'de açıktır. Bu dilim bütün API/Rust göçünü veya tüm 01
 uyumluluğunu kapatmaz. Gerçek config/credential dosyası, canlı hesap/ücretli API,

@@ -127,7 +127,7 @@ TERM-ignoring child/reap/reservation, output/invalid/foreign/missing kabulü ge�
 Prepared/Running resource typestate, join edilen Finalizing/Discarding cleanup;
 eski Elisp diff/blame argv/range/report silindi. Submodule kapsamı açık text+
 coverage ile dışarıda; unsupported layout/symlink HEAD unsafe fallback yapmaz.
-Shared Peer artık EOF/graceful drain öncesi core'u öldürmez. Ayrıntı .codex/56.
+Shared Peer artık EOF/graceful drain öncesi core'u öldürmez. Ayrıntı .agents/skills/native-tools/references/56_NATIVE_GIT_WORKTREE_READS.md.
 
 Final 1274/1274 source ERT, 0 unexpected, 155.077287 s (23:35:10); 315 native +24
 compile-fail =339 locked test. Build/fmt/strict Clippy ve dört Elisp Werror/checkdoc
@@ -145,7 +145,7 @@ live snapshot/tick ve owner interop'u taşır. Gecikmiş disk sonucuna yeni unsa
 buffer üstün gelir; değişmiş live revision ve foreign/stale owner yayınlanmaz.
 Son sync consumer read_symbol async'e geçti; eski file/diff sync API, disk reader,
 numbered formatter ve model worker yolu silindi. Edit snapshot / Dape source
-tüketicileri kendi todo 3/4 işleri için kaldı. Ayrıntı .codex/54.
+tüketicileri kendi todo 3/4 işleri için kaldı. Ayrıntı .agents/skills/native-tools/references/54_NATIVE_FILE_EXCERPTS.md.
 
 Final 1272/1272 source ERT, 0 unexpected, 148.064004 s (22:06:56); 305 native +
 24 compile-fail =329 locked test. Normal locked build/fmt/strict Clippy, 14 değişen
@@ -163,7 +163,7 @@ ExecutionGate ve PGID/process supervisor'a bağlandı. Eski Elisp log/list argv 
 empty-report motorları silindi; mutation/diff/blame tüketicileri nedeniyle genel
 Git runner kaldı. `workspace/git/repository.rs` status ve query'nin aynı root,
 worktree, executable/env, complete-output ve RunSettings hazırlığını paylaşır;
-Git motoru/parser'ı yazılmadı. Ayrıntı .codex/53.
+Git motoru/parser'ı yazılmadı. Ayrıntı .agents/skills/native-tools/references/53_NATIVE_GIT_READ_QUERIES.md.
 
 Literal/deleted/missing path, typed CommitLimit, descriptor-bound .git + target,
 complete UTF-8/captured byte/IPC sınırları; no-pager/no-signature/no-lazy-fetch
@@ -205,7 +205,7 @@ credential/env/endpoint precedence ve eligibility/default-selection motorları
 silindi; eski parser/file reader zaten kaldırılmıştı. Memory-only UI reader'da
 gizli RPC/env/file IO veya credential unlock yoktur. `kargu-set-provider` async
 task/optional Result callback sözleşmesine geçti; UI modeli native ACK'ten sonra
-seçer. Current README ve connection ownership belgesi güncellendi; ayrıntı .codex/52.
+seçer. Current README ve connection ownership belgesi güncellendi; ayrıntı .agents/skills/native-api-and-catalog/references/52_NATIVE_CONFIG_POLICY.md.
 
 Expiring owner/session ticket ve exact-revision resolve/select; geç prepare
 acquisition abort; lost commit ACK'te rollback/retry yerine fail-closed eski
@@ -259,7 +259,7 @@ Gerçek refresh native porta bağlandıktan sonra Elisp file script/decoder/load
 handoff/parse bridge ve file-only stdout override silindi. Credential interop
 worker son tüketicileri nedeniyle kaldı. Cold absent explicit refresh core
 başlatır; passive UI getter sıfır IO/RPC'dir. Missing core/capability veya ilk
-mevcut invalid/unreadable dosya last-good publication'ı temizlemez. Ayrıntı .codex/51.
+mevcut invalid/unreadable dosya last-good publication'ı temizlemez. Ayrıntı .agents/skills/native-api-and-catalog/references/51_NATIVE_CONFIG_FILE_IO.md.
 
 Gerçek provider picker testi `~/.emacs.d` fallback spelling'ini yakaladı:
 path editor capture sınırında genişletildi, native absolute-path kuralı esnetilmedi.
@@ -301,7 +301,7 @@ elc yalnız task-specific /tmp dizininde. Connection TLC **602836 / 101708**,
 queue 0, depth 22; transport **1810 / 693**, queue 0, depth 13 ile **08:30:42**'de
 temiz. Bunlar bounded lifecycle regression'ıdır; somut admission/refinement
 veya tüm 01 ispatı değildir. Rust değişmedi; `0fc7cf6` tabanındaki 274 native +
-18 compile-fail/fmt/Clippy kanıtı korunur. Ayrıntı .codex/50'de.
+18 compile-fail/fmt/Clippy kanıtı korunur. Ayrıntı .agents/skills/native-api-and-catalog/references/50_CONFIG_REFRESH_ADMISSION.md'de.
 
 Todo 1'in ek admission alt işi `[x]`; native IO/config publication/precedence/
 env/keyless/selection üst işi açık. Kullanıcı 01/07/shell.nix ve gerçek config/
@@ -322,7 +322,7 @@ geçer; doğru prefetch hedefi offline stub ile sayılır, gerçek upstream yokt
 Europe/Istanbul** geçti. İki değişen Elisp Werror bytecompile/checkdoc temiz,
 elc yalnız task-specific /tmp dizininde. Rust kaynağı değişmedi; önceki
 `0fc7cf6` native parser tabanındaki 274 native + 18 compile-fail/fmt/Clippy
-kanıtları yeni Rust özelliği diye sunulmaz. Ayrıntı .codex/49'da.
+kanıtları yeni Rust özelliği diye sunulmaz. Ayrıntı .agents/skills/native-api-and-catalog/references/49_PROVIDER_REPORT_PRIVACY.md'de.
 
 Native file IO/publication/precedence/env/keyless/provider/model selection ve
 genel log-egress kabulü açık; bu dar düzeltme onları kapatmaz. Kullanıcı
@@ -360,7 +360,7 @@ Soğuk setup fixture'ı artık her seferinde yeni core açar: shared bridge'in b
 standalone read-service application/session bootstrap'ını, editor application's
 native lease acquisition'ından ayırır. Bir readonly parse, sıfır editor lease/
 model/metadata/HTTP ve credential cleanup denetlenir; warm core'un eksik cold
-startup assertion'ını gizlemesine izin verilmez. .codex/48 ayrıntıları içerir.
+startup assertion'ını gizlemesine izin verilmez. .agents/skills/native-api-and-catalog/references/48_NATIVE_CONFIG_PARSER.md ayrıntıları içerir.
 
 File candidate/IO ve publication service hâlâ editor portudur; native config
 authority/env/keyless/credential/provider/model seçim işi açık. Yeni bulgu:
@@ -400,7 +400,7 @@ path/profile ve final uzunluk sınırını denetler. Dört ERT gerçek geçici T
 refresh + mock'lanmamış base reader + native port + loopback GET/OpenAPI/Anthropic
 POST zincirini, old-core rejection/cleanup ve silinen helper'ları kapsar. Mevcut
 gerçek retry fixture'ı query'li base ile güçlendirildi; config/wire sonradan
-değişse bile iki attempt ilk hedef/key/body'yi korur. Ayrıntılar .codex/47'de.
+değişse bile iki attempt ilk hedef/key/body'yi korur. Ayrıntılar .agents/skills/native-api-and-catalog/references/47_NATIVE_CHAT_TARGET.md'de.
 
 **1249/1249 full source ERT**, 0 unexpected, **137.84 s**, **01:06:43
 Europe/Istanbul** geçti. **269 native + 16 compile-fail**, fmt, locked build,
@@ -444,7 +444,7 @@ ve query/path düzeltmesi `[x]`; genel native config/base/precedence üst işi a
 yalnız test helper'ında gerçek native target portunu açıkça bekler; engine mock'u,
 production busy wait, module baseline genişletme veya eski assert silerek geçiş
 yoktur. Yeni native target/URI facts gerçek pipe ve loopback GET ile doğrulanır.
-Detay .codex/46'da. Final **1245/1245 full source ERT**, 0 unexpected, **137.00 s**,
+Detay .agents/skills/native-api-and-catalog/references/46_NATIVE_CATALOG_TARGET.md'de. Final **1245/1245 full source ERT**, 0 unexpected, **137.00 s**,
 **00:51:37 Europe/Istanbul** geçti. Önceki 1243/1244 taramaları da geçti; son
 capture/closed-parent fixture'ları sonrası kaynak yeniden tamamen tarandı.
 **266 native + 16 compile-fail**, fmt, locked build, strict all-targets Clippy
@@ -475,7 +475,7 @@ Yeni güvenlik bulgusu da kapatıldı: placeholder warning sonu `...` olan key'i
 kendisini logluyordu; yalnız generic uyarı kaldı. Todo'da iki alt madde `[x]`,
 native config/endpoint üst grubu açık; kalan consumer alt işleri ayrıldı.
 Setup `ready` raporunun native readiness olmadığını release kabulünde doğrulamak
-için todo 10'a bir alt iş eklendi. Ayrıntılar .codex/45'te.
+için todo 10'a bir alt iş eklendi. Ayrıntılar .agents/skills/native-migration/references/45_SETUP_CONNECTION_CUTOVER.md'de.
 
 10 yeni setup testi ve **1236/1236 full source ERT**, 0 unexpected, **137.45 s**,
 **00:12:44 Europe/Istanbul** geçti. **259 native + 16 compile-fail**, fmt,
@@ -1432,7 +1432,7 @@ Eski fd-rooted listing garantisi güncel ls çıktısına atfedilmez.
 
 01 generic standartları değiştirilmedi. `todo.md` G03–G13, API -> Rust ve dört
 uygulama backend'i kapsamı açık kalır. Kullanıcının `shell.nix` ve çalışma
-sırasında görülen `.codex/07_GECIS_3.md` fence değişikliği korunup commit dışında
+sırasında görülen `.agents/skills/native-migration/references/07_GECIS_3.md` fence değişikliği korunup commit dışında
 bırakıldı. Aşağıdaki önceki dilim kayıtları tarihsel kanıttır, güncel strateji
 veya implementasyon durumunun yerine geçmez.
 

@@ -159,8 +159,8 @@ kopyalanmamalıdır; incelemede derlenmemiş/eksik örnekler kaldırılmış, ye
 bu sözleşmeler ve kabul testleri yazılmıştır. Nihai Rust/Elisp kaynakları
 uygulama sırasında derlenebilir testleriyle üretilir.
 
-Mevcut architecture-contracts.md, docs/modularity.md,
-docs/connection-ownership.md, tests/ ve proof/ korunacak davranışların
+Mevcut .agents/rules/architecture-contracts.md, .agents/rules/modularity.md,
+.agents/rules/connection-ownership.md, tests/ ve proof/ korunacak davranışların
 dayanağıdır. todo.md'deki açık yükümlülükler Rust'a geçince otomatik kapanmaz.
 Bir uyuşmazlıkta mevcut güvenlik/sahiplik kuralı sessizce gevşetilmez;
 değişiklik gerekçesi, model/test eşlemesiyle ayrıca kaydedilir.

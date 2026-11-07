@@ -3,9 +3,11 @@
 İlk inceleme tabanı: 32e917b, 2026-10-22; tarihsel ERT: 1116/1116.
 Son kaynak/görev denetimi: 2026-11-03, `81ed1e3` tabanı.
 Tarama: 397 production kaynak + 176 test/destek kaynağı (573 tracked Rust/Elisp).
-Son çalıştırılmış kabul (2026-11-02): 593 locked Rust (32 compile-fail dahil),
-1446/1446 tam ERT ve 2/2 service odak testi. Bu doküman turunda test çalıştırılmadı;
-aşağıdaki daha eski sayılar yalnız ilgili dilimin tarihsel kanıtıdır.
+Son çalıştırılmış kabul (2026-11-07, `f01a286` tabanı): fmt + strict Clippy,
+593 locked Rust (32 compile-fail dahil), build ve `tests/ci/run-ert.sh full`
+ile temiz HOME'da 1448/1448 ERT. Bütün 207 üretim Elisp dosyası warnings-as-errors
+byte compile + check-parens + checkdoc'tan geçer. Aşağıdaki daha eski sayılar
+yalnız ilgili dilimin tarihsel kanıtıdır.
 Rust göçünün güncel uygulama/test kaydı: [.agents/skills/native-migration/references/12_MIGRATION_PROGRESS.md](.agents/skills/native-migration/references/12_MIGRATION_PROGRESS.md).
 G02 bağlantı/metadata sözleşmesi ve kalan köprüler: [.agents/rules/connection-ownership.md](.agents/rules/connection-ownership.md).
 Tamamlanan geçiş alt maddeleri takip için `[x]`, kalan işler `[ ]` ile tutulur;
@@ -344,6 +346,10 @@ kalan bridge tüketicileri; proof/ ve README.md.
   var. Güncel envanter al; tarihsel 73/84 uyarı sayısını bug sayısı veya güncel
   sonuç diye kullanma. Gerçek lint sorununu fixture false-positive'inden ayır;
   assertion/sentetik hata metnini değiştirme, test silme/global lint kapatma yok.
+  Üretim tarafı (2026-11-07): CI yalnız değişen Elisp'i lint ettiği için 21 üretim
+  dosyasında birikmiş checkdoc borcu (alt dizin `;;; kargu/x.el` başlık/footer'ı,
+  belgelenmemiş argüman, fiil kipi) giderildi; 207/207 temiz. `test-modules.el`
+  izole fixture'ları artık checkout yerine geçici çalışma dizinine yazar.
 - G02–G12 son consumer'ları taşıyınca application/async/request, registry,
   catalog/circuit, edit/job/archive global köprülerini ve çift state yollarını
   sil. Emacs'in zorunlu hook/keymap/autoload kayıtlarını dar whitelist ile ayır.
@@ -904,7 +910,10 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   SafeReadOnly portudur; executable çalıştırmaz. Project→connection→skills owned
   preparation eksik mandatory CLI'da ilk POST/unsent-history tüketimini engeller.
   Legacy Git runner/fallback, curl/resolver/policy/parser, toolchain FS seçimleri
-  ve job/foreground/counter global aynaları silindi. Detay/kabul [58_NATIVE_TOOLS_COMPLETE.md](.agents/skills/native-tools/references/58_NATIVE_TOOLS_COMPLETE.md).
+  ve global foreground/counter aynaları silindi. Proje/kaynak buffer/oturum başına
+  `kargu-job--services` tablosu, job ID sayacı (`p%d`) ve tamamlanmış job budaması
+  hâlâ Elisp'tedir ([tools/bash/jobs.el](kargu/tools/bash/jobs.el), [tools/bash/native.el](kargu/tools/bash/native.el));
+  bu job domain state'i 5.6c/G13'te açıktır (2026-11-07 denetimi). Detay/kabul [58_NATIVE_TOOLS_COMPLETE.md](.agents/skills/native-tools/references/58_NATIVE_TOOLS_COMPLETE.md).
   `tools/process.el` yalnız diff Git-apply (madde 3), Dape context/preflight
   (madde 4) ve session listing worker'ı (madde 7) için kalır; native araç fallback'i
   değildir. Dape file worker, credential/UI/package ve binary locator interop'u
@@ -3376,7 +3385,10 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         Dört ledger unit + 18 gerçek provider/stdio vaka; gerçek Emacs write/save
         → Flymake report → native diagnostic → pending=0, retained=1, üç model
         isteği kabulü geçti. 612 locked Rust (32 compile-fail), 1451/1451 tam ERT,
-        strict Clippy/fmt ve Elisp Werror/parantez/checkdoc temiz. Kanıt:
+        strict Clippy/fmt ve Elisp Werror/parantez/checkdoc temiz. Not (2026-11-07):
+        bu sayılar commit dışı çalışma ağacından alınmıştır; `5987d3b` commit'i
+        554 test + 32 compile-fail = 586 locked Rust içerir, 612 commit'ten
+        tekrar üretilemez. Güncel tekrar üretilen kapı başlıktaki sayılardır. Kanıt:
         [.agents/rules/native-receipt-verification.md](.agents/rules/native-receipt-verification.md).
       - [ ] **6.4b2 Kalan otomatik akış:** her editten sonra native-graded baseline/
         fresh-pull barrier, error delta ve bounded healing'i otomatik aynı parent
@@ -5465,7 +5477,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Önkoşul:** 10.5d asset/version contract; desteklenen platform kararı.
 
       **Başlangıç kaynakları:** kargu-core/Cargo.toml, Cargo.lock, kargu-core/src/main.rs,
-        kargu-core/src/constants.rs, kargu-core/assets/; kargu.el, kargu/bridge.el, README.md, describing.md,
+        kargu-core/src/constants.rs, kargu-core/assets/; kargu.el, kargu/bridge.el, README.md, .agents/rules/describing.md,
         shell.nix.
 
       **Uygulama adımı:** Binary + gerekli Elisp/assets paketini declared
@@ -5488,7 +5500,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Önkoşul:** 10.5a; 8.5b optional composition.
 
       **Başlangıç kaynakları:** kargu-core/Cargo.toml, Cargo.lock, kargu-core/src/main.rs,
-        kargu-core/src/constants.rs, kargu-core/assets/; kargu.el, kargu/bridge.el, README.md, describing.md,
+        kargu-core/src/constants.rs, kargu-core/assets/; kargu.el, kargu/bridge.el, README.md, .agents/rules/describing.md,
         shell.nix.
 
       **Uygulama adımı:** Temiz HOME/config ortamında explicit path/PATH,
@@ -5510,7 +5522,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Önkoşul:** 0.1 güncel authority matrisi; 10.5a/b.
 
       **Başlangıç kaynakları:** kargu-core/Cargo.toml, Cargo.lock, kargu-core/src/main.rs,
-        kargu-core/src/constants.rs, kargu-core/assets/; kargu.el, kargu/bridge.el, README.md, describing.md,
+        kargu-core/src/constants.rs, kargu-core/assets/; kargu.el, kargu/bridge.el, README.md, .agents/rules/describing.md,
         shell.nix.
 
       **Uygulama adımı:** README/describing ve architecture/connection/modularity
@@ -5535,7 +5547,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Önkoşul:** 5.3 native registry; 8.2 provider registry; 0.2 handshake.
 
       **Başlangıç kaynakları:** kargu-core/Cargo.toml, Cargo.lock, kargu-core/src/main.rs,
-        kargu-core/src/constants.rs, kargu-core/assets/; kargu.el, kargu/bridge.el, README.md, describing.md,
+        kargu-core/src/constants.rs, kargu-core/assets/; kargu.el, kargu/bridge.el, README.md, .agents/rules/describing.md,
         shell.nix.
 
       **Uygulama adımı:** Provider/tool/prompt asset manifest'i ve Rust/Elisp
@@ -5580,7 +5592,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Önkoşul:** 4.11c; native lifecycle handshake; 9.2 readiness.
 
     **Başlangıç kaynakları:** kargu-core/Cargo.toml, Cargo.lock, kargu-core/src/main.rs,
-      kargu-core/src/constants.rs, kargu-core/assets/; kargu.el, kargu/bridge.el, README.md, describing.md,
+      kargu-core/src/constants.rs, kargu-core/assets/; kargu.el, kargu/bridge.el, README.md, .agents/rules/describing.md,
       shell.nix.
 
     **Uygulama adımı:** kargu-check-setup raporunun config/dependency kapsamını native

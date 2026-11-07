@@ -50,7 +50,7 @@ portu kullanır. Encrypted/unsupported backend fixture'ı gerçek async portta
 typed unavailable sonucunu denetler; silinen API'yi test için yeniden tutmaz.
 Production auth-source araması yalnız fixed child script'inde kalır.
 Setup'ın async facade'ı hâlâ tüketicilidir; last consumer taşınmadan silinmedi.
-Bu tarihsel açık iş .codex/45'te kapandı: setup ortak connection portuna
+Bu tarihsel açık iş .agents/skills/native-migration/references/45_SETUP_CONNECTION_CUTOVER.md'de kapandı: setup ortak connection portuna
 bağlandıktan sonra key-only async facade/dispatch/delivery kaldırıldı.
 
 ## Kanıt ve sınır

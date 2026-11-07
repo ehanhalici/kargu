@@ -57,7 +57,7 @@ adapter'ına bağlandı; eski status parser/runner/formatter kaldırıldı. Diğ
 komutları, `fs.el` tüketicileri ve kalan
 aileler henüz taşınmış sayılmaz. Ayrıntı: 15_NATIVE_FIND_FILES.md.
 
-Davranış kanıtları: architecture-contracts.md, docs/modularity.md,
-docs/connection-ownership.md, tests/run-tests.el ve proof/README.md.
+Davranış kanıtları: .agents/rules/architecture-contracts.md, .agents/rules/modularity.md,
+.agents/rules/connection-ownership.md, tests/run-tests.el ve proof/README.md.
 Bunlar mevcut/amaçlanan sözleşmeleri anlatır; her özellik tamamlanmış kabul
 edilmez. todo.md'deki açık işler de taşınır ve Rust'a geçince kendiliğinden kapanmaz.
