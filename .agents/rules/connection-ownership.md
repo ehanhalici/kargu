@@ -51,6 +51,12 @@ that scope/capture ID, `quiescent: true`, an outcome (`resolved`, `unavailable`,
 `cancelled`), and a key only for `resolved`. An ordinary JSON-RPC error is not a
 completion receipt. Cancellation uses `rpc/cancel` for the reverse ID. No model IO
 or activation occurs before actual completion and current-config revalidation.
+Preparation also captures the application's native MetadataRevision before IO.
+A model-store publication during credential or workspace preparation revokes the
+candidate; activation checks that revision again. Issued credential IO still
+drains through its actual receipt. This guards the preparation interval; it does
+not yet authenticate the editor's pre-admission metadata/wire/tuning capture
+(`todo.md` 5.4a3b/c).
 Direct/env keys come from the native profile, keyless supplies no key, and only
 a matching interop receipt supplies the interop key; raw editor key capture is
 not the HTTP credential source. A direct key echo guard remains until the

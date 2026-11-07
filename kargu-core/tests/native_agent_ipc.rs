@@ -989,6 +989,68 @@ fn changed_config_during_interop_rejects_activation_after_real_drain() -> TestRe
 }
 
 #[test]
+fn changed_model_metadata_during_interop_rejects_activation_after_real_drain() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let url = format!("http://{}/v1", listener.local_addr()?);
+    let mut peer = Peer::start()?;
+    peer.initialize_with_capabilities(1_048_576, &["editor_credential_capture"])?;
+    let scope = peer.scope()?;
+    let mut bound = prompt(root.path(), &url);
+    publish_target_with_key(&mut peer, &scope, &mut bound, None)?;
+
+    let mut events = Vec::new();
+    begin(&mut peer, "capturing", &scope, bound.clone())?;
+    let lookup = credential_request(&peer, &mut events)?;
+    send(
+        &mut peer,
+        "metadata-begin",
+        "models/begin",
+        json!({"scope":scope,"arguments":{"provider":"fixture","revision":0}}),
+    )?;
+    let upload = response(&peer, "metadata-begin", &mut events)?["result"]["upload_id"].clone();
+    assert!(upload.is_string());
+    send(
+        &mut peer,
+        "metadata-append",
+        "models/append",
+        json!({"scope":scope,"arguments":{"upload_id":upload,"offset":0,
+            "chunk":json!({"operation":"put","model":"fixture-model","metadata":{"context_length":8192}}).to_string()}}),
+    )?;
+    assert!(
+        response(&peer, "metadata-append", &mut events)?
+            .get("error")
+            .is_none()
+    );
+    send(
+        &mut peer,
+        "metadata-commit",
+        "models/commit",
+        json!({"scope":scope,"arguments":{"upload_id":upload}}),
+    )?;
+    assert_eq!(
+        response(&peer, "metadata-commit", &mut events)?["result"]["revision"],
+        1
+    );
+    begin(&mut peer, "busy", &scope, bound)?;
+    assert_eq!(
+        response(&peer, "busy", &mut events)?["error"]["data"]["status"],
+        "busy"
+    );
+    complete_credential(&mut peer, &lookup, "resolved", Some("old-config-key"))?;
+    assert_eq!(
+        response(&peer, "capturing", &mut events)?["result"]["status"],
+        "stale_configuration"
+    );
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+    drop(peer);
+    Ok(())
+}
+
+#[test]
 fn native_credentials_never_accept_an_editor_key() -> TestResult {
     for committed in ["synthetic-committed-key", ""] {
         let root = tempfile::tempdir()?;

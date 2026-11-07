@@ -2672,6 +2672,30 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         ve tuning capture'ını native model/registry revision'ına bağla. Header
         template bağı tam metadata eşdeğerliği değildir. 5.4a2 sonrası.
 
+        - [x] **5.4a3a Preparation sırasında model publication değişimi:**
+          admission'da application'ın native `MetadataRevision` değerini yakala;
+          credential/workspace hazırlığı boyunca ve activation öncesi tekrar
+          denetle. Değişmiş revision eski hazırlığı `stale_configuration` ile
+          reddeder; credential completion borcu gerçek receipt'e kadar korunur.
+          Gerçek pipe testi credential beklerken `models/begin/append/commit`
+          ile metadata yayımlar; yeni claim Busy kalır, geç key activation/HTTP
+          başlatamaz. Bu kontrol henüz editör metadata capture'ının doğruluğunu
+          kanıtlamaz; aşağıdaki alt işler bitmeden 5.4a3 kapanmaz.
+          **Doğrulama (2026-11-08):** locked Rust 625/625 (32 compile-fail
+          dahil), native IPC 50/50, tam source ERT 1469/1469; strict Clippy,
+          fmt ve build temiz. Loglar `/tmp/kargu-model-preparation.log`,
+          `/tmp/kargu-model-preparation-all-rust.log` ve
+          `/tmp/kargu-model-preparation-ert.log`. Elisp/TLA+ değişmedi;
+          TLC çalıştırılmadı.
+        - [ ] **5.4a3b Native metadata receipt ve consumer:** native model
+          revision'lı capabilities/tuning projection'ını frontend hazırlığına
+          bağla; claim öncesinde eski/yabancı metadata capture'ını reddet.
+          Gerçek tüketici ve hazırlık/retry eşdeğerliğini doğrula.
+        - [ ] **5.4a3c Native wire/auth policy:** registry format/wire/auth
+          türünü native publication'a dahil et; typed connection'ı committed
+          politikadan kur, editörün wire/auth türü yetki olmasın. Custom provider
+          ve standalone API/catalog eşdeğerliğini koru. Sıra: a → b → c.
+
       - [ ] **5.4a4 Context revision receipt:** 4.9 native context store portu
         üzerinden captured revision'ı claim/activation'a bağla. 4.9 ve 5.4a3
         hazır olunca kabulü kapat; üst 5.4a kapanmadan 6.1a/5.6c kabulünü

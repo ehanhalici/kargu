@@ -172,6 +172,7 @@ struct PreparedStart {
 }
 struct Starting {
     claim: RunClaim,
+    model_revision: crate::models::store::MetadataRevision,
     task: Option<JoinHandle<Result<PreparedStart, CoreError>>>,
     input: Option<(PromptInput, crate::configuration::policy::RunTarget)>,
     credential: Option<credential::CredentialPreparation>,
@@ -362,6 +363,7 @@ impl Sessions {
         if target.interop_host().map_err(fault)?.is_some() && !host.editor_credential_available() {
             return Err(fault(CoreError::Unavailable));
         }
+        let model_revision = host.model_revision(&request.scope).map_err(fault)?;
         let claim = host
             .actor_mut(&request.scope)
             .map_err(fault)?
@@ -388,6 +390,7 @@ impl Sessions {
                 },
                 stage: Stage::Starting(Box::new(Starting {
                     claim,
+                    model_revision,
                     task: None,
                     input: Some((input, target)),
                     credential: None,
@@ -618,7 +621,8 @@ impl Sessions {
             owner.terminal = starting.claim.check_live().err();
         }
         if owner.terminal.is_none()
-            && !host.configuration_current(&owner.scope, starting.claim.scope().config_revision())
+            && (!host.configuration_current(&owner.scope, starting.claim.scope().config_revision())
+                || host.model_revision(&owner.scope).ok() != Some(starting.model_revision))
         {
             owner.terminal = Some(CoreError::ConfigurationChanged);
         }
@@ -681,7 +685,9 @@ impl Sessions {
             }
         };
         // A publication during preparation invalidates the captured receipt.
-        if !host.configuration_current(&owner.scope, starting.claim.scope().config_revision()) {
+        if !host.configuration_current(&owner.scope, starting.claim.scope().config_revision())
+            || host.model_revision(&owner.scope).ok() != Some(starting.model_revision)
+        {
             owner.terminal = Some(CoreError::ConfigurationChanged);
             drop(prepared);
             host.actor_mut(&owner.scope)?

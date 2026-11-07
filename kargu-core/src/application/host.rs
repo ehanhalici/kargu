@@ -624,6 +624,21 @@ impl Host {
         )
     }
 
+    /// Capture the application's native metadata publication before preparation IO.
+    pub(crate) fn model_revision(
+        &self,
+        scope: &ReadScope,
+    ) -> Result<crate::models::store::MetadataRevision, crate::error::CoreError> {
+        let actor = self
+            .applications
+            .get(&scope.application_id)
+            .filter(|app| app.is_live())
+            .ok_or(crate::error::CoreError::StaleOwner)?
+            .actor();
+        actor.session_selection(&scope.session_id)?;
+        Ok(actor.models.store().revision())
+    }
+
     /// Whether `revision` is still the application's published configuration.
     pub(crate) fn configuration_current(
         &self,
