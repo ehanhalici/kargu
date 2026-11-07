@@ -122,6 +122,7 @@ Startup errors are reported without switching to the Elisp backend."
         "editor_available" (kargu-loop-native--editor-tools)
         "tool_limit" 16 "turn_limit" (plist-get run :max-iterations)
         "timeout_ms" 120000
+        "model_revision" (or (plist-get settings :metadata-revision) 0)
         "config_revision" (kargu-connection-snapshot-config-revision snapshot)
         "policy_revision" (kargu-tool-registry-revision kargu--tool-registry)
         "budget" (kargu-bridge--object "requests" 16)

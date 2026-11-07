@@ -1033,7 +1033,9 @@ fn changed_model_metadata_during_interop_rejects_activation_after_real_drain() -
         response(&peer, "metadata-commit", &mut events)?["result"]["revision"],
         1
     );
-    begin(&mut peer, "busy", &scope, bound)?;
+    let mut current = bound.clone();
+    current["model_revision"] = json!(1);
+    begin(&mut peer, "busy", &scope, current)?;
     assert_eq!(
         response(&peer, "busy", &mut events)?["error"]["data"]["status"],
         "busy"
@@ -1042,6 +1044,19 @@ fn changed_model_metadata_during_interop_rejects_activation_after_real_drain() -
     assert_eq!(
         response(&peer, "capturing", &mut events)?["result"]["status"],
         "stale_configuration"
+    );
+    begin(&mut peer, "old-metadata", &scope, bound.clone())?;
+    assert_eq!(
+        response(&peer, "old-metadata", &mut events)?["error"]["data"]["status"],
+        "stale_configuration"
+    );
+    bound["model_revision"] = json!(1);
+    begin(&mut peer, "fresh-metadata", &scope, bound)?;
+    let fresh = credential_request(&peer, &mut events)?;
+    complete_credential(&mut peer, &fresh, "unavailable", None)?;
+    assert_eq!(
+        response(&peer, "fresh-metadata", &mut events)?["result"]["status"],
+        "credential_unavailable"
     );
     assert!(
         matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)

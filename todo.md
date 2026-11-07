@@ -2691,6 +2691,24 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           revision'lı capabilities/tuning projection'ını frontend hazırlığına
           bağla; claim öncesinde eski/yabancı metadata capture'ını reddet.
           Gerçek tüketici ve hazırlık/retry eşdeğerliğini doğrula.
+          - [x] **5.4a3b1 Revision taşıma/admission:** gerçek hazırlığın mevcut
+            `:metadata-revision` settings alanını `session/prompt.model_revision`
+            olarak gönder; Rust claim öncesi native head ile karşılaştırsın.
+            Eksik alan yalnız revision 0 anlamına gelir; ilk publication'dan
+            sonra sessizce yeni head'e yükseltilmez. Pipe kabulü eski revision'ın
+            claim almadan reddini, güncel revision'ın gerçek drain öncesi Busy
+            kalmasını ve drain sonrası credential hazırlığına geçişini doğrular.
+            ERT pinned snapshot testi metadata revision 7'nin taşındığını sınar.
+            **Doğrulama:** native IPC 50/50, tam source ERT 1469/1469,
+            strict Clippy/fmt/build ve değişen Elisp Werror/checkdoc temiz.
+            Loglar `/tmp/kargu-model-receipt-final.log`,
+            `/tmp/kargu-model-receipt-ert.log`, `/tmp/kargu-model-receipt-lint.log`.
+            TLA+ değişmedi; TLC çalıştırılmadı.
+          - [ ] **5.4a3b2 Native capabilities/tuning authority:** revision eşitliği
+            metadata içeriğini doğrulamaz. Aynı revision etiketli yabancı/değişmiş
+            tools, stream, supported-parameters ve tuning capture'ını yetki sayma;
+            bunları actual native model projection ve explicit user intent'ten
+            kur. Wire/auth bacağı 5.4a3c ile birlikte gerçek consumer'a bağlansın.
         - [ ] **5.4a3c Native wire/auth policy:** registry format/wire/auth
           türünü native publication'a dahil et; typed connection'ı committed
           politikadan kur, editörün wire/auth türü yetki olmasın. Custom provider

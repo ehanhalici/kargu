@@ -291,6 +291,7 @@
          (snapshot (kargu-connection-snapshot--create
                     :provider "openai" :model "pinned-model"
                     :endpoint "http://127.0.0.1:1" :config-revision 12
+                    :settings '(:metadata-revision 7)
                     :credential-scope credential))
          (run (kargu-loop--new-run "prompt"))
          (arguments (kargu-loop-native--arguments run snapshot))
@@ -301,6 +302,7 @@
     (should-not (string-search "synthetic-key" (prin1-to-string arguments)))
     (should-not (gethash "Authorization" (gethash "headers" connection)))
     (should (= (gethash "config_revision" arguments) 12))
+    (should (= (gethash "model_revision" arguments) 7))
     (should (= (gethash "turn_limit" arguments) (plist-get run :max-iterations)))))
 
 (provide 'tests/test-connection-snapshot)

@@ -59,6 +59,8 @@ struct PromptInput {
     turn_limit: ModelTurnLimit,
     timeout_ms: RunTimeout,
     config_revision: ConfigRevision,
+    #[serde(default)]
+    model_revision: crate::models::store::MetadataRevision,
     policy_revision: PolicyRevision,
     connection: ConnectionIntent,
     #[serde(default)]
@@ -364,6 +366,9 @@ impl Sessions {
             return Err(fault(CoreError::Unavailable));
         }
         let model_revision = host.model_revision(&request.scope).map_err(fault)?;
+        if input.model_revision != model_revision {
+            return Err(fault(CoreError::ConfigurationChanged));
+        }
         let claim = host
             .actor_mut(&request.scope)
             .map_err(fault)?

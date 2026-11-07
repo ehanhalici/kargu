@@ -57,6 +57,12 @@ candidate; activation checks that revision again. Issued credential IO still
 drains through its actual receipt. This guards the preparation interval; it does
 not yet authenticate the editor's pre-admission metadata/wire/tuning capture
 (`todo.md` 5.4a3b/c).
+The native frontend forwards its prepared settings' `metadata-revision` as
+`session/prompt.model_revision`. Admission requires equality with the native
+application's model head before acquiring a claim. Omission means revision zero,
+never the current head after publication. This prevents a stale preparation from
+silently adopting newer metadata; matching the revision alone does not authorize
+editor-supplied capabilities or tuning content.
 Direct/env keys come from the native profile, keyless supplies no key, and only
 a matching interop receipt supplies the interop key; raw editor key capture is
 not the HTTP credential source. A direct key echo guard remains until the
