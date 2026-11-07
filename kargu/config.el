@@ -1,4 +1,4 @@
-;;; config.el --- TOML config, provider, API key -*- lexical-binding: t; -*-
+;;; config.el --- Configuration facade over native config ports -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later

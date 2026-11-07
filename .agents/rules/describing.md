@@ -184,130 +184,66 @@ Kargu's protocol invariants and agent loop state machine are formally specified 
 
 ```
 kargu/
-├── kargu.el               # Package header, load-path setup, require ordering
-├── config.toml.example    # Example TOML configuration (provider keys, models)
-├── kargu-laws.md          # The laws, contracts and coding style
-├── shell.nix              # TLC for proof/run_tlc.sh
-├── kargu/
-│   ├── core.el            # Alist helpers, notify, OS/shell, kargu-cap-text
-│   ├── core/
-│   │   ├── custom.el      # All defcustom declarations
-│   │   ├── log.el         # Logging engine: kargu-log, wire-log, kargu-show-log
-│   │   └── session.el     # Session state plist, usage counters, session-reset
-│   ├── contract.el        # Ingress/egress contract validation facade
-│   ├── contract/
-│   │   ├── assert.el      # kargu-contract-assert, kargu-contract-validate
-│   │   ├── constants.el   # Mode enums, message roles, buffer names, HTTP codes
-│   │   ├── result.el      # Railway-Oriented Programming: kargu-ok, kargu-err
-│   │   └── types.el       # Type predicates: kargu-contract-message-p, -history-p…
-│   ├── state.el           # Centralized state store facade
-│   ├── state/
-│   │   ├── store.el       # State plist, kargu-state-get/set/update
-│   │   ├── selectors.el   # Pure read selectors: kargu-state-mode, -status, -busy-p
-│   │   ├── transitions.el # Validated lifecycle mutations: kargu-state-set-mode…
-│   │   └── hooks.el       # Event bus: kargu-state-change-hook, subscribe/unsubscribe
-│   ├── permission.el      # Project sandboxing facade
-│   ├── permission/
-│   │   ├── guards.el      # The one project root, kargu-permission-resolve
-│   │   ├── bash.el        # Command tokenization and escape validation
-│   │   └── policy.el      # Approval through kargu-ui-confirm (Approve / Reject)
-│   ├── config.el          # TOML config, provider & API key resolution facade
-│   ├── config/
-│   │   ├── toml.el        # Pure Elisp TOML parser
-│   │   ├── key.el         # API key order: override, TOML (${VAR}), keyless "", env, auth-source
-│   │   └── schema.el      # Config caching, setup check, kargu-edit-config
-│   ├── providers.el       # Provider registry facade
-│   ├── providers/
-│   │   ├── catalog.el     # Built-in catalog: endpoints and per-format behavior
-│   │   ├── registry.el    # Runtime registration and format-field accessors
-│   │   └── params.el      # Parameter schemas; :params-menu / :params-post hooks
-│   ├── languages.el       # Language profile facade
-│   ├── languages/
-│   │   ├── core.el        # Profile record (extensions, LSP, toolchain, guidance)
-│   │   └── *.el           # rust golang python c cpp java haskell ocaml elisp javascript typescript
-│   ├── json.el            # JSON encoder/decoder, empty object support
-│   ├── fs.el              # Bounded project tree walk, directory ignore filters
-│   ├── prompt.el          # System prompt builder
-│   ├── prompt/            # Base system prompt text
-│   ├── plan.el            # Plan mode facade
-│   ├── plan/              # buffer.el, dispatch.el (single-shot approval buttons)
-│   ├── ui.el              # Transient control menus facade
-│   ├── ui/
-│   │   ├── confirm.el     # Callback-style approval prompts (kargu-ui-confirm)
-│   │   ├── transient.el   # kargu-menu transient dispatch
-│   │   └── notify.el      # kargu-notify UI notification
-│   │
-│   ├── api.el             # High-level API facade
-│   ├── api/
-│   │   ├── catalog.el     # Live /models catalog, metadata cache, tool-refusal memory
-│   │   ├── circuit.el     # Circuit breaker (closed / open / half-open probe)
-│   │   ├── client.el      # kargu-api-send, cancel, connection test
-│   │   ├── http.el        # Async plz attempts, generation guards and completion
-│   │   ├── request.el     # Payload assembly and provider headers
-│   │   ├── retry.el       # HTTP errors, classification and retry scheduling
-│   │   ├── sse.el         # Incremental UTF-8/SSE transport decoding
-│   │   ├── response.el    # Response accessors, reasoning extraction
-│   │   ├── select.el      # Model selection (company / transient)
-│   │   ├── stream.el      # SSE event reduction and tool-call fragments
-│   │   ├── tools.el       # Tool registry, schema builder, argument check
-│   │   └── wire.el        # Wire-level logging
-│   │
-│   ├── history.el         # Message history and protocol firewall facade
-│   ├── history/
-│   │   ├── protocol.el    # kargu--message-history, -add, -reset
-│   │   ├── repair.el      # Protocol firewall: kargu--validate-history
-│   │   └── compact.el     # Compaction: threshold, tail, apply
-│   │
-│   ├── loop.el            # Run lifecycle, kargu-tools-enabled-p, stop, finish
-│   ├── loop/
-│   │   ├── machine.el     # Request/response classifiers and handler tables
-│   │   ├── ui.el          # Turn-limit prompt and continue decision
-│   │   ├── tools.el       # Tool queue, doom-loop approval, turn cache
-│   │   ├── heal.el        # Post-edit diagnostics and self-healing rounds
-│   │   └── compact.el     # Compaction turn (one per run)
-│   │
-│   ├── chat.el            # Chat buffer and major mode
-│   ├── chat/
-│   │   ├── attach.el      # @mention parsing and read attachments
-│   │   ├── complete.el    # Company backend for files and LSP symbols
-│   │   ├── header.el      # Header line with mode buttons
-│   │   ├── prompt.el      # Prompt input area, submit, preflight
-│   │   ├── render.el      # Tool activity and final run reports
-│   │   ├── stream.el      # Answer/reasoning rendering and split thought markers
-│   │   ├── transcript.el  # Transcript faces, insertion and window following
-│   │   ├── session.el     # Session save / load / list
-│   │   ├── tune.el        # Effort and parameter tuning
-│   │   └── tune-params.el # Per-format parameter menus
-│   │
-│   └── tools/
-│       ├── process.el     # The one timed make-process helper (callback style)
-│       ├── bash.el        # Shell tool with approval and async output
-│       ├── dape.el        # Debugger facade
-│       ├── dape/          # session, render, context, execution, commands, register
-│       ├── deps.el        # Mandatory dependency and language-server check
-│       ├── diff.el        # Edit, write and atomic apply_patch, rollback
-│       ├── diff/          # stage.el, review.el, track.el
-│       ├── git.el         # Git tools (callback style)
-│       ├── lsp.el         # LSP facade
-│       ├── lsp/           # context, skeleton, diagnostics, symbols, register
-│       ├── search.el      # ripgrep / grep / fd search (callback style)
-│       ├── skill.el       # SKILL.md discovery and load
-│       ├── toolchain.el   # Register API; strategies come from language profiles
-│       └── webfetch.el    # curl fetch; every redirect hop is checked
+├── kargu.el                  # Agentic AI development assistant for Emacs
+├── shell.nix                 # Rust toolchain, TLC and GUI libraries
+├── todo.md                   # Single work and acceptance tracking list
+├── .agents/                  # Rules, skills and migration references
+├── kargu-core/               # Rust backend: config, catalog, run, tools, edit, history
+│   ├── assets/               # Embedded provider and model manifests
+│   ├── src/                  # api, application, configuration, constants, domain, edit, error, history, ipc, lib, main, models, process, providers, security, sensors, workspace
+│   └── tests/                # Integration, IPC and compile-fail suites
+├── kargu/                    # Elisp frontend and thin editor adapters
+│   ├── api.el                # Chat send, models, connection test
+│   ├── api/                  # catalog, catalog/, circuit, client, failure, http, prepare, request, response, retry, select, tool-calls, tools, transport, wire
+│   ├── application/          # budget, coordinator, execution, mode, reset
+│   ├── async.el              # Single-delivery asynchronous task lifecycle
+│   ├── bridge/               # api, application, approval, budget, catalog, circuit, command, config, config-policy, conversation, edit, edit/, file, history, job-output, jobs, models, models/, native-edit, read, sensor, sensor/, session
+│   ├── bridge.el             # Bounded asynchronous Rust IPC client
+│   ├── chat.el               # Shell-like chat sidebar
+│   ├── chat/                 # attach, complete, header, plan, prompt, render, routing, select, select/, session, session/, stream, transcript, tune
+│   ├── config.el             # Configuration facade over native config ports
+│   ├── config/               # connection, key, schema, service, setup, worker
+│   ├── confirm.el            # UI-independent confirmation port
+│   ├── contract/             # assert, constants, file-window, history, result, selection, types
+│   ├── contract.el           # Ingress contract validation and invariants
+│   ├── core.el               # Slim core: helpers, mode, env
+│   ├── core/                 # custom, data, group, log, observers, session
+│   ├── edit.el               # Optional editing and change-evidence ports
+│   ├── files/                # async, snapshot, worker
+│   ├── files.el              # Permission-checked text reading
+│   ├── fs.el                 # Bounded project file walks
+│   ├── history/              # compact, protocol, repair, store
+│   ├── history.el            # Conversation history and protocol firewall
+│   ├── json.el               # JSON encode/decode and text coerce
+│   ├── languages.el          # Modular language support loader
+│   ├── languages/            # c, core, cpp, elisp, golang, haskell, java, javascript, ocaml, python, rust, typescript
+│   ├── loop.el               # Agent run: send, stop, status
+│   ├── loop/                 # compact, heal, machine, native, native-owner, tools, ui
+│   ├── models/               # encode, projection, service, store
+│   ├── permission.el         # LSP project root permission and sandboxing
+│   ├── permission/           # bash, execute, guards, policy
+│   ├── plan/                 # buffer, context, dispatch, store
+│   ├── plan.el               # In-memory plan buffer, review and agent execution
+│   ├── project-probe.el      # Owned native toolchain observations
+│   ├── prompt.el             # System prompt assembly
+│   ├── providers/            # catalog, projection, registry
+│   ├── providers.el          # Provider definitions and resolution
+│   ├── selection.el          # Owned provider, model and effort transitions
+│   ├── state/                # hooks, selectors, store, transitions
+│   ├── state.el              # Centralized state management facade
+│   ├── tools/                # bash, bash/, dape, dape/, deps, diff, diff/, execution, git, git/, lsp, lsp/, process, process/, registry, search, skill, toolchain, webfetch
+│   ├── ui.el                 # Transient control menu and UI shell
+│   └── ui/                   # confirm, notify, transient
 │
-├── tests/                 # ERT suites; `run-tests.el` loads them all
-│   ├── test-helpers.el    # Scratch root, temp git repo, state isolation
-│   ├── test-laws.el       # One named test per contract (a)-(f) of kargu-laws.md
-│   └── test-*.el          # One suite per module or feature
+├── tests/                    # ERT suites; `run-tests.el` loads them all
+│   ├── test-helpers.el       # Shared helpers for the Kargu ERT suites
+│   ├── test-laws.el          # One named test per contract of kargu-laws.md
+│   ├── ci/                   # CI ERT runner, Elisp lint and affected TLA+ model selection
+│   └── test-*.el             # One suite per module or feature
 │
-└── proof/
-    ├── KarguContract.tla  # Roles, modes, message schema, contract predicates
-    ├── KarguProtocol.tla  # Protocol wall (repair order), compaction
-    ├── KarguCircuit.tla   # Circuit breaker, response classification events
-    ├── KarguTools.tla     # Mode gate, doom-loop signatures
-    ├── KarguState.tla     # State store, statuses, busy and run-live classes
-    ├── KarguLoop.tla      # The loop state machine and its safety invariants
-    ├── MC.tla / MC.cfg    # TLC harness: parameters, invariants, deadlock check
-    ├── README.md          # Formal proof documentation
-    └── run_tlc.sh         # Exhaustive scan (default) or --simulate
+└── proof/                    # TLA+ models; TLC only when a model changes
+    ├── Kargu*.tla            # Application, Approval, Budget, Circuit, Connection, Contract, DebugClose, DebugExecution, DebugReadiness, DebugSelection, DebugStartup, DebugWatch, Diagnostics, Edit, EditIssuance, EditJournal, EditPreparation, EditRevision, EditorActivity, Loop, Mode, Plan, Process, ProcessSession, Protocol, Restore, Selection, State, Tools, Transport, Verification
+    ├── *MC.tla / *MC.cfg     # TLC harness per model
+    ├── README.md             # Formal proof documentation
+    └── run_tlc.sh            # Exhaustive scan, --model or --simulate
 ```

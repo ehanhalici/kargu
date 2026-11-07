@@ -1,11 +1,11 @@
-;;; tests/test-laws.el --- One named test per contract of skills.md -*- lexical-binding: t; -*-
+;;; tests/test-laws.el --- One named test per contract of kargu-laws.md -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
 
-;; skills.md "Değişiklik disiplini" lists six contracts that must turn a
+;; kargu-laws.md "Değişiklik disiplini" lists six contracts that must turn a
 ;; test red when they break.  Each has a test here, named after its letter:
 ;;
 ;;   (a) a tool-less model is refused in agent mode and the prompt stays
