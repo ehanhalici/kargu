@@ -85,6 +85,7 @@
 (declare-function kargu-bridge-native-edit-cancel "kargu/bridge/native-edit" (connection params))
 (declare-function kargu-bridge-sensor-symbols-body "kargu/bridge/sensor/symbols" (connection id params))
 (declare-function kargu-bridge-sensor-symbols-release "kargu/bridge/sensor/symbols" (connection params))
+(declare-function kargu-bridge-credential-request "kargu/bridge/credential" (connection id params))
 
 (defun kargu-bridge--dismiss-reverse (connection &optional forward-id)
   "Dismiss CONNECTION's reverse requests, optionally only for FORWARD-ID."
@@ -470,6 +471,19 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
                                (gethash (gethash "request_id" params)
                                         (kargu-bridge-connection-reverse-cleanups connection)))))
               (when entry (funcall (cdr entry)))))
+           ((and (not (eq id :missing)) (equal method "editor/credential"))
+            (if (require 'kargu/bridge/credential nil t)
+                (kargu-bridge-credential-request connection id (gethash "params" msg))
+              ;; No adapter: report quiescence without starting any work.
+              (let ((params (gethash "params" msg)))
+                (kargu-bridge--send
+                 connection
+                 (kargu-bridge--object
+                  "jsonrpc" "2.0" "id" id
+                  "result" (kargu-bridge--object
+                            "scope" (and (hash-table-p params) (gethash "scope" params))
+                            "capture_id" (and (hash-table-p params) (gethash "capture_id" params))
+                            "quiescent" t "outcome" "unavailable" "key" :json-null))))))
            ((and (not (eq id :missing)) (equal method "editor/request_approval"))
             (require 'kargu/bridge/approval)
             (kargu-bridge-approval-request connection id (gethash "params" msg)))
@@ -728,7 +742,7 @@ CALLBACK receives (CONNECTION ERROR).  Return the starting connection handle."
           (kargu-bridge-call
            connection "initialize"
            (kargu-bridge--object "protocol_major" 1 "protocol_minor" 0 "client_version" "0.1.0"
-                                 "capabilities" ["editor_file_snapshot"] "limits"
+                                 "capabilities" (kargu-bridge--client-capabilities) "limits"
                                  (kargu-bridge--object "max_frame_bytes" kargu-bridge--max-frame))
            (lambda (result error-data)
              (if error-data
@@ -755,6 +769,12 @@ CALLBACK receives (CONNECTION ERROR).  Return the starting connection handle."
                         (kargu-bridge--callback callback nil (kargu-bridge--fault "protocol_error")))))))
           connection)
       (error (kargu-bridge--close connection "startup_failed") (signal (car err) (cdr err))))))
+
+(defun kargu-bridge--client-capabilities ()
+  "Return editor adapters this client can actually serve to Rust.
+Credential capture is offered only when its adapter can be loaded."
+  (vconcat (list "editor_file_snapshot")
+           (and (locate-library "kargu/bridge/credential") (list "editor_credential_capture"))))
 
 (defun kargu-bridge-stop (&optional connection)
   "Request shutdown of CONNECTION, defaulting to the current bridge.

@@ -64,6 +64,17 @@ Startup errors are reported without switching to the Elisp backend."
           "apply_patch"
           "edit_by_lsp"))
 
+(defun kargu-loop-native--refusal-text (failure)
+  "Describe native admission FAILURE from its payload-free status."
+  (let* ((data (and (hash-table-p failure) (gethash "data" failure)))
+         (status (and (hash-table-p data) (gethash "status" data))))
+    (pcase status
+      ("stale_configuration" "Configuration changed since the run was prepared; send again")
+      ("configuration_unavailable"
+       "Native run target or credential source is unavailable for this configuration")
+      ("busy" "Another native run is still active or draining")
+      (_ "Native agent request failed"))))
+
 (defun kargu-loop-native--finish (run result failure)
   "Project native RESULT or FAILURE into the still-owned RUN's terminal state."
   (when (kargu-loop--live-p run)
@@ -77,12 +88,16 @@ Startup errors are reported without switching to the Elisp backend."
       (when (and (integerp spent) (>= spent 0))
         (plist-put run :iterations spent))
       (cond
-       (failure (kargu--loop-finish run :error "Native agent request failed"))
+       (failure (kargu--loop-finish run :error (kargu-loop-native--refusal-text failure)))
        ((and (equal status "completed") (stringp (gethash "answer_text" result)))
         (kargu--loop-finish run :done (gethash "answer_text" result)))
        ((equal status "cancelled") (kargu--loop-finish run :stopped "Native agent cancelled"))
        ((equal status "timeout") (kargu--loop-finish run :error "Native agent timed out"))
        ((equal status "rejected") (kargu--loop-finish run :error "Native agent rejected the request"))
+       ((equal status "stale_configuration")
+        (kargu--loop-finish run :error "Configuration changed while the native run was preparing; send again"))
+       ((equal status "credential_unavailable")
+        (kargu--loop-finish run :error "No credential was available for the native run (auth-source or callable returned no key)"))
        (t (kargu--loop-finish run :error "Native agent did not complete successfully"))))))
 
 (defun kargu-loop-native--arguments (run snapshot)

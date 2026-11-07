@@ -883,7 +883,7 @@ fn closed_session_credential_debt_blocks_replacement_until_quiescence() -> TestR
     complete_credential(&mut peer, &next, "unavailable", None)?;
     assert_eq!(
         response(&peer, "replacement", &mut events)?["result"]["status"],
-        "failed"
+        "credential_unavailable"
     );
     assert!(
         matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
@@ -936,10 +936,12 @@ fn unavailable_and_malformed_interop_results_are_terminal_without_provider_io() 
         begin(&mut peer, "failed-lookup", &scope, bound.clone())?;
         let lookup = credential_request(&peer, &mut events)?;
         complete_credential(&mut peer, &lookup, outcome, key)?;
-        let status = if outcome == "cancelled" {
-            "cancelled"
-        } else {
-            "failed"
+        // A quiesced source without a key is a credential refusal; a resolved
+        // receipt without its key is malformed.
+        let status = match outcome {
+            "cancelled" => "cancelled",
+            "unavailable" => "credential_unavailable",
+            _ => "failed",
         };
         assert_eq!(
             response(&peer, "failed-lookup", &mut events)?["result"]["status"],

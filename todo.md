@@ -2488,7 +2488,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           `/tmp/kargu-bindings-{rust,final-build,ert-all,ert-focus-final,lint}.log`.
           TLA+ değişmedi, TLC çalıştırılmadı. Üst 5.4a açık kalır.
 
-      - [ ] **5.4a2 Interop receipt/epoch:** auth-source/callable sonucunu
+      - [x] **5.4a2 Interop receipt/epoch:** auth-source/callable sonucunu
         native session/config/selection/target ve süreye bağlı opaque receipt'e
         bağla; duplicate/foreign/stale sonucu activation'a taşıma. 5.4a1 sonrası.
 
@@ -2564,7 +2564,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           `/tmp/kargu-native-credential-verified-{rust,ert,lint}.log`.
           TLA+ değişmedi; TLC çalıştırılmadı.
 
-        - [ ] **5.4a2c Emacs consumer ve kabul:** native run yolunda erken
+        - [x] **5.4a2c Emacs consumer ve kabul:** native run yolunda erken
           auth-source/callable lookup'u kaldır; Emacs yalnız native isteğin
           hedeflediği worker'ı çalıştırsın ve actual completion ile cevaplasın.
           Duplicate/stale/foreign/late/Stop/EOF ve sonraki claim kabulünü gerçek
@@ -2599,7 +2599,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
             ERT 1465/1465, bridge 40/40, 624 locked Rust; değişen Elisp Werror/
             checkdoc temiz. Native reverse handler'a bağlanması c2b'dedir.
 
-          - [ ] **5.4a2c2 Consumer cutover ve karma kabul:** c1 portuyla native
+          - [x] **5.4a2c2 Consumer cutover ve karma kabul:** c1 portuyla native
             credential reverse handler'ını bağla; erken frontend lookup'u native
             agent yolundan kaldır. Direct/keyless/interop, custom callable,
             Standalone API/catalog, Stop/reset/EOF ve sonraki claim testlerini
@@ -2637,7 +2637,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
               capability negotiate edilene kadar `configuration_unavailable` ile
               reddedilir; sessiz fallback yoktur.
 
-            - [ ] **5.4a2c2b Reverse handler ve gerçek consumer kabulü:** c1
+            - [x] **5.4a2c2b Reverse handler ve gerçek consumer kabulü:** c1
               actual-completion portuyla handler'ı bağla; native backend'in
               captured run seçimine göre erken frontend lookup'u kaldır.
               Capability yalnız çalışan handler/adapter varken açılır; module/
@@ -2646,6 +2646,27 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
               borcu bıraksın. Credential unavailable/timeout gibi retlerin payload
               içermeyen native reason DTO'su UI'da anlamlı gösterilsin. c2a sonrası
               karma consumer corpus'unu çalıştır.
+              **Teslim (2026-11-07):** Yeni [bridge/credential.el](kargu/bridge/credential.el)
+              `editor/credential`'ı yalnız canlı forward run isteği, exact epoch,
+              scope/capture/provider/host ve pozitif timeout varsa kabul eder; işi
+              c1'in `kargu-config-worker-capture` portuyla başlatır, `rpc/cancel`
+              yalnız revoke eder, receipt (`quiescent t`) gerçek tamamlanmadan sonra
+              gider. Epoch/forward kaybolduysa key teslim edilmez, ack `cancelled`
+              olarak yine gider. Handler yüklenemezse iş başlatılmadan quiescent
+              `unavailable` döner. `editor_credential_capture` client capability'si
+              yalnız handler bulunabiliyorsa initialize'da ilan edilir. Rust,
+              key'siz quiescent sonucu yeni `credential_unavailable` terminal
+              durumuyla ayırır; Elisp `stale_configuration`, `credential_unavailable`,
+              `configuration_unavailable` ve `busy` için payload'sız anlamlı mesaj
+              gösterir.
+              **Kanıt:** gerçek core ERT'leri — interop run'ında Rust credential'ı
+              ister, yalnız tamamlanan adapter key'i `Authorization` olur;
+              key'siz sonuç `credential_unavailable`; capture sırasında Stop
+              revoke eder, geç key teslim edilmez, receipt gerçek tamamlanmayı
+              bekler ve sağlayıcıya istek gitmez. Rust testleri yeni durumla
+              güncellendi. Karma corpus (direct/keyless fixture'ları, interop,
+              standalone API/catalog) tam ERT 1469/1469 içinde; bridge 40/40,
+              624 locked Rust, strict Clippy/fmt, değişen Elisp Werror/checkdoc.
 
       - [ ] **5.4a3 Model metadata/wire receipt:** capabilities, wire/auth türü
         ve tuning capture'ını native model/registry revision'ına bağla. Header

@@ -139,7 +139,7 @@ impl CredentialPreparation {
         }
         match (receipt.outcome, receipt.key) {
             (Outcome::Resolved, Some(key)) => Ok(key),
-            (Outcome::Unavailable, None) => Err(CoreError::Unavailable),
+            (Outcome::Unavailable, None) => Err(CoreError::CredentialUnavailable),
             (Outcome::Cancelled, None) => Err(CoreError::Cancelled),
             _ => Err(CoreError::InvalidToolOutput),
         }

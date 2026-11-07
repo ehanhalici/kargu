@@ -1492,6 +1492,7 @@ fn finish_response(
             CoreError::Cancelled | CoreError::StaleOwner => "cancelled",
             CoreError::Deadline => "timeout",
             CoreError::ConfigurationChanged => "stale_configuration",
+            CoreError::CredentialUnavailable => "credential_unavailable",
             _ => "failed",
         });
         let status = error.unwrap_or(match terminal {

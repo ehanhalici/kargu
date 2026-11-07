@@ -42,6 +42,9 @@ pub enum CoreError {
     /// Canonical tool or executor capability is absent.
     #[error("tool unavailable")]
     Unavailable,
+    /// The editor's credential source quiesced without a usable key.
+    #[error("credential unavailable")]
+    CredentialUnavailable,
     /// Current mode or policy forbids the action.
     #[error("permission rejected")]
     Rejected,
