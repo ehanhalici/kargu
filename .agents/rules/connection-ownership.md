@@ -20,9 +20,16 @@ An explicit header-only refresh therefore advances the config revision and
 invalidates an older run capture. A pending catalog request retains its frozen
 header/format capture until an explicit publication or owner loss invalidates it;
 its live endpoint/credential source DTO does not re-read header metadata.
-This template admission does not establish ownership of caller-provided
-session/app-url binding values, interop credential receipts or complete model/wire
-metadata. Those remaining consumer migrations are tracked under `todo.md` 5.4a.
+Native run header binding values are built by the typed connection boundary:
+session comes from the actual claim's native SessionId, and app-url comes from
+the committed configuration context captured by RunTarget. Caller-provided
+`auth.session`/`auth.app_url` values cannot retarget these headers. Missing auth
+capture still builds the declared wire defaults. Missing native app-url never
+borrows an editor value. App-url participates in publication identity; an explicit
+app-url-only refresh invalidates older revisions. Transient credential source
+DTOs exclude this frozen metadata, preserving pending catalog captures.
+Interop credential receipts and complete model/wire metadata remain under
+`todo.md` 5.4a; native run binding ownership does not close those migrations.
 
 `configuration/parse` accepts captured bounded UTF-8 source and refresh generation
 on the exact ready connection epoch. It performs no filesystem, environment,

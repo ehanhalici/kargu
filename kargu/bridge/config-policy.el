@@ -34,7 +34,7 @@ Environment names are interpreted only by Rust; unrelated values stay local."
       (push (copy-sequence entry) environment))
     (put cell 'environment (nreverse environment))
     (put cell 'registry (kargu-bridge-config-policy--registry t))
-    (put cell 'options (kargu-bridge-config-policy--options))
+    (put cell 'options (kargu-bridge-config-policy--options t))
     cell))
 
 (defun kargu-bridge-config-policy--wipe (value)
@@ -53,18 +53,23 @@ Environment names are interpreted only by Rust; unrelated values stay local."
   "Project native-requested NAMES from immutable editor input CELL.
 PUBLICATION includes header metadata; transient credential source DTOs do not."
   (let ((process-environment (get cell 'environment))
-        (registry (kargu-config-copy (get cell 'registry))))
+        (registry (kargu-config-copy (get cell 'registry)))
+        (options (kargu-config-copy (get cell 'options))))
     (unless publication
+      (remhash "app_url" options)
       (mapc (lambda (entry) (remhash "headers" entry) (remhash "wire_headers" entry)) registry))
-    (kargu-bridge-config-policy--context registry names (get cell 'options))))
+    (kargu-bridge-config-policy--context registry names options)))
 
-(defun kargu-bridge-config-policy--options ()
-  "Capture raw editor options and selection, without choosing any fallback."
-  (kargu-bridge--object
-   "api_base" (or (kargu-config-copy kargu-api-base) :json-null)
-   "api_key" (or (kargu-config-copy kargu-api-key) :json-null)
-   "selected_provider" (or (kargu-config-copy (kargu-selection-provider)) :json-null)
-   "selected_model" (or (kargu-config-copy (kargu-selection-model)) :json-null)))
+(defun kargu-bridge-config-policy--options (&optional publication)
+  "Capture raw editor options and selection, without choosing any fallback.
+PUBLICATION includes the application URL metadata for native header bindings."
+  (let ((options (kargu-bridge--object
+                  "api_base" (or (kargu-config-copy kargu-api-base) :json-null)
+                  "api_key" (or (kargu-config-copy kargu-api-key) :json-null)
+                  "selected_provider" (or (kargu-config-copy (kargu-selection-provider)) :json-null)
+                  "selected_model" (or (kargu-config-copy (kargu-selection-model)) :json-null))))
+    (when publication (puthash "app_url" (kargu-config-copy kargu-app-url) options))
+    options))
 
 (defun kargu-bridge-config-context (&optional names options)
   "Capture native-requested environment NAMES and raw editor OPTIONS.

@@ -282,6 +282,20 @@ impl TryFrom<ChatConnectionInput> for ChatConnection {
     }
 }
 impl ChatConnection {
+    /// Parse one native run connection and replace untrusted header binding values.
+    pub(crate) fn capture_run(
+        source: &str,
+        session: &crate::domain::SessionId,
+        app_url: Option<&str>,
+    ) -> Result<Self, ApiError> {
+        let mut input: ChatConnectionInput =
+            serde_json::from_str(source).map_err(|_| ApiError::InvalidRequest)?;
+        input
+            .auth
+            .get_or_insert_with(Default::default)
+            .bind_run(session, app_url)?;
+        input.try_into()
+    }
     /// Prepare only from the actual native model ticket, on a bounded worker.
     /// Reuses the existing wire/auth/tuning/cache implementation; history stays immutable.
     pub fn prepare_turn(

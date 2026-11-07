@@ -278,6 +278,20 @@ fn publish(
 }
 
 #[test]
+fn application_url_is_publication_metadata_with_its_own_revision_effect() -> TestResult {
+    let (mut host, scope) = host()?;
+    let mut captured = context();
+    captured["app_url"] = json!("https://first.invalid/");
+    let first = publish(&mut host, &scope, 1, "provider='custom'", captured.clone())?;
+    let same = publish(&mut host, &scope, 2, "provider='custom'", captured.clone())?;
+    assert_eq!(first["revision"], same["revision"]);
+    captured["app_url"] = json!("https://second.invalid/");
+    let changed = publish(&mut host, &scope, 3, "provider='custom'", captured)?;
+    assert_ne!(first["revision"], changed["revision"]);
+    Ok(())
+}
+
+#[test]
 fn header_policy_is_revision_bound_and_case_canonical() -> TestResult {
     let (mut host, scope) = host()?;
     let mut captured = context();

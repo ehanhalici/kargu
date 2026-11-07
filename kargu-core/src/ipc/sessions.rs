@@ -386,10 +386,8 @@ impl Sessions {
             let _lease = lease;
             let workspace = worker_claim.prepare_workspace()?;
             worker_claim.check_live()?;
-            let connection: ChatConnection =
-                serde_json::from_str(&input.connection.0).map_err(|_| CoreError::InvalidValue {
-                    field: "NativeConnection",
-                })?;
+            let connection = target
+                .prepare_connection(&input.connection.0, worker_claim.scope().session_id())?;
             let prompt = input.prompt.map(Message::try_from).transpose()?;
             worker_claim.check_live()?;
             Ok(PreparedStart {

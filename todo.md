@@ -2413,8 +2413,9 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         Loglar `/tmp/kargu-run-credentials-{rust,build,ert,bridge}.log`.
         **Açık:** direct secret wire'da editör capture'ı olarak taşınır ama artık
         native policy ile eşleşmeden tüketilemez. Interop (auth-source/callable)
-        credential için opaque receipt/epoch bağı ve header capture policy'sinin
-        tümü henüz native admission'a bağlı değil; model metadata ve context
+        credential için opaque receipt/epoch bağı henüz native admission'a
+        bağlı değil; native header template/binding kabulü 5.4a1'de kapandı.
+        Model metadata ve context
         revision'ı claim'e bağlı değil (context native store'u 4.9'a bağlı);
         activation öncesi config değişimi için deterministik pipe testi yok.
         Config commit view'u ~51 KB olduğundan 52 KiB altı frame'lerde config
@@ -2422,7 +2423,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         İki küçük-frame ERT'si yayımdan sonra daraltılan frame veya 64 KiB +
         çok sayfalı cevapla aynı davranışı sınar.
 
-      - [ ] **5.4a1 Effective header capture bağı:** `auth.key` eşleşmesi
+      - [x] **5.4a1 Effective header capture bağı:** `auth.key` eşleşmesi
         tek başına raw `connection.headers`, `auth.extra_headers` ve
         `wire.default-headers` capture'ını bağlamıyordu. Öncelik: interop
         receipt işinden önce; template portu ve binding sahipliği ayrı kabul.
@@ -2453,12 +2454,38 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           `.agents/rules/connection-ownership.md` sözleşmesi güncellendi.
           TLA+ kaynağı değişmedi; TLC çalıştırılmadı.
 
-        - [ ] **5.4a1b Binding değerlerinin sahipliği:** template listesi bağlı
+        - [x] **5.4a1b Binding değerlerinin sahipliği:** template listesi bağlı
           olsa da `auth.session` ve `auth.app_url` değerleri hâlâ editör
           capture'ıdır. Session binding'i gerçek native run/session'a;
           app-url'u committed config/context'e bağla. Scope/target/revision
           değişiminde eski değerleri kabul etme. Queue: 5.4a1a sonrası,
           5.4a2 öncesi; custom header davranışını koru.
+          **Teslim (2026-11-07, `0b38452` devamı):** native typed connection
+          builder, session binding'ini gerçek `RunClaim.scope().session_id()`
+          değerinden; app-url'u immutable `RunTarget`'ın committed context'inden
+          kuruyor. Editör `auth.session`/`auth.app_url` değerleri bu yolda
+          kullanılmıyor. Eksik `auth` nesnesi native'de kuruluyor; wire default
+          header binding'leri sessizce atlanmıyor. Native app-url yoksa editörün
+          değeri ödünç alınmıyor; ilgili template fail-closed kalıyor.
+          App-url source fingerprint'e dahil; explicit refresh'te yalnız app-url
+          değişimi revision ilerletiyor. Eski revision activation'a taşınamıyor;
+          app-url snapshot'ı credential yield sırasında tekrar okunmuyor.
+          Frontend yalnız publication metadata DTO'sunu capture ediyor.
+          **Kanıt:** native session ve committed app-url'u HTTP socket'inde
+          bekleyen test eski kodda başarısız oldu (`/tmp/kargu-bindings-red.log`),
+          yeni builder ile geçti. Forged editör değerleri ve `auth` yokluğu için
+          gerçek pipe testleri; native app-url yokluğunda editor fallback'ini
+          reddeden Rust unit testi; app-url-only revision Rust/ERT testleri ve
+          frozen/detached metadata ERT'si mevcut.
+          **Tam kabul:** locked Rust suite 609/609 (32 compile-fail dahil);
+          son eklenen no-native-app-url unit'i dahil güncel library 106/106.
+          Böylece mevcut 610 farklı Rust testi doğrulandı. Final fmt ve strict
+          all-target Clippy + explicit build exit 0. Güncel binary ile temiz
+          HOME/config full kaynak ERT 1459/1459; config-policy/catalog odak
+          15/15. Değişen Elisp warnings-as-errors compile/check-parens/checkdoc
+          temiz; `git diff --check` temiz. Loglar
+          `/tmp/kargu-bindings-{rust,final-build,ert-all,ert-focus-final,lint}.log`.
+          TLA+ değişmedi, TLC çalıştırılmadı. Üst 5.4a açık kalır.
 
       - [ ] **5.4a2 Interop receipt/epoch:** auth-source/callable sonucunu
         native session/config/selection/target ve süreye bağlı opaque receipt'e

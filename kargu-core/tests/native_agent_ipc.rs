@@ -39,7 +39,7 @@ fn server(
 }
 fn server_with_headers(
     replies: Vec<Reply>,
-    expected_headers: Vec<(&'static str, &'static str)>,
+    expected_headers: Vec<(&'static str, String)>,
 ) -> Result<(String, Server, mpsc::Receiver<Value>), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     listener.set_nonblocking(true)?;
@@ -75,7 +75,7 @@ fn server_with_headers(
                     .filter_map(|line| line.split_once(':'))
                     .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
                     .map(|(_, value)| value.trim());
-                if actual != Some(*expected) {
+                if actual != Some(expected.as_str()) {
                     return Err(std::io::Error::other("fixture wire header mismatch"));
                 }
             }
@@ -212,7 +212,7 @@ fn publish_target_with_header_policy(
         &format!("fixture-commit-{generation}"),
         "configuration/commit",
         json!({"scope":scope,"arguments":{"capture_id":capture,
-            "context":{"environment":{},"registry":[{"id":"fixture","headers":headers,"wire_headers":wire_headers}]}}}),
+            "context":{"app_url":"https://fixture.invalid/","environment":{},"registry":[{"id":"fixture","headers":headers,"wire_headers":wire_headers}]}}}),
     )?;
     let revision = committed["result"]["revision"].clone();
     if revision.is_null() {
@@ -489,18 +489,22 @@ fn continuation_keeps_the_same_native_run_and_external_api_cannot_borrow_its_bud
 #[test]
 fn committed_custom_header_templates_are_accepted() -> TestResult {
     let root = tempfile::tempdir()?;
-    let (url, server, requests) = server_with_headers(
-        vec![answer("custom headers")],
-        vec![
-            ("x-tenant", "synthetic-tenant"),
-            ("x-wire", "native-wire"),
-            ("x-session", "synthetic-session"),
-            ("h-referer", "https://fixture.invalid/"),
-        ],
-    )?;
     let mut peer = Peer::start()?;
     peer.initialize()?;
     let scope = peer.scope()?;
+    let (url, server, requests) = server_with_headers(
+        vec![answer("custom headers")],
+        vec![
+            ("x-tenant", "synthetic-tenant".to_owned()),
+            ("x-wire", "native-wire".to_owned()),
+            (
+                "x-session",
+                scope["session_id"].as_str().ok_or("session")?.to_owned(),
+            ),
+            ("h-referer", "https://fixture.invalid/".to_owned()),
+        ],
+    )?;
+
     let mut bound = prompt(root.path(), &url);
     publish_target_with_header_policy(
         &mut peer,
@@ -510,13 +514,56 @@ fn committed_custom_header_templates_are_accepted() -> TestResult {
         json!({"X-Tenant":"synthetic-tenant", "X-Session":{"binding":"session"}, "H-Referer":{"binding":"app-url"}}),
         json!({"X-Wire":"native-wire"}),
     )?;
-    bound["connection"]["auth"] = json!({"key":"", "session":"synthetic-session", "app_url":"https://fixture.invalid/",
+    bound["connection"]["auth"] = json!({"key":"", "session":"synthetic-session", "app_url":"https://foreign.invalid/",
         "extra_headers":{"x-tenant":"synthetic-tenant", "h-referer":{"binding":"app-url"}, "x-session":{"binding":"session"}}});
     bound["connection"]["wire"] = json!({"default-headers":{"x-wire":"native-wire"}});
     let mut events = Vec::new();
     begin(&mut peer, "custom-headers", &scope, bound)?;
     assert_eq!(
         response(&peer, "custom-headers", &mut events)?["result"]["status"],
+        "completed"
+    );
+    requests.recv_timeout(Duration::from_secs(2))?;
+    drop(peer);
+    server.join().map_err(|_| "server panicked")??;
+    Ok(())
+}
+
+#[test]
+fn native_wire_bindings_are_built_even_without_editor_auth() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let (url, server, requests) = server_with_headers(
+        vec![answer("native bindings")],
+        vec![
+            (
+                "x-session",
+                scope["session_id"].as_str().ok_or("session")?.to_owned(),
+            ),
+            ("h-referer", "https://fixture.invalid/".to_owned()),
+        ],
+    )?;
+    let headers = json!({"X-Session":{"binding":"session"},"H-Referer":{"binding":"app-url"}});
+    let mut bound = prompt(root.path(), &url);
+    publish_target_with_header_policy(
+        &mut peer,
+        &scope,
+        &mut bound,
+        Some(""),
+        json!({}),
+        headers.clone(),
+    )?;
+    bound["connection"]
+        .as_object_mut()
+        .ok_or("connection")?
+        .remove("auth");
+    bound["connection"]["wire"] = json!({"default-headers":headers});
+    let mut events = Vec::new();
+    begin(&mut peer, "native-bindings", &scope, bound)?;
+    assert_eq!(
+        response(&peer, "native-bindings", &mut events)?["result"]["status"],
         "completed"
     );
     requests.recv_timeout(Duration::from_secs(2))?;

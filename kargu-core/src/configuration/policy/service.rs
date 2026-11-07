@@ -120,10 +120,25 @@ pub(crate) struct RunTarget {
     pub(crate) model: Option<String>,
     pub(crate) endpoint: Option<String>,
     profile: resolve::ReadyProfile,
+    app_url: Option<crate::configuration::domain::ConfigText>,
     headers: crate::api::HeaderTemplates,
     wire_headers: crate::api::HeaderTemplates,
 }
 impl RunTarget {
+    pub(crate) fn prepare_connection(
+        &self,
+        source: &str,
+        session: &SessionId,
+    ) -> Result<crate::api::ChatConnection, CoreError> {
+        crate::api::ChatConnection::capture_run(
+            source,
+            session,
+            self.app_url.as_ref().map(|value| value.as_str()),
+        )
+        .map_err(|_| CoreError::InvalidValue {
+            field: "NativeConnection",
+        })
+    }
     pub(crate) fn verify_headers(
         &self,
         supplied: &crate::api::HeaderTemplates,
@@ -209,6 +224,7 @@ impl ConfigurationService {
                 .map_err(|_| CoreError::Unavailable)?,
             },
             profile: target,
+            app_url: published.context.app_url.clone(),
         })
     }
     /// Current committed publication revision.

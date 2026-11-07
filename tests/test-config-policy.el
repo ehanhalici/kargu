@@ -163,9 +163,10 @@
                                                        :extra-headers))) "synthetic")))))
 
 (ert-deftest kargu-config-policy-header-publication-advances-native-revision-test ()
-  "Explicit refresh publishes header metadata even with unchanged file sources."
+  "Header and application URL metadata change revision on explicit refresh."
   (kargu-bridge-test--with-core
-   (let ((kargu-application--bound (kargu-application-create))
+   (let ((kargu-app-url "https://first-app.invalid/")
+         (kargu-application--bound (kargu-application-create))
          (kargu-providers--table (copy-hash-table kargu-providers--table))
          (paths (list (expand-file-name "absent-header-config.toml" (kargu-test-scratch-root)))))
      (kargu-register-provider :id "header-fixture" :format 'openapi
@@ -177,7 +178,24 @@
                                 :extra-headers '(("X-Tenant" . "second")))
        (should (kargu-ok-p (kargu-test-await
                            (lambda (done) (kargu-config-refresh-async done :paths paths)))))
+       (should (> (kargu-config-revision) revision)))
+     (let ((revision (kargu-config-revision)))
+       (setq kargu-app-url "https://second-app.invalid/")
+       (should (kargu-ok-p (kargu-test-await
+                           (lambda (done) (kargu-config-refresh-async done :paths paths)))))
        (should (> (kargu-config-revision) revision))))))
+
+(ert-deftest kargu-config-policy-application-url-is-frozen-publication-metadata-test ()
+  "Application URL metadata is detached and omitted from live source DTOs."
+  (let* ((kargu-app-url (copy-sequence "https://captured.invalid/"))
+         (inputs (kargu-bridge-config-policy--inputs)))
+    (unwind-protect
+        (progn
+          (clear-string kargu-app-url)
+          (should (equal (gethash "app_url" (kargu-bridge-config-policy--captured-context inputs [] t))
+                         "https://captured.invalid/"))
+          (should-not (gethash "app_url" (kargu-bridge-config-policy--captured-context inputs []))))
+      (kargu-bridge-config-policy--release-inputs inputs))))
 
 (provide 'tests/test-config-policy)
 ;;; test-config-policy.el ends here

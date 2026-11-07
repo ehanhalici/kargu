@@ -292,6 +292,7 @@ impl RegistrySnapshot {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyContext {
+    pub(super) app_url: Option<ConfigText>,
     pub(super) api_base: Option<ConfigText>,
     pub(super) api_key: Option<ConfigText>,
     pub(super) selected_provider: Option<ApiProviderId>,

@@ -124,7 +124,7 @@ impl TryFrom<String> for BindingValue {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AuthCapture {
     key: Option<SecretString>,
@@ -132,6 +132,20 @@ pub(super) struct AuthCapture {
     extra_headers: HeaderTemplates,
     session: Option<BindingValue>,
     app_url: Option<BindingValue>,
+}
+impl AuthCapture {
+    /// Run bindings come from the native owner/publication, never editor captures.
+    pub(super) fn bind_run(
+        &mut self,
+        session: &crate::domain::SessionId,
+        app_url: Option<&str>,
+    ) -> Result<(), ApiError> {
+        self.session = Some(BindingValue::try_from(session.as_str().to_owned())?);
+        self.app_url = app_url
+            .map(|value| BindingValue::try_from(value.to_owned()))
+            .transpose()?;
+        Ok(())
+    }
 }
 #[derive(Default)]
 pub(super) struct HeaderRules {
@@ -240,6 +254,18 @@ mod tests {
     use super::*;
     use serde_json::{Value, json};
     type TestResult = Result<(), Box<dyn std::error::Error>>;
+    #[test]
+    fn missing_native_app_url_never_borrows_the_editor_value() -> TestResult {
+        let mut capture: AuthCapture =
+            serde_json::from_value(json!({"app_url":"https://foreign.invalid/"}))?;
+        capture.bind_run(&crate::domain::SessionId::new(), None)?;
+        let rules = HeaderRules::new(
+            AuthKind::Bearer,
+            serde_json::from_value(json!({"H-Referer":{"binding":"app-url"}}))?,
+        );
+        assert!(rules.build(HeaderMap::new(), capture).is_err());
+        Ok(())
+    }
     #[test]
     fn header_template_registry_rejects_duplicates_and_aggregate_overflow() {
         assert!(
