@@ -229,6 +229,8 @@ pub mod timeouts {
     pub const EDIT_JOURNAL: Duration = Duration::from_secs(30);
     /// Issued editor confirmation interval; expiry revokes but does not prove quiescence.
     pub const EDIT_RECEIPT: Duration = Duration::from_secs(30);
+    /// Credential observation cap; expiry revokes while actual quiescence still drains.
+    pub const CREDENTIAL_RECEIPT: Duration = Duration::from_secs(5);
     /// Bounded native all-file edit preflight worker lifetime.
     pub const EDIT_PREFLIGHT: Duration = Duration::from_secs(30);
     /// Stalled transport writer deadline.

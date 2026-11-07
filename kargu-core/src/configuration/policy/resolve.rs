@@ -68,6 +68,31 @@ impl TryFrom<Profile> for ReadyProfile {
     }
 }
 impl ReadyProfile {
+    pub(super) fn interop_host(&self) -> Result<Option<&str>, CoreError> {
+        if !matches!(self.0.credential, Credential::Interop) {
+            return Ok(None);
+        }
+        self.0
+            .checked_endpoint
+            .as_ref()
+            .and_then(|endpoint| endpoint.as_url().host_str())
+            .map(Some)
+            .ok_or(CoreError::Unavailable)
+    }
+    pub(super) fn native_key(
+        &self,
+        interop: Option<crate::api::SecretString>,
+    ) -> Result<Option<crate::api::SecretString>, CoreError> {
+        match &self.0.credential {
+            Credential::Direct(key) => crate::api::SecretString::try_from(key.as_str().to_owned())
+                .map(Some)
+                .map_err(|_| CoreError::InvalidValue {
+                    field: "NativeCredential",
+                }),
+            Credential::Keyless => Ok(None),
+            Credential::Interop => interop.map(Some).ok_or(CoreError::Unavailable),
+        }
+    }
     /// Direct and keyless captures must agree with the committed native policy.
     /// Interop credentials remain an editor-owned observation of this target.
     pub(super) fn credential_matches(&self, supplied: Option<&str>) -> bool {

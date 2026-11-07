@@ -134,6 +134,9 @@ pub(super) struct AuthCapture {
     app_url: Option<BindingValue>,
 }
 impl AuthCapture {
+    pub(super) fn set_native_key(&mut self, key: Option<SecretString>) {
+        self.key = key;
+    }
     /// Run bindings come from the native owner/publication, never editor captures.
     pub(super) fn bind_run(
         &mut self,

@@ -62,7 +62,7 @@ impl Application {
     }
 }
 
-/// Transport-independent host. It does not admit agent runs yet.
+/// Transport-independent application/session host and negotiated editor capabilities.
 pub struct Host {
     epoch: String,
     phase: Phase,
@@ -70,6 +70,7 @@ pub struct Host {
     applications: HashMap<ApplicationId, Application>,
     providers: Result<crate::providers::ProviderCatalog, crate::error::CoreError>,
     editor_file_snapshot: bool,
+    editor_credential_capture: bool,
 }
 
 /// Effect of dispatching one call.
@@ -241,12 +242,16 @@ impl Host {
             applications: HashMap::new(),
             providers: crate::providers::ProviderCatalog::embedded(),
             editor_file_snapshot: false,
+            editor_credential_capture: false,
         }
     }
 
     /// Negotiated limit applied immediately after initialize.
     pub fn frame_limit(&self) -> ByteLimit {
         self.frame_limit
+    }
+    pub(crate) fn editor_credential_available(&self) -> bool {
+        self.editor_credential_capture
     }
     pub(crate) fn editor_file_snapshot_available(&self) -> bool {
         self.editor_file_snapshot
@@ -860,6 +865,10 @@ impl Host {
             .capabilities
             .iter()
             .any(|capability| capability == "editor_file_snapshot");
+        self.editor_credential_capture = init
+            .capabilities
+            .iter()
+            .any(|capability| capability == "editor_credential_capture");
         self.phase = Phase::Negotiated;
         Ok(
             json!({"core_version":crate::VERSION, "protocol_major":protocol::MAJOR,

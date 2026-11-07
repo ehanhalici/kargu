@@ -125,15 +125,20 @@ pub(crate) struct RunTarget {
     wire_headers: crate::api::HeaderTemplates,
 }
 impl RunTarget {
+    pub(crate) fn interop_host(&self) -> Result<Option<&str>, CoreError> {
+        self.profile.interop_host()
+    }
     pub(crate) fn prepare_connection(
         &self,
         source: &str,
         session: &SessionId,
+        interop: Option<crate::api::SecretString>,
     ) -> Result<crate::api::ChatConnection, CoreError> {
         crate::api::ChatConnection::capture_run(
             source,
             session,
             self.app_url.as_ref().map(|value| value.as_str()),
+            self.profile.native_key(interop)?,
         )
         .map_err(|_| CoreError::InvalidValue {
             field: "NativeConnection",

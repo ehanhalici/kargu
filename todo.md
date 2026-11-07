@@ -2411,13 +2411,15 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         Eklenen missing-auth vakası focused native-agent testinde de geçti.
         Elisp/TLA+ kaynağı değişmedi; TLC çalıştırılmadı.
         Loglar `/tmp/kargu-run-credentials-{rust,build,ert,bridge}.log`.
-        **Açık:** direct secret wire'da editör capture'ı olarak taşınır ama artık
-        native policy ile eşleşmeden tüketilemez. Interop (auth-source/callable)
+        **Açık:** direct secret hâlâ editör DTO'sunda da taşınıyor; native
+        builder artık kendi config/env key'ini kullanıyor, fakat key echo guard
+        ve secret-free native preparation DTO cutover'ı 5.4a2c2a'da açık. Interop (auth-source/callable)
         credential için opaque receipt/epoch bağı henüz native admission'a
         bağlı değil; native header template/binding kabulü 5.4a1'de kapandı.
         Model metadata ve context
         revision'ı claim'e bağlı değil (context native store'u 4.9'a bağlı);
-        activation öncesi config değişimi için deterministik pipe testi yok.
+        activation öncesi config değişiminin deterministik pipe kabulü 5.4a2b'de
+        credential yield üzerinden eklendi.
         Config commit view'u ~51 KB olduğundan 52 KiB altı frame'lerde config
         yayımlanamaz ve native run başlayamaz; view sayfalama 8.2b3/8.2b4'tedir.
         İki küçük-frame ERT'si yayımdan sonra daraltılan frame veya 64 KiB +
@@ -2520,10 +2522,48 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           Elisp/TLA+ değişmedi; full ERT/lint ve TLC bu Rust-only dilimde tekrar
           çalıştırılmadı. Producer/consumer kabulü 5.4a2b/c'de ayrı kalır.
 
-        - [ ] **5.4a2b Native reverse credential hazırlığı:** claim'den sonra
+        - [x] **5.4a2b Native reverse credential hazırlığı:** claim'den sonra
           exact epoch/run/capture kimliği ve parent deadline ile editor interop
           isteğini üret; Stop/reset/close/config change'te revoke → actual
           quiescence → typed connection → activation sırasını uygula.
+          **Teslim (`b1b9c90` devamı):** `session/prompt`, native policy
+          interop gerektiriyorsa ve handshake'te `editor_credential_capture`
+          negotiate edilmişse claim
+          altında `editor/credential` üretir. Parametreler exact connection epoch,
+          forward request, RunScope, native capture nonce, native provider/host
+          ve parent deadline ile cap'lenmiş en çok beş saniyelik timeout'tur.
+          Doğru quiescent receipt gelmeden workspace/connection hazırlığına ve
+          model isteğine geçilmez. Stop/observer cancel, timeout ve config
+          değişimi bir kez reverse cancel gönderir; actual completion borcu
+          korunur. Session close/new session ve EOF yolları da gerçek pipe'ta
+          doğrulandı. Direct/env key native profile'dan alınır; keyless'te native
+          key yoktur; interop'ta yalnız receipt key'i kullanılır. Editör raw key'i
+          artık HTTP anahtar kaynağı değildir.
+          **Geçici tüketici sınırı:** capability yoksa native interop prompt
+          claim öncesi `configuration_unavailable` ile reddedilir. Mevcut Emacs
+          native run consumer'ı bu capability'yi henüz açmıyor; auth-source/
+          callable native opt-in kabulü C1/C2'ye kadar hazır değildir. Doğrudan
+          config/env ve keyless native yollar ile standalone API/catalog yolu
+          korunur; sessiz legacy fallback yoktur. Fixture'ların ordinary run
+          target'ları explicit direct/keyless yayınlar; interop ayrı pipe
+          producer/receipt testleriyle sınanır.
+          **Kanıt:** sekiz yeni native IPC testi: exact receipt/epoch ve gerçek
+          Authorization wire değeri; unsupported capability; forged/duplicate
+          receipt; Stop ve forward observer cancellation; parent deadline;
+          session close → replacement claim; EOF; unavailable/malformed receipt;
+          credential beklerken config publication → stale activation. Bu son
+          vaka önce açık kalan deterministik preparation/config-change kabulünü
+          de karşılar. Eski callback yeni capture/session'ı besleyemez.
+          **Frame kabulü:** ek core capability ilanı, uzun Emacs request ID'siyle
+          1 KiB initialize cevabını aştığı için kaldırıldı; kullanılabilirliği
+          client'ın negotiate ettiği `editor_credential_capture` belirler.
+          Minimum-frame testlerinin limitleri gevşetilmedi.
+          **Doğrulama:** Rust 624/624 (32 compile-fail dahil), native IPC
+          49/49; tam source ERT 1459/1459, fmt, strict Clippy ve build temiz.
+          Değişen Elisp helper'ı warning-as-error byte compile, check-parens ve
+          checkdoc'tan geçti. Son loglar
+          `/tmp/kargu-native-credential-verified-{rust,ert,lint}.log`.
+          TLA+ değişmedi; TLC çalıştırılmadı.
 
         - [ ] **5.4a2c Emacs consumer ve kabul:** native run yolunda erken
           auth-source/callable lookup'u kaldır; Emacs yalnız native isteğin
@@ -2547,6 +2587,24 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
             agent yolundan kaldır. Direct/keyless/interop, custom callable,
             Standalone API/catalog, Stop/reset/EOF ve sonraki claim testlerini
             aynı binary ile çalıştır; eski owner callback'i yeni run'a taşınmasın.
+
+            - [ ] **5.4a2c2a Credential-free native target DTO:** native run
+              hazırlığı sadece metadata/target DTO'su alsın; config/env direct
+              key UI'a dönüp `auth.key` içinde geri gelmek zorunda kalmasın.
+              Native builder artık kendi key'ini kullanıyor ama mevcut direct
+              capture guard/snapshot hâlâ key echo bekliyor. Bu tüketici için
+              secret-free projection + native-owned credential admission kur;
+              standalone API/catalog private projection'ını koru.
+
+            - [ ] **5.4a2c2b Reverse handler ve gerçek consumer kabulü:** c1
+              actual-completion portuyla handler'ı bağla; native backend'in
+              captured run seçimine göre erken frontend lookup'u kaldır.
+              Capability yalnız çalışan handler/adapter varken açılır; module/
+              capability kaybı başlamamış işi quiescent unavailable döndürür.
+              Scope/epoch/owner değişiminde key teslimi olmaz, actual ack yine
+              borcu bıraksın. Credential unavailable/timeout gibi retlerin payload
+              içermeyen native reason DTO'su UI'da anlamlı gösterilsin. c2a sonrası
+              karma consumer corpus'unu çalıştır.
 
       - [ ] **5.4a3 Model metadata/wire receipt:** capabilities, wire/auth türü
         ve tuning capture'ını native model/registry revision'ına bağla. Header

@@ -2,6 +2,7 @@
 //! actor alone advances conversation state; this service retains IO handles and
 //! consuming tickets until worker collection, including during teardown.
 
+mod credential;
 mod editor;
 mod files;
 mod native_edit;
@@ -172,6 +173,8 @@ struct PreparedStart {
 struct Starting {
     claim: RunClaim,
     task: Option<JoinHandle<Result<PreparedStart, CoreError>>>,
+    input: Option<(PromptInput, crate::configuration::policy::RunTarget)>,
+    credential: Option<credential::CredentialPreparation>,
     notified: bool,
 }
 enum Work {
@@ -205,7 +208,7 @@ struct Running {
     failure: Option<ApiError>,
 }
 enum Stage {
-    Starting(Starting),
+    Starting(Box<Starting>),
     Running(Box<Running>),
     Settled,
 }
@@ -356,13 +359,16 @@ impl Sessions {
             .prompt_target(&request.scope, input.config_revision)
             .map_err(fault)?;
         input.connection.verify(&target).map_err(fault)?;
+        if target.interop_host().map_err(fault)?.is_some() && !host.editor_credential_available() {
+            return Err(fault(CoreError::Unavailable));
+        }
         let claim = host
             .actor_mut(&request.scope)
             .map_err(fault)?
             .claim_run(
                 &request.scope.session_id,
                 ClaimIntent {
-                    workspace: RequestedWorkspace::try_from(input.root).map_err(fault)?,
+                    workspace: RequestedWorkspace::try_from(input.root.clone()).map_err(fault)?,
                     mode: input.mode,
                     tool_limit: input.tool_limit,
                     timeout: input.timeout_ms.0,
@@ -371,23 +377,43 @@ impl Sessions {
                 },
             )
             .map_err(fault)?;
-        let lease = match claim.lease() {
-            Ok(lease) => lease,
-            Err(error) => {
-                host.actor_mut(&request.scope)
-                    .map_err(fault)?
-                    .finish_claim(&claim)
-                    .map_err(fault)?;
-                return Err(fault(error));
-            }
-        };
+        self.operations.insert(
+            id,
+            Operation {
+                owner: Owner {
+                    scope: request.scope,
+                    run_scope: claim.scope().clone(),
+                    publish: true,
+                    terminal: None,
+                },
+                stage: Stage::Starting(Box::new(Starting {
+                    claim,
+                    task: None,
+                    input: Some((input, target)),
+                    credential: None,
+                    notified: false,
+                })),
+            },
+        );
+        Ok(())
+    }
+    fn spawn_start(
+        claim: &RunClaim,
+        input: PromptInput,
+        target: crate::configuration::policy::RunTarget,
+        key: Option<crate::api::SecretString>,
+    ) -> Result<JoinHandle<Result<PreparedStart, CoreError>>, CoreError> {
+        let lease = claim.lease()?;
         let worker_claim = claim.clone();
-        let task = tokio::task::spawn_blocking(move || {
+        Ok(tokio::task::spawn_blocking(move || {
             let _lease = lease;
             let workspace = worker_claim.prepare_workspace()?;
             worker_claim.check_live()?;
-            let connection = target
-                .prepare_connection(&input.connection.0, worker_claim.scope().session_id())?;
+            let connection = target.prepare_connection(
+                &input.connection.0,
+                worker_claim.scope().session_id(),
+                key,
+            )?;
             let prompt = input.prompt.map(Message::try_from).transpose()?;
             worker_claim.check_live()?;
             Ok(PreparedStart {
@@ -403,23 +429,64 @@ impl Sessions {
                 retry: input.retry,
                 edit_policy: input.edit_policy,
             })
-        });
-        self.operations.insert(
-            id,
-            Operation {
-                owner: Owner {
-                    scope: request.scope,
-                    run_scope: claim.scope().clone(),
-                    publish: true,
-                    terminal: None,
-                },
-                stage: Stage::Starting(Starting {
-                    claim,
-                    task: Some(task),
-                    notified: false,
-                }),
-            },
-        );
+        }))
+    }
+    fn prepare_start(
+        host: &Host,
+        pending: &mut PendingRequests,
+        id: &RpcId,
+        owner: &mut Owner,
+        starting: &mut Starting,
+        messages: &mut Vec<Value>,
+    ) -> Result<bool, CoreError> {
+        if starting.credential.is_none()
+            && owner.terminal.is_none()
+            && let Err(error) = Self::start_credential(host, pending, id, starting, messages)
+        {
+            owner.terminal = Some(error);
+        }
+        let key = if let Some(credential) = &mut starting.credential {
+            match credential.poll(host, &starting.claim, owner.terminal.is_some(), messages)? {
+                None => return Ok(false),
+                Some(Ok(key)) => Some(key),
+                Some(Err(error)) => {
+                    if owner.terminal.is_none() {
+                        owner.terminal = Some(error);
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        starting.credential = None;
+        let (input, target) = starting.input.take().ok_or(CoreError::CleanupFailed)?;
+        if owner.terminal.is_none() {
+            match Self::spawn_start(&starting.claim, input, target, key) {
+                Ok(task) => starting.task = Some(task),
+                Err(error) => owner.terminal = Some(error),
+            }
+        }
+        Ok(true)
+    }
+    fn start_credential(
+        host: &Host,
+        pending: &mut PendingRequests,
+        id: &RpcId,
+        starting: &mut Starting,
+        messages: &mut Vec<Value>,
+    ) -> Result<(), CoreError> {
+        let (_, target) = starting.input.as_ref().ok_or(CoreError::CleanupFailed)?;
+        if target.interop_host()?.is_some() {
+            starting.credential = Some(credential::CredentialPreparation::start(
+                host,
+                pending,
+                id,
+                &starting.claim,
+                target,
+                messages,
+            )?);
+        }
         Ok(())
     }
     pub fn disconnect(&mut self, host: &mut Host) -> Result<(), CoreError> {
@@ -522,7 +589,7 @@ impl Sessions {
                     revoke(host, op)?;
                 }
                 let done = match &op.stage {
-                    Stage::Starting(_) => Self::starting(host, ctx.api, &id, op, &mut messages)?,
+                    Stage::Starting(_) => Self::starting(host, &mut ctx, &id, op, &mut messages)?,
                     Stage::Running(_) => Self::running(host, &mut ctx, &id, op, &mut messages)?,
                     Stage::Settled => true,
                 };
@@ -538,7 +605,7 @@ impl Sessions {
     }
     fn starting(
         host: &mut Host,
-        api: &mut ApiRequests,
+        ctx: &mut SessionContext<'_>,
         id: &RpcId,
         op: &mut Operation,
         messages: &mut Vec<Value>,
@@ -549,6 +616,19 @@ impl Sessions {
         let owner = &mut op.owner;
         if owner.terminal.is_none() {
             owner.terminal = starting.claim.check_live().err();
+        }
+        if owner.terminal.is_none()
+            && !host.configuration_current(&owner.scope, starting.claim.scope().config_revision())
+        {
+            owner.terminal = Some(CoreError::ConfigurationChanged);
+        }
+        if owner.terminal.is_none()
+            && starting
+                .credential
+                .as_ref()
+                .is_some_and(|credential| credential.expired())
+        {
+            owner.terminal = Some(CoreError::Deadline);
         }
         if owner.terminal.is_some() {
             host.actor_mut(&owner.scope)?
@@ -565,6 +645,11 @@ impl Sessions {
             )? {
                 messages.push(message);
             }
+        }
+        if starting.input.is_some()
+            && !Self::prepare_start(host, ctx.pending, id, owner, starting, messages)?
+        {
+            return Ok(false);
         }
         if starting
             .task
@@ -620,7 +705,7 @@ impl Sessions {
             finish_response(host, id, owner, None, None, messages)?;
             return Ok(true);
         }
-        let budget = match api.open_run_budget(host, &run, prepared.budget) {
+        let budget = match ctx.api.open_run_budget(host, &run, prepared.budget) {
             Ok(budget) => budget,
             Err(error) => {
                 owner.terminal = Some(error);

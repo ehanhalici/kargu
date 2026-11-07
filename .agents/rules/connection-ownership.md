@@ -38,9 +38,29 @@ release the lease; only an exact scope/capture quiescent completion or connectio
 closure drains it. Completion observed after claim cancellation/expiry drains the
 lease without delivering the key. Registration failure and unissued rollback release acquired leases. A completion
 receipt is not activation authority: consumers must still check current native
-config, selection and target. This is the correlation foundation; native reverse
-credential issuance and the editor actual-completion consumer remain tracked in
-`todo.md` 5.4a2b/c and are not implemented by this port alone.
+config, selection and target.
+
+Native session preparation now uses this port. For an interop profile, the exact
+connection epoch must have negotiated client capability `editor_credential_capture`.
+Without it the prompt is refused before claim; request fields cannot grant this
+capability. Only after claim does it issue `editor/credential` with forward
+request ID, connection epoch, exact
+RunScope, capture ID, natively resolved provider/host and a timeout capped by the
+original claim deadline and five seconds. The editor returns a result containing
+that scope/capture ID, `quiescent: true`, an outcome (`resolved`, `unavailable`, or
+`cancelled`), and a key only for `resolved`. An ordinary JSON-RPC error is not a
+completion receipt. Cancellation uses `rpc/cancel` for the reverse ID. No model IO
+or activation occurs before actual completion and current-config revalidation.
+Direct/env keys come from the native profile, keyless supplies no key, and only
+a matching interop receipt supplies the interop key; raw editor key capture is
+not the HTTP credential source. A direct key echo guard remains until the
+credential-free native preparation DTO cutover.
+
+The Emacs native-run consumer does not negotiate this capability yet; native
+opt-in auth-source/callable preparation therefore fails closed until the worker
+actual-completion and consumer cutovers under `todo.md` 5.4a2c. Direct/env/keyless
+native runs and standalone API/catalog consumers retain their paths. This native
+producer acceptance does not close the editor consumer migration.
 
 `configuration/parse` accepts captured bounded UTF-8 source and refresh generation
 on the exact ready connection epoch. It performs no filesystem, environment,

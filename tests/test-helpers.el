@@ -149,15 +149,19 @@ The fixture stages a synthetic document; Rust remains the only writer."
   "Publish APPLICATION config whose native target is ARGUMENTS' connection.
 Rust resolves the run target from published config; this fixture makes the
 synthetic server URL and model that target, then binds ARGUMENTS to its
-revision.  Return ARGUMENTS."
+revision.  Ordinary fixtures publish the synthetic key or explicit keyless
+policy; interop lookup has a separate native receipt corpus.  Return ARGUMENTS."
   (let* ((connection (gethash "connection" arguments))
          (provider (or (gethash "provider" connection) "fixture"))
          (url (gethash "url" connection))
-         (model (gethash "model" connection)))
+         (model (gethash "model" connection))
+         (auth (gethash "auth" connection))
+         (key (and (hash-table-p auth) (gethash "key" auth))))
     (let ((kargu-application--bound application))
       (kargu-test-config-publish
        (kargu-config-service-context)
-       (list :provider provider :providers (list (list provider :api url :model model)))
+       (list :provider provider :providers (list (list provider :api url :model model
+                                                                     :apikey (if (stringp key) key ""))))
        "/synthetic/native-target" (format "%s|%s|%s" provider model url))
       (puthash "provider" provider connection)
       (puthash "config_revision" (kargu-config-revision) arguments))

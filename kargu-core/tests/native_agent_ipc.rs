@@ -134,6 +134,31 @@ fn response(
         events.push(message);
     }
 }
+fn credential_request(
+    peer: &Peer,
+    events: &mut Vec<Value>,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    loop {
+        let message = peer.read()?;
+        if message["method"] == "editor/credential" {
+            return Ok(message);
+        }
+        if message.get("method").is_none() {
+            return Err(format!("unexpected terminal before credential request: {message}").into());
+        }
+        events.push(message);
+    }
+}
+fn complete_credential(
+    peer: &mut Peer,
+    request: &Value,
+    outcome: &str,
+    key: Option<&str>,
+) -> TestResult {
+    peer.send(json!({"jsonrpc":"2.0","id":request["id"],"result":{
+        "scope":request["params"]["scope"],"capture_id":request["params"]["capture_id"],
+        "quiescent":true,"outcome":outcome,"key":key}}))
+}
 fn prompt(root: &std::path::Path, url: &str) -> Value {
     json!({"root":root,"mode":"agent","prompt":{"role":"user","content":"Inspect synthetic workspace"},
         "tools_enabled":false,"editor_available":[],"tool_limit":8,"turn_limit":4,"timeout_ms":15000,
@@ -153,7 +178,11 @@ fn fixture_revision() -> u64 {
 /// Publish a config whose native target is the prompt's fixture server, then
 /// bind the prompt to that revision.  Rust rejects any other editor target.
 fn publish_target(peer: &mut Peer, scope: &Value, arguments: &mut Value) -> TestResult {
-    publish_target_with_key(peer, scope, arguments, None)
+    let key = arguments["connection"]["auth"]["key"]
+        .as_str()
+        .unwrap_or("")
+        .to_owned();
+    publish_target_with_key(peer, scope, arguments, Some(&key))
 }
 fn publish_target_with_key(
     peer: &mut Peer,
@@ -579,7 +608,7 @@ fn native_prompt_rejects_uncommitted_header_credentials() -> TestResult {
             let root = tempfile::tempdir()?;
             let (url, server, requests) = server(vec![answer("native headers")])?;
             let mut peer = Peer::start()?;
-            peer.initialize()?;
+            peer.initialize_with_capabilities(1_048_576, &["editor_credential_capture"])?;
             let scope = peer.scope()?;
             let mut bound = prompt(root.path(), &url);
             publish_target_with_key(&mut peer, &scope, &mut bound, direct)?;
@@ -600,6 +629,15 @@ fn native_prompt_rejects_uncommitted_header_credentials() -> TestResult {
             );
             assert!(requests.try_recv().is_err());
             begin(&mut peer, "bound-headers", &scope, bound)?;
+            if direct.is_none() {
+                let lookup = credential_request(&peer, &mut events)?;
+                complete_credential(
+                    &mut peer,
+                    &lookup,
+                    "resolved",
+                    Some("synthetic-interop-key"),
+                )?;
+            }
             assert_eq!(
                 response(&peer, "bound-headers", &mut events)?["result"]["status"],
                 "completed"
@@ -609,6 +647,336 @@ fn native_prompt_rejects_uncommitted_header_credentials() -> TestResult {
             server.join().map_err(|_| "server panicked")??;
         }
     }
+    Ok(())
+}
+
+#[test]
+fn interop_cannot_be_enabled_without_negotiated_editor_capability() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let url = format!("http://{}/v1", listener.local_addr()?);
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut bound = prompt(root.path(), &url);
+    publish_target_with_key(&mut peer, &scope, &mut bound, None)?;
+    let mut events = Vec::new();
+    let mut forged = bound.clone();
+    forged["editor_credential_available"] = json!(true);
+    begin(&mut peer, "forged-capability", &scope, forged)?;
+    assert_eq!(
+        response(&peer, "forged-capability", &mut events)?["error"]["code"],
+        -32602
+    );
+    begin(&mut peer, "unavailable", &scope, bound)?;
+    assert_eq!(
+        response(&peer, "unavailable", &mut events)?["error"]["data"]["status"],
+        "configuration_unavailable"
+    );
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
+fn interop_credential_is_claim_bound_and_editor_key_is_not_authority() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut peer = Peer::start()?;
+    peer.initialize_with_capabilities(1_048_576, &["editor_credential_capture"])?;
+    let scope = peer.scope()?;
+    let (url, server, requests) = server_with_headers(
+        vec![answer("native credential")],
+        vec![("authorization", "Bearer resolved-worker-key".to_owned())],
+    )?;
+    let mut bound = prompt(root.path(), &url);
+    publish_target_with_key(&mut peer, &scope, &mut bound, None)?;
+    let mut events = Vec::new();
+    begin(&mut peer, "interop", &scope, bound.clone())?;
+    let lookup = credential_request(&peer, &mut events)?;
+    assert_eq!(lookup["params"]["request_id"], "interop");
+    assert_eq!(lookup["params"]["connection_epoch"], peer.epoch);
+    assert_eq!(lookup["params"]["scope"]["session_id"], scope["session_id"]);
+    assert_eq!(lookup["params"]["provider"], "fixture");
+    assert_eq!(lookup["params"]["host"], "127.0.0.1");
+    let timeout = lookup["params"]["timeout_ms"].as_u64().ok_or("timeout")?;
+    assert!(timeout > 0 && timeout <= 5000);
+    let mut forged = lookup.clone();
+    forged["params"]["capture_id"] = json!(kargu_core::domain::CredentialCaptureId::new());
+    complete_credential(&mut peer, &forged, "resolved", Some("forged-key"))?;
+    let mut foreign = lookup.clone();
+    foreign["params"]["scope"]["run_id"] = json!(kargu_core::domain::RunId::new());
+    complete_credential(&mut peer, &foreign, "resolved", Some("foreign-key"))?;
+    begin(&mut peer, "busy", &scope, bound)?;
+    assert_eq!(
+        response(&peer, "busy", &mut events)?["error"]["data"]["status"],
+        "busy"
+    );
+    assert!(requests.try_recv().is_err());
+    complete_credential(&mut peer, &lookup, "resolved", Some("resolved-worker-key"))?;
+    complete_credential(&mut peer, &lookup, "resolved", Some("duplicate-key"))?;
+    let terminal = response(&peer, "interop", &mut events)?;
+    assert_eq!(terminal["result"]["status"], "completed");
+    assert_eq!(terminal["result"]["scope"], lookup["params"]["scope"]);
+    requests.recv_timeout(Duration::from_secs(2))?;
+    drop(peer);
+    server.join().map_err(|_| "server panicked")??;
+    Ok(())
+}
+
+#[test]
+fn interop_stop_retains_the_claim_until_actual_quiescence() -> TestResult {
+    for abort in [true, false] {
+        let root = tempfile::tempdir()?;
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        listener.set_nonblocking(true)?;
+        let url = format!("http://{}/v1", listener.local_addr()?);
+        let mut peer = Peer::start()?;
+        peer.initialize_with_capabilities(1_048_576, &["editor_credential_capture"])?;
+        let scope = peer.scope()?;
+        let mut bound = prompt(root.path(), &url);
+        publish_target_with_key(&mut peer, &scope, &mut bound, None)?;
+
+        let mut events = Vec::new();
+        begin(&mut peer, "capturing", &scope, bound.clone())?;
+        let lookup = credential_request(&peer, &mut events)?;
+        if abort {
+            let aborted = peer.call(
+                "abort",
+                "session/abort",
+                json!({"scope":lookup["params"]["scope"]}),
+            )?;
+            assert_eq!(aborted["result"]["status"], "revoked");
+        } else {
+            peer.send(json!({"jsonrpc":"2.0","method":"rpc/cancel","params":{"scope":peer.epoch,"request_id":"capturing"}}))?;
+        }
+        begin(&mut peer, "busy", &scope, bound.clone())?;
+        assert_eq!(
+            response(&peer, "busy", &mut events)?["error"]["data"]["status"],
+            "busy"
+        );
+        assert!(events.iter().any(|event| event["method"] == "rpc/cancel"
+            && event["params"]["request_id"] == lookup["id"]));
+        complete_credential(&mut peer, &lookup, "resolved", Some("late-key"))?;
+        if abort {
+            assert_eq!(
+                response(&peer, "capturing", &mut events)?["result"]["status"],
+                "cancelled"
+            );
+        } else {
+            peer.call("drained", "ping", json!({}))?;
+        }
+        begin(&mut peer, "next", &scope, bound)?;
+        let next = credential_request(&peer, &mut events)?;
+        assert_ne!(next["params"]["capture_id"], lookup["params"]["capture_id"]);
+        let mut replay = lookup.clone();
+        replay["id"] = next["id"].clone();
+        complete_credential(&mut peer, &replay, "resolved", Some("old-key"))?;
+        complete_credential(&mut peer, &next, "cancelled", None)?;
+        assert_eq!(
+            response(&peer, "next", &mut events)?["result"]["status"],
+            "cancelled"
+        );
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+        drop(peer);
+    }
+    Ok(())
+}
+
+#[test]
+fn interop_parent_deadline_revokes_but_preserves_actual_drain() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let url = format!("http://{}/v1", listener.local_addr()?);
+    let mut peer = Peer::start()?;
+    peer.initialize_with_capabilities(1_048_576, &["editor_credential_capture"])?;
+    let scope = peer.scope()?;
+    let mut bound = prompt(root.path(), &url);
+    publish_target_with_key(&mut peer, &scope, &mut bound, None)?;
+
+    bound["timeout_ms"] = json!(500);
+    let mut events = Vec::new();
+    begin(&mut peer, "expiring", &scope, bound.clone())?;
+    let lookup = credential_request(&peer, &mut events)?;
+    assert!(lookup["params"]["timeout_ms"].as_u64().ok_or("timeout")? <= 500);
+    loop {
+        let message = peer.read()?;
+        if message["method"] == "rpc/cancel" && message["params"]["request_id"] == lookup["id"] {
+            break;
+        }
+        assert!(
+            message.get("method").is_some(),
+            "terminal before actual completion"
+        );
+        events.push(message);
+    }
+    begin(&mut peer, "busy", &scope, bound)?;
+    assert_eq!(
+        response(&peer, "busy", &mut events)?["error"]["data"]["status"],
+        "busy"
+    );
+    complete_credential(&mut peer, &lookup, "resolved", Some("late-key"))?;
+    assert_eq!(
+        response(&peer, "expiring", &mut events)?["result"]["status"],
+        "timeout"
+    );
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+    drop(peer);
+    Ok(())
+}
+
+#[test]
+fn closed_session_credential_debt_blocks_replacement_until_quiescence() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let url = format!("http://{}/v1", listener.local_addr()?);
+    let mut peer = Peer::start()?;
+    peer.initialize_with_capabilities(1_048_576, &["editor_credential_capture"])?;
+    let scope = peer.scope()?;
+    let mut bound = prompt(root.path(), &url);
+    publish_target_with_key(&mut peer, &scope, &mut bound, None)?;
+
+    let mut events = Vec::new();
+    begin(&mut peer, "old", &scope, bound.clone())?;
+    let lookup = credential_request(&peer, &mut events)?;
+    let closed = peer.call("close", "session/close", scope.clone())?;
+    assert_eq!(closed["result"]["status"], "closed");
+    let replacement = peer.call(
+        "create",
+        "session/create",
+        json!({"application_id":scope["application_id"]}),
+    )?["result"]
+        .clone();
+    assert_ne!(replacement["session_id"], scope["session_id"]);
+    begin(&mut peer, "busy", &replacement, bound.clone())?;
+    assert_eq!(
+        response(&peer, "busy", &mut events)?["error"]["data"]["status"],
+        "busy"
+    );
+    complete_credential(&mut peer, &lookup, "resolved", Some("old-session-key"))?;
+    peer.call("drained", "ping", json!({}))?;
+    begin(&mut peer, "replacement", &replacement, bound)?;
+    let next = credential_request(&peer, &mut events)?;
+    assert_eq!(
+        next["params"]["scope"]["session_id"],
+        replacement["session_id"]
+    );
+    let mut replay = lookup.clone();
+    replay["id"] = next["id"].clone();
+    complete_credential(&mut peer, &replay, "resolved", Some("foreign-session-key"))?;
+    complete_credential(&mut peer, &next, "unavailable", None)?;
+    assert_eq!(
+        response(&peer, "replacement", &mut events)?["result"]["status"],
+        "failed"
+    );
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+    drop(peer);
+    Ok(())
+}
+
+#[test]
+fn interop_eof_releases_the_correlation_without_model_io() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let url = format!("http://{}/v1", listener.local_addr()?);
+    let mut peer = Peer::start()?;
+    peer.initialize_with_capabilities(1_048_576, &["editor_credential_capture"])?;
+    let scope = peer.scope()?;
+    let mut bound = prompt(root.path(), &url);
+    publish_target_with_key(&mut peer, &scope, &mut bound, None)?;
+
+    let mut events = Vec::new();
+    begin(&mut peer, "disconnect", &scope, bound)?;
+    credential_request(&peer, &mut events)?;
+    peer.input.take();
+    assert!(peer.wait()?);
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+    Ok(())
+}
+
+#[test]
+fn unavailable_and_malformed_interop_results_are_terminal_without_provider_io() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let url = format!("http://{}/v1", listener.local_addr()?);
+    let mut peer = Peer::start()?;
+    peer.initialize_with_capabilities(1_048_576, &["editor_credential_capture"])?;
+    let scope = peer.scope()?;
+    let mut bound = prompt(root.path(), &url);
+    publish_target_with_key(&mut peer, &scope, &mut bound, None)?;
+
+    let mut events = Vec::new();
+    for (outcome, key) in [
+        ("unavailable", None),
+        ("resolved", None),
+        ("cancelled", None),
+    ] {
+        begin(&mut peer, "failed-lookup", &scope, bound.clone())?;
+        let lookup = credential_request(&peer, &mut events)?;
+        complete_credential(&mut peer, &lookup, outcome, key)?;
+        let status = if outcome == "cancelled" {
+            "cancelled"
+        } else {
+            "failed"
+        };
+        assert_eq!(
+            response(&peer, "failed-lookup", &mut events)?["result"]["status"],
+            status
+        );
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+    }
+    drop(peer);
+    Ok(())
+}
+
+#[test]
+fn changed_config_during_interop_rejects_activation_after_real_drain() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let url = format!("http://{}/v1", listener.local_addr()?);
+    let mut peer = Peer::start()?;
+    peer.initialize_with_capabilities(1_048_576, &["editor_credential_capture"])?;
+    let scope = peer.scope()?;
+    let mut bound = prompt(root.path(), &url);
+    publish_target_with_key(&mut peer, &scope, &mut bound, None)?;
+
+    let mut events = Vec::new();
+    begin(&mut peer, "capturing", &scope, bound.clone())?;
+    let lookup = credential_request(&peer, &mut events)?;
+    publish_target_with_key(&mut peer, &scope, &mut bound, Some("new-config-key"))?;
+    bound["connection"]["auth"]["key"] = json!("new-config-key");
+    begin(&mut peer, "busy", &scope, bound)?;
+    assert_eq!(
+        response(&peer, "busy", &mut events)?["error"]["data"]["status"],
+        "busy"
+    );
+    complete_credential(&mut peer, &lookup, "resolved", Some("old-config-key"))?;
+    assert_eq!(
+        response(&peer, "capturing", &mut events)?["result"]["status"],
+        "stale_configuration"
+    );
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+    drop(peer);
     Ok(())
 }
 
