@@ -278,6 +278,27 @@ fn publish(
 }
 
 #[test]
+fn header_policy_is_revision_bound_and_case_canonical() -> TestResult {
+    let (mut host, scope) = host()?;
+    let mut captured = context();
+    captured["registry"] = json!([{"id":"custom","headers":{"X-Tenant":"synthetic-a","H-Referer":{"binding":"app-url"}}}]);
+    let first = publish(&mut host, &scope, 1, "provider='custom'", captured.clone())?;
+    captured["registry"][0]["headers"] =
+        json!({"h-referer":{"binding":"app-url"},"x-tenant":"synthetic-a"});
+    let equivalent = publish(&mut host, &scope, 2, "provider='custom'", captured.clone())?;
+    assert_eq!(first["revision"], equivalent["revision"]);
+    captured["registry"][0]["headers"]["x-tenant"] = json!("synthetic-b");
+    let changed = publish(&mut host, &scope, 3, "provider='custom'", captured.clone())?;
+    assert_ne!(first["revision"], changed["revision"]);
+    captured["registry"][0]["headers"]["x-tenant"] = json!({"binding":"session"});
+    assert_ne!(
+        publish(&mut host, &scope, 4, "provider='custom'", captured)?["revision"],
+        changed["revision"]
+    );
+    Ok(())
+}
+
+#[test]
 fn source_revision_ignores_other_sessions_choices_but_tracks_changed_credentials() -> TestResult {
     let (mut host, scope) = host()?;
     let first = publish(&mut host, &scope, 1, "provider='custom'", context())?;

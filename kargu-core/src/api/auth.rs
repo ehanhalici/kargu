@@ -31,7 +31,7 @@ enum TemplateDto {
     Bound(BindingDto),
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Eq, PartialEq, Deserialize)]
 #[serde(try_from = "TemplateDto")]
 enum HeaderTemplate {
     Literal(HeaderValue),
@@ -53,9 +53,9 @@ impl TryFrom<TemplateDto> for HeaderTemplate {
     }
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Eq, PartialEq, Deserialize)]
 #[serde(try_from = "BTreeMap<String, HeaderTemplate>")]
-pub(super) struct HeaderTemplates(Vec<(HeaderName, HeaderTemplate)>);
+pub(crate) struct HeaderTemplates(Vec<(HeaderName, HeaderTemplate)>);
 impl TryFrom<BTreeMap<String, HeaderTemplate>> for HeaderTemplates {
     type Error = ApiError;
     fn try_from(value: BTreeMap<String, HeaderTemplate>) -> Result<Self, ApiError> {
@@ -71,7 +71,46 @@ impl TryFrom<BTreeMap<String, HeaderTemplate>> for HeaderTemplates {
             }
             templates.push((name, value));
         }
-        Ok(Self(templates))
+        templates.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+        let result = Self(templates);
+        if result.byte_len() > 64 * 1024 {
+            return Err(ApiError::Limit);
+        }
+        Ok(result)
+    }
+}
+impl HeaderTemplates {
+    /// Bounded registry accounting, including literal values and binding tags.
+    pub(crate) fn byte_len(&self) -> usize {
+        self.0.iter().fold(0_usize, |total, (name, value)| {
+            total
+                .saturating_add(name.as_str().len())
+                .saturating_add(match value {
+                    HeaderTemplate::Literal(value) => value.len(),
+                    HeaderTemplate::Session | HeaderTemplate::AppUrl => 1,
+                })
+        })
+    }
+    /// Canonical private identity; never exposes header values in a DTO.
+    pub(crate) fn fingerprint(&self) -> Result<[u8; 32], ApiError> {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        for (name, template) in &self.0 {
+            let (tag, value): (u8, &[u8]) = match template {
+                HeaderTemplate::Literal(value) => (0, value.as_bytes()),
+                HeaderTemplate::Session => (1, &[]),
+                HeaderTemplate::AppUrl => (2, &[]),
+            };
+            for part in [name.as_str().as_bytes(), &[tag], value] {
+                hash.update(
+                    u64::try_from(part.len())
+                        .map_err(|_| ApiError::Limit)?
+                        .to_le_bytes(),
+                );
+                hash.update(part);
+            }
+        }
+        Ok(hash.finalize().into())
     }
 }
 
@@ -201,6 +240,17 @@ mod tests {
     use super::*;
     use serde_json::{Value, json};
     type TestResult = Result<(), Box<dyn std::error::Error>>;
+    #[test]
+    fn header_template_registry_rejects_duplicates_and_aggregate_overflow() {
+        assert!(
+            serde_json::from_value::<HeaderTemplates>(json!({"X-Key":"a","x-key":"b"})).is_err()
+        );
+        let mut oversized = serde_json::Map::new();
+        for index in 0..5 {
+            oversized.insert(format!("x-header-{index}"), json!("s".repeat(16 * 1024)));
+        }
+        assert!(serde_json::from_value::<HeaderTemplates>(Value::Object(oversized)).is_err());
+    }
     fn build(
         kind: AuthKind,
         defaults: Value,

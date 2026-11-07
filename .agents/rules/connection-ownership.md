@@ -9,6 +9,21 @@ cancel children; failures before admission preserve existing history, edits and
 the unsent draft. A changed session, selection, endpoint or config revision
 invalidates a pending credential result.
 
+Native `session/prompt` admission resolves its target from the published config
+and the conversation selection. Direct `auth.key` must equal the native policy
+result; keyless targets cannot acquire a nonempty key. Raw connection headers
+are refused. Extra-header and wire default-header templates must equal the
+committed registry's `headers` and `wire_headers` projections; names compare
+case-insensitively, duplicate names and bounded-size violations are rejected.
+Header literals and binding tags participate in the native source fingerprint.
+An explicit header-only refresh therefore advances the config revision and
+invalidates an older run capture. A pending catalog request retains its frozen
+header/format capture until an explicit publication or owner loss invalidates it;
+its live endpoint/credential source DTO does not re-read header metadata.
+This template admission does not establish ownership of caller-provided
+session/app-url binding values, interop credential receipts or complete model/wire
+metadata. Those remaining consumer migrations are tracked under `todo.md` 5.4a.
+
 `configuration/parse` accepts captured bounded UTF-8 source and refresh generation
 on the exact ready connection epoch. It performs no filesystem, environment,
 credential or network IO and creates no application/session state. Generation is

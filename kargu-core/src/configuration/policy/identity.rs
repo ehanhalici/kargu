@@ -67,6 +67,13 @@ impl SourceFingerprint {
         for entry in entries {
             text(&mut hash, entry.id.as_str())?;
             optional(&mut hash, entry.api.as_ref())?;
+            hash.update(entry.headers.fingerprint().map_err(|_| CoreError::Limit)?);
+            hash.update(
+                entry
+                    .wire_headers
+                    .fingerprint()
+                    .map_err(|_| CoreError::Limit)?,
+            );
             hash.update([u8::from(entry.local), u8::from(entry.keyless)]);
             text(&mut hash, "models")?;
             count(&mut hash, entry.models.len())?;

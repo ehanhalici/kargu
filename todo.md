@@ -2422,6 +2422,57 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         İki küçük-frame ERT'si yayımdan sonra daraltılan frame veya 64 KiB +
         çok sayfalı cevapla aynı davranışı sınar.
 
+      - [ ] **5.4a1 Effective header capture bağı:** `auth.key` eşleşmesi
+        tek başına raw `connection.headers`, `auth.extra_headers` ve
+        `wire.default-headers` capture'ını bağlamıyordu. Öncelik: interop
+        receipt işinden önce; template portu ve binding sahipliği ayrı kabul.
+
+        - [x] **5.4a1a Header template admission:** native run raw header map'i
+          reddediyor; extra/wire default-header template'leri yayımlanmış
+          provider registry/context'iyle eşleşmek zorunda. Source fingerprint
+          header literal ve binding tag'lerini kanonik, case-insensitive ve
+          uzunluk çerçeveli hash'le kapsıyor; yalnız header değişimi revision'ı
+          ilerletiyor. Custom literal/session/app-url template'leri korunuyor.
+          Duplicate ve item/per-value/aggregate byte sınırları typed API
+          header parser'ında; registry toplam sınırına da dahil.
+          **Kanıt:** yeni gerçek pipe enjeksiyon testi eski kodda başarısız
+          oldu (`/tmp/kargu-header-red.log`). Direct/keyless/interop için üç
+          ayrı capture yolu claim/provider öncesi reddediliyor. Onaylı custom
+          ve wire default header'lar gerçek HTTP socket'inde doğrulandı.
+          Config source revision ve case-equivalence Rust testi; detached
+          frontend header DTO ERT'si 7/7 config-policy odak kabulüne dahil.
+          Değişen Elisp warnings-as-errors compile/check-parens/checkdoc temiz.
+          **Tam kabul (2026-11-07, `841b442` tabanı):** locked Rust 607/607
+          (32 compile-fail dahil), fmt, strict all-target Clippy ve build exit 0.
+          İlk full ERT katalog snapshot uyumluluğunu yakaladı; publication
+          metadata DTO'su ile transient credential source DTO'su ayrılarak
+          düzeltildi. İlgili 14/14 odak ERT ve güncel binary ile temiz HOME'da
+          full kaynak ERT 1458/1458, bridge 40/40 (exit 0). Explicit header-only
+          refresh için gerçek frontend→native revision ERT'si de var.
+          Loglar `/tmp/kargu-header-{rust-all,ert-fixed,bridge,ert-repair,lint-final}.log`.
+          `.agents/rules/connection-ownership.md` sözleşmesi güncellendi.
+          TLA+ kaynağı değişmedi; TLC çalıştırılmadı.
+
+        - [ ] **5.4a1b Binding değerlerinin sahipliği:** template listesi bağlı
+          olsa da `auth.session` ve `auth.app_url` değerleri hâlâ editör
+          capture'ıdır. Session binding'i gerçek native run/session'a;
+          app-url'u committed config/context'e bağla. Scope/target/revision
+          değişiminde eski değerleri kabul etme. Queue: 5.4a1a sonrası,
+          5.4a2 öncesi; custom header davranışını koru.
+
+      - [ ] **5.4a2 Interop receipt/epoch:** auth-source/callable sonucunu
+        native session/config/selection/target ve süreye bağlı opaque receipt'e
+        bağla; duplicate/foreign/stale sonucu activation'a taşıma. 5.4a1 sonrası.
+
+      - [ ] **5.4a3 Model metadata/wire receipt:** capabilities, wire/auth türü
+        ve tuning capture'ını native model/registry revision'ına bağla. Header
+        template bağı tam metadata eşdeğerliği değildir. 5.4a2 sonrası.
+
+      - [ ] **5.4a4 Context revision receipt:** 4.9 native context store portu
+        üzerinden captured revision'ı claim/activation'a bağla. 4.9 ve 5.4a3
+        hazır olunca kabulü kapat; üst 5.4a kapanmadan 6.1a/5.6c kabulünü
+        tamamlanmış sayma.
+
       **Önkoşul:** 8.2b2 ve 8.2c1 native revision portları; erken native claim.
 
       **Başlangıç kaynakları:** Rust: application/{claim.rs,mod.rs}, ipc/sessions.rs,

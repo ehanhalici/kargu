@@ -100,6 +100,28 @@ impl ConnectionIntent {
         {
             return Err(CoreError::ConfigurationChanged);
         }
+        if !intent
+            .get("headers")
+            .and_then(Value::as_object)
+            .is_some_and(|headers| headers.is_empty())
+        {
+            return Err(CoreError::ConfigurationChanged);
+        }
+        let headers = intent
+            .get("auth")
+            .and_then(|auth| auth.get("extra_headers"))
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let headers: crate::api::HeaderTemplates =
+            serde_json::from_value(headers).map_err(|_| CoreError::ConfigurationChanged)?;
+        let wire_headers = intent
+            .get("wire")
+            .and_then(|wire| wire.get("default-headers"))
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let wire_headers: crate::api::HeaderTemplates =
+            serde_json::from_value(wire_headers).map_err(|_| CoreError::ConfigurationChanged)?;
+        target.verify_headers(&headers, &wire_headers)?;
         target.verify_credential(
             intent
                 .get("auth")

@@ -13,6 +13,7 @@
 (require 'kargu/async)
 (require 'kargu/bridge/application)
 (require 'kargu/providers/registry)
+(require 'kargu/providers/projection)
 
 (declare-function kargu-config-copy "kargu/config/service" (value))
 (declare-function kargu-selection-provider "kargu/selection" (&optional session))
@@ -32,7 +33,7 @@ Environment names are interpreted only by Rust; unrelated values stay local."
         (error "Editor environment exceeds capture limit"))
       (push (copy-sequence entry) environment))
     (put cell 'environment (nreverse environment))
-    (put cell 'registry (kargu-bridge-config-policy--registry))
+    (put cell 'registry (kargu-bridge-config-policy--registry t))
     (put cell 'options (kargu-bridge-config-policy--options))
     cell))
 
@@ -48,10 +49,14 @@ Environment names are interpreted only by Rust; unrelated values stay local."
   (kargu-bridge-config-policy--wipe (symbol-plist cell))
   (setplist cell nil))
 
-(defun kargu-bridge-config-policy--captured-context (cell names)
-  "Project only native-requested NAMES from immutable editor input CELL."
-  (let ((process-environment (get cell 'environment)))
-    (kargu-bridge-config-policy--context (kargu-config-copy (get cell 'registry)) names (get cell 'options))))
+(defun kargu-bridge-config-policy--captured-context (cell names &optional publication)
+  "Project native-requested NAMES from immutable editor input CELL.
+PUBLICATION includes header metadata; transient credential source DTOs do not."
+  (let ((process-environment (get cell 'environment))
+        (registry (kargu-config-copy (get cell 'registry))))
+    (unless publication
+      (mapc (lambda (entry) (remhash "headers" entry) (remhash "wire_headers" entry)) registry))
+    (kargu-bridge-config-policy--context registry names (get cell 'options))))
 
 (defun kargu-bridge-config-policy--options ()
   "Capture raw editor options and selection, without choosing any fallback."
@@ -69,17 +74,25 @@ When omitted, use the last committed native view and current editor options."
    (or names (gethash "environment_names" (kargu-config-native-view)))
    (or options (kargu-bridge-config-policy--options))))
 
-(defun kargu-bridge-config-policy--registry ()
-  "Capture the registry's literal config inputs, without resolving policy."
+(defun kargu-bridge-config-policy--registry (&optional metadata)
+  "Capture the registry's literal config inputs, without resolving policy.
+METADATA includes detached header DTOs for native publication."
   (let (entries)
     (maphash (lambda (id info)
-               (push (kargu-bridge--object
-                      "id" (copy-sequence id)
-                      "api" (or (kargu-config-copy (plist-get info :api)) :json-null)
-                      "env" (vconcat (kargu-config-copy (plist-get info :env)))
-                      "models" (vconcat (kargu-config-copy (kargu-provider-models id)))
-                      "local" (if (plist-get info :local) t :json-false)
-                      "keyless" (if (plist-get info :keyless) t :json-false)) entries))
+               (let ((entry (kargu-bridge--object
+                             "id" (copy-sequence id)
+                             "api" (or (kargu-config-copy (plist-get info :api)) :json-null)
+                             "env" (vconcat (kargu-config-copy (plist-get info :env)))
+                             "models" (vconcat (kargu-config-copy (kargu-provider-models id)))
+                             "local" (if (plist-get info :local) t :json-false)
+                             "keyless" (if (plist-get info :keyless) t :json-false))))
+                 (when metadata
+                   (puthash "headers" (kargu-providers-wire-object
+                                       (or (kargu-provider-extra-headers id) :json-empty-object)) entry)
+                   (puthash "wire_headers" (kargu-providers-wire-object
+                                            (or (kargu-provider-format-headers (kargu-provider-format id))
+                                                :json-empty-object)) entry))
+                 (push entry entries)))
              kargu-providers--table)
     (vconcat (sort entries (lambda (left right) (string< (gethash "id" left) (gethash "id" right)))))))
 
@@ -146,7 +159,7 @@ under PARENT and APPLICATION.  This port never updates an editor cache."
               (t
                (condition-case nil
                    (let ((context (kargu-bridge-config-policy--captured-context
-                                   inputs (gethash "environment_names" value))))
+                                   inputs (gethash "environment_names" value) t)))
                      (setq commit-sent t)
                      (kargu-bridge-config-policy--call
                       task connection scope "configuration/commit"

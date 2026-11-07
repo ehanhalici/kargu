@@ -35,6 +35,12 @@ fn answer(text: &str) -> Reply {
 fn server(
     replies: Vec<Reply>,
 ) -> Result<(String, Server, mpsc::Receiver<Value>), Box<dyn std::error::Error>> {
+    server_with_headers(replies, Vec::new())
+}
+fn server_with_headers(
+    replies: Vec<Reply>,
+    expected_headers: Vec<(&'static str, &'static str)>,
+) -> Result<(String, Server, mpsc::Receiver<Value>), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     listener.set_nonblocking(true)?;
     let url = format!("http://{}/v1", listener.local_addr()?);
@@ -61,6 +67,17 @@ fn server(
                 let mut byte = [0];
                 socket.read_exact(&mut byte)?;
                 headers.extend_from_slice(&byte);
+            }
+            let wire_headers = String::from_utf8_lossy(&headers);
+            for (name, expected) in &expected_headers {
+                let actual = wire_headers
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+                    .map(|(_, value)| value.trim());
+                if actual != Some(*expected) {
+                    return Err(std::io::Error::other("fixture wire header mismatch"));
+                }
             }
             let length = String::from_utf8_lossy(&headers)
                 .lines()
@@ -121,7 +138,7 @@ fn prompt(root: &std::path::Path, url: &str) -> Value {
     json!({"root":root,"mode":"agent","prompt":{"role":"user","content":"Inspect synthetic workspace"},
         "tools_enabled":false,"editor_available":[],"tool_limit":8,"turn_limit":4,"timeout_ms":15000,
         "config_revision":3,"policy_revision":7,"budget":{"requests":8},
-        "connection":{"url":url,"model":"captured-model","headers":{"Content-Type":"application/json","Authorization":"Bearer synthetic-native"},
+        "connection":{"url":url,"model":"captured-model","headers":{},"auth":{"key":"synthetic-native"},
             "stream":false,"timeouts":{"connect_ms":1000,"first_byte_ms":12000,"idle_ms":null,"deadline_ms":12000}},
         "retry":{"observer":"none","policy":{"retry_max":2,"backoff_base_ms":1,"backoff_cap_ms":1}}})
 }
@@ -143,6 +160,25 @@ fn publish_target_with_key(
     scope: &Value,
     arguments: &mut Value,
     key: Option<&str>,
+) -> TestResult {
+    publish_target_with_headers(peer, scope, arguments, key, json!({}))
+}
+fn publish_target_with_headers(
+    peer: &mut Peer,
+    scope: &Value,
+    arguments: &mut Value,
+    key: Option<&str>,
+    headers: Value,
+) -> TestResult {
+    publish_target_with_header_policy(peer, scope, arguments, key, headers, json!({}))
+}
+fn publish_target_with_header_policy(
+    peer: &mut Peer,
+    scope: &Value,
+    arguments: &mut Value,
+    key: Option<&str>,
+    headers: Value,
+    wire_headers: Value,
 ) -> TestResult {
     use std::hash::{Hash, Hasher};
     let url = arguments["connection"]["url"]
@@ -176,7 +212,7 @@ fn publish_target_with_key(
         &format!("fixture-commit-{generation}"),
         "configuration/commit",
         json!({"scope":scope,"arguments":{"capture_id":capture,
-            "context":{"environment":{},"registry":[]}}}),
+            "context":{"environment":{},"registry":[{"id":"fixture","headers":headers,"wire_headers":wire_headers}]}}}),
     )?;
     let revision = committed["result"]["revision"].clone();
     if revision.is_null() {
@@ -447,6 +483,85 @@ fn continuation_keeps_the_same_native_run_and_external_api_cannot_borrow_its_bud
     );
     assert_eq!(messages.get(2).ok_or("continue notice")?["role"], "user");
     server.join().map_err(|_| "server panic")??;
+    Ok(())
+}
+
+#[test]
+fn committed_custom_header_templates_are_accepted() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let (url, server, requests) = server_with_headers(
+        vec![answer("custom headers")],
+        vec![
+            ("x-tenant", "synthetic-tenant"),
+            ("x-wire", "native-wire"),
+            ("x-session", "synthetic-session"),
+            ("h-referer", "https://fixture.invalid/"),
+        ],
+    )?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut bound = prompt(root.path(), &url);
+    publish_target_with_header_policy(
+        &mut peer,
+        &scope,
+        &mut bound,
+        Some(""),
+        json!({"X-Tenant":"synthetic-tenant", "X-Session":{"binding":"session"}, "H-Referer":{"binding":"app-url"}}),
+        json!({"X-Wire":"native-wire"}),
+    )?;
+    bound["connection"]["auth"] = json!({"key":"", "session":"synthetic-session", "app_url":"https://fixture.invalid/",
+        "extra_headers":{"x-tenant":"synthetic-tenant", "h-referer":{"binding":"app-url"}, "x-session":{"binding":"session"}}});
+    bound["connection"]["wire"] = json!({"default-headers":{"x-wire":"native-wire"}});
+    let mut events = Vec::new();
+    begin(&mut peer, "custom-headers", &scope, bound)?;
+    assert_eq!(
+        response(&peer, "custom-headers", &mut events)?["result"]["status"],
+        "completed"
+    );
+    requests.recv_timeout(Duration::from_secs(2))?;
+    drop(peer);
+    server.join().map_err(|_| "server panicked")??;
+    Ok(())
+}
+
+#[test]
+fn native_prompt_rejects_uncommitted_header_credentials() -> TestResult {
+    for direct in [Some(""), Some("synthetic-native-key"), None] {
+        for route in ["headers", "extra", "wire"] {
+            let root = tempfile::tempdir()?;
+            let (url, server, requests) = server(vec![answer("native headers")])?;
+            let mut peer = Peer::start()?;
+            peer.initialize()?;
+            let scope = peer.scope()?;
+            let mut bound = prompt(root.path(), &url);
+            publish_target_with_key(&mut peer, &scope, &mut bound, direct)?;
+            bound["connection"]["headers"] = json!({});
+            bound["connection"]["auth"] = json!({"key":direct.unwrap_or("synthetic-interop-key")});
+            let mut forged = bound.clone();
+            let injected = json!({"X-Foreign-Key":"synthetic-foreign-key"});
+            match route {
+                "extra" => forged["connection"]["auth"]["extra_headers"] = injected,
+                "wire" => forged["connection"]["wire"] = json!({"default-headers":injected}),
+                _ => forged["connection"]["headers"] = injected,
+            }
+            let mut events = Vec::new();
+            begin(&mut peer, "foreign-headers", &scope, forged)?;
+            assert_eq!(
+                response(&peer, "foreign-headers", &mut events)?["error"]["data"]["status"],
+                "stale_configuration"
+            );
+            assert!(requests.try_recv().is_err());
+            begin(&mut peer, "bound-headers", &scope, bound)?;
+            assert_eq!(
+                response(&peer, "bound-headers", &mut events)?["result"]["status"],
+                "completed"
+            );
+            requests.recv_timeout(Duration::from_secs(2))?;
+            drop(peer);
+            server.join().map_err(|_| "server panicked")??;
+        }
+    }
     Ok(())
 }
 

@@ -120,8 +120,21 @@ pub(crate) struct RunTarget {
     pub(crate) model: Option<String>,
     pub(crate) endpoint: Option<String>,
     profile: resolve::ReadyProfile,
+    headers: crate::api::HeaderTemplates,
+    wire_headers: crate::api::HeaderTemplates,
 }
 impl RunTarget {
+    pub(crate) fn verify_headers(
+        &self,
+        supplied: &crate::api::HeaderTemplates,
+        wire: &crate::api::HeaderTemplates,
+    ) -> Result<(), CoreError> {
+        if supplied == &self.headers && wire == &self.wire_headers {
+            Ok(())
+        } else {
+            Err(CoreError::ConfigurationChanged)
+        }
+    }
     pub(crate) fn verify_credential(&self, supplied: Option<&str>) -> Result<(), CoreError> {
         if self.profile.credential_matches(supplied) {
             Ok(())
@@ -178,6 +191,23 @@ impl ConfigurationService {
             provider: provider.as_str().to_owned(),
             model: model.filter(|model| !model.is_empty()).map(str::to_owned),
             endpoint: endpoint.map(str::to_owned),
+            headers: published
+                .context
+                .registry
+                .get(provider)
+                .map(|entry| entry.headers.clone())
+                .unwrap_or_default(),
+            wire_headers: match published.context.registry.get(provider) {
+                Some(entry) => entry.wire_headers.clone(),
+                None => serde_json::from_value(
+                    catalog
+                        .wire_value(provider)
+                        .and_then(|wire| wire.get("default-headers"))
+                        .cloned()
+                        .unwrap_or_else(|| json!({})),
+                )
+                .map_err(|_| CoreError::Unavailable)?,
+            },
             profile: target,
         })
     }

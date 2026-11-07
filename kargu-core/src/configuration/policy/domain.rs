@@ -227,6 +227,10 @@ impl EnvironmentSnapshot {
 #[serde(deny_unknown_fields)]
 pub(super) struct RegistryEntry {
     pub(super) id: ApiProviderId,
+    #[serde(default)]
+    pub(super) headers: crate::api::HeaderTemplates,
+    #[serde(default)]
+    pub(super) wire_headers: crate::api::HeaderTemplates,
     pub(super) api: Option<ConfigText>,
     #[serde(default)]
     pub(super) models: Vec<ConfigText>,
@@ -262,6 +266,9 @@ impl TryFrom<Vec<RegistryEntry>> for RegistrySnapshot {
                     .map(|api| api.as_str().len())
                     .unwrap_or_default(),
             );
+            bytes = bytes
+                .saturating_add(entry.headers.byte_len())
+                .saturating_add(entry.wire_headers.byte_len());
             bytes = entry.models.iter().fold(bytes, |bytes, model| {
                 bytes.saturating_add(model.as_str().len())
             });

@@ -146,5 +146,38 @@
             (should-not (kargu-async-task-timer child)))
         (kargu-async-cancel parent)))))
 
+(ert-deftest kargu-config-policy-registry-captures-detached-header-templates-test ()
+  "Literal and bound headers enter the native context as detached raw DTOs."
+  (let ((kargu-providers--table (make-hash-table :test #'equal)))
+    (puthash "fixture" (list :extra-headers
+                            (list (cons "X-Tenant" (copy-sequence "synthetic"))
+                                  (cons "X-Session" :session)))
+             kargu-providers--table)
+    (let* ((captured (kargu-bridge-config-policy--registry t))
+           (headers (gethash "headers" (aref captured 0))))
+      (should-not (gethash "headers" (aref (kargu-bridge-config-policy--registry) 0)))
+      (should (equal (gethash "X-Tenant" headers) "synthetic"))
+      (should (equal (gethash "binding" (gethash "X-Session" headers)) "session"))
+      (clear-string (gethash "X-Tenant" headers))
+      (should (equal (cdr (assoc "X-Tenant" (plist-get (gethash "fixture" kargu-providers--table)
+                                                       :extra-headers))) "synthetic")))))
+
+(ert-deftest kargu-config-policy-header-publication-advances-native-revision-test ()
+  "Explicit refresh publishes header metadata even with unchanged file sources."
+  (kargu-bridge-test--with-core
+   (let ((kargu-application--bound (kargu-application-create))
+         (kargu-providers--table (copy-hash-table kargu-providers--table))
+         (paths (list (expand-file-name "absent-header-config.toml" (kargu-test-scratch-root)))))
+     (kargu-register-provider :id "header-fixture" :format 'openapi
+                              :extra-headers '(("X-Tenant" . "first")))
+     (should (kargu-ok-p (kargu-test-await
+                         (lambda (done) (kargu-config-refresh-async done :paths paths)))))
+     (let ((revision (kargu-config-revision)))
+       (kargu-register-provider :id "header-fixture" :format 'openapi
+                                :extra-headers '(("X-Tenant" . "second")))
+       (should (kargu-ok-p (kargu-test-await
+                           (lambda (done) (kargu-config-refresh-async done :paths paths)))))
+       (should (> (kargu-config-revision) revision))))))
+
 (provide 'tests/test-config-policy)
 ;;; test-config-policy.el ends here
