@@ -1,4 +1,4 @@
-;;; kargu/history.el --- Conversation history and protocol firewall -*- lexical-binding: t; -*-
+;;; history.el --- Conversation history and protocol firewall -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -25,4 +25,4 @@
 
 (provide 'kargu/history)
 
-;;; kargu/history.el ends here
+;;; history.el ends here

@@ -33,7 +33,7 @@
   (kargu-bridge-circuit-view (kargu-application-context) (or provider (kargu--provider-name))))
 
 (defun kargu-circuit-reset (&optional provider callback)
-  "Explicitly reset native PROVIDER; `all' resets this application's circuits.
+  "Explicitly reset native PROVIDER; with `all', reset this application's circuits.
 CALLBACK receives result/error after native acknowledgement.  Never reconnect."
   (interactive)
   (let ((interactive-p (called-interactively-p 'any)))

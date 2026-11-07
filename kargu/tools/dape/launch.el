@@ -183,7 +183,7 @@
     (kargu-dape--port-connect-abort state "Unable to connect to server")))
 
 (defun kargu-dape--make-port-dape-connection (state socket)
-  "Construct and adopt a `dape-connection' from STATE and connected SOCKET."
+  "Construct and adopt a function `dape-connection' from STATE and SOCKET."
   (let* ((config (kargu-dape--port-connect-config state))
          (parent (kargu-dape--port-connect-parent state))
          (command (kargu-dape--port-connect-command state))
@@ -285,7 +285,7 @@
       (kargu-dape--port-schedule-retry state))))
 
 (defun kargu-dape--port-socket-sentinel (state socket _event)
-  "Handle nonblocking SOCKET status changes for STATE."
+  "Handle a nonblocking SOCKET status change for STATE."
   (save-match-data
     (when (and (eq (kargu-dape--port-connect-phase state) :connecting)
                (eq socket (kargu-dape--port-connect-socket state)))
@@ -353,7 +353,7 @@
               (kargu-dape--port-retry-or-fail state))))))))))
 
 (defun kargu-dape--prepare-port-environment (config)
-  "Return process-environment list with CONFIG's `command-env' applied."
+  "Return a `process-environment' list with CONFIG's `command-env' applied."
   (let ((process-environment (cl-copy-list process-environment)))
     (cl-loop for (key value) on (plist-get config 'command-env) by #'cddr do
              (setenv (pcase key
@@ -469,7 +469,8 @@
         connection))))
 
 (defun kargu-dape--dape-owned (original config &optional skip-compile)
-  "Allow owned asynchronous port launches in CONFIG to return before connecting."
+  "Allow owned asynchronous port launches in CONFIG to return before connecting.
+ORIGINAL is the advised Dape function; SKIP-COMPILE is passed through."
   (catch 'kargu-dape--async-connecting
     (funcall original config skip-compile)))
 

@@ -1,4 +1,4 @@
-;;; kargu/state.el --- Centralized state management facade -*- lexical-binding: t; -*-
+;;; state.el --- Centralized state management facade -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -20,4 +20,4 @@
 
 (provide 'kargu/state)
 
-;;; kargu/state.el ends here
+;;; state.el ends here

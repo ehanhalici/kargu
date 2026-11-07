@@ -210,7 +210,8 @@ The native catalog's IDs become the UI cache only after committed completion."
      :valid-p valid-p)))
 
 (defun kargu--catalog-receive (task provider generation body)
-  "Deliver canonical native BODY to TASK; atomically publish fresh GENERATION."
+  "Deliver canonical native BODY to TASK; atomically publish fresh GENERATION.
+PROVIDER names the catalog whose projection BODY carries."
   (let* ((projection (kargu-json-decode body))
          (records (gethash "models" projection)))
     (unless (and (vectorp records) (<= (length records) 20000))

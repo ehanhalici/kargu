@@ -1,8 +1,12 @@
-;;; kargu/languages.el --- Modular language support loader -*- lexical-binding: t; -*-
+;;; languages.el --- Modular language support loader -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Part of kargu.
+
+;;; Commentary:
+
+;; Load every bundled language profile.
 
 ;;; Code:
 
@@ -21,4 +25,4 @@
 
 (provide 'kargu/languages)
 
-;;; kargu/languages.el ends here
+;;; languages.el ends here

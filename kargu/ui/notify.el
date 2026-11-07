@@ -1,4 +1,4 @@
-;;; kargu/ui/notify.el --- Audio and echo-area notifications -*- lexical-binding: t; -*-
+;;; notify.el --- Audio and echo-area notifications -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -29,4 +29,4 @@
 
 (provide 'kargu/ui/notify)
 
-;;; kargu/ui/notify.el ends here
+;;; notify.el ends here

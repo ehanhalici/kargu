@@ -44,7 +44,7 @@
     (_ (error "Unsupported Eglot position converter"))))
 
 (defun kargu-lsp-snapshot-source (&optional flush)
-  "Capture this buffer's exact language provider; FLUSH sends pending changes."
+  "Capture this buffer's exact language provider; FLUSH first sends pending edits."
   (let ((server (and (not (derived-mode-p 'emacs-lisp-mode))
                      (bound-and-true-p eglot--managed-mode)
                      (eglot-current-server))))

@@ -102,7 +102,7 @@
     (user-error "Kargu: this Dape/JSONRPC lifecycle capability is unsupported")))
 
 (defun kargu-dape--foreign-selected-p (connection)
-  "Return non-nil when another live adapter tree owns Dape's UI selection."
+  "Return non-nil when a tree other than CONNECTION's owns Dape's selection."
   (let ((selected (or (and (boundp 'dape--connection-selected) dape--connection-selected)
                       (and (kargu-dape-resource connection)
                            (kargu-dape-resource-preserve-selected (kargu-dape-resource connection))))))
@@ -270,7 +270,8 @@
     (funcall original connection)))
 
 (defun kargu-dape--maybe-select-thread-owned (original conn thread-id &optional force)
-  "Update CONN's thread without stealing selection from a foreign adapter."
+  "Update CONN's thread without stealing selection from a foreign adapter.
+ORIGINAL is the advised Dape function; THREAD-ID and FORCE pass through."
   (if (and (kargu-dape-resource conn) (kargu-dape--foreign-selected-p conn))
       (let ((selected dape--connection-selected))
         (unwind-protect
@@ -314,7 +315,8 @@ Delegate to ORIGINAL with INVALIDATE and DISPLAY-SOURCE-P otherwise."
               (plist-put (dape--breakpoint-verified breakpoint) conn nil))))))
 
 (defun kargu-dape--start-debugging-owned (original conn)
-  "Start CONN without clearing foreign UI overlays or foreign breakpoints."
+  "Start CONN without clearing foreign UI overlays or foreign breakpoints.
+ORIGINAL is the advised Dape function."
   (let ((resource (kargu-dape-resource conn)))
     (when (and resource (kargu-dape-resource-preserve-selected resource))
       (let ((preserved (kargu-dape-resource-preserve-selected resource)))

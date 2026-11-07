@@ -18,7 +18,7 @@
 (require 'kargu/bridge/catalog)
 
 (defun kargu-catalog-request--bind-origin (task)
-  "Cancel TASK and its children when its captured origin closes or changes mode."
+  "Cancel TASK and its children if its captured origin closes or its mode changed."
   (let* ((origin (kargu-async-task-buffer task))
          (session (kargu-session-context origin))
          (cancel (lambda () (kargu-async-cancel task))))

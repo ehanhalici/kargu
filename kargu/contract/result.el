@@ -1,4 +1,4 @@
-;;; kargu/contract/result.el --- Railway-Oriented Programming (Result / Either) -*- lexical-binding: t; -*-
+;;; result.el --- Railway-Oriented Programming (Result / Either) -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -43,4 +43,4 @@
 
 (provide 'kargu/contract/result)
 
-;;; kargu/contract/result.el ends here
+;;; result.el ends here

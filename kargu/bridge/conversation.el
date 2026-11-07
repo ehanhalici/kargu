@@ -6,8 +6,8 @@
 ;;; Commentary:
 
 ;; A chat owns an opaque Rust session distinct from the application's service
-;; session. This port maps editor lifetimes to native handles; Rust owns history,
-;; run admission, revocation and actual resource drain. A close acknowledgement
+;; session.  This port maps editor lifetimes to native handles; Rust owns history,
+;; run admission, revocation and actual resource drain.  A close acknowledgement
 ;; revokes a session; it is never evidence that its workers have joined.
 
 ;;; Code:

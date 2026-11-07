@@ -1,4 +1,4 @@
-;;; kargu/contract/types.el --- Contract type predicates -*- lexical-binding: t; -*-
+;;; types.el --- Contract type predicates -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -43,7 +43,8 @@
               (stringp (alist-get "name" fn nil nil #'equal))))))
 
 (defun kargu-contract-tool-calls-p (calls)
-  "Return non-nil if CALLS is nil, :json-null, or a collection of tool calls."
+  "Return non-nil for an absent value or a valid tool-call collection.
+CALLS may be nil, :json-null, or a list or vector of tool calls."
   (cond
    ((or (null calls) (eq calls :json-null)) t)
    ((or (vectorp calls) (listp calls))
@@ -105,4 +106,4 @@ A valid schema alist must have (\"type\" . \"object\") and a \"properties\" entr
 
 (provide 'kargu/contract/types)
 
-;;; kargu/contract/types.el ends here
+;;; types.el ends here

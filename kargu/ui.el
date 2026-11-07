@@ -1,4 +1,4 @@
-;;; kargu/ui.el --- Transient control menu and UI shell -*- lexical-binding: t; -*-
+;;; ui.el --- Transient control menu and UI shell -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -30,4 +30,4 @@
 
 (provide 'kargu/ui)
 
-;;; kargu/ui.el ends here
+;;; ui.el ends here

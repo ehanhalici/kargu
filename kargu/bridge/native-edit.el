@@ -34,7 +34,7 @@
              (kargu-bridge-native-edit-entry edit)))))
 
 (defun kargu-bridge-native-edit--release (connection edit)
-  "Revoke EDIT's orchestration while retaining any actually issued activity."
+  "Revoke EDIT's orchestration on CONNECTION, retaining issued activity."
   (let ((call-id (gethash "call_id" (kargu-bridge-native-edit-params edit))))
     (when (eq edit (gethash call-id (kargu-bridge-connection-native-edits connection)))
       ;; Revoke validity before task cleanup can reenter a delayed callback.
@@ -47,7 +47,8 @@
         (kargu-async-cancel (kargu-bridge-native-edit-task edit))))))
 
 (defun kargu-bridge-native-edit--finish (connection edit failure)
-  "Report only orchestration completion for EDIT; FAILURE cannot establish effects."
+  "Report only orchestration completion for EDIT on CONNECTION.
+FAILURE cannot establish effects."
   (when (kargu-bridge-native-edit--current-p connection edit)
     (let* ((params (kargu-bridge-native-edit-params edit))
            (data (and (hash-table-p failure) (gethash "data" failure)))

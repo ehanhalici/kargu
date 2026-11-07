@@ -101,7 +101,8 @@
 (cl-defun kargu-bridge-session-start (connection scope arguments callback
                                                 &key owner on-delta on-event)
   "Start a native agent run on CONNECTION for SCOPE with ARGUMENTS.
-DELIVERIES are sent to ON-DELTA and ON-EVENT; terminal result to CALLBACK."
+OWNER is the optional live source buffer of the call.  DELIVERIES go to
+ON-DELTA and ON-EVENT; terminal result to CALLBACK."
   (kargu-bridge-call connection "session/prompt"
                      (kargu-bridge--object
                       "scope" scope

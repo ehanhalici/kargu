@@ -1,4 +1,4 @@
-;;; kargu/plan.el --- In-memory plan buffer, review and agent execution -*- lexical-binding: t; -*-
+;;; plan.el --- In-memory plan buffer, review and agent execution -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -22,4 +22,4 @@
 
 (provide 'kargu/plan)
 
-;;; kargu/plan.el ends here
+;;; plan.el ends here

@@ -1,4 +1,4 @@
-;;; kargu/contract/assert.el --- Contract assertions and validation -*- lexical-binding: t; -*-
+;;; assert.el --- Contract assertions and validation -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -38,4 +38,4 @@ Returns `kargu-ok' with VALUE if valid, or `kargu-err' with an explanation."
 
 (provide 'kargu/contract/assert)
 
-;;; kargu/contract/assert.el ends here
+;;; assert.el ends here

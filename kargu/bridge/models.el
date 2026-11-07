@@ -53,7 +53,8 @@
       (kargu-bridge-models--pump service))))
 
 (defun kargu-bridge-models-cancel (ticket &optional failure)
-  "Revoke TICKET's deliveries, draining uploads before another starts.
+  "Revoke TICKET's deliveries, draining uploads before another may begin.
+Deliver FAILURE, or a cancellation fault, to the pending callback.
 An issued commit cannot be undone; uncertainty refuses further publication."
   (when (eq (kargu-bridge-model-ticket-status ticket) :pending)
     (let* ((service (kargu-bridge-model-ticket-service ticket))

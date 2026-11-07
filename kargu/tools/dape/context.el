@@ -338,7 +338,7 @@ Oversized sources are unavailable, never represented by a partial read.")
       (_ (error "Debugger source reader returned an invalid status")))))
 
 (defun kargu-dape--attach-source-read-owner (operation)
-  "Cancel OPERATION immediately when its origin buffer closes or resets."
+  "Cancel OPERATION immediately once its origin buffer closes or is reset."
   (let* ((origin (kargu-dape-source-read-operation-origin operation))
          (task (kargu-dape-source-read-operation-task operation))
          (cancel (lambda (&rest _) (kargu-async-cancel task))))
@@ -433,7 +433,8 @@ Read against SELECTION and BUFFER-TICKS when provided."
       task)))
 
 (cl-defun kargu-dape--source-text-async (file-path callback &key selection buffer-ticks)
-  "Deliver bounded source text for workspace FILE-PATH to CALLBACK, or nil."
+  "Deliver bounded source text for workspace FILE-PATH to CALLBACK, or nil.
+SELECTION and BUFFER-TICKS bind the read to its captured debugger state."
   (kargu-dape--source-entry-async
    file-path (lambda (entry) (funcall callback (plist-get entry :text)))
    :selection selection :buffer-ticks buffer-ticks))
@@ -471,7 +472,8 @@ Read against SELECTION and BUFFER-TICKS when provided."
               (string-join (nreverse lines) "\n"))))))))
 
 (cl-defun kargu-dape--source-line-async (file-path line callback &key selection buffer-ticks)
-  "Deliver workspace FILE-PATH's trimmed 1-based LINE to CALLBACK, or nil."
+  "Deliver workspace FILE-PATH's trimmed 1-based LINE to CALLBACK, or nil.
+SELECTION and BUFFER-TICKS bind the read to its captured debugger state."
   (if (not (and (integerp line) (> line 0)))
       (progn (funcall callback nil) nil)
     (kargu-dape--source-text-async
@@ -481,7 +483,9 @@ Read against SELECTION and BUFFER-TICKS when provided."
      :selection selection :buffer-ticks buffer-ticks)))
 
 (cl-defun kargu-dape--source-snippet-async (file-path line callback &key context-lines selection buffer-ticks)
-  "Deliver workspace FILE-PATH's snippet around LINE to CALLBACK, or nil."
+  "Deliver workspace FILE-PATH's snippet around LINE to CALLBACK, or nil.
+CONTEXT-LINES defaults to 4.  SELECTION and BUFFER-TICKS bind the read
+to its captured debugger state."
   (let ((ctx (or context-lines 4)))
     (if (not (and (integerp line) (> line 0) (natnump ctx)))
         (progn (funcall callback nil) nil)

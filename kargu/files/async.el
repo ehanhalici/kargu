@@ -92,7 +92,7 @@
                  (kargu-async-cancel task)))))))
 
 (defun kargu-file--attach-read-owner (operation)
-  "Cancel OPERATION immediately when its owner closes or changes major mode."
+  "Cancel OPERATION immediately if its owner is closed or its major mode changed."
   (let* ((origin (kargu-file-read-operation-origin operation))
          (task (kargu-file-read-operation-task operation))
          (cancel (lambda () (kargu-async-cancel task))))
