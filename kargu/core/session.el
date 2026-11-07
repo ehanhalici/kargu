@@ -41,7 +41,8 @@
   (history-value (kargu-history-create) :read-only t)
   (native-conversations (make-hash-table :test #'eq) :read-only t)
   native-retired
-  (selection-value (kargu-selection-create)))
+  (selection-value (kargu-selection-create))
+  selection-queue selection-pending)
 
 (defvar-local kargu-session--context nil
   "The current buffer's owned session handle; callbacks capture it explicitly.")
@@ -70,18 +71,15 @@
                          (plist-get usage :started))
   usage)
 
-(cl-defun kargu-session-create (&key id-value usage-value
-                                    (mode-value 'ask)
-                                    (selection-value (kargu-selection-create)))
-  "Create ID-VALUE's owner with USAGE-VALUE, SELECTION-VALUE and MODE-VALUE."
+(cl-defun kargu-session-create (&key id-value usage-value (mode-value 'ask))
+  "Create ID-VALUE's owner with USAGE-VALUE and MODE-VALUE.
+Its selection starts uncommitted; only a native commit may set it."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p id-value)
   (kargu-session--validate-usage usage-value)
-  (kargu-contract-assert #'kargu-selection-p selection-value)
   (kargu-contract-assert #'kargu-contract-mode-p mode-value)
   (kargu-session--create :id-value (copy-sequence id-value)
                          :usage-value (copy-tree usage-value)
-                         :mode-value mode-value
-                         :selection-value selection-value))
+                         :mode-value mode-value))
 
 (defun kargu-session--initial-usage ()
   "Return fresh usage fields without duplicating the session identity."
@@ -131,7 +129,9 @@ Nested scalar strings are borrowed read-only values."
           (plist-put (kargu-session-usage-value session) :active active))))
 
 (defun kargu-session-replace-usage (usage)
-  "Replace the current owner's validated USAGE with an isolated session handle."
+  "Replace the current owner's validated USAGE with an isolated session handle.
+The replacement keeps mode and history; its selection starts uncommitted
+because only the native conversation commits a selection."
   (kargu-session--validate-usage usage)
   (when (plist-get (kargu-session-usage-value (kargu-session-context)) :active)
     (user-error "Kargu: stop the session's active run before replacing its counters"))
@@ -140,8 +140,7 @@ Nested scalar strings are borrowed read-only values."
         (kargu-session--create
          :id-value (kargu-session-id) :usage-value (copy-tree usage)
          :mode-value (kargu-session-mode-value (kargu-session-context))
-         :history-value (kargu-session-history-value (kargu-session-context))
-         :selection-value (kargu-session-selection-value (kargu-session-context)))))
+         :history-value (kargu-session-history-value (kargu-session-context)))))
 
 (defun kargu-session-record-usage (tokens-in tokens-out &optional session)
   "Add TOKENS-IN and TOKENS-OUT to SESSION, or the current boundary owner."

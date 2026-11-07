@@ -5,7 +5,8 @@
 
 ;;; Commentary:
 
-;; The native application publishes one immutable selection per session.
+;; Rust commits one immutable selection per native conversation.  This
+;; module validates and queues intents, then publishes only acknowledgements.
 ;; Configuration remains a fallback, not another writable selection store.
 
 ;;; Code:
@@ -23,6 +24,7 @@
 (declare-function kargu-busy-p "kargu/api/http" ())
 (declare-function kargu-connected-providers "kargu/providers/registry" ())
 (declare-function kargu--config-providers "kargu/config/schema" ())
+(declare-function kargu-bridge-selection-commit "kargu/bridge/selection" (session desired callback))
 
 (defvar kargu--live-models-cache)
 
@@ -150,25 +152,129 @@
                      (:reasoning-effort (kargu-selection-effort session))
                      (_ new)))))))))
 
+(defvar kargu-selection-port #'kargu-selection--native-port
+  "Function (SESSION DESIRED CALLBACK) committing DESIRED for SESSION.
+It runs in the requesting owner buffer and delivers CALLBACK (SELECTION
+FAILURE) once.  SELECTION is the native acknowledgement, never DESIRED
+echoed by the editor.  The default is the Rust conversation; there is no
+local fallback.")
+
+(defun kargu-selection--native-port (session desired callback)
+  "Commit DESIRED for SESSION through its Rust conversation; see CALLBACK."
+  (require 'kargu/bridge/selection)
+  (kargu-bridge-selection-commit session desired callback))
+
+(defun kargu-selection--merge (before changes)
+  "Return one selection value derived from BEFORE.
+Only fields present in the CHANGES plist differ from BEFORE."
+  (kargu-selection-create
+   :provider (if (plist-member changes :provider) (plist-get changes :provider)
+               (kargu-selection-provider-value before))
+   :model (if (plist-member changes :model) (plist-get changes :model)
+            (kargu-selection-model-value before))
+   :effort (if (plist-member changes :effort) (plist-get changes :effort)
+             (kargu-selection-effort-value before))))
+
+(defun kargu-selection--deliver (callback selection failure)
+  "Call CALLBACK with SELECTION or FAILURE, reporting an unobserved failure."
+  (if callback
+      (funcall callback selection failure)
+    (when failure
+      (message "Kargu: selection change failed (%s)"
+               (or (and (hash-table-p failure)
+                        (let ((data (gethash "data" failure)))
+                          (and (hash-table-p data) (gethash "status" data))))
+                   failure)))))
+
+(defun kargu-selection--acknowledged (session item selection failure)
+  "Adopt SESSION's native SELECTION for queued ITEM, or report FAILURE."
+  (setf (kargu-session-selection-pending session) nil)
+  (let ((origin (plist-get item :origin)) (callback (plist-get item :callback)))
+    (if (or failure (not (kargu-selection-p selection)))
+        (kargu-selection--deliver callback nil
+                                  (or failure "Invalid native selection acknowledgement"))
+      (let ((before (kargu-session-selection-value session)))
+        (setf (kargu-session-selection-value session) selection)
+        (if (buffer-live-p origin)
+            (with-current-buffer origin
+              (kargu-selection--notify session before selection))))
+      (kargu-selection--deliver
+       callback
+       (and (buffer-live-p origin) (eq session (kargu-session-context origin))
+            (eq selection (kargu-session-selection-value session))
+            selection)
+       nil)))
+  (kargu-selection--pump session))
+
+(defun kargu-selection--pump (session)
+  "Issue SESSION's next queued intent from its latest committed value."
+  (unless (kargu-session-selection-pending session)
+    (when-let* ((item (pop (kargu-session-selection-queue session))))
+      (let ((origin (plist-get item :origin)) (delivered nil))
+        (if (not (buffer-live-p origin))
+            (progn (kargu-selection--deliver (plist-get item :callback) nil "Selection owner closed")
+                   (kargu-selection--pump session))
+          (setf (kargu-session-selection-pending session) item)
+          (condition-case err
+              (with-current-buffer origin
+                (funcall kargu-selection-port session
+                         (kargu-selection--merge (kargu-session-selection-value session)
+                                                 (plist-get item :changes))
+                         (lambda (selection failure)
+                           (unless delivered
+                             (setq delivered t)
+                             (kargu-selection--acknowledged session item selection failure)))))
+            (error
+             (unless delivered
+               (setq delivered t)
+               (kargu-selection--acknowledged session item nil (error-message-string err))))))))))
+
 (cl-defun kargu-selection-update
-    (&key (provider nil provider-p) (model nil model-p) (effort nil effort-p) session)
-  "Commit supplied PROVIDER, MODEL and EFFORT together to SESSION.
-Unspecified fields retain their values.  Validate before mutation; listeners
-see the entire committed selection, never half of a provider/model change.
-Return its immutable receipt only while still current after notification."
+    (&key (provider nil provider-p) (model nil model-p) (effort nil effort-p) session callback)
+  "Request PROVIDER, MODEL and EFFORT together for SESSION's native commit.
+Unspecified fields keep the value committed when the intent is issued.
+Intents are validated, then issued one at a time; listeners see the entire
+acknowledged selection, never half of a provider/model change.  CALLBACK
+receives (SELECTION FAILURE) once.  Return the committed selection when the
+port acknowledged before returning and it is still current, otherwise nil."
   (let* ((origin (current-buffer))
          (session (or session (kargu-session-context)))
-         (before (kargu-selection-context session))
-         (after (kargu-selection-create
-                 :provider (if provider-p provider (kargu-selection-provider-value before))
-                 :model (if model-p model (kargu-selection-model-value before))
-                 :effort (if effort-p effort (kargu-selection-effort-value before)))))
+         (changes (append (and provider-p (list :provider provider))
+                          (and model-p (list :model model))
+                          (and effort-p (list :effort effort))))
+         result)
+    (kargu-selection--merge (kargu-session-selection-value session) changes)
     (kargu-selection--admit-owner session)
-    (setf (kargu-session-selection-value session) after)
-    (kargu-selection--notify session before after)
-    (when (and (buffer-live-p origin) (eq session (kargu-session-context origin))
-               (eq after (kargu-selection-context session)))
-      after)))
+    (when (>= (length (kargu-session-selection-queue session)) 16)
+      (user-error "Kargu: too many pending selection changes"))
+    (setf (kargu-session-selection-queue session)
+          (nconc (kargu-session-selection-queue session)
+                 (list (list :origin origin :changes changes
+                             :callback (lambda (selection failure)
+                                         (setq result selection)
+                                         (kargu-selection--deliver callback selection failure))))))
+    (kargu-selection--pump session)
+    result))
+
+(defun kargu-selection-seed (session selection origin callback)
+  "Commit SELECTION for unpublished SESSION from ORIGIN's buffer.
+This is for a prepared replacement that no view owns yet, so no owner
+admission or notification occurs.  CALLBACK receives (SELECTION FAILURE)
+with the native acknowledgement, which then becomes SESSION's value."
+  (kargu-contract-assert #'kargu-session-p session)
+  (kargu-contract-assert #'kargu-selection-p selection)
+  (kargu-contract-assert #'buffer-live-p origin)
+  (let (delivered)
+    (with-current-buffer origin
+      (funcall kargu-selection-port session selection
+               (lambda (ack failure)
+                 (unless delivered
+                   (setq delivered t)
+                   (when (and (null failure) (kargu-selection-p ack))
+                     (setf (kargu-session-selection-value session) ack))
+                   (funcall callback (and (null failure) ack)
+                            (or failure (unless (kargu-selection-p ack)
+                                          "Invalid native selection acknowledgement")))))))))
 
 (defun kargu-selection-publish (session before)
   "Publish SESSION's already committed selection relative to BEFORE.
@@ -178,12 +284,14 @@ This is the notification half of a coordinated session/view transaction."
   (when (eq session (kargu-session-context))
     (kargu-selection--notify session before (kargu-selection-context session))))
 
-(defun kargu-selection-reset (&optional session)
-  "Clear SESSION's choices during an admitted reset; default to current owner."
+(cl-defun kargu-selection-reset (&optional session &key callback)
+  "Request clearing SESSION's choices during an admitted reset.
+SESSION defaults to the current owner; CALLBACK observes the native commit."
   (let ((session (or session (kargu-session-context))))
     (kargu-contract-assert #'kargu-session-p session)
-    (kargu-selection--admit-owner session)
-    (setf (kargu-session-selection-value session) (kargu-selection-create))))
+    (kargu-selection-update :provider nil :model nil
+                            :effort kargu-selection-default-effort
+                            :session session :callback callback)))
 
 (gv-define-setter kargu-selection-provider (value &optional session)
   `(kargu-selection-update :provider ,value :session ,session))

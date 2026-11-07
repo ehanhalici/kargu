@@ -116,10 +116,10 @@
   "Test that context usage is accurately calculated and rendered."
   (kargu-test-set-model-metadata "gemini-2.5-flash" '(("context_length" . 1000000)))
   (let ((kargu-session--context
-         (kargu-session-create :id-value (kargu-session-id)
-                               :usage-value (list :last-prompt-tokens 32000)
-                               :selection-value
-                               (kargu-selection-create :model "gemini-2.5-flash"))))
+         (kargu-session--create :id-value (kargu-session-id)
+                                :usage-value (list :last-prompt-tokens 32000)
+                                :selection-value
+                                (kargu-selection-create :model "gemini-2.5-flash"))))
     (let ((info (kargu-session-context-info)))
       (should (= (plist-get info :used) 32000))
       (should (> (plist-get info :capacity) 0))
@@ -289,7 +289,7 @@
                                     (should (= company-minimum-prefix-length 1)))
                                 (kill-buffer chat-buf)))))
 (ert-deftest kargu-company-at-symbol-typing-cycle-test ()
-  "Test that continuous typing after `@' preserves company-backend and handles kind/require-match."
+  "Test that continuous typing after `@' preserves `company-backend' and handles kind/require-match."
   (kargu-test-with-git-repo '(("tests/test-git.el" . "x") ("tests/test-fs.el" . "y") ("main.el" . "z"))
                             (let ((chat-buf (get-buffer-create "*kargu-chat-typing-test*")))
                               (unwind-protect
@@ -458,7 +458,7 @@
       (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
                 ((symbol-function 'kargu-chat--expand-prompt) #'identity)
                 ((symbol-function 'kargu-loop-send)
-                 (lambda (&rest _) (user-error "late refusal"))))
+                 (lambda (&rest _) (user-error "Late refusal"))))
         (should-error (kargu-chat--send-input) :type 'user-error))
       (should (equal-including-properties (buffer-string) before))
       (should (= (point) saved-point))
@@ -478,7 +478,7 @@
     (let ((before (buffer-string)))
       (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil))
                 ((symbol-function 'kargu-chat--expand-prompt)
-                 (lambda (_) (error "unreadable attachment"))))
+                 (lambda (_) (error "Unreadable attachment"))))
         (should-error (kargu-chat--send-input)))
       (should (equal-including-properties (buffer-string) before))
       (should (kargu-chat--prompt-live-p)))))
@@ -627,10 +627,10 @@
     (let* ((run (list :state 'tools :chat-buffer (current-buffer)))
            (kargu--loop-run run)
            (kargu-loop-tool-start-hook
-            (cons (lambda (&rest _) (error "bad observer"))
+            (cons (lambda (&rest _) (error "Bad observer"))
                   kargu-loop-tool-start-hook))
            (kargu-loop-tool-finish-hook
-            (cons (lambda (&rest _) (error "bad observer"))
+            (cons (lambda (&rest _) (error "Bad observer"))
                   kargu-loop-tool-finish-hook))
            callback (deliveries 0))
       (cl-letf (((symbol-function 'kargu-execute-tool)

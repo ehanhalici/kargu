@@ -52,16 +52,18 @@
                              :tokens-out (gethash "tokens_out" data 0)
                              :last-prompt-tokens 0
                              :started (gethash "created_at" data
-                                               (gethash "updated_at" data "earlier")))
-          :selection-value
-          (kargu-selection-create
-           :provider (kargu-chat--explicit-selection (gethash "provider" data))
-           :model (kargu-chat--explicit-selection (gethash "model" data))
-           :effort (kargu-session-decode-effort (gethash "effort" data))))))
+                                               (gethash "updated_at" data "earlier"))))))
     (kargu-history-replace
      (mapcar #'kargu-json-to-record (append (gethash "messages" data) nil))
      (kargu-session-history-value session))
     session))
+
+(defun kargu-session-restore--selection (data)
+  "Return DATA's saved selection as an intent for the native conversation."
+  (kargu-selection-create
+   :provider (kargu-chat--explicit-selection (gethash "provider" data))
+   :model (kargu-chat--explicit-selection (gethash "model" data))
+   :effort (kargu-session-decode-effort (gethash "effort" data))))
 
 (defun kargu-session-restore--current-p (operation)
   "Return non-nil when OPERATION still owns the target and its draft."
@@ -182,11 +184,37 @@
       (if error
           (kargu-async-finish (kargu-session-restore-operation-task operation) nil error)
         (kargu-state-check-mode mode)
-        (kargu-session-restore--render operation)
-        (let ((target (kargu-session-restore--publish operation)))
-          (kargu-async-finish (kargu-session-restore-operation-task operation) target)))
+        (kargu-session-restore--seed operation))
     (error (kargu-async-finish (kargu-session-restore-operation-task operation)
                                nil (error-message-string failure)))))
+
+(defun kargu-session-restore--seed (operation)
+  "Commit OPERATION's saved selection natively, then render and publish."
+  (let ((task (kargu-session-restore-operation-task operation))
+        (prepared (kargu-session-restore-operation-prepared operation)))
+    (kargu-selection-seed
+     prepared
+     (kargu-session-restore--selection (kargu-session-restore-operation-data operation))
+     (kargu-session-restore-operation-target operation)
+     (lambda (_selection failure)
+       (condition-case err
+           (cond
+            ((not (kargu-async-pending-p task)))
+            (failure
+             (run-hook-with-args 'kargu-session-before-replace-hook prepared)
+             (kargu-async-finish task nil (format "Restored selection was refused: %s"
+                                                  (kargu-session-restore--status failure))))
+            (t
+             (kargu-session-restore--render operation)
+             (kargu-async-finish task (kargu-session-restore--publish operation))))
+         (error (kargu-async-finish task nil (error-message-string err))))))))
+
+(defun kargu-session-restore--status (failure)
+  "Return FAILURE's native status or text for a restore message."
+  (or (and (hash-table-p failure)
+           (let ((data (gethash "data" failure)))
+             (and (hash-table-p data) (gethash "status" data))))
+      failure))
 
 (cl-defun kargu-session-restore (&key data target root callback)
   "Prepare validated DATA for TARGET under ROOT, then publish atomically.

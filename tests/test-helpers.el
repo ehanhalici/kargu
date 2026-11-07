@@ -13,6 +13,24 @@
 (require 'kargu/api/prepare)
 (require 'kargu/tools/skill)
 
+(defvar kargu-selection-port)
+(declare-function kargu-selection-create "kargu/contract/selection" (&rest args))
+(declare-function kargu-selection-provider-value "kargu/contract/selection" (selection))
+(declare-function kargu-selection-model-value "kargu/contract/selection" (selection))
+(declare-function kargu-selection-effort-value "kargu/contract/selection" (selection))
+
+(defun kargu-test-selection-port (_session desired callback)
+  "Acknowledge DESIRED for CALLBACK at once, as Rust would canonicalize it.
+General fixtures use this offline port; native acceptance tests bind the
+real conversation port explicitly."
+  (let ((provider (kargu-selection-provider-value desired)))
+    (funcall callback
+             (kargu-selection-create
+              :provider (and provider (downcase (string-trim provider)))
+              :model (kargu-selection-model-value desired)
+              :effort (kargu-selection-effort-value desired))
+             nil)))
+
 (defconst kargu-test-real-project-refresh (symbol-function 'kargu-project-probe-refresh)
   "Real native project preparation selected by its consumer fixtures.")
 (defun kargu-test-refresh-project (callback &optional _root)
@@ -75,7 +93,7 @@ selector integration tests keep the real worker and file publication."
     task))
 
 (defun kargu-test-read-file (path &optional from to)
-  "Await the real native read of PATH/FROM/TO in tests only.
+  "Await the real native read of PATH/FROM/TO for a test fixture.
 Raise native failures so negative fixtures can use `should-error'."
   (let ((text (kargu-test-await
                (lambda (done)
@@ -332,6 +350,7 @@ Tests never see the working tree of Kargu as their project."
               :generation (or (bound-and-true-p kargu--generation) 0))
            (bound-and-true-p kargu-application--context)))
         (kargu-test--model-apps nil)
+        (kargu-selection-port #'kargu-test-selection-port)
         (kargu-bridge-binary-path (or (getenv "KARGU_CORE_TEST_BINARY") kargu-bridge-binary-path))
         (kargu-diff--changed (if (and (boundp 'kargu-diff--changed)
                                       (hash-table-p kargu-diff--changed))

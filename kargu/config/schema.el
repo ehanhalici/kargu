@@ -75,13 +75,20 @@ CALLBACK receives a Result after the UI has adopted the native choice."
                (unless (and (equal name (gethash "provider" value))
                             (or (stringp model) (eq model :json-null)))
                  (error "Invalid native provider selection"))
-               (setq committed (kargu-selection-update :provider (gethash "provider" value)
-                                                       :model (unless (eq model :json-null) model) :effort nil))
-               (if (not committed) (kargu-async-finish task (kargu-err "Provider selection was superseded" :stale))
-                 (when (fboundp 'kargu-api-prefetch-models) (kargu-api-prefetch-models name))
-                 (kargu-log 'info "provider set to %s (model %s)" name (or (kargu-selection-model-value committed) "none"))
-                 (message "kargu provider: %s (model %s)" name (or (kargu-selection-model-value committed) "none"))
-                 (kargu-async-finish task (kargu-ok committed))))))
+               (kargu-selection-update
+                :provider (gethash "provider" value)
+                :model (unless (eq model :json-null) model) :effort nil
+                :callback
+                (lambda (selection failure)
+                  (setq committed selection)
+                  (cond
+                   (failure (kargu-async-finish task (kargu-err "Native selection commit was refused" :stale)))
+                   ((not selection) (kargu-async-finish task (kargu-err "Provider selection was superseded" :stale)))
+                   (t
+                    (when (fboundp 'kargu-api-prefetch-models) (kargu-api-prefetch-models name))
+                    (kargu-log 'info "provider set to %s (model %s)" name (or (kargu-selection-model-value selection) "none"))
+                    (message "kargu provider: %s (model %s)" name (or (kargu-selection-model-value selection) "none"))
+                    (kargu-async-finish task (kargu-ok selection)))))))))
          (ready (result)
            (if (kargu-err-p result) (kargu-async-finish task result)
              (kargu-bridge-config-query

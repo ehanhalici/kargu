@@ -316,15 +316,18 @@ that is a member of CANDIDATES.  Without a display, read in the minibuffer."
   "Set reasoning effort to CHOSEN.  \"off\" clears it.
 NOTE replaces the confirmation message."
   (let ((eff (if (equal (downcase chosen) "off") nil (intern chosen))))
-    (when (kargu-selection-update :effort eff)
-      (when (fboundp 'kargu-chat-refresh-footer)
-	(kargu-chat-refresh-footer))
-      (force-mode-line-update t)
-      (message "%s"
-               (or note
-                   (format "kargu: reasoning effort set to '%s'."
-                           (if eff chosen "off"))))
-      (kargu-api-select--continue #'kargu-chat--goto-prompt))))
+    (kargu-selection-update
+     :effort eff
+     :callback (lambda (selection _failure)
+                 (when selection
+                   (when (fboundp 'kargu-chat-refresh-footer)
+                     (kargu-chat-refresh-footer))
+                   (force-mode-line-update t)
+                   (message "%s"
+                            (or note
+                                (format "kargu: reasoning effort set to '%s'."
+                                        (if eff chosen "off"))))
+                   (kargu-api-select--continue #'kargu-chat--goto-prompt))))))
 
 (defun kargu-chat-select-effort-company (&optional _event)
   "Select a reasoning effort with Company in the footer."
@@ -347,8 +350,10 @@ NOTE replaces the confirmation message."
 (defun kargu-api-select--apply-model (chosen pname-str)
   "Activate model CHOSEN for PNAME-STR, then ask for effort when it exists."
   (cl-incf kargu-api-select--catalog-generation)
-  (when (kargu-selection-update :provider pname-str :model chosen :effort nil)
-    (kargu-api-select--after-model chosen pname-str)))
+  (kargu-selection-update
+   :provider pname-str :model chosen :effort nil
+   :callback (lambda (selection _failure)
+               (when selection (kargu-api-select--after-model chosen pname-str)))))
 
 (defun kargu-api-select--after-model (chosen pname-str)
   "Present CHOSEN for PNAME-STR after its still-current owned commit."
@@ -496,12 +501,15 @@ asks with the footer Company list."
   (if (and (stringp refresh-or-model) (not (string-empty-p refresh-or-model)))
       (progn
         (cl-incf kargu-api-select--catalog-generation)
-        (when (kargu-selection-update :model refresh-or-model :effort nil)
-          (when (fboundp 'kargu-chat-refresh-footer)
-            (kargu-chat-refresh-footer))
-          (force-mode-line-update t)
-          (message "kargu: model set to %s" refresh-or-model)
-          refresh-or-model))
+        (kargu-selection-update
+         :model refresh-or-model :effort nil
+         :callback (lambda (selection _failure)
+                     (when selection
+                       (when (fboundp 'kargu-chat-refresh-footer)
+                         (kargu-chat-refresh-footer))
+                       (force-mode-line-update t)
+                       (message "kargu: model set to %s" refresh-or-model))))
+        refresh-or-model)
     (kargu-chat-select-model-company nil nil (kargu--provider-name))))
 
 (defun kargu-switch-provider-and-model ()

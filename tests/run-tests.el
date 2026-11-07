@@ -67,6 +67,7 @@
 (require 'tests/test-state)
 (require 'tests/test-mode-ownership)
 (require 'tests/test-selection)
+(require 'tests/test-selection-native)
 (require 'tests/test-provider-selection)
 (require 'tests/test-permission)
 (require 'tests/test-permission-operation)

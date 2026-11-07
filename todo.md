@@ -589,7 +589,7 @@ consumer/alias/test matrisiyle tamamlanır; yeni dosya gelirse envantere eklenir
 | `bridge/sensor.el`, `bridge/sensor/` | Document-symbol/diagnostic typed yolu mevcut; xref/skeleton hâlâ legacy formatter'a gider, mentions portu açık ret döner | 4.2c, 4.4d/e, 4.7a, 4.8 |
 | `config/`, `providers/` | Parse/resolve/metadata native temeller var; frontend registry/selection/config→HTTP iş sıralaması hâlâ tamamlanmadı | 8.2b2–e |
 | `models/{encode,projection,service,store}.el` | Native metadata store'a intent/projection; pasif view ve UI index authority değildir, çalışan fiyat engine'ini kopyalama | 8.2c2/e, 8.5a, 10.3c |
-| `selection.el` → `kargu-selection-update/reset` | Comment native dese de gerçek local `setf kargu-session-selection-value` writer var | 8.2c1 |
+| `selection.el` → `kargu-selection-update/reset` | Native conversation commit'i + ACK yayımı (8.2c1 kapandı); legacy busy ön kontrolü ve run admission bağı kalır | 5.4a |
 | `state/{store,selectors,transitions}.el`, `core/session.el` | Mode/selection/usage/activity domain state'i ile display snapshot karışık | 5.7a, 6.1c, 8.1a, 8.5a |
 | `history/{store,protocol,repair,compact}.el` | Native store yanında kalan Elisp history/repair/summary consumer'ları | 5.1b, 5.5a3, 6.3c, 5.10 |
 | `loop/{machine,tools,compact,heal}.el`, `loop.el` | Legacy agent hâlâ default; FSM/tool queue/summary/verification kararları Rust consumer cutover bekliyor | 5.6–5.10, 6.3/6.4, 10.4 |
@@ -4217,7 +4217,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **8.2c1 Selection writer değişimi:** `kargu-selection-update/reset`
+    - [x] **8.2c1 Selection writer değişimi:** `kargu-selection-update/reset`
       şu anda `kargu-session-selection-value` alanına yerelde yazar. Bu writer'ı
       expected revision'lı native commit + detached snapshot ile değiştir;
       provider/model/effort atomik olsun. Başarısız intent yerel seçim bırakmasın.
@@ -4232,11 +4232,28 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         kontrol karaktersizdir. Katalog üyeliği hâlâ picker'da; Rust doğrulamaz.
         Kanıt: 3 Rust birim/host testi + gerçek pipe ERT
         `kargu-bridge-real-core-session-selection-revision-test`; 596 locked Rust.
-        **Açık:** Elisp writer henüz bu porta bağlı değil. Kalan consumer işi:
-        sohbet oluştuğunda native conversation edinimi, restore/yeni session
-        tohumlamasının native commit'ten geçmesi, `kargu-selection-update` async
-        ticket + ACK snapshot yayımı ve senkron çağıranların (state/transitions,
-        chat/select, config/schema, store reset) callback'e taşınması.
+        **Consumer cutover (2026-11-07):** `kargu-selection-update/reset` artık
+        doğrulanmış intent'i oturum başına seri kuyruğa koyar; gönderim anında son
+        ACK'ten tam selection hesaplanır ve `kargu-selection-port` üzerinden
+        (varsayılan [bridge/selection.el](kargu/bridge/selection.el), fallback yok)
+        sohbetin native conversation'ına `expected_revision` ile commit edilir.
+        `kargu-session-selection-value` yalnız native ACK ile yazılır; ret/stale/
+        port hatası değeri değiştirmez ve callback'e gider. Revision conversation
+        binding'inde tutulur; stale cevabı revision'ı tazeler, intent'i tekrar
+        oynatmaz. `kargu-session-create :selection-value` ve `replace-usage`
+        kopyası kaldırıldı; restore seçimini `kargu-selection-seed` ile yayımdan
+        önce native commit eder, ret halinde yayımlamaz. chat/select ve
+        config/schema devamları ACK callback'ine taşındı.
+        **Kanıt:** `tests/test-selection-native.el` 6/6 (gerçek core ACK/kanonik
+        provider/olay sırası, inherit/off/named round-trip, invalid ret, seri
+        kuyruk birleşimi, port hatası, restore tohumlama ve ret); genel ERT
+        fixture'ları Rust semantiğini taklit eden senkron `kargu-test-selection-port`
+        kullanır. Tam ERT 1455/1455, bridge smoke 40/40, 208/208 üretim Elisp
+        Werror/checkdoc, 596 locked Rust + strict Clippy/fmt.
+        **Sınır:** Elisp `kargu-selection-busy-p` legacy run'lar için UI ön
+        kontrolü olarak kalır (Rust yalnız native run/hazırlığı görür). Native
+        run admission seçimi henüz bu store'dan yakalamaz; o bağ 5.4a'dadır.
+        Katalog üyeliği hâlâ picker'da doğrulanır.
 
       **Önkoşul:** Native conversation/session; 0.2 selection contract.
 

@@ -19,6 +19,7 @@
 (cl-defstruct (kargu-bridge-conversation (:constructor kargu-bridge-conversation--make))
   "An editor chat's exact connection/application-bound native conversation."
   connection epoch application service-scope scope waiters cleanup fault
+  (selection-revision 0)
   (state :starting))
 
 (defun kargu-bridge-conversation--current-p (binding)
