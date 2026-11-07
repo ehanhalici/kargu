@@ -228,7 +228,7 @@ send requires `api_chat_target`. Rebuild and restart an older core. Custom
 digits, `/`, `-`, `.`, `_`, or `~`, without empty interior or dot segments;
 query parameters belong to the API base, not the chat path.
 Authenticated HTTP requests refuse redirects and keep TLS verification enabled.
-See [connection ownership](docs/connection-ownership.md) for service boundaries
+See [connection ownership](.agents/rules/connection-ownership.md) for service boundaries
 and compatibility consumers.
 
 Model catalog discovery also resolves credentials asynchronously before its

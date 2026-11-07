@@ -6,8 +6,8 @@ Tarama: 397 production kaynak + 176 test/destek kaynağı (573 tracked Rust/Elis
 Son çalıştırılmış kabul (2026-11-02): 593 locked Rust (32 compile-fail dahil),
 1446/1446 tam ERT ve 2/2 service odak testi. Bu doküman turunda test çalıştırılmadı;
 aşağıdaki daha eski sayılar yalnız ilgili dilimin tarihsel kanıtıdır.
-Rust göçünün güncel uygulama/test kaydı: .codex/12_MIGRATION_PROGRESS.md.
-G02 bağlantı/metadata sözleşmesi ve kalan köprüler: docs/connection-ownership.md.
+Rust göçünün güncel uygulama/test kaydı: [.agents/skills/native-migration/references/12_MIGRATION_PROGRESS.md](.agents/skills/native-migration/references/12_MIGRATION_PROGRESS.md).
+G02 bağlantı/metadata sözleşmesi ve kalan köprüler: [.agents/rules/connection-ownership.md](.agents/rules/connection-ownership.md).
 Tamamlanan geçiş alt maddeleri takip için `[x]`, kalan işler `[ ]` ile tutulur;
 tekrarlanan iş tarifleri birleştirilir. Bir çekirdeğin testinin geçmesi,
 native tüketicilerin ona bağlandığı anlamına gelmez. Eski ARCH/MOD/DEEP/RISK kimlikleri kaynak
@@ -38,51 +38,51 @@ Atanmış işi somutlaştırmak için yeniden genel izin döngüsü kurulmaz; ka
    bağlantıyı kendi tüketicisinde yapar; son tüketici taşınmadan köprü silinmez.
    Kalan global tüketicilerin isimleri kapanışta kaydedilir, son silme G13'tedir.
 5. skills.md stage edilmez; kullanıcıya ait .gitignore/yerel dosyalar korunur.
-   Harici uygulama adapter'larının onaylı kapsamı .codex/03 ve 04 Aşama 5'tedir.
+   Harici uygulama adapter'larının onaylı kapsamı [03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md) ve [04_PHASED_ROADMAP.md](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md) [Aşama 5](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md)'tedir.
    Canlı hesap/ücretli CLI/MCP testi, binary indirme/kurulum, credential taşıma
    ve master merge/push ayrıca onay gerektirir.
 
 ### Onaylı Rust geçişi ile ilişki
 
-Kullanıcının ayrıca onayladığı Rust göçünde uygulama sırası .codex/04'tür;
+Kullanıcının ayrıca onayladığı Rust göçünde uygulama sırası [04_PHASED_ROADMAP.md](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md)'tür;
 G03–G13'teki kalan davranış/güvenlik yükümlülükleri Rust'a geçince kapanmaz.
 Mevcut API desteği Rust'a taşınırken Codex, Antigravity, Claude Code ve OpenCode
-backend'leri ayrıca eklenecek; provider seçimi ve kabul koşulları .codex/03'tedir.
+backend'leri ayrıca eklenecek; provider seçimi ve kabul koşulları [03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md)'tedir.
 
 `find_files` ve `list_files` gerçek Elisp tool gate'ine bağlandı; eski glob
 engine'leri ve senkron directory scanner silindi. Kullanıcının Unix/GNU
 bileşimi kararıyla özel Rust listing tarayıcısı da kaldırıldı: `list_files`
-ortak Rust process/gate üzerinden GNU ls çıktısı verir (.codex/17–19).
-`find_files` şimdilik native'dir (.codex/15). Genel program/argv için Rust
+ortak Rust process/gate üzerinden GNU ls çıktısı verir ([17_UNIX_TOOL_COMPOSITION.md](.agents/skills/native-tools/references/17_UNIX_TOOL_COMPOSITION.md)–[19_GNU_LS_ADAPTER.md](.agents/skills/native-tools/references/19_GNU_LS_ADAPTER.md)).
+`find_files` şimdilik native'dir ([15_NATIVE_FIND_FILES.md](.agents/skills/native-tools/references/15_NATIVE_FIND_FILES.md)). Genel program/argv için Rust
 reverse approval + Emacs presenter bağlıdır; Bash/job ve interactive session
-consumer'ları native porttadır (.codex/20–25). `workspace_grep` de rg/GNU grep
-adapter'ına bağlandı; eski Elisp grep engine'i kaldırıldı (.codex/26–27).
+consumer'ları native porttadır ([20_PERSISTENT_PROCESS_SEMANTICS.md](.agents/skills/native-tools/references/20_PERSISTENT_PROCESS_SEMANTICS.md)–[25_NATIVE_INTERACTIVE_SESSION.md](.agents/skills/native-tools/references/25_NATIVE_INTERACTIVE_SESSION.md)). `workspace_grep` de rg/GNU grep
+adapter'ına bağlandı; eski Elisp grep engine'i kaldırıldı ([26_RECORD_CAPTURE_BUDGET.md](.agents/skills/native-tools/references/26_RECORD_CAPTURE_BUDGET.md)–[27_NATIVE_WORKSPACE_GREP.md](.agents/skills/native-tools/references/27_NATIVE_WORKSPACE_GREP.md)).
 `git_status` native Git + complete-output portundadır; eski Elisp status
-engine'i silindi (.codex/28). Diğer read/mutation Git tüketicileri de native
-kapıya taşındı (.codex/53, 56, 58).
+engine'i silindi ([28_NATIVE_GIT_STATUS.md](.agents/skills/native-tools/references/28_NATIVE_GIT_STATUS.md)). Diğer read/mutation Git tüketicileri de native
+kapıya taşındı ([53_NATIVE_GIT_READ_QUERIES.md](.agents/skills/native-tools/references/53_NATIVE_GIT_READ_QUERIES.md), [56_NATIVE_GIT_WORKTREE_READS.md](.agents/skills/native-tools/references/56_NATIVE_GIT_WORKTREE_READS.md), [58_NATIVE_TOOLS_COMPLETE.md](.agents/skills/native-tools/references/58_NATIVE_TOOLS_COMPLETE.md)).
 Kullanıcının API önceliğiyle 162-provider catalog baseline Rust asset/core
-snapshot'a taşındı (.codex/29). Chat/model-list HTTP ve SSE motoru native'dir;
-Elisp parser/accumulator/watchdog silindi (.codex/30). Credential/UI portları
-kalır; wire ve prompt-cache engine'leri de native'ye taşınıp silindi (.codex/31).
-Request policy de native'ye taşınıp eski seçim/merge motorları silindi (.codex/32).
+snapshot'a taşındı ([29_NATIVE_PROVIDER_CATALOG.md](.agents/skills/native-api-and-catalog/references/29_NATIVE_PROVIDER_CATALOG.md)). Chat/model-list HTTP ve SSE motoru native'dir;
+Elisp parser/accumulator/watchdog silindi ([30_NATIVE_API_TRANSPORT.md](.agents/skills/native-api-and-catalog/references/30_NATIVE_API_TRANSPORT.md)). Credential/UI portları
+kalır; wire ve prompt-cache engine'leri de native'ye taşınıp silindi ([31_NATIVE_WIRE_AND_CACHE.md](.agents/skills/native-api-and-catalog/references/31_NATIVE_WIRE_AND_CACHE.md)).
+Request policy de native'ye taşınıp eski seçim/merge motorları silindi ([32_NATIVE_REQUEST_POLICY.md](.agents/skills/native-api-and-catalog/references/32_NATIVE_REQUEST_POLICY.md)).
 Credential/header assembly de native'ye taşınıp Elisp üretim motorları silindi
-(.codex/33); credential lookup editör portudur. Katalogun eski senkron credential
-discovery yolu da owned async connection portuna geçirildi (.codex/44); genel
+([33_NATIVE_AUTH_HEADERS.md](.agents/skills/native-api-and-catalog/references/33_NATIVE_AUTH_HEADERS.md)); credential lookup editör portudur. Katalogun eski senkron credential
+discovery yolu da owned async connection portuna geçirildi ([44_ASYNC_CATALOG_CONNECTION.md](.agents/skills/native-api-and-catalog/references/44_ASYNC_CATALOG_CONNECTION.md)); genel
 run/history ve native config/endpoint policy açık olduğu için tüm API göçü
 tamamlandı sayılmaz.
-API tüketicileri application-owned native service lease kullanır (.codex/34–35);
+API tüketicileri application-owned native service lease kullanır ([34_APPLICATION_CLOSE_AND_API_FAIRNESS.md](.agents/skills/native-api-and-catalog/references/34_APPLICATION_CLOSE_AND_API_FAIRNESS.md)–[35_EDITOR_NATIVE_APPLICATION_LEASES.md](.agents/skills/native-api-and-catalog/references/35_EDITOR_NATIVE_APPLICATION_LEASES.md));
 bu henüz native agent run/history sahipliği değildir. Native budget HTTP
 admission/drain ve gerçek root-run consumer'a bağlandı; eski Elisp debit/token
-toplama motoru silindi (.codex/36). G08 hard reservation/pricing ve genel native
+toplama motoru silindi ([36_NATIVE_API_BUDGET.md](.agents/skills/native-api-and-catalog/references/36_NATIVE_API_BUDGET.md)). G08 hard reservation/pricing ve genel native
 claim/tool/run birliği hâlâ açıktır; yalnız gözlenen token tavanı harcama garantisi değildir.
 Native retry/circuit actor, charged replay, owned observer ACK ve detached GUI
-projection/reset portları eklendi (.codex/37–38). High-level plain/stream chat
+projection/reset portları eklendi ([37_NATIVE_RESILIENCE.md](.agents/skills/native-api-and-catalog/references/37_NATIVE_RESILIENCE.md)–[38_NATIVE_CIRCUITS.md](.agents/skills/native-api-and-catalog/references/38_NATIVE_CIRCUITS.md)). High-level plain/stream chat
 varsayılanı bu portlara geçirildi; Elisp retry/backoff/timer ve circuit admission/
-sayaç/probe motorları silindi (.codex/40). Native terminal kategoriler Result
+sayaç/probe motorları silindi ([40_DEFAULT_RESILIENCE_CUTOVER.md](.agents/skills/native-migration/references/40_DEFAULT_RESILIENCE_CUTOVER.md)). Native terminal kategoriler Result
 olarak gelir; plz DTO/bağımlılığı kaldırıldı. Manuel recovery, verilen native
 reset'in ACK'ini bekler; UI görünümü admission kararı vermez.
 Model metadata için kesin rate/context/output alan tipleri ve scoped RawValue
-sınırı eklendi (.codex/41). Default /models discovery envelope normalizasyonu
+sınırı eklendi ([41_MODEL_METADATA_BOUNDARY_AUDIT.md](.agents/skills/native-api-and-catalog/references/41_MODEL_METADATA_BOUNDARY_AUDIT.md)). Default /models discovery envelope normalizasyonu
 native profile'a taşındı; Elisp sağlayıcı yanıt ayıklama parser'ları silindi.
 Native field/capability/rate normalizasyonu ve owner/revision-bound atomik store/
 override temeli eklendi. Application actor'ündeki model_metadata RPC bounded
@@ -103,12 +103,12 @@ Katalog credential hazırlığı cancellable child/connection portuna bağlıdı
 eski senkron anahtar/auth-source çözümleyicileri silindi. Genel run/history,
 native config/endpoint policy ve G08 hard monetary reservation hâlâ açıktır;
 tüm API/Rust göçü tamamlandı sayılmaz.
-01 uyum denetimi ve kalan kaynak-sahipliği bulguları .codex/39'da tutulur;
+01 uyum denetimi ve kalan kaynak-sahipliği bulguları [39_RUST_PATTERN_AUDIT.md](.agents/skills/coding-standards/references/39_RUST_PATTERN_AUDIT.md)'da tutulur;
 testlerin yeşil olması bütün Rust ağacının mimari uyum sertifikası değildir.
 Eski fd-rooted listing garantileri yeni ls adapter'ına atfedilmez. Owner/cancel,
 output cap ve onay regresyonları G11/G13'ün tamamını kapatmaz; context/egress
 ve diğer global tüketiciler aşağıdaki gruplarda açık kalır.
-Todo 2 native araç consumer kapanışı ve kalan köprü envanteri .codex/58
+Todo 2 native araç consumer kapanışı ve kalan köprü envanteri [58_NATIVE_TOOLS_COMPLETE.md](.agents/skills/native-tools/references/58_NATIVE_TOOLS_COMPLETE.md)
 üzerindedir; edit/sensör/run göçlerinin yerine geçmez. Yeni paralel iş listesi yoktur.
 
 ## Gruplar ve önkoşullar
@@ -329,7 +329,7 @@ tests/fixtures/fake-agent.el ve ortak backend contract testleri.
 - **Kabul:** native/fake ortak suite; disconnect, duplicate/out-of-order,
   approval'da reset, foreign session ve cancel sonrası late event. Dış etkiyi
   gözlemlenmediyse unknown taşı; Kargu onayı verilmiş gibi gösterme.
-  Gerçek Codex/Antigravity/Claude Code/OpenCode backend'leri .codex/04 Aşama 5'in
+  Gerçek Codex/Antigravity/Claude Code/OpenCode backend'leri [04_PHASED_ROADMAP.md](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md) Aşama 5'in
   ayrı teslim kapsamıdır; G12 native/fake portunun tamamlanması onların canlı
   entegrasyon kanıtı değildir. Binary indirme veya credential taşıma bu grubun
   kapsamı değildir.
@@ -459,9 +459,9 @@ Güncelleme: 2026-10-26, native config authority temeli `ff96691`.
 Son dilimde config publication/policy gerçek connection/UI tüketicileriyle Rust'a
 geçti; eski Elisp karar/yazım motorları silindi. Kanıt: 1268/1268 full source ERT;
 291 native + 24 compile-fail = 315 locked test, fmt/strict Clippy, Elisp Werror/
-checkdoc ve bounded lifecycle TLC temiz. Ayrıntılar .codex/12/52.
+checkdoc ve bounded lifecycle TLC temiz. Ayrıntılar [12_MIGRATION_PROGRESS.md](.agents/skills/native-migration/references/12_MIGRATION_PROGRESS.md) ve [52_NATIVE_CONFIG_POLICY.md](.agents/skills/native-api-and-catalog/references/52_NATIVE_CONFIG_POLICY.md).
 
-Bu liste .codex/04'teki onaylı göçün kalan **tüketici taşıma/kaldırma sırasını**
+Bu liste [04_PHASED_ROADMAP.md](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md)'teki onaylı göçün kalan **tüketici taşıma/kaldırma sırasını**
 özetler; G03–G13'ün yerine geçen ikinci kapsam veya yeni ürün kararı değildir.
 Kutular ancak gerçek tüketici Rust'a bağlanıp eşdeğer testler geçtikten ve eski
 Elisp motoru silindikten sonra kapanır. Her doğrulanmış küçük dilim ayrı commit
@@ -659,8 +659,8 @@ backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışın
 
     **Önkoşul:** Yok; bu taramadaki kaynak haritasını başlangıç al.
 
-    **Başlangıç kaynakları:** AGENTS.md; .codex/00_MIGRATION_ARCHITECTURE.md;
-      .codex/01_RUST_CORE_PATTERNS.md; tests/migration-inventory.el.
+    **Başlangıç kaynakları:** [AGENTS.md](.agents/AGENTS.md); [00_MIGRATION_ARCHITECTURE.md](.agents/skills/native-migration/references/00_MIGRATION_ARCHITECTURE.md);
+      [01_RUST_CORE_PATTERNS.md](.agents/skills/coding-standards/references/01_RUST_CORE_PATTERNS.md); tests/migration-inventory.el.
 
     **Uygulama adımı:** Her public entrypoint için giriş fonksiyonu → bridge/native port
       → domain writer zincirini ve tüm caller'larını kaydet; UI/primitive/bridge/domain
@@ -680,8 +680,8 @@ backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışın
 
     **Önkoşul:** 0.1'in ilgili alanı.
 
-    **Başlangıç kaynakları:** AGENTS.md; .codex/00_MIGRATION_ARCHITECTURE.md;
-      .codex/01_RUST_CORE_PATTERNS.md; tests/migration-inventory.el.
+    **Başlangıç kaynakları:** [AGENTS.md](.agents/AGENTS.md); [00_MIGRATION_ARCHITECTURE.md](.agents/skills/native-migration/references/00_MIGRATION_ARCHITECTURE.md);
+      [01_RUST_CORE_PATTERNS.md](.agents/skills/coding-standards/references/01_RUST_CORE_PATTERNS.md); tests/migration-inventory.el.
 
     **Uygulama adımı:** Mevcut scope/epoch/revision/sequence tip ve RPC DTO'larını
       listele; her alanın sahibi, birimi, limit değeri, expected-revision ve hata kodunu
@@ -700,8 +700,8 @@ backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışın
 
     **Önkoşul:** 0.1 ve ilgili 0.2 contract.
 
-    **Başlangıç kaynakları:** AGENTS.md; .codex/00_MIGRATION_ARCHITECTURE.md;
-      .codex/01_RUST_CORE_PATTERNS.md; tests/migration-inventory.el.
+    **Başlangıç kaynakları:** [AGENTS.md](.agents/AGENTS.md); [00_MIGRATION_ARCHITECTURE.md](.agents/skills/native-migration/references/00_MIGRATION_ARCHITECTURE.md);
+      [01_RUST_CORE_PATTERNS.md](.agents/skills/coding-standards/references/01_RUST_CORE_PATTERNS.md); tests/migration-inventory.el.
 
     **Uygulama adımı:** Her iş için mevcut test dosyasını, eksik consumer senaryosunu,
       gerçek/fake adapter farkını ve çalıştırılacak komutu eşle; geçmişteki test
@@ -719,8 +719,8 @@ backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışın
 
     **Önkoşul:** 0.2; ajan atama listesi.
 
-    **Başlangıç kaynakları:** AGENTS.md; .codex/00_MIGRATION_ARCHITECTURE.md;
-      .codex/01_RUST_CORE_PATTERNS.md; tests/migration-inventory.el.
+    **Başlangıç kaynakları:** [AGENTS.md](.agents/AGENTS.md); [00_MIGRATION_ARCHITECTURE.md](.agents/skills/native-migration/references/00_MIGRATION_ARCHITECTURE.md);
+      [01_RUST_CORE_PATTERNS.md](.agents/skills/coding-standards/references/01_RUST_CORE_PATTERNS.md); tests/migration-inventory.el.
 
     **Uygulama adımı:** Her dosyaya tek yazıcı ata; actor/transport/constants/manifest
       ve todo değişiklikleri için entegratör sırası belirle. Worktree temel commit'ini
@@ -746,7 +746,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   tüketsin; auth-source/callable credential yalnız sahipli Emacs interop portu
   olsun. Artık kullanılmayan Elisp parser/precedence yollarını sil. Cold config,
   custom/local provider, malformed refresh, stale revision, cancel ve iki
-  application fixture'larını koru. Kaynak: Aşama 4, G09/G13; .codex/10, 42, 44–46.
+  application fixture'larını koru. Kaynak: [Aşama 4](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md), [G09](#g09--viewselection-olayları-ve-uçtan-uca-stream-baskısı)/[G13](#g13--son-köprü-temizliği-lint-ve-bütünleşik-kabul); [10_MODEL_CATALOG_AND_REASONING.md](.agents/skills/native-api-and-catalog/references/10_MODEL_CATALOG_AND_REASONING.md), [42_CONFIG_PROVIDER_DISCOVERY.md](.agents/skills/native-api-and-catalog/references/42_CONFIG_PROVIDER_DISCOVERY.md), [44_ASYNC_CATALOG_CONNECTION.md](.agents/skills/native-api-and-catalog/references/44_ASYNC_CATALOG_CONNECTION.md)–[46_NATIVE_CATALOG_TARGET.md](.agents/skills/native-api-and-catalog/references/46_NATIVE_CATALOG_TARGET.md).
 
   - [x] Setup'ın son credential tüketicisini ortak connection resolver'ına bağla;
     ayrı `config-resolve-api-key-async`/dispatch/delivery facade'ını sil.
@@ -760,14 +760,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     - [x] Native typed config policy ve application actor publication temeli:
       owner-bound expiring prepare/commit/abort ticket, native revision/snapshot,
       exact-revision resolve; env/global/TOML/keyless/interop ve endpoint/model
-      policy native'de. Temel commit `ff96691`; consumer kapanışı .codex/52'de.
+      policy native'de. Temel commit `ff96691`; consumer kapanışı [52_NATIVE_CONFIG_POLICY.md](.agents/skills/native-api-and-catalog/references/52_NATIVE_CONFIG_POLICY.md)'de.
     - [x] Gerçek config/connection/UI consumer cutover ve kalan Elisp publication/
       precedence/env/keyless/eligibility/default-selection motorlarını sil.
   - [x] Gerçek config refresh tüketicisini `configuration/parse` native portuna
     bağla; TOML/schema/legacy-import ve content digest Rust'ta. Eski 221 satırlık
     `config/toml.el` silindi. Bounded source, safe line errors, legacy scalar
     provider + singular table uyumu, provider sırası, cold startup, parent cancel,
-    deadline, stale generation, iki application ve lost lease testli. .codex/48.
+    deadline, stale generation, iki application ve lost lease testli ([48_NATIVE_CONFIG_PARSER.md](.agents/skills/native-api-and-catalog/references/48_NATIVE_CONFIG_PARSER.md)).
   - [x] Candidate-path seçimi ve bounded regular-file capture gerçek config
     refresh tüketicisiyle `configuration/read` native owned IO portuna geçti.
     Eski editor file script/decoder/source handoff/parse bridge silindi; credential
@@ -776,8 +776,8 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     özel dosya ve malformed-first-no-fallback testli. Cold absent explicit refresh
     artık core başlatır; missing core/capability fail-closed, passive UI memory-only.
     Read portunun generation echo'su native authority değildir; son publication
-    writer'ı artık application actor'dır (consumer cutover .codex/52).
-    OS syscall iptali cooperative'dir, hard filesystem kill garantisi yok. .codex/51.
+    writer'ı artık application actor'dır (consumer cutover [52_NATIVE_CONFIG_POLICY.md](.agents/skills/native-api-and-catalog/references/52_NATIVE_CONFIG_POLICY.md)).
+    OS syscall iptali cooperative'dir, hard filesystem kill garantisi yok ([51_NATIVE_CONFIG_FILE_IO.md](.agents/skills/native-api-and-catalog/references/51_NATIVE_CONFIG_FILE_IO.md)).
   - [x] Env/keyless/credential precedence ve provider/model seçimini native
     publication/DTO tüketicisine bağla; memory-only UI reader'a gizli RPC/IO
     ekleme, eski Elisp karar fonksiyonlarını son consumer geçince kaldır.
@@ -786,22 +786,22 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     ret ve explicit refresh ile reconciliation; aynı epoch'ta session replacement
     ret; foreign application callback guard'ı ve legacy UI metadata scope koruması.
     Env/options ilk yield öncesi bounded private capture; source fingerprint'te
-    UI selection bağımsızlığı ve collection count/length framing testli. .codex/52.
+    UI selection bağımsızlığı ve collection count/length framing testli ([52_NATIVE_CONFIG_POLICY.md](.agents/skills/native-api-and-catalog/references/52_NATIVE_CONFIG_POLICY.md)).
   - [x] Geçişte bulunan ek log hijyeni: `kargu-set-provider` artık tam API-base'i
     log/message'a yazmaz, raporlama için endpoint'i okumaz. Provider/model/no-model
     seçimi ve prefetch hedefi korunur. Sentetik endpoint/query-secret/key/tenant
-    regresyonu önce kırılıp düzeltmeden sonra geçti. Ayrıntılar .codex/49.
+    regresyonu önce kırılıp düzeltmeden sonra geçti. Ayrıntılar [49_PROVIDER_REPORT_PRIVACY.md](.agents/skills/native-api-and-catalog/references/49_PROVIDER_REPORT_PRIVACY.md).
   - [x] Config refresh admission düzeltmesi: kapalı parent/inactive owner veya
     henüz timer dispatch edilmemiş expired parent generation sayacını artırıp
     başka canlı publication'ı stale saydıramaz. Worker/core başlamadan ret ve
     timer/child cleanup testli. `timeout=0`/negatif/geçersiz/büyük değerlerle
     dosya capture sınırı kapatılamaz/uzatılamaz; pozitif kısa değer ve parent
-    deadline kazanır. Gerçek held native cevap ve timeout matrisi .codex/50'de.
+    deadline kazanır. Gerçek held native cevap ve timeout matrisi [50_CONFIG_REFRESH_ADMISSION.md](.agents/skills/native-api-and-catalog/references/50_CONFIG_REFRESH_ADMISSION.md)'de.
   - [x] Katalog URL türetme/public-auth kararı native typed endpoint portunda.
     `provider/catalogTarget` salt okunur/epoch-bound; custom/private/dedicated/
     native-models path ve missing-capability fixture'ları geçti, eski Elisp URL/
     public/native-path karar fonksiyonları silindi. GET aynı connection'a bağlıdır;
-    kayıp epoch'ta reconnect/fallback yoktur. Ayrıntı .codex/46.
+    kayıp epoch'ta reconnect/fallback yoktur. Ayrıntı [46_NATIVE_CATALOG_TARGET.md](.agents/skills/native-api-and-catalog/references/46_NATIVE_CATALOG_TARGET.md).
   - [x] Geçişte bulunan ek düzeltme: `/models` ve native path ekleri query'ye
     değil URL path'ine uygulansın; public karşılaştırması query sonundaki `/`yi
     yutmasın. Native ve gerçek loopback GET fixture'ları query'yi korur.
@@ -814,17 +814,17 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     profili, bounded/typed ChatPath ve final endpoint'i authority/continuation
     capture'ından önce üretir. Gerçek OpenAPI/Anthropic POST ve config/wire
     değişimi sonrası retry aynı query'yi korur. Missing capability HTTP/owner
-    startup öncesi reddeder; doğrudan exact URL semantiği korunur. .codex/47.
+    startup öncesi reddeder; doğrudan exact URL semantiği korunur ([47_NATIVE_CHAT_TARGET.md](.agents/skills/native-api-and-catalog/references/47_NATIVE_CHAT_TARGET.md)).
     Bu iki URL alt işi tek başına üst işi kapatmadı; kalan authority/precedence/
-    selection consumer cutover'ı .codex/52'de ayrıca tamamlandı.
+    selection consumer cutover'ı [52_NATIVE_CONFIG_POLICY.md](.agents/skills/native-api-and-catalog/references/52_NATIVE_CONFIG_POLICY.md)'de ayrıca tamamlandı.
 
 - [x] **2. Kalan native araçlar ve tek izin kapısı** — `read_file`, diğer Git
   işlemleri, skill/toolchain ve webfetch tüketicilerini ortak owner/process/path/
   egress/approval portuna taşı. Mevcut `ls`/`rg`/`git` motorlarını yeniden yazma.
   Registry/alias/mode ve doğrudan çağrıda aynı gate'i kullan; job/foreground/global
   köprüleri ancak son tüketici geçince kaldır. Gerçek cancel/drain, bounded çıktı,
-  foreign owner, missing adapter ve unknown effect kabulünü doğrula. Kaynak: Aşama 2,
-  G04/G05/G11; .codex/17–28.
+  foreign owner, missing adapter ve unknown effect kabulünü doğrula. Kaynak: [Aşama 2](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md),
+  [G04](#g04--tool-context-onay-ve-tek-typed-edit-sonucu)/[G05](#g05--processjobsession-ömrü-ve-stres-riski)/[G11](#g11--proje-bağlamı-egress-ve-adapter-güvenliği); [17_UNIX_TOOL_COMPOSITION.md](.agents/skills/native-tools/references/17_UNIX_TOOL_COMPOSITION.md)–[28_NATIVE_GIT_STATUS.md](.agents/skills/native-tools/references/28_NATIVE_GIT_STATUS.md).
 
   - [x] Salt-okunur Git tüketicileri: `git_diff`, `git_log`, `git_blame`,
     `git_branches`, `git_stashes` mevcut native execution gate/process supervisor'a
@@ -844,7 +844,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       - [x] İzole Git config proof fixture: SHA-1/SHA-256 × files/reftable ×
         main/linked-worktree gerçek Git status/diff/blame sonuçları; clean-helper
         positive-control var, isolated sorgu helper çalıştırmaz/index refresh
-        etmez. Bu test tek başına yeni native capability değildir. .codex/55.
+        etmez. Bu test tek başına yeni native capability değildir ([55_GIT_CONFIG_ISOLATION_PROOF.md](.agents/skills/native-tools/references/55_GIT_CONFIG_ISOLATION_PROOF.md)).
       - [x] Ek güvenlik düzeltmesi: aynı-boyutlu dosyada mevcut `git_status`
         refresh'i de clean filtresi çalıştırabiliyor. Status da isolated profile'a
         alınsın; yalnız fsmonitor kapatmak yeterli değil. Native gate/scope altında
@@ -854,7 +854,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         config sonradan eklense de final sorgu okumaz. Native alias/direct/mode,
         cancel→actual PGID reap→cleanup→admit kabulü; eski Elisp yolları silindi.
         Submodule working tree kapsamı text + coverage ile açıkça dışarıdadır;
-        legacy symlink HEAD/layout açık unavailable, unsafe fallback yok. .codex/56.
+        legacy symlink HEAD/layout açık unavailable, unsafe fallback yok ([56_NATIVE_GIT_WORKTREE_READS.md](.agents/skills/native-tools/references/56_NATIVE_GIT_WORKTREE_READS.md)).
   - [x] Ortak native read editor portunda bulunan ek lifecycle işleri: immutable
     DTO capture, initiating application/session, origin kill/mode cleanup,
     closed/expired parent öncesi startup reddi; startup/cevap yield'inden sonra
@@ -875,7 +875,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     - [x] Son senkron tüketici `read_symbol` callback'e geçti. Eski disk/geometric
       reader, numbered formatter, sync read/diff alias ve model worker yolu
       silindi. Tam edit snapshot API'si (madde 3) ve Dape source worker'ı (madde 4)
-      kendi tüketicileri için kalır; model read fallback'i değildir. .codex/54.
+      kendi tüketicileri için kalır; model read fallback'i değildir ([54_NATIVE_FILE_EXCERPTS.md](.agents/skills/native-tools/references/54_NATIVE_FILE_EXCERPTS.md)).
   - [x] Git mutation tüketicileri: stage/unstage/commit/branch/stash ortak native
     approval ledger'a geçsin. Exact immutable action/object ve repo/index scope,
     reject/timeout/cancel, hook/signing child drain ve partial/unknown sonuçları
@@ -888,7 +888,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       bounded metadata-first scan/parser/render ve ortak actual-join read pool.
       Prompt öncesi owned async refresh; buffer/session observation, newest intent,
       stale root/settings/deadline/Stop ve alias/direct/mode gerçek consumer testli.
-      Eski Elisp scanner/parser/global TTL cache silindi. Ayrıntı .codex/57.
+      Eski Elisp scanner/parser/global TTL cache silindi. Ayrıntı [57_NATIVE_SKILLS.md](.agents/skills/native-tools/references/57_NATIVE_SKILLS.md).
     - [x] Toolchain/dependency probe tüketicileri; executable sınıfı ve bounded
       discovery mevcut shared process/gate'e bağlansın. Kurulum başlatılmaz.
   - [x] Webfetch DNS/redirect/address/egress/body/timeout kararları ortak native
@@ -904,7 +904,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   SafeReadOnly portudur; executable çalıştırmaz. Project→connection→skills owned
   preparation eksik mandatory CLI'da ilk POST/unsent-history tüketimini engeller.
   Legacy Git runner/fallback, curl/resolver/policy/parser, toolchain FS seçimleri
-  ve job/foreground/counter global aynaları silindi. Detay/kabul .codex/58.
+  ve job/foreground/counter global aynaları silindi. Detay/kabul [58_NATIVE_TOOLS_COMPLETE.md](.agents/skills/native-tools/references/58_NATIVE_TOOLS_COMPLETE.md).
   `tools/process.el` yalnız diff Git-apply (madde 3), Dape context/preflight
   (madde 4) ve session listing worker'ı (madde 7) için kalır; native araç fallback'i
   değildir. Dape file worker, credential/UI/package ve binary locator interop'u
@@ -914,8 +914,8 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   Rust'a taşı; Emacs'te yalnız canlı belge kontrolü, transaction/undo/save ve review
   etkileşimi kalsın. Tek typed sonuç kullan; dirty buffer, coding/EOL, save-hook,
   conflict, partial/unknown ve foreign rollback davranışını koru. Son consumer'dan
-  sonra Elisp stage/review/pending-plan/global edit motorlarını sil. Kaynak: Aşama 2,
-  G04/G10; .codex/06 ve 08.
+  sonra Elisp stage/review/pending-plan/global edit motorlarını sil. Kaynak: [Aşama 2](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md),
+  [G04](#g04--tool-context-onay-ve-tek-typed-edit-sonucu)/[G10](#g10--writerpersistence-revisionı-restart-sınırı-ve-veri-ömrü); [06_GECIS_2.md](.agents/skills/native-migration/references/06_GECIS_2.md) ve [08_GECIS_4.md](.agents/skills/native-migration/references/08_GECIS_4.md).
 
   **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
     yazma. Alt teslimler: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11, 3.12,
@@ -932,7 +932,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   Tam hunk ölçümü 3.23’te tamamlandı. Default consumer cutover, verification
   readers ve legacy temizliği tamamlanmadığından 3.8–3.10 açık tutulur.
   Güncel kapsam/kanıt/sınırlar:
-  `docs/task3-audit-2026-10-29.md`.
+  [.agents/skills/audit-and-review/references/task3-audit-2026-10-29.md](.agents/skills/audit-and-review/references/task3-audit-2026-10-29.md).
 
   - [x] **3.1 Sözleşme ve kabul envanteri:** mevcut public edit/LSP/patch/review/
     rollback consumer'larını ve testlerini eşle; tek typed file/batch outcome,
@@ -940,7 +940,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     `01_RUST_CORE_PATTERNS.md` newtype/TryFrom, tek writer, typestate, bounded
     IPC/worker ve no-panic/unsafe kuralları her dilimin kabul kapısıdır.
     Consumer/test eşlemesi ve sahiplik/result sözleşmesi:
-    `docs/native-edit-ownership.md`. Pure native prepare/review temeli 9 gerçek
+    [.agents/rules/native-edit-ownership.md](.agents/rules/native-edit-ownership.md). Pure native prepare/review temeli 9 gerçek
     Git/domain testiyle doğrulandı; IPC/editor cutover ayrı alt maddelerde açıktır.
   - [x] **3.2 Native teklif hazırlığı:** literal replace/full write ve immutable
     base/proposed content hash, document identity/tick, disk revision ve root/path
@@ -1050,7 +1050,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         silinmez; yalnız tüketilmiş metadata atılabilir. Aynı hedefi düzenlemek
         veya undo yapmak kapasite yüzünden gereksiz yere engellenmez. Undo'nun
         16 snapshot sınırı verification borcunu düşürmez; exact edit/file/hash
-        consume korunur. Kanıt: `docs/native-change-capacity.md`. Bu alt iş,
+        consume korunur. Kanıt: [.agents/rules/native-change-capacity.md](.agents/rules/native-change-capacity.md). Bu alt iş,
         tüketilmiş bütün run-files geçmişinin sınırsız tutulması veya Elisp
         consumer cutover'ı anlamına gelmez.
       - [x] **3.8a2 Native metadata köprüsü:** list/files/changes sayfalarını aynı
@@ -1085,7 +1085,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         net-zero'dur, evicted önceki edit hâlâ değişiklikse borcu kalır. Gerçek
         pipe'ta önceden consume edilmiş A → B → undo B → eski proof ret/yeni proof
         kabul/tam undo ve 17 edit → 16 undo sınırı geçti. Kanıt ve kapsam:
-        `docs/native-undo-verification.md`: 602 Rust (32 compile-fail), son receipt
+        [.agents/rules/native-undo-verification.md](.agents/rules/native-undo-verification.md): 602 Rust (32 compile-fail), son receipt
         20/20, 1436/1436 tam ERT, strict Clippy/fmt ve Elisp Werror/checkdoc temiz.
         Genel verification consumer cutover'ı,
         fresh diagnostic barrier, public service close/drain ve legacy silme açık.
@@ -1097,7 +1097,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         aynı in-flight isteği paylaşır. Gerçek issued primitive içinde close →
         drained:false → receipt settlement → drained:true → UI cleanup testi ve
         stale lease/shared waiter testleri geçti. 103/103 odak, 1440/1440 tam ERT;
-        Elisp Werror/parantez/checkdoc temiz. Kanıt: `docs/native-service-close.md`.
+        Elisp Werror/parantez/checkdoc temiz. Kanıt: [.agents/rules/native-service-close.md](.agents/rules/native-service-close.md).
         Genel change/verification reader'larının ilk servis lease'ine bağlanması
         ve legacy/default/global edit state temizliği ayrı olarak açıktır.
       - [x] **3.8a7 Preparation handle epoch sınırı:** normal/native conversation
@@ -1107,7 +1107,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         kodda red (yeni core'a prepare/abort gidiyordu), düzeltmede green; dört
         epoch vakası ve aynı-epoch late-cancel/stale-scope cleanup kabulü geçti.
         106/106 odak, 1444/1444 tam ERT; Elisp Werror/parantez/checkdoc temiz.
-        Kanıt: `docs/native-edit-handle-epoch.md`. Metadata/consume reader'larının
+        Kanıt: [.agents/rules/native-edit-handle-epoch.md](.agents/rules/native-edit-handle-epoch.md). Metadata/consume reader'larının
         ilk servis lease'ine bağlanması ayrı 3.8a8 işidir.
       - [x] **3.8a8 Metadata ve consume lifetime lease:** list/files/changes/
         undo paths/consume/reset portları explicit servis lease'ini kullanır;
@@ -1116,7 +1116,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         göndermez. Geç consumed:true ACK, scope/epoch kaybında eski referansı
         silemez; caller lease metadata'sını değiştirse bile request kendi
         detached capture'ını korur. 110/110 odak ERT ve son detachment regresyonu,
-        Elisp Werror/parantez/checkdoc temiz. Kanıt: `docs/native-history-lifetime.md`.
+        Elisp Werror/parantez/checkdoc temiz. Kanıt: [.agents/rules/native-history-lifetime.md](.agents/rules/native-history-lifetime.md).
         Genel verification consumer cutover'ı ve 3.8b kabulü açık kalır.
       - [ ] **3.8a9 Run reset/verification ayrımı:** legacy agent + native edit
         opt-in yolunda `reset-run-files` otomatik `reset_changes` gönderiyor;
@@ -1144,7 +1144,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           İki Rust regresyonu önce red sonra green; 604 locked Rust (32 compile-fail),
           112/112 odak ve 1449/1449 tam ERT; strict Clippy/fmt, Elisp Werror/
           parantez/checkdoc temiz. Kanıt:
-          `docs/native-run-reset-debt.md`.
+          [.agents/rules/native-run-reset-debt.md](.agents/rules/native-run-reset-debt.md).
         - [ ] **3.8a9b Tam run kabulü:** retained pending'in sonraki native model
           run'ına taşınması 3.8a9a'da geçti. Birleşik Stop/reset/geç ACK model-run
           akışını ve Rust lifecycle/default cutover + legacy run-view kaldırmayı
@@ -1163,7 +1163,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
             gerçek save ayrı testli; tek tool sonucu, korunmuş pending borcu,
             inherited history ve yeni run'ın ayrı istek sayacı doğrulandı.
             34/34 native agent kabulü, strict Clippy/fmt temiz. Kanıt:
-            `docs/native-stop-reset-acceptance.md`.
+            [.agents/rules/native-stop-reset-acceptance.md](.agents/rules/native-stop-reset-acceptance.md).
           - [ ] **3.8a9b2 Consumer/default kapanışı:** legacy run-view ve reset
             orkestrasyonunu son native verification consumer sonrasında kaldır;
             native backend varsayılanı ve toplu kabul üst 3/5/6 ile tamamla.
@@ -1466,7 +1466,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   attachment/provenance ve byte/token/egress kararlarını native'a taşı; canlı
   buffer snapshot'ı Emacs'te kalsın. Stale/unavailable tanı veya debugger bağlantısı
   başarı sayılmasın. Eşdeğer consumer testlerinden sonra eski context/domain
-  formatlama yollarını sil. Kaynak: Aşama 3, G06/G07/G11; .codex/05 ve 09.
+  formatlama yollarını sil. Kaynak: [Aşama 3](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md), [G06](#g06--bağlam-toplama-attachment-ve-egress-kontrolü)/[G07](#g07--lspdape-gözlem-portları-ve-hata-ayıklama)/[G11](#g11--proje-bağlamı-egress-ve-adapter-güvenliği); [05_GECIS_1.md](.agents/skills/native-migration/references/05_GECIS_1.md) ve [09_DYNAMIC_CONTEXT_MENTIONS.md](.agents/skills/native-api-and-catalog/references/09_DYNAMIC_CONTEXT_MENTIONS.md).
 
   **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
     yazma. Alt teslimler: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 4.10, 4.11.
@@ -1581,7 +1581,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     project-wide temiz sonucu üretilmez. Stop sonrası gerçek reverse callback
     gelene kadar drain sürer; iptal edilen capture'ın bulguları yayımlanmaz.
     Gerçek provider/stdio testinde sekiz vaka ve native read lifecycle kabulü geçti.
-    Kanıt: `docs/native-diagnostic-port.md`. Raw capture, project aggregation ve
+    Kanıt: [.agents/rules/native-diagnostic-port.md](.agents/rules/native-diagnostic-port.md). Raw capture, project aggregation ve
     UI capability ayrıca 4.3b/c'de tamamlandı; public/standalone formatter ve gerçek
     verification/healing nedeniyle üst 4.3/6.4 maddeleri açık kalır.
   - [x] **4.3b Ham dosya diagnostic capture:** reverse read, canlı belge/tick,
@@ -1606,7 +1606,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     602 locked Rust (32 compile-fail), 1431/1431 tam ERT; son gate/capture testleri
     ve 78/78 son odak ERT, strict Clippy/fmt, Elisp Werror/checkdoc/parantez temiz.
     Public/standalone formatter geçişi, fresh-pull/barrier ve verification/healing
-    tüketicileri nedeniyle 4.3/6.4 açık kalır. Kanıt: `docs/native-diagnostic-port.md`.
+    tüketicileri nedeniyle 4.3/6.4 açık kalır. Kanıt: [.agents/rules/native-diagnostic-port.md](.agents/rules/native-diagnostic-port.md).
   - [ ] **4.3d Freshness barrier:** capability destekliyorsa fresh pull veya
     exact post-edit publication beklemesini bounded native state'e bağla;
     timer dolması, “liste boş” veya yeni server aynı version ile clean sayılmasın.
@@ -2191,7 +2191,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   EOF'ta revoke → gerçek drain → repair → admit sırasını kanıtla. Headless/fake
   provider ve gerçek pipe UI uçtan uca geçince Elisp loop/history/domain state
   motorlarını tüketici tüketici sil; aynı yan etkiyi iki backend'de oynatma.
-  Kaynak: Aşama 4, G08/G12/G13; .codex/00, 07, 11.
+  Kaynak: [Aşama 4](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md), [G08](#g08--native-toplam-bütçe-geçmiş-ve-compactionprompt-maliyeti)/[G12](#g12--nativefake-agent-backend-portu)/[G13](#g13--son-köprü-temizliği-lint-ve-bütünleşik-kabul); [00_MIGRATION_ARCHITECTURE.md](.agents/skills/native-migration/references/00_MIGRATION_ARCHITECTURE.md), [07_GECIS_3.md](.agents/skills/native-migration/references/07_GECIS_3.md), [11_CASCADING_ABORT_AND_REPAIR.md](.agents/skills/native-api-and-catalog/references/11_CASCADING_ABORT_AND_REPAIR.md).
 
   **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
     yazma. Alt teslimler: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11, 5.12,
@@ -2866,7 +2866,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     history overlay veya repair motorunu çalıştırmaz; native task iptali korunur.
     Son lifecycle/history/ownership odak ERT 60/60 ve değişen Elisp Werror/parantez
     kabulü temiz. Bu, native verification reader veya genel 5.9 kapanışı değildir.
-    Kanıt: `docs/native-lifecycle-domain-isolation.md`.
+    Kanıt: [.agents/rules/native-lifecycle-domain-isolation.md](.agents/rules/native-lifecycle-domain-isolation.md).
   - [x] **5.9f Native conversation değişiklik özeti:** Rust terminal accounting
     session/service kapsamına göre pending ve retained dosya sayılarını ledger
     revision'ıyla üretir; başka conversation ve explicit edit-service kayıtları
@@ -2876,7 +2876,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     1 KiB frame için session kimliği metadata içinde tekrarlanmaz. Gerçek native
     write/edit/patch receipt → terminal accounting regresyonu, service/session
     izolasyonu, exact consume sonrası sayı ve UI sunum kabulü eklendi.
-    Kanıt: `docs/native-conversation-change-summary.md`. Path reader, gerçek
+    Kanıt: [.agents/rules/native-conversation-change-summary.md](.agents/rules/native-conversation-change-summary.md). Path reader, gerçek
     verification/healing, tam modified-run kapsamı ve genel 5.9 hâlâ açıktır.
     599 locked Rust (32 compile-fail), strict Clippy/fmt, 1422/1422 tam ERT;
     son chat sunum diliminde 65/65 odak ERT ve Elisp Werror/checkdoc/parantez temiz.
@@ -2959,7 +2959,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Önkoşul:** 3.10b, 4.10, 5.10, 6.4b6, 7.5d ve 8.6 consumer kabulü; 10.4c.
 
     **Başlangıç kaynakları:** todo 3/4/5 açık işleri;
-      docs/migration-review-2026-11-01.md; tests/run-tests.el.
+      [.agents/skills/audit-and-review/references/migration-review-2026-11-01.md](.agents/skills/audit-and-review/references/migration-review-2026-11-01.md); tests/run-tests.el.
 
     **Uygulama adımı:** Nihai entegre kodun Rust/ERT/GUI kanıtını üst 3/4/5 için
       birleştir; aynı commit için 10.6'da geçen testi gerekçesiz tekrar çalıştırmak
@@ -2984,7 +2984,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   locked Rust 574 (31 compile-fail dahil), strict all-target Clippy ve değişen
   Elisp Werror/parantez kontrolleri temiz. Budget/application/selection TLC geçti.
   Bunlar eksik native tüketici bağlantıları ve gerçek GUI kabulünü kapatmaz.
-  Ayrıntı ve açık teknik bulgular: `docs/migration-review-2026-11-01.md`.
+  Ayrıntı ve açık teknik bulgular: [.agents/skills/audit-and-review/references/migration-review-2026-11-01.md](.agents/skills/audit-and-review/references/migration-review-2026-11-01.md).
 
   - [ ] **5.13 Prompt ve instruction motoru** — kalan belirgin domain açığı:
     `prompt.el` hâlâ instructions/env/skills/mode/tools metni ve cache key üretir.
@@ -3092,8 +3092,8 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   çağrılarını aynı run handle'ına bağla. Exact fiyatla hard monetary reservation
   ve unknown usage/pricing davranışını tamamla; float veya tahmini gerçek harcama
   diye sunma. Tek compaction sınırı, ikinci overflow, başarısız özet, stale verify
-  ve geç usage fixture'ları geçince eski Elisp orchestration'ını sil. Kaynak: G08,
-  Aşama 4; .codex/10–11, 36, 41–43.
+  ve geç usage fixture'ları geçince eski Elisp orchestration'ını sil. Kaynak: [G08](#g08--native-toplam-bütçe-geçmiş-ve-compactionprompt-maliyeti),
+  [Aşama 4](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md); [10_MODEL_CATALOG_AND_REASONING.md](.agents/skills/native-api-and-catalog/references/10_MODEL_CATALOG_AND_REASONING.md)–[11_CASCADING_ABORT_AND_REPAIR.md](.agents/skills/native-api-and-catalog/references/11_CASCADING_ABORT_AND_REPAIR.md), [36_NATIVE_API_BUDGET.md](.agents/skills/native-api-and-catalog/references/36_NATIVE_API_BUDGET.md), [41_MODEL_METADATA_BOUNDARY_AUDIT.md](.agents/skills/native-api-and-catalog/references/41_MODEL_METADATA_BOUNDARY_AUDIT.md)–[43_DEFAULT_MODEL_METADATA_CUTOVER.md](.agents/skills/native-migration/references/43_DEFAULT_MODEL_METADATA_CUTOVER.md).
 
   **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
     yazma. Alt teslimler: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6. İlgili açık alt işler, gerçek
@@ -3197,7 +3197,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     fiyatıyla bir kez ücretlendir. Eksik kullanım/fiyat unknown kalsın; explicit
     sıfır fiyatı eksik fiyatla karıştırma. Kategori kesirlerini son micro-USD
     sınırına kadar tam topla, taşmayı reddet. Native wire → fiyat regresyonu ve
-    compile-fail birim ayrımı eklendi. Kanıt: `docs/native-cache-pricing.md`.
+    compile-fail birim ayrımı eklendi. Kanıt: [.agents/rules/native-cache-pricing.md](.agents/rules/native-cache-pricing.md).
     598 locked Rust (32 compile-fail), 1414/1414 full source ERT ve strict
     Clippy/fmt temiz. Bu hesap henüz runtime provider settlement'a bağlı değildir;
     hard reservation/refund/concurrency ve genel 6.2 açık kalır.
@@ -3351,7 +3351,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       pozitif reorder/generation ile duplicate/position-shift testleri green.
       Bu native comparison primitive düzeltmesidir; gerçek verification consumer
       bağlantısı değildir. 606 locked Rust (32 compile-fail), 9/9 sensor contract,
-      strict Clippy/fmt temiz. Kanıt: `docs/native-diagnostic-baseline-origin.md`.
+      strict Clippy/fmt temiz. Kanıt: [.agents/rules/native-diagnostic-baseline-origin.md](.agents/rules/native-diagnostic-baseline-origin.md).
     - [ ] **6.4b Gerçek consumer:** native receipt/document/hash/revision'a bağlı
       baseline capture → post-edit fresh observation → Rust delta/verification
       settlement → bounded healing akışını aynı parent RunId/deadline/bütçeyle
@@ -3377,7 +3377,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         → Flymake report → native diagnostic → pending=0, retained=1, üç model
         isteği kabulü geçti. 612 locked Rust (32 compile-fail), 1451/1451 tam ERT,
         strict Clippy/fmt ve Elisp Werror/parantez/checkdoc temiz. Kanıt:
-        `docs/native-receipt-verification.md`.
+        [.agents/rules/native-receipt-verification.md](.agents/rules/native-receipt-verification.md).
       - [ ] **6.4b2 Kalan otomatik akış:** her editten sonra native-graded baseline/
         fresh-pull barrier, error delta ve bounded healing'i otomatik aynı parent
         run/bütçe/deadline altında kur. Deleted/closed-file ve explicit edit-service
@@ -3545,8 +3545,8 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
     **Önkoşul:** 6.1–6.5 tamamlanmış consumer'ları.
 
-    **Başlangıç kaynakları:** 6.1–6.5 teslimleri ve docs/native-cache-pricing.md,
-      docs/native-receipt-verification.md.
+    **Başlangıç kaynakları:** 6.1–6.5 teslimleri ve [.agents/rules/native-cache-pricing.md](.agents/rules/native-cache-pricing.md),
+      [.agents/rules/native-receipt-verification.md](.agents/rules/native-receipt-verification.md).
 
     **Uygulama adımı:** Exact/unknown fiyat, cache hesap, concurrent reservation,
       summary overflow ve stale/heal/Stop yarışlarını aynı native run corpus'unda
@@ -3563,8 +3563,8 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   recovery'yi native tek yazıcıya bağla. Kesilmiş yazı, eski epoch, yarım tool/edit
   ve restart'ta replay etmeme kabulü geçince eski Elisp persistence motorunu sil.
   Gerçek kullanıcı session dosyasını test girdisi yapma; power-loss garantisini
-  seçilen journal'ın kanıtını aşacak şekilde genişletme. Kaynak: Aşama 4, G10;
-  .codex/08.
+  seçilen journal'ın kanıtını aşacak şekilde genişletme. Kaynak: [Aşama 4](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md), [G10](#g10--writerpersistence-revisionı-restart-sınırı-ve-veri-ömrü);
+  [08_GECIS_4.md](.agents/skills/native-migration/references/08_GECIS_4.md).
 
   **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
     yazma. Alt teslimler: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6. İlgili açık alt işler, gerçek
@@ -4029,7 +4029,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   UI'larını explicit native handle/DTO tüketicisi yap. Aktif run'ın backend/
   connection snapshot'ı sabit kalsın. Son consumer geçince compatibility circuit/
   catalog/job/edit/async tablolarını kaldır; passive UI yeni domain authority
-  yaratmasın. Kaynak: Aşama 3/6, G09/G13; docs/connection-ownership.md.
+  yaratmasın. Kaynak: [Aşama 3](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md)/[Aşama 6](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md), [G09](#g09--viewselection-olayları-ve-uçtan-uca-stream-baskısı)/[G13](#g13--son-köprü-temizliği-lint-ve-bütünleşik-kabul); [.agents/rules/connection-ownership.md](.agents/rules/connection-ownership.md).
 
   **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
     yazma. Alt teslimler: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6. İlgili açık alt işler, gerçek
@@ -4546,8 +4546,8 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
   effort capability'sini ayrı doğrula. Önce offline fixture; resmi entegrasyon yolu
   doğrulanmadan CLI bayrağı/port uydurma. MCP-only Antigravity backend teslimi
   sayılmaz; biri engelliyse kendi kabul kutusu açık kalır. Canlı hesap/model turu,
-  login, kurulum ve credential taşıma ayrıca onay ister. Kaynak: Aşama 5, G12;
-  .codex/03'ün dört ayrı backend kabulü ve MCP topolojisi.
+  login, kurulum ve credential taşıma ayrıca onay ister. Kaynak: [Aşama 5](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md), [G12](#g12--nativefake-agent-backend-portu);
+  [03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md)'ün dört ayrı backend kabulü ve MCP topolojisi.
 
   **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
     yazma. Alt teslimler: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 9.10. İlgili açık
@@ -4574,7 +4574,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** Native agent, offline fake ve harici backend için dar
         start/event/cancel/session portunu tanımla; fake UI corpus'unu bu portta tekrar
@@ -4597,7 +4597,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
     **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
       backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-      chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+      chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
     **Uygulama adımı:** Bounded executable/version/protocol/auth readiness worker'ını
       native'de kur; readonly discovery'yi paid turn/login/install'den ayır ve immutable
@@ -4625,11 +4625,11 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       sürüm/schema kanıtı, bounded handshake/event/terminal parser ve malformed/
       partial/unknown event fixture'ları. Bu teslim gerçek backend readiness değildir.
 
-      **Önkoşul:** 9.1/9.2; .codex/03; ilgili resmi kaynak/kurulu sürüm.
+      **Önkoşul:** 9.1/9.2; [03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md); ilgili resmi kaynak/kurulu sürüm.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** Codex için desteklenecek protokol ve sürümü uygulama sırasında
         resmi doküman/yerel schema ile doğrula; handshake/event/result codec ve
@@ -4651,7 +4651,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** Codex adapterında external thread/turn ID → native session/run
         eşlemesi, start/stream/terminal ve actual Stop/drain kur; desteklenen
@@ -4674,7 +4674,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** Codex için UI provider seçiminden ortak native backend
         contract suite çalıştır; offline fake codec ile ayrıca yetkilendirilmiş canlı
@@ -4703,11 +4703,11 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       sürüm/schema kanıtı, bounded handshake/event/terminal parser ve malformed/
       partial/unknown event fixture'ları. Bu teslim gerçek backend readiness değildir.
 
-      **Önkoşul:** 9.1/9.2; .codex/03; ilgili resmi kaynak/kurulu sürüm.
+      **Önkoşul:** 9.1/9.2; [03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md); ilgili resmi kaynak/kurulu sürüm.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** Claude Code için desteklenecek protokol ve sürümü uygulama
         sırasında resmi doküman/yerel schema ile doğrula; handshake/event/result codec
@@ -4729,7 +4729,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** Claude Code adapterında external thread/turn ID → native
         session/run eşlemesi, start/stream/terminal ve actual Stop/drain kur;
@@ -4752,7 +4752,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** Claude Code için UI provider seçiminden ortak native backend
         contract suite çalıştır; offline fake codec ile ayrıca yetkilendirilmiş canlı
@@ -4781,11 +4781,11 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       sürüm/schema kanıtı, bounded handshake/event/terminal parser ve malformed/
       partial/unknown event fixture'ları. Bu teslim gerçek backend readiness değildir.
 
-      **Önkoşul:** 9.1/9.2; .codex/03; ilgili resmi kaynak/kurulu sürüm.
+      **Önkoşul:** 9.1/9.2; [03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md); ilgili resmi kaynak/kurulu sürüm.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** OpenCode için desteklenecek protokol ve sürümü uygulama
         sırasında resmi doküman/yerel schema ile doğrula; handshake/event/result codec
@@ -4807,7 +4807,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** OpenCode adapterında external thread/turn ID → native
         session/run eşlemesi, start/stream/terminal ve actual Stop/drain kur;
@@ -4830,7 +4830,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** OpenCode için UI provider seçiminden ortak native backend
         contract suite çalıştır; offline fake codec ile ayrıca yetkilendirilmiş canlı
@@ -4859,11 +4859,11 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       sürüm/schema kanıtı, bounded handshake/event/terminal parser ve malformed/
       partial/unknown event fixture'ları. Bu teslim gerçek backend readiness değildir.
 
-      **Önkoşul:** 9.1/9.2; .codex/03; ilgili resmi kaynak/kurulu sürüm.
+      **Önkoşul:** 9.1/9.2; [03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md); ilgili resmi kaynak/kurulu sürüm.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** Antigravity için desteklenecek protokol ve sürümü uygulama
         sırasında resmi doküman/yerel schema ile doğrula; handshake/event/result codec
@@ -4885,7 +4885,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** Antigravity adapterında external thread/turn ID → native
         session/run eşlemesi, start/stream/terminal ve actual Stop/drain kur;
@@ -4908,7 +4908,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** Antigravity için UI provider seçiminden ortak native backend
         contract suite çalıştır; offline fake codec ile ayrıca yetkilendirilmiş canlı
@@ -4931,7 +4931,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
     **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
       backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-      chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+      chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
     **Uygulama adımı:** Dört adapter'ın codec/lifecycle/UI/security/fixture ve canlı
       kabul sütunlarını tek tabloda kontrol et; eksik olanı açık tut, diğerlerinin
@@ -4954,7 +4954,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
     **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
       backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-      chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+      chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
     **Uygulama adımı:** Harici agent'ın own tool effect'inin nereden geçtiğini doğrula;
       Kargu gate'e delegasyon/eşdeğer desteklenen kontrol yoksa açık read-only
@@ -4969,7 +4969,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       eklenmeli, canlı kabul ayrı.
 
   - [ ] **9.9 Ayrı MCP portu:** editor araç sunumu ayrı Rust adapter/auth/scope ve
-    capability; stdio/proxy topolojisini .codex/03'e göre uygula. Connection başına
+    capability; stdio/proxy topolojisini [03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md)'e göre uygula. Connection başına
     session/permission/byte/deadline sınırı; tool list/call, missing adapter,
     foreign owner ve disconnect cleanup kabulü. MCP, backend selection'ı kapatmaz.
 
@@ -4987,7 +4987,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** MCP sürüm/transport codec, list/call schema ve discovery
         capability'lerini native portlara bağla; mevcut Kargu IPC envelope'unu rastgele
@@ -5008,7 +5008,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** MCP connection kimliğini owner/session/root/editor grants ve
         auth sınırına bağla; tool-list erişimini tool-execution izni sayma.
@@ -5029,7 +5029,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
         backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-        chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+        chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
       **Uygulama adımı:** MCP call/approval/editor reverse/result/cancel/disconnect'i
         native child lifecycle'a bağla; owned proxy/session cleanup'ını test et.
@@ -5052,7 +5052,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
     **Başlangıç kaynakları:** Rust: application/agent/, process/, ipc/; harici
       backend/discovery/MCP adapter modülleri henüz mevcut değil. Elisp: chat/select/,
-      chat/tune.el. Sözleşme: .codex/03_EXTERNAL_BRIDGES.md.
+      chat/tune.el. Sözleşme: [.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md).
 
     **Uygulama adımı:** API ve application backend'leri aynı native list DTO'suyla
       gruplu sun; unready nedenini göster ve yalnız Ready seçim için prompt admission
@@ -5067,14 +5067,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       eklenmeli, canlı kabul ayrı.
 
 - [ ] **10. Son kabul, varsayılan cutover ve paketleme** — G03/G11 log gizliliği,
-  retention/egress ve .codex/01/39 uyum açıklarını gerçek consumer'larda kapat.
+  retention/egress ve [01_RUST_CORE_PATTERNS.md](.agents/skills/coding-standards/references/01_RUST_CORE_PATTERNS.md)/[39_RUST_PATTERN_AUDIT.md](.agents/skills/coding-standards/references/39_RUST_PATTERN_AUDIT.md) uyum açıklarını gerçek consumer'larda kapat.
   Missing-module, version mismatch, clean-machine startup, release binary/asset
   paketi ve export/geri dönüş sınırını doğrula. Tüm ERT, locked native test,
   compile-fail, fmt, strict Clippy ve uyarısız değişen Elisp geçsin; yalnız
   TLA+ kaynağı değişen ilgili exhaustive modeller çalıştırılsın. Uçtan uca
   eşdeğerlikten sonra Rust agent default olsun; yalnız
   o zaman son legacy backend/engine kaynaklarını sil. Thin editor adapter'ları
-  kalır; merge/push ayrıca onay ister. Kaynak: Aşama 6, G03/G11/G13.
+  kalır; merge/push ayrıca onay ister. Kaynak: [Aşama 6](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md), [G03](#g03--log-gizliliği-sahipli-retention-ve-ölçüm)/[G11](#g11--proje-bağlamı-egress-ve-adapter-güvenliği)/[G13](#g13--son-köprü-temizliği-lint-ve-bütünleşik-kabul).
 
   **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
     yazma. Alt teslimler: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6. İlgili açık alt işler,
@@ -5224,7 +5224,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust file_reads, git_mutations, catalog_target ve
         webfetch testleri; ERT test-security, test-attach, test-native-ownership.
 
-  - [ ] **10.3 Mimari ve kaynak denetimi (.codex/01/39, G05/G13):**
+  - [ ] **10.3 Mimari ve kaynak denetimi ([01_RUST_CORE_PATTERNS.md](.agents/skills/coding-standards/references/01_RUST_CORE_PATTERNS.md)/[39_RUST_PATTERN_AUDIT.md](.agents/skills/coding-standards/references/39_RUST_PATTERN_AUDIT.md), G05/G13):**
 
     **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
       yazma. Alt teslimler: 10.3a, 10.3b, 10.3c, 10.3d. İlgili açık alt işler, gerçek
@@ -5246,7 +5246,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         kaydını ayır; primitive alanın salt dış DTO'da kalması ile typed boundary
         atlanıp actor/store'a yazılması aynı şey değildir.
 
-        **Önkoşul:** 0.2 DTO/domain birimleri; .codex/01; ilgili alanın dosya
+        **Önkoşul:** 0.2 DTO/domain birimleri; [01_RUST_CORE_PATTERNS.md](.agents/skills/coding-standards/references/01_RUST_CORE_PATTERNS.md); ilgili alanın dosya
           sahipliği. Başka ajanın aynı modülünü eşzamanlı yeniden tasarlama.
 
         **Başlangıç kaynakları:** Rust: `domain/`, `application/agent/`,
@@ -5495,7 +5495,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         missing/wrong-version binary, optional dependency yokluğu,
         upgrade/exit/uninstall senaryolarını çalıştır.
 
-      **Bitti sayılması için:** Kullanıcı kaynak checkout'u veya .codex olmadan startup
+      **Bitti sayılması için:** Kullanıcı kaynak checkout'u veya yerel .agents referansı olmadan startup
         çalışır; discovery paid HTTP/login yapmaz; exit owned child'ı reap eder, foreign
         servisi kapatmaz.
 
@@ -5514,7 +5514,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         shell.nix.
 
       **Uygulama adımı:** README/describing ve architecture/connection/modularity
-        açıklamalarını gerçek default/port/capability ile eşle; tarihi .codex kanıtını
+        açıklamalarını gerçek default/port/capability ile eşle; tarihi referans kanıtını
         güncel teslim iddiasından ayır.
 
       **Bitti sayılması için:** Kurulum, config/session migration/export ve destek
@@ -5530,7 +5530,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       tanımları ve init capability'leri için tek source-of-truth/version/hash
       ilişkisi kur. Sahada binary/Elisp farklı sürüm olursa yanlış schema ile
       çağrı yürütme; uyumsuzluğu anlaşılır hata olarak göster. Nihai build'in
-      source checkout veya `.codex` dokümanından asset okuması gerekmemeli.
+      source checkout veya `.agents` dokümanından asset okuması gerekmemeli.
 
       **Önkoşul:** 5.3 native registry; 8.2 provider registry; 0.2 handshake.
 

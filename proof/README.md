@@ -27,7 +27,7 @@ A positive committed result requires successful verification. BFS completes
 with a quiescence flag violates `PositiveReceiptsVerified` in the mutant fixture.
 Disk/hash truth remains an explicit abstract input here; native real-file receipt
 regressions separately check the validation boundary. Native process-local rollback and an opt-in revised batch UI now exist; full
-consumer cutover remains incomplete. See `docs/task3-audit-2026-10-29.md`.
+consumer cutover remains incomplete. See `.agents/skills/audit-and-review/references/task3-audit-2026-10-29.md`.
 
 ## Native editor activity across connection replacement (2026-10-28)
 

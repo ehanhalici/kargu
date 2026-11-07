@@ -1,0 +1,223 @@
+TEST: kargu-cache-mutation-invalidates-read-results-test
+FILE: test-cache.el
+FAILED: t
+COND: (error "Kargu: invalid application status transition from :idle to :executing-tools")
+
+TEST: kargu-dape-compile-final-boundary-rechecks-start-hook-test
+FILE: test-dape-compile.el
+FAILED: t
+COND: (ert-test-failed ((should-not results) :form results :value ("ERROR: Debugger startup cancelled: launch ownership changed")))
+
+TEST: kargu-dape-execution-replaced-run-does-not-leak-poll-test
+FILE: test-dape-execution.el
+FAILED: t
+COND: (ert-test-failed ((should (eq (kargu-async-task-state task) :cancelled)) :form (eq :pending :cancelled) :value nil))
+
+TEST: kargu-heal-clean-file-passes-verification-test
+FILE: test-heal.el
+FAILED: t
+COND: (ert-test-failed ((should (string-search "Verification after edit (clean)" result)) :form (string-search "Verification after edit (clean)" "edited ok
+
+--- Verification after edit (diagnostics unavailable) [Flymake / LSP] ---
+(diagnostics unavailable: Kargu: invalid application status transition from :idle to :verifying)
+
+Verification incomplete: diagnostics are unavailable. Do not treat this edit as clean.") :value nil))
+
+TEST: kargu-heal-cleanup-keeps-captured-path-after-project-switch-test
+FILE: test-heal.el
+FAILED: t
+COND: (ert-test-failed ((should-not continued) :form continued :value ("applied
+
+--- Verification after edit (diagnostics unavailable) [Flymake / LSP] ---
+(diagnostics unavailable: Kargu: invalid application status transition from :idle to :verifying)
+
+Verification incomplete: diagnostics are unavailable. Do not treat this edit as clean.")))
+
+TEST: kargu-heal-compares-baseline-diagnostics-across-line-shifts-test
+FILE: test-heal.el
+FAILED: t
+COND: (ert-test-failed ((should (string-search "1 pre-existing error(s)" result)) :form (string-search "1 pre-existing error(s)" "edited ok
+
+--- Verification after edit (diagnostics unavailable) [Flymake / LSP] ---
+(diagnostics unavailable: Kargu: invalid application status transition from :idle to :verifying)
+
+Verification incomplete: diagnostics are unavailable. Do not treat this edit as clean.") :value nil))
+
+TEST: kargu-heal-completion-closes-batch-before-next-work-test
+FILE: test-heal.el
+FAILED: t
+COND: (void-function nil)
+
+TEST: kargu-heal-completion-consumes-only-original-records-test
+FILE: test-heal.el
+FAILED: t
+COND: (void-function nil)
+
+TEST: kargu-heal-duplicate-file-callback-cannot-repeat-next-wait-test
+FILE: test-heal.el
+FAILED: t
+COND: (void-function nil)
+
+TEST: kargu-heal-errors-ask-for-a-fix-and-count-a-round-test
+FILE: test-heal.el
+FAILED: t
+COND: (ert-test-failed ((should (string-search "1 error(s)" result)) :form (string-search "1 error(s)" "edited ok
+
+--- Verification after edit (diagnostics unavailable) [Flymake / LSP] ---
+(diagnostics unavailable: Kargu: invalid application status transition from :idle to :verifying)
+
+Verification incomplete: diagnostics are unavailable. Do not treat this edit as clean.") :value nil))
+
+TEST: kargu-heal-real-diagnostic-wait-cancels-with-batch-test
+FILE: test-heal.el
+FAILED: t
+COND: (ert-test-failed ((should (= (length kargu-async--pending) 2)) :form (= 0 2) :value nil))
+
+TEST: kargu-heal-startup-error-releases-owned-records-test
+FILE: test-heal.el
+FAILED: t
+COND: (void-function nil)
+
+TEST: kargu-heal-stop-consumes-whole-captured-batch-test
+FILE: test-heal.el
+FAILED: t
+COND: (error "Kargu: invalid application status transition from :idle to :stopped")
+
+TEST: kargu-heal-stop-preserves-new-edit-and-discards-old-reply-test
+FILE: test-heal.el
+FAILED: t
+COND: (error "Kargu: invalid application status transition from :idle to :stopped")
+
+TEST: kargu-heal-timeout-is-not-reported-as-clean-test
+FILE: test-heal.el
+FAILED: t
+COND: (ert-test-failed ((should (string-search "diagnostics timed out" result)) :form (string-search "diagnostics timed out" "edited ok
+
+--- Verification after edit (diagnostics unavailable) [Flymake / LSP] ---
+(diagnostics unavailable: Kargu: invalid application status transition from :idle to :verifying)
+
+Verification incomplete: diagnostics are unavailable. Do not treat this edit as clean.") :value nil))
+
+TEST: kargu-loop-compaction-timeout-asks-to-retry-test
+FILE: test-compact.el
+FAILED: t
+COND: (error "Kargu: invalid application status transition from :idle to :compacting")
+
+TEST: kargu-loop-continue-prompt-test
+FILE: test-loop.el
+FAILED: t
+COND: (error "Kargu: invalid application status transition from :idle to :stopped")
+
+TEST: kargu-loop-doom-approval-after-stop-does-not-run-tool-test
+FILE: test-loop.el
+FAILED: t
+COND: (error "Kargu: invalid application status transition from :idle to :executing-tools")
+
+TEST: kargu-loop-incomplete-responses-finish-as-errors-test
+FILE: test-loop.el
+FAILED: t
+COND: (error "Kargu: invalid application status transition from :error to :waiting-model")
+
+TEST: kargu-loop-repeated-reasoning-stops-at-the-global-turn-cap-test
+FILE: test-loop.el
+FAILED: t
+COND: (ert-test-failed ((should (= questions 1)) :form (= 0 1) :value nil))
+
+TEST: kargu-loop-response-continuation-failure-closes-only-its-run-test
+FILE: test-loop.el
+FAILED: t
+COND: (error "Kargu: invalid application status transition from :error to :waiting-model")
+
+TEST: kargu-loop-run-call-doom-flow-test
+FILE: test-loop.el
+FAILED: t
+COND: (error "Kargu: invalid application status transition from :idle to :executing-tools")
+
+TEST: kargu-loop-synchronous-startup-failure-releases-run-test
+FILE: test-loop.el
+FAILED: t
+COND: (ert-test-failed ((should (equal (plist-get (car reports) :error) "Initial request failed")) :form (equal "Kargu: invalid application status transition from :error to :requesting" "Initial request failed") :value nil :explanation (arrays-of-different-length 71 22 "Kargu: invalid application status transition from :error to :requesting" "Initial request failed" first-mismatch-at 0)))
+
+TEST: kargu-lsp-settle-replaced-owner-releases-wait-test
+FILE: test-lsp-settle.el
+FAILED: t
+COND: (ert-test-failed ((should (eq (kargu-async-task-state task) :cancelled)) :form (eq :pending :cancelled) :value nil))
+
+TEST: kargu-module-closing-run-owner-cancels-and-rejects-reentry-test
+FILE: test-modules.el
+FAILED: t
+COND: (ert-test-failed "Isolated module test failed (255):
+Error loading autoloads: (epg-error no usable configuration OpenPGP)
+kargu: cancelled in-flight request
+
+Error: error (\"Kargu: invalid application status transition from :stopped to :error\")
+  error(\"Kargu: invalid application status transition from %S to %S\" :stopped :error)
+  (if (kargu-application-valid-transition-p current new-status) nil (error \"Kargu: invalid application status transition from %S to %S\" current new-status))
+  (let* ((target (kargu-application-context app)) (current (let* ((cl-x target)) (progn (or (let* ((cl-x cl-x)) (progn (and (memq (type-of cl-x) cl-struct-kargu-application-tags) t))) (signal 'wrong-type-argument (list 'kargu-application cl-x))) (aref cl-x 2))))) (if (kargu-application-valid-transition-p current new-status) nil (error \"Kargu: invalid application status transition from %S to %S\" current new-status)) (let* ((cl-x target)) (or (let* ((cl-x cl-x)) (progn (and (memq (type-of cl-x) cl-struct-kargu-application-tags) t))) (signal 'wrong-type-argument (list 'kargu-application cl-x))) (let* ((v cl-x)) (aset v 2 new-status))) new-status)
+  kargu-application-transition(nil :error)
+  kargu-application-set-status(:error)
+  (let nil (kargu-application-set-status value) (kargu-state--sync-snapshot))
+  (cond ((eq key :mode) (let nil (let ((session (kargu-session-context))) (let* ((cl-x session)) (or (let* ((cl-x cl-x)) (progn (and (memq (type-of cl-x) cl-struct-kargu-session-tags) t))) (signal 'wrong-type-argument (list 'kargu-session cl-x))) (let* ((v cl-x)) (aset v 3 value))) (let* ((cl-x session)) (or (let* ((cl-x cl-x)) (progn (and (memq (type-of cl-x) cl-struct-kargu-session-tags) t))) (signal 'wrong-type-argument (list 'kargu-session cl-x))) (let* ((v cl-x)) (aset v 4 (+ (aref v 4) 1))))))) ((eq key :status) (let nil (kargu-application-set-status value) (kargu-state--sync-snapshot))) ((eq key :busy) (let nil (kargu-state--sync-snapshot))) ((memq key '(:total-tokens :completion-tokens :prompt-tokens)) (let nil (kargu-state--sync-snapshot))) (t (let nil (setq kargu--state-store (plist-put (copy-sequence kargu--state-store) key value)))))
+  kargu-state--set(:status :error)
+  kargu-state-transition-status(:error \"Kargu: invalid application status transition from :stopped to :requesting\")
+  (let ((final-st (if (memq status '(:done :limit :stopped :error)) status :idle))) (kargu-state-transition-status final-st (or text (symbol-name status))))
+  (progn (let ((final-st (if (memq status '(:done :limit :stopped :error)) status :idle))) (kargu-state-transition-status final-st (or text (symbol-name status)))))
+  (if (fboundp 'kargu-state-transition-status) (progn (let ((final-st (if (memq status '(:done :limit :stopped :error)) status :idle))) (kargu-state-transition-status final-st (or text (symbol-name status))))))
+  (let ((report (kargu-loop--finish-report run status text)) (history (or (plist-get run :history) (kargu-history-context)))) (kargu-loop--detach-origin run) (kargu-loop--cancel-retry-timer run) (kargu-async-cancel-owner run) (kargu-application-set-active-run nil) (kargu-dismiss-confirmations) (if (memq status '(:stopped :error)) (progn (kargu-edit-changes :abort))) (let* ((v history)) (kargu-history-set-overlay nil v)) (kargu-session-mark-active nil (plist-get run :session)) (if (fboundp 'kargu-state-transition-status) (progn (let ((final-st (if (memq status '(:done :limit :stopped :error)) status :idle))) (kargu-state-transition-status final-st (or text (symbol-name status)))))) (kargu--validate-history 'keep-assistant-tail history) (kargu-log 'info \"run end: %s (iterations=%d, healing=%d)\" status (plist-get report :iterations) (plist-get report :healing)) (condition-case err (let* ((on-finish (and t (plist-get run :on-finish)))) (if on-finish (funcall on-finish report))) ((debug error) (kargu-log 'error \"on-finish callback failed: %s\" (error-message-string err)))) report)
+  (progn (let ((report (kargu-loop--finish-report run status text)) (history (or (plist-get run :history) (kargu-history-context)))) (kargu-loop--detach-origin run) (kargu-loop--cancel-retry-timer run) (kargu-async-cancel-owner run) (kargu-application-set-active-run nil) (kargu-dismiss-confirmations) (if (memq status '(:stopped :error)) (progn (kargu-edit-changes :abort))) (let* ((v history)) (kargu-history-set-overlay nil v)) (kargu-session-mark-active nil (plist-get run :session)) (if (fboundp 'kargu-state-transition-status) (progn (let ((final-st (if (memq status '(:done :limit :stopped :error)) status :idle))) (kargu-state-transition-status final-st (or text (symbol-name status)))))) (kargu--validate-history 'keep-assistant-tail history) (kargu-log 'info \"run end: %s (iterations=%d, healing=%d)\" status (plist-get report :iterations) (plist-get report :healing)) (condition-case err (let* ((on-finish (and t (plist-get run :on-finish)))) (if on-finish (funcall on-finish report))) ((debug error) (kargu-log 'error \"on-finish callback failed: %s\" (error-message-string err)))) report))
+  (if (kargu-loop--live-p run) (progn (let ((report (kargu-loop--finish-report run status text)) (history (or (plist-get run :history) (kargu-history-context)))) (kargu-loop--detach-origin run) (kargu-loop--cancel-retry-timer run) (kargu-async-cancel-owner run) (kargu-application-set-active-run nil) (kargu-dismiss-confirmations) (if (memq status '(:stopped :error)) (progn (kargu-edit-changes :abort))) (let* ((v history)) (kargu-history-set-overlay nil v)) (kargu-session-mark-active nil (plist-get run :session)) (if (fboundp 'kargu-state-transition-status) (progn (let ((final-st (if (memq status '(:done :limit :stopped :error)) status :idle))) (kargu-state-transition-status final-st (or text (symbol-name status)))))) (kargu--validate-history 'keep-assistant-tail history) (kargu-log 'info \"run end: %s (iterations=%d, healing=%d)\" status (plist-get report :iterations) (plist-get report :healing)) (condition-case err (let* ((on-finish (and t (plist-get run :on-finish)))) (if on-finish (funcall on-finish report))) ((debug error) (kargu-log 'error \"on-finish callback failed: %s\" (error-message-string err)))) report)))
+  kargu-loop--finish-owned((:id \"kargu-20261021224828-15ae2a\" :prompt \"offline\" :state request :chat-buffer #<buffer  *run-owner*> :session #s(kargu-session :id-value \"kargu-20261021224828-1024ca\" :usage-value (:active nil :requests 0 :tokens-in 0 :tokens-out 0 :last-prompt-tokens 0 :started \"2026-10-21 22:48\") :mode-value ask :mode-revision 0 :mode-request nil :history-value #s(kargu-history :messages-value nil :tail-value nil :system-key-value nil :overlay-value nil :measured-tail-value nil :char-count-value nil) :selection-value #s(kargu-selection :provider-value nil :model-value nil :effort-value configured-effort)) :session-id \"kargu-20261021224828-1024ca\" :project-root \"/tmp/\" :mode ask :selection #s(kargu-selection :provider-value nil :model-value nil :effort-value configured-effort) :provider \"openai\" :model \"fake-model\" :api-base \"https://example.invalid\" :history #s(kargu-history :messages-value nil :tail-value nil :system-key-value nil :overlay-value nil :measured-tail-value nil :char-count-value nil) :max-iterations 12 :on-delta nil :on-finish #f(lambda (value) [(rejected nil) (report nil)] (progn (setq report value) (setq rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) :iterations 0 :healing 0 :verifications 0 :empty-retries 0 :upstream-retries 0 :compactions 0 :length-continues 0 :doom-sigs nil :no-tools t :owner-cleanup nil) :error \"Kargu: invalid application status transition from :stopped to :requesting\")
+  (save-current-buffer (set-buffer (if (buffer-live-p origin) origin (current-buffer))) (kargu-loop--finish-owned run status text))
+  (let ((origin (plist-get run :chat-buffer))) (save-current-buffer (set-buffer (if (buffer-live-p origin) origin (current-buffer))) (kargu-loop--finish-owned run status text)))
+  kargu--loop-finish((:id \"kargu-20261021224828-15ae2a\" :prompt \"offline\" :state request :chat-buffer #<buffer  *run-owner*> :session #s(kargu-session :id-value \"kargu-20261021224828-1024ca\" :usage-value (:active nil :requests 0 :tokens-in 0 :tokens-out 0 :last-prompt-tokens 0 :started \"2026-10-21 22:48\") :mode-value ask :mode-revision 0 :mode-request nil :history-value #s(kargu-history :messages-value nil :tail-value nil :system-key-value nil :overlay-value nil :measured-tail-value nil :char-count-value nil) :selection-value #s(kargu-selection :provider-value nil :model-value nil :effort-value configured-effort)) :session-id \"kargu-20261021224828-1024ca\" :project-root \"/tmp/\" :mode ask :selection #s(kargu-selection :provider-value nil :model-value nil :effort-value configured-effort) :provider \"openai\" :model \"fake-model\" :api-base \"https://example.invalid\" :history #s(kargu-history :messages-value nil :tail-value nil :system-key-value nil :overlay-value nil :measured-tail-value nil :char-count-value nil) :max-iterations 12 :on-delta nil :on-finish #f(lambda (value) [(rejected nil) (report nil)] (progn (setq report value) (setq rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) :iterations 0 :healing 0 :verifications 0 :empty-retries 0 :upstream-retries 0 :compactions 0 :length-continues 0 :doom-sigs nil :no-tools t :owner-cleanup nil) :error \"Kargu: invalid application status transition from :stopped to :requesting\")
+  (progn (if (> kargu--generation generation) (progn (kargu-api-cancel))) (kargu--loop-finish run :error (error-message-string err)))
+  (if (kargu-loop--live-p run) (progn (if (> kargu--generation generation) (progn (kargu-api-cancel))) (kargu--loop-finish run :error (error-message-string err))))
+  (condition-case err (progn (kargu-loop--attach-origin run) (kargu-state-transition-status :requesting) (if (kargu-loop--live-p run) (progn (kargu-session-mark-active t (plist-get run :session)) (kargu-log 'info \"run start (mode=%s, model=%s)\" (or (plist-get run :mode) (kargu-state-mode)) (or (plist-get run :model) (kargu--model))) (kargu--loop-request run prompt)))) (error (if (kargu-loop--live-p run) (progn (if (> kargu--generation generation) (progn (kargu-api-cancel))) (kargu--loop-finish run :error (error-message-string err))))))
+  (let ((generation kargu--generation)) (kargu-application-set-active-run run) (condition-case err (progn (kargu-loop--attach-origin run) (kargu-state-transition-status :requesting) (if (kargu-loop--live-p run) (progn (kargu-session-mark-active t (plist-get run :session)) (kargu-log 'info \"run start (mode=%s, model=%s)\" (or (plist-get run :mode) (kargu-state-mode)) (or (plist-get run :model) (kargu--model))) (kargu--loop-request run prompt)))) (error (if (kargu-loop--live-p run) (progn (if (> kargu--generation generation) (progn (kargu-api-cancel))) (kargu--loop-finish run :error (error-message-string err)))))))
+  kargu-loop--start-run((:id \"kargu-20261021224828-15ae2a\" :prompt \"offline\" :state request :chat-buffer #<buffer  *run-owner*> :session #s(kargu-session :id-value \"kargu-20261021224828-1024ca\" :usage-value (:active nil :requests 0 :tokens-in 0 :tokens-out 0 :last-prompt-tokens 0 :started \"2026-10-21 22:48\") :mode-value ask :mode-revision 0 :mode-request nil :history-value #s(kargu-history :messages-value nil :tail-value nil :system-key-value nil :overlay-value nil :measured-tail-value nil :char-count-value nil) :selection-value #s(kargu-selection :provider-value nil :model-value nil :effort-value configured-effort)) :session-id \"kargu-20261021224828-1024ca\" :project-root \"/tmp/\" :mode ask :selection #s(kargu-selection :provider-value nil :model-value nil :effort-value configured-effort) :provider \"openai\" :model \"fake-model\" :api-base \"https://example.invalid\" :history #s(kargu-history :messages-value nil :tail-value nil :system-key-value nil :overlay-value nil :measured-tail-value nil :char-count-value nil) :max-iterations 12 :on-delta nil :on-finish #f(lambda (value) [(rejected nil) (report nil)] (progn (setq report value) (setq rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) :iterations 0 :healing 0 :verifications 0 :empty-retries 0 :upstream-retries 0 :compactions 0 :length-continues 0 :doom-sigs nil :no-tools t :owner-cleanup nil) \"offline\\n\\n<system-reminder>\\nThis model cannot call tools. Answer in plain text. Do not invent function-call markup.\\n</system-reminder>\")
+  (let* ((no-tools (kargu-loop-preflight)) (wrapped (kargu-prompt-wrap-user prompt)) (run (kargu-loop--new-run prompt :no-tools no-tools :on-delta on-delta :on-finish on-finish))) (kargu-history-set-overlay nil nil) (kargu-edit-changes :reset) (kargu-loop--start-run run wrapped) run)
+  kargu-loop-send(\"offline\" nil #f(lambda (value) [(rejected nil) (report nil)] (progn (setq report value) (setq rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))))
+  (save-current-buffer (set-buffer origin) (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode)))
+  (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode)))
+  (progn (fset 'kargu--api-post vnew) (fset 'kargu--api-base vnew) (fset 'kargu--resolve-api-key vnew) (fset 'kargu--model vnew) (fset 'kargu--provider-name vnew) (fset 'kargu-model-supports-tools-p vnew) (fset 'kargu-deps-missing vnew) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p))))
+  (unwind-protect (progn (fset 'kargu--api-post vnew) (fset 'kargu--api-base vnew) (fset 'kargu--resolve-api-key vnew) (fset 'kargu--model vnew) (fset 'kargu--provider-name vnew) (fset 'kargu-model-supports-tools-p vnew) (fset 'kargu-deps-missing vnew) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p)))) (fset 'kargu--api-post old) (fset 'kargu--api-base old) (fset 'kargu--resolve-api-key old) (fset 'kargu--model old) (fset 'kargu--provider-name old) (fset 'kargu-model-supports-tools-p old) (fset 'kargu-deps-missing old))
+  (let* ((vnew (lambda (&rest _) nil)) (vnew (lambda (&rest _) nil)) (vnew (lambda (&rest _) \"openai\")) (vnew (lambda (&rest _) \"fake-model\")) (vnew (lambda (&rest _) \"fake-key\")) (vnew (lambda (&rest _) \"https://example.invalid\")) (vnew (lambda (_url _headers _payload _gen done &rest _) (setq callback done))) (old (symbol-function 'kargu--api-post)) (old (symbol-function 'kargu--api-base)) (old (symbol-function 'kargu--resolve-api-key)) (old (symbol-function 'kargu--model)) (old (symbol-function 'kargu--provider-name)) (old (symbol-function 'kargu-model-supports-tools-p)) (old (symbol-function 'kargu-deps-missing))) (unwind-protect (progn (fset 'kargu--api-post vnew) (fset 'kargu--api-base vnew) (fset 'kargu--resolve-api-key vnew) (fset 'kargu--model vnew) (fset 'kargu--provider-name vnew) (fset 'kargu-model-supports-tools-p vnew) (fset 'kargu-deps-missing vnew) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p)))) (fset 'kargu--api-post old) (fset 'kargu--api-base old) (fset 'kargu--resolve-api-key old) (fset 'kargu--model old) (fset 'kargu--provider-name old) (fset 'kargu-model-supports-tools-p old) (fset 'kargu-deps-missing old)))
+  (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil)) ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil)) ((symbol-function 'kargu--provider-name) (lambda (&rest _) \"openai\")) ((symbol-function 'kargu--model) (lambda (&rest _) \"fake-model\")) ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) \"fake-key\")) ((symbol-function 'kargu--api-base) (lambda (&rest _) \"https://example.invalid\")) ((symbol-function 'kargu--api-post) (lambda (_url _headers _payload _gen done &rest _) (setq callback done)))) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p))))
+  (unwind-protect (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil)) ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil)) ((symbol-function 'kargu--provider-name) (lambda (&rest _) \"openai\")) ((symbol-function 'kargu--model) (lambda (&rest _) \"fake-model\")) ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) \"fake-key\")) ((symbol-function 'kargu--api-base) (lambda (&rest _) \"https://example.invalid\")) ((symbol-function 'kargu--api-post) (lambda (_url _headers _payload _gen done &rest _) (setq callback done)))) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p)))) (when (buffer-live-p origin) (kill-buffer origin)))
+  (let ((origin (generate-new-buffer \" *run-owner*\")) session callback report rejected) (unwind-protect (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil)) ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil)) ((symbol-function 'kargu--provider-name) (lambda (&rest _) \"openai\")) ((symbol-function 'kargu--model) (lambda (&rest _) \"fake-model\")) ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) \"fake-key\")) ((symbol-function 'kargu--api-base) (lambda (&rest _) \"https://example.invalid\")) ((symbol-function 'kargu--api-post) (lambda (_url _headers _payload _gen done &rest _) (setq callback done)))) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p)))) (when (buffer-live-p origin) (kill-buffer origin))))
+  (let ((case (car tail))) (let ((origin (generate-new-buffer \" *run-owner*\")) session callback report rejected) (unwind-protect (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil)) ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil)) ((symbol-function 'kargu--provider-name) (lambda (&rest _) \"openai\")) ((symbol-function 'kargu--model) (lambda (&rest _) \"fake-model\")) ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) \"fake-key\")) ((symbol-function 'kargu--api-base) (lambda (&rest _) \"https://example.invalid\")) ((symbol-function 'kargu--api-post) (lambda (_url _headers _payload _gen done &rest _) (setq callback done)))) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p)))) (when (buffer-live-p origin) (kill-buffer origin)))) (setq tail (cdr tail)))
+  (while tail (let ((case (car tail))) (let ((origin (generate-new-buffer \" *run-owner*\")) session callback report rejected) (unwind-protect (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil)) ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil)) ((symbol-function 'kargu--provider-name) (lambda (&rest _) \"openai\")) ((symbol-function 'kargu--model) (lambda (&rest _) \"fake-model\")) ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) \"fake-key\")) ((symbol-function 'kargu--api-base) (lambda (&rest _) \"https://example.invalid\")) ((symbol-function 'kargu--api-post) (lambda (_url _headers _payload _gen done &rest _) (setq callback done)))) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p)))) (when (buffer-live-p origin) (kill-buffer origin)))) (setq tail (cdr tail))))
+  (let ((tail '(close mode-change))) (while tail (let ((case (car tail))) (let ((origin (generate-new-buffer \" *run-owner*\")) session callback report rejected) (unwind-protect (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil)) ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil)) ((symbol-function 'kargu--provider-name) (lambda (&rest _) \"openai\")) ((symbol-function 'kargu--model) (lambda (&rest _) \"fake-model\")) ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) \"fake-key\")) ((symbol-function 'kargu--api-base) (lambda (&rest _) \"https://example.invalid\")) ((symbol-function 'kargu--api-post) (lambda (_url _headers _payload _gen done &rest _) (setq callback done)))) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p)))) (when (buffer-live-p origin) (kill-buffer origin)))) (setq tail (cdr tail)))))
+  (dolist (case '(close mode-change)) (let ((origin (generate-new-buffer \" *run-owner*\")) session callback report rejected) (unwind-protect (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil)) ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil)) ((symbol-function 'kargu--provider-name) (lambda (&rest _) \"openai\")) ((symbol-function 'kargu--model) (lambda (&rest _) \"fake-model\")) ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) \"fake-key\")) ((symbol-function 'kargu--api-base) (lambda (&rest _) \"https://example.invalid\")) ((symbol-function 'kargu--api-post) (lambda (_url _headers _payload _gen done &rest _) (setq callback done)))) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p)))) (when (buffer-live-p origin) (kill-buffer origin)))))
+  (progn (setq load-prefer-newer t default-directory \"/tmp/nix-shell-731998-1481686508/kargu-scratch-VIrvgs/\") (require 'cl-lib) (require 'package) (package-initialize) (setq kargu-ui-enabled nil) (require 'kargu) (dolist (case '(close mode-change)) (let ((origin (generate-new-buffer \" *run-owner*\")) session callback report rejected) (unwind-protect (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil)) ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil)) ((symbol-function 'kargu--provider-name) (lambda (&rest _) \"openai\")) ((symbol-function 'kargu--model) (lambda (&rest _) \"fake-model\")) ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) \"fake-key\")) ((symbol-function 'kargu--api-base) (lambda (&rest _) \"https://example.invalid\")) ((symbol-function 'kargu--api-post) (lambda (_url _headers _payload _gen done &rest _) (setq callback done)))) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p)))) (when (buffer-live-p origin) (kill-buffer origin))))))
+  eval((progn (setq load-prefer-newer t default-directory \"/tmp/nix-shell-731998-1481686508/kargu-scratch-VIrvgs/\") (require 'cl-lib) (require 'package) (package-initialize) (setq kargu-ui-enabled nil) (require 'kargu) (dolist (case '(close mode-change)) (let ((origin (generate-new-buffer \" *run-owner*\")) session callback report rejected) (unwind-protect (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil)) ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil)) ((symbol-function 'kargu--provider-name) (lambda (&rest _) \"openai\")) ((symbol-function 'kargu--model) (lambda (&rest _) \"fake-model\")) ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) \"fake-key\")) ((symbol-function 'kargu--api-base) (lambda (&rest _) \"https://example.invalid\")) ((symbol-function 'kargu--api-post) (lambda (_url _headers _payload _gen done &rest _) (setq callback done)))) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \"offline\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \"Kargu: invalid application status transition from :stopped to :error
+reentry\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\"error\" (\"message\" . \"Late reply\")))) (cl-assert (not (kargu-loop-running-p)))) (when (buffer-live-p origin) (kill-buffer origin)))))) t)
+  command-line-1((\"-L\" \"/home/emrehan/.emacs.local/kargu/\" \"--eval\" \"(progn (setq load-prefer-newer t default-directory \\\"/tmp/nix-shell-731998-1481686508/kargu-scratch-VIrvgs/\\\") (require 'cl-lib) (require 'package) (package-initialize) (setq kargu-ui-enabled nil) (require 'kargu) (dolist (case '(close mode-change)) (let ((origin (generate-new-buffer \\\" *run-owner*\\\")) session callback report rejected) (unwind-protect (cl-letf (((symbol-function 'kargu-deps-missing) (lambda (&rest _) nil)) ((symbol-function 'kargu-model-supports-tools-p) (lambda (&rest _) nil)) ((symbol-function 'kargu--provider-name) (lambda (&rest _) \\\"openai\\\")) ((symbol-function 'kargu--model) (lambda (&rest _) \\\"fake-model\\\")) ((symbol-function 'kargu--resolve-api-key) (lambda (&rest _) \\\"fake-key\\\")) ((symbol-function 'kargu--api-base) (lambda (&rest _) \\\"https://example.invalid\\\")) ((symbol-function 'kargu--api-post) (lambda (_url _headers _payload _gen done &rest _) (setq callback done)))) (with-current-buffer origin (setq session (kargu-session-context)) (kargu-loop-send \\\"offline\\\" nil (lambda (value) (setq report value rejected (condition-case nil (progn (kargu-loop-send \\\"reentry\\\") nil) (user-error t))))) (if (eq case 'close) (kill-buffer origin) (fundamental-mode))) (cl-assert callback) (cl-assert rejected) (cl-assert (eq (plist-get report :status) :stopped)) (cl-assert (not (kargu-loop-running-p))) (cl-assert (not (plist-get (kargu-session-snapshot session) :active))) (funcall callback '((\\\"error\\\" (\\\"message\\\" . \\\"Late reply\\\")))) (cl-assert (not (kargu-loop-running-p)))) (when (buffer-live-p origin) (kill-buffer origin))))))\"))
+  command-line()
+  normal-top-level()
+")
+
+TEST: kargu-module-http-cleanup-without-client-or-loop-sources-test
+FILE: test-modules.el
+FAILED: t
+COND: (ert-test-failed "Isolated module test failed (255):
+Error loading autoloads: (epg-error no usable configuration OpenPGP)
+Kargu: invalid application status transition from :idle to :verifying
+
+Error: error (\"Kargu: invalid application status transition from :idle to :verifying\")
+  error(\"Kargu: invalid application status transition from %S to %S\" :idle :verifying)
+  (if (kargu-application-valid-transition-p current new-status) nil (error \"Kargu: invalid application status transition from %S to %S\" current new-status))
+  (let* ((target (kargu-application-context app)) (current (let* ((cl-x target)) (progn (or (let* ((cl-x cl-x)) (progn (and (memq (type-of cl-x) cl-struct-kargu-application-tags) t))) (signal 'wrong-type-argument (list 'kargu-application cl-x))) (aref cl-x 2))))) (if (kargu-application-valid-transition-p current new-status) nil (error \"Kargu: invalid application status transition from %S to %S\" current new-status)) (let* ((cl-x target)) (or (let* ((cl-x cl-x)) (progn (and (memq (type-of cl-x) cl-struct-kargu-application-tags) t))) (signal 'wrong-type-argument (list 'kargu-application cl-x))) (let* ((v cl-x)) (aset v 2 new-status))) new-status)
+  kargu-application-transition(nil :verifying)
+  kargu-application-set-status(:verifying)
+  (let nil (kargu-application-set-status value) (kargu-state--sync-snapshot))
+  (cond ((eq key :mode) (let nil (let ((session (kargu-session-context))) (let* ((cl-x session)) (or (let* ((cl-x cl-x)) (progn (and (memq (type-of cl-x) cl-struct-kargu-session-tags) t))) (signal 'wrong-type-argument (list 'kargu-session cl-x))) (let* ((v cl-x)) (aset v 3 value))) (let* ((cl-x session)) (or (let* ((cl-x cl-x)) (progn (and (memq (type-of cl-x) cl-struct-kargu-session-tags) t))) (signal 'wrong-type-argument (list 'kargu-session cl-x))) (let* ((v cl-x)) (aset v 4 (+ (aref v 4) 1))))))) ((eq key :status) (let nil (kargu-application-set-status value) (kargu-state--sync-snapshot))) ((eq key :busy) (let nil (kargu-state--sync-snapshot))) ((memq key '(:total-tokens :completion-tokens :prompt-tokens)) (let nil (kargu-state--sync-snapshot))) (t (let nil (setq kargu--state-store (plist-put (copy-sequence kargu--state-store) key value)))))
+  kargu-state--set(:status :verifying)
+  kargu-state-transition-status(:verifying)
+  (progn (setq load-prefer-newer t default-directory \"/tmp/nix-shell-731998-1481686508/kargu-scratch-VIrvgs/\") (require 'cl-lib) (require 'package) (package-initialize) (require 'kargu/api/http) (cl-assert (not (featurep 'kargu/api/client))) (cl-assert (not (featurep 'kargu/loop))) (kargu-state-transition-status :verifying) (let ((generation kargu--generation)) (kargu-http-clear-busy) (cl-assert (eq (kargu-state-status) :verifying)) (kargu-http-cancel) (cl-assert (= kargu--generation (1+ generation))) (cl-assert (eq (kargu-state-status) :verifying))))
+  eval((progn (setq load-prefer-newer t default-directory \"/tmp/nix-shell-731998-1481686508/kargu-scratch-VIrvgs/\") (require 'cl-lib) (require 'package) (package-initialize) (require 'kargu/api/http) (cl-assert (not (featurep 'kargu/api/client))) (cl-assert (not (featurep 'kargu/loop))) (kargu-state-transition-status :verifying) (let ((generation kargu--generation)) (kargu-http-clear-busy) (cl-assert (eq (kargu-state-status) :verifying)) (kargu-http-cancel) (cl-assert (= kargu--generation (1+ generation))) (cl-assert (eq (kargu-state-status) :verifying)))) t)
+  command-line-1((\"-L\" \"/tmp/nix-shell-731998-1481686508/kargu-module-matrix-qKZBT7\" \"--eval\" \"(progn (setq load-prefer-newer t default-directory \\\"/tmp/nix-shell-731998-1481686508/kargu-scratch-VIrvgs/\\\") (require 'cl-lib) (require 'package) (package-initialize) (require 'kargu/api/http) (cl-assert (not (featurep 'kargu/api/client))) (cl-assert (not (featurep 'kargu/loop))) (kargu-state-transition-status :verifying) (let ((generation kargu--generation)) (kargu-http-clear-busy) (cl-assert (eq (kargu-state-status) :verifying)) (kargu-http-cancel) (cl-assert (= kargu--generation (1+ generation))) (cl-assert (eq (kargu-state-status) :verifying))))\"))
+  command-line()
+  normal-top-level()
+")
+

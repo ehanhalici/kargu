@@ -1,0 +1,20 @@
+--- proof/run_tlc.sh
++++ proof/run_tlc.sh
+@@ -19,6 +19,7 @@
+ #   ./run_tlc.sh --debug-selection exhaustive debugger-selection scan
+ #   ./run_tlc.sh --debug-readiness exhaustive debugger-readiness scan
+ #   ./run_tlc.sh --connection    exhaustive connection-snapshot scan
++#   ./run_tlc.sh --transport     exhaustive transport-contract scan
+ #   ./run_tlc.sh --simulate [N]  random simulation of N behaviors (default
+ #                                100000): a quick smoke test, NOT a proof
+ #   ./run_tlc.sh <tlc args...>   any other arguments go to TLC as they are
+@@ -119,6 +120,10 @@
+     SPECIFICATION="ConnectionMC.tla (KarguConnection)"
+     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config ConnectionMC.cfg ConnectionMC.tla)
++elif [[ "$1" == "--transport" ]]; then
++    MODE="exhaustive transport-contract scan"
++    SPECIFICATION="TransportMC.tla (KarguTransport)"
++    ARGS=(-workers auto -nowarning -metadir "${METADIR}" -config TransportMC.cfg TransportMC.tla)
+ elif [[ "$1" == "--simulate" ]]; then
+     MODE="random simulation (not a proof)"
+     ARGS=(-workers auto -nowarning -metadir "${METADIR}" -simulate "num=${2:-100000}" MC.tla)
