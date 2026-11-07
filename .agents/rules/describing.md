@@ -186,7 +186,7 @@ Kargu's protocol invariants and agent loop state machine are formally specified 
 kargu/
 ├── kargu.el               # Package header, load-path setup, require ordering
 ├── config.toml.example    # Example TOML configuration (provider keys, models)
-├── skills.md              # The laws, contracts and coding style
+├── kargu-laws.md          # The laws, contracts and coding style
 ├── shell.nix              # TLC for proof/run_tlc.sh
 ├── kargu/
 │   ├── core.el            # Alist helpers, notify, OS/shell, kargu-cap-text
@@ -297,7 +297,7 @@ kargu/
 │
 ├── tests/                 # ERT suites; `run-tests.el` loads them all
 │   ├── test-helpers.el    # Scratch root, temp git repo, state isolation
-│   ├── test-laws.el       # One named test per contract (a)-(f) of skills.md
+│   ├── test-laws.el       # One named test per contract (a)-(f) of kargu-laws.md
 │   └── test-*.el          # One suite per module or feature
 │
 └── proof/

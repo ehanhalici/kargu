@@ -39,7 +39,7 @@ Atanmış işi somutlaştırmak için yeniden genel izin döngüsü kurulmaz; ka
 4. Bir grubun ortak sözleşmesini sonraki grup yeniden tasarlamaz. Gerekli dar
    bağlantıyı kendi tüketicisinde yapar; son tüketici taşınmadan köprü silinmez.
    Kalan global tüketicilerin isimleri kapanışta kaydedilir, son silme G13'tedir.
-5. skills.md stage edilmez; kullanıcıya ait .gitignore/yerel dosyalar korunur.
+5. Yerel skills.md (kök ve `.agents/rules/`) stage edilmez; kanonik kopya `.agents/rules/kargu-laws.md`; kullanıcıya ait .gitignore/yerel dosyalar korunur.
    Harici uygulama adapter'larının onaylı kapsamı [03_EXTERNAL_BRIDGES.md](.agents/skills/external-bridges/references/03_EXTERNAL_BRIDGES.md) ve [04_PHASED_ROADMAP.md](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md) [Aşama 5](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md)'tedir.
    Canlı hesap/ücretli CLI/MCP testi, binary indirme/kurulum, credential taşıma
    ve master merge/push ayrıca onay gerektirir.
