@@ -31,6 +31,17 @@ DTOs exclude this frozen metadata, preserving pending catalog captures.
 Interop credential receipts and complete model/wire metadata remain under
 `todo.md` 5.4a; native run binding ownership does not close those migrations.
 
+The native credential correlation port (`PendingRequests::register_preparation`)
+registers an actual RunClaim and its ClaimLease before editor IO. It mints a
+CredentialCaptureId independent of tool calls. Observation timeout/drop does not
+release the lease; only an exact scope/capture quiescent completion or connection
+closure drains it. Completion observed after claim cancellation/expiry drains the
+lease without delivering the key. Registration failure and unissued rollback release acquired leases. A completion
+receipt is not activation authority: consumers must still check current native
+config, selection and target. This is the correlation foundation; native reverse
+credential issuance and the editor actual-completion consumer remain tracked in
+`todo.md` 5.4a2b/c and are not implemented by this port alone.
+
 `configuration/parse` accepts captured bounded UTF-8 source and refresh generation
 on the exact ready connection epoch. It performs no filesystem, environment,
 credential or network IO and creates no application/session state. Generation is

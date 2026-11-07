@@ -140,6 +140,11 @@ identity!(
 );
 identity!(ClaimId, "claim_", "Application admission claim identity.");
 identity!(
+    CredentialCaptureId,
+    "credential_capture_",
+    "One native credential preparation receipt, never a tool invocation."
+);
+identity!(
     ToolCallId,
     "call_",
     "One committed native tool invocation identity."

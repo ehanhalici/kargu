@@ -2491,6 +2491,63 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         native session/config/selection/target ve süreye bağlı opaque receipt'e
         bağla; duplicate/foreign/stale sonucu activation'a taşıma. 5.4a1 sonrası.
 
+        - [x] **5.4a2a Claim-owned credential correlation:** tool-call olmayan
+          preparation için native capture kimliği ve retained pending kaydı kur.
+          Tablo actual `ClaimLease`'i tutsun; timeout/observer drop lease'i
+          düşürmesin. Yanlış scope/capture/quiescent olmayan cevap gerçek
+          tamamlanma sayılmasın; geç quiescent sonuç borcu bıraksın ama key'i
+          activation'a teslim etmesin. Bu port tek başına consumer cutover değildir.
+          **Teslim (`cdc1d51` devamı):** `PendingRequests::register_preparation`
+          gerçek claim'den lease alıyor ve native `CredentialCaptureId` üretiyor.
+          Opaque receipt + exact RunScope + `quiescent=true` alınmadan kaynak
+          düşmüyor. Observer drop, timeout, yanlış scope/capture, RPC error ve
+          tool-call biçimli cevap tamamlanma sayılmıyor. Cancel/expired claim
+          için doğru geç completion yalnız borcu bırakıyor; credential teslim
+          edilmiyor. Full/duplicate/expired/inactive registration, unissued
+          rollback ve connection drop lease sızdırmıyor. Tool effect portu aynı
+          completion sözleşmesini koruyor. Native reverse/Emacs consumer henüz
+          bu portu kullanmıyor; üst 5.4a2 açık.
+          **Kabul (2026-11-07):** yedi odak pending testi (altısı yeni claim
+          preparation vakası + mevcut tool effect regression) geçti. Tam locked
+          Rust 616/616 (32 compile-fail dahil), fmt, strict all-target Clippy ve
+          explicit build exit 0. Güncel binary ile independent bridge 40/40;
+          gerçek provider/editor completion içeren üç odak ERT 3/3, exit 0.
+          Selector: native-symbol-edit real-provider + provider-change-after-issue,
+          native-agent-edit captures-conversation/foreign-cancel. Son ERT
+          package autoload sırasında mevcut OpenPGP configuration mesajı verdi;
+          testlerin tamamı geçti. Loglar
+          `/tmp/kargu-credential-port-{all,final-unit,bridge,editor-ert}.log`.
+          Elisp/TLA+ değişmedi; full ERT/lint ve TLC bu Rust-only dilimde tekrar
+          çalıştırılmadı. Producer/consumer kabulü 5.4a2b/c'de ayrı kalır.
+
+        - [ ] **5.4a2b Native reverse credential hazırlığı:** claim'den sonra
+          exact epoch/run/capture kimliği ve parent deadline ile editor interop
+          isteğini üret; Stop/reset/close/config change'te revoke → actual
+          quiescence → typed connection → activation sırasını uygula.
+
+        - [ ] **5.4a2c Emacs consumer ve kabul:** native run yolunda erken
+          auth-source/callable lookup'u kaldır; Emacs yalnız native isteğin
+          hedeflediği worker'ı çalıştırsın ve actual completion ile cevaplasın.
+          Duplicate/stale/foreign/late/Stop/EOF ve sonraki claim kabulünü gerçek
+          pipe/ERT ile doğrula. Standalone API/catalog tüketicilerini koru;
+          bu alt işler bitmeden üst 5.4a2 kapanmaz.
+
+          - [ ] **5.4a2c1 Actual worker completion portu:** mevcut
+            `kargu-async--close` task'i kapatıp cleanup çağırıyor;
+            `kargu-config-worker-start` cleanup'ı process'i silip buffer'ı
+            temizliyor. Bu observer callback'i tek başına adapter/worker
+            quiescence receipt'i sayılmaz. Native adapter için actual child
+            terminal/join kanalı ekle; timeout/Stop önce revoke etsin, receipt
+            yalnız gerçek tamamlanmadan sonra gönderilsin. Custom adapter'ın
+            observer/actual completion ayrımını kontrollü geç callback testiyle
+            doğrula. Sıra: 5.4a2b → c1 → c2.
+
+          - [ ] **5.4a2c2 Consumer cutover ve karma kabul:** c1 portuyla native
+            credential reverse handler'ını bağla; erken frontend lookup'u native
+            agent yolundan kaldır. Direct/keyless/interop, custom callable,
+            Standalone API/catalog, Stop/reset/EOF ve sonraki claim testlerini
+            aynı binary ile çalıştır; eski owner callback'i yeni run'a taşınmasın.
+
       - [ ] **5.4a3 Model metadata/wire receipt:** capabilities, wire/auth türü
         ve tuning capture'ını native model/registry revision'ına bağla. Header
         template bağı tam metadata eşdeğerliği değildir. 5.4a2 sonrası.
