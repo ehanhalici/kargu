@@ -110,10 +110,17 @@ Startup errors are reported without switching to the Elisp backend."
      (let* ((provider (kargu-connection-snapshot-provider snapshot))
             (capabilities (kargu-connection-snapshot-capabilities snapshot))
             (settings (kargu-connection-snapshot-settings snapshot))
+            (wire (kargu-providers-wire-object (plist-get settings :wire)))
+            (tuning (if (plist-get settings :tuning)
+                        (kargu-providers-wire-object (plist-get settings :tuning))
+                      (kargu-bridge--object)))
             ;; Rust takes direct keys from committed policy and interop keys
             ;; from its own receipt; the editor never sends one.
             (auth (kargu-api-auth-intent nil provider)))
        (setcdr (assoc "session" auth) (plist-get run :session-id))
+       ;; These metadata assertions are owned by the native publication.
+       (remhash "supported_parameters" tuning)
+       (remhash "provider_policy" tuning)
        (kargu-bridge--object
         "root" (copy-sequence (plist-get run :project-root))
         "mode" (symbol-name (plist-get run :mode))
@@ -131,10 +138,11 @@ Startup errors are reported without switching to the Elisp backend."
          "url" (kargu-connection-snapshot-endpoint snapshot)
          "model" (kargu-connection-snapshot-model snapshot)
          "provider" provider "headers" (kargu-bridge--object)
-         "wire" (kargu-providers-wire-object (plist-get settings :wire))
-         "tuning" (if-let* ((tuning (plist-get settings :tuning)))
-                      (kargu-providers-wire-object tuning)
-                    (kargu-bridge--object))
+         "wire" (kargu-bridge--object "default-headers"
+                                      (if (hash-table-p wire)
+                                          (or (gethash "default-headers" wire) (kargu-bridge--object))
+                                        (kargu-bridge--object)))
+         "tuning" tuning
          "auth" (kargu-providers-wire-object auth)
          "cache_markers" (if (plist-get settings :cache-marker) t :json-false)
          "stream" (if kargu-stream t :json-false)

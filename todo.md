@@ -2724,7 +2724,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
               IPC 51/51, tam source ERT 1469/1469; strict Clippy, fmt ve build
               temiz. Loglar `/tmp/kargu-native-model-policy-{accepted,all,ert}.log`.
               Elisp/TLA+ değişmedi; TLC çalıştırılmadı.
-            - [ ] **5.4a3b2b Stream/reasoning ve provider tuning policy:** stream
+            - [x] **5.4a3b2b Stream/reasoning ve provider tuning policy:** stream
               yeteneğini native wire politikasına, effort/budget kabulünü native
               model projection'ına bağla; editörün `provider_policy` override'ını
               committed format/provider politikasından kur. 5.4a3c ile birlikte
@@ -2738,11 +2738,39 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
                 HTTP testi native model reasoning desteğinin hem açık hem kapalı
                 halinde explicit effort'u; ayrı test native stream kapalıyken
                 sahte wire/stream/auth/output override'larını sınar.
-              - [ ] **5.4a3b2b2 Reasoning intent ve frontend temizlik kabulü:**
+              - [x] **5.4a3b2b2 Reasoning intent ve frontend temizlik kabulü:**
                 native modelin ilan ettiği effort etiketleriyle explicit effort
                 seçiminin uyumunu doğrula; bilinmeyen/retired etiketler, thinking
                 budget ve retry davranışını gerçek consumer'da sınayarak kalan
                 frontend wire/provider-policy capture alanlarını kaldır.
+                **Teslim:** immutable native `RunModelPolicy` tool/reasoning
+                izni, exact-ID parameters ve typed effort listesini birlikte
+                yakalar. Reasoning açıksa explicit effort yalnız native ilan
+                edilen etiketlerden biri olabilir; eksik/yabancı/eski etiket
+                activation ve HTTP öncesi reddedilir. Reasoning kapalıysa önceki
+                suppression korunur. Native frontend yalnız explicit tuning
+                tercihlerini ve wire default-header guard'ını gönderir; tam wire,
+                supported-parameters ve provider-policy capture gönderilmez.
+                Explicit `off`, kalan thinking budget'ı da temizler; destekli
+                modelde bile kapalı tercihi budget alanlarıyla yeniden açılamaz.
+                **Kanıt:** gerçek IPC corpus'u retired/unknown/missing label ve
+                sıfır thinking budget'ta socket açılmadığını sınar. Nested wire
+                testi effort + budget'ı gerçek HTTP gövdesinde gözler; ilk 503
+                yanıtı beklerken model listesi high → low değiştirilir, retry
+                eski geçerli high/budget capture'ını ve aynı gövdeyi korur.
+                Güncel revision'da aynı retired high ile yeni run açma denemesi
+                HTTP üretmeden reddedilir.
+                Ardından güncel revision'la açılan off + budget run'ı reasoning
+                kontrol alanları üretmeden tamamlanır.
+                Pinned snapshot ERT'si native arguments'ta explicit temperature
+                korunurken kaldırılan metadata alanlarının dönmediğini doğrular.
+                **Doğrulama:** locked Rust 630/630 (32 compile-fail dahil), native
+                IPC 54/54; son retired-label/sonraki off-run odak testi ayrıca
+                geçti. Tam source ERT 1469/1469; strict Clippy/fmt/build ve
+                değişen Elisp Werror/checkdoc temiz. Loglar
+                `/tmp/kargu-native-effort-verified-{rust,ert}.log`,
+                `/tmp/kargu-native-effort-retired.log`,
+                `/tmp/kargu-native-effort-lint.log`. TLA+ değişmedi; TLC yok.
         - [ ] **5.4a3c Native wire/auth policy:** registry format/wire/auth
           türünü native publication'a dahil et; typed connection'ı committed
           politikadan kur, editörün wire/auth türü yetki olmasın. Custom provider
@@ -2777,6 +2805,9 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
             native publication'a al; standalone API/catalog ve custom wire
             corpus'u ile eşdeğerliği kapat. Bu kabul ve b2b2 bitmeden üst 5.4a3
             kapanmaz.
+            **İlerleme:** tam wire/provider-policy/supported-parameters request
+            alanları b2b2'de temizlendi. Kalan: custom default/unsupported ve
+            cache-marker annotation sahipliği; standalone/custom wire karma kabul.
 
       - [ ] **5.4a4 Context revision receipt:** 4.9 native context store portu
         üzerinden captured revision'ı claim/activation'a bağla. 4.9 ve 5.4a3

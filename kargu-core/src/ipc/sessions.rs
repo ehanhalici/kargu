@@ -369,12 +369,11 @@ impl Sessions {
         if input.model_revision != model_revision {
             return Err(fault(CoreError::ConfigurationChanged));
         }
-        let (tools, reasoning, parameters) = host
+        let model_policy = host
             .run_model_policy(&request.scope, &target)
             .map_err(fault)?;
-        input.tools_enabled &= tools;
-        target.model_parameters = parameters;
-        target.reasoning = reasoning;
+        input.tools_enabled &= model_policy.tools;
+        target.model_policy = model_policy;
         let claim = host
             .actor_mut(&request.scope)
             .map_err(fault)?

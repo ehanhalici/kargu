@@ -138,6 +138,9 @@ impl TryFrom<String> for ReasoningSelection {
     }
 }
 impl ReasoningSelection {
+    pub fn disabled(&self) -> bool {
+        matches!(self, Self::Disabled)
+    }
     pub fn effort(&self) -> Option<&str> {
         match self {
             Self::Effort(name) => Some(&name.0),

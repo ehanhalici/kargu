@@ -19,6 +19,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json, value::RawValue};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Immutable native model authority captured before preparation IO.
+#[derive(Clone, Default)]
+pub(crate) struct RunModelPolicy {
+    pub tools: bool,
+    pub reasoning: bool,
+    pub parameters: Option<Vec<String>>,
+    pub efforts: Option<Vec<crate::models::metadata::EffortName>>,
+}
+
 /// Summary DTO for UI presentation of a model's capabilities.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ModelSummaryDto {
@@ -281,9 +290,12 @@ impl ModelStore {
         &self,
         provider: &ApiProviderId,
         model: &ModelId,
-    ) -> Result<(bool, bool, Option<Vec<String>>), StoreError> {
+    ) -> Result<RunModelPolicy, StoreError> {
         let Some(p) = self.providers.get(provider) else {
-            return Ok((true, false, None));
+            return Ok(RunModelPolicy {
+                tools: true,
+                ..Default::default()
+            });
         };
         let canonical = alias(&p.entries, model).ok();
         let fields = canonical
@@ -302,11 +314,17 @@ impl ModelStore {
         } else {
             None
         };
-        Ok((
+        let efforts = if p.entries.contains_key(model) {
+            fields.as_ref().and_then(ModelFields::request_efforts)
+        } else {
+            None
+        };
+        Ok(RunModelPolicy {
             tools,
-            fields.as_ref().is_some_and(ModelFields::allows_reasoning),
+            reasoning: fields.as_ref().is_some_and(ModelFields::allows_reasoning),
             parameters,
-        ))
+            efforts,
+        })
     }
     /// Return a specific model summary for a provider.
     pub fn provider_model(

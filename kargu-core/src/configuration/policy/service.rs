@@ -130,8 +130,7 @@ pub(crate) struct RunTarget {
     pub(crate) provider: String,
     pub(crate) model: Option<String>,
     pub(crate) endpoint: Option<String>,
-    pub(crate) model_parameters: Option<Vec<String>>,
-    pub(crate) reasoning: bool,
+    pub(crate) model_policy: crate::models::store::RunModelPolicy,
     profile: resolve::ReadyProfile,
     app_url: Option<crate::configuration::domain::ConfigText>,
     headers: crate::api::HeaderTemplates,
@@ -155,8 +154,7 @@ impl RunTarget {
             self.app_url.as_ref().map(|value| value.as_str()),
             self.profile.native_key(interop)?,
             crate::api::NativeRunPolicy {
-                parameters: self.model_parameters.clone(),
-                reasoning: self.reasoning,
+                model: self.model_policy.clone(),
                 wire: crate::api::wire::WireSpec::native_capture(
                     self.wire.as_ref().map(|value| value.as_str()),
                     self.wire_headers.clone(),
@@ -233,8 +231,7 @@ impl ConfigurationService {
         )?;
         let (provider, model, endpoint) = target.identity();
         Ok(RunTarget {
-            model_parameters: None,
-            reasoning: false,
+            model_policy: Default::default(),
             wire: published
                 .context
                 .registry

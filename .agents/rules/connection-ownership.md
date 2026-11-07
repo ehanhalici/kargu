@@ -10,8 +10,9 @@ the unsent draft. A changed session, selection, endpoint or config revision
 invalidates a pending credential result.
 
 Native `session/prompt` admission resolves its target from the published config
-and the conversation selection. Direct `auth.key` must equal the native policy
-result; keyless targets cannot acquire a nonempty key. Raw connection headers
+and the conversation selection. Native prompts cannot carry a nonempty editor
+`auth.key`; Rust supplies the committed direct key or its own interop receipt.
+Keyless targets cannot acquire a key. Raw connection headers
 are refused. Extra-header and wire default-header templates must equal the
 committed registry's `headers` and `wire_headers` projections; names compare
 case-insensitively, duplicate names and bounded-size violations are rejected.
@@ -79,10 +80,15 @@ kind, stream capability and provider tuning defaults come from that publication
 The existing committed wire-header port supplies default headers. Stream is
 clamped to native wire support; absent native reasoning support suppresses effort
 and thinking budget. The editor forwards the explicit stream preference.
-Transient credential projections omit wire/tuning metadata. Remaining work in
-5.4a3b2b2/c2 covers effort-label compatibility, redundant request DTO removal,
-unsupported/custom default policy and cache-marker ownership; this cutover does
-not certify those contracts.
+Transient credential projections omit wire/tuning metadata. When native reasoning
+is enabled, an explicit effort must match a label from the exact model record;
+missing, foreign or retired declarations do not authorize a label. Unsupported
+reasoning retains suppression of effort/budget. The captured typed policy remains
+fixed across physical retries, including later metadata publications. Explicit
+`off` also removes a retained thinking budget, so it cannot reintroduce reasoning
+control fields. Native frontend arguments carry explicit tuning preferences and a default-header guard,
+not full wire/provider-policy/supported-parameter metadata. Remaining work in
+5.4a3c2 covers unsupported/custom default policy and cache-marker ownership.
 
 Wire metadata travels only in commit context, not initial config staging.
 The editor deduplicates identical wire strings into `wire_formats` and sends

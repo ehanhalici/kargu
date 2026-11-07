@@ -42,11 +42,25 @@ impl<'a> Defaults<'a> {
 }
 
 impl RequestTuning {
-    pub(crate) fn bind_reasoning(&mut self, allowed: bool) {
-        if !allowed {
+    pub(crate) fn bind_reasoning(
+        &mut self,
+        allowed: bool,
+        efforts: Option<&[crate::models::metadata::EffortName]>,
+    ) -> Result<(), ApiError> {
+        if !allowed
+            || self
+                .effort
+                .as_ref()
+                .is_some_and(ReasoningSelection::disabled)
+        {
             self.effort = None;
             self.thinking_budget = None;
+        } else if let Some(effort) = self.effort.as_ref().and_then(ReasoningSelection::effort)
+            && !efforts.is_some_and(|values| values.iter().any(|value| value.as_str() == effort))
+        {
+            return Err(ApiError::InvalidRequest);
         }
+        Ok(())
     }
     pub(crate) fn bind_provider_policy(&mut self, source: Option<&str>) -> Result<(), ApiError> {
         self.provider_policy = source

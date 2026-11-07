@@ -291,7 +291,11 @@
          (snapshot (kargu-connection-snapshot--create
                     :provider "openai" :model "pinned-model"
                     :endpoint "http://127.0.0.1:1" :config-revision 12
-                    :settings '(:metadata-revision 7)
+                    :settings '(:metadata-revision 7
+                                :wire (:auth "x-api-key" :stream t :chat-path "/foreign")
+                                :tuning (("temperature" . 0.4)
+                                         ("supported_parameters" . ["temperature"])
+                                         ("provider_policy" . :json-empty-object)))
                     :credential-scope credential))
          (run (kargu-loop--new-run "prompt"))
          (arguments (kargu-loop-native--arguments run snapshot))
@@ -303,6 +307,11 @@
     (should-not (gethash "Authorization" (gethash "headers" connection)))
     (should (= (gethash "config_revision" arguments) 12))
     (should (= (gethash "model_revision" arguments) 7))
+    (should (= (gethash "temperature" (gethash "tuning" connection)) 0.4))
+    (should-not (gethash "supported_parameters" (gethash "tuning" connection)))
+    (should-not (gethash "provider_policy" (gethash "tuning" connection)))
+    (should (= (hash-table-count (gethash "wire" connection)) 1))
+    (should (hash-table-p (gethash "default-headers" (gethash "wire" connection))))
     (should (= (gethash "turn_limit" arguments) (plist-get run :max-iterations)))))
 
 (provide 'tests/test-connection-snapshot)

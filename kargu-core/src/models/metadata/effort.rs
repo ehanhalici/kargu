@@ -8,6 +8,11 @@ use serde_json::value::RawValue;
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(try_from = "String")]
 pub struct EffortName(String);
+impl EffortName {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 impl TryFrom<String> for EffortName {
     type Error = MetadataError;
     fn try_from(value: String) -> Result<Self, Self::Error> {

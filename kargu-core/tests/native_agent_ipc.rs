@@ -159,6 +159,49 @@ fn complete_credential(
         "scope":request["params"]["scope"],"capture_id":request["params"]["capture_id"],
         "quiescent":true,"outcome":outcome,"key":key}}))
 }
+fn publish_model_metadata(
+    peer: &mut Peer,
+    scope: &Value,
+    revision: u64,
+    model: Value,
+    metadata: Value,
+    events: &mut Vec<Value>,
+) -> TestResult {
+    send(
+        peer,
+        "effort-begin",
+        "models/begin",
+        json!({"scope":scope,
+        "arguments":{"provider":"fixture","revision":revision}}),
+    )?;
+    let upload = response(peer, "effort-begin", events)?["result"]["upload_id"].clone();
+    assert!(upload.is_string());
+    send(
+        peer,
+        "effort-append",
+        "models/append",
+        json!({"scope":scope,
+        "arguments":{"upload_id":upload,"offset":0,"chunk":json!({"operation":"put",
+            "model":model,"metadata":metadata}).to_string()}}),
+    )?;
+    assert!(
+        response(peer, "effort-append", events)?
+            .get("error")
+            .is_none()
+    );
+    send(
+        peer,
+        "effort-commit",
+        "models/commit",
+        json!({"scope":scope,
+        "arguments":{"upload_id":upload}}),
+    )?;
+    assert_eq!(
+        response(peer, "effort-commit", events)?["result"]["revision"],
+        revision + 1
+    );
+    Ok(())
+}
 fn prompt(root: &std::path::Path, url: &str) -> Value {
     json!({"root":root,"mode":"agent","prompt":{"role":"user","content":"Inspect synthetic workspace"},
         "tools_enabled":false,"editor_available":[],"tool_limit":8,"turn_limit":4,"timeout_ms":15000,
@@ -563,7 +606,7 @@ fn native_model_policy_overrides_editor_tools_and_parameter_claims() -> TestResu
             "models/append",
             json!({"scope":scope,
             "arguments":{"upload_id":upload,"offset":0,"chunk":json!({"operation":"put",
-                "model":model,"metadata":{"supports_tools":false,"supports_reasoning":temperature,"supported_parameters":parameters}}).to_string()}}),
+                "model":model,"metadata":{"supports_tools":false,"supports_reasoning":temperature,"reasoning-efforts":["high"],"supported_parameters":parameters}}).to_string()}}),
         )?;
         assert!(
             response(&peer, "policy-append", &mut events)?
@@ -633,6 +676,118 @@ fn native_wire_auth_stream_and_provider_tuning_ignore_editor_policy() -> TestRes
     assert_ne!(body["stream"], true);
     assert!(body.get("reasoning_effort").is_none());
     assert!(body.get("thinking").is_none());
+    server.join().map_err(|_| "server panic")??;
+    Ok(())
+}
+
+#[test]
+fn undeclared_native_efforts_and_invalid_thinking_budgets_never_open_http() -> TestResult {
+    for (labels, tuning) in [
+        (json!(["low"]), json!({"effort":"high"})),
+        (Value::Null, json!({"effort":"high"})),
+        (json!(["high"]), json!({"effort":"foreign"})),
+        (json!(["high"]), json!({"thinking_budget":0})),
+    ] {
+        let root = tempfile::tempdir()?;
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        listener.set_nonblocking(true)?;
+        let url = format!("http://{}/v1", listener.local_addr()?);
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let mut bound = prompt(root.path(), &url);
+        publish_target(&mut peer, &scope, &mut bound)?;
+        let mut events = Vec::new();
+        publish_model_metadata(
+            &mut peer,
+            &scope,
+            0,
+            bound["connection"]["model"].clone(),
+            json!({"supports_reasoning":true,"reasoning-efforts":labels}),
+            &mut events,
+        )?;
+        bound["model_revision"] = json!(1);
+        bound["connection"]["tuning"] = tuning;
+        begin(&mut peer, "invalid-effort", &scope, bound)?;
+        assert_eq!(
+            response(&peer, "invalid-effort", &mut events)?["result"]["status"],
+            "failed"
+        );
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn native_effort_and_budget_remain_frozen_across_metadata_change_and_retry() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let (release, wait) = mpsc::channel();
+    let held = Reply {
+        status: 503,
+        content_type: "application/json",
+        body: "retry".to_owned(),
+        release: Some(wait),
+    };
+    let (url, server, requests) = server(vec![
+        held,
+        answer("retried reasoning"),
+        answer("reasoning disabled"),
+    ])?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut bound = prompt(root.path(), &url);
+    bound["connection"]["wire"] = json!({"reasoning-shape":"nested","stream":false});
+    publish_target(&mut peer, &scope, &mut bound)?;
+    let model = bound["connection"]["model"].clone();
+    let mut events = Vec::new();
+    publish_model_metadata(
+        &mut peer,
+        &scope,
+        0,
+        model.clone(),
+        json!({"supports_reasoning":true,"reasoning-efforts":["high"]}),
+        &mut events,
+    )?;
+    bound["model_revision"] = json!(1);
+    bound["connection"]["tuning"] = json!({"effort":"high","thinking_budget":7});
+    begin(&mut peer, "reasoning-retry", &scope, bound.clone())?;
+    let first = requests.recv_timeout(Duration::from_secs(3))?;
+    assert_eq!(first["reasoning"], json!({"effort":"high","max_tokens":7}));
+    publish_model_metadata(
+        &mut peer,
+        &scope,
+        1,
+        model,
+        json!({"supports_reasoning":true,"reasoning-efforts":["low"]}),
+        &mut events,
+    )?;
+    release.send(())?;
+    let reply = response(&peer, "reasoning-retry", &mut events)?;
+    assert_eq!(reply["result"]["status"], "completed");
+    assert_eq!(reply["result"]["accounting"]["budget"]["requests_spent"], 2);
+    assert_eq!(requests.recv_timeout(Duration::from_secs(3))?, first);
+    bound["model_revision"] = json!(2);
+    begin(&mut peer, "retired-effort", &scope, bound.clone())?;
+    assert_eq!(
+        response(&peer, "retired-effort", &mut events)?["result"]["status"],
+        "failed"
+    );
+    assert!(matches!(
+        requests.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    bound["connection"]["tuning"] = json!({"effort":"off","thinking_budget":7});
+    begin(&mut peer, "reasoning-off", &scope, bound)?;
+    assert_eq!(
+        response(&peer, "reasoning-off", &mut events)?["result"]["status"],
+        "completed"
+    );
+    let disabled = requests.recv_timeout(Duration::from_secs(3))?;
+    assert!(disabled.get("reasoning").is_none());
+    assert!(disabled.get("thinking").is_none());
     server.join().map_err(|_| "server panic")??;
     Ok(())
 }

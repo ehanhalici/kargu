@@ -11,7 +11,7 @@ mod effort;
 mod raw;
 mod text;
 
-pub use effort::EffortSpecs;
+pub use effort::{EffortName, EffortSpecs};
 pub(crate) use raw::RawMetadata;
 pub use text::{MetadataLabel, ParameterName};
 
@@ -234,6 +234,9 @@ impl ModelFields {
     /// Legacy input-only marketing observation; never billing authorization.
     pub fn input_is_zero(&self) -> bool {
         self.input_cost.known().is_some_and(InputTokenRate::is_zero)
+    }
+    pub(crate) fn request_efforts(&self) -> Option<Vec<effort::EffortName>> {
+        self.reasoning_efforts.known().cloned()
     }
     /// Exact declared request parameters; absent/invalid observations stay unknown.
     pub(crate) fn request_parameters(&self) -> Option<Vec<String>> {
