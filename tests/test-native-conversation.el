@@ -1,5 +1,14 @@
 ;;; test-native-conversation.el --- Per-chat native ownership -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2026 kargu developers.
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Each chat owns its own native conversation; fixtures use a real core.
+
+;;; Code:
+
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/bridge/conversation)
@@ -112,7 +121,7 @@
   "Send PROMPT for APPLICATION and OWNER to the local provider at URL under ROOT."
   (let (done result failure)
     (with-current-buffer owner
-      (kargu-loop-native-owned-start
+      (kargu-test-native-owned-start
        application
        (kargu-bridge--object
         "root" root "mode" "ask" "prompt" (kargu-bridge--object "role" "user" "content" prompt)

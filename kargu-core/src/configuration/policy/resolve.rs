@@ -68,6 +68,16 @@ impl TryFrom<Profile> for ReadyProfile {
     }
 }
 impl ReadyProfile {
+    /// Provider, model and endpoint text that a native run must target.
+    pub(super) fn identity(
+        &self,
+    ) -> (&crate::providers::ApiProviderId, Option<&str>, Option<&str>) {
+        (
+            &self.0.provider,
+            self.0.model.as_ref().map(ConfigText::as_str),
+            self.0.endpoint.as_ref().map(ConfigText::as_str),
+        )
+    }
     pub(super) fn into_editor_value(self) -> Value {
         self.0.into_editor_value()
     }

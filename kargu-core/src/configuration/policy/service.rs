@@ -114,6 +114,13 @@ pub(crate) struct ConfigurationService {
     published: Option<Published>,
 }
 
+/// Natively resolved run target at one exact published revision.
+pub(crate) struct RunTarget {
+    pub(crate) provider: String,
+    pub(crate) model: Option<String>,
+    pub(crate) endpoint: Option<String>,
+}
+
 /// How a native refresh request proceeds after admission.
 pub(crate) enum RefreshStart {
     /// Read the native-ordered candidates for this generation on a worker.
@@ -124,6 +131,45 @@ pub(crate) enum RefreshStart {
     Observed,
 }
 impl ConfigurationService {
+    /// Resolve the run target from the published document, its committed
+    /// context and the conversation's native selection, never editor URLs.
+    pub(crate) fn run_target(
+        &self,
+        revision: ConfigRevision,
+        provider: Option<&crate::providers::ApiProviderId>,
+        model: Option<&str>,
+        catalog: &ProviderCatalog,
+    ) -> Result<RunTarget, CoreError> {
+        if !self.is_revision(revision) {
+            return Err(CoreError::ConfigurationChanged);
+        }
+        let published = self.published.as_ref().ok_or(CoreError::Unavailable)?;
+        let selection = SelectionInput {
+            provider: provider.cloned(),
+            model: model
+                .map(|model| crate::configuration::domain::ConfigText::try_from(model.to_owned()))
+                .transpose()
+                .map_err(|_| CoreError::InvalidValue {
+                    field: "selection_model",
+                })?,
+        };
+        let target = resolve::target(
+            &published.document,
+            &published.context,
+            TargetInput {
+                provider: None,
+                model: None,
+                selection: Some(selection),
+            },
+            catalog,
+        )?;
+        let (provider, model, endpoint) = target.identity();
+        Ok(RunTarget {
+            provider: provider.as_str().to_owned(),
+            model: model.filter(|model| !model.is_empty()).map(str::to_owned),
+            endpoint: endpoint.map(str::to_owned),
+        })
+    }
     /// Current committed publication revision.
     pub(crate) fn revision(&self) -> ConfigRevision {
         self.revision

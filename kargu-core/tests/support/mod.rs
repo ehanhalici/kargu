@@ -12,6 +12,7 @@ pub(super) struct Peer {
     pub(super) input: Option<ChildStdin>,
     output: Receiver<String>,
     pub(super) epoch: String,
+    deferred: std::cell::RefCell<std::collections::VecDeque<Value>>,
 }
 
 impl Peer {
@@ -62,6 +63,7 @@ impl Peer {
             input: Some(input),
             output,
             epoch: String::new(),
+            deferred: Default::default(),
         })
     }
     pub(super) fn raw(&mut self, bytes: &[u8]) -> TestResult {
@@ -74,9 +76,33 @@ impl Peer {
         self.raw(format!("{value}\n").as_bytes())
     }
     pub(super) fn read(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        if let Some(value) = self.deferred.borrow_mut().pop_front() {
+            return Ok(value);
+        }
         // Production cleanup includes a five-second TERM grace and pipe/reap drain.
         let line = self.output.recv_timeout(Duration::from_secs(12))?;
         Ok(serde_json::from_str(&line)?)
+    }
+    /// Await one reply; unrelated messages stay queued, in order, for `read`.
+    #[allow(dead_code)]
+    pub(super) fn call(
+        &mut self,
+        id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        self.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))?;
+        let mut skipped = Vec::new();
+        let reply = loop {
+            let line = self.output.recv_timeout(Duration::from_secs(12))?;
+            let value: Value = serde_json::from_str(&line)?;
+            if value["id"] == id && value.get("method").is_none() {
+                break value;
+            }
+            skipped.push(value);
+        };
+        self.deferred.borrow_mut().extend(skipped);
+        Ok(reply)
     }
     #[allow(dead_code)]
     pub(super) fn initialize(&mut self) -> TestResult {

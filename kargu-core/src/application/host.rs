@@ -591,6 +591,45 @@ impl Host {
         }
     }
 
+    /// Natively resolve the prompt target for a conversation at `revision`.
+    pub(crate) fn prompt_target(
+        &self,
+        scope: &ReadScope,
+        revision: crate::domain::ConfigRevision,
+    ) -> Result<crate::configuration::policy::RunTarget, crate::error::CoreError> {
+        let catalog = self
+            .providers
+            .as_ref()
+            .map_err(|_| crate::error::CoreError::Unavailable)?;
+        let actor = self
+            .applications
+            .get(&scope.application_id)
+            .filter(|app| app.is_live())
+            .ok_or(crate::error::CoreError::StaleOwner)?
+            .actor();
+        let selection = actor.session_selection(&scope.session_id)?.selection();
+        actor.configuration.run_target(
+            revision,
+            selection.provider.as_ref(),
+            selection
+                .model
+                .as_ref()
+                .map(super::selection::ModelChoice::as_str),
+            catalog,
+        )
+    }
+
+    /// Whether `revision` is still the application's published configuration.
+    pub(crate) fn configuration_current(
+        &self,
+        scope: &ReadScope,
+        revision: crate::domain::ConfigRevision,
+    ) -> bool {
+        self.applications
+            .get(&scope.application_id)
+            .is_some_and(|app| app.actor().configuration.is_revision(revision))
+    }
+
     pub(crate) fn finish_configuration_refresh(
         &mut self,
         scope: &ReadScope,

@@ -1,4 +1,14 @@
 ;;; test-native-loop.el --- Native terminal projection contracts -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 kargu developers.
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Native terminal results project into the editor loop exactly once.
+
+;;; Code:
+
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/loop)
@@ -122,7 +132,7 @@
                                     "timeouts" (kargu-bridge--object "connect_ms" 50
                                                                      "deadline_ms" 100))))
           done result failure)
-     (kargu-loop-native-owned-start
+     (kargu-test-native-owned-start
       application arguments
       (lambda (value fault) (setq result value failure fault done t)))
      (kargu-bridge-test--wait (lambda () done))
@@ -162,7 +172,7 @@
      (unwind-protect
          (progn
            (puthash "prompt" (kargu-bridge--object "role" "user" "content" "fixture") arguments)
-           (kargu-loop-native-owned-start
+           (kargu-test-native-owned-start
             application arguments
             (lambda (value fault) (setq result value failure fault done t)))
            (kargu-bridge-test--wait (lambda () done))

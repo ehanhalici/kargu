@@ -1,5 +1,14 @@
 ;;; test-native-history.el --- Native display paging and ownership -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2026 kargu developers.
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Native answers reach the UI through bounded, owner-checked history pages.
+
+;;; Code:
+
 (require 'ert)
 (require 'cl-lib)
 (require 'kargu/bridge/history)
@@ -108,12 +117,14 @@
         (should (= (cl-count "current-page" cancelled :test #'equal) 1))))))
 
 (ert-deftest kargu-native-history-real-plain-answer-reaches-the-ui-once-test ()
-  (let ((kargu-bridge--max-frame 1024))
+  ;; The smallest frame that still carries a native config publication; the
+  ;; answer is large enough to need several bounded history pages.
+  (let ((kargu-bridge--max-frame (* 64 1024)))
    (kargu-bridge-test--with-core
    (let* ((application (kargu-application-create))
           (origin (generate-new-buffer " *native display plain*"))
           (root (make-temp-file "kargu-display-root-" t))
-          (answer (apply #'concat (make-list 400 "plain 🦀\r\nvisible answer\n")))
+          (answer (apply #'concat (make-list 8000 "plain 🦀\r\nvisible answer\n")))
           result done failure deltas finished rendered
           (server (kargu-stream-test--server
                    (json-serialize (kargu-bridge--object
@@ -124,7 +135,7 @@
      (unwind-protect
          (progn
            (with-current-buffer origin
-             (kargu-loop-native-owned-start
+             (kargu-test-native-owned-start
               application
               (kargu-bridge--object
                "root" root "mode" "ask" "prompt" (kargu-bridge--object "role" "user" "content" "prompt")

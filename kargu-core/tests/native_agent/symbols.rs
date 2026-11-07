@@ -559,7 +559,7 @@ fn symbol_edit_prepare_rejects_foreign_tick_provider_text_and_wire_range() -> Te
         let mut args = json!({"origin_id":edit["params"]["origin_id"],"root":root.path(),"mode":"agent",
             "intent":{"kind":"symbol","path":"file.rs","new_bytes":8},
             "live":{"id":DOC,"tick":7,"bytes":BASE.len(),"coding":"utf-8-unix","dirty":false,"read_only":false,"disk":super::edits::disk(&path)?},
-            "language_source":resource["source"],"config_revision":3,"policy_revision":7,"review_mode":"blocking","save_policy":"buffer_only"});
+            "language_source":resource["source"],"config_revision":super::fixture_revision(),"policy_revision":7,"review_mode":"blocking","save_policy":"buffer_only"});
         match case {
             "tick" => args["live"]["tick"] = json!(8),
             "provider" => args["language_source"]["server"] = json!("foreign-server"),

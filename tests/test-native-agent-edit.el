@@ -152,7 +152,7 @@
                          first nil nil (lambda (body) (push (kargu--json-decode-safe body) requests))
                          nil nil nil (list (list :body first) (list :body last))))
            (with-current-buffer owner
-             (kargu-loop-native-owned-start
+             (kargu-test-native-owned-start
               application
               (kargu-bridge--object
                "root" (directory-file-name root) "mode" "agent"

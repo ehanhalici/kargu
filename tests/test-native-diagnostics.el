@@ -84,7 +84,7 @@
 
 (defun kargu-native-diagnostics-test--roundtrip (project)
   "Exercise real native collection, optionally including PROJECT cache facts."
-  (let ((kargu-bridge--max-frame (if (eq project 'tiny) 1024 kargu-bridge--max-frame)))
+  (let ((kargu-test-native-frame (and (eq project 'tiny) 1024)))
    (kargu-bridge-test--with-core
     (let* ((root (make-temp-file "kargu-diagnostic-live-" t))
            (source (generate-new-buffer " *native diagnostic live*"))
@@ -116,7 +116,7 @@
                           first nil nil (lambda (body) (push (kargu--json-decode-safe body) requests))
                           nil nil nil (list (list :body first) (list :body last))))
             (with-current-buffer source
-              (kargu-loop-native-owned-start
+              (kargu-test-native-owned-start
                application
                (kargu-bridge--object
                 "root" root "mode" "agent" "prompt" (kargu-bridge--object "role" "user" "content" "fixture")
@@ -265,7 +265,7 @@
                               write nil nil (lambda (body) (push (kargu--json-decode-safe body) requests))
                               nil nil nil (list (list :body write) (list :body diagnose) (list :body answer)))))
               (with-current-buffer source
-                (kargu-loop-native-owned-start
+                (kargu-test-native-owned-start
                  application
                  (kargu-bridge--object
                   "root" (directory-file-name root) "mode" "agent"

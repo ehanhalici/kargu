@@ -50,6 +50,12 @@ fn printable(value: &str, field: &'static str) -> Result<(), CoreError> {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "String")]
 pub struct ModelChoice(String);
+impl ModelChoice {
+    /// Borrow the identifier at a policy boundary.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 impl TryFrom<String> for ModelChoice {
     type Error = CoreError;
     fn try_from(value: String) -> Result<Self, CoreError> {

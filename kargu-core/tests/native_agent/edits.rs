@@ -32,7 +32,7 @@ fn ticket(request: &Value, preparation: &Value) -> Value {
 }
 fn begin_args(root: &Path, request: &Value, intent: Value, review: &str) -> Value {
     json!({"origin_id":request["params"]["origin_id"],"root":root,"mode":"agent","intent":intent,"live":null,
-        "config_revision":3,"policy_revision":7,"review_mode":review,"save_policy":"save"})
+        "config_revision":super::fixture_revision(),"policy_revision":7,"review_mode":review,"save_policy":"save"})
 }
 fn prepared(
     peer: &mut Peer,

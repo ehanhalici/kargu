@@ -85,6 +85,24 @@ impl TryFrom<Option<u64>> for RunTimeout {
 #[derive(Deserialize)]
 #[serde(try_from = "Box<RawValue>")]
 struct ConnectionIntent(Zeroizing<String>);
+impl ConnectionIntent {
+    /// The editor's captured connection must name exactly the natively resolved
+    /// provider, model and endpoint; its URL is never itself an authority.
+    fn verify(&self, target: &crate::configuration::policy::RunTarget) -> Result<(), CoreError> {
+        let intent: Value = serde_json::from_str(&self.0).map_err(|_| CoreError::InvalidValue {
+            field: "NativeConnection",
+        })?;
+        let model = target.model.as_deref().ok_or(CoreError::Unavailable)?;
+        let endpoint = target.endpoint.as_deref().ok_or(CoreError::Unavailable)?;
+        if intent.get("provider").and_then(Value::as_str) != Some(target.provider.as_str())
+            || intent.get("model").and_then(Value::as_str) != Some(model)
+            || intent.get("url").and_then(Value::as_str) != Some(endpoint)
+        {
+            return Err(CoreError::ConfigurationChanged);
+        }
+        Ok(())
+    }
+}
 impl TryFrom<Box<RawValue>> for ConnectionIntent {
     type Error = CoreError;
     fn try_from(value: Box<RawValue>) -> Result<Self, CoreError> {
@@ -307,6 +325,10 @@ impl Sessions {
             return Err(fault(CoreError::StaleOwner));
         }
         let input = request.arguments;
+        let target = host
+            .prompt_target(&request.scope, input.config_revision)
+            .map_err(fault)?;
+        input.connection.verify(&target).map_err(fault)?;
         let claim = host
             .actor_mut(&request.scope)
             .map_err(fault)?
@@ -548,6 +570,16 @@ impl Sessions {
                 return Ok(true);
             }
         };
+        // A publication during preparation invalidates the captured receipt.
+        if !host.configuration_current(&owner.scope, starting.claim.scope().config_revision()) {
+            owner.terminal = Some(CoreError::ConfigurationChanged);
+            drop(prepared);
+            host.actor_mut(&owner.scope)?
+                .finish_claim(&starting.claim)?;
+            op.stage = Stage::Settled;
+            finish_response(host, id, owner, None, None, messages)?;
+            return Ok(true);
+        }
         let run = host
             .actor_mut(&owner.scope)?
             .activate_claim(prepared.workspace)?;
@@ -1349,6 +1381,7 @@ fn finish_response(
         let error = owner.terminal.as_ref().map(|error| match error {
             CoreError::Cancelled | CoreError::StaleOwner => "cancelled",
             CoreError::Deadline => "timeout",
+            CoreError::ConfigurationChanged => "stale_configuration",
             _ => "failed",
         });
         let status = error.unwrap_or(match terminal {
@@ -1376,6 +1409,8 @@ fn fault(error: CoreError) -> Fault {
         CoreError::StaleOwner => "stale_owner",
         CoreError::Busy => "busy",
         CoreError::Limit => "resource_limit",
+        CoreError::ConfigurationChanged => "stale_configuration",
+        CoreError::Unavailable => "configuration_unavailable",
         _ => "invalid_request",
     };
     Fault {

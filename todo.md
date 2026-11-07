@@ -2378,6 +2378,29 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       model/context revision'larını actor commit'ine bağla; değişen receipt'i
       activation öncesi reddet. Snapshot capture için UI'ın karar sıralamasına güvenme.
 
+      **Native hedef dilimi (2026-11-07):** `session/prompt` claim'den önce
+        `config_revision`'ın yayımlanmış native revision olduğunu doğrular ve run
+        hedefini Rust'ta yayımlanmış doküman + commit context'i + sohbetin native
+        selection'ından çözer. Editörün `connection`'ındaki provider/model/URL bu
+        hedefle birebir eşleşmezse veya revision eskiyse `stale_configuration` ile
+        reddedilir; provider'a istek gitmez. Editör URL'si artık yetki değildir.
+        Hazırlık sırasında yeni config yayımlanırsa activation öncesi terminal
+        `stale_configuration` ile claim bırakılır. Selection hazırlık boyunca
+        native olarak kilitlidir (8.2c1), captured `ChatConnection` retry boyunca
+        sabit kalır.
+        **Kanıt:** Rust `prompt_target_is_resolved_natively_and_editor_urls_are_not_authority`,
+        `native_selection_retargets_the_run_and_rejects_the_old_editor_capture`;
+        native agent düzeneği hedefini gerçekten yayımlayıp revision'a bağlanır.
+        602 locked Rust, strict Clippy/fmt; tam ERT 1456/1456, bridge 40/40.
+        **Açık:** credential secret hâlâ editör capture'ıdır (interop dışında
+        Rust kendi direct secret'ını yerine koymaz); model metadata ve context
+        revision'ı claim'e bağlı değil (context native store'u 4.9'a bağlı);
+        activation öncesi config değişimi için deterministik pipe testi yok.
+        Config commit view'u ~51 KB olduğundan 52 KiB altı frame'lerde config
+        yayımlanamaz ve native run başlayamaz; view sayfalama 8.2b3/8.2b4'tedir.
+        İki küçük-frame ERT'si yayımdan sonra daraltılan frame veya 64 KiB +
+        çok sayfalı cevapla aynı davranışı sınar.
+
       **Önkoşul:** 8.2b2 ve 8.2c1 native revision portları; erken native claim.
 
       **Başlangıç kaynakları:** Rust: application/{claim.rs,mod.rs}, ipc/sessions.rs,

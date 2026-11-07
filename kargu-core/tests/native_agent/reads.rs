@@ -379,12 +379,14 @@ fn oversized_file_capture_request_is_a_tool_failure_and_keeps_the_connection_usa
         tool_reply(
             "large-path",
             "read_file",
-            json!({"file_path":"a".repeat(3000)}),
+            json!({"file_path":"a".repeat(55_000)}),
         ),
         answer("capture limit handled"),
     ])?;
     let mut peer = Peer::start()?;
-    peer.initialize_with_capabilities(1024, &["editor_file_snapshot"])?;
+    // Large enough for native config publication, small enough that the
+    // editor capture request for a 55000-byte path cannot fit.
+    peer.initialize_with_capabilities(53 * 1024, &["editor_file_snapshot"])?;
     let scope = peer.scope()?;
     let mut input = prompt(root.path(), &url);
     input["tools_enabled"] = json!(true);
@@ -396,7 +398,7 @@ fn oversized_file_capture_request_is_a_tool_failure_and_keeps_the_connection_usa
         "params":{"scope":scope,"arguments":input}})
         .to_string()
         .len()
-            <= 1024
+            <= 53 * 1024
     );
     begin(&mut peer, "limited-file", &scope, input)?;
     let mut events = Vec::new();
@@ -413,7 +415,12 @@ fn oversized_file_capture_request_is_a_tool_failure_and_keeps_the_connection_usa
         events
             .iter()
             .any(|message| message["method"] == "session/tool_result"
-                && message["params"]["event"]["outcome"] == "failed")
+                // The over-frame capture is never sent; the bounded disk read of the
+                // overlong name then fails, or the OS refuses it.
+                && matches!(
+                    message["params"]["event"]["outcome"].as_str(),
+                    Some("failed" | "rejected")
+                ))
     );
     assert_eq!(snapshot(&mut peer, &scope, &mut events)?["state"], "idle");
     requests.recv_timeout(Duration::from_secs(2))?;

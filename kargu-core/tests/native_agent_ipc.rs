@@ -125,7 +125,62 @@ fn prompt(root: &std::path::Path, url: &str) -> Value {
             "stream":false,"timeouts":{"connect_ms":1000,"first_byte_ms":12000,"idle_ms":null,"deadline_ms":12000}},
         "retry":{"observer":"none","policy":{"retry_max":2,"backoff_base_ms":1,"backoff_cap_ms":1}}})
 }
-fn begin(peer: &mut Peer, id: &str, scope: &Value, arguments: Value) -> TestResult {
+static FIXTURE_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1000);
+thread_local! {
+    /// Revision of this test thread's last fixture publication, for edit scopes.
+    static FIXTURE_REVISION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+fn fixture_revision() -> u64 {
+    FIXTURE_REVISION.with(std::cell::Cell::get)
+}
+/// Publish a config whose native target is the prompt's fixture server, then
+/// bind the prompt to that revision.  Rust rejects any other editor target.
+fn publish_target(peer: &mut Peer, scope: &Value, arguments: &mut Value) -> TestResult {
+    use std::hash::{Hash, Hasher};
+    let url = arguments["connection"]["url"]
+        .as_str()
+        .ok_or("fixture url")?
+        .to_owned();
+    let model = arguments["connection"]["model"]
+        .as_str()
+        .ok_or("fixture model")?
+        .to_owned();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (&url, &model).hash(&mut hasher);
+    let generation = FIXTURE_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let staged = peer.call(
+        &format!("fixture-config-{generation}"),
+        "configuration/prepare",
+        json!({"scope":scope,"arguments":{"generation":generation,"path":"/synthetic/native-agent",
+            "digest":format!("{:064x}", hasher.finish()),"registry":[],
+            "document":{"provider":"fixture","model":null,"review-mode":null,
+                "providers":[{"name":"fixture","data":{"api":url,"model":model}}]}}}),
+    )?;
+    let capture = staged["result"]["capture_id"].clone();
+    if capture.is_null() {
+        return Err(format!("fixture config staging failed: {staged}").into());
+    }
+    let committed = peer.call(
+        &format!("fixture-commit-{generation}"),
+        "configuration/commit",
+        json!({"scope":scope,"arguments":{"capture_id":capture,
+            "context":{"environment":{},"registry":[]}}}),
+    )?;
+    let revision = committed["result"]["revision"].clone();
+    if revision.is_null() {
+        return Err(format!("fixture config commit failed: {committed}").into());
+    }
+    FIXTURE_REVISION.with(|cell| cell.set(revision.as_u64().unwrap_or(0)));
+    arguments["config_revision"] = revision;
+    arguments["connection"]["provider"] = json!("fixture");
+    Ok(())
+}
+fn begin(peer: &mut Peer, id: &str, scope: &Value, mut arguments: Value) -> TestResult {
+    if arguments["connection"]["url"].is_string()
+        && arguments["connection"].get("provider").is_none()
+    {
+        publish_target(peer, scope, &mut arguments)?;
+    }
     send(
         peer,
         id,
@@ -380,5 +435,91 @@ fn continuation_keeps_the_same_native_run_and_external_api_cannot_borrow_its_bud
     );
     assert_eq!(messages.get(2).ok_or("continue notice")?["role"], "user");
     server.join().map_err(|_| "server panic")??;
+    Ok(())
+}
+
+#[test]
+fn prompt_target_is_resolved_natively_and_editor_urls_are_not_authority() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let (url, server, requests) = server(vec![answer("native target")])?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut events = Vec::new();
+    let mut bound = prompt(root.path(), &url);
+    publish_target(&mut peer, &scope, &mut bound)?;
+    for (field, value) in [
+        ("url", json!("http://127.0.0.1:9/v1")),
+        ("model", json!("other-model")),
+        ("provider", json!("openai")),
+    ] {
+        let mut forged = bound.clone();
+        forged["connection"][field] = value;
+        begin(&mut peer, "forged", &scope, forged)?;
+        let reply = response(&peer, "forged", &mut events)?;
+        assert_eq!(
+            reply["error"]["data"]["status"], "stale_configuration",
+            "{field}: {reply}"
+        );
+    }
+    let mut stale = bound.clone();
+    stale["config_revision"] = json!(stale["config_revision"].as_u64().ok_or("revision")? + 1);
+    begin(&mut peer, "stale", &scope, stale)?;
+    assert_eq!(
+        response(&peer, "stale", &mut events)?["error"]["data"]["status"],
+        "stale_configuration"
+    );
+    assert!(
+        requests.try_recv().is_err(),
+        "no provider request before admission"
+    );
+    begin(&mut peer, "bound", &scope, bound)?;
+    assert_eq!(
+        response(&peer, "bound", &mut events)?["result"]["status"],
+        "completed"
+    );
+    assert_eq!(
+        requests.recv_timeout(Duration::from_secs(2))?["model"],
+        "captured-model"
+    );
+    drop(peer);
+    server.join().map_err(|_| "server panicked")??;
+    Ok(())
+}
+
+#[test]
+fn native_selection_retargets_the_run_and_rejects_the_old_editor_capture() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let (url, server, requests) = server(vec![answer("selected model")])?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut events = Vec::new();
+    let mut input = prompt(root.path(), &url);
+    publish_target(&mut peer, &scope, &mut input)?;
+    let selected = peer.call(
+        "select",
+        "session/selection/commit",
+        json!({"application_id":scope["application_id"],"session_id":scope["session_id"],
+            "expected_revision":0,"selection":{"provider":"fixture","model":"chosen-model"}}),
+    )?;
+    assert_eq!(selected["result"]["revision"], 1, "{selected}");
+    begin(&mut peer, "old", &scope, input.clone())?;
+    assert_eq!(
+        response(&peer, "old", &mut events)?["error"]["data"]["status"],
+        "stale_configuration"
+    );
+    input["connection"]["model"] = json!("chosen-model");
+    begin(&mut peer, "chosen", &scope, input)?;
+    assert_eq!(
+        response(&peer, "chosen", &mut events)?["result"]["status"],
+        "completed"
+    );
+    assert_eq!(
+        requests.recv_timeout(Duration::from_secs(2))?["model"],
+        "chosen-model"
+    );
+    drop(peer);
+    server.join().map_err(|_| "server panicked")??;
     Ok(())
 }

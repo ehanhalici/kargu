@@ -141,6 +141,42 @@ The fixture stages a synthetic document; Rust remains the only writer."
     (should-not failure)
     (kargu-config--observe service result)))
 
+(declare-function kargu-loop-native-owned-start "kargu/loop/native-owner"
+                  (application arguments callback &rest options))
+(declare-function kargu-config-revision "kargu/config/schema" ())
+
+(defun kargu-test-bind-native-target (application arguments)
+  "Publish APPLICATION config whose native target is ARGUMENTS' connection.
+Rust resolves the run target from published config; this fixture makes the
+synthetic server URL and model that target, then binds ARGUMENTS to its
+revision.  Return ARGUMENTS."
+  (let* ((connection (gethash "connection" arguments))
+         (provider (or (gethash "provider" connection) "fixture"))
+         (url (gethash "url" connection))
+         (model (gethash "model" connection)))
+    (let ((kargu-application--bound application))
+      (kargu-test-config-publish
+       (kargu-config-service-context)
+       (list :provider provider :providers (list (list provider :api url :model model)))
+       "/synthetic/native-target" (format "%s|%s|%s" provider model url))
+      (puthash "provider" provider connection)
+      (puthash "config_revision" (kargu-config-revision) arguments))
+    arguments))
+
+(defvar kargu-test-native-frame nil
+  "Editor frame limit applied after native config publication, if non-nil.
+Config views do not fit tiny frames, so tiny-frame run fixtures publish first.")
+
+(defun kargu-test-native-owned-start (application arguments &rest options)
+  "Bind ARGUMENTS natively for APPLICATION, then start the real owned run.
+OPTIONS are passed to `kargu-loop-native-owned-start'."
+  (kargu-test-bind-native-target application arguments)
+  (when kargu-test-native-frame
+    (when-let* ((binding (gethash :native-core (kargu-application-services application))))
+      (setf (kargu-bridge-connection-frame-limit (kargu-bridge-application-connection binding))
+            kargu-test-native-frame)))
+  (apply #'kargu-loop-native-owned-start application arguments options))
+
 (defun kargu-test-config-invalidate ()
   "Advance the real native revision with another explicit synthetic publication."
   (let ((snapshot (kargu-config-current-snapshot)))
