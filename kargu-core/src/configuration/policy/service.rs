@@ -131,10 +131,13 @@ pub(crate) struct RunTarget {
     pub(crate) model: Option<String>,
     pub(crate) endpoint: Option<String>,
     pub(crate) model_parameters: Option<Vec<String>>,
+    pub(crate) reasoning: bool,
     profile: resolve::ReadyProfile,
     app_url: Option<crate::configuration::domain::ConfigText>,
     headers: crate::api::HeaderTemplates,
     wire_headers: crate::api::HeaderTemplates,
+    wire: Option<crate::configuration::domain::ConfigText>,
+    tuning_policy: Option<crate::configuration::domain::ConfigText>,
 }
 impl RunTarget {
     pub(crate) fn interop_host(&self) -> Result<Option<&str>, CoreError> {
@@ -151,7 +154,16 @@ impl RunTarget {
             session,
             self.app_url.as_ref().map(|value| value.as_str()),
             self.profile.native_key(interop)?,
-            self.model_parameters.clone(),
+            crate::api::NativeRunPolicy {
+                parameters: self.model_parameters.clone(),
+                reasoning: self.reasoning,
+                wire: crate::api::wire::WireSpec::native_capture(
+                    self.wire.as_ref().map(|value| value.as_str()),
+                    self.wire_headers.clone(),
+                )
+                .map_err(|_| CoreError::Unavailable)?,
+                provider_policy: self.tuning_policy.as_ref().map(|value| value.as_str()),
+            },
         )
         .map_err(|_| CoreError::InvalidValue {
             field: "NativeConnection",
@@ -222,6 +234,31 @@ impl ConfigurationService {
         let (provider, model, endpoint) = target.identity();
         Ok(RunTarget {
             model_parameters: None,
+            reasoning: false,
+            wire: published
+                .context
+                .registry
+                .get(provider)
+                .and_then(|entry| entry.wire.clone())
+                .or_else(|| {
+                    catalog.wire_value(provider).and_then(|wire| {
+                        crate::configuration::domain::ConfigText::try_from(wire.to_string()).ok()
+                    })
+                }),
+            tuning_policy: published
+                .context
+                .registry
+                .get(provider)
+                .and_then(|entry| entry.tuning_policy.clone())
+                .or_else(|| {
+                    catalog
+                        .get(provider)
+                        .and_then(|entry| entry.request_policy())
+                        .and_then(|value| {
+                            crate::configuration::domain::ConfigText::try_from(value.to_string())
+                                .ok()
+                        })
+                }),
             provider: provider.as_str().to_owned(),
             model: model.filter(|model| !model.is_empty()).map(str::to_owned),
             endpoint: endpoint.map(str::to_owned),

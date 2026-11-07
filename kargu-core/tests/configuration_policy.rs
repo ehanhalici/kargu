@@ -462,3 +462,47 @@ fn invalid_model_identity_and_oversized_or_ambiguous_captures_fail_closed() -> T
     );
     Ok(())
 }
+
+#[test]
+fn wire_and_tuning_publications_advance_revision_and_validate_at_boundary() -> TestResult {
+    let (mut host, scope) = host()?;
+    let mut captured = context();
+    captured["registry"] = json!([{"id":"custom","wire":"{}","tuning_policy":"{}"}]);
+    let first = publish(&mut host, &scope, 1, "provider='custom'", captured.clone())?;
+    captured["registry"][0]["wire"] = json!(r#"{"auth":"x-api-key","stream":false}"#);
+    let wire = publish(&mut host, &scope, 2, "provider='custom'", captured.clone())?;
+    assert_ne!(first["revision"], wire["revision"]);
+    captured["registry"][0]["tuning_policy"] =
+        json!(r#"{"max-output-key":"max_completion_tokens"}"#);
+    let tuning = publish(&mut host, &scope, 3, "provider='custom'", captured.clone())?;
+    assert_ne!(wire["revision"], tuning["revision"]);
+    let mut interned = captured.clone();
+    let wire_value = interned["registry"][0]
+        .as_object_mut()
+        .ok_or("registry")?
+        .remove("wire")
+        .ok_or("wire")?;
+    interned["wire_formats"] = json!([wire_value]);
+    interned["registry"][0]["wire_ref"] = json!(0);
+    assert_eq!(
+        publish(&mut host, &scope, 4, "provider='custom'", interned.clone())?["revision"],
+        tuning["revision"]
+    );
+    for index in [1, 512] {
+        let mut invalid = interned.clone();
+        invalid["registry"][0]["wire_ref"] = json!(index);
+        assert!(serde_json::from_value::<PolicyContext>(invalid).is_err());
+    }
+    let mut duplicate = interned;
+    duplicate["registry"][0]["wire"] = json!("{}");
+    assert!(serde_json::from_value::<PolicyContext>(duplicate).is_err());
+    for (field, value) in [
+        ("wire", r#"{"auth":"foreign"}"#),
+        ("tuning_policy", r#"{"max-output-key":"foreign"}"#),
+    ] {
+        let mut invalid = captured.clone();
+        invalid["registry"][0][field] = json!(value);
+        assert!(serde_json::from_value::<PolicyContext>(invalid).is_err());
+    }
+    Ok(())
+}

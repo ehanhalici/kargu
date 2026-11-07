@@ -109,6 +109,22 @@ impl WireCodec {
 }
 
 impl WireSpec {
+    pub(crate) fn supports_stream(&self) -> bool {
+        self.stream
+    }
+    pub(crate) fn native_capture(
+        source: Option<&str>,
+        headers: crate::api::HeaderTemplates,
+    ) -> Result<Self, ApiError> {
+        let mut wire: Self = source
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|_| ApiError::InvalidRequest)?
+            .unwrap_or_default();
+        wire.headers.set_defaults(headers);
+        Ok(wire)
+    }
+
     /// Derive a chat target by modifying only the path of a captured base URL.
     pub fn chat_endpoint(&self, base: ApiEndpoint) -> Result<ApiEndpoint, ApiError> {
         self.chat_path.append_to(base)

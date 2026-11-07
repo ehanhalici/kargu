@@ -57,7 +57,7 @@ PUBLICATION includes header metadata; transient credential source DTOs do not."
         (options (kargu-config-copy (get cell 'options))))
     (unless publication
       (remhash "app_url" options)
-      (mapc (lambda (entry) (remhash "headers" entry) (remhash "wire_headers" entry)) registry))
+      (mapc (lambda (entry) (remhash "headers" entry) (remhash "wire_headers" entry) (remhash "wire" entry) (remhash "tuning_policy" entry)) registry))
     (kargu-bridge-config-policy--context registry names options)))
 
 (defun kargu-bridge-config-policy--options (&optional publication)
@@ -92,6 +92,11 @@ METADATA includes detached header DTOs for native publication."
                              "local" (if (plist-get info :local) t :json-false)
                              "keyless" (if (plist-get info :keyless) t :json-false))))
                  (when metadata
+                   (when-let* ((wire (kargu-provider-format-record (kargu-provider-format id))))
+                     (puthash "wire" (json-serialize (kargu-providers-wire-object wire) :false-object :json-false :null-object :json-null) entry))
+                   (puthash "tuning_policy" (json-serialize (kargu-providers-wire-object
+                                                            (or (plist-get info :request) :json-empty-object))
+                                                          :false-object :json-false :null-object :json-null) entry)
                    (puthash "headers" (kargu-providers-wire-object
                                        (or (kargu-provider-extra-headers id) :json-empty-object)) entry)
                    (puthash "wire_headers" (kargu-providers-wire-object
@@ -103,12 +108,24 @@ METADATA includes detached header DTOs for native publication."
 
 (defun kargu-bridge-config-policy--context (registry names options)
   "Capture only requested environment NAMES for REGISTRY and captured OPTIONS."
-  (let ((values (make-hash-table :test #'equal)))
+  (let ((values (make-hash-table :test #'equal))
+        (indices (make-hash-table :test #'equal)) (formats nil)
+        (registry (kargu-config-copy registry)))
+    (mapc (lambda (entry)
+            (when-let* ((wire (gethash "wire" entry)))
+              (let ((index (gethash wire indices)))
+                (unless index
+                  (setq index (hash-table-count indices))
+                  (puthash wire index indices)
+                  (push wire formats))
+                (remhash "wire" entry)
+                (puthash "wire_ref" index entry)))) registry)
     (unless (and (vectorp names) (<= (length names) 2048) (cl-every #'stringp names))
       (error "Invalid native environment projection"))
     (mapc (lambda (name) (puthash name (or (kargu-config-copy (getenv name)) :json-null) values)) names)
     (let ((context (kargu-config-copy options)))
       (puthash "environment" values context)
+      (puthash "wire_formats" (vconcat (nreverse formats)) context)
       (puthash "registry" registry context)
       context)))
 
@@ -175,7 +192,7 @@ under PARENT and APPLICATION.  This port never updates an editor cache."
              (setq scope value)
              (when (live)
                (let ((request (kargu-config-copy (get inputs 'arguments))))
-                 (puthash "registry" (get inputs 'registry) request)
+                 (puthash "registry" (gethash "registry" (kargu-bridge-config-policy--captured-context inputs [])) request)
                  (puthash "timeout_ms" (max 1 (min 5000 (floor (* 1000 (- (kargu-async-task-deadline task) (float-time))))))
                           request)
                  (kargu-bridge-config-policy--call task connection scope method request #'staged)))))

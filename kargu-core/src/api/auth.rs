@@ -156,6 +156,9 @@ pub(super) struct HeaderRules {
     defaults: HeaderTemplates,
 }
 impl HeaderRules {
+    pub(super) fn set_defaults(&mut self, defaults: HeaderTemplates) {
+        self.defaults = defaults;
+    }
     pub fn new(kind: AuthKind, defaults: HeaderTemplates) -> Self {
         Self { kind, defaults }
     }

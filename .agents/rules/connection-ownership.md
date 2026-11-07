@@ -69,18 +69,39 @@ enabled by the editor. Request parameters come only from an exact model record;
 short aliases may resolve tool capability but cannot lend request parameters.
 The typed connection replaces the editor's supported-parameter assertion before
 applying explicit temperature/output preferences. Standalone API/catalog request
-captures retain their separate contracts. Stream/reasoning and provider tuning
-defaults still require the native wire/provider cutover in 5.4a3b2b/c.
+captures retain their separate contracts. The wire/provider cutover and remaining
+acceptance boundaries under 5.4a3b2b/c are described below.
+
+Native publication now validates and retains bounded registry wire and provider
+tuning JSON. Both participate in config identity. A native run's codec, auth
+kind, stream capability and provider tuning defaults come from that publication
+(or embedded baseline); request wire/provider-policy metadata is not authority.
+The existing committed wire-header port supplies default headers. Stream is
+clamped to native wire support; absent native reasoning support suppresses effort
+and thinking budget. The editor forwards the explicit stream preference.
+Transient credential projections omit wire/tuning metadata. Remaining work in
+5.4a3b2b2/c2 covers effort-label compatibility, redundant request DTO removal,
+unsupported/custom default policy and cache-marker ownership; this cutover does
+not certify those contracts.
+
+Wire metadata travels only in commit context, not initial config staging.
+The editor deduplicates identical wire strings into `wire_formats` and sends
+bounded `wire_ref` indices. Native context admission validates each definition,
+rejects missing/conflicting references and expands them into the bounded native
+registry before fingerprinting. Inline and referenced forms identify the same
+publication. This preserves the 64 KiB history fixture without increasing its
+frame limit; general configuration view paging remains separate work.
+
 Direct/env keys come from the native profile, keyless supplies no key, and only
 a matching interop receipt supplies the interop key; raw editor key capture is
-not the HTTP credential source. A direct key echo guard remains until the
-credential-free native preparation DTO cutover.
+not the HTTP credential source. Native target preparation omits direct keys;
+prompt admission rejects editor key echoes.
 
-The Emacs native-run consumer does not negotiate this capability yet; native
-opt-in auth-source/callable preparation therefore fails closed until the worker
-actual-completion and consumer cutovers under `todo.md` 5.4a2c. Direct/env/keyless
-native runs and standalone API/catalog consumers retain their paths. This native
-producer acceptance does not close the editor consumer migration.
+The Emacs consumer negotiates this capability when its credential handler is
+available. The handler starts the actual-completion worker port and sends a
+quiescent receipt only after terminal completion. Loss of scope suppresses the
+key but still acknowledges actual completion. Missing capability fails closed;
+standalone API/catalog consumers retain their separate paths (`todo.md` 5.4a2c).
 
 `configuration/parse` accepts captured bounded UTF-8 source and refresh generation
 on the exact ready connection epoch. It performs no filesystem, environment,

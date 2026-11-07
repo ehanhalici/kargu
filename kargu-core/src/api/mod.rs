@@ -13,6 +13,7 @@ pub mod policy;
 pub mod resilience;
 pub mod stream;
 pub mod wire;
+pub(crate) use domain::NativeRunPolicy;
 pub use domain::{ChatConnection, HttpRequest, ModelId, SecretString};
 pub use failure::FailureCategory;
 pub use http::{execute, execute_captured};

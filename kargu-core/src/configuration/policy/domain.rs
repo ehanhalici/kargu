@@ -224,6 +224,19 @@ impl EnvironmentSnapshot {
 }
 
 #[derive(Deserialize)]
+#[serde(try_from = "usize")]
+struct WireIndex(usize);
+impl TryFrom<usize> for WireIndex {
+    type Error = CoreError;
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        if value >= 512 {
+            return Err(CoreError::Limit);
+        }
+        Ok(Self(value))
+    }
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RegistryEntry {
     pub(super) id: ApiProviderId,
@@ -231,6 +244,9 @@ pub(super) struct RegistryEntry {
     pub(super) headers: crate::api::HeaderTemplates,
     #[serde(default)]
     pub(super) wire_headers: crate::api::HeaderTemplates,
+    pub(super) wire: Option<ConfigText>,
+    wire_ref: Option<WireIndex>,
+    pub(super) tuning_policy: Option<ConfigText>,
     pub(super) api: Option<ConfigText>,
     #[serde(default)]
     pub(super) models: Vec<ConfigText>,
@@ -258,6 +274,21 @@ impl TryFrom<Vec<RegistryEntry>> for RegistrySnapshot {
                 return Err(CoreError::InvalidValue {
                     field: "configuration_registry",
                 });
+            }
+            if let Some(wire) = &entry.wire {
+                serde_json::from_str::<crate::api::wire::WireSpec>(wire.as_str()).map_err(
+                    |_| CoreError::InvalidValue {
+                        field: "registry_wire",
+                    },
+                )?;
+                bytes = bytes.saturating_add(wire.as_str().len());
+            }
+            if let Some(policy) = &entry.tuning_policy {
+                serde_json::from_str::<crate::api::policy::DefaultsPatch>(policy.as_str())
+                    .map_err(|_| CoreError::InvalidValue {
+                        field: "registry_tuning",
+                    })?;
+                bytes = bytes.saturating_add(policy.as_str().len());
             }
             bytes = bytes.saturating_add(
                 entry
@@ -290,7 +321,7 @@ impl RegistrySnapshot {
 
 /// Captured editor options are inputs, never a second precedence implementation.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "ContextInput")]
 pub struct PolicyContext {
     pub(super) app_url: Option<ConfigText>,
     pub(super) api_base: Option<ConfigText>,
@@ -299,6 +330,65 @@ pub struct PolicyContext {
     pub(super) selected_model: Option<ConfigText>,
     pub(super) environment: EnvironmentSnapshot,
     pub(super) registry: RegistrySnapshot,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContextInput {
+    pub(super) app_url: Option<ConfigText>,
+    pub(super) api_base: Option<ConfigText>,
+    pub(super) api_key: Option<ConfigText>,
+    pub(super) selected_provider: Option<ApiProviderId>,
+    pub(super) selected_model: Option<ConfigText>,
+    pub(super) environment: EnvironmentSnapshot,
+    pub(super) registry: RegistrySnapshot,
+    #[serde(default)]
+    wire_formats: Vec<ConfigText>,
+}
+impl TryFrom<ContextInput> for PolicyContext {
+    type Error = CoreError;
+    fn try_from(mut input: ContextInput) -> Result<Self, Self::Error> {
+        let bytes = input.wire_formats.iter().fold(0_usize, |bytes, wire| {
+            bytes.saturating_add(wire.as_str().len())
+        });
+        if input.wire_formats.len() > 512 || bytes > 512 * 1024 {
+            return Err(CoreError::Limit);
+        }
+        for wire in &input.wire_formats {
+            serde_json::from_str::<crate::api::wire::WireSpec>(wire.as_str()).map_err(|_| {
+                CoreError::InvalidValue {
+                    field: "registry_wire",
+                }
+            })?;
+        }
+        for entry in &mut input.registry.0 {
+            if let Some(index) = entry.wire_ref.take() {
+                if entry.wire.is_some() {
+                    return Err(CoreError::InvalidValue {
+                        field: "registry_wire_ref",
+                    });
+                }
+                entry.wire = Some(
+                    input
+                        .wire_formats
+                        .get(index.0)
+                        .ok_or(CoreError::InvalidValue {
+                            field: "registry_wire_ref",
+                        })?
+                        .clone(),
+                );
+            }
+        }
+        Ok(Self {
+            app_url: input.app_url,
+            api_base: input.api_base,
+            api_key: input.api_key,
+            selected_provider: input.selected_provider,
+            selected_model: input.selected_model,
+            environment: input.environment,
+            registry: RegistrySnapshot::try_from(input.registry.0)?,
+        })
+    }
 }
 
 #[derive(Deserialize)]

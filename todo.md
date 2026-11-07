@@ -2729,10 +2729,54 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
               model projection'ına bağla; editörün `provider_policy` override'ını
               committed format/provider politikasından kur. 5.4a3c ile birlikte
               frontend domain capture'ını kaldır ve karma kabulü tamamla.
+              - [x] **5.4a3b2b1 Native policy uygulaması:** stream isteği native
+                wire'ın desteklediği ölçüde açılır; native model reasoning
+                desteklemiyorsa effort/thinking budget gönderilmez. Frontend
+                yalnız explicit stream tercihini taşır. Native typed connection
+                provider tuning override'ını committed registry'den (yoksa
+                embedded provider kaydından) alır; editör override'ı kullanılmaz.
+                HTTP testi native model reasoning desteğinin hem açık hem kapalı
+                halinde explicit effort'u; ayrı test native stream kapalıyken
+                sahte wire/stream/auth/output override'larını sınar.
+              - [ ] **5.4a3b2b2 Reasoning intent ve frontend temizlik kabulü:**
+                native modelin ilan ettiği effort etiketleriyle explicit effort
+                seçiminin uyumunu doğrula; bilinmeyen/retired etiketler, thinking
+                budget ve retry davranışını gerçek consumer'da sınayarak kalan
+                frontend wire/provider-policy capture alanlarını kaldır.
         - [ ] **5.4a3c Native wire/auth policy:** registry format/wire/auth
           türünü native publication'a dahil et; typed connection'ı committed
           politikadan kur, editörün wire/auth türü yetki olmasın. Custom provider
           ve standalone API/catalog eşdeğerliğini koru. Sıra: a → b → c.
+          - [x] **5.4a3c1 Committed wire ve auth authority:** registry bounded
+            wire/policy JSON metnini native tiplerle doğrular; fingerprint'e dahil
+            eder. Typed run connection native codec/auth/stream/output policy
+            kullanır. Header template portu korunur. Registry wire yoksa embedded
+            wire, custom bilinmeyen hedefte mevcut default codec kullanılır.
+            Invalid wire/tuning publication reddedilir; yalnız wire/tuning
+            değişimi de config revision'ını ilerletir. Frontend publication
+            literal format/request DTO'larını taşır; transient credential context
+            bunları tekrar okumaz. Unsupported formatta olmayan wire alanı
+            serialize edilmez; JSON null/false eşlemeleri explicit'tir.
+            Stage yalnız config girdilerini taşır; metadata commit context'indedir.
+            Ortak wire tanımları bounded `wire_formats` tablosunda bir kez
+            gönderilir; native `wire_ref` açılımı inline kayıtla aynı fingerprint'i
+            üretir. Eksik/out-of-range veya inline+reference kayıt reddedilir;
+            açılmış registry byte sınırı tekrar uygulanır. 64 KiB history pipe
+            testi frame limiti büyütülmeden korunur. Genel config view sayfalama
+            borcu bu format tekrarlarını kaldırmakla kapanmaz.
+            **Doğrulama:** locked Rust 628/628 (32 compile-fail dahil), native
+            IPC 52/52, configuration policy 12/12, tam source ERT 1469/1469;
+            strict Clippy/fmt/build, değişen Elisp Werror/checkdoc temiz. Loglar
+            `/tmp/kargu-native-wire-verified-{rust,ert}.log`,
+            `/tmp/kargu-native-wire-small-frame.log`,
+            `/tmp/kargu-native-wire-lint.log`. TLA+ değişmedi; TLC çalıştırılmadı.
+          - [ ] **5.4a3c2 Native target DTO son geçişi:** request'ten artık
+            kullanılmayan tam wire/provider-policy capture'ını çıkar; custom
+            provider'ın wire yokluğu/default/unsupported davranışını explicit
+            native sözleşmeye bağla. Cache-marker provider annotation'ını da
+            native publication'a al; standalone API/catalog ve custom wire
+            corpus'u ile eşdeğerliği kapat. Bu kabul ve b2b2 bitmeden üst 5.4a3
+            kapanmaz.
 
       - [ ] **5.4a4 Context revision receipt:** 4.9 native context store portu
         üzerinden captured revision'ı claim/activation'a bağla. 4.9 ve 5.4a3

@@ -629,7 +629,7 @@ impl Host {
         &self,
         scope: &ReadScope,
         target: &crate::configuration::policy::RunTarget,
-    ) -> Result<(bool, Option<Vec<String>>), crate::error::CoreError> {
+    ) -> Result<(bool, bool, Option<Vec<String>>), crate::error::CoreError> {
         let actor = self
             .applications
             .get(&scope.application_id)

@@ -137,7 +137,7 @@ Startup errors are reported without switching to the Elisp backend."
                     (kargu-bridge--object))
          "auth" (kargu-providers-wire-object auth)
          "cache_markers" (if (plist-get settings :cache-marker) t :json-false)
-         "stream" (if (and kargu-stream (plist-get capabilities :stream)) t :json-false)
+         "stream" (if kargu-stream t :json-false)
          "timeouts" (kargu-bridge--object
                      "connect_ms" (kargu-transport--milliseconds kargu-api-connect-timeout)
                      "first_byte_ms" (kargu-transport--milliseconds kargu-api-first-byte-timeout)

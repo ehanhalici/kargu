@@ -281,9 +281,9 @@ impl ModelStore {
         &self,
         provider: &ApiProviderId,
         model: &ModelId,
-    ) -> Result<(bool, Option<Vec<String>>), StoreError> {
+    ) -> Result<(bool, bool, Option<Vec<String>>), StoreError> {
         let Some(p) = self.providers.get(provider) else {
-            return Ok((true, None));
+            return Ok((true, false, None));
         };
         let canonical = alias(&p.entries, model).ok();
         let fields = canonical
@@ -302,7 +302,11 @@ impl ModelStore {
         } else {
             None
         };
-        Ok((tools, parameters))
+        Ok((
+            tools,
+            fields.as_ref().is_some_and(ModelFields::allows_reasoning),
+            parameters,
+        ))
     }
     /// Return a specific model summary for a provider.
     pub fn provider_model(

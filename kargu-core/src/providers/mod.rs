@@ -63,6 +63,9 @@ enum Binding {
     Session,
 }
 impl ProviderDefinition {
+    pub(crate) fn request_policy(&self) -> Option<&Value> {
+        self.request.as_ref()
+    }
     /// Configuration policy reads names, never process environment values.
     pub fn environment(&self) -> impl Iterator<Item = &str> {
         self.env.iter().map(EnvironmentName::as_str)

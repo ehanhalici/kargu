@@ -68,6 +68,8 @@ impl SourceFingerprint {
         for entry in entries {
             text(&mut hash, entry.id.as_str())?;
             optional(&mut hash, entry.api.as_ref())?;
+            optional(&mut hash, entry.wire.as_ref())?;
+            optional(&mut hash, entry.tuning_policy.as_ref())?;
             hash.update(entry.headers.fingerprint().map_err(|_| CoreError::Limit)?);
             hash.update(
                 entry

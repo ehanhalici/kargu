@@ -42,6 +42,21 @@ impl<'a> Defaults<'a> {
 }
 
 impl RequestTuning {
+    pub(crate) fn bind_reasoning(&mut self, allowed: bool) {
+        if !allowed {
+            self.effort = None;
+            self.thinking_budget = None;
+        }
+    }
+    pub(crate) fn bind_provider_policy(&mut self, source: Option<&str>) -> Result<(), ApiError> {
+        self.provider_policy = source
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|_| ApiError::InvalidRequest)?
+            .unwrap_or_default();
+        Ok(())
+    }
+
     /// Native run metadata replaces the editor's supported-parameter assertion.
     pub(crate) fn bind_model_parameters(
         &mut self,

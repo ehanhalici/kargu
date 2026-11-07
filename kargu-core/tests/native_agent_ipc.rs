@@ -237,11 +237,20 @@ fn publish_target_with_header_policy(
     if capture.is_null() {
         return Err(format!("fixture config staging failed: {staged}").into());
     }
+    let mut committed_wire = arguments["connection"]["wire"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    committed_wire.insert("default-headers".to_owned(), wire_headers.clone());
+    let committed_policy = arguments["connection"]["tuning"]["provider_policy"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
     let committed = peer.call(
         &format!("fixture-commit-{generation}"),
         "configuration/commit",
         json!({"scope":scope,"arguments":{"capture_id":capture,
-            "context":{"app_url":"https://fixture.invalid/","environment":{},"registry":[{"id":"fixture","headers":headers,"wire_headers":wire_headers}]}}}),
+            "context":{"app_url":"https://fixture.invalid/","environment":{},"registry":[{"id":"fixture","headers":headers,"wire_headers":wire_headers,"wire":Value::Object(committed_wire).to_string(),"tuning_policy":Value::Object(committed_policy).to_string()}]}}}),
     )?;
     let revision = committed["result"]["revision"].clone();
     if revision.is_null() {
@@ -554,7 +563,7 @@ fn native_model_policy_overrides_editor_tools_and_parameter_claims() -> TestResu
             "models/append",
             json!({"scope":scope,
             "arguments":{"upload_id":upload,"offset":0,"chunk":json!({"operation":"put",
-                "model":model,"metadata":{"supports_tools":false,"supported_parameters":parameters}}).to_string()}}),
+                "model":model,"metadata":{"supports_tools":false,"supports_reasoning":temperature,"supported_parameters":parameters}}).to_string()}}),
         )?;
         assert!(
             response(&peer, "policy-append", &mut events)?
@@ -574,7 +583,7 @@ fn native_model_policy_overrides_editor_tools_and_parameter_claims() -> TestResu
         );
         bound["model_revision"] = json!(1);
         bound["tools_enabled"] = json!(true);
-        bound["connection"]["tuning"] = json!({"temperature":0.6,"max_tokens":8,
+        bound["connection"]["tuning"] = json!({"temperature":0.6,"max_tokens":8,"effort":"high",
             "supported_parameters":if temperature {json!(["max_tokens","tools"])} else {json!(["temperature","tools"])}});
         begin(&mut peer, "native-policy", &scope, bound)?;
         assert_eq!(
@@ -586,8 +595,45 @@ fn native_model_policy_overrides_editor_tools_and_parameter_claims() -> TestResu
         assert!(body.get("tool_choice").is_none());
         assert_eq!(body.get("temperature").is_some(), temperature);
         assert_eq!(body["max_tokens"], 8);
+        assert_eq!(body.get("reasoning_effort").is_some(), temperature);
         server.join().map_err(|_| "server panic")??;
     }
+    Ok(())
+}
+
+#[test]
+fn native_wire_auth_stream_and_provider_tuning_ignore_editor_policy() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let (url, server, requests) = server_with_headers(
+        vec![answer("native wire")],
+        vec![("x-api-key", "native-wire-key".to_owned())],
+    )?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut bound = prompt(root.path(), &url);
+    bound["connection"]["wire"] = json!({"auth":"x-api-key","stream":false});
+    bound["connection"]["tuning"] =
+        json!({"provider_policy":{"max-output-key":"max_completion_tokens"}});
+    publish_target_with_key(&mut peer, &scope, &mut bound, Some("native-wire-key"))?;
+    // Valid but foreign metadata cannot change the committed codec/auth/policy.
+    bound["connection"]["wire"] = json!({"auth":"bearer","stream":true,"chat-path":"/foreign"});
+    bound["connection"]["stream"] = json!(true);
+    bound["connection"]["tuning"] = json!({"max_tokens":9,"effort":"high","thinking_budget":7,
+        "provider_policy":{"max-output-key":"max_tokens"}});
+    let mut events = Vec::new();
+    begin(&mut peer, "native-wire", &scope, bound)?;
+    assert_eq!(
+        response(&peer, "native-wire", &mut events)?["result"]["status"],
+        "completed"
+    );
+    let body = requests.recv_timeout(Duration::from_secs(2))?;
+    assert_eq!(body["max_completion_tokens"], 9);
+    assert!(body.get("max_tokens").is_none());
+    assert_ne!(body["stream"], true);
+    assert!(body.get("reasoning_effort").is_none());
+    assert!(body.get("thinking").is_none());
+    server.join().map_err(|_| "server panic")??;
     Ok(())
 }
 

@@ -281,6 +281,12 @@ impl TryFrom<ChatConnectionInput> for ChatConnection {
         })
     }
 }
+pub(crate) struct NativeRunPolicy<'a> {
+    pub parameters: Option<Vec<String>>,
+    pub reasoning: bool,
+    pub wire: super::wire::WireSpec,
+    pub provider_policy: Option<&'a str>,
+}
 impl ChatConnection {
     /// Parse one native run connection and replace untrusted header binding values.
     pub(crate) fn capture_run(
@@ -288,14 +294,18 @@ impl ChatConnection {
         session: &crate::domain::SessionId,
         app_url: Option<&str>,
         native_key: Option<SecretString>,
-        model_parameters: Option<Vec<String>>,
+        policy: NativeRunPolicy<'_>,
     ) -> Result<Self, ApiError> {
         let mut input: ChatConnectionInput =
             serde_json::from_str(source).map_err(|_| ApiError::InvalidRequest)?;
         let auth = input.auth.get_or_insert_with(Default::default);
         auth.set_native_key(native_key);
         auth.bind_run(session, app_url)?;
-        input.tuning.bind_model_parameters(model_parameters)?;
+        input.tuning.bind_model_parameters(policy.parameters)?;
+        input.tuning.bind_provider_policy(policy.provider_policy)?;
+        input.tuning.bind_reasoning(policy.reasoning);
+        input.stream &= policy.wire.supports_stream();
+        input.wire = Some(policy.wire);
         input.try_into()
     }
     /// Prepare only from the actual native model ticket, on a bounded worker.
