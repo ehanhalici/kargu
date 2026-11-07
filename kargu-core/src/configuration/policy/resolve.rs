@@ -68,6 +68,15 @@ impl TryFrom<Profile> for ReadyProfile {
     }
 }
 impl ReadyProfile {
+    /// Direct and keyless captures must agree with the committed native policy.
+    /// Interop credentials remain an editor-owned observation of this target.
+    pub(super) fn credential_matches(&self, supplied: Option<&str>) -> bool {
+        match &self.0.credential {
+            Credential::Direct(secret) => supplied == Some(secret.as_str()),
+            Credential::Keyless => supplied.is_none_or(str::is_empty),
+            Credential::Interop => true,
+        }
+    }
     /// Provider, model and endpoint text that a native run must target.
     pub(super) fn identity(
         &self,

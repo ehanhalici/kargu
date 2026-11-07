@@ -136,6 +136,14 @@ fn fixture_revision() -> u64 {
 /// Publish a config whose native target is the prompt's fixture server, then
 /// bind the prompt to that revision.  Rust rejects any other editor target.
 fn publish_target(peer: &mut Peer, scope: &Value, arguments: &mut Value) -> TestResult {
+    publish_target_with_key(peer, scope, arguments, None)
+}
+fn publish_target_with_key(
+    peer: &mut Peer,
+    scope: &Value,
+    arguments: &mut Value,
+    key: Option<&str>,
+) -> TestResult {
     use std::hash::{Hash, Hasher};
     let url = arguments["connection"]["url"]
         .as_str()
@@ -146,15 +154,19 @@ fn publish_target(peer: &mut Peer, scope: &Value, arguments: &mut Value) -> Test
         .ok_or("fixture model")?
         .to_owned();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (&url, &model).hash(&mut hasher);
+    (&url, &model, key).hash(&mut hasher);
     let generation = FIXTURE_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut provider_data = json!({"api":url,"model":model});
+    if let Some(key) = key {
+        provider_data["apikey"] = json!(key);
+    }
     let staged = peer.call(
         &format!("fixture-config-{generation}"),
         "configuration/prepare",
         json!({"scope":scope,"arguments":{"generation":generation,"path":"/synthetic/native-agent",
             "digest":format!("{:064x}", hasher.finish()),"registry":[],
             "document":{"provider":"fixture","model":null,"review-mode":null,
-                "providers":[{"name":"fixture","data":{"api":url,"model":model}}]}}}),
+                "providers":[{"name":"fixture","data":provider_data}]}}}),
     )?;
     let capture = staged["result"]["capture_id"].clone();
     if capture.is_null() {
@@ -435,6 +447,52 @@ fn continuation_keeps_the_same_native_run_and_external_api_cannot_borrow_its_bud
     );
     assert_eq!(messages.get(2).ok_or("continue notice")?["role"], "user");
     server.join().map_err(|_| "server panic")??;
+    Ok(())
+}
+
+#[test]
+fn native_credentials_reject_foreign_editor_keys_before_claim() -> TestResult {
+    for expected in ["synthetic-committed-key", ""] {
+        let root = tempfile::tempdir()?;
+        let (url, server, requests) = server(vec![answer("bound credential")])?;
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let mut bound = prompt(root.path(), &url);
+        publish_target_with_key(&mut peer, &scope, &mut bound, Some(expected))?;
+        bound["connection"]["headers"] = json!({});
+        let mut events = Vec::new();
+        if !expected.is_empty() {
+            begin(&mut peer, "missing-auth", &scope, bound.clone())?;
+            assert_eq!(
+                response(&peer, "missing-auth", &mut events)?["error"]["data"]["status"],
+                "stale_configuration"
+            );
+            assert!(requests.try_recv().is_err());
+        }
+        for key in [json!("synthetic-foreign-key"), Value::Null] {
+            if expected.is_empty() && key.is_null() {
+                continue;
+            }
+            let mut forged = bound.clone();
+            forged["connection"]["auth"] = json!({"key":key});
+            begin(&mut peer, "foreign-key", &scope, forged)?;
+            assert_eq!(
+                response(&peer, "foreign-key", &mut events)?["error"]["data"]["status"],
+                "stale_configuration"
+            );
+            assert!(requests.try_recv().is_err());
+        }
+        bound["connection"]["auth"] = json!({"key":expected});
+        begin(&mut peer, "credential-bound", &scope, bound)?;
+        assert_eq!(
+            response(&peer, "credential-bound", &mut events)?["result"]["status"],
+            "completed"
+        );
+        requests.recv_timeout(Duration::from_secs(2))?;
+        drop(peer);
+        server.join().map_err(|_| "server panicked")??;
+    }
     Ok(())
 }
 

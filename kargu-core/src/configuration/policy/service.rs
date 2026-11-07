@@ -119,6 +119,16 @@ pub(crate) struct RunTarget {
     pub(crate) provider: String,
     pub(crate) model: Option<String>,
     pub(crate) endpoint: Option<String>,
+    profile: resolve::ReadyProfile,
+}
+impl RunTarget {
+    pub(crate) fn verify_credential(&self, supplied: Option<&str>) -> Result<(), CoreError> {
+        if self.profile.credential_matches(supplied) {
+            Ok(())
+        } else {
+            Err(CoreError::ConfigurationChanged)
+        }
+    }
 }
 
 /// How a native refresh request proceeds after admission.
@@ -168,6 +178,7 @@ impl ConfigurationService {
             provider: provider.as_str().to_owned(),
             model: model.filter(|model| !model.is_empty()).map(str::to_owned),
             endpoint: endpoint.map(str::to_owned),
+            profile: target,
         })
     }
     /// Current committed publication revision.

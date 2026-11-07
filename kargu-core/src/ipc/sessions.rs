@@ -100,7 +100,12 @@ impl ConnectionIntent {
         {
             return Err(CoreError::ConfigurationChanged);
         }
-        Ok(())
+        target.verify_credential(
+            intent
+                .get("auth")
+                .and_then(|auth| auth.get("key"))
+                .and_then(Value::as_str),
+        )
     }
 }
 impl TryFrom<Box<RawValue>> for ConnectionIntent {

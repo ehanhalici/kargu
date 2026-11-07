@@ -2392,8 +2392,29 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         `native_selection_retargets_the_run_and_rejects_the_old_editor_capture`;
         native agent düzeneği hedefini gerçekten yayımlayıp revision'a bağlanır.
         602 locked Rust, strict Clippy/fmt; tam ERT 1456/1456, bridge 40/40.
-        **Açık:** credential secret hâlâ editör capture'ıdır (interop dışında
-        Rust kendi direct secret'ını yerine koymaz); model metadata ve context
+        **Credential eşleşmesi (2026-11-07, `b178138` devamı):** native
+        `RunTarget`, yayımlanmış policy'nin credential kararını da private ve
+        zeroizing profile'da tutar. `session/prompt` direct credential'ın
+        editör `auth.key` alanıyla tam eşleşmesini claim'den önce kontrol eder;
+        keyless hedefe nonempty anahtar eklenemez. Eksik/foreign direct capture
+        `stale_configuration` ile reddedilir; claim veya provider isteği başlamaz.
+        Kaynak secret yeniden okunmaz; committed config/context ve selection'dan
+        çözülen profile kullanılır. Mevcut activation config-revision kontrolü
+        bu credential kararını da geçersiz kılar. Elisp karar motoru eklenmedi.
+        Gerçek pipe testi `native_credentials_reject_foreign_editor_keys_before_claim`
+        eksik auth/null/foreign key, keyless ve doğru capture sonrası aynı
+        serviste başarılı run'ı kapsar.
+        **Doğrulama:** `cargo fmt --manifest-path kargu-core/Cargo.toml --check`,
+        strict all-target Clippy, locked Rust 603/603 (32 compile-fail dahil)
+        ve explicit build exit 0. Güncel binary ile temiz HOME/config altında
+        `tests/ci/run-ert.sh full`: 1456/1456; `bridge`: 40/40, exit 0.
+        Eklenen missing-auth vakası focused native-agent testinde de geçti.
+        Elisp/TLA+ kaynağı değişmedi; TLC çalıştırılmadı.
+        Loglar `/tmp/kargu-run-credentials-{rust,build,ert,bridge}.log`.
+        **Açık:** direct secret wire'da editör capture'ı olarak taşınır ama artık
+        native policy ile eşleşmeden tüketilemez. Interop (auth-source/callable)
+        credential için opaque receipt/epoch bağı ve header capture policy'sinin
+        tümü henüz native admission'a bağlı değil; model metadata ve context
         revision'ı claim'e bağlı değil (context native store'u 4.9'a bağlı);
         activation öncesi config değişimi için deterministik pipe testi yok.
         Config commit view'u ~51 KB olduğundan 52 KiB altı frame'lerde config
