@@ -2572,7 +2572,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           pipe/ERT ile doğrula. Standalone API/catalog tüketicilerini koru;
           bu alt işler bitmeden üst 5.4a2 kapanmaz.
 
-          - [ ] **5.4a2c1 Actual worker completion portu:** mevcut
+          - [x] **5.4a2c1 Actual worker completion portu:** mevcut
             `kargu-async--close` task'i kapatıp cleanup çağırıyor;
             `kargu-config-worker-start` cleanup'ı process'i silip buffer'ı
             temizliyor. Bu observer callback'i tek başına adapter/worker
@@ -2581,6 +2581,24 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
             yalnız gerçek tamamlanmadan sonra gönderilsin. Custom adapter'ın
             observer/actual completion ayrımını kontrollü geç callback testiyle
             doğrula. Sıra: 5.4a2b → c1 → c2.
+            **Teslim (2026-11-07):** `kargu-config-worker-start` iptal/timeout'ta
+            child'ı `kill-process` ile sinyaller ama silmez; `:on-quiescent`
+            yalnız gerçek `exit`/`signal` sentinel'i ve private buffer temizliğinden
+            sonra bir kez çağrılır (başlatılamayan iş hemen tamamlanır, kapalı
+            task'te cleanup anında tamamlar). Yeni `kargu-config-worker-capture`
+            native port'u: gerçek plaintext auth-source child'ı veya yalnız
+            `kargu-config-credential-completion-adapter` sözleşmesini tanıyan
+            custom adapter; legacy adapter/runner'a iş verilmez, tamamlanma task
+            kapanışından çıkarılmaz, adapter hatası join sayılmaz, geç/çift
+            completion iptal edilen capture'a secret teslim etmez.
+            **Kanıt:** `tests/test-credential-completion.el` 6 test (iptal ve
+            timeout'ta sinyal tutulurken receipt yok, gerçek exit sonrası tek
+            receipt ve çift sentinel'de tekrar yok; gerçek plaintext capture ve
+            buffer silme; custom geç/çift completion; adapter hatası; issue
+            edilmemiş/legacy yollar; startup/decode/oversize hataları), iki eski
+            test sinyal sonrası gerçek exit'i bekleyecek şekilde güncellendi. Tam
+            ERT 1465/1465, bridge 40/40, 624 locked Rust; değişen Elisp Werror/
+            checkdoc temiz. Native reverse handler'a bağlanması c2b'dedir.
 
           - [ ] **5.4a2c2 Consumer cutover ve karma kabul:** c1 portuyla native
             credential reverse handler'ını bağla; erken frontend lookup'u native

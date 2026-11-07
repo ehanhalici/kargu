@@ -31,6 +31,16 @@
 (defvar kargu-config-worker-runner-fn nil
   "Optional injected adapter (PROVIDER HOST TASK TIMEOUT).")
 
+(defvar kargu-config-credential-adapter)
+
+(defvar kargu-config-credential-completion-adapter nil
+  "Optional native interop function (PROVIDER HOST TASK COMPLETE).
+Register cancellation with TASK, but call COMPLETE with a Result only after
+actual work has terminated, including after cancellation.  Never finish TASK
+instead of COMPLETE.  Calling COMPLETE twice has no effect after the first.
+The legacy credential adapter has no actual-completion guarantee and is not
+used by the native capture port.")
+
 (defun kargu-config-worker-source-path (source)
   "Return SOURCE's local plaintext path, or nil without opening it."
   (let ((path (if (stringp source) source
@@ -109,18 +119,40 @@
             (goto-char (point-max))
             (insert chunk)))))))
 
-(cl-defun kargu-config-worker-start (task script args &key decode (name "credential"))
+(cl-defun kargu-config-worker-start (task script args &key decode (name "credential") on-quiescent)
   "Start TASK's bounded child running fixed SCRIPT with ARGS.
-DECODE reads a finished child response; NAME identifies the operation."
-  (let ((buffer (generate-new-buffer " *kargu-credential-worker*")) process)
+DECODE reads a finished child response; NAME identifies the operation.
+ON-QUIESCENT receives a Result after the actual terminal sentinel and private
+buffer cleanup, even when TASK was cancelled.  With no child issued it runs
+immediately.  Task cancellation sends a signal; it does not forget the child."
+  (let ((buffer (generate-new-buffer " *kargu-credential-worker*")) process starting settled)
     (with-current-buffer buffer (buffer-disable-undo))
-    (kargu-async-add-cleanup
-     task (lambda ()
-            (when (and process (process-live-p process)) (delete-process process))
-            (kargu-config-worker--clean-buffer buffer)))
-    (when (kargu-async-pending-p task)
-      (condition-case nil
-          (progn
+    (cl-labels
+        ((finish (child)
+           (unless settled
+             (setq settled t)
+             (let ((result
+                    (if (not (kargu-async-pending-p task))
+                        (kargu-err "Credential worker was cancelled" :cancelled)
+                      (condition-case nil
+                          (if child
+                              (funcall (or decode #'kargu-config-worker--result) child buffer)
+                            (kargu-err "Could not start configuration worker" :auth-unavailable))
+                        (error (kargu-err "Invalid credential worker response" :auth-unavailable))))))
+               (kargu-config-worker--clean-buffer buffer)
+               (unwind-protect
+                   (when on-quiescent (funcall on-quiescent result))
+                 (kargu-async-finish task result)))))
+         (stop ()
+           (cond
+            ((and process (process-live-p process))
+             ;; Unlike delete-process, keep the process until wait status arrives.
+             (kill-process process))
+            ((and (null process) (not starting)) (finish nil)))))
+      (kargu-async-add-cleanup task #'stop)
+      (when (kargu-async-pending-p task)
+        (setq starting t)
+        (condition-case nil
             (setq process
                   (make-process
                    :name (concat "kargu-" name "-worker") :buffer buffer
@@ -129,22 +161,60 @@ DECODE reads a finished child response; NAME identifies the operation."
                    :connection-type 'pipe :coding 'utf-8-unix :noquery t
                    :filter (kargu-config-worker--filter task buffer)
                    :sentinel (lambda (child _event)
-                               (unless (process-live-p child)
-                                 (kargu-async-finish
-                                  task (funcall (or decode #'kargu-config-worker--result)
-                                                child buffer))))))
-            ;; A synchronous test adapter or early callback may have closed TASK.
-            (unless (kargu-async-pending-p task)
-              (when (process-live-p process) (delete-process process))))
-        (error
-         (kargu-async-finish
-          task (kargu-err "Could not start configuration worker" :auth-unavailable)))))))
+                               (when (memq (process-status child) '(exit signal))
+                                 (finish child)))))
+          (error (setq starting nil) (finish nil)))
+        (setq starting nil)
+        ;; A synchronous adapter or early callback may have closed TASK.
+        (unless (kargu-async-pending-p task) (stop))))))
 
-(defun kargu-config-worker--spawn (provider host sources task)
-  "Start PROVIDER's worker for HOST and SOURCES, owned by TASK."
+(defun kargu-config-worker--spawn (provider host sources task &optional on-quiescent)
+  "Start PROVIDER's worker for HOST and SOURCES, owned by TASK.
+ON-QUIESCENT observes actual completion independently of TASK delivery."
   (kargu-config-worker-start
    task (kargu-config-worker--script)
-   (list host (json-serialize (vconcat sources))) :name provider))
+   (list host (json-serialize (vconcat sources))) :name provider :on-quiescent on-quiescent))
+
+(defun kargu-config-worker-capture (provider host task on-quiescent)
+  "Capture a native credential for PROVIDER/HOST with TASK as observer.
+ON-QUIESCENT receives one Result only after actual completion.  Cancellation
+revokes secret delivery but does not acknowledge completion.  Rust owns the
+request deadline and sends cancellation; this port adds no local run policy.
+Custom work requires `kargu-config-credential-completion-adapter'; legacy-only
+adapters fail without issuing work.  No callback is inferred from task closure."
+  (kargu-contract-assert #'stringp provider)
+  (kargu-contract-assert #'kargu-async-task-p task)
+  (kargu-contract-assert #'functionp on-quiescent)
+  (let ((settled nil))
+    (cl-labels
+        ((complete (result)
+           (unless settled
+             (setq settled t)
+             (let* ((value (kargu-result-value result))
+                    (safe (cond
+                           ((not (kargu-async-pending-p task))
+                            (kargu-err "Credential capture was cancelled" :cancelled))
+                           ((and (stringp value) (not (string-empty-p value))
+                                 (<= (string-bytes value) kargu-config-worker-max-bytes))
+                            (kargu-ok value))
+                           (t (kargu-err "Credential capture unavailable" :auth-unavailable)))))
+               (kargu-async-finish task safe)
+               (funcall on-quiescent safe)))))
+      (cond
+       ((not (kargu-async-pending-p task)) (complete nil))
+       ((functionp kargu-config-credential-completion-adapter)
+        ;; Once called, only the adapter's actual completion proves quiescence.
+        ;; A thrown error could follow resource acquisition; do not invent a join.
+        (condition-case nil
+            (funcall kargu-config-credential-completion-adapter provider host task #'complete)
+          (error (kargu-async-cancel task))))
+       ((or (bound-and-true-p kargu-config-credential-adapter)
+            kargu-config-worker-runner-fn
+            (not (and (stringp host) (not (string-empty-p host))))
+            (null (kargu-config-worker-plain-sources)))
+        (complete nil))
+       (t (kargu-config-worker--spawn
+           provider host (kargu-config-worker-plain-sources) task #'complete))))))
 
 (cl-defun kargu-config-worker-resolve (provider host task &key timeout)
   "Resolve PROVIDER's credential for HOST into TASK within TIMEOUT seconds.
