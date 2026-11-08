@@ -1,0 +1,1080 @@
+# arch-checker ratchet baseline: known violations that may only be removed.
+# Regenerate with `arch-checker --write-baseline arch-checker.baseline .`
+primitive-boundary	src/api/auth.rs	`bind_run` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/auth.rs	`header_name` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/auth.rs	`header_value` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/catalog.rs	`fetch_remote_models` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/domain.rs	`capture_run` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/domain.rs	`generative` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/policy/domain.rs	`as_str` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/policy/domain.rs	`disabled` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/policy/domain.rs	`effort` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/policy/mod.rs	`bind_model_parameters` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/policy/mod.rs	`bind_provider_policy` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/policy/mod.rs	`bind_reasoning` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/resilience/domain.rs	`consistent` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/resilience/domain.rs	`threshold` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/resilience/retry.rs	`retryable` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/resilience/retry.rs	`upstream_failure` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/stream/limits.rs	`arguments` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/stream/limits.rs	`calls` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/stream/limits.rs	`event` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/stream/limits.rs	`line` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/stream/limits.rs	`raw` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/stream/mod.rs	`feed` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/api/stream/parser.rs	`feed` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/agent/mod.rs	`canonical_payload` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/agent/mod.rs	`complete` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/agent/mod.rs	`terminal` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/budget/domain.rs	`unknown` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/budget/mod.rs	`drained` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/claim.rs	`drained` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/history.rs	`can_publish_history` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/history.rs	`complete_history_call` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/history.rs	`history_rpc` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`can_publish_edit` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`can_publish_history` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`configuration_current` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`dispatch_rpc` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`dispatch` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`editor_credential_available` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`editor_file_snapshot_available` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`is_shutdown` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`matches_epoch` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`owns_application` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`owns_connection_read` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`owns_model_refresh` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`owns_read_scope` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`prepare_edit` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`prepare_workspace_read` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/host.rs	`release_application` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/mod.rs	`drained` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/mod.rs	`drained` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/mod.rs	`owns_session` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/mod.rs	`reserve_output` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/mod.rs	`same_owner` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/mod.rs	`session_count` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/mod.rs	`summary` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/selection.rs	`commit` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/steps.rs	`call_steps_settled` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/application/steps.rs	`settled` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/document.rs	`into_editor` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/document.rs	`parse` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/domain.rs	`at` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/domain.rs	`from_toml` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/policy/environment.rs	`names` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/policy/resolve.rs	`authenticated` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/policy/service.rs	`begin_refresh` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/policy/service.rs	`interop_host` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/policy/service.rs	`is_revision` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/policy/service.rs	`prepare_connection` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/policy/service.rs	`rpc` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/policy/service.rs	`run_target` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/configuration/policy/service.rs	`verify_credential` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/domain/output.rs	`accepts` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/domain/output.rs	`stop_on_bytes` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/intent.rs	`commitment` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/intent.rs	`matches_run` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/intent.rs	`permits_deletion` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/journal/storage.rs	`matches` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/journal/storage.rs	`read` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/patch/hunk.rs	`parse` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/patch/mod.rs	`normalized` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/patch/path.rs	`parse` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/patch/path.rs	`quote` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/artifact.rs	`unchanged` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/capture.rs	`existed` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/history.rs	`matches` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/hunks.rs	`measure_hunks` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/page.rs	`push` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/preflight.rs	`count` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/preflight.rs	`would_finish` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/receipt.rs	`complete` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/receipt.rs	`has_applied` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/receipt.rs	`has_modified` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/receipt.rs	`hook_modified` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/receipt.rs	`retained_bytes` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/receipt.rs	`saved` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/rollback.rs	`retained_bytes` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/service.rs	`can_publish` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/service.rs	`parent_busy` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/service.rs	`rpc` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/service.rs	`settle_verification` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/service.rs	`take` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/edit/prepare/verification.rs	`settle` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/history/presentation.rs	`capture` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/history/rpc.rs	`read_rpc` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/history/store.rs	`append_result` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/history/store.rs	`repair_missing` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/history/store.rs	`result_message` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/history/store.rs	`settled` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/history/upload.rs	`can_publish` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/history/upload.rs	`drained` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/history/upload.rs	`owns_session` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/history/upload.rs	`rpc` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/models/metadata/mod.rs	`allows_reasoning` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/models/metadata/mod.rs	`allows_tools` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/models/metadata/mod.rs	`input_is_zero` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/models/metadata/mod.rs	`parse` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/models/metadata/mod.rs	`request_parameters` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/models/numeric.rs	`per_million_label` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/models/service/mod.rs	`rpc` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/models/store/mod.rs	`snapshot_json` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/process/archive.rs	`discard` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/process/archive.rs	`push` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/process/archive.rs	`snapshot` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/process/archive.rs	`truncated` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/process/records.rs	`push` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/process/records.rs	`push` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/process/termination.rs	`outcome` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/providers/catalog_target/domain.rs	`matches_default` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/providers/domain.rs	`as_str` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/providers/mod.rs	`catalog_connection` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/providers/mod.rs	`endpoint_text` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/providers/mod.rs	`keyless` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/providers/mod.rs	`local` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/providers/mod.rs	`prompt_caching` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/security/action_snapshot.rs	`digest` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/security/catalog.rs	`description` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/security/delegated.rs	`complete_history` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/security/file.rs	`read` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/security/file.rs	`size` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/security/mod.rs	`pending_count` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/security/mod.rs	`permits_mode` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/security/mod.rs	`same_capture` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/security/mod.rs	`stop_on_bytes` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/security/read_target.rs	`immutable` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/coordinates.rs	`check_text` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/coordinates.rs	`contains` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/coordinates.rs	`offset` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/debugger.rs	`render_summary` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/diagnostics.rs	`has_native_severity` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/diagnostics.rs	`is_clean` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/diagnostics.rs	`render_for` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/mentions.rs	`escape_xml` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/mentions.rs	`estimate_tokens` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/mentions.rs	`new` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/mentions.rs	`render_xml` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/symbols.rs	`format_hover` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/symbols.rs	`format_xrefs` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/symbols/document.rs	`fresh_for` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/symbols/document.rs	`refusal_text` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/symbols/document.rs	`render_for` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/symbols/document.rs	`render_tree` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/symbols/document.rs	`render` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/symbols/document.rs	`select_edit` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/sensors/symbols/document.rs	`select` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/command.rs	`exclusions` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/command.rs	`executable` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/file/decode.rs	`decode` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/file/render.rs	`excerpt` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/file/render.rs	`finished` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/file/render.rs	`ingest` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/git/mutation.rs	`next` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/git/mutation.rs	`text` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/git/mutation/intent.rs	`arguments` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/git/mutation/intent.rs	`resolve` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/git/mutation/scope.rs	`unborn_reference` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/git/profile.rs	`finish` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/git/query.rs	`coverage` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/git/query.rs	`finish` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/git/query.rs	`text` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/git/status.rs	`text` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/grep.rs	`text` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/mod.rs	`into_tool_output` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/probe/toolchain.rs	`manager` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/skills/metadata.rs	`parse` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/skills/mod.rs	`into_tool_output` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/webfetch/mod.rs	`into_text` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/workspace/webfetch/policy.rs	`public` exposes a primitive across a module boundary; use a domain type
+pub-field	src/api/domain.rs	`HttpRequest`: field `authority` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`HttpRequest`: field `body` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`HttpRequest`: field `headers` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`HttpRequest`: field `limits` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`HttpRequest`: field `method` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`HttpRequest`: field `provider` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`HttpRequest`: field `response_profile` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`HttpRequest`: field `url` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`HttpRequest`: field `wire` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`NativeRunPolicy`: field `model` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`NativeRunPolicy`: field `prompt_caching` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`NativeRunPolicy`: field `provider_policy` is visible; keep fields private and expose accessors
+pub-field	src/api/domain.rs	`NativeRunPolicy`: field `wire` is visible; keep fields private and expose accessors
+pub-field	src/api/policy/domain.rs	`DefaultsPatch`: field `max_output_key` is visible; keep fields private and expose accessors
+pub-field	src/api/policy/domain.rs	`DefaultsPatch`: field `reasoning_disallows_temperature` is visible; keep fields private and expose accessors
+pub-field	src/api/policy/domain.rs	`DefaultsPatch`: field `sampling_parameters` is visible; keep fields private and expose accessors
+pub-field	src/api/resilience/domain.rs	`RetryDelay`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/api/resilience/domain.rs	`RetryDto`: field `backoff_base_ms` is visible; keep fields private and expose accessors
+pub-field	src/api/resilience/domain.rs	`RetryDto`: field `backoff_cap_ms` is visible; keep fields private and expose accessors
+pub-field	src/api/resilience/domain.rs	`RetryDto`: field `retry_after_max_ms` is visible; keep fields private and expose accessors
+pub-field	src/api/resilience/domain.rs	`RetryDto`: field `retry_max` is visible; keep fields private and expose accessors
+pub-field	src/api/resilience/domain.rs	`RetryDto`: field `statuses` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`CacheUsage`: field `input_excludes_cache` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`CacheUsage`: field `read` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`CacheUsage`: field `write` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`RequestRules`: field `copy` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`RequestRules`: field `max_tokens` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`RequestRules`: field `result` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`RequestRules`: field `schema` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`RequestRules`: field `system` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`RequestRules`: field `text` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`RequestRules`: field `tool` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ResponseRules`: field `cache` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ResponseRules`: field `content` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ResponseRules`: field `detect_type` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ResponseRules`: field `detect` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ResponseRules`: field `finish_default` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ResponseRules`: field `finish` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ResponseRules`: field `reasoning` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ResponseRules`: field `text` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ResponseRules`: field `tool` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ResponseRules`: field `usage` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`TextRule`: field `field` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`TextRule`: field `kind` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ToolResultRule`: field `content` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ToolResultRule`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ToolResultRule`: field `kind` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ToolRule`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ToolRule`: field `input` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ToolRule`: field `kind` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`ToolRule`: field `name` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`WireRevision`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`WireSpec`: field `cache_marker` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`WireSpec`: field `chat_path` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`WireSpec`: field `headers` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`WireSpec`: field `policy` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`WireSpec`: field `reasoning` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`WireSpec`: field `request` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`WireSpec`: field `response` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`WireSpec`: field `revision` is visible; keep fields private and expose accessors
+pub-field	src/api/wire/domain.rs	`WireSpec`: field `stream` is visible; keep fields private and expose accessors
+pub-field	src/application/agent/mod.rs	`AgentOptions`: field `editor_available` is visible; keep fields private and expose accessors
+pub-field	src/application/agent/mod.rs	`AgentOptions`: field `tools_enabled` is visible; keep fields private and expose accessors
+pub-field	src/application/agent/mod.rs	`AgentOptions`: field `turn_limit` is visible; keep fields private and expose accessors
+pub-field	src/application/agent/response.rs	`AssistantTurn`: field `answer` is visible; keep fields private and expose accessors
+pub-field	src/application/agent/response.rs	`AssistantTurn`: field `finish` is visible; keep fields private and expose accessors
+pub-field	src/application/agent/response.rs	`AssistantTurn`: field `message` is visible; keep fields private and expose accessors
+pub-field	src/application/agent/response.rs	`AssistantTurn`: field `thought` is visible; keep fields private and expose accessors
+pub-field	src/application/claim.rs	`ClaimIntent`: field `config_revision` is visible; keep fields private and expose accessors
+pub-field	src/application/claim.rs	`ClaimIntent`: field `mode` is visible; keep fields private and expose accessors
+pub-field	src/application/claim.rs	`ClaimIntent`: field `policy_revision` is visible; keep fields private and expose accessors
+pub-field	src/application/claim.rs	`ClaimIntent`: field `timeout` is visible; keep fields private and expose accessors
+pub-field	src/application/claim.rs	`ClaimIntent`: field `tool_limit` is visible; keep fields private and expose accessors
+pub-field	src/application/claim.rs	`ClaimIntent`: field `workspace` is visible; keep fields private and expose accessors
+pub-field	src/application/claim.rs	`PendingClaim`: field `claim` is visible; keep fields private and expose accessors
+pub-field	src/application/claim.rs	`PendingClaim`: field `state` is visible; keep fields private and expose accessors
+pub-field	src/application/host.rs	`Dispatch`: field `exit` is visible; keep fields private and expose accessors
+pub-field	src/application/host.rs	`Dispatch`: field `result` is visible; keep fields private and expose accessors
+pub-field	src/application/host.rs	`ReadScope`: field `application_id` is visible; keep fields private and expose accessors
+pub-field	src/application/host.rs	`ReadScope`: field `session_id` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`ApplicationActor`: field `configuration` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`ApplicationActor`: field `edits` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`ApplicationActor`: field `models` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`RunCompletion`: field `scope` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`RunCompletion`: field `tool_results` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`RunSettings`: field `mode` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`RunSettings`: field `tool_limit` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`RunSettings`: field `workspace` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`ToolResult`: field `is_error` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`ToolResult`: field `message` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`ToolResult`: field `outcome` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`ToolResult`: field `tool_call_id` is visible; keep fields private and expose accessors
+pub-field	src/application/mod.rs	`ToolResult`: field `tool_name` is visible; keep fields private and expose accessors
+pub-field	src/application/selection.rs	`Selection`: field `effort` is visible; keep fields private and expose accessors
+pub-field	src/application/selection.rs	`Selection`: field `model` is visible; keep fields private and expose accessors
+pub-field	src/application/selection.rs	`Selection`: field `provider` is visible; keep fields private and expose accessors
+pub-field	src/configuration/domain.rs	`ConfigurationSource`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ConfigurationDocument`: field `model` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ConfigurationDocument`: field `provider` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ConfigurationDocument`: field `providers` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ConfigurationDocument`: field `review_mode` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ConfiguredProvider`: field `data` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ConfiguredProvider`: field `name` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `api_base` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `api_key` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `app_url` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `environment` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `registry` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `selected_model` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `selected_provider` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`PolicyContext`: field `api_base` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`PolicyContext`: field `api_key` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`PolicyContext`: field `app_url` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`PolicyContext`: field `environment` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`PolicyContext`: field `registry` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`PolicyContext`: field `selected_model` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`PolicyContext`: field `selected_provider` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ProviderFields`: field `api` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ProviderFields`: field `apikey` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ProviderFields`: field `model` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`ProviderFields`: field `models` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `api` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `env` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `headers` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `keyless` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `local` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `models` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `prompt_caching` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `tuning_policy` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `wire_headers` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`RegistryEntry`: field `wire` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`SelectionInput`: field `model` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`SelectionInput`: field `provider` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`TargetInput`: field `model` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`TargetInput`: field `provider` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/domain.rs	`TargetInput`: field `selection` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/service.rs	`RunTarget`: field `endpoint` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/service.rs	`RunTarget`: field `model_policy` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/service.rs	`RunTarget`: field `model` is visible; keep fields private and expose accessors
+pub-field	src/configuration/policy/service.rs	`RunTarget`: field `provider` is visible; keep fields private and expose accessors
+pub-field	src/configuration/read/domain.rs	`CandidatePaths`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/configuration/read/domain.rs	`ConfigurationPath`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/edit/intent.rs	`EditorActionInput`: field `config_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/intent.rs	`EditorActionInput`: field `files` is visible; keep fields private and expose accessors
+pub-field	src/edit/intent.rs	`EditorActionInput`: field `policy_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/intent.rs	`EditorActionInput`: field `review_mode` is visible; keep fields private and expose accessors
+pub-field	src/edit/intent.rs	`EditorActionInput`: field `revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/intent.rs	`EditorActionInput`: field `save_policy` is visible; keep fields private and expose accessors
+pub-field	src/edit/intent.rs	`EditorActionInput`: field `source` is visible; keep fields private and expose accessors
+pub-field	src/edit/intent.rs	`EditorActionInput`: field `workspace` is visible; keep fields private and expose accessors
+pub-field	src/edit/journal/metadata.rs	`StoredAction`: field `config_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/journal/metadata.rs	`StoredAction`: field `policy_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/journal/metadata.rs	`StoredAction`: field `revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/journal/metadata.rs	`StoredAction`: field `root` is visible; keep fields private and expose accessors
+pub-field	src/edit/journal/mod.rs	`RecoverInput`: field `edit_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/journal/mod.rs	`RecoverInput`: field `journal_directory` is visible; keep fields private and expose accessors
+pub-field	src/edit/journal/storage.rs	`Directory`: field `held` is visible; keep fields private and expose accessors
+pub-field	src/edit/journal/storage.rs	`Directory`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/edit/journal/storage.rs	`LockedRead`: field `bytes` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`BatchFile`: field `hunks` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`BatchFile`: field `kind` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`BatchFile`: field `proposal` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Batch`: field `files` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Batch`: field `hunks` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `base_hash` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `base` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `config_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `disk` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `evidence` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `hunks` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `live` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `policy_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `proposed_hash` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `proposed` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `relative` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `restore_coding` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `restore_dirty` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `review_mode` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `root` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `save_policy` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/artifact.rs	`Prepared`: field `unchanged` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/capture.rs	`DiskContents`: field `raw_digest` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/capture.rs	`DiskContents`: field `text` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/capture.rs	`Evidence`: field `canonical` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/claim.rs	`ClaimWork`: field `artifact` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/claim.rs	`ClaimWork`: field `deadline` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/claim.rs	`ClaimWork`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/claim.rs	`ClaimWork`: field `origin` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/claim.rs	`ClaimWork`: field `parent` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/claim.rs	`ClaimedAction`: field `action` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/claim.rs	`ClaimedAction`: field `parent` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/claim.rs	`ClaimedAction`: field `settings` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/git.rs	`GitPreparation`: field `command` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/git.rs	`GitPreparation`: field `report` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/git.rs	`GitPreparation`: field `settings` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/git.rs	`GitPreparation`: field `tool` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`AppliedPublication`: field `edit_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`AppliedPublication`: field `rollback_available` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `baseline` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `disk` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `document` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `edit_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `file` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `final_hash` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `full_path` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `hook_modified` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `hunks` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `outcome` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `root` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `saved` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `service_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `session` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/history.rs	`ChangedFileRecord`: field `verification_pending` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`Inspection`: field `documents` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`Inspection`: field `input` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`Inspection`: field `parts` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`Inspection`: field `patch` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`Inspection`: field `targets` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`PatchWork`: field `deadline` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`PatchWork`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`PatchWork`: field `inspection` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`PatchWork`: field `parent` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`Target`: field `hunks` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`Target`: field `initial` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/inspection.rs	`Target`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/mod.rs	`Work`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/parent.rs	`ParentEdit`: field `call` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/parent.rs	`ParentEdit`: field `name` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/parent.rs	`ParentEdit`: field `run` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/parent.rs	`ParentPolicy`: field `review_mode` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/parent.rs	`ParentPolicy`: field `save_policy` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/parent.rs	`ParentResult`: field `outcome` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/parent.rs	`ParentResult`: field `text` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/parent.rs	`ParentSource`: field `result` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/parent.rs	`ParentSource`: field `state` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/parent.rs	`ParentSource`: field `step` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/preflight.rs	`PreflightProgress`: field `ready` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `after` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `failure` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `file` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `progress` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `write_tick` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `written_bytes` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/receipt.rs	`FileResult`: field `before_document` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/receipt.rs	`FileResult`: field `final_disk` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/receipt.rs	`FileResult`: field `final_document` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/receipt.rs	`FileResult`: field `final_text` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`AppliedSnapshot`: field `artifact` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`AppliedSnapshot`: field `edit_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`AppliedSnapshot`: field `receipt` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`AppliedSnapshot`: field `remaining` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`AppliedSnapshot`: field `service_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`AppliedSnapshot`: field `session` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `config_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `mode` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `origin_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `policy_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `review_mode` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `root` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `save_policy` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `service_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `target_edit_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `target_file` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackWork`: field `files` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackWork`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackWork`: field `input` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/rollback.rs	`RollbackWork`: field `snapshot` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Append`: field `offset` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Append`: field `origin_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Append`: field `part` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Append`: field `preparation_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Append`: field `text` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `config_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `intent` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `language_source` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `live` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `mode` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `origin_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `policy_revision` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `review_mode` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `root` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `save_policy` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Begin`: field `service_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Chunk`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Close`: field `origin_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Document`: field `document` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Document`: field `origin_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Document`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Document`: field `preparation_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`LiveDocument`: field `bytes` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`LiveDocument`: field `coding` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`LiveDocument`: field `dirty` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`LiveDocument`: field `disk` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`LiveDocument`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`LiveDocument`: field `read_only` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`LiveDocument`: field `tick` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Read`: field `file` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Read`: field `offset` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Read`: field `origin_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Read`: field `part` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Read`: field `preparation_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Targets`: field `offset` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Targets`: field `origin_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Targets`: field `preparation_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Ticket`: field `origin_id` is visible; keep fields private and expose accessors
+pub-field	src/edit/prepare/types.rs	`Ticket`: field `preparation_id` is visible; keep fields private and expose accessors
+pub-field	src/history/store.rs	`PendingCall`: field `call` is visible; keep fields private and expose accessors
+pub-field	src/history/store.rs	`PendingCall`: field `native_id` is visible; keep fields private and expose accessors
+pub-field	src/history/upload.rs	`HistoryWork`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/admission.rs	`Admitted`: field `arguments` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/admission.rs	`Admitted`: field `circuit` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/admission.rs	`Admitted`: field `flight` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/admission.rs	`Admitted`: field `page_bytes` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/admission.rs	`Admitted`: field `scope` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/budget.rs	`BudgetRef`: field `budget_id` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/budget.rs	`BudgetRef`: field `kind` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/budget.rs	`BudgetRef`: field `native_run` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/budget.rs	`Charge`: field `deadline` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/budget.rs	`Charge`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/budget.rs	`Charge`: field `ticket` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/mod.rs	`ModelDelivery`: field `budget` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/mod.rs	`ModelDelivery`: field `circuit` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/mod.rs	`ModelDelivery`: field `result` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/mod.rs	`ModelDelivery`: field `turn` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Configuration`: field `circuit` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Configuration`: field `observer` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Configuration`: field `policy` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Intent`: field `arguments` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Intent`: field `attempt` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Intent`: field `configuration` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Intent`: field `deadline` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Intent`: field `page_bytes` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Intent`: field `reference` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Operation`: field `intent` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/retry.rs	`Operation`: field `phase` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/worker.rs	`Attempt`: field `arguments` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/worker.rs	`Attempt`: field `cancel` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/worker.rs	`Attempt`: field `deadline` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/worker.rs	`Attempt`: field `expectation` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/worker.rs	`Attempt`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/worker.rs	`Attempt`: field `observe_entropy` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/worker.rs	`Attempt`: field `page_bytes` is visible; keep fields private and expose accessors
+pub-field	src/ipc/api/worker.rs	`Attempt`: field `sender` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Finishing`: field `completion` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Finishing`: field `run` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Finishing`: field `task` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `artifact` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `deadline` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `effect` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `journal` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `preflight` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `receipts` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `revoked` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `run` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `token` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Recorded`: field `artifact` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Recorded`: field `grant` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Recorded`: field `journal` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Recorded`: field `preflight` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Recording`: field `cancel` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Recording`: field `deadline` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Recording`: field `request_id` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Recording`: field `run` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Recording`: field `task` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Recording`: field `token` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`SettledReceipt`: field `expires_at` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`SettledReceipt`: field `origin` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`SettledReceipt`: field `receipt` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`SettledReceipt`: field `revision` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`SettledReceipt`: field `scope` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`SettledReceipt`: field `token` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Start`: field `artifact` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Start`: field `directory` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Start`: field `grant` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Start`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Start`: field `preflight` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Start`: field `request_id` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/editor/issue.rs	`Start`: field `run` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/input.rs	`Prepared`: field `command` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/input.rs	`Prepared`: field `reply` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/input.rs	`Prepared`: field `settings` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/input.rs	`Prepared`: field `tool` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/mod.rs	`CommandDelivery`: field `call` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/mod.rs	`CommandDelivery`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/mod.rs	`CommandDelivery`: field `outcome` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/mod.rs	`CommandDelivery`: field `result` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`ApprovalReady`: field `reply` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`ApprovalReady`: field `request` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`ApprovalReady`: field `run` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Discarding`: field `error` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Discarding`: field `run` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Discarding`: field `task` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Finalizing`: field `job` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Finalizing`: field `run` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Finalizing`: field `task` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Operation`: field `owner` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Operation`: field `phase` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Owner`: field `edit_parent` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Owner`: field `edit` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Owner`: field `mutation_issued` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Owner`: field `outcome` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Owner`: field `parent` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Owner`: field `purpose` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Owner`: field `scope` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Owner`: field `step` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Owner`: field `terminal` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Preparing`: field `cancel` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Preparing`: field `deadline` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Preparing`: field `task` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Reviewing`: field `prepared` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Reviewing`: field `receiver` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Reviewing`: field `reverse` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Running`: field `job` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Running`: field `reply` is visible; keep fields private and expose accessors
+pub-field	src/ipc/execution/state.rs	`Running`: field `run` is visible; keep fields private and expose accessors
+pub-field	src/ipc/protocol.rs	`Fault`: field `code` is visible; keep fields private and expose accessors
+pub-field	src/ipc/protocol.rs	`Fault`: field `message` is visible; keep fields private and expose accessors
+pub-field	src/ipc/protocol.rs	`Fault`: field `status` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `catalog` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `configuration_revision` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `owner` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `provider` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `specs` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `summaries` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `configuration_revision` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `owner` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `provider` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `request` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `specs` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ReadDelivery`: field `call` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ReadDelivery`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ReadDelivery`: field `outcome` is visible; keep fields private and expose accessors
+pub-field	src/ipc/read_tools.rs	`ReadDelivery`: field `text` is visible; keep fields private and expose accessors
+pub-field	src/models/service/domain.rs	`Append`: field `chunk` is visible; keep fields private and expose accessors
+pub-field	src/models/service/domain.rs	`Append`: field `offset` is visible; keep fields private and expose accessors
+pub-field	src/models/service/domain.rs	`Append`: field `upload_id` is visible; keep fields private and expose accessors
+pub-field	src/models/service/domain.rs	`Begin`: field `effort_specs` is visible; keep fields private and expose accessors
+pub-field	src/models/service/domain.rs	`Begin`: field `provider` is visible; keep fields private and expose accessors
+pub-field	src/models/service/domain.rs	`Begin`: field `revision` is visible; keep fields private and expose accessors
+pub-field	src/models/service/domain.rs	`Read`: field `offset` is visible; keep fields private and expose accessors
+pub-field	src/models/service/domain.rs	`Read`: field `revision` is visible; keep fields private and expose accessors
+pub-field	src/models/service/domain.rs	`Upload`: field `upload_id` is visible; keep fields private and expose accessors
+pub-field	src/models/store/domain.rs	`ModelUpdate`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`ModelSummaryDto`: field `context_window` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`ModelSummaryDto`: field `free` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`ModelSummaryDto`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`ModelSummaryDto`: field `max_output` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`ModelSummaryDto`: field `price_label` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`ModelSummaryDto`: field `reasoning_efforts` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`ModelSummaryDto`: field `supports_reasoning` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`ModelSummaryDto`: field `supports_tools` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`ModelSummaryDto`: field `vision` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`RunModelPolicy`: field `efforts` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`RunModelPolicy`: field `parameters` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`RunModelPolicy`: field `reasoning` is visible; keep fields private and expose accessors
+pub-field	src/models/store/mod.rs	`RunModelPolicy`: field `tools` is visible; keep fields private and expose accessors
+pub-field	src/process/archive.rs	`Archive`: field `eof` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`CapturedOutput`: field `stderr` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`CapturedOutput`: field `stdout` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`CapturedOutput`: field `truncated` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`CleanupSettings`: field `drain` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`CleanupSettings`: field `grace` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`OutputPage`: field `bytes` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`OutputPage`: field `eof` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`OutputPage`: field `next_cursor` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`OutputPage`: field `start_cursor` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`OutputPage`: field `truncated` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`ProcessResult`: field `capture_stop` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`ProcessResult`: field `cleanup_complete` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`ProcessResult`: field `exit_code` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`ProcessResult`: field `outcome` is visible; keep fields private and expose accessors
+pub-field	src/process/mod.rs	`ProcessResult`: field `signal` is visible; keep fields private and expose accessors
+pub-field	src/providers/catalog_target/domain.rs	`NativeModels`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/providers/catalog_target/domain.rs	`NativeModels`: field `unless_suffix` is visible; keep fields private and expose accessors
+pub-field	src/security/editor.rs	`EditorAdmissionInput`: field `action` is visible; keep fields private and expose accessors
+pub-field	src/security/editor.rs	`EditorAdmissionInput`: field `call_id` is visible; keep fields private and expose accessors
+pub-field	src/security/editor.rs	`EditorAdmissionInput`: field `presenter` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`ApprovedParts`: field `call_id` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`ApprovedParts`: field `command` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`ApprovedParts`: field `lease` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`ApprovedParts`: field `run` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`ApprovedParts`: field `step_id` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandInput`: field `arguments` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandInput`: field `environment` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandInput`: field `program` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandInput`: field `timeout` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandInput`: field `working_directory` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `arguments` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `capture` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `cwd` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `environment` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `idle_timeout` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `invocation` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `output_limit` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `program` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `stderr` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `success_codes` is visible; keep fields private and expose accessors
+pub-field	src/security/mod.rs	`CommandSpec`: field `timeout` is visible; keep fields private and expose accessors
+pub-field	src/security/read_target.rs	`ReadTarget`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/sensors/coordinates.rs	`Position`: field `column` is visible; keep fields private and expose accessors
+pub-field	src/sensors/coordinates.rs	`Position`: field `line` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`BreakpointDto`: field `file` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`BreakpointDto`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`BreakpointDto`: field `line` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`BreakpointDto`: field `message` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`BreakpointDto`: field `verified` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `connection_id` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `current_frame` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `local_variables` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `stack_frames` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `status` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `stop_generation` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `thread_id` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `threads` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`StackFrameDto`: field `file` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`StackFrameDto`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`StackFrameDto`: field `name` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`StackFrameDto`: field `range` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`StackFrameDto`: field `thread_id` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`ThreadDto`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`ThreadDto`: field `name` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`VariableDto`: field `children_reference` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`VariableDto`: field `name` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`VariableDto`: field `value` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`VariableDto`: field `var_type` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`WatchDto`: field `error` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`WatchDto`: field `expression` is visible; keep fields private and expose accessors
+pub-field	src/sensors/debugger.rs	`WatchDto`: field `result` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`BackendReport`: field `backend` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`BackendReport`: field `observed` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`BackendReport`: field `reported` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`BackendReport`: field `requested` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`BackendReport`: field `tick` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`DiagnosticDelta`: field `new` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`DiagnosticDelta`: field `pre_existing` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`DiagnosticDelta`: field `resolved` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`Diagnostic`: field `code` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`Diagnostic`: field `message` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`Diagnostic`: field `range` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`Diagnostic`: field `severity` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`Diagnostic`: field `source` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`DocumentStamp`: field `document_id` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`DocumentStamp`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`DocumentStamp`: field `tick` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`ServerPublication`: field `observed_server` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`ServerPublication`: field `published_version` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`ServerPublication`: field `requested_server` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`ServerPublication`: field `requested_version` is visible; keep fields private and expose accessors
+pub-field	src/sensors/diagnostics.rs	`ServerPublication`: field `tick` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `byte_count` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `content` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `dirty` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `document_id` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `hash` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `range` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `revision` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `status` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `target_id` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `target` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `token_estimate` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `truncated` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`MentionSpan`: field `end` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`MentionSpan`: field `raw` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`MentionSpan`: field `start` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`MentionSpan`: field `target_id` is visible; keep fields private and expose accessors
+pub-field	src/sensors/mentions.rs	`MentionSpan`: field `target` is visible; keep fields private and expose accessors
+pub-field	src/sensors/symbols.rs	`HoverSnapshot`: field `contents` is visible; keep fields private and expose accessors
+pub-field	src/sensors/symbols.rs	`HoverSnapshot`: field `range` is visible; keep fields private and expose accessors
+pub-field	src/sensors/symbols.rs	`XrefLocation`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/sensors/symbols.rs	`XrefLocation`: field `range` is visible; keep fields private and expose accessors
+pub-field	src/sensors/symbols.rs	`XrefLocation`: field `summary` is visible; keep fields private and expose accessors
+pub-field	src/sensors/symbols/document.rs	`SymbolEditSelection`: field `document` is visible; keep fields private and expose accessors
+pub-field	src/sensors/symbols/document.rs	`SymbolEditSelection`: field `range` is visible; keep fields private and expose accessors
+pub-field	src/sensors/symbols/document.rs	`SymbolEditSelection`: field `source` is visible; keep fields private and expose accessors
+pub-field	src/workspace/file/mod.rs	`FileExcerpt`: field `bytes_read` is visible; keep fields private and expose accessors
+pub-field	src/workspace/file/mod.rs	`FileExcerpt`: field `text` is visible; keep fields private and expose accessors
+pub-field	src/workspace/file/mod.rs	`FileExcerpt`: field `truncated` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/mutation.rs	`MutationPrepared`: field `command` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/mutation.rs	`MutationPrepared`: field `reply` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/mutation.rs	`MutationPrepared`: field `settings` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/mutation.rs	`MutationPrepared`: field `tool` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/mutation.rs	`MutationReport`: field `intent` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/mutation.rs	`MutationReport`: field `output` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/mutation/intent.rs	`Branch`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/mutation/intent.rs	`Message`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/mutation/intent.rs	`Paths`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/mutation/intent.rs	`Stash`: field `tuple field` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/query.rs	`GitPrepared`: field `command` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/query.rs	`GitPrepared`: field `reply` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/query.rs	`GitPrepared`: field `settings` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/query.rs	`GitPrepared`: field `tool` is visible; keep fields private and expose accessors
+pub-field	src/workspace/git/repository.rs	`Repository`: field `workspace` is visible; keep fields private and expose accessors
+pub-field	src/workspace/grep.rs	`GrepReport`: field `output_limit` is visible; keep fields private and expose accessors
+pub-field	src/workspace/listing.rs	`ListFilesInput`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/workspace/listing.rs	`ListFilesInput`: field `root` is visible; keep fields private and expose accessors
+pub-field	src/workspace/listing.rs	`ListFilesInput`: field `skip_directories` is visible; keep fields private and expose accessors
+pub-field	src/workspace/search.rs	`FindFilesInput`: field `max_directories` is visible; keep fields private and expose accessors
+pub-field	src/workspace/search.rs	`FindFilesInput`: field `max_files` is visible; keep fields private and expose accessors
+pub-field	src/workspace/search.rs	`FindFilesInput`: field `path` is visible; keep fields private and expose accessors
+pub-field	src/workspace/search.rs	`FindFilesInput`: field `pattern` is visible; keep fields private and expose accessors
+pub-field	src/workspace/search.rs	`FindFilesInput`: field `root` is visible; keep fields private and expose accessors
+pub-field	src/workspace/search.rs	`FindFilesInput`: field `skip_directories` is visible; keep fields private and expose accessors
+pub-field	src/workspace/search.rs	`FindFilesResult`: field `files` is visible; keep fields private and expose accessors
+pub-field	src/workspace/search.rs	`FindFilesResult`: field `text` is visible; keep fields private and expose accessors
+pub-field	src/workspace/search.rs	`FindFilesResult`: field `truncated` is visible; keep fields private and expose accessors
+pub-field	src/workspace/webfetch/policy.rs	`Target`: field `host` is visible; keep fields private and expose accessors
+pub-field	src/workspace/webfetch/policy.rs	`Target`: field `port` is visible; keep fields private and expose accessors
+pub-field	src/workspace/webfetch/policy.rs	`Target`: field `url` is visible; keep fields private and expose accessors
+too-deep	src/api/cache.rs	`prepare` nests N levels (max N); extract a function
+too-deep	src/api/catalog.rs	`summaries` nests N levels (max N); extract a function
+too-deep	src/api/http.rs	`exchange` nests N levels (max N); extract a function
+too-deep	src/api/policy/mod.rs	`apply` nests N levels (max N); extract a function
+too-deep	src/api/resilience/breaker.rs	`record` nests N levels (max N); extract a function
+too-deep	src/api/stream/accumulator.rs	`accept` nests N levels (max N); extract a function
+too-deep	src/api/stream/accumulator.rs	`fragment` nests N levels (max N); extract a function
+too-deep	src/api/stream/parser.rs	`feed` nests N levels (max N); extract a function
+too-deep	src/api/wire/domain.rs	`try_from` nests N levels (max N); extract a function
+too-deep	src/api/wire/mod.rs	`encode` nests N levels (max N); extract a function
+too-deep	src/api/wire/request.rs	`encode` nests N levels (max N); extract a function
+too-deep	src/api/wire/response.rs	`decode` nests N levels (max N); extract a function
+too-deep	src/application/agent/mod.rs	`next_agent_tool` nests N levels (max N); extract a function
+too-deep	src/application/agent/mod.rs	`start_agent` nests N levels (max N); extract a function
+too-deep	src/application/budget/mod.rs	`finish_with_cost` nests N levels (max N); extract a function
+too-deep	src/application/host.rs	`model_list` nests N levels (max N); extract a function
+too-deep	src/application/host.rs	`provider_list` nests N levels (max N); extract a function
+too-deep	src/application/host.rs	`ready_call` nests N levels (max N); extract a function
+too-deep	src/application/mod.rs	`finish` nests N levels (max N); extract a function
+too-deep	src/configuration/policy/environment.rs	`expand` nests N levels (max N); extract a function
+too-deep	src/configuration/policy/service.rs	`call` nests N levels (max N); extract a function
+too-deep	src/edit/patch/path.rs	`unquote` nests N levels (max N); extract a function
+too-deep	src/edit/prepare/capture.rs	`revalidate` nests N levels (max N); extract a function
+too-deep	src/edit/prepare/git.rs	`read_result` nests N levels (max N); extract a function
+too-deep	src/edit/prepare/hunks.rs	`myers_hunks` nests N levels (max N); extract a function
+too-deep	src/edit/prepare/receipt/verify.rs	`assess` nests N levels (max N); extract a function
+too-deep	src/edit/prepare/receipt/verify.rs	`execute` nests N levels (max N); extract a function
+too-deep	src/edit/prepare/service.rs	`prepare_rollback` nests N levels (max N); extract a function
+too-deep	src/edit/prepare/service.rs	`record_applied` nests N levels (max N); extract a function
+too-deep	src/history/presentation.rs	`capture` nests N levels (max N); extract a function
+too-deep	src/history/store.rs	`projected_bytes` nests N levels (max N); extract a function
+too-deep	src/ipc/execution/editor.rs	`tick` nests N levels (max N); extract a function
+too-deep	src/ipc/execution/editor/issue.rs	`publish` nests N levels (max N); extract a function
+too-deep	src/ipc/execution/mod.rs	`tick` nests N levels (max N); extract a function
+too-deep	src/ipc/pending.rs	`preparation_failure` nests N levels (max N); extract a function
+too-deep	src/ipc/read_tools.rs	`execute` nests N levels (max N); extract a function
+too-deep	src/ipc/sessions.rs	`running` nests N levels (max N); extract a function
+too-deep	src/ipc/sessions.rs	`tick` nests N levels (max N); extract a function
+too-deep	src/ipc/sessions/editor.rs	`poll` nests N levels (max N); extract a function
+too-deep	src/ipc/sessions/editor.rs	`read_result` nests N levels (max N); extract a function
+too-deep	src/ipc/sessions/files.rs	`poll` nests N levels (max N); extract a function
+too-deep	src/ipc/sessions/native_edit.rs	`poll` nests N levels (max N); extract a function
+too-deep	src/ipc/transport.rs	`read_messages` nests N levels (max N); extract a function
+too-deep	src/models/catalog.rs	`try_from` nests N levels (max N); extract a function
+too-deep	src/models/metadata/effort.rs	`names` nests N levels (max N); extract a function
+too-deep	src/models/metadata/mod.rs	`parameters` nests N levels (max N); extract a function
+too-deep	src/models/metadata/raw.rs	`pricing_snapshot` nests N levels (max N); extract a function
+too-deep	src/models/metadata/raw.rs	`snapshot` nests N levels (max N); extract a function
+too-deep	src/models/metadata/raw.rs	`try_from` nests N levels (max N); extract a function
+too-deep	src/models/store/mod.rs	`prepare` nests N levels (max N); extract a function
+too-deep	src/models/store/mod.rs	`projection` nests N levels (max N); extract a function
+too-deep	src/process/records.rs	`push` nests N levels (max N); extract a function
+too-deep	src/security/action_snapshot.rs	`capture` nests N levels (max N); extract a function
+too-deep	src/security/action_snapshot.rs	`revalidate` nests N levels (max N); extract a function
+too-deep	src/security/mod.rs	`dismiss_with` nests N levels (max N); extract a function
+too-deep	src/security/mod.rs	`expire` nests N levels (max N); extract a function
+too-deep	src/sensors/coordinates.rs	`offset` nests N levels (max N); extract a function
+too-deep	src/sensors/diagnostics/project.rs	`render` nests N levels (max N); extract a function
+too-deep	src/sensors/mentions.rs	`parse_inner` nests N levels (max N); extract a function
+too-deep	src/sensors/mentions.rs	`parse_token_or_quoted_until_colon` nests N levels (max N); extract a function
+too-deep	src/sensors/mentions.rs	`parse_token_or_quoted` nests N levels (max N); extract a function
+too-deep	src/workspace/command.rs	`exclusions` nests N levels (max N); extract a function
+too-deep	src/workspace/file/decode.rs	`decode` nests N levels (max N); extract a function
+too-deep	src/workspace/file/read.rs	`execute` nests N levels (max N); extract a function
+too-deep	src/workspace/file/render.rs	`excerpt` nests N levels (max N); extract a function
+too-deep	src/workspace/file/render.rs	`ingest` nests N levels (max N); extract a function
+too-deep	src/workspace/git/query.rs	`text` nests N levels (max N); extract a function
+too-deep	src/workspace/probe/mod.rs	`condition` nests N levels (max N); extract a function
+too-deep	src/workspace/probe/mod.rs	`execute` nests N levels (max N); extract a function
+too-deep	src/workspace/probe/mod.rs	`try_from` nests N levels (max N); extract a function
+too-deep	src/workspace/probe/mod.rs	`validate` nests N levels (max N); extract a function
+too-deep	src/workspace/probe/toolchain.rs	`commands` nests N levels (max N); extract a function
+too-deep	src/workspace/search.rs	`execute` nests N levels (max N); extract a function
+too-deep	src/workspace/skills/metadata.rs	`field` nests N levels (max N); extract a function
+too-many-parameters	src/api/catalog.rs	`fetch_remote_models` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/api/domain.rs	`capture_run` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/api/domain.rs	`encode_body` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/api/resilience/retry.rs	`after_failure_observed` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/api/resilience/retry.rs	`after_failure` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/api/resilience/retry.rs	`decide_with` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/budget/pricing.rs	`new` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/budget/pricing.rs	`new` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/history.rs	`complete_history_call` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/history.rs	`history_rpc` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/host.rs	`dispatch_budgeted` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/host.rs	`update_provider_models` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/mod.rs	`new` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/mod.rs	`persistent` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/mod.rs	`reserve_call` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/steps.rs	`abandon_step` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/steps.rs	`claim_step` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/application/steps.rs	`complete_action` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/catalog.rs	`prepare_catalog_request` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/identity.rs	`capture` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/mod.rs	`resolve` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/resolve.rs	`profile` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/resolve.rs	`target` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/service.rs	`call` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/service.rs	`prepare_catalog` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/service.rs	`rpc` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/service.rs	`run_target` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/service.rs	`stage_refresh` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/policy/service.rs	`stage` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/configuration/read/file.rs	`open` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/journal/mod.rs	`create` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/journal/mod.rs	`finish` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/journal/mod.rs	`recover_bytes` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/journal/mod.rs	`recover` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/journal/storage.rs	`create` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/journal/storage.rs	`read_locked` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/journal/storage.rs	`read` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/journal/storage.rs	`write_record` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/artifact.rs	`page` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/artifact.rs	`unchanged` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/capture.rs	`evidence` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/git.rs	`build_command` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/git.rs	`capture_files` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/history.rs	`execute` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/receipt.rs	`append` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/receipt/verify.rs	`observe_disk` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`begin` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`call` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`claimed_artifact` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`finish_inner` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`finish_revision` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`finish` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`record_applied` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`register_parent` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`reserve_revision` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`rpc` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/service.rs	`take` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/verification.rs	`capture` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/edit/prepare/verification.rs	`settle` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/history/upload.rs	`rpc` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/admission.rs	`capture_flight` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/budget.rs	`admit` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/budget.rs	`rpc` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/circuit.rs	`acquire` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/circuit.rs	`create` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/mod.rs	`budget_rpc` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/mod.rs	`publish_body` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/mod.rs	`start_model` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/retry.rs	`completed` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/retry.rs	`finish` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/retry.rs	`retry_attempt_retired` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/retry.rs	`retry_backoff_retired` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/retry.rs	`retry_grant` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/retry.rs	`retry_observe` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/retry.rs	`retry_revoked` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/api/retry.rs	`retry_wait` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/editor.rs	`issue` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/editor.rs	`preflight` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/editor.rs	`revise` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/editor/issue.rs	`finish_receipt` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/editor/issue.rs	`publish` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/editor/issue.rs	`start` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/editor/revise.rs	`append` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/jobs/io.rs	`input` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/jobs/io.rs	`insert` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/jobs/io.rs	`read` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/jobs/mod.rs	`dispatch` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/jobs/mod.rs	`query` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/jobs/mod.rs	`register` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/jobs/mod.rs	`rpc` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/mod.rs	`admit_bound` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/mod.rs	`admit` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/mod.rs	`advance_preparing` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/mod.rs	`advance_review` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/mod.rs	`advance` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/mod.rs	`discard` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/mod.rs	`job_rpc` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/mod.rs	`prepare` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/mod.rs	`start_edit_patch` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/mod.rs	`start_kind` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/native.rs	`prepare` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/execution/native.rs	`read_list` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/pending.rs	`insert` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/pending.rs	`register_effect` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/pending.rs	`register_preparation` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/read_tools.rs	`start_configuration_refresh` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/read_tools.rs	`start_prepared_call` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions.rs	`deliver_read` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions.rs	`event` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions.rs	`finish_read` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions.rs	`finish_response` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions.rs	`prepare_start` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions.rs	`running` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions.rs	`spawn_start` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions.rs	`start_credential` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions.rs	`starting` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions.rs	`tick` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/credential.rs	`poll` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/credential.rs	`request` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/credential.rs	`start` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/editor.rs	`issue` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/editor.rs	`poll` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/editor.rs	`read_result` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/editor.rs	`release_symbols` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/editor.rs	`request` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/editor.rs	`start` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/editor.rs	`unissued` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/files.rs	`start` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/files.rs	`start` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/native_edit.rs	`poll` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/native_edit.rs	`start_selected` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/sessions/native_edit.rs	`start` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/transport.rs	`queue_reply` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/transport.rs	`read_loop` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/ipc/transport.rs	`read_messages` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/models/service/mod.rs	`call` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/models/service/mod.rs	`rpc` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/process/io.rs	`drain` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/process/io.rs	`input_loop` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/process/mod.rs	`read` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/process/mod.rs	`supervise_child` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/process/mod.rs	`supervise` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/process/mod.rs	`try_read` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/process/termination.rs	`outcome` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/action_snapshot.rs	`capture` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/delegated.rs	`abandon_editor_tool` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/delegated.rs	`decide_editor_tool` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/delegated.rs	`prepare_editor_tool_action` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/delegated.rs	`prepare_editor_tool` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/delegated.rs	`prepare` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/editor.rs	`admit_editor_action` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/editor.rs	`admit_editor_step` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/editor.rs	`admit_editor` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/editor.rs	`decide_editor` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/editor.rs	`revision_permit` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/editor.rs	`revision_work` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/editor.rs	`validate_revision` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/file.rs	`open` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/mod.rs	`decide` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/mod.rs	`prepare_step` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/security/mod.rs	`prepare` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/sensors/symbols/document.rs	`select_edit` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/file/render.rs	`excerpt` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/file/render.rs	`ingest` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/git/mutation.rs	`final_command` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/git/mutation.rs	`next` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/git/mutation/scope.rs	`capture` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/git/repository.rs	`command_with_profile` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/git/repository.rs	`isolated_command` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/skills/discover.rs	`children` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/skills/mod.rs	`render` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/webfetch/mod.rs	`fetch` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/workspace/webfetch/mod.rs	`resolve` takes N parameters (max N); introduce a parameter type
+too-many-statements	src/api/http.rs	`exchange` has N statements (max N); split it
+too-many-statements	src/api/policy/mod.rs	`apply` has N statements (max N); split it
+too-many-statements	src/api/wire/request.rs	`encode` has N statements (max N); split it
+too-many-statements	src/api/wire/response.rs	`decode` has N statements (max N); split it
+too-many-statements	src/application/agent/mod.rs	`next_agent_tool` has N statements (max N); split it
+too-many-statements	src/application/steps.rs	`register_step` has N statements (max N); split it
+too-many-statements	src/configuration/policy/resolve.rs	`profile` has N statements (max N); split it
+too-many-statements	src/edit/journal/storage.rs	`create` has N statements (max N); split it
+too-many-statements	src/edit/journal/storage.rs	`read_locked` has N statements (max N); split it
+too-many-statements	src/edit/prepare/capture.rs	`execute` has N statements (max N); split it
+too-many-statements	src/edit/prepare/claim.rs	`execute` has N statements (max N); split it
+too-many-statements	src/edit/prepare/git.rs	`build_command` has N statements (max N); split it
+too-many-statements	src/edit/prepare/hunks.rs	`measure_hunks` has N statements (max N); split it
+too-many-statements	src/edit/prepare/hunks.rs	`myers_hunks` has N statements (max N); split it
+too-many-statements	src/edit/prepare/receipt.rs	`record` has N statements (max N); split it
+too-many-statements	src/edit/prepare/receipt/verify.rs	`assess` has N statements (max N); split it
+too-many-statements	src/edit/prepare/service.rs	`begin` has N statements (max N); split it
+too-many-statements	src/edit/prepare/service.rs	`record_applied` has N statements (max N); split it
+too-many-statements	src/history/message.rs	`try_from` has N statements (max N); split it
+too-many-statements	src/ipc/execution/editor.rs	`issue` has N statements (max N); split it
+too-many-statements	src/ipc/execution/editor.rs	`preflight` has N statements (max N); split it
+too-many-statements	src/ipc/execution/editor.rs	`revise` has N statements (max N); split it
+too-many-statements	src/ipc/execution/mod.rs	`prepare` has N statements (max N); split it
+too-many-statements	src/ipc/read_tools.rs	`start_prepared_call` has N statements (max N); split it
+too-many-statements	src/ipc/sessions.rs	`starting` has N statements (max N); split it
+too-many-statements	src/process/mod.rs	`supervise_child` has N statements (max N); split it
+too-many-statements	src/security/mod.rs	`digest` has N statements (max N); split it
+too-many-statements	src/workspace/git/mutation.rs	`final_command` has N statements (max N); split it
+too-many-statements	src/workspace/git/profile.rs	`capture` has N statements (max N); split it
+too-many-statements	src/workspace/git/repository.rs	`command_with_profile` has N statements (max N); split it
+unit-return	src/configuration/policy/environment.rs	`names` returns nothing: a pure function must return a value or a `Result`
