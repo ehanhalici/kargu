@@ -8,7 +8,12 @@ use crate::{
     error::CoreError,
     security::{CommandEnvironment, CommandInput, CommandSpec, ReadTarget, Workspace},
 };
-use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, time::Duration};
+use std::{
+    collections::BTreeMap,
+    ffi::OsString,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 pub(super) struct Repository {
     pub(super) workspace: Workspace,
@@ -70,58 +75,10 @@ impl Repository {
             .ok_or(CoreError::Unavailable)?
             .as_os_str()
             .to_os_string();
-        let mut directory = OsString::from("--git-dir=");
-        directory.push(profile.map_or(self.directory.as_path(), CapturedProfile::worktree));
-        let mut worktree = OsString::from("--work-tree=");
-        worktree.push(self.workspace.path());
-        let mut argv: Vec<OsString> = vec![
-            "--no-pager".into(),
-            "--no-lazy-fetch".into(),
-            "--literal-pathspecs".into(),
-            directory,
-            worktree,
-            "-c".into(),
-            "core.fsmonitor=false".into(),
-            "-c".into(),
-            "core.untrackedCache=false".into(),
-            "-c".into(),
-            "diff.autoRefreshIndex=false".into(),
-            "-c".into(),
-            "submodule.recurse=false".into(),
-            "-c".into(),
-            "status.submoduleSummary=false".into(),
-        ];
+        let git_dir = profile.map_or(self.directory.as_path(), CapturedProfile::worktree);
+        let mut argv = read_options(git_dir, self.workspace.path());
         argv.extend(arguments);
-        let mut environment = BTreeMap::from([
-            ("PATH".into(), binary_directory),
-            ("LC_ALL".into(), "C".into()),
-            ("GIT_OPTIONAL_LOCKS".into(), "0".into()),
-            ("GIT_TERMINAL_PROMPT".into(), "0".into()),
-        ]);
-        for key in [
-            "HOME",
-            "XDG_CONFIG_HOME",
-            "GIT_CONFIG_GLOBAL",
-            "GIT_CONFIG_SYSTEM",
-            "GIT_CONFIG_NOSYSTEM",
-        ] {
-            if let Some(value) = std::env::var_os(key) {
-                environment.insert(key.into(), value);
-            }
-        }
-        if let Some(profile) = profile {
-            environment.insert("GIT_CONFIG_NOSYSTEM".into(), "1".into());
-            environment.insert("GIT_CONFIG_GLOBAL".into(), "/dev/null".into());
-            environment.insert("GIT_ATTR_NOSYSTEM".into(), "1".into());
-            environment.insert(
-                "GIT_COMMON_DIR".into(),
-                profile.common().as_os_str().to_owned(),
-            );
-            environment.insert(
-                "GIT_INDEX_FILE".into(),
-                profile.index().as_os_str().to_owned(),
-            );
-        }
+        let environment = read_environment(binary_directory, profile);
         let mut command = CommandSpec::git_read(CommandInput {
             program,
             arguments: argv,
@@ -156,4 +113,68 @@ impl Repository {
             )),
         }
     }
+}
+
+/// Fixed global options for every read: no pager, fsmonitor, caches or submodules.
+fn read_options(git_dir: &Path, worktree: &Path) -> Vec<OsString> {
+    let mut directory = OsString::from("--git-dir=");
+    directory.push(git_dir);
+    let mut tree = OsString::from("--work-tree=");
+    tree.push(worktree);
+    vec![
+        "--no-pager".into(),
+        "--no-lazy-fetch".into(),
+        "--literal-pathspecs".into(),
+        directory,
+        tree,
+        "-c".into(),
+        "core.fsmonitor=false".into(),
+        "-c".into(),
+        "core.untrackedCache=false".into(),
+        "-c".into(),
+        "diff.autoRefreshIndex=false".into(),
+        "-c".into(),
+        "submodule.recurse=false".into(),
+        "-c".into(),
+        "status.submoduleSummary=false".into(),
+    ]
+}
+
+/// The read environment: git's own PATH, the user's config locations, and a
+/// captured profile's private config, common dir and index when one is bound.
+fn read_environment(
+    binary_directory: OsString,
+    profile: Option<&CapturedProfile>,
+) -> BTreeMap<OsString, OsString> {
+    let mut environment = BTreeMap::from([
+        ("PATH".into(), binary_directory),
+        ("LC_ALL".into(), "C".into()),
+        ("GIT_OPTIONAL_LOCKS".into(), "0".into()),
+        ("GIT_TERMINAL_PROMPT".into(), "0".into()),
+    ]);
+    for key in [
+        "HOME",
+        "XDG_CONFIG_HOME",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_CONFIG_NOSYSTEM",
+    ] {
+        if let Some(value) = std::env::var_os(key) {
+            environment.insert(key.into(), value);
+        }
+    }
+    if let Some(profile) = profile {
+        environment.insert("GIT_CONFIG_NOSYSTEM".into(), "1".into());
+        environment.insert("GIT_CONFIG_GLOBAL".into(), "/dev/null".into());
+        environment.insert("GIT_ATTR_NOSYSTEM".into(), "1".into());
+        environment.insert(
+            "GIT_COMMON_DIR".into(),
+            profile.common().as_os_str().to_owned(),
+        );
+        environment.insert(
+            "GIT_INDEX_FILE".into(),
+            profile.index().as_os_str().to_owned(),
+        );
+    }
+    environment
 }

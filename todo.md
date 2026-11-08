@@ -350,6 +350,16 @@ kalan bridge tüketicileri; proof/ ve README.md.
   dosyasında birikmiş checkdoc borcu (alt dizin `;;; kargu/x.el` başlık/footer'ı,
   belgelenmemiş argüman, fiil kipi) giderildi; 207/207 temiz. `test-modules.el`
   izole fixture'ları artık checkout yerine geçici çalışma dizinine yazar.
+- ARCH-GATE (2026-11-08): kargu-core bütünüyle rust-strict-modular-design
+  pre-commit kapısında (`kargu-core/arch-checker.conf`: `domain = src`, wire
+  katmanı `edge`, efektli actor/worker/adapter dosyaları tek tek `shell`).
+  Mevcut ihlaller `kargu-core/arch-checker.baseline` içinde; kapı yeni bulguyu,
+  bayat satırı ve HEAD'e göre kural başına büyümeyi reddeder. Bir ihlal
+  düzeltilince satırı aynı commit'te silinir (`--write-baseline` diff'i yalnız
+  silme olmalı). Kalan borç, dilimler halinde sıfıra indirilecek: pub-field
+  (DTO'lar için accessor/constructor), primitive-boundary (newtype),
+  too-many-parameters (parametre tipi), too-deep/too-many-statements (bölme).
+  `shell` listesindeki dosyaların saf kısmı ayrıldıkça listeden çıkarılsın.
 - G02–G12 son consumer'ları taşıyınca application/async/request, registry,
   catalog/circuit, edit/job/archive global köprülerini ve çift state yollarını
   sil. Emacs'in zorunlu hook/keymap/autoload kayıtlarını dar whitelist ile ayır.

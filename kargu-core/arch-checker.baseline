@@ -985,4 +985,3 @@ too-many-statements	src/ipc/sessions.rs	`starting` has N statements (max N); spl
 too-many-statements	src/process/mod.rs	`supervise_child` has N statements (max N); split it
 too-many-statements	src/workspace/git/mutation.rs	`final_command` has N statements (max N); split it
 too-many-statements	src/workspace/git/profile.rs	`capture` has N statements (max N); split it
-too-many-statements	src/workspace/git/repository.rs	`command_with_profile` has N statements (max N); split it
