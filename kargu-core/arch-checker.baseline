@@ -646,11 +646,7 @@ pub-field	src/workspace/search.rs	`FindFilesResult`: field `truncated` is visibl
 pub-field	src/workspace/webfetch/policy.rs	`Target`: field `host` is visible; keep fields private and expose accessors
 pub-field	src/workspace/webfetch/policy.rs	`Target`: field `port` is visible; keep fields private and expose accessors
 pub-field	src/workspace/webfetch/policy.rs	`Target`: field `url` is visible; keep fields private and expose accessors
-too-deep	src/api/catalog.rs	`summaries` nests N levels (max N); extract a function
 too-deep	src/api/http.rs	`exchange` nests N levels (max N); extract a function
-too-deep	src/api/policy/mod.rs	`apply` nests N levels (max N); extract a function
-too-deep	src/api/stream/accumulator.rs	`accept` nests N levels (max N); extract a function
-too-deep	src/api/wire/mod.rs	`encode` nests N levels (max N); extract a function
 too-deep	src/api/wire/request.rs	`encode` nests N levels (max N); extract a function
 too-deep	src/application/agent/mod.rs	`next_agent_tool` nests N levels (max N); extract a function
 too-deep	src/application/budget/mod.rs	`finish_with_cost` nests N levels (max N); extract a function

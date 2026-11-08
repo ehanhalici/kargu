@@ -101,46 +101,48 @@ pub async fn fetch_remote_models(
 }
 
 pub(crate) fn summaries(catalog: &ModelCatalog, specs: &EffortSpecs) -> Vec<ModelSummaryDto> {
-    let mut summaries = Vec::new();
-    for (model_id, source) in catalog.records() {
-        if let Ok(raw) = RawMetadata::try_from(source.get()) {
-            let fields = ModelFields::from_raw(&raw, specs);
-            let display = fields.display_snapshot();
-            let efforts = display
-                .get("reasoning-efforts")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let price_label = display
-                .get("price-label")
-                .and_then(|v| v.as_str().map(String::from));
-            let free = display
-                .get("free")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let vision = display
-                .get("vision")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let context_window = display.get("context-window").and_then(|v| v.as_u64());
-            let max_output = display.get("max-output").and_then(|v| v.as_u64());
-            summaries.push(ModelSummaryDto {
-                id: model_id.as_str().to_owned(),
-                context_window,
-                max_output,
-                reasoning_efforts: efforts,
-                price_label,
-                free,
-                vision,
-                supports_tools: fields.allows_tools(),
-                supports_reasoning: fields.allows_reasoning(),
-            });
-        }
-    }
+    catalog
+        .records()
+        .filter_map(|(model_id, source)| summary(model_id.as_str(), source.get(), specs))
+        .collect()
+}
 
-    summaries
+/// One model's display summary; records whose metadata does not parse are skipped.
+fn summary(model_id: &str, source: &str, specs: &EffortSpecs) -> Option<ModelSummaryDto> {
+    let raw = RawMetadata::try_from(source).ok()?;
+    let fields = ModelFields::from_raw(&raw, specs);
+    let display = fields.display_snapshot();
+    let efforts = display
+        .get("reasoning-efforts")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let price_label = display
+        .get("price-label")
+        .and_then(|v| v.as_str().map(String::from));
+    let free = display
+        .get("free")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let vision = display
+        .get("vision")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let context_window = display.get("context-window").and_then(|v| v.as_u64());
+    let max_output = display.get("max-output").and_then(|v| v.as_u64());
+    Some(ModelSummaryDto {
+        id: model_id.to_owned(),
+        context_window,
+        max_output,
+        reasoning_efforts: efforts,
+        price_label,
+        free,
+        vision,
+        supports_tools: fields.allows_tools(),
+        supports_reasoning: fields.allows_reasoning(),
+    })
 }

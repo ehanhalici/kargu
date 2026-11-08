@@ -132,7 +132,7 @@ impl RequestTuning {
             if let Some(value) = payload.get(field.as_str()) {
                 let _: OutputLimit =
                     serde_json::from_value(value.clone()).map_err(|_| ApiError::InvalidRequest)?;
-                if parameters.is_some_and(|parameters| !parameters.contains(field.as_str())) {
+                if !supports(parameters, field.as_str()) {
                     return Err(ApiError::InvalidRequest);
                 }
             }
@@ -192,4 +192,9 @@ impl RequestTuning {
         }
         Ok(Value::Object(fields))
     }
+}
+
+/// A missing parameter list declares nothing, so every parameter is allowed.
+fn supports(parameters: Option<&Parameters>, name: &str) -> bool {
+    parameters.is_none_or(|parameters| parameters.contains(name))
 }

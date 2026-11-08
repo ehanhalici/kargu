@@ -73,29 +73,7 @@ impl Accumulator {
             .and_then(|choices| choices.first())
         {
             if let Some(delta) = choice.get("delta").filter(|value| !value.is_null()) {
-                append_text(&mut self.text, delta.get("content"), self.limits.raw())?;
-                for field in [
-                    "reasoning_content",
-                    "reasoning",
-                    "reasoning_details",
-                    "thinking",
-                    "thought",
-                ] {
-                    let before = self.reasoning.len();
-                    append_text(&mut self.reasoning, delta.get(field), self.limits.raw())?;
-                    if self.reasoning.len() > before {
-                        break;
-                    }
-                }
-                if let Some(calls) = delta.get("tool_calls").filter(|value| !value.is_null()) {
-                    for call in calls.as_array().ok_or(ApiError::Protocol)? {
-                        self.fragment(call)?;
-                    }
-                } else if let Some(legacy) =
-                    delta.get("function_call").filter(|value| !value.is_null())
-                {
-                    self.fragment(&json!({"index":0,"function":legacy}))?;
-                }
+                self.delta(delta)?;
             }
             if let Some(reason) = choice
                 .get("finish_reason")
@@ -106,6 +84,32 @@ impl Accumulator {
             }
         }
         Ok(Some(value))
+    }
+    /// Append one choice delta: content, the first reasoning field that carries
+    /// text, and tool-call fragments (current or legacy shape).
+    fn delta(&mut self, delta: &Value) -> Result<(), ApiError> {
+        append_text(&mut self.text, delta.get("content"), self.limits.raw())?;
+        for field in [
+            "reasoning_content",
+            "reasoning",
+            "reasoning_details",
+            "thinking",
+            "thought",
+        ] {
+            let before = self.reasoning.len();
+            append_text(&mut self.reasoning, delta.get(field), self.limits.raw())?;
+            if self.reasoning.len() > before {
+                break;
+            }
+        }
+        if let Some(calls) = delta.get("tool_calls").filter(|value| !value.is_null()) {
+            for call in calls.as_array().ok_or(ApiError::Protocol)? {
+                self.fragment(call)?;
+            }
+        } else if let Some(legacy) = delta.get("function_call").filter(|value| !value.is_null()) {
+            self.fragment(&json!({"index":0,"function":legacy}))?;
+        }
+        Ok(())
     }
     fn fragment(&mut self, fragment: &Value) -> Result<(), ApiError> {
         if !fragment.is_object() {

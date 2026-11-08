@@ -64,24 +64,25 @@ impl WireCodec {
     ) -> Result<Value, ApiError> {
         tuning.apply(payload, self.spec.policy(), self.spec.reasoning())
     }
+    /// Keep a message's opaque blocks only when they came from this same scope.
+    fn rescope(&self, message: &mut serde_json::Map<String, Value>) {
+        let opaque = message.remove("_kargu_opaque_content");
+        if self.spec.request().is_some()
+            && let Some(opaque) = opaque
+            && opaque.get("scope").and_then(Value::as_str) == Some(self.scope.0.as_str())
+            && let Some(blocks) = opaque.get("blocks").and_then(Value::as_array)
+        {
+            message.insert(
+                "_kargu_opaque_content".to_owned(),
+                Value::Array(blocks.clone()),
+            );
+        }
+    }
     /// Encode only opaque continuation blocks from this same captured authority.
     pub fn encode(&self, mut payload: Value) -> Result<Value, ApiError> {
         if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
-            for message in messages {
-                if let Some(message) = message.as_object_mut() {
-                    let opaque = message.remove("_kargu_opaque_content");
-                    if self.spec.request().is_some()
-                        && let Some(opaque) = opaque
-                        && opaque.get("scope").and_then(Value::as_str)
-                            == Some(self.scope.0.as_str())
-                        && let Some(blocks) = opaque.get("blocks").and_then(Value::as_array)
-                    {
-                        message.insert(
-                            "_kargu_opaque_content".to_owned(),
-                            Value::Array(blocks.clone()),
-                        );
-                    }
-                }
+            for message in messages.iter_mut().filter_map(Value::as_object_mut) {
+                self.rescope(message);
             }
         }
         self.spec.encode(payload)
