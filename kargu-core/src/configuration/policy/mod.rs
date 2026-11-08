@@ -52,7 +52,7 @@ pub fn environment_names(
     let mut names = BTreeSet::new();
     for provider in &config.providers {
         if let Some(key) = &provider.data.apikey {
-            environment::names(key.as_str(), &mut names);
+            names.extend(environment::names(key.as_str()));
         }
     }
     for provider in registry.entries() {

@@ -26,7 +26,7 @@ pub(crate) struct ConfiguredProvider {
 pub struct ConfigurationDocument {
     pub(super) provider: Option<ApiProviderId>,
     pub(super) model: Option<ConfigText>,
-    pub(super) review_mode: Option<ReviewMode>,
+    review_mode: Option<ReviewMode>,
     pub(super) providers: Vec<ConfiguredProvider>,
 }
 #[derive(Deserialize)]
@@ -336,13 +336,13 @@ pub struct PolicyContext {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ContextInput {
-    pub(super) app_url: Option<ConfigText>,
-    pub(super) api_base: Option<ConfigText>,
-    pub(super) api_key: Option<ConfigText>,
-    pub(super) selected_provider: Option<ApiProviderId>,
-    pub(super) selected_model: Option<ConfigText>,
-    pub(super) environment: EnvironmentSnapshot,
-    pub(super) registry: RegistrySnapshot,
+    app_url: Option<ConfigText>,
+    api_base: Option<ConfigText>,
+    api_key: Option<ConfigText>,
+    selected_provider: Option<ApiProviderId>,
+    selected_model: Option<ConfigText>,
+    environment: EnvironmentSnapshot,
+    registry: RegistrySnapshot,
     #[serde(default)]
     wire_formats: Vec<ConfigText>,
 }

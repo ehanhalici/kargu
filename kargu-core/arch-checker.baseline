@@ -262,41 +262,25 @@ pub-field	src/application/claim.rs	`ClaimIntent`: field `timeout` is visible; ke
 pub-field	src/application/claim.rs	`ClaimIntent`: field `tool_limit` is visible; keep fields private and expose accessors
 pub-field	src/application/claim.rs	`ClaimIntent`: field `workspace` is visible; keep fields private and expose accessors
 pub-field	src/application/claim.rs	`PendingClaim`: field `claim` is visible; keep fields private and expose accessors
-pub-field	src/application/claim.rs	`PendingClaim`: field `state` is visible; keep fields private and expose accessors
 pub-field	src/application/host.rs	`Dispatch`: field `exit` is visible; keep fields private and expose accessors
 pub-field	src/application/host.rs	`Dispatch`: field `result` is visible; keep fields private and expose accessors
 pub-field	src/application/host.rs	`ReadScope`: field `application_id` is visible; keep fields private and expose accessors
 pub-field	src/application/host.rs	`ReadScope`: field `session_id` is visible; keep fields private and expose accessors
-pub-field	src/application/mod.rs	`ApplicationActor`: field `configuration` is visible; keep fields private and expose accessors
 pub-field	src/application/mod.rs	`ApplicationActor`: field `edits` is visible; keep fields private and expose accessors
-pub-field	src/application/mod.rs	`ApplicationActor`: field `models` is visible; keep fields private and expose accessors
-pub-field	src/application/mod.rs	`RunCompletion`: field `scope` is visible; keep fields private and expose accessors
 pub-field	src/application/mod.rs	`RunCompletion`: field `tool_results` is visible; keep fields private and expose accessors
 pub-field	src/application/mod.rs	`RunSettings`: field `mode` is visible; keep fields private and expose accessors
-pub-field	src/application/mod.rs	`RunSettings`: field `tool_limit` is visible; keep fields private and expose accessors
 pub-field	src/application/mod.rs	`RunSettings`: field `workspace` is visible; keep fields private and expose accessors
 pub-field	src/application/mod.rs	`ToolResult`: field `is_error` is visible; keep fields private and expose accessors
-pub-field	src/application/mod.rs	`ToolResult`: field `message` is visible; keep fields private and expose accessors
 pub-field	src/application/mod.rs	`ToolResult`: field `outcome` is visible; keep fields private and expose accessors
 pub-field	src/application/mod.rs	`ToolResult`: field `tool_call_id` is visible; keep fields private and expose accessors
-pub-field	src/application/mod.rs	`ToolResult`: field `tool_name` is visible; keep fields private and expose accessors
-pub-field	src/application/selection.rs	`Selection`: field `effort` is visible; keep fields private and expose accessors
 pub-field	src/application/selection.rs	`Selection`: field `model` is visible; keep fields private and expose accessors
 pub-field	src/application/selection.rs	`Selection`: field `provider` is visible; keep fields private and expose accessors
 pub-field	src/configuration/domain.rs	`ConfigurationSource`: field `tuple field` is visible; keep fields private and expose accessors
 pub-field	src/configuration/policy/domain.rs	`ConfigurationDocument`: field `model` is visible; keep fields private and expose accessors
 pub-field	src/configuration/policy/domain.rs	`ConfigurationDocument`: field `provider` is visible; keep fields private and expose accessors
 pub-field	src/configuration/policy/domain.rs	`ConfigurationDocument`: field `providers` is visible; keep fields private and expose accessors
-pub-field	src/configuration/policy/domain.rs	`ConfigurationDocument`: field `review_mode` is visible; keep fields private and expose accessors
 pub-field	src/configuration/policy/domain.rs	`ConfiguredProvider`: field `data` is visible; keep fields private and expose accessors
 pub-field	src/configuration/policy/domain.rs	`ConfiguredProvider`: field `name` is visible; keep fields private and expose accessors
-pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `api_base` is visible; keep fields private and expose accessors
-pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `api_key` is visible; keep fields private and expose accessors
-pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `app_url` is visible; keep fields private and expose accessors
-pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `environment` is visible; keep fields private and expose accessors
-pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `registry` is visible; keep fields private and expose accessors
-pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `selected_model` is visible; keep fields private and expose accessors
-pub-field	src/configuration/policy/domain.rs	`ContextInput`: field `selected_provider` is visible; keep fields private and expose accessors
 pub-field	src/configuration/policy/domain.rs	`PolicyContext`: field `api_base` is visible; keep fields private and expose accessors
 pub-field	src/configuration/policy/domain.rs	`PolicyContext`: field `api_key` is visible; keep fields private and expose accessors
 pub-field	src/configuration/policy/domain.rs	`PolicyContext`: field `app_url` is visible; keep fields private and expose accessors
@@ -420,20 +404,12 @@ pub-field	src/edit/prepare/mod.rs	`Work`: field `id` is visible; keep fields pri
 pub-field	src/edit/prepare/parent.rs	`ParentEdit`: field `call` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/parent.rs	`ParentEdit`: field `name` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/parent.rs	`ParentEdit`: field `run` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/parent.rs	`ParentPolicy`: field `review_mode` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/parent.rs	`ParentPolicy`: field `save_policy` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/parent.rs	`ParentResult`: field `outcome` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/parent.rs	`ParentResult`: field `text` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/parent.rs	`ParentSource`: field `result` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/parent.rs	`ParentSource`: field `state` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/parent.rs	`ParentSource`: field `step` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/preflight.rs	`PreflightProgress`: field `ready` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `after` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `failure` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `file` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `progress` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `write_tick` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/receipt.rs	`FileObservation`: field `written_bytes` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/receipt.rs	`FileResult`: field `before_document` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/receipt.rs	`FileResult`: field `final_disk` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/receipt.rs	`FileResult`: field `final_document` is visible; keep fields private and expose accessors
@@ -444,13 +420,9 @@ pub-field	src/edit/prepare/rollback.rs	`AppliedSnapshot`: field `receipt` is vis
 pub-field	src/edit/prepare/rollback.rs	`AppliedSnapshot`: field `remaining` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/rollback.rs	`AppliedSnapshot`: field `service_id` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/rollback.rs	`AppliedSnapshot`: field `session` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `config_revision` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `mode` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `origin_id` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `policy_revision` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `review_mode` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `root` is visible; keep fields private and expose accessors
-pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `save_policy` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `service_id` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `target_edit_id` is visible; keep fields private and expose accessors
 pub-field	src/edit/prepare/rollback.rs	`RollbackInput`: field `target_file` is visible; keep fields private and expose accessors
@@ -510,7 +482,6 @@ pub-field	src/ipc/api/budget.rs	`BudgetRef`: field `kind` is visible; keep field
 pub-field	src/ipc/api/budget.rs	`BudgetRef`: field `native_run` is visible; keep fields private and expose accessors
 pub-field	src/ipc/api/budget.rs	`Charge`: field `deadline` is visible; keep fields private and expose accessors
 pub-field	src/ipc/api/budget.rs	`Charge`: field `id` is visible; keep fields private and expose accessors
-pub-field	src/ipc/api/budget.rs	`Charge`: field `ticket` is visible; keep fields private and expose accessors
 pub-field	src/ipc/api/mod.rs	`ModelDelivery`: field `budget` is visible; keep fields private and expose accessors
 pub-field	src/ipc/api/mod.rs	`ModelDelivery`: field `circuit` is visible; keep fields private and expose accessors
 pub-field	src/ipc/api/mod.rs	`ModelDelivery`: field `result` is visible; keep fields private and expose accessors
@@ -535,7 +506,6 @@ pub-field	src/ipc/api/worker.rs	`Attempt`: field `observe_entropy` is visible; k
 pub-field	src/ipc/api/worker.rs	`Attempt`: field `page_bytes` is visible; keep fields private and expose accessors
 pub-field	src/ipc/api/worker.rs	`Attempt`: field `sender` is visible; keep fields private and expose accessors
 pub-field	src/ipc/execution/editor/issue.rs	`Finishing`: field `completion` is visible; keep fields private and expose accessors
-pub-field	src/ipc/execution/editor/issue.rs	`Finishing`: field `run` is visible; keep fields private and expose accessors
 pub-field	src/ipc/execution/editor/issue.rs	`Finishing`: field `task` is visible; keep fields private and expose accessors
 pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `artifact` is visible; keep fields private and expose accessors
 pub-field	src/ipc/execution/editor/issue.rs	`Issued`: field `deadline` is visible; keep fields private and expose accessors
@@ -609,12 +579,6 @@ pub-field	src/ipc/execution/state.rs	`Running`: field `run` is visible; keep fie
 pub-field	src/ipc/protocol.rs	`Fault`: field `code` is visible; keep fields private and expose accessors
 pub-field	src/ipc/protocol.rs	`Fault`: field `message` is visible; keep fields private and expose accessors
 pub-field	src/ipc/protocol.rs	`Fault`: field `status` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `catalog` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `configuration_revision` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `owner` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `provider` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `specs` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogResult`: field `summaries` is visible; keep fields private and expose accessors
 pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `configuration_revision` is visible; keep fields private and expose accessors
 pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `owner` is visible; keep fields private and expose accessors
 pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `provider` is visible; keep fields private and expose accessors
@@ -692,54 +656,12 @@ pub-field	src/security/mod.rs	`CommandSpec`: field `timeout` is visible; keep fi
 pub-field	src/security/read_target.rs	`ReadTarget`: field `path` is visible; keep fields private and expose accessors
 pub-field	src/sensors/coordinates.rs	`Position`: field `column` is visible; keep fields private and expose accessors
 pub-field	src/sensors/coordinates.rs	`Position`: field `line` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`BreakpointDto`: field `file` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`BreakpointDto`: field `id` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`BreakpointDto`: field `line` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`BreakpointDto`: field `message` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`BreakpointDto`: field `verified` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `connection_id` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `current_frame` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `local_variables` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `stack_frames` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `status` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `stop_generation` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `thread_id` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`DebugContextSnapshot`: field `threads` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`StackFrameDto`: field `file` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`StackFrameDto`: field `id` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`StackFrameDto`: field `name` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`StackFrameDto`: field `range` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`StackFrameDto`: field `thread_id` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`ThreadDto`: field `id` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`ThreadDto`: field `name` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`VariableDto`: field `children_reference` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`VariableDto`: field `name` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`VariableDto`: field `value` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`VariableDto`: field `var_type` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`WatchDto`: field `error` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`WatchDto`: field `expression` is visible; keep fields private and expose accessors
-pub-field	src/sensors/debugger.rs	`WatchDto`: field `result` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`BackendReport`: field `backend` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`BackendReport`: field `observed` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`BackendReport`: field `reported` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`BackendReport`: field `requested` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`BackendReport`: field `tick` is visible; keep fields private and expose accessors
 pub-field	src/sensors/diagnostics.rs	`DiagnosticDelta`: field `new` is visible; keep fields private and expose accessors
 pub-field	src/sensors/diagnostics.rs	`DiagnosticDelta`: field `pre_existing` is visible; keep fields private and expose accessors
 pub-field	src/sensors/diagnostics.rs	`DiagnosticDelta`: field `resolved` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`Diagnostic`: field `code` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`Diagnostic`: field `message` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`Diagnostic`: field `range` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`Diagnostic`: field `severity` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`Diagnostic`: field `source` is visible; keep fields private and expose accessors
 pub-field	src/sensors/diagnostics.rs	`DocumentStamp`: field `document_id` is visible; keep fields private and expose accessors
 pub-field	src/sensors/diagnostics.rs	`DocumentStamp`: field `path` is visible; keep fields private and expose accessors
 pub-field	src/sensors/diagnostics.rs	`DocumentStamp`: field `tick` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`ServerPublication`: field `observed_server` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`ServerPublication`: field `published_version` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`ServerPublication`: field `requested_server` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`ServerPublication`: field `requested_version` is visible; keep fields private and expose accessors
-pub-field	src/sensors/diagnostics.rs	`ServerPublication`: field `tick` is visible; keep fields private and expose accessors
 pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `byte_count` is visible; keep fields private and expose accessors
 pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `content` is visible; keep fields private and expose accessors
 pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `dirty` is visible; keep fields private and expose accessors
@@ -753,22 +675,14 @@ pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `target_id` is visi
 pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `target` is visible; keep fields private and expose accessors
 pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `token_estimate` is visible; keep fields private and expose accessors
 pub-field	src/sensors/mentions.rs	`ContextAttachment`: field `truncated` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`MentionSpan`: field `end` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`MentionSpan`: field `raw` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`MentionSpan`: field `start` is visible; keep fields private and expose accessors
-pub-field	src/sensors/mentions.rs	`MentionSpan`: field `target_id` is visible; keep fields private and expose accessors
 pub-field	src/sensors/mentions.rs	`MentionSpan`: field `target` is visible; keep fields private and expose accessors
-pub-field	src/sensors/symbols.rs	`HoverSnapshot`: field `contents` is visible; keep fields private and expose accessors
-pub-field	src/sensors/symbols.rs	`HoverSnapshot`: field `range` is visible; keep fields private and expose accessors
 pub-field	src/sensors/symbols.rs	`XrefLocation`: field `path` is visible; keep fields private and expose accessors
 pub-field	src/sensors/symbols.rs	`XrefLocation`: field `range` is visible; keep fields private and expose accessors
 pub-field	src/sensors/symbols.rs	`XrefLocation`: field `summary` is visible; keep fields private and expose accessors
 pub-field	src/sensors/symbols/document.rs	`SymbolEditSelection`: field `document` is visible; keep fields private and expose accessors
 pub-field	src/sensors/symbols/document.rs	`SymbolEditSelection`: field `range` is visible; keep fields private and expose accessors
 pub-field	src/sensors/symbols/document.rs	`SymbolEditSelection`: field `source` is visible; keep fields private and expose accessors
-pub-field	src/workspace/file/mod.rs	`FileExcerpt`: field `bytes_read` is visible; keep fields private and expose accessors
 pub-field	src/workspace/file/mod.rs	`FileExcerpt`: field `text` is visible; keep fields private and expose accessors
-pub-field	src/workspace/file/mod.rs	`FileExcerpt`: field `truncated` is visible; keep fields private and expose accessors
 pub-field	src/workspace/git/mutation.rs	`MutationPrepared`: field `command` is visible; keep fields private and expose accessors
 pub-field	src/workspace/git/mutation.rs	`MutationPrepared`: field `reply` is visible; keep fields private and expose accessors
 pub-field	src/workspace/git/mutation.rs	`MutationPrepared`: field `settings` is visible; keep fields private and expose accessors
@@ -785,9 +699,6 @@ pub-field	src/workspace/git/query.rs	`GitPrepared`: field `settings` is visible;
 pub-field	src/workspace/git/query.rs	`GitPrepared`: field `tool` is visible; keep fields private and expose accessors
 pub-field	src/workspace/git/repository.rs	`Repository`: field `workspace` is visible; keep fields private and expose accessors
 pub-field	src/workspace/grep.rs	`GrepReport`: field `output_limit` is visible; keep fields private and expose accessors
-pub-field	src/workspace/listing.rs	`ListFilesInput`: field `path` is visible; keep fields private and expose accessors
-pub-field	src/workspace/listing.rs	`ListFilesInput`: field `root` is visible; keep fields private and expose accessors
-pub-field	src/workspace/listing.rs	`ListFilesInput`: field `skip_directories` is visible; keep fields private and expose accessors
 pub-field	src/workspace/search.rs	`FindFilesInput`: field `max_directories` is visible; keep fields private and expose accessors
 pub-field	src/workspace/search.rs	`FindFilesInput`: field `max_files` is visible; keep fields private and expose accessors
 pub-field	src/workspace/search.rs	`FindFilesInput`: field `path` is visible; keep fields private and expose accessors
@@ -1058,7 +969,6 @@ too-many-statements	src/edit/journal/storage.rs	`create` has N statements (max N
 too-many-statements	src/edit/journal/storage.rs	`read_locked` has N statements (max N); split it
 too-many-statements	src/edit/prepare/capture.rs	`execute` has N statements (max N); split it
 too-many-statements	src/edit/prepare/claim.rs	`execute` has N statements (max N); split it
-too-many-statements	src/edit/prepare/git.rs	`build_command` has N statements (max N); split it
 too-many-statements	src/edit/prepare/hunks.rs	`measure_hunks` has N statements (max N); split it
 too-many-statements	src/edit/prepare/hunks.rs	`myers_hunks` has N statements (max N); split it
 too-many-statements	src/edit/prepare/receipt.rs	`record` has N statements (max N); split it
@@ -1073,8 +983,6 @@ too-many-statements	src/ipc/execution/mod.rs	`prepare` has N statements (max N);
 too-many-statements	src/ipc/read_tools.rs	`start_prepared_call` has N statements (max N); split it
 too-many-statements	src/ipc/sessions.rs	`starting` has N statements (max N); split it
 too-many-statements	src/process/mod.rs	`supervise_child` has N statements (max N); split it
-too-many-statements	src/security/mod.rs	`digest` has N statements (max N); split it
 too-many-statements	src/workspace/git/mutation.rs	`final_command` has N statements (max N); split it
 too-many-statements	src/workspace/git/profile.rs	`capture` has N statements (max N); split it
 too-many-statements	src/workspace/git/repository.rs	`command_with_profile` has N statements (max N); split it
-unit-return	src/configuration/policy/environment.rs	`names` returns nothing: a pure function must return a value or a `Result`

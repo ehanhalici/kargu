@@ -8,14 +8,15 @@ use zeroize::Zeroizing;
 fn reference(rest: &str) -> Option<(EnvironmentVariable, &str)> {
     EnvironmentVariable::parse_reference(rest)
 }
-pub(super) fn names(source: &str, names: &mut BTreeSet<EnvironmentVariable>) {
+/// Every `${NAME}` reference in `source`, in first-seen order.
+pub(super) fn names(source: &str) -> Vec<EnvironmentVariable> {
+    let mut names = Vec::new();
     let mut rest = source;
     while let Some((_, tail)) = rest.split_once("${") {
-        if let Some((name, _)) = reference(tail) {
-            names.insert(name);
-        }
+        names.extend(reference(tail).map(|(name, _)| name));
         rest = tail;
     }
+    names
 }
 pub(super) fn expand(
     source: &ConfigText,

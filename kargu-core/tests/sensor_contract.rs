@@ -215,36 +215,22 @@ fn symbols_tree_and_xref_formatting_preserves_bounds() -> TestResult {
 
 #[test]
 fn debugger_snapshot_validates_epoch_and_renders_cleanly() -> TestResult {
-    use kargu_core::sensors::debugger::{
-        DebugContextSnapshot, DebugStatus, StackFrameDto, VariableDto,
-    };
-    use kargu_core::sensors::types::{
-        DebugConnectionId, FrameId, SensorText, StopGeneration, ThreadId,
-    };
+    use kargu_core::sensors::debugger::DebugContextSnapshot;
+    use kargu_core::sensors::types::{DebugConnectionId, StopGeneration};
 
+    // The snapshot is untrusted editor data: build it the way the bridge does.
     let conn = DebugConnectionId::try_from("conn-1".to_string())?;
     let foreign = DebugConnectionId::try_from("conn-2".to_string())?;
-    let snap = DebugContextSnapshot {
-        connection_id: conn.clone(),
-        stop_generation: StopGeneration::try_from(1)?,
-        thread_id: ThreadId::try_from(1)?,
-        status: DebugStatus::Stopped,
-        current_frame: Some(StackFrameDto {
-            id: FrameId::try_from(0)?,
-            name: "main".to_string(),
-            thread_id: ThreadId::try_from(1)?,
-            file: None,
-            range: None,
-        }),
-        local_variables: vec![VariableDto {
-            name: "x".to_string(),
-            value: SensorText::try_from("42".to_string())?,
-            var_type: Some("i32".to_string()),
-            children_reference: None,
-        }],
-        stack_frames: vec![],
-        threads: vec![],
-    };
+    let snap: DebugContextSnapshot = serde_json::from_value(json!({
+        "connection_id": "conn-1",
+        "stop_generation": 1,
+        "thread_id": 1,
+        "status": "stopped",
+        "current_frame": {"id": 0, "name": "main", "thread_id": 1},
+        "local_variables": [{"name": "x", "value": "42", "var_type": "i32"}],
+        "stack_frames": [],
+        "threads": [],
+    }))?;
 
     assert!(
         snap.validate_epoch(&conn, StopGeneration::try_from(1)?)

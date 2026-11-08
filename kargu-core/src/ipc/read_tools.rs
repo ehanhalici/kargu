@@ -128,12 +128,12 @@ pub(crate) struct ModelCatalogWork {
 
 #[derive(Clone)]
 pub(crate) struct ModelCatalogResult {
-    pub owner: ReadScope,
-    pub configuration_revision: crate::domain::ConfigRevision,
-    pub provider: crate::providers::ApiProviderId,
-    pub catalog: crate::models::catalog::ModelCatalog,
-    pub summaries: Vec<crate::models::store::ModelSummaryDto>,
-    pub specs: crate::models::metadata::EffortSpecs,
+    owner: ReadScope,
+    configuration_revision: crate::domain::ConfigRevision,
+    provider: crate::providers::ApiProviderId,
+    catalog: crate::models::catalog::ModelCatalog,
+    summaries: Vec<crate::models::store::ModelSummaryDto>,
+    specs: crate::models::metadata::EffortSpecs,
 }
 impl ReadOperation {
     fn timeout(&self) -> Duration {

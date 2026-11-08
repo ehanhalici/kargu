@@ -214,9 +214,9 @@ pub struct FileExcerpt {
     /// Numbered model-facing text including explicit unknown/truncated markers.
     pub text: String,
     /// Disk bytes actually read; editor snapshots report zero.
-    pub bytes_read: usize,
+    bytes_read: usize,
     /// Whether a complete scan reached the end of the source.
-    pub truncated: bool,
+    truncated: bool,
 }
 struct Snapshot {
     text: Zeroizing<String>,

@@ -109,7 +109,7 @@ pub struct Selection {
     pub model: Option<ModelChoice>,
     /// Effort override.
     #[serde(default)]
-    pub effort: EffortChoice,
+    effort: EffortChoice,
 }
 
 /// Committed selection and the revision that produced it.

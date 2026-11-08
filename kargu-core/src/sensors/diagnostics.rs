@@ -25,15 +25,15 @@ struct DiagnosticInput {
 #[serde(from = "DiagnosticInput")]
 pub struct Diagnostic {
     /// Diagnostic producer, rather than the selected UI backend.
-    pub source: DiagnosticSource,
+    source: DiagnosticSource,
     /// Optional checker code.
-    pub code: Option<DiagnosticCode>,
+    code: Option<DiagnosticCode>,
     /// Canonical severity.
-    pub severity: Severity,
+    severity: Severity,
     /// End-exclusive range in the diagnostic's own document.
-    pub range: SourceRange,
+    range: SourceRange,
     /// Bounded message text, excluded from debug output.
-    pub message: SensorText,
+    message: SensorText,
     #[serde(skip)]
     native_severity: bool,
 }
@@ -73,15 +73,15 @@ pub struct DocumentStamp {
 #[serde(deny_unknown_fields)]
 pub struct BackendReport {
     /// Stable checker identity within this editor resource.
-    pub backend: BackendId,
+    backend: BackendId,
     /// Generation requested by the barrier.
-    pub requested: PublicationGeneration,
+    requested: PublicationGeneration,
     /// Generation observed when delivering the snapshot.
-    pub observed: PublicationGeneration,
+    observed: PublicationGeneration,
     /// Actual document tick when this report function was acquired.
-    pub tick: DocumentTick,
+    tick: DocumentTick,
     /// True only after the report function has been called for this generation.
-    pub reported: bool,
+    reported: bool,
 }
 
 /// Language-server publication evidence; missing versions cannot certify freshness.
@@ -89,15 +89,15 @@ pub struct BackendReport {
 #[serde(deny_unknown_fields)]
 pub struct ServerPublication {
     /// Server captured when requesting diagnostics.
-    pub requested_server: ServerId,
+    requested_server: ServerId,
     /// Server that supplied the publication.
-    pub observed_server: ServerId,
+    observed_server: ServerId,
     /// Version requested at the document barrier.
-    pub requested_version: Option<LspVersion>,
+    requested_version: Option<LspVersion>,
     /// Version actually carried by publishDiagnostics or a version-bound pull.
-    pub published_version: Option<LspVersion>,
+    published_version: Option<LspVersion>,
     /// Document tick observed at publication.
-    pub tick: DocumentTick,
+    tick: DocumentTick,
 }
 
 #[derive(Deserialize)]

@@ -71,7 +71,7 @@ pub(super) struct BudgetRef {
 }
 pub(super) struct Charge {
     pub id: BudgetId,
-    pub ticket: AttemptCharge,
+    ticket: AttemptCharge,
     pub deadline: Deadline,
 }
 

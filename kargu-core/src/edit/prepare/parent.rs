@@ -22,8 +22,8 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ParentPolicy {
-    pub review_mode: crate::edit::types::ReviewMode,
-    pub save_policy: crate::edit::types::SavePolicy,
+    review_mode: crate::edit::types::ReviewMode,
+    save_policy: crate::edit::types::SavePolicy,
 }
 impl Default for ParentPolicy {
     fn default() -> Self {

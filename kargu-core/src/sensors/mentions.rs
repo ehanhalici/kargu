@@ -70,13 +70,13 @@ pub enum MentionTarget {
 #[serde(deny_unknown_fields)]
 pub struct MentionSpan {
     /// Unique mention target identity.
-    pub target_id: String,
+    target_id: String,
     /// Raw slice string from user prompt.
-    pub raw: String,
+    raw: String,
     /// UTF-8 start byte index.
-    pub start: usize,
+    start: usize,
     /// UTF-8 end byte index.
-    pub end: usize,
+    end: usize,
     /// Parsed target kind and value.
     pub target: MentionTarget,
 }

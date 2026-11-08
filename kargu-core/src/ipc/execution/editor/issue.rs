@@ -84,7 +84,7 @@ pub(super) struct SettledReceipt {
     pub expires_at: Instant,
 }
 pub(super) struct Finishing {
-    pub run: RunHandle,
+    run: RunHandle,
     pub task: JoinHandle<Result<JournalCommit, CoreError>>,
     pub completion: Completion,
 }

@@ -48,10 +48,10 @@ pub(crate) struct RollbackInput {
     pub target_file: Option<EditPath>,
     pub root: Option<PathBuf>,
     pub mode: Mode,
-    pub review_mode: ReviewMode,
-    pub save_policy: SavePolicy,
-    pub config_revision: ConfigRevision,
-    pub policy_revision: PolicyRevision,
+    review_mode: ReviewMode,
+    save_policy: SavePolicy,
+    config_revision: ConfigRevision,
+    policy_revision: PolicyRevision,
 }
 pub(crate) struct RollbackWork {
     pub id: PreparationId,

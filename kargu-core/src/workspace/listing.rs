@@ -20,11 +20,11 @@ use std::{
 #[serde(deny_unknown_fields)]
 pub struct ListFilesInput {
     /// Trusted editor workspace root.
-    pub root: PathBuf,
+    root: PathBuf,
     /// Directory relative to root, or an absolute contained directory.
-    pub path: Option<PathBuf>,
+    path: Option<PathBuf>,
     /// Literal basenames excluded through ls --ignore patterns.
-    pub skip_directories: Vec<String>,
+    skip_directories: Vec<String>,
 }
 
 impl ListFilesInput {

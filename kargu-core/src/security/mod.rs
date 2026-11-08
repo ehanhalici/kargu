@@ -583,18 +583,51 @@ fn digest(
 ) -> Result<ActionDigest, CoreError> {
     let mut hash = Sha256::new();
     hash.update(b"kargu-command-v1");
-    if let Some(snapshot) = &command.action_snapshot {
-        hash.update([1]);
-        hash.update(snapshot.digest());
-    } else {
-        hash.update([0]);
+    match &command.action_snapshot {
+        Some(snapshot) => {
+            hash.update([1]);
+            hash.update(snapshot.digest());
+        }
+        None => hash.update([0]),
     }
+    put_read_targets(&mut hash, &command.read_targets)?;
+    let scope = serde_json::to_vec(run.scope())
+        .map_err(|_| CoreError::InvalidValue { field: "RunScope" })?;
+    for bytes in [
+        scope.as_slice(),
+        name.as_str().as_bytes(),
+        command.program.as_os_str().as_bytes(),
+        command.invocation.as_os_str().as_bytes(),
+        command.cwd.path().as_os_str().as_bytes(),
+    ] {
+        put_bytes(&mut hash, bytes)?;
+    }
+    put_invocation(&mut hash, command)?;
+    put_policies(&mut hash, command)?;
+    Ok(ActionDigest(hash.finalize().into()))
+}
+
+/// Length prefix shared by every variable-size digest field.
+fn put_len(hash: &mut Sha256, len: usize) -> Result<(), CoreError> {
     hash.update(
-        u64::try_from(command.read_targets.len())
+        u64::try_from(len)
             .map_err(|_| CoreError::ArithmeticOverflow)?
             .to_le_bytes(),
     );
-    for target in &command.read_targets {
+    Ok(())
+}
+
+/// One length-prefixed byte field.
+fn put_bytes(hash: &mut Sha256, bytes: &[u8]) -> Result<(), CoreError> {
+    put_len(hash, bytes.len())?;
+    hash.update(bytes);
+    Ok(())
+}
+
+/// Identity of every declared read target; immutable ones also pin content metadata.
+fn put_read_targets(hash: &mut Sha256, targets: &[ReadTarget]) -> Result<(), CoreError> {
+    put_len(hash, targets.len())?;
+    for target in targets {
         let metadata = target.metadata()?;
         hash.update([u8::from(target.immutable())]);
         if target.immutable() {
@@ -607,58 +640,21 @@ fn digest(
         }
         hash.update(metadata.dev().to_le_bytes());
         hash.update(metadata.ino().to_le_bytes());
-        let path = target.path.as_os_str().as_bytes();
-        hash.update(
-            u64::try_from(path.len())
-                .map_err(|_| CoreError::ArithmeticOverflow)?
-                .to_le_bytes(),
-        );
-        hash.update(path);
+        put_bytes(hash, target.path.as_os_str().as_bytes())?;
     }
-    let scope = serde_json::to_vec(run.scope())
-        .map_err(|_| CoreError::InvalidValue { field: "RunScope" })?;
-    for bytes in [
-        scope.as_slice(),
-        name.as_str().as_bytes(),
-        command.program.as_os_str().as_bytes(),
-        command.invocation.as_os_str().as_bytes(),
-        command.cwd.path().as_os_str().as_bytes(),
-    ] {
-        hash.update(
-            u64::try_from(bytes.len())
-                .map_err(|_| CoreError::ArithmeticOverflow)?
-                .to_le_bytes(),
-        );
-        hash.update(bytes);
-    }
-    hash.update(
-        u64::try_from(command.arguments.len())
-            .map_err(|_| CoreError::ArithmeticOverflow)?
-            .to_le_bytes(),
-    );
+    Ok(())
+}
+
+/// Arguments, environment, and the executable and cwd identities.
+fn put_invocation(hash: &mut Sha256, command: &CommandSpec) -> Result<(), CoreError> {
+    put_len(hash, command.arguments.len())?;
     for arg in &command.arguments {
-        let bytes = arg.as_os_str().as_bytes();
-        hash.update(
-            u64::try_from(bytes.len())
-                .map_err(|_| CoreError::ArithmeticOverflow)?
-                .to_le_bytes(),
-        );
-        hash.update(bytes);
+        put_bytes(hash, arg.as_os_str().as_bytes())?;
     }
-    hash.update(
-        u64::try_from(command.environment.0.len())
-            .map_err(|_| CoreError::ArithmeticOverflow)?
-            .to_le_bytes(),
-    );
+    put_len(hash, command.environment.0.len())?;
     for (key, value) in command.environment.entries() {
-        for bytes in [key.as_os_str().as_bytes(), value.as_os_str().as_bytes()] {
-            hash.update(
-                u64::try_from(bytes.len())
-                    .map_err(|_| CoreError::ArithmeticOverflow)?
-                    .to_le_bytes(),
-            );
-            hash.update(bytes);
-        }
+        put_bytes(hash, key.as_os_str().as_bytes())?;
+        put_bytes(hash, value.as_os_str().as_bytes())?;
     }
     for metadata in [
         command.executable.metadata()?,
@@ -667,18 +663,24 @@ fn digest(
         hash.update(metadata.dev().to_le_bytes());
         hash.update(metadata.ino().to_le_bytes());
     }
-    if let Some(duration) = command.timeout.duration() {
-        hash.update([1]);
-        hash.update(duration.as_nanos().to_le_bytes());
-    } else {
-        hash.update([0]);
+    Ok(())
+}
+
+/// An optional duration as a presence tag plus nanoseconds.
+fn put_duration(hash: &mut Sha256, duration: Option<Duration>) {
+    match duration {
+        Some(duration) => {
+            hash.update([1]);
+            hash.update(duration.as_nanos().to_le_bytes());
+        }
+        None => hash.update([0]),
     }
-    if let Some(duration) = command.idle_timeout.duration() {
-        hash.update([1]);
-        hash.update(duration.as_nanos().to_le_bytes());
-    } else {
-        hash.update([0]);
-    }
+}
+
+/// Timeouts, capture, exit-code and stderr policies, and the output limit.
+fn put_policies(hash: &mut Sha256, command: &CommandSpec) -> Result<(), CoreError> {
+    put_duration(hash, command.timeout.duration());
+    put_duration(hash, command.idle_timeout.duration());
     hash.update([match command.capture.retention() {
         OutputRetention::Prefix => 0,
         OutputRetention::Tail => 1,
@@ -700,12 +702,7 @@ fn digest(
         StderrPolicy::Separate => 0,
         StderrPolicy::Merge => 1,
     }]);
-    hash.update(
-        u64::try_from(command.output_limit.as_usize())
-            .map_err(|_| CoreError::ArithmeticOverflow)?
-            .to_le_bytes(),
-    );
-    Ok(ActionDigest(hash.finalize().into()))
+    put_len(hash, command.output_limit.as_usize())
 }
 
 /// UI decision; missing UI must use Rejected, never Approved.

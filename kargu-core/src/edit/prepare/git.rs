@@ -173,82 +173,16 @@ fn build_command(
     context: &Preparation,
 ) -> Result<(CommandSpec, RunSettings), CoreError> {
     let root = directory.path();
-    std::fs::create_dir_all(root.join(".git/objects"))?;
-    std::fs::create_dir_all(root.join(".git/refs/heads"))?;
-    std::fs::create_dir_all(root.join(".git/info"))?;
-    std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/kargu\n")?;
-    std::fs::write(
-        root.join(".git/config"),
-        "[core]\nrepositoryformatversion = 0\nbare = false\n",
-    )?;
-    // Highest-precedence private attributes neutralize even a patch targeting .gitattributes.
-    std::fs::write(
-        root.join(".git/info/attributes"),
-        "* -text -crlf -eol -ident -filter -working-tree-encoding\n",
-    )?;
-    for file in files {
-        context.check()?;
-        if file.proposal.evidence.existed() {
-            let path = root.join(file.proposal.relative.as_path());
-            std::fs::create_dir_all(path.parent().ok_or(EditError::InvalidPath)?)?;
-            std::fs::write(path, file.proposal.base.as_str())?;
-        }
-        file.proposal.root.revalidate()?;
-        file.proposal.evidence.revalidate()?;
-    }
+    write_scaffold(root)?;
+    write_bases(root, files, context)?;
     std::fs::write(root.join(".kargu.patch"), inspection.patch.normalized())?;
     let program = crate::workspace::command::executable("git")?;
-    let environment = BTreeMap::from([
-        (
-            OsString::from("PATH"),
-            program
-                .parent()
-                .ok_or(CoreError::Unavailable)?
-                .as_os_str()
-                .to_owned(),
-        ),
-        ("LC_ALL".into(), "C".into()),
-        ("GIT_CONFIG_GLOBAL".into(), "/dev/null".into()),
-        ("GIT_CONFIG_SYSTEM".into(), "/dev/null".into()),
-        ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
-        ("GIT_ATTR_NOSYSTEM".into(), "1".into()),
-        ("GIT_TERMINAL_PROMPT".into(), "0".into()),
-        ("GIT_OPTIONAL_LOCKS".into(), "0".into()),
-        (
-            "GIT_INDEX_FILE".into(),
-            root.join(".git/index").into_os_string(),
-        ),
-    ]);
-    let mut gitdir = OsString::from("--git-dir=");
-    gitdir.push(root.join(".git"));
-    let mut worktree = OsString::from("--work-tree=");
-    worktree.push(root);
+    let environment = git_environment(root, &program)?;
     let timeout = deadline
         .checked_duration_since(Instant::now())
         .filter(|d| !d.is_zero())
         .ok_or(CoreError::Deadline)?;
-    let arguments = vec![
-        "--no-pager".into(),
-        "--no-lazy-fetch".into(),
-        "--literal-pathspecs".into(),
-        gitdir,
-        worktree,
-        "-c".into(),
-        "core.attributesFile=/dev/null".into(),
-        "-c".into(),
-        "core.autocrlf=false".into(),
-        "-c".into(),
-        "core.safecrlf=false".into(),
-        "-c".into(),
-        "core.fsmonitor=false".into(),
-        "-c".into(),
-        "core.hooksPath=/dev/null".into(),
-        "apply".into(),
-        "--unidiff-zero".into(),
-        "--whitespace=nowarn".into(),
-        "--".into(),
-        ".kargu.patch".into(),
-    ];
+    let arguments = apply_arguments(root);
     // This closed fixed-argv adapter mutates only its owned temporary workspace.
     let workspace = Workspace::try_from(root.to_owned())?;
     let command = CommandSpec::edit_patch(
@@ -275,6 +209,87 @@ fn build_command(
         inspection.input.policy_revision,
     );
     Ok((command, settings?))
+}
+/// The private repository skeleton: no inherited config, attributes or hooks.
+fn write_scaffold(root: &Path) -> Result<(), CoreError> {
+    std::fs::create_dir_all(root.join(".git/objects"))?;
+    std::fs::create_dir_all(root.join(".git/refs/heads"))?;
+    std::fs::create_dir_all(root.join(".git/info"))?;
+    std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/kargu\n")?;
+    std::fs::write(
+        root.join(".git/config"),
+        "[core]\nrepositoryformatversion = 0\nbare = false\n",
+    )?;
+    // Highest-precedence private attributes neutralize even a patch targeting .gitattributes.
+    std::fs::write(
+        root.join(".git/info/attributes"),
+        "* -text -crlf -eol -ident -filter -working-tree-encoding\n",
+    )?;
+    Ok(())
+}
+
+/// Copy each existing base text into the private worktree, revalidating its pins.
+fn write_bases(root: &Path, files: &[BatchFile], context: &Preparation) -> Result<(), CoreError> {
+    for file in files {
+        context.check()?;
+        if file.proposal.evidence.existed() {
+            let path = root.join(file.proposal.relative.as_path());
+            std::fs::create_dir_all(path.parent().ok_or(EditError::InvalidPath)?)?;
+            std::fs::write(path, file.proposal.base.as_str())?;
+        }
+        file.proposal.root.revalidate()?;
+        file.proposal.evidence.revalidate()?;
+    }
+    Ok(())
+}
+
+/// A closed environment: only git's own directory on PATH, no user or system config.
+fn git_environment(root: &Path, program: &Path) -> Result<BTreeMap<OsString, OsString>, CoreError> {
+    let path = program.parent().ok_or(CoreError::Unavailable)?;
+    Ok(BTreeMap::from([
+        (OsString::from("PATH"), path.as_os_str().to_owned()),
+        ("LC_ALL".into(), "C".into()),
+        ("GIT_CONFIG_GLOBAL".into(), "/dev/null".into()),
+        ("GIT_CONFIG_SYSTEM".into(), "/dev/null".into()),
+        ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
+        ("GIT_ATTR_NOSYSTEM".into(), "1".into()),
+        ("GIT_TERMINAL_PROMPT".into(), "0".into()),
+        ("GIT_OPTIONAL_LOCKS".into(), "0".into()),
+        (
+            "GIT_INDEX_FILE".into(),
+            root.join(".git/index").into_os_string(),
+        ),
+    ]))
+}
+
+/// Fixed `git apply` argv against the private repository.
+fn apply_arguments(root: &Path) -> Vec<OsString> {
+    let mut gitdir = OsString::from("--git-dir=");
+    gitdir.push(root.join(".git"));
+    let mut worktree = OsString::from("--work-tree=");
+    worktree.push(root);
+    vec![
+        "--no-pager".into(),
+        "--no-lazy-fetch".into(),
+        "--literal-pathspecs".into(),
+        gitdir,
+        worktree,
+        "-c".into(),
+        "core.attributesFile=/dev/null".into(),
+        "-c".into(),
+        "core.autocrlf=false".into(),
+        "-c".into(),
+        "core.safecrlf=false".into(),
+        "-c".into(),
+        "core.fsmonitor=false".into(),
+        "-c".into(),
+        "core.hooksPath=/dev/null".into(),
+        "apply".into(),
+        "--unidiff-zero".into(),
+        "--whitespace=nowarn".into(),
+        "--".into(),
+        ".kargu.patch".into(),
+    ]
 }
 impl PatchPrepared {
     pub(crate) fn discard(self) -> Result<(), CoreError> {

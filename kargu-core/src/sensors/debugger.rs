@@ -27,17 +27,17 @@ pub enum DebugStatus {
 #[serde(deny_unknown_fields)]
 pub struct StackFrameDto {
     /// Frame identifier within the stop generation.
-    pub id: FrameId,
+    id: FrameId,
     /// Frame function or symbol name.
-    pub name: String,
+    name: String,
     /// Thread owning this frame.
-    pub thread_id: ThreadId,
+    thread_id: ThreadId,
     /// Source file path, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub file: Option<PathBuf>,
+    file: Option<PathBuf>,
     /// Source range inside the file, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub range: Option<SourceRange>,
+    range: Option<SourceRange>,
 }
 
 /// A variable in a frame scope.
@@ -45,15 +45,15 @@ pub struct StackFrameDto {
 #[serde(deny_unknown_fields)]
 pub struct VariableDto {
     /// Variable identifier name.
-    pub name: String,
+    name: String,
     /// Evaluated string value.
-    pub value: SensorText,
+    value: SensorText,
     /// Optional language type string.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub var_type: Option<String>,
+    var_type: Option<String>,
     /// Child variables reference for structured types.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub children_reference: Option<u64>,
+    children_reference: Option<u64>,
 }
 
 /// A breakpoint report from the debugger.
@@ -61,18 +61,18 @@ pub struct VariableDto {
 #[serde(deny_unknown_fields)]
 pub struct BreakpointDto {
     /// Breakpoint identifier.
-    pub id: u64,
+    id: u64,
     /// Whether the breakpoint is verified by the runtime.
-    pub verified: bool,
+    verified: bool,
     /// Breakpoint target file path.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub file: Option<PathBuf>,
+    file: Option<PathBuf>,
     /// Breakpoint target source line.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<SourceLine>,
+    line: Option<SourceLine>,
     /// Optional failure or diagnostic message.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
+    message: Option<String>,
 }
 
 /// An evaluated watch expression.
@@ -80,13 +80,13 @@ pub struct BreakpointDto {
 #[serde(deny_unknown_fields)]
 pub struct WatchDto {
     /// Evaluated watch expression string.
-    pub expression: String,
+    expression: String,
     /// Result value text, if evaluation succeeded.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<SensorText>,
+    result: Option<SensorText>,
     /// Error message, if evaluation failed.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+    error: Option<String>,
 }
 
 /// A debugger thread.
@@ -94,9 +94,9 @@ pub struct WatchDto {
 #[serde(deny_unknown_fields)]
 pub struct ThreadDto {
     /// Thread identifier.
-    pub id: ThreadId,
+    id: ThreadId,
     /// Thread label or name.
-    pub name: String,
+    name: String,
 }
 
 /// Detached canonical debugger snapshot.
@@ -104,25 +104,25 @@ pub struct ThreadDto {
 #[serde(deny_unknown_fields)]
 pub struct DebugContextSnapshot {
     /// Active debug connection identity.
-    pub connection_id: DebugConnectionId,
+    connection_id: DebugConnectionId,
     /// Stop generation epoch.
-    pub stop_generation: StopGeneration,
+    stop_generation: StopGeneration,
     /// Current thread identifier.
-    pub thread_id: ThreadId,
+    thread_id: ThreadId,
     /// Target execution status.
-    pub status: DebugStatus,
+    status: DebugStatus,
     /// Active stack frame, if stopped.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_frame: Option<StackFrameDto>,
+    current_frame: Option<StackFrameDto>,
     /// Local variables in the active frame scope.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub local_variables: Vec<VariableDto>,
+    local_variables: Vec<VariableDto>,
     /// Stack trace frames for the active thread.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub stack_frames: Vec<StackFrameDto>,
+    stack_frames: Vec<StackFrameDto>,
     /// Known threads in the debug session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub threads: Vec<ThreadDto>,
+    threads: Vec<ThreadDto>,
 }
 
 impl DebugContextSnapshot {

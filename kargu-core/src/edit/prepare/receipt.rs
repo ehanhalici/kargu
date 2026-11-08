@@ -71,12 +71,12 @@ impl After {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct FileObservation {
-    pub(crate) file: FileIndex,
-    pub(crate) progress: Progress,
-    pub(crate) failure: Option<AdapterFailure>,
-    pub(crate) write_tick: Option<DocumentTick>,
-    pub(crate) written_bytes: Option<TextBytes>,
-    pub(crate) after: After,
+    file: FileIndex,
+    progress: Progress,
+    failure: Option<AdapterFailure>,
+    write_tick: Option<DocumentTick>,
+    written_bytes: Option<TextBytes>,
+    after: After,
 }
 #[derive(Deserialize)]
 #[serde(try_from = "String")]

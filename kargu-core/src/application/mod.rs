@@ -47,7 +47,7 @@ pub enum Mode {
 pub struct RunSettings {
     pub(crate) mode: Mode,
     pub(crate) workspace: Workspace,
-    pub(crate) tool_limit: ToolCallLimit,
+    tool_limit: ToolCallLimit,
     timeout: ExecutionTimeout,
     config_revision: ConfigRevision,
     policy_revision: PolicyRevision,
@@ -322,20 +322,20 @@ pub struct ToolResult {
     /// Original tool call identity.
     pub tool_call_id: ToolCallId,
     /// Canonical registry name.
-    pub tool_name: ToolName,
+    tool_name: ToolName,
     /// Typed terminal status.
     pub outcome: ToolOutcome,
     /// Provider adapters use this when constructing error tool results.
     pub is_error: bool,
     /// Safe cancellation/error notice, including synthesized interrupted calls.
-    pub message: &'static str,
+    message: &'static str,
 }
 
 /// Released run, with exactly one result for every registered call.
 #[derive(Debug, Serialize)]
 pub struct RunCompletion {
     /// Released run scope.
-    pub scope: RunScope,
+    scope: RunScope,
     /// Idempotently repaired call results; wire-family serialization is later work.
     pub tool_results: Vec<ToolResult>,
 }
@@ -354,9 +354,9 @@ pub struct ApplicationActor {
     preparing: Option<claim::PendingClaim>,
     job_runs: HashMap<RunId, ActiveRun>,
     editor_runs: HashMap<RunId, ActiveRun>,
-    pub(crate) models: crate::models::service::ModelService,
+    models: crate::models::service::ModelService,
     pub(crate) edits: crate::edit::prepare::EditPreparations,
-    pub(crate) configuration: crate::configuration::policy::ConfigurationService,
+    configuration: crate::configuration::policy::ConfigurationService,
 }
 impl ApplicationActor {
     /// Create an empty application; composition owns this handle.

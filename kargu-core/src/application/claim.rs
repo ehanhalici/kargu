@@ -178,7 +178,7 @@ pub(super) enum ClaimState {
 }
 pub(super) struct PendingClaim {
     pub claim: RunClaim,
-    pub state: ClaimState,
+    state: ClaimState,
 }
 
 impl ApplicationActor {

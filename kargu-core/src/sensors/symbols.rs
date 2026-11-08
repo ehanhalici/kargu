@@ -89,10 +89,10 @@ pub struct XrefLocation {
 pub struct HoverSnapshot {
     /// Target source range of hover.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub range: Option<SourceRange>,
+    range: Option<SourceRange>,
     /// Markdown or text documentation chunks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub contents: Vec<SensorText>,
+    contents: Vec<SensorText>,
 }
 
 /// Outcome of symbol resolution.
