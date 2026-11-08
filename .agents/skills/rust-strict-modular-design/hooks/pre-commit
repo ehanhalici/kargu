@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# rust-strict-modular-design pre-commit gate.
+#
+# Checks exactly what is being committed: the staged index is exported to a
+# temporary tree and every opted-in crate (a directory holding both Cargo.toml
+# and arch-checker.conf) touched by the commit must pass, in order:
+#   1. cargo fmt --check
+#   2. cargo clippy: -D warnings on every target, plus the skill's panic-free
+#      deny list on library and binary code (tests may unwrap and index)
+#   3. cargo test (unit, integration and compile_fail boundary proofs)
+#   4. arch-checker (AST rules: fields, boundaries, purity, panics, size); with
+#      an arch-checker.baseline the findings must match it exactly and no rule
+#      may have more entries than in HEAD's baseline (a one-way ratchet)
+# If the checker itself changes, its own rule fixtures run first and every
+# opted-in crate is re-checked.
+#
+# Usage:  pre-commit          (as a git hook: staged snapshot, touched crates)
+#         pre-commit --all    (CI: current tree, every opted-in crate)
+# Bypass with `git commit --no-verify` is possible locally; run `--all` in CI.
+set -euo pipefail
+
+repo=$(git rev-parse --show-toplevel)
+skill_rel=$(realpath --relative-to="$repo" "$(dirname "$(realpath "$0")")/..")
+checker_rel="$skill_rel/tools/arch-checker"
+mode=${1:-staged}
+
+clippy_deny=(-D clippy::unwrap_used -D clippy::expect_used -D clippy::panic
+             -D clippy::todo -D clippy::unimplemented -D clippy::indexing_slicing)
+cache=  # set in main: .git/arch-checker-cache
+
+say() { printf '%s\n' "$*" >&2; }
+fail() { say "pre-commit: $*"; exit 1; }
+
+# Run cargo directly, or inside the repository's Nix shell when no working
+# toolchain is on PATH (a rustup shim without an installed toolchain counts as
+# absent: it has `cargo` but `rustc -V` fails).
+cargo_in() {
+    local dir=$1; shift
+    if (cd "$dir" && cargo -V && rustc -V) >/dev/null 2>&1; then
+        (cd "$dir" && cargo "$@")
+    elif command -v nix-shell >/dev/null 2>&1 && [[ -f "$repo/shell.nix" ]]; then
+        local quoted; printf -v quoted '%q ' "$@"
+        # pipefail reports nix-shell's status; an empty filter is not a failure.
+        (cd "$dir" && nix-shell "$repo/shell.nix" --run "cargo $quoted" 2>&1 |
+            { grep -v '^Kargu proof shell' >&2 || true; })
+    else
+        fail "cargo not found (and no nix-shell fallback)"
+    fi
+}
+
+# Every opted-in crate directory in the given tree, relative to its root.
+opted_in() {
+    local tree=$1
+    (cd "$tree" && git -C "$repo" ls-files -- '*arch-checker.conf' 'arch-checker.conf') |
+        while read -r conf; do
+            local dir; dir=$(dirname "$conf")
+            [[ -f "$tree/$dir/Cargo.toml" && -f "$tree/$conf" ]] && printf '%s\n' "$dir"
+        done | sort -u
+}
+
+# Export the staged index (not the working tree) into a fresh directory.
+export_index() {
+    local tree=$1
+    git -C "$repo" checkout-index --all --prefix="$tree/"
+}
+
+check_crate() {
+    local tree=$1 dir=$2 target=$3
+    local crate="$tree/$dir"
+    say "== $dir"
+    say "   [1/4] fmt";    cargo_in "$crate" fmt --check
+    say "   [2/4] clippy"
+    CARGO_TARGET_DIR="$target" cargo_in "$crate" clippy --all-targets --locked --quiet -- -D warnings
+    CARGO_TARGET_DIR="$target" cargo_in "$crate" clippy --lib --bins --locked --quiet -- -D warnings "${clippy_deny[@]}"
+    say "   [3/4] test";   CARGO_TARGET_DIR="$target" cargo_in "$crate" test --locked --quiet
+    local options=()
+    mapfile -t options < <(arch_options "$tree" "$dir")
+    say "   [4/4] arch";   "$checker_bin" "${options[@]}" "$crate"
+}
+
+# Baseline options for a crate: exact match, plus the ratchet against HEAD.
+arch_options() {
+    local tree=$1 dir=$2
+    local baseline="$tree/$dir/arch-checker.baseline"
+    [[ -f $baseline ]] || return 0
+    printf '%s\n' --baseline "$baseline"
+    local previous; previous="$cache/$(printf '%s' "$dir" | sha256sum | cut -c1-16).head-baseline"
+    if git -C "$repo" cat-file -e "HEAD:$dir/arch-checker.baseline" 2>/dev/null; then
+        git -C "$repo" show "HEAD:$dir/arch-checker.baseline" >"$previous"
+        printf '%s\n' --ratchet "$previous"
+    fi
+}
+
+build_checker() {
+    local tree=$1 target=$2
+    CARGO_TARGET_DIR="$target" cargo_in "$tree/$checker_rel" build --locked --quiet
+    checker_bin="$target/debug/arch-checker"
+    [[ -x "$checker_bin" ]] || fail "arch-checker did not build"
+}
+
+
+main() {
+    local tree changed
+    cache="$(git rev-parse --absolute-git-dir)/arch-checker-cache"
+    mkdir -p "$cache"
+    if [[ $mode == --all ]]; then
+        tree=$repo
+        changed=$(git -C "$repo" ls-files)
+    else
+        # A fixed path keeps cargo's change tracking exact across commits; a new
+        # random directory would let cached test binaries remember stale paths.
+        tree="$cache/snapshot"
+        rm -rf "$tree"
+        export_index "$tree"
+        changed=$(git -C "$repo" diff --cached --name-only --diff-filter=ACMRD)
+    fi
+    [[ -n $changed ]] || exit 0
+
+    local checker_changed=no
+    grep -q "^$checker_rel/" <<<"$changed" && checker_changed=yes
+
+    local crates=() dir
+    while read -r dir; do
+        [[ -n $dir ]] || continue
+        if [[ $checker_changed == yes ]] || grep -q "^$dir/" <<<"$changed"; then crates+=("$dir"); fi
+    done < <(opted_in "$tree")
+    [[ ${#crates[@]} -gt 0 || $checker_changed == yes ]] || exit 0
+
+    build_checker "$tree" "$cache/checker"
+    if [[ $checker_changed == yes ]]; then
+        say "== $checker_rel (rule fixtures)"
+        CARGO_TARGET_DIR="$cache/checker" cargo_in "$tree/$checker_rel" test --locked --quiet
+    fi
+    for dir in "${crates[@]}"; do
+        check_crate "$tree" "$dir" "$cache/$(printf '%s' "$dir" | sha256sum | cut -c1-16)"
+    done
+    say "pre-commit: all architecture gates passed"
+}
+
+main

@@ -1,0 +1,32 @@
+[package]
+name = "order-billing"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Reference crate for the rust-strict-modular-design skill."
+
+# A standalone crate: not part of any workspace.
+[workspace]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+unreachable_pub = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+as_conversions = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+excessive_nesting = "deny"
+shadow_unrelated = "deny"
+missing_errors_doc = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+too_many_lines = "deny"
+cognitive_complexity = "deny"

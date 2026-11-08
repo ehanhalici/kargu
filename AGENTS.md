@@ -43,6 +43,7 @@ Skills provide progressive runbooks for key agent workflows:
 - [external-bridges](.agents/skills/external-bridges/SKILL.md): External backend adapters (Codex, Antigravity, Claude, OpenCode) and MCP server integration.
 - [native-tools](.agents/skills/native-tools/SKILL.md): Filesystem traversal, execution foundations, process management, grep, and Git queries.
 - [native-api-and-catalog](.agents/skills/native-api-and-catalog/SKILL.md): Provider/model discovery, HTTP/SSE streaming, wire caching, and configuration.
+- [rust-strict-modular-design](.agents/skills/rust-strict-modular-design/SKILL.md): Single-responsibility modules and functions, `pub fn`-only module boundaries, compile-time invariants (newtypes, const-generic bounds, typestate, witness types, sealed traits) and Result-based effect isolation behind ports; with a verified reference crate and a pre-commit AST gate (arch-checker, ratchet baseline) that covers kargu-core.
 
 ## 2. Rules (`.agents/rules/`)
 Directory-based and path-scoped rules enforcing architectural contracts and invariants:

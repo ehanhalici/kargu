@@ -1,0 +1,5 @@
+# One function, one job: keep bodies small enough to read at a glance.
+too-many-lines-threshold = 40
+cognitive-complexity-threshold = 10
+too-many-arguments-threshold = 3
+excessive-nesting-threshold = 3
