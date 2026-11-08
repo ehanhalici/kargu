@@ -2112,7 +2112,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust file_reads, search, git_reads; ERT
         test-native-file, test-attach, test-file-window, test-fs.
 
-    - [ ] **4.8d Completion/dosya tarayıcısı:** `chat/complete.el` →
+    - [x] **4.8d Completion/dosya tarayıcısı:** `chat/complete.el` →
       `kargu-fs-walk` → `directory-files` çağrı zincirini kaldır; completion için
       Rust'ın bounded path listesi/cursor'ı kullanılsın. UI keystroke'unda senkron
       recursive scan veya yeni domain cache olmasın; `fs.el` consumer'ı bitmeden
@@ -2151,23 +2151,50 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         (Emacs `directory-files` çağrılmaz, kök dışı buffer önerilmez) ve
         `kargu-chat-completion-ranks-natively-and-drops-superseded-queries-test`;
         tam ERT 1471/1471.
-        **Açık:** (1) Eski `project-files` yolu VC ignore kurallarına uyuyordu;
-        native keşif yalnız skip dizinleri ve artifact politikasını uygular, Git
-        ignore edilen fakat skip listesinde olmayan dosyalar artık aday olabilir
-        (bkz. 4.8d1). (2) Sembol adaylarının sıralaması hâlâ Elisp flex
+        **Kapanış (2026-11-08):** Git ignore semantiği 4.8d1 ile geri geldi;
+        keystroke'ta Emacs taraması yok, eski sorgu cevabı uygulanmıyor,
+        skip/ignore/cap ve kök dışı korpus korunuyor.
+        **Kalan ilgili borç:** (1) yok (4.8d1). (2) Sembol adaylarının sıralaması hâlâ Elisp flex
         skorlamasıdır (`kargu-chat--score-symbol-item`), 4.4b/4.4e ile Rust'a
         taşınmalı. (3) Çoklu kök etiketlemesi kaldırıldı; completion zaten tek
         seçili kökle çalışıyordu.
 
-      - [ ] **4.8d1 Git ignore farkında aday listesi:** native mention keşfi, kök
-        bir Git deposuysa mevcut native Git okuma portuyla (`ls-files --cached
-        --others --exclude-standard` eşdeğeri, sabit argv, sınırlı çıktı) ignore
-        edilen dosyaları dışlasın; depo değilse bugünkü skip/artifact politikası
-        kalsın. Makine-global Git config'i yine okunmaz.
+      - [x] **4.8d1 Git ignore farkında aday listesi:** native mention keşfi, kök
+        bir Git deposuysa ignore edilen dosyaları dışlasın; depo değilse bugünkü
+        skip/artifact politikası kalsın. Makine-global Git config'i yine okunmaz.
 
         **Bitti sayılması için:** `.gitignore` ile dışlanan dosya aday olmaz;
           ignore kuralı olmayan kaynak görünür kalır; Git yoksa `unavailable`
           değil mevcut politika uygulanır.
+
+        **Teslim (2026-11-08):** `git` süreci yerine ripgrep ailesinin `ignore`
+          crate'i (globset ile aynı kaynak) kullanılır: `workspace/gitignore.rs`
+          yürüyüş sırasında açılan her dizinin `.gitignore`'unu ve kökün
+          `.git/info/exclude`'unu bir yığında tutar, en derin eşleşen kural
+          karar verir (`!` negation dahil), ignore edilen dizine inilmez.
+          Yalnız kök bir Git deposuysa ve yalnız editöre dönük mention keşfinde
+          (`FindFilesPlan::respecting_git_ignore`) etkindir; modelin
+          `find_files` aracı belgelenmiş, config'ten bağımsız politikasını korur.
+          `core.excludesFile`/global config okunmaz; 256 KiB üstü veya bozuk
+          ignore dosyası atlanır, keşif başarısız olmaz.
+          **Sınır:** kökün üst dizinlerindeki `.gitignore` (kök bir deponun alt
+          dizini olduğunda) okunmaz; kök depo değilse kural uygulanmaz.
+          **Kanıt:** Rust stdio
+          `mention_candidates_follow_repository_ignore_rules_only_in_a_repository`
+          (kök/iç içe `.gitignore`, negation, `info/exclude`, depo olmayan kök,
+          etkilenmeyen `find_files`); ERT
+          `kargu-chat-completion-never-adds-unrelated-buffer-roots-test` gerçek
+          Git deposunda ignore edilen dosyayı önermez; tam ERT 1471/1471.
+
+      - [ ] **4.8d2 Alt dizin kökünde üst `.gitignore` kuralları:** seçili kök
+        bir deponun alt dizini olduğunda (kökte `.git` yoksa) depo kökünü
+        sınırlı yukarı yürüyüşle bul; depo kökünden seçili köke kadar olan
+        `.gitignore` dosyalarını ve `info/exclude`'u yığına ekle. Kök dışına
+        hiçbir aday taşmasın; `.git` dosyası (worktree/submodule) için
+        `gitdir:` hedefi doğrulanmadan izlenmesin.
+
+        **Bitti sayılması için:** depo içi alt dizin kökünde üst `.gitignore`
+          ile dışlanan dosya önerilmez; depo dışı kökte davranış değişmez.
 
 
   - [ ] **4.9 Provenance/bütçe/egress:** immutable attachment metadata/hash/range,

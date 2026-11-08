@@ -4,6 +4,7 @@ pub(crate) mod command;
 pub mod completion;
 pub mod file;
 pub mod git;
+pub(crate) mod gitignore;
 pub mod grep;
 pub mod listing;
 pub(crate) mod probe;

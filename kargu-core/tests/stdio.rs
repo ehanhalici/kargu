@@ -2,7 +2,10 @@
 
 mod support;
 use serde_json::{Value, json};
-use std::time::{Duration, Instant};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 use support::Peer;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -503,6 +506,93 @@ fn mention_candidates_rank_discovered_and_visited_files_natively() -> TestResult
         "params":{"scope":scope,"arguments":oversized}}),
     )?;
     assert_eq!(peer.read()?["error"]["data"]["status"], "resource_limit");
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+fn mention_paths(
+    peer: &mut Peer,
+    scope: &Value,
+    root: &Path,
+    id: u64,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let arguments = json!({"root":root,"query":"","open_files":[],
+        "skip_directories":[".git"],"max_files":2000,"max_directories":2000,"limit":50});
+    peer.send(
+        json!({"jsonrpc":"2.0","id":id,"method":"workspace/mentionCandidates",
+        "params":{"scope":scope,"arguments":arguments}}),
+    )?;
+    let reply = peer.read()?;
+    Ok(reply["result"]["candidates"]
+        .as_array()
+        .ok_or("candidates missing")?
+        .iter()
+        .filter_map(|candidate| candidate["path"].as_str().map(str::to_owned))
+        .collect())
+}
+
+#[test]
+fn mention_candidates_follow_repository_ignore_rules_only_in_a_repository() -> TestResult {
+    let write = |root: &Path, name: &str, text: &str| -> std::io::Result<()> {
+        let path = root.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, text)
+    };
+    let repo = tempfile::tempdir()?;
+    write(repo.path(), ".git/info/exclude", "local.txt\n")?;
+    write(repo.path(), ".gitignore", "generated/\n*.log\n")?;
+    write(repo.path(), "src/.gitignore", "!keep.log\nscratch.rs\n")?;
+    for name in [
+        "src/main.rs",
+        "src/scratch.rs",
+        "src/keep.log",
+        "src/debug.log",
+        "generated/out.rs",
+        "local.txt",
+        "README.md",
+    ] {
+        write(repo.path(), name, "fixture")?;
+    }
+    let plain = tempfile::tempdir()?;
+    write(plain.path(), ".gitignore", "*.log\n")?;
+    write(plain.path(), "debug.log", "fixture")?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    peer.send(json!({"jsonrpc":"2.0","id":1,"method":"application/create"}))?;
+    let app = peer.read()?["result"]["application_id"].clone();
+    peer.send(
+        json!({"jsonrpc":"2.0","id":2,"method":"session/create","params":{"application_id":app}}),
+    )?;
+    let scope = peer.read()?["result"].clone();
+    let mut paths = mention_paths(&mut peer, &scope, repo.path(), 3)?;
+    paths.sort();
+    assert_eq!(
+        paths,
+        [
+            ".gitignore",
+            "README.md",
+            "src/.gitignore",
+            "src/keep.log",
+            "src/main.rs"
+        ]
+    );
+    // Not a repository: the ignore file is just a file, nothing is hidden.
+    let mut paths = mention_paths(&mut peer, &scope, plain.path(), 4)?;
+    paths.sort();
+    assert_eq!(paths, [".gitignore", "debug.log"]);
+    // The model's find_files keeps its configuration-independent policy.
+    peer.send(
+        json!({"jsonrpc":"2.0","id":5,"method":"workspace/findFiles",
+        "params":{"scope":scope,"arguments":{"root":repo.path(),"path":null,"pattern":"*.log",
+        "skip_directories":[".git"],"max_files":2000,"max_directories":2000}}}),
+    )?;
+    assert_eq!(
+        peer.read()?["result"]["text"],
+        "src/debug.log\nsrc/keep.log\n"
+    );
     peer.input.take();
     assert!(peer.wait()?);
     Ok(())

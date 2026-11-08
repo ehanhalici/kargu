@@ -1,9 +1,11 @@
-//! Bounded native file discovery. No subprocess, file-content read or editor wait.
+//! Bounded native file discovery. No subprocess or editor wait; no file content
+//! is read except, for editor-facing listings, the repository's ignore files.
 //!
 //! Hidden source files are included. The explicit client directory exclusions
 //! and compiled/backup artifact policy apply consistently, without depending on
 //! installed fd/rg versions or machine-global Git ignore configuration.
 
+use super::gitignore::{IgnoreStack, Visibility};
 use crate::{constants::limits, error::CoreError, security::Workspace};
 use globset::{GlobBuilder, GlobMatcher};
 use serde::{Deserialize, Serialize};
@@ -67,6 +69,7 @@ pub struct FindFilesPlan {
     skip_directories: Vec<String>,
     files: FileVisitLimit,
     directories: DirectoryVisitLimit,
+    git_ignore: bool,
 }
 
 impl TryFrom<FindFilesInput> for FindFilesPlan {
@@ -130,6 +133,7 @@ impl TryFrom<FindFilesInput> for FindFilesPlan {
             skip_directories: input.skip_directories,
             files,
             directories,
+            git_ignore: false,
         })
     }
 }
@@ -155,6 +159,21 @@ struct Walk {
 }
 
 impl FindFilesPlan {
+    /// Also hide what the repository ignores, when the workspace is a Git
+    /// repository (editor-facing listings; the model's `find_files` keeps the
+    /// documented configuration-independent policy).
+    pub(crate) fn respecting_git_ignore(mut self) -> Self {
+        self.git_ignore = true;
+        self
+    }
+
+    fn ignore_stack(&self) -> IgnoreStack {
+        self.git_ignore
+            .then(|| IgnoreStack::for_walk(self.workspace.path(), &self.target))
+            .flatten()
+            .unwrap_or_else(IgnoreStack::disabled)
+    }
+
     /// Perform local filesystem work on a blocking worker, never on the actor.
     /// Cancellation is cooperative between OS calls; blocked filesystem syscalls
     /// cannot safely be killed. The worker slot remains held until actual drain.
@@ -189,6 +208,7 @@ impl FindFilesPlan {
             } else {
                 // Incremental iterators avoid collecting a huge directory in memory.
                 let mut stack = vec![fs::read_dir(&self.target)?];
+                let mut ignores = self.ignore_stack();
                 walk.directories.0 = 1;
                 while let Some(directory) = stack.last_mut() {
                     check_live(cancel, deadline)?;
@@ -198,6 +218,7 @@ impl FindFilesPlan {
                     }
                     let Some(entry) = directory.next() else {
                         stack.pop();
+                        ignores.leave();
                         continue;
                     };
                     let entry = entry?;
@@ -209,6 +230,9 @@ impl FindFilesPlan {
                         continue;
                     }
                     let path = entry.path();
+                    if ignores.visibility(&path, &kind) == Visibility::Ignored {
+                        continue;
+                    }
                     if kind.is_dir() {
                         if self
                             .skip_directories
@@ -227,6 +251,7 @@ impl FindFilesPlan {
                             continue;
                         }
                         walk.directories.0 = walk.directories.0.saturating_add(1);
+                        ignores.enter(&path);
                         stack.push(fs::read_dir(path)?);
                     } else if kind.is_file() {
                         if walk.visited_files.0 >= self.files.0 {

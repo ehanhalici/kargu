@@ -528,9 +528,10 @@
             (should (= (mark) (+ kargu-chat--prompt-marker 8)))))))))
 
 (ert-deftest kargu-chat-completion-never-adds-unrelated-buffer-roots-test ()
-  "Rust ranks project files; an unrelated visited file is never offered."
+  "Rust ranks project files; unrelated or Git-ignored files are never offered."
   (kargu-bridge-test--with-core
-    (kargu-test-with-git-repo '(("local.el" . "local") ("src/nested.el" . "nested"))
+    (kargu-test-with-git-repo '(("local.el" . "local") ("src/nested.el" . "nested")
+                                (".gitignore" . "ignored.el\n") ("ignored.el" . "build output"))
       (let ((foreign (generate-new-buffer " *kargu-foreign-completion*"))
             (outside (make-temp-file "kargu-other-project-" t)))
         (unwind-protect
@@ -548,6 +549,7 @@
                                       (lambda (done) (kargu-chat--file-candidates "" done))))))
                   (should (member "@local.el" files))
                   (should (member "@src/nested.el" files))
+                  (should-not (member "@ignored.el" files))
                   (should-not (cl-some (lambda (file) (string-search "secret" file)) files)))))
           (kill-buffer foreign)
           (delete-directory outside t))))))

@@ -67,6 +67,7 @@ impl MentionCandidatesInput {
             max_files: self.max_files,
             max_directories: self.max_directories,
         })?
+        .respecting_git_ignore()
         .execute(cancel, deadline)?;
         let visited = self
             .open_files
