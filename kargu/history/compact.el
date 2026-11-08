@@ -19,6 +19,7 @@
 (require 'kargu/prompt)
 (require 'kargu/history/protocol)
 
+(defvar kargu--loop-run)
 (declare-function kargu--validate-history "kargu/history/repair")
 (declare-function kargu--history-fresh-system-message "kargu/history/repair" ())
 (declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
@@ -83,11 +84,13 @@ invocations.  Image tokenization remains provider-dependent."
 
 (defun kargu-history-needs-compact-p ()
   "Non-nil when the history is large enough to compact."
-  (let ((threshold (kargu-history-compact-threshold)))
-    (and (natnump threshold)
-         (> threshold 0)
-         (> (kargu-history-char-count) threshold)
-         (> (kargu-history-non-system-count) 4))))
+  (and (not (and (boundp 'kargu--loop-run)
+                 (plist-get kargu--loop-run :native-backend)))
+       (let ((threshold (kargu-history-compact-threshold)))
+         (and (natnump threshold)
+              (> threshold 0)
+              (> (kargu-history-char-count) threshold)
+              (> (kargu-history-non-system-count) 4)))))
 
 (defun kargu--history-compaction-msg-p (msg)
   "Non-nil when MSG is a compaction request or ack."

@@ -23,6 +23,9 @@
 (require 'kargu/api/retry)
 (require 'kargu/api/transport)
 (require 'kargu/application/execution)
+(require 'kargu/application/budget)
+(require 'kargu/core/session)
+(require 'kargu/core/custom)
 (require 'kargu/core/log)
 
 (defcustom kargu-loop-native-agent-enabled nil
@@ -82,11 +85,24 @@ Startup errors are reported without switching to the Elisp backend."
     (let* ((status (and (hash-table-p result) (gethash "status" result)))
            (accounting (and (hash-table-p result) (gethash "accounting" result)))
            (budget (and (hash-table-p accounting) (gethash "budget" accounting)))
-           (spent (and (hash-table-p budget) (gethash "requests_spent" budget))))
-      (plist-put run :native-change-evidence
-                 (and (hash-table-p accounting) (gethash "changes" accounting)))
+           (changes (and (hash-table-p accounting) (gethash "changes" accounting)))
+           (spent (and (hash-table-p budget) (gethash "requests_spent" budget)))
+           (compactions (and (hash-table-p budget) (gethash "compactions_spent" budget)))
+           (healing (and (hash-table-p accounting) (gethash "healing_rounds" accounting)))
+           (verifications (and (hash-table-p changes) (gethash "verified_files" changes))))
+      (plist-put run :native-change-evidence changes)
       (when (and (integerp spent) (>= spent 0))
         (plist-put run :iterations spent))
+      (when (and (integerp compactions) (>= compactions 0))
+        (plist-put run :compactions compactions))
+      (when (and (integerp healing) (>= healing 0))
+        (plist-put run :healing healing))
+      (when (and (integerp verifications) (>= verifications 0))
+        (plist-put run :verifications verifications))
+      (when (and (hash-table-p budget) (plist-get run :session))
+        (kargu-session-project-budget budget (plist-get run :session)))
+      (when (and (hash-table-p budget) (kargu-run-budget-p (plist-get run :budget)))
+        (kargu-budget-project (plist-get run :budget) budget))
       (cond
        (failure (kargu--loop-finish run :error (kargu-loop-native--refusal-text failure)))
        ((and (equal status "completed") (stringp (gethash "answer_text" result)))
@@ -116,7 +132,24 @@ Startup errors are reported without switching to the Elisp backend."
                       (kargu-bridge--object)))
             ;; Rust takes direct keys from committed policy and interop keys
             ;; from its own receipt; the editor never sends one.
-            (auth (kargu-api-auth-intent nil provider)))
+            (auth (kargu-api-auth-intent nil provider))
+            (budget-obj (plist-get run :budget))
+            (req-limit (if (kargu-run-budget-p budget-obj)
+                           (kargu-run-budget-max-requests budget-obj)
+                         (or (plist-get run :request-budget) kargu-budget-default-max-requests)))
+            (compactions-limit (if (kargu-run-budget-p budget-obj)
+                                   (kargu-run-budget-max-compactions budget-obj)
+                                 kargu-budget-default-max-compactions))
+            (timeout-secs (or (plist-get run :timeout)
+                              (and (kargu-run-budget-p budget-obj)
+                                   (kargu-run-budget-deadline budget-obj)
+                                   (max 1 (round (- (kargu-run-budget-deadline budget-obj) (float-time)))))
+                              (if kargu-stream kargu-api-stream-ceiling kargu-api-timeout)
+                              90))
+            (timeout-ms (kargu-transport--milliseconds timeout-secs))
+            (turn-limit (or (plist-get run :max-iterations) kargu-max-iterations 12))
+            (tool-limit (or (plist-get run :tool-limit) 25))
+            (observer (or (plist-get run :retry-observer) "none")))
        (setcdr (assoc "session" auth) (plist-get run :session-id))
        ;; These metadata assertions are owned by the native publication.
        (remhash "supported_parameters" tuning)
@@ -127,12 +160,13 @@ Startup errors are reported without switching to the Elisp backend."
         "prompt" :json-null
         "tools_enabled" (if (plist-get capabilities :tools) t :json-false)
         "editor_available" (kargu-loop-native--editor-tools)
-        "tool_limit" 16 "turn_limit" (plist-get run :max-iterations)
-        "timeout_ms" 120000
+        "tool_limit" tool-limit "turn_limit" turn-limit
+        "timeout_ms" timeout-ms
         "model_revision" (or (plist-get settings :metadata-revision) 0)
         "config_revision" (kargu-connection-snapshot-config-revision snapshot)
         "policy_revision" (kargu-tool-registry-revision kargu--tool-registry)
-        "budget" (kargu-bridge--object "requests" 16)
+        "budget" (kargu-bridge--object "requests" req-limit
+                                      "compactions" compactions-limit)
         "connection"
         (kargu-bridge--object
          "url" (kargu-connection-snapshot-endpoint snapshot)
@@ -149,9 +183,9 @@ Startup errors are reported without switching to the Elisp backend."
                      "connect_ms" (kargu-transport--milliseconds kargu-api-connect-timeout)
                      "first_byte_ms" (kargu-transport--milliseconds kargu-api-first-byte-timeout)
                      "idle_ms" (kargu-transport--milliseconds kargu-api-stall-timeout)
-                     "deadline_ms" 120000))
+                     "deadline_ms" timeout-ms))
         "retry" (kargu-bridge--object
-                 "observer" "none"
+                 "observer" observer
                  "policy" (kargu-providers-wire-object (kargu-api-retry-preferences))))))))
 
 (defun kargu-loop-native-start (run prompt)
@@ -179,11 +213,22 @@ Startup errors are reported without switching to the Elisp backend."
                                    (when (and on-delta (stringp chunk))
                                      (kargu-loop--deliver-delta on-delta chunk))))
               :on-event (kargu-execution-wrap context (lambda (method event)
+                          (when (and (equal method "session/state")
+                                     (hash-table-p event)
+                                     (equal (gethash "phase" event) "summary"))
+                            (kargu-loop--set-state run 'compact))
                           (when (equal method "session/accounting")
                             (let* ((budget (and (hash-table-p event) (gethash "budget" event)))
-                                   (spent (and (hash-table-p budget) (gethash "requests_spent" budget))))
+                                   (spent (and (hash-table-p budget) (gethash "requests_spent" budget)))
+                                   (compactions (and (hash-table-p budget) (gethash "compactions_spent" budget))))
                               (when (and (integerp spent) (>= spent 0))
-                                (plist-put run :iterations spent)))))))))
+                                (plist-put run :iterations spent))
+                              (when (and (integerp compactions) (>= compactions 0))
+                                (plist-put run :compactions compactions))
+                              (when (and (hash-table-p budget) (plist-get run :session))
+                                (kargu-session-project-budget budget (plist-get run :session)))
+                              (when (and (hash-table-p budget) (kargu-run-budget-p (plist-get run :budget)))
+                                (kargu-budget-project (plist-get run :budget) budget)))))))))
         (plist-put run :abort-fn (lambda () (kargu-async-cancel task)))
         task))))
 

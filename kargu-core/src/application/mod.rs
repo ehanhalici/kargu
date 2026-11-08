@@ -8,6 +8,9 @@ mod steps;
 pub use claim::{ClaimIntent, ClaimLease, PreparedRun, RequestedWorkspace, RunClaim};
 pub mod host;
 mod jobs;
+pub mod mode;
+pub mod plan;
+pub mod restore;
 pub mod selection;
 
 use crate::{
@@ -214,6 +217,10 @@ impl RunHandle {
     pub fn drained(&self) -> bool {
         self.resources.pending.load(Ordering::Acquire) == 0
     }
+    /// Captured mode for this run.
+    pub fn mode(&self) -> Mode {
+        self.settings.mode
+    }
     pub(crate) fn same_owner(&self, other: &Self) -> bool {
         self.scope == other.scope && Arc::ptr_eq(&self.resources, &other.resources)
     }
@@ -347,7 +354,11 @@ pub struct ApplicationActor {
     sessions: HashSet<SessionId>,
     histories: HashMap<SessionId, crate::history::History>,
     selections: HashMap<SessionId, selection::SessionSelection>,
+    modes: HashMap<SessionId, mode::SessionMode>,
+    plans: HashMap<SessionId, plan::SessionPlanStore>,
     session_events: HashMap<SessionId, SessionEventSequence>,
+    session_roots: HashMap<SessionId, std::path::PathBuf>,
+    session_accounting: HashMap<SessionId, restore::SessionAccounting>,
     history_imports: crate::history::HistoryImports,
     generation: Generation,
     active: Option<ActiveRun>,
@@ -367,7 +378,11 @@ impl ApplicationActor {
             sessions: HashSet::new(),
             histories: HashMap::new(),
             selections: HashMap::new(),
+            modes: HashMap::new(),
+            plans: HashMap::new(),
             session_events: HashMap::new(),
+            session_roots: HashMap::new(),
+            session_accounting: HashMap::new(),
             history_imports: crate::history::HistoryImports::default(),
             generation: Generation::ZERO,
             active: None,
@@ -397,8 +412,12 @@ impl ApplicationActor {
             .insert(id.clone(), crate::history::History::default());
         self.selections
             .insert(id.clone(), selection::SessionSelection::default());
+        self.modes.insert(id.clone(), mode::SessionMode::default());
         self.session_events
             .insert(id.clone(), SessionEventSequence::ZERO);
+        self.session_roots.remove(&id);
+        self.session_accounting
+            .insert(id.clone(), restore::SessionAccounting::default());
         id
     }
     /// Registered conversation count for host admission limits.
@@ -449,11 +468,115 @@ impl ApplicationActor {
         store.commit(expected, desired, locked)?;
         Ok(store)
     }
+    /// Detached committed mode and revision for one owned conversation.
+    pub fn session_mode(&self, session: &SessionId) -> Result<&mode::SessionMode, CoreError> {
+        self.modes.get(session).ok_or(CoreError::StaleOwner)
+    }
+    /// Commit a mode change from its observed expected revision.
+    pub fn commit_session_mode(
+        &mut self,
+        session: &SessionId,
+        expected: mode::ModeRevision,
+        intent: mode::ModeIntent,
+    ) -> Result<&mode::SessionMode, CoreError> {
+        let locked = mode::ModeLock::new(self.active.is_some() || self.preparing.is_some());
+        let store = self.modes.get_mut(session).ok_or(CoreError::StaleOwner)?;
+        store.commit(expected, intent, locked)?;
+        Ok(store)
+    }
+    /// Available tools for the specified mode.
+    pub fn available_tools_for_mode(&self, mode: Mode) -> Vec<ToolName> {
+        self.registry.available_tools_for_mode(mode)
+    }
+    /// Read one conversation's active plan record, if any.
+    pub fn session_plan(&self, session: &SessionId) -> Option<&plan::PlanRecord> {
+        self.plans
+            .get(session)
+            .and_then(|store| store.active_record())
+    }
+    /// Read one conversation's plan record by id, if any.
+    pub fn session_plan_by_id(
+        &self,
+        session: &SessionId,
+        plan_id: &PlanId,
+    ) -> Option<&plan::PlanRecord> {
+        self.plans
+            .get(session)
+            .and_then(|store| store.get_record(plan_id))
+    }
+    /// Create or replace an implementation plan for one owned conversation.
+    pub fn create_session_plan(
+        &mut self,
+        session: &SessionId,
+        text: plan::PlanText,
+    ) -> Result<&plan::PlanRecord, CoreError> {
+        if !self.owns_session(session) {
+            return Err(CoreError::StaleOwner);
+        }
+        let store = self.plans.entry(session.clone()).or_default();
+        store.create_or_replace(session.clone(), text)
+    }
+    /// Revise plan content and bump monotonic revision.
+    pub fn revise_session_plan(
+        &mut self,
+        session: &SessionId,
+        plan_id: &PlanId,
+        intent: plan::PlanReviseIntent,
+    ) -> Result<&plan::PlanRecord, CoreError> {
+        if !self.owns_session(session) {
+            return Err(CoreError::StaleOwner);
+        }
+        let store = self.plans.get_mut(session).ok_or(CoreError::StaleOwner)?;
+        store.revise(plan_id, intent)
+    }
+    /// Claim a plan for execution (single-use accept).
+    pub fn claim_session_plan(
+        &mut self,
+        session: &SessionId,
+        plan_id: &PlanId,
+        intent: plan::PlanClaimIntent,
+    ) -> Result<&plan::PlanRecord, CoreError> {
+        if !self.owns_session(session) {
+            return Err(CoreError::StaleOwner);
+        }
+        if self.active.is_some() || self.preparing.is_some() {
+            return Err(CoreError::Busy);
+        }
+        let store = self.plans.get_mut(session).ok_or(CoreError::StaleOwner)?;
+        store.claim(plan_id, intent)
+    }
+    /// Settle claimed plan dispatch.
+    pub fn complete_session_plan(
+        &mut self,
+        session: &SessionId,
+        plan_id: &PlanId,
+        success: plan::PlanDispatchSuccess,
+    ) -> Result<plan::PlanState, CoreError> {
+        if !self.owns_session(session) {
+            return Err(CoreError::StaleOwner);
+        }
+        let store = self.plans.get_mut(session).ok_or(CoreError::StaleOwner)?;
+        store.complete_dispatch(plan_id, success)
+    }
+    /// Reject a pending plan.
+    pub fn reject_session_plan(
+        &mut self,
+        session: &SessionId,
+        plan_id: &PlanId,
+        expected_revision: PlanRevision,
+    ) -> Result<plan::PlanState, CoreError> {
+        if !self.owns_session(session) {
+            return Err(CoreError::StaleOwner);
+        }
+        let store = self.plans.get_mut(session).ok_or(CoreError::StaleOwner)?;
+        store.reject(plan_id, expected_revision)
+    }
     pub(crate) fn session_projection(
         &self,
         session: &SessionId,
     ) -> Result<serde_json::Value, CoreError> {
         let history = self.session_history(session)?;
+        let mode_store = self.modes.get(session).ok_or(CoreError::StaleOwner)?;
         let sequence = self
             .session_events
             .get(session)
@@ -488,10 +611,25 @@ impl ApplicationActor {
         } else {
             ("idle", None, None)
         };
-        Ok(
-            serde_json::json!({"state":state,"active_run":scope,"phase":phase,
-            "generation":scope.map_or(self.generation, RunScope::generation),"sequence":sequence,"history_revision":history.revision()}),
-        )
+        let mut proj = serde_json::json!({
+            "state": state,
+            "active_run": scope,
+            "phase": phase,
+            "mode": mode_store.mode(),
+            "mode_revision": mode_store.revision(),
+            "generation": scope.map_or(self.generation, RunScope::generation),
+            "sequence": sequence,
+            "history_revision": history.revision()
+        });
+        if let Some(obj) = proj.as_object_mut() {
+            if let Some(root) = self.session_root(session) {
+                obj.insert("project_root".to_owned(), serde_json::json!(root));
+            }
+            if let Some(acc) = self.session_accounting(session) {
+                obj.insert("accounting".to_owned(), serde_json::json!(acc));
+            }
+        }
+        Ok(proj)
     }
     /// Close only an idle conversation.
     pub fn close_session(&mut self, session: &SessionId) -> Result<(), CoreError> {
@@ -514,7 +652,12 @@ impl ApplicationActor {
         if self.sessions.remove(session) {
             self.history_imports.revoke(Some(session));
             self.histories.remove(session);
+            self.selections.remove(session);
+            self.modes.remove(session);
+            self.plans.remove(session);
             self.session_events.remove(session);
+            self.session_roots.remove(session);
+            self.session_accounting.remove(session);
             self.models.close_session(session);
             self.configuration.close_session(session);
             self.edits.close_session(session);
@@ -530,6 +673,10 @@ impl ApplicationActor {
         }
         self.session_events.remove(session);
         self.selections.remove(session);
+        self.modes.remove(session);
+        self.plans.remove(session);
+        self.session_roots.remove(session);
+        self.session_accounting.remove(session);
         self.revoke_preparing(Some(session));
         self.history_imports.revoke(Some(session));
         self.models.close_session(session);
@@ -557,6 +704,8 @@ impl ApplicationActor {
         self.edits.revoke();
         self.sessions.clear();
         self.session_events.clear();
+        self.session_roots.clear();
+        self.session_accounting.clear();
         for run in self
             .active
             .iter()

@@ -11,8 +11,19 @@
 ;;; Code:
 
 (require 'kargu/bridge/sensor/symbols)
-(require 'kargu/tools/lsp/freshness)
-(require 'kargu/tools/lsp/coordinates)
+(require 'kargu/tools/lsp/freshness nil t)
+(require 'kargu/tools/lsp/coordinates nil t)
+
+(defvar kargu-lsp--publication nil)
+(defvar kargu-lsp--backend-reports nil)
+(declare-function kargu-lsp-coordinate-range "kargu/tools/lsp/coordinates" (beg end &optional buffer))
+(declare-function kargu-lsp--diagnostic-backends "kargu/tools/lsp/diagnostics" ())
+(declare-function kargu-lsp--publication-process "kargu/tools/lsp/freshness" (pub))
+(declare-function kargu-lsp--publication-server "kargu/tools/lsp/freshness" (pub))
+(declare-function kargu-lsp--publication-version "kargu/tools/lsp/freshness" (pub))
+(declare-function kargu-lsp--publication-tick "kargu/tools/lsp/freshness" (pub))
+(declare-function kargu-lsp--backend-report-tick "kargu/tools/lsp/diagnostics" (report))
+(declare-function kargu-lsp--backend-report-reported "kargu/tools/lsp/diagnostics" (report))
 
 (defvar kargu-bridge-diagnostics--identities (make-hash-table :test #'eq :weakness 'key)
   "Opaque identities for actual editor objects, never printed closures.")
@@ -109,6 +120,17 @@
                                 (not (seq-intersection backends (flymake-disabled-backends) #'eq))) t :json-false)
            "backends" (vconcat (nreverse reports)) "server" (or (kargu-bridge-diagnostics--server) :json-null)
            "diagnostics" (vconcat (nreverse findings)) "truncated" (if truncated t :json-false)))))))
+
+(defun kargu-bridge-diagnostics-document-snapshot (buffer root relative document-id tick)
+  "Capture BUFFER's raw pre-edit diagnostic snapshot under ROOT.
+RELATIVE, DOCUMENT-ID and TICK identify the captured document."
+  (when (and (buffer-live-p buffer) (stringp root) (stringp relative)
+             (stringp document-id) (integerp tick) (> tick 0))
+    (condition-case nil
+        (kargu-bridge-diagnostics--snapshot
+         buffer root
+         (kargu-bridge--object "path" relative "document_id" document-id "tick" tick))
+      ((error quit) nil))))
 
 (defun kargu-bridge-diagnostics--owned-path (path root)
   "Return canonical local PATH inside captured ROOT, before inspecting findings."

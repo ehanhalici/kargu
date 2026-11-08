@@ -47,16 +47,28 @@ Optional CALLBACK receives (MODE ERROR), including cancellation."
    (list (intern (completing-read "kargu mode: "
                                   '("ask" "plan" "debug" "agent")
                                   nil t))))
-  (kargu-mode-prepare
-   mode (lambda (ready error)
-          (let ((failure error))
-            (unless failure
-              (condition-case err
-                  (progn (kargu-state-set-mode ready) (kargu--publish-mode ready))
-                (error (setq failure (error-message-string err)))))
-            (cond
-             (callback (funcall callback (unless failure ready) failure))
-             (failure (message "Kargu: %s" failure)))))))
+  (let ((session (kargu-session-context)))
+    (kargu-mode-prepare
+     mode
+     (lambda (ready error)
+       (let ((failure error))
+         (if failure
+             (cond
+              (callback (funcall callback nil failure))
+              (t (message "Kargu: %s" failure)))
+           (funcall
+            kargu-mode-port session ready (eq ready 'debug)
+            (lambda (_dto err)
+              (let ((fail (or err failure)))
+                (unless fail
+                  (condition-case e
+                      (progn
+                        (kargu-state-set-mode ready)
+                        (kargu--publish-mode ready))
+                    (error (setq fail (error-message-string e)))))
+                (cond
+                 (callback (funcall callback (unless fail ready) fail))
+                 (fail (message "Kargu: %s" fail))))))))))))
 
 (defun kargu-mode-ask ()
   "Switch kargu to ask mode (read-only answers)."

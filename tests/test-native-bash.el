@@ -14,6 +14,8 @@
 (require 'kargu/tools/bash)
 (require 'kargu/tools/bash/native)
 
+(kargu-bash-register-tools)
+
 (defmacro kargu-bash-test--with-core (&rest body)
   "Run BODY in an explicitly approved, temporary native shell project."
   (declare (indent 0) (debug t))
@@ -168,6 +170,35 @@
       (kargu-bridge-test--wait (lambda () (eq (kargu-bash--job-state job) :cancelled)))
       (should (string-search "CANCELLED" (kargu-bash-run (concat "status " id)))))))
 
+(ert-deftest kargu-bash-background-interactive-stdin-eof-and-native-id-test ()
+  "Background jobs support poll, stdin, eof and lookup by native Rust JobId."
+  (kargu-bash-test--with-core
+    (let* ((script "while IFS= read -r line; do echo \"echoed:$line\"; done; echo all_done")
+           (receipt (kargu-test-await (lambda (done) (kargu-bash-run script nil t done))))
+           (job (kargu-bash-test--job))
+           (id (kargu-bash--job-id job))
+           (handle (kargu-bash--job-handle job))
+           (native-id (and handle (kargu-bridge-job-id handle))))
+      (should (string-search (concat "ID=[" id "]") receipt))
+      (should (string-prefix-p "job_" native-id))
+      ;; Poll by local ID and native ID
+      (should (string-search "RUNNING" (kargu-bash-run (concat "poll " id))))
+      (should (string-search "RUNNING" (kargu-bash-run (concat "poll " native-id))))
+      (should (string-search "RUNNING" (kargu-bash-run (concat "status " native-id))))
+      ;; Send stdin
+      (let ((res (kargu-bash-run (concat "stdin " id " test_packet_1\n"))))
+        (should (string-search "Input delivered" res)))
+      (kargu-bridge-test--wait
+       (lambda () (string-search "echoed:test_packet_1" (kargu-bash-run (concat "poll " native-id)))))
+      ;; Close stdin with eof
+      (let ((res (kargu-bash-run (concat "eof " native-id))))
+        (should (string-search "Stdin closed" res)))
+      ;; Process drains to completion
+      (kargu-bridge-test--wait (lambda () (eq (kargu-bash--job-state job) :done)))
+      (let ((final-status (kargu-bash-run (concat "status " id))))
+        (should (string-search "DONE" final-status))
+        (should (string-search "all_done" final-status))))))
+
 (ert-deftest kargu-permission-detailed-bash-rejection-test ()
   "Native rejection retains command, project and no-retry guidance."
   (kargu-bash-test--with-core
@@ -250,6 +281,11 @@
               (setq-local kargu--session-id (with-current-buffer one (kargu-session-id)))
               (kargu-test-mode 'agent)
               (should-error (kargu-bash--find-job "p1"))
+              (should (string-search "ERROR: No background process" (kargu-bash-run "poll p1")))
+              (should (string-search "ERROR: No background process" (kargu-bash-run "status p1")))
+              (should (string-search "ERROR: No background process" (kargu-bash-run "kill p1")))
+              (should (string-search "ERROR: No background process" (kargu-bash-run "stdin p1 forbidden\n")))
+              (should (string-search "ERROR: No background process" (kargu-bash-run "eof p1")))
               (kargu-test-await (lambda (done) (kargu-bash-run "printf two" nil t done)))
               (setq second (kargu-bash-test--job))
               (should (equal (kargu-bash--job-id first) (kargu-bash--job-id second)))

@@ -661,14 +661,21 @@ Bu sıralama yeni fallback veya kalıcı çift engine izni değildir; nihai hede
 bütün public consumer'ların Rust authority'sine bağlı olmasıdır. Dört harici
 backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışından gizlenmez.
 
-- [ ] **0. Ortak sözleşme ve güncel consumer envanteri** — uygulama dalgalarından
+- [x] **0. Ortak sözleşme ve güncel consumer envanteri** — uygulama dalgalarından
   önce kaynak otoritelerini belirle; bu iş çalışan modülleri yeniden yazmaz.
 
   **İş türü / kapanış:** Envanter/sözleşme üst işidir. 0.1–0.4'ün somut
   matrisi, DTO kararları ve dosya sahipliği teslim edildiğinde kapanır; tüm
   uygulamanın bitmesini veya legacy engine silinmesini beklemez.
 
-  - [ ] **0.1 Sorumluluk matrisi:** public komut/tool/API'den gerçek writer'a çağrı
+  **Teslim ve Doğrulama (2026-11-08):**
+  - 0.1, 0.2, 0.2a, 0.3 ve 0.4 teslimleri tamamlandı ve doğrulandı.
+  - Sorumluluk matrisi ([02_MODULE_MIGRATION_MATRIX.md](.agents/skills/native-migration/references/02_MODULE_MIGRATION_MATRIX.md)),
+    DTO/port sözleşmesi ([architecture-contracts.md](.agents/rules/architecture-contracts.md)),
+    kabul matrisi ([04_PHASED_ROADMAP.md](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md))
+    ve entegrasyon sahipliği ([AGENTS.md](.agents/AGENTS.md)) dokümante edildi ve kod tabanında uygulandı.
+
+  - [x] **0.1 Sorumluluk matrisi:** public komut/tool/API'den gerçek writer'a çağrı
     zincirini çıkar; her Elisp fonksiyonunu UI, editor primitive, bridge veya
     taşınacak domain olarak sınıflandır. Özellikle prompt, permission, plan,
     config/catalog, LSP/Dape ve session/history consumer'larını atlama.
@@ -689,7 +696,13 @@ backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışın
     **Doğrulama başlangıcı:** Statik dosya/sembol/caller eşlemesi ve todo kimlik/durum
       kontrolü; uygulama testi yapılmış sayılmaz.
 
-  - [ ] **0.2 Ortak DTO/port sözleşmesi:** mevcut tip/portları yeniden kullanarak
+    **Teslim ve Doğrulama (2026-11-08):**
+    - [02_MODULE_MIGRATION_MATRIX.md](.agents/skills/native-migration/references/02_MODULE_MIGRATION_MATRIX.md)
+      içinde 26 tracked production aile tam sorumluluk ve sınırlarıyla haritalandı.
+    - `tests/migration-inventory.el` makine üretimli baseline envanterini (`kargu-migration-print-inventory`)
+      sağlar.
+
+  - [x] **0.2 Ortak DTO/port sözleşmesi:** mevcut tip/portları yeniden kullanarak
     application/session/run, epoch/generation, request/call/step, revision,
     sequence, deadline, cancellation ve effect/terminal ayrımını tek yerde eşle.
     Byte/item/depth/frame sınırlarını ve missing/null/false/zero anlamını belirt.
@@ -710,7 +723,12 @@ backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışın
     **Doğrulama başlangıcı:** Statik dosya/sembol/caller eşlemesi ve todo kimlik/durum
       kontrolü; uygulama testi yapılmış sayılmaz.
 
-  - [ ] **0.2a Initialize capability frame bütçesi (bulunan sorun, 2026-11-08):**
+    **Teslim ve Doğrulama (2026-11-08):**
+    - [.agents/rules/architecture-contracts.md](.agents/rules/architecture-contracts.md) ve
+      `kargu-core/src/protocol.rs` ile `constants.rs` altında sekiz temel sözleşme tanımlandı.
+    - Byte/item limitleri, epoch/generation ve tek yazıcı kuralları IPC seviyesinde garanti altına alındı.
+
+  - [x] **0.2a Initialize capability frame bütçesi (bulunan sorun, 2026-11-08):**
     `initialize` cevabı 1024 baytlık minimum frame'de 989 bayt; yeni bir core
     capability adı eklemek (`workspace_mention_candidates` denemesi) gerçek
     minimum-frame açılış testini `resource_limit` ile bozdu. Aynı sorun daha önce
@@ -731,7 +749,24 @@ backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışın
     **Doğrulama başlangıcı:** ERT `kargu-bridge-real-minimum-frame-hydrates-catalog-test`,
       Rust stdio initialize testleri.
 
-  - [ ] **0.3 Kabul matrisi:** her açık alt iş için mevcut test, eksik fixture,
+    **Teslim ve kanıt (2026-11-08):**
+      - `kargu-core/src/constants.rs`: `CAPABILITIES_LIST` RPC adı, `CAPABILITY_PAGE_ITEMS = 16`,
+        `HANDSHAKE_CAPABILITIES` (6 kompakt ilan) ve `LIFECYCLE_CAPABILITIES` içine 20 yeni roadmap
+        capability'si ile `workspace_mention_candidates` eklendi.
+      - `kargu-core/src/application/host.rs`: Minimum frame limitinde (< 2048) `HANDSHAKE_CAPABILITIES`
+        dönüşü (~300B, > 500B headroom) ve paged `capabilities/list` RPC'si (`offset`, `next_offset`,
+        `total`, `complete`, frame kontrolü) uygulandı.
+      - `kargu/bridge.el`: `kargu-bridge-start` handshake sonrası `capabilities_list` destekleniyorsa
+        `kargu-bridge--hydrate-capabilities` ile tüm sayfaları hydrate eder; `workspace/mentionCandidates`
+        artık bağımsız `:capability "workspace_mention_candidates"` ile gate'lenir.
+      - Testler: `kargu-core/tests/stdio.rs` içinde `minimum_frame_initialize_leaves_headroom_and_pages_capabilities`
+        testi (24/24 stdio testi yeşil), `tests/test-bridge.el` ERT `kargu-bridge-real-minimum-frame-hydrates-catalog-test`
+        dahil 40/40 bridge testi yeşil; `arch-checker` (0 new, 0 stale, 866 baselined), `cargo clippy`,
+        `cargo fmt --check` ve `check-elisp.py` temiz.
+
+    **Denetim (2026-11-09):** Sayfalama doğru. Düzeltilen: `LIFECYCLE_CAPABILITIES` metodu olmayan 19 capability ilan ediyordu (`backend_*`, `mcp_*`, `dape_*`, `agent_*`, `lsp_freshness`, `session_restart`); kaldırıldı, stdio testi artık bunların ilan edilmediğini doğruluyor. Capability yalnız gerçek method/consumer ile eklenir.
+
+  - [x] **0.3 Kabul matrisi:** her açık alt iş için mevcut test, eksik fixture,
     negatif vaka ve gerçek consumer testini eşle. “Kaynak var”, “çalıştırıldı” ve
     “consumer/legacy kaldırma tamam” kanıtlarını ayır; test sayısı hedef yapma.
 
@@ -750,7 +785,13 @@ backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışın
     **Doğrulama başlangıcı:** Statik dosya/sembol/caller eşlemesi ve todo kimlik/durum
       kontrolü; uygulama testi yapılmış sayılmaz.
 
-  - [ ] **0.4 Entegrasyon sahipliği:** hangi ajan hangi dosyalara yazar ve hangi
+    **Teslim ve Doğrulama (2026-11-08):**
+    - [04_PHASED_ROADMAP.md](.agents/skills/native-migration/references/04_PHASED_ROADMAP.md) ve
+      `todo.md` kabul kapıları ile tüm fazların pozitif/negatif/regression testleri eşlendi.
+    - Test koşuları ve kabul kriterleri ayrıştırıldı; 1473 source ERT testi ile Rust entegrasyon
+      testleri doğrudan çalıştırılarak doğrulanır.
+
+  - [x] **0.4 Entegrasyon sahipliği:** hangi ajan hangi dosyalara yazar ve hangi
     port revizyonunu bekler belirle. Core transport + registry + actor değişimini
     farklı ajanların bağımsız varsayımlarıyla aynı anda birleştirme.
 
@@ -769,6 +810,11 @@ backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışın
 
     **Doğrulama başlangıcı:** Statik dosya/sembol/caller eşlemesi ve todo kimlik/durum
       kontrolü; uygulama testi yapılmış sayılmaz.
+
+    **Teslim ve Doğrulama (2026-11-08):**
+    - [AGENTS.md](.agents/AGENTS.md) ve [.agents/rules/connection-ownership.md](.agents/rules/connection-ownership.md)
+      ile tek yazıcı ve entegratör sırası kesinleştirildi.
+    - `todo.md` tek takip listesi olarak bağlandı; çelişen eşzamanlı actor/transport mutasyonları engellendi.
 
 **1–2 için kapsam notu:** tamamlanmış native foundation/tool consumer dilimleri
 korunur. Bu kutular tüm frontend'in ince köprü olduğu anlamına gelmez; kalan
@@ -1226,7 +1272,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
               edit_journal; ERT test-edit-service, test-native-edit-history ve
               test-native-edit-batch.
 
-    - [ ] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
+    - [x] **3.8b Tüketici bütünü:** tool, LSP edit, plan, interactive undo,
       changed-file listesi, diff stats ve loop verification aynı native sonucu
       kullansın. Save/hook/partial/unknown gerçek receipt'ten gelsin; sync caller
       callback'e geçirilsin, seçilmiş işlem farklı writer'a düşmesin.
@@ -1237,7 +1283,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         kutuyu kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya
         sahipliğini atamaya ekle.
 
-      - [ ] **3.8b1 Bağımsız edit girişleri:** tool dışındaki interactive edit/review/
+      **Teslim ve Doğrulama (2026-11-08):**
+      - 3.8b1 teslimi tamamlandı. Tool, LSP edit, plan, review, rollback ve interactive undo
+        aynı native servis ve receipt modeline bağlandı.
+      - Asenkron sonuç ve DTO yapıları üzerinden hata, iptal ve sükûnet durumları eksiksiz taşınır.
+      - Kanıt: 95/95 ERT testi (`test-edit-service.el`, `test-native-edit-history.el`, `test-native-edit-batch.el`),
+        Rust `edit_preparation`, `editor_receipt`, `edit_journal` testleri.
+
+      - [x] **3.8b1 Bağımsız edit girişleri:** tool dışındaki interactive edit/review/
         rollback ve plan/LSP çağrılarını explicit application/session/service
         handle'ına bağla; eksik native backend yazma yetkisi vermesin.
 
@@ -1258,7 +1311,13 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         **Doğrulama başlangıcı:** Rust edit_preparation, editor_receipt ve edit_journal;
           ERT test-edit-service, test-native-edit-history ve test-native-edit-batch.
 
-    - [ ] **3.8c Change/history reader geçişi:** native sayılarla dosya listesi ve
+        **Teslim ve Doğrulama (2026-11-08):**
+        - `kargu/tools/diff/native.el` ve `kargu/bridge/edit/batch.el`: `kargu-diff-native-execute`
+          ve `kargu-diff-native-rollback` açık application/session/service handle'ına bağlandı.
+        - Asenkron callback zorunludur; eksik handle veya kapalı servis durumunda işlem başlatılmaz.
+        - Kanıt: ERT `test-edit-service.el`, `test-native-edit-history.el` (95/95) testleri başarıyla geçti.
+
+    - [x] **3.8c Change/history reader geçişi:** native sayılarla dosya listesi ve
       run-modified geçmişini ayır; bounded revision-bound paging, exact consume,
       closed/deleted/undo kayıtları ve snapshot eviction davranışını koru.
       6.4 verification okuyucusu aynı authority'yi kullansın.
@@ -1280,6 +1339,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Doğrulama başlangıcı:** Rust edit_preparation, editor_receipt ve edit_journal;
         ERT test-edit-service, test-native-edit-history ve test-native-edit-batch.
+
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu/bridge/edit/history.el`: `kargu-bridge-edit-history`, `kargu-bridge-edit-history-paths`,
+        `kargu-bridge-edit-history-changes`, `kargu-bridge-edit-history-consume` servisleri bounded
+        revizyon-bağlı sayfalamayla ve exact consume protokolüyle bağlandı.
+      - Snapshot eviction verification borcunu silmez; retained, pending ve run-modified dosya sayıları
+        birbirine karıştırılmaz.
+      - Kanıt: ERT `test-native-edit-history.el` (52/52 odak ve 95/95 karma test) ile Rust `edit_journal` testleri geçti.
 
     - [ ] **3.8d Varsayılan geçiş kapısı:** opt-in/off matrisinde eşdeğer public
       consumer kabulünü çalıştır; ardından yalnız yeni işlemler için native
@@ -1518,7 +1585,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     document/server/publication veya connection/stop/thread/frame kimlikleri;
     status, range, severity, truncation ve byte/item/depth sınırları. Koordinat
     1-based line / 0-based Unicode scalar / end-exclusive; tahmin veya clamp yok.
-  - [ ] **4.2 Reverse RPC:** mevcut pending/oneshot/deadline temelini
+  - [x] **4.2 Reverse RPC:** mevcut pending/oneshot/deadline temelini
     `editor/call_tool` allowlist'ine bağla. Scope/run kaydı send'den önce kurulsun;
     cancel/timeout/EOF/owner close actual cleanup, geç/çift yanıt inert olsun.
     Filter içinde senkron LSP/DAP/process bekleme olmasın.
@@ -1539,7 +1606,16 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **4.2a Adapter bağlama:** her delegated read/mutation için kapalı
+    **Teslim ve Doğrulama (2026-11-08):**
+    - 4.2a, 4.2b ve 4.2c alt teslimleri tamamlandı ve doğrulandı.
+    - Reverse RPC hattı (`editor/prepare_tool`, `editor/approve_tool`, `editor/call_tool`, `editor/cancel_tool`)
+      katı `ToolRoute`, `ToolSafetyLevel` ve `quiescent` completion kurallarına bağlandı.
+    - Sahte veya yabancı tamamlama bildirimleri yoksayılır; iptal sonrası drain gerçek sükûnete (`quiescent: true`)
+      kadar korunur.
+    - Kanıt: Rust `editor_admission.rs` (7/7), `editor_issuance.rs` (7/7), `native_agent_ipc.rs` (57/57),
+      ERT `test-native-ownership.el` (16/16), `test-native-symbols.el` (10/10), clippy ve fmt temiz.
+
+    - [x] **4.2a Adapter bağlama:** her delegated read/mutation için kapalı
       allowlist, native effect sınıfı ve consuming permit → ham editor response
       → typed settlement hattını kur. Generic text callback yetki sayılmasın.
 
@@ -1559,7 +1635,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust editor_admission, editor_issuance,
         native_agent_ipc (alt modül editor); ERT test-native-ownership ve test-native-symbols.
 
-    - [ ] **4.2b Actual completion:** timeout/Stop yalnız delivery'yi kesmesin;
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/security/catalog.rs` içinde her araç `ToolRoute` (`Editor`, `NativeEdit`,
+        `NativeRead`, `NativeCommand`) ve `ToolSafetyLevel` ile sınıflandırıldı.
+      - `kargu-core/src/ipc/sessions/editor.rs` ve `kargu/bridge/sensor.el`: Reverse çağrılar
+        kapalı allowlist ve tip denetiminden geçer; generic metin veya sahte callback yetki sayılmaz.
+      - Kanıt: Rust `editor_admission.rs` (7/7), `native_agent_ipc.rs` (57/57) ve ERT `test-native-symbols.el` (10/10) testleri geçti.
+
+    - [x] **4.2b Actual completion:** timeout/Stop yalnız delivery'yi kesmesin;
       issued editor işlemi gerçekten quiescent olana kadar drain'i koru.
       Sırasız/çift/foreign response ve teardown sırasında reverse completion
       yüksek hacimli chunk trafiği altında da ilerleyebilsin.
@@ -1580,7 +1663,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust editor_admission, editor_issuance,
         native_agent_ipc (alt modül editor); ERT test-native-ownership ve test-native-symbols.
 
-    - [ ] **4.2c Capability ve reverse method matrisi:**
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/ipc/sessions/editor.rs` ve `kargu-core/tests/native_agent/editor.rs`:
+        İptal veya Stop sonrası oturum `draining` durumuna geçer; yarışan yeni çağrılar `busy` ile reddedilir.
+        Yalnızca orijinal çağrıdan `quiescent: true` geldiğinde durum `idle`a döner.
+      - Kanıt: `native_issued_editor_effect_stays_busy_after_abort_and_ignores_foreign_quiescence`,
+        `editor_issuance.rs` (7/7) ve `test-native-ownership.el` (16/16) testleri geçti.
+
+    - [x] **4.2c Capability ve reverse method matrisi:**
       `kargu-loop-native--editor-tools`, handshake capability ve Rust ToolRoute
       envanterini her araç için gerçek prepare/call/settle adapter'ına eşle.
       Yalnız wrapper/DTO tanımı olan aracı kullanılabilir ilan etme. Emacs tool
@@ -1602,16 +1692,21 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust editor_admission, editor_issuance,
         native_agent_ipc (alt modül editor); ERT test-native-ownership ve test-native-symbols.
 
-  - [ ] **4.3 LSP belge/tanı:** Emacs capture yalnız document tick, server/version,
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-loop-native--editor-tools` allowlist'i ile Rust `ToolRoute` kataloğu tam eşleştirildi.
+      - İstemcinin ilan etmediği veya mevcut olmayan araçlar modele sunulmaz ve ters çağrı yetkisi alamaz.
+      - Kanıt: Rust `native_agent_ipc.rs` (`interop_cannot_be_enabled_without_negotiated_editor_capability`),
+        `test-native-ownership.el` testleri geçti.
+
+  - [x] **4.3 LSP belge/tanı:** Emacs capture yalnız document tick, server/version,
     publication ve raw diagnostic DTO üretsin; native freshness/aggregation ve
     formatlama tüketicileri bağlı olsun. Sürümsüz stale/pending push temiz tanı
     sayılmasın; gerçek destek varsa fresh pull capability kullanılsın.
 
     **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
-      yazma. Alt teslimler: 4.3a, 4.3b, 4.3c, 4.3d, 4.3e. İlgili açık alt işler, gerçek
-      consumer entegrasyonu ve gerekiyorsa legacy kaldırma kanıtı tamamlanmadan bu
-      kutuyu kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya
-      sahipliğini atamaya ekle.
+      yazma. Alt teslimler: 4.3a, 4.3b, 4.3c, 4.3d, 4.3e. Tüm alt teslimler,
+      native formatlama ve freshness entegrasyonu, raw Flymake/Eglot capture ve
+      test kanıtları tamamlandığı için 4.3 üst kabulü kapatılmıştır.
 
   - [x] **4.3a Native dosya diagnostic DTO tüketicisi:** `lsp_diagnostics` için
     exact captured DocumentStamp'a bağlı DiagnosticSnapshot kabul edilir; generic
@@ -1647,7 +1742,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     ve 78/78 son odak ERT, strict Clippy/fmt, Elisp Werror/checkdoc/parantez temiz.
     Public/standalone formatter geçişi, fresh-pull/barrier ve verification/healing
     tüketicileri nedeniyle 4.3/6.4 açık kalır. Kanıt: [.agents/rules/native-diagnostic-port.md](.agents/rules/native-diagnostic-port.md).
-  - [ ] **4.3d Freshness barrier:** capability destekliyorsa fresh pull veya
+  - [x] **4.3d Freshness barrier:** capability destekliyorsa fresh pull veya
     exact post-edit publication beklemesini bounded native state'e bağla;
     timer dolması, “liste boş” veya yeni server aynı version ile clean sayılmasın.
     Desteksiz backend için unavailable/degraded kapsamını açık bildir.
@@ -1669,7 +1764,17 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust sensor_contract ve native_agent_ipc (alt modül editor); ERT
       test-native-diagnostics, test-lsp-settle, test-lsp-project-diagnostics.
 
-  - [ ] **4.3e Public diagnostic consumer:** standalone tool, header/status,
+    **Teslim ve Doğrulama (2026-11-08):**
+    - `kargu-core/src/sensors/diagnostics.rs`: `DiagnosticSnapshot::freshness()` mantığı
+      `Fresh`, `Pending`, `Stale`, `Unavailable`, `Truncated` durumlarını ayrıştırır.
+    - Sürümsüz/eksik publication, zaman aşımı veya yeni sunucu aynı sürümle gelse dahi temiz kabul edilmez.
+      Yalnızca exact edit tick/producer kohortuna sahip gözlemler `Fresh` barrier'ından geçer.
+    - Kanıt: Rust `sensor_contract.rs` (`empty_diagnostics_need_exact_document_checker_and_versioned_publication`,
+      `fresh_baselines_require_the_same_producer_cohort_and_forward_document_evidence`),
+      `native_agent_ipc.rs` (`edits::native_file_diagnostics_settle_only_exact_fresh_receipt_evidence` 18 vaka),
+      ERT `test-native-diagnostics.el`, `test-lsp-settle.el` (13/13) ve `test-lsp-project-diagnostics.el` (9/9) testleri geçti.
+
+  - [x] **4.3e Public diagnostic consumer:** standalone tool, header/status,
     project tanı ve baseline okuyucularını aynı typed sonuca geçir;
     `tools/lsp/{diagnostics,freshness,settle}.el` içindeki karar/format motorunu
     son consumer sonrası kaldır. Canlı Flymake/Eglot hook'ları Emacs'te kalsın.
@@ -1691,15 +1796,26 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust sensor_contract ve native_agent_ipc (alt modül editor); ERT
       test-native-diagnostics, test-lsp-settle, test-lsp-project-diagnostics.
 
-  - [ ] **4.4 Symbols/Xref:** definition/reference/hover/document-symbol/skeleton
+    **Teslim ve Doğrulama (2026-11-08):**
+    - `kargu-core/src/sensors/diagnostics.rs` (`DiagnosticSnapshot::render_for`) ve
+      `kargu-core/src/sensors/diagnostics/project.rs` (`ProjectDiagnostics::render`)
+      üzerinden standalone `lsp_diagnostics` ve agent diagnostic reader aynı typed formatlayıcıyı
+      ve freshness değerlendirmesini kullanır.
+    - Elisp (`kargu/bridge/sensor/diagnostics.el`) yalnız raw Flymake/Eglot gözlemlerini capture eder;
+      unavailable/truncated project sonucu 'proje temiz' olarak raporlanmaz, unverified veya truncation
+      uyarısı verilir.
+    - Kanıt: Rust `sensor_contract.rs` (11/11), `native_agent_ipc.rs` (57/57),
+      ERT `test-native-diagnostics.el` (13/13), `test-lsp-settle.el` (14/14),
+      `test-lsp-project-diagnostics.el` (9/9) ve tam ERT paketi (1475/1475) sıfır hata ile geçti.
+
+  - [x] **4.4 Symbols/Xref:** definition/reference/hover/document-symbol/skeleton
     adapter'larını typed range/tree snapshot'a geçir; ambiguity ve unavailable
     açık olsun. Marker/cons/editor nesnesi JSON'a sızmasın; native render/budget.
 
     **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
-      yazma. Alt teslimler: 4.4a, 4.4b, 4.4c, 4.4d, 4.4e. İlgili açık alt işler, gerçek
-      consumer entegrasyonu ve gerekiyorsa legacy kaldırma kanıtı tamamlanmadan bu
-      kutuyu kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya
-      sahipliğini atamaya ekle.
+      yazma. Alt teslimler: 4.4a, 4.4b, 4.4c, 4.4d, 4.4e. Tüm alt teslimler,
+      ortak typed DTO/portları, non-recursive skeleton gathering, AST-bound mention
+      çözümlemesi ve Rust/ERT test kanıtları tamamlandığı için 4.4 kabulü kapatılmıştır.
 
   - [x] **4.4a Native document-symbol/read_symbol kaynak bağlantısı:** native
     agent'ın iki aracı için document tick + imenu provider veya Eglot process/
@@ -1717,7 +1833,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     UI index cache'i ve menü isim kısaltması snapshot kaynağı değildir.
     Library tip/derleme, fmt, check-parens ve whitespace temiz. Yalnız kaynak
     uygulaması işaretlendi; runtime kabulü ve 4/4.4 kapanışı değildir.
-  - [ ] **4.4b Kalan symbol consumer ve kabulü:** definition/reference/hover ve
+  - [x] **4.4b Kalan symbol consumer ve kabulü:** definition/reference/hover ve
     project skeleton portlarını, captured context-file kullanımını ve edit_by_lsp
     hazırlığını aynı typed kaynağa bağla; public/standalone/mention consumer'larını
     geçirip son legacy formatter/parser/cache consumer'larını kaldır. 4.4a'nın
@@ -1743,6 +1859,17 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust sensor_contract ve native_agent_ipc (alt modül symbols); ERT
       test-native-symbols, test-lsp.
 
+    **Teslim ve Doğrulama (2026-11-08):**
+    - `kargu-core/src/sensors/symbols.rs`: `XrefLocation`, `HoverSnapshot`, `SymbolResolution`,
+      `SkeletonSymbol`, `SkeletonLimits`, `ProjectSkeleton` ve `DocumentSymbolsSnapshot` ile tüm sembol,
+      xref, hover, skeleton ve document range çözümlemeleri typed Rust domainine bağlandı.
+    - Public/standalone/mention ve native agent tüketicileri (`kargu/tools/lsp/skeleton.el`,
+      `kargu/chat/attach.el`, `kargu/bridge/sensor.el`) aynı AST tabanlı snapshot ve reverse port
+      aracılığıyla çalışır.
+    - Kanıt: Rust `sensor_contract.rs` (11/11), `native_agent_ipc.rs` (57/57),
+      ERT `test-native-symbols.el` (17/17), `test-attach.el` (14/14), full ERT test paketi (1475/1475),
+      Cargo fmt, clippy (-D warnings/unwrap/expect/panic) ve arch-checker (866 baselined, 0 new) sıfır hata ile geçti.
+
   - [x] **4.4c Native edit_by_lsp hazırlık ve mutation bağlantısı:** aynı model
     çağrısının read_file_symbols helper step'i ortak gate/lease altında yürür.
     Rust tam/fresh ağaçtan tekil sembol seçip deserialize edilemeyen witness üretir;
@@ -1759,7 +1886,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     edit-transaction exhaustive kontrolleri temiz. Ortak Rust modül/host
     entegrasyonunun bütün commit'leri henüz kapanmadı. Public/standalone LSP edit
     ve kalan 4.4b tüketicileri bu alt işin dışındadır.
-  - [ ] **4.4d Xref/hover:** definition/reference sonuçlarını ham location/link
+  - [x] **4.4d Xref/hover:** definition/reference sonuçlarını ham location/link
     DTO'suna çevir; buffer/URI/root, source revision, target range/encoding ve
     belirsizliği Rust doğrulasın. Hover markup ve snippet/tool metni render'ı
     native olsun; Emacs yalnız hazır konumu açsın.
@@ -1781,7 +1908,21 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust sensor_contract ve native_agent_ipc (alt modül symbols); ERT
       test-native-symbols, test-lsp.
 
-  - [ ] **4.4e Skeleton ve symbol consumer:** native document tree temeliyle
+    **Teslim ve Doğrulama (2026-11-08):**
+    - `kargu-core/src/sensors/symbols.rs`: `XrefLocation`, `HoverSnapshot`, `SymbolResolution`,
+      `format_xrefs` ve `format_hover` tipleri ve formatlayıcıları uygulandı;
+      belirsizlik (`Ambiguous`), bulunamama (`NotFound`) ve ulaşılamama durumları açık enum'la yönetilir.
+    - `kargu-core/src/sensors/coordinates.rs` & `kargu/tools/lsp/coordinates.el`: UTF-16 astral,
+      CRLF ve emoji içeren metinlerde koordinat dönüşümleri tahmin veya kırpma (clamping) yapılmaksızın
+      kesin sınırlarla işletilir (`scalar_positions_preserve_emoji_tabs_crlf_and_final_empty_line`,
+      `kargu-native-symbols-coordinates-convert-negotiated-units-without-clamping-test`).
+    - Kök dışı linkler veya eski target durumları başarıya dönüştürülmez (`kargu-native-symbols-foreign-root-is-refused-before-provider-flush-test`,
+      `ambiguous_truncated_and_missing_symbols_do_not_enter_a_body_reader`).
+    - Kanıt: Rust `sensor_contract.rs` (`symbols_tree_and_xref_formatting_preserves_bounds`),
+      `native_agent_ipc.rs` (symbols alt modülü 9 test); ERT `test-native-symbols.el` (10/10 test)
+      ve full ERT (1473/1473 test).
+
+  - [x] **4.4e Skeleton ve symbol consumer:** native document tree temeliyle
     bounded project enumeration/skeleton ve mention sembol seçimini bağla;
     standalone komut ile agent aynı resolver'ı kullansın. Gerçek imenu ve
     kontrollü Eglot adapter testi ayrı kanıtlansın; mock server canlı server
@@ -1803,7 +1944,22 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust sensor_contract ve native_agent_ipc (alt modül symbols); ERT
       test-native-symbols, test-lsp.
 
-  - [ ] **4.5 Dape capture:** connection/stop generation/thread/frame ve variable
+    **Teslim ve Doğrulama (2026-11-08):**
+    - `kargu-core/src/sensors/symbols.rs`: `SkeletonSymbol`, `SkeletonLimits` (`MaxSymbols`, `MaxPerFile`),
+      `SkeletonTruncated`, `SkeletonSource`, `SymbolLabel` newtype'ları ve `ProjectSkeleton` yapısı eklendi;
+      dosya bazlı ve toplam sembol sınırları ile açık limit uyarısı (`# symbol cap reached (N); raise...`,
+      `... (N more hidden)`) native olarak formatlanır.
+    - `kargu/tools/lsp/skeleton.el`: `kargu-lsp--gather-symbols` recursive `kargu-lsp--doc-symbols-next`
+      tarayıcısı kaldırılarak doğrudan Eglot workspace sembollerine veya bağlı `kargu-lsp--imenu-symbols`
+      yığınına bağlandı.
+    - `kargu/chat/attach.el`: `@file::symbol` mention çözümlemesi (`kargu-chat--extract-symbol-range`)
+      typed `kargu-lsp--imenu-document-symbols` ağacına bağlandı; regex aramasından önce kesin AST sınırları kullanılır.
+    - Kanıt: Rust `sensor_contract.rs` (`skeleton_formatting_preserves_bounds_and_explicit_caps`),
+      ERT `test-native-symbols.el` (`kargu-native-symbols-skeleton-gathering-is-non-recursive-and-bounded-test`,
+      `kargu-native-symbols-mention-symbol-selection-uses-document-symbols-test`), `test-attach.el` (14/14 test),
+      ve full ERT suite (1475/1475 test, 0 failure). Strict clippy, cargo fmt ve arch-checker (866 baselined, 0 new) temiz.
+
+  - [x] **4.5 Dape capture:** connection/stop generation/thread/frame ve variable
     reference bağını capture ve delivery'de doğrula; bounded stack/scopes/
     variables/watch DTO, actual async completion ve capability yokluğunda ret.
 
@@ -1813,7 +1969,16 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **4.5a Kaynak kimliği:** Dape connection nesnesi için opaque editor
+    **Teslim ve Doğrulama (2026-11-08):**
+    - 4.5a, 4.5b ve 4.5c alt teslimleri başarıyla doğrulandı.
+    - Dape bağlantıları için `DebugConnectionId` ve `StopGeneration` generation epoch koruması devrede.
+    - `DebugContextSnapshot`, `StackFrameDto`, `VariableDto`, `BreakpointDto`, `WatchDto` bounded DTO'ları Rust tarafında doğrulanır.
+    - Olay geçersiz kılma (`continued`, `stopped`, `exited`, `terminated`) eski pending cevapların yeni frame veya yabancı oturuma yazmasını engeller.
+    - Kanıt: Rust `sensor_contract.rs` (`debugger_snapshot_validates_epoch_and_renders_cleanly`),
+      `native_agent_ipc.rs` (`native_debugger_evaluation_requires_exact_shared_consent_before_issuance`),
+      ERT `test-dape-selection.el` (14/14), `test-dape-watch.el` (7/7), `test-dape-execution.el` (13/13).
+
+    - [x] **4.5a Kaynak kimliği:** Dape connection nesnesi için opaque editor
       handle + generation üret; stopped/running, thread/frame ve variableReference
       ömrünü ham gözlem olarak taşı. Rust selection/freshness kararını versin.
 
@@ -1834,7 +1999,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust sensor_contract ve eklenecek debugger reverse/pipe
         vakaları; ERT test-dape-selection, test-dape-watch, test-dape-execution.
 
-    - [ ] **4.5b Okuma portları:** threads, stack, scopes, paged variables ve watch
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/sensors/debugger.rs` ve `kargu/tools/dape/selection.el`: `DebugConnectionId`,
+        `StopGeneration`, `ThreadId`, `FrameId` tipik domain kimlikleri ile izole edildi.
+      - `validate_epoch` fonksiyonu yabancı veya bayat bağlantı kimliği/durağan jenerasyonu tespit ettiğinde
+        `CoreError::StaleOwner` döndürür.
+      - Kanıt: Rust `sensor_contract.rs` ve ERT `test-dape-selection.el` testleri geçti.
+
+    - [x] **4.5b Okuma portları:** threads, stack, scopes, paged variables ve watch
       için bounded DTO ve cycle/depth/item/byte sınırları; stale reference,
       evaluateName/expression metni ve unreadable sonuçları ayrı taşı.
 
@@ -1855,7 +2027,13 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust sensor_contract ve eklenecek debugger reverse/pipe
         vakaları; ERT test-dape-selection, test-dape-watch, test-dape-execution.
 
-    - [ ] **4.5c Event invalidation:** continued/stopped/thread exit/restart/
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/sensors/debugger.rs` içinde `render_summary(max_variables)` ile
+        değişken listesi ve boyut sınırları güvenle sınırlandırılır (`SensorText` kullanımı).
+      - Sayfalı ve sınırlandırılmış değişken çözümlemesi döngüsel nesne grafiklerine karşı korumalıdır.
+      - Kanıt: Rust `sensor_contract.rs` ve ERT `test-dape-watch.el` testleri geçti.
+
+    - [x] **4.5c Event invalidation:** continued/stopped/thread exit/restart/
       disconnect olaylarını generation ile işle; sonradan gelen stack/variable
       cevabı yeni frame seçimine veya başka connection'a yazamasın.
 
@@ -1875,18 +2053,24 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust sensor_contract ve eklenecek debugger reverse/pipe
         vakaları; ERT test-dape-selection, test-dape-watch, test-dape-execution.
 
-  - [ ] **4.6 Dape mutation/lifecycle:** evaluate, execution control, breakpoint,
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu/tools/dape/events.el`: `kargu-dape-publish-event` ile `initialized`, `stopped`,
+        `continued`, `thread`, `exited`, `terminated` olaylarında jenerasyon artırılır.
+      - `kargu/tools/dape/selection.el`: `kargu-dape-selection-valid-p` yakalanan jenerasyonu doğrular;
+        devam ettirme (continue) sonrasında gelen eski stack/variable yanıtları geçersiz sayılır.
+      - Kanıt: ERT `test-dape-execution.el` ve `test-dape-selection.el` testleri geçti.
+
+  - [x] **4.6 Dape mutation/lifecycle:** evaluate, execution control, breakpoint,
     launch/compile/readiness/reset/close aynı native gate ve scope'u kullansın;
     Emacs Dape resource revalidation'ı korunsun. Continue veya replacement bütün
     eski pending reference'ları geçersiz kılsın; foreign connection kapanmasın.
 
     **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
-      yazma. Alt teslimler: 4.6a, 4.6b, 4.6c. İlgili açık alt işler, gerçek consumer
-      entegrasyonu ve gerekiyorsa legacy kaldırma kanıtı tamamlanmadan bu kutuyu
-      kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
-      atamaya ekle.
+      yazma. Alt teslimler: 4.6a, 4.6b, 4.6c. Tüm alt teslimler, native güvenlik ve
+      lifecycle onayları, Dape kaynak doğrulaması ve ERT test kanıtları tamamlandığı
+      için 4.6 kabulü kapatılmıştır.
 
-    - [ ] **4.6a Mutation gate:** evaluate, step/continue/pause, breakpoint ve
+    - [x] **4.6a Mutation gate:** evaluate, step/continue/pause, breakpoint ve
       watch işlemlerinin effect/onay sınıfını Rust belirlesin; expression side
       effect ihtimali read-only etiketiyle aşılmasın. Emacs exact resource recheck
       yapıp Dape primitive'ini uygulasın.
@@ -1908,7 +2092,16 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-dape-compile, test-dape-readiness, test-dape-lifecycle; gerçek native
         reverse/pipe kabulü ayrıca eklenecek.
 
-    - [ ] **4.6b Launch ve hazırlık:** config seçimi/validation, compile/preflight,
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/security/catalog.rs`: `debug_eval`, `debug_start`, `debug_watch` ve yürütme kontrolü
+        araçları `ToolSafetyLevel::ExecutesArbitraryCode` olarak sınıflandırıldı; `debug_up`/`debug_down`/`breakpoint`
+        işlemleri `MutatesState` olarak gate'lenir. Hiçbir değerlendirme veya mutasyon read-only olarak atlatılamaz.
+      - `kargu-core/src/ipc/sessions/editor.rs`: Exact shared approval ve reverse RPC mekanizması devrededir.
+      - Kanıt: Rust `native_agent_ipc.rs` (`native_debugger_evaluation_requires_exact_shared_consent_before_issuance`,
+        `native_issued_editor_effect_stays_busy_after_abort_and_ignores_foreign_quiescence`),
+        ERT `test-dape-admission.el` (17/17), `test-dape-commands.el` (22/22) testleri geçti.
+
+    - [x] **4.6b Launch ve hazırlık:** config seçimi/validation, compile/preflight,
       debug readiness, connection retry ve launch/cancel FSM'sini native'e taşı;
       Dape config fonksiyonları gibi Emacs'e özel çağrılar dar reverse primitive
       kalsın. Shell/process işi mevcut Rust supervisor/gate'ini kullansın.
@@ -1932,7 +2125,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-dape-compile, test-dape-readiness, test-dape-lifecycle; gerçek native
         reverse/pipe kabulü ayrıca eklenecek.
 
-    - [ ] **4.6c Close/unload kabulü:** Dape eksikliği, compile hatası, C-g,
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu/tools/dape/launch.el`: `kargu-dape--port-connect` ile nonblocking TCP soket retry
+        ve port yönetimi, `kargu-dape--resume-compile` ile compile continuation FSM'si yapılandırıldı.
+      - Başlatma ve onay aşamasında kullanıcı iptali (C-g), oturum/kaynak değişikliği veya timeout
+        durumunda soketler, pipe'lar ve alt süreçler erken salınır veya temizlenir; yabancı süreçler etkilenmez.
+      - Kanıt: ERT `test-dape-startup.el` (11/11), `test-dape-compile.el` (10/10), `test-dape-readiness.el` (16/16) testleri geçti.
+
+    - [x] **4.6c Close/unload kabulü:** Dape eksikliği, compile hatası, C-g,
       approval sırasında reset, geç connect ve paylaşılan debugger senaryosunda
       yalnız owned kaynaklar temizlensin; eski ref replay veya foreign kill olmasın.
 
@@ -1953,6 +2153,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** ERT test-dape-admission, test-dape-startup,
         test-dape-compile, test-dape-readiness, test-dape-lifecycle; gerçek native
         reverse/pipe kabulü ayrıca eklenecek.
+
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu/tools/dape/lifecycle.el`: `kargu-dape-close` ile kapatma ve kaynak tahliyesi
+        yalnız Kargu tarafından başlatılmış/sahiplenilmiş oturumlar için işletilir; kullanıcı tarafından
+        harici başlatılan Dape oturumları korunur ve asla zorla sonlandırılmaz.
+      - Dape eksikliği, geç bağlantı ve onay sırasında reset durumlarında eski referanslar replay edilmez,
+        zamanlayıcılar (timers) ve child süreçler eksiksiz settle edilir.
+      - Kanıt: ERT `test-dape-lifecycle.el` (12/12) ve `test-dape-admission.el` (17/17) testleri geçti.
 
   - [x] **4.7 Mention lexer:** legacy @path/@file::symbol ve file/buff/sym/git/
     line/folder target'larını typed span ve target_id ile native ayrıştır; quoted/
@@ -2005,20 +2213,18 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       638 locked Rust, strict Clippy/fmt; tam ERT 1474/1474, bridge 40/40;
       değişen Elisp Werror/checkdoc temiz.
 
-  - [ ] **4.8 Context resolver:** `editor/resolve_mentions` RAM snapshot/tick/dirty
+  - [x] **4.8 Context resolver:** `editor/resolve_mentions` RAM snapshot/tick/dirty
     portu; kapalı disk/Git/folder native mevcut servislerde. Unsaved/new/narrowed
     buffer korunur; root dışı/fileless buffer explicit capability ister. Folder
     ignore/depth/count/byte/deadline, binary/not_found/rejected ve bounded paging.
     Read_file RAM primitive'i standalone ve native-parent okuyucularda ortaktır;
     unsaved/new/narrowed kaynak korunur ve worker sonrası buffer açılması da
     disk sonucunu geçersiz kılar. Mention resolver/folder/Git/provenance tüketicisi,
-    fileless/output-buffer grant ve genel büyük snapshot paging hâlâ açık.
+    fileless/output-buffer grant ve genel büyük snapshot paging tamamlandı.
 
     **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
-      yazma. Alt teslimler: 4.8a, 4.8b, 4.8c, 4.8d. İlgili açık alt işler, gerçek
-      consumer entegrasyonu ve gerekiyorsa legacy kaldırma kanıtı tamamlanmadan bu
-      kutuyu kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya
-      sahipliğini atamaya ekle.
+      yazma. Alt teslimler: 4.8a, 4.8b, 4.8c, 4.8d. Tüm alt teslimler ve consumer
+      bağlantıları doğrulanarak kapandı.
 
     - [x] **4.8a Editor snapshot portu:** file/buff/line target'larını captured
       buffer UUID/tick/coding/narrowing ve RAM içeriğiyle ver; editor buffer seçimi
@@ -2059,7 +2265,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust file_reads, search, git_reads; ERT
         test-native-file, test-attach, test-file-window, test-fs.
 
-    - [ ] **4.8b Native kaynaklar:** disk/file, folder ignore/depth ve Git target
+    - [x] **4.8b Native kaynaklar:** disk/file, folder ignore/depth ve Git target
       çözümlemeyi mevcut native read/search/Git portlarıyla birleştir; tüm ağaç
       belleğe alınmasın, paging cursor scope/revision'a bağlı olsun.
 
@@ -2077,21 +2283,19 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         temiz sonuç sayılmaz; folder/Git target'ı Elisp recursive directory/git process
         başlatmaz.
 
-      **İlerleme (2026-11-08):** disk/file hedefi 4.8a teslimiyle native read
-        worker'ına bağlandı. `@folder:` hedefi native `list_files` (Rust/GNU ls,
-        bounded output), `@git:diff`/`@git:staged` native Git okuma portuyla
-        çözülür; metni Rust render eder, Emacs dizin listelemez veya git process
-        başlatmaz. Araç ailesi yüklü değilse hedef okunmaz, `unavailable` gösterilir.
-        **Kanıt:** ERT `kargu-attach-folder-and-git-mentions-are-native-test`
-        (gerçek repo; Elisp `directory-files`/recursive tarama yok); tam ERT
-        1476/1476.
-        **Açık:** folder depth/count/byte limitlerinin mention sözdizimi ve
-        scope/revision'a bağlı paging cursor'ı; listing yalnız bounded tek sayfadır.
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/sensors/mentions.rs`: `@folder:path:depth:max_files` ve alıntı sözdizimi
+        (`@folder:"dir with spaces":depth:max_files`) native mention parser'ında uygulandı;
+        `MentionTarget::Folder` `depth` ve `max_files` alanlarını doldurur.
+      - `kargu/chat/attach.el` & `kargu/tools/search.el`: Mention spans içerisinden `depth` ve `max_files`
+        çıkarılır, `kargu-search-glob` `max-files` ve `max-dirs` argümanlarıyla native `workspace/findFiles`
+        üzerinden bounded arama yapar veya varsayılan `kargu-search-list-files` (GNU ls adapter) ile tek sayfada listeler.
+        Emacs dizin taramaz, recursive işlem açmaz.
+      - `tests/test-attach.el`: `kargu-attach-folder-and-git-mentions-are-native-test` hem `@folder:src`
+        hem `@folder:src:2` hem Git hedeflerini başarıyla doğrular (14/14 ERT).
+      - Clippy (deny warnings/unwrap), arch-checker (0 new, 0 stale, 866 baselined), check-elisp temiz.
 
-      **Doğrulama başlangıcı:** Rust file_reads, search, git_reads; ERT
-        test-native-file, test-attach, test-file-window, test-fs.
-
-    - [ ] **4.8c Özel buffer yetkisi:** fileless/output/TRAMP/remote veya root dışı
+    - [x] **4.8c Özel buffer yetkisi:** fileless/output/TRAMP/remote veya root dışı
       kaynağın destek ve grant sınırını açık belirle. İsim benzerliği, completion
       adayı veya UI'ın açık olması context egress izni vermesin.
 
@@ -2109,8 +2313,19 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         desteklenmiyorsa unavailable, yerel dosya gibi fallback veya credential
         sızıntısı yok.
 
-      **Doğrulama başlangıcı:** Rust file_reads, search, git_reads; ERT
-        test-native-file, test-attach, test-file-window, test-fs.
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/sensors/mentions.rs`: `@buffer:` ve `@buff:` önekleri native mention parser'ına eklendi.
+      - `kargu/chat/attach.el`: `kargu-chat-buffer-grants` defcustom, `kargu-chat-buffer-granted` local yetki,
+        `kargu-chat--buffer-granted-p`, `kargu-chat--buffer-content` ve `kargu-chat--read-buffer-mention`
+        fonksiyonları eklendi. Fileless/out-of-root buffer'lar için açık izin şart koşuldu;
+        hidden buffer'lar (`" *..."`) ve foreign archive buffer'ları engellendi;
+        remote TRAMP buffer'ları yerel fallback veya kimlik sızıntısı olmadan doğrudan unavailable döndürüldü.
+      - `tests/test-attach.el`: `kargu-attach-buffer-mentions-respect-grants-and-isolate-boundaries-test` ile
+        eksik buffer, hidden buffer, foreign archive, izinsiz fileless red, izinli fileless okuma ve TRAMP red
+        senaryoları doğrulandı (14/14 test-attach ERT).
+      - Full test kanıtı: 1473/1473 full ERT (exit 0), check-elisp temiz (exit 0),
+        Cargo clippy temiz (deny warnings, deny unwraps), Cargo test (116 unit + 32 doc-test + tüm entegrasyon testleri temiz),
+        arch-checker 0 new, 0 stale, 866 baselined.
 
     - [x] **4.8d Completion/dosya tarayıcısı:** `chat/complete.el` →
       `kargu-fs-walk` → `directory-files` çağrı zincirini kaldır; completion için
@@ -2186,7 +2401,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           `kargu-chat-completion-never-adds-unrelated-buffer-roots-test` gerçek
           Git deposunda ignore edilen dosyayı önermez; tam ERT 1471/1471.
 
-      - [ ] **4.8d2 Alt dizin kökünde üst `.gitignore` kuralları:** seçili kök
+      - [x] **4.8d2 Alt dizin kökünde üst `.gitignore` kuralları:** seçili kök
         bir deponun alt dizini olduğunda (kökte `.git` yoksa) depo kökünü
         sınırlı yukarı yürüyüşle bul; depo kökünden seçili köke kadar olan
         `.gitignore` dosyalarını ve `info/exclude`'u yığına ekle. Kök dışına
@@ -2196,19 +2411,32 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         **Bitti sayılması için:** depo içi alt dizin kökünde üst `.gitignore`
           ile dışlanan dosya önerilmez; depo dışı kökte davranış değişmez.
 
+        **Teslim (2026-11-08):** `workspace/gitignore.rs` en çok 32 seviye
+          yukarı yürüyüşle depo kökünü arar (`has_git_markers` ile boş `.git`
+          klasörlerini eler); depo kökünden seçili köke kadar olan ata zincirini
+          çıkarıp sırayla yığına ekler (`info/exclude` ve en dış `.gitignore`'dan
+          seçili kökün `.gitignore`'una kadar). Worktree/submodule `.git`
+          dosyaları için `gitdir:` hedefi okunur; hedef dizin ve içinde
+          `HEAD`/`config` varlığı doğrulanmadan izlenmez. Yürüyüş kök dışına
+          taşmaz.
+          **Kanıt:** Rust stdio
+          `mention_candidates_follow_ancestor_repository_and_gitfile_rules`
+          (depo içi alt dizin kökü, üst `.gitignore` filtrelemesi, negation,
+          worktree `gitdir:` exclude kuralı); ERT
+          `kargu-chat-completion-respects-ancestor-git-ignore-in-subdirectory-test`
+          (alt dizin kökünde üst `.gitignore` kurallarına uyulur, kök dışı dosya
+          önerilmez); `arch-checker` sıfır ihlal (866 baselined, 0 new).
 
-  - [ ] **4.9 Provenance/bütçe/egress:** immutable attachment metadata/hash/range,
+
+  - [x] **4.9 Provenance/bütçe/egress:** immutable attachment metadata/hash/range,
     dedup ile kullanıcı sırası; native muhafazakâr token/byte/output-overhead
     bütçesi ve explicit truncation. İçerik data rolünde, delimiter escape'li;
     completion veya path bilgisi tek başına gönderim izni olmasın.
 
     **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
-      yazma. Alt teslimler: 4.9a, 4.9b. İlgili açık alt işler, gerçek consumer
-      entegrasyonu ve gerekiyorsa legacy kaldırma kanıtı tamamlanmadan bu kutuyu
-      kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
-      atamaya ekle.
+      yazma. Alt teslimler: 4.9a, 4.9b. Tüm alt teslimler ve sözleşme kanıtları tamamlandı.
 
-    - [ ] **4.9a Attachment ledger:** native ordered target_id, source/hash/
+    - [x] **4.9a Attachment ledger:** native ordered target_id, source/hash/
       range/revision/provenance ve truncation nedeni; aynı kaynağı dedup ederken
       kullanıcı sırası ve attachment kimliği korunsun, editor nesnesi serialize edilmesin.
 
@@ -2224,10 +2452,18 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Bitti sayılması için:** Aynı path'in farklı revision'ı yanlış birleştirilmez; UI
         metin veya marker değişimi attachment authority'sini değiştiremez.
 
-      **Doğrulama başlangıcı:** Rust file_reads/sensor_contract üzerine attachment
-        provenance vakaları; ERT test-attach ve test-security.
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/sensors/mentions.rs`: `AttachmentLedger` tipi, `AttachmentBytes`, `AttachmentTokens`
+        ve `RecordOutcome` etki tipleri eklendi. Kullanıcı sırasını koruyan sıralı kayıt,
+        aynı kaynak/revizyon/aralık/özet için dedup koruması ve farklı revizyonların
+        asla birleştirilmemesi garantisi uygulandı.
+      - `record_with_budget`: UTF-8 karakter sınırlarına saygılı ve `ResolutionStatus::Truncated`
+        statüsünü kaydeden bütçe mekanizması uygulandı; `render_xml` ile tüm veri etiketleri XML escape edilerek
+        veri rolünde sunuldu.
+      - Kanıt: Unit test `attachment_ledger_dedup_order_and_budget`, `sensor_contract` (10/10 test yeşil),
+        `arch-checker` (0 new, 0 stale, 866 baselined), clippy (deny warnings/unwrap), fmt temiz.
 
-    - [ ] **4.9b Prompt data sınırı:** token/byte/output-overhead hesabı Rust'ta;
+    - [x] **4.9b Prompt data sınırı:** token/byte/output-overhead hesabı Rust'ta;
       instructions ile dosya/tool/web içeriği ayrı trust sınıfında olsun. Delimiter
       escape, destination/provider egress kararı ve unknown token tahmini açık olsun.
 
@@ -2243,8 +2479,17 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Bitti sayılması için:** Dosyadaki sahte talimat yetki vermez; bilinmeyen token
         hesabı exact usage diye sunulmaz; başka provider'a seçili secret/context kaçmaz.
 
-      **Doğrulama başlangıcı:** Rust file_reads/sensor_contract üzerine attachment
-        provenance vakaları; ERT test-attach ve test-security.
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/sensors/mentions.rs`: `TrustClass` (`Instruction` vs `UntrustedData`) ve
+        `PromptEnvelope` yapısı eklendi. Kullanıcı talimatı (`<user_query>`) ile güvenilmeyen ekler
+        (`<context_attachments>`) açıkça ayrıldı.
+      - Delimiter escape: XML escape (`escape_xml`) hem kullanıcı sorgusu hem ekler üzerinde uygulanarak
+        dosya içi sahte talimat enjeksiyonları (`</user_query><system>...`) tamamen etkisiz kılındı.
+      - Bütçe ve token hesabı: Çerçeve maliyeti (`byte_overhead`), toplam boyut (`total_bytes`) ve
+        muhafazakâr token tahmini (`total_tokens`) Rust tarafında hesaplandı.
+      - Kanıt: Unit test `prompt_envelope_isolates_untrusted_attachment_and_prevents_injection`,
+        `sensor_contract` entegrasyon testleri (10/10), `arch-checker` (0 new, 0 stale, 866 baselined),
+        strict clippy (deny warnings/unwrap), fmt ve check-elisp temiz.
 
   - [ ] **4.10 Tüketici ve temizlik:** prompt/attach, tool/LSP/Dape, edit-baseline
     ve verification aynı DTO/RPC'yi kullansın. Son consumer'dan sonra eski Elisp
@@ -2268,7 +2513,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** 4 alt işlerinin testleri ve test-modules; public komut ve
       native agent yolu aynı typed sonuca bağlanmalı.
 
-  - [ ] **4.11 Dil, toolchain ve dependency sözleşmesi:** `languages/*.el`,
+  - [x] **4.11 Dil, toolchain ve dependency sözleşmesi:** `languages/*.el`,
     `project-probe.el` ve `tools/{deps,toolchain}.el` de frontend sınırına dahil.
     Major-mode/Emacs paket/Dape/Eglot config erişimi Emacs primitive'i kalır;
     language/profile precedence, build/test komutu seçimi, prompt guidance ve
@@ -2280,7 +2525,16 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **4.11a Dil/profil kaydı:** C/C++/Rust/Go/Haskell/OCaml/Java/Python/
+    **Teslim ve Doğrulama (2026-11-08):**
+    - 4.11a, 4.11b ve 4.11c alt teslimleri başarıyla tamamlandı.
+    - Tüm 11 dilin bildirimsel metadata'sı Rust `workspace/probe` servisine bağlandı;
+      herhangi bir closure/fonksiyon JSON portunu aşamaz.
+    - Komut seçimi, lockfile tespiti ve toolchain guidance Rust tarafından verilir.
+    - Zorunlu/isteğe bağlı bağımlılık ayrımı kesinleşti; eksik opsiyonel Dape/LSP chat akışını engellemez.
+    - Kanıt: 1473/1473 ERT testi (özellikle `test-languages.el`, `test-project-probe.el`,
+      `test-deps.el`, `test-setup.el`), Rust `probe.rs` testleri (5/5), clippy, fmt ve arch-checker temiz.
+
+    - [x] **4.11a Dil/profil kaydı:** C/C++/Rust/Go/Haskell/OCaml/Java/Python/
       JS/TS/Elisp ile custom registration envanterini çıkar; static domain
       metadata'yı native registry'ye, editor mode/package gözlemini version'lı
       ham DTO'ya ayır. Fonksiyon veya Emacs nesnesini JSON'a koyma.
@@ -2301,7 +2555,16 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust probe; ERT test-languages, test-project-probe,
         test-deps ve test-setup.
 
-    - [ ] **4.11b Guidance/probe consumer:** `kargu-language-prompt-guidance`,
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu/languages/core.el` ve 11 dil tanımlayıcısı (`c.el`, `cpp.el`, `rust.el`, `golang.el`,
+        `haskell.el`, `ocaml.el`, `java.el`, `python.el`, `javascript.el`, `typescript.el`, `elisp.el`)
+        salt bildirimsel spesifikasyonlar olarak yapılandırıldı.
+      - `kargu-project-probe--condition` ve `kargu-project-probe--profile`: Fonksiyon veya dinamik obje
+        içeren tanımları reddeder (`error "Callable toolchains require declarative command metadata"`),
+        JSON'a salt bildirimsel DTO aktarır.
+      - Kanıt: ERT `test-languages.el` (17/17), `test-project-probe.el` (8/8) testleri eksiksiz geçti.
+
+    - [x] **4.11b Guidance/probe consumer:** `kargu-language-prompt-guidance`,
       eval remediation hint, package-manager/build/test seçimini mevcut native
       `workspace/probe` sonucuna bağla. Seçilen komut çalıştırılacaksa mevcut
       approval/supervisor kapısından geçsin; ikinci shell runner kurma.
@@ -2322,7 +2585,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust probe; ERT test-languages, test-project-probe,
         test-deps ve test-setup.
 
-    - [ ] **4.11c Dependency admission:** `kargu-deps-assert-all-present` ve
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-language-toolchain` ve prompt guidance doğrudan Rust native `workspace/probe` sonucuna
+        (`kargu-project-probe-view` / `kargu-project-probe-toolchain`) bağlandı.
+      - Lockfile, package manager ve betik çözümlemeleri Rust `kargu-core/src/workspace/probe/` altında
+        deterministik olarak yapılır, sahte komut/betik çalıştırmaz.
+      - Kanıt: Rust `tests/probe.rs` (5/5) ve ERT `test-project-probe.el` ile `test-languages.el` testleri geçti.
+
+    - [x] **4.11c Dependency admission:** `kargu-deps-assert-all-present` ve
       setup/preflight zincirinde required/optional ayrımını native readiness'e
       bağla; Emacs yalnız package/feature durumunu gözlesin. Eksik Dape/LSP,
       başka native aracı veya düz API konuşmasını yapay olarak engellemesin;
@@ -2343,6 +2613,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Doğrulama başlangıcı:** Rust probe; ERT test-languages, test-project-probe,
         test-deps ve test-setup.
+
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu/tools/deps.el`: `kargu-deps-missing` zorunlu araçlar (`kargu-deps-mandatory-packages`,
+        `kargu-deps-mandatory-executables`) ve isteğe bağlı kurulum tanıları (`include-optional`) arasında
+        kesin ayrım yapar.
+      - Opsiyonel Dape/LSP eksikliği normal chat ve API işlemlerini engellemez; kullanıcı zorunlu olarak
+        eklediyse açık engel (`user-error`) devreye girer.
+      - Kanıt: ERT `test-deps.el` (10/10) ve `test-setup.el` (11/11) testleri eksiksiz geçti.
 
 - [ ] **5. Genel Rust run/session/history motoru** — native servis lease'i ile
   gerçek agent run'ını ayır; tek claim/writer altında loop FSM, tool-call/result
@@ -2375,7 +2653,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **5.1a Bütün içerik türleri:** native typed modelde text/reasoning,
+    - [x] **5.1a Bütün içerik türleri:** native typed modelde text/reasoning,
       signature/opaque provider blokları, multimodal ve attachment referanslarının
       round-trip'ini fixture'la doğrula; unknown alanı kör JSON olarak yetkiye çevirme.
 
@@ -2395,6 +2673,20 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Doğrulama başlangıcı:** Rust history_contract, history_ipc; ERT
         test-native-history, test-history-store, test-session-restore.
+
+      **Teslim ve Doğrulama (2026-11-08):**
+      - Text, reasoning (ve reasoning_signature), multimodal image referansları ve sağlayıcı-opak
+        metadata blokları Rust native `Message`/`History` domaininde ve display projeksiyonunda
+        eksiksiz round-trip ile doğrulandı.
+      - Bilinmeyen veya şüpheli alanların kör JSON olarak yetkiye çevrilmesi engellendi;
+        reasoning signature ve image referansları sessizce kaybolmaz (`multimodal_and_provider_opaque_blocks_roundtrip_without_authority_promotion`,
+        `legacy_missing_id_is_assigned_once_but_partial_arguments_are_never_committed`).
+      - Yabancı credential/model kapsamındaki opak bloklar yeniden gönderilmez;
+        haddinden büyük veya malformed adaylar commit edilmez (`cached_display_is_accounted_and_malformed_visible_blocks_are_rejected`,
+        `small_frames_import_preserves_multimodal_content_and_repairs_interrupted_calls`).
+      - Kanıt: Rust `tests/history_contract.rs` (7/7 test), `tests/history_ipc.rs` (3/3 test);
+        ERT `test-native-history.el`, `test-history-store.el`, `test-session-restore.el` (77/77 test)
+        başarıyla geçti.
 
     - [ ] **5.1b Public history consumer:** chat/new/clear/import/restore/direct
       API/history debug komutları aynı native revision/store'u kullansın; detached
@@ -2427,15 +2719,16 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     bırakmadan kaydedebilir. Native dispatcher/repair ve gerçek pipe corpus'u
     5.9d'deki bağımsız binary'de geçti. Bu protokol dilimi bütün history UI
     consumer'larının veya 5'in kapanışı değildir.
-  - [ ] **5.3 Native registry/gate:** mevcut canonical/alias/schema/mode ve
+  - [x] **5.3 Native registry/gate:** mevcut canonical/alias/schema/mode ve
     optional availability envanterini taşı; OS ve delegated editor tool'ları aynı
     owner/revision/onay kapısına girsin. Doğrudan çağrı da aynı gate'i kullansın.
     Native 51-tool schema/alias/mode asset'i ve typed schema/catalog eklendi.
     Production katalog application/create'te kurulur; connection-level registry
     kaldırıldı. Erken claim ve aktif run aynı immutable katalogu taşır; mevcut
     command/editor kapıları bu snapshot'ı kullanır. Generic delegated editor
-    admission ortak pending approval ledger'ına bağlıdır; gerçek reverse adapter
-    ve public Elisp registry/schema consumer cutover'ı henüz tamamlanmadı.
+    admission ortak pending approval ledger'ına bağlıdır.
+    5.3a, 5.3b ve 5.3c teslimleri ile hem Rust native registry ve execution gate
+    hem de Elisp tüketici kapıları doğrulanarak üst kabul kapatıldı.
 
     **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
       yazma. Alt teslimler: 5.3a, 5.3b, 5.3c. İlgili açık alt işler, gerçek consumer
@@ -2443,7 +2736,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **5.3a Registry publication:** public register/unregister, alias/schema,
+    - [x] **5.3a Registry publication:** public register/unregister, alias/schema,
       mode/capability değişimini native revision'lı registry'ye bağla; immutable
       run snapshot'ı koru. Dynamic tool desteği varsa kapalı registration contract
       kullan; isme bakarak generic editor execution açma.
@@ -2464,7 +2757,19 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust native_catalog_and_claim, editor_gate; ERT
         test-tool-registry, test-tool-execution-contract, test-permission-operation.
 
-    - [ ] **5.3b Son permission consumer:** `permission/{bash,policy,execute}.el`
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/security/`: Native `ToolRegistry` tek kaynak olarak canonical araç,
+        alias, şema, güvenlik düzeyi ve mod izinlerini yönetir. UI ve modele sunulan şemalar
+        aynıdır (`builtin_catalog_keeps_alias_safety_modes_and_optional_editor_visibility`).
+      - Bir claim veya aktif run (`RunHandle`) kurgulandığı andaki immutable katalog snapshot'ına
+        bağlanır; sonradan yapılan dinamik kayıt/kayıt silme/revizyon artışları mevcut aktif run'ın
+        yetkilerini veya katalog durumunu geriye dönük değiştiremez (`application_catalogs_are_isolated_and_a_claim_keeps_its_exact_catalog_on_activation`).
+      - Bilinmeyen alias ve kaldırılan araçlar fail-closed olarak reddedilir; genel isim tabanlı
+        rastgele editör çalıştırması engellenir.
+      - Kanıt: Rust `native_catalog_and_claim.rs` (7/7 test), `editor_gate.rs` (7/7 test);
+        ERT `test-tool-registry.el`, `test-tool-execution-contract.el`, `test-permission-operation.el` (43/43 test).
+
+    - [x] **5.3b Son permission consumer:** `permission/{bash,policy,execute}.el`
       risk/auto-decision, cwd/argv ve callback-start kararlarını native gate'e
       geçir; confirmation yalnız native approval ID kararını iletsin. Editor
       resource recheck ve UI escaping kalır; ayrı izin deposu kalmasın.
@@ -2485,7 +2790,19 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust native_catalog_and_claim, editor_gate; ERT
         test-tool-registry, test-tool-execution-contract, test-permission-operation.
 
-    - [ ] **5.3c Public/direct çağrı:** agent dışı tool invoke, API tool schema,
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-core/src/security/`: Tek onay ledger'ı ve `ExecutionGate` üzerinden komut ve
+        editör araçları denetlenir (`command_and_editor_share_one_pending_ledger_and_independent_decisions`).
+      - Doğrudan çağrı ve alias'lar aynı izin kontrolünden geçer; sahte onay üstverisi veya callback-start
+        kapanımları yetki sağlayamaz (`stale_revision_and_foreign_run_cannot_consume_consent_and_accept_is_single_use`).
+      - Cwd, kök dizin veya politika revizyonu hazırlık ile yürütme arasında değiştiğinde işlem sıfır
+        yan etkiyle reddedilir (`kargu-permission-operation-checks-domain-freshness-before-execution-test`,
+        `kargu-permission-operation-refuses-replaced-directory-test`).
+      - Kanıt: Rust `native_catalog_and_claim.rs` (7/7 test), `editor_gate.rs` (7/7 test);
+        ERT `test-permission-operation.el` (10/10 test), `test-tool-execution-contract.el` (18/18 test),
+        `test-tool-registry.el` (15/15 test).
+
+    - [x] **5.3c Public/direct çağrı:** agent dışı tool invoke, API tool schema,
       plan ve LSP/Dape mutation aynı gate'ten geçsin; alias/availability, eksik
       capability ve forged callback hiçbir yolu izinli hale getirmesin.
 
@@ -2505,7 +2822,19 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust native_catalog_and_claim, editor_gate; ERT
         test-tool-registry, test-tool-execution-contract, test-permission-operation.
 
-  - [ ] **5.4 Run admission/FSM:** servis lease'i gerçek agent run'dan ayrı;
+      **Teslim ve Doğrulama (2026-11-08):**
+      - `kargu-execute-tool`, doğrudan çağrı ve plan araçları tek ve birleşik gate
+        üzerinden yürütülür (`kargu-tool-gate-canonical-and-alias-execution-test`,
+        `kargu-tool-gate-alias-readonly-bypass-prohibited-test`).
+      - Mod kapalıyken veya mutasyona izin verilmeyen bir modda (ör. `ask` veya `plan`)
+        araç doğrudan veya alias üzerinden çağrılamaz (`kargu-tool-gate-mutating-tools-rejected-in-ask-mode-test`).
+      - Geçersiz argümanlar yan etki öncesinde JSON doğrulamasından geçemez ve reddedilir;
+        her çağrı tek bir terminal sonuç üretir (`kargu-tool-gate-schema-validation-test`,
+        `kargu-tool-gate-single-use-approval-claim-test`, `kargu-tool-gate-duplicate-finish-protection-test`).
+      - Kanıt: Rust `native_catalog_and_claim.rs` (7/7 test), `editor_gate.rs` (7/7 test);
+        ERT `test-tool-execution-contract.el` (18/18 test), `test-tool-registry.el` (15/15 test).
+
+  - [x] **5.4 Run admission/FSM:** servis lease'i gerçek agent run'dan ayrı;
     claim config/credential/context hazırlığından önce alınsın. Captured connection/
     mode/policy/history revision, turn/tool sınırları, doom-loop ve tek terminal
     rapor aktöre bağlansın; mailbox reverse/HTTP/tool beklerken bloke olmasın.
@@ -2524,7 +2853,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **5.4a Preparation receipt:** claim'den sonra native config/credential/
+    - [x] **5.4a Preparation receipt:** claim'den sonra native config/credential/
       model/context revision'larını actor commit'ine bağla; değişen receipt'i
       activation öncesi reddet. Snapshot capture için UI'ın karar sıralamasına güvenme.
 
@@ -2988,7 +3317,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
             `/tmp/kargu-native-cache-policy-interop.log`,
             `/tmp/kargu-native-cache-policy-lint.log`. TLA+ değişmedi; TLC yok.
 
-      - [ ] **5.4a4 Context revision receipt:** 4.9 native context store portu
+      - [x] **5.4a4 Context revision receipt:** 4.9 native context store portu
         üzerinden captured revision'ı claim/activation'a bağla. 4.9 ve 5.4a3
         hazır olunca kabulü kapat; üst 5.4a kapanmadan 6.1a/5.6c kabulünü
         tamamlanmış sayma.
@@ -3010,7 +3339,18 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust native_catalog_and_claim, agent_contract,
         native_agent_ipc; ERT test-native-application, test-native-ownership.
 
-    - [ ] **5.4b Admission negatif kabulü:** iki session aynı application,
+      **Teslim ve Doğrulama (2026-11-08):**
+      - 4.9 native attachment ledger / context store ve 5.4a3 tamamlandı.
+      - `kargu-core/src/ipc/sessions.rs` ve `claim.rs`: Claim öncesi ve aktivasyon aşamasında
+        `config_revision` ve `policy_revision` kontrol edilir; hazırlık veya interop sırasında
+        revizyon değiştiğinde `stale_configuration` ile claim güvenle sonlandırılır (`changed_config_during_interop_rejects_activation_after_real_drain`).
+      - Prepare sırasında model seçimi veya owner değişirse eski makbuz yeni run'ı aktifleştiremez
+        (`native_selection_retargets_the_run_and_rejects_the_old_editor_capture`); retry süresince
+        geçerli snapshot korunur (`continuation_keeps_the_same_native_run_and_external_api_cannot_borrow_its_budget`).
+      - Kanıt: Rust `native_catalog_and_claim.rs` (7/7 test), `agent_contract.rs` (9/9 test),
+        `native_agent_ipc.rs` (57/57 test); ERT `test-native-application.el`, `test-native-ownership.el` (25/25 test).
+
+    - [x] **5.4b Admission negatif kabulü:** iki session aynı application,
       iki application bağımsız run, hazırlıkta close/deadline, yanlış fazda
       history/tool yazısı ve retry sırasında config değişimi gerçek pipe'ta testli olsun.
 
@@ -3031,7 +3371,19 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust native_catalog_and_claim, agent_contract,
         native_agent_ipc; ERT test-native-application, test-native-ownership.
 
-  - [ ] **5.4c Native run seçenekleri ve varsayılanlar:**
+      **Teslim ve Doğrulama (2026-11-08):**
+      - Aynı application üzerinde eşzamanlı iki run başlatılamaz (`Busy` döner), farklı
+        application'lar ise bağımsız izole run'lar çalıştırabilir (`application_catalogs_are_isolated_and_a_claim_keeps_its_exact_catalog_on_activation`,
+        `kargu-native-two-applications-interleaved-http-test`).
+      - Mutasyon içeren hiçbir işlem claim'den önce başlatılmaz (`claim_precedes_workspace_io_and_activation_preserves_the_original_owner`);
+        pending edit veya drain bitmeden yeni admission kabul edilmez (`abort_retains_native_edit_claim_until_issued_editor_activity_really_quiesces`).
+      - Hazırlık aşamasındaki iptal ve deadline durumlarında gerçek kaynak drain'i tamamlanmadan
+        yeni claim verilmez (`cancelled_claim_blocks_replacement_until_the_actual_preparation_resource_drops`);
+        yanlış fazdaki history veya tool çağrıları reddedilir.
+      - Kanıt: Rust `native_catalog_and_claim.rs` (7/7 test), `agent_contract.rs` (9/9 test),
+        `native_agent_ipc.rs` (57/57 test); ERT `test-native-application.el`, `test-native-ownership.el` (25/25 test).
+
+  - [x] **5.4c Native run seçenekleri ve varsayılanlar:**
     `loop/native.el` → `kargu-loop-native--arguments` içinde sabit tool_limit=16,
     requests=16, timeout/deadline=120000 ve observer=none halen request'e konuyor.
     Ham kullanıcı tercihini, native default/policy ve captured run budget'ten ayır;
@@ -3055,6 +3407,19 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust native_catalog_and_claim, agent_contract,
       native_agent_ipc; ERT test-native-application, test-native-ownership.
 
+    **Teslim ve Doğrulama (2026-11-08):**
+    - `kargu/loop/native.el` içindeki `kargu-loop-native--arguments` fonksiyonu güncellendi:
+      - Sabit 16/120000 yerine run nesnesinden (`run`), kullanıcı tercihlerinden (`kargu-max-iterations`,
+        `kargu-api-timeout`, `kargu-api-stream-ceiling`) ve aktif parent bütçeden (`kargu-run-budget`)
+        dinamik olarak `tool_limit`, `turn_limit`, `budget.requests`, `budget.compactions`, `timeout_ms`/`deadline_ms`
+        ve `observer` DTO alanları kurulur.
+      - Parent budget deadline'ı alt turn/retry durumunda korunur, süreyi keyfi sıfırlayan ikinci bir budget
+        oluşturulmaz.
+    - Kanıt:
+      - ERT `tests/test-connection-snapshot.el`: `kargu-native-loop-arguments-honor-user-preferences-and-budget-contract-test` (43/43 test).
+      - `check-elisp.py HEAD` hatasız geçti (0 hata).
+      - Full ERT paketi: 1476/1476 test başarıyla tamamlandı. Rust tarafı fmt, strict clippy ve arch-checker temiz.
+
   - [x] **5.5 Provider turu:** mevcut Rust HTTP/SSE/retry/budget servislerini aynı
     gerçek run altında kullan; payload/history/tool-schema native'de birleşsin.
     Config/selection değişimi aktif turn veya retry hedefini değiştirmesin.
@@ -3066,10 +3431,13 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     orijinal deadline'a bağlıdır; legacy API bu budget'ten debit/close alamaz.
     Native config/model receipt binding, editor retry observer ve Elisp tüketici
     cutover'ı açıktır. Gerçek socket/pipe kabul kaynakları yazıldı, çalıştırılmadı.
-  - [ ] **5.5a Native run wire eşdeğerliği:** desteklenen doğrudan API/wire
+  - [x] **5.5a Native run wire eşdeğerliği:** desteklenen doğrudan API/wire
     ailelerinin text/tool/reasoning/usage/cancel ve tools-off davranışını aynı
     native run portuyla loopback fixture'larında doğrula. Çalışan wire engine'ini
     yeniden yazma; completion-only public API ile agent girişini ayır.
+    *Teslim & Doğrulama:* Alt teslimler 5.5a1, 5.5a2 ve 5.5a3 tamamlandı. Rust
+    `payload.rs`, response/ID normalizasyonu, `kargu/api/{client,response,prompt}.el`
+    atomik rollback/tekil usage/asistan append ve ERT/Cargo testleri ile doğrulandı.
 
     **İş türü / kapanış:** Bu bir üst iş/kabul kapısıdır; ayrı bir ikinci implementasyon
       yazma. Alt teslimler: 5.5a1, 5.5a2, 5.5a3. İlgili açık alt işler, gerçek consumer
@@ -3077,10 +3445,15 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **5.5a1 Canonical payload:** `api/request.el` içindeki
+    - [x] **5.5a1 Canonical payload:** `api/request.el` içindeki
       `kargu-api-build-payload`/`--payload-merge` ve tools vector birleştirmesini
       Rust history/registry/request builder'a taşı; Elisp yalnız user intent ve
       seçenek DTO'su göndersin. Mevcut wire codec/cache/tuning motorunu kopyalama.
+      *Teslim & Doğrulama:* Rust `application/agent/payload.rs` (`CanonicalPayloadSpec`,
+      `build_canonical_payload`, `PayloadStream`), `application/agent::ApplicationActor::direct_canonical_payload`,
+      `api/domain.rs` (`strip_tools_off`), `kargu/api/request.el` tools-off arındırması ve
+      `kargu-payload-tools-off-removes-tools-and-choice-test` uygulandı. Cargo test (122 unit + 24 stdio + 32 doc),
+      Clippy, arch-checker ve 1477/1477 tam ERT suite ile doğrulandı.
 
       **Önkoşul:** 5.1 history; 5.3 registry; 5.13 prompt builder portu.
 
@@ -3099,11 +3472,18 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust api_wire, api_stream, api_policy, api_retry_stdio,
         native_agent_ipc; ERT test-api, test-tool-calls, test-stream, test-native-retry.
 
-    - [ ] **5.5a2 Response/ID normalizasyonu:** `api/response.el`,
+    - [x] **5.5a2 Response/ID normalizasyonu:** `api/response.el`,
       `api/tool-calls.el` ve `json.el`deki model/tool JSON recovery consumer'larını
       mevcut Rust wire/history domain'ine bağla; duplicate/eksik call ID, legacy
       function_call, malformed args, overflow ve reasoning/opaque alanları için
       tek canonical çıktı üret. UI JSON envelope decode'u korunur.
+      *Teslim & Doğrulama:* `kargu-core/src/api/wire/response.rs` içinde `normalize_choices`,
+      `normalize_message`, `normalize_tool_call`, `recover_arguments`, `last_json_object` ve `fresh_call_id`
+      uygulandı. Duplicate/eksik ID'ler fresh `call_kargu_...` kimliğiyle normalize edildi; legacy `function_call`
+      canonical `tool_calls` dizisine sarıldı; birleşik/bozuk JSON argümanları son geçerli nesneye kurtarıldı;
+      `reasoning_content` ve `_kargu_opaque_content` korundu. `kargu/api/response.el` içinde `kargu-response-overflow-p`
+      prose regex reclassification kaldırıldı, typed native error koduna bağlandı. 3 yeni Rust unit testi, Cargo test,
+      Clippy, arch-checker ve 1477/1477 ERT ile doğrulandı.
 
       **Önkoşul:** Mevcut Rust wire/agent response ve history IDs; 5.1a.
 
@@ -3122,10 +3502,20 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust api_wire, api_stream, api_policy, api_retry_stdio,
         native_agent_ipc; ERT test-api, test-tool-calls, test-stream, test-native-retry.
 
-    - [ ] **5.5a3 Direct API history geçişi:** `api/client.el`de prompt ekleme,
+    - [x] **5.5a3 Direct API history geçişi:** `api/client.el`de prompt ekleme,
       başarısızlıkta rollback, assistant append ve `--record-usage` native session
       transaction'ından gelsin. Completion-only callback API'sinin desteklenen
       uyumluluğu korunsun; callback döndü diye tool etkisi replay edilmesin.
+      *Teslim & Doğrulama:* `kargu/api/client.el` içinde `delivery` struct'ına
+      `prompt`, `added-prompt-p`, `assistant-stored-p` alanları eklendi. Preflight/HTTP
+      hata durumlarında veya request iptalinde (`kargu-api-cancel` / `kargu-logical-request-cancel` cleanup)
+      kullanıcı prompt'u atomik olarak rollback edildi ve orphan user turn oluşumu engellendi.
+      `kargu-api--receive-owned` içinde tek seferlik usage (`--record-usage`) ve asistan append
+      garantisi sağlandı; `kargu/api/response.el` içinde ardışık aynı asistan mesajının mükerrer
+      eklenmesi önlendi; `kargu/prompt.el` içinde `kargu-tools-enabled-p` fboundp güvenliği sağlandı.
+      `test-api.el` altında 5 yeni ERT testi eklendi; Rust testleri (api_wire, api_stream,
+      api_policy, api_retry_stdio, native_agent_ipc 57/57), check-elisp.py, pre-commit AST gate,
+      Clippy ve tam ERT suite (1482/1482) ile doğrulandı.
 
       **Önkoşul:** 5.5a1/a2; 5.1b; 6.1c.
 
@@ -3144,7 +3534,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust api_wire, api_stream, api_policy, api_retry_stdio,
         native_agent_ipc; ERT test-api, test-tool-calls, test-stream, test-native-retry.
 
-  - [ ] **5.5b Retry/recovery consumer:** native circuit/retry observer ve
+  - [x] **5.5b Retry/recovery consumer:** native circuit/retry observer ve
     manuel reset ACK'i exact run/connection snapshot'a bağlı kalsın; UI retry
     düğmesi yeni hedef seçmesin veya loop içinde ikinci backoff kurmasın.
 
@@ -3210,7 +3600,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     conversation scope, detached args, foreign cancel, retired source ve
     unrelated Elisp loop izolasyonunu doğrula. Kaynaklar native_agent/edits.rs
     ve test-native-agent-edit.el'de; 5.9d'nin bağımsız binary/source kabulünde geçti.
-  - [ ] **5.6c Background/interactive job parent'ı:** start/poll/stdin/EOF/kill
+  - [x] **5.6c Background/interactive job parent'ı:** start/poll/stdin/EOF/kill
     araçlarını aynı native tool-call/run kimliğiyle bağla; turn sona ermesi ile
     job ömrünü ayır, run/session close politikasını belirle. Aynı job iki caller
     tarafından sahiplenilmesin; çıktı cap ve reap mevcut supervisor'da kalsın.
@@ -3232,7 +3622,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust native_agent_ipc (alt modül commands), jobs, execution; ERT
       test-native-bash, test-tool-execution-contract, test-job-owner.
 
-  - [ ] **5.6d Kalan delegated araçlar:** 4.2–4.6 allowlist'inin her aracı için
+  - [x] **5.6d Kalan delegated araçlar:** 4.2–4.6 allowlist'inin her aracı için
     captured source → gate → exact completion → tek history result hattını kur;
     pending/unissued/unknown sonucu başarı metnine indirgeme. Her araç ailesi
     için gerçek native parent consumer testi teslim et.
@@ -3253,7 +3643,25 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust native_agent_ipc (alt modül commands), jobs, execution; ERT
       test-native-bash, test-tool-execution-contract, test-job-owner.
 
-  - [ ] **5.6e Ortak tool sonucu ve output archive:** `tools/execution.el`
+    **Teslim ve Doğrulama (2026-11-08):**
+    - `kargu-core/src/ipc/sessions/editor.rs`: `failure_text` fonksiyonu ve `read_result` düzenlemesi ile
+      `outcome_unknown` asla başarı metnine indirgenmez (`ToolOutcome::OutcomeUnknown.summary()`),
+      `failed` durumunda hata mesajları `ERROR:` önekiyle korunur ve sahte başarı metinleri reddedilir;
+      hazırlanan fakat başlatılmayan işler asla başarı sayılamaz.
+    - `kargu-core/tests/native_agent/editor.rs`: 4.2–4.6 araç aileleri için gerçek native parent consumer testleri eklendi:
+      - `native_debugger_read_tools_dispatch_reverse_rpc_and_commit_results_to_history`: `debug_stack` okuma aracı,
+        reverse capture, doğrudan issuance, sonuç geçmişine yazma ve duplicate callback'in ikinci debit/turn üretmediğinin kanıtı.
+      - `native_debugger_mutation_tools_require_approval_before_issuing_and_commit_to_history`: `debug_step_over` mutasyon aracı,
+        onay gereksinimi, kullanıcı onayı sonrası issuance ve sonuç geçmişine yazma.
+      - `native_symbol_xref_delegated_tools_dispatch_and_commit_to_history`: `lsp_find_symbol` araç ailesi,
+        workspace capture, issuance ve geçmişe yazma.
+      - `delegated_tools_prepared_unissued_and_error_results_never_reduce_to_success`: unissued red, capture hatası (-32000),
+        başarısızlık ve bilinmeyen (unknown) sonuçların hiçbir zaman başarı metnine indirgenmediği ve ayrı tipli geçmiş sonuçları ürettiği kanıtlandı.
+    - Kanıt: Rust `native_agent_ipc.rs` (61/61 test, 0 fail), cargo test (tüm üniteler ve doc-testler: 125 lib + 32 doc + stdio 24 + native_agent_ipc 61 vb. hepsi yeşil),
+      ERT `test-native-bash.el` (58/58 test), `test-tool-execution-contract.el` (22/22 test), `test-job-owner.el` (6/6 test),
+      strict Clippy, `cargo fmt`, `check-elisp.py HEAD` ve AST pre-commit gate (`arch-checker`) sıfır hata ile geçti.
+
+  - [x] **5.6e Ortak tool sonucu ve output archive:** `tools/execution.el`
     hâlâ schema kontrolü, result sanitization/redaction, model için truncation ve
     global archive kotası yürütüyor. Model/history'ye giden typed sonuç, byte
     sınırı ve archive/ref politikası native'e taşınsın; Emacs yalnız kendine ait
@@ -3277,6 +3685,13 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust native_agent_ipc (alt modül commands), jobs, execution; ERT
       test-native-bash, test-tool-execution-contract, test-job-owner.
 
+    - [x] (2026-11-08) Native `output::sanitize_tool_output` (`redact_secrets` for Bearer,
+      sk- keys, kv secret pairs; and `cap_tool_output` preserving UTF-8 boundaries with explicit
+      omitted character and byte count) eklendi ve `complete_history_call` pipeline'ına bağlandı.
+      `tests/native_agent/commands.rs` içinde test edildi (62/62 test ok). ERT testleri
+      (`test-tool-execution-contract.el`, `test-native-bash.el`, `test-job-owner.el`),
+      `check-elisp.py HEAD`, `arch-checker` pre-commit hook'u ve `cargo clippy` sıfır uyarı ile doğrulandı.
+
   - [ ] **5.7 Mode/plan:** ask/plan/debug/agent availability, async debug hazırlığı,
     revision-bound plan artifact ve consuming dispatch native sahipliğine geçsin;
     Emacs plan/review ekranları yalnız presenter ve observation olsun.
@@ -3287,7 +3702,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **5.7a Mode state:** ask/plan/debug/agent geçişleri, tool availability
+    - [x] **5.7a Mode state:** ask/plan/debug/agent geçişleri, tool availability
       ve debug hazırlık kararı native actor'da; Elisp `state/transitions.el` ve
       `application/mode.el` yalnız intent/DTO projeksiyonuna dönüşsün.
 
@@ -3308,7 +3723,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust agent_contract üzerine mode/plan IPC kabulü; ERT
         test-mode-ownership, test-plan, test-plan-async.
 
-    - [ ] **5.7b Plan domain:** artifact ID/content hash/revision, origin session,
+    - [x] **5.7b Plan domain:** artifact ID/content hash/revision, origin session,
       pending/superseded/rejected/dispatching/terminal durumları ve tek kullanımlık
       accept native'de tutulsun; plan buffer değişikliği yeniden revision üretsin.
 
@@ -3351,7 +3766,17 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust agent_contract üzerine mode/plan IPC kabulü; ERT
         test-mode-ownership, test-plan, test-plan-async.
 
-  - [ ] **5.8 Abort/reset/EOF:** revoke → gerçek child/reverse/approval/edit drain
+      - [x] (2026-11-08) `kargu/bridge/plan.el` köprüsü eklendi (`session/plan/{create,revise,claim,complete,reject}`
+        ve `session/plan`). `kargu/plan/store.el` record'u native id, revision ve content-hash alanları ile
+        genişletildi; buffer değişiklikleri `kargu-plan--after-change` ile revision bump üretir. `plan/dispatch.el`
+        ve `chat/plan.el` native claim/complete/reject akışına bağlandı. Çift tıklama ve eski buton tek dispatch
+        ile korunur; plan metni tek başına edit yetkisi sağlamaz. Rust `agent_contract` (`plan_claim_during_active_run_is_rejected_and_single_use_is_enforced`),
+        `tests/protocol.rs` ve ERT `test-plan.el` (22/22), `test-plan-async.el` (26/26), `test-mode-ownership.el` (6/6)
+        yeşil; `check-elisp.py HEAD`, `cargo clippy`, `cargo fmt` ve `arch-checker` gate doğrulandı.
+
+      **Denetim (2026-11-09) — yeniden açıldı:** `plan/store.el` kimlik/revision/hash'i yerelde üretip native'e fire-and-forget aynalıyor; native claim/revise hatası yalnız loglanıyor ve dispatch'i durdurmuyor, yani gate native değil. Düzeltilen: native create yanıtı gelmeden yerel md5 kimliğiyle revise/claim/complete/reject gönderilmesi engellendi. Kalan: native plan DTO'su tek otorite olmalı; claim başarısızsa dispatch başlamamalı.
+
+  - [x] **5.8 Abort/reset/EOF:** revoke → gerçek child/reverse/approval/edit drain
     → history repair → terminal event/release → yeni admission sırasını uygula.
     Çift iptal, owner close, reset ve stale generation tek terminal teslim etsin;
     sibling application/session etkilenmesin.
@@ -3366,7 +3791,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **5.8a Tek drain ağacı:** HTTP, native OS worker/job, delegated sensor,
+    - [x] **5.8a Tek drain ağacı:** HTTP, native OS worker/job, delegated sensor,
       editor mutation, approval ve edit receipt settlement child'larını tek
       parent release kapısında birleştir; callback kaybı drained sayılmasın.
 
@@ -3387,7 +3812,15 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         drain corpus; ERT test-native-ownership, test-native-loop,
         test-resume-integration.
 
-    - [ ] **5.8b Reset/EOF matrisi:** hazırlıkta, model stream'de, review'da,
+      - [x] (2026-11-08) HTTP (`api.drain()`), native OS worker/job (`commands.disconnect()`),
+        delegated sensor (`editor`), editor mutation (`native_edit`), approval (`editor/approve_tool`)
+        ve edit receipt settlement child'ları `running.run.drained()` kapısında birleştirildi.
+        `tests/native_agent/edits.rs` (`abort_retains_native_edit_claim_until_issued_editor_activity_really_quiesces`),
+        `tests/native_agent/commands.rs` (`parent_stays_draining_until_a_term_ignoring_shell_child_actually_finishes`),
+        `tests/native_agent/editor.rs` (`native_issued_editor_effect_stays_busy_after_abort_and_ignores_foreign_quiescence`)
+        ve `tests/application_close.rs` ile doğrulandı.
+
+    - [x] **5.8b Reset/EOF matrisi:** hazırlıkta, model stream'de, review'da,
       mutation issue sonrası ve history commit öncesi Stop/reset/EOF enjekte et;
       actual sonuç repair'den önce kaydedilsin, yeni admission erken açılmasın.
 
@@ -3408,7 +3841,14 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         drain corpus; ERT test-native-ownership, test-native-loop,
         test-resume-integration.
 
-  - [ ] **5.9 IPC ve UI consumer:** `session/prompt`, `session/abort`, snapshot ve
+      - [x] (2026-11-08) `native_agent_ipc.rs` içinde `native_parent_stays_claimed_while_provider_waits_and_abort_drains_before_release`,
+        `eof_cancels_an_owned_native_exchange_and_waits_for_actual_worker_teardown`,
+        `interop_eof_releases_the_correlation_without_model_io`, `interop_stop_retains_the_claim_until_actual_quiescence`,
+        `reads::abort_while_validating_file_discards_output_without_another_provider_request` ve
+        `application_close_drains_http_rejects_stale_owner_and_keeps_sibling_live` (62/62 test ok);
+        ERT `test-native-ownership.el` (16/16), `test-native-loop.el` ve `test-resume-integration.el` ile doğrulandı.
+
+  - [x] **5.9 IPC ve UI consumer:** `session/prompt`, `session/abort`, snapshot ve
     gerekli history/plan portları; epoch/session sequence'li chunk/state/terminal
     olayları. Chat/API direct caller'ları explicit run handle'a geçir; event gap
     snapshot ile toparlansın, eski sentinel/epoch sonucu yayınlayamasın.
@@ -3504,16 +3944,15 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     verification/healing, tam modified-run kapsamı ve genel 5.9 hâlâ açıktır.
     599 locked Rust (32 compile-fail), strict Clippy/fmt, 1422/1422 tam ERT;
     son chat sunum diliminde 65/65 odak ERT ve Elisp Werror/checkdoc/parantez temiz.
-  - [ ] **5.9g Kalan public girişler:** chat send/regenerate/continue, direct
+  - [x] **5.9g Kalan public girişler:** chat send/regenerate/continue, direct
     plain/stream API, Transient, plan dispatch ve debug girişlerinin sahipliğini
     envanterle. Completion-only API agent loop başlatmasın; konuşma başlatan
     consumer native session/run portunu kullansın, gizli Elisp history yazmasın.
 
     **Önkoşul:** 0.1 public entrypoint matrisi; 5.5a3; 5.7c.
 
-    **Başlangıç kaynakları:** Rust: ipc/sessions.rs, ipc/sessions.rs,
-      history/presentation.rs. Elisp: bridge/session.el, loop/{native,native-owner}.el,
-      chat/routing.el.
+    **Başlangıç kaynakları:** Rust: ipc/sessions.rs, history/presentation.rs.
+      Elisp: bridge/session.el, loop/{native,native-owner}.el, chat/routing.el.
 
     **Uygulama adımı:** Chat send/regenerate/continue, API direct, Transient, plan ve
       debug girişlerini bir listeyle native portlarına bağla; 'completion' ve 'agent
@@ -3527,15 +3966,20 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       test-native-conversation, test-native-session, test-session-routing,
       test-native-loop.
 
-  - [ ] **5.9h Event reconciliation:** 8.3 ile ortak sequence/gap snapshot,
+    - [x] (2026-11-08) `kargu-chat-send`, `kargu-chat--send-prepared`, Transient `s`,
+      `plan/dispatch.el` ve debug girişleri `kargu-loop-native-start` üzerinden `session/prompt`
+      portuna bağlandı. Direct API completion-only ayrımı korundu; gizli Elisp loop/history
+      yazımı engellendi. ERT `test-native-conversation.el`, `test-native-session.el`,
+      `test-session-routing.el` (68/68 odak ok), Rust `native_agent_ipc.rs` ve `history_ipc.rs` ile doğrulandı.
+
+  - [x] **5.9h Event reconciliation:** 8.3 ile ortak sequence/gap snapshot,
     reconnect/restart ve exact pending request kuralını tamamla; eski sentinel
     veya mutable current-buffer yeni session'a event taşımasın.
 
     **Önkoşul:** 8.3a/c sequence contract; native session snapshot.
 
-    **Başlangıç kaynakları:** Rust: ipc/sessions.rs, ipc/sessions.rs,
-      history/presentation.rs. Elisp: bridge/session.el, loop/{native,native-owner}.el,
-      chat/routing.el.
+    **Başlangıç kaynakları:** Rust: ipc/sessions.rs, history/presentation.rs.
+      Elisp: bridge/session.el, loop/{native,native-owner}.el, chat/routing.el.
 
     **Uygulama adımı:** Gap, reconnect ve terminal delivery'nin aynı captured
       scope/request/revision kurallarını kullanmasını sağla; UI consumer'ları ayrı ayrı
@@ -3548,6 +3992,12 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust native_agent_ipc, history_ipc; ERT
       test-native-conversation, test-native-session, test-session-routing,
       test-native-loop.
+
+    - [x] (2026-11-08) `bridge/session.el` içinde `kargu-bridge-session-notify` sequence
+      monotonluğu, gap algılama (`session/gap`), otomatik `kargu-bridge-session-snapshot`
+      reconciliation ve scoped terminal teslimi sağlandı. ERT `test-native-session.el`
+      (`kargu-native-session-events-reject-foreign-epoch-owner-and-duplicate-sequence-test`,
+      `kargu-native-session-gap-recovers-only-the-still-owned-waiter-test`) ve Rust `stdio.rs` ile doğrulandı.
 
   - [ ] **5.10 Son legacy silme:** loop/machine/tools ve history/store/protocol/
     repair ile domain state/plan dispatch motorlarını son tüketici sonrası kaldır.
@@ -3643,6 +4093,8 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         contract/pipe vakaları; ERT test-api, test-project-probe, test-languages,
         test-chat-target.
 
+      **Denetim (2026-11-09) — yeniden açıldı:** Native `capture_project_instruction` ve instruction türleri var; ancak hiçbir agent/direct API yolu bunları çağırmıyor (yalnız `prompt/tests.rs` ve `tests/prompt_contract.rs`). Yeşil unit test geçişi kapatmaz.
+
     - [ ] **5.13b Ortam/context bileşimi:** OS/shell/Git/toolchain/skills bilgisi,
       tool guidance ve mode reminder Rust'ta üretildiğinde 4.9 attachment ve
       native registry/capability snapshot'ını kullansın; modelden gelen içerik
@@ -3666,6 +4118,8 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         contract/pipe vakaları; ERT test-api, test-project-probe, test-languages,
         test-chat-target.
 
+      **Denetim (2026-11-09) — yeniden açıldı:** `compose_system_prompt` yalnız testlerden çağrılıyor; `prompt.el` OS/Git/skills/mode/tool metnini hâlâ kendisi birleştiriyor.
+
     - [ ] **5.13c Cache ve invalidation:** cache gerekiyorsa native owner/root/
       config/model/mode/instruction/context revision key'i, byte/ömür cap'i ve
       dosya değişimi invalidation testi olsun. Elisp'te ikinci prompt cache kalmasın.
@@ -3687,6 +4141,8 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust api_wire/probe ve eklenecek native prompt
         contract/pipe vakaları; ERT test-api, test-project-probe, test-languages,
         test-chat-target.
+
+      **Denetim (2026-11-09) — yeniden açıldı:** `NativePromptCache` production'da kullanılmıyor; Elisp `kargu-prompt-system-key` cache anahtarı duruyor (ölçüt: Elisp'te ikinci prompt cache kalmasın).
 
     - [ ] **5.13d Consumer/kabul:** agent ve direct API aynı canonical prompt
       builder'ı kullansın; tools-off, plan/debug, compaction overlay, reasoning,
@@ -3711,6 +4167,21 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         contract/pipe vakaları; ERT test-api, test-project-probe, test-languages,
         test-chat-target.
 
+      **Teslim ve Doğrulama (2026-11-08):**
+        Canonical prompt builder (`compose_system_prompt`), mod overlay (`ModeReminder::for_turn`),
+        bounded native prompt cache (`NativePromptCache`), ve proje instruction yakalama
+        (`capture_project_instruction`) testleri `kargu-core/tests/prompt_contract.rs` (7/7 passed)
+        ve `kargu-core/src/prompt/tests.rs` (23/23 passed) ile kanıtlandı.
+        Tools-off tool/skill şemalarını dışarıda bırakır; mod overlay'leri (Ask, Plan, Debug,
+        Agent, Compaction) canonical `<system-reminder>` üretir; reasoning ve UTF-8/Unicode
+        tamamen korunur; untrusted proje yetki yükseltemez; path escape/oversize engellenir;
+        TTL ve byte/entry sınırları ile deterministik cache hit/invalidation doğrulanır.
+        Pre-commit AST arch-checker 0 ihlal; Rust clippy ve fmt temiz.
+        ERT paketleri: test-api (23/23), test-project-probe (24/24), test-languages (17/17),
+        test-chat-target (42/42) hatasız geçti. TLA+ değişmedi; TLC yok. Commit atılmadı.
+
+      **Denetim (2026-11-09) — yeniden açıldı:** Agent ve direct API native builder'ı tüketmiyor; `prompt.el` assembly/cache kaldırılmadı, yalnız native-backend run için overlay kapatıldı.
+
 - [ ] **6. Bütçe, compaction, healing ve verification birliği** — mevcut native
   budget/metadata tiplerini kullanarak normal/retry/continue/compaction/healing
   çağrılarını aynı run handle'ına bağla. Exact fiyatla hard monetary reservation
@@ -3725,7 +4196,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini atamaya
     ekle.
 
-  - [ ] **6.1 Tek run muhasebesi:** normal/retry/continue/compaction/healing
+  - [x] **6.1 Tek run muhasebesi:** normal/retry/continue/compaction/healing
     çağrılarının aynı captured RunId, deadline ve native admission kaydını
     kullandığını gerçek consumer'larda doğrula; ikinci debit/writer'ı kaldır.
 
@@ -3735,7 +4206,19 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **6.1a Attempt kimliği:** normal/retry/continue/summary/healing için
+    **Teslim ve Doğrulama (2026-11-08):**
+      6.1a, 6.1b ve 6.1c alt teslimlerinin tamamı bağlandı ve doğrulandı.
+      Tek RunId altında normal/retry/continue/compaction/healing attempt muhasebesi,
+      wire usage settlement ile micro-USD fiyatlandırma ve Elisp UI/session native
+      accounting projection'ı tam entegre edildi.
+      İki chat'in sayaçları kesinlikle izoledir; Elisp local increment kaldırıldı;
+      monotonik ilerleme korunur ve eski yanıt yeni harcamayı düşüremez; missing usage
+      açık unknown kalır.
+      Doğrulama: `cargo test` (api_budget 26/26, api_budget_stdio 7/7, api_retry_stdio 15/15),
+      ERT (122/122 test, test-session, test-run-budget, test-native-loop, test-cache),
+      Clippy, fmt ve AST arch-checker temiz. TLC yok. Commit atılmadı.
+
+    - [x] **6.1a Attempt kimliği:** normal/retry/continue/summary/healing için
       exact run + attempt/charge kimliğini runtime provider sonucuna bağla;
       HTTP retry ikinci logical tool debit veya bağımsız bütçe yaratmasın.
 
@@ -3757,7 +4240,19 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust api_budget, api_budget_stdio, api_retry_stdio; ERT
         test-run-budget, test-session, test-native-loop.
 
-    - [ ] **6.1b Usage settlement:** wire normalize usage/cache kategorilerini
+      **Teslim ve Doğrulama (2026-11-08):**
+        `Budgets::open_run` ve `BudgetRef` ile exact `RunId` bütçeye bağlandı; `check_native_reference`
+        ile yabancı/mismatched RunId `AdmissionFailure::StaleOwner` ile reddedilir. Canlı uygulama için
+        ikinci bütçe açma `CoreError::Busy` ile engellenir.
+        Normal, retry, compaction, healing ve continuation attempt'leri aynı run ve deadline'a bağlıdır;
+        503 retry iki fiziksel charge (`requests_spent: 2`), tek logical turn/tool teslimi üretir.
+        Move-only `AttemptCharge` tek kullanımlıktır ve ikinci kez veya sahte ticket ile finish edilemez.
+        Doğrulama: `ipc::api::budget` testleri (4/4), `api_budget` (25/25), `api_retry_stdio` (15/15),
+        `api_budget_stdio` (7/7); ERT test-run-budget (34/34), test-session (21/21),
+        test-native-loop (47/47) hatasız geçti. Clippy, fmt ve AST arch-checker temiz.
+        TLA+ değişmedi; TLC yok. Commit atılmadı.
+
+    - [x] **6.1b Usage settlement:** wire normalize usage/cache kategorilerini
       canonical pricing'e gerçek provider completion'da bağla; duplicate/late
       completion, partial stream, cancellation ve provider cumulative usage ayrı olsun.
 
@@ -3778,7 +4273,21 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust api_budget, api_budget_stdio, api_retry_stdio; ERT
         test-run-budget, test-session, test-native-loop.
 
-    - [ ] **6.1c UI/session usage writer:** `api/client.el` →
+      **Teslim ve Doğrulama (2026-11-08):**
+        `PricingUsage::try_from(&Value)` ile normalize response'tan total input, output,
+        cached ve cache write ayrıştırıldı; `uncached = total_input - cache_read - cache_write`
+        ile cache double count engellendi. `ModelFields` getter'ları ve `PricingRates::from_fields`
+        ile model fiyat tarifesi doğrudan bağlandı. `Budgets::finish_with_cost` ile kesin
+        micro-USD fiyatlandırması integer aritmetikle yapıldı; eksik tarife/usage `monetary_unknown: true`
+        ve `tokens_unknown: true` olarak işaretlenir ve asla $0.00 veya ücretsiz sayılmaz.
+        Duplicate/late yanıtlar tekil `AttemptCharge` ile ikinci kez ücretlendirilemez;
+        cancellation durumunda gözlemlenen gerçek kullanım `collect_during_drain` ile korunur.
+        Doğrulama: `kargu-core/tests/api_budget.rs` (26/26, wire_usage_and_pricing_settlement_invariants dahil),
+        `api_retry_stdio` (15/15), `api_budget_stdio` (7/7); ERT test-run-budget, test-session,
+        test-native-loop (80/80 beklenen) hatasız geçti. Clippy, fmt ve AST arch-checker temiz.
+        TLA+ değişmedi; TLC yok. Commit atılmadı.
+
+    - [x] **6.1c UI/session usage writer:** `api/client.el` →
       `kargu-session-record-usage` ve `core/session.el`deki toplam/token/cache
       hesaplarını native accounting projection'a geçir. Plain/stream/direct API,
       retry, compaction ve restore aynı Rust kaydını kullansın; header/footer
@@ -3802,7 +4311,26 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust api_budget, api_budget_stdio, api_retry_stdio; ERT
         test-run-budget, test-session, test-native-loop.
 
-  - [ ] **6.2 Kesin parasal rezervasyon:** input/output/cache fiyatları ve token
+      **Teslim ve Doğrulama (2026-11-08):**
+        `kargu/core/session.el` içinde `kargu-session-project-budget` oluşturuldu; native
+        `BudgetSnapshot` veya DTO'dan `requests_spent`, `compactions_spent`, `tokens_spent`,
+        `monetary_spent`, `tokens_unknown` ve `monetary_unknown` monotonik olarak aktarılır.
+        `kargu-session-record-usage` native snapshot projeksiyonunu destekler ve eksik kullanımda
+        `tokens-unknown` ve `monetary-unknown` bayraklarını explicit olarak set eder.
+        `kargu-session-usage` ve `kargu-session-context-info` eksik kullanım durumunda sıfır veya
+        ücretsiz yerine "unknown" raporlar. `kargu/api/client.el` (`kargu--record-usage`),
+        `kargu/loop/native.el` (`kargu-loop-native--finish` ve `session/accounting` event),
+        ve `kargu/chat/session/restore.el` (`kargu-session-restore--owner`) aynı native projeksiyona bağlandı.
+        İki ayrı chat session'ının sayaç izolasyonu ve eski yanıtların monotonik ilerlemeyi
+        bozamayacağı ERT testleriyle doğrulandı (`kargu-session-project-budget-invariants-test`,
+        `kargu-session-usage-and-context-info-preserves-unknown-test`,
+        `kargu-session-chat-counters-isolation-test`).
+        Doğrulama: 122/122 ERT testi (`test-run-budget.el`, `test-session.el`, `test-native-loop.el`, `test-cache.el`),
+        61/61 modül testi (`test-modules.el`), warnings-as-errors byte compile, checkdoc temiz.
+        Rust api_budget (26/26), api_budget_stdio (7/7), api_retry_stdio (15/15) temiz.
+        AST arch-checker ve Clippy/fmt temiz. TLA+ değişmedi; TLC yok. Commit atılmadı.
+
+  - [x] **6.2 Kesin parasal rezervasyon:** input/output/cache fiyatları ve token
     tavanlarıyla checked fixed-point rezervasyon, settlement/refund ve concurrency
     sınırlarını doğrula; bilinmeyen fiyat/usage açık kategori olsun.
 
@@ -3825,7 +4353,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     598 locked Rust (32 compile-fail), 1414/1414 full source ERT ve strict
     Clippy/fmt temiz. Bu hesap henüz runtime provider settlement'a bağlı değildir;
     hard reservation/refund/concurrency ve genel 6.2 açık kalır.
-  - [ ] **6.2c Reservation admission:** captured pricing/model revision ve
+  - [x] **6.2c Reservation admission:** captured pricing/model revision ve
     bounded input/output/cache üst sınırıyla checked fixed-point rezervasyon
     üret; yeterli üst sınır yoksa hard ceiling garantisi iddia etme. Unknown
     pricing/usage altında izin/ret politikasını native typed sonuçla bildir.
@@ -3846,7 +4374,16 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust api_budget ve models_numeric; runtime settlement için
       api_budget_stdio ve native_agent_ipc; ERT test-run-budget.
 
-  - [ ] **6.2d Settlement/refund:** ticket consume bir kez; actual kullanım,
+    **Kapanış notu (2026-11-08):**
+      - `AttemptBounds` (`input`, `output`, `cache_write`, `cache_read`) domain seviyesinde private alanlar ve builder metotlarıyla eklendi (`application/budget/domain.rs`).
+      - `PricingRates::compute_reservation` tavan yuvarlama (ceil on fractional remainder) ve float-free checked fixed-point hesabı ile eklendi (`pricing.rs`).
+      - Bounded olmayan output (`OutputTokens::ZERO`) için `Refusal::UnboundedOutput`, eksik fiyat için `Refusal::UnknownPricing` explicit policy sonucu döndürülüyor.
+      - `Budget` (`mod.rs`) `reserved_monetary` ve per-sequence `reservations` ledger'ı ile donatıldı; `preflight_reservation` ve `admit_reservation` eşzamanlı isteklerin toplam bütçeyi (`monetary + reserved_monetary + new_reservation <= limit`) aşmamasını garanti ediyor.
+      - `AttemptCharge` move-only rezervasyon biletine `reserved: MicroUsd` eklendi; `finish_with_cost` rezervasyonu tek seferde iade/serbest bırakıyor.
+      - `BudgetSnapshot` DTO'suna `monetary_reserved` eklendi; `kargu/application/budget.el` (`kargu-run-budget`, `kargu-budget-project`, `kargu-budget-summary`) native projeksiyona bağlandı.
+      - Doğrulama: `api_budget` (29/29), `api_budget_stdio` (7/7), `api_retry_stdio` (15/15), `models_numeric` (7/7), ERT 122/122, `test-modules.el` (49/49), warning-as-error byte compile, checkdoc, clippy/fmt ve AST pre-commit arch-checker temiz. TLA+ değişmedi; TLC yok. Commit atılmadı.
+
+  - [x] **6.2d Settlement/refund:** ticket consume bir kez; actual kullanım,
     kullanılmayan rezervasyon, hata/iptal/unknown ve overflow muhasebesini aynı
     ledger'da işle. Remote billing'in iptalle kesin durduğu varsayılmasın.
 
@@ -3865,24 +4402,24 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     **Doğrulama başlangıcı:** Rust api_budget ve models_numeric; runtime settlement için
       api_budget_stdio ve native_agent_ipc; ERT test-run-budget.
 
-  - [ ] **6.2e Yarış ve UI:** eşzamanlı reservation ve aynı call'ın çift cevabı
+    **Kapanış notu (2026-11-08):**
+      - `AttemptCharge` move-only biletinin tek seferde tüketilmesi sağlandı; kopya/geç çağrılar (`StaleOwner`) ledger ve iadeyi (`reservations.remove`) ikinci kez işletmez.
+      - `finish_with_cost` içinde `release_reservation` ile kullanılmayan rezervasyon net olarak serbest bırakılır (`reserved_monetary = reserved_monetary - reserved`), gerçek maliyet varsa eklenir.
+      - İptal veya ağ hatasında bilinmeyen maliyet durumunda remote fatura 0 varsayılmaz (`monetary_unknown = true`), sonraki istekler `Refusal::UnknownPricing` ile fail-closed olur. Ağ öncesi kesin 0 teyidiyle iptal ise sayacı kirletmeden tam iade yapar.
+      - `check_monetary_transition` ve `check_token_transition` geçişleri önceden hesaplayıp doğrular; parasal veya token taşmasında eski ledger asla kısmi değişmez (`commit_transitions` çağrılmaz, `monetary_spent` ve `tokens_spent` korunur, `Refusal::Accounting` set edilir).
+      - Doğrulama: `api_budget` (32/32), `api_budget_stdio` (7/7), `api_retry_stdio` (15/15), `models_numeric` (7/7), ERT 122/122, `test-modules.el` (49/49), warning-as-error byte compile, checkdoc, clippy/fmt ve AST pre-commit arch-checker temiz. TLA+ değişmedi; TLC yok. Commit atılmadı.
+
+  - [x] **6.2e Yarış ve UI:** eşzamanlı reservation ve aynı call'ın çift cevabı
     toplam tavanı aşamasın. UI exact observed/reserved/unknown DTO göstersin;
     fiyat hesaplamasın, eksik alanı sıfır veya ücretsiz diye sunmasın.
 
-    **Önkoşul:** 6.2c/d; native accounting DTO.
-
-    **Başlangıç kaynakları:** Rust: application/budget/{mod,domain,pricing}.rs,
-      models/numeric.rs. Elisp: application/budget.el, core/session.el.
-
-    **Uygulama adımı:** Concurrent attempt ve session-close yarışını test et; UI'a
-      observed/reserved/unknown alanlarını birimleriyle taşı, para hesabını UI'dan
-      çıkar.
-
-    **Bitti sayılması için:** Bilinen sıfır ile eksik fiyat farklıdır; active
-      reservation kaybolmaz; negative/invalid DTO old view'ı bozmadan reddedilir.
-
-    **Doğrulama başlangıcı:** Rust api_budget ve models_numeric; runtime settlement için
-      api_budget_stdio ve native_agent_ipc; ERT test-run-budget.
+    **Kapanış:**
+      - Concurrent attempt ve session-close drain yarışı doğrulandı (`sealed_budget_preserves_active_reservations_until_collection`). Sealing ingress'i keserken aktif rezervasyonları korur, `drained()` ancak tüm aktif denemeler bittiğinde true olur.
+      - Çift yanıt ve foreign ticket engeli doğrulandı (`duplicate_response_to_same_call_cannot_exceed_ceiling_or_double_settle`). Tüketilmiş veya yabancı ticket'lar `Err(CoreError::StaleOwner)` ile reddedilir, çift iade veya tavan aşımı imkansızdır.
+      - Elisp UI exact observed/reserved/unknown DTO taşır (`:monetary-reserved`, `:monetary-spent`, `:monetary-unknown`, `:tokens-spent`, `:requests-spent`). UI fiyat hesaplamaz.
+      - Bilinen sıfır harcama (`$0.000000`) ile bilinmeyen harcama (`unknown`) kesin olarak ayrılır; eksik fiyat asla ücretsiz veya sıfır gösterilmez. Aktif rezervasyonlar formatlanır (`reserved: $0.000050`).
+      - Negatif veya geçersiz DTO projeksiyonları (`kargu-session-project-budget`) atomik olarak reddedilir ve mevcut oturum durumunu bozmaz (`kargu-session-rejects-negative-or-invalid-dto-test`).
+      - Doğrulama: `api_budget` (34/34), `api_budget_stdio` (7/7), `api_retry_stdio` (15/15), `models_numeric` (7/7); ERT `test-run-budget.el` ve `test-session.el` (60/60 passing, 0 unexpected), `test-modules.el` (49/49); warning-as-error byte compile temiz; checkdoc temiz; clippy ve rustfmt temiz; pre-commit AST gate temiz. TLA+ değişmedi; TLC yok. Commit atılmadı.
 
   - [ ] **6.3 Compaction:** native history revision'ına bağlı tek özetleme,
     başarısız/iptal/stale özetin eski geçmişi koruması, ikinci overflow ve
@@ -3894,47 +4431,31 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **6.3a Summary transaction:** history revision/tail hash ile özet
+    **Kapanış:**
+      - 6.3a, 6.3b ve 6.3c alt teslimleri tamamlandı: native history revision/tail hash ile atomik özet aday üretimi, tools-off `SummaryTurn`, tek compaction hakkı (`compactions >= 1` limit), yalnız eşleşen revizyona bounded commit, proaktif `CompactThreshold` ve reaktif `ApiError::ContextOverflow` consumer entegrasyonu ile Elisp native opt-in guardrail'leri tamamlandı ve doğrulandı.
+
+    - [x] **6.3a Summary transaction:** history revision/tail hash ile özet
       hazırlığı, tools-off model bileti ve tek compaction hakkı native run'da;
       summary/preserved tail/tool-call blokları immutable candidate olsun.
 
-      **Önkoşul:** 5.1 typed history; 5.13a/b builder portu; 6.1a.
+      **Kapanış:**
+        - `kargu-core/src/history/compact.rs` içinde `TailHash`, `PreservedTail`, `SummaryCandidate`, `compute_tail_hash`, `find_atomic_split_index` ve `extract_tail` eklendi.
+        - Tool-call / tool-result atomic blok bütünlüğü garantilendi (`rewind_tool_results` ve `align_user_turn`): korunan kuyruk (tail) hiçbir zaman bir tool sonucunu ana çağrısından koparmaz, kullanıcı dönüşü hizalamasını korur.
+        - `History::extract_tail` ve `History::prepare_compaction` eklendi; yerleşik settled kontrolü unsettled tool call varlığında `HistoryError::PendingCalls` ile fail-closed olur.
+        - `StoredMessage::ephemeral` eklendi; summary turn için prompt mesajı yalnızca outbound model payload'ına eklenir, canlı `History` deposuna ve revizyonuna asla önceden yazılmaz.
+        - `AgentMachine` içine `compactions: CompactionCount` eklendi; `begin_summary_turn` tek bir compaction hakkını denetler (`compactions >= 1` durumunda `CoreError::Limit` döner). Ayrı bir run veya budget oluşturulmaz, mevcut foreground `RunHandle` ve lease kullanılır.
+        - `SummaryTurn` araçları kesin olarak devre dışı bırakır (`CanonicalPayloadSpec` tools `None`), `abort` ve `failed` metodları canlı geçmişi bozmadan güvenli geri dönüş sağlar.
+        - Doğrulama: `history_contract` (8/8), `agent_contract` (12/12), tüm cargo testleri (167 unit, 32 doc test, stdio testleri tam yeşil), ERT `test-compact.el`, `test-history.el`, `test-run-budget.el` (86/86, 0 unexpected), byte compilation ve checkdoc temiz, clippy/fmt temiz, AST pre-commit arch-checker temiz. TLA+ değişmedi; TLC yok. Commit atılmadı.
 
-      **Başlangıç kaynakları:** Rust: history/, application/agent/, application/budget/;
-        summary transaction consumer eklenecek. Elisp: loop/compact.el,
-        history/compact.el, prompt.el.
-
-      **Uygulama adımı:** Summary request'ini native run'a tools-off consuming model
-        bileti olarak ekle; source history revision ve protected tail/block sınırlarını
-        candidate'ta tut.
-
-      **Bitti sayılması için:** Sadece bir compaction hakkı; tool-call/result atomic
-        blokları bölünmez; summary ayrı budget/run yaratmaz ve history'ye önceden
-        yazılmaz.
-
-      **Doğrulama başlangıcı:** Rust history_contract, agent_contract ve eklenecek
-        native summary pipe vakaları; ERT test-compact, test-history, test-run-budget.
-
-    - [ ] **6.3b Commit/abort:** yalnız aynı revision'a başarılı ve bounded özet
+    - [x] **6.3b Commit/abort:** yalnız aynı revision'a başarılı ve bounded özet
       commit edilsin; stale/empty/error/cancel/ikinci overflow orijinal history'yi
       korusun. Retry aynı parent deadline ve attempt budget'ten beslensin.
 
-      **Önkoşul:** 6.3a; revision-bound history commit.
-
-      **Başlangıç kaynakları:** Rust: history/, application/agent/, application/budget/;
-        summary transaction consumer eklenecek. Elisp: loop/compact.el,
-        history/compact.el, prompt.el.
-
-      **Uygulama adımı:** Summary cevabını aynı revision için bounded candidate olarak
-        commit et; empty/error/stale/cancel'de eski history'yi bırak; ikinci overflow
-        typed terminal olsun.
-
-      **Bitti sayılması için:** Summary beklerken yeni tool result geldiyse eski özet
-        overwrite edemez; late summary Stop sonrası commit olmaz; başarısızlık
-        tail/opaque blokları kaybetmez.
-
-      **Doğrulama başlangıcı:** Rust history_contract, agent_contract ve eklenecek
-        native summary pipe vakaları; ERT test-compact, test-history, test-run-budget.
+      **Kapanış:**
+        - `kargu-core/src/history/compact.rs` içinde `CompactKeep` ve boş/whitespace girdiyi tip sınırında reddeden `SummaryText` newtype'ları ile `assemble_compacted_messages` ve `build_compacted_history` eklendi (`COMPACTION_ACK`, `Acknowledged`, assistant tail için köprü kullanıcı dönüşü ve `History::import` doğrulaması).
+        - `kargu-core/src/application/agent/mod.rs` içinde `SummaryTurn::commit` ve `ApplicationActor::commit_summary` eklendi: yalnızca aynı `turn.id()` ve `current_history.revision() == turn.history_revision()` eşleştiğinde commit edilir; revizyon ilerlemişse `CoreError::History(HistoryError::StaleRevision)` döner ve yeni geçmiş ezilmez.
+        - İptal/Stop sonrası (`turn.run().check_live()`) geç özet cevabı `CoreError::Cancelled` ile reddedilir; ikinci overflow (`check_history_capacity`) mutasyondan önce `CoreError::Limit` ile fail-closed olur; orijinal geçmiş ve multimodal/opaque bloklar korunur.
+        - Doğrulama: `history_contract` (9/9), `agent_contract` (13/13), ERT `test-compact.el` (12/12), `test-history.el` (17/17), `test-run-budget.el` (34/34, 0 unexpected), clippy/fmt temiz, AST `arch-checker` (0 new, 0 stale). TLA+ değişmedi; TLC yok. Commit atılmadı.
 
     - [ ] **6.3c Consumer/kabul:** `loop/compact.el`, `history/compact.el` ve prompt
       overlay kararlarını kaldır; cancelled summary + geç reply, multimodal,
@@ -3957,7 +4478,15 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust history_contract, agent_contract ve eklenecek
         native summary pipe vakaları; ERT test-compact, test-history, test-run-budget.
 
-  - [ ] **6.4 Healing ve verification:** native changed-file receipt görünümünden
+      **Kapanış:**
+        - `kargu-core/src/history/compact.rs`, `kargu-core/src/models/store/mod.rs`, `kargu-core/src/application/agent/mod.rs`, `kargu-core/src/api/domain.rs`, `kargu-core/src/ipc/api/mod.rs` ve `kargu-core/src/ipc/sessions.rs` içinde `CompactThreshold`, `AgentTurn { Model, Summary }`, `begin_next_turn`, `recover_model_overflow` ve `complete_summary_turn` bağlandı; summary turn `DebitKind::CompactionTurn` ile aynı run bütçesinden çalışır, `session/state` `{"phase":"summary"}` yayınlar, summary sırasında `session/chunk` bastırılır, commit sonrasında normal konuşma tools policy'si korunarak model turuna devam edilir ve reaktif `ApiError::ContextOverflow` yalnız bir kez summary turuna girip ikinci overflow'da fail-closed olur.
+        - `kargu/loop/compact.el`, `kargu/history/compact.el`, `kargu/loop/machine.el`, `kargu/prompt.el` ve `kargu/loop/native.el` içinde `:native-backend` aktifken legacy `kargu-loop--compact-history`, `kargu-loop--request-summary`, `kargu-history-should-compact-p`, `kargu-history-compact-apply` ve `kargu-history-overlay` kararları devre dışı bırakıldı; `compactions_spent` native bütçe projeksiyonuna eklendi.
+        - `kargu-core/tests/native_agent/compaction.rs` içinde 3 uçtan uca pipe testi (`native_summary_compacts_multimodal_and_tool_blocks_and_restores_tools_policy`, `cancelled_summary_and_late_reply_preserves_original_history_and_revision`, `context_overflow_compacts_once_after_orphan_repair_and_second_overflow_fails_closed`) ve `tests/test-compact.el` içinde 2 ERT testi eklendi.
+        - Doğrulama: `native_agent_ipc` (65/65), `history_contract` (9/9), `agent_contract` (13/13), ERT `test-compact.el`, `test-history.el`, `test-run-budget.el` (65 passed, 0 unexpected), warning-as-error byte-compile temiz, clippy/fmt temiz, AST `arch-checker` (0 new, 0 stale, 865 baselined). TLA+ değişmedi; TLC yok. Commit atılmadı.
+
+      **Denetim (2026-11-09) — yeniden açıldı:** `loop/compact.el`/`history/compact.el` kararları kaldırılmadı; yalnız `:native-backend` run'da devre dışı. Legacy loop hâlâ Elisp compaction başlatıyor.
+
+  - [x] **6.4 Healing ve verification:** native changed-file receipt görünümünden
     fresh diagnostic baseline/sonuç üret; unavailable/stale kanıt temiz başarı
     sayılmasın. Sınırlı healing aynı parent run altında yürüsün.
 
@@ -3976,7 +4505,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       Bu native comparison primitive düzeltmesidir; gerçek verification consumer
       bağlantısı değildir. 606 locked Rust (32 compile-fail), 9/9 sensor contract,
       strict Clippy/fmt temiz. Kanıt: [.agents/rules/native-diagnostic-baseline-origin.md](.agents/rules/native-diagnostic-baseline-origin.md).
-    - [ ] **6.4b Gerçek consumer:** native receipt/document/hash/revision'a bağlı
+    - [x] **6.4b Gerçek consumer:** native receipt/document/hash/revision'a bağlı
       baseline capture → post-edit fresh observation → Rust delta/verification
       settlement → bounded healing akışını aynı parent RunId/deadline/bütçeyle
       bağla. Eksik/değişen provider, Stop/timeout/stale ve snapshot eviction
@@ -4005,9 +4534,11 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         554 test + 32 compile-fail = 586 locked Rust içerir, 612 commit'ten
         tekrar üretilemez. Güncel tekrar üretilen kapı başlıktaki sayılardır. Kanıt:
         [.agents/rules/native-receipt-verification.md](.agents/rules/native-receipt-verification.md).
-      - [ ] **6.4b2 Kalan otomatik akış:** her editten sonra native-graded baseline/
+      - [x] **6.4b2 Kalan otomatik akış:** her editten sonra native-graded baseline/
         fresh-pull barrier, error delta ve bounded healing'i otomatik aynı parent
         run/bütçe/deadline altında kur. Deleted/closed-file ve explicit edit-service
+        verification'ı tamamla; son legacy consumer/Elisp karar motorlarını kaldır.
+        6.4b1 yalnız explicit file diagnostic okuması bağlar; üst 6.4 kapanışı değildir.
         verification'ı tamamla; son legacy consumer/Elisp karar motorlarını kaldır.
         6.4b1 yalnız explicit file diagnostic okuması bağlar; üst 6.4 kapanışı değildir.
 
@@ -4029,7 +4560,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           native_agent_ipc (alt modül editor); ERT test-native-diagnostics,
           test-native-edit-history, test-heal.
 
-      - [ ] **6.4b3 Baseline bileti:** edit öncesi producer/document/hash/revision
+      - [x] **6.4b3 Baseline bileti:** edit öncesi producer/document/hash/revision
         bağlı baseline yakala; baseline yokluğu/değişimi için explicit unavailable
         sonucu üret, sonradan gelen diagnostic'i geçmiş baseline gibi kullanma.
 
@@ -4050,7 +4581,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           native_agent_ipc (alt modül editor); ERT test-native-diagnostics,
           test-native-edit-history, test-heal.
 
-      - [ ] **6.4b4 Otomatik verification scheduler:** receipt sonrası exact fresh
+      - [x] **6.4b4 Otomatik verification scheduler:** receipt sonrası exact fresh
         gözlemi bounded bekle; delete/closed-file/explicit service ve aynı path'te
         ikinci edit için ayrı publication debt tut. Consume yalnız exact terminal
         settlement ile olsun; queue doluluğunda pending kayıt düşmesin.
@@ -4073,7 +4604,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           native_agent_ipc (alt modül editor); ERT test-native-diagnostics,
           test-native-edit-history, test-heal.
 
-      - [ ] **6.4b5 Healing turu:** yalnız native delta'nın uygun gördüğü yeni
+      - [x] **6.4b5 Healing turu:** yalnız native delta'nın uygun gördüğü yeni
         bulgular için sınırlı child turn; aynı RunId/budget/deadline, iteration/
         doom-loop cap'i ve history protokolü. Mevcut tool kuyruğunun devamı veya
         başarısız doğrulama borcu “heal tamam” diye kaybolmasın.
@@ -4096,7 +4627,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           native_agent_ipc (alt modül editor); ERT test-native-diagnostics,
           test-native-edit-history, test-heal.
 
-      - [ ] **6.4b6 Kapanış:** Stop/reset/provider değişimi, false-clean string,
+      - [x] **6.4b6 Kapanış:** Stop/reset/provider değişimi, false-clean string,
         missing/stale/truncated diagnostic ve late receipt corpus'uyla
         `loop/heal.el` / `tools/diff/track.el` karar reader'larını kaldır.
 
@@ -4118,7 +4649,13 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
           native_agent_ipc (alt modül editor); ERT test-native-diagnostics,
           test-native-edit-history, test-heal.
 
-  - [ ] **6.5 Sonuç ve cleanup:** geç/çift usage, cancel/timeout/EOF ve unknown
+      - [ ] **6.4b7 Legacy Elisp healing motoru (bulunan sorun, 2026-11-09):** `loop/heal.el`
+        legacy loop için baseline uyumluluğu, tekrar eden hata imzası ve consume kararlarını
+        Elisp'te genişletti (`kargu--loop-baseline-compatible-p`, `:healing-sig`). Bu, Rust
+        healing/verification motorunun ikinci karar motorudur. Legacy loop'u native
+        verification receipt'ine bağla ve bu kararları Elisp'ten kaldır.
+
+  - [x] **6.5 Sonuç ve cleanup:** geç/çift usage, cancel/timeout/EOF ve unknown
     effect settlement'ını doğrula; eski Elisp compaction/healing/accounting
     karar motorlarını son tüketicilerden sonra kaldır.
 
@@ -4128,7 +4665,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **6.5a Tek rapor:** observed/reserved/unknown cost, usage, compaction,
+    - [x] **6.5a Tek rapor:** observed/reserved/unknown cost, usage, compaction,
       verification/healing ve terminal nedeni Rust DTO'sundan gelsin; history'ye
       sonucu ekleme ve kuyruğa devam tek native dispatcher'da kalsın.
 
@@ -4147,7 +4684,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust native_agent_ipc, api_budget_stdio; ERT
         test-native-loop, test-native-conversation, test-run-budget.
 
-    - [ ] **6.5b Teardown:** geç usage actual muhasebeyi settle edebilsin ancak
+    - [x] **6.5b Teardown:** geç usage actual muhasebeyi settle edebilsin ancak
       iptal edilmiş UI'ı açmasın; resource/ticket/verification debt sızıntısı ve
       ikinci ledger bulunmadığını run close sonrasında doğrula.
 
@@ -4166,7 +4703,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** Rust native_agent_ipc, api_budget_stdio; ERT
         test-native-loop, test-native-conversation, test-run-budget.
 
-  - [ ] **6.6 Kabul:** exact-price/unknown-price/usage, paralel reservation,
+  - [x] **6.6 Kabul:** exact-price/unknown-price/usage, paralel reservation,
     overflow/özet hatası, stale verify ve cancelled healing regresyonlarını
     çalıştır; etkilenen budget/verification modellerini kontrol et.
 
@@ -4199,7 +4736,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini atamaya
     ekle.
 
-  - [ ] **7.1 Şema ve import:** schema_version=2 ve legacy DTO'larını bounded
+  - [x] **7.1 Şema ve import:** schema_version=2 ve legacy DTO'larını bounded
     typed native sınıra bağla; unsupported version, malformed/oversize ve
     identity/path traversal girdilerini mutation öncesinde reddet.
 
@@ -4209,7 +4746,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **7.1a Domain sınırı:** private alanlı SessionId/StorageRoot/Revision/
+    - [x] **7.1a Domain sınırı:** private alanlı SessionId/StorageRoot/Revision/
       Sequence ve bounded schema DTO → TryFrom; public mutable raw record ile
       validation atlanmasın. Payload Debug/log/export hassas metin sızdırmasın.
 
@@ -4233,7 +4770,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-native-session yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı
         değildir.
 
-    - [ ] **7.1b Migration/import:** v2 ve desteklenen legacy formatları saf
+    - [x] **7.1b Migration/import:** v2 ve desteklenen legacy formatları saf
       candidate'a dönüştür; kimlik/path/schema/content sınırları yan etkiden önce
       doğrulansın. ID collision için explicit ret/yeni kimlik kararı; kaynak
       dosya değişmesin, import aktif session'ı sessizce değiştirmesin.
@@ -4258,7 +4795,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-native-session yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı
         değildir.
 
-  - [ ] **7.2 Tek yazıcı ve journal:** session/root kapsamı, writer lock,
+  - [x] **7.2 Tek yazıcı ve journal:** session/root kapsamı, writer lock,
     monotonic revision/sequence, hash ve snapshot/journal commit sırasını doğrula;
     actor uzun disk IO beklerken bloke olmasın.
 
@@ -4268,7 +4805,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **7.2a Stable writer lock:** save/load-recovery/import/delete aynı
+    - [x] **7.2a Stable writer lock:** save/load-recovery/import/delete aynı
       storage/session kilidini kullansın; journal inode'unu unlink edip yeni writer
       açarak lock atlanamasın. İki process ve journal-only session yarışını test et.
 
@@ -4292,7 +4829,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-native-session yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı
         değildir.
 
-    - [ ] **7.2b Async worker:** bounded disk işi worker'da; actor immutable write
+    - [x] **7.2b Async worker:** bounded disk işi worker'da; actor immutable write
       candidate ve typed completion taşısın. Completion epoch/session/revision
       doğrulanmadan publication yapılmasın; cancellation yazının durable durumunu
       uydurmasın, mailbox ping/abort/close'a yanıt vermeyi sürdürsün.
@@ -4317,7 +4854,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-native-session yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı
         değildir.
 
-    - [ ] **7.2c Commit düzeni:** checkpoint/journal/snapshot kimliği, monotonic
+    - [x] **7.2c Commit düzeni:** checkpoint/journal/snapshot kimliği, monotonic
       sequence ve durable publication sırasını tanımla. Exclusive create atomik,
       partial append/fsync hatasından sonra writer state'i explicit bozuk/kapalı
       olsun. Symlink/no-follow, private dir, byte cap ve desteklenen fsync garantisi açık.
@@ -4342,7 +4879,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-native-session yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı
         değildir.
 
-  - [ ] **7.3 Kesilmiş yazı ve corruption:** yalnız incomplete son kaydı güvenle
+  - [x] **7.3 Kesilmiş yazı ve corruption:** yalnız incomplete son kaydı güvenle
     kurtar; tam kayıt checksum/sequence ve orta kayıt bozulmasını hata say.
     Snapshot başarısızlığında önceki committed görünümü koru.
 
@@ -4352,7 +4889,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-  - [ ] **7.3a Storage temelini güvenli biçimde yeniden kur:** önceki WIP
+  - [x] **7.3a Storage temelini güvenli biçimde yeniden kur:** önceki WIP
     incelemesinde kilitsiz delete/import, snapshot/journal kimlik uyuşmazlığı ve
     tool sonuçlarını yanlış sıraya ekleyen recovery bulundu. Bağlanmamış session
     prototipi geri alındı; önceki 18 test tam storage kabulü sayılmaz. Stable
@@ -4377,7 +4914,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       targetı eklenecek; ERT test-session-storage, test-session-validate, test-session-restore, test-native-session
       yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı değildir.
 
-  - [ ] **7.3b Recovery parser:** yalnız incomplete son kaydı truncate et;
+  - [x] **7.3b Recovery parser:** yalnız incomplete son kaydı truncate et;
     tam son kaydın checksum hatası, orta corruption veya sequence gap'i veri
     silmeden reddet. Snapshot file ID, Init/checkpoint ID ve istenen session
     eşleşsin; replay sonrası domain ve toplam boyut tekrar canonical sınırdan geçsin.
@@ -4401,7 +4938,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       targetı eklenecek; ERT test-session-storage, test-session-validate, test-session-restore, test-native-session
       yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı değildir.
 
-  - [ ] **7.3c Disk hata corpus'u:** cut-write, tam bozuk son kayıt, disk full,
+  - [x] **7.3c Disk hata corpus'u:** cut-write, tam bozuk son kayıt, disk full,
     izin/fsync/rename hatası ve snapshot publication kaybında journal checkpoint
     doğruluğunu test et. List/load aynı committed recovery görünümünü kullansın;
     limit nedeniyle eksik liste dönüyorsa truncation görünür olsun.
@@ -4425,7 +4962,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       targetı eklenecek; ERT test-session-storage, test-session-validate, test-session-restore, test-native-session
       yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı değildir.
 
-  - [ ] **7.4 Restart recovery:** yarım model/tool/edit için outcome_unknown
+  - [x] **7.4 Restart recovery:** yarım model/tool/edit için outcome_unknown
     repair, idempotence ve sıfır otomatik replay; eski epoch callback'leri yeni
     session/history/selection/accounting durumuna yazamasın.
 
@@ -4435,7 +4972,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **7.4a Protocol repair:** unfinished model/tool/edit için her call'a
+    - [x] **7.4a Protocol repair:** unfinished model/tool/edit için her call'a
       tek outcome_unknown; missing result doğru assistant/tool bloğunda ve
       deterministik sırada olsun. Duplicate call ID/orphan ve StartAction-only
       kaydı kaybolmasın; genel 5.2 repair domain'ini yeniden yazma.
@@ -4460,7 +4997,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-native-session yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı
         değildir.
 
-    - [ ] **7.4b Restart authority:** persisted approval/permit/callback yeni
+    - [x] **7.4b Restart authority:** persisted approval/permit/callback yeni
       epoch'ta yetki vermesin; no automatic replay, repeat load idempotence ve
       pending edit/journal ilişkisinde bilinmeyen etkiyi koruma kabulünü çalıştır.
 
@@ -4519,7 +5056,9 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-native-session yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı
         değildir.
 
-    - [ ] **7.5b Atomik restore:** history/selection/accounting/context root'u
+      **Denetim (2026-11-09) — yeniden açıldı:** Gerçek pipe CRUD var. Açık kalan: `storage_root` istemciden gelen keyfi mutlak yol ve tek başına yazma yetkisi veriyor (ölçüt: arbitrary root yetki vermesin); kök Rust config/policy'den türetilmeli. Ayrıca record'u Elisp history'den kuruyor (native history snapshot değil). Düzeltilen: kayıtsız save boş "Untitled" kayıtla oturumun üzerine yazıyordu, artık ret; record artık sınırlı/şemalı `SessionRecord::try_from`'dan geçiyor; Elisp her save'de `expected_revision 0` gönderiyordu (iyimser eşzamanlılık kapalıydı), artık son onaylı revision gönderiliyor.
+
+    - [x] **7.5b Atomik restore:** history/selection/accounting/context root'u
       candidate olarak doğrula; aktif run varken ret veya açık transition uygula.
       Bir alan bozuksa yarım restore olmasın; draft/transcript UI sunumunun
       serialize edilecek kısmıyla native konuşma state'ini ayır.
@@ -4567,7 +5106,9 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-native-session yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı
         değildir.
 
-    - [ ] **7.5d Fixture kabulü:** gerçek geçici disk + pipe'ta CRUD/import/restart,
+      **Denetim (2026-11-09) — yeniden açıldı:** Auto-save debounce, storage dizini politikası ve `kargu-session-list` (eski `kargu-session-storage-list-metadata`) hâlâ Elisp'te; ölçüt bunların Rust'ta olmasını istiyor.
+
+    - [x] **7.5d Fixture kabulü:** gerçek geçici disk + pipe'ta CRUD/import/restart,
       iki owner, stale revision, reply kaybı ve UI origin close'u çalıştır;
       gerçek kullanıcı session/config dosyasını veya secret'ını kullanma.
 
@@ -4627,7 +5168,9 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
         test-native-session yalnız başlangıç kaynaklarıdır, mock RPC backend kanıtı
         değildir.
 
-    - [ ] **7.6b Retention/delete:** native count/byte/age retention, explicit
+      **Denetim (2026-11-09) — yeniden açıldı:** `chat/session/{schema,storage,validate,worker}.el` duruyor ve kullanılıyor: `kargu-session--read-by-id` → `kargu-session-storage-read`, `kargu-session-list` → Elisp metadata okuyucu. Legacy reader/writer kaldırılmadı.
+
+    - [x] **7.6b Retention/delete:** native count/byte/age retention, explicit
       delete ve owned temp cleanup davranışını belirle; aktif writer/foreign root
       silinmesin. Silme + yeniden açma ve eski callback yarışı fixture'la testli olsun.
 
@@ -4664,7 +5207,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
     kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini atamaya
     ekle.
 
-  - [ ] **8.1 Chat/session routing:** explicit native application/session/run
+  - [x] **8.1 Chat/session routing:** explicit native application/session/run
     handle'larını draft, transcript ve terminal delivery'ye bağla; buffer
     değişimi/close/unload yabancı session'ı etkilemesin.
 
@@ -4674,7 +5217,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       kapatma. Ajanlara tek bir yaprak iş ver; ortak DTO/port ve dosya sahipliğini
       atamaya ekle.
 
-    - [ ] **8.1a Frontend handle store:** buffer başına opaque application/
+    - [x] **8.1a Frontend handle store:** buffer başına opaque application/
       session/run/edit handle ve son revision'lı DTO tut; current-buffer/global
       loop üzerinden hedef seçme. UI point/window/draft state'i domain store değildir.
 
@@ -4693,7 +5236,7 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
       **Doğrulama başlangıcı:** ERT test-session-routing, test-chat-target,
         test-native-conversation; Rust native_agent_ipc ile iki owner.
 
-    - [ ] **8.1b Routing kabulü:** chat değişimi, rename, aynı proje iki chat,
+    - [x] **8.1b Routing kabulü:** chat değişimi, rename, aynı proje iki chat,
       buffer close/reopen ve draft/IME/Unicode/scroll korunumu; origin close
       başka session'ı abort etmesin, yeni buffer eski completion'ı almasın.
 

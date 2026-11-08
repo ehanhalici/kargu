@@ -649,7 +649,6 @@ pub-field	src/workspace/webfetch/policy.rs	`Target`: field `url` is visible; kee
 too-deep	src/api/http.rs	`exchange` nests N levels (max N); extract a function
 too-deep	src/api/wire/request.rs	`encode` nests N levels (max N); extract a function
 too-deep	src/application/agent/mod.rs	`next_agent_tool` nests N levels (max N); extract a function
-too-deep	src/application/budget/mod.rs	`finish_with_cost` nests N levels (max N); extract a function
 too-deep	src/application/host.rs	`model_list` nests N levels (max N); extract a function
 too-deep	src/configuration/policy/service.rs	`call` nests N levels (max N); extract a function
 too-deep	src/edit/prepare/service.rs	`prepare_rollback` nests N levels (max N); extract a function

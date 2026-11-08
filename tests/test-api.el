@@ -11,6 +11,8 @@
 
 (require 'ert)
 (require 'tests/test-helpers)
+(require 'kargu)
+(require 'kargu/api/client)
 (require 'kargu/api/response)
 (require 'kargu/api/circuit)
 
@@ -274,6 +276,22 @@
       (should-not (kargu-aget payload "provider"))
       (should-not (string-search "[params" (kargu-chat--footer-string))))))
 
+(ert-deftest kargu-payload-tools-off-removes-tools-and-choice-test ()
+  "Tools-off removes both tools and tool_choice from the canonical payload."
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "Hello"))))))
+    (cl-letf (((symbol-function 'kargu-advertised-tools) (lambda () nil)))
+      (let* ((payload (kargu--build-payload '(("tools" . [("forged" . t)])
+                                             ("tool_choice" . "auto")
+                                             ("stream" . t)))))
+        (should (equal (kargu-aget payload "model") (kargu--model)))
+        (should (equal (aref (kargu-aget payload "messages") 0)
+                       '(("role" . "user") ("content" . "Hello"))))
+        (should-not (assoc "tools" payload))
+        (should-not (assoc "tool_choice" payload))
+        (should (eq (cdr (assoc "stream" payload)) t))))))
+
 (ert-deftest kargu-tune-unselected-model-description-test ()
   "The remaining tuning menu works before a model has been selected."
   (cl-letf (((symbol-function 'kargu--model) (lambda () nil)))
@@ -288,6 +306,120 @@
                                (cons "error" value))) "choices")))
   (should (equal (kargu-response-error-message '(("error" . (("message" . "Rejected")))))
                  "Rejected")))
+
+(ert-deftest kargu-api-http-error-rolls-back-prompt-test ()
+  "HTTP error rolls back prompt so history has no orphan user turn."
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "initial"))
+                      (("role" . "assistant") ("content" . "reply")))))
+        (kargu--busy nil)
+        result)
+    (cl-letf (((symbol-function 'kargu-api-build-payload) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-api-auth-intent) (lambda (&rest _) nil))
+              ((symbol-function 'kargu--api-post)
+               (lambda (_url _auth _payload _gen callback &rest _)
+                 (funcall callback '(("error" . (("message" . "HTTP 500"))))))))
+      (kargu-api--send-turn
+       :prompt "failing turn" :key "k" :base "https://example.invalid"
+       :callback (lambda (resp) (setq result resp)))
+      (should (equal (kargu-response-error-message result) "HTTP 500"))
+      (should-not (cl-some (lambda (m) (equal (kargu-aget m "content") "failing turn"))
+                           (kargu-history-messages)))
+      (should (equal (kargu-aget (kargu-history-last-message) "content") "reply")))))
+
+(ert-deftest kargu-api-cancel-rolls-back-prompt-test ()
+  "In-flight cancel rolls back prompt so history has no orphan user turn."
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "initial"))
+                      (("role" . "assistant") ("content" . "reply")))))
+        (kargu--busy nil)
+        held-callback)
+    (cl-letf (((symbol-function 'kargu-api-build-payload) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-api-auth-intent) (lambda (&rest _) nil))
+              ((symbol-function 'kargu--api-post)
+               (lambda (_url _auth _payload _gen callback &rest _)
+                 (setq held-callback callback))))
+      (kargu-api--send-turn
+       :prompt "cancelled turn" :key "k" :base "https://example.invalid"
+       :callback #'ignore)
+      (should (equal (kargu-aget (kargu-history-last-message) "content") "cancelled turn"))
+      (kargu-api-cancel)
+      (should-not (cl-some (lambda (m) (equal (kargu-aget m "content") "cancelled turn"))
+                           (kargu-history-messages)))
+      (should (equal (kargu-aget (kargu-history-last-message) "content") "reply")))))
+
+(ert-deftest kargu-api-record-turn-nil-rolls-back-prompt-test ()
+  "Unrecorded turn rolls back prompt and does not store assistant reply."
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "initial"))
+                      (("role" . "assistant") ("content" . "reply")))))
+        (kargu--busy nil)
+        result)
+    (cl-letf (((symbol-function 'kargu-api-build-payload) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-api-auth-intent) (lambda (&rest _) nil))
+              ((symbol-function 'kargu--api-post)
+               (lambda (_url _auth _payload _gen callback &rest _)
+                 (funcall callback
+                          '(("choices" . [(("message" . (("role" . "assistant")
+                                                         ("content" . "pong"))))]))))))
+      (kargu-api--send-turn
+       :prompt "ping turn" :key "k" :base "https://example.invalid"
+       :record-turn nil
+       :callback (lambda (resp) (setq result resp)))
+      (should (equal (kargu-response-text result) "pong"))
+      (should-not (cl-some (lambda (m) (equal (kargu-aget m "content") "ping turn"))
+                           (kargu-history-messages)))
+      (should-not (cl-some (lambda (m) (equal (kargu-aget m "content") "pong"))
+                           (kargu-history-messages)))
+      (should (equal (kargu-aget (kargu-history-last-message) "content") "reply")))))
+
+(ert-deftest kargu-api-no-double-assistant-message-test ()
+  "Identical assistant message is never appended twice in succession."
+  (let ((kargu-session--context
+         (kargu-test-session-with-history
+          :messages '((("role" . "user") ("content" . "initial")))))
+        (resp '(("choices" . [(("message" . (("role" . "assistant")
+                                             ("content" . "answer"))))]))))
+    (kargu-api-store-assistant-turn resp)
+    (let ((count (length (kargu-history-messages))))
+      (should (equal (kargu-aget (kargu-history-last-message) "content") "answer"))
+      ;; Calling again with same response:
+      (kargu-api-store-assistant-turn resp)
+      (should (= (length (kargu-history-messages)) count)))))
+
+(ert-deftest kargu-api-completion-only-does-not-execute-tools-test ()
+  "Completion-only request normalizes tool calls without executing them."
+  (let* ((kargu-session--context
+          (kargu-test-session-with-history
+           :messages '((("role" . "user") ("content" . "initial")))))
+         (initial-count (length (kargu-history-messages)))
+         (kargu--busy nil)
+         result)
+    (cl-letf (((symbol-function 'kargu-api-build-payload) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-api-auth-intent) (lambda (&rest _) nil))
+              ((symbol-function 'kargu--api-post)
+               (lambda (_url _auth _payload _gen callback &rest _)
+                 (funcall callback
+                          '(("choices" . [(("message" . (("role" . "assistant")
+                                                         ("tool_calls" . [(("id" . "call_1")
+                                                                           ("type" . "function")
+                                                                           ("function" . (("name" . "read_file")
+                                                                                          ("arguments" . "{}"))))]))))]))))))
+      (kargu-api--send-turn
+       :prompt "run something" :key "k" :base "https://example.invalid"
+       :callback (lambda (resp) (setq result resp)))
+      (should result)
+      (should (equal (kargu-response-tool-calls result)
+                     [(("id" . "call_1")
+                       ("type" . "function")
+                       ("function" . (("name" . "read_file")
+                                      ("arguments" . "{}"))))]))
+      ;; Single assistant message stored with the tool call
+      (should (= (length (kargu-history-messages)) (+ initial-count 2)))
+      (should (equal (kargu-aget (kargu-history-last-message) "role") "assistant")))))
 
 (provide 'tests/test-api)
 ;;; test-api.el ends here

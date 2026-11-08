@@ -40,6 +40,7 @@
 (require 'kargu/chat/attach)
 (require 'kargu/chat/tune)
 (require 'kargu/chat/session)
+(require 'kargu/chat/routing)
 
 (declare-function kargu-chat--shown-provider "kargu/chat/prompt" ())
 (declare-function kargu-chat--shown-model "kargu/chat/prompt" ())
@@ -179,8 +180,14 @@ The header line shows the active mode, model, and context usage.
     (setq-local kargu-chat--project-root (kargu-session-project-root)))
   (unless kargu-chat--session-id
     (setq-local kargu-chat--session-id (kargu-session-id)))
+  (when (fboundp 'kargu-chat-handle-store)
+    (kargu-chat-handle-store (current-buffer)))
   (add-hook 'kill-buffer-hook
             (lambda ()
+              (when (and (boundp 'kargu-session--auto-save-timer)
+                         (timerp kargu-session--auto-save-timer))
+                (cancel-timer kargu-session--auto-save-timer)
+                (setq kargu-session--auto-save-timer nil))
               (when (bound-and-true-p kargu-session-auto-save)
                 (ignore-errors (kargu-session-save (current-buffer)))))
             nil t)
@@ -483,21 +490,33 @@ meanwhile.  A prompt without mentions continues synchronously."
 (defun kargu-chat--send-expanded (prompt expanded preserve-draft on-ready)
   "Publish PROMPT and send its EXPANDED form; see `kargu-chat--submit'.
 PRESERVE-DRAFT and ON-READY are as for `kargu-chat--submit'."
-  (let ((saved (kargu-chat--capture-submission))
-        (buffer (current-buffer))
-        (session (kargu-session-context)))
+  (let* ((saved (kargu-chat--capture-submission))
+         (buffer (current-buffer))
+         (session (kargu-session-context))
+         (store (and (fboundp 'kargu-chat-handle-store) (kargu-chat-handle-store buffer))))
     (condition-case err
         (progn
           (kargu-chat--publish-submission prompt)
           (kargu-chat--follow-end buffer)
           (apply #'kargu-loop-send
-                 expanded #'kargu-chat--on-delta
+                 expanded
+                 (lambda (text &optional kind)
+                   (when (and (buffer-live-p buffer)
+                              (or (null store)
+                                  (not (fboundp 'kargu-chat-handle-valid-p))
+                                  (kargu-chat-handle-valid-p store buffer)))
+                     (with-current-buffer buffer
+                       (kargu-chat--stream-delta text kind))))
                  (lambda (report)
-                   (kargu-chat--complete-submission
-                    report :buffer buffer :draft saved :preserve-draft preserve-draft :session session))
+                   (when (and (buffer-live-p buffer)
+                              (or (null store)
+                                  (not (fboundp 'kargu-chat-handle-valid-p))
+                                  (kargu-chat-handle-valid-p store buffer)))
+                     (kargu-chat--complete-submission
+                      report :buffer buffer :draft saved :preserve-draft preserve-draft :session session)))
                  (and on-ready (list :on-ready on-ready))))
       (error
-       (unless (kargu-loop-running-p)
+       (unless (kargu-loop-running-p buffer)
          (kargu-chat--rollback-submission saved))
        (signal (car err) (cdr err)))))
   (add-to-history 'kargu-chat-input-history prompt)
@@ -682,9 +701,9 @@ the editable prompt comes back."
   (kargu-mode-cancel)
   (let ((cancelled (and (fboundp 'kargu-dape-cancel-session-wait)
                         (kargu-dape-cancel-session-wait))))
-    (if (kargu-loop-running-p)
+    (if (kargu-loop-running-p (current-buffer))
         (progn
-          (kargu-loop-stop "stopped by user")
+          (kargu-loop-stop "stopped by user" (current-buffer))
           (force-mode-line-update t)
           (message "kargu: stopped agent run"))
       (when (and (markerp kargu-chat--output-marker)

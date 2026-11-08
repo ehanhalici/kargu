@@ -60,5 +60,43 @@ CALLBACK receives (DTO FAILURE CONNECTION).  No HTTP or credential IO occurs."
         (kargu-async-add-cleanup task (kargu-bridge-ensure ready))))
     task))
 
+(cl-defun kargu-bridge-provider-list (callback &key application parent authenticated-only)
+  "Fetch native provider list DTO for APPLICATION and deliver to CALLBACK.
+CALLBACK receives (DTO FAILURE).
+Optional key AUTHENTICATED-ONLY limits the list to ready providers.
+Optional keys APPLICATION and PARENT scope the task."
+  (kargu-contract-assert #'functionp callback)
+  (let* ((application (or application (kargu-application-context)))
+         (task (kargu-async-start
+                (kargu-application-wrap application callback)
+                :parent parent :owner nil :timeout kargu-bridge-catalog-timeout))
+         (binding (and application (gethash :native-core (kargu-application-services application))))
+         (ready (kargu-async-wrap
+                 task (lambda (value failure)
+                        (if failure
+                            (kargu-async-finish task nil failure)
+                          (let* ((app-binding (and application (gethash :native-core (kargu-application-services application))))
+                                 (app-id (and app-binding (get (kargu-bridge-application-identity app-binding) 'id)))
+                                 (args (kargu-bridge--object
+                                        "connection_epoch" (kargu-bridge-connection-epoch value)
+                                        "application_id" (or app-id :json-null)
+                                        "authenticated_only" (if authenticated-only t :json-false)))
+                                 (id (kargu-bridge-call
+                                      value "provider/list" args
+                                      (kargu-async-wrap
+                                       task (lambda (result error-data)
+                                              (kargu-async-finish task result error-data)))
+                                      :owner (kargu-async-task-buffer task)
+                                      :timeout (max 0.001 (- (kargu-async-task-deadline task) (float-time))))))
+                            (kargu-async-add-cleanup task (lambda () (kargu-bridge-cancel value id)))))))))
+    (when (kargu-async-pending-p task)
+      (if binding
+          (let ((captured (kargu-bridge-application-connection binding)))
+            (funcall ready captured
+                     (unless (kargu-bridge-application-current-p application captured)
+                       (kargu-bridge--fault "owner_closed"))))
+        (kargu-async-add-cleanup task (kargu-bridge-ensure ready))))
+    task))
+
 (provide 'kargu/bridge/catalog)
 ;;; catalog.el ends here

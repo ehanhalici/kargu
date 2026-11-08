@@ -174,3 +174,182 @@ fn unknown_application_cannot_borrow_another_provider_or_model_view() {
         assert!(host.dispatch(method, params, true).result.is_err());
     }
 }
+
+#[test]
+fn test_provider_list_dto_fields_and_namespace_and_no_secrets()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut host = create_ready_host();
+    let dispatch = host.dispatch(methods::PROVIDER_LIST, json!({}), true);
+    assert!(dispatch.result.is_ok());
+    let value = dispatch.result?;
+    assert_eq!(value["status"], "ok");
+    assert!(value["config_revision"].is_number());
+    let providers = value["providers"].as_array().ok_or("providers array")?;
+    for p in providers {
+        assert!(p["id"].is_string());
+        assert!(p["name"].is_string());
+        assert!(matches!(
+            p["namespace"].as_str(),
+            Some("embedded" | "api" | "custom" | "application")
+        ));
+        assert!(matches!(
+            p["readiness"].as_str(),
+            Some("ready" | "available")
+        ));
+        assert!(matches!(
+            p["availability"].as_str(),
+            Some("ready" | "available")
+        ));
+        assert!(p["config_revision"].is_number());
+        assert!(p["authenticated"].is_boolean());
+        assert!(p["status"].is_string());
+
+        // Zero secret leaks
+        assert!(p.get("apikey").is_none());
+        assert!(p.get("secret").is_none());
+        assert!(p.get("api_key").is_none());
+        assert!(p.get("headers").is_none());
+        assert!(p.get("extra_headers").is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn test_provider_list_with_configured_profiles_and_duplicate_names()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut host = create_ready_host();
+    let app_res = host.dispatch("application/create", json!({}), true);
+    assert!(app_res.result.is_ok());
+    let app_id = app_res.result?["application_id"]
+        .as_str()
+        .ok_or("app_id")?
+        .to_string();
+
+    let sess_res = host.dispatch("session/create", json!({"application_id": app_id}), true);
+    assert!(sess_res.result.is_ok());
+    let scope = sess_res.result?;
+
+    let toml_source = "provider='openrouter'\n\
+[providers.openrouter]\n\
+apikey='synthetic-openrouter-secret'\n\
+[providers.p1]\n\
+api='https://p1.invalid/v1'\n\
+apikey='synthetic-p1-secret'\n\
+[providers.p2]\n\
+api='https://p2.invalid/v1'\n\
+apikey='synthetic-p2-secret'\n\
+[providers.codex]\n\
+api='http://127.0.0.1:8080/v1'\n";
+
+    let parsed: kargu_core::configuration::ParseInput =
+        serde_json::from_value(json!({"source": toml_source, "generation": 0}))?;
+    let resolved = parsed.resolve();
+    assert_eq!(resolved["status"], "ok");
+    let parsed_doc = resolved["config"].clone();
+
+    let prep_res = host.dispatch(
+        "configuration/prepare",
+        json!({
+            "scope": scope,
+            "arguments": {
+                "generation": 1,
+                "path": "/fake/config.toml",
+                "digest": resolved["digest"],
+                "document": parsed_doc,
+                "registry": []
+            }
+        }),
+        true,
+    );
+    assert!(
+        prep_res.result.is_ok(),
+        "prepare failed: {:?}",
+        prep_res.result
+    );
+    let capture_id = prep_res.result?["capture_id"].clone();
+
+    let commit_res = host.dispatch(
+        "configuration/commit",
+        json!({
+            "scope": scope,
+            "arguments": {
+                "capture_id": capture_id,
+                "context": {
+                    "api_base": "https://fallback.invalid/v1",
+                    "environment": {},
+                    "registry": []
+                }
+            }
+        }),
+        true,
+    );
+    assert!(
+        commit_res.result.is_ok(),
+        "commit failed: {:?}",
+        commit_res.result
+    );
+    let config_rev = commit_res.result?["revision"].as_u64().ok_or("rev")?;
+
+    let list_res = host.dispatch(
+        methods::PROVIDER_LIST,
+        json!({
+            "application_id": app_id
+        }),
+        true,
+    );
+    assert!(
+        list_res.result.is_ok(),
+        "provider/list failed: {:?}",
+        list_res.result
+    );
+    let value = list_res.result?;
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["config_revision"], config_rev);
+
+    let providers = value["providers"].as_array().ok_or("providers array")?;
+
+    // 1. Check openrouter (configured from catalog -> api namespace)
+    let openrouter = providers
+        .iter()
+        .find(|p| p["id"] == "openrouter")
+        .ok_or("openrouter found")?;
+    assert_eq!(openrouter["namespace"], "api");
+    assert_eq!(openrouter["authenticated"], true);
+    assert_eq!(openrouter["readiness"], "ready");
+
+    // 2. Check p1 and p2: both exist with distinct IDs
+    let p1 = providers
+        .iter()
+        .find(|p| p["id"] == "p1")
+        .ok_or("p1 found")?;
+    let p2 = providers
+        .iter()
+        .find(|p| p["id"] == "p2")
+        .ok_or("p2 found")?;
+    assert_eq!(p1["namespace"], "custom");
+    assert_eq!(p2["namespace"], "custom");
+    assert_eq!(p1["authenticated"], true);
+    assert_eq!(p2["authenticated"], true);
+
+    // 3. Check codex (application backend)
+    let codex = providers
+        .iter()
+        .find(|p| p["id"] == "codex")
+        .ok_or("codex found")?;
+    assert_eq!(codex["namespace"], "application");
+
+    // 4. Check an unconfigured catalog provider (e.g. nvidia)
+    let nvidia = providers
+        .iter()
+        .find(|p| p["id"] == "nvidia")
+        .ok_or("nvidia found")?;
+    assert_eq!(nvidia["namespace"], "embedded");
+
+    // 5. Ensure NO secrets leak anywhere in the JSON
+    let rendered = serde_json::to_string(&value)?;
+    assert!(!rendered.contains("synthetic-openrouter-secret"));
+    assert!(!rendered.contains("synthetic-p1-secret"));
+    assert!(!rendered.contains("synthetic-p2-secret"));
+
+    Ok(())
+}

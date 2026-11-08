@@ -104,4 +104,13 @@ impl AssistantTurn {
     pub(super) fn finish(&self) -> &Finish {
         &self.finish
     }
+
+    /// Extract validated non-empty summary text for a tools-off compaction turn.
+    pub fn summary_text(&self) -> Result<crate::history::SummaryText, CoreError> {
+        if !matches!(self.finish, Finish::Stop | Finish::Length) || !self.message.calls().is_empty()
+        {
+            return Err(CoreError::InvalidToolOutput);
+        }
+        crate::history::SummaryText::from_message(&self.message).map_err(CoreError::from)
+    }
 }

@@ -134,8 +134,12 @@
   "Saving A after B changed cannot persist B or freeze A's first snapshot."
   (kargu-history-test--with-owners
     (let (saved)
-      (cl-letf (((symbol-function 'kargu-session-storage-write)
-                 (lambda (_sid _root data) (push data saved) "saved")))
+      (cl-letf (((symbol-function 'kargu-bridge-session-scope)
+                 (lambda (_buffer callback &rest _) (funcall callback 'connection 'scope nil)))
+                ((symbol-function 'kargu-bridge-session-save)
+                 (lambda (_connection params callback &rest _)
+                   (push (gethash "record" params) saved)
+                   (funcall callback nil nil))))
         (with-current-buffer a
           (kargu-history-add "user" "A1") (kargu-session-save a))
         (with-current-buffer b

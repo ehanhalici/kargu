@@ -69,8 +69,7 @@
     (setf (kargu-bash--job-handle job) handle (kargu-bash--job-state job) :running)
     (unless (kargu-bash--job-background job)
       (setf (kargu-job-service-active-async-proc (kargu-bash--job-service job)) handle)
-)
-    (kargu-bridge-job-eof handle #'ignore)
+      (kargu-bridge-job-eof handle #'ignore))
     (setf (kargu-bash--job-reader job)
           (kargu-bridge-output-start
            handle (lambda (text truncated) (kargu-bash-native--append job text truncated))

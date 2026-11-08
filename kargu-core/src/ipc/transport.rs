@@ -360,6 +360,34 @@ async fn read_messages<R: AsyncRead + Unpin>(
                     }
                     continue;
                 }
+                if matches!(
+                    method.as_str(),
+                    methods::SESSION_SAVE
+                        | methods::SESSION_LOAD
+                        | methods::SESSION_LIST
+                        | methods::SESSION_DELETE
+                        | methods::SESSION_IMPORT
+                        | methods::SESSION_PRUNE
+                ) {
+                    if let Some(id) = id.as_ref() {
+                        let prepared = match method.as_str() {
+                            methods::SESSION_SAVE => host.prepare_persistence_save(params),
+                            methods::SESSION_LOAD => host.prepare_persistence_load(params),
+                            methods::SESSION_LIST => host.prepare_persistence_list(params),
+                            methods::SESSION_DELETE => host.prepare_persistence_delete(params),
+                            methods::SESSION_IMPORT => host.prepare_persistence_import(params),
+                            methods::SESSION_PRUNE => host.prepare_persistence_prune(params),
+                            _ => Err(protocol::Fault::params()),
+                        };
+                        let admitted = prepared.and_then(|(scope, work)| {
+                            reads.start_persistence(id.clone(), scope, work)
+                        });
+                        if let Err(fault) = admitted {
+                            queue_reply(fault.response(Some(id)), host.frame_limit(), tx, permits)?;
+                        }
+                    }
+                    continue;
+                }
                 if method == methods::APPLICATION_CLOSE {
                     if let Some(id) = id.as_ref()
                         && let Err(fault) = lifecycle.start(host, id.clone(), params)

@@ -37,6 +37,8 @@
 
 (declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id provider))
 (declare-function kargu-deps-missing "kargu/tools/deps" (&optional root include-optional packages-only))
+(declare-function kargu-chat-run-handle "kargu/chat/routing" (&optional buffer))
+(declare-function kargu-chat-set-run-handle "kargu/chat/routing" (handle &optional buffer))
 
 (defgroup kargu-loop nil
   "The autonomous agent loop."
@@ -178,16 +180,42 @@ Keys include :state, :prompt, :on-delta, :on-finish, :iterations,
        name mode mode name mode))
      (t nil))))
 
-(defun kargu-loop-running-p ()
-  "Return non-nil while an agent run is in progress."
-  (not (null (kargu-application-current-run))))
+(defun kargu-loop--chat-run (buffer)
+  "Return the run owned by chat BUFFER, or nil.
+Prefer BUFFER's handle store; otherwise accept the coordinator run only
+when it was started from BUFFER, never another chat's run."
+  (or (and (fboundp 'kargu-chat-run-handle) (kargu-chat-run-handle buffer))
+      (let ((run (kargu-application-current-run)))
+        (and run (eq (plist-get run :chat-buffer) buffer) run))))
 
-(defun kargu-loop-stop (&optional reason)
-  "Stop the current agent run, optionally recording REASON."
+(defun kargu-loop-running-p (&optional buffer)
+  "Return non-nil while an agent run is in progress.
+When BUFFER or the current buffer is a chat buffer, report only that
+chat's run; otherwise report the coordinator run."
+  (let ((buf (or buffer (current-buffer))))
+    (if (and (buffer-live-p buf)
+             (with-current-buffer buf (derived-mode-p 'kargu-chat-mode)))
+        (not (null (kargu-loop--chat-run buf)))
+      (not (null (kargu-application-current-run))))))
+
+(defun kargu-loop-stop (&optional reason buffer)
+  "Stop the current agent run, optionally recording REASON.
+When BUFFER or current buffer is a chat buffer with an active run handle,
+stop only that run; otherwise stop the application current run."
   (interactive)
-  (if (null (kargu-application-current-run))
-      (message "kargu: no run in progress")
-    (kargu-loop-cancel (kargu-application-current-run) reason)))
+  (let* ((buf (or buffer (current-buffer)))
+         (chat-p (and (buffer-live-p buf)
+                      (with-current-buffer buf (derived-mode-p 'kargu-chat-mode))))
+         (chat-run (and chat-p (kargu-loop--chat-run buf))))
+    (cond
+     (chat-run
+      (kargu-loop-cancel chat-run reason))
+     (chat-p
+      (message "kargu: no run in progress for this chat buffer"))
+     ((null (kargu-application-current-run))
+      (message "kargu: no run in progress"))
+     (t
+      (kargu-loop-cancel (kargu-application-current-run) reason)))))
 
 (defun kargu-loop-cancel (run &optional reason)
   "Cancel captured RUN for REASON without touching another execution."
@@ -297,15 +325,18 @@ the diff run files and the UI as they were."
 (defun kargu-loop--start-run (run prompt)
   "Publish RUN and start its first request for PROMPT, handling startup errors."
   (let* ((app (kargu-application-context))
+         (origin (plist-get run :chat-buffer))
          (context (kargu-execution-create
                    :app app :session (plist-get run :session)
-                   :origin (plist-get run :chat-buffer)
+                   :origin origin
                    :root (plist-get run :project-root) :run run)))
     (setf (kargu-execution-claim context)
           (kargu-application-claim app :run run :run-id (plist-get run :id)
                                    :session-id (plist-get run :session-id)
                                    :mode (plist-get run :mode)))
     (plist-put run :context context)
+    (when (and (buffer-live-p origin) (fboundp 'kargu-chat-set-run-handle))
+      (kargu-chat-set-run-handle run origin))
     (unless kargu-application-owner (setq kargu--loop-run run))
     (condition-case err
         (progn
@@ -449,6 +480,10 @@ Deliver events to ON-DELTA, completion to ON-FINISH, and admission to ON-READY."
            (_revoke (when context (setf (kargu-execution-state context) :closing)))
            (report (condition-case err (kargu-loop--finish-report run status text)
                      (error (list :status :error :error (error-message-string err))))))
+      (when-let* ((origin (plist-get run :chat-buffer))
+                  ((buffer-live-p origin))
+                  ((fboundp 'kargu-chat-set-run-handle)))
+        (kargu-chat-set-run-handle nil origin))
       (unwind-protect (kargu-loop--cleanup-run run status initialized)
         (when context
           (kargu-application-release app (kargu-execution-claim context))

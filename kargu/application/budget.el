@@ -30,7 +30,7 @@
   (max-tokens nil :read-only t)
   (max-compactions 1 :read-only t)
   (requests-spent 0) (tokens-spent 0) (tokens-unknown-p nil)
-  (compactions-spent 0) (monetary-spent nil) (monetary-unknown-p t)
+  (compactions-spent 0) (monetary-spent nil) (monetary-reserved 0) (monetary-unknown-p t)
   (status :ok) native)
 
 (cl-defun kargu-budget-create (&key run-id
@@ -65,6 +65,8 @@ TIMEOUT or absolute DEADLINE capture the original wall-clock expiry."
                    (and (natnump (gethash "monetary_spent" snapshot))
                         (memq (gethash "monetary_unknown" snapshot :missing)
                               '(t :json-false))))
+               (or (eq (gethash "monetary_reserved" snapshot :missing) :missing)
+                   (natnump (gethash "monetary_reserved" snapshot)))
                (>= (gethash "requests_spent" snapshot) (kargu-run-budget-requests-spent budget))
                (>= (gethash "compactions_spent" snapshot) (kargu-run-budget-compactions-spent budget))
                (>= (gethash "tokens_spent" snapshot) (kargu-run-budget-tokens-spent budget))
@@ -80,6 +82,7 @@ TIMEOUT or absolute DEADLINE capture the original wall-clock expiry."
                        ((equal refusal "accounting") :accounting-failed)
                        ((equal refusal "monetary") :exhausted-monetary)
                        ((equal refusal "unknown_pricing") :pricing-unknown)
+                       ((equal refusal "unbounded_output") :unbounded-output)
                        ((or (null refusal) (eq refusal :json-null))
                         (if (eq (gethash "sealed" snapshot) t) :sealed :ok))
                        (t (error "Invalid native budget refusal")))))
@@ -88,6 +91,7 @@ TIMEOUT or absolute DEADLINE capture the original wall-clock expiry."
           (kargu-run-budget-tokens-spent budget) (gethash "tokens_spent" snapshot)
           (kargu-run-budget-tokens-unknown-p budget) (eq (gethash "tokens_unknown" snapshot) t))
     (setf (kargu-run-budget-monetary-spent budget) (gethash "monetary_spent" snapshot)
+          (kargu-run-budget-monetary-reserved budget) (or (gethash "monetary_reserved" snapshot) 0)
           (kargu-run-budget-monetary-unknown-p budget)
           (not (eq (gethash "monetary_unknown" snapshot :missing) :json-false)))
     ;; A late observation cannot re-open a locally revoked delivery lifetime.
@@ -133,6 +137,7 @@ TIMEOUT or absolute DEADLINE capture the original wall-clock expiry."
         :max-tokens (kargu-run-budget-max-tokens budget)
         :tokens-unknown-p (kargu-run-budget-tokens-unknown-p budget)
         :monetary-spent (kargu-run-budget-monetary-spent budget)
+        :monetary-reserved (kargu-run-budget-monetary-reserved budget)
         :monetary-unknown-p (kargu-run-budget-monetary-unknown-p budget)
         :compactions-spent (kargu-run-budget-compactions-spent budget)
         :max-compactions (kargu-run-budget-max-compactions budget)

@@ -11,6 +11,9 @@
 (require 'kargu/loop/ui)
 (require 'kargu/loop/machine)
 (require 'kargu/api/circuit)
+(require 'kargu/config/connection)
+(require 'kargu/application/execution)
+(require 'kargu/application/budget)
 
 (ert-deftest kargu-confirm-render-prompt-test ()
   "Ensure kargu-confirm--render-prompt renders banner, details, notice, and buttons."
@@ -327,6 +330,82 @@
         (funcall reply nil nil)
         (should (= posts (if (eq outcome 'success) 1 0)))
         (should (= finishes (if (eq outcome 'failure) 1 0)))))))
+
+(ert-deftest kargu-loop-retry-retains-connection-snapshot-and-endpoint-test ()
+  "Manual retry re-uses the run's pinned connection snapshot and endpoint."
+  (let* ((cred (kargu-credential-scope--create :raw-secret "pinned-secret"))
+         (snapshot (kargu-connection-snapshot--create
+                    :provider "pinned-provider"
+                    :model "pinned-model"
+                    :endpoint "https://pinned.invalid/v1"
+                    :credential-scope cred))
+         (run (list :state 'wait
+                    :provider "pinned-provider"
+                    :model "pinned-model"
+                    :connection-snapshot snapshot))
+         (kargu--loop-run run)
+         (env-provider "changed-provider")
+         (env-model "changed-model")
+         captured-snapshot sent-provider sent-model)
+    (cl-letf (((symbol-function 'kargu--provider-name) (lambda () env-provider))
+              ((symbol-function 'kargu--model) (lambda () env-model))
+              ((symbol-function 'kargu-circuit-get) (lambda (_provider) t))
+              ((symbol-function 'kargu-circuit-reset)
+               (lambda (provider callback)
+                 (setq sent-provider provider)
+                 (funcall callback nil nil)))
+              ((symbol-function 'kargu-api-send)
+               (lambda (_prompt _callback &rest _)
+                 (setq captured-snapshot (kargu-connection-current)
+                       sent-model (plist-get run :request-model)))))
+      (kargu-loop--apply-recovery run "network drop" :retry)
+      (should (equal sent-provider "pinned-provider"))
+      (should (equal sent-model "pinned-model"))
+      (should (equal (plist-get run :request-provider) "pinned-provider"))
+      (should (equal (plist-get run :request-model) "pinned-model"))
+      (should captured-snapshot)
+      (should (equal (kargu-connection-snapshot-endpoint captured-snapshot)
+                     "https://pinned.invalid/v1"))
+      (should (equal (kargu-connection-snapshot-secret captured-snapshot)
+                     "pinned-secret")))))
+
+(ert-deftest kargu-loop-retry-resets-ui-stream-once-test ()
+  "Manual retry triggers stream reset on observers exactly once before replay."
+  (let* ((stream-events nil)
+         (run (list :state 'wait :provider "test-provider" :model "test-model"))
+         (kargu--loop-run run)
+         (kargu-loop-model-stream-hook
+          (list (lambda (_run event) (push event stream-events)))))
+    (cl-letf (((symbol-function 'kargu-circuit-get) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-api-send) #'ignore))
+      (kargu-loop--apply-recovery run "timeout" :retry)
+      (should (equal (reverse stream-events) '(retry start))))))
+
+(ert-deftest kargu-loop-retry-charges-same-parent-budget-test ()
+  "Manual retry charges new attempt under the run's existing budget."
+  (let* ((budget (kargu-budget-create :run-id "run-retry-test"))
+         (app (kargu-application-create :budget budget))
+         (run (list :state 'wait :provider "p" :model "m"))
+         (context (kargu-execution-create
+                   :app app :session (kargu-session-context)
+                   :origin (current-buffer) :root "/tmp" :run run))
+         captured-budget)
+    (plist-put run :context context)
+    (setf (kargu-execution-claim context)
+          (kargu-application-claim app :run run :run-id "run-retry-test"
+                                   :session-id (kargu-session-id (kargu-session-context))
+                                   :mode 'ask))
+    (setf (kargu-execution-state context) :running)
+    (setf (kargu-execution-budget context) budget)
+    (cl-letf (((symbol-function 'kargu-circuit-get) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-api-send)
+               (lambda (&rest _)
+                 (setq captured-budget (kargu-application-budget-get)))))
+      (kargu-execution-call
+       context
+       (lambda ()
+         (kargu-loop--apply-recovery run "err" :retry)))
+      (should (eq captured-budget budget)))))
 
 (provide 'tests/test-confirm)
 ;;; test-confirm.el ends here

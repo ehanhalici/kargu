@@ -13,6 +13,8 @@
 (require 'tests/test-helpers)
 (require 'kargu/chat)
 (require 'kargu/chat/session)
+(require 'kargu/chat/routing)
+(require 'kargu/loop)
 
 (defun kargu-routing-test--restore (data root interactive)
   "Restore DATA in ROOT through the direct or INTERACTIVE entry."
@@ -95,6 +97,319 @@
   (let ((before (buffer-list)))
     (should-not (kargu-session-load "missing-record" nil default-directory))
     (should (equal before (buffer-list)))))
+
+(ert-deftest kargu-session-routing-two-chats-same-project-distinct-handles-and-sessions-test ()
+  "Two chats in the same project hold distinct handles, sessions, and run states."
+  (let* ((root (file-name-as-directory (make-temp-file "kargu-two-chats-" t)))
+         (kargu-session-auto-save nil)
+         (a (generate-new-buffer "*kargu-chat-a*"))
+         (b (generate-new-buffer "*kargu-chat-b*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer a
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)))
+          (with-current-buffer b
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)))
+          ;; Distinct buffer identities
+          (should-not (eq a b))
+          ;; Distinct session contexts and session IDs
+          (let ((sess-a (kargu-session-context a))
+                (sess-b (kargu-session-context b)))
+            (should (kargu-session-p sess-a))
+            (should (kargu-session-p sess-b))
+            (should-not (eq sess-a sess-b))
+            (should-not (equal (kargu-session-id sess-a) (kargu-session-id sess-b))))
+          ;; Distinct frontend handle stores and tokens
+          (let ((store-a (kargu-chat-handle-store a))
+                (store-b (kargu-chat-handle-store b)))
+            (should store-a)
+            (should store-b)
+            (should-not (eq store-a store-b))
+            (should-not (eq (kargu-chat-handle-store-token store-a)
+                            (kargu-chat-handle-store-token store-b)))
+            (should (kargu-chat-handle-valid-p store-a a))
+            (should (kargu-chat-handle-valid-p store-b b))
+            (should-not (kargu-chat-handle-valid-p store-a b))
+            (should-not (kargu-chat-handle-valid-p store-b a)))
+          ;; Run handle isolation: run on A does not make B busy or running
+          (should-not (kargu-chat-running-p a))
+          (should-not (kargu-chat-running-p b))
+          (let ((dummy-run (list :id "run-a" :chat-buffer a)))
+            (kargu-chat-set-run-handle dummy-run a)
+            (should (kargu-chat-running-p a))
+            (should-not (kargu-chat-running-p b))
+            (should (kargu-loop-running-p a))
+            (should-not (kargu-loop-running-p b))
+            (kargu-chat-set-run-handle nil a)
+            (should-not (kargu-chat-running-p a))
+            (should-not (kargu-loop-running-p a))))
+      (when (buffer-live-p a) (kill-buffer a))
+      (when (buffer-live-p b) (kill-buffer b))
+      (delete-directory root t))))
+
+(ert-deftest kargu-session-routing-closed-origin-reused-name-rejects-old-handle-delivery-test ()
+  "Reincarnated buffer with the same name rejects deliveries to the old handle."
+  (let* ((root (file-name-as-directory (make-temp-file "kargu-reincarnate-" t)))
+         (buf-name "*kargu-chat-reincarnate-test*")
+         (kargu-session-auto-save nil)
+         (a (get-buffer-create buf-name))
+         old-store delivered-to-new)
+    (unwind-protect
+        (progn
+          (with-current-buffer a
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)))
+          (setq old-store (kargu-chat-handle-store a))
+          (should (kargu-chat-handle-valid-p old-store a))
+          ;; Kill the origin buffer
+          (kill-buffer a)
+          (should-not (buffer-live-p a))
+          (should-not (kargu-chat-handle-valid-p old-store a))
+          ;; Reincarnate buffer with the same name
+          (let ((b (get-buffer-create buf-name)))
+            (unwind-protect
+                (progn
+                  (with-current-buffer b
+                    (let ((default-directory root) (kargu-permission--override-root root))
+                      (kargu-chat-mode)))
+                  ;; The old store is NOT valid for the new buffer
+                  (should-not (kargu-chat-handle-valid-p old-store b))
+                  (should-not (eq (kargu-chat-handle-store-token old-store)
+                                  (kargu-chat-handle-store-token (kargu-chat-handle-store b))))
+                  ;; Delivery to old handle must be rejected
+                  (when (kargu-chat-handle-valid-p old-store b)
+                    (setq delivered-to-new t))
+                  (should-not delivered-to-new))
+              (when (buffer-live-p b) (kill-buffer b)))))
+      (when (buffer-live-p a) (kill-buffer a))
+      (delete-directory root t))))
+
+(ert-deftest kargu-session-routing-find-by-session-disambiguates-buffers-test ()
+  "Buffer lookup by session ID returns the exact buffer, not an unrelated chat."
+  (let* ((root (file-name-as-directory (make-temp-file "kargu-find-sess-" t)))
+         (kargu-session-auto-save nil)
+         (a (generate-new-buffer "*kargu-find-a*"))
+         (b (generate-new-buffer "*kargu-find-b*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer a
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)))
+          (with-current-buffer b
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)))
+          (let ((id-a (kargu-session-id (kargu-session-context a)))
+                (id-b (kargu-session-id (kargu-session-context b))))
+            (should (eq (kargu-chat-find-buffer-by-session id-a root) a))
+            (should (eq (kargu-chat-find-buffer-by-session id-b root) b))
+            (should-not (eq (kargu-chat-find-buffer-by-session id-a root) b))
+            (should-not (kargu-chat-find-buffer-by-session "non-existent-sess" root))))
+      (when (buffer-live-p a) (kill-buffer a))
+      (when (buffer-live-p b) (kill-buffer b))
+      (delete-directory root t))))
+
+(ert-deftest kargu-session-routing-dto-revision-monotonic-update-test ()
+  "Handle store commits DTOs monotonically and rejects stale revisions."
+  (with-temp-buffer
+    (kargu-chat-mode)
+    (should (equal (kargu-chat-last-dto) '(0 . nil)))
+    ;; First update: revision 1 succeeds
+    (should (kargu-chat-update-dto '(:data "v1") 1))
+    (should (equal (kargu-chat-last-dto) '(1 . (:data "v1"))))
+    ;; Stale update: revision 1 rejected
+    (should-not (kargu-chat-update-dto '(:data "stale-v1") 1))
+    (should (equal (kargu-chat-last-dto) '(1 . (:data "v1"))))
+    ;; Older update: revision 0 rejected
+    (should-not (kargu-chat-update-dto '(:data "older-v0") 0))
+    (should (equal (kargu-chat-last-dto) '(1 . (:data "v1"))))
+    ;; Monotonic update: revision 3 succeeds
+    (should (kargu-chat-update-dto '(:data "v3") 3))
+    (should (equal (kargu-chat-last-dto) '(3 . (:data "v3"))))))
+
+(ert-deftest kargu-session-routing-callback-draws-correct-origin-regardless-of-current-buffer-test ()
+  "Delivery draws into the correct origin chat even when another buffer is current, preserving Unicode draft."
+  (let* ((root (file-name-as-directory (make-temp-file "kargu-route-current-" t)))
+         (kargu-session-auto-save nil)
+         (a (generate-new-buffer "*kargu-chat-a*"))
+         (b (generate-new-buffer "*kargu-chat-b*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer a
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)
+              (kargu-chat--ensure-idle-prompt)
+              (goto-char (point-max))
+              (insert "Türkçe taslak: ğüşıöç 🚀\nİkinci satır...")))
+          (with-current-buffer b
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)
+              (kargu-chat--ensure-idle-prompt)
+              (goto-char (point-max))
+              (insert "B tamponu taslağı")))
+          ;; Buffer B is current
+          (with-current-buffer b
+            (let ((store-a (kargu-chat-handle-store a)))
+              ;; Deliver delta to buffer A while B is current
+              (when (kargu-chat-handle-valid-p store-a a)
+                (with-current-buffer a
+                  (kargu-chat--stream-delta "Chunk from model to A: §42\n" nil)))
+              ;; Deliver completion report to buffer A
+              (when (kargu-chat-handle-valid-p store-a a)
+                (kargu-chat--complete-submission
+                 '(:status :done :text "Chunk from model to A: §42\n")
+                 :buffer a :session (kargu-session-context a)))))
+          ;; Verify Buffer A has the streamed text and its draft was preserved
+          (with-current-buffer a
+            (should (string-search "Chunk from model to A: §42" (buffer-string)))
+            (should (string-search "Türkçe taslak: ğüşıöç 🚀\nİkinci satır..." (buffer-string))))
+          ;; Verify Buffer B was never touched by A's delivery
+          (with-current-buffer b
+            (should-not (string-search "Chunk from model to A: §42" (buffer-string)))
+            (should (string-search "B tamponu taslağı" (buffer-string)))))
+      (when (buffer-live-p a) (kill-buffer a))
+      (when (buffer-live-p b) (kill-buffer b))
+      (delete-directory root t))))
+
+(ert-deftest kargu-session-routing-buffer-rename-preserves-delivery-and-draft-test ()
+  "Renaming a chat buffer preserves its handle validity, delivery, and Unicode draft."
+  (let* ((root (file-name-as-directory (make-temp-file "kargu-rename-" t)))
+         (kargu-session-auto-save nil)
+         (buf (generate-new-buffer "*kargu-chat-to-rename*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)
+              (kargu-chat--ensure-idle-prompt)
+              (goto-char (point-max))
+              (insert "Yeniden adlandırma taslağı: 測試 ✨")))
+          (let ((store (kargu-chat-handle-store buf)))
+            (should (kargu-chat-handle-valid-p store buf))
+            ;; Rename the buffer
+            (with-current-buffer buf
+              (rename-buffer "*kargu-chat-renamed*"))
+            ;; Handle store is still valid for the same buffer object
+            (should (kargu-chat-handle-valid-p store buf))
+            ;; Deliver delta to renamed buffer
+            (with-current-buffer buf
+              (kargu-chat--stream-delta "Cevap metni: OK\n" nil))
+            ;; Verify delivery and draft
+            (with-current-buffer buf
+              (should (string-search "Cevap metni: OK" (buffer-string)))
+              (should (string-search "Yeniden adlandırma taslağı: 測試 ✨" (buffer-string))))))
+      (when (buffer-live-p buf) (kill-buffer buf))
+      (delete-directory root t))))
+
+(ert-deftest kargu-session-routing-origin-close-does-not-abort-sibling-session-test ()
+  "Closing one chat buffer in a project does not abort or stop another active chat."
+  (let* ((root (file-name-as-directory (make-temp-file "kargu-sibling-" t)))
+         (kargu-session-auto-save nil)
+         (a (generate-new-buffer "*kargu-sibling-a*"))
+         (b (generate-new-buffer "*kargu-sibling-b*"))
+         b-completed)
+    (unwind-protect
+        (progn
+          (with-current-buffer a
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)))
+          (with-current-buffer b
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)))
+          ;; Give B an active run
+          (let ((run-b (list :id "run-b" :chat-buffer b)))
+            (kargu-chat-set-run-handle run-b b)
+            (should (kargu-chat-running-p b))
+            ;; Kill buffer A
+            (kill-buffer a)
+            (should-not (buffer-live-p a))
+            ;; Buffer B's run must still be active (never aborted by A's close!)
+            (should (buffer-live-p b))
+            (should (kargu-chat-running-p b))
+            (should (kargu-loop-running-p b))
+            ;; B completes its own run
+            (kargu-chat-set-run-handle nil b)
+            (setq b-completed t)
+            (should-not (kargu-chat-running-p b))))
+      (when (buffer-live-p a) (kill-buffer a))
+      (when (buffer-live-p b) (kill-buffer b))
+      (delete-directory root t))
+    (should b-completed)))
+
+(ert-deftest kargu-session-routing-foreign-stop-rejected-test ()
+  "Calling stop in an idle chat buffer never stops a running sibling chat."
+  (let* ((root (file-name-as-directory (make-temp-file "kargu-stop-" t)))
+         (kargu-session-auto-save nil)
+         (a (generate-new-buffer "*kargu-stop-a*"))
+         (b (generate-new-buffer "*kargu-stop-b*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer a
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)))
+          (with-current-buffer b
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)))
+          ;; Run on buffer A
+          (let ((run-a (list :id "run-a" :chat-buffer a)))
+            (kargu-chat-set-run-handle run-a a)
+            (should (kargu-chat-running-p a))
+            (should-not (kargu-chat-running-p b))
+            ;; User in buffer B attempts to stop
+            (with-current-buffer b
+              (kargu-loop-stop "user clicked stop in b" b))
+            ;; Buffer A is STILL running (no foreign stop!)
+            (should (kargu-chat-running-p a))
+            ;; Now stopping from buffer A stops A
+            (with-current-buffer a
+              (kargu-chat-set-run-handle nil a))
+            (should-not (kargu-chat-running-p a))))
+      (when (buffer-live-p a) (kill-buffer a))
+      (when (buffer-live-p b) (kill-buffer b))
+      (delete-directory root t))))
+
+(ert-deftest kargu-session-routing-reopen-buffer-never-receives-old-completion-test ()
+  "Reopening a buffer with the same name never receives completion from previous incarnation."
+  (let* ((root (file-name-as-directory (make-temp-file "kargu-reopen-" t)))
+         (buf-name "*kargu-chat-reopen-test*")
+         (kargu-session-auto-save nil)
+         (a (get-buffer-create buf-name))
+         old-store delivered-to-new)
+    (unwind-protect
+        (progn
+          (with-current-buffer a
+            (let ((default-directory root) (kargu-permission--override-root root))
+              (kargu-chat-mode)
+              (kargu-chat--ensure-idle-prompt)
+              (goto-char (point-max))
+              (insert "Old draft in A")))
+          (setq old-store (kargu-chat-handle-store a))
+          ;; Kill old buffer A
+          (kill-buffer a)
+          ;; Reopen new buffer with same name
+          (let ((b (get-buffer-create buf-name)))
+            (unwind-protect
+                (progn
+                  (with-current-buffer b
+                    (let ((default-directory root) (kargu-permission--override-root root))
+                      (kargu-chat-mode)
+                      (kargu-chat--ensure-idle-prompt)
+                      (goto-char (point-max))
+                      (insert "Yeni tampon yazısı 🌟")))
+                  ;; A late completion arrives targeting old-store
+                  (when (kargu-chat-handle-valid-p old-store b)
+                    (setq delivered-to-new t)
+                    (with-current-buffer b
+                      (kargu-chat--stream-delta "Old late completion" nil)))
+                  (should-not delivered-to-new)
+                  ;; New buffer's draft is unpolluted
+                  (with-current-buffer b
+                    (should-not (string-search "Old late completion" (buffer-string)))
+                    (should (string-search "Yeni tampon yazısı 🌟" (buffer-string)))))
+              (when (buffer-live-p b) (kill-buffer b)))))
+      (when (buffer-live-p a) (kill-buffer a))
+      (delete-directory root t))))
 
 (provide 'tests/test-session-routing)
 ;;; test-session-routing.el ends here

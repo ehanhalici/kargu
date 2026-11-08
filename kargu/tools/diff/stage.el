@@ -141,7 +141,9 @@ Dynamically bound while the hook runs.")
                 (insert-file-contents path)
                 (cons (buffer-string) buffer-file-coding-system)))
              (t (cons "" nil))))
-           (baseline (kargu-diff--capture-baseline-diagnostics path)))
+           (baseline (if exists
+                         (kargu-diff--capture-baseline-diagnostics path)
+                       (list :available nil :diagnostics nil))))
       (list :path path
             :owner (kargu-diff--capture-origin path)
             :exists exists
@@ -151,6 +153,7 @@ Dynamically bound while the hook runs.")
             :coding (cdr read-res)
             :tick (and (buffer-live-p buf) (buffer-chars-modified-tick buf))
             :disk-revision disk-rev
+            :baseline baseline
             :baseline-available (plist-get baseline :available)
             :baseline-diagnostics (plist-get baseline :diagnostics)))))
 
@@ -416,6 +419,15 @@ blocking review), plus :file, :saved and a model-facing :message."
          (svc (kargu-diff--current-service))
          (snapshots (kargu-diff--service-snapshots svc))
          (changes (kargu-diff--service-changes svc))
+         (prior (gethash path changes))
+         (effective-baseline
+          (if prior
+              (or (plist-get prior :baseline)
+                  (list :available (plist-get prior :baseline-available)
+                        :diagnostics (plist-get prior :baseline-diagnostics)))
+            (or (plist-get state :baseline)
+                (list :available (plist-get state :baseline-available)
+                      :diagnostics (plist-get state :baseline-diagnostics)))))
          (snapshot
           (list :content (plist-get state :original)
                 :created-new (not (plist-get state :exists)) :at (current-time)
@@ -424,13 +436,15 @@ blocking review), plus :file, :saved and a model-facing :message."
                 :post-content actual
                 :post-tick (buffer-chars-modified-tick buffer)
                 :post-disk-revision (kargu-diff--disk-revision path)
-                :baseline-available (plist-get state :baseline-available)
-                :baseline-diagnostics (plist-get state :baseline-diagnostics)))
+                :baseline effective-baseline
+                :baseline-available (plist-get effective-baseline :available)
+                :baseline-diagnostics (plist-get effective-baseline :diagnostics)))
          (outcome (append (list :status status :file path :snapshot snapshot) result)))
     (puthash path (cons snapshot (gethash path snapshots)) snapshots)
     (puthash path
-             (append outcome (list :baseline-available (plist-get state :baseline-available)
-                                   :baseline-diagnostics (plist-get state :baseline-diagnostics)))
+             (append outcome (list :baseline effective-baseline
+                                   :baseline-available (plist-get effective-baseline :available)
+                                   :baseline-diagnostics (plist-get effective-baseline :diagnostics)))
              changes)
     (when svc
       (cl-pushnew path (kargu-edit-service-run-modified-files svc) :test #'equal))

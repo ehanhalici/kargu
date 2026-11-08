@@ -170,5 +170,59 @@
          (when (buffer-live-p view) (kill-buffer view))
          (delete-file file))))))
 
+(ert-deftest kargu-provider-list-dto-returns-namespace-and-readiness-test ()
+  "Native provider/list returns typed DTO with namespace, readiness, and zero secrets."
+  (let* ((app (kargu-application-create))
+         result failure task)
+    (unwind-protect
+        (progn
+          (require 'kargu/bridge/catalog)
+          (setq task (kargu-bridge-provider-list
+                      (lambda (dto err)
+                        (setq result dto failure err))
+                      :application app))
+          (kargu-bridge-test--wait (lambda () (or result failure)))
+          (should-not failure)
+          (should (hash-table-p result))
+          (should (equal (gethash "status" result) "ok"))
+          (should (numberp (gethash "config_revision" result)))
+          (let ((providers (append (gethash "providers" result) nil)))
+            (should (consp providers))
+            (dolist (p providers)
+              (should (stringp (gethash "id" p)))
+              (should (stringp (gethash "name" p)))
+              (should (member (gethash "namespace" p) '("embedded" "api" "custom" "application")))
+              (should (member (gethash "readiness" p) '("ready" "available")))
+              (should (member (gethash "availability" p) '("ready" "available")))
+              (should (memq (gethash "authenticated" p) '(t :json-false nil)))
+              ;; Invariant: no secrets or headers in projection
+              (should-not (gethash "apikey" p))
+              (should-not (gethash "secret" p))
+              (should-not (gethash "headers" p))
+              (should-not (gethash "extra_headers" p)))))
+      (when (and task (kargu-async-pending-p task))
+        (kargu-async-cancel task)))))
+
+(ert-deftest kargu-provider-registry-duplicate-display-name-isolation-test ()
+  "Two providers with the identical display name maintain unforgeable distinct identities."
+  (let ((table (copy-hash-table kargu-providers--table)))
+    (unwind-protect
+        (progn
+          (kargu-register-provider :id "azure-gpt4" :name "GPT-4" :format 'openapi)
+          (kargu-register-provider :id "openai-gpt4" :name "GPT-4" :format 'openapi)
+          (should (equal (kargu-provider-name "azure-gpt4") "GPT-4"))
+          (should (equal (kargu-provider-name "openai-gpt4") "GPT-4"))
+          (let ((p1 (kargu-provider-get "azure-gpt4"))
+                (p2 (kargu-provider-get "openai-gpt4")))
+            (should-not (eq p1 p2))
+            (should (equal (plist-get p1 :id) "azure-gpt4"))
+            (should (equal (plist-get p2 :id) "openai-gpt4"))
+            (should (eq (kargu-provider-namespace "azure-gpt4") 'embedded))
+            (should (eq (kargu-provider-namespace "openai-gpt4") 'embedded))
+            (should (equal (kargu-provider-readiness "azure-gpt4") "available")))
+          (should (member "azure-gpt4" (kargu-provider-list)))
+          (should (member "openai-gpt4" (kargu-provider-list))))
+      (setq kargu-providers--table table))))
+
 (provide 'tests/test-provider-selection)
 ;;; test-provider-selection.el ends here

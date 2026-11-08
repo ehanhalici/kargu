@@ -648,6 +648,9 @@ fn native_file_diagnostics_settle_only_exact_fresh_receipt_evidence() -> TestRes
         "custom-error",
         "unknown-severity",
         "raw-warning",
+        "baseline-pre-existing",
+        "baseline-replaced-server",
+        "baseline-new-error",
         "compatibility-info",
         "forged-grade",
         "errors",
@@ -679,6 +682,13 @@ fn native_file_diagnostics_settle_only_exact_fresh_receipt_evidence() -> TestRes
                 },
             ),
         ];
+        if case == "baseline-new-error" {
+            replies.push(tool_reply(
+                "diagnose-repeat",
+                "lsp_diagnostics",
+                json!({"file_path":"file.txt"}),
+            ));
+        }
         if case != "cancelled" {
             replies.push(answer("observed"));
         }
@@ -690,7 +700,7 @@ fn native_file_diagnostics_settle_only_exact_fresh_receipt_evidence() -> TestRes
         let mut input = prompt(root.path(), &url);
         input["tools_enabled"] = json!(true);
         input["editor_available"] = json!(["write_file", "lsp_diagnostics"]);
-        input["tool_limit"] = json!(2);
+        input["tool_limit"] = json!(if case == "baseline-new-error" { 3 } else { 2 });
         input["edit_policy"] = json!({"review_mode":"auto","save_policy":"save"});
         begin(&mut peer, "verify-edit", &scope, input)?;
         let edit = reverse(&peer, "editor/run_edit", &mut events)?;
@@ -704,15 +714,55 @@ fn native_file_diagnostics_settle_only_exact_fresh_receipt_evidence() -> TestRes
             &mut events,
         )?;
         let grant = authorized(&mut peer, &scope, &edit, &prep, &mut events)?;
-        let token = issue(
-            &mut peer,
-            &scope,
-            &edit,
-            &grant,
-            &descriptor,
-            journal.path(),
-            &mut events,
-        )?;
+        let token = if matches!(
+            case,
+            "baseline-pre-existing" | "baseline-replaced-server" | "baseline-new-error"
+        ) {
+            let baseline_doc = json!({"path":"file.txt","document_id":DOC,"tick":1});
+            let baseline_diags = if case == "baseline-new-error" {
+                json!([])
+            } else {
+                json!([{"source":"actual-checker","code":null,"severity":{"flymake":3},
+                    "message":"synthetic finding",
+                    "range":{"start":{"line":1,"column":0},"end":{"line":1,"column":1}}}])
+            };
+            let baseline = json!({
+                "requested":baseline_doc,
+                "observed":baseline_doc,
+                "available":true,
+                "truncated":false,
+                "server":{"requested_server":"eglot-1","observed_server":"eglot-1",
+                    "requested_version":2,"published_version":2,"tick":1},
+                "backends":[{"backend":"actual-checker","requested":1,"observed":1,"tick":1,"reported":true}],
+                "diagnostics":baseline_diags
+            });
+            let args = json!({"origin_id":edit["params"]["origin_id"],"edit_id":grant["edit_id"],"revision":1,
+                "witness":{"file":0,"base_hash":descriptor["base_hash"],"baseline":baseline,
+                "document":{"id":DOC,"tick":1,"bytes":descriptor["base_bytes"],"coding":"utf-8-unix",
+                    "dirty":false,"read_only":false,"disk":descriptor["disk"]}}});
+            let reply = edit_rpc(&mut peer, &scope, "edit/preflight", args, &mut events)?;
+            assert_eq!(reply["result"]["state"], "preflighted", "{reply}");
+            let reply = edit_rpc(
+                &mut peer,
+                &scope,
+                "edit/issue",
+                json!({"origin_id":edit["params"]["origin_id"],
+                "edit_id":grant["edit_id"],"revision":1,"journal_directory":journal.path()}),
+                &mut events,
+            )?;
+            assert_eq!(reply["result"]["state"], "issued", "{reply}");
+            reply["result"]["issued_token"].clone()
+        } else {
+            issue(
+                &mut peer,
+                &scope,
+                &edit,
+                &grant,
+                &descriptor,
+                journal.path(),
+                &mut events,
+            )?
+        };
         fs::write(&path, TEXT)?;
         let applied = receipt(&mut peer, &scope, &edit, &grant, &token, &path, &mut events)?;
         assert_eq!(applied["result"]["receipt"]["outcome"], "applied_full");
@@ -763,19 +813,41 @@ fn native_file_diagnostics_settle_only_exact_fresh_receipt_evidence() -> TestRes
                 observation["requested"]["document_id"] = json!("foreign");
                 observation["observed"]["document_id"] = json!("foreign");
             }
-            "errors" | "warning" | "custom-error" | "unknown-severity" | "raw-warning"
+            "errors"
+            | "warning"
+            | "custom-error"
+            | "unknown-severity"
+            | "raw-warning"
+            | "baseline-pre-existing"
+            | "baseline-replaced-server"
+            | "baseline-new-error"
             | "compatibility-info" => {
                 let severity = match case {
                     "custom-error" => json!({"flymake":9}),
                     "unknown-severity" => json!({"flymake":null}),
                     "raw-warning" => json!({"flymake":2}),
+                    "baseline-pre-existing" | "baseline-replaced-server" | "baseline-new-error" => {
+                        json!({"flymake":3})
+                    }
                     "compatibility-info" => json!("info"),
                     "errors" => json!("error"),
                     _ => json!("warning"),
                 };
+                if matches!(
+                    case,
+                    "baseline-pre-existing" | "baseline-replaced-server" | "baseline-new-error"
+                ) {
+                    let srv = if case == "baseline-replaced-server" {
+                        "eglot-2"
+                    } else {
+                        "eglot-1"
+                    };
+                    observation["server"] = json!({"requested_server":srv,"observed_server":srv,
+                        "requested_version":3,"published_version":3,"tick":tick});
+                }
                 observation["diagnostics"] = json!([{
                     "source":"actual-checker","code":null,"severity":severity,
-                    "message":"synthetic finding", "range":{"start":{"line":1,"column":0},"end":{"line":1,"column":1}}}]);
+                    "message":"synthetic finding", "range":{"start":{"line":2,"column":0},"end":{"line":2,"column":1}}}]);
             }
             _ => {}
         }
@@ -792,7 +864,18 @@ fn native_file_diagnostics_settle_only_exact_fresh_receipt_evidence() -> TestRes
         } else if case != "prose" {
             completion["observation"] = json!({"kind":"diagnostics","snapshot":observation});
         }
-        peer.send(json!({"jsonrpc":"2.0","id":read["id"],"result":completion}))?;
+        peer.send(json!({"jsonrpc":"2.0","id":read["id"],"result":completion.clone()}))?;
+        if case == "baseline-new-error" {
+            let capture2 = reverse(&peer, "editor/prepare_tool", &mut events)?;
+            peer.send(json!({"jsonrpc":"2.0","id":capture2["id"],"result":{
+                "scope":capture2["params"]["scope"],"call_id":capture2["params"]["call_id"],
+                "resource":{"kind":"document","document":document}}}))?;
+            let read2 = reverse(&peer, "editor/call_tool", &mut events)?;
+            let mut completion2 = completion.clone();
+            completion2["scope"] = read2["params"]["scope"].clone();
+            completion2["call_id"] = read2["params"]["call_id"].clone();
+            peer.send(json!({"jsonrpc":"2.0","id":read2["id"],"result":completion2}))?;
+        }
         let terminal = response(&peer, "verify-edit", &mut events)?;
         assert_eq!(
             terminal["result"]["status"],
@@ -805,7 +888,10 @@ fn native_file_diagnostics_settle_only_exact_fresh_receipt_evidence() -> TestRes
         );
         assert_eq!(
             terminal["result"]["accounting"]["changes"]["pending_files"],
-            usize::from(!matches!(case, "clean" | "raw-warning" | "reset")),
+            usize::from(!matches!(
+                case,
+                "clean" | "raw-warning" | "baseline-pre-existing" | "reset"
+            )),
             "{case}: {terminal}"
         );
         assert_eq!(
@@ -814,10 +900,29 @@ fn native_file_diagnostics_settle_only_exact_fresh_receipt_evidence() -> TestRes
         );
         assert_eq!(
             terminal["result"]["accounting"]["budget"]["requests_spent"],
-            if case == "cancelled" { 2 } else { 3 }
+            match case {
+                "cancelled" => 2,
+                "baseline-new-error" => 4,
+                _ => 3,
+            }
         );
         let _first = requests.recv_timeout(Duration::from_secs(2))?;
         let _diagnose = requests.recv_timeout(Duration::from_secs(2))?;
+        if case == "baseline-new-error" {
+            let heal_turn = requests.recv_timeout(Duration::from_secs(2))?;
+            let heal_msgs = heal_turn["messages"].as_array().ok_or("messages")?;
+            let first_diag = heal_msgs.last().ok_or("first diag")?["content"]
+                .as_str()
+                .ok_or("content")?;
+            assert!(
+                first_diag.contains("Baseline comparison: 1 new error(s), 0 pre-existing error(s), 0 resolved error(s)."),
+                "{first_diag}"
+            );
+            assert!(
+                first_diag.contains("SELF-HEALING (round 1 of 2)"),
+                "{first_diag}"
+            );
+        }
         if case != "cancelled" {
             let next = requests.recv_timeout(Duration::from_secs(2))?;
             let messages = next["messages"].as_array().ok_or("messages")?;
@@ -826,12 +931,30 @@ fn native_file_diagnostics_settle_only_exact_fresh_receipt_evidence() -> TestRes
                     .iter()
                     .filter(|message| message["role"] == "tool")
                     .count(),
-                2
+                if case == "baseline-new-error" { 3 } else { 2 }
             );
             let read_result = messages.last().ok_or("diagnostic tool result")?["content"]
                 .as_str()
                 .ok_or("result")?;
             assert!(!read_result.contains("FORGED_VERIFIED"));
+            if case == "baseline-pre-existing" {
+                assert!(
+                    read_result.contains("Baseline comparison: 0 new error(s), 1 pre-existing error(s), 0 resolved error(s)."),
+                    "{read_result}"
+                );
+            } else if case == "baseline-new-error" {
+                assert!(
+                    read_result
+                        .contains("SELF-HEALING STOPPED: identical diagnostic error(s) repeated"),
+                    "{read_result}"
+                );
+            } else if matches!(case, "baseline-replaced-server" | "custom-error") {
+                assert!(
+                    read_result.contains("Baseline comparison unavailable: observed errors cannot be classified as new or pre-existing."),
+                    "{read_result}"
+                );
+                assert!(!read_result.contains("0 new error(s)"), "{read_result}");
+            }
         }
         assert_eq!(fs::read_to_string(&path)?, TEXT);
         server.join().map_err(|_| "server panic")??;

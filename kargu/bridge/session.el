@@ -16,6 +16,10 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'kargu/bridge)
+(require 'kargu/bridge/application)
+(require 'kargu/bridge/conversation)
+(require 'kargu/core/session)
+(require 'kargu/application/coordinator)
 
 (defun kargu-bridge-session--same-scope-p (left right)
   "Compare exact native run scopes LEFT and RIGHT without sharing objects."
@@ -151,9 +155,41 @@ The native persistence service owns the write."
   "Delete persisted session PARAMS via native persistence on CONNECTION."
   (kargu-bridge-call connection "session/delete" params callback :owner owner))
 
+(defun kargu-bridge-session-prune (connection params callback &optional owner)
+  "Prune persisted sessions and clean temp files for PARAMS on CONNECTION."
+  (kargu-bridge-call connection "session/prune" params callback :owner owner))
+
 (defun kargu-bridge-session-import (connection params callback &optional owner)
   "Import legacy or local session PARAMS via native persistence on CONNECTION."
   (kargu-bridge-call connection "session/import" params callback :owner owner))
+
+(defun kargu-bridge-session-restore (connection params callback &optional owner)
+  "Restore session candidate PARAMS atomically into native state on CONNECTION."
+  (kargu-bridge-call connection "session/restore" params callback :owner owner))
+
+(defun kargu-bridge-session-scope (buffer callback)
+  "Deliver (CONNECTION SCOPE FAILURE) for BUFFER to CALLBACK."
+  (let ((buf (or buffer (current-buffer))))
+    (if (not (buffer-live-p buf))
+        (funcall callback nil nil (kargu-bridge--fault "owner_closed"))
+      (let ((session (with-current-buffer buf (kargu-session-context buf)))
+            (application (kargu-application-context)))
+        (kargu-bridge-ensure
+         (lambda (connection failure)
+           (if failure
+               (funcall callback nil nil failure)
+             (kargu-bridge-application-ensure
+              connection application
+              (lambda (service failure)
+                (if failure
+                    (funcall callback nil nil failure)
+                  (with-current-buffer buf
+                    (kargu-bridge-conversation-ensure
+                     connection application session service
+                     (lambda (scope failure)
+                       (if failure
+                           (funcall callback nil nil failure)
+                         (funcall callback connection scope nil)))))))))))))))
 
 (provide 'kargu/bridge/session)
 ;;; session.el ends here

@@ -115,6 +115,103 @@
         (kargu-bridge-session-import nil params #'ignore)
         (should (equal captured-method "session/import"))))))
 
+(ert-deftest kargu-native-session-save-refuses-local-sync-writer-on-bridge-error-test ()
+  "Native save routes to bridge; on failure or unavailable it never calls sync writer."
+  (let* ((buf (get-buffer-create "*kargu-test-native-save*"))
+         (writer-called nil)
+         (bridge-called nil)
+         save-result save-error)
+    (unwind-protect
+        (with-current-buffer buf
+          (kargu-chat-mode)
+          (setq-local kargu-chat--project-root "/fixture/project")
+          (setq-local kargu-chat--session-id "sess-save-test")
+          (setf (kargu-history-messages) '((("role" . "user") ("content" . "Hello"))))
+          (cl-letf (((symbol-function 'kargu-session-storage-write)
+                     (lambda (&rest _) (setq writer-called t) (ert-fail "Sync local writer was called!")))
+                    ((symbol-function 'kargu-bridge-session-scope)
+                     (lambda (_buf callback)
+                       ;; Simulate native bridge unavailable / error
+                       (funcall callback nil nil (kargu-bridge--fault "unavailable")))))
+            (kargu-session-save buf (lambda (res err) (setq save-result res save-error err)))
+            (should-not writer-called)
+            (should-not save-result)
+            (should save-error)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest kargu-native-session-save-success-routes-dto-over-bridge-test ()
+  "Successful save delivers full session DTO with scope to native bridge."
+  (let* ((buf (get-buffer-create "*kargu-test-native-save-ok*"))
+         captured-method captured-params delivered-result)
+    (unwind-protect
+        (with-current-buffer buf
+          (kargu-chat-mode)
+          (setq-local kargu-chat--project-root "/fixture/project")
+          (setq-local kargu-chat--session-id "sess-save-ok")
+          (setf (kargu-history-messages) '((("role" . "user") ("content" . "Hello Native"))))
+          (let ((scope (kargu-native-session-test--scope))
+                (conn (kargu-bridge--connection-create :state 'ready :epoch "fixture-epoch")))
+            (cl-letf (((symbol-function 'kargu-bridge-session-scope)
+                       (lambda (_buf callback) (funcall callback conn scope nil)))
+                      ((symbol-function 'kargu-bridge-call)
+                       (lambda (_connection method params callback &rest _)
+                         (setq captured-method method captured-params params)
+                         (funcall callback (kargu-bridge--object "status" "ok" "session_id" "sess-save-ok" "revision" 1) nil))))
+              (kargu-session-save buf (lambda (res _err) (setq delivered-result res)))
+              (should (equal captured-method "session/save"))
+              (should (equal (gethash "session_id" captured-params) "sess-save-ok"))
+              (let ((rec (gethash "record" captured-params)))
+                (should (or (hash-table-p rec) (consp rec)))
+                (should (equal (kargu-aget rec "id") "sess-save-ok")))
+              (should (equal (gethash "status" delivered-result) "ok")))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest kargu-native-session-auto-save-debounce-never-slips-to-foreign-buffer-test ()
+  "Debounced auto-save captures target buffer lexically and never saves the currently active buffer."
+  (let* ((buf1 (get-buffer-create "*kargu-test-autosave-1*"))
+         (buf2 (get-buffer-create "*kargu-test-autosave-2*"))
+         saved-buffer)
+    (unwind-protect
+        (progn
+          (with-current-buffer buf1
+            (kargu-chat-mode)
+            (setq-local kargu-chat--project-root "/fixture/p1")
+            (setq-local kargu-chat--session-id "sess-p1"))
+          (with-current-buffer buf2
+            (kargu-chat-mode)
+            (setq-local kargu-chat--project-root "/fixture/p2")
+            (setq-local kargu-chat--session-id "sess-p2"))
+          (cl-letf (((symbol-function 'kargu-session-save)
+                     (lambda (&optional b _cb) (setq saved-buffer (or b (current-buffer))))))
+            (let ((kargu-session-auto-save-debounce 0.01))
+              (with-current-buffer buf1
+                (kargu-session-auto-save-debounce buf1))
+              ;; Switch current buffer to buf2 before timer fires
+              (with-current-buffer buf2
+                (sit-for 0.05))
+              ;; Verified: only buf1 was saved, never buf2
+              (should (eq saved-buffer buf1)))))
+      (when (buffer-live-p buf1) (kill-buffer buf1))
+      (when (buffer-live-p buf2) (kill-buffer buf2)))))
+
+(ert-deftest kargu-native-session-delete-routes-to-native-bridge-test ()
+  "Session delete calls native session/delete and does not run delete-file."
+  (let (captured-method captured-params file-deleted)
+    (cl-letf (((symbol-function 'delete-file)
+               (lambda (&rest _) (setq file-deleted t) (ert-fail "delete-file should not be called")))
+              ((symbol-function 'kargu-bridge-session-scope)
+               (lambda (_buf callback)
+                 (funcall callback (kargu-bridge--connection-create :state 'ready :epoch "epoch")
+                          (kargu-native-session-test--scope) nil)))
+              ((symbol-function 'kargu-bridge-call)
+               (lambda (_connection method params callback &rest _)
+                 (setq captured-method method captured-params params)
+                 (funcall callback (kargu-bridge--object "status" "ok" "deleted" t) nil))))
+      (kargu-session-delete "sess-to-delete" "/fixture/root" #'ignore)
+      (should-not file-deleted)
+      (should (equal captured-method "session/delete"))
+      (should (equal (gethash "session_id" captured-params) "sess-to-delete")))))
+
 (ert-deftest kargu-native-editor-cancel-retains-the-issued-read-until-its-callback-test ()
   (let* ((root (make-temp-file "kargu-native-symbols-" t))
          (path (expand-file-name "source.el" root))

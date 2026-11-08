@@ -16,6 +16,7 @@
 (require 'kargu/bridge/edit/batch/read)
 (require 'kargu/bridge/edit/batch/review)
 (require 'kargu/bridge/edit/activity)
+(require 'kargu/bridge/sensor/diagnostics)
 (require 'kargu/permission)
 (require 'kargu/state)
 
@@ -100,12 +101,17 @@
           :restore-clean (eq (gethash "restore_dirty" view) :json-false)))))
    files))
 
-(defun kargu-bridge-edit-batch--result (native root &optional proposals)
-  "Project verified NATIVE facts under ROOT and PROPOSALS into a consumer result."
+(defun kargu-bridge-edit-batch--result (native root &optional proposals observations)
+  "Project verified NATIVE facts under ROOT, PROPOSALS and OBSERVATIONS."
   (let* ((receipt (gethash "receipt" native))
          (files (cl-loop for file across (gethash "files" receipt)
                          for index from 0
                          for proposal = (nth index proposals)
+                         for obs = (nth index observations)
+                         for after = (and (kargu-bridge-edit-document-change-p obs)
+                                          (kargu-bridge-edit-document-change-after obs))
+                         for final-hash = (let ((h (gethash "final_hash" file)))
+                                            (unless (eq h :json-null) h))
                          for view = (plist-get proposal :view)
                          collect
                          (list :path (expand-file-name (gethash "path" file) root)
@@ -114,8 +120,15 @@
                                :status (intern (concat ":" (replace-regexp-in-string "_" "-" (gethash "outcome" file))))
                                :saved (eq (gethash "saved" file) t)
                                :hunks (gethash "hunks" file)
-                               :final-hash (let ((h (gethash "final_hash" file)))
-                                             (unless (eq h :json-null) h))
+                               :final-hash final-hash
+                               :document-id (and (kargu-bridge-edit-document-p after)
+                                                 (kargu-bridge-edit-document-id after))
+                               :document-tick (and (kargu-bridge-edit-document-p after)
+                                                   (kargu-bridge-edit-document-tick after))
+                               :deleted (null final-hash)
+                               :closed (and final-hash
+                                            (not (and (kargu-bridge-edit-document-p after)
+                                                      (buffer-live-p (kargu-bridge-edit-document-buffer after)))))
                                :base (plist-get proposal :base)
                                :existed (and (hash-table-p view) (eq (gethash "existed" view) t))
                                :baseline (plist-get proposal :baseline)
@@ -175,10 +188,23 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
             artifact (guard (lambda (files) (authorize files)))))
          (authorize (files)
            (dolist (file files)
-             (let ((path (gethash "path" (plist-get file :view))))
-               (setf (plist-get file :document) (kargu-bridge-edit-batch-read-document path))
+             (let* ((view (plist-get file :view))
+                    (path (gethash "path" view))
+                    (relative (gethash "requested_path" view))
+                    (document (kargu-bridge-edit-batch-read-document path)))
+               (setf (plist-get file :document) document
+                     (plist-get file :diagnostic-baseline)
+                     (when (and (eq (gethash "existed" view) t) (stringp relative))
+                       (kargu-bridge-diagnostics-document-snapshot
+                        (kargu-bridge-edit-document-buffer document)
+                        (plist-get spec :root) relative
+                        (kargu-bridge-edit-document-id document)
+                        (kargu-bridge-edit-document-tick document))))
                (when (functionp (plist-get spec :capture-baseline))
-                 (setf (plist-get file :baseline) (funcall (plist-get spec :capture-baseline) path)))))
+                 (setf (plist-get file :baseline)
+                       (if (eq (gethash "existed" view) t)
+                           (funcall (plist-get spec :capture-baseline) path)
+                         (list :available nil :diagnostics nil))))))
            (kargu-bridge-edit-authorize
             artifact (or (plist-get spec :presenter) 'available)
             (guard
@@ -195,10 +221,13 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
          (preflight (files edit revision)
            (cl-labels ((next (remaining index last-value)
                          (if (null remaining) (issue files edit revision last-value)
-                           (kargu-bridge-edit-preflight
-                            artifact :edit-id edit :revision revision
-                            :witness (kargu-bridge-edit-document-witness (plist-get (car remaining) :document) index)
-                            :callback (guard (lambda (value) (next (cdr remaining) (1+ index) value)))))))
+                           (let ((file (car remaining)))
+                             (kargu-bridge-edit-preflight
+                              artifact :edit-id edit :revision revision
+                              :witness (kargu-bridge-edit-document-witness
+                                        (plist-get file :document) index
+                                        (plist-get file :diagnostic-baseline))
+                              :callback (guard (lambda (value) (next (cdr remaining) (1+ index) value))))))))
              (next files 0 nil)))
          (issue (files edit revision preflight)
            (when (plist-get spec :validate-source) (funcall (plist-get spec :validate-source)))
@@ -214,7 +243,8 @@ SPEC requires a trusted :root or configured project root.  :intent is :replace,
                              (kargu-bridge-edit-batch--apply files live-p))
                   :callback (guard (lambda (value)
                                      (finish (kargu-bridge-edit-batch--result
-                                              (plist-get value :native) (plist-get spec :root) files) nil)))))
+                                              (plist-get value :native) (plist-get spec :root) files
+                                              (plist-get value :observation)) nil)))))
            (kargu-async-add-cleanup task (lambda () (kargu-bridge-edit-activity-cancel activity))))
          (prepare (application arguments parts action callback)
            (kargu-bridge-edit--start

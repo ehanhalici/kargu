@@ -11,7 +11,7 @@ use super::protocol::{self, Fault, RpcId};
 use crate::constants::limits;
 use crate::{
     api::{ApiError, HttpRequest},
-    application::agent::{AssistantTurn, ModelTurn},
+    application::agent::{AgentTurn, AssistantTurn},
     application::budget::ObservedUsage,
     application::host::{Host, ReadScope},
     error::CoreError,
@@ -34,7 +34,7 @@ struct Request {
     retry: Option<retry::Configuration>,
 }
 struct Pending {
-    model: Option<ModelTurn>,
+    model: Option<AgentTurn>,
     scope: ReadScope,
     cancel: CancellationToken,
     published: bool,
@@ -75,7 +75,7 @@ enum Success {
     Model(Box<AssistantTurn>),
 }
 pub(super) struct ModelDelivery {
-    pub turn: ModelTurn,
+    pub turn: AgentTurn,
     pub result: Result<Box<AssistantTurn>, ApiError>,
     pub budget: Option<Value>,
     pub circuit: Option<Value>,
@@ -213,11 +213,11 @@ impl ApiRequests {
         &mut self,
         host: &Host,
         id: RpcId,
-        turn: ModelTurn,
+        turn: AgentTurn,
         arguments: HttpRequest,
         budget: crate::domain::BudgetId,
         retry: Option<retry::Configuration>,
-    ) -> Result<(), Box<(Fault, ModelTurn)>> {
+    ) -> Result<(), Box<(Fault, AgentTurn)>> {
         if self.contains(&id)
             || turn.run().check_live().is_err()
             || retry
@@ -238,7 +238,7 @@ impl ApiRequests {
             arguments,
             budget: Some(budget::BudgetRef {
                 budget_id: budget,
-                kind: crate::application::budget::DebitKind::NormalRequest,
+                kind: turn.debit_kind(),
                 native_run: Some(turn.run().scope().run_id().clone()),
             }),
             retry,
@@ -255,7 +255,7 @@ impl ApiRequests {
         &mut self,
         id: RpcId,
         admitted: admission::Admitted,
-        model: Option<ModelTurn>,
+        model: Option<AgentTurn>,
     ) {
         let admission::Admitted {
             scope,
@@ -268,7 +268,7 @@ impl ApiRequests {
         let budget_id = flight.charge().map(|charge| charge.id.clone());
         let cancel = model
             .as_ref()
-            .map_or_else(|| self.root.child_token(), ModelTurn::cancellation);
+            .map_or_else(|| self.root.child_token(), AgentTurn::cancellation);
         let observe_entropy = flight.retrying();
         let expectation = if model.is_some() {
             worker::ResponseExpectation::Native

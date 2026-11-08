@@ -118,18 +118,19 @@ wait for Rust or run the removed synchronous directory scanner."
    "root" (copy-sequence root) "path" (copy-sequence target)
    "skip_directories" (vconcat (mapcar #'copy-sequence kargu-fs-skip-dirs))))
 
-(defun kargu-search-glob (callback pattern &optional path)
+(defun kargu-search-glob (callback pattern &optional path max-files max-dirs)
   "List files matching glob PATTERN under PATH (default: project root).
-The list goes to CALLBACK.  Rust owns matching, traversal and rendering.
-Return an owned async task; Stop cancels its pending RPC, not sibling work."
+The list goes to CALLBACK.  MAX-FILES and MAX-DIRS override default limits.
+Rust owns matching, traversal and rendering.  Return an owned async task;
+Stop cancels its pending RPC, not sibling work."
   (kargu-contract-assert #'kargu-contract-non-empty-string-p pattern
                          "pattern is required: %S" pattern)
   (let* ((root (kargu-search--root))
          (target (kargu-search--resolve path root))
          (arguments (kargu-search--native-arguments root target)))
     (puthash "pattern" (copy-sequence pattern) arguments)
-    (puthash "max_files" kargu-fs-max-listed-files arguments)
-    (puthash "max_directories" kargu-fs-max-visited-directories arguments)
+    (puthash "max_files" (or max-files kargu-fs-max-listed-files) arguments)
+    (puthash "max_directories" (or max-dirs kargu-fs-max-visited-directories) arguments)
     (kargu-bridge-read-task callback arguments #'kargu-bridge-find-files)))
 
 ;;;; Tool registration -----------------------------------------------------

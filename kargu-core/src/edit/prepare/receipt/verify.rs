@@ -216,6 +216,11 @@ impl ReceiptWork {
                 hunks,
                 final_text: None,
                 before_document: before.clone(),
+                diagnostic_baseline: if kind == OperationKind::Update {
+                    self.preflight.baseline(index, prepared)
+                } else {
+                    super::super::verification::DiagnosticBaseline::Unavailable
+                },
                 final_document: match &observation.after {
                     After::Document { document, .. } => Some(document.clone()),
                     _ => None,

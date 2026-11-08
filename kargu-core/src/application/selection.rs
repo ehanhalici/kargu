@@ -119,6 +119,14 @@ pub struct SessionSelection {
     selection: Selection,
 }
 impl SessionSelection {
+    /// Construct committed selection with initial zero revision.
+    pub const fn from_selection(selection: Selection) -> Self {
+        Self {
+            revision: SelectionRevision::ZERO,
+            selection,
+        }
+    }
+
     /// Current revision.
     pub fn revision(&self) -> SelectionRevision {
         self.revision
@@ -149,9 +157,27 @@ impl SessionSelection {
 }
 
 impl Selection {
+    /// Construct a complete selection.
+    pub const fn new(
+        provider: Option<ApiProviderId>,
+        model: Option<ModelChoice>,
+        effort: EffortChoice,
+    ) -> Self {
+        Self {
+            provider,
+            model,
+            effort,
+        }
+    }
+
     /// Explicit provider, or none to inherit configuration.
     pub fn provider(&self) -> &Option<ApiProviderId> {
         &self.provider
+    }
+
+    /// Explicit effort choice.
+    pub const fn effort(&self) -> &EffortChoice {
+        &self.effort
     }
 }
 

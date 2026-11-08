@@ -10,6 +10,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'kargu/chat)
 (require 'kargu/chat/session)
 (require 'tests/test-helpers)
 

@@ -15,9 +15,27 @@
 (require 'kargu/async)
 (require 'kargu/contract/types)
 
+(declare-function kargu-bridge-mode-commit "kargu/bridge/mode"
+                  (session desired debug-ready callback))
 (defvar kargu-mode-prepare-functions nil
   "Mode preparation extensions accepting ready and optional error callbacks.
 Legacy single-continuation preparers remain supported at this boundary.")
+
+(defvar kargu-mode-port #'kargu-mode--native-port
+  "Function (SESSION DESIRED DEBUG-READY CALLBACK) committing MODE to native actor.
+CALLBACK receives (RESULT FAILURE) once.")
+
+(defun kargu-mode--native-port (session desired debug-ready callback)
+  "Commit DESIRED for SESSION through Rust conversation; deliver CALLBACK.
+If native bridge is running and ready, sends `session/mode/commit',
+otherwise delivers DTO directly for standalone operation."
+  (if (and (fboundp 'kargu-bridge-status)
+           (eq (kargu-bridge-status) 'ready)
+           (fboundp 'kargu-bridge-application-ensure))
+      (progn
+        (require 'kargu/bridge/mode)
+        (kargu-bridge-mode-commit session desired debug-ready callback))
+    (funcall callback (list :mode desired :debug-ready debug-ready) nil)))
 
 (cl-defstruct (kargu-mode-preparation (:constructor kargu-mode--create))
   "A mode intent bound to a captured origin, session and workspace."

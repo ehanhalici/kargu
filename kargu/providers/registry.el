@@ -40,17 +40,23 @@ spec, not a list of model name strings.")
 (defun kargu-register-provider (&rest plist)
   "Register a provider in the global registry.
 PLIST must contain at least `:id'.  Other supported keys:
-`:name', `:api', `:env', `:models', `:models-api',
+`:name', `:namespace', `:api', `:env', `:models', `:models-api',
 `:usage-api', `:extra-headers', `:npm', `:format',
 `:prompt-caching', `:prompt-for', `:keyless', `:local', `:request'.
 The `:request' plist overrides format request policy, preserving explicit nil."
   (let* ((id (plist-get plist :id))
          (id-str (cond ((stringp id) (downcase (string-trim id)))
                        ((symbolp id) (downcase (symbol-name id)))
-                       (t (error "Provider :id must be a string or symbol: %S" id)))))
+                       (t (error "Provider :id must be a string or symbol: %S" id))))
+         (namespace (or (plist-get plist :namespace)
+                        (cond ((memq (plist-get plist :kind) '(application backend)) 'application)
+                              ((member id-str '("codex" "antigravity" "claude-code")) 'application)
+                              ((plist-get plist :format) 'embedded)
+                              (t 'custom))))
+         (updated (plist-put (copy-sequence plist) :namespace namespace)))
     (when (string-empty-p id-str)
       (error "Provider :id cannot be empty"))
-    (puthash id-str plist kargu-providers--table)
+    (puthash id-str updated kargu-providers--table)
     id-str))
 
 (defun kargu-provider-get (id)
@@ -214,11 +220,36 @@ A `:models' field-spec plist is not a model list."
     (or (and info (kargu-nonempty (plist-get info :name)))
         (if (symbolp id) (symbol-name id) (format "%s" id)))))
 
-(defun kargu-provider-list ()
-  "Return a sorted list of all registered provider ID strings."
+(defun kargu-provider-list (&optional authenticated-only)
+  "Return a sorted list of all registered provider ID strings.
+When AUTHENTICATED-ONLY is non-nil, filter out unauthenticated entries."
   (let (ids)
-    (maphash (lambda (k _v) (push k ids)) kargu-providers--table)
+    (maphash (lambda (k _v)
+               (if authenticated-only
+                   (when (kargu-provider-authenticated-p k)
+                     (push k ids))
+                 (push k ids)))
+             kargu-providers--table)
     (sort ids #'string-lessp)))
+
+(defun kargu-provider-namespace (id)
+  "Return provider ID's namespace symbol.
+It is one of `embedded', `api', `custom', or `application'."
+  (let ((info (kargu-provider-get id)))
+    (or (and info (plist-get info :namespace))
+        (when-let* ((view (kargu-config-native-view)))
+          (let ((id-str (if (symbolp id) (symbol-name id) (format "%s" id))))
+            (cl-some (lambda (p)
+                       (when (equal (gethash "provider" p) id-str)
+                         (intern (or (gethash "namespace" p) "api"))))
+                     (append (gethash "profiles" view) nil))))
+        'custom)))
+
+(defun kargu-provider-readiness (id)
+  "Return provider ID's readiness string: \"ready\" or \"available\"."
+  (if (kargu-provider-authenticated-p id)
+      "ready"
+    "available"))
 
 (defun kargu-provider-keyless-p (id)
   "Read provider ID's last committed native keyless flag."

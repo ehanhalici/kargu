@@ -3,6 +3,7 @@
 use super::{coordinates::SourceRange, types::*};
 use crate::{constants::limits, edit::types::EditPath, error::CoreError};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 mod project;
 pub use project::ProjectDiagnostics;
@@ -53,6 +54,10 @@ impl From<DiagnosticInput> for Diagnostic {
 impl Diagnostic {
     pub(crate) fn has_native_severity(&self) -> bool {
         self.native_severity
+    }
+    /// Canonical severity classification of this finding.
+    pub fn severity(&self) -> Severity {
+        self.severity
     }
 }
 
@@ -341,7 +346,53 @@ impl DiagnosticSnapshot {
             .try_fold(0usize, |sum, count| sum.checked_add(*count))?;
         Some(result)
     }
+
+    /// Deterministic signature of semantic error findings absent from `baseline`.
+    /// Returns `None` unless the comparison is valid and at least one new error exists.
+    pub fn new_error_signature(&self, baseline: &Self) -> Option<HealingSignature> {
+        let delta = self.compare_errors(baseline)?;
+        if delta.new.get() == 0 {
+            return None;
+        }
+        let mut previous = baseline_error_pool(baseline)?;
+        let mut keys = Vec::new();
+        for error in self
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+        {
+            let key = (&error.source, &error.code, error.message.as_str());
+            if let Some(count) = previous.get_mut(&key).filter(|c| **c > 0) {
+                *count = count.checked_sub(1)?;
+            } else {
+                keys.push(key);
+            }
+        }
+        keys.sort();
+        let bytes = serde_json::to_vec(&(self.requested.path.as_str(), keys)).ok()?;
+        Some(HealingSignature(<[u8; 32]>::from(Sha256::digest(bytes))))
+    }
 }
+
+type ErrorKey<'a> = (&'a DiagnosticSource, &'a Option<DiagnosticCode>, &'a str);
+
+fn baseline_error_pool(baseline: &DiagnosticSnapshot) -> Option<BTreeMap<ErrorKey<'_>, usize>> {
+    let mut pool = BTreeMap::new();
+    for error in baseline
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+    {
+        let key = (&error.source, &error.code, error.message.as_str());
+        let count: &mut usize = pool.entry(key).or_insert(0);
+        *count = count.checked_add(1)?;
+    }
+    Some(pool)
+}
+
+/// Position-independent digest of new semantic error findings introduced since baseline.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HealingSignature([u8; 32]);
 
 /// Number of diagnostics, distinct from lines, bytes or healing attempts.
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Serialize)]

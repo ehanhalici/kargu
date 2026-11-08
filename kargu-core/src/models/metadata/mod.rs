@@ -240,6 +240,22 @@ impl ModelFields {
     pub fn input_is_zero(&self) -> bool {
         self.input_cost.known().is_some_and(InputTokenRate::is_zero)
     }
+    /// Known input token rate, if present.
+    pub fn input_cost(&self) -> Option<InputTokenRate> {
+        self.input_cost.known().cloned()
+    }
+    /// Known output token rate, if present.
+    pub fn output_cost(&self) -> Option<OutputTokenRate> {
+        self.output_cost.known().cloned()
+    }
+    /// Known cache read token rate, if present.
+    pub fn cache_read_cost(&self) -> Option<CacheReadTokenRate> {
+        self.cache_read_cost.known().cloned()
+    }
+    /// Known cache write token rate, if present.
+    pub fn cache_write_cost(&self) -> Option<CacheWriteTokenRate> {
+        self.cache_write_cost.known().cloned()
+    }
     pub(crate) fn request_efforts(&self) -> Option<Vec<effort::EffortName>> {
         self.reasoning_efforts.known().cloned()
     }

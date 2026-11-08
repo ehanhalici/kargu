@@ -231,7 +231,7 @@ Return the correlation id, or nil on local rejection."
             (and (eq (kargu-bridge-connection-state connection) 'starting)
                  (not (equal method "initialize")))
             (and (eq (kargu-bridge-connection-state connection) 'binding)
-                 (not (member method '("application/create" "session/create" "provider/catalog"))))
+                 (not (member method '("application/create" "session/create" "provider/catalog" "capabilities/list"))))
             (and (eq (kargu-bridge-connection-state connection) 'stopping)
                  (not (equal method "shutdown")))
             (>= (hash-table-count (kargu-bridge-connection-pending connection))
@@ -325,9 +325,7 @@ CALLBACK receives the native (RESULT ERROR).  Rust discovers, filters and
 ranks; Emacs only displays the candidates."
   (kargu-bridge--workspace-read
    connection arguments callback :owner owner
-   ;; Advertised with native discovery: the initialize reply has no frame
-   ;; headroom for another capability at the minimum frame size.
-   :method "workspace/mentionCandidates" :capability "workspace_find_files"))
+   :method "workspace/mentionCandidates" :capability "workspace_mention_candidates"))
 
 (cl-defun kargu-bridge-read-file (connection arguments callback &key owner)
   "Read captured file ARGUMENTS on CONNECTION for OWNER into CALLBACK."
@@ -694,12 +692,42 @@ ERROR-DATA skips hydration; older peers retain the packaged projection."
     (unless callback (message "Kargu Rust core ready"))
     (kargu-bridge--callback callback connection nil)))
 
+(defun kargu-bridge--hydrate-capabilities (connection callback)
+  "Hydrate full capabilities on CONNECTION if supported before CALLBACK."
+  (setf (kargu-bridge-connection-state connection) 'binding)
+  (if (member "capabilities_list" (append (kargu-bridge-connection-capabilities connection) nil))
+      (kargu-bridge--hydrate-capabilities-page
+       connection callback 0 (append (kargu-bridge-connection-capabilities connection) nil))
+    (kargu-bridge--bind-read-service connection callback)))
+
+(defun kargu-bridge--hydrate-capabilities-page (connection callback offset items)
+  "Read capabilities page from CONNECTION at OFFSET into ITEMS.
+Then finish startup via CALLBACK."
+  (kargu-bridge-call
+   connection "capabilities/list" (kargu-bridge--object "offset" offset)
+   (lambda (page failure)
+     (if failure
+         (kargu-bridge--start-ready connection callback failure)
+       (let* ((caps (and (hash-table-p page) (gethash "capabilities" page)))
+              (next (and (hash-table-p page) (gethash "next_offset" page)))
+              (complete (and (hash-table-p page) (gethash "complete" page))))
+         (cond
+          ((not (and (vectorp caps) (integerp next) (memq complete '(t :json-false))))
+           (kargu-bridge--start-ready connection callback (kargu-bridge--fault "protocol_error")))
+          ((eq complete t)
+           (let ((all-caps (cl-remove-duplicates (append items (append caps nil)) :test #'string=)))
+             (setf (kargu-bridge-connection-capabilities connection) (vconcat all-caps)))
+           (kargu-bridge--bind-read-service connection callback))
+          (t
+           (let ((accum (append items (append caps nil))))
+             (kargu-bridge--hydrate-capabilities-page connection callback next accum)))))))))
+
 (defun kargu-bridge--bind-read-service (connection callback)
   "Bind CONNECTION's read-service session before completing startup CALLBACK.
 This is an adapter service identity, not an imported user conversation or run."
   (if (not (cl-some (lambda (capability)
                       (member capability (append (kargu-bridge-connection-capabilities connection) nil)))
-                    '("workspace_probe" "workspace_webfetch" "git_mutation" "workspace_skills" "git_worktree_read" "workspace_read_file" "workspace_find_files" "workspace_list_files_ls" "workspace_grep" "git_status" "git_read" "command_execute" "api_request")))
+                    '("workspace_probe" "workspace_webfetch" "git_mutation" "workspace_skills" "git_worktree_read" "workspace_read_file" "workspace_find_files" "workspace_mention_candidates" "workspace_list_files_ls" "workspace_grep" "git_status" "git_read" "command_execute" "api_request")))
       (kargu-bridge--start-finish connection callback nil)
     (setf (kargu-bridge-connection-state connection) 'binding)
     (kargu-bridge-call
@@ -773,7 +801,7 @@ CALLBACK receives (CONNECTION ERROR).  Return the starting connection handle."
                            (kargu-bridge-connection-capabilities connection) (gethash "capabilities" result))
                      (kargu-bridge--send connection
                                          (kargu-bridge--object "jsonrpc" "2.0" "method" "initialized"))
-                     (kargu-bridge--bind-read-service connection callback))
+                     (kargu-bridge--hydrate-capabilities connection callback))
                  (error (kargu-bridge--close connection "protocol_error")
                         (unless callback (message "Kargu Rust core handshake rejected"))
                         (kargu-bridge--callback callback nil (kargu-bridge--fault "protocol_error")))))))

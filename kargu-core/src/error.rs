@@ -9,6 +9,9 @@ pub enum CoreError {
     /// Closed edit preparation/review failure, without source text.
     #[error(transparent)]
     Edit(#[from] crate::edit::EditError),
+    /// Session persistence, schema or storage failure.
+    #[error(transparent)]
+    Persistence(#[from] crate::persistence::PersistenceError),
     /// A DTO failed to produce a valid domain value.
     #[error("invalid domain value: {field}")]
     InvalidValue {

@@ -24,6 +24,8 @@
 (require 'kargu/api)
 (require 'kargu/api/circuit)
 (require 'kargu/confirm)
+(require 'kargu/config/connection)
+(require 'kargu/application/execution)
 (declare-function kargu-loop--wrap "kargu/loop" (run function))
 
 (defvar kargu-loop-empty-retries)
@@ -60,7 +62,9 @@ EVENT is `start' for a new model turn or `retry' before replaying its stream.")
 (defun kargu-loop--classify-request (run)
   "Event for the next model request of RUN: `stale', `busy', `compact', or `send'."
   (cond
-   ((not (kargu-loop--live-p run)) 'stale)
+   ((or (not (kargu-loop--live-p run))
+        (plist-get run :native-backend))
+    'stale)
    ((plist-get run :compacting) 'busy)
    ((and (kargu--loop-compact-allowed-p run)
          (kargu-history-needs-compact-p))
@@ -102,19 +106,32 @@ send path so the continue prompt runs instead of leaving the run idle."
 (defun kargu-loop--send-model (run prompt)
   "Post PROMPT for RUN and route the answer through the response classifier."
   (kargu-loop--set-state run 'wait)
-  (plist-put run :request-model (or (plist-get run :model) (kargu--model)))
-  (plist-put run :request-provider (or (plist-get run :provider) (kargu--provider-name)))
-  (let ((on-delta (and (plist-get run :on-delta)
-                       (kargu-loop--wrap run (lambda (event)
-                                               (kargu--loop-forward-delta run event))))))
-    (plist-put run :api-on-delta on-delta)
-    (kargu-run-observers 'kargu-loop-model-stream-hook run 'start)
-    (when (kargu-loop--live-p run)
-      (kargu-api-send
-       prompt
-       (kargu-loop--wrap run (lambda (response)
-                               (kargu-loop--receive-model run response)))
-       on-delta))))
+  (let* ((snapshot (or (plist-get run :connection-snapshot)
+                       (and-let* ((context (plist-get run :context)))
+                         (kargu-execution-connection context))))
+         (provider (or (and snapshot (kargu-connection-snapshot-provider snapshot))
+                       (plist-get run :provider)
+                       (kargu--provider-name)))
+         (model (or (and snapshot (kargu-connection-snapshot-model snapshot))
+                    (plist-get run :model)
+                    (kargu--model))))
+    (plist-put run :request-model model)
+    (plist-put run :request-provider provider)
+    (let ((on-delta (and (plist-get run :on-delta)
+                         (kargu-loop--wrap run (lambda (event)
+                                                 (kargu--loop-forward-delta run event))))))
+      (plist-put run :api-on-delta on-delta)
+      (kargu-run-observers 'kargu-loop-model-stream-hook run 'start)
+      (when (kargu-loop--live-p run)
+        (let ((send-fn (lambda ()
+                         (kargu-api-send
+                          prompt
+                          (kargu-loop--wrap run (lambda (response)
+                                                  (kargu-loop--receive-model run response)))
+                          on-delta))))
+          (if snapshot
+              (kargu-connection-call snapshot send-fn)
+            (funcall send-fn)))))))
 
 (defun kargu-loop--on-api-retry (generation on-delta)
   "Publish a retry boundary only for GENERATION's owning ON-DELTA consumer."
@@ -210,7 +227,9 @@ A truncated reply that already has answer text continues once."
         (answer (kargu-nonempty (kargu-response-answer-text response)))
         (reasoning (kargu-nonempty (kargu-response-reasoning-text response))))
     (cond
-     ((not (kargu-loop--live-p run)) 'stale)
+     ((or (not (kargu-loop--live-p run))
+          (plist-get run :native-backend))
+      'stale)
      ((and err (kargu-response-overflow-p response)
            (kargu--loop-compact-allowed-p run))
       'overflow)
@@ -292,9 +311,14 @@ remembers the refusal and retries without tools."
   "Reset RUN's observed native circuit before calling CONTINUATION once.
 An unavailable view is not an admission refusal: the next native request still
 decides admission.  A reset that was issued must actually acknowledge first."
-  (let ((provider (or (plist-get run :request-provider) (plist-get run :provider)
-                      (kargu--provider-name)))
-        delivered)
+  (let* ((snapshot (or (plist-get run :connection-snapshot)
+                       (and-let* ((context (plist-get run :context)))
+                         (kargu-execution-connection context))))
+         (provider (or (and snapshot (kargu-connection-snapshot-provider snapshot))
+                       (plist-get run :request-provider)
+                       (plist-get run :provider)
+                       (kargu--provider-name)))
+         delivered)
     (if (not (kargu-circuit-get provider))
         (when (kargu-loop--live-p run) (funcall continuation))
       (kargu-circuit-reset
@@ -342,8 +366,9 @@ decides admission.  A reset that was issued must actually acknowledge first."
    :fallback-prompt (format "Request failed: %s. Retry request? " err)
    :default-action :stop
    :notify 'permission
-   :on-decision (lambda (decision)
-                  (kargu-loop--apply-recovery run err decision))))
+   :on-decision (kargu-loop--wrap
+                 run (lambda (decision)
+                       (kargu-loop--apply-recovery run err decision)))))
 
 (defun kargu-loop--response-error (response)
   "The error text of RESPONSE."

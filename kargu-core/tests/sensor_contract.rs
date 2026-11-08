@@ -214,6 +214,72 @@ fn symbols_tree_and_xref_formatting_preserves_bounds() -> TestResult {
 }
 
 #[test]
+fn skeleton_formatting_preserves_bounds_and_explicit_caps() -> TestResult {
+    use kargu_core::sensors::symbols::{
+        MaxPerFile, MaxSymbols, ProjectSkeleton, SkeletonLimits, SkeletonSource, SkeletonSymbol,
+        SkeletonTruncated, SymbolKind, SymbolName,
+    };
+    use kargu_core::sensors::types::SourceLine;
+    use std::path::PathBuf;
+
+    let root = PathBuf::from("/workspace/project");
+    let mut skeleton =
+        ProjectSkeleton::new(root.clone(), SkeletonSource::new("test-lsp".to_string()));
+
+    let sym1 = SkeletonSymbol::new(
+        SymbolName::try_from("alpha".to_string())?,
+        SymbolKind::Function,
+        SourceLine::try_from(10)?,
+    );
+    let sym2 = SkeletonSymbol::new(
+        SymbolName::try_from("beta".to_string())?,
+        SymbolKind::Variable,
+        SourceLine::try_from(25)?,
+    );
+    let sym3 = SkeletonSymbol::new(
+        SymbolName::try_from("gamma".to_string())?,
+        SymbolKind::Class,
+        SourceLine::try_from(50)?,
+    );
+
+    skeleton.add_file(root.join("src/lib.rs"), vec![sym1, sym2]);
+    skeleton.add_file(root.join("src/main.rs"), vec![sym3]);
+
+    let limits = SkeletonLimits::new(MaxSymbols::new(10), MaxPerFile::new(5));
+    let text = skeleton.render(limits)?;
+    assert!(
+        text.as_str()
+            .starts_with("# Project skeleton (LSP: test-lsp)")
+    );
+    assert!(text.as_str().contains("# root: /workspace/project"));
+    assert!(text.as_str().contains("# 2 files, 3 symbols"));
+    assert!(text.as_str().contains("src/lib.rs:"));
+    assert!(text.as_str().contains("  alpha (Function) :10"));
+    assert!(text.as_str().contains("  beta (Variable) :25"));
+    assert!(text.as_str().contains("src/main.rs:"));
+    assert!(text.as_str().contains("  gamma (Class) :50"));
+
+    let cap_limits = SkeletonLimits::new(MaxSymbols::new(2), MaxPerFile::new(2));
+    let cap_text = skeleton.render(cap_limits)?;
+    assert!(cap_text.as_str().contains("# symbol cap reached (2)"));
+    assert!(cap_text.as_str().contains("  alpha (Function) :10"));
+    assert!(cap_text.as_str().contains("  beta (Variable) :25"));
+    assert!(!cap_text.as_str().contains("src/main.rs:"));
+
+    let per_file_limits = SkeletonLimits::new(MaxSymbols::new(10), MaxPerFile::new(1));
+    let per_file_text = skeleton.render(per_file_limits)?;
+    assert!(per_file_text.as_str().contains("  alpha (Function) :10"));
+    assert!(per_file_text.as_str().contains("  ... (1 more hidden)"));
+    assert!(per_file_text.as_str().contains("  gamma (Class) :50"));
+
+    skeleton.set_truncated(SkeletonTruncated::new(true));
+    let trunc_text = skeleton.render(limits)?;
+    assert!(trunc_text.as_str().contains("# symbol cap reached (10)"));
+
+    Ok(())
+}
+
+#[test]
 fn debugger_snapshot_validates_epoch_and_renders_cleanly() -> TestResult {
     use kargu_core::sensors::debugger::DebugContextSnapshot;
     use kargu_core::sensors::types::{DebugConnectionId, StopGeneration};

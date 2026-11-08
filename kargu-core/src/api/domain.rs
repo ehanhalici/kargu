@@ -197,6 +197,20 @@ impl ConnectionInput {
     }
 }
 
+fn strip_tools_off(value: &mut serde_json::Value) {
+    if let Some(obj) = value.as_object_mut() {
+        let tools_off = match obj.get("tools") {
+            None | Some(serde_json::Value::Null) | Some(serde_json::Value::Bool(false)) => true,
+            Some(serde_json::Value::Array(items)) => items.is_empty(),
+            _ => false,
+        };
+        if tools_off {
+            obj.remove("tools");
+            obj.remove("tool_choice");
+        }
+    }
+}
+
 fn encode_body(
     mut value: serde_json::Value,
     wire: &super::wire::WireCodec,
@@ -211,6 +225,7 @@ fn encode_body(
     {
         return Err(ApiError::InvalidRequest);
     }
+    strip_tools_off(&mut value);
     value = wire.tune(value, tuning)?;
     if cache_markers {
         super::cache::prepare(&mut value)?;
@@ -320,6 +335,21 @@ impl ChatConnection {
         turn: &crate::application::agent::ModelTurn,
     ) -> Result<HttpRequest, ApiError> {
         let canonical = turn.canonical_payload(&self.model, self.stream)?;
+        self.encode_turn_request(turn.run(), &canonical)
+    }
+    /// Prepare either a normal model turn or a tools-off summary turn on a bounded worker.
+    pub fn prepare_agent_turn(
+        &self,
+        turn: &crate::application::agent::AgentTurn,
+    ) -> Result<HttpRequest, ApiError> {
+        let canonical = turn.canonical_payload(&self.model, self.stream.into())?;
+        self.encode_turn_request(turn.run(), &canonical)
+    }
+    fn encode_turn_request(
+        &self,
+        run: &crate::application::RunHandle,
+        canonical: &serde_json::value::RawValue,
+    ) -> Result<HttpRequest, ApiError> {
         let value = serde_json::from_str(canonical.get()).map_err(|_| ApiError::InvalidRequest)?;
         let body = encode_body(
             value,
@@ -328,7 +358,7 @@ impl ChatConnection {
             &self.tuning,
             self.cache_markers,
         )?;
-        turn.run().check_live().map_err(|error| match error {
+        run.check_live().map_err(|error| match error {
             crate::error::CoreError::Deadline => ApiError::RunDeadline,
             _ => ApiError::Cancelled,
         })?;

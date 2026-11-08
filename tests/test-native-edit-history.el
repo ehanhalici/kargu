@@ -206,6 +206,7 @@
               (should (= (length rows) 1))
               (should (equal (gethash "path" row) "first.txt"))
               (should (eq (gethash "saved" row) t))
+              (should (eq (gethash "baseline_available" row) :json-false))
               (should (equal paths (list first)))
               (let ((reply (kargu-native-edit-test--await
                             (lambda (receive)

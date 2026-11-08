@@ -1,8 +1,12 @@
 //! Native budget contracts replace policy tests only after editor cutover.
 
 use kargu_core::{
-    application::budget::{Budget, BudgetLimits, DebitKind, ObservedUsage, Refusal},
-    domain::{ExecutionTimeout, InputTokens, OutputTokens},
+    application::budget::{
+        AttemptBounds, Budget, BudgetLimits, DebitKind, MonetaryLimit, ObservedUsage, PricingRates,
+        Refusal,
+    },
+    domain::{CacheWriteTokens, ExecutionTimeout, InputTokens, MicroUsd, OutputTokens},
+    models::{CacheReadTokenRate, CacheWriteTokenRate, InputTokenRate, OutputTokenRate},
 };
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -603,5 +607,515 @@ fn fractional_categories_are_summed_exactly_before_the_microdollar_boundary() ->
             .compute_cost(Some(&priced_usage(2, 0, 0, 0)?))
             .is_err()
     );
+    Ok(())
+}
+
+#[test]
+fn wire_usage_and_pricing_settlement_invariants() -> TestResult {
+    use kargu_core::{
+        application::budget::{
+            Budget, BudgetLimits, DebitKind, MonetaryLimit, PricingRates, PricingUsage,
+        },
+        domain::ExecutionTimeout,
+        models::{CacheReadTokenRate, CacheWriteTokenRate, InputTokenRate, OutputTokenRate},
+    };
+    use std::str::FromStr;
+
+    // 1. Parsing wire response into PricingUsage
+    let wire_valid = json!({
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "prompt_tokens_details": {
+                "cached_tokens": 30,
+                "cache_write_tokens": 10
+            }
+        }
+    });
+    let pricing_usage = PricingUsage::try_from(&wire_valid)?;
+    assert_eq!(pricing_usage.uncached().as_u64(), 60);
+    assert_eq!(pricing_usage.output().as_u64(), 20);
+    assert_eq!(pricing_usage.cache_read().as_u64(), 30);
+    assert_eq!(pricing_usage.cache_write().as_u64(), 10);
+    assert_eq!(pricing_usage.total_input()?.as_u64(), 100);
+
+    // 2. Cache exceeding prompt_tokens fails closed
+    let wire_exceeding = json!({
+        "usage": {
+            "prompt_tokens": 50,
+            "completion_tokens": 10,
+            "prompt_tokens_details": {
+                "cached_tokens": 40,
+                "cache_write_tokens": 20
+            }
+        }
+    });
+    assert!(PricingUsage::try_from(&wire_exceeding).is_err());
+
+    // 3. Missing tokens fails closed
+    let wire_missing = json!({"usage": {"prompt_tokens": 50}});
+    assert!(PricingUsage::try_from(&wire_missing).is_err());
+
+    // 4. Exact pricing calculation without float rounding or cache double count
+    let rates = PricingRates::new(
+        Some(InputTokenRate::from_str("0.000001")?),
+        Some(OutputTokenRate::from_str("0.000002")?),
+        Some(CacheReadTokenRate::from_str("0.0000005")?),
+        Some(CacheWriteTokenRate::from_str("0.0000015")?),
+    );
+    // 60 * 1 + 20 * 2 + 30 * 0.5 + 10 * 1.5 = 60 + 40 + 15 + 15 = 130 micro-USD
+    let cost = rates.compute_cost(Some(&pricing_usage))?;
+    assert_eq!(cost.map(|c| c.as_u64()), Some(130));
+
+    // 5. Settlement into Budget
+    let mut b = Budget::new(
+        BudgetLimits::default().with_monetary(Some(MonetaryLimit::try_from(1_000)?)),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+    let charge = b.admit(DebitKind::NormalRequest)?;
+    b.finish_with_cost(charge, pricing_usage.observed_usage()?, cost)?;
+
+    let snap = snapshot(&b)?;
+    assert_eq!(snap["requests_spent"], 1);
+    assert_eq!(snap["tokens_spent"], 120); // 100 input + 20 output
+    assert_eq!(snap["tokens_unknown"], false);
+    assert_eq!(snap["monetary_spent"], 130);
+    assert_eq!(snap["monetary_unknown"], false);
+
+    // 6. Unknown rates never result in zero/free cost
+    let missing_rates = PricingRates::default();
+    let unpriced_cost = missing_rates.compute_cost(Some(&pricing_usage))?;
+    assert!(unpriced_cost.is_none());
+
+    let mut b2 = Budget::new(
+        BudgetLimits::default(),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+    let charge2 = b2.admit(DebitKind::NormalRequest)?;
+    b2.finish_with_cost(charge2, pricing_usage.observed_usage()?, unpriced_cost)?;
+    let snap2 = snapshot(&b2)?;
+    assert_eq!(snap2["monetary_unknown"], true);
+
+    Ok(())
+}
+
+#[test]
+fn reservation_rounds_up_fractional_microusd_and_fails_on_unbounded_or_unknown() -> TestResult {
+    use std::str::FromStr;
+
+    // Rates: input = $0.0000001 (0.1 micro-USD), output = $0.0000003 (0.3 micro-USD)
+    let rates = PricingRates::new(
+        Some(InputTokenRate::from_str("0.0000001")?),
+        Some(OutputTokenRate::from_str("0.0000003")?),
+        Some(CacheReadTokenRate::from_str("0.00000005")?),
+        Some(CacheWriteTokenRate::from_str("0.0000002")?),
+    );
+
+    // 10 input * 0.1 = 1.0; 5 output * 0.3 = 1.5 -> total 2.5 micro-USD
+    // Fixed-point reservation must round UP to 3 micro-USD, never truncated or floating
+    let bounds = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::from_u64(5));
+    let reservation = rates.compute_reservation(&bounds)?;
+    assert_eq!(reservation.as_u64(), 3);
+
+    // Exact whole micro-USD does not round up: 10 input * 0.1 = 1.0; 10 output * 0.3 = 3.0 -> 4.0
+    let exact_bounds = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::from_u64(10));
+    let exact_res = rates.compute_reservation(&exact_bounds)?;
+    assert_eq!(exact_res.as_u64(), 4);
+
+    // Unbounded output fails closed
+    let unbounded = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::ZERO);
+    assert_eq!(
+        rates.compute_reservation(&unbounded),
+        Err(Refusal::UnboundedOutput)
+    );
+
+    // Missing output rate fails closed
+    let missing_output = PricingRates::new(
+        Some(InputTokenRate::from_str("0.000001")?),
+        None,
+        None,
+        None,
+    );
+    assert_eq!(
+        missing_output.compute_reservation(&bounds),
+        Err(Refusal::UnknownPricing)
+    );
+
+    // Missing input rate fails closed when input > 0
+    let missing_input = PricingRates::new(
+        None,
+        Some(OutputTokenRate::from_str("0.000002")?),
+        None,
+        None,
+    );
+    assert_eq!(
+        missing_input.compute_reservation(&bounds),
+        Err(Refusal::UnknownPricing)
+    );
+
+    // Missing cache write rate fails closed when cache_write > 0
+    let bounds_with_cache =
+        AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::from_u64(5))
+            .with_cache_write(CacheWriteTokens::from_u64(4))?;
+    let missing_write = PricingRates::new(
+        Some(InputTokenRate::from_str("0.000001")?),
+        Some(OutputTokenRate::from_str("0.000002")?),
+        None,
+        None,
+    );
+    assert_eq!(
+        missing_write.compute_reservation(&bounds_with_cache),
+        Err(Refusal::UnknownPricing)
+    );
+
+    Ok(())
+}
+
+#[test]
+fn concurrent_reservations_cannot_overcommit_monetary_budget() -> TestResult {
+    use std::str::FromStr;
+
+    // Budget with monetary cap of 100 MicroUsd ($0.0001)
+    let mut b = Budget::new(
+        BudgetLimits::default().with_monetary(Some(MonetaryLimit::try_from(100)?)),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+
+    // Rates: input = 1 micro-USD / token, output = 2 micro-USD / token
+    let rates = PricingRates::new(
+        Some(InputTokenRate::from_str("0.000001")?),
+        Some(OutputTokenRate::from_str("0.000002")?),
+        None,
+        None,
+    );
+
+    // Attempt 1: 10 input (10) + 20 output (40) = 50 micro-USD
+    let bounds1 = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::from_u64(20));
+    let charge1 = b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds1))?;
+    assert_eq!(charge1.reserved().as_u64(), 50);
+
+    let snap1 = snapshot(&b)?;
+    assert_eq!(snap1["monetary_reserved"], 50);
+    assert_eq!(snap1["monetary_spent"], 0);
+    assert_eq!(snap1["outstanding"], 1);
+
+    // Attempt 2 (CONCURRENT): 10 input (10) + 15 output (30) = 40 micro-USD
+    // 50 (reserved) + 40 (new reservation) = 90 <= 100. Admitted concurrently!
+    let bounds2 = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::from_u64(15));
+    let charge2 = b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds2))?;
+    assert_eq!(charge2.reserved().as_u64(), 40);
+
+    let snap2 = snapshot(&b)?;
+    assert_eq!(snap2["monetary_reserved"], 90);
+    assert_eq!(snap2["outstanding"], 2);
+
+    // Attempt 3 (CONCURRENT): 5 input (5) + 5 output (10) = 15 micro-USD
+    // 90 (reserved) + 15 (new reservation) = 105 > 100 limit. Must be refused!
+    let bounds3 = AttemptBounds::new(InputTokens::from_u64(5), OutputTokens::from_u64(5));
+    assert_eq!(
+        b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds3))
+            .map(|_| ()),
+        Err(Refusal::Monetary)
+    );
+
+    // Refusal did not increment counters or modify reservations
+    let snap3 = snapshot(&b)?;
+    assert_eq!(snap3["requests_spent"], 2);
+    assert_eq!(snap3["monetary_reserved"], 90);
+    assert_eq!(snap3["outstanding"], 2);
+
+    // Attempt 1 finishes with actual cost 30 micro-USD (unused 20 refunded)
+    b.finish_with_cost(charge1, known(10, 10)?, Some(MicroUsd::try_from(30)?))?;
+
+    // Reserved drops from 90 to 40 (charge2's reservation remains)
+    // Spent becomes 30. Total committed = 30 + 40 = 70.
+    let snap4 = snapshot(&b)?;
+    assert_eq!(snap4["monetary_spent"], 30);
+    assert_eq!(snap4["monetary_reserved"], 40);
+    assert_eq!(snap4["outstanding"], 1);
+
+    // Now Attempt 3 can be admitted: 70 committed + 15 reservation = 85 <= 100
+    let charge3 = b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds3))?;
+    assert_eq!(charge3.reserved().as_u64(), 15);
+
+    let snap5 = snapshot(&b)?;
+    assert_eq!(snap5["requests_spent"], 3);
+    assert_eq!(snap5["monetary_reserved"], 55); // 40 + 15
+    assert_eq!(snap5["outstanding"], 2);
+
+    // Attempt 2 finishes with cancellation / 0 cost
+    b.finish_with_cost(charge2, ObservedUsage::default(), Some(MicroUsd::ZERO))?;
+    let snap6 = snapshot(&b)?;
+    assert_eq!(snap6["monetary_reserved"], 15); // only charge3 remains
+    assert_eq!(snap6["monetary_spent"], 30);
+
+    // Attempt 3 finishes with 15 cost
+    b.finish_with_cost(charge3, known(5, 5)?, Some(MicroUsd::try_from(15)?))?;
+    let snap7 = snapshot(&b)?;
+    assert_eq!(snap7["monetary_reserved"], 0);
+    assert_eq!(snap7["monetary_spent"], 45);
+    assert_eq!(snap7["outstanding"], 0);
+
+    Ok(())
+}
+
+#[test]
+fn reservation_refusal_does_not_mutate_budget_state() -> TestResult {
+    let mut b = Budget::new(
+        BudgetLimits::default().with_monetary(Some(MonetaryLimit::try_from(50)?)),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+    let before = snapshot(&b)?;
+
+    // Missing rates refused
+    assert_eq!(
+        b.admit_reservation(DebitKind::NormalRequest, None, None)
+            .map(|_| ()),
+        Err(Refusal::UnknownPricing)
+    );
+    assert_eq!(snapshot(&b)?, before);
+
+    // Unbounded output refused
+    let rates = PricingRates::default();
+    let unbounded = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::ZERO);
+    assert_eq!(
+        b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&unbounded))
+            .map(|_| ()),
+        Err(Refusal::UnboundedOutput)
+    );
+    assert_eq!(snapshot(&b)?, before);
+
+    Ok(())
+}
+
+#[test]
+fn settlement_refund_and_cancellation_with_unknown_cost_fails_closed() -> TestResult {
+    use std::str::FromStr;
+
+    // Budget with monetary cap of 200 MicroUsd
+    let mut b = Budget::new(
+        BudgetLimits::default().with_monetary(Some(MonetaryLimit::try_from(200)?)),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+    let rates = PricingRates::new(
+        Some(InputTokenRate::from_str("0.000001")?),
+        Some(OutputTokenRate::from_str("0.000002")?),
+        None,
+        None,
+    );
+
+    // 1. Admit with reservation: 10 in (10) + 20 out (40) = 50 reserved
+    let bounds1 = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::from_u64(20));
+    let charge1 = b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds1))?;
+    assert_eq!(charge1.reserved().as_u64(), 50);
+    assert_eq!(snapshot(&b)?["monetary_reserved"], 50);
+
+    // Remote request cancelled or errored without known cost:
+    // Remote billing cannot be assumed 0!
+    b.finish_with_cost(charge1, ObservedUsage::default(), None)?;
+
+    let snap = snapshot(&b)?;
+    // Reservation is released
+    assert_eq!(snap["monetary_reserved"], 0);
+    // Monetary unknown is marked true
+    assert_eq!(snap["monetary_unknown"], true);
+
+    // Next admission under monetary limit fails closed with Refusal::UnknownPricing
+    let bounds2 = AttemptBounds::new(InputTokens::from_u64(5), OutputTokens::from_u64(5));
+    assert_eq!(
+        b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds2))
+            .map(|_| ()),
+        Err(Refusal::UnknownPricing)
+    );
+
+    Ok(())
+}
+
+#[test]
+fn cancellation_before_network_with_confirmed_zero_cost_refunds_cleanly() -> TestResult {
+    use std::str::FromStr;
+
+    let mut b = Budget::new(
+        BudgetLimits::default().with_monetary(Some(MonetaryLimit::try_from(200)?)),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+    let rates = PricingRates::new(
+        Some(InputTokenRate::from_str("0.000001")?),
+        Some(OutputTokenRate::from_str("0.000002")?),
+        None,
+        None,
+    );
+
+    let bounds = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::from_u64(20));
+    let charge = b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds))?;
+    assert_eq!(snapshot(&b)?["monetary_reserved"], 50);
+
+    // Client cancelled locally before dispatch: 0 tokens, 0 MicroUsd
+    b.finish_with_cost(charge, known(0, 0)?, Some(MicroUsd::ZERO))?;
+
+    let snap = snapshot(&b)?;
+    assert_eq!(snap["monetary_reserved"], 0);
+    assert_eq!(snap["monetary_spent"], 0);
+    assert_eq!(snap["monetary_unknown"], false);
+
+    // Meter is still open and healthy for next request
+    let next_charge = b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds))?;
+    assert_eq!(next_charge.reserved().as_u64(), 50);
+    assert_eq!(snapshot(&b)?["monetary_reserved"], 50);
+
+    Ok(())
+}
+
+#[test]
+fn overflow_in_monetary_or_tokens_does_not_partially_commit_ledger() -> TestResult {
+    // 1. Monetary overflow does not partially commit tokens
+    let mut b = Budget::new(
+        BudgetLimits::default(),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+    let charge1 = b.admit(DebitKind::NormalRequest)?;
+    b.finish_with_cost(
+        charge1,
+        known(50, 50)?,
+        Some(MicroUsd::try_from(u64::MAX - 10)?),
+    )?;
+
+    let snap_before = snapshot(&b)?;
+    assert_eq!(snap_before["tokens_spent"], 100);
+    assert_eq!(snap_before["monetary_spent"], u64::MAX - 10);
+
+    let charge2 = b.admit(DebitKind::NormalRequest)?;
+    // Cost 20 will overflow (u64::MAX - 10 + 20)
+    let overflow_cost = Some(MicroUsd::try_from(20)?);
+    let err = b.finish_with_cost(charge2, known(30, 30)?, overflow_cost);
+    assert!(err.is_err());
+
+    let snap_after = snapshot(&b)?;
+    // Neither tokens nor monetary were partially committed!
+    assert_eq!(snap_after["tokens_spent"], 100);
+    assert_eq!(snap_after["monetary_spent"], u64::MAX - 10);
+    assert_eq!(snap_after["refusal"], "accounting");
+
+    // 2. Token overflow does not partially commit monetary
+    let mut b2 = Budget::new(
+        BudgetLimits::default(),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+    let c1 = b2.admit(DebitKind::NormalRequest)?;
+    b2.finish_with_cost(c1, known(u64::MAX - 10, 0)?, Some(MicroUsd::try_from(500)?))?;
+
+    let c2 = b2.admit(DebitKind::NormalRequest)?;
+    // Tokens 20 will overflow (u64::MAX - 10 + 20)
+    let err2 = b2.finish_with_cost(c2, known(20, 0)?, Some(MicroUsd::try_from(300)?));
+    assert!(err2.is_err());
+
+    let snap_after2 = snapshot(&b2)?;
+    // Neither monetary nor tokens were partially committed!
+    assert_eq!(snap_after2["monetary_spent"], 500);
+    assert_eq!(snap_after2["tokens_spent"], u64::MAX - 10);
+    assert_eq!(snap_after2["refusal"], "accounting");
+
+    Ok(())
+}
+
+#[test]
+fn sealed_budget_preserves_active_reservations_until_collection() -> TestResult {
+    use std::str::FromStr;
+
+    let mut b = Budget::new(
+        BudgetLimits::default().with_monetary(Some(MonetaryLimit::try_from(100)?)),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+    let rates = PricingRates::new(
+        Some(InputTokenRate::from_str("0.000001")?),
+        Some(OutputTokenRate::from_str("0.000002")?),
+        None,
+        None,
+    );
+
+    // Admit Attempt 1: 50 micro-USD reserved
+    let bounds1 = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::from_u64(20));
+    let charge1 = b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds1))?;
+
+    // Admit Attempt 2 (CONCURRENT): 30 micro-USD reserved
+    let bounds2 = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::from_u64(10));
+    let charge2 = b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds2))?;
+
+    assert_eq!(snapshot(&b)?["monetary_reserved"], 80);
+    assert_eq!(snapshot(&b)?["outstanding"], 2);
+
+    // Session closes: seal meter
+    let mut sealed = b.seal();
+    assert!(!sealed.drained());
+    assert_eq!(snapshot(&sealed)?["sealed"], true);
+    assert_eq!(snapshot(&sealed)?["monetary_reserved"], 80);
+
+    // Attempt 1 completes on sealed meter with cost 40 (refunds 10 unused)
+    sealed.finish_with_cost(charge1, known(10, 10)?, Some(MicroUsd::try_from(40)?))?;
+
+    // Active reservation of Attempt 2 is NOT lost: still 30!
+    let snap1 = snapshot(&sealed)?;
+    assert_eq!(snap1["monetary_reserved"], 30);
+    assert_eq!(snap1["monetary_spent"], 40);
+    assert_eq!(snap1["outstanding"], 1);
+    assert!(!sealed.drained());
+
+    // Attempt 2 completes on sealed meter with cost 25 (refunds 5 unused)
+    sealed.finish_with_cost(charge2, known(5, 5)?, Some(MicroUsd::try_from(25)?))?;
+
+    // Both drained, total spend 65, reserved 0
+    let snap2 = snapshot(&sealed)?;
+    assert_eq!(snap2["monetary_reserved"], 0);
+    assert_eq!(snap2["monetary_spent"], 65);
+    assert_eq!(snap2["outstanding"], 0);
+    assert!(sealed.drained());
+
+    Ok(())
+}
+
+#[test]
+fn duplicate_response_to_same_call_cannot_exceed_ceiling_or_double_settle() -> TestResult {
+    use std::str::FromStr;
+
+    let mut b = Budget::new(
+        BudgetLimits::default().with_monetary(Some(MonetaryLimit::try_from(50)?)),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+    let rates = PricingRates::new(
+        Some(InputTokenRate::from_str("0.000001")?),
+        Some(OutputTokenRate::from_str("0.000002")?),
+        None,
+        None,
+    );
+
+    let bounds = AttemptBounds::new(InputTokens::from_u64(10), OutputTokens::from_u64(15));
+    let charge = b.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds))?;
+    assert_eq!(charge.sequence().as_u64(), 1);
+    assert_eq!(charge.reserved().as_u64(), 40);
+
+    // First completion consumes the ticket and commits 35 micro-USD
+    b.finish_with_cost(charge, known(10, 10)?, Some(MicroUsd::try_from(35)?))?;
+
+    let snap1 = snapshot(&b)?;
+    assert_eq!(snap1["monetary_spent"], 35);
+    assert_eq!(snap1["monetary_reserved"], 0);
+    assert_eq!(snap1["outstanding"], 0);
+
+    // Foreign attempt cannot touch b
+    let mut other_budget = Budget::new(
+        BudgetLimits::default().with_monetary(Some(MonetaryLimit::try_from(50)?)),
+        ExecutionTimeout::UNLIMITED.start()?,
+    );
+    let other_charge =
+        other_budget.admit_reservation(DebitKind::NormalRequest, Some(&rates), Some(&bounds))?;
+    assert!(b.finish(other_charge, known(1, 1)?).is_err());
+
+    // Total spent is strictly bounded by limit
+    assert!(
+        snapshot(&b)?["monetary_spent"]
+            .as_u64()
+            .is_some_and(|s| s <= 50)
+    );
+
     Ok(())
 }

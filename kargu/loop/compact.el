@@ -29,7 +29,8 @@
 
 (defun kargu--loop-compact-allowed-p (run)
   "Non-nil when RUN may start at most one compaction turn."
-  (and (not (plist-get run :compacting))
+  (and (not (plist-get run :native-backend))
+       (not (plist-get run :compacting))
        (< (or (plist-get run :compactions) 0) 1)))
 
 (defun kargu--loop-start-compact (run prompt)
@@ -47,7 +48,8 @@ Count one iteration and return non-nil if started."
 
 (defun kargu--loop-begin-compaction (run)
   "Start a tools-off compaction turn for RUN, then resume."
-  (when (kargu-loop--live-p run)
+  (when (and (kargu-loop--live-p run)
+             (not (plist-get run :native-backend)))
     (kargu-log 'info "loop: compacting history (%d chars)"
                (kargu-history-char-count))
     (kargu-loop--set-state run 'compact)
@@ -149,7 +151,8 @@ A timeout asks whether to retry the compaction.  Other errors end the run."
 
 (defun kargu--loop-handle-compaction (run response)
   "Apply the compaction RESPONSE of RUN and continue the original work."
-  (when (kargu-loop--live-p run)
+  (when (and (kargu-loop--live-p run)
+             (not (plist-get run :native-backend)))
     (let ((origin (plist-get run :chat-buffer)))
       (with-current-buffer (if (buffer-live-p origin) origin (current-buffer))
         (setf (kargu-history-overlay (plist-get run :history)) nil)

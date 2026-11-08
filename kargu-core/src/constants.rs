@@ -18,10 +18,14 @@ pub mod limits {
     pub const HISTORY_CALLS: usize = 8192;
     /// Bytes reserved before committing each call for an eventual synthetic result.
     pub const HISTORY_REPAIR_BYTES: usize = 1024;
+    /// Default number of trailing messages preserved during history compaction.
+    pub const HISTORY_COMPACT_KEEP: usize = 8;
     /// Explicit model-turn ceiling, independent of charged HTTP retry attempts.
     pub const AGENT_MODEL_TURNS: u32 = 4096;
     /// Consecutive semantic duplicate calls requiring a separate decision.
     pub const AGENT_REPETITIONS: u8 = 3;
+    /// Maximum automatic self-healing rounds per agent run for new diagnostic errors.
+    pub const AGENT_HEALING_ROUNDS: u8 = 2;
     /// Canonical and provider-encoded request body bytes accepted by HTTP.
     pub const API_REQUEST_BYTES: usize = 768 * 1024;
     /// Concurrent staged history imports; aggregate source bytes remain bounded separately.
@@ -38,6 +42,10 @@ pub mod limits {
     pub const TOOL_SCHEMA_DEPTH: usize = 16;
     /// Metadata/expressions in one delegated editor tool; file bodies use edit uploads.
     pub const EDITOR_TOOL_ARGUMENT_BYTES: usize = 64 * 1024;
+    /// Maximum plan content UTF-8 bytes accepted by the native plan domain.
+    pub const PLAN_TEXT_BYTES: usize = 1024 * 1024;
+    /// Bounded retained plan records per conversation.
+    pub const SESSION_PLANS: usize = 16;
     /// Decoded text/patch bytes accepted by the native edit domain.
     pub const EDIT_TEXT_BYTES: usize = 4 * 1024 * 1024;
     /// Maximum encoded metadata-only record in an edit issuance journal.
@@ -115,6 +123,14 @@ pub mod limits {
     pub const SESSION_LIST_MAX_FILES: usize = 500;
     /// Maximum cumulative bytes read across session files during one listing (64 MiB).
     pub const SESSION_LIST_MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
+    /// Maximum session schema depth inspected before rejecting.
+    pub const SESSION_VALIDATE_MAX_DEPTH: usize = 32;
+    /// Maximum session nodes inspected before rejecting.
+    pub const SESSION_VALIDATE_MAX_NODES: usize = 100_000;
+    /// Maximum messages in one persisted session record.
+    pub const SESSION_MAX_MESSAGES: usize = 10_000;
+    /// Canonical schema version for persisted sessions.
+    pub const SESSION_SCHEMA_VERSION_V2: u32 = 2;
     /// Maximum client version length.
     pub const CLIENT_VERSION_BYTES: usize = 128;
     /// Maximum advertised client capabilities.
@@ -139,6 +155,8 @@ pub mod limits {
     pub const PROCESS_OUTPUT_MAX_BYTES: usize = 4 * 1024 * 1024;
     /// Retained process output across a run.
     pub const RUN_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+    /// Maximum character budget for a single tool result presented to the model/history.
+    pub const MODEL_TOOL_OUTPUT_CHARS: usize = 30000;
     /// Input or output page length.
     pub const PROCESS_PAGE_BYTES: usize = 32 * 1024;
     /// Bounded record capture, including a possible adapter lookahead record.
@@ -301,6 +319,7 @@ pub mod protocol {
         "session_lifecycle",
         methods::PING,
         "workspace_find_files",
+        "workspace_mention_candidates",
         "workspace_list_files_ls",
         "workspace_grep",
         "git_status",
@@ -310,6 +329,21 @@ pub mod protocol {
         "command_execute",
         "process_jobs",
         "process_idle_timeout",
+        "capabilities_list",
+        "session_persistence",
+    ];
+
+    /// Items per capability page to fit well under minimum frame limit (1024 bytes).
+    pub const CAPABILITY_PAGE_ITEMS: usize = 16;
+    /// Minimal capabilities returned during initialize handshake at minimum frame limit.
+    pub const HANDSHAKE_CAPABILITIES: &[&str] = &[
+        "capabilities_list",
+        "application_lifecycle",
+        "session_lifecycle",
+        methods::PING,
+        "provider_catalog",
+        "provider_catalog_pages",
+        "model_metadata",
     ];
 
     /// JSON-RPC and host error codes, kept separate from human error messages.
@@ -469,6 +503,8 @@ pub mod protocol {
         pub const INITIALIZE: &str = "initialize";
         /// Complete negotiation.
         pub const INITIALIZED: &str = "initialized";
+        /// Paged capabilities listing.
+        pub const CAPABILITIES_LIST: &str = "capabilities/list";
         /// Health request.
         pub const PING: &str = "ping";
         /// Create application.
@@ -483,6 +519,22 @@ pub mod protocol {
         pub const SESSION_SELECTION: &str = "session/selection";
         /// Replace a conversation's selection from its expected revision.
         pub const SESSION_SELECTION_COMMIT: &str = "session/selection/commit";
+        /// Read one conversation's committed mode and available tools.
+        pub const SESSION_MODE: &str = "session/mode";
+        /// Replace a conversation's mode from its expected revision.
+        pub const SESSION_MODE_COMMIT: &str = "session/mode/commit";
+        /// Read one conversation's current plan record.
+        pub const SESSION_PLAN: &str = "session/plan";
+        /// Create or replace an implementation plan for one conversation.
+        pub const SESSION_PLAN_CREATE: &str = "session/plan/create";
+        /// Revise plan content and bump monotonic revision.
+        pub const SESSION_PLAN_REVISE: &str = "session/plan/revise";
+        /// Claim a plan for execution with expected revision and hash (single-use accept).
+        pub const SESSION_PLAN_CLAIM: &str = "session/plan/claim";
+        /// Settle plan dispatch completion.
+        pub const SESSION_PLAN_COMPLETE: &str = "session/plan/complete";
+        /// Reject a pending plan.
+        pub const SESSION_PLAN_REJECT: &str = "session/plan/reject";
         /// Claim and run a native conversation turn through actual provider services.
         pub const SESSION_PROMPT: &str = "session/prompt";
         /// Revoke an exact native run; terminal acknowledgement follows actual drain.
@@ -499,8 +551,12 @@ pub mod protocol {
         pub const SESSION_LIST: &str = "session/list";
         /// Delete persisted session snapshot and journal files.
         pub const SESSION_DELETE: &str = "session/delete";
+        /// Prune persisted sessions and clean orphaned temp files according to retention policy.
+        pub const SESSION_PRUNE: &str = "session/prune";
         /// Import and migrate legacy or v2 session without overwriting source.
         pub const SESSION_IMPORT: &str = "session/import";
+        /// Atomically restore validated candidate session into live actor state.
+        pub const SESSION_RESTORE: &str = "session/restore";
         /// Bounded, read-only native file discovery.
         pub const FIND_FILES: &str = "workspace/findFiles";
         /// Bounded regular-file or revision-bound editor text excerpt.
@@ -530,4 +586,16 @@ pub mod protocol {
         /// Exit connection.
         pub const EXIT: &str = "exit";
     }
+
+    /// Canonical prompts used across native conversation lifecycles.
+    pub mod prompts {
+        /// User prompt for requesting a tools-off conversation history summary.
+        pub const COMPACTION_REQUEST: &str = "COMPACTION_REQUEST: Summarize the conversation so far for another coding agent. \
+            Output a structured summary with these headings: Goal, Done, Files and symbols touched, \
+            Open issues, Next step. Use exact paths. Do not continue the task. Do not call tools. \
+            Reply with the summary only.";
+    }
 }
+
+/// Embedded default system prompt asset.
+pub const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../../kargu/prompt/default.txt");

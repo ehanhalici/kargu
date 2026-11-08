@@ -227,3 +227,135 @@ fn cached_display_is_accounted_and_malformed_visible_blocks_are_rejected() -> Te
     message(json!({"role":"assistant","content":[{"type":"signature","text":{"opaque":true}}]}))?;
     Ok(())
 }
+
+#[test]
+fn summary_tail_extraction_preserves_atomic_tool_blocks_and_hash() -> TestResult {
+    let mut history = History::default();
+    history.append(message(
+        json!({"role":"user", "content":"first user question"}),
+    )?)?;
+    history.append(message(calls(&["tail-c1", "tail-c2"]))?)?;
+    let ids: Vec<_> = history
+        .pending_calls()?
+        .iter()
+        .map(|c| c.call.id().clone())
+        .collect();
+    let first = ids.first().ok_or("first")?;
+    let second = ids.get(1).ok_or("second")?;
+    history.append_result(first, ToolOutcome::Ok, "result 1")?;
+    history.append_result(second, ToolOutcome::Ok, "result 2")?;
+    history.append(message(
+        json!({"role":"assistant", "content":"tool results processed"}),
+    )?)?;
+    history.append(message(
+        json!({"role":"user", "content":"second question"}),
+    )?)?;
+    history.append(message(
+        json!({"role":"assistant", "content":"final answer"}),
+    )?)?;
+
+    assert_eq!(history.snapshot().len(), 7);
+    let rev = history.revision();
+
+    // keep = 2: split index lands on User("second question") at index 5.
+    let tail_2 = history.extract_tail(kargu_core::history::CompactKeep::new(2))?;
+    assert_eq!(tail_2.messages().len(), 2);
+    assert_eq!(
+        tail_2.messages().first().ok_or("m0")?.message().role(),
+        Role::User
+    );
+    assert_eq!(
+        tail_2.messages().get(1).ok_or("m1")?.message().role(),
+        Role::Assistant
+    );
+
+    // keep = 4: proposed split lands on index 3 (Tool result 2).
+    // Atomic block integrity MUST rewind past both tool results and their assistant call!
+    let tail_4 = history.extract_tail(kargu_core::history::CompactKeep::new(4))?;
+    // Rewinds past tool results 3 and 2, to assistant call 1, then aligns to user 0.
+    assert_eq!(tail_4.messages().len(), 7);
+    assert_eq!(
+        tail_4.messages().first().ok_or("first")?.message().role(),
+        Role::User
+    );
+
+    // prepare_compaction creates an immutable candidate recording source revision
+    let prompt = message(json!({"role":"user", "content":"COMPACTION_REQUEST: summarize"}))?;
+    let candidate = history.prepare_compaction(kargu_core::history::CompactKeep::new(2), prompt)?;
+    assert_eq!(candidate.source_revision(), rev);
+    assert_eq!(candidate.tail_hash(), tail_2.hash());
+    assert_eq!(candidate.preserved_tail().len(), 2);
+    // Live history is NOT mutated beforehand!
+    assert_eq!(history.revision(), rev);
+    assert_eq!(history.snapshot().len(), 7);
+
+    // Unsettled history refuses compaction preparation
+    history.append(message(calls(&["pending-call"]))?)?;
+    assert!(!history.settled());
+    assert_eq!(
+        history
+            .extract_tail(kargu_core::history::CompactKeep::new(2))
+            .err(),
+        Some(HistoryError::PendingCalls)
+    );
+    let prompt2 = message(json!({"role":"user", "content":"COMPACTION_REQUEST: summarize"}))?;
+    assert_eq!(
+        history
+            .prepare_compaction(kargu_core::history::CompactKeep::new(2), prompt2)
+            .err(),
+        Some(HistoryError::PendingCalls)
+    );
+    Ok(())
+}
+
+#[test]
+fn compacted_history_assembly_rejects_empty_and_preserves_structure() -> TestResult {
+    let mut history = History::default();
+    history.append(message(
+        json!({"role":"developer", "content":"system instructions"}),
+    )?)?;
+    history.append(message(json!({"role":"user", "content":"do task"}))?)?;
+    history.append(message(
+        json!({"role":"assistant", "content":"doing task"}),
+    )?)?;
+    let tail = history.extract_tail(kargu_core::history::CompactKeep::new(1))?;
+    let sys = history.snapshot().first().map(|m| m.message().clone());
+
+    // Empty or whitespace-only summary is rejected
+    assert_eq!(
+        kargu_core::history::SummaryText::try_new("").err(),
+        Some(HistoryError::InvalidMessage)
+    );
+    assert_eq!(
+        kargu_core::history::SummaryText::try_new("   \n\t  ").err(),
+        Some(HistoryError::InvalidMessage)
+    );
+
+    // Valid summary builds a replacement history
+    let summary_text = kargu_core::history::SummaryText::try_new("Goal: done; Files: none")?;
+    let compacted =
+        kargu_core::history::build_compacted_history(sys.as_ref(), &summary_text, tail.messages())?;
+    let msgs = compacted.snapshot();
+    assert_eq!(msgs.first().ok_or("sys")?.message().role(), Role::Developer);
+    assert!(
+        msgs.get(1)
+            .ok_or("ack")?
+            .message()
+            .wire()
+            .get()
+            .contains("COMPACTION_ACK:")
+    );
+    assert!(
+        msgs.get(2)
+            .ok_or("ack2")?
+            .message()
+            .wire()
+            .get()
+            .contains("Acknowledged.")
+    );
+    // Since tail message was assistant, bridging user message was inserted
+    assert_eq!(msgs.get(3).ok_or("bridge")?.message().role(), Role::User);
+    assert_eq!(msgs.get(4).ok_or("tail")?.message().role(), Role::Assistant);
+
+    Ok(())
+}

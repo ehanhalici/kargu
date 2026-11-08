@@ -102,8 +102,9 @@
       (string-match "value" "saved value")
       (let ((saved (match-data)))
         (cl-letf (((symbol-function 'kargu-chat-output-buffer) #'current-buffer)
-                  ((symbol-function 'kargu-chat-insert)
-                   (lambda (text &optional face)
+                  ((symbol-function 'kargu-chat-insert-into)
+                   (lambda (buffer text &optional face)
+                     (should (eq buffer (current-buffer)))
                      (string-match "changed" "changed")
                      (push (cons text face) chunks))))
           (kargu-chat--on-delta "A<think>B</think>C<think>D</think>E"))
@@ -553,6 +554,32 @@
                   (should-not (cl-some (lambda (file) (string-search "secret" file)) files)))))
           (kill-buffer foreign)
           (delete-directory outside t))))))
+
+(ert-deftest kargu-chat-completion-respects-ancestor-git-ignore-in-subdirectory-test ()
+  "A subdirectory project root respects ancestor .gitignore rules and excludes files."
+  (kargu-bridge-test--with-core
+    (kargu-test-with-git-repo '((".gitignore" . "*.log\n")
+                                ("sub/.gitignore" . "!keep.log\nscratch.el\n")
+                                ("top.el" . "top")
+                                ("sub/main.el" . "main")
+                                ("sub/scratch.el" . "scratch")
+                                ("sub/keep.log" . "keep")
+                                ("sub/debug.log" . "debug"))
+      (let* ((sub-root (file-name-as-directory (expand-file-name "sub" repo)))
+             (default-directory sub-root)
+             (kargu-permission--override-root sub-root))
+        (cl-letf (((symbol-function 'project-current)
+                   (lambda (&rest _) (list 'vc 'Git sub-root))))
+          (should (equal (kargu-chat--completion-roots) (list sub-root)))
+          (let ((files (mapcar #'substring-no-properties
+                               (kargu-test-await
+                                (lambda (done) (kargu-chat--file-candidates "" done))))))
+            (should (member "@main.el" files))
+            (should (member "@keep.log" files))
+            (should (member "@.gitignore" files))
+            (should-not (member "@scratch.el" files))
+            (should-not (member "@debug.log" files))
+            (should-not (member "@top.el" files))))))))
 
 (ert-deftest kargu-chat-completion-ranks-natively-and-drops-superseded-queries-test ()
   "Rust ranks and highlights; only the newest query of a prompt answers."

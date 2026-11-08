@@ -3,6 +3,12 @@
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;;; Commentary:
+
+;; Tests for history and loop compaction.
+
+;;; Code:
+
 (require 'ert)
 (require 'cl-lib)
 (require 'tests/test-helpers)
@@ -11,6 +17,9 @@
 (require 'kargu/history/compact)
 (require 'kargu/loop)
 (require 'kargu/loop/compact)
+(require 'kargu/ui/confirm)
+
+(kargu-ui-confirm-install)
 
 (defun kargu-compact-test--history (n)
   "A system message plus N user/assistant pairs."
@@ -171,7 +180,8 @@
                  (lambda (&rest _) (setq sent t)))
                 ((symbol-function 'kargu--loop-finish)
                  (lambda (_run status text) (setq finished (cons status text))))
-                ((symbol-function 'kargu-circuit-reset) #'ignore))
+                ((symbol-function 'kargu-circuit-reset)
+                 (lambda (_provider callback) (funcall callback nil nil))))
         (kargu--loop-handle-compaction run resp)
         (should sent)
         (should-not finished)
@@ -219,6 +229,58 @@
       (should-not asked)
       (should (eq (car finished) :error))
       (should (string-search "HTTP 400" (cdr finished))))))
+
+(ert-deftest kargu-native-opt-in-disables-legacy-compaction-and-overlay-decisions-test ()
+  "Native runs never invoke Elisp loop/compact, history/compact, or prompt overlay."
+  (let* ((kargu-history-compact-chars 50)
+         (kargu-session--context
+          (kargu-test-session-with-history
+           :messages (kargu-compact-test--history 6)
+           :overlay "LEGACY-OVERLAY"))
+         (run (list :state 'request :native-backend t :iterations 0 :max-iterations 10
+                    :history (kargu-history-context)))
+         (kargu--loop-run run)
+         (api-called nil))
+    (cl-letf (((symbol-function 'kargu-model-context-window) (lambda (&rest _) nil))
+              ((symbol-function 'kargu-api-send) (lambda (&rest _) (setq api-called t))))
+      (should-not (kargu-history-needs-compact-p))
+      (should-not (kargu--loop-compact-allowed-p run))
+      (should-not (kargu--loop-start-compact run "continue"))
+      (should-not api-called)
+      (should (eq (kargu-loop--classify-request run) 'stale))
+      (should (eq (kargu-loop--classify-response
+                   run '(("error" . (("code" . "context_length_exceeded")
+                                     ("message" . "maximum context length exceeded")))))
+                  'stale))
+      (should-not (equal (kargu--get-system-prompt (kargu-history-context))
+                         "LEGACY-OVERLAY")))))
+
+(ert-deftest kargu-native-error-never-triggers-legacy-summary-replay-test ()
+  "A native run error finishes cleanly without starting legacy compaction replay."
+  (let* ((kargu-session--context
+          (kargu-test-session-with-history
+           :messages (kargu-compact-test--history 3)))
+         (run (list :state 'wait :native-backend t :iterations 0 :max-iterations 10))
+         (kargu--loop-run run)
+         (legacy-compact-started nil)
+         (finished nil))
+    (cl-letf (((symbol-function 'kargu--loop-start-compact)
+               (lambda (&rest _) (setq legacy-compact-started t)))
+              ((symbol-function 'kargu--loop-finish)
+               (lambda (_r status text) (setq finished (cons status text)))))
+      (let ((result (kargu-bridge--object
+                     "status" "failed"
+                     "accounting" (kargu-bridge--object
+                                   "budget" (kargu-bridge--object
+                                             "requests_spent" 2
+                                             "compactions_spent" 1)
+                                   "failure" (kargu-bridge--object
+                                              "code" "context_overflow")))))
+        (kargu-loop-native--finish run result nil)
+        (should-not legacy-compact-started)
+        (should (eq (car finished) :error))
+        (should (= (plist-get run :iterations) 2))
+        (should (= (plist-get run :compactions) 1))))))
 
 (provide 'tests/test-compact)
 ;;; test-compact.el ends here

@@ -599,6 +599,68 @@ fn mention_candidates_follow_repository_ignore_rules_only_in_a_repository() -> T
 }
 
 #[test]
+fn mention_candidates_follow_ancestor_repository_and_gitfile_rules() -> TestResult {
+    let write = |root: &Path, name: &str, text: &str| -> std::io::Result<()> {
+        let path = root.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, text)
+    };
+    // 1. Subdirectory workspace root within a Git repository.
+    let repo = tempfile::tempdir()?;
+    write(repo.path(), ".git/info/exclude", "local.txt\n")?;
+    write(repo.path(), ".gitignore", "*.log\n*.bak\n")?;
+    write(repo.path(), "src/.gitignore", "!keep.log\nscratch.rs\n")?;
+    write(repo.path(), "README.md", "fixture")?;
+    write(repo.path(), "src/main.rs", "fixture")?;
+    write(repo.path(), "src/scratch.rs", "fixture")?;
+    write(repo.path(), "src/keep.log", "fixture")?;
+    write(repo.path(), "src/debug.log", "fixture")?;
+    write(repo.path(), "src/local.txt", "fixture")?;
+    write(repo.path(), "src/nested/deep.bak", "fixture")?;
+    write(repo.path(), "src/nested/deep.rs", "fixture")?;
+
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    peer.send(json!({"jsonrpc":"2.0","id":1,"method":"application/create"}))?;
+    let app = peer.read()?["result"]["application_id"].clone();
+    peer.send(
+        json!({"jsonrpc":"2.0","id":2,"method":"session/create","params":{"application_id":app}}),
+    )?;
+    let scope = peer.read()?["result"].clone();
+
+    // Querying with workspace root = repo/src
+    let mut paths = mention_paths(&mut peer, &scope, &repo.path().join("src"), 3)?;
+    paths.sort();
+    assert_eq!(
+        paths,
+        [".gitignore", "keep.log", "main.rs", "nested/deep.rs"]
+    );
+
+    // 2. Worktree gitfile (.git is a file pointing to gitdir)
+    let wt_base = tempfile::tempdir()?;
+    let git_common = wt_base.path().join("git_common");
+    write(&git_common, "HEAD", "ref: refs/heads/main\n")?;
+    write(&git_common, "info/exclude", "*.tmp\n")?;
+
+    let wt_root = wt_base.path().join("worktree");
+    write(&wt_root, ".git", "gitdir: ../git_common\n")?;
+    write(&wt_root, ".gitignore", "ignored_by_top/\n")?;
+    write(&wt_root, "sub/file.rs", "fixture")?;
+    write(&wt_root, "sub/temp.tmp", "fixture")?;
+    write(&wt_root, "sub/ignored_by_top/bad.rs", "fixture")?;
+
+    let mut paths = mention_paths(&mut peer, &scope, &wt_root.join("sub"), 4)?;
+    paths.sort();
+    assert_eq!(paths, ["file.rs"]);
+
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
 fn oversized_search_response_is_a_scoped_error_not_transport_failure() -> TestResult {
     let root = tempfile::tempdir()?;
     for n in 0..100 {
@@ -741,5 +803,76 @@ async fn cancelling_server_releases_its_writer_task() -> TestResult {
     assert!(server.await.is_err());
     let mut rest = Vec::new();
     tokio::time::timeout(Duration::from_secs(1), consumer.read_to_end(&mut rest)).await??;
+    Ok(())
+}
+
+#[test]
+fn minimum_frame_initialize_leaves_headroom_and_pages_capabilities() -> TestResult {
+    let mut peer = Peer::start()?;
+    peer.send(
+        json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+        "protocol_major":1,"protocol_minor":0,"client_version":"test","capabilities":[],
+        "limits":{"max_frame_bytes":1024}}}),
+    )?;
+    let init_reply = peer.read()?;
+    let init_str = serde_json::to_string(&init_reply)?;
+    assert!(
+        init_str.len() < 512,
+        "init reply too large: {} bytes",
+        init_str.len()
+    );
+    let handshake_caps = init_reply["result"]["capabilities"]
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("missing capabilities"))?;
+    assert_eq!(
+        handshake_caps.len(),
+        kargu_core::constants::protocol::HANDSHAKE_CAPABILITIES.len()
+    );
+    assert_eq!(init_reply["result"]["capability_set"], 1);
+
+    peer.send(json!({"jsonrpc":"2.0","method":"initialized"}))?;
+
+    let mut all_caps = Vec::new();
+    let mut offset = 0;
+    for page_idx in 0..10 {
+        let req_id = page_idx + 1;
+        peer.send(json!({"jsonrpc":"2.0","id":req_id,"method":"capabilities/list","params":{"offset":offset}}))?;
+        let page_reply = peer.read()?;
+        let page_str = serde_json::to_string(&page_reply)?;
+        assert!(
+            page_str.len() < 1024,
+            "page {} too large: {} bytes",
+            page_idx,
+            page_str.len()
+        );
+        let caps = page_reply["result"]["capabilities"]
+            .as_array()
+            .ok_or_else(|| std::io::Error::other("missing caps"))?;
+        for cap in caps {
+            all_caps.push(cap.as_str().unwrap_or("").to_string());
+        }
+        let complete = page_reply["result"]["complete"].as_bool().unwrap_or(false);
+        if complete {
+            break;
+        }
+        offset = page_reply["result"]["next_offset"].as_u64().unwrap_or(0) as usize;
+    }
+
+    assert!(
+        all_caps.len() >= 30,
+        "expected >= 30 capabilities, got {}",
+        all_caps.len()
+    );
+    assert!(all_caps.contains(&"capabilities_list".to_string()));
+    assert!(all_caps.contains(&"workspace_mention_candidates".to_string()));
+    assert!(all_caps.contains(&"session_persistence".to_string()));
+    assert!(
+        !all_caps
+            .iter()
+            .any(|cap| cap.starts_with("backend_") || cap.starts_with("dape_"))
+    );
+
+    peer.input.take();
+    assert!(peer.wait()?);
     Ok(())
 }

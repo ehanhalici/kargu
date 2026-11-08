@@ -96,7 +96,8 @@ A busy client, a missing key, or a missing endpoint is refused first."
   callback generation record-turn request (debit-kind :normal-request)
   (app (kargu-application-context)) (state :pending)
   (origin (current-buffer)) (session (kargu-session-context))
-  (history (kargu-history-context)))
+  (history (kargu-history-context))
+  prompt added-prompt-p assistant-stored-p)
 
 (cl-defun kargu-api--send (&key prompt callback on-delta (record-turn t) history (debit-kind :normal-request))
   "Validate connection settings and send PROMPT to CALLBACK and ON-DELTA.
@@ -186,11 +187,31 @@ RECORD-TURN controls whether a successful response enters history."
   "Record RESPONSE only in DELIVERY's captured, still-live owner."
   (setq response (kargu-api-normalize-tool-calls
                   response (kargu-api--delivery-history delivery)))
-  (unless (kargu-response-error-message response)
-    (kargu--record-usage response (kargu-api--delivery-session delivery))
-    (when (and (kargu-api--delivery-record-turn delivery)
-               (kargu-api--delivery-owner-live-p delivery))
-      (kargu-api-store-assistant-turn response (kargu-api--delivery-history delivery))))
+  (let ((err (kargu-response-error-message response)))
+    (cond
+     (err
+      (when (kargu-api--delivery-added-prompt-p delivery)
+        (kargu--api-rollback-prompt
+         (kargu-api--delivery-prompt delivery)
+         t
+         (kargu-api--delivery-history delivery))
+        (setf (kargu-api--delivery-added-prompt-p delivery) nil)))
+     ((not (kargu-api--delivery-record-turn delivery))
+      (when (kargu-api--delivery-added-prompt-p delivery)
+        (kargu--api-rollback-prompt
+         (kargu-api--delivery-prompt delivery)
+         t
+         (kargu-api--delivery-history delivery))
+        (setf (kargu-api--delivery-added-prompt-p delivery) nil))
+      (unless (kargu-api--delivery-assistant-stored-p delivery)
+        (setf (kargu-api--delivery-assistant-stored-p delivery) t)
+        (kargu--record-usage response (kargu-api--delivery-session delivery))))
+     (t
+      (unless (kargu-api--delivery-assistant-stored-p delivery)
+        (setf (kargu-api--delivery-assistant-stored-p delivery) t)
+        (kargu--record-usage response (kargu-api--delivery-session delivery))
+        (when (kargu-api--delivery-owner-live-p delivery)
+          (kargu-api-store-assistant-turn response (kargu-api--delivery-history delivery)))))))
   response)
 
 (cl-defun kargu-api--send-turn (&key prompt callback on-delta key base (record-turn t) history delivery (debit-kind :normal-request))
@@ -200,12 +221,14 @@ RECORD-TURN permits reply storage; HISTORY supplies drafts.
 DELIVERY retains the captured admission owner."
   (let* ((history (if delivery (kargu-api--delivery-history delivery)
                     (kargu-history-context history)))
-         (added-prompt-p (and prompt (not (string-empty-p prompt))))
+         (will-add-prompt (and prompt (not (string-empty-p prompt))))
          (delivery (or delivery (kargu-api--make-delivery :callback callback :record-turn record-turn
 							  :history history :debit-kind debit-kind
 							  :generation (kargu-application-current-generation)))))
-    (when added-prompt-p
-      (kargu-history-append `(("role" . "user") ("content" . ,prompt)) history))
+    (setf (kargu-api--delivery-prompt delivery) prompt)
+    (when will-add-prompt
+      (kargu-history-append `(("role" . "user") ("content" . ,prompt)) history)
+      (setf (kargu-api--delivery-added-prompt-p delivery) t))
     (condition-case-unless-debug err
         (progn
           (kargu--api-validate-preflight prompt history)
@@ -213,7 +236,9 @@ DELIVERY retains the captured admission owner."
                                  :key key :base base))
       (error
        (when (kargu-api--delivery-live-p delivery)
-         (kargu--api-rollback-prompt prompt added-prompt-p history)
+         (when (kargu-api--delivery-added-prompt-p delivery)
+           (kargu--api-rollback-prompt prompt t history)
+           (setf (kargu-api--delivery-added-prompt-p delivery) nil))
          (kargu-api--deliver delivery (kargu--api-error-alist (error-message-string err))))))))
 
 (cl-defun kargu-api--start-turn (&key delivery on-delta key base)
@@ -242,11 +267,27 @@ Send events to ON-DELTA and the response through DELIVERY."
              (kargu-api--delivery-owner-live-p delivery))
         (when (fboundp 'kargu-execution-request-started) (kargu-execution-request-started))
         (when (kargu-api--delivery-owner-live-p delivery)
+          (kargu-logical-request-add-cleanup
+           (kargu-api--delivery-request delivery)
+           (lambda ()
+             (when (and (eq (kargu-api--delivery-state delivery) :pending)
+                        (kargu-api--delivery-added-prompt-p delivery))
+               (kargu--api-rollback-prompt
+                (kargu-api--delivery-prompt delivery)
+                t
+                (kargu-api--delivery-history delivery))
+               (setf (kargu-api--delivery-added-prompt-p delivery) nil))))
           (kargu--api-post
            base (kargu-api-auth-intent key) payload gen
            (lambda (response) (kargu-api--deliver delivery response)) delta t)))
        ((= gen (kargu-application-current-generation))
         (kargu-http-clear-busy)
+        (when (kargu-api--delivery-added-prompt-p delivery)
+          (kargu--api-rollback-prompt
+           (kargu-api--delivery-prompt delivery)
+           t
+           (kargu-api--delivery-history delivery))
+          (setf (kargu-api--delivery-added-prompt-p delivery) nil))
         (kargu-api--deliver delivery
                             (kargu--api-error-alist "Request owner was invalidated")))))))
 
@@ -283,17 +324,29 @@ Build the payload in an isolated history; never store the reply."
   "Project RESPONSE usage into captured SESSION or the current UI owner.
 Native budget accounting already happened before response delivery."
   (setq session (or session (kargu-session-context)))
-  (when-let* ((usage (kargu-aget response "usage")))
-    (let ((in (kargu-aget usage "prompt_tokens"))
-          (out (kargu-aget usage "completion_tokens")))
-      (kargu-session-record-usage (and (numberp in) in) (and (numberp out) out) session)
-      (let ((details (kargu-aget usage "prompt_tokens_details")))
-        (kargu-session-record-cache-usage in (kargu-aget details "cached_tokens")
-                                          (kargu-aget details "cache_write_tokens")
-                                          :session session))
-      (when (fboundp 'kargu-state-notify-tokens)
-        (kargu-state-notify-tokens session))
-      (force-mode-line-update t)
+  (let* ((budget (or (kargu-aget response "budget")
+                     (when-let* ((acc (kargu-aget response "accounting")))
+                       (kargu-aget acc "budget"))))
+         (usage (kargu-aget response "usage")))
+    (when (or (hash-table-p budget)
+              (and (fboundp 'kargu-run-budget-p) (kargu-run-budget-p budget))
+              (and (listp budget) (kargu-aget budget "requests_spent")))
+      (kargu-session-project-budget budget session))
+    (if usage
+        (let ((in (kargu-aget usage "prompt_tokens"))
+              (out (kargu-aget usage "completion_tokens")))
+          (kargu-session-record-usage (and (numberp in) in) (and (numberp out) out) session)
+          (let ((details (kargu-aget usage "prompt_tokens_details")))
+            (kargu-session-record-cache-usage in (kargu-aget details "cached_tokens")
+                                              (kargu-aget details "cache_write_tokens")
+                                              :session session)))
+      (unless budget
+        (kargu-session-record-usage nil nil session)))
+    (when (fboundp 'kargu-state-notify-tokens)
+      (kargu-state-notify-tokens session))
+    (force-mode-line-update t)
+    (let ((in (or (and usage (kargu-aget usage "prompt_tokens")) "unknown"))
+          (out (or (and usage (kargu-aget usage "completion_tokens")) "unknown")))
       (kargu-log 'info "usage: %s in / %s out (session: %s)"
                  in out (kargu-session-usage session))))
   (kargu-session-snapshot session))

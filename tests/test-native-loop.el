@@ -295,5 +295,58 @@
       (kargu-chat--render-change-evidence :unavailable)
       (should (string-match-p "unconfirmed" text)))))
 
+(ert-deftest kargu-native-loop-single-terminal-report-facets-test ()
+  "Single terminal Rust DTO projects observed/reserved/unknown budget, changes, and healing."
+  (let* ((budget (kargu-bridge--object
+                  "requests_spent" 3
+                  "compactions_spent" 1
+                  "tokens_spent" 150
+                  "tokens_unknown" :json-false
+                  "monetary_spent" 2500
+                  "monetary_reserved" 500
+                  "monetary_unknown" :json-false
+                  "outstanding" 0
+                  "sealed" t))
+         (changes (kargu-bridge--object
+                   "revision" 4
+                   "pending_files" 1
+                   "retained_files" 2
+                   "verified_files" 1))
+         (accounting (kargu-bridge--object
+                      "budget" budget
+                      "changes" changes
+                      "history_revision" 4
+                      "healing_rounds" 2))
+         (result (kargu-bridge--object
+                  "status" "completed"
+                  "terminal" "answer"
+                  "answer_text" "All done!"
+                  "accounting" accounting))
+         (session (kargu-session--create :id-value "test-session"))
+         (run (list :id "run-1" :session session :native-backend t))
+         delivered-report)
+    (cl-letf (((symbol-function 'kargu-loop--live-p) (lambda (_run) t))
+              ((symbol-function 'kargu--loop-finish)
+               (lambda (r status &optional text)
+                 (setq delivered-report (kargu-loop--finish-report r status text)))))
+      (kargu-loop-native--finish run result nil)
+      (should delivered-report)
+      (should (eq (plist-get delivered-report :status) :done))
+      (should (equal (plist-get delivered-report :text) "All done!"))
+      (should (= (plist-get delivered-report :iterations) 3))
+      (should (= (plist-get delivered-report :healing) 2))
+      (should (= (plist-get delivered-report :verifications) 1))
+      (let ((evidence (plist-get delivered-report :change-evidence)))
+        (should (hash-table-p evidence))
+        (should (= (gethash "pending_files" evidence) 1))
+        (should (= (gethash "retained_files" evidence) 2))
+        (should (= (gethash "verified_files" evidence) 1)))
+      (let ((usage (kargu-session-usage-value session)))
+        (should (= (plist-get usage :requests-spent) 3))
+        (should (= (plist-get usage :compactions-spent) 1))
+        (should (= (plist-get usage :tokens-spent) 150))
+        (should (= (plist-get usage :monetary-spent) 2500))
+        (should (= (plist-get usage :monetary-reserved) 500))))))
+
 (provide 'tests/test-native-loop)
 ;;; test-native-loop.el ends here

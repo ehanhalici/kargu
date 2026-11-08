@@ -14,10 +14,15 @@
 (require 'kargu/tools/skill)
 
 (defvar kargu-selection-port)
+(defvar kargu-mode-port)
 (declare-function kargu-selection-create "kargu/contract/selection" (&rest args))
 (declare-function kargu-selection-provider-value "kargu/contract/selection" (selection))
 (declare-function kargu-selection-model-value "kargu/contract/selection" (selection))
 (declare-function kargu-selection-effort-value "kargu/contract/selection" (selection))
+
+(defun kargu-test-mode-port (_session desired debug-ready callback)
+  "Acknowledge DESIRED for CALLBACK at once, as Rust would commit it."
+  (funcall callback (list :mode desired :debug-ready debug-ready) nil))
 
 (defun kargu-test-selection-port (_session desired callback)
   "Acknowledge DESIRED for CALLBACK at once, as Rust would canonicalize it.
@@ -401,6 +406,7 @@ Tests never see the working tree of Kargu as their project."
            (bound-and-true-p kargu-application--context)))
         (kargu-test--model-apps nil)
         (kargu-selection-port #'kargu-test-selection-port)
+        (kargu-mode-port #'kargu-test-mode-port)
         (kargu-bridge-binary-path (or (getenv "KARGU_CORE_TEST_BINARY") kargu-bridge-binary-path))
         (kargu-diff--changed (if (and (boundp 'kargu-diff--changed)
                                       (hash-table-p kargu-diff--changed))

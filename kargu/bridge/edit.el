@@ -475,8 +475,22 @@ lifetime.  Failure revokes the preparation; text is never replayed implicitly."
 
 (cl-defun kargu-bridge-edit-preflight (artifact &key edit-id revision witness callback)
   "Preflight ARTIFACT's EDIT-ID and REVISION with WITNESS into CALLBACK."
-  (kargu-bridge-edit--execution-call
-   artifact :preflight :edit edit-id :revision revision :fields (list "witness" witness) :callback callback))
+  (let* ((frame (or (kargu-bridge-connection-frame-limit
+                     (kargu-bridge-edit-artifact-connection artifact))
+                    kargu-bridge--max-frame))
+         (witness (if (and (hash-table-p witness)
+                           (gethash "baseline" witness)
+                           (> (+ 384 (string-bytes
+                                      (encode-coding-string
+                                       (json-serialize witness :null-object :json-null :false-object :json-false)
+                                       'utf-8-unix)))
+                              frame))
+                      (let ((copy (copy-hash-table witness)))
+                        (remhash "baseline" copy)
+                        copy)
+                    witness)))
+    (kargu-bridge-edit--execution-call
+     artifact :preflight :edit edit-id :revision revision :fields (list "witness" witness) :callback callback)))
 
 (cl-defun kargu-bridge-edit--execution-call (artifact method &key edit revision fields callback)
   "Call METHOD on ARTIFACT's EDIT and REVISION with FIELDS into CALLBACK."

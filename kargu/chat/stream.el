@@ -60,7 +60,10 @@ instead of relying on deltas.")
 (defun kargu-chat--model-stream-event (run event)
   "Handle model stream EVENT only in the chat still owned by RUN."
   (let ((buffer (plist-get run :chat-buffer)))
-    (when (and (eq run kargu--loop-run) (buffer-live-p buffer)
+    (when (and (or (eq run kargu--loop-run)
+                   (and (fboundp 'kargu-application-current-run)
+                        (eq run (kargu-application-current-run))))
+               (buffer-live-p buffer)
                (with-current-buffer buffer (derived-mode-p 'kargu-chat-mode)))
       (with-current-buffer buffer
         (pcase event
@@ -98,7 +101,7 @@ whatever buffer is current when the process filter fires."
       (setq kargu-chat--thought-pending ""))
     (setq kargu-chat--streamed-text t)
     (if (eq kind 'thought)
-        (kargu-chat-insert text 'kargu-chat-thought)
+        (kargu-chat-insert-into (current-buffer) text 'kargu-chat-thought)
       (kargu-chat--stream-tagged-text text))))
 
 (defun kargu-chat--next-thought-tag (text start)
@@ -113,7 +116,7 @@ whatever buffer is current when the process filter fires."
 (defun kargu-chat--insert-stream-text (text)
   "Insert TEXT using the current reasoning face."
   (unless (string-empty-p text)
-    (kargu-chat-insert text (and kargu-chat--in-thought 'kargu-chat-thought))))
+    (kargu-chat-insert-into (current-buffer) text (and kargu-chat--in-thought 'kargu-chat-thought))))
 
 (defun kargu-chat--stream-tagged-text (text)
   "Render TEXT while switching faces at each inline reasoning marker."

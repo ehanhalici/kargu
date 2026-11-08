@@ -5,6 +5,7 @@
 
 (require 'ert)
 (require 'tests/test-helpers)
+(require 'kargu/api)
 (require 'kargu/history)
 
 (ert-deftest kargu-history-ensure-user-accepts-empty-history-test ()

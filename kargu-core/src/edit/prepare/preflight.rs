@@ -22,6 +22,8 @@ pub(crate) struct PreflightFile {
     file: FileIndex,
     base_hash: ContentHash,
     document: LiveDocument,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    baseline: Option<crate::sensors::diagnostics::DiagnosticSnapshot>,
 }
 #[derive(Default)]
 pub(crate) struct PreflightSet {
@@ -157,6 +159,20 @@ impl ReadyPreflight {
             .get(&index)
             .map(|file| &file.document)
             .ok_or_else(|| EditError::InvalidEvidence.into())
+    }
+    pub(super) fn baseline(
+        &self,
+        index: FileIndex,
+        prepared: &Prepared,
+    ) -> super::verification::DiagnosticBaseline {
+        let Some(witness) = self.witnesses.files.get(&index) else {
+            return super::verification::DiagnosticBaseline::Unavailable;
+        };
+        super::verification::DiagnosticBaseline::capture(
+            prepared,
+            &witness.document,
+            witness.baseline.as_ref(),
+        )
     }
     pub(crate) fn digest(&self) -> CaptureDigest {
         self.digest

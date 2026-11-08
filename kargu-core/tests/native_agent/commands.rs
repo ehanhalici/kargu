@@ -219,3 +219,70 @@ fn parent_stays_draining_until_a_term_ignoring_shell_child_actually_finishes() -
     server.join().map_err(|_| "server panic")??;
     Ok(())
 }
+
+#[test]
+fn tool_output_redacts_known_secrets_and_caps_oversized_text_in_history() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let script = "printf 'AUTH=Bearer secret-token-12345\nKEY=sk-12345678901234567890abcdef\n'; head -c 35000 /dev/zero | tr '\\0' 'x'";
+    let (url, server, requests) = server(vec![
+        tool_reply("provider-shell-secrets", "bash", json!({"command": script})),
+        answer("redaction verified"),
+    ])?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut input = prompt(root.path(), &url);
+    input["tools_enabled"] = json!(true);
+    input["tool_limit"] = json!(2);
+    input["turn_limit"] = json!(4);
+
+    begin(&mut peer, "shell-redact", &scope, input)?;
+    let mut events = Vec::new();
+    loop {
+        let message = peer.read()?;
+        if message["method"] == "editor/request_approval" {
+            peer.send(json!({"jsonrpc":"2.0","id":message["id"],"result":{"approved":true}}))?;
+            break;
+        }
+        events.push(message);
+    }
+
+    let terminal = response(&peer, "shell-redact", &mut events)?;
+    assert_eq!(terminal["result"]["status"], "completed");
+
+    let _first = requests.recv_timeout(Duration::from_secs(2))?;
+    let after_call = requests.recv_timeout(Duration::from_secs(2))?;
+    let msg = after_call["messages"]
+        .as_array()
+        .ok_or("messages")?
+        .last()
+        .ok_or("tool result")?;
+    assert_eq!(msg["tool_call_id"], "provider-shell-secrets");
+    let content = msg["content"].as_str().ok_or("content")?;
+
+    // Secrets must be redacted from history and model view
+    assert!(
+        !content.contains("secret-token-12345"),
+        "raw bearer token found in history"
+    );
+    assert!(
+        content.contains("Bearer [REDACTED]"),
+        "expected Bearer [REDACTED]"
+    );
+    assert!(
+        !content.contains("sk-12345678901234567890abcdef"),
+        "raw sk- key found in history"
+    );
+    assert!(
+        content.contains("[REDACTED-KEY]"),
+        "expected [REDACTED-KEY]"
+    );
+
+    // Oversized content must be capped with explicit omitted character and byte units
+    assert!(content.contains("[Output truncated: omitted"));
+    assert!(content.contains("chars ("));
+    assert!(content.contains("bytes)."));
+
+    server.join().map_err(|_| "server panic")??;
+    Ok(())
+}

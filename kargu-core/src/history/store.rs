@@ -23,6 +23,13 @@ impl StoredMessage {
     pub fn message(&self) -> &Message {
         &self.message
     }
+    /// Construct ephemeral stored message for outbound payload without mutating store.
+    pub fn ephemeral(message: Message) -> Self {
+        Self {
+            id: MessageId::new(),
+            message: Arc::new(message),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -350,5 +357,26 @@ impl History {
         candidate.revision = self.revision.next()?;
         *self = candidate;
         Ok(())
+    }
+
+    /// Extract preserved tail ensuring tool-call atomic block integrity.
+    pub fn extract_tail(
+        &self,
+        keep: super::CompactKeep,
+    ) -> Result<super::PreservedTail, HistoryError> {
+        if !self.settled() {
+            return Err(HistoryError::PendingCalls);
+        }
+        Ok(super::compact::extract_tail(&self.messages, keep))
+    }
+
+    /// Prepare a summary candidate capturing exact revision and atomic tail.
+    pub fn prepare_compaction(
+        &self,
+        keep: super::CompactKeep,
+        prompt: Message,
+    ) -> Result<super::SummaryCandidate, HistoryError> {
+        let tail = self.extract_tail(keep)?;
+        Ok(super::SummaryCandidate::new(self.revision, tail, prompt))
     }
 }

@@ -114,8 +114,7 @@ Nested `error.message' and `error.metadata' fields are flattened."
     (or (eq (kargu-result-err-code response) :context-overflow)
         (plist-get (kargu-result-err-data response) :overflow)))
    (t
-    (or (kargu-aget response "overflow")
-        (kargu--overflow-message-p (kargu-response-error-message response))))))
+    (eq (kargu-aget response "overflow") t))))
 
 (defun kargu--api-error-alist (msg &optional code data)
   "Build a callback error alist from MSG, marking overflow when detected.
@@ -233,17 +232,20 @@ so a fake empty assistant cannot poison the next POST."
         (kargu-log 'debug "skipping empty assistant turn")
         nil)
        (t
-        (unless content
-          (kargu-log 'debug "assistant content empty (type=%s, tools=%s)"
-                     (type-of (kargu-aget message "content"))
-                     (and calls-p t)))
-        (setq msg (kargu-history-append msg history))
-        (kargu--log-assistant-wire response)
-        (kargu-log 'response "assistant turn stored: %d chars text, %d chars reasoning, %d tool call(s)"
-                   (length (or content ""))
-                   (length (or reason ""))
-                   (length (or (kargu-aget msg "tool_calls") ())))
-        msg)))))
+        (if (and (kargu--assistant-role-p (kargu-aget (kargu-history-last-message history) "role"))
+                 (equal (kargu-history-last-message history) msg))
+            (kargu-history-last-message history)
+          (unless content
+            (kargu-log 'debug "assistant content empty (type=%s, tools=%s)"
+                       (type-of (kargu-aget message "content"))
+                       (and calls-p t)))
+          (setq msg (kargu-history-append msg history))
+          (kargu--log-assistant-wire response)
+          (kargu-log 'response "assistant turn stored: %d chars text, %d chars reasoning, %d tool call(s)"
+                     (length (or content ""))
+                     (length (or reason ""))
+                     (length (or (kargu-aget msg "tool_calls") ())))
+          msg))))))
 
 (defalias 'kargu-api-store-assistant-turn #'kargu--history-append-assistant)
 

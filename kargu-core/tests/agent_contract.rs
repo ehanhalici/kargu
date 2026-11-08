@@ -430,3 +430,269 @@ fn partial_or_length_truncated_calls_cannot_become_executable_history() -> TestR
     actor.finish(&run)?;
     Ok(())
 }
+
+#[test]
+fn mode_transitions_during_active_run_are_rejected_and_captured_policy_is_immutable() -> TestResult
+{
+    let (_root, mut actor, run) = start_mode(Mode::Ask, true, 4)?;
+    let session = run.scope().session_id().clone();
+
+    // An active run freezes its mode in RunSettings
+    assert_eq!(run.mode(), Mode::Ask);
+
+    // Attempting to change mode while a run is active is rejected with CoreError::Busy
+    let intent = kargu_core::application::mode::ModeIntent::new(
+        Mode::Agent,
+        kargu_core::application::mode::DebugReady::new(false),
+    );
+    let busy = actor.commit_session_mode(
+        &session,
+        kargu_core::application::mode::ModeRevision::ZERO,
+        intent,
+    );
+    assert!(matches!(busy, Err(CoreError::Busy)));
+
+    // The active run mode remains Ask
+    assert_eq!(run.mode(), Mode::Ask);
+
+    // Complete the run
+    let model = actor.begin_model_turn(&run)?;
+    model.complete(
+        &mut actor,
+        response(json!({"role":"assistant","content":"Answer"}), "stop")?,
+    )?;
+    actor.finish(&run)?;
+
+    // Now that run is finished and idle, mode transition succeeds
+    let agent_intent = kargu_core::application::mode::ModeIntent::new(
+        Mode::Agent,
+        kargu_core::application::mode::DebugReady::new(false),
+    );
+    let committed = actor.commit_session_mode(
+        &session,
+        kargu_core::application::mode::ModeRevision::ZERO,
+        agent_intent,
+    )?;
+    assert_eq!(committed.mode(), Mode::Agent);
+    assert_eq!(
+        committed.revision(),
+        kargu_core::application::mode::ModeRevision::try_from(1)?
+    );
+
+    // The old finished run's captured settings mode is still Mode::Ask (immutable)
+    assert_eq!(run.mode(), Mode::Ask);
+    Ok(())
+}
+
+#[test]
+fn plan_claim_during_active_run_is_rejected_and_single_use_is_enforced() -> TestResult {
+    let (_root, mut actor, run) = start_mode(Mode::Plan, true, 4)?;
+    let session = run.scope().session_id().clone();
+
+    // Create a plan for this session
+    let plan = actor.create_session_plan(
+        &session,
+        kargu_core::application::plan::PlanText::try_from("1. Plan action")?,
+    )?;
+    let plan_id = plan.id().clone();
+    let rev = plan.revision();
+    let hash = plan.content_hash();
+
+    // While a run is active, claim is rejected with CoreError::Busy
+    let intent = kargu_core::application::plan::PlanClaimIntent::new(rev, hash);
+    assert!(matches!(
+        actor.claim_session_plan(&session, &plan_id, intent),
+        Err(CoreError::Busy)
+    ));
+
+    // Cancel and finish the active run
+    actor.cancel(&run)?;
+    actor.finish(&run)?;
+
+    // Now claim succeeds
+    let claimed = actor.claim_session_plan(&session, &plan_id, intent)?;
+    assert_eq!(
+        claimed.state(),
+        kargu_core::application::plan::PlanState::Dispatching
+    );
+
+    // Second claim fails with AlreadyCompleted
+    assert!(matches!(
+        actor.claim_session_plan(&session, &plan_id, intent),
+        Err(CoreError::AlreadyCompleted)
+    ));
+
+    Ok(())
+}
+
+#[test]
+fn summary_turn_uses_existing_run_without_mutating_history_and_permits_only_one_compaction()
+-> TestResult {
+    let (_root, mut actor, run) = start(true, 4)?;
+    let session = run.scope().session_id().clone();
+    let (initial_rev, initial_messages) = actor.history_snapshot(&session)?;
+    assert_eq!(initial_messages.len(), 1);
+
+    let prompt: Message = serde_json::from_value(json!({
+        "role": "user",
+        "content": "COMPACTION_REQUEST: summarize previous context"
+    }))?;
+
+    // 1. Begin summary turn on existing run
+    let summary =
+        actor.begin_summary_turn(&run, kargu_core::history::CompactKeep::new(8), prompt)?;
+    assert_eq!(summary.history_revision(), initial_rev);
+    assert_eq!(actor.agent_phase(&run)?, AgentPhase::Summary);
+
+    // 2. Candidate captures source revision and preserved tail
+    let candidate = summary.candidate();
+    assert_eq!(candidate.source_revision(), initial_rev);
+    assert_eq!(candidate.preserved_tail().len(), 1);
+
+    // 3. Live history is NOT mutated beforehand!
+    let (live_rev, live_messages) = actor.history_snapshot(&session)?;
+    assert_eq!(live_rev, initial_rev);
+    assert_eq!(live_messages.len(), 1);
+
+    // 4. Tools-off: canonical payload has no tools
+    let payload: Value = serde_json::from_str(
+        summary
+            .canonical_payload(
+                &kargu_core::api::ModelId::try_from("summarizer-model".to_owned())?,
+                kargu_core::application::agent::PayloadStream::PLAIN,
+            )?
+            .get(),
+    )?;
+    assert!(payload.get("tools").is_none());
+    assert!(payload.get("tool_choice").is_none());
+
+    // 5. While summary is in flight, neither model turn nor second summary can start
+    assert!(matches!(actor.begin_model_turn(&run), Err(CoreError::Busy)));
+    let prompt2: Message = serde_json::from_value(json!({
+        "role": "user",
+        "content": "COMPACTION_REQUEST: second attempt"
+    }))?;
+    assert!(matches!(
+        actor.begin_summary_turn(
+            &run,
+            kargu_core::history::CompactKeep::new(8),
+            prompt2.clone()
+        ),
+        Err(CoreError::Busy)
+    ));
+
+    // 6. Abort summary turn restores Ready phase without modifying history
+    summary.abort(&mut actor)?;
+    assert_eq!(actor.agent_phase(&run)?, AgentPhase::Ready);
+    let (after_abort_rev, after_abort_msgs) = actor.history_snapshot(&session)?;
+    assert_eq!(after_abort_rev, initial_rev);
+    assert_eq!(after_abort_msgs.len(), 1);
+
+    // 7. Sadece bir compaction hakkı: second compaction turn is rejected with CoreError::Limit!
+    assert!(matches!(
+        actor.begin_summary_turn(&run, kargu_core::history::CompactKeep::new(8), prompt2),
+        Err(CoreError::Limit)
+    ));
+
+    // 8. Normal model turn can still proceed under remaining turn budget
+    let model = actor.begin_model_turn(&run)?;
+    assert!(!model.tools().is_empty());
+    assert_eq!(model.history_revision(), initial_rev);
+    assert_eq!(actor.agent_phase(&run)?, AgentPhase::Model);
+
+    Ok(())
+}
+
+#[test]
+fn summary_commit_only_on_matching_revision_and_stale_or_empty_or_cancel_preserves_history()
+-> TestResult {
+    let (_root, mut actor, run) = start(true, 4)?;
+    let session = run.scope().session_id().clone();
+    let (initial_rev, initial_messages) = actor.history_snapshot(&session)?;
+    assert_eq!(initial_messages.len(), 1);
+
+    let prompt: Message = serde_json::from_value(json!({
+        "role": "user",
+        "content": "COMPACTION_REQUEST: summarize context"
+    }))?;
+
+    let summary =
+        actor.begin_summary_turn(&run, kargu_core::history::CompactKeep::new(8), prompt)?;
+    assert_eq!(summary.history_revision(), initial_rev);
+    assert_eq!(actor.agent_phase(&run)?, AgentPhase::Summary);
+
+    // 1. Empty summary is rejected at the domain boundary without mutating history
+    assert!(matches!(
+        kargu_core::history::SummaryText::try_new(""),
+        Err(kargu_core::history::HistoryError::InvalidMessage)
+    ));
+    let (rev_after_empty, msgs_after_empty) = actor.history_snapshot(&session)?;
+    assert_eq!(rev_after_empty, initial_rev);
+    assert_eq!(msgs_after_empty.len(), 1);
+
+    // 2. Whitespace summary is also rejected without mutating history
+    assert!(matches!(
+        kargu_core::history::SummaryText::try_new("   \n\t  "),
+        Err(kargu_core::history::HistoryError::InvalidMessage)
+    ));
+    let (rev_after_ws, msgs_after_ws) = actor.history_snapshot(&session)?;
+    assert_eq!(rev_after_ws, initial_rev);
+    assert_eq!(msgs_after_ws.len(), 1);
+
+    // 3. Successful commit: matching revision replaces history and transitions to Ready
+    let valid_summary =
+        kargu_core::history::SummaryText::try_new("Prior work: buffer inspection.")?;
+    let committed_rev = summary.commit(&mut actor, &valid_summary)?;
+    assert!(committed_rev.get() > initial_rev.get());
+    assert_eq!(actor.agent_phase(&run)?, AgentPhase::Ready);
+
+    let (compacted_rev, compacted_msgs) = actor.history_snapshot(&session)?;
+    assert_eq!(compacted_rev, committed_rev);
+    // Messages must contain: user COMPACTION_ACK, assistant Acknowledged, and tail
+    assert!(compacted_msgs.iter().any(|m| {
+        m.message().role() == kargu_core::history::Role::User
+            && m.message()
+                .wire()
+                .get()
+                .contains("COMPACTION_ACK: Prior work summary:")
+    }));
+    assert!(compacted_msgs.iter().any(|m| {
+        m.message().role() == kargu_core::history::Role::Assistant
+            && m.message()
+                .wire()
+                .get()
+                .contains("Acknowledged. Continuing from the summary.")
+    }));
+
+    // 4. Stale summary turn: after commit, a second attempt with the same summary turn is rejected
+    let replay_summary = kargu_core::history::SummaryText::try_new("Late replay of summary")?;
+    assert!(matches!(
+        summary.commit(&mut actor, &replay_summary),
+        Err(CoreError::StaleOwner)
+    ));
+    let (rev_after_replay, msgs_after_replay) = actor.history_snapshot(&session)?;
+    assert_eq!(rev_after_replay, committed_rev);
+    assert_eq!(msgs_after_replay.len(), compacted_msgs.len());
+
+    // 5. Normal model turn can immediately proceed from Ready state
+    let next_model = actor.begin_model_turn(&run)?;
+    assert_eq!(next_model.history_revision(), committed_rev);
+    assert_eq!(actor.agent_phase(&run)?, AgentPhase::Model);
+
+    // 6. Test late summary commit after run cancellation / stop:
+    let (_root2, mut actor2, run2) = start(true, 4)?;
+    let prompt2: Message = serde_json::from_value(json!({
+        "role": "user",
+        "content": "COMPACTION_REQUEST: summarize run2"
+    }))?;
+    let summary2 =
+        actor2.begin_summary_turn(&run2, kargu_core::history::CompactKeep::new(8), prompt2)?;
+    actor2.cancel(&run2)?;
+    let late_summary = kargu_core::history::SummaryText::try_new("Late summary after cancel")?;
+    assert!(matches!(
+        summary2.commit(&mut actor2, &late_summary),
+        Err(CoreError::Cancelled)
+    ));
+
+    Ok(())
+}

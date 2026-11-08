@@ -1,15 +1,21 @@
 //! Native conversation ordering under the application's existing foreground
 //! claim. IO owners receive consuming tickets; only this actor commits history.
 
+pub(crate) mod output;
+mod payload;
 mod response;
+pub use payload::PayloadStream;
+pub(crate) use payload::{CanonicalPayloadSpec, build_canonical_payload};
 pub use response::AssistantTurn;
 
 use super::{ApplicationActor, RunHandle, RunLease, RunPurpose, ToolOutcome};
 use crate::{
     constants::limits,
-    domain::{MessageId, ModelTurnId, ToolCallId, ToolName},
+    domain::{CompactionCount, HealingRoundCount, MessageId, ModelTurnId, ToolCallId, ToolName},
     error::CoreError,
-    history::{HistoryRevision, Message, Role, StoredMessage},
+    history::{
+        CompactKeep, HistoryRevision, Message, Role, StoredMessage, SummaryCandidate, SummaryText,
+    },
     security::{ToolRoute, UserDecision},
 };
 use response::Finish;
@@ -79,6 +85,8 @@ pub enum AgentPhase {
     Ready,
     /// One model ticket is awaiting actual provider completion.
     Model,
+    /// Single compaction turn is in progress.
+    Summary,
     /// A committed tool batch still has undispatched calls.
     Tools,
     /// One tool ticket must settle before advancing.
@@ -95,6 +103,10 @@ enum Phase {
         id: ModelTurnId,
         revision: HistoryRevision,
     },
+    Summary {
+        id: ModelTurnId,
+        candidate: Arc<SummaryCandidate>,
+    },
     Tools,
     Tool {
         id: ToolCallId,
@@ -108,6 +120,7 @@ impl Phase {
         match self {
             Self::Ready => AgentPhase::Ready,
             Self::Model { .. } => AgentPhase::Model,
+            Self::Summary { .. } => AgentPhase::Summary,
             Self::Tools => AgentPhase::Tools,
             Self::Tool { .. } => AgentPhase::Tool,
             Self::Continuation(reason) => AgentPhase::Continuation(*reason),
@@ -116,11 +129,34 @@ impl Phase {
     }
 }
 
+/// Outcome of admitting a post-edit diagnostic delta into a bounded healing turn.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HealingVerdict {
+    /// Eligible new errors admitted for a bounded healing turn under parent run.
+    Admitted {
+        /// 1-based healing round number (`1..=AGENT_HEALING_ROUNDS`).
+        round: std::num::NonZeroU8,
+    },
+    /// Identical new error set repeated across healing rounds (doom-loop cap).
+    RepeatedErrors,
+    /// Healing round cap (`AGENT_HEALING_ROUNDS`) or turn limit exhausted.
+    BudgetExhausted,
+}
+
+#[derive(Default)]
+struct HealingState {
+    rounds: u8,
+    last_signature: Option<crate::sensors::diagnostics::HealingSignature>,
+}
+
 pub(super) struct AgentMachine {
     options: AgentOptions,
     turns: ModelTurns,
+    compactions: CompactionCount,
+    overflow_pending: bool,
     phase: Phase,
     repeated: Option<Repetition>,
+    healing: HealingState,
 }
 struct Repetition {
     signature: [u8; 32],
@@ -139,6 +175,18 @@ impl AgentMachine {
             } if current == id => Ok(()),
             _ => Err(CoreError::Rejected),
         }
+    }
+    fn check_summary_admission(&self) -> Result<(), CoreError> {
+        if !matches!(self.phase, Phase::Ready) {
+            return Err(CoreError::Busy);
+        }
+        if self.compactions.as_u64() >= 1 {
+            return Err(CoreError::Limit);
+        }
+        if self.turns.0 >= self.options.turn_limit.0 {
+            return Err(CoreError::Limit);
+        }
+        Ok(())
     }
 }
 
@@ -187,34 +235,14 @@ impl ModelTurn {
         model: &crate::api::ModelId,
         stream: bool,
     ) -> Result<Box<RawValue>, crate::api::ApiError> {
-        #[derive(Serialize)]
-        struct Payload<'a> {
-            model: &'a crate::api::ModelId,
-            messages: Vec<&'a Message>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            tools: Option<&'a [Value]>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            tool_choice: Option<&'static str>,
-            stream: bool,
-        }
         let live_error = |error| match error {
             CoreError::Deadline => crate::api::ApiError::RunDeadline,
             _ => crate::api::ApiError::Cancelled,
         };
         self.run.check_live().map_err(live_error)?;
-        let enabled = !self.tools.is_empty();
-        let payload = Payload {
-            model,
-            messages: self.messages.iter().map(StoredMessage::message).collect(),
-            tools: enabled.then_some(self.tools.as_slice()),
-            tool_choice: enabled.then_some("auto"),
-            stream,
-        };
-        let raw = serde_json::value::to_raw_value(&payload)
-            .map_err(|_| crate::api::ApiError::InvalidRequest)?;
-        if raw.get().len() > limits::API_REQUEST_BYTES {
-            return Err(crate::api::ApiError::Limit);
-        }
+        let tools = (!self.tools.is_empty()).then_some(self.tools.as_slice());
+        let spec = CanonicalPayloadSpec::new(model, tools, stream.into());
+        let raw = build_canonical_payload(spec, self.messages.iter().map(StoredMessage::message))?;
         self.run.check_live().map_err(live_error)?;
         Ok(raw)
     }
@@ -231,6 +259,161 @@ impl ModelTurn {
         actor.check_model_turn(&self)?;
         actor.agent_mut(&self.run)?.phase = Phase::Terminal(AgentStop::Failed);
         Ok(())
+    }
+    /// Transition back to Ready with a pending compaction after provider context overflow.
+    pub fn recover_overflow(self, actor: &mut ApplicationActor) -> Result<(), CoreError> {
+        actor.recover_model_overflow(&self)
+    }
+}
+
+/// One tools-off compaction exchange. Keep this ticket in the IO task until it joins;
+/// its lease prevents premature run release. Live history is NOT mutated beforehand.
+#[must_use = "Retain the summary ticket until the actual provider operation has joined"]
+pub struct SummaryTurn {
+    run: RunHandle,
+    id: ModelTurnId,
+    candidate: Arc<SummaryCandidate>,
+    messages: Vec<StoredMessage>,
+    _lease: RunLease,
+}
+
+impl SummaryTurn {
+    /// Native completion identity.
+    pub fn id(&self) -> &ModelTurnId {
+        &self.id
+    }
+    /// Captured actual run; services borrow this rather than admitting a sibling.
+    pub fn run(&self) -> &RunHandle {
+        &self.run
+    }
+    /// Child cancellation for this provider exchange.
+    pub fn cancellation(&self) -> tokio_util::sync::CancellationToken {
+        self.run.cancel_token()
+    }
+    /// Exact history revision captured before this exchange.
+    pub fn history_revision(&self) -> HistoryRevision {
+        self.candidate.source_revision()
+    }
+    /// Borrow the immutable summary candidate.
+    pub fn candidate(&self) -> &SummaryCandidate {
+        &self.candidate
+    }
+    /// Outbound messages including ephemeral summary prompt; live history is untouched.
+    pub fn messages(&self) -> &[StoredMessage] {
+        &self.messages
+    }
+    /// Assemble canonical provider payload with tools strictly off.
+    pub fn canonical_payload(
+        &self,
+        model: &crate::api::ModelId,
+        stream: PayloadStream,
+    ) -> Result<Box<RawValue>, crate::api::ApiError> {
+        let live_error = |error| match error {
+            CoreError::Deadline => crate::api::ApiError::RunDeadline,
+            _ => crate::api::ApiError::Cancelled,
+        };
+        self.run.check_live().map_err(live_error)?;
+        let spec = CanonicalPayloadSpec::new(model, None, stream);
+        let raw = build_canonical_payload(spec, self.messages.iter().map(StoredMessage::message))?;
+        self.run.check_live().map_err(live_error)?;
+        Ok(raw)
+    }
+    /// Abort the summary turn without modifying history, restoring Ready state.
+    pub fn abort(self, actor: &mut ApplicationActor) -> Result<(), CoreError> {
+        actor.validate(&self.run)?;
+        match &actor.agent(&self.run)?.phase {
+            Phase::Summary { id, .. } if id == &self.id => {}
+            _ => return Err(CoreError::StaleOwner),
+        }
+        actor.agent_mut(&self.run)?.phase = Phase::Ready;
+        Ok(())
+    }
+    /// Report terminal transport failure after actual request drain.
+    pub fn failed(self, actor: &mut ApplicationActor) -> Result<(), CoreError> {
+        actor.validate(&self.run)?;
+        match &actor.agent(&self.run)?.phase {
+            Phase::Summary { id, .. } if id == &self.id => {}
+            _ => return Err(CoreError::StaleOwner),
+        }
+        actor.agent_mut(&self.run)?.phase = Phase::Terminal(AgentStop::Failed);
+        Ok(())
+    }
+    /// Commit a validated compaction summary for this turn's exact revision.
+    /// Live history is replaced only on success; stale/empty/overflow leaves original intact.
+    pub fn commit(
+        &self,
+        actor: &mut ApplicationActor,
+        summary: &SummaryText,
+    ) -> Result<HistoryRevision, CoreError> {
+        actor.commit_summary(self, summary)
+    }
+}
+
+/// One active provider exchange ticket (normal model turn or tools-off summary turn).
+#[must_use = "Retain the turn ticket until the actual provider operation has joined"]
+pub enum AgentTurn {
+    /// Normal conversation model turn.
+    Model(ModelTurn),
+    /// Single tools-off compaction turn.
+    Summary(SummaryTurn),
+}
+impl AgentTurn {
+    /// Native completion identity.
+    pub fn id(&self) -> &ModelTurnId {
+        match self {
+            Self::Model(turn) => turn.id(),
+            Self::Summary(turn) => turn.id(),
+        }
+    }
+    /// Captured actual run.
+    pub fn run(&self) -> &RunHandle {
+        match self {
+            Self::Model(turn) => turn.run(),
+            Self::Summary(turn) => turn.run(),
+        }
+    }
+    /// Child cancellation token.
+    pub fn cancellation(&self) -> tokio_util::sync::CancellationToken {
+        match self {
+            Self::Model(turn) => turn.cancellation(),
+            Self::Summary(turn) => turn.cancellation(),
+        }
+    }
+    /// Budget debit category for the initial attempt of this turn.
+    pub fn debit_kind(&self) -> super::budget::DebitKind {
+        match self {
+            Self::Model(_) => super::budget::DebitKind::NormalRequest,
+            Self::Summary(_) => super::budget::DebitKind::CompactionTurn,
+        }
+    }
+    /// Build canonical provider payload for this turn.
+    pub fn canonical_payload(
+        &self,
+        model: &crate::api::ModelId,
+        stream: PayloadStream,
+    ) -> Result<Box<RawValue>, crate::api::ApiError> {
+        match self {
+            Self::Model(turn) => turn.canonical_payload(model, stream.is_streaming()),
+            Self::Summary(turn) => turn.canonical_payload(model, stream),
+        }
+    }
+    /// Complete this turn with a validated provider reply.
+    pub fn complete(
+        self,
+        actor: &mut ApplicationActor,
+        reply: AssistantTurn,
+    ) -> Result<AgentPhase, CoreError> {
+        match self {
+            Self::Model(turn) => turn.complete(actor, reply),
+            Self::Summary(turn) => actor.complete_summary_turn(turn, reply),
+        }
+    }
+    /// Report terminal transport failure after actual request drain.
+    pub fn failed(self, actor: &mut ApplicationActor) -> Result<(), CoreError> {
+        match self {
+            Self::Model(turn) => turn.failed(actor),
+            Self::Summary(turn) => turn.failed(actor),
+        }
     }
 }
 
@@ -442,14 +625,75 @@ impl ApplicationActor {
         self.owned_mut(run)?.agent = Some(AgentMachine {
             options,
             turns: ModelTurns::default(),
+            compactions: CompactionCount::ZERO,
+            overflow_pending: false,
             phase: Phase::Ready,
             repeated: None,
+            healing: HealingState::default(),
         });
         Ok(())
+    }
+    /// Admit or refuse a bounded self-healing round for new diagnostic errors under `run`.
+    pub fn record_healing_observation(
+        &mut self,
+        run: &RunHandle,
+        signature: Option<crate::sensors::diagnostics::HealingSignature>,
+    ) -> Result<Option<HealingVerdict>, CoreError> {
+        self.validate(run)?;
+        run.check_live()?;
+        let machine = self.agent_mut(run)?;
+        let Some(sig) = signature else {
+            machine.healing.last_signature = None;
+            return Ok(None);
+        };
+        if machine.healing.last_signature == Some(sig) {
+            machine.healing.rounds = limits::AGENT_HEALING_ROUNDS;
+            return Ok(Some(HealingVerdict::RepeatedErrors));
+        }
+        if machine.healing.rounds >= limits::AGENT_HEALING_ROUNDS
+            || machine.turns.0 >= machine.options.turn_limit.0
+        {
+            return Ok(Some(HealingVerdict::BudgetExhausted));
+        }
+        let next = machine.healing.rounds.saturating_add(1);
+        machine.healing.rounds = next;
+        machine.healing.last_signature = Some(sig);
+        let round = std::num::NonZeroU8::new(next).ok_or(CoreError::ArithmeticOverflow)?;
+        Ok(Some(HealingVerdict::Admitted { round }))
+    }
+    /// Return the number of observed self-healing rounds recorded under `run`.
+    pub fn healing_rounds(&self, run: &RunHandle) -> Result<HealingRoundCount, CoreError> {
+        self.validate(run)?;
+        let machine = self.agent(run)?;
+        Ok(HealingRoundCount::from_u64(u64::from(
+            machine.healing.rounds,
+        )))
+    }
+    /// Assemble a canonical provider payload for a direct completion from native history.
+    pub fn direct_canonical_payload(
+        &self,
+        session: &crate::domain::SessionId,
+        spec: CanonicalPayloadSpec<'_>,
+    ) -> Result<Box<RawValue>, CoreError> {
+        let (_revision, stored) = self.history_snapshot(session)?;
+        build_canonical_payload(spec, stored.iter().map(StoredMessage::message)).map_err(|error| {
+            match error {
+                crate::api::ApiError::Limit => CoreError::Limit,
+                _ => CoreError::InvalidToolOutput,
+            }
+        })
     }
     /// Read an exact run's native phase without admitting work or touching IO.
     pub fn agent_phase(&self, run: &RunHandle) -> Result<AgentPhase, CoreError> {
         Ok(self.agent(run)?.phase.view())
+    }
+    /// Borrow the active summary candidate if the agent is in Summary phase.
+    pub fn summary_candidate(&self, run: &RunHandle) -> Result<&SummaryCandidate, CoreError> {
+        self.validate(run)?;
+        match &self.agent(run)?.phase {
+            Phase::Summary { candidate, .. } => Ok(candidate),
+            _ => Err(CoreError::StaleOwner),
+        }
     }
     /// Freeze one complete outbound history/schema snapshot. A second request
     /// cannot overtake the first, and partial stream deltas never enter history.
@@ -575,6 +819,169 @@ impl ApplicationActor {
         }
         machine.options.turn_limit = limit;
         Ok(())
+    }
+    /// Begin a single tools-off compaction turn under the existing native run.
+    /// Does not create a separate run or budget; live history is NOT mutated beforehand.
+    pub fn begin_summary_turn(
+        &mut self,
+        run: &RunHandle,
+        keep: CompactKeep,
+        prompt: Message,
+    ) -> Result<SummaryTurn, CoreError> {
+        self.validate(run)?;
+        run.check_live()?;
+        let session = run.scope().session_id();
+        self.agent(run)?.check_summary_admission()?;
+        let history = self.session_history(session)?;
+        if !history.settled() {
+            return Err(CoreError::Busy);
+        }
+        let candidate = Arc::new(history.prepare_compaction(keep, prompt)?);
+        let mut messages = history.snapshot();
+        messages.push(StoredMessage::ephemeral(candidate.prompt().clone()));
+        let lease = run.lease()?;
+        let id = ModelTurnId::new();
+        self.advance_summary_turn(run, id.clone(), candidate.clone())?;
+        Ok(SummaryTurn {
+            run: run.clone(),
+            id,
+            candidate,
+            messages,
+            _lease: lease,
+        })
+    }
+
+    fn advance_summary_turn(
+        &mut self,
+        run: &RunHandle,
+        id: ModelTurnId,
+        candidate: Arc<SummaryCandidate>,
+    ) -> Result<(), CoreError> {
+        let machine = self.agent_mut(run)?;
+        let turns = ModelTurns(
+            machine
+                .turns
+                .0
+                .checked_add(1)
+                .ok_or(CoreError::ArithmeticOverflow)?,
+        );
+        let compactions = machine.compactions.next()?;
+        machine.turns = turns;
+        machine.compactions = compactions;
+        machine.phase = Phase::Summary { id, candidate };
+        Ok(())
+    }
+
+    fn check_summary_turn(&self, turn: &SummaryTurn) -> Result<(), CoreError> {
+        self.validate(turn.run())?;
+        turn.run().check_live()?;
+        match &self.agent(turn.run())?.phase {
+            Phase::Summary { id, candidate }
+                if id == turn.id() && candidate.source_revision() == turn.history_revision() =>
+            {
+                Ok(())
+            }
+            _ => Err(CoreError::StaleOwner),
+        }
+    }
+
+    /// Commit a validated compaction summary for this turn's exact revision.
+    /// Live history is replaced only on success; stale/empty/overflow leaves original intact.
+    pub fn commit_summary(
+        &mut self,
+        turn: &SummaryTurn,
+        summary: &SummaryText,
+    ) -> Result<HistoryRevision, CoreError> {
+        self.check_summary_turn(turn)?;
+        let session = turn.run().scope().session_id();
+        let current_history = self.session_history(session)?;
+        if current_history.revision() != turn.history_revision() {
+            return Err(CoreError::History(
+                crate::history::HistoryError::StaleRevision,
+            ));
+        }
+        let sys_msg = current_history.snapshot().first().and_then(|m| {
+            let role = m.message().role();
+            (role == Role::System || role == Role::Developer).then(|| m.message().clone())
+        });
+        let compacted = crate::history::build_compacted_history(
+            sys_msg.as_ref(),
+            summary,
+            turn.candidate().preserved_tail(),
+        )?;
+        self.check_history_capacity(session, compacted.accounted_bytes())?;
+        let history = self
+            .histories
+            .get_mut(session)
+            .ok_or(CoreError::StaleOwner)?;
+        history.replace(turn.history_revision(), compacted)?;
+        let new_rev = history.revision();
+        self.agent_mut(turn.run())?.phase = Phase::Ready;
+        Ok(new_rev)
+    }
+
+    fn recover_model_overflow(&mut self, turn: &ModelTurn) -> Result<(), CoreError> {
+        self.check_model_turn(turn)?;
+        let machine = self.agent_mut(&turn.run)?;
+        if machine.compactions.as_u64() >= 1 || machine.turns.0 >= machine.options.turn_limit.0 {
+            machine.phase = Phase::Terminal(AgentStop::Failed);
+            return Err(CoreError::Limit);
+        }
+        machine.overflow_pending = true;
+        machine.phase = Phase::Ready;
+        Ok(())
+    }
+
+    fn complete_summary_turn(
+        &mut self,
+        turn: SummaryTurn,
+        reply: AssistantTurn,
+    ) -> Result<AgentPhase, CoreError> {
+        let result = reply
+            .summary_text()
+            .and_then(|summary| turn.commit(self, &summary));
+        match result {
+            Ok(_) => Ok(AgentPhase::Ready),
+            Err(error) => {
+                let _ = turn.failed(self);
+                Err(error)
+            }
+        }
+    }
+
+    /// Begin either a single tools-off summary turn (when threshold or overflow demands it)
+    /// or the next normal conversation model turn.
+    pub fn begin_next_turn(
+        &mut self,
+        run: &RunHandle,
+        threshold: crate::history::CompactThreshold,
+    ) -> Result<AgentTurn, CoreError> {
+        if self.should_start_summary(run, threshold)? {
+            self.agent_mut(run)?.overflow_pending = false;
+            let prompt = crate::history::compaction_prompt_message()?;
+            let keep = CompactKeep::new(limits::HISTORY_COMPACT_KEEP);
+            return self
+                .begin_summary_turn(run, keep, prompt)
+                .map(AgentTurn::Summary);
+        }
+        self.begin_model_turn(run).map(AgentTurn::Model)
+    }
+
+    fn should_start_summary(
+        &self,
+        run: &RunHandle,
+        threshold: crate::history::CompactThreshold,
+    ) -> Result<bool, CoreError> {
+        self.validate(run)?;
+        let machine = self.agent(run)?;
+        if !matches!(machine.phase, Phase::Ready) || machine.compactions.as_u64() >= 1 {
+            return Ok(false);
+        }
+        if machine.overflow_pending {
+            return Ok(true);
+        }
+        let (_, messages) = self.history_snapshot(run.scope().session_id())?;
+        Ok(threshold.is_exceeded_by(&messages))
     }
     /// Correlate exactly one committed invocation, in provider batch order.
     /// Rejections become results for that call rather than a protocol gap.

@@ -11,7 +11,16 @@
 ;;; Code:
 
 (require 'kargu/bridge/sensor)
-(require 'kargu/tools/lsp/snapshot)
+(require 'kargu/tools/lsp/snapshot nil t)
+
+(defvar kargu-lsp-snapshot--items 64
+  "Fallback symbol budget; `kargu/tools/lsp/snapshot' replaces it when loaded.")
+(defvar kargu-lsp-snapshot--bytes 16384
+  "Fallback symbol byte budget; `kargu/tools/lsp/snapshot' replaces it when loaded.")
+(declare-function kargu-lsp-snapshot-limit "kargu/tools/lsp/snapshot" (symbols maximum))
+(declare-function kargu-lsp-snapshot-capture "kargu/tools/lsp/snapshot"
+                  (buffer source callback timeout-ms))
+(declare-function kargu-lsp-snapshot-body "kargu/tools/lsp/snapshot" (range))
 
 (defun kargu-bridge-sensor-symbols--size (value)
   "Return exact UTF-8 JSON framing bytes for detached VALUE."

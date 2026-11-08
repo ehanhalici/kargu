@@ -1657,3 +1657,53 @@ fn native_selection_retargets_the_run_and_rejects_the_old_editor_capture() -> Te
     server.join().map_err(|_| "server panicked")??;
     Ok(())
 }
+
+#[test]
+fn two_chat_owners_in_same_project_are_independent_and_closed_owner_rejects_late_delivery()
+-> TestResult {
+    let root = tempfile::tempdir()?;
+    let (url, server, requests) = server(vec![answer("reply from chat b")])?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope_a = peer.scope()?;
+
+    let scope_b = peer.call(
+        "create-b",
+        "session/create",
+        json!({"application_id": scope_a["application_id"]}),
+    )?["result"]
+        .clone();
+    assert_ne!(scope_a["session_id"], scope_b["session_id"]);
+
+    let mut events = Vec::new();
+    let mut input_b = prompt(root.path(), &url);
+    publish_target(&mut peer, &scope_b, &mut input_b)?;
+
+    let closed_a = peer.call("close-a", "session/close", scope_a.clone())?;
+    assert_eq!(closed_a["result"]["status"], "closed");
+
+    begin(&mut peer, "send-a", &scope_a, input_b.clone())?;
+    let reply_a = response(&peer, "send-a", &mut events)?;
+    assert!(
+        reply_a["error"]["data"]["status"] == "stale_owner"
+            || reply_a["error"]["code"] == -32602
+            || reply_a["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("not found")),
+        "closed session A must reject requests: {reply_a}"
+    );
+
+    begin(&mut peer, "send-b", &scope_b, input_b)?;
+    assert_eq!(
+        response(&peer, "send-b", &mut events)?["result"]["status"],
+        "completed"
+    );
+    assert_eq!(
+        requests.recv_timeout(Duration::from_secs(2))?["model"],
+        "captured-model"
+    );
+
+    drop(peer);
+    server.join().map_err(|_| "server panicked")??;
+    Ok(())
+}

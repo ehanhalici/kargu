@@ -428,6 +428,17 @@ impl ToolRegistry {
     pub fn revision(&self) -> RegistryRevision {
         self.revision
     }
+    /// Return sorted tool names admitted under the requested mode.
+    pub fn available_tools_for_mode(&self, mode: Mode) -> Vec<ToolName> {
+        let mut names: Vec<ToolName> = self
+            .definitions
+            .iter()
+            .filter(|(_, desc)| desc.permits_mode(mode))
+            .map(|(name, _)| name.clone())
+            .collect();
+        names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        names
+    }
     /// Register a process executor atomically. Every process is arbitrary code.
     pub fn register_process(
         &mut self,

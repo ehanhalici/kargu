@@ -290,17 +290,19 @@ This reports observations without asserting approval, freshness or an outcome."
                  (kargu-bridge-edit-document-disk document))))
    'hash-table))
 
-(defun kargu-bridge-edit-document-witness (document file)
+(defun kargu-bridge-edit-document-witness (document file &optional baseline)
   "Encode DOCUMENT as native preflight witness for FILE's zero-based index.
 Hash the observed buffer text; never echo the native proposal's base hash as
-an assertion about a potentially stale editor buffer."
-  (map-into
-   `(("file" . ,file)
-     ("base_hash" . ,(secure-hash 'sha256
-                                  (encode-coding-string
-                                   (kargu-bridge-edit-document-text document) 'utf-8-unix)))
-     ("document" . ,(kargu-bridge-edit-document-facts document)))
-   'hash-table))
+an assertion about a potentially stale editor buffer.  Optional BASELINE
+attaches a raw pre-edit diagnostic snapshot for native baseline comparison."
+  (let ((fields `(("file" . ,file)
+                  ("base_hash" . ,(secure-hash 'sha256
+                                               (encode-coding-string
+                                                (kargu-bridge-edit-document-text document) 'utf-8-unix)))
+                  ("document" . ,(kargu-bridge-edit-document-facts document)))))
+    (when (hash-table-p baseline)
+      (push (cons "baseline" baseline) fields))
+    (map-into fields 'hash-table)))
 
 (defconst kargu-bridge-edit-document--progress
   '((:not-entered . "not_entered") (:replacing . "replacing")

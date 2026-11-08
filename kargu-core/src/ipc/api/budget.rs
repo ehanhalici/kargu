@@ -11,7 +11,7 @@ use crate::{
         host::{Host, ReadScope},
     },
     constants::{limits, protocol::methods},
-    domain::{ApplicationId, BudgetId, Deadline, ExecutionTimeout, RunId},
+    domain::{ApplicationId, BudgetId, Deadline, ExecutionTimeout, MicroUsd, RunId},
     error::CoreError,
 };
 use serde::Deserialize;
@@ -132,10 +132,15 @@ impl Meter {
             Self::Sealed(budget) => budget.snapshot(),
         }
     }
-    fn finish(&mut self, charge: AttemptCharge, usage: ObservedUsage) -> Result<(), CoreError> {
+    fn finish_with_cost(
+        &mut self,
+        charge: AttemptCharge,
+        usage: ObservedUsage,
+        cost: Option<MicroUsd>,
+    ) -> Result<(), CoreError> {
         match self {
-            Self::Open(budget) => budget.finish(charge, usage),
-            Self::Sealed(budget) => budget.finish(charge, usage),
+            Self::Open(budget) => budget.finish_with_cost(charge, usage, cost),
+            Self::Sealed(budget) => budget.finish_with_cost(charge, usage, cost),
         }
     }
 }
@@ -416,13 +421,21 @@ impl Budgets {
             .map(|entry| json!(entry.meter.snapshot()))
     }
     pub fn finish(&mut self, charge: Charge, usage: ObservedUsage) -> Result<Value, CoreError> {
+        self.finish_with_cost(charge, usage, None)
+    }
+    pub fn finish_with_cost(
+        &mut self,
+        charge: Charge,
+        usage: ObservedUsage,
+        cost: Option<MicroUsd>,
+    ) -> Result<Value, CoreError> {
         let entry = self
             .entries
             .get_mut(&charge.id)
             .ok_or(CoreError::CleanupFailed)?;
         // Overflow is recorded terminally by the meter; the detached projection
         // still reports the last exact total and unknown flag to its owner.
-        match entry.meter.finish(charge.ticket, usage) {
+        match entry.meter.finish_with_cost(charge.ticket, usage, cost) {
             Ok(()) | Err(CoreError::ArithmeticOverflow) => Ok(json!(entry.meter.snapshot())),
             Err(error) => Err(error),
         }
@@ -638,6 +651,110 @@ mod tests {
             })
         ));
         assert!(budgets.entries.is_empty());
+        Ok(())
+    }
+    #[test]
+    fn exact_run_id_and_attempt_charge_bound_to_runtime_provider() -> TestResult {
+        use crate::{
+            application::{Mode, RunSettings},
+            domain::{ConfigRevision, InputTokens, OutputTokens, PolicyRevision, ToolCallLimit},
+            security::Workspace,
+        };
+        let (mut host, _scope, typed) = host()?;
+        let settings = RunSettings::new(
+            Mode::Agent,
+            Workspace::try_from(std::env::temp_dir())?,
+            ToolCallLimit::try_from(16)?,
+            Duration::from_secs(30),
+            ConfigRevision::try_from(3)?,
+            PolicyRevision::try_from(7)?,
+        )?;
+        let run = host.actor_mut(&typed)?.admit(&typed.session_id, settings)?;
+        let mut budgets = Budgets::default();
+
+        // 1. Open run binds native_run RunId.
+        let budget_id = budgets.open_run(&host, &run, BudgetLimits::default())?;
+
+        // 2. Helper or second open for same application while live is refused.
+        assert!(matches!(
+            budgets.open_run(&host, &run, BudgetLimits::default()),
+            Err(CoreError::Busy)
+        ));
+
+        // 3. Mismatched or absent native_run is rejected with StaleOwner.
+        let foreign_ref = BudgetRef {
+            budget_id: budget_id.clone(),
+            kind: DebitKind::NormalRequest,
+            native_run: Some(RunId::new()),
+        };
+        assert!(matches!(
+            budgets.admit_metered(&host, &typed, &foreign_ref),
+            Err(AdmissionFailure::StaleOwner)
+        ));
+        let unauth_ref = BudgetRef {
+            budget_id: budget_id.clone(),
+            kind: DebitKind::NormalRequest,
+            native_run: None,
+        };
+        assert!(matches!(
+            budgets.admit_metered(&host, &typed, &unauth_ref),
+            Err(AdmissionFailure::StaleOwner)
+        ));
+
+        // 4. Exact matching native_run succeeds for initial attempt.
+        let valid_ref = BudgetRef {
+            budget_id: budget_id.clone(),
+            kind: DebitKind::NormalRequest,
+            native_run: Some(run.scope().run_id().clone()),
+        };
+        let charge1 = budgets.admit_metered(&host, &typed, &valid_ref)?;
+        // Cannot admit another while charge1 is outstanding.
+        assert!(matches!(
+            budgets.admit_metered(&host, &typed, &valid_ref),
+            Err(AdmissionFailure::Busy)
+        ));
+
+        let snap1 = budgets.finish(
+            charge1,
+            ObservedUsage::new(
+                Some(InputTokens::try_from(10)?),
+                Some(OutputTokens::try_from(5)?),
+            ),
+        )?;
+        assert_eq!(snap1["requests_spent"], 1);
+
+        // 5. 503 retry attempt produces second physical charge under the SAME run budget.
+        let retry_ref = BudgetRef {
+            budget_id: budget_id.clone(),
+            kind: DebitKind::RetryAttempt,
+            native_run: Some(run.scope().run_id().clone()),
+        };
+        let charge2 = budgets.admit_metered(&host, &typed, &retry_ref)?;
+        let snap2 = budgets.finish(
+            charge2,
+            ObservedUsage::new(
+                Some(InputTokens::try_from(10)?),
+                Some(OutputTokens::try_from(5)?),
+            ),
+        )?;
+        assert_eq!(snap2["requests_spent"], 2);
+
+        // 6. Helper step (compaction turn) debits existing run budget without opening a new one.
+        let comp_ref = BudgetRef {
+            budget_id: budget_id.clone(),
+            kind: DebitKind::CompactionTurn,
+            native_run: Some(run.scope().run_id().clone()),
+        };
+        let charge3 = budgets.admit_metered(&host, &typed, &comp_ref)?;
+        let snap3 = budgets.finish(charge3, ObservedUsage::default())?;
+        assert_eq!(snap3["compactions_spent"], 1);
+        assert_eq!(snap3["requests_spent"], 3);
+
+        // 7. Closing with valid run succeeds once drained.
+        let closed_snap = budgets.close_run(&run, &budget_id)?;
+        assert_eq!(closed_snap["requests_spent"], 3);
+        assert_eq!(closed_snap["compactions_spent"], 1);
+
         Ok(())
     }
 }

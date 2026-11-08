@@ -264,6 +264,16 @@ impl Message {
         ]);
         Self::try_from(raw(&fields)?)
     }
+    /// Construct a canonical user text message.
+    pub fn user_text(text: &str) -> Result<Self, HistoryError> {
+        let fields = BTreeMap::from([("role", raw(&Role::User)?), ("content", raw(&text)?)]);
+        Self::try_from(raw(&fields)?)
+    }
+    /// Construct a canonical assistant text message.
+    pub fn assistant_text(text: &str) -> Result<Self, HistoryError> {
+        let fields = BTreeMap::from([("role", raw(&Role::Assistant)?), ("content", raw(&text)?)]);
+        Self::try_from(raw(&fields)?)
+    }
 }
 impl Serialize for Message {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

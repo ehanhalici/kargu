@@ -79,32 +79,18 @@ Without CALLBACK return only an already collected snapshot."
                   (file-path &optional callback))
 
 (defun kargu-lsp--doc-symbols (callback)
-  "Collect open project document symbols asynchronously for CALLBACK."
-  (kargu-lsp--doc-symbols-next
-   (seq-take (kargu-lsp--project-buffers) 40) nil callback))
-
-(defun kargu-lsp--doc-symbols-next (buffers items callback)
-  "Collect symbols from BUFFERS onto ITEMS and deliver them to CALLBACK."
-  (if (null buffers) (funcall callback items nil)
-    (let ((path (buffer-file-name (car buffers))))
-      (kargu-lsp-get-file-symbols
-       path (lambda (symbols error)
-              (if error (funcall callback nil error)
-                (kargu-lsp--doc-symbols-next
-                 (cdr buffers)
-                 (append items (mapcar (lambda (sym)
-                                        (list path (plist-get sym :start-line)
-                                              (plist-get sym :name)
-                                              (plist-get sym :kind)))
-                                      (kargu-lsp--flatten-symbols symbols)))
-                 callback)))))))
+  "Collect open project document symbols for CALLBACK."
+  (funcall callback (kargu-lsp--imenu-symbols (list (kargu-lsp-project-root))) nil))
 
 (defun kargu-lsp--gather-symbols (callback)
   "Collect project symbols and deliver (ITEMS ERROR) to CALLBACK."
-  (kargu-lsp--ws-symbols
-   "" (lambda (items _error)
-        (if items (funcall callback items nil)
-          (kargu-lsp--doc-symbols callback)))))
+  (if (kargu-eglot-connected-p)
+      (kargu-lsp--ws-symbols
+       "" (lambda (items error)
+            (if (or error (null items))
+                (funcall callback (kargu-lsp--imenu-symbols (list (kargu-lsp-project-root))) nil)
+              (funcall callback items nil))))
+    (funcall callback (kargu-lsp--imenu-symbols (list (kargu-lsp-project-root))) nil)))
 
 (defun kargu-lsp--imenu-symbols (&optional roots)
   "Gather symbols via `imenu' from open file-visiting buffers.

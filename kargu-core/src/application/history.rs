@@ -26,16 +26,16 @@ impl ApplicationActor {
         Ok((history.revision(), history.snapshot()))
     }
 
-    fn check_history_capacity(
+    pub(super) fn check_history_capacity(
         &self,
         session: &SessionId,
-        replacement: usize,
+        replacement: crate::history::HistoryBytes,
     ) -> Result<(), CoreError> {
         let bytes = self
             .histories
             .iter()
             .filter(|(id, _)| *id != session)
-            .try_fold(replacement, |bytes, (_, history)| {
+            .try_fold(replacement.get(), |bytes, (_, history)| {
                 bytes.checked_add(history.accounted_bytes().get())
             })
             .ok_or(CoreError::ArithmeticOverflow)?;
@@ -73,7 +73,7 @@ impl ApplicationActor {
         {
             return Err(CoreError::Busy);
         }
-        self.check_history_capacity(session, candidate.accounted_bytes().get())?;
+        self.check_history_capacity(session, candidate.accounted_bytes())?;
         self.histories
             .get_mut(session)
             .ok_or(CoreError::StaleOwner)?
@@ -108,7 +108,7 @@ impl ApplicationActor {
             .get(session)
             .ok_or(CoreError::StaleOwner)?
             .projected_bytes(&message)?;
-        self.check_history_capacity(session, projected.get())?;
+        self.check_history_capacity(session, projected)?;
         Ok(self
             .histories
             .get_mut(session)
@@ -147,13 +147,14 @@ impl ApplicationActor {
             .provider_id(native_id)
             .ok_or(CoreError::StaleOwner)?
             .clone();
-        let message = history.result_message(&provider, text)?;
-        self.check_history_capacity(session, history.projected_bytes(&message)?.get())?;
+        let sanitized = crate::application::agent::output::SanitizedToolOutput::sanitize(text);
+        let message = history.result_message(&provider, sanitized.as_str())?;
+        self.check_history_capacity(session, history.projected_bytes(&message)?)?;
         let id = self
             .histories
             .get_mut(session)
             .ok_or(CoreError::StaleOwner)?
-            .append_result(&provider, outcome, text)?;
+            .append_result(&provider, outcome, sanitized.as_str())?;
         if !already_settled {
             self.complete_tool(run, native_id, outcome)?;
         }

@@ -5,9 +5,15 @@ use crate::constants::{
     limits,
     protocol::{self, methods},
 };
-use crate::domain::{ApplicationId, ByteLimit, RequestScope, SessionId};
+use crate::domain::{ApplicationId, ByteLimit, PlanId, PlanRevision, RequestScope, SessionId};
 use crate::ipc::protocol::Fault;
-use crate::providers::ApiProviderId;
+use crate::persistence::{
+    CollisionPolicy, DeleteTask, ImportTask, ListTask, LoadTask, MaxSessionAge, MaxSessionBytes,
+    MaxSessionCount, PersistenceTarget, PersistenceWork, PruneTask, RawSessionPayload, SaveTask,
+    SessionRecord, SessionRetentionPolicy, StorageRevision, StorageRoot, StorageSessionId,
+    migrate_candidate,
+};
+use crate::providers::{ApiProviderId, ProviderCatalog};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -25,6 +31,119 @@ pub(crate) struct ReadScope {
 struct ReadRequest<T> {
     scope: ReadScope,
     arguments: T,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistenceSaveParams {
+    scope: ReadScope,
+    storage_root: std::path::PathBuf,
+    expected_revision: u64,
+    #[serde(default)]
+    session_id: Option<String>,
+    record: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistenceLoadParams {
+    scope: ReadScope,
+    storage_root: std::path::PathBuf,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    expected_revision: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistenceListParams {
+    scope: ReadScope,
+    storage_root: std::path::PathBuf,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistenceDeleteParams {
+    scope: ReadScope,
+    storage_root: std::path::PathBuf,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    expected_revision: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistenceImportParams {
+    scope: ReadScope,
+    storage_root: std::path::PathBuf,
+    source_payload: Value,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    collision: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistencePruneParams {
+    scope: ReadScope,
+    storage_root: std::path::PathBuf,
+    #[serde(default)]
+    max_count: Option<usize>,
+    #[serde(default)]
+    max_bytes: Option<u64>,
+    #[serde(default)]
+    max_age_secs: Option<u64>,
+    #[serde(default)]
+    active_sessions: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SessionRestoreParams {
+    application_id: ApplicationId,
+    #[serde(default)]
+    session_id: Option<SessionId>,
+    #[serde(alias = "record")]
+    candidate: Value,
+    #[serde(default)]
+    expected_root: Option<std::path::PathBuf>,
+}
+
+fn parse_storage_root(path: &std::path::Path) -> Result<StorageRoot, Fault> {
+    crate::workspace::command::validate_path(path).map_err(|_| Fault::params())?;
+    StorageRoot::try_from(path).map_err(|_| Fault::params())
+}
+
+fn parse_collision_policy(
+    collision: Option<&str>,
+    session_id: &StorageSessionId,
+) -> Result<CollisionPolicy, Fault> {
+    match collision {
+        None | Some("reject") => Ok(CollisionPolicy::Reject),
+        Some("override") => Ok(CollisionPolicy::Override(session_id.clone())),
+        Some("derive_with_prefix") => Ok(CollisionPolicy::DeriveWithPrefix(session_id.clone())),
+        _ => Err(Fault::params()),
+    }
+}
+
+fn parse_active_sessions(
+    scope: &ReadScope,
+    extra: Option<Vec<String>>,
+) -> Result<std::collections::BTreeSet<StorageSessionId>, Fault> {
+    let mut active = std::collections::BTreeSet::new();
+    let scope_sid =
+        StorageSessionId::try_from(scope.session_id.as_str()).map_err(|_| Fault::params())?;
+    active.insert(scope_sid);
+    if let Some(extra_ids) = extra {
+        for id_str in extra_ids {
+            let sid = StorageSessionId::try_from(id_str.as_str()).map_err(|_| Fault::params())?;
+            active.insert(sid);
+        }
+    }
+    Ok(active)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -118,6 +237,72 @@ struct SelectionCommit {
     session_id: SessionId,
     expected_revision: super::selection::SelectionRevision,
     selection: super::selection::Selection,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModeCommit {
+    application_id: ApplicationId,
+    session_id: SessionId,
+    expected_revision: super::mode::ModeRevision,
+    mode: super::Mode,
+    #[serde(default)]
+    debug_ready: super::mode::DebugReady,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlanQuery {
+    application_id: ApplicationId,
+    session_id: SessionId,
+    #[serde(default)]
+    plan_id: Option<PlanId>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlanCreateRequest {
+    application_id: ApplicationId,
+    session_id: SessionId,
+    text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlanReviseRequest {
+    application_id: ApplicationId,
+    session_id: SessionId,
+    plan_id: PlanId,
+    expected_revision: PlanRevision,
+    text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlanClaimRequest {
+    application_id: ApplicationId,
+    session_id: SessionId,
+    plan_id: PlanId,
+    expected_revision: PlanRevision,
+    expected_hash: super::plan::PlanHash,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlanCompleteRequest {
+    application_id: ApplicationId,
+    session_id: SessionId,
+    plan_id: PlanId,
+    success: super::plan::PlanDispatchSuccess,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlanRejectRequest {
+    application_id: ApplicationId,
+    session_id: SessionId,
+    plan_id: PlanId,
+    expected_revision: PlanRevision,
 }
 
 #[derive(Deserialize)]
@@ -674,6 +859,161 @@ impl Host {
         Ok(actor.models.store().revision())
     }
 
+    pub(crate) fn prepare_persistence_save(
+        &self,
+        params: Value,
+    ) -> Result<(ReadScope, PersistenceWork), Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let args: PersistenceSaveParams =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&args.scope) {
+            return Err(owner_fault());
+        }
+        let storage_root = parse_storage_root(&args.storage_root)?;
+        let session_id = match args.session_id.as_deref() {
+            Some(sid) => StorageSessionId::try_from(sid).map_err(|_| Fault::params())?,
+            None => StorageSessionId::try_from(args.scope.session_id.as_str())
+                .map_err(|_| Fault::params())?,
+        };
+        // A save always carries the caller's record; never overwrite a session with a
+        // blank one. The record passes the bounded, schema-checked constructor.
+        let record =
+            SessionRecord::try_from(args.record.to_string()).map_err(|_| Fault::params())?;
+        if record.id() != &session_id {
+            return Err(Fault::params());
+        }
+        let target = PersistenceTarget::new(storage_root, session_id);
+        let work = PersistenceWork::Save(SaveTask::new(
+            target,
+            StorageRevision::from_u64(args.expected_revision),
+            Box::new(record),
+        ));
+        Ok((args.scope, work))
+    }
+
+    pub(crate) fn prepare_persistence_load(
+        &self,
+        params: Value,
+    ) -> Result<(ReadScope, PersistenceWork), Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let args: PersistenceLoadParams =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&args.scope) {
+            return Err(owner_fault());
+        }
+        let storage_root = parse_storage_root(&args.storage_root)?;
+        let session_id = match args.session_id.as_deref() {
+            Some(sid) => StorageSessionId::try_from(sid).map_err(|_| Fault::params())?,
+            None => StorageSessionId::try_from(args.scope.session_id.as_str())
+                .map_err(|_| Fault::params())?,
+        };
+        let target = PersistenceTarget::new(storage_root, session_id);
+        let work = PersistenceWork::Load(LoadTask::new(
+            target,
+            args.expected_revision.map(StorageRevision::from_u64),
+        ));
+        Ok((args.scope, work))
+    }
+
+    pub(crate) fn prepare_persistence_list(
+        &self,
+        params: Value,
+    ) -> Result<(ReadScope, PersistenceWork), Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let args: PersistenceListParams =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&args.scope) {
+            return Err(owner_fault());
+        }
+        let storage_root = parse_storage_root(&args.storage_root)?;
+        let work = PersistenceWork::List(ListTask::new(storage_root));
+        Ok((args.scope, work))
+    }
+
+    pub(crate) fn prepare_persistence_delete(
+        &self,
+        params: Value,
+    ) -> Result<(ReadScope, PersistenceWork), Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let args: PersistenceDeleteParams =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&args.scope) {
+            return Err(owner_fault());
+        }
+        let storage_root = parse_storage_root(&args.storage_root)?;
+        let session_id = match args.session_id.as_deref() {
+            Some(sid) => StorageSessionId::try_from(sid).map_err(|_| Fault::params())?,
+            None => StorageSessionId::try_from(args.scope.session_id.as_str())
+                .map_err(|_| Fault::params())?,
+        };
+        let target = PersistenceTarget::new(storage_root, session_id);
+        let work = PersistenceWork::Delete(DeleteTask::new(
+            target,
+            args.expected_revision.map(StorageRevision::from_u64),
+        ));
+        Ok((args.scope, work))
+    }
+
+    pub(crate) fn prepare_persistence_import(
+        &self,
+        params: Value,
+    ) -> Result<(ReadScope, PersistenceWork), Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let args: PersistenceImportParams =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&args.scope) {
+            return Err(owner_fault());
+        }
+        let storage_root = parse_storage_root(&args.storage_root)?;
+        let session_id = match args.session_id.as_deref() {
+            Some(sid) => StorageSessionId::try_from(sid).map_err(|_| Fault::params())?,
+            None => StorageSessionId::try_from(args.scope.session_id.as_str())
+                .map_err(|_| Fault::params())?,
+        };
+        let collision = parse_collision_policy(args.collision.as_deref(), &session_id)?;
+        let raw_payload = RawSessionPayload::try_from(match &args.source_payload {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .map_err(|_| Fault::params())?;
+        let candidate = migrate_candidate(&raw_payload, &collision).map_err(|_| Fault::params())?;
+        let work = PersistenceWork::Import(ImportTask::new(storage_root, Box::new(candidate)));
+        Ok((args.scope, work))
+    }
+
+    pub(crate) fn prepare_persistence_prune(
+        &self,
+        params: Value,
+    ) -> Result<(ReadScope, PersistenceWork), Fault> {
+        if self.phase != Phase::Ready {
+            return Err(state_fault());
+        }
+        let args: PersistencePruneParams =
+            serde_json::from_value(params).map_err(|_| Fault::params())?;
+        if !self.owns_read_scope(&args.scope) {
+            return Err(owner_fault());
+        }
+        let storage_root = parse_storage_root(&args.storage_root)?;
+        let policy = SessionRetentionPolicy::new(
+            args.max_count.map(MaxSessionCount::from_usize),
+            args.max_bytes.map(MaxSessionBytes::from_u64),
+            args.max_age_secs.map(MaxSessionAge::from_secs),
+        );
+        let active = parse_active_sessions(&args.scope, args.active_sessions)?;
+        let work = PersistenceWork::Prune(PruneTask::new(storage_root, policy, active));
+        Ok((args.scope, work))
+    }
+
     /// Whether `revision` is still the application's published configuration.
     pub(crate) fn configuration_current(
         &self,
@@ -920,10 +1260,16 @@ impl Host {
             .iter()
             .any(|capability| capability == "editor_credential_capture");
         self.phase = Phase::Negotiated;
+        let capabilities = if self.frame_limit.as_usize() < 2048 {
+            protocol::HANDSHAKE_CAPABILITIES
+        } else {
+            protocol::LIFECYCLE_CAPABILITIES
+        };
         Ok(
             json!({"core_version":crate::VERSION, "protocol_major":protocol::MAJOR,
             "protocol_minor":protocol::MINOR, "connection_epoch":self.epoch,
-            "capabilities":protocol::LIFECYCLE_CAPABILITIES,
+            "capabilities":capabilities,
+            "capability_set": 1,
             "limits":{"max_frame_bytes":self.frame_limit,"max_pending_requests":limits::MAX_PENDING}}),
         )
     }
@@ -1039,6 +1385,7 @@ impl Host {
             }
             methods::PING if empty_params(&params) => Ok(json!({"status":"ok"})),
             methods::PING => Err(Fault::params()),
+            methods::CAPABILITIES_LIST => capabilities_page(params),
             methods::PROVIDER_CATALOG if empty_params(&params) => self
                 .providers
                 .as_ref()
@@ -1116,6 +1463,34 @@ impl Host {
                 let id = actor.actor_mut().create_session();
                 Ok(json!({"application_id":scope.application_id,"session_id":id}))
             }
+            methods::SESSION_RESTORE => {
+                let args: SessionRestoreParams =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let app = self
+                    .applications
+                    .get_mut(&args.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?;
+                let actor = app.actor_mut();
+                let session_id = match args.session_id {
+                    Some(ref id) => {
+                        if !actor.owns_session(id) {
+                            return Err(owner_fault());
+                        }
+                        id.clone()
+                    }
+                    None => actor.create_session(),
+                };
+                let candidate = crate::application::restore::RestoreCandidate::from_json(
+                    &args.candidate,
+                    args.expected_root.as_deref(),
+                )
+                .map_err(restore_fault)?;
+                let receipt = actor
+                    .restore_session(&session_id, candidate)
+                    .map_err(restore_fault)?;
+                Ok(receipt.into_json())
+            }
             methods::SESSION_SNAPSHOT | methods::SESSION_CLOSE => {
                 let scope: SessionScope =
                     serde_json::from_value(params).map_err(|_| Fault::params())?;
@@ -1178,6 +1553,152 @@ impl Host {
                     .map_err(selection_fault)?;
                 Ok(json!({"revision":store.revision(),"selection":store.selection()}))
             }
+            methods::SESSION_MODE => {
+                let scope: SessionScope =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let actor = self
+                    .applications
+                    .get(&scope.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?
+                    .actor();
+                let store = actor
+                    .session_mode(&scope.session_id)
+                    .map_err(|_| owner_fault())?;
+                let available_tools = actor.available_tools_for_mode(store.mode());
+                Ok(json!({
+                    "revision": store.revision(),
+                    "mode": store.mode(),
+                    "debug_ready": store.debug_ready(),
+                    "available_tools": available_tools,
+                }))
+            }
+            methods::SESSION_MODE_COMMIT => {
+                let request: ModeCommit =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let actor = self
+                    .applications
+                    .get_mut(&request.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?
+                    .actor_mut();
+                if !actor.owns_session(&request.session_id) {
+                    return Err(owner_fault());
+                }
+                let intent = super::mode::ModeIntent::new(request.mode, request.debug_ready);
+                let (revision, mode, debug_ready) = {
+                    let store = actor
+                        .commit_session_mode(&request.session_id, request.expected_revision, intent)
+                        .map_err(mode_fault)?;
+                    (store.revision(), store.mode(), store.debug_ready())
+                };
+                let available_tools = actor.available_tools_for_mode(mode);
+                Ok(json!({
+                    "revision": revision,
+                    "mode": mode,
+                    "debug_ready": debug_ready,
+                    "available_tools": available_tools,
+                }))
+            }
+            methods::SESSION_PLAN => {
+                let query: PlanQuery =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let actor = self
+                    .applications
+                    .get(&query.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?
+                    .actor();
+                if !actor.owns_session(&query.session_id) {
+                    return Err(owner_fault());
+                }
+                let plan = match query.plan_id {
+                    Some(ref id) => actor.session_plan_by_id(&query.session_id, id),
+                    None => actor.session_plan(&query.session_id),
+                };
+                Ok(json!({ "plan": plan }))
+            }
+            methods::SESSION_PLAN_CREATE => {
+                let request: PlanCreateRequest =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let text = super::plan::PlanText::try_new(request.text).map_err(plan_fault)?;
+                let actor = self
+                    .applications
+                    .get_mut(&request.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?
+                    .actor_mut();
+                let plan = actor
+                    .create_session_plan(&request.session_id, text)
+                    .map_err(plan_fault)?;
+                Ok(json!({ "plan": plan }))
+            }
+            methods::SESSION_PLAN_REVISE => {
+                let request: PlanReviseRequest =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let text = super::plan::PlanText::try_new(request.text).map_err(plan_fault)?;
+                let actor = self
+                    .applications
+                    .get_mut(&request.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?
+                    .actor_mut();
+                let intent = super::plan::PlanReviseIntent::new(request.expected_revision, text);
+                let plan = actor
+                    .revise_session_plan(&request.session_id, &request.plan_id, intent)
+                    .map_err(plan_fault)?;
+                Ok(json!({ "plan": plan }))
+            }
+            methods::SESSION_PLAN_CLAIM => {
+                let request: PlanClaimRequest =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let actor = self
+                    .applications
+                    .get_mut(&request.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?
+                    .actor_mut();
+                let intent = super::plan::PlanClaimIntent::new(
+                    request.expected_revision,
+                    request.expected_hash,
+                );
+                let plan = actor
+                    .claim_session_plan(&request.session_id, &request.plan_id, intent)
+                    .map_err(plan_fault)?;
+                Ok(json!({ "claimed": true, "plan": plan }))
+            }
+            methods::SESSION_PLAN_COMPLETE => {
+                let request: PlanCompleteRequest =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let actor = self
+                    .applications
+                    .get_mut(&request.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?
+                    .actor_mut();
+                let state = actor
+                    .complete_session_plan(&request.session_id, &request.plan_id, request.success)
+                    .map_err(plan_fault)?;
+                Ok(json!({ "state": state }))
+            }
+            methods::SESSION_PLAN_REJECT => {
+                let request: PlanRejectRequest =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                let actor = self
+                    .applications
+                    .get_mut(&request.application_id)
+                    .filter(|app| app.is_live())
+                    .ok_or_else(owner_fault)?
+                    .actor_mut();
+                let state = actor
+                    .reject_session_plan(
+                        &request.session_id,
+                        &request.plan_id,
+                        request.expected_revision,
+                    )
+                    .map_err(plan_fault)?;
+                Ok(json!({ "rejected": true, "state": state }))
+            }
             _ => Err(Fault {
                 code: protocol::error_codes::METHOD_NOT_FOUND,
                 message: "Method not found",
@@ -1233,77 +1754,34 @@ impl Host {
             ),
             None => None,
         };
-        let configured_profiles = app
-            .and_then(|app| app.actor().configuration.published_view())
-            .and_then(|view| view.get("profiles").and_then(Value::as_array).cloned())
-            .unwrap_or_default();
+        let (config_revision, configured_profiles) = app
+            .and_then(|app| {
+                let view = app.actor().configuration.published_view()?;
+                let rev = view.get("revision").and_then(Value::as_u64).unwrap_or(0);
+                let profiles = view
+                    .get("profiles")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                Some((rev, profiles))
+            })
+            .unwrap_or((0, Vec::new()));
 
         let mut seen = std::collections::BTreeSet::new();
         let mut items = Vec::new();
 
         // 1. Process configured profiles first
-        for profile in configured_profiles {
-            let Some(p_id) = profile.get("provider").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            if !seen.insert(p_id.to_string()) {
-                continue;
+        for profile in &configured_profiles {
+            if let Some(item) = provider_profile_item(profile, catalog, config_revision) {
+                let p_id = item
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if seen.insert(p_id) {
+                    items.push(item);
+                }
             }
-            let api_p_id = match ApiProviderId::try_from(p_id.to_string()) {
-                Ok(id) => id,
-                Err(_) => continue,
-            };
-            let embedded_def = catalog.get(&api_p_id);
-            let name = embedded_def
-                .map(|d| d.name().as_str().to_string())
-                .unwrap_or_else(|| capitalize_provider(p_id));
-            let is_local = profile
-                .get("local")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-                || embedded_def.is_some_and(|d| d.local());
-            let cred_source = profile
-                .get("credential_source")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let authenticated = profile
-                .get("authenticated")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-                || is_local;
-            let status = if is_local {
-                "local"
-            } else if cred_source == "environment" {
-                "env_key"
-            } else if authenticated {
-                "configured"
-            } else {
-                "available"
-            };
-            let default_model = profile
-                .get("configured_model")
-                .and_then(|v| v.as_str())
-                .or_else(|| profile.get("model").and_then(|v| v.as_str()))
-                .map(String::from);
-            let models: Vec<String> = profile
-                .get("models")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            items.push(json!({
-                "id": p_id,
-                "name": name,
-                "status": status,
-                "authenticated": authenticated,
-                "default_model": default_model,
-                "models": models,
-                "local": is_local,
-            }));
         }
 
         let auth_only = req.authenticated_only.unwrap_or(false);
@@ -1311,28 +1789,9 @@ impl Host {
         // 2. Add embedded definitions not yet seen if authenticated_only is false
         if !auth_only {
             for def in catalog.definitions() {
-                let p_id = def.id().as_str();
-                if !seen.insert(p_id.to_string()) {
-                    continue;
+                if seen.insert(def.id().as_str().to_string()) {
+                    items.push(provider_embedded_item(def, config_revision));
                 }
-                let is_local = def.local();
-                let authenticated = is_local || def.keyless();
-                let status = if is_local {
-                    "local"
-                } else if authenticated {
-                    "configured"
-                } else {
-                    "available"
-                };
-                items.push(json!({
-                    "id": p_id,
-                    "name": def.name().as_str(),
-                    "status": status,
-                    "authenticated": authenticated,
-                    "default_model": null,
-                    "models": Vec::<String>::new(),
-                    "local": is_local,
-                }));
             }
         }
 
@@ -1356,6 +1815,7 @@ impl Host {
 
         Ok(json!({
             "status": "ok",
+            "config_revision": config_revision,
             "providers": items,
             "connected": connected
         }))
@@ -1483,6 +1943,131 @@ struct ModelListRequest {
     _refresh: bool,
 }
 
+fn provider_profile_item(
+    profile: &Value,
+    catalog: &ProviderCatalog,
+    config_revision: u64,
+) -> Option<Value> {
+    let p_id = profile.get("provider").and_then(|v| v.as_str())?;
+    let api_p_id = ApiProviderId::try_from(p_id.to_string()).ok()?;
+    let embedded_def = catalog.get(&api_p_id);
+    let name = profile
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| embedded_def.map(|d| d.name().as_str().to_string()))
+        .unwrap_or_else(|| capitalize_provider(p_id));
+    let is_local = profile
+        .get("local")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || embedded_def.is_some_and(|d| d.local());
+    let cred_source = profile
+        .get("credential_source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let authenticated = profile
+        .get("authenticated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || is_local;
+    let status = if is_local {
+        "local"
+    } else if cred_source == "environment" {
+        "env_key"
+    } else if authenticated {
+        "configured"
+    } else {
+        "available"
+    };
+    let default_model = profile
+        .get("configured_model")
+        .and_then(|v| v.as_str())
+        .or_else(|| profile.get("model").and_then(|v| v.as_str()))
+        .map(String::from);
+    let models: Vec<String> = profile
+        .get("models")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let is_configured = cred_source == "configuration"
+        || cred_source == "environment"
+        || cred_source == "global"
+        || profile
+            .get("configured_model")
+            .and_then(|v| v.as_str())
+            .is_some();
+    let is_app_backend = profile
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .is_some_and(|k| k == "application")
+        || profile.get("backend").is_some()
+        || matches!(p_id, "codex" | "antigravity" | "claude-code");
+    let namespace = if is_app_backend {
+        "application"
+    } else if embedded_def.is_some() {
+        if is_configured { "api" } else { "embedded" }
+    } else {
+        "custom"
+    };
+    let (readiness, availability) = if authenticated {
+        ("ready", "ready")
+    } else {
+        ("available", "available")
+    };
+    Some(json!({
+        "id": p_id,
+        "name": name,
+        "namespace": namespace,
+        "readiness": readiness,
+        "availability": availability,
+        "status": status,
+        "authenticated": authenticated,
+        "config_revision": config_revision,
+        "default_model": default_model,
+        "models": models,
+        "local": is_local,
+    }))
+}
+
+fn provider_embedded_item(
+    def: &crate::providers::ProviderDefinition,
+    config_revision: u64,
+) -> Value {
+    let p_id = def.id().as_str();
+    let is_local = def.local();
+    let authenticated = is_local || def.keyless();
+    let status = if is_local {
+        "local"
+    } else if authenticated {
+        "configured"
+    } else {
+        "available"
+    };
+    let (readiness, availability) = if authenticated {
+        ("ready", "ready")
+    } else {
+        ("available", "available")
+    };
+    json!({
+        "id": p_id,
+        "name": def.name().as_str(),
+        "namespace": "embedded",
+        "readiness": readiness,
+        "availability": availability,
+        "status": status,
+        "authenticated": authenticated,
+        "config_revision": config_revision,
+        "default_model": null,
+        "models": Vec::<String>::new(),
+        "local": is_local,
+    })
+}
+
 fn capitalize_provider(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
@@ -1553,10 +2138,86 @@ fn selection_fault(error: crate::error::CoreError) -> Fault {
         _ => owner_fault(),
     }
 }
+fn mode_fault(error: crate::error::CoreError) -> Fault {
+    match error {
+        crate::error::CoreError::Busy => Fault {
+            code: protocol::error_codes::INVALID_STATE,
+            message: "Active work owns the mode",
+            status: "busy",
+        },
+        crate::error::CoreError::StaleOwner => Fault {
+            code: protocol::error_codes::STALE_OWNER,
+            message: "Mode revision or owner is stale",
+            status: "stale_revision",
+        },
+        crate::error::CoreError::Unavailable => Fault {
+            code: protocol::error_codes::INVALID_STATE,
+            message: "Debugger preparation failed or unverified",
+            status: "debug_refusal",
+        },
+        _ => owner_fault(),
+    }
+}
+fn plan_fault(error: crate::error::CoreError) -> Fault {
+    match error {
+        crate::error::CoreError::AlreadyCompleted => Fault {
+            code: protocol::error_codes::INVALID_STATE,
+            message: "This plan was already decided",
+            status: "already_decided",
+        },
+        crate::error::CoreError::StaleOwner => Fault {
+            code: protocol::error_codes::STALE_OWNER,
+            message: "Plan revision, hash or owner is stale",
+            status: "stale_revision",
+        },
+        crate::error::CoreError::Busy => Fault {
+            code: protocol::error_codes::INVALID_STATE,
+            message: "Active work owns the plan",
+            status: "busy",
+        },
+        crate::error::CoreError::InvalidValue { .. } => Fault::params(),
+        crate::error::CoreError::Limit => capacity_fault(),
+        _ => owner_fault(),
+    }
+}
+fn restore_fault(error: crate::error::CoreError) -> Fault {
+    match error {
+        crate::error::CoreError::Busy => Fault {
+            code: protocol::error_codes::INVALID_STATE,
+            message: "Session restore locked by active run or preparation",
+            status: "busy",
+        },
+        crate::error::CoreError::StaleOwner => owner_fault(),
+        crate::error::CoreError::WorkspaceChanged => Fault {
+            code: protocol::error_codes::REJECTED,
+            message: "Candidate project root incompatible with target",
+            status: "root_mismatch",
+        },
+        crate::error::CoreError::Limit => capacity_fault(),
+        _ => Fault::params(),
+    }
+}
 fn capacity_fault() -> Fault {
     Fault {
         code: protocol::error_codes::RESOURCE_LIMIT,
         message: "Resource limit reached",
         status: "resource_limit",
     }
+}
+
+fn capabilities_page(params: Value) -> Result<Value, Fault> {
+    let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let total = protocol::LIFECYCLE_CAPABILITIES.len();
+    let end = (offset + protocol::CAPABILITY_PAGE_ITEMS).min(total);
+    let slice = protocol::LIFECYCLE_CAPABILITIES
+        .get(offset..end)
+        .unwrap_or(&[]);
+    let complete = end >= total;
+    Ok(json!({
+        "capabilities": slice,
+        "offset": offset,
+        "next_offset": end,
+        "total": total,
+        "complete": complete,
+    }))
 }

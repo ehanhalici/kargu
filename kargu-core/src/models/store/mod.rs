@@ -26,6 +26,12 @@ pub(crate) struct RunModelPolicy {
     pub reasoning: bool,
     pub parameters: Option<Vec<String>>,
     pub efforts: Option<Vec<crate::models::metadata::EffortName>>,
+    compact_threshold: crate::history::CompactThreshold,
+}
+impl RunModelPolicy {
+    pub(crate) fn compact_threshold(&self) -> crate::history::CompactThreshold {
+        self.compact_threshold
+    }
 }
 
 /// Summary DTO for UI presentation of a model's capabilities.
@@ -319,11 +325,18 @@ impl ModelStore {
         } else {
             None
         };
+        let compact_threshold =
+            crate::history::CompactThreshold::from_context_window(fields.as_ref().and_then(|f| {
+                f.display_snapshot()
+                    .get("context-window")
+                    .and_then(Value::as_u64)
+            }));
         Ok(RunModelPolicy {
             tools,
             reasoning: fields.as_ref().is_some_and(ModelFields::allows_reasoning),
             parameters,
             efforts,
+            compact_threshold,
         })
     }
     /// Return a specific model summary for a provider.

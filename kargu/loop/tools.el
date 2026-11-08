@@ -32,6 +32,7 @@
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
 (declare-function kargu--loop-verify-files "kargu/loop/heal"
                   (run id name result queue files))
+(declare-function kargu--loop-native-change-p "kargu/loop/heal" (change))
 
 (defun kargu--loop-next-call (run queue)
   "Execute the next call in QUEUE for RUN, or continue the loop."
@@ -232,7 +233,9 @@ SIG keys the read-only cache; delivery is claimed before any continuation."
 (defun kargu-loop--after-budget (run id name result queue files)
   "Consume FILES for ID and NAME on RUN; extend RESULT and continue QUEUE."
   (dolist (file files)
-    (kargu-edit-changes :consume-file file))
+    (when-let* ((change (kargu-edit-changes :capture file)))
+      (unless (kargu--loop-native-change-p change)
+        (kargu-edit-changes :consume change))))
   (kargu-log 'warn "loop: healing budget spent; %d changed file(s) not auto-verified"
              (length files))
   (kargu--loop-add-result-and-continue

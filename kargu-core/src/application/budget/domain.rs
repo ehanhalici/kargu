@@ -2,7 +2,7 @@
 
 use crate::{
     constants::limits,
-    domain::{InputTokens, MicroUsd, OutputTokens, TokenCount},
+    domain::{CacheWriteTokens, CachedTokens, InputTokens, MicroUsd, OutputTokens, TokenCount},
     error::CoreError,
 };
 use serde::{Deserialize, Serialize};
@@ -218,5 +218,77 @@ impl TryFrom<&Value> for ObservedUsage {
                 .map(OutputTokens::try_from)
                 .transpose()?,
         })
+    }
+}
+
+/// Conservative upper bounds for an admission reservation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttemptBounds {
+    input: InputTokens,
+    output: OutputTokens,
+    cache_write: Option<CacheWriteTokens>,
+    cache_read: Option<CachedTokens>,
+}
+
+impl AttemptBounds {
+    /// Construct bounds with prompt input and completion output limits.
+    pub fn new(input: InputTokens, output: OutputTokens) -> Self {
+        Self {
+            input,
+            output,
+            cache_write: None,
+            cache_read: None,
+        }
+    }
+
+    /// Attach an optional cache-creation upper bound.
+    pub fn with_cache_write(mut self, cache_write: CacheWriteTokens) -> Result<Self, CoreError> {
+        if cache_write.as_u64() > self.input.as_u64() {
+            return Err(CoreError::InvalidValue {
+                field: "AttemptBounds",
+            });
+        }
+        self.cache_write = Some(cache_write);
+        Ok(self)
+    }
+
+    /// Attach an optional cache-read upper bound.
+    pub fn with_cache_read(mut self, cache_read: CachedTokens) -> Result<Self, CoreError> {
+        let write = self.cache_write.map_or(0, |w| w.as_u64());
+        let sum = match cache_read.as_u64().checked_add(write) {
+            Some(sum) => sum,
+            None => {
+                return Err(CoreError::InvalidValue {
+                    field: "AttemptBounds",
+                });
+            }
+        };
+        if sum > self.input.as_u64() {
+            return Err(CoreError::InvalidValue {
+                field: "AttemptBounds",
+            });
+        }
+        self.cache_read = Some(cache_read);
+        Ok(self)
+    }
+
+    /// Prompt input tokens upper bound.
+    pub fn input(&self) -> InputTokens {
+        self.input
+    }
+
+    /// Completion output tokens upper bound.
+    pub fn output(&self) -> OutputTokens {
+        self.output
+    }
+
+    /// Cache write tokens upper bound.
+    pub fn cache_write(&self) -> Option<CacheWriteTokens> {
+        self.cache_write
+    }
+
+    /// Cache read tokens upper bound.
+    pub fn cache_read(&self) -> Option<CachedTokens> {
+        self.cache_read
     }
 }

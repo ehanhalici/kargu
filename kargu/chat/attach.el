@@ -24,7 +24,15 @@
 (require 'kargu/files/async)
 (require 'kargu/bridge/mentions)
 
+(declare-function kargu-lsp--imenu-document-symbols "kargu/tools/lsp/symbols" (buffer))
 (defvar kargu-chat-attach-max-lines 150)
+(defvar-local kargu-chat-buffer-granted nil
+  "Non-nil when this buffer has an explicit user grant for mention egress.")
+(defcustom kargu-chat-buffer-grants nil
+  "List of buffer names or regexps explicitly granted for `@buff:' mentions.
+Fileless and out-of-root buffers require an explicit grant for security."
+  :type '(repeat string)
+  :group 'kargu-chat)
 (declare-function kargu-chat--completion-roots "kargu/chat/complete")
 
 
@@ -170,9 +178,18 @@ If FROM or TO is nil, processes entire buffer."
           (delay-mode-hooks
             (set-auto-mode t))
         (error nil)))
-    (let ((found-pos (kargu-chat--find-symbol-pos sym-name)))
-      (when found-pos
-        (kargu-chat--compute-symbol-bounds found-pos)))))
+    (or (when (require 'kargu/tools/lsp/symbols nil t)
+          (let ((syms (ignore-errors
+                        (kargu-lsp--imenu-document-symbols (current-buffer)))))
+            (when-let* ((match (cl-find sym-name syms
+                                        :key (lambda (s) (plist-get s :name))
+                                        :test #'equal))
+                        (start (plist-get match :start-line))
+                        (end (plist-get match :end-line)))
+              (cons start (max start end)))))
+        (let ((found-pos (kargu-chat--find-symbol-pos sym-name)))
+          (when found-pos
+            (kargu-chat--compute-symbol-bounds found-pos))))))
 
 (cl-defun kargu-chat--attach-symbol-block
     (mention &key (roots (kargu-chat--completion-roots)))
@@ -201,11 +218,11 @@ If FROM or TO is nil, processes entire buffer."
                     abs sym-part from to dump))))))))
 
 (defun kargu-chat--span-mentions (spans)
-  "Return SPANS' distinct file and symbol mentions as (FILES . SYMBOLS).
+  "Return SPANS' distinct file, buffer and symbol mentions as (FILES . SYMBOLS).
 SPANS are native lexer DTOs.  A whole-file mention is its path string, a
-line-range mention is (PATH FROM . TO), a folder is (:folder PATH) and a Git
-target is (:git STAGED); a symbol mention is `path::symbol'.  Named buffer
-targets need an explicit grant (todo 4.8c) and are not attached."
+line-range mention is (PATH FROM . TO), a folder is (:folder PATH), a buffer
+is (:buffer NAME) and a Git target is (:git STAGED); a symbol mention is
+`path::symbol'."
   (let (files symbols)
     (mapc (lambda (span)
             (let* ((target (gethash "target" span))
@@ -218,7 +235,16 @@ targets need an explicit grant (todo 4.8c) and are not attached."
                    (when (and (stringp path) (natnump from) (natnump to))
                      (cl-pushnew (cons path (cons from to)) files :test #'equal))))
                 ("folder"
-                 (when (stringp path) (cl-pushnew (list :folder path) files :test #'equal)))
+                 (let ((depth (gethash "depth" target))
+                       (max-files (gethash "max_files" target)))
+                   (when (stringp path)
+                     (cl-pushnew (if (or depth max-files)
+                                     (list :folder path depth max-files)
+                                   (list :folder path))
+                                 files :test #'equal))))
+                ((or "buff" "buffer")
+                 (let ((name (gethash "name" target)))
+                   (when (stringp name) (cl-pushnew (list :buffer name) files :test #'equal))))
                 ("git_diff" (cl-pushnew (list :git nil) files :test #'equal))
                 ("git_staged" (cl-pushnew (list :git t) files :test #'equal))
                 ("legacy_file_symbol"
@@ -229,9 +255,15 @@ targets need an explicit grant (todo 4.8c) and are not attached."
     (cons (nreverse files) (nreverse symbols))))
 
 (defun kargu-chat--mention-label (mention)
-  "Return the display label of file, folder or Git MENTION."
+  "Return the display label of file, folder, buffer or Git MENTION."
   (pcase mention
+    (`(:folder ,path ,depth ,max-files)
+     (cond
+      ((and depth max-files) (format "%s:%s:%s" path depth max-files))
+      (depth (format "%s:%s" path depth))
+      (t path)))
     (`(:folder ,path) path)
+    (`(:buffer ,name) name)
     (`(:git ,staged) (if staged "git:staged" "git:diff"))
     (`(,path . ,_) path)
     (_ mention)))
@@ -246,6 +278,8 @@ A native refusal keeps its payload-free reason and attaches no content."
               label (substring text (length "ERROR: "))))
      ((eq (car-safe mention) :folder)
       (format "<attached_folder path=\"%s\">\n%s\n</attached_folder>\n" label text))
+     ((eq (car-safe mention) :buffer)
+      (format "<attached_buffer name=\"%s\">\n%s\n</attached_buffer>\n" label text))
      ((eq (car-safe mention) :git)
       (format "<attached_git target=\"%s\">\n%s\n</attached_git>\n" label text))
      (t (format "%s\n%s\n" (kargu-chat--called-read label) text)))))
@@ -259,17 +293,72 @@ reports the excerpt bounds."
     (kargu-file-window-create :limit (max 1 (or kargu-chat-attach-max-lines 150)))))
 
 (declare-function kargu-search-list-files "kargu/tools/search" (&optional path callback))
+(declare-function kargu-search-glob "kargu/tools/search" (callback pattern &optional path max-files max-dirs))
 (declare-function kargu-git-diff "kargu/tools/git" (callback &optional staged path commit))
 
+(defun kargu-chat--buffer-granted-p (name buf)
+  "Return non-nil if buffer NAME or BUF has an explicit user grant."
+  (or (member name kargu-chat-buffer-grants)
+      (cl-some (lambda (pattern)
+                 (and (stringp pattern) (string-match-p pattern name)))
+               kargu-chat-buffer-grants)
+      (and (buffer-live-p buf) (buffer-local-value 'kargu-chat-buffer-granted buf))))
+
+(defun kargu-chat--buffer-content (buf)
+  "Return bounded content of live buffer BUF, preserving editor state."
+  (with-current-buffer buf
+    (save-excursion
+      (save-restriction
+        (widen)
+        (let* ((max-bytes (min 262144 (or (and (boundp 'kargu-bridge--max-frame) kargu-bridge--max-frame) 262144)))
+               (size (buffer-size)))
+          (if (<= size max-bytes)
+              (buffer-substring-no-properties (point-min) (point-max))
+            (concat (buffer-substring-no-properties (point-min) (+ (point-min) max-bytes))
+                    "\n... [truncated]")))))))
+
+(defun kargu-chat--read-buffer-mention (name callback)
+  "Read live editor buffer NAME into CALLBACK subject to grant verification."
+  (let ((buf (get-buffer name)))
+    (cond
+     ((not (buffer-live-p buf))
+      (funcall callback "ERROR: buffer not found"))
+     ((string-prefix-p " " name)
+      (funcall callback "ERROR: hidden buffers cannot be attached"))
+     ((and (buffer-file-name buf)
+           (file-remote-p (buffer-file-name buf)))
+      (funcall callback "ERROR: remote TRAMP buffers are unavailable"))
+     ((with-current-buffer buf
+        (or (derived-mode-p 'tar-mode 'archive-mode 'archive-subfile-mode)
+            (string-match-p "\\(?:\\.tar\\|\\.zip\\|\\.gz\\|\\.tgz\\|\\.xz\\):"
+                            (or (buffer-file-name buf) (buffer-name buf)))))
+      (funcall callback "ERROR: foreign archive buffers are unavailable"))
+     ((and (buffer-file-name buf)
+           (not (kargu-permission-within-project-p (buffer-file-name buf))))
+      (if (kargu-chat--buffer-granted-p name buf)
+          (funcall callback (kargu-chat--buffer-content buf))
+        (funcall callback "ERROR: out-of-root buffer requires explicit grant")))
+     ((null (buffer-file-name buf))
+      (if (kargu-chat--buffer-granted-p name buf)
+          (funcall callback (kargu-chat--buffer-content buf))
+        (funcall callback "ERROR: fileless buffer requires explicit grant")))
+     (t
+      (funcall callback (kargu-chat--buffer-content buf))))))
+
 (defun kargu-chat--read-mention (mention callback)
-  "Resolve file, line, folder or Git MENTION natively into CALLBACK's text.
+  "Resolve file, line, folder, buffer or Git MENTION into CALLBACK's text.
 Folder and Git targets use their optional native tool families; without them
 the mention is reported unavailable rather than read in Elisp."
   (pcase mention
-    (`(:folder ,path)
-     (if (require 'kargu/tools/search nil t)
-         (kargu-search-list-files path callback)
-       (funcall callback "ERROR: folder listing is unavailable")))
+    (`(:folder ,path . ,rest)
+     (let ((depth (car-safe rest)) (max-files (cadr rest)))
+       (if (require 'kargu/tools/search nil t)
+           (if (or depth max-files)
+               (kargu-search-glob callback "*" path max-files depth)
+             (kargu-search-list-files path callback))
+         (funcall callback "ERROR: folder listing is unavailable"))))
+    (`(:buffer ,name)
+     (kargu-chat--read-buffer-mention name callback))
     (`(:git ,staged)
      (if (require 'kargu/tools/git nil t)
          (kargu-git-diff callback staged)

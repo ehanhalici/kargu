@@ -13,6 +13,9 @@
 (require 'ert)
 (require 'tests/test-helpers)
 (require 'tests/test-bridge)
+(require 'kargu/api/catalog)
+(require 'kargu/api/http)
+(require 'kargu/api/response)
 (require 'kargu/api/transport)
 
 (defun kargu-stream-test--server (body stream &optional hold capture capture-headers status headers script)

@@ -29,6 +29,7 @@
 (defvar kargu-chat--project-root)
 (defvar kargu-chat--session-id)
 (defvar kargu-chat--session-title)
+(defvar kargu-chat--session-revision)
 (defvar kargu-chat--output-marker)
 (defvar kargu-chat--prompt-marker)
 
@@ -43,16 +44,31 @@
 
 (defun kargu-session-restore--owner (data)
   "Build an isolated session from validated DATA without publishing hooks."
-  (let ((session
-         (kargu-session-create
-          :id-value (gethash "id" data)
-          :mode-value (intern (gethash "mode" data "ask"))
-          :usage-value (list :active nil :requests (gethash "requests" data 0)
-                             :tokens-in (gethash "tokens_in" data 0)
-                             :tokens-out (gethash "tokens_out" data 0)
-                             :last-prompt-tokens 0
-                             :started (gethash "created_at" data
-                                               (gethash "updated_at" data "earlier"))))))
+  (let* ((tokens-in (gethash "tokens_in" data))
+         (tokens-out (gethash "tokens_out" data))
+         (tokens-unk (or (eq (gethash "tokens_unknown" data) t)
+                         (and (null tokens-in) (null tokens-out))))
+         (monetary-unk (not (eq (gethash "monetary_unknown" data :missing) :json-false)))
+         (session
+          (kargu-session-create
+           :id-value (gethash "id" data)
+           :mode-value (intern (gethash "mode" data "ask"))
+           :usage-value (list :active nil
+                              :requests (gethash "requests" data 0)
+                              :requests-spent (gethash "requests" data 0)
+                              :tokens-in (and (numberp tokens-in) tokens-in)
+                              :tokens-out (and (numberp tokens-out) tokens-out)
+                              :tokens-spent (gethash "tokens_spent" data
+                                                     (if (and (numberp tokens-in) (numberp tokens-out))
+                                                         (+ tokens-in tokens-out)
+                                                       0))
+                              :tokens-unknown (and tokens-unk t)
+                              :monetary-spent (gethash "monetary_spent" data 0)
+                              :monetary-reserved (gethash "monetary_reserved" data 0)
+                              :monetary-unknown (and monetary-unk t)
+                              :last-prompt-tokens (and (numberp tokens-in) tokens-in)
+                              :started (gethash "created_at" data
+                                                (gethash "updated_at" data "earlier"))))))
     (kargu-history-replace
      (mapcar #'kargu-json-to-record (append (gethash "messages" data) nil))
      (kargu-session-history-value session))
@@ -150,6 +166,8 @@
     (setq-local kargu-session--context session kargu--session-id (kargu-session-id session)
                 kargu-chat--session-id (kargu-session-id session)
                 kargu-chat--session-title (gethash "title" data)
+                kargu-chat--session-revision (let ((revision (gethash "revision" data)))
+                                               (if (natnump revision) revision 0))
                 kargu-chat--project-root (kargu-session-restore-operation-root operation)
                 default-directory (kargu-session-restore-operation-root operation))
     (dolist (field '(kargu-chat--output-marker kargu-chat--prompt-marker))

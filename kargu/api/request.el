@@ -76,7 +76,12 @@ Real connection preparation supplies its captured native ticket's receipt."
 EXTRA is a list of additional (KEY . VALUE) conses that replace or add
 entries (e.g. (\"stream\" . t)).  The \"tools\" array is only included when
 at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
-  (kargu-api-build-payload (kargu-history-context) extra))
+  (let ((items (if (and (= (length extra) 1)
+                        (listp (car extra))
+                        (consp (caar extra)))
+                   (car extra)
+                 extra)))
+    (kargu-api-build-payload (kargu-history-context) items)))
 
 (defun kargu-api-build-payload (history &optional extra)
   "Build a payload snapshot from HISTORY and optional EXTRA entries."
@@ -86,8 +91,11 @@ at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
           (append
            `(("model" . ,(kargu--model))
              ("messages" . ,(vconcat messages)))
-           (kargu--payload-tools-entries tools))))
-    (kargu--payload-merge payload extra)))
+           (kargu--payload-tools-entries tools)))
+         (merged (kargu--payload-merge payload extra)))
+    (if (or (null tools) (= (length tools) 0))
+        (seq-remove (lambda (cell) (member (car cell) '("tools" "tool_choice"))) merged)
+      merged)))
 
 (defun kargu-api-auth-intent (key &optional provider)
   "Capture raw KEY and header bindings for native auth at PROVIDER.

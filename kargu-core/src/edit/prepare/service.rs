@@ -877,7 +877,7 @@ impl EditPreparations {
                             && record.service_id == service_id
                             && &record.full_path == path
                     })
-                    .map(|record| record.baseline);
+                    .map(|record| record.baseline.without_diagnostics());
                 let remaining_for_path = self.snapshots.iter().rev().find_map(|s| {
                     if &s.session != session || s.service_id != service_id {
                         return None;
@@ -906,7 +906,10 @@ impl EditPreparations {
                 });
                 // Net-zero is determined by retained identity, never by the absence
                 // of an undo body. Evicted bodies cannot erase verification debt.
-                if baseline.is_some_and(|original| original.matches(version.final_hash())) {
+                if baseline
+                    .as_ref()
+                    .is_some_and(|original| original.matches(version.final_hash()))
+                {
                     continue;
                 }
                 if let Some((prev_edit, prev_index, prev_root, prev_full, prev_rel, prev_res)) =
@@ -981,12 +984,21 @@ impl EditPreparations {
                         && record.service_id == service_id
                         && record.full_path == file.path
                 })
-                .map(|record| record.baseline)
-                .unwrap_or_else(|| {
-                    super::history::ChangeBaseline::Known(
-                        file.evidence.existed().then_some(file.base_hash),
-                    )
-                });
+                .map_or_else(
+                    || super::history::ChangeBaseline::Known {
+                        original: file.evidence.existed().then_some(file.base_hash),
+                        diagnostics: result.diagnostic_baseline().clone(),
+                    },
+                    |record| {
+                        if record.verification_pending {
+                            record.baseline.clone()
+                        } else {
+                            record
+                                .baseline
+                                .with_diagnostics(result.diagnostic_baseline().clone())
+                        }
+                    },
+                );
             self.changes.retain(|record| {
                 !(&record.session == session
                     && record.service_id == service_id

@@ -291,6 +291,8 @@ pub(crate) struct FileResult {
     #[serde(skip)]
     before_document: LiveDocument,
     #[serde(skip)]
+    diagnostic_baseline: super::verification::DiagnosticBaseline,
+    #[serde(skip)]
     pub(super) final_disk: DiskState,
     saved: bool,
     hook_modified: bool,
@@ -433,6 +435,9 @@ impl FileResult {
     pub(super) fn before_document(&self) -> &LiveDocument {
         &self.before_document
     }
+    pub(super) fn diagnostic_baseline(&self) -> &super::verification::DiagnosticBaseline {
+        &self.diagnostic_baseline
+    }
 }
 
 #[cfg(test)]
@@ -466,6 +471,7 @@ mod tests {
                 final_text: Some(body),
                 final_document: Some(doc.clone()),
                 before_document: doc,
+                diagnostic_baseline: super::super::verification::DiagnosticBaseline::Unavailable,
                 final_disk: DiskState::Absent {},
                 saved: false,
                 hook_modified: false,

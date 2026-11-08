@@ -13,6 +13,7 @@
 (require 'ert)
 (require 'tests/test-helpers)
 (require 'kargu/chat)
+(require 'kargu/chat/session)
 
 (defconst kargu-session-restore-test--data
   '(("id" . "restored") ("mode" . "plan") ("provider" . "new-provider")
@@ -221,7 +222,15 @@
         (kargu-selection-update :effort 'none)
         (let ((transcript (kargu-session--extract-transcript (current-buffer))))
           (narrow-to-region 3 9)
-          (kargu-session-save)
+          (cl-letf (((symbol-function 'kargu-bridge-session-scope)
+                     (lambda (_buf cb) (funcall cb 'mock-conn 'mock-scope nil)))
+                    ((symbol-function 'kargu-bridge-session-save)
+                     (lambda (_conn params cb &optional _buf)
+                       (let ((rec (gethash "record" params)))
+                         (kargu-session-storage-write
+                          (kargu-aget rec "id") repo rec))
+                       (funcall cb t nil))))
+            (kargu-session-save))
           (let ((saved (kargu-session-storage-read kargu-chat--session-id repo)))
             (should (= (kargu-aget saved "schema_version") 2))
             (should (equal (kargu-aget saved "transcript") transcript))

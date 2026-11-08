@@ -30,6 +30,13 @@
                   (application &rest options))
 (declare-function kargu-lsp-diagnostics-snapshot "kargu/tools/lsp/diagnostics" (file-path))
 (declare-function kargu-lsp-current-diagnostics-p "kargu/tools/lsp/freshness" (buffer))
+(declare-function kargu-lsp--diagnostic-backends "kargu/tools/lsp/freshness" ())
+(declare-function eglot-current-server "eglot" ())
+(declare-function jsonrpc--process "jsonrpc" (connection))
+(defvar eglot--managed-mode)
+(defvar eglot--versioned-identifier)
+(defvar flymake-mode)
+(defvar kargu-bridge-edit-document--id)
 
 ;;;; Rollback snapshots ---------------------------------------------------
 
@@ -65,7 +72,7 @@ Owned by `kargu-edit-service'.")
         (buffer-string)))))
 
 (defun kargu-diff--capture-baseline-diagnostics (path)
-  "Capture (:available BOOL :diagnostics LIST) for PATH before editing."
+  "Capture (:available BOOL :diagnostics LIST ...) for PATH before editing."
   (let* ((buf (find-buffer-visiting path))
          (available (and (buffer-live-p buf)
                          (fboundp 'kargu-lsp-current-diagnostics-p)
@@ -75,7 +82,28 @@ Owned by `kargu-edit-service'.")
                   (condition-case nil
                       (copy-tree (kargu-lsp-diagnostics-snapshot path))
                     (error (setq available nil) nil)))))
-    (list :available (and available t) :diagnostics diags)))
+    (if (not available)
+        (list :available nil :diagnostics nil)
+      (with-current-buffer buf
+        (let* ((server (and (bound-and-true-p eglot--managed-mode)
+                            (fboundp 'eglot-current-server)
+                            (eglot-current-server)))
+               (proc (and server (fboundp 'jsonrpc--process)
+                          (ignore-errors (jsonrpc--process server)))))
+          (list :available t
+                :diagnostics diags
+                :buffer buf
+                :document-id (and (boundp 'kargu-bridge-edit-document--id)
+                                  (eq (car-safe kargu-bridge-edit-document--id) buf)
+                                  (cdr kargu-bridge-edit-document--id))
+                :tick (buffer-chars-modified-tick)
+                :server server
+                :server-process proc
+                :server-version (and (boundp 'eglot--versioned-identifier)
+                                     eglot--versioned-identifier)
+                :backends (and (bound-and-true-p flymake-mode)
+                               (fboundp 'kargu-lsp--diagnostic-backends)
+                               (copy-sequence (kargu-lsp--diagnostic-backends)))))))))
 
 (defun kargu-diff--replace-buffer-preserving-view (buffer new-content)
   "Replace widened contents of BUFFER with NEW-CONTENT, keeping view and point."

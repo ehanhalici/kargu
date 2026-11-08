@@ -171,6 +171,11 @@ identity!(
     "budget_",
     "One non-reusable API accounting lifetime."
 );
+identity!(
+    PlanId,
+    "plan_",
+    "Plan artifact identifier owned by one conversation."
+);
 
 macro_rules! counter {
     ($name:ident, $doc:literal) => {
@@ -183,6 +188,12 @@ macro_rules! counter {
         impl $name {
             /// Empty value in this unit.
             pub const ZERO: Self = Self(0);
+            /// Single unit value.
+            pub const ONE: Self = Self(1);
+            /// Construct from a numeric count.
+            pub const fn from_u64(value: u64) -> Self {
+                Self(value)
+            }
             /// Borrow the underlying count at a serialization or library boundary.
             pub const fn as_u64(self) -> u64 {
                 self.0
@@ -221,12 +232,20 @@ counter!(
     "Captured configuration publication revision."
 );
 counter!(PolicyRevision, "Captured permission policy revision.");
+counter!(
+    PlanRevision,
+    "Monotonic plan revision within one plan lifetime."
+);
 counter!(TokenCount, "Token quantity with checked arithmetic.");
 counter!(
     RequestCount,
     "Charged API attempts, independent of retries or tool steps."
 );
 counter!(CompactionCount, "Started logical context compactions.");
+counter!(
+    HealingRoundCount,
+    "Observed self-healing rounds under a run."
+);
 counter!(
     InputTokens,
     "Input usage, independent of output/reasoning usage."

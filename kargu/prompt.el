@@ -262,7 +262,9 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
 
 (defun kargu-prompt--tools-off-p ()
   "Return non-nil when the active request cannot use tools."
-  (not (kargu-tools-enabled-p)))
+  (if (fboundp 'kargu-tools-enabled-p)
+      (not (kargu-tools-enabled-p))
+    nil))
 
 (defconst kargu-prompt--no-tools-reminder
   "<system-reminder>\nThis model cannot call tools. Answer in plain text. Do not invent function-call markup.\n</system-reminder>"
@@ -317,13 +319,21 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
   "Ordered functions whose non-empty strings form the system prompt.")
 
 
+(defvar kargu--loop-run)
+
+(defun kargu-prompt--effective-overlay (&optional history)
+  "Return HISTORY's temporary overlay unless native backend owns the run."
+  (unless (and (boundp 'kargu--loop-run)
+               (plist-get kargu--loop-run :native-backend))
+    (kargu-history-overlay history)))
+
 (defun kargu-prompt-system-key (&optional history)
   "Return the current prompt identity for HISTORY or the current owner."
   (list (kargu-state-mode)
         (and (kargu-prompt--tools-off-p) t)
         (kargu--model)
         (and (fboundp 'kargu-eglot-connected-p) (kargu-eglot-connected-p) t)
-        (kargu-history-overlay history)
+        (kargu-prompt--effective-overlay history)
         (kargu-prompt--workspace)
         (kargu-prompt--context-file-name)
         (format-time-string "%Y-%m-%d")
@@ -334,7 +344,7 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
 
 (defun kargu--get-system-prompt (&optional history)
   "Return the active system prompt, honoring HISTORY's temporary overlay."
-  (or (kargu-history-overlay history)
+  (or (kargu-prompt--effective-overlay history)
       (string-join
        (append
         (delq nil (mapcar (lambda (fn)

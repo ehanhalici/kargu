@@ -54,12 +54,15 @@
 
 (defun kargu-chat-output-buffer ()
   "Return the active chat buffer for rendering."
-  (or (and (bound-and-true-p kargu--loop-run)
-           (plist-get kargu--loop-run :chat-buffer)
-           (buffer-live-p (plist-get kargu--loop-run :chat-buffer))
-           (plist-get kargu--loop-run :chat-buffer))
-      (and (derived-mode-p 'kargu-chat-mode) (current-buffer))
-      (kargu-chat-find-buffer)))
+  (let ((run (or (and (bound-and-true-p kargu--loop-run) kargu--loop-run)
+                 (and (fboundp 'kargu-application-current-run)
+                      (kargu-application-current-run)))))
+    (or (and run
+             (plist-get run :chat-buffer)
+             (buffer-live-p (plist-get run :chat-buffer))
+             (plist-get run :chat-buffer))
+        (and (derived-mode-p 'kargu-chat-mode) (current-buffer))
+        (kargu-chat-find-buffer))))
 
 (defun kargu-chat--compute-window-follow-states (windows in-start at)
   "Choose follow targets for WINDOWS using prompt IN-START and output AT."

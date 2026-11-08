@@ -373,3 +373,306 @@ fn native_diagnostics_use_exact_typed_freshness_and_ignore_editor_verdict_prose(
     }
     Ok(())
 }
+
+#[test]
+fn native_debugger_read_tools_dispatch_reverse_rpc_and_commit_results_to_history() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let (url, server, requests) = server(vec![
+        tool_reply("call-debug-stack", "debug_stack", json!({"max_levels": 5})),
+        answer("stack inspected"),
+    ])?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut input = prompt(root.path(), &url);
+    input["tools_enabled"] = json!(true);
+    input["editor_available"] = json!(["debug_stack"]);
+    input["tool_limit"] = json!(2);
+    input["turn_limit"] = json!(4);
+
+    begin(&mut peer, "debug-stack-pipeline", &scope, input)?;
+
+    let mut events = Vec::new();
+    let capture = reverse(&peer, "editor/prepare_tool", &mut events)?;
+    assert_eq!(capture["params"]["tool"], "debug_stack");
+    assert_eq!(capture["params"]["request_id"], "debug-stack-pipeline");
+    captured(
+        &mut peer,
+        &capture,
+        json!({"kind":"debugger","connection_id":"fixture-debugger","stop_generation":3,
+            "thread_id":1,"frame_id":0}),
+    )?;
+    let reverse_call = reverse(&peer, "editor/call_tool", &mut events)?;
+    assert_eq!(reverse_call["params"]["tool"], "debug_stack");
+    assert_eq!(
+        reverse_call["params"]["resource"]["connection_id"],
+        "fixture-debugger"
+    );
+    completed(
+        &mut peer,
+        &reverse_call,
+        "ok",
+        "Call Stack:\n  [0] main (src/main.rs:10)\n  [1] start (src/init.rs:2)",
+    )?;
+    // Duplicate callback must be discarded without producing a second debit or turn.
+    let _ = completed(&mut peer, &reverse_call, "ok", "DUPLICATE_CALL_COMPLETION");
+
+    let terminal = response(&peer, "debug-stack-pipeline", &mut events)?;
+    assert_eq!(terminal["result"]["status"], "completed");
+    assert_eq!(
+        terminal["result"]["accounting"]["budget"]["requests_spent"],
+        2
+    );
+
+    let _first = requests.recv_timeout(Duration::from_secs(2))?;
+    let after_call = requests.recv_timeout(Duration::from_secs(2))?;
+    let msg = after_call["messages"]
+        .as_array()
+        .ok_or("messages")?
+        .last()
+        .ok_or("tool result")?;
+    assert_eq!(msg["tool_call_id"], "call-debug-stack");
+    let content = msg["content"].as_str().ok_or("content")?;
+    assert!(content.contains("Call Stack:"));
+    assert!(!content.contains("DUPLICATE_CALL_COMPLETION"));
+
+    server.join().map_err(|_| "server panic")??;
+    Ok(())
+}
+
+#[test]
+fn native_debugger_mutation_tools_require_approval_before_issuing_and_commit_to_history()
+-> TestResult {
+    let root = tempfile::tempdir()?;
+    let (url, server, requests) = server(vec![
+        tool_reply("call-debug-step", "debug_step_over", json!({})),
+        answer("step completed"),
+    ])?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut input = prompt(root.path(), &url);
+    input["tools_enabled"] = json!(true);
+    input["editor_available"] = json!(["debug_step_over"]);
+    input["tool_limit"] = json!(2);
+    input["turn_limit"] = json!(4);
+
+    begin(&mut peer, "debug-step-pipeline", &scope, input)?;
+
+    let mut events = Vec::new();
+    let capture = reverse(&peer, "editor/prepare_tool", &mut events)?;
+    assert_eq!(capture["params"]["tool"], "debug_step_over");
+    captured(
+        &mut peer,
+        &capture,
+        json!({"kind":"debugger","connection_id":"fixture-debugger","stop_generation":3,"thread_id":1}),
+    )?;
+    let approval = reverse(&peer, "editor/approve_tool", &mut events)?;
+    assert_eq!(approval["params"]["safety"], "executes_arbitrary_code");
+    peer.send(json!({"jsonrpc":"2.0","id":approval["id"],"result":{
+        "scope":approval["params"]["scope"],"call_id":approval["params"]["call_id"],"approved":true}}))?;
+
+    let reverse_call = reverse(&peer, "editor/call_tool", &mut events)?;
+    assert_eq!(reverse_call["params"]["tool"], "debug_step_over");
+    completed(
+        &mut peer,
+        &reverse_call,
+        "ok",
+        "[DEBUGGER PAUSED: Action 'step_over' completed]\nLocation: src/main.rs:12",
+    )?;
+
+    let terminal = response(&peer, "debug-step-pipeline", &mut events)?;
+    assert_eq!(terminal["result"]["status"], "completed");
+
+    let _first = requests.recv_timeout(Duration::from_secs(2))?;
+    let after_call = requests.recv_timeout(Duration::from_secs(2))?;
+    let msg = after_call["messages"]
+        .as_array()
+        .ok_or("messages")?
+        .last()
+        .ok_or("tool result")?;
+    assert_eq!(msg["tool_call_id"], "call-debug-step");
+    assert!(
+        msg["content"]
+            .as_str()
+            .ok_or("content")?
+            .contains("[DEBUGGER PAUSED")
+    );
+
+    server.join().map_err(|_| "server panic")??;
+    Ok(())
+}
+
+#[test]
+fn native_symbol_xref_delegated_tools_dispatch_and_commit_to_history() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let (url, server, requests) = server(vec![
+        tool_reply(
+            "call-find-sym",
+            "lsp_find_symbol",
+            json!({"symbol_name": "TargetStruct"}),
+        ),
+        answer("symbol resolved"),
+    ])?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    let scope = peer.scope()?;
+    let mut input = prompt(root.path(), &url);
+    input["tools_enabled"] = json!(true);
+    input["editor_available"] = json!(["lsp_find_symbol"]);
+    input["tool_limit"] = json!(2);
+    input["turn_limit"] = json!(4);
+
+    begin(&mut peer, "find-sym-pipeline", &scope, input)?;
+
+    let mut events = Vec::new();
+    let capture = reverse(&peer, "editor/prepare_tool", &mut events)?;
+    assert_eq!(capture["params"]["tool"], "lsp_find_symbol");
+    captured(&mut peer, &capture, json!({"kind":"workspace"}))?;
+
+    let reverse_call = reverse(&peer, "editor/call_tool", &mut events)?;
+    assert_eq!(reverse_call["params"]["tool"], "lsp_find_symbol");
+    completed(
+        &mut peer,
+        &reverse_call,
+        "ok",
+        "src/types.rs:20: pub struct TargetStruct",
+    )?;
+
+    let terminal = response(&peer, "find-sym-pipeline", &mut events)?;
+    assert_eq!(terminal["result"]["status"], "completed");
+
+    let _first = requests.recv_timeout(Duration::from_secs(2))?;
+    let after_call = requests.recv_timeout(Duration::from_secs(2))?;
+    let msg = after_call["messages"]
+        .as_array()
+        .ok_or("messages")?
+        .last()
+        .ok_or("tool result")?;
+    assert_eq!(msg["tool_call_id"], "call-find-sym");
+    assert!(
+        msg["content"]
+            .as_str()
+            .ok_or("content")?
+            .contains("TargetStruct")
+    );
+
+    server.join().map_err(|_| "server panic")??;
+    Ok(())
+}
+
+#[test]
+fn delegated_tools_prepared_unissued_and_error_results_never_reduce_to_success() -> TestResult {
+    for case in ["capture_error", "rejected", "failed", "outcome_unknown"] {
+        let root = tempfile::tempdir()?;
+        let (url, server, requests) = server(vec![
+            tool_reply(
+                "call-non-ok",
+                if case == "capture_error" || case == "rejected" {
+                    "debug_step_over"
+                } else {
+                    "debug_stack"
+                },
+                json!({}),
+            ),
+            answer("tool finished"),
+        ])?;
+        let mut peer = Peer::start()?;
+        peer.initialize()?;
+        let scope = peer.scope()?;
+        let mut input = prompt(root.path(), &url);
+        input["tools_enabled"] = json!(true);
+        input["editor_available"] = json!(["debug_step_over", "debug_stack"]);
+        input["tool_limit"] = json!(2);
+        input["turn_limit"] = json!(4);
+
+        begin(&mut peer, "non-ok-pipeline", &scope, input)?;
+
+        let mut events = Vec::new();
+        let capture = reverse(&peer, "editor/prepare_tool", &mut events)?;
+
+        if case == "capture_error" {
+            // Emacs returns resource unavailable error
+            peer.send(json!({
+                "jsonrpc": "2.0",
+                "id": capture["id"],
+                "error": {"code": -32000, "message": "Editor resource unavailable"}
+            }))?;
+        } else {
+            captured(
+                &mut peer,
+                &capture,
+                json!({"kind":"debugger","connection_id":"fixture-debugger","stop_generation":3,
+                    "thread_id":1,"frame_id":0}),
+            )?;
+
+            if case == "rejected" {
+                let approval = reverse(&peer, "editor/approve_tool", &mut events)?;
+                peer.send(json!({"jsonrpc":"2.0","id":approval["id"],"result":{
+                    "scope":approval["params"]["scope"],"call_id":approval["params"]["call_id"],"approved":false}}))?;
+            } else {
+                let reverse_call = reverse(&peer, "editor/call_tool", &mut events)?;
+                if case == "failed" {
+                    completed(
+                        &mut peer,
+                        &reverse_call,
+                        "failed",
+                        "ERROR: breakpoint 99 not found",
+                    )?;
+                } else if case == "outcome_unknown" {
+                    completed(
+                        &mut peer,
+                        &reverse_call,
+                        "outcome_unknown",
+                        "Interrupted during pause",
+                    )?;
+                }
+            }
+        }
+
+        let terminal = response(&peer, "non-ok-pipeline", &mut events)?;
+        assert_eq!(terminal["result"]["status"], "completed");
+
+        let _first = requests.recv_timeout(Duration::from_secs(2))?;
+        let after_call = requests.recv_timeout(Duration::from_secs(2))?;
+        let msg = after_call["messages"]
+            .as_array()
+            .ok_or("messages")?
+            .last()
+            .ok_or("tool result")?;
+        assert_eq!(msg["tool_call_id"], "call-non-ok");
+        let content = msg["content"].as_str().ok_or("content")?;
+
+        assert!(
+            !content.contains("Operation completed"),
+            "{case}: must not reduce to success prose: {content}"
+        );
+        match case {
+            "capture_error" => {
+                assert!(
+                    content.contains("ERROR: editor resource capture unavailable"),
+                    "{content}"
+                );
+            }
+            "rejected" => {
+                assert!(
+                    content.contains("ERROR: operation rejected by policy or user"),
+                    "{content}"
+                );
+            }
+            "failed" => {
+                assert!(
+                    content.contains("ERROR: breakpoint 99 not found"),
+                    "{content}"
+                );
+            }
+            "outcome_unknown" => {
+                assert!(content.contains("ERROR: [INTERRUPTED]"), "{content}");
+            }
+            _ => {}
+        }
+
+        server.join().map_err(|_| "server panic")??;
+    }
+    Ok(())
+}

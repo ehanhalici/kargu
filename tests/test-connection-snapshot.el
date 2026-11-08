@@ -314,6 +314,32 @@
     (should (hash-table-p (gethash "default-headers" (gethash "wire" connection))))
     (should (= (gethash "turn_limit" arguments) (plist-get run :max-iterations)))))
 
+(ert-deftest kargu-native-loop-arguments-honor-user-preferences-and-budget-contract-test ()
+  "Test that kargu-loop-native--arguments honors user limits and parent budget deadline."
+  (let* ((credential (kargu-credential-scope--create :raw-secret "secret"))
+         (snapshot (kargu-connection-snapshot--create
+                    :provider "anthropic" :model "test-model"
+                    :endpoint "http://127.0.0.1:8080"
+                    :config-revision 1 :capabilities '(:tools t :stream t)
+                    :settings '(:wire (:auth "x-api-key"))
+                    :credential-scope credential))
+         (budget (kargu-budget-create :run-id "test-run"
+                                      :max-requests 42
+                                      :max-compactions 3
+                                      :timeout 180))
+         (run (list :session-id "s1" :project-root "/tmp/project" :mode 'agent
+                    :budget budget :tool-limit 8 :retry-observer "ui" :max-iterations 5))
+         (arguments (kargu-loop-native--arguments run snapshot))
+         (connection (gethash "connection" arguments))
+         (timeouts (gethash "timeouts" connection)))
+    (should (= (gethash "tool_limit" arguments) 8))
+    (should (= (gethash "turn_limit" arguments) 5))
+    (should (= (gethash "requests" (gethash "budget" arguments)) 42))
+    (should (= (gethash "compactions" (gethash "budget" arguments)) 3))
+    (should (equal (gethash "observer" (gethash "retry" arguments)) "ui"))
+    (should (<= 170000 (gethash "timeout_ms" arguments) 180000))
+    (should (equal (gethash "deadline_ms" timeouts) (gethash "timeout_ms" arguments)))))
+
 (provide 'tests/test-connection-snapshot)
 
 ;;; test-connection-snapshot.el ends here

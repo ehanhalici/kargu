@@ -12,6 +12,27 @@
 (declare-function kargu-chat--focus-selection "kargu/chat/prompt" (&optional open-company))
 (declare-function kargu-api-select--stay-on-field "kargu/api/select" (field))
 
+(defmacro kargu-test-with-session-bridge (&rest body)
+  "Execute BODY with a mock session bridge saving to local test storage."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'kargu-bridge-session-scope)
+              (lambda (_buf cb) (funcall cb (kargu-bridge--connection-create :state 'ready :epoch "mock-epoch") 'mock-scope nil)))
+             ((symbol-function 'kargu-bridge-session-save)
+              (lambda (_conn params cb &optional _buf)
+                (let* ((rec (gethash "record" params))
+                       (root (or (kargu-aget rec "project_root") default-directory)))
+                  (kargu-session-storage-write (kargu-aget rec "id") root rec)
+                  (when cb (funcall cb (kargu-bridge--object "status" "ok") nil)))))
+             ((symbol-function 'kargu-bridge-session-delete)
+              (lambda (_conn params cb &optional _buf)
+                (let* ((sid (gethash "session_id" params))
+                       (storage-dir (gethash "storage_root" params))
+                       (file (expand-file-name (format "%s.json" sid) storage-dir)))
+                  (when (file-exists-p file)
+                    (delete-file file))
+                  (when cb (funcall cb (kargu-bridge--object "status" "ok" "deleted" t) nil))))))
+     ,@body))
+
 (ert-deftest kargu-session-storage-paths-reject-traversal-and-symlinks-test ()
   "Session identities cannot read, delete or overwrite files outside storage."
   (kargu-test-with-git-repo nil
@@ -106,7 +127,7 @@
          (test-msgs '((("role" . "user") ("content" . "Hello Kargu"))
                       (("role" . "assistant") ("content" . "Hello! How can I help?")))))
     (unwind-protect
-        (progn
+        (kargu-test-with-session-bridge
           ;; Set up buf1
           (with-current-buffer buf1
             (kargu-chat-mode)
@@ -157,7 +178,7 @@
          (kargu-session--context
           (kargu-test-session-with-history :provider "openrouter" :model "kept-model")))
     (unwind-protect
-        (progn
+        (kargu-test-with-session-bridge
           (with-current-buffer buf1
             (kargu-chat-mode)
             (setq-local kargu-chat--project-root (file-name-as-directory proj-dir))
@@ -200,7 +221,7 @@
          (bufA (get-buffer-create "*kargu-chat-A*"))
          (bufB (get-buffer-create "*kargu-chat-B*")))
     (unwind-protect
-        (progn
+        (kargu-test-with-session-bridge
           (with-current-buffer bufA
             (kargu-chat-mode)
             (setq-local kargu-chat--project-root (file-name-as-directory projA))
@@ -245,7 +266,7 @@
          (buf-init (get-buffer-create "*kargu-chat-temp-init*"))
          (kargu-session-auto-restore t))
     (unwind-protect
-        (progn
+        (kargu-test-with-session-bridge
           ;; Create and save a session
           (with-current-buffer buf-init
             (kargu-chat-mode)
@@ -283,7 +304,7 @@
          (proj-root (file-name-as-directory proj))
          (buf (get-buffer-create "*kargu-chat-temp-del*")))
     (unwind-protect
-        (progn
+        (kargu-test-with-session-bridge
           (with-current-buffer buf
             (kargu-chat-mode)
             (setq-local kargu-chat--project-root proj-root)
@@ -365,7 +386,7 @@
 
          (buf (get-buffer-create "*kargu-save-empty*")))
     (unwind-protect
-        (progn
+        (kargu-test-with-session-bridge
           (with-current-buffer buf
             (kargu-chat-mode)
             (setq-local kargu-chat--project-root proj-root)
@@ -584,7 +605,7 @@
         (stop-called nil)
         (circuit-reset-called nil))
     (unwind-protect
-        (progn
+        (kargu-test-with-session-bridge
           (with-current-buffer buf-a
             (kargu-chat-mode)
             (kargu-history-append '(("role" . "user") ("content" . "keep me")))
@@ -623,6 +644,151 @@
       (kargu-application-set-active-run nil)
       (when (buffer-live-p buf-a) (kill-buffer buf-a))
       (when (buffer-live-p buf-b) (kill-buffer buf-b)))))
+
+(ert-deftest kargu-session-project-budget-invariants-test ()
+  "Native budget projections advance counters monotonically and reject decrement."
+  (let* ((session (kargu-session-create :id-value "test-mon-001"
+                                        :usage-value (list :requests 0)))
+         (snap1 (let ((ht (make-hash-table :test #'equal)))
+                  (puthash "requests_spent" 3 ht)
+                  (puthash "compactions_spent" 1 ht)
+                  (puthash "tokens_spent" 250 ht)
+                  (puthash "tokens_unknown" :json-false ht)
+                  (puthash "monetary_spent" 1500 ht)
+                  (puthash "monetary_unknown" :json-false ht)
+                  ht))
+         (snap2 (let ((ht (make-hash-table :test #'equal)))
+                  (puthash "requests_spent" 1 ht)
+                  (puthash "compactions_spent" 0 ht)
+                  (puthash "tokens_spent" 100 ht)
+                  (puthash "tokens_unknown" :json-false ht)
+                  (puthash "monetary_spent" 500 ht)
+                  (puthash "monetary_unknown" :json-false ht)
+                  ht))
+         (snap3 (let ((ht (make-hash-table :test #'equal)))
+                  (puthash "requests_spent" 5 ht)
+                  (puthash "compactions_spent" 2 ht)
+                  (puthash "tokens_spent" 600 ht)
+                  (puthash "tokens_unknown" t ht)
+                  (puthash "monetary_spent" 3000 ht)
+                  (puthash "monetary_unknown" t ht)
+                  ht)))
+    ;; Install snap1
+    (kargu-session-project-budget snap1 session)
+    (let ((usage (kargu-session-usage-value session)))
+      (should (= (plist-get usage :requests-spent) 3))
+      (should (= (plist-get usage :compactions-spent) 1))
+      (should (= (plist-get usage :tokens-spent) 250))
+      (should (= (plist-get usage :monetary-spent) 1500))
+      (should-not (plist-get usage :tokens-unknown))
+      (should-not (plist-get usage :monetary-unknown)))
+    ;; An older reply (snap2) cannot decrement counters
+    (kargu-session-project-budget snap2 session)
+    (let ((usage (kargu-session-usage-value session)))
+      (should (= (plist-get usage :requests-spent) 3))
+      (should (= (plist-get usage :compactions-spent) 1))
+      (should (= (plist-get usage :tokens-spent) 250))
+      (should (= (plist-get usage :monetary-spent) 1500)))
+    ;; Further advance with unknown usage (snap3)
+    (kargu-session-project-budget snap3 session)
+    (let ((usage (kargu-session-usage-value session)))
+      (should (= (plist-get usage :requests-spent) 5))
+      (should (= (plist-get usage :compactions-spent) 2))
+      (should (= (plist-get usage :tokens-spent) 600))
+      (should (= (plist-get usage :monetary-spent) 3000))
+      (should (eq (plist-get usage :tokens-unknown) t))
+      (should (eq (plist-get usage :monetary-unknown) t)))))
+
+(ert-deftest kargu-session-usage-and-context-info-preserves-unknown-test ()
+  "Missing token or pricing usage displays unknown and never zero."
+  (let* ((session (kargu-session-create :id-value "test-unk-001"
+                                        :usage-value (list :requests 0
+                                                           :tokens-unknown t
+                                                           :monetary-unknown t)))
+         (report (kargu-session-usage session))
+         (ctx (kargu-session-context-info session)))
+    (should (string-search "tokens-in: unknown" report))
+    (should (string-search "tokens-out: unknown" report))
+    (should (equal (plist-get ctx :used) "unknown"))
+    (should-not (plist-get ctx :percent))
+    (should (string-search "unknown" (plist-get ctx :formatted)))
+    (should-not (string-search "0/0" (plist-get ctx :formatted)))
+    (should-not (string-search "0%" (plist-get ctx :formatted)))))
+
+(ert-deftest kargu-session-chat-counters-isolation-test ()
+  "Two chat sessions maintain isolated token and spend counters."
+  (let* ((sess1 (kargu-session-create :id-value "chat-001"
+                                      :usage-value (list :requests 0)))
+         (sess2 (kargu-session-create :id-value "chat-002"
+                                      :usage-value (list :requests 0))))
+    (kargu-session-record-usage 100 50 sess1)
+    (kargu-session-record-usage 10 5 sess2)
+    (should (= (plist-get (kargu-session-usage-value sess1) :tokens-in) 100))
+    (should (= (plist-get (kargu-session-usage-value sess1) :tokens-out) 50))
+    (should (= (plist-get (kargu-session-usage-value sess2) :tokens-in) 10))
+    (should (= (plist-get (kargu-session-usage-value sess2) :tokens-out) 5))
+    ;; Projecting budget into sess1 leaves sess2 untouched
+    (let ((snap (let ((ht (make-hash-table :test #'equal)))
+                  (puthash "requests_spent" 4 ht)
+                  (puthash "tokens_spent" 500 ht)
+                  (puthash "monetary_spent" 2000 ht)
+                  ht)))
+      (kargu-session-project-budget snap sess1)
+      (should (= (plist-get (kargu-session-usage-value sess1) :requests-spent) 4))
+      (should (= (plist-get (kargu-session-usage-value sess1) :tokens-spent) 500))
+      (should-not (plist-get (kargu-session-usage-value sess2) :requests-spent))
+      (should (= (plist-get (kargu-session-usage-value sess2) :tokens-spent) 15)))))
+
+(ert-deftest kargu-session-monetary-reserved-and-distinguished-zero-test ()
+  "Active reservation is displayed, and known zero is distinct from unknown."
+  (let* ((sess-zero (kargu-session-create :id-value "zero-001"
+                                          :usage-value (list :requests 1
+                                                             :monetary-spent 0
+                                                             :monetary-reserved 50
+                                                             :monetary-unknown nil)))
+         (sess-unk (kargu-session-create :id-value "unk-001"
+                                         :usage-value (list :requests 1
+                                                            :monetary-spent 0
+                                                            :monetary-unknown t)))
+         (report-zero (kargu-session-usage sess-zero))
+         (report-unk (kargu-session-usage sess-unk)))
+    ;; Known zero spend formats as $0.000000, active reservation formats as $0.000050
+    (should (string-search "spent: $0.000000" report-zero))
+    (should (string-search "reserved: $0.000050" report-zero))
+    ;; Unknown spend formats as unknown, never 0 or free
+    (should (string-search "spent: unknown" report-unk))
+    (should-not (string-search "spent: $0.000000" report-unk))))
+
+(ert-deftest kargu-session-rejects-negative-or-invalid-dto-test ()
+  "Negative or invalid DTO projections are rejected without corrupting session."
+  (let* ((session (kargu-session-create :id-value "guard-001"
+                                        :usage-value (list :requests-spent 2
+                                                           :tokens-spent 100
+                                                           :monetary-spent 500)))
+         (orig (copy-tree (kargu-session-usage-value session))))
+    ;; Negative requests_spent
+    (let ((bad (make-hash-table :test #'equal)))
+      (puthash "requests_spent" -1 bad)
+      (should-error (kargu-session-project-budget bad session)))
+    (should (equal (kargu-session-usage-value session) orig))
+
+    ;; Negative tokens_spent
+    (let ((bad (make-hash-table :test #'equal)))
+      (puthash "tokens_spent" -100 bad)
+      (should-error (kargu-session-project-budget bad session)))
+    (should (equal (kargu-session-usage-value session) orig))
+
+    ;; Negative monetary_spent
+    (let ((bad (make-hash-table :test #'equal)))
+      (puthash "monetary_spent" -50 bad)
+      (should-error (kargu-session-project-budget bad session)))
+    (should (equal (kargu-session-usage-value session) orig))
+
+    ;; Negative monetary_reserved
+    (let ((bad (make-hash-table :test #'equal)))
+      (puthash "monetary_reserved" -10 bad)
+      (should-error (kargu-session-project-budget bad session)))
+    (should (equal (kargu-session-usage-value session) orig))))
 
 (provide 'tests/test-session)
 ;;; test-session.el ends here

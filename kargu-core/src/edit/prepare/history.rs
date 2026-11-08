@@ -87,14 +87,45 @@ pub(crate) struct AppliedPublication {
 }
 
 /// No retained baseline is different from an originally absent file.
-#[derive(Clone, Copy)]
+#[derive(Clone, Default)]
 pub(super) enum ChangeBaseline {
-    Known(Option<ContentHash>),
+    Known {
+        original: Option<ContentHash>,
+        diagnostics: super::verification::DiagnosticBaseline,
+    },
+    #[default]
     Unavailable,
 }
 impl ChangeBaseline {
-    pub(super) fn matches(self, hash: Option<ContentHash>) -> bool {
-        matches!(self, Self::Known(original) if original == hash)
+    pub(super) fn matches(&self, hash: Option<ContentHash>) -> bool {
+        matches!(self, Self::Known { original, .. } if *original == hash)
+    }
+    pub(super) fn without_diagnostics(&self) -> Self {
+        match self {
+            Self::Known { original, .. } => Self::Known {
+                original: *original,
+                diagnostics: super::verification::DiagnosticBaseline::Unavailable,
+            },
+            Self::Unavailable => Self::Unavailable,
+        }
+    }
+    pub(super) fn with_diagnostics(
+        &self,
+        diagnostics: super::verification::DiagnosticBaseline,
+    ) -> Self {
+        match self {
+            Self::Known { original, .. } => Self::Known {
+                original: *original,
+                diagnostics,
+            },
+            Self::Unavailable => Self::Unavailable,
+        }
+    }
+    pub(super) fn diagnostics(&self) -> &super::verification::DiagnosticBaseline {
+        match self {
+            Self::Known { diagnostics, .. } => diagnostics,
+            Self::Unavailable => &super::verification::DiagnosticBaseline::Unavailable,
+        }
     }
 }
 
@@ -126,6 +157,7 @@ pub(crate) struct ChangeSummary {
     revision: HistoryRevision,
     pending_files: FileCount,
     retained_files: FileCount,
+    verified_files: FileCount,
 }
 impl ChangeSummary {
     pub(super) fn capture(
@@ -137,12 +169,13 @@ impl ChangeSummary {
             .iter()
             .filter(|row| &row.session == session && row.service_id.is_none())
             .collect();
+        let pending = owned.iter().filter(|row| row.verification_pending).count();
+        let verified = owned.len().saturating_sub(pending);
         Ok(Self {
             revision,
-            pending_files: FileCount::try_from(
-                owned.iter().filter(|row| row.verification_pending).count(),
-            )?,
+            pending_files: FileCount::try_from(pending)?,
             retained_files: FileCount::try_from(owned.len())?,
+            verified_files: FileCount::try_from(verified)?,
         })
     }
 }
@@ -360,6 +393,10 @@ pub(super) fn execute(
                     "hunks": record.hunks,
                     "saved": record.saved,
                     "hook_modified": record.hook_modified,
+                    "baseline_available": matches!(
+                        record.baseline.diagnostics(),
+                        super::verification::DiagnosticBaseline::Captured { .. }
+                    ),
                     "verification_pending": record.verification_pending,
                 }))? {
                     break;

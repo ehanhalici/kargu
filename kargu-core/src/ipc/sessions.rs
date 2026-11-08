@@ -19,7 +19,7 @@ use crate::{
     application::{
         ClaimIntent, Mode, PreparedRun, RequestedWorkspace, RunClaim, RunHandle, RunScope,
         agent::{
-            AgentOptions, AgentPhase, AgentStop, AgentTool, ContinuationReason, ModelTurn,
+            AgentOptions, AgentPhase, AgentStop, AgentTool, AgentTurn, ContinuationReason,
             ModelTurnLimit, ToolAdmission,
         },
         budget::BudgetLimits,
@@ -171,6 +171,7 @@ struct PreparedStart {
     budget: BudgetLimits,
     retry: Option<RetryConfiguration>,
     edit_policy: crate::edit::prepare::ParentPolicy,
+    compact_threshold: crate::history::CompactThreshold,
 }
 struct Starting {
     claim: RunClaim,
@@ -182,9 +183,10 @@ struct Starting {
 }
 enum Work {
     Idle,
-    Preparing(JoinHandle<(ModelTurn, Result<HttpRequest, ApiError>)>),
+    Preparing(JoinHandle<(AgentTurn, Result<HttpRequest, ApiError>)>),
     Model {
         id: RpcId,
+        summary: bool,
     },
     Command {
         id: RpcId,
@@ -205,6 +207,7 @@ struct Running {
     budget: BudgetId,
     retry: Option<RetryConfiguration>,
     edit_policy: crate::edit::prepare::ParentPolicy,
+    compact_threshold: crate::history::CompactThreshold,
     work: Work,
     terminal: Option<AgentStop>,
     waiting: bool,
@@ -422,6 +425,7 @@ impl Sessions {
             let _lease = lease;
             let workspace = worker_claim.prepare_workspace()?;
             worker_claim.check_live()?;
+            let compact_threshold = target.model_policy.compact_threshold();
             let connection = target.prepare_connection(
                 &input.connection.0,
                 worker_claim.scope().session_id(),
@@ -441,6 +445,7 @@ impl Sessions {
                 budget: input.budget,
                 retry: input.retry,
                 edit_policy: input.edit_policy,
+                compact_threshold,
             })
         }))
     }
@@ -535,11 +540,14 @@ impl Sessions {
         };
         let Some((id, op)) = self.operations.iter_mut().find(|(_, op)| {
             matches!(&op.stage,
-            Stage::Running(running) if match &running.work { Work::Model { id } => id == &request, _ => false })
+            Stage::Running(running) if match &running.work { Work::Model { id, .. } => id == &request, _ => false })
         }) else {
             return Ok(Some(message));
         };
-        if op.owner.terminal.is_some() || !host.owns_read_scope(&op.owner.scope) {
+        if op.owner.terminal.is_some()
+            || !host.owns_read_scope(&op.owner.scope)
+            || matches!(&op.stage, Stage::Running(running) if matches!(running.work, Work::Model { summary: true, .. }))
+        {
             return Ok(None);
         }
         if message.get("method").and_then(Value::as_str) != Some("api/delta") {
@@ -739,6 +747,7 @@ impl Sessions {
             budget,
             retry: prepared.retry,
             edit_policy: prepared.edit_policy,
+            compact_threshold: prepared.compact_threshold,
             work: Work::Idle,
             terminal: None,
             waiting: false,
@@ -805,6 +814,7 @@ impl Sessions {
                 .map_err(|_| CoreError::CleanupFailed)?;
             match prepared {
                 Ok(request) if owner.terminal.is_none() => {
+                    let summary = matches!(turn, AgentTurn::Summary(_));
                     let native_id = RpcId::String(format!(
                         "s:model:{}:{}",
                         host.request_scope()?.as_str(),
@@ -818,7 +828,12 @@ impl Sessions {
                         running.budget.clone(),
                         running.retry.clone(),
                     ) {
-                        Ok(()) => running.work = Work::Model { id: native_id },
+                        Ok(()) => {
+                            running.work = Work::Model {
+                                id: native_id,
+                                summary,
+                            }
+                        }
                         Err(rejected) => {
                             let (_fault, turn) = *rejected;
                             drop(turn);
@@ -1171,6 +1186,10 @@ impl Sessions {
                 .edits
                 .conversation_changes(&owner.scope.session_id)?;
             let budget = ctx.api.close_run_budget(&running.run, &running.budget)?;
+            let healing_rounds = host
+                .actor_mut(&owner.scope)?
+                .healing_rounds(&running.run)
+                .ok();
             let actor = host.actor_mut(&owner.scope)?;
             actor.finish(&running.run)?;
             let revision = actor
@@ -1188,19 +1207,40 @@ impl Sessions {
             } else {
                 None
             };
-            let accounting = json!({"budget":budget,"changes":changes,"history_revision":revision,
-                "answer_message":answer_message,"failure":running.failure.as_ref().map(ApiError::snapshot)});
+            let mut accounting = json!({
+                "budget": budget,
+                "changes": changes,
+                "history_revision": revision,
+                "healing_rounds": healing_rounds.unwrap_or(crate::domain::HealingRoundCount::ZERO),
+            });
+            if let Some(object) = accounting.as_object_mut() {
+                if let Some(answer) = answer_message {
+                    object.insert("answer_message".to_owned(), json!(answer));
+                }
+                if let Some(failure) = running.failure.as_ref().map(ApiError::snapshot) {
+                    object.insert("failure".to_owned(), json!(failure));
+                }
+            }
             op.stage = Stage::Settled;
             finish_response(host, id, owner, terminal, Some(accounting), messages)?;
             return Ok(true);
         }
         match host.actor_mut(&owner.scope)?.agent_phase(&running.run)? {
             AgentPhase::Ready if !running.waiting => {
-                match host.actor_mut(&owner.scope)?.begin_model_turn(&running.run) {
+                match host
+                    .actor_mut(&owner.scope)?
+                    .begin_next_turn(&running.run, running.compact_threshold)
+                {
                     Ok(turn) => {
+                        if matches!(turn, AgentTurn::Summary(_))
+                            && let Some(message) =
+                                event(host, id, owner, "session/state", json!({"phase":"summary"}))?
+                        {
+                            messages.push(message);
+                        }
                         let connection = running.connection.clone();
                         running.work = Work::Preparing(tokio::task::spawn_blocking(move || {
-                            let result = connection.prepare_turn(&turn);
+                            let result = connection.prepare_agent_turn(&turn);
                             (turn, result)
                         }));
                     }
@@ -1449,9 +1489,10 @@ impl Sessions {
                 }
             }
             Err(error) => {
-                delivery.turn.failed(actor)?;
-                run.terminal = Some(AgentStop::Failed);
-                run.failure = Some(error);
+                if !fail_or_compact(actor, delivery.turn, &error)? {
+                    run.terminal = Some(AgentStop::Failed);
+                    run.failure = Some(error);
+                }
             }
         }
         if let Some(message) = event(
@@ -1465,6 +1506,20 @@ impl Sessions {
         }
         Ok(())
     }
+}
+
+fn fail_or_compact(
+    actor: &mut crate::application::ApplicationActor,
+    turn: AgentTurn,
+    error: &ApiError,
+) -> Result<bool, CoreError> {
+    if matches!(error, ApiError::ContextOverflow { .. })
+        && let AgentTurn::Model(model) = turn
+    {
+        return Ok(model.recover_overflow(actor).is_ok());
+    }
+    turn.failed(actor)?;
+    Ok(false)
 }
 
 fn revoke(host: &mut Host, op: &Operation) -> Result<(), CoreError> {
@@ -1518,11 +1573,16 @@ fn finish_response(
         });
         // The notification envelope already carries exact RunScope. Do not
         // duplicate it inside the event and overflow otherwise valid small frames.
-        let payload = json!({"status":status,"terminal":terminal,"accounting":accounting});
-        if let Some(message) = event(host, id, owner, "session/terminal", payload.clone())? {
+        let mut event_accounting = accounting.clone();
+        if let Some(object) = event_accounting.as_mut().and_then(Value::as_object_mut) {
+            object.remove("answer_message");
+        }
+        let event_payload =
+            json!({"status":status,"terminal":terminal,"accounting":event_accounting});
+        if let Some(message) = event(host, id, owner, "session/terminal", event_payload)? {
             messages.push(message);
         }
-        let mut reply = payload;
+        let mut reply = json!({"status":status,"terminal":terminal,"accounting":accounting});
         reply
             .as_object_mut()
             .ok_or(CoreError::InvalidToolOutput)?

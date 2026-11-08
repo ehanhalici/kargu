@@ -474,7 +474,7 @@ impl EditorCall {
                         }
                     }
                 };
-                let result = if result.0 == ToolOutcome::Cancelled
+                let mut result = if result.0 == ToolOutcome::Cancelled
                     && (expired || matches!(terminal, Some(CoreError::Deadline)))
                 {
                     (
@@ -501,8 +501,26 @@ impl EditorCall {
                     // Only this captured publication can consume the evidence.
                     // A refused metadata settlement keeps the debt. The read
                     // itself remains valid and must not complete its action twice.
-                    let _settled = host
-                        .actor_mut(scope)?
+                    let actor = host.actor_mut(scope)?;
+                    let verdict =
+                        if snapshot.freshness() == crate::sensors::diagnostics::Freshness::Fresh {
+                            actor
+                                .record_healing_observation(
+                                    self.call.run(),
+                                    ticket.healing_signature(&snapshot),
+                                )
+                                .ok()
+                                .flatten()
+                        } else {
+                            None
+                        };
+                    if let Some(note) = ticket.baseline_note(&snapshot, verdict)
+                        && result.1.len().saturating_add(note.as_str().len())
+                            <= crate::constants::limits::SENSOR_DIAGNOSTIC_BYTES
+                    {
+                        result.1.push_str(note.as_str());
+                    }
+                    let _settled = actor
                         .edits
                         .settle_verification(&scope.session_id, ticket, &snapshot)
                         .unwrap_or(false);
@@ -639,7 +657,7 @@ fn read_result(
     if completion.outcome != ToolOutcome::Ok {
         return Ok(ReadProgress::Done(
             completion.outcome,
-            completion.outcome.summary().to_owned(),
+            failure_text(completion.outcome, completion.text),
         ));
     }
     if call.name().as_str() == "lsp_diagnostics" {
@@ -797,5 +815,14 @@ fn editor_action(call: &AgentTool) -> Result<(ToolName, Value), CoreError> {
         ))
     } else {
         Ok((call.name().clone(), args))
+    }
+}
+
+fn failure_text(outcome: ToolOutcome, text: Option<String>) -> String {
+    match outcome {
+        ToolOutcome::Failed => text
+            .filter(|t| t.starts_with("ERROR:") || t.starts_with("[ERROR]"))
+            .unwrap_or_else(|| outcome.summary().to_owned()),
+        _ => outcome.summary().to_owned(),
     }
 }

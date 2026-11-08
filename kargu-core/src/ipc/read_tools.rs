@@ -75,6 +75,7 @@ struct PendingRead {
     edit: Option<crate::edit::prepare::PreparationId>,
     history: Option<crate::domain::HistoryUploadId>,
     refresh: Option<crate::application::host::ConfigurationRefreshMeta>,
+    persistence: Option<ReadScope>,
     call: Option<AgentTool>,
 }
 
@@ -108,6 +109,7 @@ enum ReadOperation {
     Rollback(crate::edit::prepare::RollbackWork),
     JournalRecovery(crate::edit::journal::RecoverInput),
     ModelCatalog(Box<ModelCatalogWork>),
+    Persistence(Box<crate::persistence::worker::PersistenceWork>),
 }
 enum ReadCompletion {
     History(Box<crate::history::History>),
@@ -116,6 +118,7 @@ enum ReadCompletion {
     Edit(Box<crate::edit::prepare::PreparationResult>),
     JournalRecovery(Box<crate::edit::journal::RecoveredJournal>),
     ModelCatalog(Box<ModelCatalogResult>),
+    Persistence(Box<crate::persistence::worker::PersistenceOutput>),
 }
 
 pub(crate) struct ModelCatalogWork {
@@ -144,6 +147,7 @@ impl ReadOperation {
             Self::JournalRecovery(_) => timeouts::EDIT_JOURNAL,
             Self::History(_) => timeouts::HISTORY_IMPORT,
             Self::ModelCatalog(_) => Duration::from_secs(15),
+            Self::Persistence(_) => timeouts::WORKSPACE_READ,
         }
     }
     fn execute(
@@ -152,6 +156,9 @@ impl ReadOperation {
         deadline: Instant,
     ) -> Result<ReadCompletion, CoreError> {
         match self {
+            Self::Persistence(work) => work
+                .execute(cancel, deadline)
+                .map(|output| ReadCompletion::Persistence(Box::new(output))),
             Self::ModelCatalog(work) => tokio::runtime::Handle::current().block_on(async move {
                 let snapshot =
                     crate::api::execute(work.request, |_| async { Ok(()) }, cancel.clone())
@@ -217,12 +224,18 @@ impl ReadCompletion {
                 "models": value.summaries,
                 "cached": false
             })),
+            Self::Persistence(value) => value.into_value(),
         }
     }
 }
 
 pub(super) enum ReadEvent {
     Message(Value),
+    Persistence {
+        id: RpcId,
+        scope: ReadScope,
+        result: Result<Box<crate::persistence::worker::PersistenceOutput>, CoreError>,
+    },
     History {
         id: RpcId,
         scope: ReadScope,
@@ -309,6 +322,20 @@ impl ReadEvent {
                     Err(fault) => fault.response(Some(&id)),
                 },
             ),
+            Self::Persistence { id, scope, result } => {
+                let result = if host.owns_read_scope(&scope) {
+                    result
+                } else {
+                    Err(CoreError::StaleOwner)
+                };
+                Some(match result {
+                    Ok(output) => match output.into_value() {
+                        Ok(value) => super::protocol::success(&id, value),
+                        Err(err) => fault(err).response(Some(&id)),
+                    },
+                    Err(err) => fault(err).response(Some(&id)),
+                })
+            }
             Self::Tool => None,
         }
     }
@@ -459,6 +486,7 @@ impl ReadTools {
                 edit: None,
                 history: None,
                 refresh: None,
+                persistence: None,
                 call: Some(call),
             },
         );
@@ -582,6 +610,23 @@ impl ReadTools {
         self.start_owned(id, ReadOwner::Session(scope), ReadOperation::History(input))
     }
 
+    pub fn start_persistence(
+        &mut self,
+        id: RpcId,
+        scope: ReadScope,
+        input: crate::persistence::worker::PersistenceWork,
+    ) -> Result<(), Fault> {
+        self.start_owned(
+            id.clone(),
+            ReadOwner::Session(scope.clone()),
+            ReadOperation::Persistence(Box::new(input)),
+        )?;
+        if let Some(request) = self.requests.get_mut(&id) {
+            request.persistence = Some(scope);
+        }
+        Ok(())
+    }
+
     fn start_owned(
         &mut self,
         id: RpcId,
@@ -624,6 +669,7 @@ impl ReadTools {
                 edit,
                 history,
                 refresh: None,
+                persistence: None,
                 call: None,
             },
         );
@@ -734,6 +780,20 @@ impl ReadTools {
                 result,
             }));
         }
+        if let Some(_scope) = request.persistence {
+            let ReadOwner::Session(owner_scope) = request.scope else {
+                return Some(Err(CoreError::CleanupFailed));
+            };
+            let result = result.and_then(|completion| match completion {
+                ReadCompletion::Persistence(output) => Ok(output),
+                _ => Err(CoreError::CleanupFailed),
+            });
+            return Some(Ok(ReadEvent::Persistence {
+                id,
+                scope: owner_scope,
+                result,
+            }));
+        }
         if let Some(meta) = request.refresh {
             let ReadOwner::Session(scope) = request.scope else {
                 return Some(Err(CoreError::CleanupFailed));
@@ -791,6 +851,7 @@ impl ReadTools {
                 | ReadEvent::History { .. }
                 | ReadEvent::ModelCatalog { .. }
                 | ReadEvent::ConfigurationRefresh { .. }
+                | ReadEvent::Persistence { .. }
                 | ReadEvent::Tool => Err(CoreError::CleanupFailed),
             })
         })
@@ -1094,6 +1155,24 @@ fn fault(error: CoreError) -> Fault {
             "Invalid native read response",
             "invalid_output",
         ),
+        CoreError::Persistence(crate::persistence::PersistenceError::StaleRevision) => (
+            codes::STALE_OWNER,
+            "Stale session revision",
+            "stale_revision",
+        ),
+        CoreError::Persistence(crate::persistence::PersistenceError::Collision) => (
+            codes::INVALID_STATE,
+            "Session collision",
+            "session_collision",
+        ),
+        CoreError::Persistence(crate::persistence::PersistenceError::PathEscape) => (
+            codes::REJECTED,
+            "Session path escapes storage root",
+            "path_escape",
+        ),
+        CoreError::Persistence(crate::persistence::PersistenceError::Validation(msg)) => {
+            (codes::INVALID_PARAMS, msg, "validation_failed")
+        }
         _ => (
             codes::RESOURCE_LIMIT,
             "Read resource limit reached",

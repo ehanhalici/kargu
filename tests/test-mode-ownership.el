@@ -89,5 +89,32 @@
       (should-error (kargu-state-set-mode 'agent) :type 'user-error)
       (should (eq (kargu-state-mode) 'ask)))))
 
+(ert-deftest kargu-mode-port-commits-native-dto-and-propagates-refusal-test ()
+  "The mode port commits to the native actor and fails closed on refusal."
+  (with-temp-buffer
+    (let (committed-mode committed-debug-ready port-failure events)
+      (let ((kargu-mode-port
+             (lambda (_session desired debug-ready callback)
+               (setq committed-mode desired
+                     committed-debug-ready debug-ready)
+               (if port-failure
+                   (funcall callback nil port-failure)
+                 (funcall callback (list :mode desired :debug-ready debug-ready :revision 1) nil)))))
+        ;; Success case
+        (kargu-set-mode 'agent (lambda (mode error) (push (list mode error) events)))
+        (should (eq (kargu-state-mode) 'agent))
+        (should (eq committed-mode 'agent))
+        (should-not committed-debug-ready)
+        (should (equal events '((agent nil))))
+
+        ;; Failure case (e.g. refused by native actor)
+        (setq port-failure "Native refusal: active work owns the mode"
+              events nil)
+        (kargu-set-mode 'plan (lambda (mode error) (push (list mode error) events)))
+        (should (eq (kargu-state-mode) 'agent))
+        (should (= (length events) 1))
+        (should-not (caar events))
+        (should (equal (cadar events) "Native refusal: active work owns the mode"))))))
+
 (provide 'tests/test-mode-ownership)
 ;;; test-mode-ownership.el ends here

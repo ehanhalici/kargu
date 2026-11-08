@@ -212,14 +212,60 @@
                (lambda (&rest _) (ert-fail "Folder mention listed a directory in Elisp")))
               ((symbol-function 'directory-files-recursively)
                (lambda (&rest _) (ert-fail "Folder mention scanned recursively in Elisp"))))
-      (let ((out (kargu-attach-test--expand "see @folder:src then @git:diff and @git:staged")))
+      (let ((out (kargu-attach-test--expand "see @folder:src then @folder:src:2 and @git:diff and @git:staged")))
         (should (string-search "<attached_folder path=\"src\">" out))
         (should (string-search "one.el" out))
         (should (string-search "two.el" out))
+        (should (string-search "<attached_folder path=\"src:2\">" out))
         (should (string-search "<attached_git target=\"git:diff\">" out))
         (should (string-search "+changed" out))
         (should (string-search "<attached_git target=\"git:staged\">" out))
         (should (string-search "+staged" out))))))
+
+(ert-deftest kargu-attach-buffer-mentions-respect-grants-and-isolate-boundaries-test ()
+  "Buffer mentions require explicit grants for fileless/out-of-root and reject TRAMP/archives."
+  (let ((scratch (get-buffer-create "*test-kargu-scratch*"))
+        (hidden (get-buffer-create " *test-kargu-hidden*"))
+        (archive (get-buffer-create "archive.tar:member.txt"))
+        (tramp (get-buffer-create "*test-kargu-tramp*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer scratch
+            (erase-buffer) (insert "scratch content\n"))
+          (with-current-buffer hidden
+            (erase-buffer) (insert "secret hidden\n"))
+          (with-current-buffer archive
+            (erase-buffer) (insert "archive text\n"))
+          (with-current-buffer tramp
+            (setq-local buffer-file-name "/ssh:remote.host:/tmp/remote.txt")
+            (erase-buffer) (insert "remote secret\n"))
+          ;; 1. Missing buffer says not found
+          (let ((out (kargu-attach-test--expand "see @buff:nonexistent")))
+            (should (string-search "<code_selection path=\"nonexistent\">" out))
+            (should (string-search "(buffer not found)" out)))
+          ;; 2. Hidden buffer is rejected
+          (let ((out (kargu-attach-test--expand "see @buff:\" *test-kargu-hidden*\"")))
+            (should (string-search "(hidden buffers cannot be attached)" out)))
+          ;; 3. Foreign archive buffer is rejected
+          (let ((out (kargu-attach-test--expand "see @buff:archive.tar:member.txt")))
+            (should (string-search "(foreign archive buffers are unavailable)" out)))
+          ;; 4. Fileless buffer without grant is rejected
+          (let ((kargu-chat-buffer-grants nil))
+            (let ((out (kargu-attach-test--expand "see @buff:*test-kargu-scratch*")))
+              (should (string-search "(fileless buffer requires explicit grant)" out))
+              (should-not (string-search "scratch content" out))))
+          ;; 5. Fileless buffer with explicit grant succeeds
+          (let ((kargu-chat-buffer-grants '("*test-kargu-scratch*")))
+            (let ((out (kargu-attach-test--expand "see @buff:*test-kargu-scratch*")))
+              (should (string-search "<attached_buffer name=\"*test-kargu-scratch*\">" out))
+              (should (string-search "scratch content" out))))
+          ;; 6. Simulated remote TRAMP buffer is rejected without fallback
+          (let ((out (kargu-attach-test--expand "see @buff:*test-kargu-tramp*")))
+            (should (string-search "(remote TRAMP buffers are unavailable)" out))))
+      (kill-buffer scratch)
+      (kill-buffer hidden)
+      (kill-buffer archive)
+      (kill-buffer tramp))))
 
 (provide 'tests/test-attach)
 ;;; test-attach.el ends here

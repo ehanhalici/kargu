@@ -12,6 +12,8 @@
 (require 'tests/test-native-symbols)
 (require 'tests/test-stream)
 (require 'kargu/bridge/sensor/diagnostics)
+(require 'kargu/bridge/edit/batch)
+(require 'kargu/bridge/edit/history)
 (require 'kargu/loop/native-owner)
 
 (defun kargu-native-diagnostics-test--backend (report &rest _)
@@ -309,6 +311,160 @@
     (put type 'severity nil)
     (let ((capture (kargu-bridge-diagnostics--facts finding)))
       (should (eq (gethash "flymake" (gethash "severity" (car capture))) :json-null)))))
+
+(ert-deftest kargu-native-diagnostics-pre-existing-error-baseline-settles-only-for-same-producer-real-pipe-test ()
+  (kargu-bridge-test--with-core
+    (let* ((root (make-temp-file "kargu-native-baseline-" t))
+           (journal (make-temp-file "kargu-native-baseline-journal-" t))
+           (kargu-bridge-edit-batch-journal-directory journal)
+           (application (kargu-application-create))
+           (path (expand-file-name "source.el" root))
+           (text "prefix\n  🦀β updated\n")
+           source server requests done result failure)
+      (unwind-protect
+          (cl-letf (((symbol-function 'trusted-content-p) (lambda () t)))
+            (cl-labels ((reply (name arguments)
+                          (json-serialize
+                           (kargu-bridge--object
+                            "choices" (vector
+                                       (kargu-bridge--object
+                                        "message" (kargu-bridge--object
+                                                   "role" "assistant" "content" :json-null
+                                                   "tool_calls" (vector (kargu-bridge--object
+                                                                         "id" name "type" "function"
+                                                                         "function" (kargu-bridge--object
+                                                                                     "name" name "arguments" (decode-coding-string (json-serialize arguments) 'utf-8-unix)))))
+                                        "finish_reason" "tool_calls"))) :null-object :json-null)))
+              (write-region "prefix\n  🦀β suffix\n" nil path nil 'silent)
+              (setq source (find-file-noselect path))
+              (with-current-buffer source
+                (emacs-lisp-mode)
+                (setq-local kargu-application-owner application
+                            flymake-diagnostic-functions '(kargu-native-diagnostics-test--backend))
+                (flymake-mode 1)
+                (flymake-start)
+                (add-hook 'after-save-hook #'flymake-start nil t))
+              (let* ((write (reply "write_file" (kargu-bridge--object "file_path" "source.el" "contents" text)))
+                     (diagnose (reply "lsp_diagnostics" (kargu-bridge--object "file_path" "source.el")))
+                     (answer "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"done\"},\"finish_reason\":\"stop\"}]}"))
+                (setq server (kargu-stream-test--server
+                              write nil nil (lambda (body) (push (kargu--json-decode-safe body) requests))
+                              nil nil nil (list (list :body write) (list :body diagnose) (list :body answer)))))
+              (with-current-buffer source
+                (kargu-test-native-owned-start
+                 application
+                 (kargu-bridge--object
+                  "root" (directory-file-name root) "mode" "agent"
+                  "prompt" (kargu-bridge--object "role" "user" "content" "edit with pre-existing diagnostic")
+                  "tools_enabled" t "editor_available" ["write_file" "lsp_diagnostics"]
+                  "tool_limit" 2 "turn_limit" 3 "timeout_ms" 10000
+                  "config_revision" 1 "policy_revision" 1
+                  "edit_policy" (kargu-bridge--object "review_mode" "auto" "save_policy" "save")
+                  "connection" (kargu-bridge--object
+                                "url" (format "http://127.0.0.1:%d/v1" (process-contact server :service))
+                                "model" "fixture" "headers" (kargu-bridge--object) "stream" :json-false
+                                "timeouts" (kargu-bridge--object "connect_ms" 1000 "first_byte_ms" 1000 "deadline_ms" 8000)))
+                 (lambda (value fault) (setq result value failure fault done t)) :owner source))
+              (kargu-bridge-test--wait (lambda () done))
+              (should-not failure)
+              (should (equal (gethash "status" result) "completed"))
+              (let* ((accounting (gethash "accounting" result))
+                     (changes (gethash "changes" accounting)))
+                (should (= (gethash "pending_files" changes) 0))
+                (should (= (gethash "retained_files" changes) 1)))
+              (let* ((messages (gethash "messages" (car requests)))
+                     (diagnostic (aref messages (1- (length messages))))
+                     (content (gethash "content" diagnostic)))
+                (should (equal (gethash "tool_call_id" diagnostic) "lsp_diagnostics"))
+                (should (string-match-p "Baseline comparison: 0 new error(s), 1 pre-existing error(s), 0 resolved error(s)\\." content)))))
+        (when (and (processp server) (process-live-p server)) (delete-process server))
+        (when (buffer-live-p source)
+          (with-current-buffer source (set-buffer-modified-p nil)) (kill-buffer source))
+        (delete-directory root t)
+        (delete-directory journal t)))))
+
+(defun kargu-native-diagnostics-test--error-backend (report &rest _)
+  "Publish a raw error finding with valid positions."
+  (funcall report (list (flymake-make-diagnostic (current-buffer) 1 2 :error "error finding 🦀"))))
+
+(ert-deftest kargu-native-diagnostics-negative-corpus-preserves-pending-debt-real-pipe-test ()
+  "False-clean prose, missing/unavailable/error diagnostics never settle receipt evidence;
+pending verification debt is preserved."
+  (dolist (case '(false-clean error unavailable))
+    (kargu-bridge-test--with-core
+      (let* ((root (make-temp-file "kargu-native-neg-" t))
+             (journal (make-temp-file "kargu-native-neg-journal-" t))
+             (kargu-bridge-edit-batch-journal-directory journal)
+             (application (kargu-application-create))
+             (path (expand-file-name "source.el" root))
+             (text "new 🦀\n")
+             source server requests done result failure)
+        (unwind-protect
+            (cl-letf (((symbol-function 'trusted-content-p) (lambda () t)))
+              (cl-labels ((reply (name arguments)
+                            (json-serialize
+                             (kargu-bridge--object
+                              "choices" (vector
+                                         (kargu-bridge--object
+                                          "message" (kargu-bridge--object
+                                                     "role" "assistant" "content" :json-null
+                                                     "tool_calls" (vector (kargu-bridge--object
+                                                                           "id" name "type" "function"
+                                                                           "function" (kargu-bridge--object
+                                                                                       "name" name "arguments" (decode-coding-string (json-serialize arguments) 'utf-8-unix)))))
+                                          "finish_reason" "tool_calls"))) :null-object :json-null)))
+                (write-region "old\n" nil path nil 'silent)
+                (setq source (find-file-noselect path))
+                (with-current-buffer source
+                  (emacs-lisp-mode)
+                  (setq-local kargu-application-owner application)
+                  (pcase case
+                    ('error
+                     (setq-local flymake-diagnostic-functions '(kargu-native-diagnostics-test--error-backend))
+                     (flymake-mode 1))
+                    ('unavailable
+                     (flymake-mode -1))
+                    (_
+                     (setq-local flymake-diagnostic-functions '(kargu-native-diagnostics-test--clean-backend))
+                     (flymake-mode 1)))
+                  (add-hook 'after-save-hook #'flymake-start nil t))
+                (let* ((write (reply "write_file" (kargu-bridge--object "file_path" "source.el" "contents" text)))
+                       (diagnose (reply "lsp_diagnostics" (kargu-bridge--object "file_path" "source.el")))
+                       (answer "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"FORGED_CLEAN_PROSE\"},\"finish_reason\":\"stop\"}]}")
+                       (replies (if (eq case 'false-clean)
+                                    (list (list :body write) (list :body answer))
+                                  (list (list :body write) (list :body diagnose) (list :body answer)))))
+                  (setq server (kargu-stream-test--server
+                                write nil nil (lambda (body) (push (kargu--json-decode-safe body) requests))
+                                nil nil nil replies)))
+                (with-current-buffer source
+                  (kargu-test-native-owned-start
+                   application
+                   (kargu-bridge--object
+                    "root" (directory-file-name root) "mode" "agent"
+                    "prompt" (kargu-bridge--object "role" "user" "content" "negative verification corpus")
+                    "tools_enabled" t "editor_available" ["write_file" "lsp_diagnostics"]
+                    "tool_limit" 2 "turn_limit" 3 "timeout_ms" 10000
+                    "config_revision" 1 "policy_revision" 1
+                    "edit_policy" (kargu-bridge--object "review_mode" "auto" "save_policy" "save")
+                    "connection" (kargu-bridge--object
+                                  "url" (format "http://127.0.0.1:%d/v1" (process-contact server :service))
+                                  "model" "fixture" "headers" (kargu-bridge--object) "stream" :json-false
+                                  "timeouts" (kargu-bridge--object "connect_ms" 1000 "first_byte_ms" 1000 "deadline_ms" 8000)))
+                   (lambda (value fault) (setq result value failure fault done t)) :owner source))
+                (kargu-bridge-test--wait (lambda () done))
+                (let* ((accounting (and (hash-table-p result) (gethash "accounting" result)))
+                       (changes (and (hash-table-p accounting) (gethash "changes" accounting))))
+                  (should-not failure)
+                  (should (equal (gethash "status" result) "completed"))
+                  ;; Debt MUST be preserved (pending_files = 1) in all negative cases!
+                  (should (= (gethash "pending_files" changes) 1))
+                  (should (= (gethash "retained_files" changes) 1)))))
+          (when (and (processp server) (process-live-p server)) (delete-process server))
+          (when (buffer-live-p source)
+            (with-current-buffer source (set-buffer-modified-p nil)) (kill-buffer source))
+          (delete-directory root t)
+          (delete-directory journal t))))))
 
 (provide 'tests/test-native-diagnostics)
 ;;; test-native-diagnostics.el ends here

@@ -14,6 +14,8 @@
 (require 'cl-lib)
 (require 'tests/test-native-session)
 (require 'kargu/bridge/sensor/symbols)
+(require 'kargu/tools/lsp/skeleton)
+(require 'kargu/chat/attach)
 
 (defun kargu-native-symbols-test--range ()
   "Return a two-scalar range containing an emoji and a Greek letter."
@@ -220,6 +222,41 @@
                    (lambda (&rest _) (ert-fail "Late symbol reply performed another capture"))))
           (funcall success []))
         (should (= (length replies) 1))))))
+
+(ert-deftest kargu-native-symbols-skeleton-gathering-is-non-recursive-and-bounded-test ()
+  (let ((root (make-temp-file "kargu-skeleton-nonrec-" t)))
+    (unwind-protect
+        (let* ((file-a (expand-file-name "a.el" root))
+               (buf-a (find-file-noselect file-a))
+               delivered)
+          (with-current-buffer buf-a
+            (emacs-lisp-mode)
+            (insert "(defun alpha () t)\n")
+            (save-buffer))
+          (cl-letf (((symbol-function 'kargu-eglot-connected-p) (lambda () nil))
+                    ((symbol-function 'kargu-lsp-project-root) (lambda () root)))
+            (kargu-lsp--gather-symbols
+             (lambda (items err)
+               (setq delivered (list items err))))
+            (should-not (cadr delivered))
+            (should (consp (car delivered)))
+            (let ((first-item (caar delivered)))
+              (should (equal (car first-item) file-a))
+              (should (equal (nth 2 first-item) "alpha"))))
+          (when (buffer-live-p buf-a) (kill-buffer buf-a)))
+      (delete-directory root t))))
+
+(ert-deftest kargu-native-symbols-mention-symbol-selection-uses-document-symbols-test ()
+  (let ((root (make-temp-file "kargu-mention-sym-" t)))
+    (unwind-protect
+        (let ((file-py (expand-file-name "mod.py" root)))
+          (with-temp-file file-py
+            (insert "def first():\n    return 1\n\ndef second():\n    return 2\n"))
+          (let ((range (kargu-chat--extract-symbol-range file-py "second")))
+            (should (consp range))
+            (should (= (car range) 4))
+            (should (>= (cdr range) 4))))
+      (delete-directory root t))))
 
 (provide 'tests/test-native-symbols)
 ;;; test-native-symbols.el ends here
