@@ -111,8 +111,9 @@ On each commit the hook:
    the panic-free deny list on `--lib --bins`, `cargo test` (including
    `compile_fail` proofs) and `arch-checker` (with baseline and ratchet).
 
-Build output is cached in `.git/arch-checker-cache`. Without `cargo` on `PATH`
-the hook uses the repository's `shell.nix`.
+Build output is cached in `.git/arch-checker-cache`. Cargo runs directly when
+`PATH` has a complete toolchain (`rustc -vV` succeeds from `/`, which a bare
+rustup shim does not), otherwise inside the repository's `shell.nix`.
 
 ## Known limits and how to close them
 

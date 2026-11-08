@@ -31,14 +31,16 @@ cache=  # set in main: .git/arch-checker-cache
 say() { printf '%s\n' "$*" >&2; }
 fail() { say "pre-commit: $*"; exit 1; }
 
-# Run cargo directly, or inside the repository's Nix shell when no working
-# toolchain is on PATH (a rustup shim without an installed toolchain counts as
-# absent: it has `cargo` but `rustc -V` fails).
+# Run cargo directly when PATH has a complete toolchain, otherwise inside the
+# repository's shell.nix.  "Complete" is probed from `/`: a rustup `rustc`
+# shim answers only inside a directory with a toolchain file, yet cargo also
+# runs rustc from dependency directories, so a probe from the crate itself
+# would pass and the build would then fail.
 cargo_in() {
     local dir=$1; shift
-    if (cd "$dir" && cargo -V && rustc -V) >/dev/null 2>&1; then
+    if command -v cargo >/dev/null 2>&1 && (cd / && rustc -vV) >/dev/null 2>&1; then
         (cd "$dir" && cargo "$@")
-    elif command -v nix-shell >/dev/null 2>&1 && [[ -f "$repo/shell.nix" ]]; then
+    elif [[ -f "$repo/shell.nix" ]] && command -v nix-shell >/dev/null 2>&1; then
         local quoted; printf -v quoted '%q ' "$@"
         # pipefail reports nix-shell's status; an empty filter is not a failure.
         (cd "$dir" && nix-shell "$repo/shell.nix" --run "cargo $quoted" 2>&1 |
