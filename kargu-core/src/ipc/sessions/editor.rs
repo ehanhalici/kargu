@@ -140,7 +140,7 @@ impl EditorCall {
         messages: &mut Vec<Value>,
     ) -> Result<Self, Box<(CoreError, AgentTool)>> {
         let result = (|| {
-            call.run().settings().workspace.revalidate()?;
+            call.run().settings().workspace().revalidate()?;
             let deadline = deadline(&call)?;
             let id = reverse_id(host, &call, "capture")?;
             let message = request(host, forward, &id, &call, "editor/prepare_tool", json!({}))?;
@@ -529,7 +529,7 @@ impl EditorCall {
         {
             self.verification = host.actor_mut(scope)?.edits.capture_verification(
                 &scope.session_id,
-                self.call.run().settings().workspace.path(),
+                self.call.run().settings().workspace().path(),
                 document,
             );
         }
@@ -643,7 +643,7 @@ fn read_result(
         ));
     }
     if call.name().as_str() == "lsp_diagnostics" {
-        call.run().settings().workspace.revalidate()?;
+        call.run().settings().workspace().revalidate()?;
         let (freshness, text) = match (resource, completion.observation) {
             (
                 EditorResource::Document { document },
@@ -673,7 +673,7 @@ fn read_result(
         call.name().as_str(),
         "read_file_symbols" | "read_symbol" | "edit_by_lsp"
     ) {
-        call.run().settings().workspace.revalidate()?;
+        call.run().settings().workspace().revalidate()?;
         let EditorResource::LanguageDocument { document, source } = resource else {
             return Err(CoreError::InvalidToolOutput);
         };
@@ -760,7 +760,7 @@ pub(super) fn request(
     extra: Value,
 ) -> Result<Value, CoreError> {
     let mut params = json!({"request_id":forward.value(),"connection_epoch":host.request_scope()?.as_str(),
-        "scope":call.run().scope(),"root":call.run().settings().workspace.path(),
+        "scope":call.run().scope(),"root":call.run().settings().workspace().path(),
         "call_id":call.id(),"tool":call.name(),"arguments":call.arguments()});
     if call.name().as_str() == "edit_by_lsp"
         && matches!(method, "editor/prepare_tool" | "editor/call_tool")

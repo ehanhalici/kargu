@@ -72,7 +72,7 @@ pub(super) struct BudgetRef {
 pub(super) struct Charge {
     pub id: BudgetId,
     ticket: AttemptCharge,
-    pub deadline: Deadline,
+    deadline: Deadline,
 }
 
 /// Internal admission taxonomy. RPC strings exist only in the wire projection.
@@ -478,6 +478,13 @@ fn stale() -> Fault {
         "stale_owner",
         "Budget belongs to another or closed accounting lifetime",
     )
+}
+
+impl Charge {
+    /// The `deadline` field.
+    pub fn deadline(&self) -> Deadline {
+        self.deadline
+    }
 }
 
 #[cfg(test)]

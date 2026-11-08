@@ -62,7 +62,7 @@ impl WireCodec {
         payload: Value,
         tuning: &super::policy::RequestTuning,
     ) -> Result<Value, ApiError> {
-        tuning.apply(payload, self.spec.policy(), self.spec.reasoning)
+        tuning.apply(payload, self.spec.policy(), self.spec.reasoning())
     }
     /// Encode only opaque continuation blocks from this same captured authority.
     pub fn encode(&self, mut payload: Value) -> Result<Value, ApiError> {

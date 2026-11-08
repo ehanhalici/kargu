@@ -189,7 +189,7 @@ pub struct CommandSpec {
     cwd: Workspace,
     timeout: ExecutionTimeout,
     pub(crate) idle_timeout: IdleTimeout,
-    pub(crate) capture: CapturePolicy,
+    capture: CapturePolicy,
     pub(crate) success_codes: SuccessCodes,
     pub(crate) output_limit: OutputLimit,
     pub(crate) stderr: StderrPolicy,
@@ -341,7 +341,7 @@ impl CommandSpec {
             snapshot.revalidate()?;
         }
         run.check_live()?;
-        run.settings().workspace.revalidate()?;
+        run.settings().workspace().revalidate()?;
         self.cwd.revalidate()?;
         for target in &self.read_targets {
             target.revalidate()?;
@@ -353,7 +353,7 @@ impl CommandSpec {
             }
             None => false,
         };
-        if !isolated && !self.cwd.path.starts_with(run.settings().workspace.path()) {
+        if !isolated && !self.cwd.path.starts_with(run.settings().workspace().path()) {
             return Err(CoreError::Rejected);
         }
         let held = self.executable.metadata()?;
@@ -1177,5 +1177,12 @@ impl CommandSpec {
     /// The `timeout` field.
     pub(crate) fn timeout(&self) -> &ExecutionTimeout {
         &self.timeout
+    }
+}
+
+impl CommandSpec {
+    /// The `capture` field.
+    pub(crate) fn capture(&self) -> CapturePolicy {
+        self.capture
     }
 }

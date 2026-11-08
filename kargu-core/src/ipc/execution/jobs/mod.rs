@@ -105,7 +105,7 @@ impl Jobs {
         supervisor: &ProcessSupervisor,
     ) -> Result<Value, CoreError> {
         let pid = supervisor.process_id(&run, &id)?;
-        let root = run.settings().workspace.path().to_owned();
+        let root = run.settings().workspace().path().to_owned();
         let claim_deadline = Instant::now()
             .checked_add(timeouts::JOB_CLAIM)
             .ok_or(CoreError::ArithmeticOverflow)?;

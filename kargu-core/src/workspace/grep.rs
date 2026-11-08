@@ -231,7 +231,10 @@ mod tests {
         }))?;
         let (command, _, report) = input.prepare()?;
         assert_eq!(command.timeout().duration(), Some(timeouts::WORKSPACE_READ));
-        assert_eq!(command.capture.records().map(RecordLimit::as_u64), Some(4));
+        assert_eq!(
+            command.capture().records().map(RecordLimit::as_u64),
+            Some(4)
+        );
         assert_eq!(command.environment.entries().count(), 1);
         assert!(command.arguments.iter().any(|arg| arg == "--line-buffered"));
         assert!(!command.arguments.iter().any(|arg| arg == "--max-count"));

@@ -448,7 +448,7 @@ impl ReadTools {
             return Err(Box::new((error, call)));
         }
         let cancel = call.run().cancel_token();
-        let workspace = call.run().settings().workspace.clone();
+        let workspace = call.run().settings().workspace().clone();
         self.requests.insert(
             id.clone(),
             PendingRead {
@@ -887,7 +887,7 @@ fn prepare_call(
     run.check_live()?;
     let args: Value =
         serde_json::from_str(arguments.get()).map_err(|_| CoreError::InvalidToolOutput)?;
-    let root = run.settings().workspace.path();
+    let root = run.settings().workspace().path();
     match name.as_str() {
         "find_files" => {
             let pattern = string_arg(&args, &["pattern"])?.ok_or(CoreError::InvalidValue {

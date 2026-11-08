@@ -83,7 +83,7 @@ impl ParentEdit {
     }
     pub(super) fn check_begin(&self, input: &Begin) -> Result<(), CoreError> {
         self.run.check_live()?;
-        if input.root != self.run.settings().workspace.path()
+        if input.root != self.run.settings().workspace().path()
             || input.mode != self.run.settings().mode
             || input.config_revision != self.run.scope().config_revision()
             || input.policy_revision != self.run.scope().policy_revision()
@@ -130,7 +130,7 @@ impl ParentEdit {
         let path = || {
             let path = std::path::Path::new(text("file_path")?);
             let relative = if path.is_absolute() {
-                path.strip_prefix(self.run.settings().workspace.path())
+                path.strip_prefix(self.run.settings().workspace().path())
                     .map_err(|_| CoreError::Rejected)?
             } else {
                 path
@@ -156,12 +156,12 @@ impl ParentEdit {
         if !valid {
             return Err(EditError::InvalidEvidence.into());
         }
-        self.run.settings().workspace.revalidate()
+        self.run.settings().workspace().revalidate()
     }
     pub(super) fn workspace(&self) -> Result<Workspace, CoreError> {
         self.run.check_live()?;
-        self.run.settings().workspace.revalidate()?;
-        Ok(self.run.settings().workspace.clone())
+        self.run.settings().workspace().revalidate()?;
+        Ok(self.run.settings().workspace().clone())
     }
     pub(super) fn deadline(&self, deadline: Instant) -> Instant {
         self.run

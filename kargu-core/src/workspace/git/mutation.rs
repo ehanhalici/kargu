@@ -77,7 +77,7 @@ impl MutationInput {
         // Validate every model path before even a read-only Git child starts.
         if let Mutation::Stage { paths } | Mutation::Unstage { paths } = &self.query {
             for path in &paths.0 {
-                scope::relative(repository.workspace.path(), path)?;
+                scope::relative(repository.workspace().path(), path)?;
             }
         }
         let limit = OutputLimit::try_from(65536usize)?;
@@ -137,7 +137,7 @@ impl MutationPreparation {
                     return Err(CoreError::InvalidToolOutput);
                 }
                 let snapshot = std::sync::Arc::new(scope::capture(
-                    self.repository.workspace.path(),
+                    self.repository.workspace().path(),
                     &directory,
                     &common,
                     &self.input.query,
@@ -252,7 +252,7 @@ impl MutationPreparation {
         context: &Preparation,
     ) -> Result<MutationPrepared, CoreError> {
         let input = self.input;
-        let root = self.repository.workspace.path();
+        let root = self.repository.workspace().path();
         context.check()?;
         snapshot.revalidate()?;
         let mut argv = vec![
@@ -288,7 +288,7 @@ impl MutationPreparation {
         let settings = match timeout {
             Some(t) => RunSettings::new(
                 Mode::Agent,
-                self.repository.workspace.clone(),
+                self.repository.workspace().clone(),
                 ToolCallLimit::default(),
                 t.checked_add(timeouts::APPROVAL)
                     .ok_or(CoreError::ArithmeticOverflow)?,
@@ -297,7 +297,7 @@ impl MutationPreparation {
             )?,
             None => RunSettings::persistent(
                 Mode::Agent,
-                self.repository.workspace.clone(),
+                self.repository.workspace().clone(),
                 ToolCallLimit::default(),
                 input.config_revision,
                 input.policy_revision,

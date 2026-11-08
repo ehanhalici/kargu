@@ -29,8 +29,11 @@ fn usage(value: &Value, rules: &ResponseRules) -> Result<Option<Value>, ApiError
         }
     }
     if let Some(cache) = rules.cache().as_ref() {
-        let read = count(source.get(cache.read.as_str()), CachedTokens::try_from)?;
-        let write = count(source.get(cache.write.as_str()), CacheWriteTokens::try_from)?;
+        let read = count(source.get(cache.read().as_str()), CachedTokens::try_from)?;
+        let write = count(
+            source.get(cache.write().as_str()),
+            CacheWriteTokens::try_from,
+        )?;
         if cache.input_excludes_cache
             && let Some(input) = count(mapped.get("prompt_tokens"), InputTokens::try_from)?
         {
@@ -103,7 +106,7 @@ pub(super) fn decode(response: Value, rules: &ResponseRules) -> Result<Value, Ap
                 "name":block.get(rules.tool.name.as_str()).and_then(Value::as_str).unwrap_or("tool"),
                 "arguments":block.get(rules.tool.input.as_str()).cloned().unwrap_or(json!({})).to_string()}}));
         } else {
-            if let Some(reasoning) = rules.reasoning.as_ref()
+            if let Some(reasoning) = rules.reasoning().as_ref()
                 && kind == reasoning.kind().as_str()
             {
                 thought.push_str(

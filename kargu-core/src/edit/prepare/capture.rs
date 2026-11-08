@@ -145,7 +145,7 @@ pub(super) fn evidence(
 }
 pub(super) struct DiskContents {
     text: EditText,
-    pub raw_digest: crate::edit::types::CaptureDigest,
+    raw_digest: crate::edit::types::CaptureDigest,
 }
 pub(super) fn disk_text(
     evidence: &Evidence,
@@ -319,5 +319,9 @@ impl DiskContents {
     /// The `text` field.
     pub fn text(&self) -> &EditText {
         &self.text
+    }
+    /// The `raw_digest` field.
+    pub fn raw_digest(&self) -> crate::edit::types::CaptureDigest {
+        self.raw_digest
     }
 }

@@ -44,7 +44,7 @@ pub(super) fn prepare(
     run.check_live()?;
     context.check()?;
     let args: Value = serde_json::from_str(args.get()).map_err(|_| CoreError::InvalidToolOutput)?;
-    let root = run.settings().workspace.path();
+    let root = run.settings().workspace().path();
     let timeout = u64::try_from(timeouts::WORKSPACE_READ.as_millis())
         .map_err(|_| CoreError::ArithmeticOverflow)?;
     match name.as_str() {

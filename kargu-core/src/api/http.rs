@@ -94,7 +94,7 @@ where
     }
     if response
         .content_length()
-        .is_some_and(|bytes| bytes > request.limits.raw() as u64)
+        .is_some_and(|bytes| bytes > request.limits().raw() as u64)
     {
         return Err(ApiError::Limit);
     }
@@ -117,7 +117,7 @@ where
     }
     let mut stream = response.bytes_stream();
     let mut decoder = if explicit_sse {
-        Some(StreamDecoder::new(request.limits))
+        Some(StreamDecoder::new(request.limits()))
     } else {
         None
     };
@@ -137,7 +137,7 @@ where
         };
         let chunk = chunk.map_err(|_| ApiError::Connection)?;
         bytes_read = bytes_read.checked_add(chunk.len()).ok_or(ApiError::Limit)?;
-        if bytes_read > request.limits.raw() {
+        if bytes_read > request.limits().raw() {
             return Err(ApiError::Limit);
         }
         if !sniffed && let Some(first) = chunk.iter().find(|byte| !byte.is_ascii_whitespace()) {
@@ -146,7 +146,7 @@ where
                 if catalog {
                     return Err(ApiError::Protocol);
                 }
-                decoder = Some(StreamDecoder::new(request.limits));
+                decoder = Some(StreamDecoder::new(request.limits()));
                 json.clear();
             }
         }

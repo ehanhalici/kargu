@@ -61,7 +61,7 @@ impl TryFrom<RetryDto> for RetryPolicy {
             });
         }
         Ok(Self {
-            maximum: value.retry_max,
+            maximum: value.retry_max(),
             statuses: value.statuses,
             base: value.backoff_base_ms,
             cap: value.backoff_cap_ms,

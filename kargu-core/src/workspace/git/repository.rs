@@ -16,7 +16,7 @@ use std::{
 };
 
 pub(super) struct Repository {
-    pub(super) workspace: Workspace,
+    workspace: Workspace,
     directory: PathBuf,
     identity: ReadTarget,
 }
@@ -177,4 +177,11 @@ fn read_environment(
         );
     }
     environment
+}
+
+impl Repository {
+    /// The `workspace` field.
+    pub(super) fn workspace(&self) -> &Workspace {
+        &self.workspace
+    }
 }

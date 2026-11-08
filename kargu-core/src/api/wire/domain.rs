@@ -85,8 +85,8 @@ struct BlockDto {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(super) struct CacheUsage {
-    pub read: Field,
-    pub write: Field,
+    read: Field,
+    write: Field,
     #[serde(default)]
     pub input_excludes_cache: bool,
 }
@@ -137,7 +137,7 @@ pub(super) struct RequestRules {
 pub(super) struct ResponseRules {
     text: TextRule,
     pub tool: ToolRule,
-    pub reasoning: Option<TextRule>,
+    reasoning: Option<TextRule>,
     content: Field,
     detect: Vec<Field>,
     detect_type: Option<Field>,
@@ -159,7 +159,7 @@ pub struct WireSpec {
     pub(super) cache_marker: bool,
     pub(super) revision: WireRevision,
     policy: crate::api::policy::DefaultsPatch,
-    pub(super) reasoning: crate::api::policy::ReasoningShape,
+    reasoning: crate::api::policy::ReasoningShape,
 }
 pub(super) struct WireRevision(pub String);
 impl Default for WireSpec {
@@ -358,5 +358,30 @@ impl WireSpec {
     /// The `policy` field.
     pub(super) fn policy(&self) -> &crate::api::policy::DefaultsPatch {
         &self.policy
+    }
+}
+
+impl CacheUsage {
+    /// The `read` field.
+    pub fn read(&self) -> &Field {
+        &self.read
+    }
+    /// The `write` field.
+    pub fn write(&self) -> &Field {
+        &self.write
+    }
+}
+
+impl ResponseRules {
+    /// The `reasoning` field.
+    pub fn reasoning(&self) -> &Option<TextRule> {
+        &self.reasoning
+    }
+}
+
+impl WireSpec {
+    /// The `reasoning` field.
+    pub(super) fn reasoning(&self) -> crate::api::policy::ReasoningShape {
+        self.reasoning
     }
 }

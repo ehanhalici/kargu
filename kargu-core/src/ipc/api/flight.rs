@@ -22,7 +22,7 @@ impl Flight {
     }
     pub fn deadline(&self) -> Option<Deadline> {
         match self {
-            Self::Single(charge) => charge.as_ref().map(|charge| charge.deadline),
+            Self::Single(charge) => charge.as_ref().map(|charge| charge.deadline()),
             Self::Attempt(operation) => Some(operation.intent.deadline),
             Self::Backoff(operation) => Some(operation.intent.deadline),
             Self::Observing(operation) => Some(operation.intent.deadline),

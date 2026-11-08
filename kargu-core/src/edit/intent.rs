@@ -192,7 +192,10 @@ impl EditorAction {
     }
     pub(crate) fn matches_run(&self, run: &RunHandle) -> bool {
         run.settings().mode == Mode::Agent
-            && self.input.workspace.same_capture(&run.settings().workspace)
+            && self
+                .input
+                .workspace
+                .same_capture(run.settings().workspace())
             && self.input.config_revision == run.scope().config_revision()
             && self.input.policy_revision == run.scope().policy_revision()
     }

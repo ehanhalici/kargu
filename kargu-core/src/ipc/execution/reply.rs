@@ -173,7 +173,7 @@ impl RunningReply {
             _ => format!("{stdout}{stderr}{notice}"),
         };
         let mut value = json!({"outcome":result.outcome,"exit_code":result.exit_code,"signal":result.signal,
-            "cleanup_complete":result.cleanup_complete,"capture_stop":result.capture_stop,
+            "cleanup_complete":result.cleanup_complete,"capture_stop":result.capture_stop(),
             "stdout":stdout,"stderr":stderr,"truncated":output.truncated,"text":text});
         if let Self::GitRead(report) = self {
             value

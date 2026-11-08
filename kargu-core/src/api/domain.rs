@@ -144,7 +144,7 @@ pub struct HttpRequest {
     pub(super) headers: HeaderMap,
     pub(super) body: Option<Zeroizing<String>>,
     timeouts: Timeouts,
-    pub(super) limits: super::stream::StreamLimits,
+    limits: super::stream::StreamLimits,
     wire: Arc<super::wire::WireCodec>,
     response_profile: ResponseProfile,
 }
@@ -461,5 +461,12 @@ impl HttpRequest {
     /// The `response_profile` field.
     pub(super) fn response_profile(&self) -> &ResponseProfile {
         &self.response_profile
+    }
+}
+
+impl HttpRequest {
+    /// The `limits` field.
+    pub(super) fn limits(&self) -> super::stream::StreamLimits {
+        self.limits
     }
 }

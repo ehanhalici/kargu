@@ -56,7 +56,7 @@ impl TryFrom<PathBuf> for RepositoryPath {
 }
 impl RepositoryPath {
     fn capture(self, repository: &Repository) -> Result<(OsString, PathBuf), CoreError> {
-        let root = repository.workspace.path();
+        let root = repository.workspace().path();
         let original = root.join(self.0);
         let relative = original
             .strip_prefix(root)

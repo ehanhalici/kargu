@@ -46,7 +46,7 @@ pub enum Mode {
 #[derive(Clone)]
 pub struct RunSettings {
     pub(crate) mode: Mode,
-    pub(crate) workspace: Workspace,
+    workspace: Workspace,
     tool_limit: ToolCallLimit,
     timeout: ExecutionTimeout,
     config_revision: ConfigRevision,
@@ -893,5 +893,12 @@ impl RunCompletion {
     /// Idempotently repaired call results; wire-family serialization is later work.
     pub fn tool_results(&self) -> &Vec<ToolResult> {
         &self.tool_results
+    }
+}
+
+impl RunSettings {
+    /// The `workspace` field.
+    pub(crate) fn workspace(&self) -> &Workspace {
+        &self.workspace
     }
 }

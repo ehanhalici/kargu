@@ -94,7 +94,7 @@ fn default_statuses() -> Vec<RetryStatus> {
 #[serde(deny_unknown_fields)]
 pub(super) struct RetryDto {
     #[serde(default)]
-    pub retry_max: RetryLimit,
+    retry_max: RetryLimit,
     #[serde(default = "default_statuses")]
     pub statuses: Vec<RetryStatus>,
     #[serde(default)]
@@ -168,4 +168,11 @@ pub enum Publication {
     Silent,
     /// Some text/reasoning/tool-call delta was published.
     Visible,
+}
+
+impl RetryDto {
+    /// The `retry_max` field.
+    pub fn retry_max(&self) -> RetryLimit {
+        self.retry_max
+    }
 }

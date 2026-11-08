@@ -160,7 +160,7 @@ impl ApiRequests {
                 kind: DebitKind::RetryAttempt,
                 native_run: reference.native_run,
             },
-            deadline: charge.deadline,
+            deadline: charge.deadline(),
             attempt: RetryAttempt::ZERO,
             page_bytes,
         };

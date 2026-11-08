@@ -46,7 +46,8 @@ fn observe_disk(
             // text and disk bytes. Require actual native decoding as well as raw integrity.
             let contents = capture::disk_contents(&evidence, cancel, deadline)?;
             contents.text().as_str() == text.as_str()
-                && encoded_hash.is_none_or(|expected| EncodedHash(contents.raw_digest) == expected)
+                && encoded_hash
+                    .is_none_or(|expected| EncodedHash(contents.raw_digest()) == expected)
         }
         _ => false,
     };

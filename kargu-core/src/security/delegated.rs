@@ -76,7 +76,7 @@ impl PreparedEditorTool {
         resource: EditorResource,
     ) -> Result<Self, CoreError> {
         run.check_live()?;
-        run.settings().workspace.revalidate()?;
+        run.settings().workspace().revalidate()?;
         let descriptor = registry.resolve(requested)?;
         let metadata = descriptor.presentation().ok_or(CoreError::Unavailable)?;
         if metadata.route() != ToolRoute::Editor || !descriptor.permits_mode(run.settings().mode) {
@@ -90,7 +90,7 @@ impl PreparedEditorTool {
         {
             let path = std::path::Path::new(path);
             let relative = if path.is_absolute() {
-                path.strip_prefix(run.settings().workspace.path())
+                path.strip_prefix(run.settings().workspace().path())
                     .map_err(|_| CoreError::Rejected)?
             } else {
                 path
@@ -107,7 +107,7 @@ impl PreparedEditorTool {
         if arguments.get().len() > limits::EDITOR_TOOL_ARGUMENT_BYTES {
             return Err(CoreError::Limit);
         }
-        let root = run.settings().workspace.path().to_path_buf();
+        let root = run.settings().workspace().path().to_path_buf();
         let digest = serde_json::to_vec(&json!({"scope":run.scope(),"root":root,
             "call_id":call_id,"tool_name":descriptor.name(),"registry_revision":registry.revision(),
             "arguments":arguments,"resource":resource}))
@@ -125,7 +125,7 @@ impl PreparedEditorTool {
     }
     fn matches_run(&self, run: &RunHandle) -> bool {
         &self.scope == run.scope()
-            && self.root == run.settings().workspace.path()
+            && self.root == run.settings().workspace().path()
             && self.descriptor.permits_mode(run.settings().mode)
     }
     /// Canonical tool identity, after native alias resolution.
@@ -267,7 +267,7 @@ impl AuthorizedEditorTool {
     /// Validate immediately before queuing the editor invocation; never reread UI selection.
     pub fn revalidate(&self, actor: &ApplicationActor) -> Result<(), CoreError> {
         actor.validate(&self.run)?;
-        self.run.settings().workspace.revalidate()?;
+        self.run.settings().workspace().revalidate()?;
         if Instant::now() >= self.deadline {
             return Err(CoreError::ApprovalExpired);
         }

@@ -88,7 +88,7 @@ impl ReadPlan {
             }
             Query::Status {} => (
                 Body::Status(StatusReport::new(
-                    self.repository.workspace.path().to_owned(),
+                    self.repository.workspace().path().to_owned(),
                 )),
                 vec![
                     "status".into(),

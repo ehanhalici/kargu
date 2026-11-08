@@ -426,7 +426,7 @@ async fn record_budget_stops_a_live_producer_then_reaps_before_success() -> Test
         .deliver(&mut f.actor)?;
     assert!(started.elapsed() >= Duration::from_millis(60));
     assert!(result.cleanup_complete);
-    assert_eq!(result.capture_stop, Some(CaptureStop::Records));
+    assert_eq!(result.capture_stop(), Some(CaptureStop::Records));
     assert_eq!(result.outcome, ToolOutcome::Ok);
     assert_eq!(result.signal, Some(15));
     let page = f
@@ -471,7 +471,7 @@ async fn byte_exhaustion_cannot_masquerade_as_complete_record_capture() -> TestR
         .await?
         .deliver(&mut f.actor)?;
     assert!(result.cleanup_complete);
-    assert_eq!(result.capture_stop, Some(CaptureStop::Bytes));
+    assert_eq!(result.capture_stop(), Some(CaptureStop::Bytes));
     assert_eq!(result.outcome, ToolOutcome::Failed);
     assert_eq!(
         f.output(&job, OutputStream::Stdout).await?,
@@ -503,7 +503,7 @@ async fn search_stderr_byte_exhaustion_also_stops_and_fails_the_owned_producer()
         .await?
         .deliver(&mut f.actor)?;
     assert!(result.cleanup_complete);
-    assert_eq!(result.capture_stop, Some(CaptureStop::Bytes));
+    assert_eq!(result.capture_stop(), Some(CaptureStop::Bytes));
     assert_eq!(result.outcome, ToolOutcome::Failed);
     assert_eq!(
         f.output(&job, OutputStream::Stderr).await?,
@@ -537,7 +537,7 @@ async fn complete_capture_stops_on_either_stream_without_a_record_budget() -> Te
             .await?
             .deliver(&mut f.actor)?;
         assert!(result.cleanup_complete);
-        assert_eq!(result.capture_stop, Some(CaptureStop::Bytes));
+        assert_eq!(result.capture_stop(), Some(CaptureStop::Bytes));
         assert_eq!(result.outcome, ToolOutcome::Failed);
         assert_eq!(f.output(&job, stream).await?, (b"abc".to_vec(), true));
         let summary = f.actor.finish(&f.run)?;
@@ -569,7 +569,7 @@ async fn no_match_exit_requires_the_explicit_approved_success_policy() -> TestRe
             .await?
             .deliver(&mut f.actor)?;
         assert!(result.cleanup_complete);
-        assert_eq!(result.capture_stop, None);
+        assert_eq!(result.capture_stop(), None);
         assert_eq!(result.exit_code, Some(1));
         assert_eq!(result.outcome, expected);
         f.actor.finish(&f.run)?;

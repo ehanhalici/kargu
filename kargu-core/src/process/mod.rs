@@ -146,7 +146,7 @@ pub struct ProcessResult {
     /// All tracked tasks and the direct child were drained/reaped.
     pub cleanup_complete: bool,
     /// Explicit capture stop, independent of the actual OS exit status.
-    pub capture_stop: Option<CaptureStop>,
+    capture_stop: Option<CaptureStop>,
 }
 impl ProcessResult {
     fn reject_output(&mut self) {
@@ -259,11 +259,11 @@ impl ProcessSupervisor {
         let pid = ProcessId::try_from(child.id().ok_or(CoreError::CleanupFailed)?)?;
         let spec = authorized.command();
         let stdout = Arc::new(Mutex::new(Archive::new(
-            spec.capture.retention(),
+            spec.capture().retention(),
             spec.output_limit,
         )));
         let stderr = Arc::new(Mutex::new(Archive::new(
-            spec.capture.retention(),
+            spec.capture().retention(),
             spec.output_limit,
         )));
         let (input, rx) = mpsc::channel(limits::PROCESS_INPUT_QUEUE);
@@ -611,7 +611,7 @@ async fn supervise_child(
         return unknown_result();
     };
     let (activity, mut idle) = IdleMonitor::new(command.idle_timeout);
-    let (capture, mut records) = RecordMonitor::for_policy(command.capture);
+    let (capture, mut records) = RecordMonitor::for_policy(command.capture());
     let stderr_capture = capture.as_ref().map(StreamCapture::stderr);
     let mut out_task = AbortOnDropHandle::new(tokio::spawn(drain(
         stdout,
@@ -751,5 +751,12 @@ async fn reap_adopted(group: &ProcessGroup, deadline: Instant) -> bool {
             Err(Errno::ECHILD) => return true,
             Err(_) => return false,
         }
+    }
+}
+
+impl ProcessResult {
+    /// Explicit capture stop, independent of the actual OS exit status.
+    pub fn capture_stop(&self) -> Option<CaptureStop> {
+        self.capture_stop
     }
 }
