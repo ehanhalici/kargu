@@ -138,15 +138,15 @@ struct RequestDto {
 #[serde(try_from = "RequestDto")]
 pub struct HttpRequest {
     pub(crate) authority: super::ApiAuthority,
-    pub(crate) provider: Option<crate::providers::ApiProviderId>,
-    pub(super) url: ApiEndpoint,
-    pub(super) method: Method,
+    provider: Option<crate::providers::ApiProviderId>,
+    url: ApiEndpoint,
+    method: Method,
     pub(super) headers: HeaderMap,
     pub(super) body: Option<Zeroizing<String>>,
     timeouts: Timeouts,
     pub(super) limits: super::stream::StreamLimits,
-    pub(super) wire: Arc<super::wire::WireCodec>,
-    pub(super) response_profile: ResponseProfile,
+    wire: Arc<super::wire::WireCodec>,
+    response_profile: ResponseProfile,
 }
 
 struct ConnectionInput {
@@ -438,5 +438,28 @@ impl HttpRequest {
     }
     pub(super) fn deadline(&self) -> Option<Duration> {
         self.timeouts.deadline_ms.as_ref().map(|value| value.0)
+    }
+}
+
+impl HttpRequest {
+    /// The `provider` field.
+    pub(crate) fn provider(&self) -> &Option<crate::providers::ApiProviderId> {
+        &self.provider
+    }
+    /// The `url` field.
+    pub(super) fn url(&self) -> &ApiEndpoint {
+        &self.url
+    }
+    /// The `method` field.
+    pub(super) fn method(&self) -> &Method {
+        &self.method
+    }
+    /// The `wire` field.
+    pub(super) fn wire(&self) -> &Arc<super::wire::WireCodec> {
+        &self.wire
+    }
+    /// The `response_profile` field.
+    pub(super) fn response_profile(&self) -> &ResponseProfile {
+        &self.response_profile
     }
 }

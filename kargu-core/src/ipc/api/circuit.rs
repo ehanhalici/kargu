@@ -147,7 +147,7 @@ impl Circuits {
             Owned {
                 owner: scope.application_id.clone(),
                 authority: request.authority.clone(),
-                provider: request.provider.clone(),
+                provider: request.provider().clone(),
                 policy,
                 classification: classification.clone(),
                 circuit,

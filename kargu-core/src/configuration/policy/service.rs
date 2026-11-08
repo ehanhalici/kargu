@@ -290,7 +290,7 @@ impl ConfigurationService {
                 .map_err(|_| CoreError::Unavailable)?,
             },
             profile: target,
-            app_url: published.context.app_url.clone(),
+            app_url: published.context.app_url().clone(),
         })
     }
     /// Current committed publication revision.

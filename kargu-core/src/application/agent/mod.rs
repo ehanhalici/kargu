@@ -517,7 +517,7 @@ impl ApplicationActor {
         reply: AssistantTurn,
     ) -> Result<AgentPhase, CoreError> {
         self.check_model_turn(turn)?;
-        let phase = match reply.finish {
+        let phase = match reply.finish() {
             Finish::Filtered => Phase::Terminal(AgentStop::ContentFiltered),
             Finish::Other => Phase::Terminal(AgentStop::ProviderStopped),
             Finish::Length => Phase::Continuation(ContinuationReason::Length),

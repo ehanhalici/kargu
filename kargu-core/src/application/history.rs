@@ -57,7 +57,7 @@ impl ApplicationActor {
         if self
             .preparing
             .as_ref()
-            .is_some_and(|pending| pending.claim.scope().session_id() == session)
+            .is_some_and(|pending| pending.claim().scope().session_id() == session)
         {
             return Err(CoreError::Busy);
         }
@@ -198,7 +198,7 @@ impl ApplicationActor {
             sessions.contains(session)
                 || preparing
                     .as_ref()
-                    .is_some_and(|pending| pending.claim.scope().session_id() == session)
+                    .is_some_and(|pending| pending.claim().scope().session_id() == session)
                 || active
                     .iter()
                     .chain(jobs.values())
@@ -222,7 +222,7 @@ impl ApplicationActor {
             && (self
                 .preparing
                 .as_ref()
-                .is_some_and(|pending| pending.claim.scope().session_id() == session)
+                .is_some_and(|pending| pending.claim().scope().session_id() == session)
                 || self
                     .active
                     .iter()

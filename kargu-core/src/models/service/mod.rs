@@ -142,7 +142,7 @@ impl ModelService {
             }
             methods::MODEL_COMMIT => {
                 let input: domain::Upload = decode(arguments)?;
-                self.upload(session, &input.upload_id, expired)?;
+                self.upload(session, input.upload_id(), expired)?;
                 let upload = self.staging.take().ok_or(ServiceError::Stale)?;
                 if upload.base != self.store.revision() {
                     return Err(ServiceError::Stale);
@@ -154,7 +154,7 @@ impl ModelService {
             }
             methods::MODEL_ABORT => {
                 let input: domain::Upload = decode(arguments)?;
-                self.upload(session, &input.upload_id, expired)?;
+                self.upload(session, input.upload_id(), expired)?;
                 self.staging = None;
                 Ok(json!({"status":"aborted"}))
             }

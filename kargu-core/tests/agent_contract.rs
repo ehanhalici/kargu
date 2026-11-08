@@ -157,7 +157,7 @@ fn native_agent_serializes_model_batch_gate_results_and_next_turn_under_one_owne
     );
     assert!(matches!(actor.begin_model_turn(&run), Err(CoreError::Busy)));
     let done = actor.finish(&run)?;
-    assert_eq!(done.tool_results.len(), 2);
+    assert_eq!(done.tool_results().len(), 2);
     assert!(actor.session_history(run.scope().session_id())?.settled());
     Ok(())
 }
@@ -213,7 +213,7 @@ fn issued_tool_reports_facts_after_cancel_and_never_replays_the_call() -> TestRe
     )?;
     let result = actor.finish(&run)?;
     assert_eq!(
-        result.tool_results.first().ok_or("result")?.outcome,
+        result.tool_results().first().ok_or("result")?.outcome,
         ToolOutcome::Ok
     );
     assert!(actor.session_history(run.scope().session_id())?.settled());
@@ -240,7 +240,7 @@ fn dropping_an_unissued_tool_repairs_only_its_missing_result_after_cancellation(
     drop(tool);
     let result = actor.finish(&run)?;
     assert_eq!(
-        result.tool_results.first().ok_or("result")?.outcome,
+        result.tool_results().first().ok_or("result")?.outcome,
         ToolOutcome::Cancelled
     );
     assert!(actor.session_history(run.scope().session_id())?.settled());

@@ -53,8 +53,8 @@ enum BlockRole {
 
 #[derive(Clone)]
 pub(super) struct TextRule {
-    pub kind: Field,
-    pub field: Field,
+    kind: Field,
+    field: Field,
 }
 #[derive(Clone)]
 pub(super) struct ToolRule {
@@ -126,39 +126,39 @@ struct WireDto {
 }
 
 pub(super) struct RequestRules {
-    pub text: TextRule,
+    text: TextRule,
     pub tool: ToolRule,
     pub result: ToolResultRule,
-    pub schema: Field,
-    pub system: Option<Field>,
+    schema: Field,
+    system: Option<Field>,
     pub max_tokens: OutputLimit,
     pub copy: Vec<Field>,
 }
 pub(super) struct ResponseRules {
-    pub text: TextRule,
+    text: TextRule,
     pub tool: ToolRule,
     pub reasoning: Option<TextRule>,
-    pub content: Field,
-    pub detect: Vec<Field>,
-    pub detect_type: Option<Field>,
-    pub finish: BTreeMap<Field, Field>,
-    pub finish_default: Field,
+    content: Field,
+    detect: Vec<Field>,
+    detect_type: Option<Field>,
+    finish: BTreeMap<Field, Field>,
+    finish_default: Field,
     pub usage: BTreeMap<Field, Field>,
-    pub cache: Option<CacheUsage>,
+    cache: Option<CacheUsage>,
 }
 
 /// No credential data. Unused metadata fields are left to the metadata service.
 #[derive(Deserialize)]
 #[serde(try_from = "serde_json::Value")]
 pub struct WireSpec {
-    pub(super) chat_path: super::target::ChatPath,
+    chat_path: super::target::ChatPath,
     pub(super) headers: crate::api::auth::HeaderRules,
-    pub(super) request: Option<RequestRules>,
-    pub(super) response: Option<ResponseRules>,
+    request: Option<RequestRules>,
+    response: Option<ResponseRules>,
     pub(super) stream: bool,
     pub(super) cache_marker: bool,
     pub(super) revision: WireRevision,
-    pub(super) policy: crate::api::policy::DefaultsPatch,
+    policy: crate::api::policy::DefaultsPatch,
     pub(super) reasoning: crate::api::policy::ReasoningShape,
 }
 pub(super) struct WireRevision(pub String);
@@ -282,5 +282,81 @@ impl TryFrom<WireDto> for WireSpec {
             policy: dto.request.unwrap_or_default(),
             reasoning: dto.reasoning_shape.unwrap_or_default(),
         })
+    }
+}
+
+impl TextRule {
+    /// The `kind` field.
+    pub fn kind(&self) -> &Field {
+        &self.kind
+    }
+    /// The `field` field.
+    pub fn field(&self) -> &Field {
+        &self.field
+    }
+}
+
+impl RequestRules {
+    /// The `text` field.
+    pub fn text(&self) -> &TextRule {
+        &self.text
+    }
+    /// The `schema` field.
+    pub fn schema(&self) -> &Field {
+        &self.schema
+    }
+    /// The `system` field.
+    pub fn system(&self) -> &Option<Field> {
+        &self.system
+    }
+}
+
+impl ResponseRules {
+    /// The `text` field.
+    pub fn text(&self) -> &TextRule {
+        &self.text
+    }
+    /// The `content` field.
+    pub fn content(&self) -> &Field {
+        &self.content
+    }
+    /// The `detect` field.
+    pub fn detect(&self) -> &Vec<Field> {
+        &self.detect
+    }
+    /// The `detect_type` field.
+    pub fn detect_type(&self) -> &Option<Field> {
+        &self.detect_type
+    }
+    /// The `finish` field.
+    pub fn finish(&self) -> &BTreeMap<Field, Field> {
+        &self.finish
+    }
+    /// The `finish_default` field.
+    pub fn finish_default(&self) -> &Field {
+        &self.finish_default
+    }
+    /// The `cache` field.
+    pub fn cache(&self) -> &Option<CacheUsage> {
+        &self.cache
+    }
+}
+
+impl WireSpec {
+    /// The `chat_path` field.
+    pub(super) fn chat_path(&self) -> &super::target::ChatPath {
+        &self.chat_path
+    }
+    /// The `request` field.
+    pub(super) fn request(&self) -> &Option<RequestRules> {
+        &self.request
+    }
+    /// The `response` field.
+    pub(super) fn response(&self) -> &Option<ResponseRules> {
+        &self.response
+    }
+    /// The `policy` field.
+    pub(super) fn policy(&self) -> &crate::api::policy::DefaultsPatch {
+        &self.policy
     }
 }

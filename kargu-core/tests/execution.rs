@@ -443,7 +443,7 @@ async fn record_budget_stops_a_live_producer_then_reaps_before_success() -> Test
     assert_eq!(page.truncated, page.next_cursor.as_u64() > retained);
     let summary = f.actor.finish(&f.run)?;
     assert_eq!(
-        summary.tool_results.first().map(|result| result.outcome),
+        summary.tool_results().first().map(|result| result.outcome),
         Some(ToolOutcome::Ok)
     );
     Ok(())
@@ -542,7 +542,7 @@ async fn complete_capture_stops_on_either_stream_without_a_record_budget() -> Te
         assert_eq!(f.output(&job, stream).await?, (b"abc".to_vec(), true));
         let summary = f.actor.finish(&f.run)?;
         assert_eq!(
-            summary.tool_results.first().map(|result| result.outcome),
+            summary.tool_results().first().map(|result| result.outcome),
             Some(ToolOutcome::Failed)
         );
     }
@@ -704,9 +704,9 @@ fn mode_alias_owner_and_replay_gates_are_fail_closed() -> TestResult {
     assert!(!f.root.join("denied").exists());
     assert!(f.run.drained());
     let summary = f.actor.finish(&f.run)?;
-    assert_eq!(summary.tool_results.len(), 1);
+    assert_eq!(summary.tool_results().len(), 1);
     assert_eq!(
-        summary.tool_results.first().map(|r| r.outcome),
+        summary.tool_results().first().map(|r| r.outcome),
         Some(ToolOutcome::Rejected)
     );
     let mut read_only = Fixture::new(Mode::Ask, Duration::from_secs(10))?;
@@ -719,7 +719,7 @@ fn mode_alias_owner_and_replay_gates_are_fail_closed() -> TestResult {
         read_only
             .actor
             .finish(&read_only.run)?
-            .tool_results
+            .tool_results()
             .is_empty()
     );
     // Aliases never overwrite a canonical definition or silently retarget it.
@@ -758,10 +758,10 @@ fn cancellation_repairs_pending_calls_in_ingress_order_before_release() -> TestR
     ));
     f.gate.dismiss_run(&mut f.actor, &f.run)?;
     let summary = f.actor.finish(&f.run)?;
-    assert_eq!(summary.tool_results.len(), 2);
+    assert_eq!(summary.tool_results().len(), 2);
     assert!(
         summary
-            .tool_results
+            .tool_results()
             .iter()
             .all(|r| r.outcome == ToolOutcome::Cancelled && r.is_error)
     );
@@ -850,7 +850,7 @@ async fn interactive_stdin_eof_output_exit_and_take_once_delivery() -> TestResul
     assert!(f.supervisor.jobs(&f.run).is_empty());
     let summary = f.actor.finish(&f.run)?;
     assert_eq!(
-        summary.tool_results.first().map(|r| r.outcome),
+        summary.tool_results().first().map(|r| r.outcome),
         Some(ToolOutcome::Failed)
     );
     Ok(())
@@ -876,7 +876,7 @@ async fn child_and_term_ignoring_descendant_are_killed_and_reaped() -> TestResul
     completion.deliver(&mut f.actor)?;
     let summary = f.actor.finish(&f.run)?;
     assert_eq!(
-        summary.tool_results.first().map(|r| r.outcome),
+        summary.tool_results().first().map(|r| r.outcome),
         Some(ToolOutcome::Cancelled)
     );
     Ok(())
@@ -982,9 +982,9 @@ async fn run_concurrency_is_bounded_and_claim_is_retained_during_drain() -> Test
             .deliver(&mut f.actor)?;
     }
     let summary = f.actor.finish(&f.run)?;
-    assert_eq!(summary.tool_results.len(), limits::RUN_PROCESSES + 1);
+    assert_eq!(summary.tool_results().len(), limits::RUN_PROCESSES + 1);
     assert_eq!(
-        summary.tool_results.last().map(|r| r.outcome),
+        summary.tool_results().last().map(|r| r.outcome),
         Some(ToolOutcome::Failed)
     );
     Ok(())
@@ -1030,7 +1030,7 @@ async fn delayed_approval_and_delayed_execution_cannot_revive_an_expired_run() -
     assert_eq!(
         f.actor
             .finish(&f.run)?
-            .tool_results
+            .tool_results()
             .first()
             .map(|r| r.outcome),
         Some(ToolOutcome::Timeout)
@@ -1081,7 +1081,7 @@ async fn executable_replacement_after_approval_is_rejected_before_spawn() -> Tes
     assert_eq!(
         f.actor
             .finish(&f.run)?
-            .tool_results
+            .tool_results()
             .first()
             .map(|r| r.outcome),
         Some(ToolOutcome::Rejected)
@@ -1111,7 +1111,7 @@ async fn dropping_supervisor_cancels_children_and_preserves_unknown_effect_evide
     assert!(!PathBuf::from(format!("/proc/{pid}")).exists());
     let result = f.actor.finish(&f.run)?;
     assert_eq!(
-        result.tool_results.first().map(|r| r.outcome),
+        result.tool_results().first().map(|r| r.outcome),
         Some(ToolOutcome::OutcomeUnknown)
     );
     Ok(())
@@ -1132,7 +1132,7 @@ fn tool_budget_is_not_a_token_or_process_slot_limit() -> TestResult {
     f.gate.expire(&mut f.actor, &f.run)?;
     assert_eq!(f.gate.pending_count(), 0);
     assert_eq!(
-        u64::try_from(f.actor.finish(&f.run)?.tool_results.len())?,
+        u64::try_from(f.actor.finish(&f.run)?.tool_results().len())?,
         limits::TOOL_CALLS
     );
     Ok(())
@@ -1150,7 +1150,7 @@ fn attempting_spawn_without_a_runtime_is_a_typed_failure_not_a_panic() -> TestRe
     assert_eq!(
         f.actor
             .finish(&f.run)?
-            .tool_results
+            .tool_results()
             .first()
             .map(|r| r.outcome),
         Some(ToolOutcome::Failed)

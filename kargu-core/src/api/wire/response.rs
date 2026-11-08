@@ -28,7 +28,7 @@ fn usage(value: &Value, rules: &ResponseRules) -> Result<Option<Value>, ApiError
             mapped.insert(to.as_str().to_owned(), json!(value));
         }
     }
-    if let Some(cache) = rules.cache.as_ref() {
+    if let Some(cache) = rules.cache().as_ref() {
         let read = count(source.get(cache.read.as_str()), CachedTokens::try_from)?;
         let write = count(source.get(cache.write.as_str()), CacheWriteTokens::try_from)?;
         if cache.input_excludes_cache
@@ -67,19 +67,19 @@ pub(super) fn decode(response: Value, rules: &ResponseRules) -> Result<Value, Ap
     {
         return Ok(response);
     }
-    let detected = rules.detect.iter().any(|key| {
+    let detected = rules.detect().iter().any(|key| {
         response
             .get(key.as_str())
             .is_some_and(|value| !value.is_null())
     }) || rules
-        .detect_type
+        .detect_type()
         .as_ref()
         .is_some_and(|kind| response.get("type").and_then(Value::as_str) == Some(kind.as_str()));
     if !detected {
         return Ok(response);
     }
     let content = response
-        .get(rules.content.as_str())
+        .get(rules.content().as_str())
         .and_then(Value::as_array)
         .ok_or(ApiError::Protocol)?;
     let mut text = String::new();
@@ -91,10 +91,10 @@ pub(super) fn decode(response: Value, rules: &ResponseRules) -> Result<Value, Ap
             .get("type")
             .and_then(Value::as_str)
             .ok_or(ApiError::Protocol)?;
-        if kind == rules.text.kind.as_str() {
+        if kind == rules.text().kind().as_str() {
             text.push_str(
                 block
-                    .get(rules.text.field.as_str())
+                    .get(rules.text().field().as_str())
                     .and_then(Value::as_str)
                     .ok_or(ApiError::Protocol)?,
             );
@@ -104,11 +104,11 @@ pub(super) fn decode(response: Value, rules: &ResponseRules) -> Result<Value, Ap
                 "arguments":block.get(rules.tool.input.as_str()).cloned().unwrap_or(json!({})).to_string()}}));
         } else {
             if let Some(reasoning) = rules.reasoning.as_ref()
-                && kind == reasoning.kind.as_str()
+                && kind == reasoning.kind().as_str()
             {
                 thought.push_str(
                     block
-                        .get(reasoning.field.as_str())
+                        .get(reasoning.field().as_str())
                         .and_then(Value::as_str)
                         .ok_or(ApiError::Protocol)?,
                 );
@@ -117,18 +117,18 @@ pub(super) fn decode(response: Value, rules: &ResponseRules) -> Result<Value, Ap
         }
     }
     let stop = rules
-        .detect
+        .detect()
         .iter()
         .find_map(|key| response.get(key.as_str()).and_then(Value::as_str));
     let finish = stop
         .and_then(|stop| {
             rules
-                .finish
+                .finish()
                 .iter()
                 .find(|(key, _)| key.as_str() == stop)
                 .map(|(_, finish)| finish)
         })
-        .unwrap_or(&rules.finish_default);
+        .unwrap_or(rules.finish_default());
     let mut message = Map::from_iter([
         ("role".to_owned(), json!("assistant")),
         ("content".to_owned(), json!(text)),

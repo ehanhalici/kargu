@@ -265,9 +265,9 @@ fn editor_rejection_can_commit_its_history_result_without_a_second_native_call()
             .is_err()
     );
     let completion = actor.finish(&run)?;
-    assert_eq!(completion.tool_results.len(), 1);
+    assert_eq!(completion.tool_results().len(), 1);
     assert_eq!(
-        completion.tool_results.first().ok_or("result")?.outcome,
+        completion.tool_results().first().ok_or("result")?.outcome,
         ToolOutcome::Rejected
     );
     let history = actor.session_history(&session)?.snapshot();

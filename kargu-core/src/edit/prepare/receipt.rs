@@ -285,11 +285,11 @@ pub(crate) struct FileResult {
     final_hash: Option<ContentHash>,
     hunks: Option<crate::edit::types::HunkCount>,
     #[serde(skip)]
-    pub(super) final_text: Option<Arc<EditText>>,
+    final_text: Option<Arc<EditText>>,
     #[serde(skip)]
     pub(super) final_document: Option<LiveDocument>,
     #[serde(skip)]
-    pub(super) before_document: LiveDocument,
+    before_document: LiveDocument,
     #[serde(skip)]
     pub(super) final_disk: DiskState,
     saved: bool,
@@ -418,6 +418,20 @@ impl ReceiptPages {
             }
         }
         page.finish(offset, self.total)
+    }
+}
+
+impl FileResult {
+    /// The `final_text` field.
+    pub(super) fn final_text(&self) -> &Option<Arc<EditText>> {
+        &self.final_text
+    }
+}
+
+impl FileResult {
+    /// The `before_document` field.
+    pub(super) fn before_document(&self) -> &LiveDocument {
+        &self.before_document
     }
 }
 

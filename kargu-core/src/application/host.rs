@@ -615,7 +615,7 @@ impl Host {
         let selection = actor.session_selection(&scope.session_id)?.selection();
         actor.configuration.run_target(
             revision,
-            selection.provider.as_ref(),
+            selection.provider().as_ref(),
             selection
                 .model
                 .as_ref()

@@ -94,7 +94,7 @@ impl PreflightSet {
         if let Some(captured) = &prepared.live
             && (captured.id != document.id
                 || captured.tick != document.tick
-                || captured.coding != document.coding)
+                || captured.coding() != document.coding())
         {
             return Err(EditError::Conflict.into());
         }

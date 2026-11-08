@@ -418,11 +418,11 @@ mod tests {
             )
         };
         let first = capture("first-key", "tenant-a")?;
-        let result=first.wire.decode(json!({"type":"message","content":[{"type":"thinking","thinking":"thought","signature":"opaque-fixture-signature"}]}))?;
+        let result=first.wire().decode(json!({"type":"message","content":[{"type":"thinking","thinking":"thought","signature":"opaque-fixture-signature"}]}))?;
         let payload = json!({"model":"fixture","messages":[result["choices"][0]["message"]]});
         let same = capture("first-key", "tenant-a")?;
         assert!(
-            same.wire
+            same.wire()
                 .encode(payload.clone())?
                 .to_string()
                 .contains("opaque-fixture-signature")
@@ -433,7 +433,7 @@ mod tests {
         ] {
             assert!(
                 !other
-                    .wire
+                    .wire()
                     .encode(payload.clone())?
                     .to_string()
                     .contains("opaque-fixture-signature")

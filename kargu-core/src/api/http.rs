@@ -66,7 +66,7 @@ where
     let first_byte = request.first_byte_timeout();
     let idle = request.idle_timeout();
     let mut call = client
-        .request(request.method.clone(), request.url.as_url().clone())
+        .request(request.method().clone(), request.url().as_url().clone())
         .headers(request.headers.clone());
     if let Some(body) = request.body.as_ref() {
         call = call.body(body.as_bytes().to_vec());
@@ -109,7 +109,7 @@ where
                 .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"))
         });
     let catalog = matches!(
-        request.response_profile,
+        request.response_profile(),
         super::domain::ResponseProfile::ModelCatalog
     );
     if catalog && explicit_sse {
@@ -159,7 +159,7 @@ where
     if let Some(decoder) = decoder {
         let (deltas, result) = decoder.finish()?;
         publish(deltas, &events).await?;
-        request.wire.decode(result)
+        request.wire().decode(result)
     } else {
         if catalog {
             let source = std::str::from_utf8(&json).map_err(|_| ApiError::Protocol)?;
@@ -209,7 +209,7 @@ where
                 },
             );
         }
-        request.wire.decode(value)
+        request.wire().decode(value)
     }
 }
 

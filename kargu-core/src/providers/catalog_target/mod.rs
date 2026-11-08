@@ -94,7 +94,7 @@ impl CatalogConnectionInput {
         let path = url.path().trim_end_matches('/');
         let native = self.native_models.as_ref().filter(|spec| {
             !spec
-                .unless_suffix
+                .unless_suffix()
                 .as_ref()
                 .is_some_and(|suffix| path.ends_with(suffix.as_str()))
         });

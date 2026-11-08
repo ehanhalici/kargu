@@ -42,10 +42,10 @@ impl AppliedSnapshot {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RollbackInput {
-    pub origin_id: OriginId,
+    origin_id: OriginId,
     pub service_id: Option<crate::domain::EditServiceId>,
     pub target_edit_id: Option<EditorEditId>,
-    pub target_file: Option<EditPath>,
+    target_file: Option<EditPath>,
     pub root: Option<PathBuf>,
     pub mode: Mode,
     review_mode: ReviewMode,
@@ -85,7 +85,7 @@ impl RollbackWork {
                 cancel,
                 deadline,
             )?;
-            if disk != result.final_disk || evidence.canonical != prepared.evidence.canonical {
+            if disk != result.final_disk || evidence.canonical() != prepared.evidence.canonical() {
                 return Err(EditError::Conflict.into());
             }
             let original_kind = match &*self.snapshot.artifact {
@@ -100,7 +100,7 @@ impl RollbackWork {
                 }
             };
             let base = result
-                .final_text
+                .final_text()
                 .clone()
                 .unwrap_or_else(|| Arc::new(EditText::default()));
             if let Some(hash) = result.final_hash()
@@ -155,7 +155,7 @@ impl RollbackWork {
                     } else {
                         None
                     },
-                    restore_coding: Some(result.before_document.coding.clone()),
+                    restore_coding: Some(result.before_document().coding().clone()),
                 },
             });
         }
@@ -164,5 +164,16 @@ impl RollbackWork {
         artifact.retained_bytes()?;
         checkpoint(cancel, deadline)?;
         Ok(super::PreparationResult::Complete(artifact))
+    }
+}
+
+impl RollbackInput {
+    /// The `origin_id` field.
+    pub fn origin_id(&self) -> &OriginId {
+        &self.origin_id
+    }
+    /// The `target_file` field.
+    pub fn target_file(&self) -> &Option<EditPath> {
+        &self.target_file
     }
 }

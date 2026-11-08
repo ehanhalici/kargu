@@ -645,7 +645,7 @@ async fn supervise_child(
         activity.clone(),
     )));
     let Ok(deadline) = command
-        .timeout
+        .timeout()
         .start()
         .map(|deadline| deadline.earliest(run.deadline()))
     else {

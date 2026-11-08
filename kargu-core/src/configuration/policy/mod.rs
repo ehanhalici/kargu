@@ -51,7 +51,7 @@ pub fn environment_names(
 ) -> Result<Value, CoreError> {
     let mut names = BTreeSet::new();
     for provider in &config.providers {
-        if let Some(key) = &provider.data.apikey {
+        if let Some(key) = &provider.data.apikey() {
             names.extend(environment::names(key.as_str()));
         }
     }

@@ -63,9 +63,9 @@ pub struct DocumentStamp {
     /// Workspace-relative source path.
     pub path: EditPath,
     /// Opaque editor document identity.
-    pub document_id: DocumentId,
+    document_id: DocumentId,
     /// Captured live modification tick.
-    pub tick: DocumentTick,
+    tick: DocumentTick,
 }
 
 /// One checker's report-function generation and its actual completion evidence.
@@ -362,4 +362,15 @@ pub struct DiagnosticDelta {
     pub pre_existing: DiagnosticCount,
     /// Baseline errors absent from the new snapshot.
     pub resolved: DiagnosticCount,
+}
+
+impl DocumentStamp {
+    /// Opaque editor document identity.
+    pub fn document_id(&self) -> &DocumentId {
+        &self.document_id
+    }
+    /// Captured live modification tick.
+    pub fn tick(&self) -> &DocumentTick {
+        &self.tick
+    }
 }

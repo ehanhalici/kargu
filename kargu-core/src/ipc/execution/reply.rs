@@ -24,7 +24,7 @@ pub(super) enum Reply {
 impl Reply {
     pub fn approval_intent(&self) -> Option<&Value> {
         match self {
-            Self::GitMutation(r) => Some(&r.intent),
+            Self::GitMutation(r) => Some(r.intent()),
             _ => None,
         }
     }
@@ -103,9 +103,9 @@ impl RunningReply {
         ByteLimit::try_from(match self {
             Self::EditPatch(_) => limits::EDIT_PATCH_OUTPUT_BYTES,
             Self::GitMutationPrepare(_) => 65536,
-            Self::GitMutation(report) => report.output.as_usize().max(1),
+            Self::GitMutation(report) => report.output().as_usize().max(1),
             Self::Command => limits::SEARCH_RESULT_BYTES,
-            Self::Grep(report) => report.output_limit.as_usize().max(1),
+            Self::Grep(report) => report.output_limit().as_usize().max(1),
             Self::GitPrepare(preparation) => preparation.output_limit().as_usize().max(1),
             Self::GitRead(report) => report.output_limit().as_usize().max(1),
         })

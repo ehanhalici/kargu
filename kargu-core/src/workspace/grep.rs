@@ -75,7 +75,7 @@ impl MatchLimit {
 pub(crate) struct GrepReport {
     pattern: SearchPattern,
     limit: MatchLimit,
-    pub(crate) output_limit: OutputLimit,
+    output_limit: OutputLimit,
 }
 impl GrepReport {
     pub(crate) fn text(&self, stdout: &str) -> Result<String, CoreError> {
@@ -208,6 +208,13 @@ impl GrepInput {
     }
 }
 
+impl GrepReport {
+    /// The `output_limit` field.
+    pub(crate) fn output_limit(&self) -> &OutputLimit {
+        &self.output_limit
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,7 +230,7 @@ mod tests {
             "glob":"**/*.el","max_matches":3,"skip_directories":["node_modules"]
         }))?;
         let (command, _, report) = input.prepare()?;
-        assert_eq!(command.timeout.duration(), Some(timeouts::WORKSPACE_READ));
+        assert_eq!(command.timeout().duration(), Some(timeouts::WORKSPACE_READ));
         assert_eq!(command.capture.records().map(RecordLimit::as_u64), Some(4));
         assert_eq!(command.environment.entries().count(), 1);
         assert!(command.arguments.iter().any(|arg| arg == "--line-buffered"));

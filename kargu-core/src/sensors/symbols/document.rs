@@ -454,7 +454,7 @@ impl SymbolBody {
 #[derive(Clone, Serialize)]
 pub(crate) struct SymbolEditSelection {
     pub(crate) document: DocumentStamp,
-    pub(crate) source: LanguageSource,
+    source: LanguageSource,
     pub(crate) range: SourceRange,
 }
 impl SymbolSnapshot {
@@ -476,5 +476,12 @@ impl SymbolSnapshot {
             source: source.clone(),
             range: selected.range,
         })
+    }
+}
+
+impl SymbolEditSelection {
+    /// The `source` field.
+    pub(crate) fn source(&self) -> &LanguageSource {
+        &self.source
     }
 }

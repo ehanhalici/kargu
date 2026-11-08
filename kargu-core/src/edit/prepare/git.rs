@@ -47,7 +47,7 @@ impl PatchWork {
         let deadline = self.deadline.min(context.deadline());
         let root = match &self.parent {
             Some(parent) => parent.workspace()?,
-            None => Workspace::try_from(self.inspection.input.root.clone())?,
+            None => Workspace::try_from(self.inspection.input().root.clone())?,
         };
         if root.path().to_str().is_none() {
             return Err(EditError::InvalidPath.into());
@@ -68,7 +68,7 @@ impl PatchWork {
                 report: PatchPrepared {
                     directory,
                     files,
-                    hunks: self.inspection.patch.hunk_count(),
+                    hunks: self.inspection.patch().hunk_count(),
                     deadline,
                 },
             }),
@@ -91,7 +91,7 @@ fn capture_files(
     for (index, target) in inspection.targets.iter().enumerate() {
         crate::security::file::checkpoint(cancel, deadline)?;
         let (evidence, disk) = capture::evidence(root, target.path.as_path(), cancel, deadline)?;
-        if !paths.insert(evidence.canonical.clone()) {
+        if !paths.insert(evidence.canonical().clone()) {
             return Err(EditError::Conflict.into());
         }
         let live = inspection.documents.remove(&target.path);
@@ -122,7 +122,7 @@ fn capture_files(
             _ => {}
         }
         for op in inspection
-            .patch
+            .patch()
             .operations()
             .iter()
             .filter(|op| op.path() == &target.path)
@@ -139,7 +139,7 @@ fn capture_files(
             hunks: Some(target.hunks),
             proposal: Prepared {
                 root: root.clone(),
-                path: evidence.canonical.clone(),
+                path: evidence.canonical().clone(),
                 relative: target.path.clone(),
                 base_hash: base.hash(),
                 proposed_hash: proposed.hash(),
@@ -150,10 +150,10 @@ fn capture_files(
                 unchanged: false,
                 hunks: Some(target.hunks),
                 live,
-                config_revision: inspection.input.config_revision,
-                policy_revision: inspection.input.policy_revision,
-                review_mode: inspection.input.review_mode,
-                save_policy: inspection.input.save_policy,
+                config_revision: inspection.input().config_revision,
+                policy_revision: inspection.input().policy_revision,
+                review_mode: inspection.input().review_mode,
+                save_policy: inspection.input().save_policy,
                 restore_dirty: None,
                 restore_coding: None,
             },
@@ -175,7 +175,7 @@ fn build_command(
     let root = directory.path();
     write_scaffold(root)?;
     write_bases(root, files, context)?;
-    std::fs::write(root.join(".kargu.patch"), inspection.patch.normalized())?;
+    std::fs::write(root.join(".kargu.patch"), inspection.patch().normalized())?;
     let program = crate::workspace::command::executable("git")?;
     let environment = git_environment(root, &program)?;
     let timeout = deadline
@@ -205,8 +205,8 @@ fn build_command(
         workspace,
         ToolCallLimit::default(),
         timeout,
-        inspection.input.config_revision,
-        inspection.input.policy_revision,
+        inspection.input().config_revision,
+        inspection.input().policy_revision,
     );
     Ok((command, settings?))
 }

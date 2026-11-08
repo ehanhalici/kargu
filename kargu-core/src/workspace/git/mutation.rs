@@ -62,8 +62,8 @@ pub(crate) enum MutationReply {
     Report(MutationReport),
 }
 pub(crate) struct MutationReport {
-    pub intent: Value,
-    pub output: OutputLimit,
+    intent: Value,
+    output: OutputLimit,
     label: &'static str,
     retained: Option<String>,
 }
@@ -368,5 +368,16 @@ impl MutationReport {
             return Err(CoreError::Limit);
         }
         Ok(text)
+    }
+}
+
+impl MutationReport {
+    /// The `intent` field.
+    pub fn intent(&self) -> &Value {
+        &self.intent
+    }
+    /// The `output` field.
+    pub fn output(&self) -> &OutputLimit {
+        &self.output
     }
 }

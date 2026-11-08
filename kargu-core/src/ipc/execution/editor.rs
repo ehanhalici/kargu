@@ -422,7 +422,7 @@ impl Editors {
                 return Err(fault(CoreError::StaleOwner));
             }
             let page = settled
-                .receipt
+                .receipt()
                 .page_files(offset, id.result_budget(host.frame_limit()).map_err(fault)?)
                 .map_err(fault)?;
             if page.get("complete") == Some(&Value::Bool(true)) {
@@ -1759,9 +1759,12 @@ mod tests {
                     },
                 )?
                 .ok_or(CoreError::CleanupFailed)?;
-                assert_eq!(completion.tool_results.len(), 1);
+                assert_eq!(completion.tool_results().len(), 1);
                 assert_eq!(
-                    completion.tool_results.first().map(|result| result.outcome),
+                    completion
+                        .tool_results()
+                        .first()
+                        .map(|result| result.outcome),
                     Some(if reason == "expired" {
                         crate::application::ToolOutcome::Timeout
                     } else {

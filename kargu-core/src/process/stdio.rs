@@ -9,7 +9,7 @@ pub(super) fn spawn(spec: &CommandSpec) -> Result<Child, CoreError> {
     command
         .arg0(&spec.invocation)
         .args(&spec.arguments)
-        .current_dir(spec.cwd.path())
+        .current_dir(spec.cwd().path())
         .env_clear()
         .envs(spec.environment.entries())
         .stdin(Stdio::piped())

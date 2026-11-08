@@ -21,7 +21,7 @@ pub(super) enum Finish {
 /// No Debug implementation can print source, reasoning, or provider signatures.
 pub struct AssistantTurn {
     pub(super) message: Message,
-    pub(super) finish: Finish,
+    finish: Finish,
     pub(super) answer: bool,
     pub(super) thought: bool,
 }
@@ -96,5 +96,12 @@ impl TryFrom<Box<RawValue>> for AssistantTurn {
             answer,
             thought,
         })
+    }
+}
+
+impl AssistantTurn {
+    /// The `finish` field.
+    pub(super) fn finish(&self) -> &Finish {
+        &self.finish
     }
 }

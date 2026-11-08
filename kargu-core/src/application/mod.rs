@@ -337,7 +337,7 @@ pub struct RunCompletion {
     /// Released run scope.
     scope: RunScope,
     /// Idempotently repaired call results; wire-family serialization is later work.
-    pub tool_results: Vec<ToolResult>,
+    tool_results: Vec<ToolResult>,
 }
 
 /// Domain actor: all state changes require exclusive access, never an I/O await.
@@ -461,18 +461,18 @@ impl ApplicationActor {
         let preparing = self
             .preparing
             .as_ref()
-            .filter(|pending| pending.claim.scope().session_id() == session);
+            .filter(|pending| pending.claim().scope().session_id() == session);
         let active = self
             .active
             .as_ref()
             .filter(|active| active.handle.scope().session_id() == session);
         let (state, scope, phase) = if let Some(pending) = preparing {
-            let state = if pending.claim.check_live().is_ok() {
+            let state = if pending.claim().check_live().is_ok() {
                 "preparing"
             } else {
                 "draining"
             };
-            (state, Some(pending.claim.scope()), None)
+            (state, Some(pending.claim().scope()), None)
         } else if let Some(active) = active {
             let state = if active.handle.check_live().is_ok() {
                 "running"
@@ -498,7 +498,7 @@ impl ApplicationActor {
         if self
             .preparing
             .as_ref()
-            .is_some_and(|pending| pending.claim.scope().session_id() == session)
+            .is_some_and(|pending| pending.claim().scope().session_id() == session)
         {
             return Err(CoreError::Busy);
         }
@@ -886,5 +886,12 @@ impl Drop for ApplicationActor {
         {
             run.handle.resources.cancellation.cancel();
         }
+    }
+}
+
+impl RunCompletion {
+    /// Idempotently repaired call results; wire-family serialization is later work.
+    pub fn tool_results(&self) -> &Vec<ToolResult> {
+        &self.tool_results
     }
 }

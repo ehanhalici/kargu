@@ -26,8 +26,8 @@ pub(super) struct Target {
     pub hunks: HunkCount,
 }
 pub(crate) struct Inspection {
-    pub(super) input: Begin,
-    pub(super) patch: UnifiedPatch,
+    input: Begin,
+    patch: UnifiedPatch,
     pub(super) targets: Vec<Target>,
     pub(super) documents: BTreeMap<EditPath, LiveDocument>,
     pub(super) parts: BTreeMap<Part, PartBuffer>,
@@ -129,4 +129,15 @@ pub(crate) struct PatchWork {
     pub(super) inspection: Inspection,
     pub(super) deadline: Instant,
     pub(crate) parent: Option<super::ParentEdit>,
+}
+
+impl Inspection {
+    /// The `input` field.
+    pub(super) fn input(&self) -> &Begin {
+        &self.input
+    }
+    /// The `patch` field.
+    pub(super) fn patch(&self) -> &UnifiedPatch {
+        &self.patch
+    }
 }

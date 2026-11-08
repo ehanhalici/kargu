@@ -27,7 +27,7 @@ fn observe_disk(
         cancel,
         deadline,
     )?;
-    if evidence.canonical != prepared.evidence.canonical {
+    if evidence.canonical() != prepared.evidence.canonical() {
         return Err(EditError::Conflict.into());
     }
     let matches_final = match &observation.after {
@@ -45,7 +45,7 @@ fn observe_disk(
             // An uploaded hash cannot assert a relationship between arbitrary logical
             // text and disk bytes. Require actual native decoding as well as raw integrity.
             let contents = capture::disk_contents(&evidence, cancel, deadline)?;
-            contents.text.as_str() == text.as_str()
+            contents.text().as_str() == text.as_str()
                 && encoded_hash.is_none_or(|expected| EncodedHash(contents.raw_digest) == expected)
         }
         _ => false,
@@ -100,7 +100,7 @@ fn assess(evidence: FileEvidence<'_>, result: &mut FileResult) {
     let After::Document { document, .. } = &observation.after else {
         return;
     };
-    let same_source = document.coding == before.coding;
+    let same_source = document.coding() == before.coding();
     if prepared.unchanged
         && disk.state == before.disk
         && after.hash() == prepared.base_hash

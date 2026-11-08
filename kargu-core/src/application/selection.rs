@@ -103,7 +103,7 @@ pub enum EffortChoice {
 pub struct Selection {
     /// Explicit provider, or none to inherit configuration.
     #[serde(default)]
-    pub provider: Option<ApiProviderId>,
+    provider: Option<ApiProviderId>,
     /// Explicit model, or none to inherit configuration.
     #[serde(default)]
     pub model: Option<ModelChoice>,
@@ -145,6 +145,13 @@ impl SessionSelection {
             self.selection = desired;
         }
         Ok(())
+    }
+}
+
+impl Selection {
+    /// Explicit provider, or none to inherit configuration.
+    pub fn provider(&self) -> &Option<ApiProviderId> {
+        &self.provider
     }
 }
 

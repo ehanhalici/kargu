@@ -54,11 +54,11 @@ impl SourceFingerprint {
             &mut hash,
             &Zeroizing::new(document.editor_value().to_string()),
         )?;
-        optional(&mut hash, context.app_url.as_ref())?;
+        optional(&mut hash, context.app_url().as_ref())?;
         optional(&mut hash, context.api_base.as_ref())?;
-        optional(&mut hash, context.api_key.as_ref())?;
-        count(&mut hash, context.environment.entries().len())?;
-        for (name, value) in context.environment.entries() {
+        optional(&mut hash, context.api_key().as_ref())?;
+        count(&mut hash, context.environment().entries().len())?;
+        for (name, value) in context.environment().entries() {
             text(&mut hash, name.as_str())?;
             optional(&mut hash, value.as_ref())?;
         }

@@ -182,7 +182,7 @@ pub(crate) struct LiveDocument {
     pub id: DocumentId,
     pub tick: DocumentTick,
     pub bytes: TextBytes,
-    pub coding: Coding,
+    coding: Coding,
     pub dirty: bool,
     pub read_only: bool,
     pub disk: DiskState,
@@ -295,8 +295,8 @@ impl From<Part> for String {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Targets {
-    pub origin_id: OriginId,
-    pub preparation_id: PreparationId,
+    origin_id: OriginId,
+    preparation_id: PreparationId,
     pub offset: FileCursor,
 }
 #[derive(Deserialize)]
@@ -354,5 +354,30 @@ pub(super) enum PreparedPart {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Close {
-    pub origin_id: OriginId,
+    origin_id: OriginId,
+}
+
+impl LiveDocument {
+    /// The `coding` field.
+    pub fn coding(&self) -> &Coding {
+        &self.coding
+    }
+}
+
+impl Targets {
+    /// The `origin_id` field.
+    pub fn origin_id(&self) -> &OriginId {
+        &self.origin_id
+    }
+    /// The `preparation_id` field.
+    pub fn preparation_id(&self) -> &PreparationId {
+        &self.preparation_id
+    }
+}
+
+impl Close {
+    /// The `origin_id` field.
+    pub fn origin_id(&self) -> &OriginId {
+        &self.origin_id
+    }
 }

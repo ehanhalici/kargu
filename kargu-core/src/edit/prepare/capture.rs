@@ -26,7 +26,7 @@ use zeroize::Zeroizing;
 
 pub(super) struct Evidence {
     original: PathBuf,
-    pub(super) canonical: PathBuf,
+    canonical: PathBuf,
     pin: ReadTarget,
     exists: bool,
 }
@@ -144,7 +144,7 @@ pub(super) fn evidence(
     Ok((evidence, disk))
 }
 pub(super) struct DiskContents {
-    pub text: EditText,
+    text: EditText,
     pub raw_digest: crate::edit::types::CaptureDigest,
 }
 pub(super) fn disk_text(
@@ -305,5 +305,19 @@ impl Work {
                 restore_coding: None,
             }),
         )))
+    }
+}
+
+impl Evidence {
+    /// The `canonical` field.
+    pub(super) fn canonical(&self) -> &PathBuf {
+        &self.canonical
+    }
+}
+
+impl DiskContents {
+    /// The `text` field.
+    pub fn text(&self) -> &EditText {
+        &self.text
     }
 }

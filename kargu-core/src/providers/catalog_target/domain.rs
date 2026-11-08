@@ -115,5 +115,12 @@ pub(super) enum ModelsAuth {
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub(super) struct NativeModels {
     pub path: ModelsPath,
-    pub unless_suffix: Option<CompatibleSuffix>,
+    unless_suffix: Option<CompatibleSuffix>,
+}
+
+impl NativeModels {
+    /// The `unless_suffix` field.
+    pub fn unless_suffix(&self) -> &Option<CompatibleSuffix> {
+        &self.unless_suffix
+    }
 }

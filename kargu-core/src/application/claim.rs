@@ -177,7 +177,7 @@ pub(super) enum ClaimState {
     Draining,
 }
 pub(super) struct PendingClaim {
-    pub claim: RunClaim,
+    claim: RunClaim,
     state: ClaimState,
 }
 
@@ -308,5 +308,12 @@ impl ApplicationActor {
             pending.claim.resources.cancellation.cancel();
             pending.claim.preparation.cancel();
         }
+    }
+}
+
+impl PendingClaim {
+    /// The `claim` field.
+    pub fn claim(&self) -> &RunClaim {
+        &self.claim
     }
 }

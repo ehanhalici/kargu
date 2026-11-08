@@ -414,16 +414,16 @@ impl EditPreparations {
             }
             methods::EDIT_TARGETS | methods::EDIT_FILES => {
                 let input: types::Targets = decode(args)?;
-                let entry = self.owned(session, &input.origin_id, &input.preparation_id)?;
+                let entry = self.owned(session, input.origin_id(), input.preparation_id())?;
                 match (&entry.phase, method) {
                     (Phase::Collecting(patch), methods::EDIT_TARGETS) => {
                         patch.targets(input.offset, frame)
                     }
                     (Phase::Ready(artifact), methods::EDIT_FILES) => {
-                        artifact.files(&input.preparation_id, input.offset, frame)
+                        artifact.files(input.preparation_id(), input.offset, frame)
                     }
                     (Phase::Claimed { artifact, .. }, methods::EDIT_FILES) => {
-                        artifact.files(&input.preparation_id, input.offset, frame)
+                        artifact.files(input.preparation_id(), input.offset, frame)
                     }
                     _ => Err(CoreError::AlreadyCompleted),
                 }
@@ -451,7 +451,7 @@ impl EditPreparations {
             methods::EDIT_CLOSE => {
                 let input: types::Close = decode(args)?;
                 self.entries.retain(|_, entry| {
-                    if !entry.owner.matches(session, &input.origin_id) {
+                    if !entry.owner.matches(session, input.origin_id()) {
                         return true;
                     }
                     match &mut entry.phase {
@@ -1091,7 +1091,7 @@ impl EditPreparations {
                                 .as_ref()
                                 .is_none_or(|root| root == file.root.path())
                                 && input
-                                    .target_file
+                                    .target_file()
                                     .as_ref()
                                     .is_none_or(|path| path == &file.relative)
                         })
@@ -1119,7 +1119,7 @@ impl EditPreparations {
             Entry {
                 owner: Owner {
                     session: session.clone(),
-                    origin: input.origin_id.clone(),
+                    origin: input.origin_id().clone(),
                     service_id: input.service_id.clone(),
                 },
                 reserved,

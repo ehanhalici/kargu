@@ -62,7 +62,7 @@ impl WireCodec {
         payload: Value,
         tuning: &super::policy::RequestTuning,
     ) -> Result<Value, ApiError> {
-        tuning.apply(payload, &self.spec.policy, self.spec.reasoning)
+        tuning.apply(payload, self.spec.policy(), self.spec.reasoning)
     }
     /// Encode only opaque continuation blocks from this same captured authority.
     pub fn encode(&self, mut payload: Value) -> Result<Value, ApiError> {
@@ -70,7 +70,7 @@ impl WireCodec {
             for message in messages {
                 if let Some(message) = message.as_object_mut() {
                     let opaque = message.remove("_kargu_opaque_content");
-                    if self.spec.request.is_some()
+                    if self.spec.request().is_some()
                         && let Some(opaque) = opaque
                         && opaque.get("scope").and_then(Value::as_str)
                             == Some(self.scope.0.as_str())
@@ -126,7 +126,7 @@ impl WireSpec {
 
     /// Derive a chat target by modifying only the path of a captured base URL.
     pub fn chat_endpoint(&self, base: ApiEndpoint) -> Result<ApiEndpoint, ApiError> {
-        self.chat_path.append_to(base)
+        self.chat_path().append_to(base)
     }
 
     /// Bind metadata before IO; a different model/provider/endpoint cannot borrow signatures.
@@ -150,14 +150,14 @@ impl WireSpec {
     }
     /// Convert an owned canonical payload without modifying editor history.
     pub fn encode(&self, payload: Value) -> Result<Value, ApiError> {
-        match self.request.as_ref() {
+        match self.request().as_ref() {
             Some(rules) => request::encode(payload, rules),
             None => Ok(payload),
         }
     }
     /// Convert only the captured response shape; never infer another provider.
     pub fn decode(&self, response: Value) -> Result<Value, ApiError> {
-        match self.response.as_ref() {
+        match self.response().as_ref() {
             Some(rules) => response::decode(response, rules),
             None => Ok(response),
         }

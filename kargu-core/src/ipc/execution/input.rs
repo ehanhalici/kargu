@@ -191,7 +191,7 @@ impl ExecuteInput {
         .with_output_limit(self.output_bytes)
         .with_idle_timeout(self.idle_timeout_ms)
         .with_stderr(self.stderr);
-        if command.program.to_str().is_none() || command.cwd.path().to_str().is_none() {
+        if command.program.to_str().is_none() || command.cwd().path().to_str().is_none() {
             return Err(CoreError::InvalidValue {
                 field: "CommandPathEncoding",
             });

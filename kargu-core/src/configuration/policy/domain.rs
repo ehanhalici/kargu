@@ -8,9 +8,9 @@ use std::collections::BTreeMap;
 #[serde(deny_unknown_fields)]
 pub(crate) struct ProviderFields {
     pub(super) api: Option<ConfigText>,
-    pub(super) apikey: Option<ConfigText>,
+    apikey: Option<ConfigText>,
     pub(super) model: Option<ConfigText>,
-    pub(super) models: Option<Vec<ConfigText>>,
+    models: Option<Vec<ConfigText>>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -324,12 +324,12 @@ impl RegistrySnapshot {
 #[derive(Deserialize)]
 #[serde(try_from = "ContextInput")]
 pub struct PolicyContext {
-    pub(super) app_url: Option<ConfigText>,
+    app_url: Option<ConfigText>,
     pub(super) api_base: Option<ConfigText>,
-    pub(super) api_key: Option<ConfigText>,
+    api_key: Option<ConfigText>,
     pub(super) selected_provider: Option<ApiProviderId>,
     pub(super) selected_model: Option<ConfigText>,
-    pub(super) environment: EnvironmentSnapshot,
+    environment: EnvironmentSnapshot,
     pub(super) registry: RegistrySnapshot,
 }
 
@@ -406,4 +406,30 @@ pub struct TargetInput {
 pub(super) struct SelectionInput {
     pub(super) provider: Option<ApiProviderId>,
     pub(super) model: Option<ConfigText>,
+}
+
+impl ProviderFields {
+    /// The `apikey` field.
+    pub(super) fn apikey(&self) -> &Option<ConfigText> {
+        &self.apikey
+    }
+    /// The `models` field.
+    pub(super) fn models(&self) -> &Option<Vec<ConfigText>> {
+        &self.models
+    }
+}
+
+impl PolicyContext {
+    /// The `app_url` field.
+    pub(super) fn app_url(&self) -> &Option<ConfigText> {
+        &self.app_url
+    }
+    /// The `api_key` field.
+    pub(super) fn api_key(&self) -> &Option<ConfigText> {
+        &self.api_key
+    }
+    /// The `environment` field.
+    pub(super) fn environment(&self) -> &EnvironmentSnapshot {
+        &self.environment
+    }
 }

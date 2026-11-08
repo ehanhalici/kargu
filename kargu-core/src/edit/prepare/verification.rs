@@ -25,8 +25,8 @@ pub(crate) struct VerificationTicket {
 fn matches_document(row: &ChangedFileRecord, document: &DocumentStamp) -> bool {
     row.path == document.path
         && row.document.as_ref().is_some_and(|saved| {
-            String::from(saved.id.clone()) == document.document_id.as_str()
-                && saved.tick.get() == document.tick.get()
+            String::from(saved.id.clone()) == document.document_id().as_str()
+                && saved.tick.get() == document.tick().get()
         })
 }
 pub(super) fn capture(

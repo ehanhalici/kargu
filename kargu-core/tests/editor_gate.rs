@@ -141,9 +141,9 @@ fn auto_grant_holds_actual_run_until_explicit_unissued_cancellation() -> TestRes
     grant.revalidate(&f.actor)?;
     grant.cancel_unissued(&mut f.actor)?;
     let completion = f.actor.finish(&f.run)?;
-    assert_eq!(completion.tool_results.len(), 1);
+    assert_eq!(completion.tool_results().len(), 1);
     assert_eq!(
-        completion.tool_results.first().map(|r| r.outcome),
+        completion.tool_results().first().map(|r| r.outcome),
         Some(ToolOutcome::Cancelled)
     );
     Ok(())
@@ -193,7 +193,7 @@ fn presenter_deletion_and_actual_mode_fail_before_creating_pending_work() -> Tes
             Err(CoreError::Rejected)
         ));
         assert_eq!(f.gate.pending_count(), 0);
-        assert!(f.actor.finish(&f.run)?.tool_results.is_empty());
+        assert!(f.actor.finish(&f.run)?.tool_results().is_empty());
     }
     for mode in [ReviewMode::Async, ReviewMode::Blocking] {
         let mut f = Fixture::new(Mode::Agent)?;
@@ -208,7 +208,7 @@ fn presenter_deletion_and_actual_mode_fail_before_creating_pending_work() -> Tes
             Err(CoreError::Rejected)
         ));
         assert_eq!(f.gate.pending_count(), 0);
-        assert!(f.actor.finish(&f.run)?.tool_results.is_empty());
+        assert!(f.actor.finish(&f.run)?.tool_results().is_empty());
     }
     let mut f = Fixture::new(Mode::Agent)?;
     let input = f.input(ReviewMode::Auto, true)?;
@@ -241,7 +241,7 @@ fn root_capture_and_policy_config_are_bound_to_the_actual_native_run() -> TestRe
             Err(CoreError::Rejected)
         ));
     }
-    assert!(f.actor.finish(&f.run)?.tool_results.is_empty());
+    assert!(f.actor.finish(&f.run)?.tool_results().is_empty());
     Ok(())
 }
 #[test]
@@ -285,10 +285,10 @@ fn command_and_editor_share_one_pending_ledger_and_independent_decisions() -> Te
         Err(CoreError::Rejected)
     ));
     let completion = f.actor.finish(&f.run)?;
-    assert_eq!(completion.tool_results.len(), 2);
+    assert_eq!(completion.tool_results().len(), 2);
     assert!(
         completion
-            .tool_results
+            .tool_results()
             .iter()
             .all(|r| r.outcome == ToolOutcome::Rejected)
     );
@@ -311,7 +311,7 @@ async fn exact_deadline_and_revocation_release_only_through_shared_drain() -> Te
     assert_eq!(
         f.actor
             .finish(&f.run)?
-            .tool_results
+            .tool_results()
             .first()
             .map(|r| r.outcome),
         Some(ToolOutcome::Timeout)
@@ -327,7 +327,7 @@ async fn exact_deadline_and_revocation_release_only_through_shared_drain() -> Te
     assert_eq!(
         f.actor
             .finish(&f.run)?
-            .tool_results
+            .tool_results()
             .first()
             .map(|r| r.outcome),
         Some(ToolOutcome::Cancelled)
@@ -352,7 +352,7 @@ fn interruption_is_terminal_and_duplicate_paths_never_enter_the_ledger() -> Test
     assert_eq!(
         f.actor
             .finish(&f.run)?
-            .tool_results
+            .tool_results()
             .first()
             .map(|r| r.outcome),
         Some(ToolOutcome::Cancelled)

@@ -79,7 +79,7 @@ pub(super) struct Append {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Upload {
-    pub upload_id: UploadId,
+    upload_id: UploadId,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -144,5 +144,12 @@ impl From<ServiceError> for Fault {
             message,
             status,
         }
+    }
+}
+
+impl Upload {
+    /// The `upload_id` field.
+    pub fn upload_id(&self) -> &UploadId {
+        &self.upload_id
     }
 }

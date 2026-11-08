@@ -186,8 +186,8 @@ pub struct CommandSpec {
     pub(crate) invocation: PathBuf,
     pub(crate) program: PathBuf,
     pub(crate) arguments: Vec<OsString>,
-    pub(crate) cwd: Workspace,
-    pub(crate) timeout: ExecutionTimeout,
+    cwd: Workspace,
+    timeout: ExecutionTimeout,
     pub(crate) idle_timeout: IdleTimeout,
     pub(crate) capture: CapturePolicy,
     pub(crate) success_codes: SuccessCodes,
@@ -1166,5 +1166,16 @@ impl ExecutionGate {
     /// Number of owned requests still awaiting a decision.
     pub fn pending_count(&self) -> usize {
         self.pending.len()
+    }
+}
+
+impl CommandSpec {
+    /// The `cwd` field.
+    pub(crate) fn cwd(&self) -> &Workspace {
+        &self.cwd
+    }
+    /// The `timeout` field.
+    pub(crate) fn timeout(&self) -> &ExecutionTimeout {
+        &self.timeout
     }
 }

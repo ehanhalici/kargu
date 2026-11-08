@@ -80,7 +80,7 @@ pub(super) struct SettledReceipt {
     pub origin: crate::edit::types::EditorSourceId,
     pub token: EditorIssueToken,
     pub revision: crate::edit::types::EditorRevision,
-    pub receipt: crate::edit::prepare::receipt::ReceiptPages,
+    receipt: crate::edit::prepare::receipt::ReceiptPages,
     pub expires_at: Instant,
 }
 pub(super) struct Finishing {
@@ -360,5 +360,12 @@ impl Finishing {
         super::finish_standalone(actor, &self.run)?;
         actor.edits.release_claim(&scope.session_id, preparation)?;
         Ok((replies, settled))
+    }
+}
+
+impl SettledReceipt {
+    /// The `receipt` field.
+    pub fn receipt(&self) -> &crate::edit::prepare::receipt::ReceiptPages {
+        &self.receipt
     }
 }

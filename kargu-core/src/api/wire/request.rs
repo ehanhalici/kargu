@@ -9,7 +9,7 @@ fn blocks(content: Option<&Value>, text: &TextRule) -> Result<Vec<Value>, ApiErr
         None | Some(Value::Null) => Ok(Vec::new()),
         Some(Value::String(value)) if value.is_empty() => Ok(Vec::new()),
         Some(Value::String(value)) => Ok(vec![
-            json!({"type":text.kind.as_str(),text.field.as_str():value}),
+            json!({"type":text.kind().as_str(),text.field().as_str():value}),
         ]),
         Some(Value::Array(value)) => Ok(value.clone()),
         _ => Err(ApiError::InvalidRequest),
@@ -66,7 +66,7 @@ pub(super) fn encode(payload: Value, rules: &RequestRules) -> Result<Value, ApiE
             .and_then(Value::as_str)
             .ok_or(ApiError::InvalidRequest)?;
         match role {
-            "system" => system.extend(blocks(message.get("content"), &rules.text)?),
+            "system" => system.extend(blocks(message.get("content"), rules.text())?),
             "tool" => {
                 let id = message
                     .get("tool_call_id")
@@ -87,7 +87,7 @@ pub(super) fn encode(payload: Value, rules: &RequestRules) -> Result<Value, ApiE
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default();
-                content.extend(blocks(message.get("content"), &rules.text)?);
+                content.extend(blocks(message.get("content"), rules.text())?);
                 if let Some(calls) = message.get("tool_calls").filter(|calls| !calls.is_null()) {
                     for call in calls.as_array().ok_or(ApiError::InvalidRequest)? {
                         content.push(tool_call(call, rules)?);
@@ -98,7 +98,7 @@ pub(super) fn encode(payload: Value, rules: &RequestRules) -> Result<Value, ApiE
                 }
             }
             "user" | "developer" => {
-                pending.extend(blocks(message.get("content"), &rules.text)?);
+                pending.extend(blocks(message.get("content"), rules.text())?);
                 flush(&mut pending, &mut messages);
             }
             _ => return Err(ApiError::InvalidRequest),
@@ -130,7 +130,7 @@ pub(super) fn encode(payload: Value, rules: &RequestRules) -> Result<Value, ApiE
             body.insert(key.as_str().to_owned(), value.clone());
         }
     }
-    if let Some(key) = rules.system.as_ref()
+    if let Some(key) = rules.system().as_ref()
         && !system.is_empty()
     {
         body.insert(key.as_str().to_owned(), json!(system));
@@ -156,7 +156,7 @@ pub(super) fn encode(payload: Value, rules: &RequestRules) -> Result<Value, ApiE
                     ),
                 ),
                 (
-                    rules.schema.as_str().to_owned(),
+                    rules.schema().as_str().to_owned(),
                     function.get("parameters").cloned().unwrap_or(json!({})),
                 ),
             ]);

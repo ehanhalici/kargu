@@ -94,9 +94,9 @@ impl ParentEdit {
         }
         if let Some(selection) = &self.selection {
             let live = input.live.as_ref().ok_or(CoreError::StaleOwner)?;
-            if String::from(live.id.clone()) != selection.document.document_id.as_str()
-                || live.tick.get() != selection.document.tick.get()
-                || input.language_source.as_ref() != Some(&selection.source)
+            if String::from(live.id.clone()) != selection.document.document_id().as_str()
+                || live.tick.get() != selection.document.tick().get()
+                || input.language_source.as_ref() != Some(selection.source())
                 || input.intent.path() != Some(&selection.document.path)
             {
                 return Err(CoreError::StaleOwner);

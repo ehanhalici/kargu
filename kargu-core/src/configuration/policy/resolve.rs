@@ -230,10 +230,10 @@ pub(super) fn profile(
             }
         })
         .or_else(|| nonempty(fields.and_then(|fields| fields.model.as_ref())));
-    let raw = fields.and_then(|fields| fields.apikey.as_ref());
+    let raw = fields.and_then(|fields| fields.apikey().as_ref());
     let mut missing = BTreeSet::new();
     let expanded = raw
-        .map(|raw| environment::expand(raw, &context.environment, &mut missing))
+        .map(|raw| environment::expand(raw, context.environment(), &mut missing))
         .transpose()?
         .flatten();
     let mut env_names = Vec::new();
@@ -246,13 +246,13 @@ pub(super) fn profile(
     }
     let env_key = env_names
         .iter()
-        .find_map(|name| context.environment.get(name));
+        .find_map(|name| context.environment().get(name));
     let explicit_keyless = raw.is_some_and(|raw| raw.as_str().is_empty());
     let metadata_keyless = registered
         .map(|entry| entry.keyless)
         .unwrap_or_else(|| baseline.is_some_and(|entry| entry.keyless()));
     let global = nonempty(if provider == active {
-        context.api_key.as_ref()
+        context.api_key().as_ref()
     } else {
         None
     });
@@ -282,7 +282,7 @@ pub(super) fn profile(
             !trimmed.is_empty() && !trimmed.ends_with("...")
         });
     let models = fields
-        .and_then(|fields| fields.models.as_ref())
+        .and_then(|fields| fields.models().as_ref())
         .filter(|models| !models.is_empty())
         .or_else(|| registered.map(|entry| &entry.models));
     Ok(Profile {
