@@ -107,26 +107,18 @@ fn names(source: &str, encoding: &Encoding) -> Field<Vec<EffortName>> {
                 .collect()
         }),
     };
-    values
-        .and_then(|values| {
-            if values.len() > 128 {
-                None
-            } else {
+    Field::from_list(
+        values
+            .filter(|values| values.len() <= 128)
+            .and_then(|values| {
                 values
                     .into_iter()
                     .filter(|value| !value.is_empty())
                     .map(EffortName::try_from)
                     .collect::<Result<Vec<_>, _>>()
                     .ok()
-            }
-        })
-        .map_or(Field::Invalid, |values| {
-            if values.is_empty() {
-                Field::Missing
-            } else {
-                Field::Known(values)
-            }
-        })
+            }),
+    )
 }
 fn path(source: &str, keys: &[PathKey], encoding: &Encoding) -> Field<Vec<EffortName>> {
     let Some((key, rest)) = keys.split_first() else {

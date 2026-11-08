@@ -34,6 +34,16 @@ pub enum Field<T> {
     /// Parsed once at the boundary.
     Known(T),
 }
+impl<T> Field<Vec<T>> {
+    /// A parsed list: empty means no observation, `None` means it was invalid.
+    pub(crate) fn from_list(values: Option<Vec<T>>) -> Self {
+        match values {
+            None => Self::Invalid,
+            Some(values) if values.is_empty() => Self::Missing,
+            Some(values) => Self::Known(values),
+        }
+    }
+}
 impl<T> Field<T> {
     /// Borrow a successfully parsed observation, never coerce an invalid one.
     pub fn known(&self) -> Option<&T> {
@@ -130,16 +140,11 @@ fn label(value: Option<&str>) -> Field<MetadataLabel> {
 fn parameters(value: Option<&str>) -> Field<Vec<ParameterName>> {
     match value {
         None | Some("null" | "[]") => Field::Missing,
-        Some(source) => serde_json::from_str::<Vec<ParameterName>>(source)
-            .ok()
-            .filter(|values| values.len() <= 256)
-            .map_or(Field::Invalid, |values| {
-                if values.is_empty() {
-                    Field::Missing
-                } else {
-                    Field::Known(values)
-                }
-            }),
+        Some(source) => Field::from_list(
+            serde_json::from_str::<Vec<ParameterName>>(source)
+                .ok()
+                .filter(|values| values.len() <= 256),
+        ),
     }
 }
 impl ModelFields {

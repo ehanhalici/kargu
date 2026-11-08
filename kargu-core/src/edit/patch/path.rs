@@ -13,6 +13,20 @@ pub(super) fn parse(raw: &str, prefix: &str) -> Result<Option<EditPath>, EditErr
     }
     EditPath::try_from(decoded.strip_prefix(prefix).unwrap_or(&decoded).to_owned()).map(Some)
 }
+/// Git's up-to-three-digit octal escape; `first` is the digit already read.
+fn octal(first: u8, input: &mut std::iter::Peekable<std::str::Bytes<'_>>) -> Result<u8, EditError> {
+    let mut value = u16::from(first - b'0');
+    for _ in 0..2 {
+        let Some(digit) = input.next_if(|b| matches!(b, b'0'..=b'7')) else {
+            break;
+        };
+        value = value
+            .checked_mul(8)
+            .and_then(|n| n.checked_add(u16::from(digit - b'0')))
+            .ok_or(EditError::InvalidPath)?;
+    }
+    u8::try_from(value).map_err(|_| EditError::InvalidPath)
+}
 fn unquote(text: &str) -> Result<String, EditError> {
     let text = text
         .strip_prefix('"')
@@ -38,20 +52,7 @@ fn unquote(text: &str) -> Result<String, EditError> {
             b'v' => 11,
             b'f' => 12,
             b'r' => 13,
-            b'0'..=b'7' => {
-                let mut value = u16::from(escaped - b'0');
-                for _ in 0..2 {
-                    if !input.peek().is_some_and(|b| matches!(b, b'0'..=b'7')) {
-                        break;
-                    }
-                    let digit = input.next().ok_or(EditError::InvalidPath)? - b'0';
-                    value = value
-                        .checked_mul(8)
-                        .and_then(|n| n.checked_add(u16::from(digit)))
-                        .ok_or(EditError::InvalidPath)?;
-                }
-                u8::try_from(value).map_err(|_| EditError::InvalidPath)?
-            }
+            b'0'..=b'7' => octal(escaped, &mut input)?,
             _ => return Err(EditError::InvalidPath),
         };
         bytes.push(byte);

@@ -63,6 +63,23 @@ impl SourceRange {
     }
 }
 
+/// Byte offset of scalar `column` inside one line, excluding its terminator.
+fn column_offset(part: &str, column: usize) -> Result<usize, CoreError> {
+    let body = match part.strip_suffix('\n') {
+        Some(body) => body.strip_suffix('\r').unwrap_or(body),
+        None => part,
+    };
+    if column == body.chars().count() {
+        return Ok(body.len());
+    }
+    body.char_indices()
+        .nth(column)
+        .map(|(index, _)| index)
+        .ok_or(CoreError::InvalidValue {
+            field: "ScalarColumn",
+        })
+}
+
 /// Convert an exact scalar position into a UTF-8 byte offset in a snapshot.
 pub fn offset(text: &str, position: Position) -> Result<usize, CoreError> {
     let target = position.line.get();
@@ -71,22 +88,8 @@ pub fn offset(text: &str, position: Position) -> Result<usize, CoreError> {
     let mut start = 0usize;
     for part in text.split_inclusive('\n') {
         if line == target {
-            let body = match part.strip_suffix('\n') {
-                Some(body) => body.strip_suffix('\r').unwrap_or(body),
-                None => part,
-            };
-            let local = if column == body.chars().count() {
-                body.len()
-            } else {
-                body.char_indices()
-                    .nth(column)
-                    .map(|(index, _)| index)
-                    .ok_or(CoreError::InvalidValue {
-                        field: "ScalarColumn",
-                    })?
-            };
             return start
-                .checked_add(local)
+                .checked_add(column_offset(part, column)?)
                 .ok_or(CoreError::ArithmeticOverflow);
         }
         start = start

@@ -203,6 +203,14 @@ impl<'a> MentionLexer<'a> {
         self.parse_inner(Some(crate::constants::limits::MENTION_TARGETS))
     }
 
+    /// Rule: an `@` right after a word character is an email address, not a mention.
+    fn preceded_by_word(&self, idx: usize) -> bool {
+        self.text
+            .get(..idx)
+            .and_then(|s| s.chars().last())
+            .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
+    }
+
     fn parse_inner(&self, maximum: Option<usize>) -> Option<Vec<MentionSpan>> {
         let mut results = Vec::new();
         let bytes = self.text.as_bytes();
@@ -224,36 +232,28 @@ impl<'a> MentionLexer<'a> {
                 continue;
             }
 
-            if bytes.get(idx) == Some(&b'@') {
-                // Rule: do not match email address (e.g. user@example.com)
-                let preceded_by_word = if idx > 0 {
-                    let prev = self.text.get(..idx).and_then(|s| s.chars().last());
-                    prev.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
-                } else {
-                    false
+            let found =
+                (bytes.get(idx) == Some(&b'@') && !self.preceded_by_word(idx) && idx + 1 < len)
+                    .then(|| self.try_parse_target(idx + 1))
+                    .flatten();
+            if let Some((target, span_len)) = found {
+                let Some(span_str) = self.text.get(idx..idx + span_len + 1) else {
+                    break;
                 };
-
-                if !preceded_by_word
-                    && idx + 1 < len
-                    && let Some((target, span_len)) = self.try_parse_target(idx + 1)
-                {
-                    let Some(span_str) = self.text.get(idx..idx + span_len + 1) else {
-                        break;
-                    };
-                    if maximum.is_some_and(|limit| results.len() >= limit) {
-                        return None;
-                    }
-                    seq_id += 1;
-                    results.push(MentionSpan {
-                        target_id: format!("mention-{}", seq_id),
-                        raw: span_str.to_string(),
-                        start: idx,
-                        end: idx + span_len + 1,
-                        target,
-                    });
-                    idx += span_len + 1;
-                    continue;
+                let full = maximum.is_some_and(|limit| results.len() >= limit);
+                if full {
+                    return None;
                 }
+                seq_id += 1;
+                results.push(MentionSpan {
+                    target_id: format!("mention-{}", seq_id),
+                    raw: span_str.to_string(),
+                    start: idx,
+                    end: idx + span_len + 1,
+                    target,
+                });
+                idx += span_len + 1;
+                continue;
             }
 
             idx += 1;
@@ -381,38 +381,11 @@ fn parse_token_or_quoted(input: &str) -> Option<(String, usize)> {
         return Some((token.to_owned(), close + 2 * quote.len_utf8()));
     }
     if input.starts_with('"') {
-        let mut out = String::new();
-        let mut chars = input.char_indices().skip(1);
-        while let Some((idx, c)) = chars.next() {
-            if c == '\\' {
-                if let Some((_, next_c)) = chars.next() {
-                    out.push(next_c);
-                }
-            } else if c == '"' {
-                return Some((out, idx + 1));
-            } else {
-                out.push(c);
-            }
-        }
-        None
+        parse_double_quoted(input)
     } else {
-        let end = input
-            .find(|c: char| {
-                c.is_whitespace()
-                    || c == ')'
-                    || c == ']'
-                    || c == '}'
-                    || c == '>'
-                    || c == ','
-                    || c == ';'
-            })
-            .unwrap_or(input.len());
-        if end == 0 {
-            None
-        } else {
-            let slice = input.get(..end)?;
-            Some((slice.to_string(), end))
-        }
+        bare_token(input, |c| {
+            c.is_whitespace() || matches!(c, ')' | ']' | '}' | '>' | ',' | ';')
+        })
     }
 }
 
@@ -421,43 +394,37 @@ fn parse_token_or_quoted_until_colon(input: &str) -> Option<(String, usize)> {
         return None;
     }
     if input.starts_with('"') {
-        let mut out = String::new();
-        let mut chars = input.char_indices().skip(1);
-        while let Some((idx, c)) = chars.next() {
-            if c == '\\' {
-                if let Some((_, next_c)) = chars.next() {
-                    out.push(next_c);
-                }
-            } else if c == '"' {
-                return Some((out, idx + 1));
-            } else {
-                out.push(c);
-            }
-        }
-        None
+        parse_double_quoted(input)
     } else {
-        let end = input
-            .find(|c: char| c == ':' || c.is_whitespace())
-            .unwrap_or(input.len());
-        if end == 0 {
-            None
-        } else {
-            let slice = input.get(..end)?;
-            Some((slice.to_string(), end))
-        }
+        bare_token(input, |c| c == ':' || c.is_whitespace())
     }
 }
 
-fn parse_range_spec(input: &str) -> Option<(String, usize)> {
-    let end = input
-        .find(|c: char| c.is_whitespace() || c == ')' || c == ']' || c == ',' || c == ';')
-        .unwrap_or(input.len());
-    if end == 0 {
-        None
-    } else {
-        let slice = input.get(..end)?;
-        Some((slice.to_string(), end))
+/// A `"…"` token with backslash escapes; an unclosed quote is no token.
+fn parse_double_quoted(input: &str) -> Option<(String, usize)> {
+    let mut out = String::new();
+    let mut chars = input.char_indices().skip(1);
+    while let Some((idx, c)) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next().map(|(_, next)| next)),
+            '"' => return Some((out, idx + 1)),
+            _ => out.push(c),
+        }
     }
+    None
+}
+
+/// The non-empty prefix of `input` before the first `stop` character.
+fn bare_token(input: &str, stop: impl Fn(char) -> bool) -> Option<(String, usize)> {
+    let end = input.find(stop).unwrap_or(input.len());
+    let slice = input.get(..end).filter(|slice| !slice.is_empty())?;
+    Some((slice.to_string(), end))
+}
+
+fn parse_range_spec(input: &str) -> Option<(String, usize)> {
+    bare_token(input, |c| {
+        c.is_whitespace() || matches!(c, ')' | ']' | ',' | ';')
+    })
 }
 
 fn parse_lines(spec: &str) -> Option<(SourceLine, SourceLine)> {

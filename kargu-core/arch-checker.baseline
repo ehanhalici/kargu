@@ -656,7 +656,6 @@ too-deep	src/application/agent/mod.rs	`next_agent_tool` nests N levels (max N); 
 too-deep	src/application/budget/mod.rs	`finish_with_cost` nests N levels (max N); extract a function
 too-deep	src/application/host.rs	`model_list` nests N levels (max N); extract a function
 too-deep	src/configuration/policy/service.rs	`call` nests N levels (max N); extract a function
-too-deep	src/edit/patch/path.rs	`unquote` nests N levels (max N); extract a function
 too-deep	src/edit/prepare/service.rs	`prepare_rollback` nests N levels (max N); extract a function
 too-deep	src/edit/prepare/service.rs	`record_applied` nests N levels (max N); extract a function
 too-deep	src/history/presentation.rs	`capture` nests N levels (max N); extract a function
@@ -675,11 +674,7 @@ too-deep	src/models/metadata/raw.rs	`try_from` nests N levels (max N); extract a
 too-deep	src/models/store/mod.rs	`projection` nests N levels (max N); extract a function
 too-deep	src/security/action_snapshot.rs	`capture` nests N levels (max N); extract a function
 too-deep	src/security/action_snapshot.rs	`revalidate` nests N levels (max N); extract a function
-too-deep	src/sensors/coordinates.rs	`offset` nests N levels (max N); extract a function
 too-deep	src/sensors/diagnostics/project.rs	`render` nests N levels (max N); extract a function
-too-deep	src/sensors/mentions.rs	`parse_inner` nests N levels (max N); extract a function
-too-deep	src/sensors/mentions.rs	`parse_token_or_quoted_until_colon` nests N levels (max N); extract a function
-too-deep	src/sensors/mentions.rs	`parse_token_or_quoted` nests N levels (max N); extract a function
 too-deep	src/workspace/file/read.rs	`execute` nests N levels (max N); extract a function
 too-deep	src/workspace/file/render.rs	`excerpt` nests N levels (max N); extract a function
 too-deep	src/workspace/file/render.rs	`ingest` nests N levels (max N); extract a function
@@ -688,7 +683,6 @@ too-deep	src/workspace/probe/mod.rs	`execute` nests N levels (max N); extract a 
 too-deep	src/workspace/probe/mod.rs	`try_from` nests N levels (max N); extract a function
 too-deep	src/workspace/probe/mod.rs	`validate` nests N levels (max N); extract a function
 too-deep	src/workspace/search.rs	`execute` nests N levels (max N); extract a function
-too-deep	src/workspace/skills/metadata.rs	`field` nests N levels (max N); extract a function
 too-many-parameters	src/api/catalog.rs	`fetch_remote_models` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/api/domain.rs	`capture_run` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/api/domain.rs	`encode_body` takes N parameters (max N); introduce a parameter type

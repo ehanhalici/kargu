@@ -57,6 +57,51 @@ pub(super) fn parse(text: &str, path: &Path) -> Result<Skill, CoreError> {
     })
 }
 
+/// A YAML block scalar (`|` keeps newlines, `>` folds them) from its indented lines.
+fn block_scalar<'a>(header: &str, lines: &mut impl Iterator<Item = &'a str>) -> String {
+    let block: Vec<_> = lines
+        .by_ref()
+        .take_while(|line| line.is_empty() || line.starts_with([' ', '\t']))
+        .collect();
+    let indent = block
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            line.len()
+                .saturating_sub(line.trim_start_matches([' ', '\t']).len())
+        })
+        .min()
+        .unwrap_or(0);
+    let lines: Vec<_> = block
+        .iter()
+        .map(|line| line.get(indent.min(line.len())..).unwrap_or(""))
+        .collect();
+    let mut output = String::new();
+    let mut previous: Option<&str> = None;
+    for line in lines {
+        if let Some(prior) = previous {
+            if header.starts_with('|')
+                || line.is_empty()
+                || prior.starts_with(' ')
+                || line.starts_with(' ')
+            {
+                output.push('\n');
+            } else if !prior.is_empty() {
+                output.push(' ');
+            }
+        }
+        output.push_str(line);
+        previous = Some(line);
+    }
+    output
+}
+/// Where a plain scalar's trailing `# comment` starts (a `#` after whitespace).
+fn comment_start(value: &str) -> Option<usize> {
+    value.char_indices().find_map(|(i, c)| {
+        (c == '#' && value.get(..i).is_some_and(|s| s.ends_with([' ', '\t']))).then_some(i)
+    })
+}
+
 fn field(front: &str, key: &str) -> Result<Option<String>, CoreError> {
     let mut lines = front.lines();
     while let Some(line) = lines.next() {
@@ -66,39 +111,7 @@ fn field(front: &str, key: &str) -> Result<Option<String>, CoreError> {
         let value = value.trim();
         let header = value.split('#').next().unwrap_or("").trim();
         if matches!(header, "|" | "|-" | "|+" | ">" | ">-" | ">+") {
-            let block: Vec<_> = lines
-                .take_while(|line| line.is_empty() || line.starts_with([' ', '\t']))
-                .collect();
-            let indent = block
-                .iter()
-                .filter(|line| !line.trim().is_empty())
-                .map(|line| {
-                    line.len()
-                        .saturating_sub(line.trim_start_matches([' ', '\t']).len())
-                })
-                .min()
-                .unwrap_or(0);
-            let lines: Vec<_> = block
-                .iter()
-                .map(|line| line.get(indent.min(line.len())..).unwrap_or(""))
-                .collect();
-            let mut output = String::new();
-            let mut previous: Option<&str> = None;
-            for line in lines {
-                if let Some(prior) = previous {
-                    if header.starts_with('|')
-                        || line.is_empty()
-                        || prior.starts_with(' ')
-                        || line.starts_with(' ')
-                    {
-                        output.push('\n');
-                    } else if !prior.is_empty() {
-                        output.push(' ');
-                    }
-                }
-                output.push_str(line);
-                previous = Some(line);
-            }
+            let output = block_scalar(header, &mut lines);
             return Ok(Some(output.trim().into()));
         }
         let scalar = if value.starts_with('"') {
@@ -114,11 +127,8 @@ fn field(front: &str, key: &str) -> Result<Option<String>, CoreError> {
                 })?
                 .replace("''", "'")
         } else {
-            let end = value.char_indices().find_map(|(i, c)| {
-                (c == '#' && value.get(..i).is_some_and(|s| s.ends_with([' ', '\t']))).then_some(i)
-            });
             value
-                .get(..end.unwrap_or(value.len()))
+                .get(..comment_start(value).unwrap_or(value.len()))
                 .ok_or(CoreError::Limit)?
                 .trim()
                 .into()
