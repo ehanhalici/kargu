@@ -12,6 +12,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'tests/test-helpers)
+(require 'tests/test-bridge)
 (require 'kargu/core)
 (require 'kargu/api)
 (require 'kargu/chat)
@@ -253,9 +254,9 @@
                                     ;; Type `@'
                                     (insert "@")
                                     (should (equal (kargu-chat--at-prefix) "@"))
+                                    ;; File candidates come from Rust asynchronously.
                                     (let ((cands (kargu-chat-company 'candidates "@")))
-                                      (should (listp cands))
-                                      (should (> (length cands) 0)))
+                                      (should (eq (car cands) :async)))
                                     ;; Rogue company-backend clearing
                                     (let ((rogue (lambda (&rest _) nil)))
                                       (setq company-backend rogue)
@@ -279,7 +280,8 @@
                                         (should (> (length sym-cands) 0))
                                         (should (cl-some (lambda (c) (string-match-p "CalcTotal" c)) sym-cands)))
                                       ;; Query with :: delimiter
-                                      (let ((cands (kargu-chat-company 'candidates "@main.go::Calc")))
+                                      (let ((cands (kargu-test-await
+                                                    (cdr (kargu-chat-company 'candidates "@main.go::Calc")))))
                                         (should (listp cands))
                                         (should (> (length cands) 0))
                                         (should (cl-some (lambda (c) (string-match-p "CalcTotal" c)) cands))))
@@ -290,6 +292,7 @@
                                 (kill-buffer chat-buf)))))
 (ert-deftest kargu-company-at-symbol-typing-cycle-test ()
   "Test that continuous typing after `@' preserves `company-backend' and handles kind/require-match."
+  (kargu-bridge-test--with-core
   (kargu-test-with-git-repo '(("tests/test-git.el" . "x") ("tests/test-fs.el" . "y") ("main.el" . "z"))
                             (let ((chat-buf (get-buffer-create "*kargu-chat-typing-test*")))
                               (unwind-protect
@@ -298,7 +301,8 @@
                                     (kargu-chat--ensure-idle-prompt)
                                     (goto-char (point-max))
                                     ;; 1. Verify kargu-chat-company protocol commands
-                                    (let ((file-cands (kargu-chat-company 'candidates "@tests/test-git.el")))
+                                    (let ((file-cands (kargu-test-await
+                                                       (cdr (kargu-chat-company 'candidates "@tests/test-git.el")))))
                                       (should (consp file-cands))
                                       (let ((cand (car file-cands)))
                                         (should (equal (get-text-property 0 'company-backend cand) 'kargu-chat-company))
@@ -324,9 +328,10 @@
 
                                     ;; 5. Even if company-backend were forced to nil, candidate property prevents crash
                                     (setq company-backend nil)
-                                    (let ((cand (car (kargu-chat-company 'candidates "@tests"))))
+                                    (let ((cand (car (kargu-test-await
+                                                      (cdr (kargu-chat-company 'candidates "@tests"))))))
                                       (should (equal (company-call-backend 'kind cand) 'file))))
-                                (kill-buffer chat-buf)))))
+                                (kill-buffer chat-buf))))))
 (ert-deftest kargu-chat-request-uses-the-buffer-model-test ()
   "A request from a chat carries that chat's model, and the other chat keeps its own."
   (let ((buf1 (get-buffer-create "*kargu-chat-sel-1*"))
@@ -523,24 +528,45 @@
             (should (= (mark) (+ kargu-chat--prompt-marker 8)))))))))
 
 (ert-deftest kargu-chat-completion-never-adds-unrelated-buffer-roots-test ()
-  "An unrelated file buffer is neither scanned nor offered as a mention."
-  (kargu-test-with-git-repo '(("local.el" . "local"))
-    (let ((foreign (generate-new-buffer " *kargu-foreign-completion*")))
-      (unwind-protect
-          (progn
-            (with-current-buffer foreign
-              (setq buffer-file-name "/tmp/other-project/secret.el"))
-            (cl-letf (((symbol-function 'project-current)
-                       (lambda (&rest _) (error "Must not scan other buffer projects"))))
-              (should (equal (kargu-chat--completion-roots) (list repo))))
-            (cl-letf (((symbol-function 'kargu-chat--project-absolute-files)
-                       (lambda (root)
-                         (should (equal root repo))
-                         (list (expand-file-name "local.el" root)))))
-              (let ((files (kargu-chat--collect-files (kargu-chat--completion-roots))))
-                (should (member "local.el" files))
-                (should-not (member "secret.el" files)))))
-        (kill-buffer foreign)))))
+  "Rust ranks project files; an unrelated visited file is never offered."
+  (kargu-bridge-test--with-core
+    (kargu-test-with-git-repo '(("local.el" . "local") ("src/nested.el" . "nested"))
+      (let ((foreign (generate-new-buffer " *kargu-foreign-completion*"))
+            (outside (make-temp-file "kargu-other-project-" t)))
+        (unwind-protect
+            (progn
+              (with-current-buffer foreign
+                (setq buffer-file-name (expand-file-name "secret.el" outside)))
+              (write-region "secret" nil (expand-file-name "secret.el" outside) nil 'silent)
+              (cl-letf (((symbol-function 'project-current)
+                         (lambda (&rest _) (error "Must not scan other buffer projects")))
+                        ((symbol-function 'directory-files)
+                         (lambda (&rest _) (error "Completion must not list directories in Emacs"))))
+                (should (equal (kargu-chat--completion-roots) (list repo)))
+                (let ((files (mapcar #'substring-no-properties
+                                     (kargu-test-await
+                                      (lambda (done) (kargu-chat--file-candidates "" done))))))
+                  (should (member "@local.el" files))
+                  (should (member "@src/nested.el" files))
+                  (should-not (cl-some (lambda (file) (string-search "secret" file)) files)))))
+          (kill-buffer foreign)
+          (delete-directory outside t))))))
+
+(ert-deftest kargu-chat-completion-ranks-natively-and-drops-superseded-queries-test ()
+  "Rust ranks and highlights; only the newest query of a prompt answers."
+  (kargu-bridge-test--with-core
+    (kargu-test-with-git-repo '(("src/main.el" . "x") ("docs/domain.el" . "y") ("main.elc" . "z"))
+      (let* (first
+             (second (kargu-test-await
+                      (lambda (done)
+                        (kargu-chat--file-candidates "zzz" (lambda (value) (setq first value)))
+                        (kargu-chat--file-candidates "main" done)))))
+        (should (equal (mapcar #'substring-no-properties second)
+                       '("@src/main.el" "@docs/domain.el")))
+        (should (equal (get-text-property 0 'kargu-match (car second)) '((5 . 9))))
+        (should (eq (get-text-property 0 'kargu-kind (car second)) 'file))
+        (accept-process-output nil 0.1)
+        (should-not first)))))
 
 (ert-deftest kargu-chat-retries-replace-only-the-failed-request-output-test ()
   "HTTP and loop retries keep prior logs and the draft but discard partial deltas."

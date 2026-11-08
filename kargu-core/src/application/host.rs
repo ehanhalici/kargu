@@ -356,6 +356,14 @@ impl Host {
                     serde_json::from_value(params).map_err(|_| Fault::params())?;
                 (request.scope, WorkspaceRead::FindFiles(request.arguments))
             }
+            methods::MENTION_CANDIDATES => {
+                let request: ReadRequest<crate::workspace::completion::MentionCandidatesInput> =
+                    serde_json::from_value(params).map_err(|_| Fault::params())?;
+                (
+                    request.scope,
+                    WorkspaceRead::MentionCandidates(request.arguments),
+                )
+            }
             _ => return Err(Fault::params()),
         };
         if !self.owns_read_scope(&scope) {

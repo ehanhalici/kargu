@@ -671,6 +671,7 @@ async fn read_messages<R: AsyncRead + Unpin>(
                 if matches!(
                     method.as_str(),
                     methods::FIND_FILES
+                        | methods::MENTION_CANDIDATES
                         | methods::READ_FILE
                         | methods::SKILLS
                         | methods::WEBFETCH

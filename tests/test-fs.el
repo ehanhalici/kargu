@@ -1,11 +1,11 @@
-;;; tests/test-fs.el --- Tests for the bounded file walk and skill discovery -*- lexical-binding: t; -*-
+;;; tests/test-fs.el --- Tests for shared discovery policy and skill discovery -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 kargu developers.
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
 
-;; Temporary trees exercise bounded traversal and shared search policies.
+;; Temporary trees exercise the shared search policies sent to Rust.
 
 ;;; Code:
 
@@ -32,74 +32,19 @@
            ,@body)
        (delete-directory root t))))
 
-(ert-deftest kargu-fs-walk-skips-vendor-dirs-and-artifacts-test ()
-  "The walk ignores skipped directories, backups and compiled files."
-  (kargu-fs-test--with-tree '(("a.el" . "x") ("sub/b.el" . "y") ("node_modules/c.js" . "z")
-                              (".git/config" . "g") ("a.elc" . "b") ("a.el~" . "b"))
-			    (let ((names (mapcar (lambda (f) (file-relative-name f root)) (kargu-fs-walk root))))
-			      (should (equal (sort names #'string<) '("a.el" "sub/b.el"))))))
-
 (ert-deftest kargu-fs-configurable-exclusions-keep-legitimate-source-names-test ()
-  "Removing a generated-directory exclusion exposes source in walks and grep."
+  "Removing a generated-directory exclusion exposes source to native grep."
   (kargu-bridge-test--with-core
   (kargu-fs-test--with-tree '(("src/build/main.el" . "needle\n")
                               ("src/vendor/library.el" . "needle\n")
                               (".git/secret" . "needle\n"))
     (let ((kargu-fs-skip-dirs '(".git"))
           (kargu-permission--override-root root))
-      (let ((files (kargu-fs-walk root)))
-        (should (= (length files) 2))
-        (should (member (expand-file-name "src/build/main.el" root) files)))
       (let ((output (kargu-test-await
                      (lambda (callback) (kargu-search-grep callback "needle")))))
         (should (string-search "src/build/main.el" output))
         (should (string-search "src/vendor/library.el" output))
         (should-not (string-search ".git/secret" output)))))))
-
-(ert-deftest kargu-fs-walk-cap-counts-visited-files-test ()
-  "The cap bounds visited files, whether or not the filter keeps them."
-  (kargu-fs-test--with-tree (mapcar (lambda (i) (cons (format "f%d.txt" i) "x")) (number-sequence 1 10))
-			    (let ((seen 0))
-			      (kargu-fs-walk root 3 (lambda (_f) (setq seen (1+ seen)) nil))
-			      (should (= seen 3)))
-			    (should (= (length (kargu-fs-walk root 4)) 4))))
-
-(ert-deftest kargu-fs-walk-confines-links-and-visits-directories-once-test ()
-  "Symlink cycles terminate and external files never reach the callback."
-  (skip-unless (fboundp 'make-symbolic-link))
-  (kargu-fs-test--with-tree '(("root.el" . "root") ("src/inside.el" . "inside"))
-			    (let ((outside (make-temp-file "kargu-external-" t))
-				  (read-directory (symbol-function 'directory-files))
-				  (reads 0) seen)
-			      (unwind-protect
-				  (progn
-				    (write-region "private" nil (expand-file-name "secret.el" outside) nil 'silent)
-				    (make-symbolic-link root (expand-file-name "loop" root))
-				    (make-symbolic-link (expand-file-name "src" root) (expand-file-name "alias" root))
-				    (make-symbolic-link outside (expand-file-name "external" root))
-				    (make-symbolic-link (expand-file-name "secret.el" outside) (expand-file-name "file-link.el" root))
-				    (cl-letf (((symbol-function 'directory-files)
-					       (lambda (&rest args)
-						 (cl-incf reads)
-						 (when (> reads 10) (error "Repeated directory traversal"))
-						 (apply read-directory args))))
-				      (kargu-fs-walk root 20 (lambda (path) (push (file-truename path) seen) t)))
-				    (should (= reads 2))
-				    (should (= (length seen) 2))
-				    (should-not (member (expand-file-name "secret.el" outside) seen)))
-				(delete-directory outside t)))))
-
-(ert-deftest kargu-fs-directory-budget-is-independent-of-file-cap-test ()
-  "A directory-only tree has a finite visit budget without altering the file cap."
-  (kargu-fs-test--with-tree '(("src/deep/a.el" . "a") ("root.el" . "b"))
-			    (let ((kargu-fs-max-visited-directories 1))
-			      (should (equal (kargu-fs-walk root 20) (list (expand-file-name "root.el" root)))))))
-
-(ert-deftest kargu-fs-skips-relative-to-root-not-ancestor-names-test ()
-  "A project below build/vendor remains visible while nested artifacts stay hidden."
-  (should-not (kargu-fs-skipped-path-p "/workspace/build/project/src/main.el" "/workspace/build/project/"))
-  (should (kargu-fs-skipped-path-p "/workspace/build/project/node_modules/a.js" "/workspace/build/project/"))
-  (should-not (kargu-fs-skipped-path-p "/workspace/build/project/src/build" "/workspace/build/project/")))
 
 (ert-deftest kargu-search-grep-does-not-follow-external-links-test ()
   "Native search cannot follow recursive symlinks outside the project.
@@ -157,14 +102,6 @@ Both engines' raw lookahead/cleanup and argv policy live in Rust tests."
                 (should (string-prefix-p "No matches" out))
               (should (string-prefix-p "ERROR:" out)))
             (should-not (string-search "omitted" out))))))))
-
-(ert-deftest kargu-fs-skipped-path-and-relative-path-test ()
-  "Skipped components are detected; paths inside the root turn relative."
-  (should (kargu-fs-skipped-path-p "/p/node_modules/x.js"))
-  (should-not (kargu-fs-skipped-path-p "/p/src/x.js"))
-  (should (equal (kargu-rel-path "/p/src/x.js" "/p/") "src/x.js"))
-  (should (equal (kargu-rel-path "/p/..notes/x.js" "/p/") "..notes/x.js"))
-  (should (equal (kargu-rel-path "/elsewhere/x.js" "/p/") "/elsewhere/x.js")))
 
 (ert-deftest kargu-search-native-port-captures-shared-directory-policy-test ()
   "The native port captures configuration and never starts an Elisp search."

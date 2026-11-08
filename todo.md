@@ -710,6 +710,27 @@ backend 9'da ayrı teslim edilir; bunların eksikliği final ürün kapanışın
     **Doğrulama başlangıcı:** Statik dosya/sembol/caller eşlemesi ve todo kimlik/durum
       kontrolü; uygulama testi yapılmış sayılmaz.
 
+  - [ ] **0.2a Initialize capability frame bütçesi (bulunan sorun, 2026-11-08):**
+    `initialize` cevabı 1024 baytlık minimum frame'de 989 bayt; yeni bir core
+    capability adı eklemek (`workspace_mention_candidates` denemesi) gerçek
+    minimum-frame açılış testini `resource_limit` ile bozdu. Aynı sorun daha önce
+    `editor_credential_capture` ilanında da yaşandı. Şimdilik yeni RPC'ler
+    mevcut aile capability'si altında yayınlanıyor (`workspace/mentionCandidates`
+    → `workspace_find_files`); bu, capability'nin tek bir metodu kanıtladığı
+    sözleşmeyi bulanıklaştırır.
+
+    **Uygulama adımı:** capability ilanını sayfalı ya da sürümlü kompakt bir
+      kümeye taşı (ör. `capability_set` revizyonu + ayrı `capabilities/list`
+      sayfası); Elisp'in bind/ensure kontrolleri aynı kaynaktan beslensin.
+      Minimum frame limiti gevşetilmesin.
+
+    **Bitti sayılması için:** 1024 baytlık frame'de en az 20 yeni capability adı
+      eklenebilir; her RPC kendi capability'si ile gate'lenir; eski client'lar
+      için geriye dönük davranış tanımlıdır.
+
+    **Doğrulama başlangıcı:** ERT `kargu-bridge-real-minimum-frame-hydrates-catalog-test`,
+      Rust stdio initialize testleri.
+
   - [ ] **0.3 Kabul matrisi:** her açık alt iş için mevcut test, eksik fixture,
     negatif vaka ve gerçek consumer testini eşle. “Kaynak var”, “çalıştırıldı” ve
     “consumer/legacy kaldırma tamam” kanıtlarını ayır; test sayısı hedef yapma.
@@ -2112,6 +2133,42 @@ consumer'ları 5.3'te, editor/debugger/context geçişleri 3–4'te izlenir.
 
       **Doğrulama başlangıcı:** Rust file_reads, search, git_reads; ERT
         test-native-file, test-attach, test-file-window, test-fs.
+
+      **İlerleme (2026-11-08):** `@` dosya adayları artık Rust'tan gelir: yeni
+        `workspace/mentionCandidates` RPC'si (`kargu-core/src/workspace/completion/`)
+        native bounded keşfi (`FindFilesPlan`, skip dizinleri, artifact politikası,
+        dosya/dizin bütçesi, symlink izlenmez) ile editörün ziyaret ettiği ve kök
+        içinde kalan dosyaları birleştirir, bulanık sıralamayı ve vurgu
+        aralıklarını hesaplar (en çok 50 aday). `chat/complete.el` yalnız sonucu
+        company adayına çevirir; aynı prompt'ta yeni sorgu eski isteği iptal
+        eder, hata boş aday döner. Elisp'teki `project-files`/`kargu-fs-walk`
+        tarayıcısı, 8 saniyelik dosya cache'i, dosya flex skorlaması ve artık
+        tüketicisi kalmayan `kargu-fs-walk`, `kargu-fs-skipped-path-p`,
+        `kargu-fs-ignore-file-p`, `kargu-rel-path` silindi.
+        **Kanıt:** Rust rank unit testleri (3) ve stdio
+        `mention_candidates_rank_discovered_and_visited_files_natively`; ERT
+        `kargu-chat-completion-never-adds-unrelated-buffer-roots-test`
+        (Emacs `directory-files` çağrılmaz, kök dışı buffer önerilmez) ve
+        `kargu-chat-completion-ranks-natively-and-drops-superseded-queries-test`;
+        tam ERT 1471/1471.
+        **Açık:** (1) Eski `project-files` yolu VC ignore kurallarına uyuyordu;
+        native keşif yalnız skip dizinleri ve artifact politikasını uygular, Git
+        ignore edilen fakat skip listesinde olmayan dosyalar artık aday olabilir
+        (bkz. 4.8d1). (2) Sembol adaylarının sıralaması hâlâ Elisp flex
+        skorlamasıdır (`kargu-chat--score-symbol-item`), 4.4b/4.4e ile Rust'a
+        taşınmalı. (3) Çoklu kök etiketlemesi kaldırıldı; completion zaten tek
+        seçili kökle çalışıyordu.
+
+      - [ ] **4.8d1 Git ignore farkında aday listesi:** native mention keşfi, kök
+        bir Git deposuysa mevcut native Git okuma portuyla (`ls-files --cached
+        --others --exclude-standard` eşdeğeri, sabit argv, sınırlı çıktı) ignore
+        edilen dosyaları dışlasın; depo değilse bugünkü skip/artifact politikası
+        kalsın. Makine-global Git config'i yine okunmaz.
+
+        **Bitti sayılması için:** `.gitignore` ile dışlanan dosya aday olmaz;
+          ignore kuralı olmayan kaynak görünür kalır; Git yoksa `unavailable`
+          değil mevcut politika uygulanır.
+
 
   - [ ] **4.9 Provenance/bütçe/egress:** immutable attachment metadata/hash/range,
     dedup ile kullanıcı sırası; native muhafazakâr token/byte/output-overhead

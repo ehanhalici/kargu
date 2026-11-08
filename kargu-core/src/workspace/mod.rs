@@ -1,6 +1,7 @@
 //! Closed native read-operation boundary shared by host admission and IO workers.
 
 pub(crate) mod command;
+pub mod completion;
 pub mod file;
 pub mod git;
 pub mod grep;
@@ -22,6 +23,7 @@ pub(crate) enum WorkspaceRead {
     Skills(skills::SkillInput),
     Webfetch(webfetch::FetchInput),
     Probe(probe::ProbeInput),
+    MentionCandidates(completion::MentionCandidatesInput),
 }
 
 #[derive(Serialize)]
@@ -32,6 +34,7 @@ pub(crate) enum ReadResult {
     Skills(skills::SkillResult),
     Webfetch(webfetch::FetchResult),
     Probe(probe::ProbeResult),
+    MentionCandidates(completion::MentionCandidates),
 }
 
 impl WorkspaceRead {
@@ -48,6 +51,9 @@ impl WorkspaceRead {
         }
         match self {
             Self::Probe(input) => input.execute(cancel, deadline).map(ReadResult::Probe),
+            Self::MentionCandidates(input) => input
+                .execute(cancel, deadline)
+                .map(ReadResult::MentionCandidates),
             Self::Webfetch(input) => input.execute(cancel, deadline).map(ReadResult::Webfetch),
             Self::Skills(input) => input.execute(cancel, deadline).map(ReadResult::Skills),
             Self::ReadFile(input) => input.execute(cancel, deadline).map(ReadResult::File),
@@ -68,7 +74,7 @@ impl ReadResult {
             Self::File(result) => Ok((ToolOutcome::Ok, result.text)),
             Self::Skills(result) => Ok(result.into_tool_output()),
             Self::Webfetch(result) => Ok((result.outcome(), result.into_text())),
-            Self::Probe(_) => Err(CoreError::InvalidToolOutput),
+            Self::Probe(_) | Self::MentionCandidates(_) => Err(CoreError::InvalidToolOutput),
         }
     }
 }

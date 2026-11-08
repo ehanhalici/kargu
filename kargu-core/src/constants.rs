@@ -511,6 +511,8 @@ pub mod protocol {
         pub const WEBFETCH: &str = "workspace/webfetch";
         /// Declarative toolchain/executable discovery; never executes.
         pub const PROBE: &str = "workspace/probe";
+        /// Ranked `@` mention completion paths from bounded native discovery.
+        pub const MENTION_CANDIDATES: &str = "workspace/mentionCandidates";
         /// Bounded fixed-argv GNU ls listing, through the shared command service.
         pub const LIST_FILES: &str = "workspace/listFiles";
         /// Bounded rg/GNU grep composition through the shared process owner.

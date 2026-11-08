@@ -319,6 +319,16 @@ CALLBACK receives the native (RESULT ERROR).  No Elisp fallback is executed."
   (kargu-bridge--workspace-read connection arguments callback :owner owner
 				:method "workspace/findFiles" :capability "workspace_find_files"))
 
+(cl-defun kargu-bridge-mention-candidates (connection arguments callback &key owner)
+  "Rank `@' mention paths for ARGUMENTS on CONNECTION for OWNER.
+CALLBACK receives the native (RESULT ERROR).  Rust discovers, filters and
+ranks; Emacs only displays the candidates."
+  (kargu-bridge--workspace-read
+   connection arguments callback :owner owner
+   ;; Advertised with native discovery: the initialize reply has no frame
+   ;; headroom for another capability at the minimum frame size.
+   :method "workspace/mentionCandidates" :capability "workspace_find_files"))
+
 (cl-defun kargu-bridge-read-file (connection arguments callback &key owner)
   "Read captured file ARGUMENTS on CONNECTION for OWNER into CALLBACK."
   (kargu-bridge--workspace-read

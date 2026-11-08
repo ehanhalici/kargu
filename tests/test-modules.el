@@ -92,8 +92,11 @@ FORMS run in a disposable workspace, so fixtures never touch the checkout."
        (kargu-chat-mode)
        (kargu-chat--notice-without-eglot)
        (cl-assert (null (kargu-chat--symbol-candidates "missing")))
-       (let (answered)
+       ;; Without a core the native file request fails; it still answers.
+       (let (answered (deadline (+ (float-time) 10)))
          (kargu-chat--async-candidates "@missing" (lambda (_) (setq answered t)))
+         (while (and (not answered) (< (float-time) deadline))
+           (accept-process-output nil 0.05))
          (cl-assert answered))
        (kargu-chat-stop)))))
 
@@ -515,10 +518,12 @@ FORMS run in a disposable workspace, so fixtures never touch the checkout."
                        "/etc/passwd" default-directory))))))
 
 (ert-deftest kargu-module-filesystem-is-independent-test ()
-  "A bounded filesystem walk does not initialize the application."
+  "Loading the discovery settings alone does not initialize the application."
   (kargu-module-test--load-foundation
    'kargu/fs
-   '(cl-assert (listp (kargu-fs-walk default-directory 1)))))
+   '(progn
+      (cl-assert (member ".git" kargu-fs-skip-dirs))
+      (cl-assert (not (fboundp 'kargu-fs-walk))))))
 
 (ert-deftest kargu-module-process-is-independent-test ()
   "Loading the process service alone starts no process or runtime."

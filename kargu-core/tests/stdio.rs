@@ -453,6 +453,62 @@ fn native_file_discovery_uses_owned_session_and_keeps_reader_responsive() -> Tes
 }
 
 #[test]
+fn mention_candidates_rank_discovered_and_visited_files_natively() -> TestResult {
+    let root = tempfile::tempdir()?;
+    std::fs::create_dir_all(root.path().join("src"))?;
+    std::fs::create_dir_all(root.path().join("target/deep"))?;
+    std::fs::write(root.path().join("src/main.rs"), "fixture")?;
+    std::fs::write(root.path().join("src/domain.rs"), "fixture")?;
+    std::fs::write(root.path().join("src/main.elc"), "artifact")?;
+    // Skipped from discovery, but the editor is visiting it.
+    std::fs::write(root.path().join("target/deep/main_gen.rs"), "fixture")?;
+    let outside = tempfile::tempdir()?;
+    std::fs::write(outside.path().join("main.rs"), "foreign")?;
+    let mut peer = Peer::start()?;
+    peer.initialize()?;
+    peer.send(json!({"jsonrpc":"2.0","id":1,"method":"application/create"}))?;
+    let app = peer.read()?["result"]["application_id"].clone();
+    peer.send(
+        json!({"jsonrpc":"2.0","id":2,"method":"session/create","params":{"application_id":app}}),
+    )?;
+    let scope = peer.read()?["result"].clone();
+    let arguments = json!({"root":root.path(),"query":"main",
+        "open_files":[root.path().join("target/deep/main_gen.rs"), outside.path().join("main.rs"),
+                      root.path().join("src/main.elc")],
+        "skip_directories":["target"],"max_files":2000,"max_directories":2000,"limit":10});
+    peer.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"workspace/mentionCandidates",
+        "params":{"scope":scope,"arguments":arguments}}),
+    )?;
+    let reply = peer.read()?;
+    let candidates = reply["result"]["candidates"]
+        .as_array()
+        .ok_or("candidates missing")?;
+    let paths: Vec<&str> = candidates
+        .iter()
+        .filter_map(|candidate| candidate["path"].as_str())
+        .collect();
+    // Basename prefixes rank before a basename substring; the artifact and the
+    // file outside the root never appear.
+    assert_eq!(
+        paths,
+        ["src/main.rs", "target/deep/main_gen.rs", "src/domain.rs"]
+    );
+    assert_eq!(candidates[0]["match"], json!([[4, 8]]));
+    assert_eq!(reply["result"]["truncated"], false);
+    let mut oversized = arguments.clone();
+    oversized["limit"] = json!(51);
+    peer.send(
+        json!({"jsonrpc":"2.0","id":4,"method":"workspace/mentionCandidates",
+        "params":{"scope":scope,"arguments":oversized}}),
+    )?;
+    assert_eq!(peer.read()?["error"]["data"]["status"], "resource_limit");
+    peer.input.take();
+    assert!(peer.wait()?);
+    Ok(())
+}
+
+#[test]
 fn oversized_search_response_is_a_scoped_error_not_transport_failure() -> TestResult {
     let root = tempfile::tempdir()?;
     for n in 0..100 {

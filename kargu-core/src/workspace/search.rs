@@ -316,6 +316,18 @@ impl FindFilesPlan {
     }
 }
 
+/// The workspace-relative form of an editor-visited `path`, when discovery
+/// would also show it: canonically inside the workspace and not an artifact.
+pub(crate) fn displayable(workspace: &Workspace, path: &Path) -> Option<PathBuf> {
+    let real = path.canonicalize().ok()?;
+    if ignored_artifact(&real) {
+        return None;
+    }
+    real.strip_prefix(workspace.path())
+        .ok()
+        .map(Path::to_path_buf)
+}
+
 fn ignored_artifact(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
