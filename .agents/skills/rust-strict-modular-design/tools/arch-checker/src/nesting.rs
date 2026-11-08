@@ -43,12 +43,14 @@ impl Meter {
         }
     }
 
-    /// An `else if` continues its chain; it is not one level deeper.
+    /// An `else if` or `else` continues its chain; it is not one level deeper.
     fn visit_if_chain(&mut self, node: &syn::ExprIf) {
         self.visit_expr(&node.cond);
         self.visit_block(&node.then_branch);
         match node.else_branch.as_ref().map(|(_, branch)| branch.as_ref()) {
             Some(Expr::If(next)) => self.visit_if_chain(next),
+            // The final `else { … }` is the chain's last arm, not a deeper block.
+            Some(Expr::Block(last)) => self.visit_block(&last.block),
             Some(other) => self.visit_expr(other),
             None => {}
         }

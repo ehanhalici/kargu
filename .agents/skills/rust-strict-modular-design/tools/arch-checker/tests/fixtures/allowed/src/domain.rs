@@ -57,3 +57,11 @@ pub fn elapsed(start: Instant, now: Instant) -> Duration {
 
 #[cfg(test)]
 mod checks;
+
+pub fn pick(total: &Total) -> Total {
+    if total.get() > 1 {
+        if total.get() > 2 { Total::new(2) } else { Total::new(1) }
+    } else {
+        Total::new(0)
+    }
+}
