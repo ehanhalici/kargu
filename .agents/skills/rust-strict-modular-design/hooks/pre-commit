@@ -31,6 +31,14 @@ cache=  # set in main: .git/arch-checker-cache
 say() { printf '%s\n' "$*" >&2; }
 fail() { say "pre-commit: $*"; exit 1; }
 
+# Git exports GIT_DIR, GIT_INDEX_FILE, … to hooks; tests that run git on their
+# own temporary repositories must not inherit this repository's.  Call only
+# inside a subshell.
+without_git_env() {
+    # shellcheck disable=SC2046
+    unset $(git rev-parse --local-env-vars)
+}
+
 # Run cargo directly when PATH has a complete toolchain, otherwise inside the
 # repository's shell.nix.  "Complete" is probed from `/`: a rustup `rustc`
 # shim answers only inside a directory with a toolchain file, yet cargo also
@@ -39,11 +47,11 @@ fail() { say "pre-commit: $*"; exit 1; }
 cargo_in() {
     local dir=$1; shift
     if command -v cargo >/dev/null 2>&1 && (cd / && rustc -vV) >/dev/null 2>&1; then
-        (cd "$dir" && cargo "$@")
+        (without_git_env; cd "$dir" && cargo "$@")
     elif [[ -f "$repo/shell.nix" ]] && command -v nix-shell >/dev/null 2>&1; then
         local quoted; printf -v quoted '%q ' "$@"
         # pipefail reports nix-shell's status; an empty filter is not a failure.
-        (cd "$dir" && nix-shell "$repo/shell.nix" --run "cargo $quoted" 2>&1 |
+        (without_git_env; cd "$dir" && nix-shell "$repo/shell.nix" --run "cargo $quoted" 2>&1 |
             { grep -v '^Kargu proof shell' >&2 || true; })
     else
         fail "cargo not found (and no nix-shell fallback)"
