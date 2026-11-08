@@ -12,6 +12,23 @@ struct Block {
     text: Option<Box<RawValue>>,
 }
 
+/// Concatenated text of the `text`/`output_text` blocks of a content array.
+fn block_text(source: &str) -> Result<String, HistoryError> {
+    let blocks: Vec<Block> =
+        serde_json::from_str(source).map_err(|_| HistoryError::InvalidMessage)?;
+    let mut text = String::new();
+    for block in blocks
+        .into_iter()
+        .filter(|block| matches!(block.kind.as_str(), "text" | "output_text"))
+    {
+        let source = block.text.ok_or(HistoryError::InvalidMessage)?;
+        let part: String =
+            serde_json::from_str(source.get()).map_err(|_| HistoryError::InvalidMessage)?;
+        text.push_str(&part);
+    }
+    Ok(text)
+}
+
 pub(super) fn capture(
     role: Role,
     content: Option<&RawValue>,
@@ -29,18 +46,7 @@ pub(super) fn capture(
     let text: String = if source.starts_with('"') {
         serde_json::from_str(source).map_err(|_| HistoryError::InvalidMessage)?
     } else {
-        let blocks: Vec<Block> =
-            serde_json::from_str(source).map_err(|_| HistoryError::InvalidMessage)?;
-        let mut text = String::new();
-        for block in blocks {
-            if matches!(block.kind.as_str(), "text" | "output_text") {
-                let source = block.text.ok_or(HistoryError::InvalidMessage)?;
-                let part: String =
-                    serde_json::from_str(source.get()).map_err(|_| HistoryError::InvalidMessage)?;
-                text.push_str(&part);
-            }
-        }
-        text
+        block_text(source)?
     };
     Ok(Some(Arc::from(text)))
 }

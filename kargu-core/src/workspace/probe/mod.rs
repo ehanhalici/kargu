@@ -125,35 +125,47 @@ impl TryFrom<ProbeDto> for ProbeInput {
             if !ids.insert(&profile.id) {
                 return Err(CoreError::Rejected);
             }
-            if profile.id.is_empty()
-                || profile.id.len() > 128
-                || profile.name.len() > 256
-                || profile.id.contains('\0')
-                || profile.name.contains('\0')
-            {
-                return Err(CoreError::Limit);
-            }
-            for c in &profile.detectors {
-                validate(c, 0, &mut count)?;
-            }
-            if let Toolchain::Static { commands } = &profile.toolchain {
-                for v in [
-                    &commands.build_cmd,
-                    &commands.test_cmd,
-                    &commands.lint_cmd,
-                    &commands.notes,
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    if v.len() > 8192 || v.contains('\0') {
-                        return Err(CoreError::Limit);
-                    }
-                }
-            }
+            validate_profile(profile, &mut count)?;
         }
         Ok(Self(d))
     }
+}
+fn validate_profile(profile: &Profile, count: &mut usize) -> Result<(), CoreError> {
+    if profile.id.is_empty()
+        || profile.id.len() > 128
+        || profile.name.len() > 256
+        || profile.id.contains('\0')
+        || profile.name.contains('\0')
+    {
+        return Err(CoreError::Limit);
+    }
+    for c in &profile.detectors {
+        validate(c, 0, count)?;
+    }
+    let Toolchain::Static { commands } = &profile.toolchain else {
+        return Ok(());
+    };
+    let texts = [
+        &commands.build_cmd,
+        &commands.test_cmd,
+        &commands.lint_cmd,
+        &commands.notes,
+    ];
+    if texts
+        .into_iter()
+        .flatten()
+        .any(|v| v.len() > 8192 || v.contains('\0'))
+    {
+        return Err(CoreError::Limit);
+    }
+    Ok(())
+}
+fn valid_extension(extension: &str) -> bool {
+    !extension.is_empty()
+        && extension.len() <= 32
+        && extension
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 fn validate(c: &Condition, depth: usize, count: &mut usize) -> Result<(), CoreError> {
     *count = count.saturating_add(1);
@@ -168,13 +180,7 @@ fn validate(c: &Condition, depth: usize, count: &mut usize) -> Result<(), CoreEr
             }
         }
         Condition::Extension { extensions, .. } => {
-            if extensions.len() > 32
-                || extensions.iter().any(|s| {
-                    s.is_empty()
-                        || s.len() > 32
-                        || !s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
-                })
-            {
+            if extensions.len() > 32 || !extensions.iter().all(|s| valid_extension(s)) {
                 return Err(CoreError::Rejected);
             }
         }
@@ -206,66 +212,75 @@ impl Probe<'_> {
         checkpoint(self.cancel, self.deadline)?;
         match condition {
             Condition::Path { path } => Ok(self.path_exists(path)),
-            Condition::Any { items } => {
-                for c in items {
-                    if self.condition(c)? {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            }
-            Condition::All { items } => {
-                for c in items {
-                    if !self.condition(c)? {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
+            Condition::Any { items } => self.any(items),
+            Condition::All { items } => self.all(items),
             Condition::Extension {
                 extensions,
-                recursive,
-            } => {
-                if !recursive {
-                    for (index, entry) in std::fs::read_dir(self.root)?.enumerate() {
-                        checkpoint(self.cancel, self.deadline)?;
-                        if index >= self.input.max_files.0 {
-                            self.complete = false;
-                            return Ok(false);
-                        }
-                        let e = entry?;
-                        if e.file_type()?.is_file()
-                            && e.path()
-                                .extension()
-                                .and_then(|s| s.to_str())
-                                .is_some_and(|s| extensions.iter().any(|ext| ext == s))
-                        {
-                            return Ok(true);
-                        }
-                    }
-                    return Ok(false);
-                }
-                for ext in extensions {
-                    let result = FindFilesPlan::try_from(FindFilesInput {
-                        root: self.root.to_owned(),
-                        path: None,
-                        pattern: format!("*.{ext}"),
-                        skip_directories: self.input.skip_directories.clone(),
-                        max_files: self.input.max_files.0,
-                        max_directories: self.input.max_directories.0,
-                    })?
-                    .execute(self.cancel, self.deadline)?;
-                    if !result.files.is_empty() {
-                        return Ok(true);
-                    }
-                    if result.truncated {
-                        self.complete = false;
-                    }
-                }
-                Ok(false)
-            }
+                recursive: false,
+            } => self.top_level_extension(extensions),
+            Condition::Extension {
+                extensions,
+                recursive: true,
+            } => self.recursive_extension(extensions),
         }
     }
+    fn any(&mut self, items: &[Condition]) -> Result<bool, CoreError> {
+        for c in items {
+            if self.condition(c)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+    fn all(&mut self, items: &[Condition]) -> Result<bool, CoreError> {
+        for c in items {
+            if !self.condition(c)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+    /// Whether a file directly under the root has one of `extensions`.
+    fn top_level_extension(&mut self, extensions: &[String]) -> Result<bool, CoreError> {
+        for (index, entry) in std::fs::read_dir(self.root)?.enumerate() {
+            checkpoint(self.cancel, self.deadline)?;
+            if index >= self.input.max_files.0 {
+                self.complete = false;
+                return Ok(false);
+            }
+            let e = entry?;
+            if e.file_type()?.is_file() && has_extension(&e.path(), extensions) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+    /// Whether a bounded recursive search finds a file with one of `extensions`.
+    fn recursive_extension(&mut self, extensions: &[String]) -> Result<bool, CoreError> {
+        for ext in extensions {
+            let result = FindFilesPlan::try_from(FindFilesInput {
+                root: self.root.to_owned(),
+                path: None,
+                pattern: format!("*.{ext}"),
+                skip_directories: self.input.skip_directories.clone(),
+                max_files: self.input.max_files.0,
+                max_directories: self.input.max_directories.0,
+            })?
+            .execute(self.cancel, self.deadline)?;
+            if !result.files.is_empty() {
+                return Ok(true);
+            }
+            if result.truncated {
+                self.complete = false;
+            }
+        }
+        Ok(false)
+    }
+}
+fn has_extension(path: &Path, extensions: &[String]) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| extensions.iter().any(|ext| ext == s))
 }
 #[derive(Serialize)]
 pub(crate) struct ProbeResult {
@@ -276,6 +291,16 @@ pub(crate) struct ProbeResult {
     executables: BTreeMap<String, bool>,
     complete: bool,
     package_manager: String,
+}
+/// An absolute executable path, or a bare name found on `search_path`.
+fn on_search_path(name: &str, search_path: &[PathBuf]) -> bool {
+    if Path::new(name).is_absolute() {
+        is_executable(Path::new(name))
+    } else if name.contains('/') {
+        false
+    } else {
+        search_path.iter().any(|p| is_executable(&p.join(name)))
+    }
 }
 impl ProbeInput {
     pub(crate) fn execute(
@@ -303,13 +328,8 @@ impl ProbeInput {
         let mut toolchains = BTreeMap::new();
         for profile in &input.profiles {
             checkpoint(cancel, deadline)?;
-            if language.is_none() {
-                for detector in &profile.detectors {
-                    if probe.condition(detector)? {
-                        language = Some(profile.id.clone());
-                        break;
-                    }
-                }
+            if language.is_none() && probe.any(&profile.detectors)? {
+                language = Some(profile.id.clone());
             }
             toolchains.insert(
                 profile.id.clone(),
@@ -319,17 +339,7 @@ impl ProbeInput {
         let mut executables = BTreeMap::new();
         for name in &input.executables {
             checkpoint(cancel, deadline)?;
-            let found = if Path::new(name).is_absolute() {
-                is_executable(Path::new(name))
-            } else if name.contains('/') {
-                false
-            } else {
-                input
-                    .search_path
-                    .iter()
-                    .any(|p| is_executable(&p.join(name)))
-            };
-            executables.insert(name.clone(), found);
+            executables.insert(name.clone(), on_search_path(name, &input.search_path));
         }
         workspace.revalidate()?;
         checkpoint(cancel, deadline)?;

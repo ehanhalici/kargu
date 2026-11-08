@@ -386,6 +386,52 @@ impl ModelStore {
         self.commit(prepared)
     }
 }
+/// The unprefixed name of a `vendor/model` id, if it has a non-empty one.
+fn basename(model: &ModelId) -> Option<&str> {
+    model
+        .as_str()
+        .rsplit_once('/')
+        .map(|(_, basename)| basename)
+        .filter(|basename| !basename.is_empty())
+}
+
+fn refuses(provider: &Provider, name: &str) -> bool {
+    provider
+        .refused
+        .iter()
+        .any(|refused| refused.as_str() == name)
+}
+
+/// Short alias to its model and tool flag; `None` when two models share it.
+type ShortAliases<'a> = BTreeMap<&'a str, Option<(&'a ModelId, bool)>>;
+
+/// Push one provider's model records; return its unambiguous short aliases.
+fn model_records<'a>(
+    id: &ApiProviderId,
+    provider: &'a Provider,
+    records: &mut Vec<Value>,
+) -> Result<ShortAliases<'a>, StoreError> {
+    let mut short = ShortAliases::new();
+    for (model, record) in &provider.entries {
+        let raw = record.effective()?;
+        let fields = ModelFields::from_raw(&raw, &provider.specs);
+        let mut metadata = raw.snapshot()?;
+        let object = metadata.as_object_mut().ok_or(StoreError::Invalid)?;
+        object.insert("provider".to_owned(), json!(id));
+        object.insert("id".to_owned(), json!(model));
+        records.push(json!({"provider":id,"id":model,"metadata":metadata,"fields":fields,"display":fields.display_snapshot(),
+            "tools":fields.allows_tools() && !provider.refused.contains(model),"reasoning":fields.allows_reasoning(),"input_zero":fields.input_is_zero()}));
+        if let Some(basename) = basename(model) {
+            let tools = fields.allows_tools() && !refuses(provider, basename);
+            short
+                .entry(basename)
+                .and_modify(|value| *value = None)
+                .or_insert(Some((model, tools)));
+        }
+    }
+    Ok(short)
+}
+
 fn projection(
     revision: MetadataRevision,
     providers: &BTreeMap<ApiProviderId, Provider>,
@@ -399,36 +445,12 @@ fn projection(
         for model in &provider.refused {
             refusals.push(json!({"provider":id,"id":model,"tools":false}));
         }
-        let mut short: BTreeMap<&str, Option<(&ModelId, bool)>> = BTreeMap::new();
-        for (model, record) in &provider.entries {
-            let raw = record.effective()?;
-            let fields = ModelFields::from_raw(&raw, &provider.specs);
-            let mut metadata = raw.snapshot()?;
-            let object = metadata.as_object_mut().ok_or(StoreError::Invalid)?;
-            object.insert("provider".to_owned(), json!(id));
-            object.insert("id".to_owned(), json!(model));
-            records.push(json!({"provider":id,"id":model,"metadata":metadata,"fields":fields,"display":fields.display_snapshot(),
-                "tools":fields.allows_tools() && !provider.refused.contains(model),"reasoning":fields.allows_reasoning(),"input_zero":fields.input_is_zero()}));
-            if let Some((_, basename)) = model.as_str().rsplit_once('/')
-                && !basename.is_empty()
-            {
-                short
-                    .entry(basename)
-                    .and_modify(|value| *value = None)
-                    .or_insert(Some((
-                        model,
-                        fields.allows_tools()
-                            && !provider
-                                .refused
-                                .iter()
-                                .any(|refused| refused.as_str() == basename),
-                    )));
-            }
-        }
-        for (name, model) in short {
-            if let Some((model, tools)) = model {
-                aliases.push(json!({"provider":id,"alias":name,"id":model,"tools":tools}));
-            }
+        let short = model_records(id, provider, &mut records)?;
+        for (name, (model, tools)) in short
+            .into_iter()
+            .filter_map(|(name, model)| Some((name, model?)))
+        {
+            aliases.push(json!({"provider":id,"alias":name,"id":model,"tools":tools}));
         }
     }
     Ok(

@@ -42,20 +42,7 @@ impl TryFrom<&str> for RawMetadata {
         let raw: Self = serde_json::from_str(source).map_err(|_| MetadataError::Shape)?;
         for key in ["pricing", "top_provider", "architecture", "details"] {
             if let Some(value) = raw.0.get(key) {
-                // Preserve the legacy one-object wrapper accepted by metadata ports.
-                let source = value.get();
-                if source.starts_with('{') {
-                    let _: Self = serde_json::from_str(source).map_err(|_| MetadataError::Shape)?;
-                } else if source.starts_with('[') {
-                    let values: Vec<Box<RawValue>> =
-                        serde_json::from_str(source).map_err(|_| MetadataError::Shape)?;
-                    if let [value] = values.as_slice()
-                        && value.get().starts_with('{')
-                    {
-                        let _: Self =
-                            serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?;
-                    }
-                }
+                validate_wrapped(value.get())?;
             }
         }
         Ok(raw)
@@ -89,50 +76,7 @@ impl RawMetadata {
     pub(crate) fn snapshot(&self) -> Result<Value, MetadataError> {
         let mut fields = serde_json::Map::new();
         for (key, value) in &self.0 {
-            let value = if key == "pricing" {
-                pricing_snapshot(value.get())?
-            } else if matches!(
-                key.as_str(),
-                "input-cost"
-                    | "output-cost"
-                    | "context_length"
-                    | "context_window"
-                    | "inputTokenLimit"
-                    | "context-window"
-                    | "max_output"
-                    | "outputTokenLimit"
-                    | "max_completion_tokens"
-                    | "max-output"
-            ) {
-                // Integral JSON quantities keep their exact integer kind. Other
-                // numeric lexemes stay strings, never rounded JSON floats.
-                if !matches!(key.as_str(), "input-cost" | "output-cost")
-                    && value.get().parse::<u64>().is_ok()
-                {
-                    serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?
-                } else {
-                    exact_literal(value.get())?
-                }
-            } else if key == "top_provider" && value.get().starts_with('{') {
-                let nested: Self =
-                    serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?;
-                nested.snapshot()?
-            } else if key == "top_provider" && value.get().starts_with('[') {
-                let values: Vec<Box<RawValue>> =
-                    serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?;
-                if let [value] = values.as_slice()
-                    && value.get().starts_with('{')
-                {
-                    let nested: Self =
-                        serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?;
-                    Value::Array(vec![nested.snapshot()?])
-                } else {
-                    serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?
-                }
-            } else {
-                serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?
-            };
-            fields.insert(key.clone(), value);
+            fields.insert(key.clone(), field_snapshot(key, value.get())?);
         }
         Ok(Value::Object(fields))
     }
@@ -145,6 +89,82 @@ impl RawMetadata {
                 .saturating_add(key.len())
                 .saturating_add(value.get().len())
         })
+    }
+}
+
+/// Preserve the legacy one-object wrapper accepted by metadata ports: a nested
+/// object, or a one-element array of one, must itself be valid metadata.
+fn validate_wrapped(source: &str) -> Result<(), MetadataError> {
+    if source.starts_with('{') {
+        let _: RawMetadata = serde_json::from_str(source).map_err(|_| MetadataError::Shape)?;
+    } else if source.starts_with('[') {
+        let values: Vec<Box<RawValue>> =
+            serde_json::from_str(source).map_err(|_| MetadataError::Shape)?;
+        if let [value] = values.as_slice()
+            && value.get().starts_with('{')
+        {
+            let _: RawMetadata =
+                serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?;
+        }
+    }
+    Ok(())
+}
+
+/// Keys whose values are numeric quantities.
+fn is_quantity(key: &str) -> bool {
+    matches!(
+        key,
+        "input-cost"
+            | "output-cost"
+            | "context_length"
+            | "context_window"
+            | "inputTokenLimit"
+            | "context-window"
+            | "max_output"
+            | "outputTokenLimit"
+            | "max_completion_tokens"
+            | "max-output"
+    )
+}
+
+/// Integral JSON quantities keep their exact integer kind. Other numeric
+/// lexemes stay strings, never rounded JSON floats.
+fn quantity_snapshot(key: &str, source: &str) -> Result<Value, MetadataError> {
+    if !matches!(key, "input-cost" | "output-cost") && source.parse::<u64>().is_ok() {
+        serde_json::from_str(source).map_err(|_| MetadataError::Shape)
+    } else {
+        exact_literal(source)
+    }
+}
+
+/// A `top_provider` object, or a one-element array of one, snapshotted recursively.
+fn provider_snapshot(source: &str) -> Result<Value, MetadataError> {
+    if source.starts_with('{') {
+        let nested: RawMetadata = serde_json::from_str(source).map_err(|_| MetadataError::Shape)?;
+        return nested.snapshot();
+    }
+    let values: Vec<Box<RawValue>> =
+        serde_json::from_str(source).map_err(|_| MetadataError::Shape)?;
+    if let [value] = values.as_slice()
+        && value.get().starts_with('{')
+    {
+        let nested: RawMetadata =
+            serde_json::from_str(value.get()).map_err(|_| MetadataError::Shape)?;
+        Ok(Value::Array(vec![nested.snapshot()?]))
+    } else {
+        serde_json::from_str(source).map_err(|_| MetadataError::Shape)
+    }
+}
+
+fn field_snapshot(key: &str, source: &str) -> Result<Value, MetadataError> {
+    if key == "pricing" {
+        pricing_snapshot(source)
+    } else if is_quantity(key) {
+        quantity_snapshot(key, source)
+    } else if key == "top_provider" && (source.starts_with('{') || source.starts_with('[')) {
+        provider_snapshot(source)
+    } else {
+        serde_json::from_str(source).map_err(|_| MetadataError::Shape)
     }
 }
 
