@@ -66,6 +66,13 @@ impl<'a> Scanner<'a> {
         }
         Ok(())
     }
+    /// A pending `\r` not followed by `\n` is a character of its own.
+    fn flush_carriage(&mut self, next: char) -> Result<(), CoreError> {
+        if std::mem::take(&mut self.carriage) && next != '\n' {
+            self.character('\r')?;
+        }
+        Ok(())
+    }
     pub(super) fn ingest(
         &mut self,
         text: &str,
@@ -79,14 +86,9 @@ impl<'a> Scanner<'a> {
                 return Ok(());
             }
             checkpoint(cancel, deadline)?;
-            if self.carriage {
-                self.carriage = false;
-                if character != '\n' {
-                    self.character('\r')?;
-                    if self.stopped {
-                        return Ok(());
-                    }
-                }
+            self.flush_carriage(character)?;
+            if self.stopped {
+                return Ok(());
             }
             if character == '\r' {
                 self.carriage = true;
@@ -119,6 +121,11 @@ impl<'a> Scanner<'a> {
             complete: self.complete,
         }
     }
+}
+
+/// Whether the requested window continues past `line` (an open window always does).
+fn more_requested(window: &Window, line: LineNumber) -> bool {
+    window.to.is_none_or(|to| line.0 < to.0)
 }
 
 pub(super) fn excerpt(
@@ -173,12 +180,12 @@ pub(super) fn excerpt(
             if snapshot.complete {
                 total = Some(line.0);
             } else {
-                truncated = !boundary || window.to.is_none_or(|to| line.0 < to.0);
+                truncated = !boundary || more_requested(window, line);
             }
             break;
         }
         if remaining == 0 {
-            truncated = window.to.is_none_or(|to| line.0 < to.0);
+            truncated = more_requested(window, line);
             break;
         }
         line = line.next()?;

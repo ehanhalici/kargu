@@ -47,6 +47,15 @@ impl TryFrom<ProjectInput> for ProjectDiagnostics {
         Ok(Self(value))
     }
 }
+/// Only a fresh report from the same producer for the same file supersedes a cached finding.
+fn supersedes(snapshot: &DiagnosticSnapshot, finding: &CachedFinding) -> bool {
+    snapshot.freshness() == Freshness::Fresh
+        && snapshot.document().path == finding.path
+        && snapshot
+            .backends
+            .iter()
+            .any(|backend| backend.backend.as_str() == finding.source.as_str())
+}
 impl ProjectDiagnostics {
     /// Aggregate and render in Rust, preserving unversioned cache uncertainty.
     pub fn render(&self) -> Result<(Freshness, String), CoreError> {
@@ -70,15 +79,7 @@ impl ProjectDiagnostics {
         }
         let mut seen = BTreeSet::new();
         for finding in &self.0.cached {
-            // Only a fresh report from this same producer can supersede its cache.
-            if live.iter().any(|snapshot| {
-                snapshot.freshness() == Freshness::Fresh
-                    && snapshot.document().path == finding.path
-                    && snapshot
-                        .backends
-                        .iter()
-                        .any(|backend| backend.backend.as_str() == finding.source.as_str())
-            }) {
+            if live.iter().any(|snapshot| supersedes(snapshot, finding)) {
                 continue;
             }
             let key = (

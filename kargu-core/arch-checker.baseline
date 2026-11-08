@@ -668,12 +668,7 @@ too-deep	src/ipc/sessions/editor.rs	`poll` nests N levels (max N); extract a fun
 too-deep	src/ipc/sessions/editor.rs	`read_result` nests N levels (max N); extract a function
 too-deep	src/ipc/sessions/native_edit.rs	`poll` nests N levels (max N); extract a function
 too-deep	src/ipc/transport.rs	`read_messages` nests N levels (max N); extract a function
-too-deep	src/security/action_snapshot.rs	`capture` nests N levels (max N); extract a function
-too-deep	src/security/action_snapshot.rs	`revalidate` nests N levels (max N); extract a function
-too-deep	src/sensors/diagnostics/project.rs	`render` nests N levels (max N); extract a function
 too-deep	src/workspace/file/read.rs	`execute` nests N levels (max N); extract a function
-too-deep	src/workspace/file/render.rs	`excerpt` nests N levels (max N); extract a function
-too-deep	src/workspace/file/render.rs	`ingest` nests N levels (max N); extract a function
 too-deep	src/workspace/search.rs	`execute` nests N levels (max N); extract a function
 too-many-parameters	src/api/catalog.rs	`fetch_remote_models` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/api/domain.rs	`capture_run` takes N parameters (max N); introduce a parameter type

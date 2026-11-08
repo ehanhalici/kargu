@@ -79,23 +79,50 @@ impl ActionSnapshot {
                 Entry::Symlink {
                     metadata,
                     destination,
-                } => {
-                    let current =
-                        fs::symlink_metadata(path).map_err(|_| CoreError::WorkspaceChanged)?;
-                    if super::file::Revision::from(current)
-                        != super::file::Revision::from(metadata.clone())
-                        || fs::read_link(path).map_err(|_| CoreError::WorkspaceChanged)?
-                            != *destination
-                    {
-                        return Err(CoreError::WorkspaceChanged);
-                    }
-                }
+                } => symlink_unchanged(path, metadata, destination)?,
             }
         }
         // Directory revisions include child insertions/removals. This is evidence
         // checked before spawn, not a filesystem lock or an atomic Git transaction.
         Ok(())
     }
+}
+/// A captured symlink still has the same lstat revision and destination bytes.
+fn symlink_unchanged(
+    path: &Path,
+    metadata: &fs::Metadata,
+    destination: &Path,
+) -> Result<(), CoreError> {
+    let current = fs::symlink_metadata(path).map_err(|_| CoreError::WorkspaceChanged)?;
+    if super::file::Revision::from(current) != super::file::Revision::from(metadata.clone())
+        || fs::read_link(path).map_err(|_| CoreError::WorkspaceChanged)? != destination
+    {
+        return Err(CoreError::WorkspaceChanged);
+    }
+    Ok(())
+}
+/// Git stages the link itself. Capture its bytes and lstat revision; never
+/// traverse its destination or open a special-file target.
+fn symlink_entry(path: &Path, meta: fs::Metadata) -> Result<Entry, CoreError> {
+    let destination = fs::read_link(path)?;
+    if destination.as_os_str().len() > limits::SEARCH_PATH_BYTES {
+        return Err(CoreError::Limit);
+    }
+    if super::file::Revision::from(fs::symlink_metadata(path)?)
+        != super::file::Revision::from(meta.clone())
+    {
+        return Err(CoreError::WorkspaceChanged);
+    }
+    Ok(Entry::Symlink {
+        metadata: meta,
+        destination,
+    })
+}
+fn ensure_room(pending: usize, entries: usize) -> Result<(), CoreError> {
+    if pending.saturating_add(entries) >= limits::GIT_ACTION_ENTRIES {
+        return Err(CoreError::Limit);
+    }
+    Ok(())
 }
 fn hash_metadata(hash: &mut Sha256, meta: &fs::Metadata) {
     use std::os::unix::fs::MetadataExt;
@@ -125,24 +152,8 @@ fn capture(
         }
         let metadata = match fs::symlink_metadata(&path) {
             Ok(meta) if meta.file_type().is_symlink() => {
-                // Git stages the link itself. Capture its bytes and lstat revision;
-                // never traverse its destination or open a special-file target.
-                let destination = fs::read_link(&path)?;
-                if destination.as_os_str().len() > limits::SEARCH_PATH_BYTES {
-                    return Err(CoreError::Limit);
-                }
-                if super::file::Revision::from(fs::symlink_metadata(&path)?)
-                    != super::file::Revision::from(meta.clone())
-                {
-                    return Err(CoreError::WorkspaceChanged);
-                }
-                entries.insert(
-                    path,
-                    Entry::Symlink {
-                        metadata: meta,
-                        destination,
-                    },
-                );
+                let entry = symlink_entry(&path, meta)?;
+                entries.insert(path, entry);
                 continue;
             }
             Ok(meta) if meta.is_file() || meta.is_dir() => meta,
@@ -160,9 +171,7 @@ fn capture(
         if metadata.is_dir() {
             for child in fs::read_dir(&path)? {
                 checkpoint(cancel, deadline)?;
-                if pending.len().saturating_add(entries.len()) >= limits::GIT_ACTION_ENTRIES {
-                    return Err(CoreError::Limit);
-                }
+                ensure_room(pending.len(), entries.len())?;
                 pending.push((child?.path(), depth.saturating_add(1)));
             }
         }
