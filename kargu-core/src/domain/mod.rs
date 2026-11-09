@@ -9,6 +9,7 @@
 use crate::constants::limits;
 
 pub mod error;
+pub mod rpc;
 use error::CoreError;
 use serde::{Deserialize, Serialize};
 

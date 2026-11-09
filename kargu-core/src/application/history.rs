@@ -214,7 +214,7 @@ impl ApplicationActor {
         method: &str,
         arguments: serde_json::Value,
         frame: crate::domain::ByteLimit,
-    ) -> Result<serde_json::Value, crate::ipc::protocol::Fault> {
+    ) -> Result<serde_json::Value, crate::domain::rpc::Fault> {
         let revision = self
             .session_history(session)
             .map_err(crate::history::fault)?

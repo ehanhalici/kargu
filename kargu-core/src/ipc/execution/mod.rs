@@ -1059,9 +1059,5 @@ pub(super) fn fault(error: CoreError) -> Fault {
             "resource_limit",
         ),
     };
-    Fault {
-        code,
-        message,
-        status,
-    }
+    Fault::new(code, message, status)
 }

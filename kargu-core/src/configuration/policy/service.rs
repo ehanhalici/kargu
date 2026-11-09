@@ -6,9 +6,9 @@ use crate::{
         RefreshGeneration,
         read::{ConfigurationPath, ConfigurationTimeout},
     },
+    domain::rpc::Fault,
     domain::{ByteLimit, ConfigRevision, SessionId},
     error::CoreError,
-    ipc::protocol::Fault,
     providers::ProviderCatalog,
 };
 use serde::Deserialize;
@@ -726,11 +726,7 @@ pub(crate) fn fault(error: CoreError) -> Fault {
         CoreError::Unavailable => (codes::INVALID_STATE, "configuration_unavailable"),
         _ => (codes::INVALID_PARAMS, "invalid_configuration"),
     };
-    Fault {
-        code,
-        status,
-        message: "Native configuration operation rejected",
-    }
+    Fault::new(code, "Native configuration operation rejected", status)
 }
 
 #[cfg(test)]

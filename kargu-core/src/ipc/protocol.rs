@@ -7,51 +7,7 @@ use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
 
-/// A request or response identity; integer and string identities stay distinct.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum RpcId {
-    /// String request identity.
-    String(String),
-    /// Signed JSON integer request identity.
-    Integer(i64),
-}
-
-impl RpcId {
-    /// Parse a supported non-null JSON-RPC identity.
-    pub fn parse(value: &Value) -> Option<Self> {
-        match value {
-            Value::String(text) => Some(Self::String(text.clone())),
-            Value::Number(number) => number.as_i64().map(Self::Integer),
-            _ => None,
-        }
-    }
-
-    /// Reserve the exact serialized RPC envelope before constructing paged results.
-    pub(crate) fn result_budget(
-        &self,
-        frame: crate::domain::ByteLimit,
-    ) -> Result<crate::domain::ByteLimit, crate::error::CoreError> {
-        let envelope = serde_json::to_vec(&success(self, json!({})))
-            .map_err(|_| crate::error::CoreError::Limit)?;
-        let overhead = envelope
-            .len()
-            .checked_sub(2)
-            .ok_or(crate::error::CoreError::Limit)?;
-        crate::domain::ByteLimit::try_from(
-            frame
-                .as_usize()
-                .checked_sub(overhead)
-                .ok_or(crate::error::CoreError::Limit)?,
-        )
-    }
-    /// Preserve the original identity's wire representation.
-    pub fn value(&self) -> Value {
-        match self {
-            Self::String(text) => json!(text),
-            Self::Integer(number) => json!(number),
-        }
-    }
-}
+pub use crate::domain::rpc::{Fault, RpcId, success};
 
 /// Classified envelopes, without ambiguous untagged deserialization.
 #[derive(Debug)]
@@ -74,50 +30,6 @@ pub enum Message {
     },
 }
 
-/// A sanitized wire error. It never includes the input text.
-#[derive(Clone, Debug, thiserror::Error)]
-#[error("{message}")]
-pub struct Fault {
-    /// Standard or application error code.
-    pub code: i64,
-    /// Static safe description.
-    pub message: &'static str,
-    /// Stable machine-readable status.
-    pub status: &'static str,
-}
-
-impl Fault {
-    /// Construct a method-parameter rejection.
-    pub fn params() -> Self {
-        Self {
-            code: protocol::error_codes::INVALID_PARAMS,
-            message: "Invalid params",
-            status: "invalid_params",
-        }
-    }
-
-    /// Construct a protocol envelope rejection.
-    pub fn invalid() -> Self {
-        Self {
-            code: protocol::error_codes::INVALID_REQUEST,
-            message: "Invalid Request",
-            status: "invalid_request",
-        }
-    }
-
-    /// Encode a JSON-RPC error without echoing untrusted input.
-    pub fn response(&self, id: Option<&RpcId>) -> Value {
-        json!({"jsonrpc":protocol::JSONRPC, "id":id.map(RpcId::value),
-               "error":{"code":self.code,"message":self.message,
-                        "data":{"status":self.status}}})
-    }
-}
-
-/// Wrap a successful response, including an explicit null result.
-pub fn success(id: &RpcId, result: Value) -> Value {
-    json!({"jsonrpc":protocol::JSONRPC, "id":id.value(), "result":result})
-}
-
 /// Decode an envelope, rejecting duplicate keys at every nesting depth.
 pub fn decode(line: &str) -> Result<Message, Fault> {
     let mut deserializer = serde_json::Deserializer::from_str(line);
@@ -126,11 +38,7 @@ pub fn decode(line: &str) -> Result<Message, Fault> {
             deserializer.end()?;
             Ok(v.0)
         })
-        .map_err(|_| Fault {
-            code: protocol::error_codes::PARSE,
-            message: "Parse error",
-            status: "parse_error",
-        })?;
+        .map_err(|_| Fault::new(protocol::error_codes::PARSE, "Parse error", "parse_error"))?;
     let object = strict.as_object().ok_or_else(Fault::invalid)?;
     if object.get("jsonrpc").and_then(Value::as_str) != Some(protocol::JSONRPC) {
         return Err(Fault::invalid());

@@ -6,9 +6,9 @@ use crate::{
         limits,
         protocol::{error_codes, methods},
     },
+    domain::rpc::Fault,
     domain::{ApiPageBytes, ByteLimit, MessageId},
     error::CoreError,
-    ipc::protocol::Fault,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -210,9 +210,5 @@ pub(crate) fn fault(error: CoreError) -> Fault {
             "Invalid conversation protocol",
         ),
     };
-    Fault {
-        code,
-        status,
-        message,
-    }
+    Fault::new(code, message, status)
 }

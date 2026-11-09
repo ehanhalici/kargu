@@ -490,11 +490,11 @@ async fn publish_body(
     }
 }
 fn fault(status: &'static str, message: &'static str) -> Fault {
-    Fault {
-        code: crate::constants::protocol::error_codes::INVALID_STATE,
+    Fault::new(
+        crate::constants::protocol::error_codes::INVALID_STATE,
         message,
         status,
-    }
+    )
 }
 
 #[cfg(test)]

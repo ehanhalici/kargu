@@ -46,14 +46,14 @@ fn strict_envelopes_and_null_results() -> Result<(), Box<dyn std::error::Error>>
         r#"[]"#,
         r#"{"jsonrpc":"1.0","method":"ping"}"#,
     ] {
-        assert_eq!(decode(text).err().map(|e| e.code), Some(-32600));
+        assert_eq!(decode(text).err().map(|e| e.code()), Some(-32600));
     }
     for text in [
         r#"{"jsonrpc":"2.0","method":"ping","method":"shutdown"}"#,
         r#"{"jsonrpc":"2.0","method":"ping","params":{"secret":1,"secret":2}}"#,
         r#"{"jsonrpc":"2.0","method":"ping"} false"#,
     ] {
-        assert_eq!(decode(text).err().map(|e| e.code), Some(-32700));
+        assert_eq!(decode(text).err().map(|e| e.code()), Some(-32700));
     }
     assert!(matches!(
         decode(r#"{"jsonrpc":"2.0","id":"r:1","method":"editor/call_tool"}"#),
@@ -252,7 +252,7 @@ fn session_selection_commits_only_from_the_owned_expected_revision()
         .dispatch("session/selection/commit", commit(0, json!({}), &app), true)
         .result;
     assert_eq!(
-        stale.err().map(|fault| fault.status),
+        stale.err().map(|fault| fault.status()),
         Some("stale_revision")
     );
     let foreign = host
@@ -262,7 +262,10 @@ fn session_selection_commits_only_from_the_owned_expected_revision()
             true,
         )
         .result;
-    assert_eq!(foreign.err().map(|fault| fault.status), Some("stale_owner"));
+    assert_eq!(
+        foreign.err().map(|fault| fault.status()),
+        Some("stale_owner")
+    );
     for invalid in [
         json!({"effort":{"kind":"named","name":"off"}}),
         json!({"model":""}),
@@ -272,7 +275,7 @@ fn session_selection_commits_only_from_the_owned_expected_revision()
             .dispatch("session/selection/commit", commit(1, invalid, &app), true)
             .result;
         assert_eq!(
-            result.err().map(|fault| fault.status),
+            result.err().map(|fault| fault.status()),
             Some("invalid_params")
         );
     }
@@ -289,7 +292,10 @@ fn session_selection_commits_only_from_the_owned_expected_revision()
     assert_eq!(reset["selection"]["model"], Value::Null);
     host.dispatch("session/close", scope.clone(), true).result?;
     let closed = host.dispatch("session/selection", scope, true).result;
-    assert_eq!(closed.err().map(|fault| fault.status), Some("stale_owner"));
+    assert_eq!(
+        closed.err().map(|fault| fault.status()),
+        Some("stale_owner")
+    );
     Ok(())
 }
 
@@ -373,13 +379,16 @@ fn session_mode_and_tool_availability_are_owned_natively_and_fail_closed()
     let stale = host
         .dispatch("session/mode/commit", commit(0, "agent", false), true)
         .result;
-    assert_eq!(stale.err().map(|f| f.status), Some("stale_revision"));
+    assert_eq!(stale.err().map(|f| f.status()), Some("stale_revision"));
 
     // Debug mode without debug_ready fails closed and retains Plan mode
     let unready_debug = host
         .dispatch("session/mode/commit", commit(1, "debug", false), true)
         .result;
-    assert_eq!(unready_debug.err().map(|f| f.status), Some("debug_refusal"));
+    assert_eq!(
+        unready_debug.err().map(|f| f.status()),
+        Some("debug_refusal")
+    );
     let check = host.dispatch("session/mode", scope.clone(), true).result?;
     assert_eq!(check["revision"], 1);
     assert_eq!(check["mode"], "plan");
@@ -430,12 +439,12 @@ fn session_mode_and_tool_availability_are_owned_natively_and_fail_closed()
             true,
         )
         .result;
-    assert_eq!(unknown.err().map(|f| f.status), Some("invalid_params"));
+    assert_eq!(unknown.err().map(|f| f.status()), Some("invalid_params"));
 
     // After close, session/mode fails with stale_owner
     host.dispatch("session/close", scope.clone(), true).result?;
     let closed = host.dispatch("session/mode", scope, true).result;
-    assert_eq!(closed.err().map(|f| f.status), Some("stale_owner"));
+    assert_eq!(closed.err().map(|f| f.status()), Some("stale_owner"));
     Ok(())
 }
 
@@ -526,7 +535,10 @@ fn session_plan_lifecycle_and_single_use_claim_are_owned_natively_and_fail_close
             true,
         )
         .result;
-    assert_eq!(stale_revise.err().map(|f| f.status), Some("stale_revision"));
+    assert_eq!(
+        stale_revise.err().map(|f| f.status()),
+        Some("stale_revision")
+    );
 
     // 6. Claim with stale revision or bad hash fails
     let stale_claim = host
@@ -542,7 +554,10 @@ fn session_plan_lifecycle_and_single_use_claim_are_owned_natively_and_fail_close
             true,
         )
         .result;
-    assert_eq!(stale_claim.err().map(|f| f.status), Some("stale_revision"));
+    assert_eq!(
+        stale_claim.err().map(|f| f.status()),
+        Some("stale_revision")
+    );
 
     let bad_hash_claim = host
         .dispatch(
@@ -558,7 +573,7 @@ fn session_plan_lifecycle_and_single_use_claim_are_owned_natively_and_fail_close
         )
         .result;
     assert_eq!(
-        bad_hash_claim.err().map(|f| f.status),
+        bad_hash_claim.err().map(|f| f.status()),
         Some("stale_revision")
     );
 
@@ -594,7 +609,7 @@ fn session_plan_lifecycle_and_single_use_claim_are_owned_natively_and_fail_close
         )
         .result;
     assert_eq!(
-        replay_claim.err().map(|f| f.status),
+        replay_claim.err().map(|f| f.status()),
         Some("already_decided")
     );
 
@@ -655,7 +670,7 @@ fn session_plan_lifecycle_and_single_use_claim_are_owned_natively_and_fail_close
         )
         .result;
     assert_eq!(
-        terminal_claim.err().map(|f| f.status),
+        terminal_claim.err().map(|f| f.status()),
         Some("already_decided")
     );
 
@@ -704,11 +719,11 @@ fn session_plan_lifecycle_and_single_use_claim_are_owned_natively_and_fail_close
             true,
         )
         .result;
-    assert_eq!(rej_claim.err().map(|f| f.status), Some("already_decided"));
+    assert_eq!(rej_claim.err().map(|f| f.status()), Some("already_decided"));
 
     // 14. Session close rejects subsequent operations
     host.dispatch("session/close", scope.clone(), true).result?;
     let closed = host.dispatch("session/plan", scope, true).result;
-    assert_eq!(closed.err().map(|f| f.status), Some("stale_owner"));
+    assert_eq!(closed.err().map(|f| f.status()), Some("stale_owner"));
     Ok(())
 }

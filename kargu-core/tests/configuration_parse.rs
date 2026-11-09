@@ -153,7 +153,7 @@ fn host_requires_ready_epoch_and_correlation_without_creating_an_application() -
         .result
         .err()
         .ok_or("accepted foreign epoch")?;
-    assert_eq!(fault.status, "stale_owner");
+    assert_eq!(fault.status(), "stale_owner");
     assert!(host.dispatch("ping", json!({}), true).result.is_ok());
     Ok(())
 }

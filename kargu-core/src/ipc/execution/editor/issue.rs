@@ -253,7 +253,7 @@ impl Finishing {
                 };
                 effect.complete_quiescent(actor, observed, reason)?;
                 if let Some(request_id) = request_id {
-                    replies.push(if durable {protocol::success(&request_id,json!({"edit_id":id,"state":"quiescent","effect":observed,"stop_reason":reason,"journal_committed":true}))}else{crate::ipc::protocol::Fault {code:crate::constants::protocol::error_codes::OUTCOME_UNKNOWN,status:"outcome_unknown",message:"Editor journal settlement failed; do not replay this operation"}.response(Some(&request_id))});
+                    replies.push(if durable {protocol::success(&request_id,json!({"edit_id":id,"state":"quiescent","effect":observed,"stop_reason":reason,"journal_committed":true}))}else{crate::ipc::protocol::Fault::new(crate::constants::protocol::error_codes::OUTCOME_UNKNOWN, "Editor journal settlement failed; do not replay this operation", "outcome_unknown").response(Some(&request_id))});
                 }
             }
             Completion::Receipt {
@@ -347,11 +347,11 @@ impl Finishing {
                             )
                         }
                     } else {
-                        crate::ipc::protocol::Fault {
-                            code: crate::constants::protocol::error_codes::OUTCOME_UNKNOWN,
-                            status: "outcome_unknown",
-                            message: "Editor journal settlement failed; do not replay this operation",
-                        }
+                        crate::ipc::protocol::Fault::new(
+                            crate::constants::protocol::error_codes::OUTCOME_UNKNOWN,
+                            "Editor journal settlement failed; do not replay this operation",
+                            "outcome_unknown",
+                        )
                         .response(Some(&request_id))
                     });
                 }

@@ -235,6 +235,11 @@ pub-field	src/application/claim.rs	`ClaimIntent`: field `tool_limit` is visible;
 pub-field	src/application/claim.rs	`ClaimIntent`: field `workspace` is visible; keep fields private and expose accessors
 pub-field	src/application/host.rs	`Dispatch`: field `exit` is visible; keep fields private and expose accessors
 pub-field	src/application/host.rs	`Dispatch`: field `result` is visible; keep fields private and expose accessors
+pub-field	src/application/host.rs	`ModelCatalogWork`: field `configuration_revision` is visible; keep fields private and expose accessors
+pub-field	src/application/host.rs	`ModelCatalogWork`: field `owner` is visible; keep fields private and expose accessors
+pub-field	src/application/host.rs	`ModelCatalogWork`: field `provider` is visible; keep fields private and expose accessors
+pub-field	src/application/host.rs	`ModelCatalogWork`: field `request` is visible; keep fields private and expose accessors
+pub-field	src/application/host.rs	`ModelCatalogWork`: field `specs` is visible; keep fields private and expose accessors
 pub-field	src/application/host.rs	`ReadScope`: field `application_id` is visible; keep fields private and expose accessors
 pub-field	src/application/host.rs	`ReadScope`: field `session_id` is visible; keep fields private and expose accessors
 pub-field	src/application/mod.rs	`ApplicationActor`: field `edits` is visible; keep fields private and expose accessors
@@ -524,14 +529,6 @@ pub-field	src/ipc/execution/state.rs	`Reviewing`: field `reverse` is visible; ke
 pub-field	src/ipc/execution/state.rs	`Running`: field `job` is visible; keep fields private and expose accessors
 pub-field	src/ipc/execution/state.rs	`Running`: field `reply` is visible; keep fields private and expose accessors
 pub-field	src/ipc/execution/state.rs	`Running`: field `run` is visible; keep fields private and expose accessors
-pub-field	src/ipc/protocol.rs	`Fault`: field `code` is visible; keep fields private and expose accessors
-pub-field	src/ipc/protocol.rs	`Fault`: field `message` is visible; keep fields private and expose accessors
-pub-field	src/ipc/protocol.rs	`Fault`: field `status` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `configuration_revision` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `owner` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `provider` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `request` is visible; keep fields private and expose accessors
-pub-field	src/ipc/read_tools.rs	`ModelCatalogWork`: field `specs` is visible; keep fields private and expose accessors
 pub-field	src/ipc/read_tools.rs	`ReadDelivery`: field `call` is visible; keep fields private and expose accessors
 pub-field	src/ipc/read_tools.rs	`ReadDelivery`: field `id` is visible; keep fields private and expose accessors
 pub-field	src/ipc/read_tools.rs	`ReadDelivery`: field `outcome` is visible; keep fields private and expose accessors

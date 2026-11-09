@@ -285,10 +285,7 @@ mod tests {
         let next = request(limits::API_CIRCUITS)?;
         assert!(matches!(
             circuits.acquire(&host, &scope, &next, policy, &classification),
-            Err(Fault {
-                status: "resource_limit",
-                ..
-            })
+            Err(fault) if fault.status() == "resource_limit"
         ));
         let first = first.ok_or("first circuit")?;
         circuits
@@ -300,10 +297,7 @@ mod tests {
         let held = circuits.acquire(&host, &scope, &request(0)?, policy, &classification)?;
         assert!(matches!(
             circuits.acquire(&host, &scope, &next, policy, &classification),
-            Err(Fault {
-                status: "resource_limit",
-                ..
-            })
+            Err(fault) if fault.status() == "resource_limit"
         ));
         circuits.finish(held, None)?;
         let admitted = circuits.acquire(&host, &scope, &next, policy, &classification)?;

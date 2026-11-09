@@ -84,7 +84,7 @@ impl PartBuffer {
         Ok(())
     }
 }
-pub(crate) fn fault(error: CoreError) -> crate::ipc::protocol::Fault {
+pub(crate) fn fault(error: CoreError) -> crate::domain::rpc::Fault {
     use crate::constants::protocol::error_codes as codes;
     let (code, status, message) = match error {
         CoreError::Edit(EditError::Limit) | CoreError::Limit => (
@@ -155,9 +155,5 @@ pub(crate) fn fault(error: CoreError) -> crate::ipc::protocol::Fault {
             "Invalid edit preparation arguments",
         ),
     };
-    crate::ipc::protocol::Fault {
-        code,
-        status,
-        message,
-    }
+    crate::domain::rpc::Fault::new(code, message, status)
 }

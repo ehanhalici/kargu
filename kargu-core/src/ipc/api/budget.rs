@@ -645,10 +645,7 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(Fault {
-                status: "budget_busy",
-                ..
-            })
+            Err(fault) if fault.status() == "budget_busy"
         ));
         assert!(budgets.entries.is_empty());
         Ok(())

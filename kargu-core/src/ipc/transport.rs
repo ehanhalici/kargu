@@ -784,11 +784,11 @@ fn queue_reply(
     if line.len() > limit.as_usize() {
         let id = reply.get("id").and_then(protocol::RpcId::parse);
         line = serde_json::to_string(
-            &protocol::Fault {
-                code: crate::constants::protocol::error_codes::RESOURCE_LIMIT,
-                message: "Response exceeds negotiated frame limit",
-                status: "resource_limit",
-            }
+            &protocol::Fault::new(
+                crate::constants::protocol::error_codes::RESOURCE_LIMIT,
+                "Response exceeds negotiated frame limit",
+                "resource_limit",
+            )
             .response(id.as_ref()),
         )
         .map_err(|_| TransportError::Framing)?;

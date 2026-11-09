@@ -133,7 +133,7 @@ fn call(
 ) -> Result<Value, Box<dyn std::error::Error>> {
     host.dispatch(method, json!({"scope":scope,"arguments":args}), true)
         .result
-        .map_err(|fault| format!("config rpc {method}: {}", fault.status).into())
+        .map_err(|fault| format!("config rpc {method}: {}", fault.status()).into())
 }
 fn prepare(
     host: &mut Host,

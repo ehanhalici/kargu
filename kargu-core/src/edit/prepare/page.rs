@@ -60,7 +60,7 @@ mod tests {
     use super::*;
     #[test]
     fn metadata_pages_fit_the_exact_rpc_id_including_escaped_unicode() -> Result<(), CoreError> {
-        use crate::ipc::protocol::{RpcId, success};
+        use crate::domain::rpc::{RpcId, success};
         let frame = ByteLimit::try_from(1024)?;
         for spelling in [
             "simple".to_owned(),

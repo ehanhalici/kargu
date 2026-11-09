@@ -2,7 +2,7 @@
 
 use crate::{
     constants::{limits, protocol},
-    ipc::protocol::Fault,
+    domain::rpc::Fault,
     models::{
         metadata::EffortSpecs,
         store::{MetadataRevision, StoreError},
@@ -139,11 +139,7 @@ impl From<ServiceError> for Fault {
                 "invalid_metadata",
             ),
         };
-        Self {
-            code,
-            message,
-            status,
-        }
+        Self::new(code, message, status)
     }
 }
 

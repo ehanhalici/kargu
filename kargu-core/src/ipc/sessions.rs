@@ -1602,9 +1602,9 @@ fn fault(error: CoreError) -> Fault {
         CoreError::Unavailable => "configuration_unavailable",
         _ => "invalid_request",
     };
-    Fault {
-        code: crate::constants::protocol::error_codes::INVALID_STATE,
-        message: "Native run request refused",
+    Fault::new(
+        crate::constants::protocol::error_codes::INVALID_STATE,
+        "Native run request refused",
         status,
-    }
+    )
 }

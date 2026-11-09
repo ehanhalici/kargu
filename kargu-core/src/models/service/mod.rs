@@ -3,8 +3,8 @@
 mod domain;
 use crate::{
     constants::{limits, protocol::methods},
+    domain::rpc::Fault,
     domain::{ByteLimit, SessionId},
-    ipc::protocol::Fault,
     models::{
         metadata::EffortSpecs,
         store::{MetadataRevision, ModelStore, ModelUpdate},
@@ -241,7 +241,7 @@ mod tests {
             )
             .err()
             .ok_or("expired upload accepted")?;
-        assert_eq!(failure.status, "timeout");
+        assert_eq!(failure.status(), "timeout");
         assert_eq!(service.store.revision(), MetadataRevision::default());
         assert!(service.staging.is_none());
         service.rpc(
@@ -279,7 +279,7 @@ mod tests {
             )?;
         }
         let failure = service.rpc(&owner, methods::MODEL_APPEND, json!({"upload_id":upload.get("upload_id"),"offset":limits::MODEL_CATALOG_BYTES,"chunk":"x"}), ByteLimit::WIRE_MAX, now).err().ok_or("oversize accepted")?;
-        assert_eq!(failure.status, "resource_limit");
+        assert_eq!(failure.status(), "resource_limit");
         assert_eq!(
             service
                 .staging

@@ -5,8 +5,8 @@ use crate::constants::{
     limits,
     protocol::{self, methods},
 };
+use crate::domain::rpc::Fault;
 use crate::domain::{ApplicationId, ByteLimit, PlanId, PlanRevision, RequestScope, SessionId};
-use crate::ipc::protocol::Fault;
 use crate::persistence::{
     CollisionPolicy, DeleteTask, ImportTask, ListTask, LoadTask, MaxSessionAge, MaxSessionBytes,
     MaxSessionCount, PersistenceTarget, PersistenceWork, PruneTask, RawSessionPayload, SaveTask,
@@ -368,6 +368,15 @@ pub(crate) enum ConfigurationRefreshStart {
         crate::configuration::read::ReadInput,
         ConfigurationRefreshMeta,
     ),
+}
+
+/// A prepared model-catalog fetch the transport executes off the actor.
+pub(crate) struct ModelCatalogWork {
+    pub owner: ReadScope,
+    pub configuration_revision: crate::domain::ConfigRevision,
+    pub provider: crate::providers::ApiProviderId,
+    pub request: crate::api::HttpRequest,
+    pub specs: crate::models::metadata::EffortSpecs,
 }
 
 /// Native precedence: explicit grants, else XDG config, then the Emacs directory.
@@ -1081,7 +1090,7 @@ impl Host {
     pub(crate) fn prepare_model_refresh(
         &self,
         params: Value,
-    ) -> Result<(RequestScope, crate::ipc::ModelCatalogWork), Fault> {
+    ) -> Result<(RequestScope, ModelCatalogWork), Fault> {
         if self.phase != Phase::Ready {
             return Err(state_fault());
         }
@@ -1109,16 +1118,16 @@ impl Host {
             )
             .map_err(|error| match error {
                 crate::error::CoreError::StaleOwner => owner_fault(),
-                crate::error::CoreError::Unavailable => Fault {
-                    code: protocol::error_codes::INVALID_STATE,
-                    message: "Native catalog credential is unavailable",
-                    status: "credential_unavailable",
-                },
+                crate::error::CoreError::Unavailable => Fault::new(
+                    protocol::error_codes::INVALID_STATE,
+                    "Native catalog credential is unavailable",
+                    "credential_unavailable",
+                ),
                 _ => Fault::params(),
             })?;
         Ok((
             connection,
-            crate::ipc::ModelCatalogWork {
+            ModelCatalogWork {
                 owner: request.scope,
                 configuration_revision: request.configuration_revision,
                 provider: provider.clone(),
@@ -1171,17 +1180,17 @@ impl Host {
         &mut self,
         method: &str,
         params: Value,
-        id: Option<&crate::ipc::protocol::RpcId>,
+        id: Option<&crate::domain::rpc::RpcId>,
     ) -> Dispatch {
         let response_limit = match id.map(|id| id.result_budget(self.frame_limit)).transpose() {
             Ok(limit) => limit.unwrap_or(self.frame_limit),
             Err(_) => {
                 return Dispatch {
-                    result: Err(Fault {
-                        code: protocol::error_codes::RESOURCE_LIMIT,
-                        status: "resource_limit",
-                        message: "Response envelope exceeds negotiated frame limit",
-                    }),
+                    result: Err(Fault::new(
+                        protocol::error_codes::RESOURCE_LIMIT,
+                        "Response envelope exceeds negotiated frame limit",
+                        "resource_limit",
+                    )),
                     exit: false,
                 };
             }
@@ -1251,11 +1260,11 @@ impl Host {
             return Err(Fault::params());
         }
         if init.protocol_major != protocol::MAJOR {
-            return Err(Fault {
-                code: protocol::error_codes::INCOMPATIBLE_VERSION,
-                message: "Incompatible protocol version",
-                status: "incompatible_version",
-            });
+            return Err(Fault::new(
+                protocol::error_codes::INCOMPATIBLE_VERSION,
+                "Incompatible protocol version",
+                "incompatible_version",
+            ));
         }
         self.frame_limit =
             ByteLimit::try_from(init.limits.max_frame_bytes.min(limits::MAX_FRAME_BYTES))
@@ -1399,18 +1408,22 @@ impl Host {
                 .providers
                 .as_ref()
                 .map(crate::providers::ProviderCatalog::snapshot)
-                .map_err(|_| Fault {
-                    code: protocol::error_codes::INVALID_STATE,
-                    message: "Provider manifest is invalid",
-                    status: "invalid_catalog",
+                .map_err(|_| {
+                    Fault::new(
+                        protocol::error_codes::INVALID_STATE,
+                        "Provider manifest is invalid",
+                        "invalid_catalog",
+                    )
                 }),
             methods::PROVIDER_CATALOG => {
                 let request: CatalogPageRequest =
                     serde_json::from_value(params).map_err(|_| Fault::params())?;
-                let catalog = self.providers.as_ref().map_err(|_| Fault {
-                    code: protocol::error_codes::INVALID_STATE,
-                    message: "Provider manifest is invalid",
-                    status: "invalid_catalog",
+                let catalog = self.providers.as_ref().map_err(|_| {
+                    Fault::new(
+                        protocol::error_codes::INVALID_STATE,
+                        "Provider manifest is invalid",
+                        "invalid_catalog",
+                    )
                 })?;
                 catalog
                     .page(request.offset, response_limit)
@@ -1435,10 +1448,12 @@ impl Host {
                     return Err(capacity_fault());
                 }
                 let id = ApplicationId::new();
-                let registry = crate::security::ToolRegistry::standard().map_err(|_| Fault {
-                    code: protocol::error_codes::INVALID_STATE,
-                    message: "Tool manifest is invalid",
-                    status: "invalid_catalog",
+                let registry = crate::security::ToolRegistry::standard().map_err(|_| {
+                    Fault::new(
+                        protocol::error_codes::INVALID_STATE,
+                        "Tool manifest is invalid",
+                        "invalid_catalog",
+                    )
                 })?;
                 self.applications.insert(
                     id.clone(),
@@ -1708,11 +1723,11 @@ impl Host {
                     .map_err(plan_fault)?;
                 Ok(json!({ "rejected": true, "state": state }))
             }
-            _ => Err(Fault {
-                code: protocol::error_codes::METHOD_NOT_FOUND,
-                message: "Method not found",
-                status: "unavailable",
-            }),
+            _ => Err(Fault::new(
+                protocol::error_codes::METHOD_NOT_FOUND,
+                "Method not found",
+                "unavailable",
+            )),
         }
     }
 
@@ -1748,10 +1763,12 @@ impl Host {
                 return Err(owner_fault());
             }
         }
-        let catalog = self.providers.as_ref().map_err(|_| Fault {
-            code: protocol::error_codes::INVALID_STATE,
-            message: "Provider manifest is invalid",
-            status: "invalid_catalog",
+        let catalog = self.providers.as_ref().map_err(|_| {
+            Fault::new(
+                protocol::error_codes::INVALID_STATE,
+                "Provider manifest is invalid",
+                "invalid_catalog",
+            )
         })?;
 
         let app = match req.application_id.as_ref() {
@@ -2119,71 +2136,71 @@ fn empty_params(value: &Value) -> bool {
     value.as_object().is_some_and(|v| v.is_empty())
 }
 fn state_fault() -> Fault {
-    Fault {
-        code: protocol::error_codes::INVALID_STATE,
-        message: "Invalid connection state",
-        status: "invalid_state",
-    }
+    Fault::new(
+        protocol::error_codes::INVALID_STATE,
+        "Invalid connection state",
+        "invalid_state",
+    )
 }
 fn owner_fault() -> Fault {
-    Fault {
-        code: protocol::error_codes::STALE_OWNER,
-        message: "Unknown or foreign owner",
-        status: "stale_owner",
-    }
+    Fault::new(
+        protocol::error_codes::STALE_OWNER,
+        "Unknown or foreign owner",
+        "stale_owner",
+    )
 }
 fn selection_fault(error: crate::error::CoreError) -> Fault {
     match error {
-        crate::error::CoreError::Busy => Fault {
-            code: protocol::error_codes::INVALID_STATE,
-            message: "Active work owns the selection",
-            status: "busy",
-        },
-        crate::error::CoreError::StaleOwner => Fault {
-            code: protocol::error_codes::STALE_OWNER,
-            message: "Selection revision or owner is stale",
-            status: "stale_revision",
-        },
+        crate::error::CoreError::Busy => Fault::new(
+            protocol::error_codes::INVALID_STATE,
+            "Active work owns the selection",
+            "busy",
+        ),
+        crate::error::CoreError::StaleOwner => Fault::new(
+            protocol::error_codes::STALE_OWNER,
+            "Selection revision or owner is stale",
+            "stale_revision",
+        ),
         _ => owner_fault(),
     }
 }
 fn mode_fault(error: crate::error::CoreError) -> Fault {
     match error {
-        crate::error::CoreError::Busy => Fault {
-            code: protocol::error_codes::INVALID_STATE,
-            message: "Active work owns the mode",
-            status: "busy",
-        },
-        crate::error::CoreError::StaleOwner => Fault {
-            code: protocol::error_codes::STALE_OWNER,
-            message: "Mode revision or owner is stale",
-            status: "stale_revision",
-        },
-        crate::error::CoreError::Unavailable => Fault {
-            code: protocol::error_codes::INVALID_STATE,
-            message: "Debugger preparation failed or unverified",
-            status: "debug_refusal",
-        },
+        crate::error::CoreError::Busy => Fault::new(
+            protocol::error_codes::INVALID_STATE,
+            "Active work owns the mode",
+            "busy",
+        ),
+        crate::error::CoreError::StaleOwner => Fault::new(
+            protocol::error_codes::STALE_OWNER,
+            "Mode revision or owner is stale",
+            "stale_revision",
+        ),
+        crate::error::CoreError::Unavailable => Fault::new(
+            protocol::error_codes::INVALID_STATE,
+            "Debugger preparation failed or unverified",
+            "debug_refusal",
+        ),
         _ => owner_fault(),
     }
 }
 fn plan_fault(error: crate::error::CoreError) -> Fault {
     match error {
-        crate::error::CoreError::AlreadyCompleted => Fault {
-            code: protocol::error_codes::INVALID_STATE,
-            message: "This plan was already decided",
-            status: "already_decided",
-        },
-        crate::error::CoreError::StaleOwner => Fault {
-            code: protocol::error_codes::STALE_OWNER,
-            message: "Plan revision, hash or owner is stale",
-            status: "stale_revision",
-        },
-        crate::error::CoreError::Busy => Fault {
-            code: protocol::error_codes::INVALID_STATE,
-            message: "Active work owns the plan",
-            status: "busy",
-        },
+        crate::error::CoreError::AlreadyCompleted => Fault::new(
+            protocol::error_codes::INVALID_STATE,
+            "This plan was already decided",
+            "already_decided",
+        ),
+        crate::error::CoreError::StaleOwner => Fault::new(
+            protocol::error_codes::STALE_OWNER,
+            "Plan revision, hash or owner is stale",
+            "stale_revision",
+        ),
+        crate::error::CoreError::Busy => Fault::new(
+            protocol::error_codes::INVALID_STATE,
+            "Active work owns the plan",
+            "busy",
+        ),
         crate::error::CoreError::InvalidValue { .. } => Fault::params(),
         crate::error::CoreError::Limit => capacity_fault(),
         _ => owner_fault(),
@@ -2191,27 +2208,27 @@ fn plan_fault(error: crate::error::CoreError) -> Fault {
 }
 fn restore_fault(error: crate::error::CoreError) -> Fault {
     match error {
-        crate::error::CoreError::Busy => Fault {
-            code: protocol::error_codes::INVALID_STATE,
-            message: "Session restore locked by active run or preparation",
-            status: "busy",
-        },
+        crate::error::CoreError::Busy => Fault::new(
+            protocol::error_codes::INVALID_STATE,
+            "Session restore locked by active run or preparation",
+            "busy",
+        ),
         crate::error::CoreError::StaleOwner => owner_fault(),
-        crate::error::CoreError::WorkspaceChanged => Fault {
-            code: protocol::error_codes::REJECTED,
-            message: "Candidate project root incompatible with target",
-            status: "root_mismatch",
-        },
+        crate::error::CoreError::WorkspaceChanged => Fault::new(
+            protocol::error_codes::REJECTED,
+            "Candidate project root incompatible with target",
+            "root_mismatch",
+        ),
         crate::error::CoreError::Limit => capacity_fault(),
         _ => Fault::params(),
     }
 }
 fn capacity_fault() -> Fault {
-    Fault {
-        code: protocol::error_codes::RESOURCE_LIMIT,
-        message: "Resource limit reached",
-        status: "resource_limit",
-    }
+    Fault::new(
+        protocol::error_codes::RESOURCE_LIMIT,
+        "Resource limit reached",
+        "resource_limit",
+    )
 }
 
 fn capabilities_page(params: Value) -> Result<Value, Fault> {

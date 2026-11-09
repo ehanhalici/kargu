@@ -183,7 +183,7 @@ fn host_projection_is_readonly_epoch_bound_and_requires_ready_request() -> TestR
         .result
         .err()
         .ok_or("accepted foreign epoch")?;
-    assert_eq!(fault.status, "stale_owner");
+    assert_eq!(fault.status(), "stale_owner");
     assert!(host.dispatch("ping", json!({}), true).result.is_ok());
     Ok(())
 }

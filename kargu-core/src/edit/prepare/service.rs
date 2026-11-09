@@ -7,10 +7,10 @@ use super::{
 use crate::{
     application::Mode,
     constants::{limits, protocol::methods, timeouts},
+    domain::rpc::Fault,
     domain::{ByteLimit, SessionId},
     edit::EditError,
     error::CoreError,
-    ipc::protocol::Fault,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};

@@ -121,13 +121,7 @@ enum ReadCompletion {
     Persistence(Box<crate::persistence::worker::PersistenceOutput>),
 }
 
-pub(crate) struct ModelCatalogWork {
-    pub owner: ReadScope,
-    pub configuration_revision: crate::domain::ConfigRevision,
-    pub provider: crate::providers::ApiProviderId,
-    pub request: crate::api::HttpRequest,
-    pub specs: crate::models::metadata::EffortSpecs,
-}
+pub(crate) use crate::application::host::ModelCatalogWork;
 
 #[derive(Clone)]
 pub(crate) struct ModelCatalogResult {
@@ -1109,7 +1103,7 @@ fn read_failure(error: CoreError) -> (ToolOutcome, String) {
     };
     let text = match outcome {
         ToolOutcome::Cancelled | ToolOutcome::Timeout => outcome.summary().to_owned(),
-        _ => format!("ERROR: {}", fault(error).message),
+        _ => format!("ERROR: {}", fault(error).message()),
     };
     (outcome, text)
 }
@@ -1179,11 +1173,7 @@ fn fault(error: CoreError) -> Fault {
             "resource_limit",
         ),
     };
-    Fault {
-        code,
-        message,
-        status,
-    }
+    Fault::new(code, message, status)
 }
 
 #[cfg(test)]

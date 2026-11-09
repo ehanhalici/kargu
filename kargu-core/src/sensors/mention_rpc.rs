@@ -3,9 +3,9 @@
 use super::mentions::MentionLexer;
 use crate::{
     constants::{limits, protocol::error_codes},
+    domain::rpc::Fault,
     domain::{ByteLimit, RequestScope},
     edit::types::CaptureDigest,
-    ipc::protocol::Fault,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -96,9 +96,9 @@ impl ParseRequest {
     }
 }
 fn limit() -> Fault {
-    Fault {
-        code: error_codes::RESOURCE_LIMIT,
-        message: "Mention parse limit exceeded",
-        status: "resource_limit",
-    }
+    Fault::new(
+        error_codes::RESOURCE_LIMIT,
+        "Mention parse limit exceeded",
+        "resource_limit",
+    )
 }

@@ -22,11 +22,11 @@ impl Lifecycle {
     }
     pub fn start(&mut self, host: &mut Host, id: RpcId, params: Value) -> Result<(), Fault> {
         if self.closing.len() >= limits::MAX_PENDING || self.contains(&id) {
-            return Err(Fault {
-                code: crate::constants::protocol::error_codes::RESOURCE_LIMIT,
-                status: "resource_limit",
-                message: "Application close capacity reached",
-            });
+            return Err(Fault::new(
+                crate::constants::protocol::error_codes::RESOURCE_LIMIT,
+                "Application close capacity reached",
+                "resource_limit",
+            ));
         }
         let application = host.close_application(params)?;
         self.closing.insert(
