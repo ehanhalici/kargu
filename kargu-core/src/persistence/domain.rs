@@ -16,49 +16,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-/// Failures encountered during session validation, storage path resolution, or schema conversion.
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum PersistenceError {
-    /// The session identifier was empty or contained illegal characters / path traversal.
-    #[error("invalid session identifier: {0}")]
-    InvalidId(&'static str),
-    /// The resolved session file escapes the storage root boundary.
-    #[error("session path escapes storage root")]
-    PathEscape,
-    /// The session schema version is unsupported.
-    #[error("unsupported session schema version: {0}")]
-    UnsupportedVersion(u32),
-    /// A required field was invalid or missing.
-    #[error("session record validation failed: {0}")]
-    Validation(&'static str),
-    /// Tree nesting depth exceeded maximum permitted limit.
-    #[error("session structure exceeded depth limit")]
-    DepthLimitExceeded,
-    /// Node count exceeded maximum permitted limit.
-    #[error("session exceeded node limit")]
-    NodeLimitExceeded,
-    /// Serialized file size exceeded maximum byte limit.
-    #[error("session file exceeded size limit")]
-    SizeLimitExceeded,
-    /// Number of messages exceeded maximum permitted limit.
-    #[error("session messages exceeded count limit")]
-    MessageLimitExceeded,
-    /// Session identifier collision when importing or creating.
-    #[error("session identifier collision")]
-    Collision,
-    /// Checksum verification failure in journal record.
-    #[error("journal checksum mismatch")]
-    ChecksumMismatch,
-    /// Non-contiguous sequence jump in journal record.
-    #[error("journal sequence gap")]
-    SequenceGap,
-    /// Corrupt journal envelope line.
-    #[error("corrupt journal line: {0}")]
-    CorruptedRecord(&'static str),
-    /// Expected session revision does not match stored revision.
-    #[error("stale session revision")]
-    StaleRevision,
-}
+pub use crate::error::PersistenceError;
 
 /// A validated, safe filename component identifying a session.
 ///

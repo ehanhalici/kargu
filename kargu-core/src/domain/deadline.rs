@@ -1,6 +1,6 @@
 //! Explicit unlimited execution, independent of bounded approval and cleanup.
 
-use crate::error::CoreError;
+use super::error::CoreError;
 use std::time::Duration;
 use tokio::time::Instant;
 

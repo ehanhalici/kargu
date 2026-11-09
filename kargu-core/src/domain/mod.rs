@@ -6,7 +6,10 @@
 //! fn mix(tokens: TokenCount, steps: StepCount) { let _ = tokens.checked_add(steps); }
 //! ```
 
-use crate::{constants::limits, error::CoreError};
+use crate::constants::limits;
+
+pub mod error;
+use error::CoreError;
 use serde::{Deserialize, Serialize};
 
 mod api;

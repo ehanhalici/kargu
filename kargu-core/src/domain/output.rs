@@ -1,7 +1,8 @@
 //! Typed record capture and accepted process exit semantics.
 
+use super::error::CoreError;
 use super::{OutputRecords, OutputRetention};
-use crate::{constants::limits, error::CoreError};
+use crate::constants::limits;
 use serde::{Deserialize, Serialize};
 
 /// Positive bounded stdout record count; distinct from bytes or file coordinates.
