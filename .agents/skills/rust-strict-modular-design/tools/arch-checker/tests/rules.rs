@@ -183,3 +183,18 @@ fn ratchet_rejects_a_grown_baseline() -> TestResult {
     assert_eq!(status, Some(0), "{report}");
     Ok(())
 }
+
+#[test]
+fn module_cycle_reports_both_directions_and_spares_acyclic_edges() -> TestResult {
+    let (status, report) = run("cycle")?;
+    assert_eq!(status, Some(1), "{report}");
+    let cycles: Vec<&str> = report
+        .lines()
+        .filter(|l| l.contains("[module-cycle]"))
+        .collect();
+    assert_eq!(cycles.len(), 2, "{report}");
+    assert!(cycles.iter().any(|l| l.contains("`a` depends on `b`")));
+    assert!(cycles.iter().any(|l| l.contains("`b` depends on `a`")));
+    assert!(!report.contains("`c` depends on"), "{report}");
+    Ok(())
+}

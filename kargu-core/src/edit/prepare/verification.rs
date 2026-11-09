@@ -9,11 +9,11 @@ use super::{
 #[cfg(test)]
 use crate::edit::types::EditPath;
 use crate::{
-    application::agent::HealingVerdict,
     constants::limits,
     domain::{EditServiceId, SessionId},
     edit::types::{ContentHash, EditorEditId},
     error::CoreError,
+    run::HealingVerdict,
     sensors::diagnostics::{
         Diagnostic, DiagnosticDelta, DiagnosticSnapshot, DocumentStamp, Freshness,
         HealingSignature, Severity,

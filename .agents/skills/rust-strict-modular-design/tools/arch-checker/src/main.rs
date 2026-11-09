@@ -15,6 +15,7 @@ mod analyze;
 mod baseline;
 mod config;
 mod finding;
+mod graph;
 mod nesting;
 mod sources;
 mod types;
@@ -110,10 +111,12 @@ fn run(root: &Path) -> Result<Vec<finding::Finding>, Failure> {
         .iter()
         .flat_map(|source| analyze::newtypes(source.syntax()))
         .collect();
-    Ok(sources
+    let mut findings: Vec<finding::Finding> = sources
         .iter()
         .flat_map(|source| analyze::check(source.path(), source.syntax(), &config, &newtypes))
-        .collect())
+        .collect();
+    findings.extend(graph::module_cycles(&sources));
+    Ok(findings)
 }
 
 /// Print findings and turn them into the exit status.

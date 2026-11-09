@@ -129,19 +129,7 @@ impl Phase {
     }
 }
 
-/// Outcome of admitting a post-edit diagnostic delta into a bounded healing turn.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HealingVerdict {
-    /// Eligible new errors admitted for a bounded healing turn under parent run.
-    Admitted {
-        /// 1-based healing round number (`1..=AGENT_HEALING_ROUNDS`).
-        round: std::num::NonZeroU8,
-    },
-    /// Identical new error set repeated across healing rounds (doom-loop cap).
-    RepeatedErrors,
-    /// Healing round cap (`AGENT_HEALING_ROUNDS`) or turn limit exhausted.
-    BudgetExhausted,
-}
+pub use crate::run::HealingVerdict;
 
 #[derive(Default)]
 struct HealingState {

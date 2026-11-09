@@ -37,6 +37,7 @@ types, tests and review.
 | `global-state` | in `domain`: `static mut`, statics of `Mutex`/`RwLock`/`Cell`/`RefCell`/`Once*`/`Lazy*`/`Atomic*`, `thread_local!` |
 | `panic` | `.unwrap()`, `.expect()`, `.unwrap_err()`, `.expect_err()`, `.unwrap_unchecked()`, `panic!`, `todo!`, `unimplemented!`, `unreachable!` |
 | `too-many-statements` / `too-many-parameters` / `too-deep` | body, `self`-less parameter count, nested control flow over the configured limits (`else if` chains, match arms and closure bodies count once) |
+| `module-cycle` | a `crate::<module>` reference in non-test code that lies on a cycle of top-level modules; both directions are reported, so move the shared part below both |
 
 `#[cfg(test)]` modules (inline or out-of-line `mod tests;` files) and `#[test]`
 functions are skipped; only `src/` is scanned.

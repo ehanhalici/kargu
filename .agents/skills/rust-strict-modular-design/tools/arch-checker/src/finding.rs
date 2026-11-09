@@ -25,6 +25,8 @@ pub enum Rule {
     TooManyParameters,
     /// Control flow is nested deeper than one job needs.
     TooDeep,
+    /// Top-level modules depend on each other in a cycle.
+    ModuleCycle,
 }
 
 impl Rule {
@@ -41,6 +43,7 @@ impl Rule {
             Self::TooManyStatements => "too-many-statements",
             Self::TooManyParameters => "too-many-parameters",
             Self::TooDeep => "too-deep",
+            Self::ModuleCycle => "module-cycle",
         }
     }
 }
