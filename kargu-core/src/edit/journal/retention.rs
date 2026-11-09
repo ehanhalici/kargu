@@ -4,7 +4,7 @@ use super::{
     storage::{self, Directory},
 };
 use crate::{
-    constants::limits, edit::types::EditorEditId, error::CoreError, security::file::checkpoint,
+    constants::limits, edit::types::EditorEditId, error::CoreError, policy::file::checkpoint,
 };
 use nix::{
     fcntl::AtFlags,

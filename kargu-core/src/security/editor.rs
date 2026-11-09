@@ -1,16 +1,15 @@
 //! Editor actions share the command approval map, but can never become commands.
 use super::{ActionDigest, CapturedAction, ExecutionGate, PendingApproval, ToolRegistry};
-use crate::edit::{prepare::FileIndex, types::EditText};
+use crate::intent::types::{EditText, FileIndex};
 use crate::{
-    application::ApplicationActor,
     constants::{limits, timeouts},
     domain::{ApprovalId, ToolCallId, ToolName, ToolSafetyLevel, ToolStepId},
-    edit::{
-        intent::EditorAction,
+    error::CoreError,
+    intent::{
+        EditorAction,
         types::{EditorRevision, ReviewMode},
     },
-    error::CoreError,
-    run::{RunHandle, RunLease, RunScope, ToolOutcome},
+    run::{RunHandle, RunLease, RunLedger, RunScope, ToolOutcome},
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -125,7 +124,7 @@ impl AuthorizedEditorEdit {
         &self.action
     }
     /// Recheck owner/mode/deadline without performing filesystem IO on the actor.
-    pub fn revalidate(&self, actor: &ApplicationActor) -> Result<(), CoreError> {
+    pub fn revalidate(&self, actor: &dyn RunLedger) -> Result<(), CoreError> {
         actor.validate(&self.run)?;
         if Instant::now() >= self.deadline {
             return Err(CoreError::ApprovalExpired);
@@ -144,35 +143,34 @@ impl AuthorizedEditorEdit {
     }
     pub(crate) fn issue(
         self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
     ) -> Result<IssuedEditorEdit, Box<(CoreError, Self)>> {
         if let Err(error) = self.revalidate(actor).and_then(|()| {
-            actor.mark_action_started(&self.run, &self.call_id, self.step_id.as_ref())
+            actor.mark_action_started(&self.run, (&self.call_id, self.step_id.as_ref()))
         }) {
             return Err(Box::new((error, self)));
         }
         Ok(IssuedEditorEdit(self))
     }
-    pub(crate) fn expire_unissued(self, actor: &mut ApplicationActor) -> Result<(), CoreError> {
+    pub(crate) fn expire_unissued(self, actor: &mut dyn RunLedger) -> Result<(), CoreError> {
         actor.validate_owner(&self.run)?;
         actor.complete_action(
             &self.run,
-            &self.call_id,
-            self.step_id.as_ref(),
+            (&self.call_id, self.step_id.as_ref()),
             ToolOutcome::Timeout,
         )?;
         drop(self.lease);
         Ok(())
     }
     /// Cancel an authorization before any journalled issuance. No applied result is fabricated.
-    pub fn cancel_unissued(self, actor: &mut ApplicationActor) -> Result<(), CoreError> {
+    pub fn cancel_unissued(self, actor: &mut dyn RunLedger) -> Result<(), CoreError> {
         actor.validate_owner(&self.run)?;
         let outcome = if Instant::now() >= self.deadline {
             ToolOutcome::Timeout
         } else {
             ToolOutcome::Cancelled
         };
-        actor.complete_action(&self.run, &self.call_id, self.step_id.as_ref(), outcome)?;
+        actor.complete_action(&self.run, (&self.call_id, self.step_id.as_ref()), outcome)?;
         drop(self.lease);
         Ok(())
     }
@@ -185,22 +183,21 @@ impl IssuedEditorEdit {
     }
     pub(crate) fn complete_quiescent(
         self,
-        actor: &mut ApplicationActor,
-        effect: crate::edit::types::QuiescentEffect,
-        reason: crate::edit::types::NoDispatchReason,
+        actor: &mut dyn RunLedger,
+        effect: crate::intent::types::QuiescentEffect,
+        reason: crate::intent::types::NoDispatchReason,
     ) -> Result<(), CoreError> {
         actor.validate_owner(&self.0.run)?;
         let outcome = match effect {
-            crate::edit::types::QuiescentEffect::OutcomeUnknown => ToolOutcome::OutcomeUnknown,
-            crate::edit::types::QuiescentEffect::NotDispatched => match reason {
-                crate::edit::types::NoDispatchReason::Timeout => ToolOutcome::Timeout,
-                crate::edit::types::NoDispatchReason::Cancelled => ToolOutcome::Cancelled,
+            crate::intent::types::QuiescentEffect::OutcomeUnknown => ToolOutcome::OutcomeUnknown,
+            crate::intent::types::QuiescentEffect::NotDispatched => match reason {
+                crate::intent::types::NoDispatchReason::Timeout => ToolOutcome::Timeout,
+                crate::intent::types::NoDispatchReason::Cancelled => ToolOutcome::Cancelled,
             },
         };
         actor.complete_action(
             &self.0.run,
-            &self.0.call_id,
-            self.0.step_id.as_ref(),
+            (&self.0.call_id, self.0.step_id.as_ref()),
             outcome,
         )?;
         drop(self.0.lease);
@@ -208,14 +205,13 @@ impl IssuedEditorEdit {
     }
     pub(crate) fn complete(
         self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         outcome: ToolOutcome,
     ) -> Result<(), CoreError> {
         actor.validate_owner(&self.0.run)?;
         actor.complete_action(
             &self.0.run,
-            &self.0.call_id,
-            self.0.step_id.as_ref(),
+            (&self.0.call_id, self.0.step_id.as_ref()),
             outcome,
         )?;
         drop(self.0.lease);
@@ -246,7 +242,7 @@ fn digest(
     Ok(ActionDigest(hash.finalize().into()))
 }
 pub(crate) struct EditorRevisionWork {
-    action: crate::edit::intent::EditorActionInput,
+    action: crate::intent::EditorActionInput,
     run: RunHandle,
     name: ToolName,
 }
@@ -307,7 +303,7 @@ impl ExecutionGate {
     /// Admit an editor intent through the shared ledger. Hashes/client IDs alone never consent.
     pub fn admit_editor(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         registry: &ToolRegistry,
         requested: &ToolName,
@@ -318,7 +314,7 @@ impl ExecutionGate {
     /// Admit one concrete editor effect inside an already committed native tool call.
     pub(crate) fn admit_editor_step(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         requested: &ToolName,
         input: EditorAdmissionInput,
@@ -335,7 +331,7 @@ impl ExecutionGate {
     }
     fn admit_editor_action(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         registry: &ToolRegistry,
         requested: &ToolName,
@@ -370,13 +366,16 @@ impl ExecutionGate {
         );
         let lease = run.lease()?;
         if let Some(step) = &step_id {
-            actor.claim_step(run, &call_id, step, descriptor.name(), descriptor.safety())?;
+            actor.claim_step(
+                run,
+                (&call_id, step),
+                (descriptor.name(), descriptor.safety()),
+            )?;
         } else {
             actor.reserve_call(
                 run,
                 call_id.clone(),
-                descriptor.name().clone(),
-                descriptor.safety(),
+                (descriptor.name().clone(), descriptor.safety()),
             )?;
         }
         let id = ApprovalId::new();
@@ -412,7 +411,7 @@ impl ExecutionGate {
     }
     pub(crate) fn revision_work(
         &self,
-        actor: &ApplicationActor,
+        actor: &dyn RunLedger,
         run: &RunHandle,
         request: &EditorApprovalRequest,
         revision: EditorRevision,
@@ -434,7 +433,7 @@ impl ExecutionGate {
     }
     pub(crate) fn revision_permit<'a>(
         &'a mut self,
-        actor: &ApplicationActor,
+        actor: &dyn RunLedger,
         run: &RunHandle,
         request: &'a mut EditorApprovalRequest,
         revision: EditorRevision,
@@ -455,7 +454,7 @@ impl ExecutionGate {
     /// Consume exactly one matching native revision; foreign/stale decisions leave it pending.
     pub fn decide_editor(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         request: &EditorApprovalRequest,
         revision: EditorRevision,
@@ -504,7 +503,7 @@ impl ExecutionGate {
                 CoreError::Cancelled => ToolOutcome::Cancelled,
                 _ => ToolOutcome::Rejected,
             };
-            actor.complete_action(run, &pending.call_id, pending.step_id.as_ref(), outcome)?;
+            actor.complete_action(run, (&pending.call_id, pending.step_id.as_ref()), outcome)?;
             return Err(error);
         }
         Ok(AuthorizedEditorEdit {

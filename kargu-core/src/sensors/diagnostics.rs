@@ -1,7 +1,7 @@
 //! Native diagnostic freshness and baseline comparison over detached editor facts.
 
 use super::{coordinates::SourceRange, types::*};
-use crate::{constants::limits, edit::types::EditPath, error::CoreError};
+use crate::{constants::limits, domain::evidence::EditPath, error::CoreError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};

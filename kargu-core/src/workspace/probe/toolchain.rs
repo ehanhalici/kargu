@@ -1,6 +1,6 @@
 //! File-dependent command selection is metadata; discovery executes no scripts.
 use super::{Commands, Probe, Toolchain};
-use crate::{error::CoreError, security::file::PinnedFile};
+use crate::{error::CoreError, policy::file::PinnedFile};
 use zeroize::Zeroizing;
 pub(super) fn manager(p: &Probe<'_>) -> &'static str {
     if p.exists("pnpm-lock.yaml") {

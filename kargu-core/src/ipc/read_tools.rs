@@ -486,11 +486,11 @@ impl ReadTools {
         );
         self.workers.spawn_blocking(move || {
             let result = (|| {
-                crate::security::file::checkpoint(&cancel, deadline)?;
+                crate::policy::file::checkpoint(&cancel, deadline)?;
                 workspace.revalidate()?;
                 let result = input.execute(&cancel, deadline)?;
                 workspace.revalidate()?;
-                crate::security::file::checkpoint(&cancel, deadline)?;
+                crate::policy::file::checkpoint(&cancel, deadline)?;
                 Ok(result)
             })();
             (id, result)

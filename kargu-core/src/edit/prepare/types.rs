@@ -1,4 +1,5 @@
 //! Exact upload, editor identity and native filesystem evidence boundaries.
+pub(crate) use crate::intent::types::FileIndex;
 use crate::{
     constants::limits,
     domain::Mode,
@@ -232,24 +233,6 @@ pub(super) struct Begin {
     pub policy_revision: PolicyRevision,
     pub review_mode: ReviewMode,
     pub save_policy: SavePolicy,
-}
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
-#[serde(try_from = "usize")]
-pub(crate) struct FileIndex(usize);
-impl TryFrom<usize> for FileIndex {
-    type Error = EditError;
-    fn try_from(v: usize) -> Result<Self, EditError> {
-        if v < limits::EDIT_FILES {
-            Ok(Self(v))
-        } else {
-            Err(EditError::Limit)
-        }
-    }
-}
-impl FileIndex {
-    pub(crate) fn get(self) -> usize {
-        self.0
-    }
 }
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]

@@ -1,7 +1,7 @@
 //! Bounded provider discovery envelope boundary, before any UI publication.
 
 use super::metadata::{MetadataError, RawMetadata};
-use crate::{api::ModelId, constants::limits};
+use crate::{constants::limits, domain::ModelId};
 use serde::{
     Deserialize, Deserializer,
     de::{self, MapAccess, Visitor},

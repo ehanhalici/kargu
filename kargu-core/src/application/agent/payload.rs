@@ -3,34 +3,11 @@
 //! Extra fields cannot forge tools or override model/messages.
 
 use crate::{
-    api::{ApiError, ModelId},
+    api::{ApiError, ModelId, PayloadStream},
     constants::limits,
     history::Message,
 };
 use serde_json::{Map, Value, json, value::RawValue};
-
-/// Stream delivery mode for a canonical payload.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PayloadStream(bool);
-
-#[allow(dead_code)]
-impl PayloadStream {
-    /// Non-streaming single-response payload.
-    pub const PLAIN: Self = Self(false);
-    /// Server-sent events streaming payload.
-    pub const STREAMING: Self = Self(true);
-
-    /// Whether streaming mode is enabled.
-    pub fn is_streaming(&self) -> bool {
-        self.0
-    }
-}
-
-impl From<bool> for PayloadStream {
-    fn from(value: bool) -> Self {
-        Self(value)
-    }
-}
 
 /// Inputs for building a canonical provider request payload.
 pub struct CanonicalPayloadSpec<'a> {

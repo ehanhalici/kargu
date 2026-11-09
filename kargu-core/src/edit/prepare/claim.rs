@@ -14,8 +14,8 @@ use crate::{
         types::{CaptureDigest, EditorRevision},
     },
     error::CoreError,
+    policy::file::checkpoint,
     run::{PreparedEditorSettings, RunSettings},
-    security::file::checkpoint,
 };
 use std::{sync::Arc, time::Instant};
 use tokio_util::sync::CancellationToken;

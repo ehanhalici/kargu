@@ -195,3 +195,39 @@ pub enum PersistenceError {
     #[error("stale session revision")]
     StaleRevision,
 }
+
+/// Budget refusal taxonomy; no decisions depend on upstream error text.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, thiserror::Error)]
+#[serde(rename_all = "snake_case")]
+pub enum Refusal {
+    /// No additional request fits.
+    #[error("request budget exhausted")]
+    Requests,
+    /// Absolute run deadline elapsed.
+    #[error("budget deadline exhausted")]
+    Deadline,
+    /// Another logical compaction is forbidden.
+    #[error("compaction budget exhausted")]
+    Compactions,
+    /// Observed usage exhausted the configured ceiling.
+    #[error("token budget exhausted")]
+    Tokens,
+    /// A token cap cannot be verified after an unknown/partial measurement.
+    #[error("token usage unknown under a configured ceiling")]
+    UnknownUsage,
+    /// No hard reservation exists, so wait for the outstanding measurement.
+    #[error("token measurement pending")]
+    PendingUsage,
+    /// Exact accounting failed; never wrap or reset it to zero.
+    #[error("budget accounting overflow")]
+    Accounting,
+    /// Hard monetary budget exhausted.
+    #[error("monetary budget exhausted")]
+    Monetary,
+    /// Pricing is unknown under a configured monetary ceiling.
+    #[error("pricing unknown under a configured monetary ceiling")]
+    UnknownPricing,
+    /// Output upper bound is missing or zero under a configured monetary ceiling.
+    #[error("output upper bound required under a configured monetary ceiling")]
+    UnboundedOutput,
+}

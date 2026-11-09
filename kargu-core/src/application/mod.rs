@@ -4,6 +4,7 @@ pub mod agent;
 pub mod budget;
 mod claim;
 mod history;
+mod ledger;
 mod steps;
 pub use claim::{ClaimIntent, ClaimLease, PreparedRun, RequestedWorkspace, RunClaim};
 pub mod host;

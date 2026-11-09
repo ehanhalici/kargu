@@ -6,12 +6,11 @@ use super::{
     types::{Begin, Intent, Part},
 };
 use crate::{
-    application::agent::{AgentTool, ToolAdmission},
     domain::{ToolCallId, ToolName, ToolStepId},
     edit::{EditError, types::EditPath},
     error::CoreError,
+    policy::Workspace,
     run::{RunHandle, ToolOutcome},
-    security::{ToolRoute, Workspace},
 };
 use serde_json::{Value, value::RawValue};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -28,6 +27,31 @@ impl Default for ParentPolicy {
         Self {
             review_mode: crate::edit::types::ReviewMode::Blocking,
             save_policy: crate::edit::types::SavePolicy::BufferOnly,
+        }
+    }
+}
+
+/// The committed model call a native edit answers. Its owner has already
+/// admitted it for native edit dispatch; this carries no grant of its own.
+pub(crate) struct ParentCall {
+    run: RunHandle,
+    id: ToolCallId,
+    name: ToolName,
+    arguments: Arc<RawValue>,
+}
+impl ParentCall {
+    /// A call `run` committed as `id`, invoking `name` with its arguments.
+    pub(crate) fn new(
+        run: RunHandle,
+        id: ToolCallId,
+        invocation: (ToolName, Arc<RawValue>),
+    ) -> Self {
+        let (name, arguments) = invocation;
+        Self {
+            run,
+            id,
+            name,
+            arguments,
         }
     }
 }
@@ -59,23 +83,20 @@ pub(crate) struct ParentResult {
 }
 impl ParentEdit {
     pub(super) fn capture(
-        call: &AgentTool,
+        call: ParentCall,
         policy: ParentPolicy,
         selection: Option<crate::sensors::symbols::SymbolEditSelection>,
     ) -> Result<Self, CoreError> {
-        if call.admission() != ToolAdmission::Ready || call.route() != Some(ToolRoute::NativeEdit) {
-            return Err(CoreError::Rejected);
-        }
-        call.run().check_live()?;
-        if (call.name().as_str() == "edit_by_lsp") != selection.is_some() {
+        call.run.check_live()?;
+        if (call.name.as_str() == "edit_by_lsp") != selection.is_some() {
             return Err(CoreError::Rejected);
         }
         Ok(Self {
-            run: call.run().clone(),
-            call: call.id().clone(),
-            name: call.name().clone(),
+            run: call.run,
+            call: call.id,
+            name: call.name,
             policy,
-            arguments: Arc::from(call.arguments().to_owned()),
+            arguments: call.arguments,
             selection,
         })
     }

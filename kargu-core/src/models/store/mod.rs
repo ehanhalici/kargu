@@ -8,10 +8,10 @@
 
 mod domain;
 use crate::{
-    api::ModelId,
     constants::limits,
+    domain::ApiProviderId,
+    domain::ModelId,
     models::metadata::{EffortSpecs, ModelFields, RawMetadata},
-    providers::ApiProviderId,
 };
 use domain::Operation;
 pub use domain::{MetadataRevision, ModelUpdate, StoreError};

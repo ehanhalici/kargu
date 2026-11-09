@@ -12,7 +12,7 @@ use crate::{
         types::{ContentHash, EditPath, EditText, HunkCount},
     },
     error::CoreError,
-    security::Workspace,
+    policy::Workspace,
 };
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc};

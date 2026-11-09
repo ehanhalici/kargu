@@ -1,7 +1,7 @@
 //! Streaming range capture and one presentation policy for disk and live text.
 
 use super::{ExcerptCharBudget, FileExcerpt, LineNumber, ScanCharBudget, Snapshot, Window};
-use crate::{error::CoreError, security::file::checkpoint};
+use crate::{error::CoreError, policy::file::checkpoint};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;

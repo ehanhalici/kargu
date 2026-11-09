@@ -3,7 +3,7 @@ use super::super::{Prepared, capture};
 use super::*;
 use crate::{
     edit::{patch::OperationKind, types::SavePolicy},
-    security::file::checkpoint,
+    policy::file::checkpoint,
 };
 use tokio_util::sync::CancellationToken;
 

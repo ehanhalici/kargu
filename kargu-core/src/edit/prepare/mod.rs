@@ -16,7 +16,7 @@ pub(crate) use artifact::Artifact;
 use artifact::Prepared;
 pub(crate) use git::{GitPreparation, PatchPrepared, RunningPatch};
 pub(crate) use inspection::{PatchWork, PreparationResult, PrepareWork};
-pub(crate) use parent::{ParentEdit, ParentPolicy, ParentResult};
+pub(crate) use parent::{ParentCall, ParentEdit, ParentPolicy, ParentResult};
 mod preflight;
 pub(crate) mod receipt;
 mod rollback;

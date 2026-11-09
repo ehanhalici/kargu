@@ -1,31 +1,12 @@
 //! Parse-once HTTP authority, secret headers and independent network timers.
 
-use super::ApiError;
+use super::{ApiError, PayloadStream};
+pub use crate::domain::ModelId;
 use crate::providers::ApiEndpoint;
 use reqwest::{Method, header::HeaderMap};
 use serde::Deserialize;
 use std::{collections::BTreeMap, fmt, sync::Arc, time::Duration};
 use zeroize::Zeroizing;
-
-/// Open model namespace; never confused with a provider or external thread ID.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, serde::Serialize)]
-#[serde(try_from = "String")]
-pub struct ModelId(String);
-impl TryFrom<String> for ModelId {
-    type Error = ApiError;
-    fn try_from(value: String) -> Result<Self, ApiError> {
-        if value.trim().is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
-            return Err(ApiError::InvalidRequest);
-        }
-        Ok(Self(value))
-    }
-}
-impl ModelId {
-    /// Borrow its opaque, case-sensitive wire identity without provider folding.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
 
 /// A captured secret. Neither diagnostics nor serialization expose plaintext.
 #[derive(Deserialize)]
@@ -328,22 +309,21 @@ impl ChatConnection {
         input.wire = Some(policy.wire);
         input.try_into()
     }
-    /// Prepare only from the actual native model ticket, on a bounded worker.
-    /// Reuses the existing wire/auth/tuning/cache implementation; history stays immutable.
+    /// Prepare a turn's request on a bounded worker for `run`.
+    ///
+    /// `payload` builds the turn's canonical body for this connection's model and
+    /// stream choice; the existing wire/auth/tuning/cache encoding applies to it.
+    /// The connection knows nothing of the turn that supplies the payload.
     pub fn prepare_turn(
         &self,
-        turn: &crate::application::agent::ModelTurn,
+        run: &crate::run::RunHandle,
+        payload: impl FnOnce(
+            &ModelId,
+            PayloadStream,
+        ) -> Result<Box<serde_json::value::RawValue>, ApiError>,
     ) -> Result<HttpRequest, ApiError> {
-        let canonical = turn.canonical_payload(&self.model, self.stream)?;
-        self.encode_turn_request(turn.run(), &canonical)
-    }
-    /// Prepare either a normal model turn or a tools-off summary turn on a bounded worker.
-    pub fn prepare_agent_turn(
-        &self,
-        turn: &crate::application::agent::AgentTurn,
-    ) -> Result<HttpRequest, ApiError> {
-        let canonical = turn.canonical_payload(&self.model, self.stream.into())?;
-        self.encode_turn_request(turn.run(), &canonical)
+        let canonical = payload(&self.model, self.stream.into())?;
+        self.encode_turn_request(run, &canonical)
     }
     fn encode_turn_request(
         &self,

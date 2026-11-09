@@ -69,9 +69,6 @@ primitive-boundary	src/configuration/policy/service.rs	`run_target` exposes a pr
 primitive-boundary	src/configuration/policy/service.rs	`verify_credential` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/domain/output.rs	`accepts` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/domain/output.rs	`stop_on_bytes` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/edit/intent.rs	`commitment` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/edit/intent.rs	`matches_run` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/edit/intent.rs	`permits_deletion` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/edit/journal/storage.rs	`matches` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/edit/journal/storage.rs	`read` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/edit/patch/hunk.rs	`parse` exposes a primitive across a module boundary; use a domain type
@@ -108,6 +105,9 @@ primitive-boundary	src/history/upload.rs	`can_publish` exposes a primitive acros
 primitive-boundary	src/history/upload.rs	`drained` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/history/upload.rs	`owns_session` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/history/upload.rs	`rpc` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/intent/mod.rs	`commitment` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/intent/mod.rs	`matches_run` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/intent/mod.rs	`permits_deletion` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/models/metadata/mod.rs	`allows_reasoning` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/models/metadata/mod.rs	`allows_tools` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/models/metadata/mod.rs	`input_is_zero` exposes a primitive across a module boundary; use a domain type
@@ -117,6 +117,8 @@ primitive-boundary	src/models/numeric.rs	`per_million_label` exposes a primitive
 primitive-boundary	src/models/service/mod.rs	`rpc` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/models/store/mod.rs	`snapshot_json` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/policy/catalog.rs	`description` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/policy/file.rs	`read` exposes a primitive across a module boundary; use a domain type
+primitive-boundary	src/policy/file.rs	`size` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/policy/mod.rs	`permits_mode` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/policy/mod.rs	`same_capture` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/process/archive.rs	`discard` exposes a primitive across a module boundary; use a domain type
@@ -139,11 +141,8 @@ primitive-boundary	src/run.rs	`same_owner` exposes a primitive across a module b
 primitive-boundary	src/run.rs	`summary` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/action_snapshot.rs	`digest` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/delegated.rs	`complete_history` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/security/file.rs	`read` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/security/file.rs	`size` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/mod.rs	`pending_count` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/security/mod.rs	`stop_on_bytes` exposes a primitive across a module boundary; use a domain type
-primitive-boundary	src/security/read_target.rs	`immutable` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/coordinates.rs	`check_text` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/coordinates.rs	`contains` exposes a primitive across a module boundary; use a domain type
 primitive-boundary	src/sensors/coordinates.rs	`offset` exposes a primitive across a module boundary; use a domain type
@@ -278,14 +277,6 @@ pub-field	src/configuration/policy/service.rs	`RunTarget`: field `model` is visi
 pub-field	src/configuration/policy/service.rs	`RunTarget`: field `provider` is visible; keep fields private and expose accessors
 pub-field	src/configuration/read/domain.rs	`CandidatePaths`: field `tuple field` is visible; keep fields private and expose accessors
 pub-field	src/configuration/read/domain.rs	`ConfigurationPath`: field `tuple field` is visible; keep fields private and expose accessors
-pub-field	src/edit/intent.rs	`EditorActionInput`: field `config_revision` is visible; keep fields private and expose accessors
-pub-field	src/edit/intent.rs	`EditorActionInput`: field `files` is visible; keep fields private and expose accessors
-pub-field	src/edit/intent.rs	`EditorActionInput`: field `policy_revision` is visible; keep fields private and expose accessors
-pub-field	src/edit/intent.rs	`EditorActionInput`: field `review_mode` is visible; keep fields private and expose accessors
-pub-field	src/edit/intent.rs	`EditorActionInput`: field `revision` is visible; keep fields private and expose accessors
-pub-field	src/edit/intent.rs	`EditorActionInput`: field `save_policy` is visible; keep fields private and expose accessors
-pub-field	src/edit/intent.rs	`EditorActionInput`: field `source` is visible; keep fields private and expose accessors
-pub-field	src/edit/intent.rs	`EditorActionInput`: field `workspace` is visible; keep fields private and expose accessors
 pub-field	src/edit/journal/metadata.rs	`StoredAction`: field `config_revision` is visible; keep fields private and expose accessors
 pub-field	src/edit/journal/metadata.rs	`StoredAction`: field `policy_revision` is visible; keep fields private and expose accessors
 pub-field	src/edit/journal/metadata.rs	`StoredAction`: field `revision` is visible; keep fields private and expose accessors
@@ -423,6 +414,14 @@ pub-field	src/edit/prepare/types.rs	`Ticket`: field `preparation_id` is visible;
 pub-field	src/history/store.rs	`PendingCall`: field `call` is visible; keep fields private and expose accessors
 pub-field	src/history/store.rs	`PendingCall`: field `native_id` is visible; keep fields private and expose accessors
 pub-field	src/history/upload.rs	`HistoryWork`: field `id` is visible; keep fields private and expose accessors
+pub-field	src/intent/mod.rs	`EditorActionInput`: field `config_revision` is visible; keep fields private and expose accessors
+pub-field	src/intent/mod.rs	`EditorActionInput`: field `files` is visible; keep fields private and expose accessors
+pub-field	src/intent/mod.rs	`EditorActionInput`: field `policy_revision` is visible; keep fields private and expose accessors
+pub-field	src/intent/mod.rs	`EditorActionInput`: field `review_mode` is visible; keep fields private and expose accessors
+pub-field	src/intent/mod.rs	`EditorActionInput`: field `revision` is visible; keep fields private and expose accessors
+pub-field	src/intent/mod.rs	`EditorActionInput`: field `save_policy` is visible; keep fields private and expose accessors
+pub-field	src/intent/mod.rs	`EditorActionInput`: field `source` is visible; keep fields private and expose accessors
+pub-field	src/intent/mod.rs	`EditorActionInput`: field `workspace` is visible; keep fields private and expose accessors
 pub-field	src/ipc/api/admission.rs	`Admitted`: field `arguments` is visible; keep fields private and expose accessors
 pub-field	src/ipc/api/admission.rs	`Admitted`: field `circuit` is visible; keep fields private and expose accessors
 pub-field	src/ipc/api/admission.rs	`Admitted`: field `flight` is visible; keep fields private and expose accessors
@@ -551,6 +550,11 @@ pub-field	src/models/store/mod.rs	`RunModelPolicy`: field `efforts` is visible; 
 pub-field	src/models/store/mod.rs	`RunModelPolicy`: field `parameters` is visible; keep fields private and expose accessors
 pub-field	src/models/store/mod.rs	`RunModelPolicy`: field `reasoning` is visible; keep fields private and expose accessors
 pub-field	src/models/store/mod.rs	`RunModelPolicy`: field `tools` is visible; keep fields private and expose accessors
+pub-field	src/policy/mod.rs	`CommandInput`: field `arguments` is visible; keep fields private and expose accessors
+pub-field	src/policy/mod.rs	`CommandInput`: field `environment` is visible; keep fields private and expose accessors
+pub-field	src/policy/mod.rs	`CommandInput`: field `program` is visible; keep fields private and expose accessors
+pub-field	src/policy/mod.rs	`CommandInput`: field `timeout` is visible; keep fields private and expose accessors
+pub-field	src/policy/mod.rs	`CommandInput`: field `working_directory` is visible; keep fields private and expose accessors
 pub-field	src/process/archive.rs	`Archive`: field `eof` is visible; keep fields private and expose accessors
 pub-field	src/process/mod.rs	`CapturedOutput`: field `stderr` is visible; keep fields private and expose accessors
 pub-field	src/process/mod.rs	`CapturedOutput`: field `stdout` is visible; keep fields private and expose accessors
@@ -579,11 +583,6 @@ pub-field	src/security/mod.rs	`ApprovedParts`: field `command` is visible; keep 
 pub-field	src/security/mod.rs	`ApprovedParts`: field `lease` is visible; keep fields private and expose accessors
 pub-field	src/security/mod.rs	`ApprovedParts`: field `run` is visible; keep fields private and expose accessors
 pub-field	src/security/mod.rs	`ApprovedParts`: field `step_id` is visible; keep fields private and expose accessors
-pub-field	src/security/mod.rs	`CommandInput`: field `arguments` is visible; keep fields private and expose accessors
-pub-field	src/security/mod.rs	`CommandInput`: field `environment` is visible; keep fields private and expose accessors
-pub-field	src/security/mod.rs	`CommandInput`: field `program` is visible; keep fields private and expose accessors
-pub-field	src/security/mod.rs	`CommandInput`: field `timeout` is visible; keep fields private and expose accessors
-pub-field	src/security/mod.rs	`CommandInput`: field `working_directory` is visible; keep fields private and expose accessors
 pub-field	src/security/mod.rs	`CommandSpec`: field `arguments` is visible; keep fields private and expose accessors
 pub-field	src/security/mod.rs	`CommandSpec`: field `environment` is visible; keep fields private and expose accessors
 pub-field	src/security/mod.rs	`CommandSpec`: field `idle_timeout` is visible; keep fields private and expose accessors
@@ -592,7 +591,6 @@ pub-field	src/security/mod.rs	`CommandSpec`: field `output_limit` is visible; ke
 pub-field	src/security/mod.rs	`CommandSpec`: field `program` is visible; keep fields private and expose accessors
 pub-field	src/security/mod.rs	`CommandSpec`: field `stderr` is visible; keep fields private and expose accessors
 pub-field	src/security/mod.rs	`CommandSpec`: field `success_codes` is visible; keep fields private and expose accessors
-pub-field	src/security/read_target.rs	`ReadTarget`: field `path` is visible; keep fields private and expose accessors
 pub-field	src/sensors/coordinates.rs	`Position`: field `column` is visible; keep fields private and expose accessors
 pub-field	src/sensors/coordinates.rs	`Position`: field `line` is visible; keep fields private and expose accessors
 pub-field	src/sensors/diagnostics.rs	`DiagnosticDelta`: field `new` is visible; keep fields private and expose accessors
@@ -797,6 +795,7 @@ too-many-parameters	src/ipc/transport.rs	`read_loop` takes N parameters (max N);
 too-many-parameters	src/ipc/transport.rs	`read_messages` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/models/service/mod.rs	`call` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/models/service/mod.rs	`rpc` takes N parameters (max N); introduce a parameter type
+too-many-parameters	src/policy/file.rs	`open` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/process/io.rs	`drain` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/process/io.rs	`input_loop` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/process/mod.rs	`read` takes N parameters (max N); introduce a parameter type
@@ -819,7 +818,6 @@ too-many-parameters	src/security/editor.rs	`decide_editor` takes N parameters (m
 too-many-parameters	src/security/editor.rs	`revision_permit` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/security/editor.rs	`revision_work` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/security/editor.rs	`validate_revision` takes N parameters (max N); introduce a parameter type
-too-many-parameters	src/security/file.rs	`open` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/security/mod.rs	`decide` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/security/mod.rs	`prepare_step` takes N parameters (max N); introduce a parameter type
 too-many-parameters	src/security/mod.rs	`prepare` takes N parameters (max N); introduce a parameter type

@@ -1242,7 +1242,9 @@ impl Sessions {
                         }
                         let connection = running.connection.clone();
                         running.work = Work::Preparing(tokio::task::spawn_blocking(move || {
-                            let result = connection.prepare_agent_turn(&turn);
+                            let result = connection.prepare_turn(turn.run(), |model, stream| {
+                                turn.canonical_payload(model, stream)
+                            });
                             (turn, result)
                         }));
                     }

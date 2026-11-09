@@ -72,28 +72,7 @@ impl TryFrom<String> for SourceDate {
     }
 }
 
-/// Open provider namespace, distinct from model IDs and application backends.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
-#[serde(try_from = "String")]
-pub struct ApiProviderId(String);
-impl TryFrom<String> for ApiProviderId {
-    type Error = CoreError;
-    fn try_from(value: String) -> Result<Self, CoreError> {
-        let value = value.trim().to_lowercase();
-        if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
-            return Err(CoreError::InvalidValue {
-                field: "ApiProviderId",
-            });
-        }
-        Ok(Self(value))
-    }
-}
-impl ApiProviderId {
-    /// Canonical namespace used only at storage/wire boundaries.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+pub use crate::domain::ApiProviderId;
 
 /// Valid HTTP(S) model endpoint, not a general webfetch permission.
 #[derive(Clone, Deserialize, Serialize)]

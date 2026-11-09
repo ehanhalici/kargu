@@ -12,6 +12,7 @@ pub mod domain;
 pub mod edit;
 pub mod error;
 pub mod history;
+pub mod intent;
 pub mod ipc;
 pub mod models;
 pub mod persistence;

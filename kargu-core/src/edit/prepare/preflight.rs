@@ -9,7 +9,7 @@ use crate::{
         types::{CaptureDigest, ContentHash},
     },
     error::CoreError,
-    security::file::checkpoint,
+    policy::file::checkpoint,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

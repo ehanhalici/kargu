@@ -4,7 +4,7 @@ use crate::error::CoreError;
 use std::{fs::File, os::unix::fs::MetadataExt, path::PathBuf};
 
 pub(crate) struct ReadTarget {
-    pub(super) path: PathBuf,
+    path: PathBuf,
     held: File,
     revision: Option<super::file::Revision>,
 }
@@ -45,8 +45,34 @@ impl ReadTarget {
             revision: self.revision.clone(),
         })
     }
-    pub(super) fn immutable(&self) -> bool {
+    fn immutable(&self) -> bool {
         self.revision.is_some()
+    }
+    /// Contribute this target's identity to an action digest; immutable targets
+    /// also pin their content metadata.
+    pub(crate) fn digest_into(&self, hash: &mut sha2::Sha256) -> Result<(), CoreError> {
+        use sha2::Digest;
+        use std::os::unix::ffi::OsStrExt;
+        let metadata = self.metadata()?;
+        hash.update([u8::from(self.immutable())]);
+        if self.immutable() {
+            hash.update(metadata.len().to_le_bytes());
+            hash.update(metadata.mode().to_le_bytes());
+            hash.update(metadata.mtime().to_le_bytes());
+            hash.update(metadata.mtime_nsec().to_le_bytes());
+            hash.update(metadata.ctime().to_le_bytes());
+            hash.update(metadata.ctime_nsec().to_le_bytes());
+        }
+        hash.update(metadata.dev().to_le_bytes());
+        hash.update(metadata.ino().to_le_bytes());
+        let path = self.path.as_os_str().as_bytes();
+        hash.update(
+            u64::try_from(path.len())
+                .map_err(|_| CoreError::ArithmeticOverflow)?
+                .to_le_bytes(),
+        );
+        hash.update(path);
+        Ok(())
     }
     pub(crate) fn revalidate(&self) -> Result<(), CoreError> {
         let held = self.held.metadata()?;

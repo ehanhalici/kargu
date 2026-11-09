@@ -5,7 +5,7 @@ use super::{
     types::{DocumentId, SensorText, SourceLine},
 };
 use crate::{
-    edit::types::{ContentHash, EditPath},
+    domain::evidence::{ContentHash, EditPath},
     error::CoreError,
 };
 use serde::{Deserialize, Serialize};

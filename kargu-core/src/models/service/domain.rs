@@ -2,12 +2,12 @@
 
 use crate::{
     constants::{limits, protocol},
+    domain::ApiProviderId,
     domain::rpc::Fault,
     models::{
         metadata::EffortSpecs,
         store::{MetadataRevision, StoreError},
     },
-    providers::ApiProviderId,
 };
 use serde::{Deserialize, Serialize};
 

@@ -5,8 +5,8 @@ use crate::{
     constants::{limits, protocol::methods, timeouts},
     domain::{ApiPageBytes, ByteLimit, HistoryUploadId, SessionId},
     error::CoreError,
+    policy::file::checkpoint,
     run::ToolOutcome,
-    security::file::checkpoint,
 };
 use serde::{
     Deserialize,

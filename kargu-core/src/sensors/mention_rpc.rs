@@ -3,9 +3,9 @@
 use super::mentions::MentionLexer;
 use crate::{
     constants::{limits, protocol::error_codes},
+    domain::evidence::CaptureDigest,
     domain::rpc::Fault,
     domain::{ByteLimit, RequestScope},
-    edit::types::CaptureDigest,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};

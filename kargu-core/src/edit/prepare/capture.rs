@@ -10,7 +10,7 @@ use crate::{
         types::{EditPath, EditText},
     },
     error::CoreError,
-    security::{
+    policy::{
         ReadTarget, Workspace,
         file::{PinnedFile, checkpoint},
     },

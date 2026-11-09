@@ -9,6 +9,8 @@ pub mod catalog;
 mod domain;
 mod failure;
 mod http;
+mod payload_stream;
+pub use payload_stream::PayloadStream;
 pub mod policy;
 pub mod resilience;
 pub mod stream;
@@ -49,7 +51,7 @@ pub enum ApiError {
     RunDeadline,
     /// A later native attempt was refused without opening its socket.
     #[error("Run budget refused another API attempt")]
-    BudgetRefused(crate::application::budget::Refusal),
+    BudgetRefused(crate::error::Refusal),
     /// Bounded local retry coordination could not safely authorize replay.
     #[error("API retry coordination unavailable")]
     RetryUnavailable,
@@ -106,10 +108,7 @@ impl ApiError {
             result.insert("reason".to_owned(), json!(reason));
         }
         if matches!(self, Self::RunDeadline) {
-            result.insert(
-                "reason".to_owned(),
-                json!(crate::application::budget::Refusal::Deadline),
-            );
+            result.insert("reason".to_owned(), json!(crate::error::Refusal::Deadline));
         }
         if let Self::Http {
             status,

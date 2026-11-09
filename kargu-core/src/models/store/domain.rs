@@ -1,8 +1,8 @@
 //! Parse-once update commands, revision identity and closed publication errors.
 
 use crate::{
-    api::ModelId,
     constants::limits,
+    domain::ModelId,
     models::{
         catalog::ModelCatalog,
         metadata::{MetadataError, RawMetadata},

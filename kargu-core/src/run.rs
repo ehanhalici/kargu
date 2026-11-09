@@ -420,3 +420,51 @@ impl RunSettings {
         &self.workspace
     }
 }
+
+/// The application ledger an execution gate or process supervisor settles
+/// against: call and step admission, start and terminal outcome of one run.
+///
+/// The application actor implements it; gates and supervisors receive this
+/// port, never the actor, so they stay below the application they serve.
+pub trait RunLedger {
+    /// Confirm `run` is this application's live run.
+    fn validate(&self, run: &RunHandle) -> Result<(), CoreError>;
+    /// Confirm `run` belongs to this application, live or draining.
+    fn validate_owner(&self, run: &RunHandle) -> Result<(), CoreError>;
+    /// Register the step `call` and `tool` of an already committed parent call.
+    fn claim_step(
+        &mut self,
+        run: &RunHandle,
+        call: (&ToolCallId, &ToolStepId),
+        tool: (&ToolName, ToolSafetyLevel),
+    ) -> Result<(), CoreError>;
+    /// Reserve a new call `id` of `tool` against the run's tool budget.
+    fn reserve_call(
+        &mut self,
+        run: &RunHandle,
+        id: ToolCallId,
+        tool: (ToolName, ToolSafetyLevel),
+    ) -> Result<(), CoreError>;
+    /// Record that `action` began its effects.
+    fn mark_action_started(
+        &mut self,
+        run: &RunHandle,
+        action: (&ToolCallId, Option<&ToolStepId>),
+    ) -> Result<(), CoreError>;
+    /// Settle `action` with its terminal `outcome`.
+    fn complete_action(
+        &mut self,
+        run: &RunHandle,
+        action: (&ToolCallId, Option<&ToolStepId>),
+        outcome: ToolOutcome,
+    ) -> Result<(), CoreError>;
+    /// Commit the history result of call `id`.
+    fn complete_history_call(
+        &mut self,
+        run: &RunHandle,
+        id: &ToolCallId,
+        result: (ToolOutcome, &str),
+    ) -> Result<MessageId, CoreError>;
+    /// Quarantine a run whose effects can no longer be established.
+    fn quarantine(&mut self, run: &RunHandle) -> Result<(), CoreError>;
+}

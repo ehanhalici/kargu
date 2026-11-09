@@ -1,6 +1,6 @@
 //! Unauthenticated public GET; manual redirects and numeric pinning on every hop.
 mod policy;
-use crate::{error::CoreError, security::file::checkpoint};
+use crate::{error::CoreError, policy::file::checkpoint};
 use futures_util::StreamExt;
 use policy::Target;
 use serde::{Deserialize, Serialize};

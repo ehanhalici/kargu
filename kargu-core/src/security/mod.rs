@@ -3,16 +3,15 @@
 //! Path identity checks are revalidation evidence, not an OS shell sandbox.
 
 use crate::{
-    application::ApplicationActor,
     constants::{limits, timeouts},
     domain::Mode,
     domain::*,
     error::CoreError,
-    run::{RunHandle, RunLease, RunScope, ToolOutcome},
+    run::{RunHandle, RunLease, RunLedger, RunScope, ToolOutcome},
 };
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     ffi::OsString,
     fs::File,
     os::unix::{
@@ -27,8 +26,8 @@ use tokio::time::Instant;
 
 mod editor;
 pub use crate::policy::{
-    RegistryRevision, ToolDescriptor, ToolModes, ToolPresentation, ToolRegistry, ToolRoute,
-    UserDecision, Workspace, schema,
+    CommandEnvironment, CommandInput, RegistryRevision, ToolDescriptor, ToolModes,
+    ToolPresentation, ToolRegistry, ToolRoute, UserDecision, Workspace, schema,
 };
 mod delegated;
 pub use delegated::{
@@ -41,51 +40,8 @@ pub use editor::{
 };
 pub(crate) use editor::{IssuedEditorEdit, RevisedEditorAction};
 mod action_snapshot;
-pub(crate) mod file;
+pub(crate) use crate::policy::{ReadTarget, file};
 pub(crate) use action_snapshot::ActionSnapshot;
-mod read_target;
-pub(crate) use read_target::ReadTarget;
-
-/// Explicit immutable subprocess environment; secrets are never implicitly inherited.
-#[derive(Clone, Default)]
-pub struct CommandEnvironment(BTreeMap<OsString, OsString>);
-impl TryFrom<BTreeMap<OsString, OsString>> for CommandEnvironment {
-    type Error = CoreError;
-    fn try_from(values: BTreeMap<OsString, OsString>) -> Result<Self, CoreError> {
-        if values.len() > limits::COMMAND_ENVIRONMENT_ENTRIES {
-            return Err(CoreError::Limit);
-        }
-        let mut bytes = 0_usize;
-        for (key, value) in &values {
-            if key.is_empty()
-                || key
-                    .as_os_str()
-                    .as_bytes()
-                    .iter()
-                    .any(|b| *b == 0 || *b == b'=')
-                || value.as_os_str().as_bytes().contains(&0)
-            {
-                return Err(CoreError::InvalidValue {
-                    field: "CommandEnvironment",
-                });
-            }
-            bytes = bytes
-                .checked_add(key.len())
-                .and_then(|n| n.checked_add(value.len()))
-                .ok_or(CoreError::ArithmeticOverflow)?;
-        }
-        if bytes > limits::COMMAND_BYTES {
-            return Err(CoreError::Limit);
-        }
-        Ok(Self(values))
-    }
-}
-impl CommandEnvironment {
-    /// Iterate only for trusted execution/presentation; no Debug/Serialize is derived.
-    pub fn entries(&self) -> impl Iterator<Item = (&OsString, &OsString)> {
-        self.0.iter()
-    }
-}
 
 #[derive(PartialEq, Eq)]
 struct ExecutableRevision {
@@ -107,20 +63,6 @@ impl From<&std::fs::Metadata> for ExecutableRevision {
             changed: (m.ctime(), m.ctime_nsec()),
         }
     }
-}
-
-/// Boundary DTO: parsed once before the immutable command is formed.
-pub struct CommandInput {
-    /// Explicit executable path; PATH/shell interpolation is not performed.
-    pub program: PathBuf,
-    /// Exact argv values.
-    pub arguments: Vec<OsString>,
-    /// Explicit working directory.
-    pub working_directory: PathBuf,
-    /// Per-command wall-clock limit, also capped by the run deadline.
-    pub timeout: Option<Duration>,
-    /// Exact approved environment. Empty means env_clear, not implicit inheritance.
-    pub environment: CommandEnvironment,
 }
 
 /// Validated immutable command; no Debug or Serialize can disclose its arguments.
@@ -207,7 +149,16 @@ impl TryFrom<CommandInput> for CommandSpec {
 impl CommandSpec {
     /// Closed Git adapter may prepare a patch only in its retained private
     /// workspace. This capability is never deserialized from command RPC input.
-    pub(crate) fn edit_patch(input: CommandInput, workspace: Workspace) -> Result<Self, CoreError> {
+    /// The isolated `git apply` of an edit patch: complete capture, the patch
+    /// output bound and the patch file as pinned read evidence.
+    pub(crate) fn isolated_patch(patch: crate::policy::PatchCommand) -> Result<Self, CoreError> {
+        let (input, workspace, snapshot) = patch.into_parts();
+        Self::edit_patch(input, workspace)?
+            .with_capture(CapturePolicy::Complete)
+            .with_output_limit(OutputLimit::try_from(limits::EDIT_PATCH_OUTPUT_BYTES)?)
+            .with_snapshot_target(snapshot)
+    }
+    fn edit_patch(input: CommandInput, workspace: Workspace) -> Result<Self, CoreError> {
         let mut command = Self::git_read(input)?;
         workspace.revalidate()?;
         if command.cwd.path() != workspace.path() {
@@ -388,19 +339,7 @@ fn put_bytes(hash: &mut Sha256, bytes: &[u8]) -> Result<(), CoreError> {
 fn put_read_targets(hash: &mut Sha256, targets: &[ReadTarget]) -> Result<(), CoreError> {
     put_len(hash, targets.len())?;
     for target in targets {
-        let metadata = target.metadata()?;
-        hash.update([u8::from(target.immutable())]);
-        if target.immutable() {
-            hash.update(metadata.len().to_le_bytes());
-            hash.update(metadata.mode().to_le_bytes());
-            hash.update(metadata.mtime().to_le_bytes());
-            hash.update(metadata.mtime_nsec().to_le_bytes());
-            hash.update(metadata.ctime().to_le_bytes());
-            hash.update(metadata.ctime_nsec().to_le_bytes());
-        }
-        hash.update(metadata.dev().to_le_bytes());
-        hash.update(metadata.ino().to_le_bytes());
-        put_bytes(hash, target.path.as_os_str().as_bytes())?;
+        target.digest_into(hash)?;
     }
     Ok(())
 }
@@ -411,7 +350,7 @@ fn put_invocation(hash: &mut Sha256, command: &CommandSpec) -> Result<(), CoreEr
     for arg in &command.arguments {
         put_bytes(hash, arg.as_os_str().as_bytes())?;
     }
-    put_len(hash, command.environment.0.len())?;
+    put_len(hash, command.environment.entries().count())?;
     for (key, value) in command.environment.entries() {
         put_bytes(hash, key.as_os_str().as_bytes())?;
         put_bytes(hash, value.as_os_str().as_bytes())?;
@@ -573,7 +512,7 @@ impl ApprovalRequest {
 
 enum CapturedAction {
     Command(Box<CommandSpec>),
-    Editor(Box<crate::edit::intent::EditorAction>),
+    Editor(Box<crate::intent::EditorAction>),
     Delegated(Box<PreparedEditorTool>),
 }
 struct PendingApproval {
@@ -629,7 +568,7 @@ impl AuthorizedCommand {
             lease: self.lease,
         }
     }
-    pub(crate) fn revalidate(&self, actor: &ApplicationActor) -> Result<(), CoreError> {
+    pub(crate) fn revalidate(&self, actor: &dyn RunLedger) -> Result<(), CoreError> {
         actor.validate(&self.run)?;
         if Instant::now() >= self.deadline {
             return Err(CoreError::ApprovalExpired);
@@ -659,7 +598,7 @@ impl ExecutionGate {
     /// Validate typed arguments/owner/mode/budget before requesting user approval.
     pub fn prepare(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         registry: &ToolRegistry,
         requested: &ToolName,
@@ -680,7 +619,7 @@ impl ExecutionGate {
     }
     pub(crate) fn prepare_step(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         requested: &ToolName,
         parent: ToolCallId,
@@ -701,7 +640,7 @@ impl ExecutionGate {
     }
     fn prepare_command(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         input: CommandAdmission<'_>,
     ) -> Result<ApprovalRequest, CoreError> {
@@ -735,13 +674,16 @@ impl ExecutionGate {
         );
         let lease = run.lease()?;
         if let Some(step) = &step_id {
-            actor.claim_step(run, &call_id, step, descriptor.name(), descriptor.safety())?;
+            actor.claim_step(
+                run,
+                (&call_id, step),
+                (descriptor.name(), descriptor.safety()),
+            )?;
         } else {
             actor.reserve_call(
                 run,
                 call_id.clone(),
-                descriptor.name().clone(),
-                descriptor.safety(),
+                (descriptor.name().clone(), descriptor.safety()),
             )?;
         }
         let id = ApprovalId::new();
@@ -784,7 +726,7 @@ impl ExecutionGate {
     /// Consume only a matching owner's exact review. Replay, expiry and rejection fail closed.
     pub fn decide(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         request: &ApprovalRequest,
         decision: UserDecision,
@@ -823,7 +765,7 @@ impl ExecutionGate {
             } else {
                 ToolOutcome::Rejected
             };
-            actor.complete_action(run, &pending.call_id, pending.step_id.as_ref(), outcome)?;
+            actor.complete_action(run, (&pending.call_id, pending.step_id.as_ref()), outcome)?;
             return Err(error);
         }
         // Recompute from private captured data, never caller-supplied display text.
@@ -842,21 +784,21 @@ impl ExecutionGate {
     /// Remove cancelled/expired requests for this run, releasing its resource leases.
     pub fn dismiss_run(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
     ) -> Result<(), CoreError> {
         self.dismiss_with(actor, run, ToolOutcome::Cancelled)
     }
     pub(crate) fn timeout_run(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
     ) -> Result<(), CoreError> {
         self.dismiss_with(actor, run, ToolOutcome::Timeout)
     }
     fn dismiss_with(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         outcome: ToolOutcome,
     ) -> Result<(), CoreError> {
@@ -871,8 +813,7 @@ impl ExecutionGate {
             if let Some(pending) = self.pending.remove(&id) {
                 actor.complete_action(
                     run,
-                    &pending.call_id,
-                    pending.step_id.as_ref(),
+                    (&pending.call_id, pending.step_id.as_ref()),
                     if Instant::now() >= pending.deadline {
                         ToolOutcome::Timeout
                     } else {
@@ -884,11 +825,7 @@ impl ExecutionGate {
         Ok(())
     }
     /// Sweep only this owner's expired/revoked approvals on the controller timer.
-    pub fn expire(
-        &mut self,
-        actor: &mut ApplicationActor,
-        run: &RunHandle,
-    ) -> Result<(), CoreError> {
+    pub fn expire(&mut self, actor: &mut dyn RunLedger, run: &RunHandle) -> Result<(), CoreError> {
         actor.validate_owner(run)?;
         let now = Instant::now();
         let ids: Vec<_> = self
@@ -906,7 +843,11 @@ impl ExecutionGate {
                 } else {
                     ToolOutcome::Cancelled
                 };
-                actor.complete_action(run, &pending.call_id, pending.step_id.as_ref(), outcome)?;
+                actor.complete_action(
+                    run,
+                    (&pending.call_id, pending.step_id.as_ref()),
+                    outcome,
+                )?;
             }
         }
         Ok(())

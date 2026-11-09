@@ -15,7 +15,7 @@ use crate::{
         types::{EditPath, EditText, EditorEditId},
     },
     error::CoreError,
-    security::file::checkpoint,
+    policy::file::checkpoint,
 };
 use serde::Deserialize;
 use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Instant};

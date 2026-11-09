@@ -865,13 +865,13 @@ impl Editors {
         let cancel = run.cancel_token();
         let worker_cancel = cancel.clone();
         let task = tokio::task::spawn_blocking(move || {
-            crate::security::file::checkpoint(&worker_cancel, deadline)?;
+            crate::policy::file::checkpoint(&worker_cancel, deadline)?;
             let text = std::sync::Arc::new(new_text);
             let mut candidate = (*artifact).clone();
             candidate.revise(file_index, text.clone())?;
             candidate.retained_bytes()?;
             let revised = gate_work.execute(file_index, text)?;
-            crate::security::file::checkpoint(&worker_cancel, deadline)?;
+            crate::policy::file::checkpoint(&worker_cancel, deadline)?;
             Ok((candidate, revised))
         });
         self.operations.insert(
@@ -2300,7 +2300,7 @@ mod tests {
         let task = tokio::task::spawn_blocking(move || {
             let _held = artifact;
             wait.recv().map_err(|_| CoreError::Cancelled)?;
-            crate::security::file::checkpoint(&worker_cancel, deadline)?;
+            crate::policy::file::checkpoint(&worker_cancel, deadline)?;
             Err(CoreError::Cancelled)
         });
         let request_id = RpcId::String("held-revision".into());

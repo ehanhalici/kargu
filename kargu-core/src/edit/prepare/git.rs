@@ -9,12 +9,12 @@ use super::{
 use crate::{
     constants::limits,
     domain::Mode,
-    domain::{CapturePolicy, OutputLimit, ToolCallLimit, ToolName},
+    domain::{ToolCallLimit, ToolName},
     edit::{EditError, patch::OperationKind, types::EditText},
     error::CoreError,
+    policy::{CommandEnvironment, CommandInput, PatchCommand, Workspace},
     process::{CapturedOutput, ProcessResult},
     run::{RunHandle, RunSettings, ToolOutcome},
-    security::{CommandEnvironment, CommandInput, CommandSpec, Workspace},
     workspace::command::Preparation,
 };
 use std::{
@@ -27,7 +27,7 @@ use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) struct GitPreparation {
-    pub command: CommandSpec,
+    pub command: PatchCommand,
     pub settings: RunSettings,
     pub tool: ToolName,
     pub report: PatchPrepared,
@@ -90,7 +90,7 @@ fn capture_files(
     let mut paths = BTreeSet::new();
     let mut budget = RetainedBytes::default();
     for (index, target) in inspection.targets.iter().enumerate() {
-        crate::security::file::checkpoint(cancel, deadline)?;
+        crate::policy::file::checkpoint(cancel, deadline)?;
         let (evidence, disk) = capture::evidence(root, target.path.as_path(), cancel, deadline)?;
         if !paths.insert(evidence.canonical().clone()) {
             return Err(EditError::Conflict.into());
@@ -129,7 +129,7 @@ fn capture_files(
             .filter(|op| op.path() == &target.path)
         {
             for hunk in op.hunks() {
-                crate::security::file::checkpoint(cancel, deadline)?;
+                crate::policy::file::checkpoint(cancel, deadline)?;
                 hunk.check_unique_context(&base)?;
             }
         }
@@ -172,7 +172,7 @@ fn build_command(
     directory: &TempDir,
     deadline: Instant,
     context: &Preparation,
-) -> Result<(CommandSpec, RunSettings), CoreError> {
+) -> Result<(PatchCommand, RunSettings), CoreError> {
     let root = directory.path();
     write_scaffold(root)?;
     write_bases(root, files, context)?;
@@ -186,7 +186,7 @@ fn build_command(
     let arguments = apply_arguments(root);
     // This closed fixed-argv adapter mutates only its owned temporary workspace.
     let workspace = Workspace::try_from(root.to_owned())?;
-    let command = CommandSpec::edit_patch(
+    let command = PatchCommand::new(
         CommandInput {
             program,
             arguments,
@@ -195,10 +195,8 @@ fn build_command(
             environment: CommandEnvironment::try_from(environment)?,
         },
         workspace.clone(),
-    )?
-    .with_capture(CapturePolicy::Complete)
-    .with_output_limit(OutputLimit::try_from(limits::EDIT_PATCH_OUTPUT_BYTES)?)
-    .with_snapshot_target(root.join(".kargu.patch"))?;
+        root.join(".kargu.patch"),
+    );
     // Git receives only private paths. Original source pins belong to the report,
     // which revalidates every file off-mailbox before publishing any proposal.
     let settings = RunSettings::new(
@@ -328,7 +326,7 @@ impl RunningPatch {
             budget.include(&file.proposal.base)?;
         }
         for file in &mut self.prepared.files {
-            crate::security::file::checkpoint(&self.cancel, self.prepared.deadline)?;
+            crate::policy::file::checkpoint(&self.cancel, self.prepared.deadline)?;
             let path = self
                 .prepared
                 .directory
@@ -378,7 +376,7 @@ fn read_private(
     cancel: &CancellationToken,
     deadline: Instant,
 ) -> Result<EditText, CoreError> {
-    use crate::security::file::PinnedFile;
+    use crate::policy::file::PinnedFile;
     use zeroize::Zeroizing;
     let file = PinnedFile::open(path, path.canonicalize()?, cancel, deadline)?;
     if file.size() > limits::EDIT_TEXT_BYTES as u64 {

@@ -1,21 +1,23 @@
-//! Immutable editor intent. Capture hashes and IDs never substitute for permission.
-use super::{
-    EditError,
-    types::{
-        CaptureDigest, EditPath, EditText, EditorRevision, EditorSourceId, ReviewMode, SavePolicy,
-    },
-};
+//! Immutable editor intent and its value types, below the edit services that
+//! prepare and apply it and the approval gate that reviews it.
+//! Capture hashes and IDs never substitute for permission.
+pub mod types;
+
+use crate::error::EditError;
 use crate::{
     constants::limits,
     domain::Mode,
     domain::{ConfigRevision, PolicyRevision},
     error::CoreError,
+    policy::Workspace,
     run::RunHandle,
-    security::Workspace,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, sync::Arc};
+use types::{
+    CaptureDigest, EditPath, EditText, EditorRevision, EditorSourceId, ReviewMode, SavePolicy,
+};
 
 /// A closed file intent with decoded text and a captured-evidence commitment.
 /// No Debug/Serialize implementation can implicitly disclose source bodies.
@@ -215,7 +217,7 @@ impl EditorAction {
     /// Publish a revised version of the action with an incremented revision.
     pub(crate) fn revise(
         &self,
-        file_index: super::prepare::FileIndex,
+        file_index: types::FileIndex,
         new_text: Arc<EditText>,
     ) -> Result<EditorAction, CoreError> {
         let mut input = self.input.clone();

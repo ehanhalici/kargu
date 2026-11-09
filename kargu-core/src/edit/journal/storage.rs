@@ -6,7 +6,7 @@ use super::{
 use crate::{
     constants::limits,
     error::CoreError,
-    security::file::{Revision, checkpoint},
+    policy::file::{Revision, checkpoint},
 };
 use nix::{
     fcntl::{AtFlags, Flock, FlockArg, OFlag, open, openat},

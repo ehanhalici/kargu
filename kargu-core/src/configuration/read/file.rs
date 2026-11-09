@@ -3,7 +3,7 @@
 use crate::{
     configuration::MAX_SOURCE_BYTES,
     error::CoreError,
-    security::file::{PinnedFile, checkpoint},
+    policy::file::{PinnedFile, checkpoint},
 };
 use std::{
     path::{Path, PathBuf},

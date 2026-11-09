@@ -3,13 +3,13 @@
 mod domain;
 use crate::{
     constants::{limits, protocol::methods},
+    domain::ApiProviderId,
     domain::rpc::Fault,
     domain::{ByteLimit, SessionId},
     models::{
         metadata::EffortSpecs,
         store::{MetadataRevision, ModelStore, ModelUpdate},
     },
-    providers::ApiProviderId,
 };
 use domain::{ServiceError, UploadId, UploadOffset};
 use serde::{Deserialize, de::DeserializeOwned};

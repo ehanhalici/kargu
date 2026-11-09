@@ -93,9 +93,12 @@ impl NativeEdit {
                 session_id: call.run().scope().session_id().clone(),
             };
             if let Err(error) = host.actor_mut(&scope).and_then(|actor| {
-                actor
-                    .edits
-                    .register_parent(origin.clone(), &call, policy, selection)
+                actor.edits.register_parent(
+                    origin.clone(),
+                    call.native_edit_call()?,
+                    policy,
+                    selection,
+                )
             }) {
                 ctx.pending.cancel(&reverse, &host.request_scope()?);
                 return Err(error);

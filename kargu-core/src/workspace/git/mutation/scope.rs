@@ -13,7 +13,7 @@ pub(super) fn unborn_reference(
     directory: &Path,
     context: &Preparation,
 ) -> Result<String, CoreError> {
-    use crate::security::file::PinnedFile;
+    use crate::policy::file::PinnedFile;
     let path = directory.join("HEAD");
     let file = PinnedFile::open(
         &path,

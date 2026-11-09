@@ -1,4 +1,4 @@
-//! Explicit tool policy: the pinned workspace, the application-owned tool
+//! Explicit tool policy: the pinned workspace and files, the command input, the application-owned tool
 //! registry with its mode admission, and the user's approval decision.
 //!
 //! Pure policy values every module may consult; command capture and the
@@ -6,16 +6,22 @@
 
 use crate::{constants::limits, domain::*, error::CoreError};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
+    ffi::OsString,
     fs::File,
+    os::unix::ffi::OsStrExt,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 mod catalog;
+pub(crate) mod file;
+mod read_target;
 pub mod schema;
 pub use catalog::{ToolModes, ToolPresentation, ToolRoute};
+pub(crate) use read_target::ReadTarget;
 
 /// Pinned directory identity used by settings and commands.
 #[derive(Clone)]
@@ -287,4 +293,81 @@ pub enum UserDecision {
     Approved,
     /// User or missing UI denied the action.
     Rejected,
+}
+
+/// Explicit immutable subprocess environment; secrets are never implicitly inherited.
+#[derive(Clone, Default)]
+pub struct CommandEnvironment(BTreeMap<OsString, OsString>);
+impl TryFrom<BTreeMap<OsString, OsString>> for CommandEnvironment {
+    type Error = CoreError;
+    fn try_from(values: BTreeMap<OsString, OsString>) -> Result<Self, CoreError> {
+        if values.len() > limits::COMMAND_ENVIRONMENT_ENTRIES {
+            return Err(CoreError::Limit);
+        }
+        let mut bytes = 0_usize;
+        for (key, value) in &values {
+            if key.is_empty()
+                || key
+                    .as_os_str()
+                    .as_bytes()
+                    .iter()
+                    .any(|b| *b == 0 || *b == b'=')
+                || value.as_os_str().as_bytes().contains(&0)
+            {
+                return Err(CoreError::InvalidValue {
+                    field: "CommandEnvironment",
+                });
+            }
+            bytes = bytes
+                .checked_add(key.len())
+                .and_then(|n| n.checked_add(value.len()))
+                .ok_or(CoreError::ArithmeticOverflow)?;
+        }
+        if bytes > limits::COMMAND_BYTES {
+            return Err(CoreError::Limit);
+        }
+        Ok(Self(values))
+    }
+}
+impl CommandEnvironment {
+    /// Iterate only for trusted execution/presentation; no Debug/Serialize is derived.
+    pub fn entries(&self) -> impl Iterator<Item = (&OsString, &OsString)> {
+        self.0.iter()
+    }
+}
+
+/// Boundary DTO: parsed once before the immutable command is formed.
+pub struct CommandInput {
+    /// Explicit executable path; PATH/shell interpolation is not performed.
+    pub program: PathBuf,
+    /// Exact argv values.
+    pub arguments: Vec<OsString>,
+    /// Explicit working directory.
+    pub working_directory: PathBuf,
+    /// Per-command wall-clock limit, also capped by the run deadline.
+    pub timeout: Option<Duration>,
+    /// Exact approved environment. Empty means env_clear, not implicit inheritance.
+    pub environment: CommandEnvironment,
+}
+
+/// The fixed `git apply` a patch preparation needs run in its owned workspace.
+/// The command gate builds, approves and runs it; this grants nothing.
+pub(crate) struct PatchCommand {
+    input: CommandInput,
+    workspace: Workspace,
+    snapshot: PathBuf,
+}
+impl PatchCommand {
+    /// The patch `input` runs in `workspace`, reading the patch file `snapshot`.
+    pub(crate) fn new(input: CommandInput, workspace: Workspace, snapshot: PathBuf) -> Self {
+        Self {
+            input,
+            workspace,
+            snapshot,
+        }
+    }
+    /// The argv input, its owned workspace and the patch file it reads.
+    pub(crate) fn into_parts(self) -> (CommandInput, Workspace, PathBuf) {
+        (self.input, self.workspace, self.snapshot)
+    }
 }

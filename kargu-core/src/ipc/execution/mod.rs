@@ -455,7 +455,7 @@ impl Commands {
             scope,
             RunPurpose::AgentTurn,
             parent,
-            move |context| input.prepare(context).map(Prepared::from),
+            move |context| input.prepare(context).and_then(Prepared::try_from),
         )?;
         self.operations
             .get_mut(&id)

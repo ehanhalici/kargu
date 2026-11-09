@@ -83,14 +83,15 @@ impl From<crate::workspace::git::GitPrepared> for Prepared {
         }
     }
 }
-impl From<crate::edit::prepare::GitPreparation> for Prepared {
-    fn from(p: crate::edit::prepare::GitPreparation) -> Self {
-        Self {
+impl TryFrom<crate::edit::prepare::GitPreparation> for Prepared {
+    type Error = CoreError;
+    fn try_from(p: crate::edit::prepare::GitPreparation) -> Result<Self, CoreError> {
+        Ok(Self {
             tool: p.tool,
-            command: p.command,
+            command: CommandSpec::isolated_patch(p.command)?,
             settings: p.settings,
             reply: Reply::EditPatch(Box::new(p.report)),
-        }
+        })
     }
 }
 impl Prepared {

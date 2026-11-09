@@ -14,8 +14,8 @@ use crate::{
         types::{CaptureDigest, EditorEditId, EditorRevision},
     },
     error::CoreError,
+    policy::file::checkpoint,
     run::RunScope,
-    security::file::checkpoint,
 };
 use metadata::StoredAction;
 use serde::{Deserialize, Serialize};

@@ -113,7 +113,7 @@ impl EditPreparations {
     pub(crate) fn register_parent(
         &mut self,
         source: OriginId,
-        call: &crate::application::agent::AgentTool,
+        call: super::ParentCall,
         policy: super::ParentPolicy,
         selection: Option<crate::sensors::symbols::SymbolEditSelection>,
     ) -> Result<(), CoreError> {

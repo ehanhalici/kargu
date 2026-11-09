@@ -4,7 +4,7 @@
 pub(crate) mod output;
 mod payload;
 mod response;
-pub use payload::PayloadStream;
+pub use crate::api::PayloadStream;
 pub(crate) use payload::{CanonicalPayloadSpec, build_canonical_payload};
 pub use response::AssistantTurn;
 
@@ -476,6 +476,17 @@ impl AgentTool {
     /// Trusted executor boundary; absent for a tool with no native definition.
     pub fn route(&self) -> Option<ToolRoute> {
         self.route
+    }
+    /// This call as a native edit's parent, once admitted for native edit dispatch.
+    pub(crate) fn native_edit_call(&self) -> Result<crate::edit::prepare::ParentCall, CoreError> {
+        if self.admission != ToolAdmission::Ready || self.route != Some(ToolRoute::NativeEdit) {
+            return Err(CoreError::Rejected);
+        }
+        Ok(crate::edit::prepare::ParentCall::new(
+            self.run.clone(),
+            self.id.clone(),
+            (self.name.clone(), self.arguments.clone()),
+        ))
     }
     /// Dispatch decision, independent of concrete action approval.
     pub fn admission(&self) -> ToolAdmission {

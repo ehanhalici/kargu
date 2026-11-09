@@ -14,7 +14,7 @@ use crate::{
     },
     error::CoreError,
     ipc::protocol::{self, RpcId},
-    security::file::checkpoint,
+    policy::file::checkpoint,
     security::{AuthorizedEditorEdit, IssuedEditorEdit},
 };
 use serde_json::{Value, json};

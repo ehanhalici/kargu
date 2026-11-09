@@ -9,6 +9,7 @@
 use crate::constants::limits;
 
 pub mod error;
+pub mod evidence;
 pub mod rpc;
 use error::CoreError;
 use serde::{Deserialize, Serialize};
@@ -396,6 +397,49 @@ pub enum Mode {
     Debug,
     /// General code and shell execution mode.
     Agent,
+}
+
+/// Open model namespace; never confused with a provider or external thread ID.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+pub struct ModelId(String);
+impl TryFrom<String> for ModelId {
+    type Error = CoreError;
+    fn try_from(value: String) -> Result<Self, CoreError> {
+        if value.trim().is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
+            return Err(CoreError::InvalidValue { field: "ModelId" });
+        }
+        Ok(Self(value))
+    }
+}
+impl ModelId {
+    /// Borrow its opaque, case-sensitive wire identity without provider folding.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Open provider namespace, distinct from model IDs and application backends.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+pub struct ApiProviderId(String);
+impl TryFrom<String> for ApiProviderId {
+    type Error = CoreError;
+    fn try_from(value: String) -> Result<Self, CoreError> {
+        let value = value.trim().to_lowercase();
+        if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
+            return Err(CoreError::InvalidValue {
+                field: "ApiProviderId",
+            });
+        }
+        Ok(Self(value))
+    }
+}
+impl ApiProviderId {
+    /// Canonical namespace used only at storage/wire boundaries.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Validated canonical tool or alias name; it is not an arbitrary RPC method.

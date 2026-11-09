@@ -5,11 +5,10 @@
 //! abrupt host death still require a separate OS containment capability.
 
 use crate::{
-    application::ApplicationActor,
     constants::{limits, timeouts},
     domain::{ByteLimit, ByteOffset, CaptureStop, JobId, ProcessId, ToolCallId, ToolStepId},
     error::CoreError,
-    run::{RunHandle, RunLease, ToolOutcome},
+    run::{RunHandle, RunLease, RunLedger, ToolOutcome},
     security::AuthorizedCommand,
 };
 use futures_util::FutureExt;
@@ -175,14 +174,13 @@ impl JobCompletion {
         &self.result
     }
     /// Deliver exactly once to the owning actor, outside any I/O callback.
-    pub fn deliver(self, actor: &mut ApplicationActor) -> Result<ProcessResult, CoreError> {
+    pub fn deliver(self, actor: &mut dyn RunLedger) -> Result<ProcessResult, CoreError> {
         if !self.result.cleanup_complete {
             actor.quarantine(&self.run)?;
         }
         actor.complete_action(
             &self.run,
-            &self.call_id,
-            self.step_id.as_ref(),
+            (&self.call_id, self.step_id.as_ref()),
             self.result.outcome,
         )?;
         Ok(self.result)
@@ -233,7 +231,7 @@ impl ProcessSupervisor {
     /// Spawn only an approved command, revalidating owner, deadline, cwd and executable.
     pub fn start(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         authorized: AuthorizedCommand,
     ) -> Result<JobId, CoreError> {
         let (child, slots) = match self.spawn_approved(actor, &authorized) {
@@ -248,8 +246,7 @@ impl ProcessSupervisor {
                     };
                     let _ = actor.complete_action(
                         authorized.run(),
-                        authorized.call_id(),
-                        authorized.step_id(),
+                        (authorized.call_id(), authorized.step_id()),
                         outcome,
                     );
                 }
@@ -299,7 +296,7 @@ impl ProcessSupervisor {
 
     fn spawn_approved(
         &self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         authorized: &AuthorizedCommand,
     ) -> Result<(Child, Slots), CoreError> {
         tokio::runtime::Handle::try_current().map_err(|_| CoreError::Unavailable)?;
@@ -317,7 +314,10 @@ impl ProcessSupervisor {
             .process_slots()
             .try_acquire_owned()
             .map_err(|_| CoreError::Limit)?;
-        actor.mark_action_started(authorized.run(), authorized.call_id(), authorized.step_id())?;
+        actor.mark_action_started(
+            authorized.run(),
+            (authorized.call_id(), authorized.step_id()),
+        )?;
         Ok((
             stdio::spawn(authorized.command())?,
             Slots {

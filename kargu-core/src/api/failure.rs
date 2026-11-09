@@ -86,7 +86,7 @@ impl ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::budget::Refusal;
+    use crate::error::Refusal;
     use serde_json::json;
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 

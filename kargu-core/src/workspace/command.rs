@@ -45,7 +45,7 @@ impl Preparation {
         self.deadline
     }
     pub(crate) fn check(&self) -> Result<(), CoreError> {
-        crate::security::file::checkpoint(&self.cancel, self.deadline)
+        crate::policy::file::checkpoint(&self.cancel, self.deadline)
     }
 }
 

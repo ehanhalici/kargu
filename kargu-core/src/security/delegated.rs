@@ -6,11 +6,10 @@ use super::{
     RegistryRevision, ToolDescriptor, ToolRegistry, ToolRoute, UserDecision,
 };
 use crate::{
-    application::ApplicationActor,
     constants::{limits, timeouts},
     domain::{ApprovalId, MessageId, ToolCallId, ToolName, ToolSafetyLevel, ToolStepId},
     error::CoreError,
-    run::{RunHandle, RunLease, RunScope, ToolOutcome},
+    run::{RunHandle, RunLease, RunLedger, RunScope, ToolOutcome},
     sensors::{
         diagnostics::DocumentStamp,
         symbols::LanguageSource,
@@ -96,7 +95,7 @@ impl PreparedEditorTool {
             } else {
                 path
             };
-            let path = crate::edit::types::EditPath::try_from(
+            let path = crate::intent::types::EditPath::try_from(
                 relative.to_str().ok_or(CoreError::Rejected)?.to_owned(),
             )?;
             if path != document.path {
@@ -266,7 +265,7 @@ impl AuthorizedEditorTool {
         &self.action
     }
     /// Validate immediately before queuing the editor invocation; never reread UI selection.
-    pub fn revalidate(&self, actor: &ApplicationActor) -> Result<(), CoreError> {
+    pub fn revalidate(&self, actor: &dyn RunLedger) -> Result<(), CoreError> {
         actor.validate(&self.run)?;
         self.run.settings().workspace().revalidate()?;
         if Instant::now() >= self.deadline {
@@ -278,9 +277,9 @@ impl AuthorizedEditorTool {
         Ok(())
     }
     /// Enter the actual delegated request. Retain the consuming result through callback cleanup.
-    pub fn issue(self, actor: &mut ApplicationActor) -> Result<IssuedEditorTool, CoreError> {
+    pub fn issue(self, actor: &mut dyn RunLedger) -> Result<IssuedEditorTool, CoreError> {
         self.revalidate(actor)?;
-        actor.mark_action_started(&self.run, &self.action.call_id, self.step_id.as_ref())?;
+        actor.mark_action_started(&self.run, (&self.action.call_id, self.step_id.as_ref()))?;
         Ok(IssuedEditorTool {
             run: self.run,
             action: self.action,
@@ -310,13 +309,12 @@ impl IssuedEditorTool {
     /// Record terminal facts for a standalone call after actual adapter cleanup.
     pub fn complete(
         self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         outcome: ToolOutcome,
     ) -> Result<(), CoreError> {
         actor.complete_action(
             &self.run,
-            &self.action.call_id,
-            self.step_id.as_ref(),
+            (&self.action.call_id, self.step_id.as_ref()),
             outcome,
         )
     }
@@ -324,14 +322,14 @@ impl IssuedEditorTool {
     /// A retired owner may report facts but cannot execute another editor action.
     pub fn complete_history(
         self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         outcome: ToolOutcome,
         text: &str,
     ) -> Result<MessageId, CoreError> {
         if self.step_id.is_some() {
             return Err(CoreError::Rejected);
         }
-        actor.complete_history_call(&self.run, &self.action.call_id, outcome, text)
+        actor.complete_history_call(&self.run, &self.action.call_id, (outcome, text))
     }
 }
 
@@ -339,7 +337,7 @@ impl ExecutionGate {
     /// Release one unissued delegated review without cancelling sibling actions.
     pub fn abandon_editor_tool(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         request: &EditorToolApprovalRequest,
         outcome: ToolOutcome,
@@ -353,13 +351,13 @@ impl ExecutionGate {
             .pending
             .remove(request.id())
             .ok_or(CoreError::ApprovalUnavailable)?;
-        actor.complete_action(run, &pending.call_id, pending.step_id.as_ref(), outcome)
+        actor.complete_action(run, (&pending.call_id, pending.step_id.as_ref()), outcome)
     }
 
     /// Admit one prepared editor call through the command/edit shared approval map.
     pub fn prepare_editor_tool(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         action: PreparedEditorTool,
         presenter: EditorPresenter,
@@ -368,7 +366,7 @@ impl ExecutionGate {
     }
     pub(crate) fn prepare_editor_tool_action(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         action: PreparedEditorTool,
         presenter: EditorPresenter,
@@ -392,13 +390,16 @@ impl ExecutionGate {
                 .ok_or(CoreError::ArithmeticOverflow)?,
         );
         if let Some(step) = &step_id {
-            actor.claim_step(run, &action.call_id, step, action.name(), action.safety())?;
+            actor.claim_step(
+                run,
+                (&action.call_id, step),
+                (action.name(), action.safety()),
+            )?;
         } else {
             actor.reserve_call(
                 run,
                 action.call_id.clone(),
-                action.name().clone(),
-                action.safety(),
+                (action.name().clone(), action.safety()),
             )?;
         }
         let id = ApprovalId::new();
@@ -452,7 +453,7 @@ impl ExecutionGate {
     /// Consume an exact consent once. Reject/timeout settle only this call, not a sibling run.
     pub fn decide_editor_tool(
         &mut self,
-        actor: &mut ApplicationActor,
+        actor: &mut dyn RunLedger,
         run: &RunHandle,
         request: &EditorToolApprovalRequest,
         decision: UserDecision,
@@ -476,7 +477,7 @@ impl ExecutionGate {
             None
         };
         if let Some((error, outcome)) = refusal {
-            actor.complete_action(run, &pending.call_id, pending.step_id.as_ref(), outcome)?;
+            actor.complete_action(run, (&pending.call_id, pending.step_id.as_ref()), outcome)?;
             return Err(error);
         }
         Ok(AuthorizedEditorTool {
