@@ -9,7 +9,7 @@
 ;; Project-scoped persistent chat sessions across Emacs and Kargu restarts.
 ;; Saves conversation history, metadata, token usage, and transcripts as JSON.
 ;; Automatically restores the latest chat session when reopening a project.
-;; Public: `kargu-session-save', `kargu-session-load', `kargu-session-list',
+;; Public: `kargu-session-save', `kargu-session-load', `kargu-session-list-async',
 ;; `kargu-session-delete', `kargu-chat-sessions', `kargu-session-auto-save-all'.
 
 ;;; Code:
@@ -35,12 +35,12 @@
   "Active asynchronous session listing task owned by this buffer.")
 
 (declare-function kargu-state-mode "kargu/state/selectors" ())
-(declare-function kargu-set-mode "kargu/core" (mode))
+(declare-function kargu-set-mode "kargu/core" (mode &optional callback))
 (declare-function kargu--provider-name "kargu/config/key" ())
 (declare-function kargu--model "kargu/config/key" ())
 (declare-function kargu-chat--ensure-idle-prompt "kargu/chat/prompt" ())
 (declare-function kargu-chat-list-buffers "kargu/chat" ())
-(declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-loop-running-p "kargu/loop" (&optional buffer))
 
 (defcustom kargu-session-auto-save t
   "When non-nil, chat sessions are automatically saved after each turn."
@@ -299,10 +299,6 @@ request names the directory it writes."
      "user_emacs_directory" (expand-file-name user-emacs-directory)
      "sessions_directory" (or (and central (kargu-session--customized-directory))
                               :json-null))))
-
-(defun kargu-session-list (&optional root)
-  "Return list of saved session metadata alists for project ROOT, newest first."
-  (kargu-session-storage-list-metadata (kargu-session-project-root root)))
 
 (defun kargu-session--list-owner-valid-p (origin session root generation)
   "Return non-nil while ORIGIN still owns SESSION, ROOT and GENERATION."

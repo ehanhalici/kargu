@@ -16,14 +16,14 @@
 
 (defvar kargu-lsp--publication nil)
 (defvar kargu-lsp--backend-reports nil)
-(declare-function kargu-lsp-coordinate-range "kargu/tools/lsp/coordinates" (beg end &optional buffer))
-(declare-function kargu-lsp--diagnostic-backends "kargu/tools/lsp/diagnostics" ())
+(declare-function kargu-lsp-coordinate-range "kargu/tools/lsp/coordinates" (start end))
+(declare-function kargu-lsp--diagnostic-backends "kargu/tools/lsp/freshness" ())
 (declare-function kargu-lsp--publication-process "kargu/tools/lsp/freshness" (pub))
 (declare-function kargu-lsp--publication-server "kargu/tools/lsp/freshness" (pub))
 (declare-function kargu-lsp--publication-version "kargu/tools/lsp/freshness" (pub))
 (declare-function kargu-lsp--publication-tick "kargu/tools/lsp/freshness" (pub))
-(declare-function kargu-lsp--backend-report-tick "kargu/tools/lsp/diagnostics" (report))
-(declare-function kargu-lsp--backend-report-reported "kargu/tools/lsp/diagnostics" (report))
+(declare-function kargu-lsp--backend-report-tick "kargu/tools/lsp/freshness" (report))
+(declare-function kargu-lsp--backend-report-reported "kargu/tools/lsp/freshness" (report))
 
 (defvar kargu-bridge-diagnostics--identities (make-hash-table :test #'eq :weakness 'key)
   "Opaque identities for actual editor objects, never printed closures.")

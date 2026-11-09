@@ -540,7 +540,7 @@ Storage is native; tests observe it only through the public flows."
         (progn
           (make-directory dir t)
           (dolist (sid '("session-a" "session-c" "session-b"))
-            (kargu-session-storage-write
+            (kargu-test-session-write
              sid proj-root
              `(("schema_version" . 2)
                ("effort" . (("kind" . "inherit")))
@@ -557,7 +557,7 @@ Storage is native; tests observe it only through the public flows."
                               (("role" . "assistant") ("content" . "world"))]))))
           ;; Write corrupted and mismatched-id files that must be skipped
           (write-region "{corrupt" nil (expand-file-name "broken.json" dir))
-          (kargu-session-storage-write
+          (kargu-test-session-write
            "mismatch" proj-root '(("id" . "other-id") ("updated_at" . "2026-10-21 13:00:00")))
           (let ((sessions (kargu-test-session--list proj-root)))
             (should (equal (mapcar (lambda (s) (kargu-aget s "id")) sessions)
@@ -594,7 +594,7 @@ Storage is native; tests observe it only through the public flows."
         (with-current-buffer buf
           (kargu-chat-mode)
           (setq-local kargu-chat--project-root proj-root)
-          (kargu-session-storage-write
+          (kargu-test-session-write
            "s-1" proj-root
            `(("schema_version" . 2) ("effort" . (("kind" . "inherit"))) ("id" . "s-1")
              ("title" . "Async 1") ("updated_at" . "2026-10-21 10:00:00")

@@ -38,16 +38,15 @@ Startup errors are reported without switching to the Elisp backend."
   "Return the explicit native backend choice, including when core is missing."
   kargu-loop-native-agent-enabled)
 
-
 (declare-function kargu--loop-finish "kargu/loop" (run status &optional text))
 (declare-function kargu-loop--live-p "kargu/loop" (run))
 (declare-function kargu-loop--set-state "kargu/loop" (run state))
-(declare-function kargu-state-mode "kargu/state/mode" ())
-(declare-function kargu-model-supports-tools-p "kargu/api/catalog" ())
+(declare-function kargu-state-mode "kargu/state/selectors" ())
+(declare-function kargu-model-supports-tools-p "kargu/api/catalog" (&optional model-id provider))
 (declare-function kargu--provider-name "kargu/config/key" ())
 (declare-function kargu--model "kargu/config/key" ())
-(declare-function kargu--api-base "kargu/config/key" ())
-(declare-function kargu--api-key "kargu/config/key" ())
+(declare-function kargu--api-base "kargu/config/key" (&optional provider))
+
 (defun kargu-loop-native--editor-tools ()
   "List of editor tools allowlisted for native agent reverse dispatch.
 Exactly the tools `kargu-bridge-sensor-call-tool' and the native edit

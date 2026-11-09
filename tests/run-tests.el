@@ -60,7 +60,6 @@
 (require 'tests/test-tool-execution-contract)
 (require 'tests/test-transport-contract)
 (require 'tests/test-job-owner)
-(require 'tests/test-process-session)
 (require 'tests/test-process-stress)
 (require 'tests/test-resume-integration)
 (require 'tests/test-tool-registry)

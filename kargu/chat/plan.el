@@ -16,8 +16,8 @@
 (require 'kargu/chat/transcript)
 (require 'kargu/state/selectors)
 
-(declare-function kargu-chat-prompt "kargu/chat" (&optional prompt &key on-ready))
-(declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-chat-prompt "kargu/chat" (&optional prompt &rest options))
+(declare-function kargu-loop-running-p "kargu/loop" (&optional buffer))
 (declare-function kargu-chat--input-text "kargu/chat/prompt" ())
 
 (defun kargu-chat-plan--current-p (record)

@@ -28,7 +28,7 @@
 (declare-function kargu-execution-request-started "kargu/application/execution" ())
 
 (declare-function kargu-busy-p "kargu/api/http" ())
-(declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-loop-running-p "kargu/loop" (&optional buffer))
 (declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
 
 (defalias 'kargu--api-cancel-busy #'kargu-api-clear-busy)

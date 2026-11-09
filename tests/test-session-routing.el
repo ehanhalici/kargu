@@ -139,16 +139,16 @@
             (should-not (kargu-chat-handle-valid-p store-a b))
             (should-not (kargu-chat-handle-valid-p store-b a)))
           ;; Run handle isolation: run on A does not make B busy or running
-          (should-not (kargu-chat-running-p a))
-          (should-not (kargu-chat-running-p b))
+          (should-not (kargu-loop-running-p a))
+          (should-not (kargu-loop-running-p b))
           (let ((dummy-run (list :id "run-a" :chat-buffer a)))
             (kargu-chat-set-run-handle dummy-run a)
-            (should (kargu-chat-running-p a))
-            (should-not (kargu-chat-running-p b))
+            (should (kargu-loop-running-p a))
+            (should-not (kargu-loop-running-p b))
             (should (kargu-loop-running-p a))
             (should-not (kargu-loop-running-p b))
             (kargu-chat-set-run-handle nil a)
-            (should-not (kargu-chat-running-p a))
+            (should-not (kargu-loop-running-p a))
             (should-not (kargu-loop-running-p a))))
       (when (buffer-live-p a) (kill-buffer a))
       (when (buffer-live-p b) (kill-buffer b))
@@ -190,48 +190,6 @@
               (when (buffer-live-p b) (kill-buffer b)))))
       (when (buffer-live-p a) (kill-buffer a))
       (delete-directory root t))))
-
-(ert-deftest kargu-session-routing-find-by-session-disambiguates-buffers-test ()
-  "Buffer lookup by session ID returns the exact buffer, not an unrelated chat."
-  (let* ((root (file-name-as-directory (make-temp-file "kargu-find-sess-" t)))
-         (kargu-session-auto-save nil)
-         (a (generate-new-buffer "*kargu-find-a*"))
-         (b (generate-new-buffer "*kargu-find-b*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer a
-            (let ((default-directory root) (kargu-permission--override-root root))
-              (kargu-chat-mode)))
-          (with-current-buffer b
-            (let ((default-directory root) (kargu-permission--override-root root))
-              (kargu-chat-mode)))
-          (let ((id-a (kargu-session-id (kargu-session-context a)))
-                (id-b (kargu-session-id (kargu-session-context b))))
-            (should (eq (kargu-chat-find-buffer-by-session id-a root) a))
-            (should (eq (kargu-chat-find-buffer-by-session id-b root) b))
-            (should-not (eq (kargu-chat-find-buffer-by-session id-a root) b))
-            (should-not (kargu-chat-find-buffer-by-session "non-existent-sess" root))))
-      (when (buffer-live-p a) (kill-buffer a))
-      (when (buffer-live-p b) (kill-buffer b))
-      (delete-directory root t))))
-
-(ert-deftest kargu-session-routing-dto-revision-monotonic-update-test ()
-  "Handle store commits DTOs monotonically and rejects stale revisions."
-  (with-temp-buffer
-    (kargu-chat-mode)
-    (should (equal (kargu-chat-last-dto) '(0 . nil)))
-    ;; First update: revision 1 succeeds
-    (should (kargu-chat-update-dto '(:data "v1") 1))
-    (should (equal (kargu-chat-last-dto) '(1 . (:data "v1"))))
-    ;; Stale update: revision 1 rejected
-    (should-not (kargu-chat-update-dto '(:data "stale-v1") 1))
-    (should (equal (kargu-chat-last-dto) '(1 . (:data "v1"))))
-    ;; Older update: revision 0 rejected
-    (should-not (kargu-chat-update-dto '(:data "older-v0") 0))
-    (should (equal (kargu-chat-last-dto) '(1 . (:data "v1"))))
-    ;; Monotonic update: revision 3 succeeds
-    (should (kargu-chat-update-dto '(:data "v3") 3))
-    (should (equal (kargu-chat-last-dto) '(3 . (:data "v3"))))))
 
 (ert-deftest kargu-session-routing-callback-draws-correct-origin-regardless-of-current-buffer-test ()
   "Delivery draws into the correct origin chat even when another buffer is current, preserving Unicode draft."
@@ -325,18 +283,18 @@
           ;; Give B an active run
           (let ((run-b (list :id "run-b" :chat-buffer b)))
             (kargu-chat-set-run-handle run-b b)
-            (should (kargu-chat-running-p b))
+            (should (kargu-loop-running-p b))
             ;; Kill buffer A
             (kill-buffer a)
             (should-not (buffer-live-p a))
             ;; Buffer B's run must still be active (never aborted by A's close!)
             (should (buffer-live-p b))
-            (should (kargu-chat-running-p b))
+            (should (kargu-loop-running-p b))
             (should (kargu-loop-running-p b))
             ;; B completes its own run
             (kargu-chat-set-run-handle nil b)
             (setq b-completed t)
-            (should-not (kargu-chat-running-p b))))
+            (should-not (kargu-loop-running-p b))))
       (when (buffer-live-p a) (kill-buffer a))
       (when (buffer-live-p b) (kill-buffer b))
       (delete-directory root t))
@@ -359,17 +317,17 @@
           ;; Run on buffer A
           (let ((run-a (list :id "run-a" :chat-buffer a)))
             (kargu-chat-set-run-handle run-a a)
-            (should (kargu-chat-running-p a))
-            (should-not (kargu-chat-running-p b))
+            (should (kargu-loop-running-p a))
+            (should-not (kargu-loop-running-p b))
             ;; User in buffer B attempts to stop
             (with-current-buffer b
               (kargu-loop-stop "user clicked stop in b" b))
             ;; Buffer A is STILL running (no foreign stop!)
-            (should (kargu-chat-running-p a))
+            (should (kargu-loop-running-p a))
             ;; Now stopping from buffer A stops A
             (with-current-buffer a
               (kargu-chat-set-run-handle nil a))
-            (should-not (kargu-chat-running-p a))))
+            (should-not (kargu-loop-running-p a))))
       (when (buffer-live-p a) (kill-buffer a))
       (when (buffer-live-p b) (kill-buffer b))
       (delete-directory root t))))

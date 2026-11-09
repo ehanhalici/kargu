@@ -71,18 +71,6 @@ Real connection preparation supplies its captured native ticket's receipt."
     `(("tools" . ,tools)
       ("tool_choice" . "auto"))))
 
-(defun kargu--build-payload (&rest extra)
-  "Assemble the chat-completions request payload.
-EXTRA is a list of additional (KEY . VALUE) conses that replace or add
-entries (e.g. (\"stream\" . t)).  The \"tools\" array is only included when
-at least one tool is VISIBLE after `kargu--tools-visible-p' filtering."
-  (let ((items (if (and (= (length extra) 1)
-                        (listp (car extra))
-                        (consp (caar extra)))
-                   (car extra)
-                 extra)))
-    (kargu-api-build-payload (kargu-history-context) items)))
-
 (defun kargu-api-build-payload (history &optional extra)
   "Build a payload snapshot from HISTORY and optional EXTRA entries."
   (let* ((tools (kargu--build-tools-vector))

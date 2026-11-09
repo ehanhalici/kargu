@@ -25,7 +25,7 @@
     :compacting :pause :done :limit :stopped :error :closing :resetting)
   "List of valid lifecycle statuses for the Kargu state machine.")
 
-(declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-loop-running-p "kargu/loop" (&optional buffer))
 (declare-function kargu-busy-p "kargu/api/http" ())
 (declare-function kargu-state--set "kargu/state/store" (key value))
 
@@ -71,11 +71,6 @@ Each function receives the mode and may signal a refusal.")
                          "MODEL must be a non-empty string: %S" model)
   (kargu-selection-update :model model)
   model)
-
-(defun kargu-state-clear-model ()
-  "Clear the active model."
-  (kargu-selection-update :model nil)
-  nil)
 
 (defun kargu-state-set-reasoning-effort (effort)
   "Set the active reasoning EFFORT to a symbol from the model API, or nil."

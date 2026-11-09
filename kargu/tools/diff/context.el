@@ -28,15 +28,15 @@
 (declare-function kargu-diff-native-execute "kargu/tools/diff/native" (spec callback &optional service))
 (declare-function kargu-bridge-edit-history-close-service "kargu/bridge/edit/history"
                   (application service-id &optional callback lease))
-(declare-function kargu-application-context "kargu/core/application" ())
+(declare-function kargu-application-context "kargu/application/coordinator" (&optional app))
 (declare-function kargu-diff-apply-patch "kargu/tools/diff"
                   (patch-text &optional callback))
 (declare-function kargu-diff--describe "kargu/tools/diff/stage" (outcome))
-(declare-function kargu-permission-resolve "kargu/permission" (path &optional kind root))
+(declare-function kargu-permission-resolve "kargu/permission/guards" (path &optional label root))
 (declare-function kargu-session-context "kargu/core/session" ())
-(declare-function kargu-session-id "kargu/core/session" (session))
+(declare-function kargu-session-id "kargu/core/session" (&optional session))
 (declare-function kargu-session-id-value "kargu/core/session" (session))
-(declare-function kargu-process-cancel "kargu/tools/process" (proc))
+(declare-function kargu-process-cancel "kargu/tools/process" (process &optional grace-seconds))
 (declare-function kargu-diff--ediff-quit "kargu/tools/diff/review" ())
 (declare-function ediff-really-quit "ediff-util" (&optional flag))
 
@@ -249,12 +249,6 @@ Repeated calls share an in-flight close, and a failed close can be retried."
   "Register TIMER with edit SERVICE."
   (when (and service (kargu-edit-service-p service) timer)
     (cl-pushnew timer (kargu-edit-service-timers service))))
-
-(defun kargu-edit-service-unregister-timer (service timer)
-  "Unregister TIMER from edit SERVICE."
-  (when (and service (kargu-edit-service-p service) timer)
-    (setf (kargu-edit-service-timers service)
-          (delq timer (kargu-edit-service-timers service)))))
 
 (defun kargu-edit-service-register-buffer (service buf)
   "Register buffer BUF with edit SERVICE."

@@ -22,7 +22,7 @@
 (declare-function kargu-lsp-snapshot-source "kargu/tools/lsp/snapshot" (&optional flush))
 (declare-function kargu-bridge-sensor-symbols-call "kargu/bridge/sensor/symbols" (connection id params))
 (declare-function kargu-bridge-sensor-diagnostics-call "kargu/bridge/sensor/diagnostics" (connection id params))
-(declare-function kargu-lsp-find-definition "kargu/tools/lsp/symbols" (name callback))
+(declare-function kargu-lsp-find-definition "kargu/tools/lsp/symbols" (symbol-name &optional callback))
 (declare-function kargu-lsp-build-skeleton "kargu/tools/lsp/skeleton" (&optional root callback))
 
 (cl-defstruct (kargu-bridge-sensor-call (:constructor kargu-bridge-sensor--make))
@@ -283,10 +283,6 @@
                 (gethash "scope" params) (gethash "scope" (kargu-bridge-sensor-call-params call)))
                (eq (kargu-bridge-sensor-call-state call) :issued))
       (setf (kargu-bridge-sensor-call-state call) :cancelled))))
-
-(defun kargu-bridge-sensor-resolve-mentions (connection id _params)
-  "Refuse ID on CONNECTION until the bounded native context port is connected."
-  (kargu-bridge-sensor--error connection id))
 
 (provide 'kargu/bridge/sensor)
 ;;; sensor.el ends here

@@ -112,7 +112,7 @@
   (kargu-test-with-git-repo nil
     (let ((kargu-sessions-directory (expand-file-name "central" repo))
           (kargu-session-storage-location 'central))
-      (kargu-session-storage-write "safe" repo '(("id" . "other")))
+      (kargu-test-session-write "safe" repo '(("id" . "other")))
       (with-temp-buffer
         (insert "keep my draft")
         (let (reply)

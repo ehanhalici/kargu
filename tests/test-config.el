@@ -33,28 +33,6 @@
             (should (eq kargu-diff-review-mode 'auto))))
       (delete-file file))))
 
-(ert-deftest kargu-config-missing-environment-reference-is-actionable-test ()
-  "Native missing-reference diagnostics contain names, never the source literal."
-  (let ((process-environment (copy-sequence process-environment))
-        (kargu-api-key nil) (kargu-application--bound (kargu-application-create)) notices)
-    (setenv "KARGU_ENV_TEST_SECRET" "ok")
-    (setenv "KARGU_ENV_TEST_ABSENT" nil)
-    (cl-letf (((symbol-function 'kargu-log)
-               (lambda (level format &rest arguments)
-                 (push (cons level (apply #'format format arguments)) notices))))
-      (kargu-test-config-publish
-       (kargu-config-service-context)
-       '(:providers (("custom" :apikey "prefix-${KARGU_ENV_TEST_SECRET}-suffix"))) "/fixture" "first")
-      (should (equal (kargu-config-api-key-fast "custom") "prefix-ok-suffix"))
-      (kargu-test-config-publish
-       (kargu-config-service-context)
-       '(:providers (("custom" :apikey "private-literal-${KARGU_ENV_TEST_ABSENT}"))) "/fixture" "second")
-      (should-not (kargu-config-api-key-fast "custom"))
-      (should (= (length notices) 1))
-      (should (eq (caar notices) 'warn))
-      (should (string-search "KARGU_ENV_TEST_ABSENT" (cdar notices)))
-      (should-not (string-search "private-literal" (cdar notices))))))
-
 (ert-deftest kargu-setup-reports-all-mandatory-dependencies-test ()
   "CLI and package failures appear together; optional integrations do not block."
   (let ((problems (car (kargu--setup-problems
@@ -169,21 +147,6 @@
             (should-not (kargu--config-plist))))
       (when (file-exists-p file) (delete-file file)))))
 
-(ert-deftest kargu-config-hot-readers-never-touch-files-test ()
-  "Config, endpoint and fast credential readers only consume memory."
-  (let ((kargu-application--bound (kargu-application-create))
-        (native-comp-enable-subr-trampolines nil)
-        (kargu-api-key nil))
-    (kargu-test-config-publish (kargu-config-service-context)
-                               '(:provider "alpha" :providers (("alpha" :apikey "" :api "http://a/v1")))
-                               "/nonexistent/config" "digest")
-    (cl-letf (((symbol-function 'file-readable-p) (lambda (&rest _) (ert-fail "UI file read")))
-              ((symbol-function 'file-attributes) (lambda (&rest _) (ert-fail "UI stat")))
-              ((symbol-function 'file-exists-p) (lambda (&rest _) (ert-fail "UI exists"))))
-      (should (kargu--config-plist))
-      (should (equal (kargu--api-base "alpha") "http://a/v1"))
-      (should (equal (kargu-config-api-key-fast "alpha") "")))))
-
 (ert-deftest kargu-config-refresh-reverse-completion-and-cancel-test ()
   "Rust's stale verdict never publishes; cancellation closes its native port task."
   (let ((kargu-application--bound (kargu-application-create)) tasks results cleaned)
@@ -267,41 +230,6 @@
           (should-not (buffer-live-p (process-buffer process))))
       (cancel-timer timer)
       (kargu-async-cancel task))))
-
-(ert-deftest kargu-api-key-resolution-order-test ()
-  "Native publications choose global/file/env/keyless sources; readers stay cached."
-  (let ((kargu-session--context (kargu-test-session-with-history :provider "alpha"))
-        (kargu-application--bound (kargu-application-create))
-        (kargu-providers--table (copy-hash-table kargu-providers--table))
-        (kargu-api-key nil)
-        (data '(:providers (("alpha" :apikey "${KARGU_TEST_KEY}") ("beta" :apikey "") ("gamma" :api "https://fixture.invalid")))))
-    (dolist (id '("alpha" "beta" "gamma"))
-      (kargu-register-provider :id id :api "https://fixture.invalid" :env '("KARGU_TEST_ENV")))
-    (setenv "KARGU_TEST_KEY" "from-ref")
-    (setenv "KARGU_TEST_ENV" "from-env")
-    (kargu-test-config-publish (kargu-config-service-context) data "/fixture" "first")
-    (should (equal (kargu-config-api-key-fast "alpha") "from-ref"))
-    (should (equal (kargu-config-api-key-fast "beta") ""))
-    (should (equal (kargu-config-api-key-fast "gamma") "from-env"))
-    (setenv "KARGU_TEST_KEY" nil)
-    (should (equal (kargu-config-api-key-fast "alpha") "from-ref"))
-    (kargu-test-config-publish (kargu-config-service-context) data "/fixture" "second")
-    (should (equal (kargu-config-api-key-fast "alpha") "from-env"))
-    (let ((kargu-api-key "global"))
-      (kargu-test-config-publish (kargu-config-service-context) data "/fixture" "third")
-      (should (equal (kargu-config-api-key-fast "alpha") "global"))
-      (should (equal (kargu-config-api-key-fast "gamma") "from-env")))))
-
-(ert-deftest kargu-provider-detection-respects-credential-owner-test ()
-  "Only the native captured active provider can receive a global credential."
-  (let ((kargu-session--context (kargu-test-session-with-history :provider "alpha"))
-        (kargu-api-key "active-only"))
-    (setenv "KARGU_ABSENT_PROVIDER_KEY" nil)
-    (kargu-test-config-publish (kargu-config-service-context)
-                               '(:providers (("alpha") ("beta" :apikey "${KARGU_ABSENT_PROVIDER_KEY}"))) "/fixture" "owner")
-    (should (kargu-provider-authenticated-p "alpha"))
-    (should-not (kargu-provider-authenticated-p "beta"))
-    (should-not (kargu-config-api-key-fast "beta"))))
 
 (ert-deftest kargu-provider-discovery-never-invokes-secret-function-or-gpg-test ()
   "Native eligibility publication and readers never unlock editor auth sources."

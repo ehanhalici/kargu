@@ -78,10 +78,6 @@ Without CALLBACK return only an already collected snapshot."
 (declare-function kargu-lsp-get-file-symbols "kargu/tools/lsp/symbols"
                   (file-path &optional callback))
 
-(defun kargu-lsp--doc-symbols (callback)
-  "Collect open project document symbols for CALLBACK."
-  (funcall callback (kargu-lsp--imenu-symbols (list (kargu-lsp-project-root))) nil))
-
 (defun kargu-lsp--gather-symbols (callback)
   "Collect project symbols and deliver (ITEMS ERROR) to CALLBACK."
   (if (kargu-eglot-connected-p)

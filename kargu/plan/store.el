@@ -17,7 +17,7 @@
 (require 'kargu/async)
 
 (declare-function kargu-session-context "kargu/core/session" (&optional buffer))
-(declare-function kargu-bridge-status "kargu/bridge" ())
+(declare-function kargu-bridge-status "kargu/bridge" (&optional connection))
 (declare-function kargu-bridge-plan-create "kargu/bridge/plan" (session text callback))
 (declare-function kargu-bridge-plan-revise "kargu/bridge/plan" (session plan-id revision text callback))
 (declare-function kargu-bridge-plan-claim "kargu/bridge/plan" (session plan-id revision hash callback))

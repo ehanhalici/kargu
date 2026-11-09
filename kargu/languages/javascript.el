@@ -16,9 +16,6 @@
 (require 'kargu/languages/core)
 (require 'json)
 
-(defun kargu-language-js-package-manager (root)
-  "Return ROOT's observed native package manager, or nil."
-  (when-let* ((view (kargu-project-probe-view root))) (gethash "package_manager" view)))
 (defun kargu-language-js-toolchain (root &optional typescript)
   "Return ROOT's observed native commands, optionally for TYPESCRIPT."
   (kargu-project-probe-toolchain (if typescript 'typescript 'javascript) root))

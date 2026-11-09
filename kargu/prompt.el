@@ -29,10 +29,9 @@
 
 (declare-function kargu-tools-enabled-p "kargu/loop" (&optional run))
 (declare-function kargu-provider-prompt-file "kargu/providers/registry" (model-id))
-(declare-function kargu-lsp-build-skeleton "kargu/tools/lsp/skeleton" (&optional refresh))
+(declare-function kargu-lsp-build-skeleton "kargu/tools/lsp/skeleton" (&optional refresh callback))
 (declare-function kargu-dape-live-p "kargu/tools/dape/session")
 (declare-function kargu-dape-context-snapshot "kargu/tools/dape/context")
-
 
 (defgroup kargu-prompt nil
   "System prompt and instruction-file injection."
@@ -317,7 +316,6 @@ Uses the Strategy Pattern registry in `kargu/tools/toolchain'."
     kargu-prompt--mode-block
     kargu-prompt--tools-guidance-block)
   "Ordered functions whose non-empty strings form the system prompt.")
-
 
 (defvar kargu--loop-run)
 

@@ -42,8 +42,7 @@ EVENT is `start' for a new model turn or `retry' before replaying its stream.")
 (declare-function kargu--loop-start-compact "kargu/loop/compact" (run prompt))
 (declare-function kargu--loop-next-call "kargu/loop/tools" (run queue))
 (declare-function kargu-tools-enabled-p "kargu/loop" (&optional run))
-(declare-function kargu-model-mark-tools-refused "kargu/api/catalog"
-                  (&optional model-id provider))
+(declare-function kargu-model-mark-tools-refused "kargu/api/catalog" (&optional model-id provider callback))
 (declare-function kargu--model "kargu/config/key" ())
 
 (defconst kargu-loop--length-reasons '("length" "max_tokens")

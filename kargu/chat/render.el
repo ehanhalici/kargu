@@ -14,9 +14,9 @@
 (require 'kargu/chat/stream)
 (require 'kargu/api/tools)
 
-(declare-function kargu-diff-file-stats "kargu/tools/diff/track" (path))
+(declare-function kargu-diff-file-stats "kargu/tools/diff/track" (file-path &optional service))
 (declare-function kargu-diff-review "kargu/tools/diff/review" (&optional path))
-(declare-function kargu-diff-rollback "kargu/tools/diff/track" (path &optional single-step))
+(declare-function kargu-diff-rollback "kargu/tools/diff/track" (file-path &optional single-step service &rest options))
 
 (defvar kargu--loop-run)
 (defvar kargu-loop-tool-start-hook)

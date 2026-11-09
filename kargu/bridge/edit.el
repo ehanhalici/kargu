@@ -550,35 +550,5 @@ before dispatch.  No write capability is returned."
                   (kargu-async-wrap task (lambda (scope fault) (bound connection scope fault)))))))))
     task))
 
-(cl-defun kargu-bridge-edit-recover (application journal-directory edit-id &key callback parent)
-  "Inspect JOURNAL-DIRECTORY's EDIT-ID for APPLICATION into CALLBACK.
-PARENT guards the asynchronous read; recovery never creates a write grant."
-  (let* ((directory (expand-file-name journal-directory))
-         (id (copy-sequence edit-id))
-         (task (kargu-async-start callback :timeout 30 :parent parent)))
-    (kargu-bridge-ensure
-     (kargu-async-wrap
-      task
-      (lambda (connection failure)
-        (if failure (kargu-async-finish task nil failure)
-          (kargu-bridge-application-ensure
-           connection application
-           (kargu-async-wrap
-            task
-            (lambda (scope error-data)
-              (if error-data (kargu-async-finish task nil error-data)
-                (kargu-bridge-call
-                 connection "edit/recover"
-                 (kargu-bridge--object
-                  "scope" (kargu-bridge-application--copy-scope scope)
-                  "arguments" (kargu-bridge--object
-                               "journal_directory" directory
-                               "edit_id" id))
-                 (lambda (value fault)
-                   (if fault
-                       (kargu-async-finish task nil fault)
-                     (kargu-async-finish task value nil))))))))))))
-    task))
-
 (provide 'kargu/bridge/edit)
 ;;; edit.el ends here

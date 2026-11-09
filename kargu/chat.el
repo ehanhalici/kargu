@@ -49,7 +49,7 @@
 (declare-function kargu-dape-ready-p "kargu/tools/dape/session" ())
 (declare-function kargu-dape-ensure-session "kargu/tools/dape/session"
                   (on-ready &optional on-cancel))
-(declare-function kargu-dape-cancel-session-wait "kargu/tools/dape/readiness" ())
+(declare-function kargu-dape-cancel-session-wait "kargu/tools/dape/readiness" (&optional buffer))
 (defvar kargu-eglot-required-message)
 
 (defvar-local kargu-chat--eglot-notice-p nil
@@ -74,26 +74,13 @@
   :group 'kargu
   :prefix "kargu-chat-")
 
-(defcustom kargu-chat-attach-max-lines 150
-  "Line count above which `@' file mentions are references, not bodies.
-Files at or below this many lines are inlined as a synthetic Read
-transcript.  Longer files become a `<referenced_file>' hint so
-the model must call `read_file' instead of drowning the prompt."
-  :type 'natnum
-  :group 'kargu-ui)
-
-(defcustom kargu-chat-max-listed-files 2000
-  "Cap on files collected for `@' completion under one project root."
-  :type 'natnum
-  :group 'kargu-ui)
-
 ;;;; Chat major mode ------------------------------------------------------
 
-(declare-function kargu-chat-select-mode-company "kargu/api/select" (&optional _event))
-(declare-function kargu-chat-select-provider-company "kargu/api/select")
-(declare-function kargu-chat-select-model-company "kargu/api/select")
-(declare-function kargu-chat-select-effort-company "kargu/api/select")
-(declare-function kargu-switch-provider-and-model "kargu/api/select")
+(declare-function kargu-chat-select-mode-company "kargu/chat/select" (&optional _event))
+(declare-function kargu-chat-select-provider-company "kargu/chat/select" (&optional _event))
+(declare-function kargu-chat-select-model-company "kargu/chat/select" (&optional live-ids catalog-ids provider-name _event))
+(declare-function kargu-chat-select-effort-company "kargu/chat/select" (&optional _event))
+(declare-function kargu-switch-provider-and-model "kargu/chat/select" ())
 
 (defvar-keymap kargu-chat-mode-map
   :doc "Keymap for `kargu-chat-mode'."
@@ -371,7 +358,7 @@ LSP is optional; a missing connection is reported without blocking chat."
     (user-error "Kargu: select a provider and model before sending")))
 
 (declare-function kargu-loop-require-tools-for-agent "kargu/loop" ())
-(declare-function kargu-model-forget-tools-refusals "kargu/api/catalog" ())
+(declare-function kargu-model-forget-tools-refusals "kargu/api/catalog" (&optional callback))
 
 (defun kargu-chat--refuse-agent-without-tools ()
   "Signal when agent mode is on and the model cannot call tools.

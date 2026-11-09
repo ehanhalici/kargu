@@ -20,7 +20,7 @@
 
 (declare-function kargu-loop-running-p "kargu/loop")
 (declare-function kargu-chat-stop "kargu/chat")
-(declare-function kargu-chat-select-mode-company "kargu/api/select" (&optional _event))
+(declare-function kargu-chat-select-mode-company "kargu/chat/select" (&optional _event))
 (declare-function kargu-deps-missing-p "kargu/tools/deps" (&optional root))
 (declare-function kargu-chat-list-buffers "kargu/chat" ())
 (declare-function kargu-chat-refresh-footer "kargu/chat/prompt" ())

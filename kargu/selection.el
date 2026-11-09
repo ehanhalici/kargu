@@ -20,7 +20,7 @@
 (require 'kargu/contract/selection)
 (require 'kargu/state/hooks)
 
-(declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-loop-running-p "kargu/loop" (&optional buffer))
 (declare-function kargu-busy-p "kargu/api/http" ())
 (declare-function kargu-connected-providers "kargu/providers/registry" ())
 (declare-function kargu--config-providers "kargu/config/schema" ())

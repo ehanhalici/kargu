@@ -17,11 +17,8 @@
 (require 'subr-x)
 (require 'kargu/core/group)
 
-(declare-function kargu-bridge-approval-execute "kargu/bridge/approval"
-                  (connection arguments callback &rest options))
 (declare-function kargu-bridge-approval-request "kargu/bridge/approval" (connection id params))
 (declare-function kargu-bridge-sensor-call-tool "kargu/bridge/sensor" (connection id params))
-(declare-function kargu-bridge-sensor-resolve-mentions "kargu/bridge/sensor" (connection id params))
 (declare-function kargu-bridge-job--disconnect "kargu/bridge/jobs" (job status))
 (declare-function kargu-bridge-edit-activity-disconnect "kargu/bridge/edit/activity" (connection))
 (declare-function kargu-bridge-edit-activity-revoke "kargu/bridge/edit/activity" (connection params))
@@ -384,13 +381,6 @@ CALLBACK receives native (RESULT ERROR); no legacy process fallback exists."
                    "git_worktree_read" "git_read")
    :timeout (kargu-bridge--read-timeout arguments)))
 
-(cl-defun kargu-bridge-execute (connection arguments callback &key owner)
-  "Execute explicit program/argv ARGUMENTS on CONNECTION after user approval.
-CALLBACK receives (RESULT ERROR).  OWNER defaults to the current buffer.
-This noninteractive port does not replace the existing Bash job tool."
-  (require 'kargu/bridge/approval)
-  (kargu-bridge-approval-execute connection arguments callback :owner (or owner (current-buffer))))
-
 (cl-defun kargu-bridge--workspace-read (connection arguments callback &key owner method capability timeout)
   "Call read METHOD with ARGUMENTS on CONNECTION for OWNER.
 Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
@@ -534,9 +524,6 @@ Require negotiated CAPABILITY and deliver CALLBACK once with (RESULT ERROR)."
                    (and (hash-table-p p) (gethash "tool" p))))
             (require 'kargu/bridge/sensor)
             (kargu-bridge-sensor-call-tool connection id (gethash "params" msg)))
-           ((and (not (eq id :missing)) (equal method "editor/resolve_mentions"))
-            (require 'kargu/bridge/sensor)
-            (kargu-bridge-sensor-resolve-mentions connection id (gethash "params" msg)))
            ((not (eq id :missing))
             (kargu-bridge--send
              connection (kargu-bridge--object

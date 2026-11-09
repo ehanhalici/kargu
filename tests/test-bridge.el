@@ -72,7 +72,7 @@
                        (when (eq (kargu-confirmation-operation request) :prompt)
                          (setq decision (plist-get (kargu-confirmation-options request) :on-decision)
                                details (plist-get (kargu-confirmation-options request) :details))))))
-            (kargu-bridge-execute conn args (lambda (result error-data) (setq reply result failure error-data finished t)))
+            (kargu-bridge-test--execute conn args (lambda (result error-data) (setq reply result failure error-data finished t)))
             (puthash "arguments" ["-c" "printf mutated"] args)
             (kargu-bridge-test--wait (lambda () decision))
             (should (string-search "original" details))
@@ -98,7 +98,7 @@
                            (when (eq (kargu-confirmation-operation request) :prompt)
                              (if quit (signal 'quit nil)
                                (funcall (plist-get (kargu-confirmation-options request) :on-decision) :reject))))))
-                (kargu-bridge-execute conn (kargu-bridge-test--command root "printf bad > effect")
+                (kargu-bridge-test--execute conn (kargu-bridge-test--command root "printf bad > effect")
                                       (lambda (_result error-data) (setq failure error-data finished t)))
                 (kargu-bridge-test--wait (lambda () finished))
                 (should (equal (gethash "status" (gethash "data" failure)) "rejected"))
@@ -117,7 +117,7 @@
                        (pcase (kargu-confirmation-operation request)
                          (:prompt (setq decision (plist-get (kargu-confirmation-options request) :on-decision)) 'owned-handle)
                          (:cancel (setq cancelled t))))))
-            (kargu-bridge-execute conn (kargu-bridge-test--command root "printf bad > effect")
+            (kargu-bridge-test--execute conn (kargu-bridge-test--command root "printf bad > effect")
                                   (lambda (_result error-data) (setq failure error-data)) :owner owner)
             (kargu-bridge-test--wait (lambda () decision))
             (kill-buffer owner)
@@ -141,7 +141,7 @@
                        (pcase (kargu-confirmation-operation request)
                          (:prompt (setq decision (plist-get (kargu-confirmation-options request) :on-decision)) 'reverse-handle)
                          (:cancel (setq cancelled t))))))
-            (kargu-bridge-execute conn (kargu-bridge-test--command root "printf bad > effect")
+            (kargu-bridge-test--execute conn (kargu-bridge-test--command root "printf bad > effect")
                                   (lambda (_result error-data) (setq failure error-data finished t)))
             (kargu-bridge-test--wait (lambda () decision))
             (kargu-bridge-test--call conn "session/close" (kargu-bridge-connection-read-scope conn))
@@ -500,6 +500,14 @@
                  (lambda (_connection _callback error-data) (setq failure error-data))))
         (kargu-bridge--hydrate-catalog-page nil #'ignore 0 nil))
       (should failure) (should (= calls 1)))))
+
+(defun kargu-bridge-test--execute (connection arguments callback &rest options)
+  "Run ARGUMENTS through the shared approval port with OPTIONS.
+The owner defaults to the current buffer."
+  (require 'kargu/bridge/approval)
+  (apply #'kargu-bridge-approval-execute connection arguments callback
+         (if (plist-member options :owner) options
+           (append (list :owner (current-buffer)) options))))
 
 (provide 'tests/test-bridge)
 ;;; test-bridge.el ends here

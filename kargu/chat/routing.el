@@ -15,7 +15,7 @@
 
 (declare-function kargu-session-context "kargu/core/session" (&optional buffer))
 (declare-function kargu-session-id "kargu/core/session" (&optional session))
-(declare-function kargu-application-context "kargu/application/coordinator" ())
+(declare-function kargu-application-context "kargu/application/coordinator" (&optional app))
 
 (defvar-local kargu-chat--project-root nil
   "Canonical project root owning the current chat buffer.")
@@ -24,15 +24,12 @@
   "Buffer-local session identifier.")
 
 (cl-defstruct (kargu-chat-handle-store (:constructor kargu-chat-handle-store--create))
-  "Opaque native handles, committed DTO revision, and buffer epoch for one chat buffer."
+  "Opaque native handles and the buffer epoch of one chat buffer."
   (buffer nil :read-only t)
   (token (gensym "kargu-chat-buffer-") :read-only t)
   (application-handle nil)
   (session-handle nil)
-  (run-handle nil)
-  (edit-handle nil)
-  (last-dto nil)
-  (last-revision 0))
+  (run-handle nil))
 
 (defvar-local kargu-chat--handle-store nil
   "Buffer-local handle store capturing native handles, run states and DTOs.")
@@ -83,63 +80,6 @@ Rejects dead buffers, token mismatches, and reincarnated buffer names."
       (with-current-buffer buf
         (let ((store (kargu-chat-handle-store buf)))
           (setf (kargu-chat-handle-store-run-handle store) handle))))))
-
-(defun kargu-chat-edit-handle (&optional buffer)
-  "Return the active edit handle of BUFFER, or nil when none."
-  (when-let* ((buf (or buffer (current-buffer)))
-              ((buffer-live-p buf)))
-    (with-current-buffer buf
-      (and kargu-chat--handle-store
-           (kargu-chat-handle-store-edit-handle kargu-chat--handle-store)))))
-
-(defun kargu-chat-set-edit-handle (handle &optional buffer)
-  "Set the active edit HANDLE for BUFFER."
-  (let ((buf (or buffer (current-buffer))))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (let ((store (kargu-chat-handle-store buf)))
-          (setf (kargu-chat-handle-store-edit-handle store) handle))))))
-
-(defun kargu-chat-running-p (&optional buffer)
-  "Return non-nil when BUFFER has an active run in flight."
-  (not (null (kargu-chat-run-handle buffer))))
-
-(defun kargu-chat-last-dto (&optional buffer)
-  "Return (REVISION . DTO) for the last committed state of BUFFER."
-  (when-let* ((buf (or buffer (current-buffer)))
-              ((buffer-live-p buf)))
-    (with-current-buffer buf
-      (when-let* ((store (kargu-chat-handle-store buf)))
-        (cons (kargu-chat-handle-store-last-revision store)
-              (kargu-chat-handle-store-last-dto store))))))
-
-(defun kargu-chat-update-dto (dto revision &optional buffer)
-  "Store committed DTO and monotonically advance REVISION for BUFFER.
-Rejects stale or non-monotonic updates."
-  (let ((buf (or buffer (current-buffer))))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (let ((store (kargu-chat-handle-store buf)))
-          (when (and (numberp revision)
-                     (> revision (kargu-chat-handle-store-last-revision store)))
-            (setf (kargu-chat-handle-store-last-dto store) dto)
-            (setf (kargu-chat-handle-store-last-revision store) revision)
-            t))))))
-
-(defun kargu-chat-find-buffer-by-session (session-id &optional project-root)
-  "Find an existing chat buffer matching SESSION-ID and optional PROJECT-ROOT."
-  (let ((root (and project-root
-                   (file-name-as-directory (file-truename project-root)))))
-    (cl-find-if
-     (lambda (buf)
-       (with-current-buffer buf
-         (and (derived-mode-p 'kargu-chat-mode)
-              (equal session-id (or kargu-chat--session-id
-                                    (and (fboundp 'kargu-session-id) (kargu-session-id))))
-              (or (null root)
-                  (equal root (or kargu-chat--project-root
-                                  (kargu-permission-project-root buf)))))))
-     (buffer-list))))
 
 (defvar kargu-chat-buffer-name)
 

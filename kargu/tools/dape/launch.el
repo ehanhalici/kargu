@@ -21,7 +21,7 @@
 (defvar dape--connection-counter)
 (defvar dape-debug)
 
-(declare-function kargu-session-id "kargu/core/session" ())
+(declare-function kargu-session-id "kargu/core/session" (&optional session))
 (declare-function dape "dape" (config &optional skip-compile))
 (declare-function dape-connection "dape" (&rest slots))
 (declare-function dape-handle-request "dape" (conn command arguments))

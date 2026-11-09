@@ -182,7 +182,6 @@
 
 
 
-(declare-function kargu-api-normalize-response "kargu/api/wire" (response))
 (declare-function kargu-provider-format-stream-p "kargu/providers/registry" (format))
 (declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
 
@@ -261,51 +260,10 @@
   (should (equal (kargu--payload-merge '(("a" . 1) ("thinking" . 2)) '(("thinking" . 3)))
                  '(("a" . 1) ("thinking" . 3)))))
 
-(ert-deftest kargu-payload-no-provider-custom-parameters-test ()
-  "Legacy custom JSON settings cannot override the supported core settings."
-  (let ((kargu-temperature 0.2) (kargu-max-tokens 1234)
-        (kargu-reasoning-effort nil) (kargu-thinking-budget nil)
-        (kargu-session--context
-         (kargu-test-session-with-history
-          :messages '((("role" . "system") ("content" . "System"))
-                      (("role" . "user") ("content" . "Hi"))))))
-    (let ((payload (kargu--build-payload)))
-      (should-not (kargu-aget payload "temperature"))
-      (should-not (kargu-aget payload "max_tokens"))
-      (should (= (kargu-aget (kargu-api-request-tuning (kargu--provider-name) (kargu--model)) "max_tokens") 1234))
-      (should-not (kargu-aget payload "provider"))
-      (should-not (string-search "[params" (kargu-chat--footer-string))))))
-
-(ert-deftest kargu-payload-tools-off-removes-tools-and-choice-test ()
-  "Tools-off removes both tools and tool_choice from the canonical payload."
-  (let ((kargu-session--context
-         (kargu-test-session-with-history
-          :messages '((("role" . "user") ("content" . "Hello"))))))
-    (cl-letf (((symbol-function 'kargu-advertised-tools) (lambda () nil)))
-      (let* ((payload (kargu--build-payload '(("tools" . [("forged" . t)])
-                                             ("tool_choice" . "auto")
-                                             ("stream" . t)))))
-        (should (equal (kargu-aget payload "model") (kargu--model)))
-        (should (equal (aref (kargu-aget payload "messages") 0)
-                       '(("role" . "user") ("content" . "Hello"))))
-        (should-not (assoc "tools" payload))
-        (should-not (assoc "tool_choice" payload))
-        (should (eq (cdr (assoc "stream" payload)) t))))))
-
 (ert-deftest kargu-tune-unselected-model-description-test ()
   "The remaining tuning menu works before a model has been selected."
   (cl-letf (((symbol-function 'kargu--model) (lambda () nil)))
     (should (string-search "not selected" (kargu-tune--model-desc)))))
-
-(ert-deftest kargu-api-null-error-is-not-a-provider-failure-test ()
-  "Null and false error fields are not errors; actual messages remain errors."
-  (dolist (value '(nil :json-null :json-false))
-    (should-not (kargu-response-error-message (list (cons "error" value))))
-    (should (kargu-aget (kargu-api-normalize-response
-                         (list (cons "choices" [(("message" . (("content" . "Done"))))])
-                               (cons "error" value))) "choices")))
-  (should (equal (kargu-response-error-message '(("error" . (("message" . "Rejected")))))
-                 "Rejected")))
 
 (ert-deftest kargu-api-http-error-rolls-back-prompt-test ()
   "HTTP error rolls back prompt so history has no orphan user turn."

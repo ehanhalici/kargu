@@ -18,13 +18,19 @@
 (require 'kargu/application/budget)
 
 (defvar kargu--loop-run nil)
-(defvar kargu--busy nil)
-(defvar kargu--generation 0)
-(defvar kargu--current-process nil)
+(defvar kargu--busy nil
+  "Non-nil while a chat request is in flight.")
+(defvar kargu--generation 0
+  "Request generation counter.
+Every request captures the current generation; when a request is
+cancelled the counter is bumped and the stale process callbacks
+become no-ops.  OS/network resources are owned by Rust.")
+(defvar kargu--current-process nil
+  "Owned Rust delivery handle for the in-flight chat request.")
 (defvar kargu-metadata--legacy nil
   "Non-nil inside a detached compatibility continuation.")
 
-(declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-loop-running-p "kargu/loop" (&optional buffer))
 (declare-function kargu-busy-p "kargu/api/http" ())
 
 ;;;; Logical request record ------------------------------------------------

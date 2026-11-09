@@ -68,16 +68,6 @@ The offline display label is not a prepared connection or an execution grant."
         (kargu-connection-snapshot-endpoint snapshot)
       (kargu-config-profile-field "endpoint" id))))
 
-(defun kargu-config-api-key-fast (&optional provider)
-  "Read PROVIDER's last committed direct/keyless credential projection.
-No environment expansion, auth-source search or core startup occurs here."
-  (when-let* ((profile (kargu-config-profile provider))
-              (credential (gethash "credential" profile)))
-    (pcase (gethash "kind" credential)
-      ("direct" (gethash "secret" credential))
-      ("keyless" "")
-      (_ nil))))
-
 (defun kargu--api-key-placeholder-p (key)
   "Non-nil if KEY is empty or a documented dummy placeholder."
   (and (stringp key)

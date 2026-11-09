@@ -24,8 +24,8 @@
   (require 'transient nil t))
 
 (declare-function kargu-test-connection "kargu/api/client")
-(declare-function kargu-chat-select-provider "kargu/api/select")
-(declare-function kargu-set-model "kargu/api/select")
+(declare-function kargu-chat-select-provider "kargu/chat/select" ())
+(declare-function kargu-set-model "kargu/chat/select" (&optional refresh-or-model))
 (declare-function kargu-state-set-reasoning-effort "kargu/state/transitions" (effort))
 
 ;;;; Dynamic descriptions for transient -----------------------------------

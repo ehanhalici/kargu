@@ -17,8 +17,7 @@
 (require 'kargu/config/connection)
 
 (defvar kargu--state-store)
-(defvar kargu-execution--current nil
-  "Dynamically bound execution context, never a retained runtime singleton.")
+(defvar kargu-execution--current)
 
 (cl-defstruct (kargu-execution (:constructor kargu-execution--create))
   "Captured APP, CLAIM, SESSION, ORIGIN, ROOT and RUN with their TASK lifetime."

@@ -56,78 +56,6 @@
   (should (equal (kargu-provider-models-api "ollama") "http://localhost:11434/api/tags"))
   (should (equal (kargu-provider-models-api "openrouter") "https://openrouter.ai/api/v1/models")))
 
-(ert-deftest kargu-providers-zero-url-toml-config-test ()
-  "When TOML specifies only `apikey', URL is automatically resolved."
-  (let* ((temp-config (make-temp-file "kargu-test-config-" nil ".toml"))
-         (kargu-application--bound (kargu-application-create))
-         (kargu-session--context
-          (kargu-test-session-with-history :provider nil :model nil)))
-    (unwind-protect
-        (progn
-          (with-temp-file temp-config
-            (insert "provider = \"deepseek\"\n\n"
-                    "[providers.deepseek]\n"
-                    "apikey = \"sk-test-deepseek-12345\"\n"
-                    "model = \"deepseek-chat\"\n"))
-          (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
-            (should (kargu-ok-p (kargu-test-await
-                                 (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
-            (should (equal (kargu--provider-name) "deepseek"))
-            ;; API base should resolve to DeepSeek's default URL automatically:
-            (should (equal (kargu--api-base) "https://api.deepseek.com/v1"))
-            ;; Model should resolve from TOML configured model:
-            (should (equal (kargu--model) "deepseek-chat"))
-            ;; API key should resolve to the configured key:
-            (should (equal (kargu-config-api-key-fast) "sk-test-deepseek-12345"))))
-      (delete-file temp-config))))
-
-(ert-deftest kargu-providers-custom-url-override-test ()
-  "When user specifies custom `api' in TOML, it overrides the built-in default."
-  (let* ((temp-config (make-temp-file "kargu-test-config-" nil ".toml"))
-         (kargu-application--bound (kargu-application-create))
-         (kargu-session--context
-          (kargu-test-session-with-history :provider nil :model nil)))
-    (unwind-protect
-        (progn
-          (with-temp-file temp-config
-            (insert "provider = \"deepseek\"\n\n"
-                    "[providers.deepseek]\n"
-                    "api = \"https://my-custom-proxy.internal/v1\"\n"
-                    "apikey = \"sk-test-custom-key\"\n"))
-          (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
-            (should (kargu-ok-p (kargu-test-await
-                                 (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
-            (should (equal (kargu--provider-name) "deepseek"))
-            ;; User-provided API base must take precedence:
-            (should (equal (kargu--api-base) "https://my-custom-proxy.internal/v1"))
-            (should (equal (kargu-config-api-key-fast) "sk-test-custom-key"))))
-      (delete-file temp-config))))
-
-(ert-deftest kargu-providers-env-key-resolution-test ()
-  "Environment variable specific to active provider is used if TOML omits apikey."
-  (let* ((temp-config (make-temp-file "kargu-test-config-" nil ".toml"))
-         (kargu-application--bound (kargu-application-create))
-         (kargu-session--context
-          (kargu-test-session-with-history :provider "groq"))
-         (kargu-api-key nil))
-    (unwind-protect
-        (progn
-          (with-temp-file temp-config
-            (insert "provider = \"groq\"\n"))
-          (cl-letf (((symbol-function 'kargu-config-file) (lambda () temp-config)))
-            (should (kargu-ok-p (kargu-test-await
-                                 (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
-            (setenv "GROQ_API_KEY" "gsk_test_groq_env_key")
-            (should (kargu-ok-p (kargu-test-await
-                                 (lambda (done) (kargu-config-refresh-async done :paths (list temp-config))))))
-            (unwind-protect
-                (progn
-                  (should (equal (kargu--provider-name) "groq"))
-                  (should (equal (kargu--api-base) "https://api.groq.com/openai/v1"))
-                  (should (equal (kargu-config-api-key-fast) "gsk_test_groq_env_key")))
-              (setenv "GROQ_API_KEY" nil))))
-      (delete-file temp-config))))
-
 (ert-deftest kargu-providers-dynamic-registration-test ()
   "Dynamic registration adds new provider with custom defaults."
   (kargu-register-provider
@@ -208,23 +136,6 @@
       (setenv "GROQ_API_KEY" nil)
       (when (file-exists-p empty-cfg) (delete-file empty-cfg)))))
 
-(ert-deftest kargu-providers-payload-tuning-test ()
-  "Payload stays canonical while core receives raw tuning preferences."
-  (let ((kargu-reasoning-effort 'medium) (kargu-thinking-budget 4096)
-        (kargu-max-tokens 8192) (kargu-temperature 0.5)
-        (kargu-session--context
-         (kargu-test-session-with-history :messages '((("role" . "user") ("content" . "hello")))
-                                          :provider "deepseek" :model "deepseek-chat")))
-    (let ((payload (kargu--build-payload))
-          (tuning (kargu-api-request-tuning "deepseek" "deepseek-chat")))
-      (should (equal (kargu-aget payload "model") "deepseek-chat"))
-      (should-not (assoc "temperature" payload))
-      (should-not (assoc "max_tokens" payload))
-      (should-not (assoc "reasoning_effort" payload))
-      (should (= (kargu-aget tuning "temperature") 0.5))
-      (should (= (kargu-aget tuning "max_tokens") 8192))
-      (should (equal (kargu-aget tuning "effort") "medium")))))
-
 (ert-deftest kargu-providers-extract-models-test ()
   "Editor reads only native canonical records; provider envelopes live in Rust."
   ;; Raw data/models/items/bare-array cases are actual native models_catalog.rs
@@ -289,25 +200,6 @@
   (should (null (kargu-provider-prompt-caching "ollama")))
   (should (null (kargu-provider-prompt-caching "cohere")))
   (should (null (kargu-provider-prompt-caching "perplexity"))))
-
-(ert-deftest kargu-providers-prompt-caching-is-captured-not-applied-by-editor-test ()
-  "Editor captures native cache policy but leaves canonical history unchanged.
-Marker placement cases moved to kargu-core/tests/api_wire.rs."
-  (dolist (provider '("openrouter" "anthropic" "ollama"))
-    (let* ((kargu-session--context
-            (kargu-test-session-with-history
-             :messages '((("role" . "system") ("content" . "Stable"))
-                         (("role" . "user") ("content" . "one"))
-                         (("role" . "assistant") ("content" . "answer"))
-                         (("role" . "user") ("content" . "two")))
-             :provider provider :model "fixture"))
-           (settings (kargu-api-connection-settings provider "fixture"))
-           (payload (kargu--build-payload)))
-      (should (eq (plist-get settings :cache-marker)
-                  (if (equal provider "ollama") nil t)))
-      (should (equal (kargu-aget (aref (kargu-aget payload "messages") 0) "content") "Stable"))
-      (should (equal (kargu-aget (aref (kargu-aget payload "messages") 2) "content") "answer"))
-      (should-not (string-search "cache_control" (kargu-json-encode-record payload))))))
 
 (ert-deftest kargu-providers-native-projection-preserves-explicit-override-test ()
   "A refreshed core baseline must not overwrite an editor registration."

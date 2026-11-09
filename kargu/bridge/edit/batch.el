@@ -22,7 +22,7 @@
 
 (defvar kargu-diff-review-mode)
 (defvar kargu-diff-auto-save)
-(declare-function kargu-permission-project-root "kargu/permission/guards" ())
+(declare-function kargu-permission-project-root "kargu/permission/guards" (&optional buffer))
 
 (defcustom kargu-bridge-edit-batch-journal-directory
   (locate-user-emacs-file "kargu/edit-journals/")

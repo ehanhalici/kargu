@@ -23,7 +23,6 @@
 (require 'auth-source)
 
 (declare-function kargu--config-providers "kargu/config/schema")
-(declare-function kargu-config-api-key-fast "kargu/config/key" (&optional provider-name))
 (declare-function kargu-config-profile-field "kargu/config/key" (name &optional provider))
 (declare-function kargu-config-native-view "kargu/config/service" ())
 
@@ -143,17 +142,6 @@ The provider must enable prompt caching and its format must place markers."
        (plist-get (kargu-provider-format-record (kargu-provider-format id))
                   :cache-marker)
        t))
-
-(defun kargu-provider-format-field (id field)
-  "FIELD of provider ID's format record, or nil."
-  (plist-get (kargu-provider-format-record (kargu-provider-format id)) field))
-
-(defun kargu-provider-reasoning-shape (id)
-  "How provider ID's requests carry reasoning settings.
-One of `effort' (the default), `nested' or `thinking'."
-  (or (plist-get (kargu-provider-format-record (kargu-provider-format id))
-                 :reasoning-shape)
-      'effort))
 
 (defun kargu-provider-format-auth (format)
   "Auth style for FORMAT: `x-api-key' or `bearer'."

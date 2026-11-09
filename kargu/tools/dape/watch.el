@@ -16,7 +16,7 @@
 (require 'kargu/core/session)
 (require 'kargu/permission)
 
-(declare-function kargu-session-id "kargu/core/session" ())
+(declare-function kargu-session-id "kargu/core/session" (&optional session))
 
 (defvar kargu-dape--watches (make-hash-table :test #'eq :weakness 'key)
   "Adapter-keyed watch collections; a discarded adapter does not stay alive.")

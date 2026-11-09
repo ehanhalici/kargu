@@ -7,8 +7,6 @@
 
 ;; Provides high-level ports to the native Rust agent session machine:
 ;; - `kargu-bridge-session-start`: starts native agent turn via `session/prompt`
-;; - `kargu-bridge-session-abort`: revokes active native run via `session/abort`
-;; - `kargu-bridge-session-continue`: extends turn limit or accepts repetition via `session/continue`
 ;; - `kargu-bridge-session-snapshot`: queries native session state and history revision via `session/snapshot`
 
 ;;; Code:
@@ -117,23 +115,6 @@ ON-DELTA and ON-EVENT; terminal result to CALLBACK."
                      :on-delta on-delta
                      :on-event on-event))
 
-(defun kargu-bridge-session-abort (connection run-scope callback &optional owner)
-  "Abort active RUN-SCOPE on CONNECTION and deliver response to CALLBACK."
-  (kargu-bridge-call connection "session/abort"
-                     (kargu-bridge--object "scope" run-scope)
-                     callback
-                     :owner owner))
-
-(cl-defun kargu-bridge-session-continue (connection run-scope callback
-                                                    &key reason turn-limit call-id (approved nil approved-p) owner)
-  "Continue RUN-SCOPE on CONNECTION and deliver response to CALLBACK."
-  (let ((params (kargu-bridge--object "scope" run-scope)))
-    (when reason (puthash "reason" reason params))
-    (when turn-limit (puthash "turn_limit" turn-limit params))
-    (when call-id (puthash "call_id" call-id params))
-    (when approved-p (puthash "approved" (if approved t :json-false) params))
-    (kargu-bridge-call connection "session/continue" params callback :owner owner)))
-
 (defun kargu-bridge-session-snapshot (connection scope callback &optional owner)
   "Query session state snapshot for SCOPE on CONNECTION."
   (kargu-bridge-call connection "session/snapshot" scope callback :owner owner))
@@ -155,17 +136,9 @@ The native persistence service owns the write."
   "Delete persisted session PARAMS via native persistence on CONNECTION."
   (kargu-bridge-call connection "session/delete" params callback :owner owner))
 
-(defun kargu-bridge-session-prune (connection params callback &optional owner)
-  "Prune persisted sessions and clean temp files for PARAMS on CONNECTION."
-  (kargu-bridge-call connection "session/prune" params callback :owner owner))
-
 (defun kargu-bridge-session-import (connection params callback &optional owner)
   "Import legacy or local session PARAMS via native persistence on CONNECTION."
   (kargu-bridge-call connection "session/import" params callback :owner owner))
-
-(defun kargu-bridge-session-restore (connection params callback &optional owner)
-  "Restore session candidate PARAMS atomically into native state on CONNECTION."
-  (kargu-bridge-call connection "session/restore" params callback :owner owner))
 
 (defun kargu-bridge-session-scope (buffer callback)
   "Deliver (CONNECTION SCOPE FAILURE) for BUFFER to CALLBACK."

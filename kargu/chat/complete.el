@@ -29,7 +29,10 @@
 (defvar kargu-lsp-request-timeout)
 
 (defvar kargu-context-buffer nil)
-(defvar kargu-chat-max-listed-files 2000)
+(defcustom kargu-chat-max-listed-files 2000
+  "Cap on files collected for `@' completion under one project root."
+  :type 'natnum
+  :group 'kargu-ui)
 (defvar kargu-chat--prompt-marker nil)
 (declare-function kargu-chat--in-input-p "kargu/chat/prompt")
 (declare-function company-begin-backend "company")

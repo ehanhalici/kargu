@@ -14,7 +14,7 @@
 ;; Public API:
 ;;   `kargu-language-register', `kargu-language-get',
 ;;   `kargu-language-detect', `kargu-language-detect-by-extension',
-;;   `kargu-language-for-buffer', `kargu-language-context-spec',
+;;   `kargu-language-for-buffer',
 ;;   `kargu-language-requires-lsp-p',
 ;;   `kargu-language-active', `kargu-language-prompt-guidance',
 ;;   `kargu-language-eval-hint'.
@@ -112,18 +112,6 @@ Does not look at the project root."
   (or (cl-find-if #'kargu-language--mode-matches-p (kargu-language-list))
       (and buffer-file-name
            (kargu-language-detect-by-extension buffer-file-name))))
-
-(defun kargu-language-context-spec ()
-  "Return the language spec for this buffer or its directory.
-Uses the major mode or file extension first.  Otherwise detects
-from `default-directory' or this chat's project root.  Does not
-call `kargu-lsp-project-root'."
-  (or (kargu-language-for-buffer)
-      (and (stringp default-directory)
-           (kargu-language-detect default-directory))
-      (let ((root (and (boundp 'kargu-chat--project-root)
-                       kargu-chat--project-root)))
-        (and (stringp root) (kargu-language-detect root)))))
 
 (defun kargu-language-active (&optional root)
   "Return the active language spec for ROOT or current buffer context.

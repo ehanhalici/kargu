@@ -25,7 +25,7 @@
 
 (declare-function kargu-provider-effort-specs "kargu/providers/registry" (id))
 (declare-function kargu-history-context-threshold "kargu/history/compact" (ctx-tokens))
-(declare-function kargu-connection-current "kargu/config/connection" (&optional buffer))
+(declare-function kargu-connection-current "kargu/config/connection" ())
 (declare-function kargu-connection-setting "kargu/config/connection" (name &optional snapshot))
 (declare-function kargu-connection-matches-p "kargu/config/connection" (model provider))
 (declare-function kargu-config-copy "kargu/config/service" (value))
@@ -57,8 +57,6 @@ Only unambiguous short aliases in that provider are accepted."
     (if (and (fboundp 'kargu-connection-matches-p) (kargu-connection-matches-p id provider))
         (kargu-config-copy (kargu-connection-setting :metadata))
       (kargu-model-store-get (or provider (kargu--provider-name)) id))))
-
-
 
 (defconst kargu--model-property-aliases
   '(("context-window" . "context_length") ("max-output" . "max_output")

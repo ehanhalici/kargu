@@ -16,7 +16,7 @@
 (require 'kargu/tools/dape/launch)
 
 (defvar dape-configs)
-(declare-function kargu-session-id "kargu/core/session" ())
+(declare-function kargu-session-id "kargu/core/session" (&optional session))
 (defcustom kargu-dape-config nil
   "Dape configuration to use, or nil to discover an installed language match."
   :type '(choice (const :tag "Detect from language" nil) symbol)

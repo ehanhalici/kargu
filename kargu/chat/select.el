@@ -36,7 +36,6 @@
 (declare-function kargu--config-providers "kargu/config/schema" ())
 (declare-function kargu-chat-goto-footer-field "kargu/chat/prompt" (field))
 (declare-function kargu-chat--goto-prompt "kargu/chat/prompt" ())
-(declare-function kargu-state-clear-model "kargu/state/transitions" ())
 (declare-function kargu-history-compact-threshold "kargu/history/compact" ())
 
 (defvar company-backends)
@@ -68,8 +67,6 @@ An empty QUERY returns CANDIDATES unchanged."
           (nreverse res))))))
 
 (defalias 'kargu-api-select--strings #'kargu-selection-normalize-candidates)
-(defalias 'kargu-api-select--plain #'kargu-selection-plain-choice)
-
 ;;;; Company backend ------------------------------------------------------
 
 (defun kargu-api-select--backend (candidates annotations start)

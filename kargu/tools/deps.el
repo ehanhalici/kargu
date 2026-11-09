@@ -18,7 +18,7 @@
 ;;
 ;; Public API:
 ;;   `kargu-deps-missing', `kargu-deps-missing-p',
-;;   `kargu-deps-format-missing-report', `kargu-deps-assert-all-present'.
+;;   `kargu-deps-format-missing-report'.
 
 ;;; Code:
 
@@ -310,12 +310,6 @@ Each plist contains:
     (push "Please install the missing tools and try again (C-c C-c)." lines)
     (push border lines)
     (string-join (nreverse lines) "\n")))
-
-(defun kargu-deps-assert-all-present (&optional root)
-  "Signal a `user-error' if any mandatory tools are missing for ROOT."
-  (when-let* ((missing (kargu-deps-missing root)))
-    (let ((names (string-join (mapcar (lambda (m) (format "%s" (plist-get m :name))) missing) ", ")))
-      (user-error "Kargu: cannot send prompt: mandatory tools are missing: %s (please install them first)" names))))
 
 (provide 'kargu/tools/deps)
 

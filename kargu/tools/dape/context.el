@@ -20,7 +20,7 @@
 (declare-function kargu--tool-arg "kargu/api/tools" (args &rest keys))
 (declare-function kargu--tool-file-path "kargu/api/tools" (args))
 (declare-function kargu--tool-arg-keys "kargu/api/tools" (args))
-(declare-function kargu-session-id "kargu/core/session" ())
+(declare-function kargu-session-id "kargu/core/session" (&optional session))
 (declare-function kargu-session-context "kargu/core/session" (&optional buffer))
 
 (defcustom kargu-dape-request-timeout 30

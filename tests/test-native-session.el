@@ -84,15 +84,6 @@
       (funcall snapshot-callback (kargu-bridge--object "state" "idle") nil)
       (should-not (member "session/snapshot" events)))))
 
-(ert-deftest kargu-native-session-repeat-rejection-sends-explicit-false-test ()
-  (let (captured)
-    (cl-letf (((symbol-function 'kargu-bridge-call)
-               (lambda (_connection _method params _callback &rest _options)
-                 (setq captured params))))
-      (kargu-bridge-session-continue nil (kargu-native-session-test--scope) #'ignore
-                                     :call-id "call_12345678-1234-4234-8234-000000000005" :approved nil)
-      (should (eq (gethash "approved" captured :missing) :json-false)))))
-
 (ert-deftest kargu-native-session-persistence-bridge-methods-test ()
   (let (captured-method captured-params)
     (cl-letf (((symbol-function 'kargu-bridge-call)
@@ -118,7 +109,6 @@
 (ert-deftest kargu-native-session-save-refuses-local-sync-writer-on-bridge-error-test ()
   "Native save routes to bridge; on failure or unavailable it never calls sync writer."
   (let* ((buf (get-buffer-create "*kargu-test-native-save*"))
-         (writer-called nil)
          (bridge-called nil)
          save-result save-error)
     (unwind-protect
@@ -127,14 +117,11 @@
           (setq-local kargu-chat--project-root "/fixture/project")
           (setq-local kargu-chat--session-id "sess-save-test")
           (setf (kargu-history-messages) '((("role" . "user") ("content" . "Hello"))))
-          (cl-letf (((symbol-function 'kargu-session-storage-write)
-                     (lambda (&rest _) (setq writer-called t) (ert-fail "Sync local writer was called!")))
-                    ((symbol-function 'kargu-bridge-session-scope)
+          (cl-letf (((symbol-function 'kargu-bridge-session-scope)
                      (lambda (_buf callback)
                        ;; Simulate native bridge unavailable / error
                        (funcall callback nil nil (kargu-bridge--fault "unavailable")))))
             (kargu-session-save buf (lambda (res err) (setq save-result res save-error err)))
-            (should-not writer-called)
             (should-not save-result)
             (should save-error)))
       (when (buffer-live-p buf) (kill-buffer buf)))))

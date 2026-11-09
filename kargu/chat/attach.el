@@ -25,7 +25,13 @@
 (require 'kargu/bridge/mentions)
 
 (declare-function kargu-lsp--imenu-document-symbols "kargu/tools/lsp/symbols" (buffer))
-(defvar kargu-chat-attach-max-lines 150)
+(defcustom kargu-chat-attach-max-lines 150
+  "Line count above which `@' file mentions are references, not bodies.
+Files at or below this many lines are inlined as a synthetic Read
+transcript.  Longer files become a `<referenced_file>' hint so
+the model must call `read_file' instead of drowning the prompt."
+  :type 'natnum
+  :group 'kargu-ui)
 (defvar-local kargu-chat-buffer-granted nil
   "Non-nil when this buffer has an explicit user grant for mention egress.")
 (defcustom kargu-chat-buffer-grants nil

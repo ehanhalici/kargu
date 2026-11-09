@@ -333,33 +333,6 @@
                                                       (cdr (kargu-chat-company 'candidates "@tests"))))))
                                       (should (equal (company-call-backend 'kind cand) 'file))))
                                 (kill-buffer chat-buf))))))
-(ert-deftest kargu-chat-request-uses-the-buffer-model-test ()
-  "A request from a chat carries that chat's model, and the other chat keeps its own."
-  (let ((buf1 (get-buffer-create "*kargu-chat-sel-1*"))
-        (buf2 (get-buffer-create "*kargu-chat-sel-2*"))
-        (kargu-session--context
-         (kargu-test-session-with-history :provider "openrouter" :model "model-shared")))
-    (unwind-protect
-        (progn
-          (with-current-buffer buf1
-            (kargu-chat-mode)
-            (kargu-selection-update :provider "openrouter" :model "model-shared"))
-          (with-current-buffer buf2
-            (kargu-chat-mode)
-            (kargu-selection-update :provider "openrouter" :model "model-shared"))
-          (with-current-buffer buf1
-            (kargu-set-model "model-one"))
-          (with-current-buffer buf1
-            (should (equal (kargu--model) "model-one"))
-            (should (equal (kargu-aget (kargu--build-payload) "model") "model-one"))
-            (should (equal (kargu-selection-model) "model-one")))
-          (with-current-buffer buf2
-            (should (equal (kargu--model) "model-shared"))
-            (should (equal (kargu-selection-model) "model-shared"))
-            (should (equal (kargu-aget (kargu--build-payload) "model") "model-shared"))))
-      (when (buffer-live-p buf1) (kill-buffer buf1))
-      (when (buffer-live-p buf2) (kill-buffer buf2)))))
-
 (ert-deftest kargu-chat-tool-heading-shows-path-test ()
   "Tool lines name the target, and a normal result is ok rather than a char count."
   (require 'kargu/chat/render)

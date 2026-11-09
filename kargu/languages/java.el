@@ -12,10 +12,6 @@
 
 (require 'kargu/languages/core)
 
-(defun kargu-language-java-toolchain (root)
-  "Return ROOT's completed native Java command metadata."
-  (kargu-project-probe-toolchain 'java root))
-
 (defconst kargu-language-java-spec
   (kargu-make-language-spec
    :id 'java

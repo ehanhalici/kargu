@@ -30,7 +30,7 @@
 
 (declare-function kargu-chat-show "kargu/chat" ())
 (declare-function kargu-notify "kargu/ui/notify" (type &optional msg))
-(declare-function kargu-loop-running-p "kargu/loop" ())
+(declare-function kargu-loop-running-p "kargu/loop" (&optional buffer))
 (declare-function kargu-chat--ensure-running-prompt "kargu/chat/prompt" ())
 (declare-function kargu-chat--ensure-idle-prompt "kargu/chat/prompt" ())
 

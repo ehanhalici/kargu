@@ -23,7 +23,8 @@
 (defvar kargu--loop-run nil)
 (defvar kargu-async--current-task nil
   "Dynamically bound parent while an asynchronous operation starts or resumes.")
-(defvar kargu-execution--current nil)
+(defvar kargu-execution--current nil
+  "Dynamically bound execution context, never a retained runtime singleton.")
 (declare-function kargu-execution-app "kargu/application/execution" (context))
 (declare-function kargu-execution-call "kargu/application/execution" (context function &rest args))
 (declare-function kargu-execution-live-p "kargu/application/execution" (context))

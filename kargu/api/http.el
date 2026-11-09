@@ -32,27 +32,20 @@
 (require 'kargu/api/transport)
 
 (declare-function kargu-provider-format "kargu/providers/registry" (id))
-(declare-function kargu-provider-extra-auth "kargu/providers/registry" (id))
+
 (declare-function kargu-provider-format-auth "kargu/providers/registry" (format))
 (declare-function kargu--provider-name "kargu/config/key" ())
 
 ;;;; Asynchronous request plumbing ----------------------------------------
 
-(defvar kargu--busy nil
-  "Non-nil while a chat request is in flight.")
+(defvar kargu--busy)
 
 (defvar kargu-api-timeout)
 (defvar kargu-api-stall-timeout)
 (defvar kargu-api-stream-ceiling)
 
-(defvar kargu--current-process nil
-  "Owned Rust delivery handle for the in-flight chat request.")
-
-(defvar kargu--generation 0
-  "Request generation counter.
-Every request captures the current generation; when a request is
-cancelled the counter is bumped and the stale process callbacks
-become no-ops.  OS/network resources are owned by Rust.")
+(defvar kargu--current-process)
+(defvar kargu--generation)
 
 (autoload 'kargu-api-cancel "kargu/api/client" nil t)
 (autoload 'kargu-api-clear-busy "kargu/api/client")

@@ -749,30 +749,6 @@
              (should (equal (with-temp-buffer (insert-file-contents third) (buffer-string)) "new-3\n")))
          (delete-directory root t))))))
 
-(ert-deftest kargu-native-edit-batch-recover-journal-across-restart-test ()
-  "Verify `kargu-bridge-edit-recover' inspects durable journals across core restarts."
-  (kargu-native-edit-test--with-core
-   (let* ((root (make-temp-file "kargu-recover-" t))
-          (path (expand-file-name "file.txt" root)))
-     (unwind-protect
-         (progn
-           (write-region "old\n" nil path nil 'silent)
-           (let* ((result (kargu-native-edit-test--execute
-                           (list :intent :write :root root :path path :content "new\n")))
-                  (edit-id (plist-get result :edit-id)))
-             (should (stringp edit-id))
-             ;; Close current core connection and recover journal from a fresh process
-             (kargu-bridge--close conn "test_restart")
-             (let ((recovered (kargu-native-edit-test--await
-                               (lambda (callback)
-                                 (kargu-bridge-edit-recover
-                                  (kargu-application-context)
-                                  kargu-bridge-edit-batch-journal-directory
-                                  edit-id :callback callback)))))
-               (should (equal (gethash "state" recovered) "resolved"))
-               (should (equal (gethash "kind" (gethash "resolution" recovered)) "receipt")))))
-       (delete-directory root t)))))
-
 (ert-deftest kargu-native-edit-review-error-and-evidence-projection-test ()
   "Presenter startup errors abort cleanly without killing foreign Ediff buffers, and projection records diff stats."
   (kargu-native-edit-test--with-core

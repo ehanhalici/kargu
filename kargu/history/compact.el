@@ -21,7 +21,7 @@
 
 (defvar kargu--loop-run)
 (declare-function kargu--validate-history "kargu/history/repair")
-(declare-function kargu--history-fresh-system-message "kargu/history/repair" ())
+(declare-function kargu--history-fresh-system-message "kargu/history/repair" (&optional history))
 (declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
 (declare-function kargu-tool-schema-char-count "kargu/api/tools" ())
 

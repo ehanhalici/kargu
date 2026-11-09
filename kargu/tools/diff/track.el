@@ -19,20 +19,20 @@
 (require 'kargu/files)
 (require 'kargu/tools/diff/context)
 
-(declare-function kargu-diff-native-rollback "kargu/tools/diff/native"
-                  (path &rest options))
+(declare-function kargu-diff-native-rollback "kargu/tools/diff/native" (path &rest options))
 (declare-function kargu-diff-native-enabled-p "kargu/tools/diff/native" ())
 (declare-function kargu-bridge-edit-history-paths "kargu/bridge/edit/history"
                   (application callback &optional service-id lease))
-(declare-function kargu-bridge-edit-history-consume "kargu/bridge/edit/history"
-                  (application &rest options))
-(declare-function kargu-bridge-edit-history-reset "kargu/bridge/edit/history"
-                  (application &rest options))
+
 (declare-function kargu-lsp-diagnostics-snapshot "kargu/tools/lsp/diagnostics" (file-path))
 (declare-function kargu-lsp-current-diagnostics-p "kargu/tools/lsp/freshness" (buffer))
 (declare-function kargu-lsp--diagnostic-backends "kargu/tools/lsp/freshness" ())
 (declare-function eglot-current-server "eglot" ())
 (declare-function jsonrpc--process "jsonrpc" (connection))
+(declare-function kargu-bridge-edit-history-consume "kargu/bridge/edit/history"
+                  (application &rest options))
+(declare-function kargu-bridge-edit-history-reset "kargu/bridge/edit/history"
+                  (application &rest options))
 (defvar eglot--managed-mode)
 (defvar eglot--versioned-identifier)
 (defvar flymake-mode)

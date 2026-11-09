@@ -456,5 +456,20 @@ Tests never see the working tree of Kargu as their project."
 
 (advice-add 'ert-run-test :around #'kargu-test--isolate)
 
+;;; Session fixtures --------------------------------------------------------
+
+(declare-function kargu-session-storage-file "kargu/chat/session/storage" (id root))
+
+(defun kargu-test-session-write (id root data)
+  "Write session DATA for ID under project ROOT as a private fixture file.
+This is a test fixture only: native persistence owns every production
+write.  Return the file path."
+  (let ((file (kargu-session-storage-file id root)))
+    (make-directory (file-name-directory file) t)
+    (with-temp-file file
+      (insert (kargu-json-encode-record data)))
+    (set-file-modes file #o600)
+    file))
+
 (provide 'tests/test-helpers)
 ;;; test-helpers.el ends here

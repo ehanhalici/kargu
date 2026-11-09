@@ -31,8 +31,6 @@ Safely handles malformed records, dotted pairs, and non-object data."
   (and (stringp value) (not (string-empty-p value)) value))
 
 (defalias 'kargu--aget #'kargu-aget)
-(defalias 'kargu--nonempty #'kargu-nonempty)
-
 (defun kargu-to-int (value &optional default)
   "Coerce VALUE to an integer, or return DEFAULT (defaults to nil).
 Handles integers, floats (rounded), and integer strings."

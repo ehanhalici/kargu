@@ -120,29 +120,6 @@
           (should (equal (kargu-connection-snapshot-secret snapshot) ""))
           (kargu-connection-snapshot-wipe snapshot))))))
 
-(ert-deftest kargu-connection-callable-secret-never-called-on-ui-thread-test ()
-  "Discovery and native policy never invoke an editor callable secret."
-  (let ((called 0) (kargu-api-key nil)
-        (auth-sources '("~/.authinfo.gpg"))
-        (kargu-config-credential-adapter
-         (lambda (_provider _host child) (kargu-async-finish child (kargu-ok "deferred-token")))))
-    (cl-letf (((symbol-function 'auth-source-search)
-               (lambda (&rest _) (list (list :secret (lambda () (cl-incf called) "private-callable"))))))
-      (kargu-test-config-publish (kargu-config-service-context)
-                                 '(:providers (("remote-mock" :api "https://mock.example/v1"))) "/fixture" "callable")
-      (should-not (kargu-provider-authenticated-p "remote-mock"))
-      (should-not (kargu-config-api-key-fast "remote-mock"))
-      (should (= called 0))
-      (let (result)
-        (let ((task (kargu-connection-resolve-async "remote-mock" "m1" :callback (lambda (value) (setq result value)))))
-          (should (kargu-async-task-p task))
-          (should-not result)
-          (should (= called 0))
-          (kargu-bridge-test--wait (lambda () result))
-          (should (kargu-ok-p result))
-          (should (= called 0))
-          (kargu-connection-snapshot-wipe (kargu-result-value result)))))))
-
 (ert-deftest kargu-connection-stale-discard-on-config-revision-test ()
   "A real native publication invalidates credentials held at the interop port."
   (let* ((kargu-api-key nil) pending result

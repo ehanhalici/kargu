@@ -122,11 +122,6 @@ TIMEOUT or absolute DEADLINE capture the original wall-clock expiry."
   "Display remaining attempts from BUDGET's last native projection."
   (max 0 (- (kargu-run-budget-max-requests budget) (kargu-run-budget-requests-spent budget))))
 
-(defun kargu-budget-remaining-time (budget)
-  "Display seconds before BUDGET's deadline, or nil when unlimited."
-  (when-let* ((deadline (kargu-run-budget-deadline budget)))
-    (max 0.0 (- deadline (float-time)))))
-
 (defun kargu-budget-summary (budget)
   "Return BUDGET's detached display summary."
   (list :run-id (kargu-run-budget-run-id budget)

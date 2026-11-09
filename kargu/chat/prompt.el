@@ -25,10 +25,10 @@
 (declare-function kargu-chat-output-buffer "kargu/chat/transcript" ())
 
 (declare-function kargu-chat-stop "kargu/chat")
-(declare-function kargu-chat-select-mode-company "kargu/api/select" (&optional _event))
-(declare-function kargu-chat-select-provider-company "kargu/api/select")
-(declare-function kargu-chat-select-model-company "kargu/api/select")
-(declare-function kargu-chat-select-effort-company "kargu/api/select")
+(declare-function kargu-chat-select-mode-company "kargu/chat/select" (&optional _event))
+(declare-function kargu-chat-select-provider-company "kargu/chat/select" (&optional _event))
+(declare-function kargu-chat-select-model-company "kargu/chat/select" (&optional live-ids catalog-ids provider-name _event))
+(declare-function kargu-chat-select-effort-company "kargu/chat/select" (&optional _event))
 (declare-function kargu--provider-name "kargu/config/key")
 (declare-function kargu--model "kargu/config/key")
 (declare-function kargu-model-context-window "kargu/api/catalog" (&optional model-id provider))
@@ -73,7 +73,6 @@ ACTION-FN is called on RET or click.  MOUSE-FN receives mouse events."
                 'keymap map
                 'button t
                 'action (lambda (_) (funcall action-fn)))))
-
 
 (defun kargu-chat--shown-provider ()
   "Provider chosen for this chat buffer, or nil.
@@ -152,7 +151,6 @@ fresh chat asks for a selection."
      "mouse-1 or RET: select reasoning effort (company list)"
      (lambda () (interactive) (kargu-chat-select-effort-company t))
      (lambda (e) (interactive "e") (kargu-chat-select-effort-company e)))))
-
 
 (defvar-local kargu-chat--missing-tools-state nil
   "List of missing tool IDs currently displayed as an error banner in this buffer.")

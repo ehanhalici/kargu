@@ -34,11 +34,11 @@ Dynamically bound while the hook runs.")
 (defvar kargu-diff--batch-defer-commit nil
   "Non-nil while staging a multi-file batch so reviews defer disk commits.")
 
-(declare-function kargu-diff--apply-interactive "kargu/tools/diff/review"
-                  (path buf-a original new-content exists callback))
-(declare-function kargu-diff--sessions "kargu/tools/diff/review" ())
 (declare-function kargu-diff--session-live-p "kargu/tools/diff/review" (session))
-(declare-function kargu-diff--reap-stale "kargu/tools/diff/review" (path))
+(declare-function kargu-diff--reap-stale "kargu/tools/diff/review" (path &optional service))
+(declare-function kargu-diff--apply-interactive "kargu/tools/diff/review"
+                  (path buf-a original new-content exists callback
+                        &optional pre-state defer-commit))
 (defvar kargu-diff--sessions)
 
 ;;;; Helpers --------------------------------------------------------------

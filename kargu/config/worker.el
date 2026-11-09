@@ -57,11 +57,6 @@ used by the native capture port.")
   (and (boundp 'auth-sources) (listp auth-sources)
        (delq nil (mapcar #'kargu-config-worker-source-path auth-sources))))
 
-(defun kargu-config-worker-unsupported-p ()
-  "Return non-nil when configured auth sources have no supported local file."
-  (and (boundp 'auth-sources) auth-sources
-       (null (kargu-config-worker-plain-sources))))
-
 (defun kargu-config-worker--script ()
   "Return the fixed credential worker entry expression."
   (prin1-to-string

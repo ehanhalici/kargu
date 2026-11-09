@@ -34,10 +34,5 @@
       (kargu-provider-format
        (downcase (string-trim (format "%s" (or pname "")))))))))
 
-(defun kargu-api-normalize-response (response)
-  "Normalize canonical RESPONSE's identities for the current history store.
-Provider-specific wire normalization has already completed inside Rust."
-  (kargu-api-normalize-tool-calls response))
-
 (provide 'kargu/api/wire)
 ;;; wire.el ends here
